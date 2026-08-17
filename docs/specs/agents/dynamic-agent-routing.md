@@ -1,6 +1,7 @@
 ---
 status: draft
 created: 2026-08-13
+updated: 2026-08-17
 owner: cfl
 ---
 
@@ -9,11 +10,18 @@ owner: cfl
 Decision:
 [ADR-2026-08-13-dynamic-agent-profile-routing](../../decisions/2026-08-13-dynamic-agent-profile-routing.md).
 
+Provider error classes and policy evaluation follow
+[ADR-2026-08-17-provider-error-classes-and-policies](../../decisions/2026-08-17-provider-error-classes-and-policies.md)
+and [Provider Error Recovery](../platform/provider-error-recovery.md).
+
 Turn attribution follows
 [ADR-2026-07-18-turn-configuration-snapshots](../../decisions/2026-07-18-turn-configuration-snapshots.md).
 
 Implementation plan:
 [Dynamic Agent Routing](../../plans/dynamic-agent-routing/plan.md).
+
+Provider policy extension plan:
+[Provider Error Policies](../../plans/provider-error-policies/plan.md).
 
 Rollout blocker repair:
 [Dynamic Agent Routing Rollout Blockers](dynamic-agent-routing-rollout-blockers.md).
@@ -53,7 +61,9 @@ its work through complete existing agent profiles.
   as Frontier, Balanced, Economy, Review, or Security Review. Kandev stores no
   class or tier field and assigns no semantics to those names.
 - Each profile has an ordered candidate list. A candidate identifies one
-  concrete profile and can contain actions for classified provider errors.
+  concrete profile and stores separate transient-error and hard-error policies.
+  Each class can wait for a trusted near reset, retry the same candidate with
+  bounded exponential backoff, then either skip the candidate or stop.
 - A concrete profile with `AutoFallback=true` is not an eligible dynamic
   candidate. The conductor is the only owner of cross-candidate fallback. An
   explicit `FallbackModel` remains part of the concrete profile's start-model
@@ -87,14 +97,19 @@ its work through complete existing agent profiles.
 - Desktop Agent settings adds a Dynamic profiles section beside the existing
   installed-agent profile groups. Its primary action creates a named dynamic
   profile, each row opens a dedicated profile route for candidates and rules.
+- The new-profile route owns exactly one draft dynamic profile. It does not show
+  Add profile or allow multiple drafts on the same page. Additional profiles
+  are created from the Dynamic agents list after the current profile is saved
+  or discarded.
 - Phone Agent settings uses the existing fully tappable profile-row and direct
   profile-route pattern from `agent-profiles-section.tsx` and
   `mobile-agent-profile-layout.spec.ts`. The editor is dense, persistent content,
   so it uses direct navigation rather than compressing the desktop form into a
   dialog or drawer.
 - On the phone profile route, name and current routing summary appear first,
-  followed by ordered candidates and error actions. The primary action is Add
-  candidate. It remains visible and has a touch target of at least 44px.
+  followed by ordered candidates and their Transient errors and Hard errors
+  disclosures. The primary action is Add candidate. It remains visible and has
+  a touch target of at least 44px.
 - Candidate selection is a temporary choice and uses the existing mobile picker
   or inset bottom-drawer pattern. The candidate list remains the page's single
   vertical scroll owner, uses dynamic viewport sizing through the settings
@@ -106,6 +121,9 @@ its work through complete existing agent profiles.
 - Desktop and mobile share profile state, validation, selection logic, and the
   settings save coordinator. Only layout and temporary picker presentation
   differ.
+- Error class descriptions, retry schedule, reset-wait rule, and exhausted
+  outcome are visible form content. Hover help can supplement this copy but
+  cannot be the only explanation.
 - Chat route changes remain inline conversation events on every viewport. The
   model/options/commands controls are replaced in place, so mobile users do not
   lose composer state or navigate to another tab.
@@ -166,36 +184,41 @@ when the logical session starts and whenever a route-decision trigger occurs:
 1. loads the configured concrete candidates in order,
 2. rejects missing, disabled, incompatible, or cross-scope profiles,
 3. skips candidates whose shared circuit is open,
-4. applies the configured actions for classified provider errors, and
+4. applies the candidate's configured class policy to a current,
+   effect-safe classified provider error, and
 5. claims the next route generation with a compare-and-swap operation and
    records the selected candidate before launch.
 
-The feature supports these rule types:
-
-- fixed candidate order,
-- retry the same candidate or select the next candidate for configured
-  provider-error classes, and
-- stop instead of selecting the next candidate for configured terminal
-  conditions.
+Each candidate has one `transient` and one `hard` policy. A policy can wait for
+a validated near reset, retry the same candidate with a bounded exponential
+schedule, and then either skip to the next candidate or stop. Exact policy
+fields, ordering, legacy normalization, validation, and unknown-error behavior
+are owned by [Provider Error Recovery](../platform/provider-error-recovery.md).
+Unknown, ambiguous, stale, or effect-unsafe failures always stop automatic
+recovery even if a class policy would retry or skip.
 
 If no candidate is eligible, the task remains assigned to the dynamic profile
 and enters a visible waiting or action-required state. It is not reassigned to a
 different Kandev task session.
 
-The waiting and action-required surfaces show the current reason, the earliest
-known recovery time, and the actions that are valid for the current route
-generation. `Retry` evaluates the full policy again. `Try next` excludes the
-current candidate for that decision only. It does not open a circuit or change
-the saved profile. Core routing accepts these actions only after the current
-turn settles. Dynamic routing does not cancel an active turn to change routes.
+The waiting and action-required surfaces show the current class, safe reason,
+retry ordinal, deadline, exhausted outcome, and actions valid for the current
+route generation. `Retry now` uses the same candidate and consumes the next
+retry slot. `Skip now` excludes the current candidate for that decision only.
+`Cancel wait` stops the pending schedule without changing saved policy. These
+actions do not open a circuit or change the profile. Core routing accepts them
+only after the current turn settles. Dynamic routing does not cancel an active
+turn to change routes.
 
 ### Route-decision triggers
 
 A running dynamic session reconsiders its route only when:
 
-- the active turn settles with a classified provider error covered by the
-  profile's retry or fallback policy,
-- the user requests Retry, Try next, or another explicit reroute action,
+- the active turn settles with a current, effect-safe classified provider
+  error covered by the candidate's class policy,
+- a persisted retry or reset-wait deadline becomes due,
+- the user requests Retry now, Skip now, Cancel wait, or another explicit
+  route action,
 - the active candidate is disabled or removed from the dynamic profile, or
 - restart reconciliation finds that the persisted route is no longer valid.
 
@@ -327,10 +350,12 @@ family. It does not classify a row's separate Office identity role.
 - `dynamic_profile_id` and ordered `position` as identity,
 - `execution_profile_id` referencing a concrete agent profile,
 - enabled state, and
-- a versioned rule document containing normalized provider-error actions.
+- a versioned policy document containing complete `transient` and `hard`
+  policies.
 
 The backend validates scope, candidate launchability, duplicate positions,
-empty candidate lists, and unsupported rule types transactionally. The cycle
+empty candidate lists, unsupported policy versions, incomplete class coverage,
+invalid outcomes, and retry or duration bounds transactionally. The cycle
 validator walks only dynamic-candidate edges. Office identity execution
 bindings do not form candidate edges, and rich Office identities cannot be
 dynamic candidates.
@@ -345,10 +370,13 @@ Each routed task session stores:
 - `profile_version` used by the latest route decision,
 - downstream ACP session identity and its owning concrete profile,
 - latest route state (`selecting`, `starting`, `active`, `reroute_pending`,
-  `switching`, `waiting`, `action_required`, or `stopped`),
+  `switching`, `retry_wait`, `waiting_for_reset`, `retrying`,
+  `action_required`, or `stopped`),
 - pending route reason when an active-candidate change must wait for the current
   turn, and
-- bounded continuation metadata and last route reason.
+- bounded continuation metadata, last route reason, classified code and class,
+  catalogue version, policy snapshot, retry ordinal, absolute deadline, and
+  pending exhausted outcome.
 
 An Office run additionally stores its stable Office agent identity. That ID is
 never substituted for the dynamic or concrete profile ID.
@@ -388,19 +416,22 @@ and never derive historical attribution from current session state.
 - Profile-consuming APIs continue to accept one selected `agent_profile_id`.
   They never require the caller to resolve or submit a concrete candidate.
 - Dynamic profile CRUD uses the agent settings profile API and accepts the
-  candidate and rule contract as one versioned transaction.
+  candidate and per-class policy contract as one versioned transaction. It
+  returns field-addressable validation errors and always returns the normalized
+  policy document.
 - Candidate validation and deletion-conflict responses identify referencing
   profile IDs and safe names.
 - Task-session snapshots include logical profile, active concrete profile,
   route state, route generation, pending profile enforcement, and current
   authoritative capabilities.
 - The WebSocket request `session.route_action` accepts `session_id`, `action`
-  (`retry` or `try_next`), and `expected_generation`. A successful response
+  (`retry_now`, `skip_now`, `cancel_wait`, or `stop`), and
+  `expected_generation`. A successful response
   returns the current route snapshot. A stale generation returns a conflict
   with the authoritative snapshot. An action during an active turn returns a
   failed-precondition response.
 - Route events use the contracts described above. All route-scoped user actions
-  include the expected generation so a stale Retry or Try next action cannot
+  include the expected generation so a stale Retry now or Skip now action cannot
   affect a successor route.
 - Office-specific routing mutation endpoints are removed before Office ships.
   Office read models consume shared route status by task-session or run ID.
@@ -450,9 +481,10 @@ and never derive historical attribution from current session state.
 ## Test strategy
 
 - Backend table-driven tests cover profile-kind resolution, fixed ordering,
-  error actions, circuit sharing and scoping, generation fencing, continuation,
-  restart reconciliation, utility calls, and the concrete/dynamic transparent
-  resolver boundary.
+  class-policy validation and evaluation, reset waits, exponential retry,
+  exhausted outcomes, circuit sharing and scoping, generation fencing,
+  continuation, restart reconciliation, utility calls, and the
+  concrete/dynamic transparent resolver boundary.
 - Repository integration tests cover dynamic configuration, logical route
   state, immutable turn and utility attribution, conflict details, and
   preservation of legacy Office routing rows.
@@ -468,16 +500,25 @@ and never derive historical attribution from current session state.
 | State | Trigger | Next state |
 | --- | --- | --- |
 | `selecting` | route generation and candidate committed | `starting` |
-| `selecting` | no eligible candidate, timed recovery exists | `waiting` |
+| `selecting` | no eligible candidate, circuit recovery exists | `waiting` |
 | `selecting` | no candidate and user action required | `action_required` |
 | `starting` | downstream ACP initialized and capabilities captured | `active` |
-| `starting` | classified retryable failure | `starting` or `switching` |
-| `active` | classified failure allowed by profile policy | `switching` |
+| `starting` | safe classified failure with reset wait | `waiting_for_reset` |
+| `starting` | safe classified failure with retry budget | `retry_wait` |
+| `starting` | recovery exhausted | `switching` or `action_required` |
+| `active` | safe classified failure with reset wait | `waiting_for_reset` |
+| `active` | safe classified failure with retry budget | `retry_wait` |
+| `active` | recovery exhausted | `switching` or `action_required` |
 | `active` | active candidate disabled or removed | `reroute_pending` |
 | `active` | concrete-profile process restart | `starting` with same route |
 | `reroute_pending` | active turn settles | `switching` |
 | `switching` | successor decision committed | `starting` with generation + 1 |
 | `switching` | no successor is eligible | `waiting` or `action_required` |
+| `retry_wait` or `waiting_for_reset` | deadline due and generation current | `retrying` |
+| `retrying` | candidate succeeds | `active` |
+| `retrying` | safe classified failure | class policy evaluates again |
+| `retry_wait` or `waiting_for_reset` | Skip now | `switching` |
+| `retry_wait` or `waiting_for_reset` | Cancel wait or Stop | `action_required` or `stopped` |
 | `waiting` | reset, probe success, or Retry now | `selecting` |
 | `action_required` | settings or credentials change, or explicit retry | `selecting` |
 | any nonterminal state | user stops session | `stopped` |
@@ -516,6 +557,10 @@ require the current exclusive probe lease.
   the earliest known recovery time and remediation actions.
 - If a route action carries a stale generation, Kandev does not change route
   state and returns the authoritative route snapshot.
+- If an error is unclassified, stale, conflicting, or effect-unsafe, Kandev
+  does not apply its candidate class policy and enters manual recovery.
+- If a trusted reset is beyond the configured maximum wait, Kandev does not
+  wait for or shorten it. It proceeds to retry or the exhausted outcome.
 - If dynamic routing is disabled after a session is persisted, Kandev keeps its
   route state and does not launch or resume downstream ACP until the feature is
   enabled again.
@@ -528,7 +573,8 @@ require the current exclusive probe lease.
 - Dynamic profile configuration and reference protection survive backend
   restart and workspace reload.
 - Logical task-session identity, route generation, active concrete profile,
-  provider-native session ownership, waiting deadlines, and shared circuits are
+  provider-native session ownership, classification and policy snapshots,
+  retry ordinals, waiting deadlines, pending outcomes, and shared circuits are
   durable.
 - Provider-native resume data is usable only with the concrete profile that
   created it.
@@ -588,18 +634,27 @@ require the current exclusive probe lease.
 - **GIVEN** an existing database contains legacy Office workspace routing rows,
   **WHEN** it upgrades to dynamic routing, **THEN** those rows remain unchanged
   but no Office settings or launch path reads or displays them.
-- **GIVEN** a waiting route at generation 7, **WHEN** the user sends Try next
+- **GIVEN** a waiting route at generation 7, **WHEN** the user sends Skip now
   for generation 7, **THEN** Kandev excludes the current candidate for one
   decision and returns the resulting authoritative route snapshot.
-- **GIVEN** a route has advanced to generation 8, **WHEN** a delayed Retry for
-  generation 7 arrives, **THEN** Kandev rejects it and returns generation 8
-  without changing route state.
+- **GIVEN** a route has advanced to generation 8, **WHEN** a delayed Retry now
+  for generation 7 arrives, **THEN** Kandev rejects it and returns generation
+  8 without changing route state.
+- **GIVEN** a transient policy allows three retries starting at five seconds,
+  **WHEN** the candidate keeps returning an effect-safe capacity error,
+  **THEN** the route persists 5, 10, and 20 second waits before applying its
+  configured skip or stop outcome.
+- **GIVEN** a hard quota error includes a trusted reset in one minute, **WHEN**
+  the policy permits reset waits up to five minutes, **THEN** the route waits
+  durably and retries the same candidate after the reset.
+- **GIVEN** a new dynamic profile is being created, **WHEN** its editor opens,
+  **THEN** it contains one draft profile and no Add profile action.
 - **GIVEN** Office is enabled and dynamic routing is disabled, **WHEN** one
   Office identity selects a concrete profile and another selects a dynamic
   profile, **THEN** the concrete identity can launch and the dynamic identity
   enters an actionable feature-disabled state.
 - **GIVEN** a phone viewport, **WHEN** the user creates or inspects a dynamic
-  profile, **THEN** candidates and error actions use a single-column touch
+  profile, **THEN** candidates and class policies use a single-column touch
   layout. Routing status and recovery actions remain available without
   horizontal page overflow.
 
@@ -611,6 +666,7 @@ require the current exclusive probe lease.
   cost preference, allowance thresholds, and `interrupt_turn`. These behaviors
   belong to [Dynamic Agent Telemetry Routing](dynamic-agent-telemetry-routing.md).
 - Automatic purchase, plan upgrade, or credential refresh.
+- Model-based classification or extraction of provider error details.
 - Moving a healthy active task back to an earlier candidate immediately after
   recovery.
 - Letting workflows or Office workspaces duplicate provider order, error

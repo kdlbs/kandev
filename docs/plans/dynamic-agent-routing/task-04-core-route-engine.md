@@ -10,7 +10,7 @@ spec: "../../specs/agents/dynamic-agent-routing.md"
 
 # Task 04: Core route engine
 
-- **Acceptance:** Implement fixed ordering, configured semantic error actions,
+- **Acceptance:** Implement fixed ordering, configured compatibility error actions,
   durable route attempts and state, the adapter binding-descriptor contract,
   HMAC fingerprint derivation, scope-specific circuits, exclusive half-open
   probe leases, and single-owner route generations without plugin dependencies.
@@ -33,6 +33,8 @@ spec: "../../specs/agents/dynamic-agent-routing.md"
 - **Risks:** Unknown bindings must isolate by profile. Raw secrets, literal
   environment values, command prefixes, and account IDs cannot enter keys or
   logs. A missing adapter descriptor cannot silently use provider-wide scope.
+  The generic action map remains a compatibility boundary; the separate
+  Provider Error Policies package owns its class-policy replacement.
 
 ## Results
 

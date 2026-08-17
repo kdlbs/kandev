@@ -28,7 +28,9 @@ spec: "../../specs/agents/dynamic-agent-routing.md"
   blockers, risks, and synchronized task and plan status.
 - **Verification:** `cd apps && pnpm install --frozen-lockfile && cd web && pnpm e2e:run --project chromium tests/settings/dynamic-agent-profile.spec.ts && pnpm e2e:run --project mobile-chrome tests/settings/mobile-dynamic-agent-profile.spec.ts`
 - **Risks:** Use causal waits and restore shared profile state. A visible row is
-  not sufficient proof of touch behavior or persistence.
+  not sufficient proof of touch behavior or persistence. Per-class policy E2E
+  belongs to the Provider Error Policies package; this task retains baseline
+  dynamic profile creation and ordering coverage.
 
 ## Results
 

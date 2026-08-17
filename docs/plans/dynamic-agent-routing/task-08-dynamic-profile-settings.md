@@ -43,3 +43,6 @@ Verification:
 - `pnpm --filter @kandev/web run i18n:ratchet`
 
 All commands passed. Dedicated settings Playwright coverage remains pending.
+The separate Provider Error Policies package owns one-draft creation and the
+transient/hard retry, reset-wait, skip, and stop editor that supersedes the
+generic action control delivered here.

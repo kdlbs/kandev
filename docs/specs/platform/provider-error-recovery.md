@@ -1,6 +1,7 @@
 ---
 status: draft
 created: 2026-08-08
+updated: 2026-08-17
 owner: Kandev
 ---
 
@@ -9,369 +10,337 @@ owner: Kandev
 Decisions:
 
 - [ADR-2026-08-08-provider-neutral-agent-error-recovery](../../decisions/2026-08-08-provider-neutral-agent-error-recovery.md)
-- [ADR-2026-07-29-agent-stall-user-controlled-recovery](../../decisions/2026-07-29-agent-stall-user-controlled-recovery.md)
+- [ADR-2026-08-17-provider-error-classes-and-policies](../../decisions/2026-08-17-provider-error-classes-and-policies.md)
 - [ADR-2026-08-13-dynamic-agent-profile-routing](../../decisions/2026-08-13-dynamic-agent-profile-routing.md)
 
-Routing behavior is specified in
-[Dynamic Agent Routing](../agents/dynamic-agent-routing.md). Interactive
-recovery applies to concrete profiles, while configured routing applies to
-dynamic profiles in both Kanban and Office. Older Office-specific table and
-endpoint names below describe the current implementation to migrate; they do
-not retain product ownership of routing.
+Implementation plan:
+[Provider Error Policies](../../plans/provider-error-policies/plan.md).
+
+Dynamic profile configuration and route continuity are specified in
+[Dynamic Agent Routing](../agents/dynamic-agent-routing.md). This specification
+owns the provider-neutral error catalogue, policy schema, and recovery
+semantics used by concrete profiles, dynamic profiles, Kanban, utility calls,
+and Office.
 
 ## Why
 
-Codex, Claude, OpenCode, and future agent CLIs report equivalent provider
-failures through different ACP frames and diagnostic streams. Users need
-temporary capacity failures to recover with honest progress. Concrete-profile
-sessions need conservative interactive retry, while dynamic profiles need
-durable configured fallback and recovery in Kanban and Office. Both must
-classify provider failures consistently without sharing the same retry policy.
+Agent CLIs and providers report equivalent failures through different ACP
+frames, HTTP metadata, process exits, and diagnostic strings. Capacity,
+network, subscription, and quota failures need different recovery behavior,
+but orchestration code must not branch on provider names or raw prose.
+
+Users also need explicit control over how a dynamic candidate reacts. A short
+outage may justify a few retries, while an exhausted subscription may justify
+waiting for a near reset, skipping to the next candidate, or stopping for
+manual action. The same classification and policy semantics must apply in
+Kanban and Office so a selected dynamic profile does not change meaning between
+workspace modes.
 
 ## What
 
-### Provider-neutral classification
+### Evidence and deterministic classification
 
-- Kandev correlates supported error evidence with the active agent session,
-  foreground prompt, and prompt generation before it can settle a turn.
-- Evidence may come from an ACP prompt error, ordered ACP updates and completion,
-  managed structured stderr, a process exit, or structured HTTP metadata.
-- Agent-specific evidence adapters produce one bounded, sanitized evidence
-  envelope. Orchestration, lifecycle, and UI code do not inspect an agent name or
-  raw provider message to choose recovery behavior.
-- A shared classifier assigns only a stable semantic code, confidence, scope,
-  classifier rule ID, and validated timing hints. It does not assign a global
-  retry or fallback verdict.
-- The classifier distinguishes temporary model capacity from an invalid or
-  unavailable model, and short rate throttling from subscription or plan quota
-  exhaustion.
-- The assigned profile kind selects either concrete-profile interactive
-  recovery or dynamic-profile routing. Only high-confidence, current-prompt
-  evidence can authorize automatic retry or a post-start route change.
-  Inactivity alone never classifies a provider failure.
-- Classifier rules are deterministic and fixture-driven. Adding another known
-  error example normally adds a sanitized fixture and registry rule rather than
-  an orchestrator, UI, or agent-type branch.
+- Agent adapters collect bounded evidence from structured ACP errors, ordered
+  ACP updates, managed stderr, process exits, and structured HTTP metadata.
+- Evidence is correlated to the active invocation, prompt generation, and
+  lifecycle phase before it can authorize recovery.
+- A shared deterministic classifier maps evidence to a stable semantic code,
+  policy class, confidence, scope, classifier rule ID, and validated timing
+  hints.
+- Provider-specific signatures live in adapter extractors and a central
+  fixture-driven catalogue. Kanban, Office, lifecycle, and UI code do not
+  inspect provider names or raw error strings to choose behavior.
+- Structured metadata and exact signatures outrank broad text patterns.
+  Collision tests enforce deterministic priority.
+- Adding a known provider message normally adds a sanitized fixture and
+  catalogue rule. It does not add an orchestration or UI branch.
+- Classification is deterministic in this version. Calling a model to classify
+  an error or extract timing data is deferred.
 
-### Concrete-profile interactive recovery
+### Error classes
 
-- `network_unavailable`, `provider_overloaded`, `provider_unavailable`,
-  `model_capacity`, `agent_transport_lost`, and confirmed short `rate_limited`
-  failures are eligible for automatic retry.
-- Before replaying, Kandev verifies that the prompt has produced no assistant
-  content or tool activity, unless the adapter provides a resumable retry
-  guarantee. A transient failure after potentially effectful progress remains a
-  manual recovery.
-- An automatic retry preserves the original prompt, selected agent and execution
-  profiles, model, permissions, and turn configuration.
-- Kandev makes at most five automatic attempts. Nominal backoff is 5, 10, 20,
-  40, and 60 seconds with bounded jitter. A trustworthy short provider retry
-  hint can lengthen the next delay.
-- Kandev never changes the selected model, account, agent, or provider for a
-  concrete profile, and never purchases capacity.
-- Exactly one backend schedule owns retry for a session and prompt generation.
-  A successful attempt clears recovery state. Exhaustion transitions to the
-  existing manual Resume and Start fresh choices.
-- Authentication, credentials, subscription or billing action, plan quota, invalid model,
-  disabled model, and provider-configuration failures never schedule a Kanban
-  automatic retry.
-- A known quota reset time or remediation destination is displayed, but does not
-  arm a Kanban timer.
-- A permission denial, task error, or repository error follows its existing
-  terminal recovery behavior.
-- An unknown error fails closed to generic manual recovery. Raw unclassified
-  evidence is not presented as trusted provider guidance.
+The policy layer has two configurable classes:
 
-### Dynamic-profile routing
+| Class | Meaning | Initial semantic codes and examples |
+| --- | --- | --- |
+| `transient` | The provider, network, transport, or selected model is temporarily unable to serve the request. | `network_unavailable`, `provider_unavailable`, `provider_overloaded`, `model_capacity`, confirmed short `rate_limited`, and launch-safe `agent_transport_lost` |
+| `hard` | The selected account, subscription, credentials, provider configuration, or model cannot continue without a longer reset or user/configuration change. | `quota_limited`, `subscription_required`, `auth_required`, `missing_credentials`, `provider_not_configured`, and `model_unavailable` |
 
-- A dynamic profile consumes the shared classification through its configured
-  routing policy in Kanban or Office. It does not use the concrete profile's
-  interactive prompt timer or retry-attempt budget.
-- The short same-route phase applies to every dynamic run, even when provider
-  fallback is disabled. Fallback after exhaustion still requires an enabled,
-  explicitly configured alternative.
-- Office consumes the shared code through its own routing policy. It never uses
-  Kanban's short prompt timer or retry-attempt budget.
-- The short same-route phase applies to supported Office retry codes, even when
-  provider fallback is disabled. Fallback after exhaustion still requires an
-  enabled, explicitly configured alternative.
-- `agent_transport_lost` is launch-only in Office. The launch path retries the
-  same execution profile three times, then stops routing that candidate without
-  degrading the provider or selecting a fallback. The post-start path declines
-  to handle this code, so the existing failure path handles the run.
-- Network interruption, temporary provider unavailability/overload, model
-  capacity, and a validated rate-limit wait of at most 60 seconds first retry the
-  same execution profile after nominal 5, 10, and 20 second delays with jitter.
-- During that short phase the failed provider is not degraded or excluded from
-  the run's route cycle. Three failed retries promote it to a degraded route;
-  the router may then fall through to the next configured execution profile.
-- The retry attempt has one owning run, while the short cooldown is scoped to the
-  affected workspace/provider/model. Concurrent runs wait for that cooldown and
-  do not independently retry or switch providers. Success releases them;
-  exhaustion promotes the route to normal degradation/fallback.
-- A rate-limit wait longer than 60 seconds, quota exhaustion, auth/subscription,
-  and model/configuration errors bypass the short phase and immediately use the
-  configured fallback policy.
-- A route with auth, inactive-subscription, missing-configuration, or invalid
-  model evidence remains `user_action_required`; the router may try another route,
-  but does not schedule the blocked route itself.
-- Renewable quota exhaustion bypasses the same-route short phase, falls through
-  to the next configured route, and leaves the affected route in durable
-  provider-health recovery using a validated reset hint or the minute-scale
-  backoff when no reset is known.
-- Short rate limits, overload, and availability failures carry durable
-  provider-health retry state only after the short same-route phase is
-  exhausted. A validated reset hint wins; otherwise the router uses its
-  minute-scale 2, 5, 10, 20, and 60-minute backoff with jitter.
-- When all routes are exhausted, Kandev durably parks the run as waiting for
-  provider capacity or blocked for provider action. The scheduler wakes waiting
-  runs, while blocked runs surface settings/inbox remediation.
-- Non-provider run failures retain Office's separate generic scheduler retry
-  budget and CEO escalation. They are not reclassified as provider capacity.
-- A pre-progress short retry may re-drive the exact prompt. After assistant or
-  tool progress, the router retries through a fresh same-provider session that first
-  inspects durable task and worktree state. Ambiguous prompt delivery is never
-  automatically repeated.
+The semantic code remains authoritative diagnostic detail. The class is the
+stable policy input. A catalogue revision can add new codes and signatures,
+but it must assign every recoverable code to exactly one class.
 
-### Workspace-specific progress
+Task, repository, permission, local runtime, cancellation, and resume-state
+errors are not provider errors. They retain their existing owner and cannot
+trigger candidate switching through this policy.
 
-- A scheduled Kanban retry appears as one localized inline warning in the task
-  chat. It shows a safe provider/model label when available, the next retry ordinal,
-  maximum attempts, and a live `Retrying in Ns` countdown.
-- The backend sends the exact absolute `retry_at`; the browser derives the
-  countdown locally and does not write a new message every second.
-- When the timer fires, the same surface changes to `Retrying now`. If another
-  transient failure occurs, it advances to the next attempt and new `retry_at`.
-- The user can cancel the schedule. Sending another prompt, changing model or
-  profile, stopping the session, or starting fresh also cancels the old retry
-  before the new action proceeds.
-- The UI announces scheduled, retrying, cancelled, recovered, and exhausted
-  transitions accessibly, but does not announce every countdown tick.
-- Desktop and phone surfaces expose the same status and actions. Phone controls
-  retain at least a 44px touch target without horizontal page overflow.
-- Office task/run detail, agent detail, dashboard, and inbox show route attempts,
-  actual provider/model, fallback reason, parked status, and next durable wake.
-  During short recovery they explicitly say the same provider will retry and
-  show its countdown and ordinal. Actions are Retry now, Try next provider now
-  when configured, or provider remediation.
+Unrecognized, low-confidence, stale, or conflicting evidence has classification
+state `unclassified`. It is not a third configurable class. It stops automatic
+recovery and surfaces manual recovery so an unknown string cannot silently
+repeat work or change providers. Historical attempts retain the semantic code,
+class, rule ID, and catalogue version assigned when the attempt occurred.
+
+### Replay and effect-safety gate
+
+Classification does not by itself authorize retry or switching.
+
+- Automatic retry, reset waiting, or fallback requires evidence tied to the
+  current invocation and a failure boundary that is known to be pre-result and
+  effect-safe.
+- A provider-supported resumable retry guarantee can satisfy this gate when it
+  identifies the same provider-native session and generation.
+- Assistant output, tool activity, partial utility output, ambiguous prompt
+  delivery, or stale event ordering fails closed unless a durable continuation
+  package makes successor delivery safe under the dynamic-routing contract.
+- User configuration cannot override this gate. An unsafe transient or hard
+  failure stops for manual recovery even when its class policy requests retry
+  or skip.
+
+### Per-class policy
+
+Each dynamic candidate stores one policy for `transient` and one for `hard`.
+Each policy contains:
+
+| Field | Meaning |
+| --- | --- |
+| `retry.enabled` | Whether Kandev retries the same candidate before the final outcome |
+| `retry.max_retries` | Maximum additional attempts after the failed attempt |
+| `retry.initial_interval_seconds` | Delay before the first retry; later delays double exponentially |
+| `wait_for_reset.enabled` | Whether a trustworthy future reset or retry time can replace the next retry delay |
+| `wait_for_reset.max_wait_seconds` | Longest future reset interval this policy will wait |
+| `on_exhausted` | `skip` to evaluate the next candidate, or `stop` for manual recovery |
+
+This shape makes retry, reset waiting, skip, and stop explicit without leaving
+retry exhaustion undefined. Disabling retry and reset waiting applies
+`on_exhausted` immediately.
+
+Backend limits are part of the contract: enabled retry accepts 1 through 10
+additional attempts, the initial interval accepts 1 second through 1 hour, and
+each computed retry delay is capped at 24 hours. Enabled reset waiting accepts
+1 second through 7 days. Disabled sections store zero values. The frontend
+uses the same limits, while the backend remains authoritative.
+
+Policy evaluation follows this order:
+
+1. Reject stale, unclassified, or effect-unsafe failures.
+2. If reset waiting is enabled, has not already been used for this candidate
+   and class in the current route cycle, and a validated future `retry_after`
+   or `reset_at` is no later than `max_wait_seconds`, persist a wait for that
+   deadline.
+3. Otherwise, if retries remain, persist a retry of the same candidate. The
+   first delay is `initial_interval_seconds`; each later delay doubles from the
+   initial interval. Backend safety limits reject overflow and unbounded
+   schedules.
+4. When the retry budget is exhausted or no wait applies, execute
+   `on_exhausted`: exclude the candidate for this route cycle when `skip`, or
+   enter manual recovery when `stop`.
+
+Waiting and its one post-wait attempt do not consume the exponential retry
+budget. A candidate and class can use reset waiting at most once per route
+cycle, so a repeated or revised hint cannot create an indefinite wait loop. A
+reset at or before the current time is ignored. A reset beyond the configured
+maximum is not shortened; Kandev proceeds to retry or the exhausted outcome.
+Only validated structured hints or catalogue extractors may set timing
+metadata.
+
+New and legacy candidates default to immediate `skip` for both classes: retry
+and reset waiting disabled, `on_exhausted=skip`. This preserves the current
+generic `try_next` behavior and avoids introducing hidden delays. Existing
+`retry_same`, `try_next`, `stop`, and per-code rules are normalized once into
+the versioned class-policy document:
+
+- `try_next` becomes no wait, no retry, then `skip` for both classes.
+- `stop` becomes no wait, no retry, then `stop` for both classes.
+- `retry_same` becomes one same-candidate retry after 5 seconds, then `stop`,
+  unless an existing explicit per-code rule overrides the mapped class.
+
+The backend returns the normalized document after create or update. The UI does
+not write legacy rule shapes.
+
+### Durable scheduling and route ownership
+
+- The backend owns retry and reset timers. Browsers render absolute deadlines
+  and never dispatch retries from countdown completion.
+- A dynamic route persists its candidate, generation, failure code, class,
+  catalogue version, policy snapshot, retry ordinal, deadline, and pending
+  outcome before work is scheduled.
+- Retry and reset waits use the same generation fencing and single transition
+  owner as candidate switching. A timer, manual action, and provider event
+  cannot advance the route twice.
+- Restart reconciliation re-arms only a provably undispatched schedule. An
+  ambiguous dispatch stops for manual recovery.
+- User actions can retry now, skip now, cancel a pending wait, or stop. Each
+  action carries the expected generation and returns the authoritative route
+  snapshot.
+- Shared resource circuits remain an eligibility input. A per-candidate policy
+  controls the current route response; circuit state prevents concurrent
+  sessions from creating a retry herd. Expired circuits recover through one
+  exclusive probe.
+
+### Use across Kanban, utility calls, and Office
+
+- A dynamic profile has one policy document regardless of caller. Kanban,
+  workflows, utility calls, and Office pass the same classified error and
+  policy snapshot to the shared evaluator.
+- Callers do not copy provider error tables or retry schedules. They provide
+  invocation identity, effect evidence, and presentation context.
+- Concrete-profile interactive recovery can retain its product-specific
+  defaults, but it consumes the same class and timing metadata rather than a
+  separate provider allow-list.
+- Utility calls use a unique routing invocation ID and may recover only before
+  any partial result or effect.
+- Office scheduler wake reasons do not modify candidate error policy. Office
+  reads the dynamic route state and presents the same retry, wait, skip, and
+  stop outcome.
+
+### User interface
+
+- Every dynamic candidate exposes separate Transient errors and Hard errors
+  sections.
+- Each section explains the class with concrete examples in visible text. The
+  primary behavior is not hidden in a hover-only tooltip.
+- Users can enable same-candidate retry, set maximum retries, set the initial
+  retry interval, enable reset waiting, set the maximum wait, and choose Skip
+  candidate or Stop after recovery is exhausted.
+- The form shows the exponential schedule implied by the current values and
+  explains that reset waiting applies only to trusted future dates within the
+  maximum.
+- Validation is inline and mirrored by the backend. Counts and durations must
+  be finite, non-negative, and within backend-owned limits.
+- Desktop uses an expandable policy area inside each candidate row. Phone uses
+  the same direct settings route and a single-column disclosure layout with one
+  page scroll owner, 44px controls, and no horizontal document overflow.
+- Active route surfaces show the class, safe cause, retry ordinal, absolute
+  deadline, and next outcome. They do not expose unsanitized provider text.
 
 ## Data model
 
-The normalized internal classification contains:
+The normalized classification contains:
 
 | Field | Meaning |
 | --- | --- |
-| `code` | Stable semantic cause such as `model_capacity` or `quota_limited` |
-| `confidence` | `high`, `medium`, or `low` classifier confidence |
-| `scope` | Provider, account, model, or request scope when known |
-| `classifier_rule` | Stable rule ID for tests, metrics, and diagnostics |
+| `code` | Stable semantic cause |
+| `class` | `transient`, `hard`, or internal `unclassified` state |
+| `catalogue_version` | Deterministic catalogue version used for the result |
+| `confidence` | `high`, `medium`, or `low` |
+| `scope` | Provider, account, model, profile, or request scope when known |
+| `classifier_rule` | Stable fixture-backed rule ID |
 | `provider_id` / `model_id` | Safe identifiers when present |
-| `occurred_at` | Time of the correlated failure |
-| `retry_after` / `reset_at` | Optional validated short retry hint or quota reset hint |
-| `safe_excerpt` | Bounded sanitized evidence for collapsed technical details |
+| `phase` / `occurred_at` | Correlated lifecycle phase and timestamp |
+| `retry_after` / `reset_at` | Optional validated timing hints |
+| `safe_excerpt` | Bounded sanitized evidence for technical details |
 
-Each consumer adds its own policy result. Existing compatibility fields such as
-`AutoRetryable`, `FallbackAllowed`, and `UserAction` become Office-policy
-projections rather than classifier-owned universal truths. Kanban stores its
-interactive disposition separately.
+Dynamic profile policy documents are versioned and store the two class-policy
+objects on each candidate. Legacy maps remain readable only for migration.
 
-Persisted retry status contains:
+Dynamic route state adds the persisted policy decision fields needed to resume
+or reject a pending schedule. Attempt history is append-only and records the
+policy snapshot, so later profile edits or catalogue changes do not rewrite why
+an earlier decision occurred.
 
-| Field | Meaning |
-| --- | --- |
-| `prompt_generation` | Turn identity that owns the retry |
-| `failure_code` | Stable semantic cause |
-| `interactive_disposition` | Kanban policy result |
-| `retry_state` | `scheduled`, `dispatching`, `cancelled`, `recovered`, or `exhausted` |
-| `retry_attempt` | Upcoming or active automatic retry ordinal; original prompt is not counted |
-| `max_attempts` | Central attempt budget used by this schedule |
-| `retry_at` | Exact UTC time for a scheduled retry |
-| `provider_id` / `model_id` | Optional safe display labels |
-
-The status is Kanban-session scoped. Office keeps its existing durable
-`office_provider_health`, `office_run_route_attempts`, and run routing fields.
-Raw agent streams and unsanitized provider errors are not added to either model.
-
-Office extends its run-routing overlay with a durable short-retry phase,
-same-route retry ordinal, and absolute retry deadline. A transient attempt uses
-an outcome distinct from fallback exclusion; only short-budget exhaustion marks
-that provider failed for the route cycle.
-
-Office provider health adds a non-degraded `short_retry` cooldown carrying the
-affected scope and deadline. Durable ownership is represented by the run's
-`current_route_attempt_seq` pointing at its `retry_scheduled` route-attempt row;
-the short-retry ordinal is the count of those rows after the run's cycle
-baseline. The run's `scheduled_retry_at` mirrors the cooldown deadline. This
-mapping coordinates concurrent runs without making the provider eligible for
-fallback before the short budget ends, and survives restart without adding an
-owner column to provider health.
+Raw streams, credentials, account identifiers, and unbounded error text are not
+stored in policy or route state.
 
 ## API surface
 
-- Existing session state and message payloads carry the structured retry status.
-  `retry_at` is an absolute UTC timestamp, never pre-rendered countdown text.
-- The existing `session.recover` request accepts `cancel_retry` for the owning
-  session. Cancellation is idempotent.
-- The backend publishes status changes when a retry is scheduled, begins,
-  succeeds, is cancelled, or exhausts its budget. One-second countdown ticks are
-  frontend-only presentation.
-- Office routing continues to expose its durable route-health and route-attempt
-  events. Its policy derives fallback, health state, and scheduler eligibility
-  from the shared classification plus Office context.
-- Office exposes a workspace-admin run action to skip a pending short wait and
-  advance to the next configured provider. It carries the expected route-attempt
-  sequence so a timer race cannot advance twice.
+- Dynamic profile CRUD accepts and returns the versioned per-class policy
+  document. Unsupported versions, unknown classes, unknown outcomes, invalid
+  bounds, and incomplete class coverage return field-addressable validation
+  errors.
+- Route state and event payloads expose stable error code, class, retry ordinal,
+  maximum retries, absolute deadline, and pending outcome.
+- Manual route actions carry expected generation. Cancellation is idempotent.
+- The classifier API is internal. Provider adapters submit evidence envelopes;
+  no public API accepts arbitrary user-authored regexes or class assignments.
 
-## Concrete-profile state machine
+## State machine
 
 | State | Trigger | Next state |
 | --- | --- | --- |
-| `classified` | High-confidence transient and replay-safe | `scheduled` |
-| `classified` | User action, terminal, unknown, or replay-unsafe | manual recovery |
-| `scheduled` | `retry_at` reached and generation still current | `dispatching` |
-| `scheduled` | Cancel, new prompt, configuration change, stop, or stale generation | `cancelled` |
-| `dispatching` | Prompt succeeds | `recovered` |
-| `dispatching` | Another eligible transient and budget remains | `scheduled` |
-| `dispatching` | Hard/unknown failure or budget exhausted | manual recovery / `exhausted` |
+| `active` | Current, classified, effect-safe failure with eligible reset wait | `waiting_for_reset` |
+| `active` | Current, classified, effect-safe failure with retry budget | `retry_wait` |
+| `active` | Recovery exhausted with `skip` | `switching` |
+| `active` | Recovery exhausted with `stop`, or unsafe/unclassified failure | `action_required` |
+| `waiting_for_reset` | Deadline reached and generation current | `retrying` |
+| `retry_wait` | Deadline reached and generation current | `retrying` |
+| `waiting_for_reset` or `retry_wait` | Skip now | `switching` |
+| `waiting_for_reset` or `retry_wait` | Cancel or stop | `action_required` |
+| `retrying` | Success | `active` |
+| `retrying` | Classified failure with budget remaining | `waiting_for_reset` or `retry_wait` |
+| `retrying` | Recovery exhausted | `switching` or `action_required` |
 
-Only the backend advances this state machine. The frontend renders it and sends
-explicit user actions. Dynamic profiles use the route state machine in
-[Dynamic Agent Routing](../agents/dynamic-agent-routing.md).
+## Permissions
 
-## Dynamic-profile short-retry state machine
-
-| State | Trigger | Next state |
-| --- | --- | --- |
-| `route_active` | High-confidence short transient | `same_route_short_retry` |
-| `same_route_short_retry` | `retry_at` reached, attempt remains | retry same execution profile |
-| `same_route_short_retry` | Retry succeeds | `route_active` |
-| `same_route_short_retry` | Third retry fails | degrade route, then enabled configured fallback or parked capacity |
-| `route_active` | Long-horizon or user-action provider failure | configured fallback or blocked/parked |
-| `same_route_short_retry` | User selects Try next provider now | degrade route and configured fallback |
-
-Runs that encounter an existing route-scoped `short_retry` cooldown wait on its
-deadline without consuming another retry attempt or considering fallback.
+- Existing agent-profile management permission controls policy edits.
+- Profile selection does not grant access to credentials, raw evidence, or
+  classifier internals.
+- Office assignment permissions do not grant routing-policy mutation.
 
 ## Failure modes
 
-- If a Codex-style failure is split across ACP metadata, a message, and
-  `end_turn`, only the correctly ordered, current-prompt sequence settles as an
-  error. A partial or stale sequence is ignored as authoritative evidence.
-- If a classifier rule does not recognize a provider message, Kanban does not
-  automatically retry it and Office does not perform a post-start fallback. Its
-  bounded sanitized evidence can inform a later rule fixture.
-- If two rules match, deterministic specificity and priority select one result;
-  registry collision tests prevent accidental broad-rule overrides.
-- If a new semantic code lacks either a Kanban or Office policy entry, exhaustive
-  policy validation fails; no default may silently authorize retry or fallback.
-- If a transient failure follows assistant output or tool activity and no safe
-  resume guarantee exists, Kandev does not replay it automatically.
-- If a timer fires after a new prompt generation or session replacement, the
-  generation guard drops it before dispatch.
-- If cancellation races the timer, one backend owner decides the outcome. A
-  cancelled schedule cannot dispatch afterward.
-- If an Office same-route timer races a fallback request, the scheduler commits
-  exactly one transition; the original provider cannot launch after fallback
-  has selected a successor.
-- If persistence of the visible status fails, Kandev cancels the schedule rather
-  than running an invisible automatic retry.
-- If the backend restarts with a `scheduled` retry, it re-arms only after proving
-  the exact prompt/configuration is reconstructable. An ambiguous `dispatching`
-  retry becomes manual recovery to avoid duplicate delivery.
-- If a browser clock is skewed, reaching zero changes only presentation; the
-  backend still owns actual dispatch time and the next state update corrects the
-  display.
+- Unknown evidence stops automatic work and preserves sanitized diagnostic
+  context for catalogue growth.
+- A timing hint that cannot be parsed, is in the past, or exceeds the policy
+  maximum does not schedule a wait.
+- Invalid policy data is rejected at write time. Invalid persisted legacy data
+  loads as an actionable configuration error and never authorizes work.
+- If durable state cannot be written, Kandev does not schedule the timer,
+  repeat the prompt, or launch a successor.
+- If a timer races a manual action, generation fencing commits one outcome.
+- If assistant output, tool activity, or a partial utility result makes replay
+  ambiguous, the configured policy is not applied automatically.
+- If a new semantic code lacks a class assignment or policy coverage,
+  exhaustive registry tests fail and runtime classification is unclassified.
+- If many sessions share an open resource circuit, one probe owns recovery and
+  the rest continue waiting or evaluate other candidates without stampede.
 
 ## Persistence guarantees
 
-- Classification and retry status survive browser reloads through the existing
-  session message/state persistence.
-- The frontend reconstructs a live countdown from persisted `retry_at` and the
-  current clock.
-- Prompt generation and retry ordinal are durable enough to reject stale timers
-  and ACP frames.
-- A backend restart never claims an in-memory timer still exists. It either
-  safely re-arms a provably undispatched durable schedule or changes the surface
-  to manual recovery.
-- Sanitized classifier evidence follows existing diagnostic retention rules; raw
-  ACP/stderr streams do not become durable retry metadata.
-- Office provider health, route attempts, parked-run status, and scheduler
-  deadlines retain their existing database-backed restart guarantees.
-- Office's same-route retry phase and deadline are equally durable. Restart only
-  re-arms an attempt known not to have reached dispatch.
+- Classification, catalogue version, policy snapshot, retry count, deadline,
+  and pending outcome survive reload and backend restart.
+- Profile edits affect the next failure decision. They do not mutate a pending
+  timer or historical attempt unless the user cancels and retries explicitly.
+- Absolute deadlines are stored in UTC. Browser clocks affect countdown display
+  only.
+- A restart never repeats a dispatch whose completion is ambiguous.
 
 ## Scenarios
 
-- **GIVEN** the active Luna/Codex prompt emits `systemError`, a selected-model
-  capacity message, and `end_turn`, **WHEN** the ordered evidence is correlated,
-  **THEN** Kandev classifies `model_capacity` and schedules the first safe retry.
-- **GIVEN** Claude reports a structured 529 overload before producing content or
-  tool activity, **WHEN** it is classified, **THEN** the same retry lifecycle and
-  UI apply without a Claude-specific orchestration branch.
-- **GIVEN** OpenCode emits a correlated temporary provider-unavailable diagnostic,
-  **WHEN** its adapter normalizes the evidence for a Kanban session, **THEN** the
-  Kanban policy can schedule the same short recovery.
-- **GIVEN** any Kanban agent reports a subscription or plan usage limit, **WHEN**
-  it is classified, **THEN** Kandev shows the safe explanation and
-  reset/remediation hint but schedules no automatic retry.
-- **GIVEN** an Office agent hits a renewable provider quota, **WHEN** automatic
-  routing is enabled, **THEN** Office marks that route degraded and immediately
-  tries the next configured execution profile.
-- **GIVEN** an Office agent encounters a network reset or selected-model capacity
-  failure before producing work, **WHEN** routing is enabled, **THEN** Office
-  retries the same execution profile after a visible few-second countdown and
-  does not select a fallback provider.
-- **GIVEN** that same short transient persists through three Office retries,
-  **WHEN** the final short attempt fails, **THEN** Office degrades the route and
-  tries the next configured execution profile.
-- **GIVEN** Office fallback is disabled, **WHEN** the same short budget is
-  exhausted, **THEN** the run enters durable provider-capacity recovery and
-  never selects another provider.
-- **GIVEN** several Office runs encounter the same model-capacity cooldown,
-  **WHEN** one run owns the short retry, **THEN** the other runs wait on that
-  deadline without consuming attempts, switching providers, or launching a
-  retry herd.
-- **GIVEN** an Office rate limit carries a validated 10-minute retry hint,
-  **WHEN** another configured provider is available, **THEN** Office bypasses
-  the short phase and falls through immediately.
-- **GIVEN** every Office route is quota-limited, **WHEN** the configured chain is
-  exhausted, **THEN** the run is durably parked and wakes at the earliest
-  validated reset or Office provider-health backoff.
-- **GIVEN** an Office route requires an inactive subscription, **WHEN** another
-  configured route is available, **THEN** Office falls through to it while the
-  failed route remains blocked for user action and receives no timed retry.
-- **GIVEN** an Office run is parked for provider capacity, **WHEN** the user opens
-  its task or dashboard on a phone, **THEN** the actual route, fallback reason,
-  next durable wake, and Retry now or remediation action remain available with
-  touch targets of at least 44px and no horizontal overflow.
-- **GIVEN** an Office same-provider retry is pending, **WHEN** the user views the
-  run on a phone, **THEN** the provider, attempt ordinal, live countdown, Retry
-  now, and Try next provider now remain visible without a new drawer or
-  horizontal overflow.
-- **GIVEN** a new provider error example maps to an existing semantic cause,
-  **WHEN** a developer adds its sanitized fixture and registry rule, **THEN** all
-  recovery consumers gain the behavior without lifecycle or UI changes.
-- **GIVEN** an automatic retry is scheduled, **WHEN** the user reloads the task,
-  **THEN** the same attempt and live countdown render from the absolute
-  `retry_at`.
-- **GIVEN** the countdown is visible on a phone, **WHEN** the user taps Cancel,
-  **THEN** the backend cancels the schedule through a touch target of at least
-  44px and no later retry dispatches.
-- **GIVEN** a transient failure occurred after a tool call, **WHEN** no resumable
-  retry guarantee exists, **THEN** Kandev offers manual recovery instead of
-  replaying the prompt.
-- **GIVEN** five automatic retries all fail transiently, **WHEN** the budget is
-  exhausted, **THEN** the countdown stops and localized Resume and Start fresh
-  recovery actions appear.
+- **GIVEN** a candidate returns a high-confidence capacity error before output,
+  **WHEN** its transient policy allows three retries starting at 5 seconds,
+  **THEN** Kandev persists waits of 5, 10, and 20 seconds before applying the
+  configured exhausted outcome.
+- **GIVEN** a quota error includes a trusted reset one minute from now,
+  **WHEN** the hard policy allows reset waits up to five minutes, **THEN** the
+  route waits durably until the reset and retries the same candidate once.
+- **GIVEN** the same reset is six hours away, **WHEN** the maximum wait is five
+  minutes, **THEN** Kandev does not shorten or wait for it and proceeds to the
+  configured retry or exhausted outcome.
+- **GIVEN** a transient retry budget is exhausted with `on_exhausted=skip`,
+  **WHEN** another candidate is eligible, **THEN** the same logical dynamic
+  session advances to that candidate.
+- **GIVEN** a hard policy has no retry or wait and ends in `stop`, **WHEN** the
+  provider reports exhausted credits, **THEN** the route enters manual recovery
+  without trying another provider.
+- **GIVEN** an agent emits an unknown string error, **WHEN** no deterministic
+  catalogue rule matches, **THEN** Kandev stops automatic recovery and retains
+  only bounded sanitized evidence for a future fixture.
+- **GIVEN** a failure follows tool activity, **WHEN** the candidate policy says
+  retry or skip, **THEN** effect safety overrides the policy and Kandev stops for
+  manual recovery.
+- **GIVEN** the same dynamic profile is selected by Kanban and Office, **WHEN**
+  each sees the same classified, effect-safe error, **THEN** both apply the same
+  candidate policy and route transition.
+- **GIVEN** a phone viewport, **WHEN** a user edits both class policies, **THEN**
+  all controls remain usable in one column with no horizontal page overflow.
 
 ## Out of scope
 
 - Inferring failure from inactivity alone.
-- Automatically buying capacity, upgrading a subscription, authenticating an
+- User-authored regular expressions or arbitrary remapping of semantic codes.
+- Model or API calls that classify error text, stack traces, or timing hints.
+- Automatically buying credits, upgrading subscriptions, authenticating an
   account, or changing provider configuration.
-- Silently changing the selected agent, profile, model, account, or provider for
-  an interactive task session.
-- Automatically scheduling a Kanban prompt at a distant subscription or quota
-  reset time.
-- Treating arbitrary raw stderr or model-authored text as trusted error evidence.
-- Unifying Kanban and Office retry state machines, schedules, or UI surfaces.
+- Overriding effect-safety or generation fencing through profile settings.
+- Telemetry, cost, or subscription-usage routing. Those remain in the separate
+  Dynamic Agent Telemetry Routing package.

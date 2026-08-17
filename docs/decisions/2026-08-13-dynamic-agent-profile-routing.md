@@ -1,8 +1,16 @@
 # ADR-2026-08-13-dynamic-agent-profile-routing: Unify Provider Routing Behind Dynamic Agent Profiles
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-17)
 **Date:** 2026-08-13
 **Area:** backend, frontend, protocol, workflow
+
+## Amendment (2026-08-17)
+
+[ADR-2026-08-17-provider-error-classes-and-policies](2026-08-17-provider-error-classes-and-policies.md)
+replaces generic dynamic candidate actions with separate transient and hard
+policies. Each policy can wait for a trusted near reset, retry with bounded
+exponential backoff, then skip or stop. The shared routing ownership and
+continuation boundaries in this decision remain unchanged.
 
 ## Context
 

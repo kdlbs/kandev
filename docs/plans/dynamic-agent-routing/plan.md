@@ -13,6 +13,12 @@ fixed-order and error-based routing, durable conductor, shared health, and
 Kanban, utility, and Office surfaces. Plugin cost and subscription telemetry
 belong to a separate deferred package and are not implementation tasks here.
 
+The follow-up [Provider Error Policies](../provider-error-policies/plan.md)
+package replaces the generic candidate action map with shared transient and
+hard policies, durable reset waits, bounded exponential retry, and explicit
+skip/stop exhaustion. This package retains the compatibility action path until
+that migration lands.
+
 ---
 
 ## Backend
@@ -51,7 +57,7 @@ belong to a separate deferred package and are not implementation tasks here.
 ### Core route engine
 
 - Create `internal/agent/runtime/dynamic` for route selection, route state,
-  fixed order, semantic error actions, shared resource circuits, probe leases,
+  fixed order, compatibility error actions, shared resource circuits, probe leases,
   and generation fencing. Reuse `runtime/routingerr` classification and migrate
   reusable Office backoff behavior without importing `internal/office`.
 - Add a concrete-adapter `CredentialBindingDescriptor` contract after launch
@@ -126,7 +132,7 @@ belong to a separate deferred package and are not implementation tasks here.
 ### Profile settings
 
 - Extend agent profile types/API normalization with `kind`, dynamic candidates,
-  version, provider-error actions, and typed dependency details.
+  version, compatibility provider-error actions, and typed dependency details.
 - Add the Dynamic family section and dedicated profile route. Desktop uses the
   settings-page editor, phone uses direct navigation with one internal scroll
   owner. Candidate selection uses the existing inset mobile picker drawer.
@@ -254,8 +260,8 @@ Implementation slice validated on 2026-08-15:
   observability migration, and dedicated E2E projects were not implemented in
   this slice.
 
-The telemetry-routing plan and its specification remain separate and are not
-implemented or edited by this package. The remaining dynamic-routing work is
+The telemetry-routing and provider-error-policy plans remain separate and are
+not implemented by this package. The remaining dynamic-routing work is
 explicitly tracked in the task results below rather than represented as a
 completed package.
 

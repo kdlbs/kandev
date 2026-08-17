@@ -6,6 +6,15 @@ owner: cfl
 
 # Office Agent Runtime — Error Handling Contract
 
+> **Amendment (2026-08-17):** The provider-classification and automatic
+> recovery policy in this spec is superseded by
+> [Provider Error Recovery](../platform/provider-error-recovery.md) and
+> [Dynamic Agent Routing](../agents/dynamic-agent-routing.md). Office consumes
+> the shared transient/hard catalogue and the selected dynamic profile's policy.
+> The terminal run state, inbox, and manual recovery contracts below still own
+> non-provider and effect-unsafe failures. The historical v1 classification
+> text remains as migration context and is not the target behavior.
+
 This spec defines the runtime contract for how Office agent errors are observed, classified, and recovered. It covers what the lifecycle layer publishes on failure, how sessions and wakeups transition, how failures surface in the inbox and per-task chat, and how the user recovers — via Mark fixed, Resume session, or reassignment to a different agent.
 
 ## Why
