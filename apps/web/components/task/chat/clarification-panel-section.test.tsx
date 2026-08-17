@@ -93,6 +93,22 @@ const CONTAINER_TESTID = "clarification-overlay-container";
 const QUESTION_COUNT_TESTID = "clarification-question-count";
 
 describe("ClarificationPanelSection — collapse affordance", () => {
+  it("keeps the expanded question controls in one header row", () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 3 }),
+      clarMessage({ pendingId: "p1", id: "m2", questionId: "q2", index: 1, total: 3 }),
+      clarMessage({ pendingId: "p1", id: "m3", questionId: "q3", index: 2, total: 3 }),
+    ];
+    renderSection(true, messages);
+
+    const header = screen.getByTestId("clarification-overlay-header");
+    expect(header.querySelector('[data-testid="clarification-stepper"]')).not.toBeNull();
+    expect(header.querySelector('[data-testid="clarification-submit"]')).not.toBeNull();
+    expect(header.querySelector('[data-testid="clarification-skip"]')).not.toBeNull();
+    expect(header.querySelector('[data-testid="clarification-collapse-toggle"]')).not.toBeNull();
+    expect(screen.queryByText("Clarification needed")).toBeNull();
+  });
+
   it("collapses on Escape without posting a rejection, and stays reachable to expand again", () => {
     const messages = [
       clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),

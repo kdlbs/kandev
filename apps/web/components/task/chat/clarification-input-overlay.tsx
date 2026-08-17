@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { IconX, IconMessageQuestion, IconInfoCircle, IconCheck } from "@tabler/icons-react";
-import { cn } from "@/lib/utils";
+import { IconMessageQuestion, IconInfoCircle } from "@tabler/icons-react";
 import ReactMarkdown from "react-markdown";
 import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 import type {
@@ -12,15 +11,13 @@ import type {
   ClarificationQuestion,
 } from "@/lib/types/http";
 import { useClarificationGroup } from "@/hooks/domains/session/use-clarification-group";
-import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { SHORTCUTS } from "@/lib/keyboard/constants";
 import {
   ClarificationCarouselNav,
   ClarificationCustomInput,
   ClarificationOptions,
   ClarificationStepper,
 } from "./clarification-overlay-parts";
+import { ClarificationHeaderActions } from "./clarification-overlay-header";
 import { useTranslation } from "react-i18next";
 
 type ClarificationInputOverlayProps = {
@@ -32,6 +29,9 @@ type ClarificationInputOverlayProps = {
   // reject the bundle — it only dismisses the UI (e.g. collapses the panel).
   // The question stays pending and the agent stays blocked.
   onDismiss: () => void;
+  // Called by the expanded header's collapse control.
+  onCollapse?: () => void;
+  collapseContentId?: string;
 };
 
 type SingleQuestionMeta = {
@@ -465,102 +465,14 @@ function ClarificationCarouselBody({
   );
 }
 
-function ClarificationSkipButton({
-  isSubmitting,
-  onSkip,
-  label,
-}: {
-  isSubmitting: boolean;
-  onSkip: () => void;
-  label: string;
-}) {
-  const button = (
-    <span className="inline-flex" data-testid="clarification-skip-shortcut">
-      <button
-        type="button"
-        onClick={onSkip}
-        disabled={isSubmitting}
-        className="text-muted-foreground hover:text-foreground cursor-pointer disabled:opacity-50"
-        data-testid="clarification-skip"
-        aria-label={label}
-      >
-        <IconX className="h-4 w-4" />
-      </button>
-    </span>
-  );
-
-  if (isSubmitting) {
-    return button;
-  }
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function ClarificationHeaderActions({
-  total,
-  allAnswered,
-  isSubmitting,
-  onSubmit,
-  onSkip,
-}: {
-  total: number;
-  allAnswered: boolean;
-  isSubmitting: boolean;
-  onSubmit: () => void;
-  onSkip: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex items-center gap-2">
-      {total > 1 && (
-        <KeyboardShortcutTooltip
-          shortcut={SHORTCUTS.SUBMIT}
-          description={t("task:submitAnswers")}
-          enabled={!isSubmitting}
-        >
-          <span
-            className="inline-flex"
-            data-testid="clarification-submit-shortcut"
-            tabIndex={!allAnswered && !isSubmitting ? 0 : undefined}
-          >
-            <button
-              type="button"
-              onClick={onSubmit}
-              disabled={!allAnswered || isSubmitting}
-              data-testid="clarification-submit"
-              className={cn(
-                "inline-flex items-center gap-1 text-xs px-3 py-1 rounded font-medium transition-colors",
-                allAnswered && !isSubmitting
-                  ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
-                  : "bg-muted text-muted-foreground cursor-not-allowed",
-              )}
-            >
-              {isSubmitting ? t("task:submitting") : t("task:submit")}
-              <IconCheck className="h-3 w-3" />
-            </button>
-          </span>
-        </KeyboardShortcutTooltip>
-      )}
-      <ClarificationSkipButton
-        isSubmitting={isSubmitting}
-        onSkip={onSkip}
-        label={t("task:skipAllQuestions")}
-      />
-    </div>
-  );
-}
-
 export function ClarificationInputOverlay({
   messages,
   onResolved,
   shortcutScopeRef,
   keyboardShortcutsEnabled = true,
   onDismiss,
+  onCollapse,
+  collapseContentId,
 }: ClarificationInputOverlayProps) {
   const sortedMessages = useMemo(
     () => sortMessagesByQuestionIndex(resolveQuestionMessages(messages)),
@@ -596,7 +508,10 @@ export function ClarificationInputOverlay({
 
   return (
     <div className="relative" data-testid="clarification-overlay">
-      <div className="flex items-center justify-between gap-3 px-4 pt-2 pb-1">
+      <div
+        className="flex min-h-11 items-center justify-between gap-3 px-4"
+        data-testid="clarification-overlay-header"
+      >
         <div className="flex items-center gap-3 min-w-0">
           <IconMessageQuestion className="h-4 w-4 text-blue-500 flex-shrink-0" />
           {total > 1 && (
@@ -623,6 +538,8 @@ export function ClarificationInputOverlay({
           isSubmitting={isSubmitting}
           onSubmit={handleSubmit}
           onSkip={() => void group.skipAll("User skipped")}
+          onCollapse={onCollapse}
+          collapseContentId={collapseContentId}
         />
       </div>
       {sharedContext && (

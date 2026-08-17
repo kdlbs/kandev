@@ -88,58 +88,61 @@ export function ClarificationPanelSection({
 
   const questionCount = messages?.length ?? 0;
   const actionLabel = collapsed ? t("chat:expandClarification") : t("chat:collapseClarification");
+  const compact = collapsed || questionCount === 0;
 
   return (
     <div className="relative flex-shrink-0 border-t border-sky-400/30 bg-card">
-      {!collapsed && <ResizeHandle {...resizeHandleProps} />}
+      {!compact && <ResizeHandle {...resizeHandleProps} />}
       <div
         ref={containerRef}
         data-testid="clarification-overlay-container"
         className={
-          collapsed ? "h-11" : "flex min-h-[7.5rem] flex-col overflow-hidden overscroll-contain"
+          compact ? "h-11" : "flex min-h-[7.5rem] flex-col overflow-hidden overscroll-contain"
         }
         style={
-          collapsed
+          compact
             ? undefined
             : { maxHeight: `${maxHeightVh}vh`, ...(height !== null ? { height } : {}) }
         }
       >
-        <div className="flex h-11 flex-shrink-0 items-center justify-between gap-2 pl-4">
-          <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
-            <IconMessageQuestion className="h-4 w-4 flex-shrink-0 text-blue-500" />
-            <span className="truncate">{t("chat:clarificationNeeded")}</span>
-            {questionCount > 0 && (
-              <span
-                data-testid="clarification-question-count"
-                className="truncate text-xs font-normal text-muted-foreground"
-              >
-                {t("task:questionCount", { count: questionCount })}
-              </span>
-            )}
+        {compact && (
+          <div className="flex h-11 flex-shrink-0 items-center justify-between gap-2 pl-4">
+            <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+              <IconMessageQuestion className="h-4 w-4 flex-shrink-0 text-blue-500" />
+              <span className="truncate">{t("chat:clarificationNeeded")}</span>
+              {questionCount > 0 && (
+                <span
+                  data-testid="clarification-question-count"
+                  className="truncate text-xs font-normal text-muted-foreground"
+                >
+                  {t("task:questionCount", { count: questionCount })}
+                </span>
+              )}
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-11 w-11 flex-shrink-0 cursor-pointer rounded-none"
+              aria-label={actionLabel}
+              aria-expanded={!collapsed}
+              aria-controls={contentId}
+              title={actionLabel}
+              data-testid="clarification-collapse-toggle"
+              onClick={() => setCollapsed((current) => !current)}
+            >
+              {collapsed ? (
+                <IconChevronUp className="h-4 w-4" />
+              ) : (
+                <IconChevronDown className="h-4 w-4" />
+              )}
+            </Button>
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-11 w-11 flex-shrink-0 cursor-pointer rounded-none"
-            aria-label={actionLabel}
-            aria-expanded={!collapsed}
-            aria-controls={contentId}
-            title={actionLabel}
-            data-testid="clarification-collapse-toggle"
-            onClick={() => setCollapsed((current) => !current)}
-          >
-            {collapsed ? (
-              <IconChevronUp className="h-4 w-4" />
-            ) : (
-              <IconChevronDown className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
+        )}
         <div
           id={contentId}
           data-testid="clarification-scroll-region"
-          className={collapsed ? "hidden" : "min-h-0 flex-1 overflow-y-auto px-1"}
+          className={compact ? "hidden" : "min-h-0 flex-1 overflow-y-auto px-1"}
         >
           <ClarificationInputOverlay
             messages={messages}
@@ -147,6 +150,8 @@ export function ClarificationPanelSection({
             shortcutScopeRef={shortcutScopeRef}
             keyboardShortcutsEnabled={!collapsed}
             onDismiss={() => setCollapsed(true)}
+            onCollapse={() => setCollapsed(true)}
+            collapseContentId={contentId}
           />
         </div>
       </div>
