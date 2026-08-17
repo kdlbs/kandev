@@ -1003,6 +1003,11 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 	// External mode does NOT include message_task_kandev (no live session context)
 	assert.NotContains(t, tools, "message_task_kandev")
 	assert.NotContains(t, tools, "stop_task_kandev")
+
+	// External mode includes the question-answering tools (spec S1/S2); the
+	// agent-facing ask_user_question_kandev stays off this surface (spec S3).
+	assert.Contains(t, tools, "list_pending_questions_kandev")
+	assert.Contains(t, tools, "answer_question_kandev")
 }
 
 func TestServerModeExternal_ToolCount(t *testing.T) {
@@ -1012,9 +1017,9 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 create_task + 2 task-dependency = 35.
+	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 create_task + 2 task-dependency + 2 question-answering (list_pending_questions + answer_question) = 37.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 35, len(tools))
+	assert.Equal(t, 37, len(tools))
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 
