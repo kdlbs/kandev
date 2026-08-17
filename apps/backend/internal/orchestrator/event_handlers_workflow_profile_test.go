@@ -106,6 +106,25 @@ func TestAutoStartStepPrompt_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	}
 }
 
+func TestAutoStartStepPrompt_ResetContextInjectsCompletionContractForReusedSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-reused", "session-reused", models.TaskSessionStateWaitingForInput)
+	session, _ := repo.GetTaskSession(ctx, "session-reused")
+	session.AgentExecutionID = "execution-reused"
+	session.AgentProfileID = "profile-review"
+	_ = repo.UpdateTaskSession(ctx, session)
+	step := &wfmodels.WorkflowStep{ID: "step-review", WorkflowID: "wf1", Name: "Review", AutoAdvanceRequiresSignal: true, Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterResetAgentContext}, {Type: wfmodels.OnEnterAutoStartAgent}}}}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[step.ID] = step
+	messages := &mockMessageCreator{}
+	svc := createTestServiceWithScheduler(repo, stepGetter, newMockTaskRepo(), &mockAgentManager{repoForExecutionLookup: repo})
+	svc.messageCreator = messages
+	_ = svc.autoStartStepPrompt(ctx, "task-reused", session, step, "Review the change", false, false)
+	if len(messages.userMessages) != 1 || !strings.Contains(messages.userMessages[0].content, "step_complete_kandev") {
+		t.Fatalf("reused reset-context prompt lacks completion contract: %#v", messages.userMessages)
+	}
+}
 func TestResolveStepAgentProfile(t *testing.T) {
 	t.Run("returns step profile when set", func(t *testing.T) {
 		svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
