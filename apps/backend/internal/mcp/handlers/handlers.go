@@ -2244,10 +2244,10 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	// rather than echoing into its own conversation.
 	if req.SenderTaskID == req.TaskID && req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-			"task cannot send a message to itself (pass session_id to message a sibling session on your own task)", nil)
+			"task cannot send a message to itself. To leave a note for the current task, write it in the current assistant response; to persist machine-readable restart state, update the task plan. Use message_task_kandev only for another task or pass session_id to message a sibling session on your own task", nil)
 	}
 	if req.SessionID != "" && req.SessionID == req.SenderSessionID {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session cannot send a message to itself", nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session cannot send a message to itself. Use the current assistant response for human-readable notes, update the task plan for machine-readable restart state, or pass a sibling session_id", nil)
 	}
 	if req.DeliveryMode != "" && req.DeliveryMode != deliveryModeQueued && req.DeliveryMode != deliveryModeInterrupt {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,

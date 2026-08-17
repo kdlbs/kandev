@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const sessionWakeCoalescePrefix = "session-wake:"
@@ -21,8 +22,14 @@ func (s *Service) DeliverSessionWake(ctx context.Context, taskID, sessionID, wak
 		return "", fmt.Errorf("task_id, session_id, and wake_id are required")
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil || session.TaskID != taskID {
-		return "", fmt.Errorf("session does not belong to task")
+	if err != nil || session == nil {
+		return models.SessionWakeDeliveryTerminal, models.NewSessionWakeTerminalDeliveryError("session was deleted or cannot be found")
+	}
+	if session.TaskID != taskID {
+		return models.SessionWakeDeliveryTerminal, models.NewSessionWakeTerminalDeliveryError("session does not belong to task")
+	}
+	if isTerminalSessionState(session.State) {
+		return models.SessionWakeDeliveryTerminal, models.NewSessionWakeTerminalDeliveryError(fmt.Sprintf("session %s is %s", session.ID, session.State))
 	}
 	_, _, err = s.messageQueue.QueueMessageWithCoalesceKey(ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByServer, false, nil, nil, sessionWakeCoalescePrefix+wakeID, true)
 	if err != nil {

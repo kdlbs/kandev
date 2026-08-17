@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"errors"
+	"fmt"
+	"time"
+)
 
 const (
 	SessionWakeDeliveryPending  = "pending"
@@ -9,6 +13,12 @@ const (
 	SessionWakeDeliveryFailed   = "failed"
 	SessionWakeDeliveryTerminal = "terminal"
 )
+
+var ErrSessionWakeTerminalDelivery = errors.New("session wake target is terminal")
+
+func NewSessionWakeTerminalDeliveryError(reason string) error {
+	return fmt.Errorf("%w: %s", ErrSessionWakeTerminalDelivery, reason)
+}
 
 // TaskSessionWake is a durable, task-owned request to wake an existing
 // session. It deliberately has no task-creation state: a firing is only a

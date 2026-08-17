@@ -42,7 +42,10 @@ func (s *Service) UpsertSessionWake(ctx context.Context, taskID, sessionID strin
 		return nil, "", err
 	}
 	wake := &models.TaskSessionWake{TaskID: taskID, SessionID: sessionID, Marker: strings.TrimSpace(req.Marker), Prompt: req.Prompt, CronExpression: strings.TrimSpace(req.CronExpression), Timezone: normalizedTimezone(req.Timezone), NextRunAt: next.UTC(), ExpiresAt: req.ExpiresAt.UTC(), LastDeliveryStatus: models.SessionWakeDeliveryPending}
-	existing, _ := s.sessionWakes.ListTaskSessionWakes(ctx, taskID, sessionID)
+	existing, err := s.sessionWakes.ListTaskSessionWakes(ctx, taskID, sessionID)
+	if err != nil {
+		return nil, "", err
+	}
 	action := "created"
 	for _, item := range existing {
 		if item.Marker == wake.Marker {
@@ -57,7 +60,16 @@ func (s *Service) UpsertSessionWake(ctx context.Context, taskID, sessionID strin
 	if _, err := s.sessionWakes.UpsertTaskSessionWake(ctx, wake); err != nil {
 		return nil, "", err
 	}
-	return wake, action, nil
+	stored, err := s.sessionWakes.ListTaskSessionWakes(ctx, taskID, sessionID)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, item := range stored {
+		if item.Marker == wake.Marker {
+			return item, action, nil
+		}
+	}
+	return nil, "", fmt.Errorf("session wake was not persisted")
 }
 
 func (s *Service) ListSessionWakes(ctx context.Context, taskID, sessionID string) ([]*models.TaskSessionWake, error) {
@@ -96,7 +108,11 @@ func validateSessionWakeRequest(req UpsertSessionWakeRequest) error {
 	if !req.ExpiresAt.After(time.Now()) {
 		return fmt.Errorf("expires_at must be in the future")
 	}
-	_, err := cron.NextScheduleTime(req.CronExpression, normalizedTimezone(req.Timezone), time.Now().UTC())
+	timezone := normalizedTimezone(req.Timezone)
+	if _, err := time.LoadLocation(timezone); err != nil {
+		return fmt.Errorf("invalid timezone %q: %w", timezone, err)
+	}
+	_, err := cron.NextScheduleTime(req.CronExpression, timezone, time.Now().UTC())
 	return err
 }
 

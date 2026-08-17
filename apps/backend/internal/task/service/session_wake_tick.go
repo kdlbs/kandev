@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -35,6 +36,10 @@ func (s *Service) TickSessionWakes(ctx context.Context, deliverer interface {
 		}
 		status, deliveryErr := deliverer.DeliverSessionWake(ctx, wake.TaskID, wake.SessionID, wake.ID, wake.Prompt)
 		if deliveryErr != nil {
+			if errors.Is(deliveryErr, models.ErrSessionWakeTerminalDelivery) {
+				_ = s.sessionWakes.RecordTaskSessionWakeDelivery(ctx, wake.ID, models.SessionWakeDeliveryTerminal, deliveryErr.Error(), nil)
+				continue
+			}
 			_ = s.sessionWakes.RecordTaskSessionWakeDelivery(ctx, wake.ID, models.SessionWakeDeliveryFailed, deliveryErr.Error(), nil)
 			continue
 		}

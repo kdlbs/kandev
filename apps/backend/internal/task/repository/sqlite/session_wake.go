@@ -19,7 +19,7 @@ func (r *Repository) ListTaskSessionWakes(ctx context.Context, taskID, sessionID
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var wakes []*models.TaskSessionWake
 	for rows.Next() {
 		wake, scanErr := scanSessionWake(rows)
@@ -40,12 +40,13 @@ func (r *Repository) UpsertTaskSessionWake(ctx context.Context, wake *models.Tas
 	wake.UpdatedAt = now
 	var existing string
 	err = r.db.QueryRowContext(ctx, r.db.Rebind(`SELECT id FROM task_session_wakes WHERE task_id = ? AND session_id = ? AND marker = ?`), wake.TaskID, wake.SessionID, wake.Marker).Scan(&existing)
-	if err == nil {
+	switch {
+	case err == nil:
 		created = false
 		wake.ID = existing
-	} else if errors.Is(err, sql.ErrNoRows) {
+	case errors.Is(err, sql.ErrNoRows):
 		created = true
-	} else {
+	default:
 		return false, err
 	}
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`INSERT INTO task_session_wakes (`+sessionWakeColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

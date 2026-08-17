@@ -11,11 +11,11 @@ func (r *Repository) ListDueTaskSessionWakes(ctx context.Context, now time.Time,
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`SELECT `+sessionWakeColumns+` FROM task_session_wakes WHERE next_run_at <= ? AND expires_at > ? ORDER BY next_run_at ASC LIMIT ?`), now.UTC(), now.UTC(), limit)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`SELECT `+sessionWakeColumns+` FROM task_session_wakes WHERE next_run_at <= ? AND expires_at > ? AND last_delivery_status != ? ORDER BY next_run_at ASC LIMIT ?`), now.UTC(), now.UTC(), models.SessionWakeDeliveryTerminal, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var wakes []*models.TaskSessionWake
 	for rows.Next() {
 		wake, scanErr := scanSessionWake(rows)
