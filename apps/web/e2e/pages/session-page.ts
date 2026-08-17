@@ -485,7 +485,9 @@ export class SessionPage {
 
   /** Expand/collapse toggle in the clarification bar's header row. */
   clarificationCollapseToggle(): Locator {
-    return this.activeChat().getByTestId("clarification-collapse-toggle");
+    // The expanded overlay stays mounted but is hidden when the compact bar
+    // is shown, so scope this locator to the one visible toggle.
+    return this.activeChat().locator('[data-testid="clarification-collapse-toggle"]:visible');
   }
 
   /** Shared context shown once above the active clarification question. */

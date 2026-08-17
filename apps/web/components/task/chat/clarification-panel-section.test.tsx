@@ -124,7 +124,7 @@ describe("ClarificationPanelSection — collapse affordance", () => {
     expect(screen.getByTestId(SCROLL_REGION_TESTID).className).toContain("hidden");
 
     // Restore: clicking the toggle re-expands the same still-pending bundle.
-    fireEvent.click(screen.getByTestId("clarification-collapse-toggle"));
+    fireEvent.click(screen.getByRole("button", { name: "Expand clarification" }));
     expect(screen.getByTestId(SCROLL_REGION_TESTID).className).not.toContain("hidden");
   });
 
@@ -194,7 +194,9 @@ describe("ClarificationPanelSection — question-count localization", () => {
     const messages = [
       clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 2 }),
     ];
-    renderSection(true, messages);
+    const { scopeRef } = renderSection(true, messages);
+
+    fireEvent.keyDown(scopeRef.current!, { key: "Escape" });
 
     expect(screen.getByTestId(QUESTION_COUNT_TESTID).textContent).toBe("1 question");
   });
@@ -204,7 +206,9 @@ describe("ClarificationPanelSection — question-count localization", () => {
       clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 2 }),
       clarMessage({ pendingId: "p1", id: "m2", questionId: "q2", index: 1, total: 2 }),
     ];
-    renderSection(true, messages);
+    const { scopeRef } = renderSection(true, messages);
+
+    fireEvent.keyDown(scopeRef.current!, { key: "Escape" });
 
     expect(screen.getByTestId(QUESTION_COUNT_TESTID).textContent).toBe("2 questions");
   });
@@ -214,9 +218,10 @@ describe("ClarificationPanelSection — question-count localization", () => {
       clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 2 }),
       clarMessage({ pendingId: "p1", id: "m2", questionId: "q2", index: 1, total: 2 }),
     ];
-    renderSection(true, messages);
+    const { scopeRef } = renderSection(true, messages);
 
     fireEvent.click(screen.getAllByTestId("clarification-option")[0]);
+    fireEvent.keyDown(scopeRef.current!, { key: "Escape" });
 
     expect(screen.getByTestId(QUESTION_COUNT_TESTID).textContent).toBe("2 questions");
   });
@@ -225,7 +230,9 @@ describe("ClarificationPanelSection — question-count localization", () => {
     const messages = [
       clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
     ];
-    renderSection(true, messages);
+    const { scopeRef } = renderSection(true, messages);
+
+    fireEvent.keyDown(scopeRef.current!, { key: "Escape" });
 
     await i18n.changeLanguage("pseudo");
 
