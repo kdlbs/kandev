@@ -1565,6 +1565,7 @@
   "sessionActionSetPrimary": "設為主要工作階段",
   "sessionActionStop": "停止工作階段中",
   "sessionActionSuccessful": "{{action}}成功",
+  "sessionCompleted": "此工作階段已完成。",
   "addDependency": "新增依賴…",
   "advancedSettings": "進階設定",
   "agentHasStopped": "該代理程式已停止。",

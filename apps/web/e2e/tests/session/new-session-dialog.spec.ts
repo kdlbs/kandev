@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForSessionDone } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -19,6 +20,65 @@ test.describe("New session dialog", () => {
         await apiClient.deletePrompt(prompt.id);
       }
     }
+  });
+
+  test("completed sessions replace the composer with a New Agent action", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Completed Session New Agent Task",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    await waitForSessionDone(apiClient, task.id, task.session_id, "Waiting for first session");
+    await apiClient.seedTaskSession(task.id, {
+      state: "COMPLETED",
+      sessionId: task.session_id,
+      agentProfileId: seedData.agentProfileId,
+      completedAt: new Date().toISOString(),
+    });
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        return sessions.find((session) => session.id === task.session_id)?.state;
+      })
+      .toBe("COMPLETED");
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    await expect(session.completedSessionBanner()).toBeVisible({ timeout: 15_000 });
+    await expect(session.completedSessionNewAgentButton()).toHaveText("New Agent");
+    await expect(session.activeChat().locator(".tiptap.ProseMirror")).not.toBeVisible();
+    await expect(session.submitButton()).not.toBeVisible();
+    await expect(session.recoveryResumeButton()).not.toBeVisible();
+    await expect(session.recoveryFreshButton()).not.toBeVisible();
+
+    await session.completedSessionNewAgentButton().click();
+    await expect(session.newSessionDialog()).toBeVisible({ timeout: 5_000 });
+    await session.newSessionPromptInput().fill("/e2e:simple-message");
+    await session.newSessionStartButton().click();
+    await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 10_000 });
+
+    await expect
+      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
+        timeout: 30_000,
+      })
+      .toBe(2);
+    await expect(session.sessionTabByText("2")).toBeVisible({ timeout: 15_000 });
   });
 
   test("opens dialog from + menu and shows environment info", async ({

@@ -1565,6 +1565,7 @@
   "sessionActionSetPrimary": "设为主要会话",
   "sessionActionStop": "停止会话中",
   "sessionActionSuccessful": "{{action}}成功",
+  "sessionCompleted": "此会话已完成。",
   "addDependency": "添加依赖…",
   "advancedSettings": "高级设置",
   "agentHasStopped": "该智能体已停止。",
