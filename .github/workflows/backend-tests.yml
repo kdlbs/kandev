@@ -337,9 +337,11 @@ jobs:
     # so it cannot catch a package that starts reading them again — the class
     # of bug that shipped alongside internal/gitlab's host-trust tests (they
     # only passed because CI never set KANDEV_GITLAB_HOST/GITLAB_HOST/
-    # GITLAB_TOKEN). This job poisons them with obviously-fake .invalid-TLD
-    # values so both GitLab-facing packages are forced to prove they stay
-    # hermetic instead of accidentally depending on an unset ambient env.
+    # GITLAB_TOKEN), and that internal/github hit for real with an ambient
+    # GH_TOKEN/GITHUB_TOKEN picking a PAT client over the "no auth configured"
+    # path. This job poisons them with obviously-fake values so the GitLab-
+    # and GitHub-facing packages are forced to prove they stay hermetic
+    # instead of accidentally depending on an unset ambient env.
     container: ghcr.io/kdlbs/kandev-ci:build-latest
     defaults:
       run:
@@ -374,6 +376,12 @@ jobs:
           GITLAB_HOST: https://gitlab.ambient-ci.invalid
           GITLAB_TOKEN: glpat-ambient-ci-not-a-real-token
         run: go test -race ./internal/gitlab/... ./internal/agentctl/server/process/...
+
+      - name: Run GitHub-facing package under a poisoned ambient environment
+        env:
+          GH_TOKEN: ghp-ambient-ci-not-a-real-token
+          GITHUB_TOKEN: ghp-ambient-ci-not-a-real-token-legacy
+        run: go test -race ./internal/github/...
 
   # The required check. Runs on every event, including the ones where every job
   # above is correctly skipped, so the merge queue always has a conclusion to
