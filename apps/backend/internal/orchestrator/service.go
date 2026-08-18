@@ -40,6 +40,7 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -2603,6 +2604,15 @@ func canResumeRunning(running *models.ExecutorRunning) bool {
 }
 
 func isMissingBranchError(err error) bool {
+	// A checked-out-elsewhere error chain can still mention "couldn't find
+	// remote ref" inside its concatenated fetch+checkout stderr, so the
+	// substring match below would misclassify it as a missing branch and
+	// post PR-recovery guidance for a branch that is in fact present
+	// locally. The local preparer wraps worktree.ErrBranchCheckedOut for
+	// that case; honor the typed sentinel first.
+	if errors.Is(err, worktree.ErrBranchCheckedOut) {
+		return false
+	}
 	for current := err; current != nil; current = errors.Unwrap(current) {
 		if isMissingBranchMessage(current.Error()) {
 			return true
