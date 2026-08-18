@@ -252,7 +252,7 @@ The setting is **off by default**, only available on Docker profiles, and affect
 
 ### Credentials and security
 
-> **Trust boundary:** A container is useful but not a hostile-code sandbox. The daemon has host-level power, bind mounts expose sources, agents can use injected secrets, and the default image has outbound network access. Kandev does not mount the Docker socket automatically. The User namespace support option relaxes container isolation — see the [security ADR](../decisions/2026-08-18-executor-userns-security-options.md).
+> **Trust boundary:** A container is useful but not a hostile-code sandbox. The daemon has host-level power, bind mounts expose sources, agents can use injected secrets, and the default image has outbound network access. Kandev does not mount the Docker socket automatically. The User namespace support option relaxes container isolation. See the [security ADR](../decisions/2026-08-18-executor-userns-security-options.md).
 
 <details>
 <summary>Docker credential and security details</summary>

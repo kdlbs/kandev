@@ -32,6 +32,11 @@ import (
 //go:embed default.json
 var defaultProfileJSON []byte
 
+const (
+	seccompActionAllow = "SCMP_ACT_ALLOW"
+	seccompActionErrno = "SCMP_ACT_ERRNO"
+)
+
 // usernsRelaxedSyscalls lists the syscalls that the Docker default profile
 // gates behind CAP_SYS_ADMIN but that the Kandev userns profile allows
 // unconditionally. Each of these is safe to allow because it remains
@@ -122,12 +127,12 @@ func processSyscallRules(rules []json.RawMessage) (keepRules []int, addedSyscall
 		}
 
 		// Drop clone3 ENOSYS fallback rule.
-		if ruleHasName(rule, "clone3") && rule.Action == "SCMP_ACT_ERRNO" {
+		if ruleHasName(rule, "clone3") && rule.Action == seccompActionErrno {
 			continue
 		}
 
 		// CAP_SYS_ADMIN-gated group — split out namespace syscalls.
-		if rule.Action == "SCMP_ACT_ALLOW" && hasCap(rule, "CAP_SYS_ADMIN") {
+		if rule.Action == seccompActionAllow && hasCap(rule, "CAP_SYS_ADMIN") {
 			var remaining, moved []string
 			for _, name := range rule.Names {
 				if slices.Contains(usernsRelaxedSyscalls, name) {
@@ -138,7 +143,7 @@ func processSyscallRules(rules []json.RawMessage) (keepRules []int, addedSyscall
 			}
 			if len(remaining) > 0 {
 				sort.Strings(remaining)
-				modified := makeRule(remaining, "SCMP_ACT_ALLOW", capInclude("CAP_SYS_ADMIN"))
+				modified := makeRule(remaining, seccompActionAllow, capInclude("CAP_SYS_ADMIN"))
 				rules[i] = modified
 				keepRules = append(keepRules, i)
 			}
@@ -177,13 +182,13 @@ func mergeUnconditionalAllow(rules []json.RawMessage, keepRules []int, addedSysc
 			allNames = append(allNames, addedSyscalls...)
 			sort.Strings(allNames)
 			allNames = slices.Compact(allNames)
-			rules[i] = makeRule(allNames, "SCMP_ACT_ALLOW", nil)
+			rules[i] = makeRule(allNames, seccompActionAllow, nil)
 			merged = true
 			break
 		}
 	}
 	if !merged {
-		newRule := makeRule(addedSyscalls, "SCMP_ACT_ALLOW", nil)
+		newRule := makeRule(addedSyscalls, seccompActionAllow, nil)
 		rules = append([]json.RawMessage{newRule}, rules...)
 	}
 
@@ -195,7 +200,7 @@ func mergeUnconditionalAllow(rules []json.RawMessage, keepRules []int, addedSysc
 }
 
 func isUnconditionalAllowRule(rule seccompRule) bool {
-	return rule.Action == "SCMP_ACT_ALLOW" &&
+	return rule.Action == seccompActionAllow &&
 		rule.Includes == nil && rule.Excludes == nil &&
 		len(rule.Args) == 0 && len(rule.Names) > 0
 }
@@ -252,8 +257,4 @@ func hasMaskedEqArg(rule seccompRule) bool {
 		}
 	}
 	return false
-}
-
-func containsAll(names []string, target string) bool {
-	return slices.Contains(names, target)
 }

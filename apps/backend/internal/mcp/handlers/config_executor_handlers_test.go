@@ -3,16 +3,15 @@ package handlers
 import (
 	"testing"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestRejectOperatorConfigKeys_RejectsReservedKey(t *testing.T) {
 	err := rejectOperatorConfigKeys(map[string]string{
-		lifecycle.MetadataKeyAllowUserNamespaces: "true",
+		allowUserNamespacesProfileConfigKey: "true",
 	})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), lifecycle.MetadataKeyAllowUserNamespaces)
+	assert.Contains(t, err.Error(), allowUserNamespacesProfileConfigKey)
 }
 
 func TestRejectOperatorConfigKeys_AcceptsNormalKeys(t *testing.T) {
@@ -31,5 +30,3 @@ func TestRejectOperatorConfigKeys_AcceptsNilConfig(t *testing.T) {
 	err := rejectOperatorConfigKeys(nil)
 	assert.NoError(t, err)
 }
-
-

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -21,8 +20,10 @@ import (
 // security relaxations from within a task, without widening the surface onto
 // the operator path (which already exposes prepare_script — strictly more
 // powerful).
+const allowUserNamespacesProfileConfigKey = "allow_user_namespaces"
+
 var operatorOnlyConfigKeys = []string{
-	lifecycle.MetadataKeyAllowUserNamespaces,
+	allowUserNamespacesProfileConfigKey,
 }
 
 // rejectOperatorConfigKeys returns an error if the config map contains any
