@@ -11,14 +11,6 @@ export function areAllEmptyStepsAutoHidden(visibleSteps: Step[], moveTargetSteps
   return visibleSteps.length === 0 && moveTargetSteps.length > 0;
 }
 
-export function getAutoHiddenMoveTargets<T extends Step>(
-  visibleSteps: Step[],
-  moveTargetSteps: T[],
-): T[] {
-  const visibleStepIds = new Set(visibleSteps.map((step) => step.id));
-  return moveTargetSteps.filter((step) => !visibleStepIds.has(step.id));
-}
-
 export function deriveAutoHiddenStepIds(
   steps: Step[],
   tasks: StepTask[],

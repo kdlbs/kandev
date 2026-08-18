@@ -20,44 +20,33 @@ import { MobileColumnTabs } from "./mobile-column-tabs";
 import { SwipeableColumns } from "./swipeable-columns";
 import { MobileDropTargets } from "./mobile-drop-targets";
 import { KanbanDragSurface } from "./kanban-drag-surface";
+import { getDesktopEmptyState } from "./desktop-auto-hidden-empty-state";
+import { isOrphanMoveTarget, useOrphanDisplay } from "./swimlane-orphan-display";
+export {
+  ORPHAN_STEP,
+  ORPHAN_STEP_ID,
+  isOrphanMoveTarget,
+  remapOrphanTasks,
+} from "./swimlane-orphan-display";
 import { AdaptiveDesktopKanban } from "./adaptive-desktop-kanban";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { MobileWorkflowNavigation } from "@/lib/kanban/view-registry";
 import { resolveMobileColumnIndex } from "@/lib/kanban/mobile-column-index";
 import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
 import { countAdmittedTasks } from "@/lib/kanban/wip-limit";
+import { areAllEmptyStepsAutoHidden } from "@/lib/kanban/auto-hide-empty-columns";
 import {
-  areAllEmptyStepsAutoHidden,
-  getAutoHiddenMoveTargets,
-} from "@/lib/kanban/auto-hide-empty-columns";
+  getDragDisplaySteps,
+  getTemporaryStepIds,
+  useKanbanDragScrollAnchor,
+} from "@/hooks/domains/kanban/use-kanban-drag-scroll-anchor";
+import { cn } from "@kandev/ui/lib/utils";
 import {
   type KanbanExternalLinkAvailability,
   useKanbanExternalLinkAvailability,
 } from "@/components/kanban-external-link-availability";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
-
-/**
- * Sentinel step ID used to collect tasks whose workflow_step_id no longer
- * matches any rendered column.  Tasks remapped here are visible as a
- * "Needs Reassignment" fallback column so they are never silently hidden.
- */
-export const ORPHAN_STEP_ID = "__kandev_orphan__";
-
-export const ORPHAN_STEP: WorkflowStep = {
-  id: ORPHAN_STEP_ID,
-  title: "",
-  color: "#f59e0b",
-};
-
-/**
- * The "Needs Reassignment" column is a display-only fallback, not a real
- * workflow step — it must never be offered as a manual move destination
- * (drag-and-drop, "Move to" menus, or Pipeline navigation).
- */
-export function isOrphanMoveTarget(targetStepId: string): boolean {
-  return targetStepId === ORPHAN_STEP_ID;
-}
 
 export type SwimlaneKanbanContentProps = {
   workflowId: string;
@@ -177,6 +166,40 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanban
   };
 }
 
+function useSwimlaneKanbanPresentationDnd({
+  displaySteps,
+  moveTargetSteps,
+  isMobile,
+  ...dndOptions
+}: SwimlaneKanbanDndOptions & {
+  displaySteps: WorkflowStep[];
+  moveTargetSteps: WorkflowStep[];
+  isMobile: boolean;
+}) {
+  const dnd = useSwimlaneKanbanDnd(dndOptions);
+  const renderedSteps = useMemo(
+    () => getDragDisplaySteps(displaySteps, moveTargetSteps, !!dnd.activeTask, isMobile),
+    [displaySteps, moveTargetSteps, dnd.activeTask, isMobile],
+  );
+  const { boardRef, handleAnchoredDragStart } = useKanbanDragScrollAnchor({
+    tasks: dndOptions.tasks,
+    activeTask: dnd.activeTask,
+    renderedSteps,
+    onDragStart: dnd.handleDragStart,
+  });
+  const temporaryStepIds = useMemo(
+    () => getTemporaryStepIds(displaySteps, moveTargetSteps),
+    [displaySteps, moveTargetSteps],
+  );
+  return {
+    ...dnd,
+    renderedSteps,
+    temporaryStepIds,
+    boardRef,
+    handleDragStart: handleAnchoredDragStart,
+  };
+}
+
 function useMobileColumnIndex(workflowId: string, steps: WorkflowStep[], tasks: Task[]) {
   const storedStepId = useAppStore(
     (state) => state.mobileKanban.activeStepIdByWorkflowId[workflowId],
@@ -204,49 +227,6 @@ function useMobileColumnIndex(workflowId: string, steps: WorkflowStep[], tasks: 
   );
 
   return { activeIndex, setActiveIndex };
-}
-
-/**
- * remapOrphanTasks re-keys any task whose workflowStepId matches no step in
- * `stepIds` to `orphanStepId`.  Returns the remapped task list and whether
- * any orphans were found.  Pure function — safe to call outside React.
- */
-export function remapOrphanTasks(
-  tasks: Task[],
-  stepIds: Set<string>,
-  orphanStepId: string,
-): { tasks: Task[]; hasOrphans: boolean } {
-  let hasOrphans = false;
-  const remapped = tasks.map((t) => {
-    if (!t.workflowStepId || stepIds.has(t.workflowStepId)) return t;
-    hasOrphans = true;
-    return { ...t, workflowStepId: orphanStepId };
-  });
-  return { tasks: remapped, hasOrphans };
-}
-
-/**
- * useOrphanDisplay remaps tasks with an unknown workflowStepId to the sentinel
- * ORPHAN_STEP so they appear in a visible fallback column instead of being
- * silently dropped from the board.
- *
- * Returns:
- *   displayTasks – all tasks, with orphaned ones keyed to ORPHAN_STEP_ID
- *   displaySteps – original steps plus ORPHAN_STEP when orphans are present
- */
-function useOrphanDisplay(
-  tasks: Task[],
-  steps: WorkflowStep[],
-): { displayTasks: Task[]; displaySteps: WorkflowStep[] } {
-  const { t } = useTranslation("kanban");
-  return useMemo(() => {
-    const stepIds = new Set(steps.map((s) => s.id));
-    const { tasks: displayTasks, hasOrphans } = remapOrphanTasks(tasks, stepIds, ORPHAN_STEP_ID);
-    const displaySteps = hasOrphans
-      ? [...steps, { ...ORPHAN_STEP, title: t("kanban:needsReassignment") }]
-      : steps;
-    return { displayTasks, displaySteps };
-  }, [tasks, steps, t]);
 }
 
 function useTasksByStep(tasks: Task[]) {
@@ -377,6 +357,7 @@ type SharedKanbanLayoutProps = {
   onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
   externalLinkAvailability: KanbanExternalLinkAvailability;
+  temporaryStepIds: Set<string>;
 };
 
 function TabletKanbanLayout({
@@ -397,17 +378,25 @@ function TabletKanbanLayout({
   onSelectRange,
   isMultiSelectMode,
   externalLinkAvailability,
+  temporaryStepIds,
 }: SharedKanbanLayoutProps) {
   const getTasksForStep = useTasksByStep(tasks);
 
   return (
     <div
       className="flex h-full min-h-0 gap-2 overflow-x-auto snap-x snap-mandatory scrollbar-hide"
-      data-testid="tablet-kanban-layout"
-    >
-      {steps.map((step) => (
-        <div key={step.id} className="h-full min-h-0 w-[calc(50%-4px)] flex-shrink-0 snap-start">
-          <KanbanColumn
+        data-testid="tablet-kanban-layout"
+      >
+        {steps.map((step) => (
+          <div
+            key={step.id}
+            data-kanban-step-id={step.id}
+            className={cn(
+              "h-full min-h-0 w-[calc(50%-4px)] flex-shrink-0 snap-start",
+              temporaryStepIds.has(step.id) && "opacity-70",
+            )}
+          >
+            <KanbanColumn
             step={step}
             tasks={getTasksForStep(step.id)}
             presentation="desktop"
@@ -451,6 +440,7 @@ function DesktopKanbanLayout({
   onSelectRange,
   isMultiSelectMode,
   externalLinkAvailability,
+  temporaryStepIds,
 }: SharedKanbanLayoutProps) {
   const getTasksForStep = useTasksByStep(tasks);
 
@@ -458,26 +448,28 @@ function DesktopKanbanLayout({
     <AdaptiveDesktopKanban
       steps={steps}
       renderColumn={(step) => (
-        <KanbanColumn
-          step={step}
-          tasks={getTasksForStep(step.id)}
-          presentation="desktop"
-          onPreviewTask={onPreviewTask}
-          onOpenTask={onOpenTask}
-          onEditTask={onEditTask}
-          onDeleteTask={onDeleteTask}
-          onArchiveTask={onArchiveTask}
-          onMoveTask={moveTaskToStep}
-          steps={moveTargetSteps}
-          deletingTaskId={deletingTaskId}
-          archivingTaskId={archivingTaskId}
-          showMaximizeButton={showMaximizeButton}
-          selectedIds={selectedIds}
-          onToggleSelect={onToggleSelect}
-          onSelectRange={onSelectRange}
-          isMultiSelectMode={isMultiSelectMode}
-          externalLinkAvailability={externalLinkAvailability}
-        />
+        <div className={cn("h-full", temporaryStepIds.has(step.id) && "opacity-70")}>
+          <KanbanColumn
+            step={step}
+            tasks={getTasksForStep(step.id)}
+            presentation="desktop"
+            onPreviewTask={onPreviewTask}
+            onOpenTask={onOpenTask}
+            onEditTask={onEditTask}
+            onDeleteTask={onDeleteTask}
+            onArchiveTask={onArchiveTask}
+            onMoveTask={moveTaskToStep}
+            steps={moveTargetSteps}
+            deletingTaskId={deletingTaskId}
+            archivingTaskId={archivingTaskId}
+            showMaximizeButton={showMaximizeButton}
+            selectedIds={selectedIds}
+            onToggleSelect={onToggleSelect}
+            onSelectRange={onSelectRange}
+            isMultiSelectMode={isMultiSelectMode}
+            externalLinkAvailability={externalLinkAvailability}
+          />
+        </div>
       )}
     />
   );
@@ -521,25 +513,7 @@ function renderKanbanLayout({
   return <DesktopKanbanLayout {...sharedProps} />;
 }
 
-function DesktopAutoHiddenEmptyState() {
-  const { t } = useTranslation();
-  return (
-    <div
-      className="mx-3 mb-3 rounded-lg border border-dashed border-border/70 px-4 py-6 text-center text-sm text-muted-foreground"
-      data-testid="kanban-auto-hidden-empty-state"
-    >
-      {t("kanban:allEmptyStepsAutoHidden")}
-    </div>
-  );
-}
-
-function useAutoHiddenMoveTargets(displaySteps: WorkflowStep[], moveTargetSteps: WorkflowStep[]) {
-  return useMemo(
-    () => getAutoHiddenMoveTargets(displaySteps, moveTargetSteps),
-    [displaySteps, moveTargetSteps],
-  );
-}
-
+// eslint-disable-next-line max-lines-per-function -- responsive Kanban composition stays centralized while DnD, empty-state, and layout concerns are extracted.
 export function SwimlaneKanbanContent({
   workflowId,
   steps,
@@ -571,13 +545,17 @@ export function SwimlaneKanbanContent({
     displaySteps,
     displayTasks,
   );
-  const { sensors, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToStep, activeTask } =
-    useSwimlaneKanbanDnd({ tasks: displayTasks, workflowId, onMoveError });
-  const autoHiddenMoveTargets = useAutoHiddenMoveTargets(displaySteps, moveTargetSteps);
-
+  const drag = useSwimlaneKanbanPresentationDnd({
+    tasks: displayTasks,
+    workflowId,
+    onMoveError,
+    displaySteps,
+    moveTargetSteps,
+    isMobile,
+  });
   const sharedProps = useMemo(
     () => ({
-      steps: displaySteps,
+      steps: drag.renderedSteps,
       moveTargetSteps,
       tasks: displayTasks,
       onPreviewTask,
@@ -585,7 +563,7 @@ export function SwimlaneKanbanContent({
       onEditTask,
       onDeleteTask,
       onArchiveTask,
-      moveTaskToStep,
+      moveTaskToStep: drag.moveTaskToStep,
       showMaximizeButton,
       deletingTaskId,
       archivingTaskId,
@@ -594,8 +572,10 @@ export function SwimlaneKanbanContent({
       onSelectRange,
       isMultiSelectMode,
       externalLinkAvailability,
+      temporaryStepIds: drag.temporaryStepIds,
     }),
     [
+      drag.renderedSteps,
       moveTargetSteps,
       displayTasks,
       onPreviewTask,
@@ -603,7 +583,7 @@ export function SwimlaneKanbanContent({
       onEditTask,
       onDeleteTask,
       onArchiveTask,
-      moveTaskToStep,
+      drag.moveTaskToStep,
       showMaximizeButton,
       deletingTaskId,
       archivingTaskId,
@@ -612,13 +592,12 @@ export function SwimlaneKanbanContent({
       onSelectRange,
       isMultiSelectMode,
       externalLinkAvailability,
+      drag.temporaryStepIds,
     ],
   );
 
-  if (displaySteps.length === 0 && !isMobile) {
-    if (!areAllEmptyStepsAutoHidden(displaySteps, moveTargetSteps)) return null;
-    return <DesktopAutoHiddenEmptyState />;
-  }
+  const desktopEmptyState = getDesktopEmptyState(isMobile, displaySteps, moveTargetSteps);
+  if (desktopEmptyState !== undefined) return desktopEmptyState;
 
   const layoutContent = renderKanbanLayout({
     isMobile,
@@ -626,20 +605,19 @@ export function SwimlaneKanbanContent({
     sharedProps,
     activeIndex,
     setActiveIndex,
-    activeTask,
+    activeTask: drag.activeTask,
     mobileWorkflowNavigation,
   });
 
   return (
     <KanbanDragSurface
-      sensors={sensors}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-      onDragCancel={handleDragCancel}
+      sensors={drag.sensors}
+      onDragStart={drag.handleDragStart}
+      onDragEnd={drag.handleDragEnd}
+      onDragCancel={drag.handleDragCancel}
       layoutContent={layoutContent}
-      autoHiddenMoveTargets={autoHiddenMoveTargets}
-      activeTask={activeTask}
-      isMobile={isMobile}
+      activeTask={drag.activeTask}
+      boardRef={drag.boardRef}
     />
   );
 }

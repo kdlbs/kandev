@@ -19,12 +19,16 @@ export function AdaptiveDesktopKanban({ steps, renderColumn }: AdaptiveDesktopKa
         <div
           data-testid="desktop-kanban-lane-grid"
           className="grid h-full min-h-0 min-w-full gap-0"
-          style={{ gridTemplateColumns: getKanbanColumnGridTemplate(steps.length) }}
-        >
-          {steps.map((step) => (
-            <div key={step.id} className="min-h-0 min-w-0 snap-start">
-              {renderColumn(step)}
-            </div>
+            style={{ gridTemplateColumns: getKanbanColumnGridTemplate(steps.length) }}
+          >
+            {steps.map((step) => (
+              <div
+                key={step.id}
+                data-kanban-step-id={step.id}
+                className="min-h-0 min-w-0 snap-start"
+              >
+                {renderColumn(step)}
+              </div>
           ))}
         </div>
       </div>

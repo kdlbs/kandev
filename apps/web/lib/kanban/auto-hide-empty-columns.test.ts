@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   areAllEmptyStepsAutoHidden,
   deriveAutoHiddenStepIds,
-  getAutoHiddenMoveTargets,
   sortWorkflowStepsByPosition,
 } from "./auto-hide-empty-columns";
 
@@ -21,17 +20,6 @@ describe("deriveAutoHiddenStepIds", () => {
   it("leaves manually hidden steps to the manual visibility contract", () => {
     const result = deriveAutoHiddenStepIds(steps, [], true, ["backlog"]);
     expect([...result]).toEqual(["doing", "done"]);
-  });
-});
-
-describe("getAutoHiddenMoveTargets", () => {
-  it("returns only non-rendered destinations without changing either input", () => {
-    const visible = [{ id: "backlog" }, { id: "review" }];
-    const moveTargets = [...visible, { id: "done" }];
-
-    expect(getAutoHiddenMoveTargets(visible, moveTargets)).toEqual([{ id: "done" }]);
-    expect(visible.map((step) => step.id)).toEqual(["backlog", "review"]);
-    expect(moveTargets.map((step) => step.id)).toEqual(["backlog", "review", "done"]);
   });
 });
 
