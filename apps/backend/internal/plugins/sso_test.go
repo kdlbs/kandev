@@ -30,11 +30,25 @@ func ssoRecordWithAccess(
 	return &store.Record{
 		Status: status,
 		Manifest: manifest.Manifest{
+			APIVersion:    manifest.CurrentAPIVersion,
 			ID:            id,
 			Capabilities:  manifest.Capabilities{Auth: auth},
 			Webhooks:      whs,
 			AuthProviders: providers,
 		},
+	}
+}
+
+func TestSSOProvidersPreservesLegacyPublicDefault(t *testing.T) {
+	record := ssoRecordWithAccess("legacy", StatusActive, true, []string{"initiate"}, nil,
+		[]manifest.AuthProvider{{ID: "legacy", DisplayName: "Legacy", Initiate: "initiate"}})
+	record.APIVersion = manifest.LegacyAPIVersion
+	reg := NewRegistry()
+	reg.Add(record)
+
+	svc := &Service{registry: reg}
+	if got := svc.SSOProviders(); len(got) != 1 {
+		t.Fatalf("SSOProviders() = %d providers, want 1 for v1 public default: %+v", len(got), got)
 	}
 }
 

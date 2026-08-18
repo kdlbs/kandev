@@ -3,6 +3,8 @@ package manifest
 import (
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 const validManifestYAML = `
@@ -72,12 +74,12 @@ func TestParse_UserStateCapabilityRoundTrips(t *testing.T) {
 }
 
 // TestParse_UserStateCapabilityDefaultsFalse pins that omitting
-// capabilities.user_state defaults to authenticated — a plugin must opt in before
+// capabilities.user_state defaults to false — a plugin must opt in before
 // the per-user storage routes accept its writes (AC17).
 func TestParse_UserStateCapabilityDefaultsFalse(t *testing.T) {
 	m := validManifest(t)
 	if m.Capabilities.UserState {
-		t.Fatalf("Capabilities.UserState = true, want authenticated (not declared in fixture)")
+		t.Fatalf("Capabilities.UserState = true, want false (not declared in fixture)")
 	}
 }
 
@@ -85,32 +87,41 @@ func TestParse_UserStateCapabilityDefaultsFalse(t *testing.T) {
 // (AC10): the auth gate reads this field to decide whether a webhook is
 // reachable without a caller identity.
 func TestParse_WebhookAccessRoundTrips(t *testing.T) {
-	yaml := strings.Replace(validManifestYAML, `method: "POST"`, "method: \"POST\"\n    access: public", 1)
-	m, err := Parse([]byte(yaml))
+	input := strings.Replace(validManifestYAML, `method: "POST"`, "method: \"POST\"\n    access: public", 1)
+	m, err := Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("Parse() unexpected error: %v", err)
 	}
-	if len(m.Webhooks) != 1 || m.Webhooks[0].EffectiveAccess() != WebhookAccessPublic {
+	encoded, err := yaml.Marshal(m)
+	if err != nil {
+		t.Fatalf("Marshal() unexpected error: %v", err)
+	}
+	m, err = Parse(encoded)
+	if err != nil {
+		t.Fatalf("Parse(round trip) unexpected error: %v", err)
+	}
+	if len(m.Webhooks) != 1 || m.Webhooks[0].EffectiveAccess(m.APIVersion) != WebhookAccessPublic {
 		t.Fatalf("Webhooks[0].EffectiveAccess() = %+v, want a single public webhook", m.Webhooks)
 	}
 }
 
-// TestParse_WebhookAccessDefaultsAuthenticated pins that omitting webhooks[].access
-// defaults to authenticated — an unflagged webhook requires a caller identity.
-func TestParse_WebhookAccessDefaultsAuthenticated(t *testing.T) {
-	m := validManifest(t)
-	if len(m.Webhooks) != 1 || m.Webhooks[0].EffectiveAccess() != WebhookAccessAuthenticated {
-		t.Fatalf("Webhooks[0].EffectiveAccess() = %+v, want authenticated (not declared in fixture)", m.Webhooks)
+func TestWebhookAccessDefaultIsVersioned(t *testing.T) {
+	webhook := Webhook{Key: "events"}
+	if got := webhook.EffectiveAccess(LegacyAPIVersion); got != WebhookAccessPublic {
+		t.Fatalf("v1 EffectiveAccess() = %q, want public", got)
+	}
+	if got := webhook.EffectiveAccess(CurrentAPIVersion); got != WebhookAccessAuthenticated {
+		t.Fatalf("v2 EffectiveAccess() = %q, want authenticated", got)
 	}
 }
 
-// TestParse_APIVersionStaysOne pins assumption 2 (hard cutover, no
-// api_version grandfathering): adding webhooks[].access is additive YAML, so
-// supportedAPIVersion / the parsed api_version contract is unchanged.
-func TestParse_APIVersionStaysOne(t *testing.T) {
-	m := validManifest(t)
-	if m.APIVersion != 1 {
-		t.Fatalf("m.APIVersion = %d, want 1", m.APIVersion)
+func TestValidateAcceptsSupportedAPIVersions(t *testing.T) {
+	for _, version := range []int{LegacyAPIVersion, CurrentAPIVersion} {
+		m := validManifest(t)
+		m.APIVersion = version
+		if err := m.Validate(); err != nil {
+			t.Fatalf("api_version %d: Validate() unexpected error: %v", version, err)
+		}
 	}
 }
 
@@ -562,7 +573,7 @@ func TestValidate_RejectsInvalidManifests(t *testing.T) {
 		},
 		{
 			name:    "unsupported api_version",
-			mutate:  func(m *Manifest) { m.APIVersion = 2 },
+			mutate:  func(m *Manifest) { m.APIVersion = CurrentAPIVersion + 1 },
 			wantErr: "api_version",
 		},
 		{

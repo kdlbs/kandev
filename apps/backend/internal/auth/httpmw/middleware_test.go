@@ -203,6 +203,10 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 			name: "plugin webhook (deferred, not a policy pin)", method: http.MethodPost, path: "/api/plugins/p1/webhooks/key1",
 		},
 		{
+			name: "plugin webhook GET (deferred, not a policy pin)", method: http.MethodGet,
+			path: "/api/plugins/p1/webhooks/key1",
+		},
+		{
 			// Unsupported methods are not registered webhook relay routes, so they should
 			// not bypass the global auth challenge just because the path has the relay
 			// shape.

@@ -16,10 +16,11 @@ unauthenticated `/api/plugins/:id/webhooks/:key` proxy, explicitly bypassed in
 
 **Amendment (2026-08-12):** that allowlist entry was removed — see
 `2026-08-12-plugin-webhook-auth-gate.md` — so the webhook proxy is
-authenticated by default too, unless its manifest entry opts out with
-`webhooks[].access: public`. This does not change the rest of this ADR's
-reasoning: what motivated `host.storage` was the *browser session's own
-user identity* being reachable at all from a plugin's frontend bundle, which
+authenticated by default for API v2, unless its manifest entry opts out with
+`webhooks[].access: public`. API v1 keeps omitted access public for compatibility.
+This does not change the rest of this ADR's
+reasoning: what motivated `host.storage` was the _browser session's own
+user identity_ being reachable at all from a plugin's frontend bundle, which
 the webhook proxy still does not provide (it relays a request, not a
 per-user storage API).
 
@@ -76,7 +77,7 @@ CREATE TABLE plugin_user_state (
   signal.
 - **Optional conditional write.** `PUT` accepts `ifUnmodifiedSince`; the write
   folds that comparison into the upsert's own `ON CONFLICT ... DO UPDATE ...
-  WHERE updated_at <= ?` clause — not a separate read-then-write, even inside
+WHERE updated_at <= ?` clause — not a separate read-then-write, even inside
   one transaction, which only serializes under SQLite's single-writer model.
   This codebase also runs against PostgreSQL, whose default READ COMMITTED
   isolation lets two concurrent transactions both pass a plain `SELECT`-based

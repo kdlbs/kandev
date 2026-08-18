@@ -24,10 +24,13 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	goruntime "runtime"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 )
 
@@ -128,6 +131,59 @@ func TestWebhookAuthGate_AuthenticatedNonPublicReachesRelay(t *testing.T) {
 	}
 }
 
+func doWebhookIdentityRequest(
+	router http.Handler, method, path string, identity authn.Identity, origin string,
+) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader("{}"))
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	req = req.WithContext(authn.WithIdentity(req.Context(), identity))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestWebhookAuthGate_SessionRequiresAcceptedOrigin(t *testing.T) {
+	router, svc := newTestRouter(t)
+	installedWebhookPlugin(t, svc, "kandev-plugin-session-origin", "key1", false)
+	identity := authn.Identity{UserID: "user-1", Role: authn.RoleMember, SessionID: "session-1"}
+	path := "/api/plugins/kandev-plugin-session-origin/webhooks/key1"
+
+	for _, tc := range []struct {
+		name   string
+		origin string
+		want   int
+	}{
+		{name: "missing", want: http.StatusForbidden},
+		{name: "foreign", origin: "https://attacker.example", want: http.StatusForbidden},
+		{name: "same host", origin: "https://example.com", want: http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := doWebhookIdentityRequest(router, http.MethodGet, path, identity, tc.origin)
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d, body=%s", rec.Code, tc.want, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestWebhookAuthGate_NonBrowserIdentitiesDoNotRequireOrigin(t *testing.T) {
+	router, svc := newTestRouter(t)
+	installedWebhookPlugin(t, svc, "kandev-plugin-non-browser", "key1", false)
+	path := "/api/plugins/kandev-plugin-non-browser/webhooks/key1"
+	identities := []authn.Identity{
+		{UserID: "user-1", Role: authn.RoleMember, TokenID: "token-1"},
+		{UserID: "default", Role: authn.RoleAdmin, Synthetic: true},
+	}
+	for _, identity := range identities {
+		rec := doWebhookIdentityRequest(router, http.MethodPost, path, identity, "")
+		if !reachedRelay(rec.Code) {
+			t.Fatalf("identity %+v: status = %d, want 503, body=%s", identity, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 // TestWebhookAuthGate_AuthDisabledReachesRelayRegardlessOfPublic pins AC4:
 // with auth disabled, httpmw.Middleware injects a synthetic identity onto
 // every request, so both public and non-public webhooks reach the relay —
@@ -200,7 +256,7 @@ func TestFlattenHeaders_StripsKandevSessionCookie(t *testing.T) {
 	h := http.Header{}
 	h.Set("Cookie", "kandev_session=secret-token; other=keep-me")
 
-	out := flattenHeaders(h, "kandev_session")
+	out := flattenHeaders(h, "kandev_session", true)
 	if got := out["Cookie"]; got != "other=keep-me" {
 		t.Fatalf("Cookie = %q, want only the surviving non-Kandev cookie", got)
 	}
@@ -213,7 +269,7 @@ func TestFlattenHeaders_OmitsCookieHeaderWhenNothingSurvives(t *testing.T) {
 	h := http.Header{}
 	h.Set("Cookie", "kandev_session=secret-token")
 
-	out := flattenHeaders(h, "kandev_session")
+	out := flattenHeaders(h, "kandev_session", true)
 	if _, present := out["Cookie"]; present {
 		t.Fatalf("Cookie header present = %v, want omitted entirely", out["Cookie"])
 	}
@@ -225,13 +281,13 @@ func TestFlattenHeaders_OmitsCookieHeaderWhenNothingSurvives(t *testing.T) {
 func TestFlattenHeaders_StripsPATBearerButKeepsOtherBearers(t *testing.T) {
 	pat := http.Header{}
 	pat.Set("Authorization", "Bearer kandev_pat_abc123_secret")
-	if out := flattenHeaders(pat, ""); out["Authorization"] != "" {
+	if out := flattenHeaders(pat, "", true); out["Authorization"] != "" {
 		t.Fatalf("Authorization = %q, want stripped PAT bearer", out["Authorization"])
 	}
 
 	provider := http.Header{}
 	provider.Set("Authorization", "Bearer provider-issued-token")
-	if out := flattenHeaders(provider, ""); out["Authorization"] != "Bearer provider-issued-token" {
+	if out := flattenHeaders(provider, "", true); out["Authorization"] != "Bearer provider-issued-token" {
 		t.Fatalf("Authorization = %q, want the non-PAT bearer relayed unchanged", out["Authorization"])
 	}
 }
@@ -245,7 +301,7 @@ func TestFlattenHeaders_StripsPATBearerCaseInsensitively(t *testing.T) {
 	for _, scheme := range []string{"bearer", "BEARER", "BeArEr"} {
 		h := http.Header{}
 		h.Set("Authorization", scheme+" kandev_pat_abc123_secret")
-		if out := flattenHeaders(h, ""); out["Authorization"] != "" {
+		if out := flattenHeaders(h, "", true); out["Authorization"] != "" {
 			t.Fatalf("scheme %q: Authorization = %q, want stripped PAT bearer", scheme, out["Authorization"])
 		}
 	}
@@ -253,7 +309,7 @@ func TestFlattenHeaders_StripsPATBearerCaseInsensitively(t *testing.T) {
 	// A bare PAT with no scheme at all is stripped too.
 	bare := http.Header{}
 	bare.Set("Authorization", "kandev_pat_abc123_secret")
-	if out := flattenHeaders(bare, ""); out["Authorization"] != "" {
+	if out := flattenHeaders(bare, "", true); out["Authorization"] != "" {
 		t.Fatalf("Authorization = %q, want stripped bare PAT", out["Authorization"])
 	}
 }
@@ -265,7 +321,7 @@ func TestFlattenHeaders_StripsSessionCookieFromRepeatedHeaders(t *testing.T) {
 	h.Add("Cookie", "other=keep-me")
 	h.Add("Cookie", "kandev_session=secret-token")
 
-	out := flattenHeaders(h, "kandev_session")
+	out := flattenHeaders(h, "kandev_session", true)
 	if got := out["Cookie"]; got != "other=keep-me" {
 		t.Fatalf("Cookie = %q, want only the non-Kandev cookie", got)
 	}
@@ -278,7 +334,7 @@ func TestFlattenHeaders_StripsPATFromRepeatedAuthorizationHeaders(t *testing.T) 
 	h.Add("Authorization", "Bearer provider-issued-token")
 	h.Add("Authorization", "Bearer kandev_pat_abc123_secret")
 
-	if out := flattenHeaders(h, ""); out["Authorization"] != "" {
+	if out := flattenHeaders(h, "", true); out["Authorization"] != "" {
 		t.Fatalf("Authorization = %q, want omitted when any field carries a PAT", out["Authorization"])
 	}
 }
@@ -309,8 +365,26 @@ func TestFlattenHeaders_NoSessionCookieNameSkipsStripping(t *testing.T) {
 	h := http.Header{}
 	h.Set("Cookie", "a=1; b=2")
 
-	out := flattenHeaders(h, "")
+	out := flattenHeaders(h, "", true)
 	if out["Cookie"] != "a=1; b=2" {
 		t.Fatalf("Cookie = %q, want unchanged when no session cookie name is configured", out["Cookie"])
+	}
+}
+
+func TestFlattenHeaders_AuthenticatedWebhookDropsAmbientCredentials(t *testing.T) {
+	h := http.Header{}
+	h.Set("Authorization", "Bearer reverse-proxy-token")
+	h.Set("Cookie", "CF_Authorization=ambient; _oauth2_proxy=ambient")
+	h.Set("Content-Type", "application/json")
+
+	out := flattenHeaders(h, "kandev_session", false)
+	if _, present := out["Authorization"]; present {
+		t.Fatalf("Authorization = %q, want omitted for authenticated webhook", out["Authorization"])
+	}
+	if _, present := out["Cookie"]; present {
+		t.Fatalf("Cookie = %q, want omitted for authenticated webhook", out["Cookie"])
+	}
+	if got := out["Content-Type"]; got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
 	}
 }

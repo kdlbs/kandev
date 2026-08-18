@@ -20,7 +20,9 @@ does not expose draft contents or let plugins synthesize outbound messages. Task
 task creation, and new-session creation each supply an adapter to the same public shape.
 
 Kandev extends each webhook declaration with `access: public|authenticated` and
-`max_body_bytes`. This is amended by ADR-2026-08-12: existing declarations default to `authenticated` and 4 MiB; `public` is an explicit opt-in. Authenticated webhooks require
+`max_body_bytes`. This is amended by ADR-2026-08-12: API v1 omissions remain public,
+while API v2 omissions default to authenticated. Both use a 4 MiB default limit.
+Authenticated webhooks require
 the normal Kandev identity and same-origin browser checks; their configured limit may be raised to a
 16 MiB host ceiling. Both modes continue through the existing `HandleWebhook` RPC, with request
 cancellation propagated through its context.

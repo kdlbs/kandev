@@ -15,6 +15,7 @@ import (
 
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/authn"
+	commonhttpmw "github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
@@ -52,14 +53,19 @@ type actionInvoker interface {
 	) (*pluginsdk.PluginActionResponse, error)
 }
 
+type webhookInvoker interface {
+	InvokeWebhook(context.Context, string, *pluginsdk.WebhookRequest) (*pluginsdk.WebhookResponse, error)
+}
+
 // Controller holds the plugin HTTP handlers: operator-facing management
 // (install/list/get/config/uninstall/enable/disable), the bundle/UI
 // static-file serving (from the extracted package on disk), and the
 // external webhook relay (HTTP -> Host RPC over the live subprocess).
 type Controller struct {
-	svc           *Service
-	log           *logger.Logger
-	actionInvoker actionInvoker
+	svc            *Service
+	log            *logger.Logger
+	actionInvoker  actionInvoker
+	webhookInvoker webhookInvoker
 }
 
 // RegisterRoutes wires the plugin HTTP surface. deliverer is accepted for
@@ -67,7 +73,7 @@ type Controller struct {
 // alongside this call) — no handler in this file calls it directly, since
 // Service already notifies it on every install/status change.
 func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.Logger) {
-	ctrl := &Controller{svc: svc, log: log, actionInvoker: svc}
+	ctrl := &Controller{svc: svc, log: log, actionInvoker: svc, webhookInvoker: svc}
 
 	api := router.Group("/api/plugins")
 	api.POST("/install", authn.RequireAdmin(), ctrl.install)
@@ -395,7 +401,8 @@ func (c *Controller) webhook(ctx *gin.Context) {
 	id, key := ctx.Param("id"), ctx.Param("key")
 	record, lookupErr := c.svc.Get(id)
 	declaration, declared := findWebhookDeclaration(record, key)
-	if !webhookCallerAuthorized(ctx, declared && declaration.EffectiveAccess() == manifest.WebhookAccessPublic) {
+	public := declared && declaration.EffectiveAccess(record.APIVersion) == manifest.WebhookAccessPublic
+	if !webhookCallerAuthorized(ctx, public) {
 		return
 	}
 	if lookupErr != nil {
@@ -416,16 +423,23 @@ func (c *Controller) webhook(ctx *gin.Context) {
 		WebhookKey: key,
 		Method:     ctx.Request.Method,
 		Query:      ctx.Request.URL.RawQuery,
-		Headers:    flattenHeaders(ctx.Request.Header, c.svc.sessionCookieName()),
+		Headers:    flattenHeaders(ctx.Request.Header, c.svc.sessionCookieName(), public),
 		Body:       body,
 	}
 
-	resp, err := c.svc.InvokeWebhook(ctx.Request.Context(), id, req)
+	leasedRecord, release, err := c.svc.beginPluginDispatch(id, dispatchGeneration(record))
 	if err != nil {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 		return
 	}
-	c.writeWebhookResponse(ctx, record, resp)
+	defer release()
+
+	resp, err := c.webhookInvoker.InvokeWebhook(ctx.Request.Context(), id, req)
+	if err != nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	c.writeWebhookResponse(ctx, leasedRecord, resp)
 }
 
 // webhookCallerAuthorized requires a caller identity unless the declaration
@@ -435,12 +449,22 @@ func webhookCallerAuthorized(ctx *gin.Context, public bool) bool {
 	if public {
 		return true
 	}
-	if _, ok := authn.FromGin(ctx); ok {
-		return true
+	identity, ok := authn.FromGin(ctx)
+	if !ok {
+		ctx.Header("WWW-Authenticate", "Bearer")
+		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return false
 	}
-	ctx.Header("WWW-Authenticate", "Bearer")
-	ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
-	return false
+	if identity.SessionID != "" {
+		origin := ctx.GetHeader("Origin")
+		if origin == "" || !commonhttpmw.AllowedOrigin(origin, ctx.Request.Host) {
+			ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "an accepted Origin is required for session-authenticated webhooks",
+			})
+			return false
+		}
+	}
+	return true
 }
 
 // webhookStatusForResponse validates a plugin-supplied WebhookResponse.Status
@@ -560,17 +584,23 @@ func readCappedWebhookBody(ctx *gin.Context, maxBytes int64) ([]byte, error) {
 // single-valued map[string]string WebhookRequest.Headers expects,
 // per §3 of docs/plans/plugins/GRPC-CONTRACT.md: multi-valued headers are
 // joined by ", ".
-func flattenHeaders(h http.Header, sessionCookieName string) map[string]string {
+func flattenHeaders(h http.Header, sessionCookieName string, public bool) map[string]string {
 	out := make(map[string]string, len(h))
 	for k, v := range h {
 		switch http.CanonicalHeaderKey(k) {
 		case "Cookie":
+			if !public {
+				continue
+			}
 			stripped, keep := stripSessionCookies(v, sessionCookieName)
 			if !keep {
 				continue
 			}
 			out[k] = stripped
 		case "Authorization":
+			if !public {
+				continue
+			}
 			if containsKandevPATCredential(v) {
 				continue
 			}

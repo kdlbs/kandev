@@ -16,12 +16,12 @@ a login screen or any behavioral change.
 
 1. **Opt-in via the `features.auth` runtime feature toggle**, resolved into
    `cfg.Features.Auth` at startup (env `KANDEV_FEATURES_AUTH` > DB override >
-   profile default). The effective mode is *derived* from it, not persisted
+   profile default). The effective mode is _derived_ from it, not persisted
    separately: `flag off → disabled`, `flag on + no admin → setup`, `flag on
-   + admin exists → enabled`. Enablement lives in the existing Feature Toggles
-   system — there is no bespoke `auth.mode` setting or Authentication page.
-   (An earlier iteration split "reveal UI" and "enforce" into two controls;
-   they were collapsed into the one flag.)
+   - admin exists → enabled`. Enablement lives in the existing Feature Toggles
+system — there is no bespoke `auth.mode` setting or Authentication page.
+     (An earlier iteration split "reveal UI" and "enforce" into two controls;
+     they were collapsed into the one flag.)
 2. **Synthetic identity in disabled mode.** The global HTTP middleware (and
    WS gateway) inject `Identity{default-user, admin, Synthetic}` when auth is
    off. Downstream code branches on identity, never on mode — internal
@@ -68,8 +68,9 @@ too, on the premise that "the plugin subprocess owns signature validation."
 That premise was unenforced: nothing in the manifest schema or the plugin SDK
 required a plugin to authenticate its own webhook. See
 `2026-08-12-plugin-webhook-auth-gate.md` for the fix — plugin webhooks now
-require a real caller identity by default; a manifest opts a specific webhook
-out via `webhooks[].access: public`.
+require a real caller identity by default in API v2; a manifest opts a specific
+webhook out via `webhooks[].access: public`. API v1 keeps omitted access public
+for compatibility and logs a migration warning.
 
 ## Consequences
 

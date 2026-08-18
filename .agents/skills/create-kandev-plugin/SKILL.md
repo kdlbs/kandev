@@ -229,7 +229,9 @@ request. Do not silently substitute a directory in the Kandev monorepo.
    subscriptions, and side effects; Kandev revokes registered routes, slots,
    handlers, styles, and navigation separately. Use `/mobile-parity` for
    interaction design and `/e2e` for user-visible flows.
-7. Webhook routes require a real Kandev caller identity by default. Follow
+7. API v2 webhook routes require a real Kandev caller identity by default. API
+   v1 keeps omitted access public for compatibility, so new plugins must use
+   API v2. Follow
    `docs/public/plugins-authoring.md` for the current body-size and route
    limits. Kandev rejects undeclared keys and, unless the manifest declares
    `webhooks[].access: public`, rejects anonymous callers with 401 before your

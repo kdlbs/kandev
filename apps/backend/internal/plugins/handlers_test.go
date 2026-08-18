@@ -546,7 +546,7 @@ func TestWebhookRelayHeadersStripHostCredentials(t *testing.T) {
 		"X-Plugin-Key":  []string{"plugin-secret"},
 	}
 
-	got := flattenHeaders(headers, "kandev_session")
+	got := flattenHeaders(headers, "kandev_session", false)
 
 	if _, ok := got["Authorization"]; ok {
 		t.Fatal("Authorization header was forwarded to plugin")
