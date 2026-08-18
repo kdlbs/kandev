@@ -4369,7 +4369,55 @@ func (s *Service) DrainQueuedMessage(ctx context.Context, sessionID string) (boo
 	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
 		return false, err
 	}
+	if s.sessionHasPendingClarification(ctx, sessionID) {
+		return false, ErrSessionNotPromptable
+	}
+	if s.messageQueue == nil {
+		return false, errors.New("message queue is not configured")
+	}
+	if err := s.messageQueue.SetAutoRun(ctx, sessionID, true); err != nil {
+		return false, fmt.Errorf("resume queue Auto-run: %w", err)
+	}
 	return s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID), nil
+}
+
+// SetQueueAutoRun persists the queue policy and, when enabling an eligible
+// session, immediately attempts the FIFO head. It never cancels an active turn
+// and treats busy, clarification, and lifecycle guards as a successful armed
+// policy with no immediate dispatch.
+func (s *Service) SetQueueAutoRun(ctx context.Context, sessionID string, enabled bool) (bool, bool, error) {
+	if sessionID == "" {
+		return false, false, errors.New("session_id is required")
+	}
+	if s.messageQueue == nil {
+		return false, false, errors.New("message queue is not configured")
+	}
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
+	if err := s.messageQueue.SetAutoRun(ctx, sessionID, enabled); err != nil {
+		return false, false, fmt.Errorf("set queue Auto-run: %w", err)
+	}
+	if !enabled || s.isCancelInFlight(sessionID) || s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
+		return s.messageQueue.GetStatus(ctx, sessionID).AutoRun, false, nil
+	}
+	if s.sessionHasPendingClarification(ctx, sessionID) {
+		return s.messageQueue.GetStatus(ctx, sessionID).AutoRun, false, nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return s.messageQueue.GetStatus(ctx, sessionID).AutoRun, false, fmt.Errorf("load session for queue Auto-run: %w", err)
+	}
+	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
+		if isSessionBusyError(err) {
+			return s.messageQueue.GetStatus(ctx, sessionID).AutoRun, false, nil
+		}
+		return s.messageQueue.GetStatus(ctx, sessionID).AutoRun, false, err
+	}
+	dispatched := s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID)
+	return s.messageQueue.GetStatus(ctx, sessionID).AutoRun, dispatched, nil
 }
 
 // cancelInFlightGuard is a per-session mutex serializing cancel/interrupt/
@@ -5442,6 +5490,15 @@ func (s *Service) finishCancelledAgentTurn(ctx context.Context, sessionID string
 		}
 	} else if _, err := s.reconcileCancelledTurnOwned(ctx, "", sessionID, nil, false, prepared.capturedTurnID); err != nil {
 		return fmt.Errorf("reconcile cancelled turn: %w", err)
+	}
+	if s.messageQueue != nil {
+		paused, err := s.messageQueue.PauseAutoRunIfPending(ctx, sessionID)
+		if err != nil {
+			return fmt.Errorf("pause queued messages after cancel: %w", err)
+		}
+		if paused {
+			s.publishQueueStatusEvent(ctx, sessionID)
+		}
 	}
 
 	s.recordCancelledAgentMessage(ctx, session, sessionID, prepared.cancelTurnID)

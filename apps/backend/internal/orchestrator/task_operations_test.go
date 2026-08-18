@@ -1165,11 +1165,14 @@ func TestUserCancelCompletion_SilentCancelDoesNotTrigger(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-silent-cancel", "session-silent-cancel", "step1")
 	svc := createEngineService(t, repo, cancelCompletionStepGetter(true, false), &mockAgentManager{})
+	_, err := svc.messageQueue.QueueMessage(ctx, "session-silent-cancel", "task-silent-cancel", "stay armed", "", messagequeue.QueuedByUser, false, nil)
+	require.NoError(t, err)
 
 	require.NoError(t, svc.cancelAgentSilent(ctx, "task-silent-cancel", "session-silent-cancel"))
 	task, err := repo.GetTask(ctx, "task-silent-cancel")
 	require.NoError(t, err)
 	assert.Equal(t, "step1", task.WorkflowStepID)
+	assert.True(t, svc.messageQueue.GetStatus(ctx, "session-silent-cancel").AutoRun)
 }
 
 func TestCancelAgent_AllowsAcknowledgementStreamToDrain(t *testing.T) {
@@ -1868,6 +1871,7 @@ func TestCancelAgent_LeavesQueuedMessageParked(t *testing.T) {
 
 			status := svc.messageQueue.GetStatus(ctx, "session1")
 			require.Equal(t, 1, status.Count)
+			require.False(t, status.AutoRun, "explicit cancel with a backlog must pause Auto-run")
 			require.Len(t, status.Entries, 1)
 			require.Equal(t, queued.ID, status.Entries[0].ID, "cancel must leave the same queued entry parked")
 		})
@@ -1920,6 +1924,9 @@ func TestCancelAgent_QueuedMessageRunsAfterExplicitDrain(t *testing.T) {
 	status := svc.messageQueue.GetStatus(ctx, "session1")
 	if status.Count != 0 {
 		t.Fatalf("expected explicit drain to remove the queued prompt, count=%d entries=%+v", status.Count, status.Entries)
+	}
+	if !status.AutoRun {
+		t.Fatal("expected explicit drain to resume Auto-run")
 	}
 }
 

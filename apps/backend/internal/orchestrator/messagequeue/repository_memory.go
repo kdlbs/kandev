@@ -18,6 +18,7 @@ type memoryRepository struct {
 	nextPosition map[string]int64            // sessionID -> monotonic counter
 	pendingMoves map[string]*PendingMove
 	generation   map[string]int64
+	autoRun      map[string]bool
 }
 
 // NewMemoryRepository returns an in-memory Repository. Suitable for tests.
@@ -27,6 +28,7 @@ func NewMemoryRepository() Repository {
 		nextPosition: make(map[string]int64),
 		pendingMoves: make(map[string]*PendingMove),
 		generation:   make(map[string]int64),
+		autoRun:      make(map[string]bool),
 	}
 }
 
@@ -284,9 +286,13 @@ func (r *memoryRepository) TakeHead(_ context.Context, sessionID string) (*Queue
 func (r *memoryRepository) ReserveHead(_ context.Context, sessionID string) (*QueuedMessage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.reserveHeadLocked(sessionID), nil
+}
+
+func (r *memoryRepository) reserveHeadLocked(sessionID string) *QueuedMessage {
 	list := r.entries[sessionID]
 	if len(list) == 0 {
-		return nil, nil
+		return nil
 	}
 	head := list[0]
 	out := *head
@@ -297,14 +303,58 @@ func (r *memoryRepository) ReserveHead(_ context.Context, sessionID string) (*Qu
 		out.Metadata = clearReservedMetadata(head.Metadata)
 		out.reservedLifecycleDelivery = true
 		head.Metadata = markReservedMetadata(out.Metadata)
-		return &out, nil
+		return &out
 	}
 	r.entries[sessionID] = list[1:]
 	if len(r.entries[sessionID]) == 0 {
 		delete(r.entries, sessionID)
 		delete(r.nextPosition, sessionID)
 	}
-	return &out, nil
+	return &out
+}
+
+// GetAutoRun returns true when no explicit policy exists.
+func (r *memoryRepository) GetAutoRun(_ context.Context, sessionID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.autoRunLocked(sessionID), nil
+}
+
+func (r *memoryRepository) autoRunLocked(sessionID string) bool {
+	enabled, exists := r.autoRun[sessionID]
+	return !exists || enabled
+}
+
+// SetAutoRun persists the per-session automatic-drain policy.
+func (r *memoryRepository) SetAutoRun(_ context.Context, sessionID string, enabled bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.autoRun[sessionID] = enabled
+	return nil
+}
+
+// PauseAutoRunIfPending persists OFF only while visible work remains.
+func (r *memoryRepository) PauseAutoRunIfPending(_ context.Context, sessionID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, msg := range r.entries[sessionID] {
+		if msg.IsReservedInFlight() {
+			continue
+		}
+		r.autoRun[sessionID] = false
+		return true, nil
+	}
+	return false, nil
+}
+
+// ReserveHeadIfAutoRun atomically checks policy and reserves the FIFO head.
+func (r *memoryRepository) ReserveHeadIfAutoRun(_ context.Context, sessionID string) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.autoRunLocked(sessionID) {
+		return nil, false, nil
+	}
+	return r.reserveHeadLocked(sessionID), true, nil
 }
 
 // AcknowledgeByID removes a reserved durable entry after executor acceptance.
@@ -411,6 +461,7 @@ func (r *memoryRepository) ClaimSendNow(_ context.Context, sessionID string, exp
 	} else {
 		r.entries[sessionID] = remaining
 	}
+	r.autoRun[sessionID] = true
 	return &SendNowClaim{Sources: sources, Dispatch: *envelope, SourceGenerations: generations}, nil
 }
 
@@ -826,6 +877,10 @@ func (r *memoryRepository) DeleteAllBySession(_ context.Context, sessionID strin
 func (r *memoryRepository) TransferSession(_ context.Context, oldSessionID, newSessionID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if oldSessionID == newSessionID {
+		return nil
+	}
+	destinationAutoRun := r.autoRunLocked(oldSessionID) && r.autoRunLocked(newSessionID)
 	if list, ok := r.entries[oldSessionID]; ok {
 		// Mirror the SQLite repo: shift transferred positions past the
 		// destination's max so source entries always sort *after* anything
@@ -858,6 +913,8 @@ func (r *memoryRepository) TransferSession(_ context.Context, oldSessionID, newS
 		r.pendingMoves[newSessionID] = move
 		delete(r.pendingMoves, oldSessionID)
 	}
+	r.autoRun[newSessionID] = destinationAutoRun
+	delete(r.autoRun, oldSessionID)
 	return nil
 }
 

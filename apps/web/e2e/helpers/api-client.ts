@@ -2361,7 +2361,7 @@ export class ApiClient {
     await this.wsRequest("message.queue.cancel", { session_id: sessionId });
   }
 
-  async getQueueStatus(sessionId: string): Promise<{ count: number }> {
+  async getQueueStatus(sessionId: string): Promise<{ count: number; auto_run: boolean }> {
     return this.wsRequest("message.queue.get", { session_id: sessionId });
   }
 

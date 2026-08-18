@@ -2161,7 +2161,19 @@ func (s *Service) syncTaskStateForPendingMove(ctx context.Context, taskID, fromS
 // cancel/interrupt for the same session could land in between and this
 // call would otherwise blindly take a message for a session that turned
 // out to no longer be idle.
+type queueDrainOutcome uint8
+
+const (
+	queueDrainSkipped queueDrainOutcome = iota
+	queueDrainDispatched
+	queueDrainPaused
+)
+
 func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, sessionID string) bool {
+	return s.drainQueuedMessageForPromptableSessionOutcome(ctx, sessionID) == queueDrainDispatched
+}
+
+func (s *Service) drainQueuedMessageForPromptableSessionOutcome(ctx context.Context, sessionID string) queueDrainOutcome {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
@@ -2169,21 +2181,21 @@ func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, se
 	if s.isCancelInFlight(sessionID) {
 		s.logger.Debug("skipping drain while cancellation is in progress",
 			zap.String("session_id", sessionID))
-		return false
+		return queueDrainSkipped
 	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to reload session before drain",
 			zap.String("session_id", sessionID), zap.Error(err))
-		return false
+		return queueDrainSkipped
 	}
 	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
 		s.logger.Debug("skipping drain: session is not promptable once the guard is held",
 			zap.String("session_id", sessionID), zap.Error(err))
-		return false
+		return queueDrainSkipped
 	}
-	return s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID)
+	return s.drainQueuedMessageForPromptableSessionLockedOutcome(ctx, sessionID)
 }
 
 // drainQueuedMessageForPromptableSessionLocked takes the next queued
@@ -2198,12 +2210,22 @@ func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, se
 // or an admitted-but-not-yet-dispatched steer. Send Now uses the phase-specific
 // helpers to supersede only a pending automatic FIFO reservation.
 func (s *Service) drainQueuedMessageForPromptableSessionLocked(ctx context.Context, sessionID string) bool {
+	return s.drainQueuedMessageForPromptableSessionLockedOutcome(ctx, sessionID) == queueDrainDispatched
+}
+
+func (s *Service) drainQueuedMessageForPromptableSessionLockedOutcome(ctx context.Context, sessionID string) queueDrainOutcome {
 	if s.messageQueue == nil || s.isCancelInFlight(sessionID) ||
 		s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
-		return false
+		return queueDrainSkipped
 	}
-	queuedMsg, ok := s.messageQueue.ReserveQueued(ctx, sessionID)
-	return s.dispatchTakenQueuedMessage(ctx, sessionID, queuedMsg, ok)
+	queuedMsg, ok, autoRun := s.messageQueue.ReserveQueuedWithAutoRun(ctx, sessionID)
+	if !autoRun {
+		return queueDrainPaused
+	}
+	if s.dispatchTakenQueuedMessage(ctx, sessionID, queuedMsg, ok) {
+		return queueDrainDispatched
+	}
+	return queueDrainSkipped
 }
 
 // dispatchTakenQueuedMessage publishes the queue-status update and dispatches

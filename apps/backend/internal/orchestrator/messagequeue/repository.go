@@ -61,6 +61,23 @@ type Repository interface {
 	// stored until AcknowledgeByID is called after executor acceptance.
 	ReserveHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
 
+	// GetAutoRun returns the durable per-session automatic-drain policy. Missing
+	// state defaults to true so existing sessions retain their current behavior.
+	GetAutoRun(ctx context.Context, sessionID string) (bool, error)
+
+	// SetAutoRun persists the per-session automatic-drain policy independently
+	// of queue contents.
+	SetAutoRun(ctx context.Context, sessionID string, enabled bool) error
+
+	// PauseAutoRunIfPending atomically persists OFF only when at least one
+	// visible pending entry remains. Reserved lifecycle rows do not count.
+	PauseAutoRunIfPending(ctx context.Context, sessionID string) (bool, error)
+
+	// ReserveHeadIfAutoRun reads the policy and reserves the FIFO head in one
+	// per-session transaction. The returned bool is false only when Auto-run is
+	// OFF; nil with true means the enabled queue is empty.
+	ReserveHeadIfAutoRun(ctx context.Context, sessionID string) (*QueuedMessage, bool, error)
+
 	// AcknowledgeByID is an internal dispatch operation that removes a reserved
 	// entry regardless of its server-owned queued_by identity.
 	AcknowledgeByID(ctx context.Context, sessionID, entryID string) error

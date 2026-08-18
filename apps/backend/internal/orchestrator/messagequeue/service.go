@@ -515,21 +515,49 @@ func lifecycleGenerationFromMetadata(metadata map[string]interface{}) (int64, bo
 // ReserveQueued atomically takes an ordinary head entry or reserves a durable
 // lifecycle head entry. The admission lock keeps drains from observing an
 // insert before its automatic-merge finalization completes. A reserved
-// lifecycle row survives until acknowledged.
+// lifecycle row survives until acknowledged. Auto-run OFF leaves the head in
+// place and reports no reserved entry.
 func (s *Service) ReserveQueued(ctx context.Context, sessionID string) (*QueuedMessage, bool) {
+	msg, exists, _ := s.ReserveQueuedWithAutoRun(ctx, sessionID)
+	return msg, exists
+}
+
+// ReserveQueuedWithAutoRun also reports the policy decision. Nil/false/true
+// means enabled but empty (or a logged storage error); nil/false/false means
+// Auto-run is OFF.
+func (s *Service) ReserveQueuedWithAutoRun(ctx context.Context, sessionID string) (*QueuedMessage, bool, bool) {
 	var msg *QueuedMessage
+	autoRun := true
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		var err error
-		msg, err = s.repo.ReserveHead(admittedCtx, sessionID)
+		msg, autoRun, err = s.repo.ReserveHeadIfAutoRun(admittedCtx, sessionID)
 		return err
 	})
 	if err != nil {
 		s.logger.Error("reserve head failed",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return nil, false
+		return nil, false, true
 	}
-	return msg, msg != nil
+	return msg, msg != nil, autoRun
+}
+
+// SetAutoRun persists automatic-drain policy through the queue admission gate.
+func (s *Service) SetAutoRun(ctx context.Context, sessionID string, enabled bool) error {
+	return s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.repo.SetAutoRun(admittedCtx, sessionID, enabled)
+	})
+}
+
+// PauseAutoRunIfPending atomically parks a visible backlog, if one exists.
+func (s *Service) PauseAutoRunIfPending(ctx context.Context, sessionID string) (bool, error) {
+	var paused bool
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		paused, err = s.repo.PauseAutoRunIfPending(admittedCtx, sessionID)
+		return err
+	})
+	return paused, err
 }
 
 // AcknowledgeQueued removes a server-reserved entry after prompt acceptance.
@@ -834,12 +862,20 @@ func (s *Service) CancelAll(ctx context.Context, sessionID string) (int, error) 
 func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus {
 	maxPerSession := s.MaxPerSession()
 	mergeEnabled := s.MergeEnabled()
+	autoRun, autoRunErr := s.repo.GetAutoRun(ctx, sessionID)
+	if autoRunErr != nil {
+		s.logger.Error("get queue auto-run failed",
+			zap.String("session_id", sessionID),
+			zap.Error(autoRunErr))
+		// Preserve pre-policy behavior if status storage is temporarily unreadable.
+		autoRun = true
+	}
 	entries, err := s.repo.ListBySession(ctx, sessionID)
 	if err != nil {
 		s.logger.Error("list queued failed",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return &QueueStatus{Entries: []QueuedMessage{}, Count: 0, Max: maxPerSession, MergeEnabled: mergeEnabled}
+		return &QueueStatus{Entries: []QueuedMessage{}, Count: 0, Max: maxPerSession, AutoRun: autoRun, MergeEnabled: mergeEnabled}
 	}
 	pending := make([]QueuedMessage, 0, len(entries))
 	for _, entry := range entries {
@@ -854,6 +890,7 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 		Entries:      pending,
 		Count:        len(pending),
 		Max:          maxPerSession,
+		AutoRun:      autoRun,
 		MergeEnabled: mergeEnabled,
 	}
 }

@@ -207,6 +207,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [message-queue-management](ui/message-queue-management.md) | shipped |
 | [message-queue-merge](ui/message-queue-merge.md) | shipped |
 | [message-queue-reorder](ui/message-queue-reorder.md) | building |
+| [message-queue-run](ui/message-queue-run.md) | shipped |
 | [message-queue-send-now](ui/message-queue-send-now.md) | shipped |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
 | [settings-discovery](ui/settings-discovery.md) | shipped |

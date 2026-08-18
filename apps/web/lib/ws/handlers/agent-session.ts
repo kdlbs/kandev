@@ -669,7 +669,7 @@ function handleCancellationPendingMessage(
 }
 
 /** Writes a message.queue.status_changed broadcast into the queue slice,
- * defaulting count/max/mergeEnabled when the backend omits them. */
+ * defaulting count/max/mergeEnabled/Auto-run when the backend omits them. */
 function handleQueueStatusChangedMessage(
   store: StoreApi<AppState>,
   payload: QueueStatusChangedPayload,
@@ -682,7 +682,10 @@ function handleQueueStatusChangedMessage(
   const count = typeof payload.count === "number" ? payload.count : entries.length;
   const max = typeof payload.max === "number" ? payload.max : 0;
   const mergeEnabled = typeof payload.merge_enabled === "boolean" ? payload.merge_enabled : true;
-  store.getState().setQueueEntries(payload.session_id, entries, { count, max, mergeEnabled });
+  const autoRun = typeof payload.auto_run === "boolean" ? payload.auto_run : true;
+  store
+    .getState()
+    .setQueueEntries(payload.session_id, entries, { count, max, mergeEnabled, autoRun });
 }
 
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {

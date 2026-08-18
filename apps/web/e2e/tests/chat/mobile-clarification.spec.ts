@@ -10,7 +10,7 @@ import { seedClarificationSession } from "../../helpers/clarification";
 test.describe("Mobile clarification multiline answer", () => {
   test.describe.configure({ retries: 1, timeout: 120_000 });
 
-  test("keeps a pending question open while typing a digit in the inline composer", async ({
+  test("Auto-run ON does not bypass a pending clarification on mobile", async ({
     testPage,
     apiClient,
     seedData,
@@ -34,8 +34,16 @@ test.describe("Mobile clarification multiline answer", () => {
     await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
     await expect(session.clarificationOverlay()).toBeVisible();
     await testPage.getByTestId("queue-chip").tap();
-    await expect(testPage.getByTestId("queued-ghost-list")).toBeVisible();
-    await expect(testPage.getByTestId("queue-drain-next")).not.toBeVisible();
+    const panel = testPage.getByTestId("queued-ghost-list");
+    await expect(panel).toBeVisible();
+    const autoRun = panel.getByTestId("queue-auto-run");
+    await expect(autoRun).toHaveAttribute("data-state", "checked");
+    await autoRun.tap();
+    await expect(autoRun).toHaveAttribute("data-state", "unchecked");
+    await autoRun.tap();
+    await expect(autoRun).toHaveAttribute("data-state", "checked");
+    await expect(panel.getByTestId("queue-entry")).toHaveCount(1);
+    await expect(session.clarificationOverlay()).toBeVisible();
   });
 
   test("Enter inserts a newline and the Send button submits the multiline answer", async ({

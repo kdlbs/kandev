@@ -178,6 +178,11 @@ func (r *sqliteRepository) initSchema() error {
 	CREATE TABLE IF NOT EXISTS queue_session_locks (
 		session_id TEXT PRIMARY KEY
 	);
+
+	CREATE TABLE IF NOT EXISTS queue_session_state (
+		session_id TEXT PRIMARY KEY,
+		auto_run   INTEGER NOT NULL DEFAULT 1
+	);
 	`)
 	if err != nil {
 		return err
@@ -854,16 +859,147 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 
 // ReserveHead returns the lowest-position entry, deleting ordinary rows and reserving durable lifecycle rows.
 func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*QueuedMessage, error) {
+	msg, _, err := r.reserveHead(ctx, sessionID, false)
+	return msg, err
+}
+
+// GetAutoRun returns true when no explicit per-session state exists.
+func (r *sqliteRepository) GetAutoRun(ctx context.Context, sessionID string) (bool, error) {
+	var enabled int
+	err := r.ro.GetContext(ctx, &enabled, r.db.Rebind(`
+		SELECT auto_run FROM queue_session_state WHERE session_id = ?
+	`), sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("get queue auto-run: %w", err)
+	}
+	return enabled != 0, nil
+}
+
+// SetAutoRun persists policy while holding the queue's per-session lock.
+func (r *sqliteRepository) SetAutoRun(ctx context.Context, sessionID string, enabled bool) error {
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
 
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("begin reserve tx: %w", err)
+		return fmt.Errorf("begin set auto-run tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
-		return nil, err
+		return err
+	}
+	if err := r.setAutoRunTx(ctx, tx, sessionID, enabled); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// PauseAutoRunIfPending persists OFF only when a visible pending row exists.
+func (r *sqliteRepository) PauseAutoRunIfPending(ctx context.Context, sessionID string) (bool, error) {
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin conditional auto-run pause tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return false, err
+	}
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
+		SELECT metadata_json FROM queued_messages WHERE session_id = ?
+	`), sessionID)
+	if err != nil {
+		return false, fmt.Errorf("list queue metadata for auto-run pause: %w", err)
+	}
+	hasPending := false
+	for rows.Next() {
+		var metadataJSON string
+		if err := rows.Scan(&metadataJSON); err != nil {
+			_ = rows.Close()
+			return false, fmt.Errorf("scan queue metadata for auto-run pause: %w", err)
+		}
+		reserved, err := isReservedMetadataJSON(metadataJSON)
+		if err != nil {
+			_ = rows.Close()
+			return false, err
+		}
+		if !reserved {
+			hasPending = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return false, fmt.Errorf("iterate queue metadata for auto-run pause: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return false, fmt.Errorf("close queue metadata for auto-run pause: %w", err)
+	}
+	if !hasPending {
+		return false, nil
+	}
+	if err := r.setAutoRunTx(ctx, tx, sessionID, false); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *sqliteRepository) setAutoRunTx(ctx context.Context, tx *sqlx.Tx, sessionID string, enabled bool) error {
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO queue_session_state (session_id, auto_run) VALUES (?, ?)
+		ON CONFLICT(session_id) DO UPDATE SET auto_run = excluded.auto_run
+	`), sessionID, boolToInt(enabled)); err != nil {
+		return fmt.Errorf("set queue auto-run: %w", err)
+	}
+	return nil
+}
+
+func (r *sqliteRepository) getAutoRunTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (bool, error) {
+	var enabled int
+	err := tx.GetContext(ctx, &enabled, r.db.Rebind(`
+		SELECT auto_run FROM queue_session_state WHERE session_id = ?
+	`), sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("get queue auto-run in transaction: %w", err)
+	}
+	return enabled != 0, nil
+}
+
+// ReserveHeadIfAutoRun reads policy and reserves the FIFO head under one lock.
+func (r *sqliteRepository) ReserveHeadIfAutoRun(ctx context.Context, sessionID string) (*QueuedMessage, bool, error) {
+	return r.reserveHead(ctx, sessionID, true)
+}
+
+func (r *sqliteRepository) reserveHead(ctx context.Context, sessionID string, requireAutoRun bool) (*QueuedMessage, bool, error) {
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, true, fmt.Errorf("begin reserve tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return nil, true, err
+	}
+	if requireAutoRun {
+		enabled, err := r.getAutoRunTx(ctx, tx, sessionID)
+		if err != nil {
+			return nil, true, err
+		}
+		if !enabled {
+			return nil, false, nil
+		}
 	}
 
 	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
@@ -876,43 +1012,62 @@ func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*
 	`), sessionID)
 	msg, storedMetadataJSON, err := scanQueuedRowWithMetadataJSON(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, true, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("reserve head: %w", err)
+		return nil, true, fmt.Errorf("reserve head: %w", err)
 	}
 	if msg.IsDurableLifecycle() {
-		// Keep the row for crash recovery but stop reporting it as pending.
-		// Strip a marker persisted by an interrupted prior process from the
-		// returned copy so a failed retry becomes visible again.
-		msg.Metadata = clearReservedMetadata(msg.Metadata)
-		reservedJSON, err := marshalMetadata(markReservedMetadata(msg.Metadata))
-		if err != nil {
-			return nil, err
-		}
-		res, err := tx.ExecContext(ctx, r.db.Rebind(`
-			UPDATE queued_messages SET metadata_json = ?
-			WHERE id = ? AND session_id = ? AND metadata_json = ?
-		`), reservedJSON, msg.ID, sessionID, storedMetadataJSON)
-		if err != nil {
-			return nil, fmt.Errorf("mark lifecycle reservation in flight: %w", err)
-		}
-		affected, err := res.RowsAffected()
-		if err != nil {
-			return nil, fmt.Errorf("mark lifecycle reservation rows affected: %w", err)
-		}
-		if affected == 0 {
-			return nil, nil
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, err
-		}
-		msg.reservedLifecycleDelivery = true
-		return msg, nil
+		reserved, err := r.reserveLifecycleHead(ctx, tx, msg, storedMetadataJSON)
+		return reserved, true, err
+	}
+	reserved, err := r.reserveOrdinaryHead(ctx, tx, msg)
+	return reserved, true, err
+}
+
+func (r *sqliteRepository) reserveLifecycleHead(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	msg *QueuedMessage,
+	storedMetadataJSON string,
+) (*QueuedMessage, error) {
+	// Keep the row for crash recovery but stop reporting it as pending.
+	// Strip a marker persisted by an interrupted prior process from the
+	// returned copy so a failed retry becomes visible again.
+	msg.Metadata = clearReservedMetadata(msg.Metadata)
+	reservedJSON, err := marshalMetadata(markReservedMetadata(msg.Metadata))
+	if err != nil {
+		return nil, err
 	}
 	res, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE queued_messages SET metadata_json = ?
+		WHERE id = ? AND session_id = ? AND metadata_json = ?
+	`), reservedJSON, msg.ID, msg.SessionID, storedMetadataJSON)
+	if err != nil {
+		return nil, fmt.Errorf("mark lifecycle reservation in flight: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("mark lifecycle reservation rows affected: %w", err)
+	}
+	if affected == 0 {
+		return nil, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	msg.reservedLifecycleDelivery = true
+	return msg, nil
+}
+
+func (r *sqliteRepository) reserveOrdinaryHead(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	msg *QueuedMessage,
+) (*QueuedMessage, error) {
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM queued_messages WHERE id = ? AND session_id = ?
-	`), msg.ID, sessionID)
+	`), msg.ID, msg.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("delete reserved ordinary head: %w", err)
 	}
@@ -1063,6 +1218,9 @@ func (r *sqliteRepository) ClaimSendNow(ctx context.Context, sessionID string, e
 	}
 
 	if err := r.applySQLiteSendNowClaim(ctx, tx, sessionID, sources, storedByID); err != nil {
+		return nil, err
+	}
+	if err := r.setAutoRunTx(ctx, tx, sessionID, true); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -2071,6 +2229,17 @@ func (r *sqliteRepository) TransferSession(ctx context.Context, oldSessionID, ne
 			return err
 		}
 	}
+	if oldSessionID == newSessionID {
+		return tx.Commit()
+	}
+	sourceAutoRun, err := r.getAutoRunTx(ctx, tx, oldSessionID)
+	if err != nil {
+		return err
+	}
+	destinationAutoRun, err := r.getAutoRunTx(ctx, tx, newSessionID)
+	if err != nil {
+		return err
+	}
 
 	// Shift positions on the destination so transferred entries land at the tail
 	// without colliding on the (session_id, position) implicit ordering.
@@ -2095,6 +2264,14 @@ func (r *sqliteRepository) TransferSession(ctx context.Context, oldSessionID, ne
 		UPDATE pending_moves SET session_id = ? WHERE session_id = ?
 	`), newSessionID, oldSessionID); err != nil {
 		return fmt.Errorf("transfer pending move: %w", err)
+	}
+	if err := r.setAutoRunTx(ctx, tx, newSessionID, sourceAutoRun && destinationAutoRun); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queue_session_state WHERE session_id = ?
+	`), oldSessionID); err != nil {
+		return fmt.Errorf("clear source queue auto-run: %w", err)
 	}
 	return tx.Commit()
 }

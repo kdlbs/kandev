@@ -204,6 +204,21 @@ export async function sendQueuedNow(
   }
 }
 
+/** Persist the per-session queue Auto-run policy and start the queue when enabling it. */
+export async function setQueueAutoRun(
+  sessionId: string,
+  enabled: boolean,
+): Promise<{ session_id: string; auto_run: boolean; dispatched: boolean }> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  return client.request<{ session_id: string; auto_run: boolean; dispatched: boolean }>(
+    "message.queue.auto_run.set",
+    { session_id: sessionId, enabled },
+  );
+}
+
 /** Fetch the full queue snapshot (entries + capacity). */
 export async function getQueueStatus(sessionId: string): Promise<QueueStatus> {
   const client = getWebSocketClient();

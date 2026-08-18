@@ -174,6 +174,7 @@ export type QueueStatusChangedPayload = {
   count?: number;
   max?: number;
   merge_enabled?: boolean;
+  auto_run?: boolean;
 };
 
 export type AvailableCommandPayload = {
