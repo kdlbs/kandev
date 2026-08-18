@@ -1,7 +1,12 @@
 import { cleanup, fireEvent, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRef, type RefObject } from "react";
+import { createElement, createRef, type RefObject } from "react";
 import { useSuggestionEscapeFallback } from "./use-suggestion-escape-fallback";
+import {
+  ClarificationEscapeGuardProvider,
+  type ClarificationEscapeGuardRegistry,
+  type ClarificationEscapePredicate,
+} from "@/hooks/use-clarification-escape-guard";
 
 afterEach(cleanup);
 
@@ -178,5 +183,65 @@ describe("useSuggestionEscapeFallback", () => {
 
     document.body.removeChild(backgroundContainer);
     document.body.removeChild(foregroundContainer);
+  });
+});
+
+describe("useSuggestionEscapeFallback guard predicate ownership", () => {
+  /**
+   * The capture-phase guard predicate (registered via
+   * useClarificationEscapeGuard) must claim an Escape only when this
+   * composer's own container actually owns it -- exactly like the
+   * bubble-phase listener in the suite above. A predicate that claimed every
+   * Escape unconditionally would leave the dialog open (and the key
+   * otherwise unhandled) once focus left the composer while a menu was still
+   * open, since the bubble listener already refuses to act for an unowned
+   * target.
+   */
+  it("claims Escape only when the container owns the target", () => {
+    const container = document.createElement("div");
+    const outsider = document.createElement("div");
+    document.body.appendChild(container);
+    document.body.appendChild(outsider);
+    const containerRef = { current: container };
+
+    let registeredPredicate: ClarificationEscapePredicate | null = null;
+    const registry: ClarificationEscapeGuardRegistry = {
+      register: (_id, predicate) => {
+        registeredPredicate = predicate;
+      },
+      unregister: () => {
+        registeredPredicate = null;
+      },
+    };
+
+    renderHook(
+      () =>
+        useSuggestionEscapeFallback({
+          isSuggestionMenuOpen: true,
+          mentionMenuOpen: true,
+          slashMenuOpen: false,
+          entityReferenceMenuOpen: false,
+          closeMentionMenu: vi.fn(),
+          closeSlashMenu: vi.fn(),
+          closeEntityReferenceMenu: vi.fn(),
+          containerRef,
+        }),
+      {
+        wrapper: ({ children }) =>
+          createElement(ClarificationEscapeGuardProvider, { value: registry }, children),
+      },
+    );
+
+    expect(registeredPredicate).not.toBeNull();
+    const ownedEvent = new KeyboardEvent("keydown", { key: "Escape" });
+    Object.defineProperty(ownedEvent, "target", { value: container });
+    const unownedEvent = new KeyboardEvent("keydown", { key: "Escape" });
+    Object.defineProperty(unownedEvent, "target", { value: outsider });
+
+    expect(registeredPredicate!(ownedEvent)).toBe(true);
+    expect(registeredPredicate!(unownedEvent)).toBe(false);
+
+    document.body.removeChild(container);
+    document.body.removeChild(outsider);
   });
 });

@@ -360,13 +360,23 @@ function useMenuHandlers() {
   };
 }
 
-function useEntityReferenceMenuClose(editor: Editor | null, close: () => void) {
+function useEntityReferenceMenuClose(editorRef: RefObject<Editor | null>, close: () => void) {
   return useCallback(() => {
+    const editor = editorRef.current;
     if (editor) {
       exitSuggestion(editor.view, EntityReferenceSuggestionPluginKey);
     }
     close();
-  }, [editor, close]);
+  }, [editorRef, close]);
+}
+
+// `editorRef` is created before `editor` exists (it backs a close handler
+// composed earlier, in useSuggestionMenuOpenState) -- resync it every render
+// so callers reading `editorRef.current` always see the latest instance.
+function useEditorRefSync(editorRef: RefObject<Editor | null>, editor: Editor | null) {
+  useLayoutEffect(() => {
+    editorRef.current = editor;
+  });
 }
 
 function useReverseSearchSelectHandler(
@@ -422,10 +432,12 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     sessionId,
   });
   const { editorWrapperRef, ...overlay } = useReverseSearchOverlay(sessionId);
-  const { isSuggestionMenuOpen } = useSuggestionMenuOpenState(
+  const editorRef = useRef<Editor | null>(null);
+  const { isSuggestionMenuOpen, closeEntityReferenceMenu } = useSuggestionMenuOpenState(
     menu,
     entityReferences,
     editorWrapperRef,
+    editorRef,
   );
   const { history, getHistory } = useChatHistory(sessionId);
   const { isDraining } = useDrainOlderMessages(sessionId, overlay.isReverseSearchOpen);
@@ -455,8 +467,8 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     isReverseSearchOpen: overlay.isReverseSearchOpen,
     ref,
   });
+  useEditorRefSync(editorRef, editor);
   const { closeReverseSearch } = overlay;
-  const closeEntityReferenceMenu = useEntityReferenceMenuClose(editor, entityReferences.close);
   const handleReverseSearchSelect = useReverseSearchSelectHandler(
     applyHistoryEntry,
     closeReverseSearch,
@@ -574,10 +586,12 @@ function useSuggestionMenuOpenState(
   menu: ReturnType<typeof useMenuHandlers>,
   entityReferences: ReturnType<typeof useEntityReferenceComposer>,
   containerRef: RefObject<HTMLElement | null>,
+  editorRef: RefObject<Editor | null>,
 ) {
   const mentionMenuOpen = menu.mentionMenu.isOpen && menu.mentionMenu.items.length > 0;
   const slashMenuOpen = menu.slashMenu.isOpen && menu.slashMenu.items.length > 0;
   const isSuggestionMenuOpen = mentionMenuOpen || slashMenuOpen || entityReferences.isOpen;
+  const closeEntityReferenceMenu = useEntityReferenceMenuClose(editorRef, entityReferences.close);
   useSuggestionEscapeFallback({
     isSuggestionMenuOpen,
     mentionMenuOpen,
@@ -585,10 +599,10 @@ function useSuggestionMenuOpenState(
     entityReferenceMenuOpen: entityReferences.isOpen,
     closeMentionMenu: menu.handleMentionClose,
     closeSlashMenu: menu.handleSlashClose,
-    closeEntityReferenceMenu: entityReferences.close,
+    closeEntityReferenceMenu,
     containerRef,
   });
-  return { isSuggestionMenuOpen, mentionMenuOpen, slashMenuOpen };
+  return { isSuggestionMenuOpen, mentionMenuOpen, slashMenuOpen, closeEntityReferenceMenu };
 }
 
 // Stable reference (module scope) so the guard registry sees the same

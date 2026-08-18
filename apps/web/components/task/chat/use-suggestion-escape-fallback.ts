@@ -1,15 +1,7 @@
 "use client";
 
-import { useEffect, type RefObject } from "react";
-import {
-  useClarificationEscapeGuard,
-  type ClarificationEscapePredicate,
-} from "@/hooks/use-clarification-escape-guard";
-
-// Stable reference (module scope, not re-created per render/call) so the
-// guard registry sees the same predicate identity across renders while a
-// suggestion menu stays open, instead of re-registering on every render.
-const CLAIM_ANY_ESCAPE: ClarificationEscapePredicate = () => true;
+import { useCallback, useEffect, type RefObject } from "react";
+import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 
 export type SuggestionEscapeFallbackArgs = {
   /** True while any ProseMirror suggestion popup (mention, slash, entity
@@ -50,10 +42,18 @@ function isOwnedByContainer(container: HTMLElement | null, node: Node | null): b
  * listener (below) ever gets a turn. `useClarificationEscapeGuard` is the only
  * hook point that runs early enough (Quick Chat's `onEscapeKeyDown` prop,
  * invoked synchronously from within DismissableLayer's own capture handler) to
- * prevent that: registering `CLAIM_ANY_ESCAPE` while a suggestion popup is open
- * tells the dialog this Escape is spoken for, so it stays open instead of
- * closing out from under the popup. No-ops on the main task chat panel, where
- * there is no ClarificationEscapeGuardProvider.
+ * prevent that: registering an ownership-aware predicate while a suggestion
+ * popup is open tells the dialog this Escape is spoken for -- but only when
+ * the keydown actually targets (or focus sits inside) this composer's own
+ * `containerRef`, mirroring the bubble-phase listener's own ownership check
+ * below. Without that check, a menu left open in a backgrounded composer (see
+ * OWNERSHIP below) would claim every Escape regardless of where focus
+ * actually is, and if focus later leaves this composer entirely (e.g. Tab
+ * navigates out while an empty-results popup is still open, which does not
+ * consume Tab) the claim would stay unconditionally true forever -- the dialog
+ * would never dismiss AND the bubble listener would correctly refuse to act
+ * (wrong owner), leaving Escape completely dead. No-ops on the main task chat
+ * panel, where there is no ClarificationEscapeGuardProvider.
  *
  * With the dialog's own auto-dismiss suppressed, a plain document-BUBBLE
  * listener still runs after the target regardless of `defaultPrevented` (that
@@ -63,19 +63,21 @@ function isOwnedByContainer(container: HTMLElement | null, node: Node | null): b
  * sees the same keydown either -- mirroring what the Suggestion plugins' own
  * onKeyDown does when it runs normally.
  *
- * OWNERSHIP: this document-level listener is not scoped by React tree -- it
- * receives every Escape keydown that reaches `document`, from *any* mounted
- * composer instance. Quick Chat is a modal layered over a still-mounted task
- * page, so both composers can be alive at once, and `popup-menu.tsx` closes a
- * menu only on outside `pointerdown` (no blur handler), so a menu left open in
- * a backgrounded composer stays open indefinitely. Without an ownership check,
- * whichever instance's listener happens to be registered first "wins" the
- * event regardless of which composer the user is actually typing into --
- * closing the wrong (background) menu and calling stopPropagation() before the
- * foreground instance's own listener ever runs. `containerRef` is this
- * composer's own editor wrapper; the handler bails unless the keydown's
- * target or the currently focused element sits inside it, so only the
- * composer that actually owns the keystroke acts on it.
+ * OWNERSHIP: neither this document-level bubble listener nor the capture-phase
+ * guard predicate above is scoped by React tree -- both see every Escape
+ * keydown from *any* mounted composer instance (the guard predicate, via
+ * whatever the registry's Escape handler is called with; this listener, via
+ * `document`). Quick Chat is a modal layered over a still-mounted task page,
+ * so both composers can be alive at once, and `popup-menu.tsx` closes a menu
+ * only on outside `pointerdown` (no blur handler), so a menu left open in a
+ * backgrounded composer stays open indefinitely. Without an ownership check on
+ * both, whichever instance happens to run first "wins" the event regardless of
+ * which composer the user is actually typing into -- closing the wrong
+ * (background) menu, or claiming an Escape it has no way to act on.
+ * `containerRef` is this composer's own editor wrapper; both the predicate and
+ * the listener bail unless the keydown's target or the currently focused
+ * element sits inside it, so only the composer that actually owns the
+ * keystroke reacts to it.
  *
  * On the main task chat panel there is no competing capture listener, so the
  * Suggestion plugin's own bubble-phase stopPropagation() halts the event at
@@ -92,7 +94,17 @@ export function useSuggestionEscapeFallback({
   closeEntityReferenceMenu,
   containerRef,
 }: SuggestionEscapeFallbackArgs) {
-  useClarificationEscapeGuard(isSuggestionMenuOpen ? CLAIM_ANY_ESCAPE : null);
+  const isOwnEscape = useCallback(
+    (event: KeyboardEvent) => {
+      const container = containerRef.current;
+      return (
+        isOwnedByContainer(container, event.target as Node | null) ||
+        isOwnedByContainer(container, document.activeElement)
+      );
+    },
+    [containerRef],
+  );
+  useClarificationEscapeGuard(isSuggestionMenuOpen ? isOwnEscape : null);
   useEffect(() => {
     if (!isSuggestionMenuOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
