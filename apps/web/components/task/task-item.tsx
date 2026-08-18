@@ -22,8 +22,9 @@ import {
   shouldUseQuestionTaskIcon,
   shouldUsePermissionTaskIcon,
 } from "@/lib/ui/state-icons";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
-import { TaskRowTags } from "./task-row-plugin-slots";
+import { TaskRowMetadata } from "./task-row-plugin-slots";
 import { classifyTask } from "./task-classify";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
@@ -68,7 +69,7 @@ type TaskItemProps = {
   menuOpen?: boolean;
   isDeleting?: boolean;
   taskId?: string;
-  /** Drives the `task-row-tags` plugin slot's `workflowStepId`. */
+  /** Drives the `task-row-metadata` plugin slot's `workflowStepId`. */
   workflowStepId?: string | null;
   primarySessionId?: string | null;
   hasPendingClarification?: boolean;
@@ -386,7 +387,11 @@ function TaskItemContent({
         </span>
       )}
       {taskId && (
-        <TaskRowTags taskId={taskId} workflowStepId={workflowStepId ?? null} surface="sidebar" />
+        <TaskRowMetadata
+          taskId={taskId}
+          workflowStepId={workflowStepId ?? null}
+          surface="sidebar"
+        />
       )}
       <TaskItemStatsRow
         updatedAt={showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt}

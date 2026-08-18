@@ -2,25 +2,34 @@
 
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import { useAppStore } from "@/components/state-provider";
+import { usePluginRegistry } from "@/lib/plugins/registry";
+import type { TaskRowMetadataSlotProps } from "@/lib/plugins/types";
+import { cn } from "@/lib/utils";
 
 /**
- * `task-row-tags` slot: the row-level analog of `task-card-tags` for the
- * denser task-listing surfaces (sidebar task tree, `/tasks` list). Reads the
- * active workspace from the store itself, same as `TaskCardTags` — the
- * caller doesn't need to thread `workspaceId` down, and `<PluginSlot/>`
- * already renders nothing when the slot is empty.
+ * Plugin-agnostic, compact secondary metadata for dense task-listing rows.
+ * The component owns its layout wrapper so an empty registry contributes no
+ * DOM or spacing.
  */
-export function TaskRowTags({
+export function TaskRowMetadata({
   taskId,
   workflowStepId,
   surface,
+  className,
 }: {
   taskId: string;
   workflowStepId: string | null;
-  surface: "sidebar" | "task-list";
+  surface: TaskRowMetadataSlotProps["surface"];
+  className?: string;
 }) {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const registry = usePluginRegistry();
+  if (registry.getSlotRegistrations("task-row-metadata").length === 0) return null;
+
+  const slotProps: TaskRowMetadataSlotProps = { taskId, workspaceId, workflowStepId, surface };
   return (
-    <PluginSlot name="task-row-tags" slotProps={{ taskId, workspaceId, workflowStepId, surface }} />
+    <div data-testid="task-row-metadata" className={cn("min-w-0", className)}>
+      <PluginSlot name="task-row-metadata" slotProps={slotProps} />
+    </div>
   );
 }

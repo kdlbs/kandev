@@ -746,18 +746,23 @@ presentation }`. Every plugin panel shares one generic `"plugin-panel"` dockview
   throws renders a per-panel error-boundary fallback without affecting the rest of
   the layout. Decision:
   ADR-2026-08-04-plugin-contribution-lifecycle-authority.
-- **Kanban card contributions:** `registerTaskMenuAction({ id, label, icon?,
-group: "edit", visible?, run })` adds an item to the kanban card's `Edit`
+- **Task-menu and row contributions:** `registerTaskMenuAction({ id, label, icon?,
+group: "edit" | "primary", visible?, run })` adds `"edit"` actions to the kanban card's `Edit`
   submenu (the flat `Edit` item becomes `Edit > Edit task` once any plugin
   registers one); `run(context)` receives `{ workspaceId, taskId, taskTitle,
 workflowStepId, presentation }`, and a rejected `run` is caught and logged
-  without blocking the menu from closing. `registerComponent("task-card-indicators",
+  without blocking the menu from closing. `"primary"` actions render on cards
+  and desktop/mobile task-row menus. `registerComponent("task-card-indicators",
 C)` renders `C` beside the PR status icon on every kanban card, receiving
   `{ taskId, workspaceId, workflowStepId }` as `slotProps`.
   `registerComponent("task-card-tags", C)` renders `C` in its own row on every
   kanban card (below the badges row), receiving the same
   `{ taskId, workspaceId, workflowStepId }` shape — for a contribution too wide
   for the cramped title-row `task-card-indicators` spot, e.g. a row of tag chips.
+  `registerComponent("task-row-metadata", C)` renders plugin-agnostic,
+  read-only metadata on sidebar and `/tasks` rows. It receives
+  `{ taskId, workspaceId, workflowStepId, surface }`. An empty slot adds no
+  wrapper or spacing. Decision: ADR-2026-08-18-plugin-task-row-metadata.
 - **Sidebar workspace actions:** `registerComponent("sidebar-workspace-actions", C)`
   renders `C` after Quick Terminal/Quick Chat in the desktop sidebar's New Task
   row and in the shared phone navigation sheet, forwarding
@@ -1086,6 +1091,16 @@ complete.
   `visible(context)` or `run(context)` callback executes, **THEN**
   `context.presentation` is `"mobile"`; the same action invoked from desktop receives
   `"desktop"`.
+
+- **GIVEN** a plugin registers a `"primary"` task-menu action, **WHEN** a user
+  opens a desktop sidebar or phone task-sheet menu, **THEN** the same action is
+  present with the correct `presentation`. **GIVEN** the plugin unregisters
+  while the menu is open, **THEN** its action disappears without a reload.
+
+- **GIVEN** any plugin registers `"task-row-metadata"`, **WHEN** sidebar or
+  `/tasks` rows render, **THEN** it receives `{ taskId, workspaceId,
+  workflowStepId, surface }`. **GIVEN** the slot is empty, **THEN** the host
+  renders no metadata wrapper or extra spacing.
 
 - **GIVEN** a plugin has per-user state and deleting those rows returns an error,
   **WHEN** an operator uninstalls it, **THEN** the request fails, the package and plugin

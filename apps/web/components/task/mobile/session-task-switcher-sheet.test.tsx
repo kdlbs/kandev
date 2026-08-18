@@ -18,9 +18,6 @@ const mocks = vi.hoisted(() => ({
     taskPRs: { byTaskId: {} },
     taskMRs: { byWorkspaceId: {} },
     comments: { byTaskId: {} },
-    // TaskRowTags (task-row-tags slot) and the shared context menu's
-    // plugin "primary" entries both read the active workspace.
-    workspaces: { activeId: null as string | null },
   },
 }));
 

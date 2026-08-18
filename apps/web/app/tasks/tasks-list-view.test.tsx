@@ -130,10 +130,10 @@ describe("TasksListView row — destructive-action guard", () => {
   });
 });
 
-describe("TasksListView row — task-row-tags slot", () => {
-  const PLUGIN_ID = "kandev-plugin-tags";
-  const TAGS_TEST_ID = "plugin-row-tags";
-  const SLOT = "task-row-tags";
+describe("TasksListView row — task-row-metadata slot", () => {
+  const PLUGIN_ID = "example-metadata-plugin";
+  const METADATA_TEST_ID = "plugin-row-metadata";
+  const SLOT = "task-row-metadata";
 
   function SlotPropsProbe({ slotProps }: { slotProps?: unknown }) {
     const p = slotProps as {
@@ -143,7 +143,7 @@ describe("TasksListView row — task-row-tags slot", () => {
       surface: string;
     };
     return (
-      <span data-testid={TAGS_TEST_ID}>
+      <span data-testid={METADATA_TEST_ID}>
         {p.taskId}|{p.workspaceId}|{p.workflowStepId}|{p.surface}
       </span>
     );
@@ -168,7 +168,7 @@ describe("TasksListView row — task-row-tags slot", () => {
 
     renderWithWorkspace(true);
 
-    expect(screen.getByTestId(TAGS_TEST_ID).textContent).toBe("task-1|ws-1|step-1|task-list");
+    expect(screen.getByTestId(METADATA_TEST_ID).textContent).toBe("task-1|ws-1|step-1|task-list");
   });
 
   it("renders the slot with surface: 'task-list' in the compact row variant", () => {
@@ -176,15 +176,17 @@ describe("TasksListView row — task-row-tags slot", () => {
 
     renderWithWorkspace(false);
 
-    expect(screen.getByTestId(TAGS_TEST_ID).textContent).toBe("task-1|ws-1|step-1|task-list");
+    expect(screen.getByTestId(METADATA_TEST_ID).textContent).toBe("task-1|ws-1|step-1|task-list");
   });
 
   it("renders nothing in either variant when no plugin is registered", () => {
     renderWithWorkspace(true);
-    expect(screen.queryByTestId(TAGS_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(METADATA_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("task-row-metadata")).toBeNull();
     cleanup();
 
     renderWithWorkspace(false);
-    expect(screen.queryByTestId(TAGS_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(METADATA_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("task-row-metadata")).toBeNull();
   });
 });
