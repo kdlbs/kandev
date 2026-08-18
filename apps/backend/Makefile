@@ -111,6 +111,29 @@ else
   endef
 endif
 
+# CGO locale for Git Bash/MSYS on Windows.
+#
+# This mingw (WinLibs) gcc resolves its own install path, then passes it to ld/
+# collect2 across a locale-sensitive boundary. Under a UTF-8 locale, ld mis-decodes
+# the ANSI-encoded path, so a non-ASCII segment (e.g. an accented Windows
+# username under C:\Users\...) collapses to U+FFFD and the link cannot find
+# crt2.o / crtbegin.o / -lm. Forcing the C locale keeps the raw path bytes, so the
+# CGO link resolves. See docs/public/windows-support.md.
+#
+# Use LC_ALL=C, not LANG=C: LANG is the lowest-precedence locale variable
+# (LC_ALL > LC_CTYPE > LANG), so LANG=C is silently ignored when the shell already
+# exports LC_ALL or LC_CTYPE as UTF-8. LC_ALL=C overrides them all.
+#
+# Scope mirrors the shell-syntax block above: Windows but NOT native cmd, i.e.
+# $(MSYSTEM) is set, so this is Git Bash/MSYS. It is empty only on Unix and native
+# cmd. On Git Bash/MSYS the prefix is always applied: a harmless no-op on an ASCII
+# toolchain path, and the actual fix on a non-ASCII one.
+ifeq ($(OS),Windows_NT)
+  ifneq ($(OS)$(MSYSTEM),Windows_NT)
+    CGO_LOCALE := LC_ALL=C
+  endif
+endif
+
 # Build info
 #
 # Keyed on $(OS)$(MSYSTEM) like the shell-syntax block above. cmd.exe has no
@@ -220,18 +243,20 @@ build-runtime: build-agentctl build-agentctl-remote build-kandev
 build-kandev:
 	@echo "Building $(BINARY_NAME)..."
 	@$(call MKDIR,$(BUILD_DIR))
-	$(CGO_PREFIX) $(GO) build $(GOFLAGS) -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE) ./cmd/kandev
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) build $(GOFLAGS) -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE) ./cmd/kandev
 
 ## Build all binaries (unified + individual services + agentctl)
 build-all: build build-agentctl
 	@echo "Building individual services..."
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agent-manager$(EXE) ./cmd/agent-manager
 
-## Build the agentctl sidecar binary (includes embedded MCP server)
+## Build the agentctl sidecar binary (includes embedded MCP server). Carries
+## $(CGO_LOCALE) because agentctl imports cgo (unlike mock-agent/acpdbg/winjob),
+## so its native `go build` invokes gcc; see the CGO_LOCALE note above.
 build-agentctl:
 	@echo "Building agentctl..."
 	@$(call MKDIR,$(BUILD_DIR))
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl$(EXE) ./cmd/agentctl
+	$(CGO_LOCALE) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl$(EXE) ./cmd/agentctl
 
 ## Build only the agentctl helpers needed by the development profile.
 build-agentctl-dev: $(DEV_AGENTCTL_TARGETS)
@@ -321,7 +346,7 @@ start-debug: build
 ## Run tests
 test:
 	@echo "Running tests..."
-	$(CGO_PREFIX) $(GO) test -tags fts5 ./...
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 ./...
 
 ## Run only the Windows-sensitive packages — mirrors the test-windows job in
 ## .github/workflows/backend-tests.yml. The broader suite uses Unix-only
@@ -331,11 +356,11 @@ test:
 ## runtime.GOOS guards in source.
 test-windows:
 	@echo "Running Windows-sensitive packages..."
-	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/...
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/...
 	@echo "Running Windows port-collision tests..."
-	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/common/netutil -run TestIsAddrInUse
-	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/instance -run TestAllocatePortAndListenerRetriesAddressInUse
-	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/gateway/websocket -run TestResolveAndBindReportsOccupiedPort
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/common/netutil -run TestIsAddrInUse
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/instance -run TestAllocatePortAndListenerRetriesAddressInUse
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/gateway/websocket -run TestResolveAndBindReportsOccupiedPort
 
 ## Verify run/dev/start-debug expand to the right per-shell command line across
 ## native Windows (cmd), Git Bash/MSYS, and Unix — the Make-target dispatch the
@@ -368,12 +393,12 @@ test-sprites-e2e: build-agentctl-linux
 LIFECYCLE_GOLEAK_COUNT ?= 20
 test-lifecycle-goleak:
 	@echo "Stress-running lifecycle goleak suite ($(LIFECYCLE_GOLEAK_COUNT)x)..."
-	$(CGO_PREFIX) $(GO) test -tags fts5 -race -count=$(LIFECYCLE_GOLEAK_COUNT) -timeout 600s ./internal/agent/runtime/lifecycle/ ./internal/agent/runtime/agentctl/
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -race -count=$(LIFECYCLE_GOLEAK_COUNT) -timeout 600s ./internal/agent/runtime/lifecycle/ ./internal/agent/runtime/agentctl/
 
 ## Run tests with coverage
 test-coverage:
 	@echo "Running tests with coverage..."
-	$(CGO_PREFIX) $(GO) test -tags fts5 -v -coverprofile=coverage.out ./...
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 
 ## Regenerate Go stubs from proto/kandev/plugin/v1/plugin.proto (§3 of
@@ -406,7 +431,7 @@ lint:
 # supported target that could reach a finding before removing reported code.
 deadcode:
 	@echo "Scanning for unreachable Go functions (host configuration only; verify other targets before deleting findings; toolchain=$(DEADCODE_GO_TOOLCHAIN), override with DEADCODE_GO_TOOLCHAIN=go1.XY.Z)..."
-	$(DEADCODE_ENV) $(GO) run golang.org/x/tools/cmd/deadcode@$(DEADCODE_VERSION) -tags fts5 ./...
+	$(CGO_LOCALE) $(DEADCODE_ENV) $(GO) run golang.org/x/tools/cmd/deadcode@$(DEADCODE_VERSION) -tags fts5 ./...
 
 ## Format code
 fmt:

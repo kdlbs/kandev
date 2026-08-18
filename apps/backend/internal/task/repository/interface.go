@@ -158,6 +158,12 @@ type TaskStatusSummaryRepository interface {
 	DeleteTaskStatusSummary(ctx context.Context, taskID string) error
 }
 
+// TaskActivityRepository reconstructs the bounded task activity timestamp
+// from authoritative task, prompt, and turn rows.
+type TaskActivityRepository interface {
+	LoadTaskLastActivity(ctx context.Context, taskIDs []string) (map[string]time.Time, error)
+}
+
 // TaskRepoRepository handles the task↔repository junction table (models.TaskRepository rows).
 // Named TaskRepoRepository to reduce reader confusion with the TaskRepository sub-interface above.
 type TaskRepoRepository interface {

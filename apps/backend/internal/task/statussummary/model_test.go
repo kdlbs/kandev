@@ -29,6 +29,34 @@ func TestTaskStatusSummarySemanticEqualityIgnoresTransportMetadata(t *testing.T)
 	}
 }
 
+func TestTaskStatusSummaryLastActivityIsSemanticAndBackwardCompatible(t *testing.T) {
+	activity := time.Date(2026, time.August, 17, 12, 0, 0, 0, time.UTC)
+	first := TaskStatusSummary{LastActivityAt: &activity}
+	second := first
+	if first.SemanticEqual(second) == false {
+		t.Fatal("equal last activity timestamps should compare equal")
+	}
+	later := activity.Add(time.Minute)
+	second.LastActivityAt = &later
+	if first.SemanticEqual(second) {
+		t.Fatal("different last activity timestamps must not compare equal")
+	}
+	payload, err := first.SemanticJSON()
+	if err != nil {
+		t.Fatalf("last activity semantic JSON: %v", err)
+	}
+	if !strings.Contains(string(payload), `"last_activity_at"`) {
+		t.Fatalf("last activity missing from semantic JSON: %s", payload)
+	}
+	var decoded TaskStatusSummary
+	if err := json.Unmarshal([]byte(`{"revision": 4, "updated_at": "2026-08-17T10:00:00Z"}`), &decoded); err != nil {
+		t.Fatalf("decode legacy summary: %v", err)
+	}
+	if decoded.LastActivityAt != nil {
+		t.Fatalf("legacy summary activity = %v, want nil", decoded.LastActivityAt)
+	}
+}
+
 func TestTaskStatusSummarySemanticJSONIsBoundedAndOmitsTransportMetadata(t *testing.T) {
 	summary := TaskStatusSummary{
 		Revision:  4,

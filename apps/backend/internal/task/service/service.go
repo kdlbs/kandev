@@ -278,6 +278,7 @@ type Repos struct {
 	Reviews           repository.ReviewRepository
 	ResourceCleanups  repository.TaskResourceCleanupRepository
 	StatusSummaries   repository.TaskStatusSummaryRepository
+	TaskActivity      repository.TaskActivityRepository
 	SubagentContexts  repository.SubagentContextRepository
 }
 
@@ -301,6 +302,7 @@ type Service struct {
 	reviews                         repository.ReviewRepository
 	resourceCleanups                repository.TaskResourceCleanupRepository
 	statusSummaries                 repository.TaskStatusSummaryRepository
+	taskActivity                    repository.TaskActivityRepository
 	subagentContexts                repository.SubagentContextRepository
 	attachmentSvc                   *AttachmentService
 	statusSummaryPRs                TaskStatusSummaryPRReader
@@ -440,6 +442,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		reviews:               repos.Reviews,
 		resourceCleanups:      repos.ResourceCleanups,
 		statusSummaries:       repos.StatusSummaries,
+		taskActivity:          repos.TaskActivity,
 		subagentContexts:      repos.SubagentContexts,
 		eventBus:              eventBus,
 		logger:                log,

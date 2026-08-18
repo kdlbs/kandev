@@ -116,15 +116,16 @@ type AgentLifecycleData struct {
 }
 
 type PromptUsageData struct {
-	TaskID       string      `json:"task_id"`
-	SessionID    string      `json:"session_id"`
-	AgentID      string      `json:"agent_id"`
-	AgentType    string      `json:"agent_type"`
-	Model        string      `json:"model"`
-	Provider     string      `json:"provider"`
-	Usage        UsageTokens `json:"usage"`
-	TurnID       string      `json:"turn_id,omitempty"`
-	UsageEventID string      `json:"usage_event_id,omitempty"`
+	TaskID         string      `json:"task_id"`
+	SessionID      string      `json:"session_id"`
+	AgentID        string      `json:"agent_id"`
+	AgentProfileID string      `json:"agent_profile_id,omitempty"`
+	AgentType      string      `json:"agent_type"`
+	Model          string      `json:"model"`
+	Provider       string      `json:"provider"`
+	Usage          UsageTokens `json:"usage"`
+	TurnID         string      `json:"turn_id,omitempty"`
+	UsageEventID   string      `json:"usage_event_id,omitempty"`
 }
 
 // UsageTokens mirrors streams.PromptUsage on the wire. All counts are int64
@@ -134,9 +135,11 @@ type PromptUsageData struct {
 // ProviderReportedCostPresent is true (including an explicit zero), the
 // subscriber uses it directly and skips the models.dev lookup. The legacy
 // positive-value check remains in the resolver for older events. Estimated is
-// true when the adapter synthesised tokens (codex-acp cumulative-delta
-// inference). OutputTokensPresent distinguishes an observed zero from a
-// missing output-token sample. The pointer is nil only for legacy events that
+// true when the token counts are not authoritative for a complete turn: the
+// adapter synthesised them (codex-acp cumulative-delta inference), or the
+// provider returned a frame that covers only part of the turn.
+// OutputTokensPresent distinguishes an observed zero from a missing
+// output-token sample. The pointer is nil only for legacy events that
 // predate this field, so the subscriber can apply the old inference rule to
 // those events without overriding an explicit false from a new event.
 type UsageTokens struct {
@@ -533,7 +536,7 @@ func (s *Service) tryPostStartFallback(
 // update. Cost resolution follows the two-layer order from
 // docs/specs/office/costs.md, and CostSource on the row records which
 // layer actually produced the dollar amount (see resolveCostForUsage in
-// prompt_usage_cost.go — distinct from Estimated, a token-synthesis flag):
+// prompt_usage_cost.go — distinct from Estimated, a usage-authority flag):
 //
 //  1. Provider-reported cost (Layer A) — claude-acp emits exact USD per
 //     turn on usage_update.cost.amount; the adapter forwards this as
@@ -548,7 +551,7 @@ func (s *Service) tryPostStartFallback(
 //     data.Usage.Estimated verbatim on this path, not hardcoded true.
 //
 // buildCostEvent (prompt_usage_cost.go) also records the cache read/write
-// split (NULL when Usage.Estimated — see its doc comment) and turn_id /
+// split when the usage frame reports cache data, and turn_id /
 // usage_event_id threaded from the publish site. The ledger insert and the
 // task_sessions rollup increment (tokens_in / tokens_cached_in / tokens_out /
 // cost_subcents) are written atomically by recordCostEventAndRollup — see its
@@ -573,9 +576,28 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 		return nil
 	}
 
+	sessionAgentProfileID := data.AgentProfileID
+	if sessionAgentProfileID == "" {
+		id, lookupErr := s.repo.GetSessionAgentProfileID(ctx, data.TaskID, data.SessionID)
+		if lookupErr != nil {
+			// Best-effort attribution fallback: log and continue with an
+			// unattributed row rather than dropping the cost event over a
+			// failed lookup, which would reproduce the exact symptom this
+			// fallback exists to fix.
+			s.logger.Warn("session agent profile lookup failed",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.Error(lookupErr))
+		} else {
+			sessionAgentProfileID = id
+		}
+	}
+
 	resolution := s.resolveCostForUsage(ctx, *data)
 	provider := resolveProvider(*data)
-	costEvent := buildCostEvent(*data, fields, s.projectIDForTask(ctx, data.TaskID), provider, resolution)
+	costEvent := buildCostEvent(
+		*data, fields, s.projectIDForTask(ctx, data.TaskID), provider, resolution, sessionAgentProfileID,
+	)
 
 	if err := s.recordCostEventAndRollup(
 		ctx, costEvent, data.SessionID,
@@ -592,7 +614,7 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 
 	if fields.WorkspaceID != "" {
 		if err := s.CheckBudget(
-			ctx, fields.WorkspaceID, fields.AssigneeAgentProfileID, costEvent.ProjectID,
+			ctx, fields.WorkspaceID, costEvent.AgentProfileID, costEvent.ProjectID,
 		); err != nil {
 			s.logger.Warn("post-event budget check failed",
 				zap.String("task_id", data.TaskID), zap.Error(err))

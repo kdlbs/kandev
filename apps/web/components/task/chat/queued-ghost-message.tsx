@@ -42,6 +42,7 @@ import { buildEntityReferenceMarkdownComponents } from "@/components/task/chat/m
 import { QueuedGhostRowActions } from "@/components/task/chat/queued-ghost-row-actions";
 import { AttachmentRow, type QueuedAttachment } from "@/components/task/chat/queued-attachment-row";
 import { t } from "@/lib/i18n";
+import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 
 /** Imperative handle for the ghost row, used by chat input "edit last queued" affordance. */
 export type QueuedGhostMessageHandle = {
@@ -192,6 +193,10 @@ function EditView({
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
+      // Claim the key here: once this edit is cancelled, nothing further up
+      // the tree (e.g. a clarification panel's own Escape-collapses handler)
+      // should also react to the same keypress.
+      event.stopPropagation();
       onCancel();
     } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
@@ -507,6 +512,29 @@ function useFocusQueuedEdit(
   }, [editing, textareaRef]);
 }
 
+function useQueuedGhostEditEscapeGuard(
+  editing: boolean,
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>,
+): void {
+  const editEscapeGuard = useCallback(
+    (event: KeyboardEvent) => {
+      if (!editing || event.key !== "Escape") return false;
+      const textarea = textareaRef.current;
+      if (!textarea) return false;
+      const target = event.target;
+      return (
+        target === textarea ||
+        (target instanceof Node && textarea.contains(target)) ||
+        document.activeElement === textarea
+      );
+    },
+    [editing, textareaRef],
+  );
+  // Radix dialogs inspect Escape during document capture, before the
+  // textarea's bubble-phase handler can cancel the edit.
+  useClarificationEscapeGuard(editing ? editEscapeGuard : null);
+}
+
 type QueuedGhostSaveArgs = {
   value: string;
   entryContent: string;
@@ -580,6 +608,7 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
     const [value, setValue] = useState(entry.content);
     const [saving, setSaving] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    useQueuedGhostEditEscapeGuard(editing, textareaRef);
     const entityReferences = useMemo(
       () => entityReferencesFromMetadata(entry.metadata),
       [entry.metadata],

@@ -46,6 +46,7 @@ export const KNOWN_DIMENSIONS = new Set<string>([
 export const KNOWN_SORT_KEYS = new Set<string>([
   "state",
   "updatedAt",
+  "lastActivityAt",
   "createdAt",
   "title",
   "custom",

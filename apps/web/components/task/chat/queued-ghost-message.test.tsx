@@ -3,6 +3,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueuedGhostMessage, canMergeEntry, canMergeWithAbove } from "./queued-ghost-message";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
+import {
+  ClarificationEscapeGuardProvider,
+  type ClarificationEscapeGuardEntry,
+  type ClarificationEscapeGuardRegistry,
+} from "@/hooks/use-clarification-escape-guard";
 import { entityReferenceMarkdown } from "@/lib/entity-references/message-references";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
@@ -79,6 +84,22 @@ function renderWithProviders(node: React.ReactNode) {
       <ToastProvider>{node}</ToastProvider>
     </StateProvider>,
   );
+}
+
+function withEscapeGuardRegistry(node: React.ReactNode) {
+  const holder: { entry: ClarificationEscapeGuardEntry } = { entry: null };
+  const registry: ClarificationEscapeGuardRegistry = {
+    register: (_id, predicate) => {
+      holder.entry = { test: predicate };
+    },
+    unregister: () => {
+      holder.entry = null;
+    },
+  };
+  render(
+    <ClarificationEscapeGuardProvider value={registry}>{node}</ClarificationEscapeGuardProvider>,
+  );
+  return holder;
 }
 
 describe("QueuedGhostMessage reorder handle", () => {
@@ -174,6 +195,18 @@ describe("QueuedGhostMessage reorder handle", () => {
     renderRow({ queued_by: "user-1" }, { canEdit: true });
     fireEvent.click(screen.getByTestId(EDIT_TESTID));
     expect(screen.queryByTestId(HANDLE_TESTID)).toBeNull();
+  });
+});
+
+describe("QueuedGhostMessage Escape handling", () => {
+  it("claims Escape at dialog capture time while editing", () => {
+    const holder = withEscapeGuardRegistry(
+      <QueuedGhostMessage entry={entry()} canEdit onSave={async () => {}} onRemove={() => {}} />,
+    );
+
+    fireEvent.click(screen.getByTestId(EDIT_TESTID));
+
+    expect(holder.entry?.test(new KeyboardEvent("keydown", { key: "Escape" }))).toBe(true);
   });
 });
 

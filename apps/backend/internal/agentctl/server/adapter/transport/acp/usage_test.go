@@ -315,6 +315,53 @@ func TestConsumeUsageDelta_UnknownSession(t *testing.T) {
 	}
 }
 
+// TestFallbackUsageForNilTypedUsage pins the extracted fallback's existing
+// contract (adapter_prompt.go's usage==nil branch, unchanged by this card):
+// it fires on nonnegative context growth OR a provider-reported cost
+// sample, and always carries InputTokens only — this adapter shape has no
+// way to observe output tokens, which is exactly what Estimated=true
+// signals downstream (see fallbackUsageForNilTypedUsage's doc comment).
+func TestFallbackUsageForNilTypedUsage(t *testing.T) {
+	t.Run("no growth and no cost sample yields nil", func(t *testing.T) {
+		if got := fallbackUsageForNilTypedUsage(0, 0, false); got != nil {
+			t.Fatalf("expected nil, got %#v", got)
+		}
+	})
+
+	t.Run("context growth alone attaches an estimated input-only frame", func(t *testing.T) {
+		got := fallbackUsageForNilTypedUsage(350, 0, false)
+		if got == nil {
+			t.Fatal("expected non-nil usage")
+		}
+		if !got.Estimated {
+			t.Error("Estimated should be true")
+		}
+		if got.InputTokens != 350 {
+			t.Errorf("InputTokens = %d, want 350", got.InputTokens)
+		}
+		if got.ProviderReportedCostPresent {
+			t.Error("no cost sample was supplied; ProviderReportedCostPresent should be false")
+		}
+	})
+
+	t.Run("cost sample present attaches the delta as an estimated frame", func(t *testing.T) {
+		got := fallbackUsageForNilTypedUsage(350, 615, true)
+		if got == nil {
+			t.Fatal("expected non-nil usage")
+		}
+		if got.ProviderReportedCostSubcents != 615 || !got.ProviderReportedCostPresent {
+			t.Errorf("provider cost not forwarded: %#v", got)
+		}
+	})
+
+	t.Run("cost sample present with zero growth still attaches", func(t *testing.T) {
+		got := fallbackUsageForNilTypedUsage(0, 0, true)
+		if got == nil {
+			t.Fatal("expected non-nil usage for an explicit zero cost sample")
+		}
+	})
+}
+
 func TestNewSession_ClearsUsageTrackers(t *testing.T) {
 	a, _ := setupConcurrencyFakeAgent(t)
 	if err := a.Initialize(context.Background()); err != nil {

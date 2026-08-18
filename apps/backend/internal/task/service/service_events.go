@@ -378,8 +378,8 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		"priority":         task.Priority,
 		"position":         task.Position,
 		"wip_admitted":     task.WIPAdmitted,
-		"created_at":       task.CreatedAt.Format(time.RFC3339),
-		"updated_at":       task.UpdatedAt.Format(time.RFC3339),
+		"created_at":       task.CreatedAt.Format(time.RFC3339Nano),
+		"updated_at":       task.UpdatedAt.Format(time.RFC3339Nano),
 		"is_ephemeral":     task.IsEphemeral,
 		"autopilot":        task.Autopilot,
 		// Consumers that restore quick-chat tabs filter on origin, so it has to
@@ -388,7 +388,7 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 	}
 	data["queued_for_step_id"] = task.QueuedForStepID
 	if task.QueuedAt != nil {
-		data["queued_at"] = task.QueuedAt.Format(time.RFC3339)
+		data["queued_at"] = task.QueuedAt.Format(time.RFC3339Nano)
 	} else {
 		data["queued_at"] = nil
 	}
@@ -407,7 +407,7 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 	}
 	data["archived_at"] = nil
 	if task.ArchivedAt != nil {
-		data["archived_at"] = task.ArchivedAt.Format(time.RFC3339)
+		data["archived_at"] = task.ArchivedAt.Format(time.RFC3339Nano)
 	}
 	// Orchestrator-originated events fetch the task via the raw repo.GetTask,
 	// which does not populate Repositories. Load on demand so the payload

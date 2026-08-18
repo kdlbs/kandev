@@ -317,23 +317,22 @@ const CostContractVersion int64 = 3
 //
 // CostSubcents is stored as hundredths of a cent (int64) to keep token-rate
 // math integer-only. UI divides by 10000 when rendering dollars. Estimated
-// is true when token counts were synthesised by the adapter (e.g.
-// cumulative-delta inference for codex-acp) rather than reported directly
-// by the agent; the row still counts toward budget totals at face value.
+// is true when token counts are not authoritative for a complete turn, such
+// as adapter synthesis or a provider frame that covers only part of a turn;
+// the row still counts toward budget totals at face value.
 //
 // TokensCachedRead / TokensCachedWrite / TokensOut / TurnID / UsageEventID /
 // CostSource / the Rate*PerMillion columns / PricingCatalogVersion /
 // CostContractVersion are all nullable (pointer fields): NULL means "not
 // recorded" — a legacy row written before the column existed, or (for the
-// cache split specifically) an adapter with no per-turn usage frame, such as
-// codex-acp's occupancy-growth synthesis (Estimated=true). TokensOut is NULL
-// specifically when no output count was observed: a 0 there would assert a
-// measurement that was never taken, and a downstream per-output-token measure
-// must see "unknown" rather than a fake zero-output turn. The JSON cost-list
-// representation includes this field as null so API consumers can make the
-// same distinction. NULL is never backfilled to 0; TokensCachedIn keeps its
-// original read+write sum semantics on every row so existing consumers of
-// that column are unaffected. See docs/specs/office/costs.md.
+// cache split specifically) an adapter that did not report cache data.
+// TokensOut is NULL specifically when no output count was observed: a 0
+// would assert a measurement that was never taken, and a downstream
+// per-output-token measure must see "unknown" rather than a fake zero-output
+// turn. The JSON cost-list representation includes this field as null so API
+// consumers can make the same distinction. NULL is never backfilled to 0;
+// TokensCachedIn keeps its original read+write sum semantics on every row so
+// existing consumers of that column are unaffected. See docs/specs/office/costs.md.
 type CostEvent struct {
 	ID                        string      `json:"id" db:"id"`
 	SessionID                 string      `json:"session_id" db:"session_id"`

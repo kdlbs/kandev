@@ -227,6 +227,11 @@ export function createEntityReferenceSuggestion(
         onUpdate: updateMenu,
         onKeyDown(keyDown: SuggestionKeyDownProps) {
           if (keyDown.event.key === "Escape") {
+            // Claim the key here: once the entity-reference popup is closed,
+            // nothing further up the tree (e.g. a clarification panel's own
+            // Escape-collapses handler) should also react to the same
+            // keypress.
+            keyDown.event.stopPropagation();
             setMenuState(EMPTY_ENTITY_REFERENCE_STATE);
             inputGate.reset();
             exitSuggestion(keyDown.view, EntityReferenceSuggestionPluginKey);

@@ -54,6 +54,10 @@ type SessionObservationSnapshot struct {
 // observations for one task.
 type SessionObservationLoader func(context.Context, string) (SessionObservationSnapshot, error)
 
+// TaskActivityLoader rehydrates the durable maximum activity timestamp for a
+// task when a projector starts with a legacy or incomplete summary row.
+type TaskActivityLoader func(context.Context, string) (*time.Time, error)
+
 // PullRequestLoader rehydrates the keyed PR observations needed to preserve
 // sibling pull requests across projector restarts and CAS rebases.
 type PullRequestLoader func(context.Context, string) ([]PullRequestInput, error)
@@ -78,6 +82,7 @@ type ProjectorConfig struct {
 	LoadGitObservations     GitObservationLoader
 	LoadPendingActions      PendingActionLoader
 	LoadSessionObservations SessionObservationLoader
+	LoadTaskActivity        TaskActivityLoader
 	LoadPullRequests        PullRequestLoader
 	// CountQueuedPrompts returns the number of prompts currently en-queued for
 	// a task across all of its sessions (pending semantics identical to
@@ -99,6 +104,7 @@ type Projector struct {
 	loadGitObservations     GitObservationLoader
 	loadPendingActions      PendingActionLoader
 	loadSessionObservations SessionObservationLoader
+	loadTaskActivity        TaskActivityLoader
 	loadPullRequests        PullRequestLoader
 	countQueuedPrompts      func(context.Context, string) (int, error)
 	logger                  *logger.Logger
@@ -121,6 +127,7 @@ type projectionState struct {
 	revision         uint64
 	current          *TaskStatusSummary
 	queuedCount      int
+	lastActivityAt   *time.Time
 	sessions         map[string]sessionObservation
 	pending          map[string]string
 	pendingRequests  map[string]pendingRequestIdentity
@@ -184,6 +191,7 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		loadGitObservations:     cfg.LoadGitObservations,
 		loadPendingActions:      cfg.LoadPendingActions,
 		loadSessionObservations: cfg.LoadSessionObservations,
+		loadTaskActivity:        cfg.LoadTaskActivity,
 		loadPullRequests:        cfg.LoadPullRequests,
 		countQueuedPrompts:      cfg.CountQueuedPrompts,
 		logger:                  log.WithFields(zap.String("component", "task-status-summary-projector")),
@@ -201,13 +209,17 @@ func (p *Projector) Start(ctx context.Context) error {
 		return nil
 	}
 	patterns := []string{
+		events.TaskCreated,
 		events.TaskUpdated,
+		events.TaskStateChanged,
 		events.TaskSessionStateChanged,
 		events.TaskSessionActivityChanged,
 		events.TaskSessionErrorChanged,
 		events.MessageAdded,
 		events.MessageUpdated,
 		events.MessageDeleted,
+		events.TurnStarted,
+		events.TurnCompleted,
 		events.ClarificationAnswered,
 		events.ClarificationPrimaryAnswered,
 		events.ClarificationCancelled,
@@ -304,16 +316,16 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 	}
 
 	if event.Type == events.MessageQueueStatusChanged {
+		activityChanged := applyTaskActivityEventLocked(state, event.Type, data)
+		pendingChanged := false
 		if p.loadPendingActions != nil && !state.pendingObserved {
-			pendingChanged, refreshErr := p.refreshPendingLocked(ctx, taskID, state)
+			var refreshErr error
+			pendingChanged, refreshErr = p.refreshPendingLocked(ctx, taskID, state)
 			if refreshErr != nil {
 				return refreshErr
 			}
-			if err := p.persistPendingRefreshLocked(ctx, taskID, state, pendingChanged, "", nil); err != nil {
-				return err
-			}
 		}
-		return p.applyQueueStatusEvent(ctx, state, taskID)
+		return p.applyQueueStatusEvent(ctx, state, taskID, pendingChanged || activityChanged, event.Type, data)
 	}
 
 	refreshPending := p.loadPendingActions != nil &&
@@ -391,46 +403,36 @@ const maxQueueCountPersistAttempts = 3
 // authoritative queue store. The event payload's per-session count is not
 // reused: the badge is per-task across all sessions, and the queue may have
 // changed between the status snapshot and this projection.
-func (p *Projector) applyQueueStatusEvent(ctx context.Context, state *projectionState, taskID string) error {
-	if p.countQueuedPrompts == nil {
-		return nil
-	}
+func (p *Projector) applyQueueStatusEvent(
+	ctx context.Context,
+	state *projectionState,
+	taskID string,
+	sourceChanged bool,
+	eventType string,
+	eventData map[string]interface{},
+) error {
 	for attempt := 0; attempt < maxQueueCountPersistAttempts; attempt++ {
-		count, err := p.countQueuedPrompts(ctx, taskID)
+		count, err := p.loadQueueCount(ctx, taskID, state)
 		if err != nil {
-			return fmt.Errorf("count queued prompts for task %q: %w", taskID, err)
+			if persistErr := p.persistQueueSourceOnCountError(ctx, taskID, state, sourceChanged); persistErr != nil {
+				return persistErr
+			}
+			return err
 		}
-		if count == state.queuedCount {
+		if !sourceChanged && count == state.queuedCount {
 			return nil
 		}
-		previousCount := state.queuedCount
-		state.queuedCount = count
-		accepted, err := p.persistAndPublishLocked(ctx, taskID, state)
+		accepted, err := p.persistQueueStatus(ctx, taskID, state, count)
 		if err != nil {
-			// Keep in-memory state aligned with the last persisted value so a
-			// later zero-count event can retry instead of short-circuiting.
-			state.queuedCount = previousCount
-			// Delete cascades the summary row (FK) before the post-commit
-			// queue-status event. With warm state the recount hits persist
-			// rather than resolveWorkspace. Only suppress a verified gone-task
-			// failure; transient DB errors must propagate.
-			if count == 0 && isGoneTaskPersistErr(err) {
-				p.logger.Debug("skipping queue status persist for gone task",
-					zap.String("task_id", taskID),
-					zap.Error(err))
-				return nil
-			}
 			return err
 		}
 		if accepted {
 			return nil
 		}
-		// A competing writer may have changed any summary domain. Rebuild every
-		// keyed source before recounting so the queue retry cannot overwrite the
-		// winner with stale in-memory observations.
-		if err := p.rebaseProjectionStateFromCurrent(ctx, taskID, state); err != nil {
+		if err := p.rebaseQueueStatusEvent(ctx, taskID, state, eventType, eventData); err != nil {
 			return err
 		}
+		sourceChanged = true
 	}
 	// The count self-corrects on the next queue event or list load, but a
 	// sustained contention run is worth surfacing so a repeated rejector is not
@@ -439,6 +441,75 @@ func (p *Projector) applyQueueStatusEvent(ctx context.Context, state *projection
 		zap.String("task_id", taskID),
 		zap.Int("attempts", maxQueueCountPersistAttempts))
 	return nil
+}
+
+func (p *Projector) loadQueueCount(ctx context.Context, taskID string, state *projectionState) (int, error) {
+	if p.countQueuedPrompts == nil {
+		return state.queuedCount, nil
+	}
+	count, err := p.countQueuedPrompts(ctx, taskID)
+	if err != nil {
+		return 0, fmt.Errorf("count queued prompts for task %q: %w", taskID, err)
+	}
+	return count, nil
+}
+
+func (p *Projector) persistQueueSourceOnCountError(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+	sourceChanged bool,
+) error {
+	if !sourceChanged {
+		return nil
+	}
+	_, err := p.persistAndPublishLocked(ctx, taskID, state)
+	return err
+}
+
+func (p *Projector) persistQueueStatus(ctx context.Context, taskID string, state *projectionState, count int) (bool, error) {
+	previousCount := state.queuedCount
+	state.queuedCount = count
+	accepted, err := p.persistAndPublishLocked(ctx, taskID, state)
+	if err == nil {
+		return accepted, nil
+	}
+	// Keep in-memory state aligned with the last persisted value so a later
+	// zero-count event can retry instead of short-circuiting.
+	state.queuedCount = previousCount
+	// Delete cascades the summary row (FK) before the post-commit queue-status
+	// event. With warm state the recount hits persist rather than resolveWorkspace.
+	// Only suppress a verified gone-task failure; transient DB errors propagate.
+	if count == 0 && isGoneTaskPersistErr(err) {
+		p.logger.Debug("skipping queue status persist for gone task",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return true, nil
+	}
+	return false, err
+}
+
+func (p *Projector) rebaseQueueStatusEvent(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+	eventType string,
+	eventData map[string]interface{},
+) error {
+	// A competing writer may have changed any summary domain. Rebuild every
+	// keyed source before recounting so the queue retry cannot overwrite the
+	// winner with stale in-memory observations.
+	if err := p.rebaseProjectionStateFromCurrent(ctx, taskID, state); err != nil {
+		return err
+	}
+	if eventType != "" {
+		applyTaskActivityEventLocked(state, eventType, eventData)
+	}
+	if p.loadPendingActions == nil {
+		return nil
+	}
+	_, err := p.refreshPendingLocked(ctx, taskID, state)
+	return err
 }
 
 func (p *Projector) lockTask(taskID string) func() {
@@ -504,6 +575,7 @@ func (p *Projector) persistAndPublishLocked(ctx context.Context, taskID string, 
 			state.current = cloneSummary(stored)
 			state.revision = stored.Revision
 			state.queuedCount = stored.QueuedPromptCount
+			state.lastActivityAt = maxTimePtr(state.lastActivityAt, stored.LastActivityAt)
 		}
 		return false, nil
 	}

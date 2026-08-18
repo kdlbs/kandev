@@ -528,10 +528,17 @@ type ConfigOptionValue struct {
 // of a cent (amount_usd * 10000). When > 0 the office subscriber records
 // it verbatim and skips the models.dev pricing lookup.
 //
-// Estimated is true when the adapter synthesised token counts (e.g.
-// codex-acp's cumulative-delta inference) rather than receiving an
-// authoritative per-turn usage frame. Rows flagged estimated still count
-// toward budget totals at face value per docs/specs/office/costs.md.
+// Estimated is true when the token counts do not represent an
+// authoritative per-turn measurement: either the adapter synthesised them
+// (e.g. codex-acp's cumulative-delta inference when no typed usage frame
+// is present at all — fallbackUsageForNilTypedUsage in
+// server/adapter/transport/acp/adapter_prompt.go), or the typed frame
+// itself is scoped to less than the whole turn (codex-acp's usage field is
+// hardcoded to the LAST model request of a multi-request turn, not a
+// per-turn total — see normalizeCodexPromptUsage in
+// server/adapter/transport/acp/dialect_codex.go). Rows flagged estimated
+// still count toward budget totals at face value per
+// docs/specs/office/costs.md.
 type PromptUsage struct {
 	InputTokens  int64 `json:"input_tokens"`
 	OutputTokens int64 `json:"output_tokens"`

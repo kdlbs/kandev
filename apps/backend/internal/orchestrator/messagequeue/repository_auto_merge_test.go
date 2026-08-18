@@ -99,6 +99,9 @@ func TestRepository_AutoMergeIntoAbove_PreservesIdentityAndCombinesAdditiveData(
 				},
 			})
 			targetIdentity := autoMergeIdentity(*target)
+			// The surviving row carries the newest admission timestamp so durable
+			// activity reconstruction does not lose the folded user prompt.
+			targetIdentity.QueuedAt = source.QueuedAt.UTC().Truncate(time.Microsecond)
 
 			merged, didMerge, err := autoRepo.AutoMergeIntoAbove(context.Background(), "session", source.ID)
 			if err != nil || !didMerge {

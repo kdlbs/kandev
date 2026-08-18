@@ -1223,6 +1223,7 @@
   "sortCreated": "建立時間",
   "sortCustom": "自訂",
   "sortDirection": "排序方向 {{direction}}",
+  "sortLastActivity": "最後活動",
   "sortStatus": "狀態",
   "sortTitle": "標題",
   "sortUpdated": "更新時間",
@@ -1699,5 +1700,13 @@
   "modelSelectionRemediationTitle": "請檢查以下各項",
   "modelSelectionRemediationUnknown": "請檢查執行器設定檔。",
   "modelSelectionRequested": "請求的模型",
-  "modelSelectionWarning": "執行器無法使用已儲存的模型選擇。"
+  "modelSelectionWarning": "執行器無法使用已儲存的模型選擇。",
+  "collapsePrompt": "收起提示",
+  "durationUnitHours": "時",
+  "durationUnitMinutes": "分",
+  "durationUnitSeconds": "秒",
+  "expandPrompt": "展開提示",
+  "promptHistory": "提示紀錄",
+  "promptHistoryEmpty": "暫無提示。",
+  "scrollToPrompt": "滾動到提示"
 }

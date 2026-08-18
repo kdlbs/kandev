@@ -31,6 +31,8 @@ const debugWidths = createDebugLogger("dockview:widths");
 const LAYOUT_STORAGE_KEY = "dockview-layout-v3";
 const terminalTerminateClosePanelIds = new Set<string>();
 
+/** Record a terminal panel whose close should skip the park-on-close handling
+ *  (the caller terminates the terminal explicitly). */
 export function markTerminalPanelTerminateClose(panelId: string): void {
   terminalTerminateClosePanelIds.add(panelId);
 }
@@ -57,10 +59,15 @@ let enforcing = false;
 let sashDragging = false;
 let rightSashDragging = false;
 
+/** Return whether the layout currently shows the pinned right column (the
+ *  right-top or right-bottom group). */
 function hasPinnedRightColumn(api: DockviewReadyEvent["api"]): boolean {
   return api.groups.some((group) => [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP].includes(group.id));
 }
 
+/** Recompute the automatic right-column pinned target from the measured grid
+ *  width and sidebar visibility; no-op when the right column is hidden or the
+ *  user has set a manual right width. */
 function refreshAutomaticRightTarget(api: DockviewReadyEvent["api"]): void {
   const store = useDockviewStore.getState();
   if (!hasPinnedRightColumn(api) || getManualRightWidth(store.currentLayoutEnvId) !== null) return;
@@ -72,6 +79,8 @@ function refreshAutomaticRightTarget(api: DockviewReadyEvent["api"]): void {
   );
 }
 
+/** Return whether `target` is the sash separating the pinned right column from
+ *  the rest of the grid (the last root splitview sash). */
 function isPinnedRightSash(api: DockviewReadyEvent["api"], target: EventTarget | null): boolean {
   if (!hasPinnedRightColumn(api)) return false;
   const sash = (target as HTMLElement | null)?.closest(".dv-sash");
@@ -81,6 +90,9 @@ function isPinnedRightSash(api: DockviewReadyEvent["api"], target: EventTarget |
   return rootSashes?.[rootSashes.length - 1]?.container === sash;
 }
 
+/** Resize splitview view `idx` back to `target` (clamped to `maximumWidth`)
+ *  when it differs by more than 1px, ignoring dockview rejections of
+ *  unreachable sizes. */
 function restoreColumnToTarget(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sv: any,
@@ -118,6 +130,10 @@ function applyRightConstraints(api: DockviewReadyEvent["api"]): number {
   return maximumWidth;
 }
 
+/** Force the pinned right column back to its target width (manual width,
+ *  stored target, or responsive default) after layout changes, counteracting
+ *  dockview's proportional rebalancing; skipped while a sash drag, maximize,
+ *  or layout restore is in progress unless `allowDuringRestore` is set. */
 // eslint-disable-next-line complexity
 function enforcePinnedTargets(api: DockviewReadyEvent["api"], allowDuringRestore = false): void {
   if (enforcing || sashDragging) return;
@@ -175,6 +191,9 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
     return () => layoutSub.dispose();
   }
 
+  /** Begin tracking a sash drag: flag the drag state on a primary-button
+   *  mousedown over a `.dv-sash` and record whether it is the right column's
+   *  sash. */
   const onMouseDown = (e: MouseEvent): void => {
     // Only track primary-button drags. A right/middle mousedown that didn't
     // start a drag must not leave `sashDragging` permanently set (cubic P2).
@@ -189,6 +208,9 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
       }
     }
   };
+  /** End a sash drag: clear the drag flags and, when the dragged sash was the
+   *  right column's, capture the post-drag width as the new pinned target and
+   *  persist it as the manual right width. */
   const onMouseUp = (e: MouseEvent): void => {
     if (e.button !== 0 || !sashDragging) return;
     const persistRight = rightSashDragging;
@@ -231,6 +253,9 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
   };
 }
 
+/** Persist the current right-column width to the store's `pinnedWidths` when
+ *  it changes so it can be restored later; no-op during layout restore,
+ *  maximize, or when no manual right width is set. */
 function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
   const store = useDockviewStore.getState();
   if (store.isRestoringLayout) return;
@@ -285,6 +310,8 @@ export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => 
         })
       : null;
   if (ro && parent) ro.observe(parent);
+  /** On window resize, refresh the automatic right target and re-sync
+   *  dockview's grid to the live container on the next animation frame. */
   const onWindowResize = (): void => {
     requestAnimationFrame(() => {
       refreshAutomaticRightTarget(api);
@@ -325,6 +352,8 @@ export function syncDockviewContainerSize(
   enforcePinnedTargets(api);
 }
 
+/** Keep the store's active group id in sync with dockview and persist pinned
+ *  column widths on every layout change. */
 export function setupGroupTracking(api: DockviewReadyEvent["api"]): () => void {
   const d1 = api.onDidActiveGroupChange((group) => {
     useDockviewStore.setState({ activeGroupId: group?.id ?? null });
@@ -338,11 +367,18 @@ export function setupGroupTracking(api: DockviewReadyEvent["api"]): () => void {
   };
 }
 
+/** Debounce-save the dockview layout to localStorage and the env layout store
+ *  on layout changes (skipping restores and maximize overlays), flush pending
+ *  saves on page unload, and expose `__persistDockviewLayout__` for e2e tests;
+ *  returns a cleanup that removes listeners and cancels the debounce. */
 export function setupLayoutPersistence(
   api: DockviewReadyEvent["api"],
   saveTimerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>,
   envIdRef: React.MutableRefObject<string | null>,
 ): () => void {
+  /** Serialize the current dockview layout to localStorage and, when an env
+   *  id is set, to the env layout store; skips while a restore is in flight
+   *  or a pre-maximize layout is pending. */
   const persistNow = (): void => {
     const live = useDockviewStore.getState();
     if (live.preMaximizeLayout !== null || live.isRestoringLayout) return;
@@ -393,6 +429,8 @@ export function setupLayoutPersistence(
 
   // Flush a pending debounced save on tab close / reload — otherwise a
   // resize completed less than 300ms before unload is lost.
+  /** Flush any pending debounced layout save before the page unloads so a
+   *  resize made less than the debounce window ago isn't lost. */
   const onBeforeUnload = (): void => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
@@ -485,11 +523,21 @@ function handleTerminalPanelClosed(
   }
 }
 
+/** Wire dockview panel-removal cleanup: clear scroll targets, exit maximize
+ *  when the last non-sidebar panel closes, stop the panel's vscode session /
+ *  park or stop its terminal, and release the panel's portal. */
 export function setupPortalCleanup(
   api: DockviewReadyEvent["api"],
   appStore: StoreApi<AppState>,
 ): void {
   api.onDidRemovePanel((panel) => {
+    const dockviewStore = useDockviewStore.getState();
+    if (panel.id.startsWith("session:")) {
+      dockviewStore.clearScrollTargetForOwner(panel.id.slice("session:".length), panel.id);
+    } else if (panel.id === "chat") {
+      const activeSessionId = appStore.getState().tasks.activeSessionId;
+      if (activeSessionId) dockviewStore.clearScrollTargetForOwner(activeSessionId, panel.id);
+    }
     if (useDockviewStore.getState().isRestoringLayout) return;
     const remainingPanelCount = api.panels.filter((p) => p.id !== panel.id).length;
     handleMaximizeExitOnLastClose(api, panel.id, remainingPanelCount);

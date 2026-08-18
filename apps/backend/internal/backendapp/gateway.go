@@ -295,6 +295,17 @@ func provideGateway(
 		projector := statussummary.NewProjector(statussummary.ProjectorConfig{
 			Store:    taskRepo,
 			EventBus: eventBus,
+			LoadTaskActivity: func(ctx context.Context, taskID string) (*time.Time, error) {
+				byTask, err := taskRepo.LoadTaskLastActivity(ctx, []string{taskID})
+				if err != nil {
+					return nil, err
+				}
+				activityAt, ok := byTask[taskID]
+				if !ok {
+					return nil, nil
+				}
+				return &activityAt, nil
+			},
 			LoadSessionObservations: func(ctx context.Context, taskID string) (statussummary.SessionObservationSnapshot, error) {
 				return loadTaskSessionObservations(ctx, taskRepo, activityProvider, taskID)
 			},

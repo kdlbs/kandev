@@ -13,6 +13,7 @@ const STARTED_AT = "2026-07-23T10:00:00.000Z";
 const COMPLETED_AT = "2026-07-23T10:01:00.000Z";
 const LATER_AT = "2026-07-23T10:02:00.000Z";
 
+/** Creates a zustand store backed by the session slice. */
 function makeStore() {
   return create<SessionSlice>()(
     immer((set) => ({
@@ -697,5 +698,18 @@ describe("shouldApplyTurnUpdate", () => {
     const existing = turn("t", { completed_at: COMPLETED_AT, updated_at: COMPLETED_AT });
     const incoming = turn("t", { started_at: LATER_AT, updated_at: LATER_AT });
     expect(shouldApplyTurnUpdate(existing, incoming)).toBe(false);
+  });
+
+  it("retains stored turns that the snapshot omits", () => {
+    const store = makeStore();
+    seedSession(store, "RUNNING", LATER_AT);
+    store.getState().addTurn(turn("live-only"));
+
+    store.getState().mergeTurnsSnapshot(SESSION_ID, [turn("turn-1")], 0);
+
+    expect(store.getState().turns.bySession[SESSION_ID].map((item) => item.id)).toEqual([
+      "live-only",
+      "turn-1",
+    ]);
   });
 });

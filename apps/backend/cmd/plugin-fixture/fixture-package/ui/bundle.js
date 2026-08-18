@@ -244,7 +244,28 @@
 
       function MainTopBarSlot(props) {
         var slotProps = props.slotProps || {};
-        return jsx("span", { id: "hello-main-top-bar" }, "Hello " + slotProps.currentPage);
+        var label = "Hello " + slotProps.currentPage;
+        return jsx(
+          ui.Button,
+          {
+            id: "hello-main-top-bar",
+            variant: "outline",
+            size: "icon-sm",
+            "aria-label": label,
+          },
+          jsx(
+            "svg",
+            {
+              className: "h-4 w-4",
+              viewBox: "0 0 24 24",
+              fill: "none",
+              stroke: "currentColor",
+              "aria-hidden": "true",
+            },
+            jsx("path", { d: "M5 12h14M12 5l7 7l-7 7" }),
+          ),
+          jsx("span", { className: "sr-only" }, label),
+        );
       }
 
       // Debounce delay for the Notes panel's autosave — short, so e2e specs

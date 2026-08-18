@@ -8,7 +8,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/dra
 import { Button } from "@kandev/ui/button";
 import { QuickChatSheetButton } from "./quick-chat-sheet-button";
 import { TaskSwitcher } from "../task-switcher";
-import type { TaskSwitcherItem, TaskSwitcherProps } from "../task-switcher";
+import type { TaskSwitcherItem } from "../task-switcher";
 import { SidebarFilterBar } from "../sidebar-filter/sidebar-filter-bar";
 import type { StepDef } from "../task-switcher-context-menu";
 import type { TaskMoveWorkflow } from "../task-move-context-menu";
@@ -39,7 +39,7 @@ import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useMobileTaskRename } from "./use-mobile-task-rename";
 import { SidebarTaskEditDialog, useSidebarTaskEdit } from "../task-session-sidebar-edit";
 import { usePortForwardingVisibility } from "../port-forwarding-visibility-provider";
-
+import { buildMobileTaskSwitcherProps } from "./session-task-switcher-sheet-props";
 type SessionTaskSwitcherSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -47,7 +47,6 @@ type SessionTaskSwitcherSheetProps = {
   workflowId: string | null;
   presentation?: "sheet" | "drawer";
 };
-
 export function useTaskSheetSelectionController() {
   const [selectionController] = useState(createTaskSheetSelectionController);
   useEffect(
@@ -58,7 +57,6 @@ export function useTaskSheetSelectionController() {
   );
   return selectionController;
 }
-
 function useMobileTaskLinking(workspaceId: string | null) {
   const store = useAppStoreApi();
   const actions = useSidebarLinkActions(store);
@@ -80,7 +78,7 @@ function useSidebarGroupToggle(viewId: string) {
   );
 }
 
-type MobileTaskListProps = {
+export type MobileTaskListProps = {
   tasks: TaskSwitcherItem[];
   workflows: TaskMoveWorkflow[];
   stepsByWorkflowId: Record<string, StepDef[]>;
@@ -106,62 +104,6 @@ type MobileTaskListProps = {
   onRetryLoad?: () => void;
   retryLabel?: string;
 };
-
-/**
- * Assembles the TaskSwitcher props for the mobile task list, mirroring the
- * desktop `buildTaskSwitcherProps` so the prop-forwarding surface stays a
- * thin mapping layer.
- */
-function buildMobileTaskSwitcherProps(
-  props: MobileTaskListProps,
-  helpers: {
-    grouped: TaskSwitcherProps["grouped"];
-    collapsedGroupKeys: string[];
-    onToggleGroup: (groupKey: string) => void;
-    collapsedSubtaskParentIds: string[];
-    onToggleSubtasks: (parentTaskId: string) => void;
-    onTogglePin: (taskId: string) => void;
-    onReorderGroup: (groupTaskIds: string[]) => void;
-    onReorderSubtasks: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
-    pinnedTaskIds: string[];
-  },
-): TaskSwitcherProps {
-  return {
-    grouped: helpers.grouped,
-    workflows: props.workflows,
-    stepsByWorkflowId: props.stepsByWorkflowId,
-    activeTaskId: props.activeTaskId,
-    selectedTaskId: props.selectedTaskId,
-    collapsedGroupKeys: helpers.collapsedGroupKeys,
-    onToggleGroup: helpers.onToggleGroup,
-    collapsedSubtaskParentIds: helpers.collapsedSubtaskParentIds,
-    onToggleSubtasks: helpers.onToggleSubtasks,
-    onSelectTask: props.onSelectTask,
-    onEditTask: props.onEditTask,
-    onRenameTask: props.onRenameTask,
-    onCreateSubtask: props.onCreateSubtask,
-    onArchiveTask: props.onArchiveTask,
-    onDeleteTask: props.onDeleteTask,
-    onDetachTask: props.onDetachTask,
-    onNestTask: props.onNestTask,
-    onLinkPullRequest: props.onLinkPullRequest,
-    onLinkIssue: props.onLinkIssue,
-    onLinkMergeRequest: props.onLinkMergeRequest,
-    onLinkJiraTicket: props.onLinkJiraTicket,
-    onLinkLinearIssue: props.onLinkLinearIssue,
-    onLinkSentryIssue: props.onLinkSentryIssue,
-    onTogglePin: helpers.onTogglePin,
-    onReorderGroup: helpers.onReorderGroup,
-    onReorderSubtasks: helpers.onReorderSubtasks,
-    pinnedTaskIds: helpers.pinnedTaskIds,
-    deletingTaskId: props.deletingTaskId,
-    isLoading: props.isLoading,
-    loadError: props.loadError,
-    onRetryLoad: props.onRetryLoad,
-    retryLabel: props.retryLabel,
-    totalTaskCount: props.tasks.length,
-  };
-}
 
 /**
  * The mobile task tree surface: renders the shared TaskSwitcher with the
@@ -201,6 +143,7 @@ export function MobileTaskList(props: MobileTaskListProps) {
     onReorderGroup: handleReorderGroup,
     onReorderSubtasks: handleReorderSubtasks,
     pinnedTaskIds,
+    showActivityTime: view.sort.key === "lastActivityAt",
   });
   return <TaskSwitcher {...switcherProps} />;
 }

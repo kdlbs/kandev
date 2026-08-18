@@ -128,6 +128,7 @@ export const defaultState = {
 
 export type DefaultState = typeof defaultState;
 
+/** Merge the code-host slice fields (MRs, watches, presets, stats, status, Azure DevOps PRs/work items) from hydration state over defaults. */
 function mergeCodeHostFields(
   d: DefaultState,
   s: HydrationState,
@@ -162,6 +163,7 @@ function mergeCodeHostFields(
   };
 }
 
+/** Merge quick-chat state from hydration over defaults, applying locally stored chat names to the SSR-provided sessions. */
 function mergeQuickChatState(initialState: HydrationState): DefaultState["quickChat"] {
   const { sessions, ...hydratedQuickChat } = initialState.quickChat ?? {};
   const quickChat = {
@@ -176,6 +178,7 @@ function mergeQuickChatState(initialState: HydrationState): DefaultState["quickC
   return sessions ? mergeHydratedQuickChatSessions(quickChat, sessions) : quickChat;
 }
 
+/** Merge sidebar view state, preferring the server-provided views, active view, and draft from user settings when present. */
 function mergeSidebarViewState(initialState: HydrationState): DefaultState["sidebarViews"] {
   const sidebarViews = { ...defaultState.sidebarViews, ...initialState.sidebarViews };
   const userSettings = initialState.userSettings;
@@ -196,6 +199,7 @@ function mergeSidebarViewState(initialState: HydrationState): DefaultState["side
   return sidebarViews;
 }
 
+/** Merge sidebar task prefs, copying the server-provided pinned, ordered, and subtask-order lists from user settings over defaults. */
 function mergeSidebarTaskPrefsState(
   initialState: HydrationState,
 ): DefaultState["sidebarTaskPrefs"] {
@@ -219,6 +223,7 @@ function mergeSidebarTaskPrefsState(
   };
 }
 
+/** Merge review-PR selection state, deep-merging the per-task selected keys from hydration over defaults. */
 function mergeReviewPRSelectionState(
   initialState: HydrationState,
 ): DefaultState["reviewPRSelection"] {
@@ -232,6 +237,7 @@ function mergeReviewPRSelectionState(
   };
 }
 
+/** Return the hydrated session-failure notification, or the default when none is provided. */
 function mergeSessionFailureNotification(initialState: HydrationState) {
   return initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification;
 }
@@ -247,6 +253,7 @@ function mergeAgentReviewArtifacts(initialState: HydrationState) {
   };
 }
 
+/** Merges the GitHub slices for initial (SSR/boot) hydration. */
 /** Merges the GitHub slices for initial (SSR/boot) hydration. */
 function mergeGitHubState(initialState: HydrationState) {
   return {
@@ -387,6 +394,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
 // Split out of mergeInitialState to stay under the per-function line limit —
 // these fields are the UI/panel slice of the merge and have no cross-field
 // dependencies on the rest of DefaultState.
+/** Merge the UI/panel slice fields (panels, quick chat, sidebar views/task prefs, review selection, notification) from hydration state over defaults. */
 function mergeUIPanelState(initialState: HydrationState) {
   return {
     previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },
