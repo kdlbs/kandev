@@ -268,5 +268,7 @@
   "coordinatorMonitoring": "Coordinator monitoring",
   "coordinatorMonitoringHelp": "Select steps the coordinator should monitor and set per-step prompts.",
   "noStepsToMonitor": "No workflow steps to monitor.",
-  "coordinatorStepPromptPlaceholder": "Optional prompt for this step..."
+  "coordinatorStepPromptPlaceholder": "Optional prompt for this step...",
+  "failedToLoadCoordinatorMonitoring": "Failed to load coordinator monitoring settings",
+  "failedToSaveCoordinatorMonitoring": "Failed to save coordinator monitoring settings"
 }

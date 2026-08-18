@@ -1,0 +1,81 @@
+package service
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/workflow/models"
+)
+
+func TestService_CoordinatorMonitoring_SaveThenLoad(t *testing.T) {
+	svc, db := setupTestService(t)
+	insertWorkflow(t, db, "wf-1", "Workflow 1")
+	step := &models.WorkflowStep{WorkflowID: "wf-1", Name: "Step A", Position: 0}
+	createStep(t, svc, step)
+
+	ctx := context.Background()
+
+	entries, err := svc.GetCoordinatorMonitoring(ctx, "wf-1")
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+
+	saved, err := svc.SetCoordinatorMonitoring(ctx, "ws-1", "wf-1", []models.CoordinatorStepMonitor{
+		{WorkflowStepID: step.ID, Selected: true, Prompt: "watch closely"},
+	})
+	require.NoError(t, err)
+	require.Len(t, saved, 1)
+	assert.Equal(t, step.ID, saved[0].WorkflowStepID)
+	assert.True(t, saved[0].Selected)
+	assert.Equal(t, "watch closely", saved[0].Prompt)
+
+	loaded, err := svc.GetCoordinatorMonitoring(ctx, "wf-1")
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, "watch closely", loaded[0].Prompt)
+}
+
+func TestService_CoordinatorMonitoring_ReplaceRemovesStaleRows(t *testing.T) {
+	svc, db := setupTestService(t)
+	insertWorkflow(t, db, "wf-1", "Workflow 1")
+	step := &models.WorkflowStep{WorkflowID: "wf-1", Name: "Step A", Position: 0}
+	createStep(t, svc, step)
+
+	ctx := context.Background()
+	_, err := svc.SetCoordinatorMonitoring(ctx, "ws-1", "wf-1", []models.CoordinatorStepMonitor{
+		{WorkflowStepID: step.ID, Selected: true, Prompt: "first"},
+	})
+	require.NoError(t, err)
+
+	saved, err := svc.SetCoordinatorMonitoring(ctx, "ws-1", "wf-1", []models.CoordinatorStepMonitor{
+		{WorkflowStepID: step.ID, Selected: false, Prompt: ""},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, saved)
+
+	loaded, err := svc.GetCoordinatorMonitoring(ctx, "wf-1")
+	require.NoError(t, err)
+	assert.Empty(t, loaded)
+}
+
+func TestService_CoordinatorMonitoring_RejectsForeignStepID(t *testing.T) {
+	svc, db := setupTestService(t)
+	insertWorkflow(t, db, "wf-1", "Workflow 1")
+	insertWorkflow(t, db, "wf-2", "Workflow 2")
+	stepInOther := &models.WorkflowStep{WorkflowID: "wf-2", Name: "Other Step", Position: 0}
+	createStep(t, svc, stepInOther)
+
+	ctx := context.Background()
+	_, err := svc.SetCoordinatorMonitoring(ctx, "ws-1", "wf-1", []models.CoordinatorStepMonitor{
+		{WorkflowStepID: stepInOther.ID, Selected: true, Prompt: "should be rejected"},
+	})
+	require.Error(t, err)
+	assert.True(t, strings.Contains(err.Error(), "does not belong to workflow"))
+
+	loaded, err := svc.GetCoordinatorMonitoring(ctx, "wf-1")
+	require.NoError(t, err)
+	assert.Empty(t, loaded)
+}

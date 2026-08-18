@@ -31,10 +31,11 @@ import { isWorkflowFieldDirty } from "./workflow-dirty-state";
 import { WorkflowSyncedBadge } from "./workflow-synced-badge";
 import { useWorkflowMutationGuard } from "./workflow-mutation-guard";
 import { useWorkflowDraftContributor } from "./use-workflow-draft-contributor";
+import { useCoordinatorMonitorContributor } from "./use-coordinator-monitor-contributor";
 import { WorkflowPromptSection } from "./workflow-prompt-section";
 import { WorkflowDescriptionField } from "./workflow-description-field";
 import { useWorkflowDuplication } from "@/app/settings/workspace/use-workflow-duplication";
-import { CoordinatorMonitorSection, type MonitorConfigMap } from "./coordinator-monitor-section";
+import { CoordinatorMonitorSection } from "./coordinator-monitor-section";
 
 const TEMP_WORKFLOW_PREFIX = "temp-workflow-";
 
@@ -352,7 +353,10 @@ function useWorkflowCardState(props: WorkflowCardProps) {
   const isNewWorkflow = workflow.id.startsWith(TEMP_WORKFLOW_PREFIX);
   const mutationGuard = useWorkflowMutationGuard(workflowSteps);
   const [sessionConfigResolutionPending, setSessionConfigResolutionPending] = useState(false);
-  const [coordinatorMonitorConfig, setCoordinatorMonitorConfig] = useState<MonitorConfigMap>({});
+  const coordinatorMonitor = useCoordinatorMonitorContributor({
+    workflowId: workflow.id,
+    workspaceId: workflow.workspace_id,
+  });
   const stepActions = useWorkflowStepActions({
     workflow,
     isNewWorkflow,
@@ -417,10 +421,11 @@ function useWorkflowCardState(props: WorkflowCardProps) {
     stepDeleteHandlers,
     stepsForStepMigration,
     ...workflowDraft,
+    hasUnsavedChanges: workflowDraft.hasUnsavedChanges || coordinatorMonitor.isDirty,
     sessionConfigResolutionPending,
     setSessionConfigResolutionPending,
-    coordinatorMonitorConfig,
-    setCoordinatorMonitorConfig,
+    coordinatorMonitorConfig: coordinatorMonitor.draftConfig,
+    setCoordinatorMonitorConfig: coordinatorMonitor.setDraftConfig,
   };
 }
 

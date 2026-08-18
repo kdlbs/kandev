@@ -325,6 +325,78 @@ func (c *Controller) ReorderSteps(ctx context.Context, req ReorderStepsRequest) 
 	return c.svc.ReorderSteps(ctx, req.WorkflowID, req.StepIDs)
 }
 
+// Coordinator monitoring responses
+
+// CoordinatorMonitoringEntry is the wire shape for a single monitored step
+// (checked or not, plus its optional custom prompt).
+type CoordinatorMonitoringEntry struct {
+	WorkflowStepID string `json:"workflow_step_id"`
+	Selected       bool   `json:"selected"`
+	Prompt         string `json:"prompt"`
+}
+
+// ListCoordinatorMonitoringResponse wraps the saved coordinator-monitoring
+// entries for a workflow.
+type ListCoordinatorMonitoringResponse struct {
+	Entries []CoordinatorMonitoringEntry `json:"entries"`
+}
+
+// SetCoordinatorMonitoringRequest is the request for replacing a workflow's
+// coordinator-monitoring configuration.
+type SetCoordinatorMonitoringRequest struct {
+	WorkflowID  string                       `json:"workflow_id"`
+	WorkspaceID string                       `json:"workspace_id"`
+	Entries     []CoordinatorMonitoringEntry `json:"entries"`
+}
+
+// GetCoordinatorMonitoring returns the saved coordinator-monitoring
+// configuration for a workflow.
+func (c *Controller) GetCoordinatorMonitoring(ctx context.Context, workflowID string) (*ListCoordinatorMonitoringResponse, error) {
+	entries, err := c.svc.GetCoordinatorMonitoring(ctx, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	return &ListCoordinatorMonitoringResponse{Entries: toCoordinatorMonitoringEntries(entries)}, nil
+}
+
+// SetCoordinatorMonitoring replaces the coordinator-monitoring configuration
+// for a workflow. The workflow must be mutable (not GitHub-synced, not in a
+// read-only Improve workspace), matching the guard applied to step CRUD.
+func (c *Controller) SetCoordinatorMonitoring(ctx context.Context, req SetCoordinatorMonitoringRequest) (*ListCoordinatorMonitoringResponse, error) {
+	if err := c.svc.EnsureWorkflowMutable(ctx, req.WorkflowID); err != nil {
+		return nil, err
+	}
+	saved, err := c.svc.SetCoordinatorMonitoring(ctx, req.WorkspaceID, req.WorkflowID, fromCoordinatorMonitoringEntries(req.Entries))
+	if err != nil {
+		return nil, err
+	}
+	return &ListCoordinatorMonitoringResponse{Entries: toCoordinatorMonitoringEntries(saved)}, nil
+}
+
+func toCoordinatorMonitoringEntries(entries []models.CoordinatorStepMonitor) []CoordinatorMonitoringEntry {
+	result := make([]CoordinatorMonitoringEntry, 0, len(entries))
+	for _, e := range entries {
+		result = append(result, CoordinatorMonitoringEntry{
+			WorkflowStepID: e.WorkflowStepID,
+			Selected:       e.Selected,
+			Prompt:         e.Prompt,
+		})
+	}
+	return result
+}
+
+func fromCoordinatorMonitoringEntries(entries []CoordinatorMonitoringEntry) []models.CoordinatorStepMonitor {
+	result := make([]models.CoordinatorStepMonitor, 0, len(entries))
+	for _, e := range entries {
+		result = append(result, models.CoordinatorStepMonitor{
+			WorkflowStepID: e.WorkflowStepID,
+			Selected:       e.Selected,
+			Prompt:         e.Prompt,
+		})
+	}
+	return result
+}
+
 // History responses
 
 type ListHistoryRequest struct {

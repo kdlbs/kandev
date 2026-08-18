@@ -3,6 +3,8 @@ import type {
   ListWorkflowTemplatesResponse,
   ListWorkflowStepsResponse,
   ListSessionStepHistoryResponse,
+  ListCoordinatorMonitoringResponse,
+  SetCoordinatorMonitoringRequest,
   StepDefinition,
   StepEvents,
   WorkflowTemplate,
@@ -103,6 +105,28 @@ export async function createWorkflowStep(
     ...options,
     init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
+}
+
+// Coordinator monitoring operations
+export async function getCoordinatorMonitoring(workflowId: string, options?: ApiRequestOptions) {
+  return fetchJson<ListCoordinatorMonitoringResponse>(
+    `/api/v1/workflows/${workflowId}/coordinator-monitoring`,
+    options,
+  );
+}
+
+export async function setCoordinatorMonitoring(
+  workflowId: string,
+  payload: SetCoordinatorMonitoringRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<ListCoordinatorMonitoringResponse>(
+    `/api/v1/workflows/${workflowId}/coordinator-monitoring`,
+    {
+      ...options,
+      init: { method: "PUT", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    },
+  );
 }
 
 // Session Step History operations

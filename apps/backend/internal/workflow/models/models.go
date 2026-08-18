@@ -270,6 +270,18 @@ func RemapStepID(id string, idMap map[string]string) string {
 	return id
 }
 
+// CoordinatorStepMonitor represents whether a Coordinator plugin monitors a
+// given workflow step, and an optional coordinator-specific prompt for that
+// step. Stored host-side (Settings > Workspace > Workflow configuration) and
+// read by the Coordinator plugin through a capability-scoped Host API; the
+// plugin does not own this data.
+type CoordinatorStepMonitor struct {
+	WorkflowStepID string    `json:"workflow_step_id"`
+	Selected       bool      `json:"selected"`
+	Prompt         string    `json:"prompt"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 // StepTransitionTrigger represents how a session moved between steps
 type StepTransitionTrigger string
 

@@ -138,6 +138,13 @@ func (r *Repository) initSchema() error {
 		return err
 	}
 
+	// Coordinator plugin — host-owned per-step monitoring policy (checked
+	// steps + custom prompts), read by the plugin through a capability-scoped
+	// Host API. Empty table preserves today's behaviour (nothing monitored).
+	if err := r.initCoordinatorMonitoringSchema(); err != nil {
+		return err
+	}
+
 	// Seed system templates
 	if err := r.seedSystemTemplates(); err != nil {
 		return fmt.Errorf("failed to seed system templates: %w", err)
