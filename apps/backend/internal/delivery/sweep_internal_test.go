@@ -223,7 +223,7 @@ func TestPublishWriterHealth_LogsStalledWarnWhenThresholdExceeded(t *testing.T) 
 	}
 
 	sweep := NewSweep(repo, nil, testLogger)
-	sweep.publishWriterHealth()
+	sweep.publishWriterHealth(context.Background())
 
 	entries := observed.FilterMessage("delivery_ledger.stalled").All()
 	if len(entries) != 1 {
