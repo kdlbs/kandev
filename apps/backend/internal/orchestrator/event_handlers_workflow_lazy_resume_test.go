@@ -282,7 +282,7 @@ func TestResetAgentContext_InterleavingC_StaleOldEventDoesNotOverwriteFresh(t *t
 	}
 }
 
-// TestResetAgentContext_FailureAfterLiveSessionMovedReconcilesToken covers a
+// TestResetAgentContext_FailureAfterLiveSessionMovedReconcilesState covers a
 // deeper shape of "preserve recoverability on ResetAgentContext failure" than
 // TestResetAgentContext_FailedProviderResetRetainsResumeToken: the lifecycle
 // manager's ResetAgentContext can commit the execution's live ACP session to
@@ -293,7 +293,7 @@ func TestResetAgentContext_InterleavingC_StaleOldEventDoesNotOverwriteFresh(t *t
 // already moved on and no longer recognizes the old ACP session, so the
 // stale token can never be resumed. resetAgentContext must reconcile the
 // persisted token to the live truth even when it reports failure.
-func TestResetAgentContext_FailureAfterLiveSessionMovedReconcilesToken(t *testing.T) {
+func TestResetAgentContext_FailureAfterLiveSessionMovedReconcilesState(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
@@ -305,15 +305,25 @@ func TestResetAgentContext_FailureAfterLiveSessionMovedReconcilesToken(t *testin
 	if err := repo.UpdateResumeToken(ctx, "s1", execID, staleToken, ""); err != nil {
 		t.Fatalf("seed stale resume token: %v", err)
 	}
+	if err := repo.SetSessionMetadataKey(ctx, "s1", contextWindowMetadataKey, map[string]interface{}{
+		"size": int64(200000), "used": int64(190000),
+	}); err != nil {
+		t.Fatalf("seed context window: %v", err)
+	}
 
-	agentManager := &mockAgentManager{
+	var agentManager *mockAgentManager
+	agentManager = &mockAgentManager{
 		repoForExecutionLookup: repo,
 		restartProcessErr:      errors.New("model reapplication failed after session reset"),
 		getACPSessionIDForSessionFunc: func(string) (string, bool) {
+			if len(agentManager.restartProcessCalls) == 0 {
+				return staleToken, true
+			}
 			return movedToken, true
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+	staleContextGeneration := svc.captureContextWindowGeneration("s1")
 	session, err := repo.GetTaskSession(ctx, "s1")
 	if err != nil {
 		t.Fatalf("load session: %v", err)
@@ -331,16 +341,31 @@ func TestResetAgentContext_FailureAfterLiveSessionMovedReconcilesToken(t *testin
 		t.Fatalf("failed reset left a dead token persisted: got %q, want live session %q",
 			running.ResumeToken, movedToken)
 	}
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session after failed reset: %v", err)
+	}
+	if updated.Metadata[contextWindowMetadataKey] != nil {
+		t.Fatalf("partial reset retained context from the old ACP session: %#v",
+			updated.Metadata[contextWindowMetadataKey])
+	}
+	persisted, _, err := svc.persistContextWindowUpdate(ctx, "s1", staleContextGeneration, map[string]interface{}{
+		"size": int64(200000), "used": int64(195000),
+	})
+	if err != nil {
+		t.Fatalf("persist stale context update: %v", err)
+	}
+	if persisted {
+		t.Fatal("context update captured before the partial reset was persisted")
+	}
 }
 
 // TestResetAgentContext_FailureWithUnchangedLiveSessionPreservesToken pins the
 // other half of the reconcile contract: when ResetAgentContext fails and the
-// live ACP session did NOT move, the still-valid token must survive. The
-// reconcile write is a rewrite of the same value here, so the observable
-// guarantee from #2765 ("a failed reset keeps a usable recovery token") is
-// unchanged. Without this test, weakening the reconcile — dropping the
-// non-empty guard, or writing before reading the live id — would blank a
-// perfectly good token and no test would notice.
+// live ACP session did NOT move, the still-valid token and recovery cursor must
+// survive. The observable guarantee from #2765 ("a failed reset keeps a usable
+// recovery token") is unchanged. Without this test, reconciling unchanged state
+// would blank a valid cursor and no test would notice.
 func TestResetAgentContext_FailureWithUnchangedLiveSessionPreservesToken(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -348,8 +373,9 @@ func TestResetAgentContext_FailureWithUnchangedLiveSessionPreservesToken(t *test
 
 	const execID = "exec-1"
 	const liveToken = "acp-session-that-never-moved"
+	const lastMessageUUID = "last-message-before-failed-reset"
 	seedExecutorRunning(t, repo, "s1", "t1", execID)
-	if err := repo.UpdateResumeToken(ctx, "s1", execID, liveToken, ""); err != nil {
+	if err := repo.UpdateResumeToken(ctx, "s1", execID, liveToken, lastMessageUUID); err != nil {
 		t.Fatalf("seed resume token: %v", err)
 	}
 
@@ -378,13 +404,16 @@ func TestResetAgentContext_FailureWithUnchangedLiveSessionPreservesToken(t *test
 		t.Fatalf("failed reset destroyed a still-valid token: got %q, want %q",
 			running.ResumeToken, liveToken)
 	}
+	if running.LastMessageUUID != lastMessageUUID {
+		t.Fatalf("failed reset destroyed the recovery cursor: got %q, want %q",
+			running.LastMessageUUID, lastMessageUUID)
+	}
 }
 
-// TestResetAgentContext_FailureFromRotatedExecutionDoesNotOverwrite proves the
-// reconcile write stays subject to storeResumeToken's execution-level CAS. If
-// the executors_running row has already rotated to a newer execution by the
-// time the failing reset reconciles, the write belongs to a defunct execution
-// and must be dropped rather than stamped over the live execution's token.
+// TestResetAgentContext_FailureFromRotatedExecutionDoesNotOverwrite proves that
+// reconciliation stays scoped to the execution that attempted the reset. If
+// the executors_running row has already rotated, the failed reset belongs to a
+// defunct execution and must not change the live execution's state.
 func TestResetAgentContext_FailureFromRotatedExecutionDoesNotOverwrite(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -400,13 +429,17 @@ func TestResetAgentContext_FailureFromRotatedExecutionDoesNotOverwrite(t *testin
 		t.Fatalf("seed resume token: %v", err)
 	}
 
-	agentManager := &mockAgentManager{
+	var agentManager *mockAgentManager
+	agentManager = &mockAgentManager{
 		// The reset is still operating on the older execution.
 		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
 			return staleExecID, nil
 		},
 		restartProcessErr: errors.New("model reapplication failed after session reset"),
 		getACPSessionIDForSessionFunc: func(string) (string, bool) {
+			if len(agentManager.restartProcessCalls) == 0 {
+				return "acp-session-before-defunct-reset", true
+			}
 			return "acp-session-of-defunct-execution", true
 		},
 	}
@@ -456,12 +489,16 @@ func TestResetAgentContext_FailureReconcileDroppedWhenSessionMovesMidFlight(t *t
 		restartProcessErr:      errors.New("model reapplication failed after session reset"),
 		getACPSessionIDForSessionFunc: func(string) (string, bool) {
 			lookups++
-			if lookups == 1 {
+			switch lookups {
+			case 1:
+				return seededToken, true
+			case 2:
 				// What resetAgentContext observes and tries to reconcile to.
 				return "acp-session-observed-by-reconcile", true
+			default:
+				// A newer generation took over before the guard re-read it.
+				return "acp-session-from-newer-generation", true
 			}
-			// A newer generation took over before the guard re-read it.
-			return "acp-session-from-newer-generation", true
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
@@ -473,7 +510,7 @@ func TestResetAgentContext_FailureReconcileDroppedWhenSessionMovesMidFlight(t *t
 	if svc.resetAgentContext(ctx, "t1", session, "test") {
 		t.Fatal("expected reset to report failure")
 	}
-	if lookups < 2 {
+	if lookups < 3 {
 		t.Fatalf("expected the reconcile write to be re-checked against the live id, got %d lookups", lookups)
 	}
 

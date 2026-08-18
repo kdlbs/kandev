@@ -3254,24 +3254,14 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		zap.String("step_name", stepName),
 		zap.String("agent_execution_id", executionID))
 
+	previousACPSessionID := s.currentACPSessionID(sessionID)
 	if err := s.agentManager.ResetAgentContext(ctx, executionID); err != nil {
 		s.logger.Error("failed to reset agent context",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName),
 			zap.Error(err))
-		// A session-level reset can partially succeed: ResetSession itself
-		// commits the execution's live ACP session to a new id before a
-		// later step (e.g. re-applying the session model) fails and turns
-		// the overall call into an error. When that happens, the agent has
-		// already moved on and no longer recognizes the pre-reset session,
-		// so leaving resume_token at its old value does not "preserve"
-		// recoverability — it persists a token that can never be resumed.
-		// Reconcile to the live truth; when nothing actually changed this is
-		// a harmless rewrite of the same value.
-		if liveACPSessionID := s.currentACPSessionID(sessionID); liveACPSessionID != "" {
-			s.storeResumeToken(ctx, taskID, sessionID, executionID, liveACPSessionID, "")
-		}
+		s.reconcileFailedContextReset(ctx, taskID, session, executionID, previousACPSessionID)
 		return false
 	}
 
@@ -3295,6 +3285,38 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 	// after the provider reset succeeds. The token is handled explicitly above.
 	s.clearPersistedResetState(ctx, sessionID, session)
 	return true
+}
+
+// reconcileFailedContextReset handles a reset that moved the live ACP session
+// before a later reset step failed. The old cursor and context metadata belong
+// to the previous ACP session and must not survive that partial transition.
+func (s *Service) reconcileFailedContextReset(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	executionID string,
+	previousACPSessionID string,
+) {
+	liveACPSessionID := s.currentACPSessionID(session.ID)
+	if liveACPSessionID == "" || liveACPSessionID == previousACPSessionID {
+		return
+	}
+
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	if err != nil {
+		s.logger.Warn("failed to inspect execution after partial context reset",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("agent_execution_id", executionID),
+			zap.Error(err))
+		return
+	}
+	if running.AgentExecutionID != executionID {
+		return
+	}
+
+	s.storeResumeToken(ctx, taskID, session.ID, executionID, liveACPSessionID, "")
+	s.clearPersistedResetState(ctx, session.ID, session)
 }
 
 // clearPersistedResetState clears the durable, DB-backed session state that a
