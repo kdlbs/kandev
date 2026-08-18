@@ -348,7 +348,10 @@ Tooltip*, including `TooltipProvider`), the recharts wrappers (`ChartContainer`,
 `ChartStyle`), plus first-party app UI: `PageTopbar` (the kandev title bar, for
 routes that opt out of the default chrome and own their layout),
 `TaskCreateDialog` (kandev's real create-task modal, prefilled via
-`initialValues`), `Combobox` (the app's Command+Popover picker), and the
+`initialValues`), `Combobox` (the app's Command+Popover picker),
+`WorkspaceAgentChat` (the host-owned managed conversation chat surface for
+workspace-agent plugins like the coordinator — see the
+[WorkspaceAgentChat](#host.ui.WorkspaceAgentChat) section below), and the
 provider-neutral code-host dashboard set: `ChangeRequestList`,
 `ChangeRequestRow`, `ChangeRequestDetail`, `IntegrationListToolbar`, `IntegrationScopeBar`,
 `IntegrationSaveQueryDialog`, `IntegrationRepositoryFilter`, `IntegrationCursorPagination`,
@@ -579,6 +582,35 @@ interface RichTextReadOnlyProps {
 Deliberately narrow — not the plan editor's `comments`, `onSelectionChange`,
 `onCommentClick`, `onCommentDeleted`, or `onEditorReady` props, so the plan
 editor's internals can keep evolving without breaking this contract.
+
+### `host.ui.WorkspaceAgentChat` — managed workspace-agent conversation
+
+Host-owned chat surface for persistent workspace-agent plugins such as the
+coordinator. Renders a full managed conversation transcript (message list +
+chat composer + clarification overlay) backed by a hidden, workflowless
+ephemeral task/session. The host resolves the backing session from a stable
+`(workspaceId, conversationKey)` pair; plugins provide the key and receive
+the resolved `sessionId`.
+
+```ts
+interface WorkspaceAgentChatProps {
+  /** Workspace ID the conversation belongs to. */
+  workspaceId: string;
+  /** Stable conversation key scoped to this plugin (e.g. "coordinator"). */
+  conversationKey: string;
+  /** Resolved session ID for the managed conversation. */
+  sessionId: string;
+  /** Optional placeholder in the chat composer. */
+  placeholderOverride?: string;
+}
+```
+
+The `sessionId` is returned by the plugin's `api.invokeAction("conversations.ensure")`
+action declared in the manifest, which calls the host's agent conversation service.
+The host guarantees at most one backing task/session per `(pluginId, workspaceId,
+conversationKey)` tuple, even across concurrent requests or Kandev restarts. See the
+[Agent conversation contract](#agent-conversation-contract) in GRPC-CONTRACT.md for
+the backend RPC details.
 
 ### `host.storage` — authenticated per-user key/value storage
 

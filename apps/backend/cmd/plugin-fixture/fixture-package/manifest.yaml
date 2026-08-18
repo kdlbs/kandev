@@ -28,6 +28,7 @@ capabilities:
   state: true
   secrets: true
   user_state: true
+  agent_conversation: true
 
 # These provider-neutral declarations keep the package fixture useful as a
 # second-provider contract: the labels and canned data resemble a Bitbucket
@@ -43,6 +44,9 @@ actions:
     scope: "task"
     max_body_bytes: 4096
   - key: "watch-create-task"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "conversations.probe"
     scope: "workspace"
     max_body_bytes: 4096
 

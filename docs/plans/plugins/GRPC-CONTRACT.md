@@ -105,6 +105,15 @@ service Host {
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
   rpc PreviewPluginOwnedTaskTree(PreviewPluginOwnedTaskTreeRequest) returns (PreviewPluginOwnedTaskTreeResponse);
   rpc DeletePluginOwnedTaskTree(DeletePluginOwnedTaskTreeRequest) returns (DeletePluginOwnedTaskTreeResponse);
+
+  // Agent conversations — capability agent_conversation. Ensure creates or
+  // retrieves a hidden workflowless ephemeral task/session for the
+  // (plugin_id, workspace_id, conversation_key) tuple. Dispatch sends a prompt
+  // to an ensured conversation with stable occurrence idempotency. Delete
+  // removes only conversations owned by this plugin.
+  rpc EnsureAgentConversation(EnsureAgentConversationRequest) returns (EnsureAgentConversationResponse);
+  rpc DispatchAgentConversation(DispatchAgentConversationRequest) returns (DispatchAgentConversationResponse);
+  rpc DeleteAgentConversation(DeleteAgentConversationRequest) returns (DeleteAgentConversationResponse);
 }
 
 message Event {
@@ -532,11 +541,70 @@ the API, never the DB.
   before doing any work — `state` for `GetState`/`SetState`/`DeleteState`/
   `ListState`, `secrets` for `RevealSecret`, `api_read:<resource>` for each Host
   data API read RPC (§3a), `api_write:tasks` for `CreateTask`/`UpdateTask` and
-  `api_write:messages` for `SendMessage` — and returns PermissionDenied with
-  `capability '<name>' not declared` on a miss. `EmitEvent` is ungated. Reads
-  and writes gate independently on the same resource, so a plugin can declare
-  `api_read:tasks` without `api_write:tasks` (or vice versa), and likewise for
-  `messages`.
+  `api_write:messages` for `SendMessage`, `agent_conversation` for
+  `EnsureAgentConversation`/`DispatchAgentConversation`/`DeleteAgentConversation` —
+  and returns PermissionDenied with `capability '<name>' not declared` on a miss.
+  `EmitEvent` is ungated. Reads and writes gate independently on the same resource,
+  so a plugin can declare `api_read:tasks` without `api_write:tasks` (or vice versa),
+  and likewise for `messages`.
+
+### 5a. Agent conversation contract
+
+Gated by `capabilities: { agent_conversation: true }` in the manifest. Three RPCs
+provide managed, hidden conversation sessions keyed by `(plugin_id, workspace_id,
+conversation_key)`:
+
+**`EnsureAgentConversation`** — idempotent create-or-get for a hidden workflowless
+ephemeral task/session. The plugin provides an `AgentConversationSpec` with
+`workspace_id`, `conversation_key`, optional `base_prompt` (baked into every
+dispatch), optional `agent_profile_id`, and optional `executor_profile_id`. The
+host guarantees at most one backing task per tuple, even across concurrent requests
+or Kandev restarts. Returns an `AgentConversationDescriptor` with `task_id`,
+`session_id`, `workspace_id`, `conversation_key`, and the effective
+`agent_profile_id`.
+
+```proto
+message AgentConversationSpec {
+  string workspace_id = 1;
+  string conversation_key = 2;
+  string base_prompt = 3;
+  string agent_profile_id = 4;
+  string executor_profile_id = 5;
+}
+
+message AgentConversationDescriptor {
+  string task_id = 1;
+  string session_id = 2;
+  string workspace_id = 3;
+  string conversation_key = 4;
+  string agent_profile_id = 5;
+}
+```
+
+**`DispatchAgentConversation`** — sends a prompt to an ensured conversation. The
+plugin provides `workspace_id`, `conversation_key`, `text`, and a stable
+`occurrence_key` for idempotency (e.g. a hash of the trigger event and due
+timestamp). An already-claimed key returns the prior dispatch result silently.
+If the backing session is busy, the prompt is queued; if idle, the agent is
+prompted. Returns the `session_id`, a `status` string, and the
+`AgentConversationDescriptor`.
+
+```proto
+message DispatchAgentConversationRequest {
+  string workspace_id = 1;
+  string conversation_key = 2;
+  string text = 3;
+  string occurrence_key = 4;
+}
+```
+
+**`DeleteAgentConversation`** — deletes all conversations matching the request.
+Only conversations owned by this plugin are affected. Accepts `workspace_id` and
+optional `conversation_key` (omit to delete all conversations for this plugin in
+the workspace). Returns `deleted_count`.
+
+See PLUGIN-API.md for the frontend `WorkspaceAgentChat` component that renders
+the managed conversation transcript for a resolved `session_id`.
 
 ## 6. Package format (`<id>-<version>.tar.gz`)
 
