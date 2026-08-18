@@ -550,7 +550,7 @@ func waitForFreshSessionModelState(ctx context.Context, log *logger.Logger, exec
 }
 
 func freshSessionModelCatalogReady(state *CachedModelState) bool {
-	return state != nil && len(state.Models) > 0
+	return state != nil && (len(state.Models) > 0 || len(state.ConfigOptions) > 0 || state.ConfigOptionsSettled)
 }
 
 func (m *Manager) effectiveSessionModelForReset(ctx context.Context, execution *AgentExecution) string {
@@ -574,7 +574,9 @@ func (m *Manager) captureSessionRuntimeConfigForReset(
 			mode = modeState.CurrentModeID
 		}
 	}
-	if !optionsSet {
+	if liveOptions, liveOptionsKnown := liveSessionRuntimeConfigOptions(modelState); liveOptionsKnown {
+		options = liveOptions
+	} else if !optionsSet {
 		options = selectedRuntimeConfigOptions(modelState)
 	}
 	return models.SessionRuntimeConfig{
@@ -582,6 +584,13 @@ func (m *Manager) captureSessionRuntimeConfigForReset(
 		Mode:          mode,
 		ConfigOptions: sanitizeRuntimeConfigOptions(options),
 	}
+}
+
+func liveSessionRuntimeConfigOptions(state *CachedModelState) (map[string]string, bool) {
+	if state == nil || (!state.ConfigOptionsSettled && len(state.ConfigOptions) == 0) {
+		return nil, false
+	}
+	return selectedRuntimeConfigOptions(state), true
 }
 
 func selectedRuntimeConfigOptions(state *CachedModelState) map[string]string {
@@ -733,15 +742,16 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		waitForFreshSessionModelState(ctx, m.logger, execution)
 	}
 	if err := m.restoreSessionRuntimeConfig(ctx, execution, newSessionID, runtimeConfig); err != nil {
-		_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
-			exec.Status = v1.AgentStatusFailed
-			exec.ErrorMessage = err.Error()
-		})
-		return err
+		restoreErr := fmt.Errorf("failed to restore session runtime configuration after reset: %w", err)
+		m.updateExecutionError(executionID, restoreErr.Error())
+		m.persistExecutorRunning(context.WithoutCancel(ctx), execution)
+		return restoreErr
 	}
-	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
-		exec.Status = v1.AgentStatusReady
-	})
+	if err := m.updateStatusAndPersist(ctx, executionID, v1.AgentStatusReady); err != nil {
+		m.updateExecutionError(executionID, "failed to mark reset agent ready: "+err.Error())
+		m.persistExecutorRunning(context.WithoutCancel(ctx), execution)
+		return fmt.Errorf("failed to mark reset agent ready: %w", err)
+	}
 
 	m.logger.Info("agent context reset via session (no process restart)",
 		zap.String("execution_id", executionID),

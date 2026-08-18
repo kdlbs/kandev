@@ -82,4 +82,21 @@ Changed files:
 Verification:
 
 - `cd apps/backend && go test -race -run 'TestManager_(ResetAgentContext|RestartAgentProcess)_(ReappliesSessionRuntimeConfig|FailsClosedOnRuntimeConfigRestore)$' ./internal/agent/runtime/lifecycle` — 4 passed.
-- `cd apps/backend && go test -race ./internal/agent/runtime/lifecycle` — 1,908 passed.
+- `cd apps/backend && go test -race ./internal/agent/runtime/lifecycle` — 1,911 passed.
+
+PR fixup coverage added after review:
+
+- Live `ConfigOptions` snapshots are authoritative when available, so removed
+  persisted options are not restored and newer provider values win over stale
+  profile values.
+- Option-only and explicitly settled empty catalogs satisfy the fresh-session
+  readiness gate without waiting for a model list.
+- The mock can reject model restoration, and the reset test verifies that mode,
+  options, ready events, and reset-success events are not applied or published.
+- Reset failures persist the failed executor-running status before returning.
+
+Additional verification:
+
+- Focused fixup tests — 4 passed.
+- `cd apps/web && pnpm e2e:run tests/workflow/workflow-step-proceed.spec.ts -- --grep "preserves session settings across context reset"` — 1 passed.
+- `cd apps/backend && make lint` — 0 issues.

@@ -11,6 +11,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -145,6 +146,8 @@ func TestManager_RestartAgentProcess_ReappliesSessionRuntimeConfig(t *testing.T)
 
 func TestManager_ResetAgentContext_FailsClosedOnRuntimeConfigRestore(t *testing.T) {
 	mgr := newTestManager(t)
+	writer := &captureExecutorRunningWriter{}
+	mgr.SetExecutorRunningWriter(writer)
 	provider := runtimeConfigResetWorkspaceInfo()
 	mgr.workspaceInfoProvider = provider
 	mock := newRestartMockAgentctlServer(t, false, false)
@@ -164,7 +167,39 @@ func TestManager_ResetAgentContext_FailsClosedOnRuntimeConfigRestore(t *testing.
 	require.Error(t, err)
 	require.Equal(t, v1.AgentStatusFailed, exec.Status)
 	require.NotEmpty(t, exec.ErrorMessage)
+	require.NotNil(t, writer.running)
+	require.Equal(t, models.ExecutorRunningStatusFailed, writer.running.Status)
 	require.Equal(t, []string{"agent.session.reset", "agent.session.set_model", "agent.session.set_mode", "agent.session.set_config_option"}, mock.getWSActions())
+
+	bus := mgr.eventBus.(*MockEventBus)
+	for _, event := range bus.PublishedEvents {
+		require.NotEqual(t, events.AgentBootReady, event.Type)
+		require.NotEqual(t, events.AgentContextReset, event.Type)
+	}
+}
+
+func TestManager_ResetAgentContext_FailsClosedOnSessionModelRestore(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.workspaceInfoProvider = runtimeConfigResetWorkspaceInfo()
+	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.modelState = runtimeConfigResetModelState()
+	mock.failModel = true
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(cancel)
+	require.NoError(t, client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil))
+
+	exec := runtimeConfigResetExecution(client, true)
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	err := mgr.ResetAgentContext(ctx, exec.ID)
+	require.Error(t, err)
+	require.Equal(t, v1.AgentStatusFailed, exec.Status)
+	require.Equal(t, []string{"agent.session.reset", "agent.session.set_model"}, mock.getWSActions())
+	require.Empty(t, mock.getSetModeIDs())
+	require.Empty(t, mock.getSetOptions())
 
 	bus := mgr.eventBus.(*MockEventBus)
 	for _, event := range bus.PublishedEvents {
@@ -290,4 +325,30 @@ func TestSanitizeRuntimeConfigOptionsFiltersInvalidEntries(t *testing.T) {
 	})
 
 	require.Equal(t, map[string]string{"effort": "max"}, options)
+}
+
+func TestManager_CaptureSessionRuntimeConfigPrefersLiveProviderOptions(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			"session-1": {
+				SessionID:               "session-1",
+				RuntimeModel:            "mock-smart",
+				SessionMode:             "acceptEdits",
+				RuntimeConfigOptions:    map[string]string{"effort": "low", "removed": "stale"},
+				RuntimeConfigOptionsSet: true,
+			},
+		},
+	}
+	exec := runtimeConfigResetExecution(nil, true)
+	exec.SetModelState(&CachedModelState{
+		CurrentModelID: "mock-smart",
+		ConfigOptions: []streams.ConfigOption{
+			{ID: "effort", CurrentValue: "max"},
+		},
+	})
+
+	config := mgr.captureSessionRuntimeConfigForReset(context.Background(), exec)
+
+	require.Equal(t, map[string]string{"effort": "max"}, config.ConfigOptions)
 }

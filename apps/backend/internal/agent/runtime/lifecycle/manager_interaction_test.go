@@ -49,6 +49,7 @@ type restartMockAgentctlServer struct {
 	failStop           bool
 	failSessionNew     bool
 	failMode           bool
+	failModel          bool
 	failConfigOptionID string
 	modelState         *streams.SessionModelState
 	newModelState      *streams.SessionModelState
@@ -82,6 +83,15 @@ func TestWaitForFreshSessionModelStateWaitsForAdvertisedCatalog(t *testing.T) {
 	}()
 
 	require.True(t, waitForFreshSessionModelState(context.Background(), newTestLogger(), execution))
+}
+
+func TestFreshSessionModelCatalogReadyAcceptsConfigOptionsWithoutModels(t *testing.T) {
+	require.True(t, freshSessionModelCatalogReady(&CachedModelState{
+		ConfigOptions: []streams.ConfigOption{{ID: "effort", CurrentValue: "max"}},
+	}))
+	require.True(t, freshSessionModelCatalogReady(&CachedModelState{
+		ConfigOptionsSettled: true,
+	}))
 }
 
 func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *restartMockAgentctlServer {
@@ -190,9 +200,13 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 					})
 				}
 			case "agent.session.set_model":
-				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-					"success": true,
-				})
+				if m.failModel {
+					resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "model rejected", nil)
+				} else {
+					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+						"success": true,
+					})
+				}
 			case "agent.session.set_config_option":
 				var payload struct {
 					ConfigID string `json:"config_id"`

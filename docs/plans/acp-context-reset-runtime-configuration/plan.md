@@ -107,10 +107,13 @@ Also state that a restoration error prevents the destination step's automatic pr
 Implementation is complete. The exact task verification commands passed:
 
 - Backend focused lifecycle reset/restart tests: 4 passed.
-- Full backend lifecycle package under the race detector: 1,908 passed.
+- Full backend lifecycle package under the race detector: 1,911 passed.
 - Workflow reset and hydration E2E: 1 passed.
 - Public documentation tests and validator: 61 tests passed; 41 published
   pages validated.
+- PR fixup coverage: live provider option snapshots replace stale persisted
+  entries, option-only catalogs satisfy restoration readiness, rejected model
+  restoration fails closed, and reset failure status is persisted.
 
 ## Implementation Waves And Parallel Candidates
 
