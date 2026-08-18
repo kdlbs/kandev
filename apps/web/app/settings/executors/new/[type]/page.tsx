@@ -581,6 +581,7 @@ function buildCreateProfilePayload(form: ReturnType<typeof useCreateProfileFormS
       gitUserEmail: form.gitUserEmail,
       dockerfile: form.dockerfile,
       imageTag: form.imageTag,
+      allowUserNamespaces: form.allowUserNamespaces,
     }),
     prepare_script: form.prepareScript,
     cleanup_script: form.cleanupScript,
