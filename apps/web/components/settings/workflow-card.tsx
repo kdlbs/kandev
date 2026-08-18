@@ -34,6 +34,7 @@ import { useWorkflowDraftContributor } from "./use-workflow-draft-contributor";
 import { WorkflowPromptSection } from "./workflow-prompt-section";
 import { WorkflowDescriptionField } from "./workflow-description-field";
 import { useWorkflowDuplication } from "@/app/settings/workspace/use-workflow-duplication";
+import { CoordinatorMonitorSection, type MonitorConfigMap } from "./coordinator-monitor-section";
 
 const TEMP_WORKFLOW_PREFIX = "temp-workflow-";
 
@@ -351,6 +352,7 @@ function useWorkflowCardState(props: WorkflowCardProps) {
   const isNewWorkflow = workflow.id.startsWith(TEMP_WORKFLOW_PREFIX);
   const mutationGuard = useWorkflowMutationGuard(workflowSteps);
   const [sessionConfigResolutionPending, setSessionConfigResolutionPending] = useState(false);
+  const [coordinatorMonitorConfig, setCoordinatorMonitorConfig] = useState<MonitorConfigMap>({});
   const stepActions = useWorkflowStepActions({
     workflow,
     isNewWorkflow,
@@ -417,6 +419,8 @@ function useWorkflowCardState(props: WorkflowCardProps) {
     ...workflowDraft,
     sessionConfigResolutionPending,
     setSessionConfigResolutionPending,
+    coordinatorMonitorConfig,
+    setCoordinatorMonitorConfig,
   };
 }
 
@@ -455,6 +459,15 @@ export function WorkflowCard(props: WorkflowCardProps) {
             readOnly={s.readOnly}
             onSessionConfigResolutionPendingChange={s.setSessionConfigResolutionPending}
           />
+          {!s.workflowLoading && (
+            <CoordinatorMonitorSection
+              workflowId={workflow.id}
+              steps={s.workflowSteps}
+              config={s.coordinatorMonitorConfig}
+              onChange={s.setCoordinatorMonitorConfig}
+              disabled={s.readOnly}
+            />
+          )}
           <WorkflowCardHeaderActions
             workflowId={workflow.id}
             setExportYaml={s.setExportYaml}

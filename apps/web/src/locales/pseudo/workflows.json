@@ -264,5 +264,9 @@
   "workflowSyncCompleted": "Ŵōŕķƒĺōŵ śŷńć ćōḿƥĺēţēď",
   "loadingSteps": "Ĺōàďĩńĝ śţēƥś…",
   "noStepsInThisWorkflow": "Ńō śţēƥś ĩń ţĥĩś ŵōŕķƒĺōŵ",
-  "selectAWorkflowFirst": "Śēĺēćţ à ŵōŕķƒĺōŵ ƒĩŕśţ"
+  "selectAWorkflowFirst": "Śēĺēćţ à ŵōŕķƒĺōŵ ƒĩŕśţ",
+  "coordinatorMonitoring": "Çöördïñätör mönïtörïñg",
+  "coordinatorMonitoringHelp": "Sëlëçt stëps thë çöördïñätör shöüld mönïtör äñd sët për-stëp prömpts.",
+  "noStepsToMonitor": "Nö wörlflöw stëps tö mönïtör.",
+  "coordinatorStepPromptPlaceholder": "Öptïöñäl prömpt för thïs stëp..."
 }
