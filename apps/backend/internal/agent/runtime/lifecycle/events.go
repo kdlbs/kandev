@@ -34,16 +34,17 @@ func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string
 	p.publishAgentEventPayload(ctx, eventType, newAgentEventPayload(execution))
 }
 
-// PublishAgentStalled publishes one advisory inactivity signal for a prompt.
+// PublishAgentStalled publishes one inactivity signal for a prompt.
 // neverStarted reports whether the agent has emitted zero events since this
-// prompt was dispatched, letting the orchestrator classify the notice as a
-// terminal failure rather than a mid-work pause.
+// prompt was dispatched, and activityEpoch lets the consumer revalidate that
+// classification before applying a terminal transition.
 func (p *EventPublisher) PublishAgentStalled(
 	ctx context.Context,
 	execution *AgentExecution,
 	promptGeneration uint64,
 	lastActivityAt time.Time,
 	stalledFor time.Duration,
+	activityEpoch uint64,
 	neverStarted bool,
 ) {
 	if p.eventBus == nil {
@@ -54,6 +55,7 @@ func (p *EventPublisher) PublishAgentStalled(
 		TaskID:           execution.TaskID,
 		SessionID:        execution.SessionID,
 		PromptGeneration: promptGeneration,
+		ActivityEpoch:    activityEpoch,
 		LastActivityAt:   lastActivityAt,
 		StalledFor:       stalledFor,
 		NeverStarted:     neverStarted,

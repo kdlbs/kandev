@@ -1021,11 +1021,9 @@ func (sm *SessionManager) waitForPromptDone(
 			return nil, ctx.Err()
 
 		case <-stallTicker.C:
-			execution.lastActivityAtMu.Lock()
-			elapsed := time.Since(execution.lastActivityAt)
-			lastActivity := execution.lastActivityAt
-			neverStarted := !execution.agentEventSincePrompt
-			execution.lastActivityAtMu.Unlock()
+			lastActivity, agentEventSeen, activityEpoch := execution.promptActivitySnapshot()
+			elapsed := time.Since(lastActivity)
+			neverStarted := !agentEventSeen
 
 			if elapsed >= 5*time.Minute && !stallReported {
 				sm.logger.Warn("agent stall detected: no events received",
@@ -1040,6 +1038,7 @@ func (sm *SessionManager) waitForPromptDone(
 						promptGeneration,
 						lastActivity,
 						elapsed,
+						activityEpoch,
 						neverStarted,
 					)
 				}
@@ -1147,6 +1146,7 @@ func (sm *SessionManager) markPromptDispatched(execution *AgentExecution, genera
 	if generation != 0 && execution.promptGeneration == generation &&
 		execution.promptCompletionGeneration != generation {
 		execution.dispatchedPromptGeneration = generation
+		execution.armPromptActivity()
 	}
 }
 
@@ -1491,10 +1491,6 @@ func (sm *SessionManager) preparePrompt(
 			sm.logger.Warn("failed to store user message to history", zap.Error(err))
 		}
 	}
-	execution.lastActivityAtMu.Lock()
-	execution.lastActivityAt = time.Now()
-	execution.agentEventSincePrompt = false
-	execution.lastActivityAtMu.Unlock()
 	return ctx, effectivePrompt, promptGeneration, nil
 }
 

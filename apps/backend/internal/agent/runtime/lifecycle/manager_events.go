@@ -310,10 +310,7 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 	}
 	m.releaseActivity(executionActivityKey(execution.ID))
 
-	execution.lastActivityAtMu.Lock()
-	execution.lastActivityAt = time.Now()
-	execution.agentEventSincePrompt = true
-	execution.lastActivityAtMu.Unlock()
+	execution.markAgentActivity()
 
 	// Check buffer content BEFORE any processing
 	execution.messageMu.Lock()
@@ -509,9 +506,13 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 // (available_commands_update arriving 50ms after MarkBootReady, etc.) don't
 // accidentally re-arm a freshly-booted no-prompt session as Running.
 func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.AgentEvent) {
+	_, isTurnContent := turnContentEventTypes[event.Type]
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
-	execution.agentEventSincePrompt = true
+	if isTurnContent {
+		execution.agentEventSincePrompt = true
+		execution.promptActivityEpoch++
+	}
 	execution.lastActivityAtMu.Unlock()
 
 	// Gate firstActivityOnce on `Status != Ready` so a delayed metadata

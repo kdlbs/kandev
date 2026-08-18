@@ -16,6 +16,7 @@ import (
 const (
 	stallCancelTurnButtonTestID = "stall-cancel-turn-button"
 	metaKeyActionVisibility     = "action_visibility"
+	actionVisibilityRunning     = "running"
 	neverStartedNoticeContent   = "Agent produced no output since start."
 )
 
@@ -32,7 +33,8 @@ var errAgentNeverStarted = errors.New("agent produced no output since start")
 // output at all since the prompt was dispatched (payload.NeverStarted), the
 // condition is terminal and unrecoverable: the notice is posted as an error
 // and the session/task transition to FAILED via the same idempotent CAS path
-// used for launch failures.
+// used for launch failures. The activity epoch prevents a late event from
+// turning an old watchdog snapshot into a terminal failure.
 func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.AgentStalledPayload) {
 	if s.messageCreator == nil || s.repo == nil || payload.TaskID == "" || payload.SessionID == "" {
 		return
@@ -61,6 +63,19 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 	) {
 		return
 	}
+	if payload.ActivityEpoch != 0 {
+		activityOwner, ok := s.agentManager.(interface {
+			OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool
+		})
+		if !ok || !activityOwner.OwnsPromptActivity(
+			payload.SessionID,
+			payload.AgentExecutionID,
+			payload.PromptGeneration,
+			payload.ActivityEpoch,
+		) {
+			return
+		}
+	}
 	turnID, err := s.peekActiveTurnID(ctx, payload.SessionID)
 	if err != nil {
 		return
@@ -69,10 +84,15 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 		return
 	}
 	metadata := map[string]interface{}{
-		metaKeyActionVisibility: "running",
-		metaKeySessionID:        payload.SessionID,
-		metaKeyTaskID:           payload.TaskID,
-		"actions": []map[string]interface{}{{
+		metaKeySessionID: payload.SessionID,
+		metaKeyTaskID:    payload.TaskID,
+	}
+	messageType := string(v1.MessageTypeStatus)
+	if payload.NeverStarted {
+		messageType = string(v1.MessageTypeError)
+	} else {
+		metadata[metaKeyActionVisibility] = actionVisibilityRunning
+		metadata["actions"] = []map[string]interface{}{{
 			actionMetaKeyType:   "ws_request",
 			actionMetaKeyLabel:  "Cancel turn",
 			actionMetaKeyTestID: stallCancelTurnButtonTestID,
@@ -80,11 +100,7 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 				"method":  "agent.cancel",
 				"payload": map[string]interface{}{"session_id": payload.SessionID},
 			},
-		}},
-	}
-	messageType := string(v1.MessageTypeStatus)
-	if payload.NeverStarted {
-		messageType = string(v1.MessageTypeError)
+		}}
 	}
 	if err := s.messageCreator.CreateSessionMessage(
 		ctx,

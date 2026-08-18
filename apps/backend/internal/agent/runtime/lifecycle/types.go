@@ -218,9 +218,13 @@ type AgentExecution struct {
 	// produced a single frame for this prompt" from "it worked, then paused" —
 	// both cases otherwise bump the same lastActivityAt timestamp.
 	agentEventSincePrompt bool
-	lastActivityAtMu      sync.Mutex
-	activeTool            *activeTopLevelTool
-	activeToolMu          sync.RWMutex
+	// promptActivityEpoch changes when a prompt is armed or a genuine agent
+	// event arrives. Stall consumers use it to reject a snapshot that became
+	// stale while the event was crossing the bus.
+	promptActivityEpoch uint64
+	lastActivityAtMu    sync.Mutex
+	activeTool          *activeTopLevelTool
+	activeToolMu        sync.RWMutex
 
 	// Fires once on the first agent event to publish AgentRunning.
 	firstActivityOnce sync.Once
@@ -343,6 +347,34 @@ func (e *AgentExecution) promptGenerationSnapshot() uint64 {
 	e.promptLifecycleMu.Lock()
 	defer e.promptLifecycleMu.Unlock()
 	return e.promptGeneration
+}
+
+func (e *AgentExecution) armPromptActivity() {
+	e.lastActivityAtMu.Lock()
+	e.lastActivityAt = time.Now()
+	e.agentEventSincePrompt = false
+	e.promptActivityEpoch++
+	e.lastActivityAtMu.Unlock()
+}
+
+func (e *AgentExecution) markAgentActivity() {
+	e.lastActivityAtMu.Lock()
+	e.lastActivityAt = time.Now()
+	e.agentEventSincePrompt = true
+	e.promptActivityEpoch++
+	e.lastActivityAtMu.Unlock()
+}
+
+func (e *AgentExecution) promptActivitySnapshot() (time.Time, bool, uint64) {
+	e.lastActivityAtMu.Lock()
+	defer e.lastActivityAtMu.Unlock()
+	return e.lastActivityAt, e.agentEventSincePrompt, e.promptActivityEpoch
+}
+
+func (e *AgentExecution) promptActivityEpochSnapshot() uint64 {
+	e.lastActivityAtMu.Lock()
+	defer e.lastActivityAtMu.Unlock()
+	return e.promptActivityEpoch
 }
 
 // beginStartupAttempt starts a generation for a new ACP process. Generation

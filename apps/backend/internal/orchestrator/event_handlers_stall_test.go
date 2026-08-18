@@ -23,6 +23,7 @@ func TestHandleAgentStalled_PersistsNeutralRunningNotice(t *testing.T) {
 		currentPromptExecutionID: "execution-1",
 	}
 	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(1)
 	svc := createTestServiceWithScheduler(
 		repo,
 		newMockStepGetter(),
@@ -42,6 +43,7 @@ func TestHandleAgentStalled_PersistsNeutralRunningNotice(t *testing.T) {
 		TaskID:           "task-1",
 		SessionID:        "session-1",
 		PromptGeneration: 7,
+		ActivityEpoch:    1,
 		ToolName:         "shell",
 		ToolTitle:        "Start dev server",
 		ToolStatus:       "in_progress",
@@ -57,7 +59,7 @@ func TestHandleAgentStalled_PersistsNeutralRunningNotice(t *testing.T) {
 	if !strings.Contains(message.content, "Still waiting on Start dev server") {
 		t.Fatalf("notice content = %q, want sanitized tool title", message.content)
 	}
-	if message.metadata["action_visibility"] != "running" {
+	if message.metadata["action_visibility"] != actionVisibilityRunning {
 		t.Fatalf("action visibility = %v, want running", message.metadata["action_visibility"])
 	}
 	if message.turnID != activeTurn.ID {
@@ -97,6 +99,7 @@ func TestHandleAgentStalled_NeverStartedFailsSessionAndTask(t *testing.T) {
 		currentPromptExecutionID: "execution-1",
 	}
 	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(1)
 	taskRepo := newMockTaskRepo()
 	seedMockTaskState(taskRepo, "task-1", v1.TaskStateInProgress)
 	svc := createTestServiceWithScheduler(
@@ -118,6 +121,7 @@ func TestHandleAgentStalled_NeverStartedFailsSessionAndTask(t *testing.T) {
 		TaskID:           "task-1",
 		SessionID:        "session-1",
 		PromptGeneration: 7,
+		ActivityEpoch:    1,
 		NeverStarted:     true,
 	})
 
@@ -134,13 +138,11 @@ func TestHandleAgentStalled_NeverStartedFailsSessionAndTask(t *testing.T) {
 	if message.turnID != activeTurn.ID {
 		t.Fatalf("notice turn ID = %q, want active turn %q", message.turnID, activeTurn.ID)
 	}
-	actions, ok := message.metadata["actions"].([]map[string]interface{})
-	if !ok || len(actions) != 1 {
-		t.Fatalf("actions = %#v, want the cancel action preserved", message.metadata["actions"])
+	if _, hasVisibility := message.metadata["action_visibility"]; hasVisibility {
+		t.Fatalf("terminal notice has running visibility metadata: %#v", message.metadata)
 	}
-	action := actions[0]
-	if action["label"] != "Cancel turn" || action["test_id"] != "stall-cancel-turn-button" {
-		t.Fatalf("cancel action = %#v, want it preserved on the never-started branch", action)
+	if _, hasActions := message.metadata["actions"]; hasActions {
+		t.Fatalf("terminal notice has a running cancel action: %#v", message.metadata)
 	}
 
 	after, err := repo.GetTaskSession(ctx, "session-1")
@@ -156,6 +158,31 @@ func TestHandleAgentStalled_NeverStartedFailsSessionAndTask(t *testing.T) {
 	taskRepo.mu.Unlock()
 	if taskState != v1.TaskStateFailed {
 		t.Fatalf("task state = %q, want FAILED", taskState)
+	}
+}
+
+func TestHandleAgentStalled_RejectsActivityEpochChangedAfterSnapshot(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	agentMgr := &mockAgentManager{currentPromptExecutionID: "execution-1"}
+	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(2)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.messageCreator = &mockMessageCreator{}
+
+	svc.handleAgentStalled(ctx, lifecycle.AgentStalledPayload{
+		AgentExecutionID: "execution-1",
+		TaskID:           "task-1",
+		SessionID:        "session-1",
+		PromptGeneration: 7,
+		ActivityEpoch:    1,
+		NeverStarted:     true,
+	})
+
+	if got := len(svc.messageCreator.(*mockMessageCreator).sessionMessages); got != 0 {
+		t.Fatalf("stale activity snapshot created %d messages, want 0", got)
 	}
 }
 

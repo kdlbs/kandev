@@ -309,6 +309,15 @@ describe("ActionMessage — running stall notice", () => {
     expect(container.firstChild).toBeNull();
   });
 
+  it("keeps a terminal stall diagnostic visible after the session fails", () => {
+    const message = stalledMessage();
+    message.type = "error";
+
+    renderAction(message, "FAILED");
+
+    expect(screen.getByText("Still waiting on Start dev server.")).toBeTruthy();
+  });
+
   it("sends agent.cancel when Cancel turn is activated", async () => {
     renderAction(stalledMessage(), "RUNNING", undefined, "turn-1");
 

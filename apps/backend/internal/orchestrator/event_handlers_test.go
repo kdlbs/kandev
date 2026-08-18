@@ -343,8 +343,9 @@ type mockAgentManager struct {
 	// ErrCancelEscalated sentinels handled inside cancelAgentSilent).
 	cancelAgentErr error
 
-	currentPromptGeneration  atomic.Uint64
-	currentPromptExecutionID string
+	currentPromptGeneration    atomic.Uint64
+	currentPromptActivityEpoch atomic.Uint64
+	currentPromptExecutionID   string
 
 	// set_session_mode tracking (issue #1183). Records (sessionID, modeID) for
 	// every SetSessionModeBySessionID call. setSessionModeErr, when set, is
@@ -525,6 +526,15 @@ func (m *mockAgentManager) IsAgentReadyForPrompt(ctx context.Context, sessionID 
 
 func (m *mockAgentManager) OwnsPromptGeneration(_ string, executionID string, generation uint64) bool {
 	return executionID == m.currentPromptExecutionID && generation == m.currentPromptGeneration.Load()
+}
+
+func (m *mockAgentManager) OwnsPromptActivity(
+	_ string,
+	executionID string,
+	generation, activityEpoch uint64,
+) bool {
+	return m.OwnsPromptGeneration("", executionID, generation) &&
+		activityEpoch == m.currentPromptActivityEpoch.Load()
 }
 
 func (m *mockAgentManager) GetPromptGenerationForSession(_ context.Context, _ string) (uint64, error) {
