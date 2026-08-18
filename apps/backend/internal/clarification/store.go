@@ -30,6 +30,19 @@ type Store struct {
 	// coordinate multi-waiter scenarios deterministically; always nil in
 	// production.
 	onWaitEntered func(pendingID string)
+
+	// onRespondEntered, if non-nil, is invoked inside Respond after the
+	// initial pending lookup and before pending.mu is acquired. Tests use it
+	// to force a specific interleaving against a concurrent CancelRequest or
+	// CancelSession; always nil in production.
+	onRespondEntered func(pendingID string)
+
+	// onCancelSessionEntered, if non-nil, is invoked inside CancelSession for
+	// each matching entry, after it has been removed from s.pending and
+	// before that entry's pending.mu is acquired. Tests use it to force a
+	// specific interleaving against a concurrent Respond; always nil in
+	// production.
+	onCancelSessionEntered func(pendingID string)
 }
 
 // NewStore creates a new clarification store.
@@ -151,10 +164,15 @@ func (s *Store) WaitForResponse(ctx context.Context, pendingID string) (*Respons
 func (s *Store) Respond(pendingID string, resp *Response) error {
 	s.mu.RLock()
 	pending, ok := s.pending[pendingID]
+	hook := s.onRespondEntered
 	s.mu.RUnlock()
 
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrNotFound, pendingID)
+	}
+
+	if hook != nil {
+		hook(pendingID)
 	}
 
 	pending.mu.Lock()
@@ -246,9 +264,13 @@ func (s *Store) CancelSession(sessionID string) []string {
 			cancelled = append(cancelled, id)
 		}
 	}
+	hook := s.onCancelSessionEntered
 	s.mu.Unlock()
 
-	for _, pending := range toCancel {
+	for i, pending := range toCancel {
+		if hook != nil {
+			hook(cancelled[i])
+		}
 		pending.mu.Lock()
 		if !pending.resolved {
 			close(pending.CancelCh)

@@ -2,6 +2,7 @@ package clarification
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -480,6 +481,24 @@ func TestCancelRequest_AfterRespond_DoesNotCloseCancelCh(t *testing.T) {
 // while the blocked tool call already exited with a cancellation error.
 // Respond must instead report failure so the caller falls back to the R7a
 // no-live-waiter path.
+//
+// Review Round 4 found the original, sequential version of this test
+// (CancelRequest fully completes, then Respond is called) is phantom-green:
+// CancelRequest deletes the map entry from s.pending before Respond's own
+// lookup runs, so a purely sequential call always short-circuits on the
+// pre-existing ErrNotFound path and never reaches the new
+// `select { case <-pending.CancelCh: return ErrAlreadyCancelled }` guard this
+// test is named for. Confirmed by mutation testing: deleting that guard
+// entirely left the sequential test passing.
+//
+// This version forces the real interleaving instead: two goroutines actually
+// racing at the Store level. Respond's own map lookup must complete (finding
+// the live entry) before CancelRequest deletes it, but CancelRequest's
+// pending.mu section -- which closes CancelCh -- must complete before
+// Respond's own pending.mu section runs. The onRespondEntered hook parks
+// Respond deterministically between those two points (after the lookup,
+// before pending.mu.Lock()) so the ordering is guaranteed rather than left to
+// scheduler luck.
 func TestRespond_AfterCancelRequest_ReturnsError(t *testing.T) {
 	s := NewStore(time.Second)
 	id, _ := s.CreateRequest(&Request{
@@ -488,17 +507,115 @@ func TestRespond_AfterCancelRequest_ReturnsError(t *testing.T) {
 	})
 	pending := s.pending[id]
 
+	parked := make(chan struct{})
+	release := make(chan struct{})
+	s.onRespondEntered = func(string) {
+		close(parked)
+		<-release
+	}
+
+	respondErr := make(chan error, 1)
+	go func() {
+		respondErr <- s.Respond(id, &Response{Answers: []Answer{{QuestionID: "q1"}}})
+	}()
+	<-parked // Respond found the live entry; it is parked just before acquiring pending.mu.
+
 	if !s.CancelRequest(id) {
 		t.Fatal("expected CancelRequest to report the entry existed")
 	}
+	close(release) // Let Respond proceed to pending.mu, now that CancelCh is closed.
 
-	if err := s.Respond(id, &Response{Answers: []Answer{{QuestionID: "q1"}}}); err == nil {
-		t.Fatal("expected Respond to report an error once the entry was already cancelled -- silently succeeding would be reported as a delivered answer nobody is waiting for")
+	err := <-respondErr
+	if err == nil {
+		t.Fatal("expected Respond to report an error once a concurrent CancelRequest closed CancelCh first -- silently succeeding would be reported as a delivered answer nobody is waiting for")
+	}
+	if !errors.Is(err, ErrAlreadyCancelled) {
+		t.Fatalf("expected ErrAlreadyCancelled, got %v", err)
 	}
 
 	select {
 	case <-pending.done:
-		t.Fatal("Respond must not close done once the entry has already been cancelled: there is no live waiter left to deliver to")
+		t.Fatal("Respond must not close done once a concurrent cancel has already closed CancelCh: there is no live waiter left to deliver to")
 	default:
+	}
+}
+
+// TestCancelSession_ConcurrentWithRespond_DoesNotCloseCancelChOnceDelivered
+// proves CancelSession's pending.resolved gate under genuine concurrency,
+// independently of TestCancelRequest_AfterRespond_DoesNotCloseCancelCh above.
+// CancelSession shares the exact bug shape CancelRequest had before the
+// Round 3 fix (it can close CancelCh on an already-resolved entry) and is the
+// higher-traffic of the two paths -- it fires on every turn-complete, for
+// every pending entry of a session, not just one targeted entry. Review
+// Round 4 found it had zero regression coverage: reverting its
+// `if !pending.resolved` gate to an unconditional close left the entire
+// internal/clarification suite green.
+//
+// Uses two real goroutines actually racing through the Store -- one running
+// Respond, one running CancelSession for the same session -- synchronized via
+// the onRespondEntered and onCancelSessionEntered hooks so the interleaving
+// is deterministic rather than scheduler luck (an earlier attempt at
+// reproducing the sibling CancelRequest race via raw iteration counts did not
+// reliably reproduce in this sandbox). Both goroutines are parked
+// independently after reaching their own lock-acquisition point; the test
+// then releases Respond first and waits for it to fully complete (closing
+// done) before releasing CancelSession, forcing CancelSession's pending.mu
+// section to observe an already-resolved entry.
+func TestCancelSession_ConcurrentWithRespond_DoesNotCloseCancelChOnceDelivered(t *testing.T) {
+	s := NewStore(time.Second)
+	id, _ := s.CreateRequest(&Request{
+		SessionID: "s1",
+		Questions: []Question{{ID: "q1", Prompt: "p?", Options: []Option{{ID: "o1", Label: "A"}}}},
+	})
+	pending := s.pending[id]
+
+	respondParked := make(chan struct{})
+	respondRelease := make(chan struct{})
+	s.onRespondEntered = func(string) {
+		close(respondParked)
+		<-respondRelease
+	}
+
+	cancelParked := make(chan struct{})
+	cancelRelease := make(chan struct{})
+	s.onCancelSessionEntered = func(string) {
+		close(cancelParked)
+		<-cancelRelease
+	}
+
+	respondErr := make(chan error, 1)
+	go func() {
+		respondErr <- s.Respond(id, &Response{Answers: []Answer{{QuestionID: "q1"}}})
+	}()
+	<-respondParked // Respond found the live entry; parked just before acquiring pending.mu.
+
+	cancelDone := make(chan []string, 1)
+	go func() {
+		cancelDone <- s.CancelSession("s1")
+	}()
+	<-cancelParked // CancelSession removed the entry from s.pending; parked just before acquiring pending.mu.
+
+	// Release Respond first and wait for it to fully finish -- pending.resolved
+	// is now true and done is closed -- before letting CancelSession proceed.
+	close(respondRelease)
+	if err := <-respondErr; err != nil {
+		t.Fatalf("unexpected Respond error: %v", err)
+	}
+
+	close(cancelRelease)
+	cancelled := <-cancelDone
+	if len(cancelled) != 1 || cancelled[0] != id {
+		t.Fatalf("expected CancelSession to report the entry, got %v", cancelled)
+	}
+
+	select {
+	case <-pending.CancelCh:
+		t.Fatal("CancelSession must not close CancelCh once Respond has already resolved and delivered the entry: doing so races WaitForResponse's select against the already-closed done channel and can spuriously report cancellation for an answer that was actually delivered")
+	default:
+	}
+	select {
+	case <-pending.done:
+	default:
+		t.Fatal("expected done to remain closed (set by Respond)")
 	}
 }
