@@ -1024,13 +1024,15 @@ func (sm *SessionManager) waitForPromptDone(
 			execution.lastActivityAtMu.Lock()
 			elapsed := time.Since(execution.lastActivityAt)
 			lastActivity := execution.lastActivityAt
+			neverStarted := !execution.agentEventSincePrompt
 			execution.lastActivityAtMu.Unlock()
 
 			if elapsed >= 5*time.Minute && !stallReported {
 				sm.logger.Warn("agent stall detected: no events received",
 					zap.String("execution_id", execution.ID),
 					zap.Duration("elapsed_since_last_event", elapsed),
-					zap.Time("last_activity", lastActivity))
+					zap.Time("last_activity", lastActivity),
+					zap.Bool("never_started", neverStarted))
 				if sm.eventPublisher != nil {
 					sm.eventPublisher.PublishAgentStalled(
 						ctx,
@@ -1038,6 +1040,7 @@ func (sm *SessionManager) waitForPromptDone(
 						promptGeneration,
 						lastActivity,
 						elapsed,
+						neverStarted,
 					)
 				}
 				stallReported = true
@@ -1286,6 +1289,10 @@ func (sm *SessionManager) dispatchSteerLocked(
 // activity-timestamp bump for a steer that actually dispatched. Kept off the
 // fallback path so a steer that degrades to an ordinary prompt is not recorded
 // twice.
+//
+// Deliberately does not touch agentEventSincePrompt: a steer is user input
+// injected into an already-running turn, not agent output, so it must not
+// mask a stalled agent as having produced something.
 func (sm *SessionManager) recordSteerActivity(execution *AgentExecution, prompt string) {
 	if sm.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
 		if err := sm.historyManager.AppendUserMessage(execution.SessionID, prompt); err != nil {
@@ -1486,6 +1493,7 @@ func (sm *SessionManager) preparePrompt(
 	}
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
+	execution.agentEventSincePrompt = false
 	execution.lastActivityAtMu.Unlock()
 	return ctx, effectivePrompt, promptGeneration, nil
 }

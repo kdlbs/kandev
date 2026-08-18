@@ -42,6 +42,9 @@ type AgentStalledPayload struct {
 	ToolName         string        `json:"tool_name,omitempty"`
 	ToolTitle        string        `json:"tool_title,omitempty"`
 	ToolStatus       string        `json:"tool_status,omitempty"`
+	// NeverStarted is true when the agent has not emitted a single event since
+	// this prompt was dispatched — a terminal failure, not a mid-work pause.
+	NeverStarted bool `json:"never_started"`
 }
 
 // AgentctlEventPayload is the payload for agentctl lifecycle events (starting, ready, error).

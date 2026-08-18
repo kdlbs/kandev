@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -15,10 +16,23 @@ import (
 const (
 	stallCancelTurnButtonTestID = "stall-cancel-turn-button"
 	metaKeyActionVisibility     = "action_visibility"
+	neverStartedNoticeContent   = "Agent produced no output since start."
 )
 
-// handleAgentStalled persists an advisory recovery affordance without changing
-// the prompt, session, or task lifecycle.
+// errAgentNeverStarted is the launch-failure error recorded when a stalled
+// prompt's agent has emitted zero events since dispatch. Its Error() string
+// is persisted as the session's error_message by recordSessionLaunchFailure;
+// it is not a missing-branch error, so handleSessionLaunchFailed's
+// branch-guidance side effect stays inert for this path.
+var errAgentNeverStarted = errors.New("agent produced no output since start")
+
+// handleAgentStalled persists an advisory recovery affordance for a turn that
+// stalled after producing at least one agent event, leaving the prompt,
+// session, and task lifecycle unchanged. When the agent has produced no
+// output at all since the prompt was dispatched (payload.NeverStarted), the
+// condition is terminal and unrecoverable: the notice is posted as an error
+// and the session/task transition to FAILED via the same idempotent CAS path
+// used for launch failures.
 func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.AgentStalledPayload) {
 	if s.messageCreator == nil || s.repo == nil || payload.TaskID == "" || payload.SessionID == "" {
 		return
@@ -68,12 +82,16 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 			},
 		}},
 	}
+	messageType := string(v1.MessageTypeStatus)
+	if payload.NeverStarted {
+		messageType = string(v1.MessageTypeError)
+	}
 	if err := s.messageCreator.CreateSessionMessage(
 		ctx,
 		payload.TaskID,
 		stallNoticeContent(payload),
 		payload.SessionID,
-		string(v1.MessageTypeStatus),
+		messageType,
 		turnID,
 		metadata,
 		false,
@@ -83,9 +101,15 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 			zap.String("session_id", payload.SessionID),
 			zap.Error(err))
 	}
+	if payload.NeverStarted {
+		s.recordSessionLaunchFailure(ctx, payload.TaskID, payload.SessionID, errAgentNeverStarted, session)
+	}
 }
 
 func stallNoticeContent(payload lifecycle.AgentStalledPayload) string {
+	if payload.NeverStarted {
+		return neverStartedNoticeContent
+	}
 	tool := strings.TrimSpace(payload.ToolTitle)
 	if tool == "" {
 		tool = strings.TrimSpace(payload.ToolName)

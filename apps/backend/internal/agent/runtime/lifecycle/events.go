@@ -35,12 +35,16 @@ func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string
 }
 
 // PublishAgentStalled publishes one advisory inactivity signal for a prompt.
+// neverStarted reports whether the agent has emitted zero events since this
+// prompt was dispatched, letting the orchestrator classify the notice as a
+// terminal failure rather than a mid-work pause.
 func (p *EventPublisher) PublishAgentStalled(
 	ctx context.Context,
 	execution *AgentExecution,
 	promptGeneration uint64,
 	lastActivityAt time.Time,
 	stalledFor time.Duration,
+	neverStarted bool,
 ) {
 	if p.eventBus == nil {
 		return
@@ -52,6 +56,7 @@ func (p *EventPublisher) PublishAgentStalled(
 		PromptGeneration: promptGeneration,
 		LastActivityAt:   lastActivityAt,
 		StalledFor:       stalledFor,
+		NeverStarted:     neverStarted,
 	}
 	if tool := execution.activeToolSnapshot(); tool != nil {
 		payload.ToolCallID = tool.ToolCallID

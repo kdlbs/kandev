@@ -211,10 +211,16 @@ type AgentExecution struct {
 	promptFinishedMu sync.Mutex
 
 	// Last time an agent event was received (for stall detection)
-	lastActivityAt   time.Time
-	lastActivityAtMu sync.Mutex
-	activeTool       *activeTopLevelTool
-	activeToolMu     sync.RWMutex
+	lastActivityAt time.Time
+	// agentEventSincePrompt is armed (false) on each prompt dispatch and set
+	// true by the first genuine agent event (recordActivity/handleCompleteEvent)
+	// that follows. It lets the stall watchdog distinguish "the agent never
+	// produced a single frame for this prompt" from "it worked, then paused" —
+	// both cases otherwise bump the same lastActivityAt timestamp.
+	agentEventSincePrompt bool
+	lastActivityAtMu      sync.Mutex
+	activeTool            *activeTopLevelTool
+	activeToolMu          sync.RWMutex
 
 	// Fires once on the first agent event to publish AgentRunning.
 	firstActivityOnce sync.Once

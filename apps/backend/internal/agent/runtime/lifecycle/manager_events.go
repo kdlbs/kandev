@@ -312,6 +312,7 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
+	execution.agentEventSincePrompt = true
 	execution.lastActivityAtMu.Unlock()
 
 	// Check buffer content BEFORE any processing
@@ -510,6 +511,7 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.AgentEvent) {
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
+	execution.agentEventSincePrompt = true
 	execution.lastActivityAtMu.Unlock()
 
 	// Gate firstActivityOnce on `Status != Ready` so a delayed metadata
