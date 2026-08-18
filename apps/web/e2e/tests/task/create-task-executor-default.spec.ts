@@ -110,4 +110,29 @@ test.describe("Task-create executor safety defaults", () => {
       await saveTaskCreatePreference(apiClient, seedData, worktreeProfile.id);
     }
   });
+
+  test("returns to Worktree after leaving repository-less mode", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { localProfile, worktreeProfile } = await executorProfiles(apiClient);
+    await apiClient.updateWorkspace(seedData.workspaceId, { default_executor_id: "" });
+    await saveTaskCreatePreference(apiClient, seedData, localProfile.id);
+
+    try {
+      await openCreateTask(testPage);
+      const executorSelector = testPage.getByTestId("executor-profile-selector");
+      await expect(executorSelector).toContainText(worktreeProfile.name);
+
+      await testPage.getByTestId("source-mode-scratch").click();
+      await expect(executorSelector).toContainText(localProfile.name);
+
+      await testPage.getByTestId("source-mode-workspace").click();
+      await expect(executorSelector).toContainText(worktreeProfile.name);
+    } finally {
+      await apiClient.updateWorkspace(seedData.workspaceId, { default_executor_id: "" });
+      await saveTaskCreatePreference(apiClient, seedData, worktreeProfile.id);
+    }
+  });
 });
