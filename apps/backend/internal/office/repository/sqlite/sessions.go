@@ -40,15 +40,18 @@ func (r *Repository) HasPriorSessionForAgent(ctx context.Context, taskID, agentI
 	return state != "CREATED", nil
 }
 
-// GetSessionAgentProfileID returns the agent_profile_id recorded on a
-// task_sessions row — the agent that actually ran the session, as opposed
-// to RunnerProjection's workflow-configured runner. Returns "" if the
-// session or its agent_profile_id is not found.
-func (r *Repository) GetSessionAgentProfileID(ctx context.Context, sessionID string) (string, error) {
+// GetSessionAgentProfileID returns the agent_profile_id recorded on the
+// task_sessions row for the given task. This is the agent that actually ran
+// the session, as opposed to RunnerProjection's workflow-configured runner.
+// Returns "" if the session, task pair, or agent_profile_id is not found.
+func (r *Repository) GetSessionAgentProfileID(
+	ctx context.Context, taskID, sessionID string,
+) (string, error) {
 	var agentProfileID string
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(
-		`SELECT COALESCE(agent_profile_id, '') FROM task_sessions WHERE id = ?`,
-	), sessionID).Scan(&agentProfileID)
+		`SELECT COALESCE(agent_profile_id, '') FROM task_sessions
+		 WHERE task_id = ? AND id = ?`,
+	), taskID, sessionID).Scan(&agentProfileID)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}

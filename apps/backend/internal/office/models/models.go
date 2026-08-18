@@ -290,18 +290,17 @@ var ValidProjectStatuses = map[ProjectStatus]bool{
 //
 // CostSubcents is stored as hundredths of a cent (int64) to keep token-rate
 // math integer-only. UI divides by 10000 when rendering dollars. Estimated
-// is true when token counts were synthesised by the adapter (e.g.
-// cumulative-delta inference for codex-acp) rather than reported directly
-// by the agent; the row still counts toward budget totals at face value.
+// is true when token counts are not authoritative for a complete turn, such
+// as adapter synthesis or a provider frame that covers only part of a turn;
+// the row still counts toward budget totals at face value.
 //
 // TokensCachedRead / TokensCachedWrite / TurnID / UsageEventID / CostSource /
 // the Rate*PerMillion columns / PricingCatalogVersion / CostContractVersion
 // are all nullable (pointer fields): NULL means "not recorded" — a legacy
 // row written before the column existed, or (for the cache split
-// specifically) an adapter with no per-turn usage frame, such as codex-acp's
-// occupancy-growth synthesis (Estimated=true). NULL is never backfilled to
-// 0; TokensCachedIn keeps its original read+write sum semantics on every
-// row so existing consumers of that column are unaffected. See
+// specifically) an adapter that did not report cache data. NULL is never
+// backfilled to 0; TokensCachedIn keeps its original read+write sum semantics
+// on every row so existing consumers of that column are unaffected. See
 // docs/specs/office/costs.md.
 type CostEvent struct {
 	ID                        string      `json:"id" db:"id"`

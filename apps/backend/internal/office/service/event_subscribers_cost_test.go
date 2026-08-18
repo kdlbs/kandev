@@ -317,8 +317,8 @@ func TestPromptUsage_CostSourceModelsDevList(t *testing.T) {
 	if row.PricingCatalogVersion == nil || *row.PricingCatalogVersion != "2026-08-12T00:00:00Z" {
 		t.Errorf("PricingCatalogVersion = %v, want the fake's version", row.PricingCatalogVersion)
 	}
-	if row.CostContractVersion == nil || *row.CostContractVersion != 2 {
-		t.Errorf("CostContractVersion = %v, want 2 (in-band activation point)", row.CostContractVersion)
+	if row.CostContractVersion == nil || *row.CostContractVersion != 3 {
+		t.Errorf("CostContractVersion = %v, want 3 (in-band activation point)", row.CostContractVersion)
 	}
 }
 
@@ -385,9 +385,9 @@ func TestPromptUsage_ThoughtTokensDoNotAffectCost(t *testing.T) {
 // covers the R2-F4 regression: usage carrying authoritative (non-synthesised)
 // token counts must keep Estimated=false even though the row is unpriced —
 // cost_source=unpriced alone carries "we could not resolve a price";
-// Estimated is strictly "the token counts were synthesised" (see
-// costContractVersion's v1→v2 doc comment in prompt_usage_cost.go). Before
-// that fix this case incorrectly forced Estimated=true.
+// Estimated remains independent from pricing resolution (see the
+// costContractVersion history in prompt_usage_cost.go). Before v2 this case
+// incorrectly forced Estimated=true.
 func TestPromptUsage_CostSourceUnpriced(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	ctx := context.Background()
@@ -419,7 +419,7 @@ func TestPromptUsage_CostSourceUnpriced(t *testing.T) {
 		t.Fatalf("CostSource = %v, want %q", row.CostSource, models.CostSourceUnpriced)
 	}
 	if row.Estimated {
-		t.Error("Estimated = true, want false: unpriced must not overwrite the adapter's own token-synthesis flag")
+		t.Error("Estimated = true, want false: unpriced must not overwrite the adapter's usage-authority flag")
 	}
 }
 
@@ -463,11 +463,10 @@ func TestPromptUsage_FallsBackToSessionAgentProfileWhenUnassigned(t *testing.T) 
 	}
 }
 
-// TestPromptUsage_WorkflowRunnerWinsOverSessionAgentProfile confirms the
-// session fallback strictly fills blanks: when RunnerProjection already
-// resolves an assignee, the session's own agent_profile_id (which could
-// differ, e.g. after a mid-task agent swap) must never override it.
-func TestPromptUsage_WorkflowRunnerWinsOverSessionAgentProfile(t *testing.T) {
+// TestPromptUsage_SessionAgentProfileWinsOverWorkflowRunner protects the
+// immutable attribution boundary: the session's profile owns the usage event,
+// even when RunnerProjection now points at a different workflow runner.
+func TestPromptUsage_SessionAgentProfileWinsOverWorkflowRunner(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	ctx := context.Background()
 
@@ -494,8 +493,8 @@ func TestPromptUsage_WorkflowRunnerWinsOverSessionAgentProfile(t *testing.T) {
 	if err != nil || len(costs) != 1 {
 		t.Fatalf("list costs: %v (len=%d)", err, len(costs))
 	}
-	if got := costs[0].AgentProfileID; got != "workflow-runner" {
-		t.Errorf("AgentProfileID = %q, want %q (workflow projection must win)", got, "workflow-runner")
+	if got := costs[0].AgentProfileID; got != "session-runner" {
+		t.Errorf("AgentProfileID = %q, want %q (session identity must win)", got, "session-runner")
 	}
 }
 

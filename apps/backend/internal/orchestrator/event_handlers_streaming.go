@@ -2567,6 +2567,8 @@ func usageEventIDFor(sessionID, executionID string, promptGeneration uint64) str
 // case — CurrentModelID only travels on session_models frames) we fall back
 // to the session's AgentProfileSnapshot, populated at session creation and
 // refreshed by persistSessionModel on ACP model updates.
+// AgentProfileID always comes from the persistent task session. It must not
+// be resolved from the mutable workflow runner projection after publication.
 //
 // turnID is resolved by the caller (handleCompleteStreamEvent), not here:
 // the terminal-execution snapshot and the live active-turn lookup are both
@@ -2586,16 +2588,21 @@ func (s *Service) publishPromptUsage(
 	}
 
 	model, agentType := resolvePromptUsageLabels(payload, session)
+	agentProfileID := ""
+	if session != nil {
+		agentProfileID = session.AgentProfileID
+	}
 
 	eventPayload := lifecycle.SessionPromptUsageEventPayload{
-		TaskID:    payload.TaskID,
-		SessionID: sessionID,
-		AgentID:   payload.AgentID,
-		AgentType: agentType,
-		Model:     model,
-		Usage:     payload.Data.Usage,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		TurnID:    turnID,
+		TaskID:         payload.TaskID,
+		SessionID:      sessionID,
+		AgentID:        payload.AgentID,
+		AgentProfileID: agentProfileID,
+		AgentType:      agentType,
+		Model:          model,
+		Usage:          payload.Data.Usage,
+		Timestamp:      time.Now().UTC().Format(time.RFC3339),
+		TurnID:         turnID,
 		UsageEventID: usageEventIDFor(
 			sessionID, payload.ExecutionID, payload.Data.PromptGeneration,
 		),

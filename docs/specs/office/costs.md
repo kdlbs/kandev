@@ -1,7 +1,7 @@
 ---
 status: in-progress
 created: 2026-04-25
-updated: 2026-08-14
+updated: 2026-08-18
 owner: cfl
 ---
 
@@ -43,17 +43,17 @@ Office adds per-session cost estimation, aggregated views by agent/project/model
 | `provider` | string | e.g. `anthropic`, `openai` |
 | `tokens_in` | int64 | input token count |
 | `tokens_cached_in` | int64 | cached input tokens (prompt caching). Always `= tokens_cached_read + tokens_cached_write` when the split is known; kept for existing rollup consumers (see `TaskSession additions` below) |
-| `tokens_cached_read` | int64, nullable | cached-read portion of `tokens_cached_in`. NULL for legacy rows (pre-contract-v2) and for adapters with no per-turn usage frame (`estimated=true`, e.g. codex-acp) - never `0`, since a merged column cannot be decomposed after the fact |
+| `tokens_cached_read` | int64, nullable | cached-read portion of `tokens_cached_in`. NULL for legacy rows (pre-contract-v2) and when no cache data was reported - never `0`, since a missing split is not proof of zero cache usage |
 | `tokens_cached_write` | int64, nullable | cached-write portion of `tokens_cached_in`. Same NULL rule as `tokens_cached_read` - cache write and cache read price at different per-million rates, so the split matters |
 | `tokens_out` | int64 | output token count |
 | `cost_subcents` | int64 | hundredths of a cent (renamed from `cost_cents`). UI divides by 10000 |
-| `estimated` | bool | true when token counts were synthesised (e.g. codex-acp's cumulative-delta inference). A token-synthesis flag ONLY - independent of `cost_source` below. An unpriced row (list-price lookup miss) does not force this true; it reflects whatever the usage payload reported |
+| `estimated` | bool | true when token counts are not authoritative for a complete turn: the adapter synthesised them (for example, codex-acp cumulative-delta inference), or the provider frame covers only part of the turn (for example, Codex's last request). Independent of `cost_source` |
 | `turn_id` | string, nullable | the turn this event was recorded at completion of. NULL when no turn could be resolved (e.g. an error/interrupt completion outside the normal ready path) |
 | `usage_event_id` | string, nullable | idempotency key derived from `(session_id, execution_id, prompt_generation)` at the publish site; unique when non-NULL (partial index) so a redelivered prompt-usage event does not double-insert or double-count the session rollup. NULL for legacy rows. Generation-less transports receive a random per-publish key, so those rows are intentionally not deduplicated |
 | `cost_source` | enum, nullable | `provider_reported` \| `models_dev_list` \| `unpriced`. Records which layer of the two-layer lookup below actually produced `cost_subcents` - distinct from `estimated`. NULL for legacy rows |
 | `rate_input_per_million` / `rate_cached_read_per_million` / `rate_cached_write_per_million` / `rate_output_per_million` | int64, nullable | the four models.dev rates actually applied, in subcents-per-million-tokens. Populated only when `cost_source = models_dev_list`; NULL otherwise (including `provider_reported`, where no rate table applies) |
 | `pricing_catalog_version` | string, nullable | the models.dev cache's "as-of" identifier (RFC3339 load/fetch time - the dataset has no version field of its own) that produced the applied rates. Populated only when `cost_source = models_dev_list` |
-| `cost_contract_version` | int64, nullable | in-band activation marker for this row's column semantics, since the point-in-time Rill extract has no schema versioning of its own. Current value `2` (v1 -> v2: the unpriced path stopped forcing `estimated=true`, see the `estimated` row above). NULL for legacy pre-contract rows - never backfilled |
+| `cost_contract_version` | int64, nullable | in-band activation marker for this row's column semantics, since the point-in-time Rill extract has no schema versioning of its own. Current value `3` (v1 -> v2 separated pricing failure from token synthesis; v2 -> v3 also marks partial-turn typed usage as estimated). NULL for legacy pre-contract rows - never backfilled |
 | `provider_event_id` | string | null for wire-side rows; non-null for disk-runner rows. Format `ccusage:<provider>:<session_id>:<model>` |
 | `provider_credits` | int64 | amp `credits` field (null elsewhere) |
 | `occurred_at` | timestamp | when the cost was incurred |
@@ -61,6 +61,10 @@ Office adds per-session cost estimation, aggregated views by agent/project/model
 Disk-runner rows are upserted by `(session_id, provider_event_id)`. For codex, after a successful aggregate row lands, the wire-side `estimated=true` rows for the same session are deleted to avoid double-counting.
 
 **Contract v2 columns** (`tokens_cached_read`, `tokens_cached_write`, `turn_id`, `usage_event_id`, `cost_source`, the four `rate_*_per_million` columns, `pricing_catalog_version`, `cost_contract_version`) were added via an idempotent nullable-column migration (`migrateCostEventContract`); every legacy row reads NULL for all of them, never `0` - see the cross-cutting rule in `Persistence guarantees` below. Postgres parity follows the same migration shape per ADR 0027.
+
+**Contract v3 semantics** keep the v2 column layout and pricing-source rules. They
+define `estimated=true` for both synthesised totals and typed usage frames that
+cover only part of a turn.
 
 ### `office_budget_policies`
 
@@ -199,7 +203,7 @@ There is no per-field permission model. Conformance tests should assert that cos
 **Survives restart:**
 
 - `office_cost_events` rows (full history, never trimmed). Disk-runner rows keyed by `(session_id, provider_event_id)` survive re-ingestion without duplicating; wire-side rows are additionally deduplicated by the unique `usage_event_id` partial index (contract v2). The wire-side `estimated=true` rows for codex are deleted once the matching aggregate row lands.
-- **Contract v2 column semantics never change value mid-series.** Legacy rows (written before contract v2) read NULL, never `0`, for every new column - the downstream point-in-time extract has no schema versioning, so a column whose meaning flips from "not recorded" to "recorded as zero" partway through the series would be silently discontinuous. `cost_contract_version` on each row is the in-band marker a consumer checks instead of inferring from a date.
+- **Contract v2 column semantics never change value mid-series.** Legacy rows (written before contract v2) read NULL, never `0`, for every new column - the downstream point-in-time extract has no schema versioning, so a column whose meaning flips from "not recorded" to "recorded as zero" partway through the series would be silently discontinuous. `cost_contract_version` on each row is the in-band marker a consumer checks instead of inferring from a date. Contract v3 changes the meaning of `estimated` for new rows only; legacy rows keep their recorded value.
 - `office_budget_policies` rows.
 - `TaskSession.cost_subcents` / `tokens_in` / `tokens_out` / `tokens_cached_in` running totals, kept in sync with `office_cost_events` so per-session totals are correct without a re-scan - written atomically with the ledger insert (see `Failure modes` above), so the two can never diverge on a partial write.
 - Per-agent `budget_monthly_cents` stored on the agent instance row.

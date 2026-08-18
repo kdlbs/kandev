@@ -686,6 +686,9 @@ func (p SessionTodosEventPayload) GetSessionID() string {
 // AgentID is the lifecycle execution.ID (UUID); AgentType is the CLI engine
 // slug (claude-acp, codex-acp, ...). The office cost subscriber derives the
 // provider name from AgentType — AgentID is kept for legacy consumers.
+// AgentProfileID is the stable profile recorded on the task session. It is
+// copied at publish time so asynchronous cost consumers do not use a mutable
+// workflow runner projection for attribution.
 //
 // TurnID is captured on the lifecycle completion frame before AgentReady can
 // admit a successor prompt and is forwarded by the orchestrator. The
@@ -694,15 +697,16 @@ func (p SessionTodosEventPayload) GetSessionID() string {
 // Both are empty when unavailable (e.g. no active turn), never a synthesized
 // placeholder.
 type SessionPromptUsageEventPayload struct {
-	TaskID       string               `json:"task_id"`
-	SessionID    string               `json:"session_id"`
-	AgentID      string               `json:"agent_id"`
-	AgentType    string               `json:"agent_type,omitempty"`
-	Model        string               `json:"model,omitempty"`
-	Usage        *streams.PromptUsage `json:"usage"`
-	Timestamp    string               `json:"timestamp"`
-	TurnID       string               `json:"turn_id,omitempty"`
-	UsageEventID string               `json:"usage_event_id,omitempty"`
+	TaskID         string               `json:"task_id"`
+	SessionID      string               `json:"session_id"`
+	AgentID        string               `json:"agent_id"`
+	AgentProfileID string               `json:"agent_profile_id,omitempty"`
+	AgentType      string               `json:"agent_type,omitempty"`
+	Model          string               `json:"model,omitempty"`
+	Usage          *streams.PromptUsage `json:"usage"`
+	Timestamp      string               `json:"timestamp"`
+	TurnID         string               `json:"turn_id,omitempty"`
+	UsageEventID   string               `json:"usage_event_id,omitempty"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

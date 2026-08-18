@@ -15,7 +15,7 @@ import (
 // The Rill cost extract has no schema versioning of its own, so a row
 // written under a prior contract is distinguished by comparing
 // cost_contract_version, not by a date an analyst has to be told out of
-// band. Bump only if the contract's meaning changes again.
+// band. Bump whenever the contract's meaning changes.
 //
 // v1 → v2: on the CostSourceUnpriced path, v1 forced Estimated=true
 // regardless of data.Usage.Estimated, conflating "we could not resolve a
@@ -24,7 +24,10 @@ import (
 // to keep separate. v2 preserves data.Usage.Estimated verbatim on every
 // path (see resolveCostForUsage); cost_source=unpriced alone now carries
 // the pricing-failure signal.
-const costContractVersion int64 = 2
+//
+// v2 → v3: Estimated also marks typed usage frames that cover only part of a
+// turn, such as Codex's last model request in a multi-request turn.
+const costContractVersion int64 = 3
 
 // costResolution is resolveCostForUsage's output: the priced cost plus
 // everything needed to record provenance on the row. Kept separate from
@@ -40,7 +43,7 @@ type costResolution struct {
 
 // resolveCostForUsage applies the Layer A / Layer B lookup and records
 // which layer produced the dollar amount — CostSource, distinct from
-// Estimated (a token-synthesis flag, not cost provenance). Layer A wins
+// Estimated (a usage-authority flag, not cost provenance). Layer A wins
 // when the adapter forwarded a provider-reported cost sample, including an
 // explicit zero
 // (claude-acp's usage_update.cost.amount). Layer B (models.dev) is queried
@@ -48,8 +51,8 @@ type costResolution struct {
 // configured the row is unpriced. Estimated is data.Usage.Estimated
 // verbatim on every branch, including unpriced: whether the tokens were
 // synthesised and whether a price could be resolved are independent facts,
-// and cost_source=unpriced already carries the second one — see
-// costContractVersion's v1→v2 doc comment.
+// and cost_source=unpriced already carries the second one — see the
+// costContractVersion history above.
 func (s *Service) resolveCostForUsage(ctx context.Context, data PromptUsageData) costResolution {
 	if data.Usage.ProviderReportedCostPresent || data.Usage.ProviderReportedCostSubcents > 0 {
 		return costResolution{
@@ -115,11 +118,11 @@ func (s *Service) lookupPricingWithVersion(
 // buildCostEvent assembles the office_cost_events row for a prompt-usage
 // update.
 //
-// AgentProfileID prefers RunnerProjection's workflow-configured runner
-// (fields.AssigneeAgentProfileID) and falls back to sessionAgentProfileID —
-// the session's own task_sessions.agent_profile_id — only when that
-// projection is empty (e.g. a Kanban step with no pinned runner). This
-// strictly fills blanks and never overrides an existing attribution.
+// AgentProfileID prefers sessionAgentProfileID — the stable
+// task_sessions.agent_profile_id captured when the session ran. It falls back
+// to RunnerProjection's workflow-configured runner only for legacy events that
+// have no session identity. This prevents a later workflow reassignment from
+// moving an earlier session's usage to a different profile.
 //
 // The cache split (TokensCachedRead / TokensCachedWrite) is recorded only
 // when the usage frame actually carries cache data (either field nonzero).
@@ -138,9 +141,9 @@ func buildCostEvent(
 	data PromptUsageData, fields *sqlite.TaskExecutionFields, projectID, provider string,
 	resolution costResolution, sessionAgentProfileID string,
 ) *models.CostEvent {
-	agentProfileID := fields.AssigneeAgentProfileID
+	agentProfileID := sessionAgentProfileID
 	if agentProfileID == "" {
-		agentProfileID = sessionAgentProfileID
+		agentProfileID = fields.AssigneeAgentProfileID
 	}
 	event := &models.CostEvent{
 		SessionID:      data.SessionID,
