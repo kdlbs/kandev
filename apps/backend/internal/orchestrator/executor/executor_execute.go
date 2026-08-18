@@ -850,6 +850,16 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		session.ExecutorID = execConfig.ExecutorID
 	}
 
+	// Validate every managed-credential repository binding before persisting
+	// the session row. Doing this after the row exists would leave a
+	// zero-message session behind once launch fails at credential issuance.
+	if err := e.PreflightManagedGitCredentials(ctx, task.WorkspaceID, task.ID); err != nil {
+		e.logger.Error("managed Git credential preflight failed",
+			zap.String("task_id", task.ID),
+			zap.Error(err))
+		return "", err
+	}
+
 	var createErr error
 	if atomicCreator, ok := e.repo.(initialRuntimeSeedTaskSessionCreator); ok {
 		createErr = atomicCreator.CreateTaskSessionWithInitialRuntimeSeed(ctx, session)

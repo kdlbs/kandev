@@ -215,6 +215,7 @@ func (r *Repository) runMigrations() error {
 		SET provider_host = 'https://github.com'
 		WHERE LOWER(TRIM(provider)) = 'github'
 			AND TRIM(COALESCE(provider_host, '')) = ''`)
+	r.migrateRepositoryCredentialOriginBackfill()
 	r.migrate.Apply("repositories.worktree_branch_template", `ALTER TABLE repositories ADD COLUMN worktree_branch_template TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.worktree_branch_template.backfill", `
 		UPDATE repositories

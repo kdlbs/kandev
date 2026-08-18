@@ -1490,6 +1490,22 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 		zap.String("current_profile", currentSession.AgentProfileID),
 		zap.String("new_profile", newAgentProfileID))
 
+	// Validate managed-credential repository bindings before mutating either
+	// session's ownership. Reusing or replacing the current session only to
+	// discover at launch that a repository binding is irreparable would leave
+	// the task stuck on a doomed session with no recovery path back to the one
+	// that was still working.
+	dbTask, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task for session switch preflight: %w", err)
+	}
+	if dbTask == nil {
+		return nil, fmt.Errorf("task %s not found for session switch preflight", taskID)
+	}
+	if err := s.executor.PreflightManagedGitCredentials(ctx, dbTask.WorkspaceID, taskID); err != nil {
+		return nil, err
+	}
+
 	// Signal to the frontend that the task is preparing a new agent.
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
 		s.logger.Warn("failed to set task SCHEDULING during agent switch",

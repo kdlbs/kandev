@@ -235,6 +235,60 @@ func (e *Executor) resolveManagedGitHubCredentials(
 	return false, nil
 }
 
+// PreflightManagedGitCredentials validates every task repository binding that
+// would use a managed Git credential lease, without cloning or issuing one.
+// It is a read-only check meant to run before a new session row is persisted
+// (PrepareSession) or before a workflow profile switch tears down the
+// current session (see switchSessionForStep), so an irreparable repository
+// identity - a foreign/ambiguous provider host, a malformed clone URL -
+// rejects the operation before anything is mutated, rather than surfacing as
+// a doomed session created later at launch time.
+//
+// This does not model an explicit per-launch GitHub token override (an
+// executor profile secret bound to GITHUB_TOKEN/GH_TOKEN): that value is
+// only resolved later, at actual launch, from executor profile data this
+// preflight does not have. A repository whose identity fails here but would
+// have launched anyway under such an override is out of scope; the
+// workspace-level credential policy mode is the deterministic signal this
+// preflight relies on.
+func (e *Executor) PreflightManagedGitCredentials(ctx context.Context, workspaceID, taskID string) error {
+	if e.gitCredentialIssuer == nil {
+		// No broker configured: the managed-credential feature is inactive, so
+		// nothing here will ever attempt to resolve a repository's identity.
+		return nil
+	}
+	policy := TaskGitCredentialPolicy{Mode: taskGitCredentialsModeManaged}
+	if e.githubCredentialPolicyResolver != nil {
+		resolved, err := e.githubCredentialPolicyResolver.ResolveTaskGitCredentialPolicy(ctx, workspaceID)
+		if err == nil {
+			policy = resolved
+		}
+	}
+	if policy.Mode == taskGitCredentialsModeExecutor {
+		return nil
+	}
+	taskRepos, err := e.repo.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("list task repositories: %w", err)
+	}
+	for _, taskRepo := range taskRepos {
+		if taskRepo == nil || taskRepo.RepositoryID == "" {
+			continue
+		}
+		repository, err := e.repo.GetRepository(ctx, taskRepo.RepositoryID)
+		if err != nil {
+			return fmt.Errorf("load repository %q: %w", taskRepo.RepositoryID, err)
+		}
+		if repository == nil || managedGitCredentialProvider(repository, true, nil) == "" {
+			continue
+		}
+		if _, _, _, _, err := gitCredentialCloneIdentity(repository, repository.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (e *Executor) issueGitCredentialScopes(
 	ctx context.Context,
 	req *LaunchAgentRequest,
