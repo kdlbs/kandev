@@ -77,12 +77,17 @@ added). Declared narrow local interfaces for the repository, task authorizer, me
 event bus so `internal/clarification` does not import `internal/task/service`.
 
 Verified in this session's final gauntlet (Wave 10): `go test ./internal/clarification/...` passes,
-including `resolver_test.go` (restart-survives-claim via a cleared in-memory store),
-`resolver_validation_test.go` (every N6/N7/N8/N8a/N8b case rejected pre-claim with no row written),
-and `resolver_concurrency_test.go` (two concurrent `ResolveBundle` calls against a real shared SQLite
-database yield exactly one `claimed=true`, one row, one published event, and a loser carrying the
-winner's stored status/response/resume). `gofmt -l` reports no files; `go build ./...` succeeds;
-`golangci-lint run ./internal/clarification/... --timeout=5m` is clean.
+including `resolver_test.go` (the full `ResolveBundle` behavior matrix — winning/losing claims, live
+waiter delivery, partial-application failure, resume-reported-despite-persist-failure, and more),
+`resolver_restart_test.go` (R6: a cleared/restarted in-memory `Store` does not let a second caller win
+an already-durably-claimed resolution), and `outcome_validation_test.go` (every N6/N7/N8/N8a/N8b
+validation case rejected pre-claim with no row written). Concurrency is proved one layer down, against
+a real shared database rather than a mocked store, by
+`internal/task/repository/sqlite/clarification_resolution_test.go`'s
+`TestInsertClarificationResolution_ConcurrentGoroutines_ExactlyOneWinner`: concurrent claim-insert
+calls against a real shared SQLite database yield exactly one winner and one row. `gofmt -l` reports
+no files; `go build ./...` succeeds; `golangci-lint run ./internal/clarification/... --timeout=5m`
+is clean.
 
 No external side effects.
 </content>
