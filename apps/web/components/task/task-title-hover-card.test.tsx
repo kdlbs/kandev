@@ -86,19 +86,17 @@ function renderCard(tasks: KanbanState["tasks"], title = LONG_TITLE) {
   render(
     <StateProvider initialState={{ kanban: { workflowId: "wf-1", steps: [], tasks } }}>
       <TaskTitleHoverCard taskId="parent-1" title={title}>
-        <span tabIndex={0} data-testid="trigger">
-          {title}
-        </span>
+        <span data-testid="trigger">{title}</span>
       </TaskTitleHoverCard>
     </StateProvider>,
   );
 }
 
-// Radix HoverCard schedules the open (even on focus) through the same
-// openDelay timer, so the content mounts asynchronously — waiting via
-// findBy lets real timers elapse rather than asserting synchronously.
+// Keyboard activation opens the interactive preview and moves focus into it.
 async function openCard() {
-  screen.getByTestId("trigger").focus();
+  const trigger = screen.getByTestId("task-title-preview-trigger");
+  trigger.focus();
+  fireEvent.click(trigger, { detail: 0 });
   await screen.findAllByTestId("task-title-hover-card");
 }
 
@@ -312,5 +310,37 @@ describe("TaskTitleHoverCard — subtask cap and dismissal", () => {
     fireEvent.click(titleEl!);
 
     expect(onParentClick).not.toHaveBeenCalled();
+  });
+
+  it("does not bubble keyboard activation from a subtask link to the parent row", async () => {
+    const onParentKeyDown = vi.fn();
+    render(
+      <StateProvider
+        initialState={{
+          kanban: {
+            workflowId: "wf-1",
+            steps: [],
+            tasks: [
+              makeTask({ id: "parent-1" }),
+              makeTask({ id: "child-1", title: "Child", parentTaskId: "parent-1" }),
+            ],
+          },
+        }}
+      >
+        <div onKeyDown={onParentKeyDown}>
+          <TaskTitleHoverCard taskId="parent-1" title="Parent">
+            <span>Parent</span>
+          </TaskTitleHoverCard>
+        </div>
+      </StateProvider>,
+    );
+    await openCard();
+
+    const row = subtaskRow("child-1");
+    expect(document.activeElement).toBe(row);
+    row.focus();
+    fireEvent.keyDown(row, { key: "Enter" });
+
+    expect(onParentKeyDown).not.toHaveBeenCalled();
   });
 });

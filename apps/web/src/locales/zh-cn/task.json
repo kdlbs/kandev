@@ -1320,6 +1320,8 @@
   "submitUnavailable": "无法提交",
   "submitting": "正在提交…",
   "subtask": "子任务",
+  "subtasksHeading_one": "{{count}} 个子任务",
+  "subtasksHeading_other": "{{count}} 个子任务",
   "subtasksBecomeRootTasksUnlessYou": "除非勾选此项，否则子任务将成为根任务。它们可能仍在进行中。",
   "subtasksStayActiveUnlessYouTick": "除非勾选此项，否则子任务保持活动。它们可能仍在进行中。",
   "successful": "{{operationName}} 成功",

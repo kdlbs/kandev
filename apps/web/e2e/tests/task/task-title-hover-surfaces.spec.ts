@@ -118,6 +118,37 @@ test.describe("Task title hover card on the non-Kanban surfaces", () => {
     await expect(hoverCard).not.toContainText(CHILD_TWO_TITLE);
   });
 
+  test("keyboard activation opens a child task without opening its parent", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const { parent, childOne } = await seedParentWithSubtasks(apiClient, seedData);
+
+    await testPage.goto("/tasks");
+    await testPage.waitForLoadState("networkidle");
+
+    const parentRow = testPage
+      .getByTestId("tasks-list")
+      .getByTestId("tasks-list-row")
+      .filter({ hasText: PARENT_TITLE });
+    await expect(parentRow).toHaveCount(1, { timeout: 45_000 });
+
+    const trigger = parentRow.getByTestId("task-title-preview-trigger");
+    await trigger.focus();
+    await trigger.press("Enter");
+
+    const hoverCard = testPage.getByTestId("task-title-hover-card");
+    const childRow = hoverCard.getByTestId(`task-subtask-row-${childOne.id}`);
+    await expect(hoverCard).toBeVisible();
+    await expect(childRow).toBeFocused();
+
+    await childRow.press("Enter");
+    await expect(testPage).toHaveURL(new RegExp(`/t/${childOne.id}`));
+    expect(testPage.url()).not.toContain(parent.id);
+  });
+
   test("AC12/AC13: the AppSidebar task row shows the full title and its subtask rows", async ({
     testPage,
     apiClient,

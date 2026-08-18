@@ -1,4 +1,4 @@
-import React, { act } from "react";
+import React from "react";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileTreeNode } from "@/lib/types/backend";
@@ -12,12 +12,10 @@ vi.mock("@/components/toast-provider", () => ({
 // actually sees. A key-echoing stub silently turns every migrated label into a
 // raw `ns:key` and the assertions then only prove the stub works.
 
-import { FileContextMenu, TreeNodeName, useFileRename } from "./file-context-menu";
+import { FileContextMenu } from "./file-context-menu";
 
 const FILE_NODE: FileTreeNode = { name: "README.md", path: "README.md", is_dir: false, size: 0 };
 const DIR_NODE: FileTreeNode = { name: "src", path: "src", is_dir: true, size: 0 };
-const RENAME_ROW = "rename-row";
-const FOCUS_ANCHOR = "focus-anchor";
 const BULK_TREE: FileTreeNode = {
   name: "root",
   path: "",
@@ -29,10 +27,7 @@ const BULK_TREE: FileTreeNode = {
   ],
 };
 
-afterEach(() => {
-  cleanup();
-  vi.useRealTimers();
-});
+afterEach(cleanup);
 
 function openMenu(triggerTestId: string) {
   const trigger = screen.getByTestId(triggerTestId);
@@ -60,138 +55,6 @@ function BulkDeleteHarness({ onDeleteFile }: { onDeleteFile: (path: string) => P
     </>
   );
 }
-
-function RenameHarness() {
-  const [tree, setTree] = React.useState<FileTreeNode | null>(FILE_NODE);
-  const rename = useFileRename(FILE_NODE, tree, setTree, vi.fn().mockResolvedValue(true));
-
-  return (
-    <FileContextMenu
-      node={FILE_NODE}
-      tree={tree}
-      setTree={setTree}
-      onRenameFile={vi.fn().mockResolvedValue(true)}
-      onStartRename={rename.handleStartRename}
-    >
-      <div data-testid={RENAME_ROW}>
-        <TreeNodeName node={FILE_NODE} isActive={false} gitStatus={undefined} rename={rename} />
-      </div>
-    </FileContextMenu>
-  );
-}
-
-// `FileContextMenuSurface` defers `onStartRename` to `onCloseAutoFocus` and calls
-// `preventDefault()` there so Radix does not pull focus back to the trigger and
-// steal it from the freshly mounted input. Both halves of that are only correct
-// if the deferral is scoped to a *pending* rename: any other menu item, and any
-// dismissal, must leave Radix's default focus restoration alone and must never
-// enter edit mode. A pending flag that outlives its close is the failure mode.
-// The anchor stands in for whatever held focus when the user opened the menu.
-// Radix restores focus to it on close, so asserting against it distinguishes a
-// real restoration from focus falling back to `document.body`.
-function PendingRenameHarness({ onStartRename }: { onStartRename: () => void }) {
-  const [tree, setTree] = React.useState<FileTreeNode | null>(FILE_NODE);
-  return (
-    <>
-      <button data-testid={FOCUS_ANCHOR}>anchor</button>
-      <FileContextMenu
-        node={FILE_NODE}
-        tree={tree}
-        setTree={setTree}
-        onRenameFile={vi.fn().mockResolvedValue(true)}
-        onDownloadFile={vi.fn().mockResolvedValue(true)}
-        onStartRename={onStartRename}
-      >
-        <div data-testid={RENAME_ROW}>row</div>
-      </FileContextMenu>
-    </>
-  );
-}
-
-describe("FileContextMenu rename", () => {
-  it("does not start rename when a different menu item is selected", async () => {
-    const onStartRename = vi.fn();
-    render(<PendingRenameHarness onStartRename={onStartRename} />);
-
-    openMenu(RENAME_ROW);
-    fireEvent.click(screen.getByText("Download"));
-
-    await waitFor(() => expect(screen.queryByText("Download")).toBeNull());
-    expect(onStartRename).not.toHaveBeenCalled();
-    expect(screen.queryByRole("textbox")).toBeNull();
-  });
-
-  it("does not start rename when the menu is dismissed without a selection", async () => {
-    const onStartRename = vi.fn();
-    render(<PendingRenameHarness onStartRename={onStartRename} />);
-
-    openMenu(RENAME_ROW);
-    fireEvent.keyDown(document, { key: "Escape" });
-
-    await waitFor(() => expect(screen.queryByText("Rename")).toBeNull());
-    expect(onStartRename).not.toHaveBeenCalled();
-  });
-
-  it("does not replay a consumed rename on the next menu close", async () => {
-    const onStartRename = vi.fn();
-    render(<PendingRenameHarness onStartRename={onStartRename} />);
-
-    openMenu(RENAME_ROW);
-    fireEvent.click(screen.getByText("Rename"));
-    await waitFor(() => expect(onStartRename).toHaveBeenCalledTimes(1));
-
-    // Reopening and dismissing must not re-fire the rename the previous close
-    // already consumed.
-    openMenu(RENAME_ROW);
-    fireEvent.keyDown(document, { key: "Escape" });
-
-    await waitFor(() => expect(screen.queryByText("Rename")).toBeNull());
-    expect(onStartRename).toHaveBeenCalledTimes(1);
-  });
-
-  // The three tests above prove `onStartRename` stays unfired, which is only
-  // half of the contract. `preventDefault()` suppresses Radix's focus
-  // restoration, and hoisting it above the pending-rename guard would keep every
-  // assertion above green while silently dropping the user back on
-  // `document.body` after Download or Escape. These two pin the other half.
-  it("restores focus to the opener when a different menu item is selected", async () => {
-    render(<PendingRenameHarness onStartRename={vi.fn()} />);
-    const anchor = screen.getByTestId(FOCUS_ANCHOR);
-    anchor.focus();
-
-    openMenu(RENAME_ROW);
-    fireEvent.click(screen.getByText("Download"));
-
-    await waitFor(() => expect(document.activeElement).toBe(anchor));
-  });
-
-  it("restores focus to the opener when the menu is dismissed without a selection", async () => {
-    render(<PendingRenameHarness onStartRename={vi.fn()} />);
-    const anchor = screen.getByTestId(FOCUS_ANCHOR);
-    anchor.focus();
-
-    openMenu(RENAME_ROW);
-    fireEvent.keyDown(document, { key: "Escape" });
-
-    await waitFor(() => expect(document.activeElement).toBe(anchor));
-  });
-
-  it("starts rename after the menu closes and immediately focuses the selected filename", async () => {
-    vi.useFakeTimers();
-    render(<RenameHarness />);
-
-    openMenu(RENAME_ROW);
-    fireEvent.click(screen.getByText("Rename"));
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-
-    const input = screen.getByRole("textbox");
-    expect(document.activeElement).toBe(input);
-    expect((input as HTMLInputElement).selectionStart).toBe(0);
-    expect((input as HTMLInputElement).selectionEnd).toBe(FILE_NODE.name.length);
-  });
-});
 
 describe("FileContextMenu Download item", () => {
   it("shows a Download item for a file when onDownloadFile is provided", () => {

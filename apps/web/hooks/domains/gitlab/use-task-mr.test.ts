@@ -89,9 +89,8 @@ function workspaceProbe(workspaceId: string) {
   });
 }
 
-// Simulates AppSidebar and /tasks each mounting their own useWorkspaceMRs
-// instance for the same workspace: each instance's fetchedRef is private, so
-// this renders two independent hook instances sharing one store.
+// Simulates AppSidebar and /tasks mounting separate hook instances for the
+// same workspace. Both instances share one store and one active request.
 function DualWorkspaceMRInstance() {
   useWorkspaceMRs("ws-1");
   return null;
@@ -233,43 +232,66 @@ describe("useWorkspaceMRs", () => {
   });
 });
 
+describe("useWorkspaceMRs cache failures", () => {
+  beforeEach(() => {
+    listWorkspaceTaskMRsMock.mockReset();
+  });
+
+  it("removes cached workspace data when its refresh fails", async () => {
+    const staleMR = makeMR({ id: "stale", task_id: "task-1" });
+    listWorkspaceTaskMRsMock.mockRejectedValueOnce(new Error("boom"));
+
+    const { result } = renderHook(
+      () => {
+        useWorkspaceMRs("ws-1");
+        return useAppStore((state) => state.taskMRs.byWorkspaceId["ws-1"] ?? EMPTY_TASK_MRS);
+      },
+      {
+        wrapper: ({ children }) =>
+          createElement(StateProvider, {
+            initialState: {
+              workspaces: { items: [], activeId: "ws-1" },
+              taskMRs: { byWorkspaceId: { "ws-1": { "task-1": [staleMR] } } },
+            },
+            children,
+          }),
+      },
+    );
+
+    expect(result.current["task-1"]).toEqual([staleMR]);
+    await waitFor(() => expect(result.current).toEqual({}));
+  });
+});
+
 describe("useWorkspaceMRs, co-mounted instances", () => {
   beforeEach(() => {
     listWorkspaceTaskMRsMock.mockReset();
   });
 
-  it("keeps an already-fetched workspace's MRs visible while a second co-mounted instance re-fetches", async () => {
-    // Regression for PR #2610 review: AppSidebar and /tasks each mount their
-    // own useWorkspaceMRs(workspaceId) instance. Each instance's fetchedRef
-    // is private, so the second instance to mount for an already-fetched
-    // workspace must not blank the shared store while its own fetch is in
-    // flight — the first instance's badges must stay visible throughout.
+  it("shares an in-flight request but permits a later refresh", async () => {
     const mr = makeMR({ task_id: "task-1" });
-    listWorkspaceTaskMRsMock.mockResolvedValueOnce({ task_mrs: { "task-1": [mr] } });
+    let resolveFirst: (v: { task_mrs: Record<string, TaskMR[]> }) => void = () => {};
+    const firstPromise = new Promise<{ task_mrs: Record<string, TaskMR[]> }>((resolve) => {
+      resolveFirst = resolve;
+    });
+    listWorkspaceTaskMRsMock.mockReturnValueOnce(firstPromise);
 
-    const view = render(dualWorkspaceMRTree(false));
+    const view = render(dualWorkspaceMRTree(true));
+    await waitFor(() => expect(listWorkspaceTaskMRsMock).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      resolveFirst({ task_mrs: { "task-1": [mr] } });
+    });
     await waitFor(() =>
       expect(screen.getByTestId(WORKSPACE_MRS_TEST_ID).textContent).toEqual(
         JSON.stringify({ "task-1": [mr] }),
       ),
     );
 
-    let resolveSecond: (v: { task_mrs: Record<string, TaskMR[]> }) => void = () => {};
-    const secondPromise = new Promise<{ task_mrs: Record<string, TaskMR[]> }>((resolve) => {
-      resolveSecond = resolve;
-    });
-    listWorkspaceTaskMRsMock.mockReturnValueOnce(secondPromise);
+    view.rerender(dualWorkspaceMRTree(false));
+    listWorkspaceTaskMRsMock.mockResolvedValueOnce({ task_mrs: { "task-1": [mr] } });
     view.rerender(dualWorkspaceMRTree(true));
-
-    // The second instance's fetch is still in flight — the first instance's
-    // already-fetched MR must not have been blanked by a pre-fetch reset.
-    expect(screen.getByTestId(WORKSPACE_MRS_TEST_ID).textContent).toEqual(
-      JSON.stringify({ "task-1": [mr] }),
-    );
-
-    await act(async () => {
-      resolveSecond({ task_mrs: { "task-1": [mr] } });
-    });
+    await waitFor(() => expect(listWorkspaceTaskMRsMock).toHaveBeenCalledTimes(2));
   });
 });
 

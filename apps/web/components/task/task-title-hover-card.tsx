@@ -1,13 +1,16 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useRef, type FocusEvent, type MouseEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
+import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTaskSubtasks } from "@/hooks/domains/kanban/use-task-subtasks";
+import { useHoverPopover } from "@/components/integrations/use-hover-popover";
 import { TaskSubtaskRow } from "./task-subtask-row";
 
 const MAX_VISIBLE_SUBTASKS = 12;
+const OPEN_DELAY_MS = 200;
+const CLOSE_DELAY_MS = 100;
 
 function SubtasksSection({ taskId }: { taskId: string }) {
   const { t } = useTranslation();
@@ -39,14 +42,94 @@ function SubtasksSection({ taskId }: { taskId: string }) {
   );
 }
 
-/**
- * Wraps a task title with a hover card showing the full, untruncated title
- * in bold plus a clickable list of direct subtasks. Uses HoverCard (not
- * Tooltip) because the UI package's TooltipContent is pointer-events-none
- * with disableHoverableContent, which makes clickable rows impossible there.
- * Bails out to plain children on a coarse pointer — no touch surface is added
- * for this hover (mobile-parity out-of-scope per plan).
- */
+function DesktopTaskTitlePreview({
+  taskId,
+  title,
+  children,
+  side,
+  align,
+}: {
+  taskId: string;
+  title: string;
+  children: ReactNode;
+  side: "top" | "right" | "bottom" | "left";
+  align: "start" | "center" | "end";
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const keyboardSessionRef = useRef(false);
+  const hover = useHoverPopover({ openDelayMs: OPEN_DELAY_MS, closeDelayMs: CLOSE_DELAY_MS });
+
+  const handleTriggerClick = (event: MouseEvent<HTMLButtonElement>) => {
+    if (event.detail !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    keyboardSessionRef.current = true;
+    hover.onOpenChange(true);
+  };
+
+  const handleContentBlur = (event: FocusEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) hover.onContentLeave();
+  };
+
+  return (
+    <Popover open={hover.open} onOpenChange={hover.onOpenChange}>
+      <PopoverAnchor asChild>
+        <button
+          ref={triggerRef}
+          type="button"
+          data-testid="task-title-preview-trigger"
+          aria-haspopup="dialog"
+          aria-expanded={hover.open}
+          onPointerEnter={hover.onTriggerEnter}
+          onPointerLeave={hover.onTriggerLeave}
+          onKeyDown={(event) => event.stopPropagation()}
+          onClick={handleTriggerClick}
+          className="min-w-0 max-w-full cursor-pointer text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+        >
+          {children}
+        </button>
+      </PopoverAnchor>
+      <PopoverContent
+        ref={contentRef}
+        side={side}
+        align={align}
+        data-testid="task-title-hover-card"
+        className="w-80 max-w-[calc(100vw-1rem)] max-h-80 overflow-y-auto p-3"
+        onPointerEnter={hover.onContentEnter}
+        onPointerLeave={() => {
+          if (!contentRef.current?.contains(document.activeElement)) hover.onContentLeave();
+        }}
+        onFocusCapture={hover.onContentEnter}
+        onBlurCapture={handleContentBlur}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          if (keyboardSessionRef.current) {
+            contentRef.current
+              ?.querySelector<HTMLElement>(
+                'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+              )
+              ?.focus();
+          }
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          if (keyboardSessionRef.current) triggerRef.current?.focus();
+          keyboardSessionRef.current = false;
+        }}
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <div className="text-pretty break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">
+          {title}
+        </div>
+        <SubtasksSection taskId={taskId} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** Interactive desktop preview with direct mobile navigation as the coarse-pointer fallback. */
 export function TaskTitleHoverCard({
   taskId,
   title,
@@ -65,21 +148,8 @@ export function TaskTitleHoverCard({
   if (!isFinePointer) return <>{children}</>;
 
   return (
-    <HoverCard openDelay={200} closeDelay={100}>
-      <HoverCardTrigger asChild>{children}</HoverCardTrigger>
-      <HoverCardContent
-        side={side}
-        align={align}
-        data-testid="task-title-hover-card"
-        className="w-80 max-w-[calc(100vw-1rem)] max-h-80 overflow-y-auto p-3"
-        onClick={(event) => event.stopPropagation()}
-        onPointerDown={(event) => event.stopPropagation()}
-      >
-        <div className="text-pretty break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">
-          {title}
-        </div>
-        <SubtasksSection taskId={taskId} />
-      </HoverCardContent>
-    </HoverCard>
+    <DesktopTaskTitlePreview taskId={taskId} title={title} side={side} align={align}>
+      {children}
+    </DesktopTaskTitlePreview>
   );
 }

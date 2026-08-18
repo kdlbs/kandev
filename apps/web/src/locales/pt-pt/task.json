@@ -1321,6 +1321,8 @@
   "submitUnavailable": "Submissão indisponível",
   "submitting": "A submeter…",
   "subtask": "Subtarefa",
+  "subtasksHeading_one": "{{count}} subtarefa",
+  "subtasksHeading_other": "{{count}} subtarefas",
   "subtasksBecomeRootTasksUnlessYou": "As subtarefas passam a tarefas de raiz se não assinalar esta opção. Podem ainda estar em curso.",
   "subtasksStayActiveUnlessYouTick": "As subtarefas mantêm-se ativas se não assinalar esta opção. Podem ainda estar em curso.",
   "successful": "{{operationName}} bem-sucedida",

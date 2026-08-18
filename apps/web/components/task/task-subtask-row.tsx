@@ -48,6 +48,9 @@ export function TaskSubtaskRow({ subtask }: { subtask: TaskSubtask }) {
       className="flex cursor-pointer items-center gap-1.5 rounded-sm px-1 py-1 hover:bg-accent"
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+      }}
     >
       {/* The state label names the icon, not the link: an aria-label on the
           anchor would replace its accessible name, so every row would announce
