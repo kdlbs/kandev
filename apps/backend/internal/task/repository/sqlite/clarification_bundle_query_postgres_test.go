@@ -66,6 +66,61 @@ func TestPostgresListUnresolvedClarificationBundlesExcludesParentQuestion(t *tes
 	}
 }
 
+// TestPostgresListUnresolvedClarificationBundlesAbsentStatusCountsAsPending
+// mirrors TestListUnresolvedClarificationBundles_AbsentStatusCountsAsPending
+// (D4a conjunct 2) on Postgres: a message with no status metadata at all
+// (jsonb key absent, not merely empty) must still count as pending. The
+// SQLite-only run of this arm never exercises Postgres's jsonb "key missing"
+// comparison, which reads differently from SQLite's absent-column semantics.
+func TestPostgresListUnresolvedClarificationBundlesAbsentStatusCountsAsPending(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+
+	seedBundleTask(t, repo, "task-pg-absent", "")
+	seedBundleSession(t, repo, "sess-pg-absent", "task-pg-absent")
+	seedBundleTurn(t, repo, "turn-pg-absent", "sess-pg-absent", "task-pg-absent")
+	insertClarificationMessage(t, repo, "msg-pg-absent", "sess-pg-absent", "task-pg-absent", "turn-pg-absent", "pending-pg-absent", "q1", "", 0, time.Now().UTC())
+
+	page, err := repo.ListUnresolvedClarificationBundles(ctx, unscopedOpts(50))
+	if err != nil {
+		t.Fatalf("ListUnresolvedClarificationBundles: %v", err)
+	}
+	if len(page.Bundles) != 1 || page.Bundles[0].PendingID != "pending-pg-absent" {
+		t.Fatalf("bundles = %+v, want exactly pending-pg-absent", page.Bundles)
+	}
+}
+
+// TestPostgresListUnresolvedClarificationBundlesExcludesAllTerminalLegacyBundle
+// mirrors TestListUnresolvedClarificationBundles_ExcludesAllTerminalLegacyBundle
+// (D4a conjunct 2) on Postgres: a pre-upgrade bundle with no resolution row
+// but every message already terminal must not resurface. The SQLite-only run
+// of this arm never exercises the Postgres jsonb status-comparison branch.
+func TestPostgresListUnresolvedClarificationBundlesExcludesAllTerminalLegacyBundle(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+
+	seedBundleTask(t, repo, "task-pg-terminal", "")
+	seedBundleSession(t, repo, "sess-pg-terminal", "task-pg-terminal")
+	seedBundleTurn(t, repo, "turn-pg-terminal", "sess-pg-terminal", "task-pg-terminal")
+	insertClarificationMessage(t, repo, "msg-pg-terminal", "sess-pg-terminal", "task-pg-terminal", "turn-pg-terminal", "pending-pg-terminal", "q1", "answered", 0, time.Now().UTC())
+
+	page, err := repo.ListUnresolvedClarificationBundles(ctx, unscopedOpts(50))
+	if err != nil {
+		t.Fatalf("ListUnresolvedClarificationBundles: %v", err)
+	}
+	if len(page.Bundles) != 0 {
+		t.Fatalf("bundles = %+v, want none (all-terminal legacy bundle)", page.Bundles)
+	}
+}
+
 // TestPostgresListUnresolvedClarificationBundlesCursorPagination proves L9/D6
 // cursor pagination against a real MIN() aggregate comparison on Postgres,
 // where the bound time.Time cursor arg is compared to a jsonb-derived
