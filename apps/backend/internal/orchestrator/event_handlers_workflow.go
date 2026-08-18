@@ -1897,10 +1897,14 @@ func (s *Service) tagSessionAsWorkflowSwitched(ctx context.Context, sessionID st
 }
 
 // switchSessionForStep activates a session for the new agent profile.
-// If an existing session on this task already uses the target profile it is
-// reused (re-promoted to primary, brought out of COMPLETED if it had been
-// switched away from previously). Otherwise a new session is prepared.
-// In both cases the previous session is stopped and marked COMPLETED.
+// If a nonterminal session on this task already uses the target profile, it
+// is reused (re-promoted to primary). Otherwise a new session is prepared —
+// including when the only matching session is terminal (COMPLETED, FAILED,
+// or CANCELLED): workflow re-entry never resumes a terminal session's ACP
+// conversation, because prior-completion state in that conversation can
+// mislead the agent into replaying stale routing intent (see
+// findReusableSessionForProfile). In both cases the previous session is
+// stopped and marked COMPLETED.
 func (s *Service) switchSessionForStep(ctx context.Context, taskID string, currentSession *models.TaskSession, newAgentProfileID string) (*models.TaskSession, error) {
 	s.logger.Info("switching session for workflow step agent profile change",
 		zap.String("task_id", taskID),
@@ -1950,10 +1954,19 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 	return s.createNewSessionForStep(ctx, taskID, currentSession, newAgentProfileID)
 }
 
-// findReusableSessionForProfile returns the most-recently-updated session on
-// this task that uses the target profile (and is not the session being
-// switched away from), or nil if none exists. Failed/cancelled sessions are
-// excluded — those are dead and shouldn't be revived implicitly.
+// findReusableSessionForProfile returns the most-recently-updated
+// *nonterminal* session on this task that uses the target profile (and is
+// not the session being switched away from), or nil if none exists.
+//
+// Terminal sessions (COMPLETED, FAILED, CANCELLED) are always excluded —
+// they are historical endpoints, not workflow-reusable. A prior incident
+// showed why: reviving a COMPLETED session lazily resumed its persisted ACP
+// conversation, which still contained the agent's earlier completion state.
+// Seeing the task routed back to that step, the agent reasonably inferred
+// its prior completion had been cancelled and moved the task backward,
+// re-arming the same cycle on the next re-entry. Terminal-profile re-entry
+// always goes through createNewSessionForStep instead, which gets a fresh
+// ACP conversation and the canonical current task/workflow context.
 func (s *Service) findReusableSessionForProfile(ctx context.Context, taskID, profileID, excludeSessionID string) (*models.TaskSession, error) {
 	if profileID == "" {
 		return nil, nil
@@ -1970,11 +1983,7 @@ func (s *Service) findReusableSessionForProfile(ctx context.Context, taskID, pro
 		if sess.AgentProfileID != profileID {
 			continue
 		}
-		// Skip user-cancelled sessions — those are explicit stops and
-		// shouldn't be auto-revived. FAILED sessions are reused (the failure
-		// may have been transient; either way the user expects "one session
-		// per profile per task" so we revive rather than orphan a duplicate).
-		if sess.State == models.TaskSessionStateCancelled {
+		if isTerminalSessionState(sess.State) {
 			continue
 		}
 		if best == nil || sess.UpdatedAt.After(best.UpdatedAt) {
@@ -1984,19 +1993,14 @@ func (s *Service) findReusableSessionForProfile(ctx context.Context, taskID, pro
 	return best, nil
 }
 
-// reuseSessionForStep promotes an existing session to primary, brings it out
-// of COMPLETED/FAILED if needed, and stops + completes the previous session.
-// The agent for the reused session is not relaunched here — when a prompt
-// arrives, the autoStart/PromptTask paths handle the launch.
-//
-// Previously-launched sessions (executors_running record exists, has resume
-// token) are flipped to WAITING_FOR_INPUT so PromptTask's ensureSessionRunning
-// lazy-resumes them via ResumeSession.
-//
-// Never-launched sessions (e.g. PrepareSession created the row but the
-// workflow switched away before the agent started) have no executors_running
-// record. They go to CREATED so autoStartStepPrompt routes through
-// StartCreatedSession → LaunchPreparedSession (a full fresh launch).
+// reuseSessionForStep promotes an existing nonterminal session to primary
+// and stops + completes the previous session. The agent for the reused
+// session is not relaunched here — when a prompt arrives, the
+// autoStart/PromptTask paths handle the launch (including lazy-resume via
+// ResumeSession for a session that was previously launched and is currently
+// WAITING_FOR_INPUT). findReusableSessionForProfile guarantees `existing` is
+// never terminal (COMPLETED/FAILED/CANCELLED) — see its doc comment for why
+// reviving a terminal session's ACP conversation here would be unsafe.
 func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, currentSession, existing *models.TaskSession) (*models.TaskSession, error) {
 	s.logger.Info("reusing existing session for profile",
 		zap.String("task_id", taskID),
@@ -2004,10 +2008,6 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 		zap.String("reused_session", existing.ID),
 		zap.String("reused_profile", existing.AgentProfileID),
 		zap.String("reused_state", string(existing.State)))
-
-	if existing.State == models.TaskSessionStateCompleted || existing.State == models.TaskSessionStateFailed {
-		s.reviveReusedSession(ctx, existing)
-	}
 
 	s.tagSessionAsWorkflowSwitched(ctx, existing.ID)
 
@@ -2033,35 +2033,6 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 
 	s.completeAndStopSession(ctx, taskID, currentSession)
 	return existing, nil
-}
-
-// reviveReusedSession flips a terminal (COMPLETED/FAILED) session back to a
-// state where the downstream autoStart/PromptTask paths can launch its agent.
-// The target state depends on whether the session was ever launched:
-//   - Has executors_running record → WAITING_FOR_INPUT, lazy-resume from token
-//   - No record → CREATED, fresh launch via StartCreatedSession
-//
-// The previous error message (from a prior FAILED state) is cleared so the
-// frontend stops surfacing stale red banners on a now-active session.
-func (s *Service) reviveReusedSession(ctx context.Context, session *models.TaskSession) {
-	wasLaunched := false
-	if running, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID); err == nil && running != nil {
-		wasLaunched = true
-	}
-	if wasLaunched {
-		session.State = models.TaskSessionStateWaitingForInput
-	} else {
-		session.State = models.TaskSessionStateCreated
-	}
-	session.CompletedAt = nil
-	session.ErrorMessage = ""
-	session.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
-		s.logger.Warn("failed to revive reused session out of COMPLETED",
-			zap.String("session_id", session.ID),
-			zap.String("target_state", string(session.State)),
-			zap.Error(err))
-	}
 }
 
 // createNewSessionForStep is the original switch-and-create-fresh-session path,
