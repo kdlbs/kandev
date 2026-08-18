@@ -1017,13 +1017,31 @@ func (s *grpcHostServer) DeletePluginOwnedTaskTree(ctx context.Context, req *plu
 	return &pluginv1.DeletePluginOwnedTaskTreeResponse{DeletedTaskIds: deletedTaskIDs}, nil
 }
 
-func (s *grpcHostServer) EnsureAgentConversation(ctx context.Context, req *pluginv1.EnsureAgentConversationRequest) (*pluginv1.EnsureAgentConversationResponse, error) {
-	manager, ok := s.impl.(AgentConversationHost)
+// agentConversationManagerFor resolves the impl's agent conversation manager.
+// The type assertion alone is not enough: AgentConversationHost is a public
+// interface, and an implementation signals "this caller may not use agent
+// conversations" (undeclared capability) or "not wired yet" by returning a nil
+// manager. Calling through that nil interface panics the whole gRPC server, so
+// the adapter answers Unimplemented instead.
+func (s *grpcHostServer) agentConversationManagerFor() (AgentConversationManager, error) {
+	host, ok := s.impl.(AgentConversationHost)
 	if !ok {
 		return nil, status.Error(codes.Unimplemented, "agent_conversation capability not implemented on this host")
 	}
+	manager := host.AgentConversations()
+	if manager == nil {
+		return nil, status.Error(codes.Unimplemented, "agent_conversation capability not implemented on this host")
+	}
+	return manager, nil
+}
+
+func (s *grpcHostServer) EnsureAgentConversation(ctx context.Context, req *pluginv1.EnsureAgentConversationRequest) (*pluginv1.EnsureAgentConversationResponse, error) {
+	manager, err := s.agentConversationManagerFor()
+	if err != nil {
+		return nil, err
+	}
 	spec := agentConversationSpecFromProto(req.GetSpec())
-	descriptor, statusStr, err := manager.AgentConversations().Ensure(ctx, spec)
+	descriptor, statusStr, err := manager.Ensure(ctx, spec)
 	if err != nil {
 		return nil, err
 	}
@@ -1034,11 +1052,11 @@ func (s *grpcHostServer) EnsureAgentConversation(ctx context.Context, req *plugi
 }
 
 func (s *grpcHostServer) DispatchAgentConversation(ctx context.Context, req *pluginv1.DispatchAgentConversationRequest) (*pluginv1.DispatchAgentConversationResponse, error) {
-	manager, ok := s.impl.(AgentConversationHost)
-	if !ok {
-		return nil, status.Error(codes.Unimplemented, "agent_conversation capability not implemented on this host")
+	manager, err := s.agentConversationManagerFor()
+	if err != nil {
+		return nil, err
 	}
-	dispatch, err := manager.AgentConversations().Dispatch(ctx, req.GetWorkspaceId(), req.GetConversationKey(), req.GetText(), req.GetOccurrenceKey())
+	dispatch, err := manager.Dispatch(ctx, req.GetWorkspaceId(), req.GetConversationKey(), req.GetText(), req.GetOccurrenceKey())
 	if err != nil {
 		return nil, err
 	}
@@ -1046,11 +1064,11 @@ func (s *grpcHostServer) DispatchAgentConversation(ctx context.Context, req *plu
 }
 
 func (s *grpcHostServer) DeleteAgentConversation(ctx context.Context, req *pluginv1.DeleteAgentConversationRequest) (*pluginv1.DeleteAgentConversationResponse, error) {
-	manager, ok := s.impl.(AgentConversationHost)
-	if !ok {
-		return nil, status.Error(codes.Unimplemented, "agent_conversation capability not implemented on this host")
+	manager, err := s.agentConversationManagerFor()
+	if err != nil {
+		return nil, err
 	}
-	deletedCount, err := manager.AgentConversations().Delete(ctx, req.GetWorkspaceId(), req.GetConversationKey())
+	deletedCount, err := manager.Delete(ctx, req.GetWorkspaceId(), req.GetConversationKey())
 	if err != nil {
 		return nil, err
 	}
