@@ -3260,6 +3260,18 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName),
 			zap.Error(err))
+		// A session-level reset can partially succeed: ResetSession itself
+		// commits the execution's live ACP session to a new id before a
+		// later step (e.g. re-applying the session model) fails and turns
+		// the overall call into an error. When that happens, the agent has
+		// already moved on and no longer recognizes the pre-reset session,
+		// so leaving resume_token at its old value does not "preserve"
+		// recoverability — it persists a token that can never be resumed.
+		// Reconcile to the live truth; when nothing actually changed this is
+		// a harmless rewrite of the same value.
+		if liveACPSessionID := s.currentACPSessionID(sessionID); liveACPSessionID != "" {
+			s.storeResumeToken(ctx, taskID, sessionID, executionID, liveACPSessionID, "")
+		}
 		return false
 	}
 

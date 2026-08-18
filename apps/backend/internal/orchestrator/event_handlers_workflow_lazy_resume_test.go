@@ -281,3 +281,54 @@ func TestResetAgentContext_InterleavingC_StaleOldEventDoesNotOverwriteFresh(t *t
 		t.Fatalf("stale old-session event overwrote fresh token: got %q, want %q", running.ResumeToken, freshToken)
 	}
 }
+
+// TestResetAgentContext_FailureAfterLiveSessionMovedReconcilesToken covers a
+// deeper shape of "preserve recoverability on ResetAgentContext failure" than
+// TestResetAgentContext_FailedProviderResetRetainsResumeToken: the lifecycle
+// manager's ResetAgentContext can commit the execution's live ACP session to
+// a NEW id (ResetSession itself succeeded) and only fail afterward — e.g. a
+// later re-apply-session-model step erroring — so it still returns a
+// non-nil error overall. Leaving the persisted resume_token at its pre-reset
+// value in that case does not preserve a resumable session: the agent has
+// already moved on and no longer recognizes the old ACP session, so the
+// stale token can never be resumed. resetAgentContext must reconcile the
+// persisted token to the live truth even when it reports failure.
+func TestResetAgentContext_FailureAfterLiveSessionMovedReconcilesToken(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	const execID = "exec-1"
+	const staleToken = "old-acp-session"
+	const movedToken = "new-acp-session-committed-before-failure"
+	seedExecutorRunning(t, repo, "s1", "t1", execID)
+	if err := repo.UpdateResumeToken(ctx, "s1", execID, staleToken, ""); err != nil {
+		t.Fatalf("seed stale resume token: %v", err)
+	}
+
+	agentManager := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		restartProcessErr:      errors.New("model reapplication failed after session reset"),
+		getACPSessionIDForSessionFunc: func(string) (string, bool) {
+			return movedToken, true
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+
+	if svc.resetAgentContext(ctx, "t1", session, "test") {
+		t.Fatal("expected reset to report failure")
+	}
+
+	running, err := repo.GetExecutorRunningBySessionID(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load executor row: %v", err)
+	}
+	if running.ResumeToken != movedToken {
+		t.Fatalf("failed reset left a dead token persisted: got %q, want live session %q",
+			running.ResumeToken, movedToken)
+	}
+}
