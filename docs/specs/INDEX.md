@@ -295,7 +295,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [automation-runs-delete-all-by-status](automation-runs-delete-all-by-status/spec.md) | draft |
 | [no-silent-model-fallback](no-silent-model-fallback/spec.md) | approved |
 | [portable-agent-configuration](portable-agent-configuration/spec.md) | draft |
-| [e2e-duration-aware-sharding](e2e-duration-aware-sharding/spec.md) | implemented |
+| [e2e-duration-aware-sharding](e2e-duration-aware-sharding/spec.md) | building |
 | [board-step-visibility-filter](board-step-visibility-filter/spec.md) | draft |
 | [shutdown-turn-failure-suppression](shutdown-turn-failure-suppression/spec.md) | draft |
 | [executor-profile-env-precedence](executor-profile-env-precedence/spec.md) | building |
