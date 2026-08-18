@@ -370,6 +370,75 @@ func TestResolveBundle_WinningAnswer_NoWaiter_PublishesAnsweredEvent(t *testing.
 	}
 }
 
+// TestResolveBundle_WinningAnswer_NoWaiter_PublishFails_ResumeFailed proves
+// R8a rule 2: with no live waiter, a clarification.answered publish that
+// itself fails yields resume=failed rather than resume=published -- the
+// resolver must not report a resume method it could not actually complete.
+func TestResolveBundle_WinningAnswer_NoWaiter_PublishFails_ResumeFailed(t *testing.T) {
+	msgs := map[string][]*taskmodels.Message{"p1": {questionMessage("m1", "s1", "p1", "q1", 0)}}
+	f := newResolverFixture(t, msgs)
+	f.eventBus.publishErr = errors.New("simulated publish failure")
+
+	res, claimed, err := f.resolver.ResolveBundle(context.Background(), "p1", Outcome{
+		Answers: []Answer{{QuestionID: "q1"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !claimed {
+		t.Fatalf("expected claimed=true")
+	}
+	if res.Resume != taskmodels.ClarificationResolutionResumeFailed {
+		t.Fatalf("expected resume=failed when the answered publish fails, got %q", res.Resume)
+	}
+}
+
+// TestResolveBundle_WinningAnswer_DeliversToLiveWaiter_PrimaryPublishFails_StillPublished
+// proves R8c: publishPrimaryAnswered (the informational event for other
+// subscribers once a live waiter has already been delivered to directly) is
+// best-effort. Its failure must not downgrade the resume value the waiter
+// path already earned.
+func TestResolveBundle_WinningAnswer_DeliversToLiveWaiter_PrimaryPublishFails_StillPublished(t *testing.T) {
+	msgs := map[string][]*taskmodels.Message{"p1": {questionMessage("m1", "s1", "p1", "q1", 0)}}
+	f := newResolverFixture(t, msgs)
+	pendingID, _ := f.store.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{ID: "q1"}}})
+	msgs[pendingID] = msgs["p1"]
+	delete(msgs, "p1")
+	for _, m := range msgs[pendingID] {
+		m.Metadata["pending_id"] = pendingID
+	}
+
+	waiterDone := make(chan *Response, 1)
+	go func() {
+		resp, _ := f.store.WaitForResponse(context.Background(), pendingID)
+		waiterDone <- resp
+	}()
+
+	f.eventBus.publishErr = errors.New("simulated primary-answered publish failure")
+
+	res, claimed, err := f.resolver.ResolveBundle(context.Background(), pendingID, Outcome{
+		Answers: []Answer{{QuestionID: "q1"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !claimed {
+		t.Fatalf("expected claimed=true")
+	}
+	if res.Resume != taskmodels.ClarificationResolutionResumePublished {
+		t.Fatalf("expected resume=published (the best-effort primary-answered publish failing must not change this), got %q", res.Resume)
+	}
+
+	select {
+	case delivered := <-waiterDone:
+		if delivered == nil || len(delivered.Answers) != 1 {
+			t.Fatalf("expected the waiter to still receive the answer despite the best-effort publish failing, got %+v", delivered)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("waiter never received a response")
+	}
+}
+
 // TestResolveBundle_Rejected_NoWaiter_AlwaysNotApplicable proves R9: a
 // rejected bundle with no live waiter always resumes not_applicable, even
 // though the stale_dismissed publish is best-effort.
@@ -578,17 +647,31 @@ func TestResolveBundle_M7a_ResumeReportedEvenWhenPersistFails(t *testing.T) {
 	}
 }
 
-// TestResolveBundle_Cancel_ClosesCancelChOnLoss proves X3/X3a: a losing
-// cancel still closes the in-memory CancelCh, even though it performs no
-// other step-5 work.
-func TestResolveBundle_Cancel_ClosesCancelChOnLoss(t *testing.T) {
+// TestResolveBundle_Cancel_DoesNotCloseCancelChOnceAlreadyDelivered documents
+// a deliberate, narrow deviation from X3's literal "whenever an entry
+// exists" wording. X3a's own safety argument for closing CancelCh on a
+// losing cancel is that doing so "is not a resolution and touches nothing R2
+// protects" -- true only while the entry is still unresolved. Once a
+// winning Respond has already closed `done` (full delivery, not the R5/R5a
+// partial-application wedge X3a actually targets), closing CancelCh too
+// leaves both channels closed on the same entry. Store.WaitForResponse
+// selects on both non-deterministically, so any waiter racing the two
+// close() calls -- or arriving afterward, since select doesn't care about
+// ordering, only readiness -- can observe a spurious "cancelled" error for
+// an answer that was actually delivered (the exact P1 codex-flagged race in
+// resolver.go/store.go). Store.CancelRequest therefore gates the CancelCh
+// close on pending.resolved (checked under pending.mu, the same lock
+// Respond uses), so a losing cancel that loses the race to an already-full
+// delivery is a true no-op on CancelCh, not just on the durable row.
+func TestResolveBundle_Cancel_DoesNotCloseCancelChOnceAlreadyDelivered(t *testing.T) {
 	msgs := map[string][]*taskmodels.Message{"p1": {questionMessage("m1", "s1", "p1", "q1", 0)}}
 	f := newResolverFixture(t, msgs)
 	pendingID, _ := f.store.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{ID: "q1"}}})
 	msgs[pendingID] = msgs["p1"]
 	delete(msgs, "p1")
 
-	// First call wins the claim by answering.
+	// First call wins the claim by answering, and (unlike the R5/R5a partial
+	// application case) fully delivers: Respond runs and closes done.
 	if _, claimed, err := f.resolver.ResolveBundle(context.Background(), pendingID, Outcome{
 		Answers: []Answer{{QuestionID: "q1"}},
 	}); err != nil || !claimed {
@@ -609,8 +692,13 @@ func TestResolveBundle_Cancel_ClosesCancelChOnLoss(t *testing.T) {
 	}
 	select {
 	case <-pending.CancelCh:
+		t.Fatalf("a losing cancel arriving after full delivery must not close CancelCh: doing so races WaitForResponse's select against the already-closed done channel and can spuriously report cancellation for an answer that was actually delivered")
 	default:
-		t.Fatalf("expected a losing cancel to still close CancelCh")
+	}
+	select {
+	case <-pending.done:
+	default:
+		t.Fatalf("expected done to remain closed (set by the winning Respond)")
 	}
 }
 

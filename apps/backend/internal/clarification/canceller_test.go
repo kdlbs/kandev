@@ -57,9 +57,16 @@ func (s *stubMessageStore) UpdateMessage(_ context.Context, m *taskmodels.Messag
 
 type stubEventBus struct {
 	events []*bus.Event
+	// publishErr, when non-nil, is returned by every Publish call instead of
+	// recording the event. Tests use this to exercise the resolver's
+	// no-live-waiter publish-failure branches (R8a, R8c).
+	publishErr error
 }
 
 func (s *stubEventBus) Publish(_ context.Context, _ string, ev *bus.Event) error {
+	if s.publishErr != nil {
+		return s.publishErr
+	}
 	s.events = append(s.events, ev)
 	return nil
 }

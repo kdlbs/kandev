@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -438,6 +439,50 @@ func TestHandleAnswerQuestion_SecondCaller_ClaimedFalseSameOutcome(t *testing.T)
 	require.False(t, secondBody.Claimed)
 	require.Equal(t, firstBody.Status, secondBody.Status)
 	require.JSONEq(t, string(firstBody.Response), string(secondBody.Response))
+}
+
+// failingMessageUpdater wraps a real message updater but injects a failure
+// for one question, letting tests trigger the R5/R5a partial-application
+// path (a winning claim whose per-question message update fails partway)
+// without corrupting the database, mirroring sessionDeletingResolutionStore's
+// approach for M8a above.
+type failingMessageUpdater struct {
+	inner   *svcMessageUpdater
+	failOnQ string
+}
+
+func (f *failingMessageUpdater) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, messageID, questionID, status string, answer *clarification.Answer) error {
+	if questionID == f.failOnQ {
+		return errors.New("simulated message update failure")
+	}
+	return f.inner.UpdateClarificationMessage(ctx, sessionID, pendingID, messageID, questionID, status, answer)
+}
+
+// TestHandleAnswerQuestion_PartialApplicationFailure_InternalError proves the
+// MCP mapping mirrors the REST one (handlers.go writeResolutionResult /
+// clarification.IsPartialApplicationError): a winning claim whose per-question
+// message update fails partway (R5/R5a) is already claimed durably, so
+// answer_question_kandev cannot report not-found or validation -- it must
+// surface ws.ErrorCodeInternalError.
+func TestHandleAnswerQuestion_PartialApplicationFailure_InternalError(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	seedBundle(t, ctx, svc, repo, "pending-partial-1")
+
+	store := clarification.NewStore(time.Minute)
+	updater := &failingMessageUpdater{inner: &svcMessageUpdater{svc: svc}, failOnQ: "q2"}
+	resolver := clarification.NewResolver(store, repo, repo, updater, svc, nil, testLogger(t))
+	h := &Handlers{taskSvc: svc, clarificationResolver: resolver, clarificationBundles: repo, logger: testLogger(t)}
+
+	resp, err := h.handleAnswerQuestion(ctx, makeWSMessage(t, ws.ActionMCPAnswerQuestion, map[string]interface{}{
+		"pending_id": "pending-partial-1",
+		"answers": []map[string]interface{}{
+			{"question_id": "q1", "selected_options": []string{"opt-a"}},
+			{"question_id": "q2", "selected_options": []string{"opt-c"}},
+		},
+	}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
 }
 
 func TestHandleAnswerQuestion_Rejected(t *testing.T) {

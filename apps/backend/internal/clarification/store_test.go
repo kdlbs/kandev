@@ -426,3 +426,79 @@ func TestWaitForResponse_Broadcast_MultipleWaiters(t *testing.T) {
 		t.Fatalf("expected both waiters to receive response, got %d", got)
 	}
 }
+
+// TestCancelRequest_AfterRespond_DoesNotCloseCancelCh proves the Review
+// Round 3 fix (codex-flagged race): resolver.go's claimAndApply calls
+// CancelRequest unconditionally on every cancel outcome (spec X3/X3a), win
+// or lose, independently of whether a concurrent winning Respond has
+// already recorded the resolution. Before the fix, CancelRequest closed
+// CancelCh under only the store-level s.mu, never checking pending.resolved
+// under pending.mu the way Respond does -- so a losing cancel arriving
+// after Respond had already closed done (but before WaitForResponse's own
+// cleanup removed the map entry -- exactly the window X3's "whenever an
+// entry exists" targets) could ALSO close CancelCh on the same live entry.
+// With both channels closed, WaitForResponse's select picks between them
+// non-deterministically, occasionally reporting a spurious "cancelled"
+// error to a waiter whose answer had already been delivered successfully.
+//
+// The fix makes CancelRequest check pending.resolved under pending.mu
+// (mirroring the check Respond already performs) and skip closing CancelCh
+// once the entry is resolved: closing it serves no purpose once there is no
+// wedge left to break (X3a's own rationale), and skipping it is what
+// guarantees at most one of done/CancelCh is ever closed per entry.
+func TestCancelRequest_AfterRespond_DoesNotCloseCancelCh(t *testing.T) {
+	s := NewStore(time.Second)
+	id, _ := s.CreateRequest(&Request{
+		SessionID: "s1",
+		Questions: []Question{{ID: "q1", Prompt: "p?", Options: []Option{{ID: "o1", Label: "A"}}}},
+	})
+	pending := s.pending[id] // captured before CancelRequest can remove the map entry
+
+	if err := s.Respond(id, &Response{Answers: []Answer{{QuestionID: "q1"}}}); err != nil {
+		t.Fatalf("unexpected Respond error: %v", err)
+	}
+
+	s.CancelRequest(id)
+
+	select {
+	case <-pending.CancelCh:
+		t.Fatal("a losing cancel must not close CancelCh once the entry is already resolved: doing so races WaitForResponse's select against the already-closed done channel and can spuriously report cancellation for an answer that was actually delivered")
+	default:
+	}
+	select {
+	case <-pending.done:
+	default:
+		t.Fatal("expected done to remain closed (set by Respond)")
+	}
+}
+
+// TestRespond_AfterCancelRequest_ReturnsError proves the mirror ordering of
+// the same fix: once a cancel has already closed CancelCh (X3, unconditional
+// on any cancel outcome), a Respond call racing in afterward must not
+// silently record success -- there is no live waiter left to deliver to, so
+// treating it as delivered would let the resolver believe resume:"published"
+// while the blocked tool call already exited with a cancellation error.
+// Respond must instead report failure so the caller falls back to the R7a
+// no-live-waiter path.
+func TestRespond_AfterCancelRequest_ReturnsError(t *testing.T) {
+	s := NewStore(time.Second)
+	id, _ := s.CreateRequest(&Request{
+		SessionID: "s1",
+		Questions: []Question{{ID: "q1", Prompt: "p?", Options: []Option{{ID: "o1", Label: "A"}}}},
+	})
+	pending := s.pending[id]
+
+	if !s.CancelRequest(id) {
+		t.Fatal("expected CancelRequest to report the entry existed")
+	}
+
+	if err := s.Respond(id, &Response{Answers: []Answer{{QuestionID: "q1"}}}); err == nil {
+		t.Fatal("expected Respond to report an error once the entry was already cancelled -- silently succeeding would be reported as a delivered answer nobody is waiting for")
+	}
+
+	select {
+	case <-pending.done:
+		t.Fatal("Respond must not close done once the entry has already been cancelled: there is no live waiter left to deliver to")
+	default:
+	}
+}

@@ -15,6 +15,7 @@ import (
 var (
 	ErrNotFound         = errors.New("clarification request not found")
 	ErrAlreadyResponded = errors.New("response already submitted")
+	ErrAlreadyCancelled = errors.New("clarification request already cancelled")
 )
 
 // Store manages pending clarification requests.
@@ -163,6 +164,18 @@ func (s *Store) Respond(pendingID string, resp *Response) error {
 		return fmt.Errorf("%w: %s", ErrAlreadyResponded, pendingID)
 	}
 
+	// A concurrent cancel may have already closed CancelCh (and possibly
+	// already unblocked WaitForResponse) while this entry was still
+	// unresolved. pending.mu makes this check race-free: CancelRequest
+	// only closes CancelCh while holding the same lock, so if it got there
+	// first, that close is already visible here. There is no live waiter
+	// left to deliver to, so this must not report success.
+	select {
+	case <-pending.CancelCh:
+		return fmt.Errorf("%w: %s", ErrAlreadyCancelled, pendingID)
+	default:
+	}
+
 	resp.PendingID = pendingID
 	resp.RespondedAt = time.Now()
 	pending.resp = resp
@@ -176,15 +189,31 @@ func (s *Store) Respond(pendingID string, resp *Response) error {
 // entry existed (and was removed), false otherwise. Used by callers that need
 // to surface a creation-side failure immediately rather than wait for the
 // 2-hour MCP timeout.
+//
+// A losing resolution claim (see clarification.Resolver) calls this
+// unconditionally on every cancel outcome, independently of whichever
+// concurrent request reaches the entry first. CancelCh is only closed while
+// an entry is still unresolved: once Respond has recorded a resolution,
+// closing CancelCh would serve no purpose (there is no wedge left to break)
+// and would race Respond's own close of done, letting WaitForResponse's
+// select nondeterministically report a spurious cancellation for an answer
+// that was actually delivered. Gating on pending.resolved under the same
+// pending.mu Respond uses is what makes the two mutually exclusive.
 func (s *Store) CancelRequest(pendingID string) bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	pending, ok := s.pending[pendingID]
 	if !ok {
+		s.mu.Unlock()
 		return false
 	}
-	close(pending.CancelCh)
 	delete(s.pending, pendingID)
+	s.mu.Unlock()
+
+	pending.mu.Lock()
+	defer pending.mu.Unlock()
+	if !pending.resolved {
+		close(pending.CancelCh)
+	}
 	return true
 }
 
@@ -203,18 +232,28 @@ func (s *Store) ListPending() []*Request {
 
 // CancelSession cancels all pending clarification requests for a given session.
 // It closes the CancelCh to unblock any WaitForResponse callers and removes entries.
-// Returns the list of cancelled pending IDs.
+// Returns the list of cancelled pending IDs. Same race protection as
+// CancelRequest: CancelCh is only closed for an entry that is still
+// unresolved, checked under that entry's own pending.mu.
 func (s *Store) CancelSession(sessionID string) []string {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	var toCancel []*PendingClarification
 	var cancelled []string
 	for id, pending := range s.pending {
 		if pending.Request.SessionID == sessionID {
-			close(pending.CancelCh)
+			toCancel = append(toCancel, pending)
 			delete(s.pending, id)
 			cancelled = append(cancelled, id)
 		}
+	}
+	s.mu.Unlock()
+
+	for _, pending := range toCancel {
+		pending.mu.Lock()
+		if !pending.resolved {
+			close(pending.CancelCh)
+		}
+		pending.mu.Unlock()
 	}
 	return cancelled
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,6 +26,10 @@ type stubMessageCreator struct {
 		status     string
 	}
 	created [][]Question
+	// failOnQ, when set, makes UpdateClarificationMessage return an error for
+	// that question_id only, simulating the R5/R5a partial-application
+	// failure the 500 mapping test needs to trigger through the REST layer.
+	failOnQ string
 }
 
 func (s *stubMessageCreator) CreateClarificationRequestMessages(
@@ -47,6 +52,9 @@ func (s *stubMessageCreator) UpdateClarificationMessage(
 		questionID string
 		status     string
 	}{pendingID, messageID, questionID, status})
+	if s.failOnQ != "" && questionID == s.failOnQ {
+		return errors.New("simulated message update failure")
+	}
 	return nil
 }
 
@@ -312,6 +320,34 @@ func TestHttpRespond_AllAnswers_PrimaryPath_Success(t *testing.T) {
 		if u.status != "answered" {
 			t.Errorf("expected status=answered, got %q", u.status)
 		}
+	}
+}
+
+// TestHttpRespond_PartialApplicationFailure_500 proves the REST mapping for
+// IsPartialApplicationError (handlers.go writeResolutionResult): when a
+// winning claim's per-question message update fails partway (R5/R5a), the
+// bundle is already claimed durably, so the handler cannot report 400/404 --
+// it must surface a 500 with the partial-application error, distinct from a
+// clean success, so callers know delivery was incomplete.
+func TestHttpRespond_PartialApplicationFailure_500(t *testing.T) {
+	msgs := map[string][]*taskmodels.Message{
+		"pending-7": {
+			clarificationMessage("m1", "pending-7", "q1", 0, "First?", "opt1"),
+			clarificationMessage("m2", "pending-7", "q2", 1, "Second?"),
+		},
+	}
+	h, _, _, msgCreator := setupTestHandler(t, msgs)
+	msgCreator.failOnQ = "q2"
+
+	body := RespondBody{
+		Answers: []Answer{
+			{QuestionID: "q1", SelectedOptions: []string{"opt1"}},
+			{QuestionID: "q2", CustomText: "free-form"},
+		},
+	}
+	rec := runRespond(t, h, "pending-7", body)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for a partial-application failure, got %d (body=%s)", rec.Code, rec.Body.String())
 	}
 }
 
