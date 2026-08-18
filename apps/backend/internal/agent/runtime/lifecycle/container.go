@@ -16,6 +16,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
+	"github.com/kandev/kandev/internal/agent/docker/seccomp"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/constants"
@@ -59,6 +60,7 @@ type ContainerConfig struct {
 	McpProfile                     *mcpprofile.Context
 	PrepareScript                  string // Script to run inside container before agent starts (e.g., clone repo)
 	ImageTagOverride               string // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
+	AllowUserNamespaces            bool   // If true, the container is launched with a relaxed seccomp profile and apparmor=unconfined.
 	LocalClonePath                 string // Host path for file:// repository clone URLs; mounted read-only at the same path.
 	BootstrapNonce                 string // one-time nonce for agentctl handshake (set internally)
 	AgentctlStartupConfig          commonconfig.AgentctlStartupConfig
@@ -561,6 +563,9 @@ exec /usr/local/bin/agentctl`,
 		},
 		AutoRemove: false, // We manage cleanup ourselves
 	}
+	if config.AllowUserNamespaces {
+		containerCfg.SecurityOpt = securityOptsForUserNamespaces()
+	}
 	if scope := os.Getenv(e2eDockerScopeEnv); scope != "" {
 		containerCfg.Labels[e2eDockerScopeLabel] = scope
 	}
@@ -582,6 +587,24 @@ exec /usr/local/bin/agentctl`,
 // formatCoreutilsTimeout converts a Go duration to the single-unit format
 // accepted by GNU timeout. time.Duration.String can emit compound values such
 // as "10m0s", which GNU timeout rejects as an invalid interval.
+// securityOptsForUserNamespaces returns Docker SecurityOpt values that
+// relax seccomp and AppArmor to allow user namespace creation by processes
+// without CAP_SYS_ADMIN. Returns nil on error (the caller should treat nil
+// as "no security options" and continue without relaxing).
+func securityOptsForUserNamespaces() []string {
+	profileJSON, err := seccomp.UsernsProfileJSON()
+	if err != nil {
+		// This should never happen with the vendored profile; if it does
+		// the container will be launched without the security options,
+		// which preserves safety (stricter defaults) over functionality.
+		return nil
+	}
+	return []string{
+		"seccomp=" + profileJSON,
+		"apparmor=unconfined",
+	}
+}
+
 func formatCoreutilsTimeout(timeout time.Duration) string {
 	return strconv.FormatFloat(timeout.Seconds(), 'f', -1, 64) + "s"
 }

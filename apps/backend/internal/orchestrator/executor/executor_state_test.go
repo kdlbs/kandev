@@ -86,6 +86,20 @@ func TestResolveExecutorConfig_AuthoritativeSSHKeys_ClobberTaskMetadata(t *testi
 			taskValue:    "bash --norc",
 			wantMetadata: "",
 		},
+		{
+			name:         "userns_profile_wins_when_set",
+			key:          lifecycle.MetadataKeyAllowUserNamespaces,
+			profileValue: "true",
+			taskValue:    "false",
+			wantMetadata: "true",
+		},
+		{
+			name:         "empty_userns_profile_clobbers_task",
+			key:          lifecycle.MetadataKeyAllowUserNamespaces,
+			profileValue: "",
+			taskValue:    "true",
+			wantMetadata: "",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

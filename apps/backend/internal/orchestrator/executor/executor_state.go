@@ -263,6 +263,7 @@ var profileConfigAuthoritativeKeys = []string{
 	// the profile value wins unconditionally — including when it is empty,
 	// which the reader treats as disabled.
 	lifecycle.MetadataKeySSHReclaimTaskDir,
+	lifecycle.MetadataKeyAllowUserNamespaces,
 }
 
 // applyProfileConfigToMetadata projects profile.Config keys into the
