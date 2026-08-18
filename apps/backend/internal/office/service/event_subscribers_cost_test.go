@@ -4,6 +4,11 @@ import (
 	"context"
 	"testing"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
@@ -76,12 +81,17 @@ func TestPromptUsage_CacheSplitRecordedWhenNotEstimated(t *testing.T) {
 	}
 }
 
-// TestPromptUsage_CacheSplitNullWhenEstimated confirms the codex/no-usage-
-// frame caveat: when Usage.Estimated is true (context-occupancy synthesis,
-// adapter_prompt.go's fallback), the split columns must be NULL, never 0 —
-// a zero would falsely claim "no cache activity" for an adapter that never
-// reported cache tokens at all. tokens_cached_in still equals read+write
-// (both zero here), preserving the existing column's semantics.
+// TestPromptUsage_CacheSplitNullWhenEstimated confirms the context-occupancy
+// fallback caveat (adapter_prompt.go's fallbackUsageForNilTypedUsage, used
+// when an adapter emits no typed usage frame at all): when the usage sample
+// carries no cache counts at all (both fields absent/zero, as that fallback
+// always produces), the split columns must be NULL, never 0 — a zero would
+// falsely claim "no cache activity" for an adapter that never reported cache
+// tokens at all. The gate is cache-data availability, not Usage.Estimated
+// (see TestPromptUsage_CacheSplitPersistedWhenEstimatedWithCacheData for the
+// codex case: Estimated=true but real cache numbers present). tokens_cached_in
+// still equals read+write (both zero here), preserving the existing column's
+// semantics.
 func TestPromptUsage_CacheSplitNullWhenEstimated(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	ctx := context.Background()
@@ -114,6 +124,59 @@ func TestPromptUsage_CacheSplitNullWhenEstimated(t *testing.T) {
 	}
 	if row.TokensCachedWrite != nil {
 		t.Errorf("TokensCachedWrite = %v, want nil (NULL, never 0)", *row.TokensCachedWrite)
+	}
+}
+
+// TestPromptUsage_CacheSplitPersistedWhenEstimatedWithCacheData is a
+// regression test for a Review round-1 finding: gating the cache split on
+// Usage.Estimated (rather than on whether cache data is actually present)
+// silently dropped codex's real cache numbers, because codex-acp's typed
+// per-request usage frame sets Estimated=true (it is scoped to the last
+// model request of the turn, not the whole turn) while still reporting
+// genuine cachedReadTokens/cachedWriteTokens — a live capture showed
+// cachedReadTokens=22272 on exactly such a frame. The split must survive
+// even though the row is (correctly) marked estimated.
+func TestPromptUsage_CacheSplitPersistedWhenEstimatedWithCacheData(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "worker-codex-cache")
+	insertTestTask(t, svc, "task-codex-cache", "ws-1")
+	setTestTaskAssignee(t, svc, "task-codex-cache", "worker-codex-cache")
+
+	event := bus.NewEvent(events.SessionPromptUsageUpdated, "test", map[string]interface{}{
+		"task_id":    "task-codex-cache",
+		"session_id": "session-codex-cache",
+		"agent_id":   "codex-acp",
+		"model":      "gpt-5.6-terra",
+		"usage": map[string]interface{}{
+			"input_tokens":        377,
+			"cached_read_tokens":  22272,
+			"cached_write_tokens": 0,
+			"output_tokens":       9,
+			"estimated":           true,
+		},
+	})
+	if err := eb.Publish(ctx, events.BuildSessionPromptUsageSubject("session-codex-cache"), event); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	costs, err := svc.ListCostEvents(ctx, "ws-1")
+	if err != nil || len(costs) != 1 {
+		t.Fatalf("list costs: %v (len=%d)", err, len(costs))
+	}
+	row := costs[0]
+	if !row.Estimated {
+		t.Fatalf("Estimated = false, want true (codex's typed frame is per-request, not per-turn)")
+	}
+	if row.TokensCachedRead == nil || *row.TokensCachedRead != 22272 {
+		t.Errorf("TokensCachedRead = %v, want 22272 (real cache data must survive Estimated=true)", row.TokensCachedRead)
+	}
+	if row.TokensCachedWrite == nil || *row.TokensCachedWrite != 0 {
+		t.Errorf("TokensCachedWrite = %v, want 0 (explicit, not nil)", row.TokensCachedWrite)
+	}
+	if row.TokensCachedIn != 22272 {
+		t.Errorf("TokensCachedIn = %d, want 22272 (read+write, unchanged semantics)", row.TokensCachedIn)
 	}
 }
 
@@ -433,6 +496,57 @@ func TestPromptUsage_WorkflowRunnerWinsOverSessionAgentProfile(t *testing.T) {
 	}
 	if got := costs[0].AgentProfileID; got != "workflow-runner" {
 		t.Errorf("AgentProfileID = %q, want %q (workflow projection must win)", got, "workflow-runner")
+	}
+}
+
+// TestPromptUsage_SessionAgentProfileLookupFailureLogsAndContinues is a
+// regression test for a Review round-1 finding: the session-agent-profile
+// fallback lookup's error was silently discarded, unlike every other error
+// path in handlePromptUsage (each of which records an explicit drop-reason
+// counter). A DB failure on that lookup would have silently reproduced the
+// exact "unattributed cost event" symptom this card was filed to fix, with
+// nothing in the logs to explain why. The fix logs the failure and — since
+// attribution is best-effort — still writes the cost event, unattributed,
+// rather than dropping it.
+func TestPromptUsage_SessionAgentProfileLookupFailureLogsAndContinues(t *testing.T) {
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
+	}
+	svc, eb := newTestServiceWithBusLogger(t, log)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "codex-runner")
+	insertTestTask(t, svc, "task-broken-lookup", "ws-1")
+	// Deliberately no setTestTaskAssignee call, so RunnerProjection is ""
+	// and handlePromptUsage takes the session-fallback branch under test.
+	svc.ExecSQL(t, `DROP TABLE task_sessions`)
+
+	event := bus.NewEvent(events.SessionPromptUsageUpdated, "test", map[string]interface{}{
+		"task_id":    "task-broken-lookup",
+		"session_id": "session-broken-lookup",
+		"agent_id":   "codex-acp",
+		"model":      "gpt-5.6-terra",
+		"usage": map[string]interface{}{
+			"input_tokens":  100,
+			"output_tokens": 10,
+		},
+	})
+	if err := eb.Publish(ctx, events.BuildSessionPromptUsageSubject("session-broken-lookup"), event); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	if logs.FilterMessage("session agent profile lookup failed").Len() == 0 {
+		t.Fatal("session agent profile lookup failure was not logged")
+	}
+
+	costs, err := svc.ListCostEvents(ctx, "ws-1")
+	if err != nil || len(costs) != 1 {
+		t.Fatalf("list costs: %v (len=%d) — lookup failure must not drop the cost event", err, len(costs))
+	}
+	if got := costs[0].AgentProfileID; got != "" {
+		t.Errorf("AgentProfileID = %q, want \"\" (fallback lookup failed, no attribution to fall back to)", got)
 	}
 }
 

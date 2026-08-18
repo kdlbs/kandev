@@ -571,7 +571,17 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 
 	sessionAgentProfileID := ""
 	if fields.AssigneeAgentProfileID == "" {
-		if id, err := s.repo.GetSessionAgentProfileID(ctx, data.SessionID); err == nil {
+		id, lookupErr := s.repo.GetSessionAgentProfileID(ctx, data.SessionID)
+		if lookupErr != nil {
+			// Best-effort attribution fallback: log and continue with an
+			// unattributed row rather than dropping the cost event over a
+			// failed lookup, which would reproduce the exact symptom this
+			// fallback exists to fix.
+			s.logger.Warn("session agent profile lookup failed",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.Error(lookupErr))
+		} else {
 			sessionAgentProfileID = id
 		}
 	}

@@ -122,14 +122,18 @@ func (s *Service) lookupPricingWithVersion(
 // strictly fills blanks and never overrides an existing attribution.
 //
 // The cache split (TokensCachedRead / TokensCachedWrite) is recorded only
-// when data.Usage.Estimated is false. codex-acp's ACP bridge (and any
-// future adapter with no per-turn usage frame) synthesises InputTokens from
-// context-occupancy growth with Estimated=true and never sets the cache
-// fields — a NULL split there is honest; 0 would silently claim "no cache
-// activity" for an agent that never reported one. TokensCachedIn keeps its
-// original read+write sum on every row regardless, so existing consumers
-// (the tree-holds rollup, card 2faa29da's task_sessions fix) are
-// unaffected.
+// when the usage frame actually carries cache data (either field nonzero).
+// The context-occupancy fallback (fallbackUsageForNilTypedUsage in
+// adapter_prompt.go) never populates either field, so a NULL split there is
+// honest — it is a "no data reported" absence, not a claimed zero. Gating on
+// Estimated instead would be wrong: codex-acp's per-request typed frame sets
+// Estimated=true (it's scoped to the last model request of the turn, not
+// the whole turn — see normalizeCodexPromptUsage in dialect_codex.go) but
+// does carry real cache numbers, and discarding them would silently NULL a
+// value we actually have. TokensCachedIn keeps its original read+write sum
+// on every row regardless — a definite total whether or not the split is
+// known — so existing consumers (the tree-holds rollup, card 2faa29da's
+// task_sessions fix) are unaffected.
 func buildCostEvent(
 	data PromptUsageData, fields *sqlite.TaskExecutionFields, projectID, provider string,
 	resolution costResolution, sessionAgentProfileID string,
@@ -156,7 +160,7 @@ func buildCostEvent(
 	contractVersion := costContractVersion
 	event.CostContractVersion = &contractVersion
 
-	if !data.Usage.Estimated {
+	if data.Usage.CachedReadTokens != 0 || data.Usage.CachedWriteTokens != 0 {
 		cachedRead := data.Usage.CachedReadTokens
 		cachedWrite := data.Usage.CachedWriteTokens
 		event.TokensCachedRead = &cachedRead

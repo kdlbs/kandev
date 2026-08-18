@@ -236,8 +236,9 @@ type Adapter struct {
 	// For an adapter with no typed usage frame at all, the prompt-complete
 	// handler falls back to nonnegative context-occupancy growth as an
 	// estimated input count (fallbackUsageForNilTypedUsage in
-	// adapter_prompt.go), gated on a provider-reported cost sample being
-	// present to attach.
+	// adapter_prompt.go). It attaches when context occupancy grew
+	// (delta > 0) OR a provider-reported cost sample is present —
+	// either condition alone is enough.
 	usageBySession map[string]*usageTracker
 
 	// Available auth methods captured from the ACP initialize response.
