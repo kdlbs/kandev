@@ -3,18 +3,23 @@ package sqlite
 // TestStepTransitionWritersArePinned is the writer-health control that
 // matters most, per the spec: the realistic failure mode is not the ledger
 // writer breaking, it's a NEW production statement mutating
-// tasks.workflow_step_id that nobody wired into it. This walks the package's
-// own source (go/parser, not a line regex — every statement here is a
-// multi-line raw string literal, which a regex over raw lines misreports on)
-// and asserts the exact set of functions containing such a statement matches
-// the registered, ledger-wired set. Add a new mutating statement and this
-// test fails until it is registered below AND wired to recordStepTransition.
+// tasks.workflow_step_id that nobody wired into it. This walks the entire
+// backend source tree (go/parser, not a line regex — every statement here is
+// a multi-line raw string literal, which a regex over raw lines misreports
+// on), rooted at apps/backend/internal (see findBackendSourceRoot) rather
+// than this package's own directory — a writer added in ANY backend
+// package, not only this one, must be able to fail this test — and asserts
+// the exact set of functions containing such a statement matches the
+// registered, ledger-wired set. Add a new mutating statement and this test
+// fails until it is registered below AND wired to recordStepTransition.
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -43,9 +48,26 @@ var registeredStepMutators = []string{
 }
 
 func TestStepTransitionWritersArePinned(t *testing.T) {
-	found, err := findWorkflowStepIDMutators(t, ".")
+	root, err := findBackendSourceRoot(".")
 	if err != nil {
-		t.Fatalf("scan package for workflow_step_id mutators: %v", err)
+		t.Fatalf("locate backend source root: %v", err)
+	}
+	// Sanity check that the scan root is genuinely the wide boundary and not
+	// silently regressed back to "." (this package's own directory) — a
+	// writer added in ANY backend package, not just this one, must be able
+	// to fail this test. internal/office is an arbitrary sibling package
+	// known to exist; its presence under root proves the walk spans more
+	// than internal/task/repository/sqlite.
+	if filepath.Base(root) != "internal" {
+		t.Fatalf("scan root %q is not the backend internal/ directory", root)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "office")); statErr != nil {
+		t.Fatalf("scan root %q does not contain sibling package internal/office — root is narrower than the whole backend source tree: %v", root, statErr)
+	}
+
+	found, err := findWorkflowStepIDMutators(t, root)
+	if err != nil {
+		t.Fatalf("scan backend source for workflow_step_id mutators: %v", err)
 	}
 
 	registered := make(map[string]bool, len(registeredStepMutators))
@@ -88,6 +110,33 @@ func TestStepTransitionWritersArePinned(t *testing.T) {
 	}
 }
 
+// findBackendSourceRoot walks up from startDir looking for the Go module
+// root (the directory containing go.mod) and returns its internal/
+// subdirectory. This is the production scan's boundary: internal/ is the
+// entire body of backend source that could define a tasks.workflow_step_id
+// writer, so rooting the pinning test there instead of "." (this package's
+// own directory) is what actually closes false-negative shape (d) — a
+// writer added in any OTHER backend package, not just a nested subdirectory
+// of this one. go test always runs with the package directory as its
+// working directory, so startDir="." from this package resolves reliably to
+// apps/backend/internal regardless of where the repo checkout lives.
+func findBackendSourceRoot(startDir string) (string, error) {
+	dir, err := filepath.Abs(startDir)
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
+			return filepath.Join(dir, "internal"), nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("no go.mod found above %s", startDir)
+		}
+		dir = parent
+	}
+}
+
 // findWorkflowStepIDMutators recursively parses every non-test .go file
 // under dir (plus .go.txt, so isolated test fixtures under testdata/ can be
 // parsed without ever compiling as part of any real package) and returns the
@@ -97,7 +146,21 @@ func TestStepTransitionWritersArePinned(t *testing.T) {
 // the body references by name, or via a call to a local fmt.Sprintf-based
 // column setter passed the literal column name "workflow_step_id". A
 // directory literally named "testdata" is skipped while walking so
-// production scans (dir=".") never pick up fixtures.
+// production scans never pick up fixtures.
+//
+// dir can span many packages (the production scan roots at the whole
+// backend internal/ tree — see findBackendSourceRoot). Constants and
+// format-setters are therefore resolved per package, grouping parsed files
+// by their containing directory and running the const/format-setter/mutation
+// pipeline independently per directory, rather than flattening every parsed
+// file's package-level consts into one repo-wide map. Two unrelated packages
+// can legally declare a const or helper function with the same bare name
+// (e.g. two packages each with their own `updateQuery` constant); a flat map
+// would let one package's SQL literal leak into another's mutation check —
+// or mask a genuine literal — purely by name collision. Each directory is
+// exactly one Go package once _test.go files are excluded (which this scan
+// already does), so scoping resolution to the files parsed from one
+// directory at a time is correct without tracking real package identifiers.
 func findWorkflowStepIDMutators(t *testing.T, dir string) (map[string]bool, error) {
 	t.Helper()
 
@@ -105,31 +168,40 @@ func findWorkflowStepIDMutators(t *testing.T, dir string) (map[string]bool, erro
 	if err != nil {
 		return nil, err
 	}
-	fset := token.NewFileSet()
-	files := make([]*ast.File, 0, len(paths))
+
+	byDir := make(map[string][]string)
 	for _, path := range paths {
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			return nil, err
-		}
-		files = append(files, file)
+		d := filepath.Dir(path)
+		byDir[d] = append(byDir[d], path)
 	}
 
-	constants := collectPackageStringConstants(files)
-	formatSetters := collectFormatColumnSetters(files, constants)
-
 	found := make(map[string]bool)
-	for _, file := range files {
-		ast.Inspect(file, func(n ast.Node) bool {
-			fn, ok := n.(*ast.FuncDecl)
-			if !ok || fn.Body == nil {
+	fset := token.NewFileSet()
+	for _, dirPaths := range byDir {
+		files := make([]*ast.File, 0, len(dirPaths))
+		for _, path := range dirPaths {
+			file, err := parser.ParseFile(fset, path, nil, 0)
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, file)
+		}
+
+		constants := collectPackageStringConstants(files)
+		formatSetters := collectFormatColumnSetters(files, constants)
+
+		for _, file := range files {
+			ast.Inspect(file, func(n ast.Node) bool {
+				fn, ok := n.(*ast.FuncDecl)
+				if !ok || fn.Body == nil {
+					return true
+				}
+				if functionMutatesWorkflowStepID(fn.Body, constants, formatSetters) {
+					found[funcIdentity(fn)] = true
+				}
 				return true
-			}
-			if functionMutatesWorkflowStepID(fn.Body, constants, formatSetters) {
-				found[funcIdentity(fn)] = true
-			}
-			return true
-		})
+			})
+		}
 	}
 	return found, nil
 }
@@ -351,9 +423,12 @@ func receiverTypeName(fn *ast.FuncDecl) string {
 // SQL literal, an fmt.Sprintf-interpolated column name (the exact shape
 // already live in internal/office/repository/sqlite/tasks.go's
 // execTaskScalar), two distinct receiver types sharing a bare method name,
-// and a writer placed in a subdirectory. testdata/ is otherwise skipped by
-// findWorkflowStepIDMutators so these fixtures never affect
-// TestStepTransitionWritersArePinned's scan of the real package.
+// and a writer placed in a subdirectory nested under whatever root the
+// detector is given (proving recursion, not scan-root width — see
+// TestFindWorkflowStepIDMutatorsCatchesSiblingPackageWriter below for that).
+// testdata/ is otherwise skipped by findWorkflowStepIDMutators so these
+// fixtures never affect TestStepTransitionWritersArePinned's scan of real
+// backend source.
 func TestFindWorkflowStepIDMutatorsCatchesEvasiveShapes(t *testing.T) {
 	found, err := findWorkflowStepIDMutators(t, filepath.Join("testdata", "pinfixtures"))
 	if err != nil {
@@ -365,12 +440,67 @@ func TestFindWorkflowStepIDMutatorsCatchesEvasiveShapes(t *testing.T) {
 		"FixtureRepo.sprintfInterpolatedStepMutator", // (b) fmt.Sprintf column interpolation
 		"RepoA.updateTaskTx",                         // (c) receiver-qualified identity
 		"RepoB.updateTaskTx",                         // (c) distinct from RepoA's, not collapsed
-		"NestedRepo.deeplyNestedStepMutator",         // (d) nested subdirectory
+		"NestedRepo.deeplyNestedStepMutator",         // (d, partial) recursion into a subdirectory
 	}
 	for _, name := range want {
 		if !found[name] {
 			t.Errorf("expected findWorkflowStepIDMutators to catch %q, but it did not (found: %v)", name, found)
 		}
+	}
+}
+
+// TestFindWorkflowStepIDMutatorsCatchesSiblingPackageWriter is the permanent
+// regression proof for the rest of false-negative shape (d): "single-package
+// scope misses writers added outside the sqlite repo package." The nested
+// fixture above proves the detector recurses into subdirectories of
+// whatever root it is given; it does not prove the production scan's root
+// actually spans sibling packages, since before this fix the root was "."
+// (this package's own directory) and recursion had nothing above it to
+// explore. This test targets that boundary directly, independent of the
+// real repo layout: it builds a synthetic two-package tree in a t.TempDir()
+// — one package with a genuine tasks.workflow_step_id writer, a sibling
+// package with none — and asserts findWorkflowStepIDMutators, given the
+// tree's root, finds the writer inside the sibling package. That is exactly
+// the guarantee TestStepTransitionWritersArePinned now depends on when
+// rooted at findBackendSourceRoot's apps/backend/internal boundary: a
+// writer in ANY sibling package under that root must be caught, not only
+// ones nested under this package's own directory.
+func TestFindWorkflowStepIDMutatorsCatchesSiblingPackageWriter(t *testing.T) {
+	root := t.TempDir()
+	pkgWithWriter := filepath.Join(root, "pkgwithwriter")
+	pkgWithoutWriter := filepath.Join(root, "pkgwithoutwriter")
+	if err := os.MkdirAll(pkgWithWriter, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", pkgWithWriter, err)
+	}
+	if err := os.MkdirAll(pkgWithoutWriter, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", pkgWithoutWriter, err)
+	}
+	writePinTestFixtureFile(t, filepath.Join(pkgWithWriter, "writer.go"), `package pkgwithwriter
+
+type Repository struct{}
+
+func (r *Repository) mutateStep() string {
+	return "UPDATE tasks SET workflow_step_id = ? WHERE id = ?"
+}
+`)
+	writePinTestFixtureFile(t, filepath.Join(pkgWithoutWriter, "other.go"), `package pkgwithoutwriter
+
+func Noop() {}
+`)
+
+	found, err := findWorkflowStepIDMutators(t, root)
+	if err != nil {
+		t.Fatalf("scan synthetic sibling-package tree: %v", err)
+	}
+	if !found["Repository.mutateStep"] {
+		t.Fatalf("expected a writer in a sibling package under %s to be found; found=%v", root, found)
+	}
+}
+
+func writePinTestFixtureFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
 	}
 }
 

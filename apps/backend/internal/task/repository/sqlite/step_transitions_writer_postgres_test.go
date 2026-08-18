@@ -8,6 +8,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -152,5 +153,145 @@ func TestPostgresLedgerWriterConcurrentMovesProduceIntactChain(t *testing.T) {
 	}
 	if final.WorkflowStepID != "step-b" && final.WorkflowStepID != "step-c" {
 		t.Fatalf("final workflow_step_id = %q, want step-b or step-c (last committed writer wins)", final.WorkflowStepID)
+	}
+}
+
+// TestPostgresReadTaskStepInTxBlocksOnConcurrentRowLock is the deterministic
+// counterpart to TestPostgresLedgerWriterConcurrentMovesProduceIntactChain
+// above. That test's sync.WaitGroup barrier only releases both goroutines at
+// the same instant — it does not force them to overlap once released, so
+// the Go scheduler can (and often does) run one mover's entire transaction
+// to completion before the other even begins. When that happens the second
+// mover reads an already-updated step and the chain looks intact whether or
+// not readTaskStepInTx's FOR UPDATE clause (step_transitions.go:28-30) does
+// anything at all. Reintroducing the historical stamp-before-lock bug that
+// test guards against produced only 7 failures out of 20 runs — a coin
+// flip, not a control.
+//
+// This test instead proves the lock's actual serialization property
+// directly and deterministically, mirroring the pattern in
+// turn_step_stamp_postgres_test.go's
+// TestPostgresCreateTurnWithStepStampBlocksOnConcurrentStepMove (same
+// openSecondPostgresConnection helper): one goroutine acquires the row's
+// FOR UPDATE lock via readTaskStepInTx and holds its transaction open on a
+// channel; a second, independent connection then attempts a real production
+// UpdateTask on the same task and must NOT return while the first
+// transaction still holds the lock. Releasing the lock lets the second
+// writer proceed, and the resulting ledger chain confirms it committed
+// after the lock was released, not concurrently with it.
+func TestPostgresReadTaskStepInTxBlocksOnConcurrentRowLock(t *testing.T) {
+	dsn := testutil.PostgresDSNFromEnv(t)
+	db := testutil.OpenIsolatedPostgres(t, dsn)
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	// A second, independent connection to the same isolated schema — see
+	// openSecondPostgresConnection's doc comment for why a shared
+	// db.OpenIsolatedPostgres connection (capped at one physical connection)
+	// cannot exercise genuine Postgres-level lock contention.
+	moverDB := openSecondPostgresConnection(t, dsn, db)
+	moverRepo, err := NewWithDB(moverDB, moverDB, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema on second connection: %v", err)
+	}
+	ctx := steptelemetry.WithAttribution(context.Background(), steptelemetry.Attribution{
+		Trigger: steptelemetry.TriggerManualMove, ActorKind: steptelemetry.ActorHuman, ActorID: "user-pg-lock",
+	})
+	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{ID: "ws-pg-lock", Name: "PG Lock Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	task := &models.Task{ID: "task-pg-lock", WorkspaceID: "ws-pg-lock", WorkflowID: "wf-pg-lock", WorkflowStepID: "step-a", Title: "PG Lock Task", Priority: "medium"}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	// The holder goroutine plays the concurrent transaction: it acquires the
+	// same readTaskStepInTx FOR UPDATE lock a real step move takes (on the
+	// first connection), then holds its transaction open — without writing
+	// anything — until this test explicitly releases it. It never changes
+	// workflow_step_id, so the mover's later UpdateTask below is the only
+	// real step move in this test.
+	lockHeld := make(chan struct{})
+	releaseLock := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseLock) }) }
+	// Guarantees the holder goroutine is released even if a t.Fatal below
+	// unwinds this goroutine early (runtime.Goexit still runs deferred
+	// funcs) — otherwise a failed assertion leaves the holder blocked
+	// forever on <-releaseLock, holding its transaction open, and
+	// t.Cleanup's DROP SCHEMA hangs waiting for that lock instead of
+	// reporting the actual test failure.
+	defer release()
+	holderDone := make(chan error, 1)
+	go func() {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			holderDone <- err
+			return
+		}
+		if _, _, _, err := repo.readTaskStepInTx(ctx, tx, task.ID); err != nil {
+			_ = tx.Rollback()
+			holderDone <- err
+			return
+		}
+		close(lockHeld)
+		<-releaseLock
+		holderDone <- tx.Commit()
+	}()
+
+	select {
+	case <-lockHeld:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the holder goroutine to acquire the row lock")
+	}
+
+	// The mover runs on moverRepo/moverDB, the SECOND connection — genuinely
+	// independent of db, so its call below contends for the real Postgres
+	// row lock rather than for Go's connection pool. It is the unmodified
+	// production UpdateTask path, not a simulation.
+	moverDone := make(chan error, 1)
+	go func() {
+		moved := *task
+		moved.WorkflowStepID = "step-b"
+		moverDone <- moverRepo.UpdateTask(ctx, &moved)
+	}()
+
+	select {
+	case <-moverDone:
+		t.Fatal("moverRepo.UpdateTask returned while a concurrent transaction still held the row's FOR UPDATE lock — readTaskStepInTx is not serializing concurrent movers")
+	case <-time.After(300 * time.Millisecond):
+		// Still blocked, as expected: the row lock is held.
+	}
+
+	release()
+	if err := <-holderDone; err != nil {
+		t.Fatalf("holder goroutine: %v", err)
+	}
+
+	select {
+	case err := <-moverDone:
+		if err != nil {
+			t.Fatalf("moverRepo.UpdateTask: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for moverRepo.UpdateTask to proceed after the lock was released")
+	}
+
+	final, err := repo.GetTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if final.WorkflowStepID != "step-b" {
+		t.Fatalf("final workflow_step_id = %q, want step-b (the mover's UpdateTask committed after the holder released its lock)", final.WorkflowStepID)
+	}
+
+	rows := assertChainIntact(t, repo, task.ID)
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2 (genesis + the mover's real UpdateTask move; the holder never wrote anything)", len(rows))
+	}
+	last := rows[len(rows)-1]
+	if last.toWorkflowStepID == nil || *last.toWorkflowStepID != "step-b" {
+		t.Fatalf("final to_workflow_step_id = %v, want step-b", last.toWorkflowStepID)
 	}
 }

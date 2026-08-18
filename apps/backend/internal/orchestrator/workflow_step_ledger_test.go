@@ -29,8 +29,16 @@ import (
 // (TestApplyTransitionRecordsEngineTransitionFromSessionID) or in isolation
 // (TestEngineTransitionAttributionPreservesUserCancellationTrigger), never
 // through executeStepTransition's own call to it with a real ledger write.
-// Table-driven over both legacy triggers so a future edit that maps
-// triggerOnEnter to the wrong engine.Trigger flips a real row silently.
+// Table-driven over both legacy triggers so each of ProcessOnTurnStart's and
+// ProcessOnTurnComplete's real call sites into executeStepTransition is
+// proven to reach a correct session-originated ledger row on its own, not
+// just one of the two. This does NOT distinguish on_turn_start from
+// on_turn_complete: engineTriggerIsSessionOriginated puts both in the same
+// case arm, so a bug that swapped the triggerOnEnter->engine.Trigger mapping
+// at the executeStepTransition call site (event_handlers_workflow.go) would
+// still produce byte-identical rows here and go undetected — only a change
+// that stopped treating one of the two as session-originated would surface
+// as a failure.
 func TestExecuteStepTransitionRecordsEngineTransitionOnLegacyPath(t *testing.T) {
 	tests := []struct {
 		name           string
