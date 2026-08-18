@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
@@ -98,7 +98,15 @@ vi.mock("./quick-chat-delete-dialog", () => ({
 
 function EscapeGuardProbe() {
   const [guarded, setGuarded] = useState(false);
-  useClarificationEscapeGuard(guarded);
+  // A stand-in for a real handled/in-scope/unmodified Escape: the toggle
+  // simulates whichever widget-side condition (enabled, target-in-scope, no
+  // modifier) is currently true, and the dialog must consult the predicate
+  // itself rather than a value it derived some other way. Memoized like a
+  // real caller (e.g. clarification-input-overlay.tsx's useEscapeGuardRegistration)
+  // must -- an inline closure would be a fresh reference every render, and the
+  // hook's effect re-running every render would re-register in a loop.
+  const predicate = useCallback(() => guarded, [guarded]);
+  useClarificationEscapeGuard(predicate);
   return (
     <div data-testid="quick-chat-session-view">
       <button

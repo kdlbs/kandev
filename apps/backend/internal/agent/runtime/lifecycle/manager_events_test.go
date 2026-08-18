@@ -1532,6 +1532,26 @@ func TestHandleAgentEvent_UpdatesLastActivityAt(t *testing.T) {
 	}
 }
 
+func TestRecordActivity_MetadataDoesNotMarkPromptStarted(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	execution := createTestExecution("exec-metadata", "task-1", "session-1")
+	execution.agentEventSincePrompt = false
+	execution.lastActivityAt = time.Now().Add(-time.Minute)
+
+	mgr.recordActivity(execution, agentctl.AgentEvent{Type: "session_models"})
+
+	lastActivity, agentEventSeen, epoch := execution.promptActivitySnapshot()
+	if time.Since(lastActivity) > time.Second {
+		t.Fatalf("metadata event did not refresh last activity: %v ago", time.Since(lastActivity))
+	}
+	if agentEventSeen {
+		t.Fatal("metadata event marked the prompt as started")
+	}
+	if epoch != 0 {
+		t.Fatalf("metadata event advanced activity epoch to %d, want 0", epoch)
+	}
+}
+
 func TestHandleAgentEvent_TracksActiveTopLevelTool(t *testing.T) {
 	mgr, _ := createTestManagerWithTracking()
 	execution := createTestExecution("exec-1", "task-1", "session-1")

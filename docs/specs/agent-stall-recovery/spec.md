@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-07-29
-updated: 2026-08-08
+updated: 2026-08-18
 owner: Kandev
 ---
 
@@ -13,6 +13,7 @@ Decisions:
 - [ADR-2026-08-02-agent-terminal-diagnostics-over-stderr](../../decisions/2026-08-02-agent-terminal-diagnostics-over-stderr.md)
 - [ADR-2026-08-07-allowlisted-provider-action-links](../../decisions/2026-08-07-allowlisted-provider-action-links.md)
 - [ADR-2026-08-08-provider-neutral-agent-error-recovery](../../decisions/2026-08-08-provider-neutral-agent-error-recovery.md)
+- [ADR-2026-08-18-never-started-agent-stall-terminal](../../decisions/2026-08-18-never-started-agent-stall-terminal.md)
 
 Implementation plans:
 
@@ -47,8 +48,10 @@ mere inactivity so a failed turn is not presented as healthy work.
 - The notice remains visible and actionable while the affected prompt's
   `turn_id` is the active turn in a `RUNNING` session, including after a page
   reload. It is hidden when that turn settles or a later turn becomes active.
-- Detection alone does not change task state, session state, prompt admission,
-  or process liveness.
+- Detection after genuine agent activity does not change task state, session
+  state, prompt admission, or process liveness. A current five-minute snapshot
+  with no genuine event since prompt dispatch is a launch failure and moves the
+  session and task to `FAILED`.
 - The backend logs the first stall detected for a prompt generation and does
   not emit another notice or log entry on every watchdog check.
 
@@ -178,6 +181,10 @@ sanitized diagnostic message for the collapsed technical-details surface.
 - **GIVEN** a stall notice is visible on a phone viewport, **WHEN** the user taps
   **Cancel turn**, **THEN** the same cancellation outcome is reachable through
   an inline, content-width touch target of at least 44px.
+- **GIVEN** a prompt has produced no genuine agent event since dispatch,
+  **WHEN** the current five-minute watchdog snapshot is handled, **THEN** Kandev
+  persists a terminal error, moves the session and task to `FAILED`, and does
+  not render a running-only cancel action.
 - **GIVEN** a quiet but legitimate long-running turn, **WHEN** the inactivity
   threshold passes and the user does not cancel, **THEN** Kandev leaves the
   turn and process running.
@@ -214,8 +221,8 @@ sanitized diagnostic message for the collapsed technical-details surface.
 
 ## Out of scope
 
-- Automatically timing out, failing, cancelling, or killing a turn based only
-  on inactivity.
+- Automatically timing out, cancelling, or killing a turn based only on
+  inactivity.
 - Making the inactivity threshold user-configurable.
 - Reading, tailing, or exposing an agent vendor's private log files.
 - Treating arbitrary stderr text as trusted terminal evidence.

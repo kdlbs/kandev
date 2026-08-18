@@ -382,7 +382,9 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	}
 	switch action {
 	case "fresh_start":
-		s.clearResumeToken(ctx, sessionID)
+		if err := s.clearResumeToken(ctx, sessionID); err != nil {
+			return nil, fmt.Errorf("failed to clear resume token for fresh start: %w", err)
+		}
 	case "resume":
 		// no-op — relaunch with existing resume token
 	default:

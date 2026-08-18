@@ -27,6 +27,7 @@ type SessionModelsEntry = {
   currentModelId: string;
   models: SessionModelEntry[];
   configOptions: ConfigOptionEntry[];
+  configOptionsSettled?: boolean;
   configBaseline?: Record<string, string>;
   /** Set when the session started on the profile's fallback model. */
   fallbackModel?: string;
@@ -46,22 +47,20 @@ function configValueKeys(value: unknown): string[] {
     .map(([key]) => key);
 }
 
-function recordValue(value: unknown, key: string): unknown {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  return (value as Record<string, unknown>)[key];
-}
-
 function configValue(value: unknown, key: string): string | undefined {
-  const candidate = recordValue(value, key);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const candidate = (value as Record<string, unknown>)[key];
   return typeof candidate === "string" && candidate ? candidate : undefined;
 }
 
 const MODEL_CONFIG_KEY = "model";
-// Legacy snapshots used config_options.agent for agent identity. Provider-defined
-// agent options stay valid unless the value matches the session identity.
+// "agent" identifies which agent runs the session. Legacy snapshots can record
+// it as an identity or the stale value "default", but provider-defined agent
+// options remain required when the provider advertises them.
 const AGENT_CONFIG_KEY = "agent";
+const LEGACY_AGENT_CONFIG_VALUE = "default";
 
-function isLegacyAgentIdentityConfig(session: TaskSession | null, agents: Agent[]): boolean {
+function isLegacyAgentConfig(session: TaskSession | null, agents: Agent[]): boolean {
   if (!session) return false;
   const snapshot = session.agent_profile_snapshot;
   const profile = agents
@@ -75,17 +74,16 @@ function isLegacyAgentIdentityConfig(session: TaskSession | null, agents: Agent[
       profile?.agentDisplayName,
     ].filter((value): value is string => !!value),
   );
-  if (identityValues.size === 0) return false;
-  const metadata = session.metadata;
   const optionSources = [
     snapshot?.config_options,
     profile?.configOptions,
-    recordValue(recordValue(metadata, "runtime_config"), "config_options"),
-    recordValue(recordValue(metadata, "runtime_config_overrides"), "config_options"),
+    (session.metadata?.runtime_config as Record<string, unknown> | undefined)?.config_options,
+    (session.metadata?.runtime_config_overrides as Record<string, unknown> | undefined)
+      ?.config_options,
   ];
   return optionSources.some((source) => {
     const value = configValue(source, AGENT_CONFIG_KEY);
-    return !!value && identityValues.has(value);
+    return value === LEGACY_AGENT_CONFIG_VALUE || (!!value && identityValues.has(value));
   });
 }
 
@@ -124,11 +122,12 @@ export function hasCompleteDynamicConfig(
   // configOptions. Treat that key as satisfied when the session has a flat model
   // list — the selector renders fine from it.
   const hasFlatModelList = !!sessionModelsData.models.length;
-  const hasLegacyAgentIdentity = isLegacyAgentIdentityConfig(session, agents);
+  const hasLegacyAgentConfig =
+    sessionModelsData.configOptionsSettled === true && isLegacyAgentConfig(session, agents);
   return required.every(
     (key) =>
       available.has(key) ||
-      (key === AGENT_CONFIG_KEY && hasLegacyAgentIdentity) ||
+      (key === AGENT_CONFIG_KEY && hasLegacyAgentConfig) ||
       (key === MODEL_CONFIG_KEY && hasFlatModelList),
   );
 }

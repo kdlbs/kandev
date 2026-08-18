@@ -1179,6 +1179,9 @@ func taskSessionModelsBootState(
 		"models":         models,
 		"configOptions":  options,
 	}
+	if snapshot.ConfigOptionsSettled {
+		state["configOptionsSettled"] = true
+	}
 	if len(baseline) > 0 {
 		state["configBaseline"] = baseline
 	}

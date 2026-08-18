@@ -27,6 +27,14 @@ export type PluginIcon = string | Component<PluginIconProps>;
 /** Placement for a registered nav item; see `PluginRegistry.registerNavItem`. */
 export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
 
+/** Context passed to components registered for the `main-top-bar` slot. */
+export interface MainTopBarSlotProps {
+  workspaceId: string | null;
+  workspaceLabel?: string;
+  currentPage: "kanban" | "tasks";
+  presentation: "desktop" | "mobile";
+}
+
 export type StateUpdater<Value> = Value | ((previous: Value) => Value);
 export type StateSetter<Value> = (value: StateUpdater<Value>) => void;
 

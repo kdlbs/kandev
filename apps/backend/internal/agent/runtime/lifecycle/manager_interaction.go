@@ -1325,6 +1325,15 @@ func (m *Manager) OwnsPromptGeneration(sessionID, executionID string, generation
 	return m.executionStore.OwnsPromptGeneration(sessionID, executionID, generation)
 }
 
+// OwnsPromptActivity reports whether a stall snapshot still belongs to the
+// active prompt and no genuine event arrived after the snapshot was captured.
+func (m *Manager) OwnsPromptActivity(
+	sessionID, executionID string,
+	generation, activityEpoch uint64,
+) bool {
+	return m.executionStore.OwnsPromptActivity(sessionID, executionID, generation, activityEpoch)
+}
+
 // GetPromptGenerationForSession returns the generation currently owned by the
 // active prompt for sessionID. Orchestrator cancellation uses this together
 // with the execution and turn IDs to reject stale terminal events while the

@@ -131,7 +131,7 @@ func (s BudgetScopeType) Valid() bool {
 }
 
 // CostSource records which layer priced a CostEvent's dollars, distinct
-// from Estimated (a token-synthesis flag). NULL on legacy rows written
+// from Estimated (a usage-authority flag). NULL on legacy rows written
 // before this field existed — never inferred.
 type CostSource string
 

@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- hydration paths share one complete-state fixture. */
 import { beforeEach, describe, expect, it } from "vitest";
 import { produce } from "immer";
 import type { Draft } from "immer";
@@ -9,12 +10,14 @@ import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/ty
 
 const TERMINAL_TAB_ID = "terminal-1";
 
+/** Builds an AppState draft carrying only the default UI slice for hydrateUI tests. */
 function makeDraft(): AppState {
   // hydrateUI only touches UI-slice fields; an empty object cast satisfies
   // the rest without dragging the full AppState shape into this test.
   return { ...defaultUIState } as unknown as AppState;
 }
 
+/** Builds a deep-cloned AppState from the default state for full-state hydration tests. */
 function makeAppDraft(): AppState {
   return structuredClone(defaultState) as AppState;
 }
@@ -632,15 +635,37 @@ describe("hydrateState — session runtime model state", () => {
     });
 
     expect(result.sessionModels.bySessionId["active-session"].currentModelId).toBe(liveModelId);
-  });
-});
 
-describe("hydrateState — system slice", () => {
-  it("leaves the system slice untouched when the caller supplies no system fields", () => {
-    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+    const systemResult = produce(makeAppDraft(), (draft: Draft<AppState>) => {
       hydrateState(draft, {});
     });
-
-    expect(result.system).toEqual(defaultState.system);
+    expect(systemResult.system).toEqual(defaultState.system);
   });
+});
+it.each([true, false])(
+  "turn hydration marks a session only when it is force-merged",
+  (forceMerge) => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      if (!forceMerge) draft.turns.bySession["session-1"] = [];
+      hydrateState(
+        draft,
+        { turns: { bySession: { "session-1": [] } } } as unknown as Partial<AppState>,
+        { activeSessionId: "session-1", forceMergeSessionId: forceMerge ? "session-1" : null },
+      );
+    });
+
+    expect(result.turns.loadedBySession).toEqual(forceMerge ? { "session-1": true } : {});
+  },
+);
+
+it("marks an absent inactive session after ordinary turn hydration", () => {
+  const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+    hydrateState(
+      draft,
+      { turns: { bySession: { "session-1": [] } } } as unknown as Partial<AppState>,
+      { activeSessionId: "other-session", forceMergeSessionId: null },
+    );
+  });
+
+  expect(result.turns.loadedBySession["session-1"]).toBe(true);
 });

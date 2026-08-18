@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { makeApi, makeStore } from "./dockview-panel-actions.test-utils";
 import type { MockPanel } from "./dockview-panel-actions.test-utils";
-import { buildExtraPanelActions, buildPanelActions } from "./dockview-panel-actions";
+import { buildPanelActions } from "./dockview-panel-actions";
+import { buildExtraPanelActions } from "./dockview-extra-panel-actions";
 import { DEV_SERVER_PANEL_ID } from "./layout-manager/constants";
 
 const RIGHT_BOTTOM_GROUP = "group-right-bottom";
@@ -28,7 +29,8 @@ describe("focusOrAddBrowserPanel", () => {
 describe("addDevServerPanel", () => {
   it("opens the dev-server output panel in the terminal group", () => {
     const api = makeApi({ extraGroupIds: [RIGHT_BOTTOM_GROUP] });
-    const actions = buildExtraPanelActions(makeStore(api).get);
+    const store = makeStore(api);
+    const actions = buildExtraPanelActions(store.set, store.get);
 
     actions.addDevServerPanel();
 
@@ -41,7 +43,8 @@ describe("addDevServerPanel", () => {
 
   it("carries no terminalId so closing the tab never parks or destroys a user shell", () => {
     const api = makeApi({ extraGroupIds: [RIGHT_BOTTOM_GROUP] });
-    const actions = buildExtraPanelActions(makeStore(api).get);
+    const store = makeStore(api);
+    const actions = buildExtraPanelActions(store.set, store.get);
 
     actions.addDevServerPanel();
 
@@ -52,7 +55,8 @@ describe("addDevServerPanel", () => {
 
   it("reuses the existing panel instead of stacking duplicates", () => {
     const api = makeApi({ extraGroupIds: [RIGHT_BOTTOM_GROUP] });
-    const actions = buildExtraPanelActions(makeStore(api).get);
+    const store = makeStore(api);
+    const actions = buildExtraPanelActions(store.set, store.get);
 
     actions.addDevServerPanel();
     actions.addDevServerPanel();
@@ -62,7 +66,8 @@ describe("addDevServerPanel", () => {
 
   it("honours an explicit target group", () => {
     const api = makeApi({ extraGroupIds: ["group-other"] });
-    const actions = buildExtraPanelActions(makeStore(api).get);
+    const store = makeStore(api);
+    const actions = buildExtraPanelActions(store.set, store.get);
 
     actions.addDevServerPanel("group-other");
 

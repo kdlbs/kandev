@@ -1700,5 +1700,13 @@
   "modelSelectionRemediationTitle": "请检查以下各项",
   "modelSelectionRemediationUnknown": "请检查执行器配置。",
   "modelSelectionRequested": "请求的模型",
-  "modelSelectionWarning": "执行器无法使用已保存的模型选择。"
+  "modelSelectionWarning": "执行器无法使用已保存的模型选择。",
+  "collapsePrompt": "收起提示",
+  "durationUnitHours": "时",
+  "durationUnitMinutes": "分",
+  "durationUnitSeconds": "秒",
+  "expandPrompt": "展开提示",
+  "promptHistory": "提示历史",
+  "promptHistoryEmpty": "暂无提示。",
+  "scrollToPrompt": "滚动到提示"
 }

@@ -1524,12 +1524,18 @@ type MainTopBarSlotProps = {
   workspaceId: string | null; // workspace the top bar is showing, null on global home
   workspaceLabel?: string; // human-readable workspace name, when known
   currentPage: "kanban" | "tasks";
+  presentation: "desktop" | "mobile";
 };
 ```
 
 Because the bar is not scoped to a task, no task/session ids are provided. Like
 `chat-top-bar` it is a compact horizontal strip, so keep contributions to small
-badges or `h-7` buttons that match the native metric chips.
+badges or icon buttons. On a phone, `presentation` is `"mobile"`; the
+contribution joins the horizontally scrollable middle strip between the fixed
+Kandev link and menu button. Use `host.ui.Button` for documented icon actions.
+The host normalizes those buttons to a 32px box and their SVG icons to 16px.
+Do not add a second horizontal scroll container. Desktop contributions keep
+their existing sizing.
 
 ```js
 // inside initialize(registry, host):

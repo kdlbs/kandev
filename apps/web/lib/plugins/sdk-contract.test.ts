@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
   PluginHostApi as PublicPluginHostApi,
+  MainTopBarSlotProps as PublicMainTopBarSlotProps,
   PluginNavSection as PublicPluginNavSection,
   PluginRegistry as PublicPluginRegistry,
   RepositoryProviderRegistration as PublicRepositoryProviderRegistration,
@@ -9,6 +10,7 @@ import type {
 } from "@kandev/plugin-sdk";
 import type {
   PluginHostApi,
+  MainTopBarSlotProps as HostMainTopBarSlotProps,
   PluginNavSection,
   PluginRegistry,
   RepositoryProviderRegistration,
@@ -48,6 +50,10 @@ describe("public plugin SDK", () => {
     // `import type { PluginNavSection } from "@kandev/plugin-sdk"` verbatim, and
     // TS's structural typing can't otherwise tell an inline union from a named export.
     const navSectionIsCanonical: SameType<PluginNavSection, PublicPluginNavSection> = true;
+    const mainTopBarSlotPropsAreCanonical: SameType<
+      HostMainTopBarSlotProps,
+      PublicMainTopBarSlotProps
+    > = true;
     expect(hostHasEveryPublicKey).toBe(true);
     expect(registryHasEveryPublicKey).toBe(true);
     expect(publicHasEveryRegistryKey).toBe(true);
@@ -57,6 +63,7 @@ describe("public plugin SDK", () => {
     expect(reviewSummaryIsCanonical).toBe(true);
     expect(associationIsCanonical).toBe(true);
     expect(navSectionIsCanonical).toBe(true);
+    expect(mainTopBarSlotPropsAreCanonical).toBe(true);
     expect(publicHostContract).toBeTypeOf("function");
     expect(publicRegistryContract).toBeTypeOf("function");
   });

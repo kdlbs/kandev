@@ -9,6 +9,46 @@ export async function requireBox(locator: Locator, label: string): Promise<Eleme
   return box;
 }
 
+/**
+ * Returns descendant text in the order Chromium paints its glyphs from left to
+ * right. DOM text remains in logical order when bidi layout moves punctuation,
+ * so each character needs its own rendered range for visual-order assertions.
+ */
+export async function getSingleLineTextInVisualOrder(locator: Locator): Promise<string> {
+  return locator.evaluate((node) => {
+    const characters: { character: string; left: number; top: number; sourceIndex: number }[] = [];
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    let sourceIndex = 0;
+
+    for (let textNode = walker.nextNode(); textNode; textNode = walker.nextNode()) {
+      const text = textNode.textContent ?? "";
+      let offset = 0;
+      for (const character of Array.from(text)) {
+        const range = document.createRange();
+        const nextOffset = offset + character.length;
+        range.setStart(textNode, offset);
+        range.setEnd(textNode, nextOffset);
+        const rect = range.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          characters.push({ character, left: rect.left, top: rect.top, sourceIndex });
+        }
+        offset = nextOffset;
+        sourceIndex += 1;
+      }
+    }
+
+    const firstTop = characters[0]?.top;
+    if (firstTop !== undefined && characters.some(({ top }) => Math.abs(top - firstTop) > 1)) {
+      throw new Error("Expected text to render on one line");
+    }
+
+    return characters
+      .sort((left, right) => left.left - right.left || left.sourceIndex - right.sourceIndex)
+      .map(({ character }) => character)
+      .join("");
+  });
+}
+
 // Shared layout assertions for mobile / responsive specs. Extracted because
 // both onboarding mobile specs need the same overflow + padding checks and
 // duplicating the DOM walk caused review churn.

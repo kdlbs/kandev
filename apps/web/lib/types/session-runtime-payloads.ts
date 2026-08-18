@@ -46,6 +46,7 @@ export type SessionModelsPayload = {
   current_model_id: string;
   models: SessionModelInfoPayload[];
   config_options: ConfigOptionPayload[];
+  config_options_settled?: boolean;
   config_baseline?: Record<string, string>;
   timestamp: string;
 };

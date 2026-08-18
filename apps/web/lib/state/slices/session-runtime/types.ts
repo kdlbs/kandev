@@ -255,6 +255,7 @@ export type SessionModelsState = {
       currentModelId: string;
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
+      configOptionsSettled?: boolean;
       configBaseline?: Record<string, string>;
       /** Set when the session started on the profile's fallback model. */
       fallbackModel?: string;

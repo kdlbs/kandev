@@ -1700,5 +1700,13 @@
   "modelSelectionRemediationTitle": "Verifique estes itens",
   "modelSelectionRemediationUnknown": "Verifique a configuração do executor.",
   "modelSelectionRequested": "Modelo pedido",
-  "modelSelectionWarning": "O executor não conseguiu usar a seleção de modelo guardada."
+  "modelSelectionWarning": "O executor não conseguiu usar a seleção de modelo guardada.",
+  "collapsePrompt": "Recolher prompt",
+  "durationUnitHours": "h",
+  "durationUnitMinutes": "m",
+  "durationUnitSeconds": "s",
+  "expandPrompt": "Expandir prompt",
+  "promptHistory": "Histórico de prompts",
+  "promptHistoryEmpty": "Ainda sem prompts.",
+  "scrollToPrompt": "Ir para o prompt"
 }

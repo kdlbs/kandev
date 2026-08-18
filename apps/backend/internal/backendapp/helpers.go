@@ -500,13 +500,15 @@ func appendSessionModelsMessage(sessionID string, session *models.TaskSession, l
 	if modelState == nil || (modelState.CurrentModelID == "" && len(modelState.Models) == 0) {
 		return result
 	}
+	snapshot, _ := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
 	notification, err := ws.NewNotification(ws.ActionSessionModelsUpdated, lifecycle.SessionModelsEventPayload{
-		TaskID:         session.TaskID,
-		SessionID:      sessionID,
-		CurrentModelID: modelState.CurrentModelID,
-		Models:         modelState.Models,
-		ConfigOptions:  modelState.ConfigOptions,
-		ConfigBaseline: sessionACPConfigBaseline(session),
+		TaskID:               session.TaskID,
+		SessionID:            sessionID,
+		CurrentModelID:       modelState.CurrentModelID,
+		Models:               modelState.Models,
+		ConfigOptions:        modelState.ConfigOptions,
+		ConfigOptionsSettled: modelState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled,
+		ConfigBaseline:       sessionACPConfigBaseline(session),
 	})
 	if err == nil {
 		result = append(result, notification)
