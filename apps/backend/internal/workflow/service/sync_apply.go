@@ -160,7 +160,7 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 	// persisting any step. A malformed later step must leave the synced workflow
 	// untouched so the next sync can retry after the source is fixed.
 	for _, sp := range pw.Steps {
-		step := s.stepFromPortable(wf.ID, sp, posToID)
+		step := s.stepFromPortableForSync(wf.ID, sp, posToID, existingByName[sp.Name])
 		if err := models.ValidateWorkflowStep(step); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: invalid step %q: %v", wf.Name, sp.Name, err))
 			return
@@ -173,13 +173,21 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 		return
 	}
 	for _, sp := range pw.Steps {
-		step := s.stepFromPortable(wf.ID, sp, posToID)
-		if existing, ok := existingByName[sp.Name]; ok {
+		existing := existingByName[sp.Name]
+		step := s.stepFromPortableForSync(wf.ID, sp, posToID, existing)
+		var rebinding bool
+		var oldProfileID, existingID string
+		var reviewRebindings []profileRebinding
+		if existing != nil {
 			step.CreatedAt = existing.CreatedAt
 			step.StageType = existing.StageType // not carried by the portable format
 			if stepMatchesDefinition(existing, step) {
 				continue
 			}
+			rebinding = existing.AgentProfileID != "" && existing.AgentProfileID != step.AgentProfileID
+			oldProfileID = existing.AgentProfileID
+			existingID = existing.ID
+			reviewRebindings = findReviewProfileRebindings(existing.Events, step.Events)
 			err = s.repo.UpdateStep(ctx, step)
 		} else {
 			err = s.repo.CreateStep(ctx, step)
@@ -188,6 +196,7 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to apply step %q: %v", wf.Name, sp.Name, err))
 			return
 		}
+		s.logStepProfileRebindings(wf, sp.Name, existingID, rebinding, oldProfileID, step.AgentProfileID, reviewRebindings)
 		changed = true
 	}
 	for _, st := range toDelete {
@@ -200,6 +209,142 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 	if changed {
 		result.Updated = append(result.Updated, wf.Name)
 	}
+}
+
+func (s *Service) logStepProfileRebindings(wf *taskmodels.Workflow, stepName, stepID string, rebinding bool, oldProfileID, newProfileID string, reviewRebindings []profileRebinding) {
+	if rebinding {
+		s.logger.Warn("workflow sync rebinding step's agent profile",
+			zap.String("workflow_id", wf.ID),
+			zap.String("workflow_name", wf.Name),
+			zap.String("step_id", stepID),
+			zap.String("step_name", stepName),
+			zap.String("old_agent_profile_id", oldProfileID),
+			zap.String("new_agent_profile_id", newProfileID))
+	}
+	for _, reviewRebinding := range reviewRebindings {
+		s.logger.Warn("workflow sync rebinding step's review agent profile",
+			zap.String("workflow_id", wf.ID),
+			zap.String("workflow_name", wf.Name),
+			zap.String("step_id", stepID),
+			zap.String("step_name", stepName),
+			zap.String("old_agent_profile_id", reviewRebinding.oldID),
+			zap.String("new_agent_profile_id", reviewRebinding.newID))
+	}
+}
+
+type profileRebinding struct {
+	oldID string
+	newID string
+}
+
+func (s *Service) stepFromPortableForSync(workflowID string, sp models.StepPortable, posToID map[int]string, existing *models.WorkflowStep) *models.WorkflowStep {
+	existingProfileID := ""
+	if existing != nil {
+		existingProfileID = existing.AgentProfileID
+	}
+	var matchProfile models.AgentProfileMatcher
+	if s.matchProfile != nil {
+		matchProfile = s.reviewProfileMatcherForSync(existing)
+	}
+	return s.stepFromPortableWithMatcher(workflowID, sp, posToID, matchProfile, existingProfileID)
+}
+
+func (s *Service) reviewProfileMatcherForSync(existing *models.WorkflowStep) models.AgentProfileMatcher {
+	preserved := make(map[string][]string)
+	if existing != nil && s.resolveProfile != nil {
+		for _, action := range existing.Events.OnEnter {
+			if action.Type != models.OnEnterRunCodeReview || action.Config == nil {
+				continue
+			}
+			profileID, ok := action.Config[models.ReviewAgentProfileConfigKey].(string)
+			if !ok || profileID == "" {
+				continue
+			}
+			if portable := s.resolveProfile(profileID); portable != nil {
+				key := portableProfileKey(portable.AgentName, portable.Model, portable.Mode)
+				preserved[key] = append(preserved[key], profileID)
+			}
+		}
+	}
+	return func(agentName, model, mode, currentID string) string {
+		if currentID != "" {
+			return s.matchProfile(agentName, model, mode, currentID)
+		}
+		key := portableProfileKey(agentName, model, mode)
+		if candidates := preserved[key]; len(candidates) > 0 {
+			profileID := candidates[0]
+			preserved[key] = candidates[1:]
+			return profileID
+		}
+		if s.matchProfile == nil {
+			return ""
+		}
+		return s.matchProfile(agentName, model, mode, "")
+	}
+}
+
+func portableProfileKey(agentName, model, mode string) string {
+	return agentName + "\x00" + model + "\x00" + mode
+}
+
+func findReviewProfileRebindings(existing, desired models.StepEvents) []profileRebinding {
+	oldIDs := reviewProfileIDs(existing)
+	newIDs := reviewProfileIDs(desired)
+	newCounts := make(map[string]int, len(newIDs))
+	for _, profileID := range newIDs {
+		if profileID != "" {
+			newCounts[profileID]++
+		}
+	}
+	var unmatchedOld []string
+	for _, profileID := range oldIDs {
+		if profileID == "" {
+			continue
+		}
+		if newCounts[profileID] > 0 {
+			newCounts[profileID]--
+			continue
+		}
+		unmatchedOld = append(unmatchedOld, profileID)
+	}
+	oldCounts := make(map[string]int, len(oldIDs))
+	for _, profileID := range oldIDs {
+		if profileID != "" {
+			oldCounts[profileID]++
+		}
+	}
+	var unmatchedNew []string
+	for _, profileID := range newIDs {
+		if profileID == "" {
+			continue
+		}
+		if oldCounts[profileID] > 0 {
+			oldCounts[profileID]--
+			continue
+		}
+		unmatchedNew = append(unmatchedNew, profileID)
+	}
+	var rebindings []profileRebinding
+	for i, oldID := range unmatchedOld {
+		newID := ""
+		if i < len(unmatchedNew) {
+			newID = unmatchedNew[i]
+		}
+		rebindings = append(rebindings, profileRebinding{oldID: oldID, newID: newID})
+	}
+	return rebindings
+}
+
+func reviewProfileIDs(events models.StepEvents) []string {
+	var profileIDs []string
+	for _, action := range events.OnEnter {
+		if action.Type != models.OnEnterRunCodeReview || action.Config == nil {
+			continue
+		}
+		profileID, _ := action.Config[models.ReviewAgentProfileConfigKey].(string)
+		profileIDs = append(profileIDs, profileID)
+	}
+	return profileIDs
 }
 
 // stepMatchesDefinition reports whether an existing step already equals its
@@ -268,15 +413,27 @@ func (s *Service) planStepChanges(ctx context.Context, wf *taskmodels.Workflow, 
 func (s *Service) applyWorkflowFields(ctx context.Context, wf *taskmodels.Workflow, pw models.WorkflowPortable) (bool, error) {
 	profileID := ""
 	if pw.AgentProfile != nil && s.matchProfile != nil {
-		profileID = s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode)
+		profileID = s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode, wf.AgentProfileID)
 	}
 	if wf.Description == pw.Description && wf.Prompt == pw.Prompt && wf.AgentProfileID == profileID {
 		return false, nil
 	}
+	oldProfileID := wf.AgentProfileID
+	rebinding := oldProfileID != "" && oldProfileID != profileID
 	wf.Description = pw.Description
 	wf.Prompt = pw.Prompt
 	wf.AgentProfileID = profileID
-	return true, s.workflowProvider.UpdateWorkflow(ctx, wf)
+	if err := s.workflowProvider.UpdateWorkflow(ctx, wf); err != nil {
+		return true, err
+	}
+	if rebinding {
+		s.logger.Warn("workflow sync rebinding workflow's agent profile",
+			zap.String("workflow_id", wf.ID),
+			zap.String("workflow_name", wf.Name),
+			zap.String("old_agent_profile_id", oldProfileID),
+			zap.String("new_agent_profile_id", profileID))
+	}
+	return true, nil
 }
 
 // ReleaseSyncedWorkflows converts every GitHub-sourced workflow in the

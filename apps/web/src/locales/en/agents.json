@@ -11,7 +11,6 @@
   "agentNotFound": "Agent not found.",
   "agentProfileSettings": "{{name}} profile settings",
   "agentProfilesTitle": "{{name}} Profiles",
-  "approveUpdate": "Approve update",
   "authRequiredOpenLoginTerminal": "Authentication required - click to open login terminal",
   "authRequiredOpenShell": "Authentication required - click to open a shell and sign in",
   "authenticationRequired": "Authentication required",
@@ -153,7 +152,6 @@
   "noModeFound": "No mode found.",
   "noModelFound": "No model found.",
   "noModelsFound": "No models found.",
-  "noProfilesYet": "No profiles yet. Create one from an installed agent.",
   "noProfilesYetShort": "No profiles yet",
   "notInstalled": "Not installed",
   "openTerminal": "Open terminal",
@@ -187,7 +185,6 @@
   "runtimeUpdateSessionsNote": "Active sessions keep running; only later probes and launches use the refreshed runtime.",
   "runtimeUpdatedRefreshFailed": "Runtime updated, but capabilities could not be refreshed: {{error}}",
   "runtimeUpdatedSuccess": "Runtime updated successfully.",
-  "runtimeVersion": "Runtime version",
   "activeRuntimeVersion": "Active version: {{version}}",
   "activeRuntimeVersionMarker": "active",
   "latestRuntimeVersion": "latest",
@@ -234,5 +231,9 @@
   "duplicateProfileNamed": "Duplicate {{name}}",
   "duplicateProfileSuccess": "Profile duplicated",
   "duplicateSaveBlocked": "Settings are still saving. Try again in a moment.",
-  "failedToDuplicateProfile": "Failed to duplicate profile"
+  "failedToDuplicateProfile": "Failed to duplicate profile",
+  "saveProfile": "Save profile",
+  "createProfile": "Create profile",
+  "savingProfile": "Saving...",
+  "creatingProfile": "Creating..."
 }

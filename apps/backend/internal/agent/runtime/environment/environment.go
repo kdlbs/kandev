@@ -52,21 +52,27 @@ func (e *SecretError) Unwrap() error { return e.err }
 // passed to the callback.
 type RevealFunc func(context.Context, Definition) (string, error)
 
-// Validate checks source identity and conflicts without revealing any secret
-// values. Callers may use it as an early shape check; Resolve must still run at
-// the final composition boundary after all managed runtime definitions exist.
+// Validate checks source identity, tier precedence, and secret-veto
+// conflicts without revealing any secret values. Callers may use it as an
+// early shape check; Resolve must still run at the final composition
+// boundary after all managed runtime definitions exist. Validate emits no
+// override record, no log, and no counter increment — the environment
+// package holds no logger and stays a pure function of its inputs.
 func Validate(definitions []Definition) error {
-	_, err := selectDefinitions(definitions)
+	_, _, err := selectDefinitions(definitions)
 	return err
 }
 
-// Resolve sorts definitions deterministically, deduplicates identical source
-// identities, reports every origin participating in a conflict, and reveals
-// secrets only after the complete conflict pass succeeds.
-func Resolve(ctx context.Context, definitions []Definition, reveal RevealFunc) (map[string]string, error) {
-	selected, err := selectDefinitions(definitions)
+// Resolve sorts definitions deterministically over five named columns,
+// merges identical source identities, applies the secret veto and then tier
+// precedence to any remaining ambiguity, and reveals secrets only after the
+// complete conflict pass succeeds. On any error it returns a nil map and a
+// nil []OverrideRecord — all or nothing, even when tier precedence had
+// already resolved other keys before the failing key was reached.
+func Resolve(ctx context.Context, definitions []Definition, reveal RevealFunc) (map[string]string, []OverrideRecord, error) {
+	selected, records, err := selectDefinitions(definitions)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	resolved := make(map[string]string, len(selected))
@@ -80,70 +86,220 @@ func Resolve(ctx context.Context, definitions []Definition, reveal RevealFunc) (
 		value := definition.Literal
 		if definition.SecretID != "" {
 			if reveal == nil {
-				return nil, &SecretError{Key: definition.Key, Origin: definition.Origin, err: fmt.Errorf("secret resolver unavailable")}
+				return nil, nil, &SecretError{Key: definition.Key, Origin: definition.Origin, err: fmt.Errorf("secret resolver unavailable")}
 			}
 			value, err = reveal(ctx, definition)
 			if err != nil {
-				return nil, &SecretError{Key: definition.Key, Origin: definition.Origin, err: err}
+				return nil, nil, &SecretError{Key: definition.Key, Origin: definition.Origin, err: err}
 			}
 		}
 		resolved[key] = value
 	}
-	return resolved, nil
+	return resolved, records, nil
 }
 
-func selectDefinitions(definitions []Definition) (map[string]Definition, error) {
+// selectDefinitions implements the resolution procedure: a deterministic
+// five-column sort, per-key identity merging, the secret veto, and tier
+// precedence over any remaining ambiguity.
+func selectDefinitions(definitions []Definition) (map[string]Definition, []OverrideRecord, error) {
 	ordered := append([]Definition(nil), definitions...)
 	sort.SliceStable(ordered, func(i, j int) bool {
-		if ordered[i].Key != ordered[j].Key {
-			return ordered[i].Key < ordered[j].Key
-		}
-		if ordered[i].Origin != ordered[j].Origin {
-			return ordered[i].Origin < ordered[j].Origin
-		}
-		return ordered[i].SecretID < ordered[j].SecretID
+		return definitionLess(ordered[i], ordered[j])
 	})
 
-	selected := make(map[string]Definition, len(ordered))
-	origins := make(map[string]map[string]struct{}, len(ordered))
-	conflicts := make(map[string]map[string]struct{})
+	keyOrder := make([]string, 0, len(ordered))
+	buckets := make(map[string][]Definition, len(ordered))
 	for _, definition := range ordered {
 		if strings.TrimSpace(definition.Key) == "" {
 			continue
 		}
-		if prior, exists := selected[definition.Key]; exists {
-			if definitionIdentity(prior) != definitionIdentity(definition) {
-				if conflicts[definition.Key] == nil {
-					conflicts[definition.Key] = make(map[string]struct{})
-				}
-				for origin := range origins[definition.Key] {
-					conflicts[definition.Key][origin] = struct{}{}
-				}
-				conflicts[definition.Key][definition.Origin] = struct{}{}
-				continue
-			}
-			origins[definition.Key][definition.Origin] = struct{}{}
-			continue
+		if _, exists := buckets[definition.Key]; !exists {
+			keyOrder = append(keyOrder, definition.Key)
 		}
-		selected[definition.Key] = definition
-		origins[definition.Key] = map[string]struct{}{definition.Origin: {}}
+		buckets[definition.Key] = append(buckets[definition.Key], definition)
 	}
 
-	if len(conflicts) > 0 {
-		keys := make([]string, 0, len(conflicts))
-		for key := range conflicts {
-			keys = append(keys, key)
+	selected := make(map[string]Definition, len(keyOrder))
+	var records []OverrideRecord
+	var conflictKeys []string
+	conflicts := make(map[string]*ConflictError, len(keyOrder))
+
+	for _, key := range keyOrder {
+		groups := buildIdentityGroups(buckets[key])
+		definition, record, conflictErr := resolveGroups(key, groups)
+		if conflictErr != nil {
+			conflictKeys = append(conflictKeys, key)
+			conflicts[key] = conflictErr
+			continue
 		}
-		sort.Strings(keys)
-		key := keys[0]
-		conflictOrigins := make([]string, 0, len(conflicts[key]))
-		for origin := range conflicts[key] {
-			conflictOrigins = append(conflictOrigins, origin)
+		selected[key] = definition
+		if record != nil {
+			records = append(records, *record)
 		}
-		sort.Strings(conflictOrigins)
-		return nil, &ConflictError{Key: key, Origins: conflictOrigins}
 	}
-	return selected, nil
+
+	if len(conflictKeys) > 0 {
+		sort.Strings(conflictKeys)
+		return nil, nil, conflicts[conflictKeys[0]]
+	}
+
+	sort.Slice(records, func(i, j int) bool { return records[i].Key < records[j].Key })
+	return selected, records, nil
+}
+
+// definitionLess orders definitions by the five named columns — Key, Origin,
+// SecretID, WorkspaceID, Literal, all ascending — the total order the
+// procedure requires so merged-identity survivorship and revealed values
+// never depend on input slice order.
+func definitionLess(a, b Definition) bool {
+	if a.Key != b.Key {
+		return a.Key < b.Key
+	}
+	if a.Origin != b.Origin {
+		return a.Origin < b.Origin
+	}
+	if a.SecretID != b.SecretID {
+		return a.SecretID < b.SecretID
+	}
+	if a.WorkspaceID != b.WorkspaceID {
+		return a.WorkspaceID < b.WorkspaceID
+	}
+	return a.Literal < b.Literal
+}
+
+// identityGroup collects every definition sharing one definitionIdentity for
+// a key. definition is the representative — the first under the total order
+// — whose Literal/SecretID/WorkspaceID are used for revealing; origins is
+// the full set of every origin that contributed to this identity.
+type identityGroup struct {
+	definition Definition
+	origins    map[string]struct{}
+}
+
+// buildIdentityGroups groups defs (already ordered by definitionLess) by
+// definitionIdentity, preserving first-seen order.
+func buildIdentityGroups(defs []Definition) []*identityGroup {
+	var groups []*identityGroup
+	byIdentity := make(map[string]*identityGroup, len(defs))
+	for _, definition := range defs {
+		id := definitionIdentity(definition)
+		group, ok := byIdentity[id]
+		if !ok {
+			group = &identityGroup{definition: definition, origins: map[string]struct{}{}}
+			byIdentity[id] = group
+			groups = append(groups, group)
+		}
+		group.origins[definition.Origin] = struct{}{}
+	}
+	return groups
+}
+
+// resolveGroups applies steps 4 through 6 of the resolution procedure to one
+// key's identity groups: a single surviving identity wins outright; more
+// than one triggers the secret veto first, then tier precedence.
+func resolveGroups(key string, groups []*identityGroup) (Definition, *OverrideRecord, *ConflictError) {
+	if len(groups) == 1 {
+		return groups[0].definition, nil, nil
+	}
+	if hasSecretBackedGroup(groups) {
+		return Definition{}, nil, conflictError(key, groups)
+	}
+
+	winner, winningTier, ambiguous := strongestGroup(groups)
+	if ambiguous {
+		return Definition{}, nil, conflictError(key, groups)
+	}
+	return winner.definition, overrideRecord(key, groups, winner, winningTier), nil
+}
+
+func hasSecretBackedGroup(groups []*identityGroup) bool {
+	for _, group := range groups {
+		if group.definition.SecretID != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// strongestGroup finds the group whose strongest contributing origin
+// classifies into the numerically smallest (strongest) tier. ambiguous is
+// true when more than one group ties for that top tier.
+func strongestGroup(groups []*identityGroup) (winner *identityGroup, winningTier Tier, ambiguous bool) {
+	winner = groups[0]
+	winningTier = strongestTier(winner.origins)
+	for _, group := range groups[1:] {
+		tier := strongestTier(group.origins)
+		switch {
+		case tier < winningTier:
+			winner, winningTier, ambiguous = group, tier, false
+		case tier == winningTier:
+			ambiguous = true
+		}
+	}
+	return winner, winningTier, ambiguous
+}
+
+// strongestTier is the numerically smallest (strongest) tier among origins.
+func strongestTier(origins map[string]struct{}) Tier {
+	var best Tier
+	first := true
+	for origin := range origins {
+		tier := TierForOrigin(origin)
+		if first || tier < best {
+			best, first = tier, false
+		}
+	}
+	return best
+}
+
+func conflictError(key string, groups []*identityGroup) *ConflictError {
+	return &ConflictError{Key: key, Origins: allOrigins(groups)}
+}
+
+func overrideRecord(key string, groups []*identityGroup, winner *identityGroup, winningTier Tier) *OverrideRecord {
+	losing := make(map[string]Tier)
+	for _, group := range groups {
+		if group == winner {
+			continue
+		}
+		for origin := range group.origins {
+			losing[origin] = TierForOrigin(origin)
+		}
+	}
+	return &OverrideRecord{
+		Key:            key,
+		WinningOrigins: sortedOriginSet(winner.origins),
+		WinningTier:    winningTier,
+		LosingOrigins:  sortedOriginTiers(losing),
+	}
+}
+
+func allOrigins(groups []*identityGroup) []string {
+	set := make(map[string]struct{})
+	for _, group := range groups {
+		for origin := range group.origins {
+			set[origin] = struct{}{}
+		}
+	}
+	return sortedOriginSet(set)
+}
+
+func sortedOriginSet(set map[string]struct{}) []string {
+	result := make([]string, 0, len(set))
+	for origin := range set {
+		result = append(result, origin)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func sortedOriginTiers(tiers map[string]Tier) []OriginTier {
+	result := make([]OriginTier, 0, len(tiers))
+	for origin, tier := range tiers {
+		result = append(result, OriginTier{Origin: origin, Tier: tier})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Origin < result[j].Origin })
+	return result
 }
 
 func definitionIdentity(definition Definition) string {

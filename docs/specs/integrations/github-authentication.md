@@ -1,7 +1,7 @@
 ---
 status: building
 created: 2026-07-19
-amended: 2026-08-07
+amended: 2026-08-12
 owner: Kandev
 ---
 
@@ -52,6 +52,12 @@ automation under different GitHub Apps without operating separate Kandev deploym
   workspace automation connection. **Inherit executor Git credentials** injects no GitHub broker
   helper or `gh` shim: Local and Worktree tasks use host-visible Git/SSH credentials, while remote
   tasks use credentials configured in that executor.
+- A task that is explicitly created for a pre-PR fork contribution under managed task credentials
+  may carry one server-authored, versioned `contribution_destination` on its canonical repository
+  attachment. Managed routing may issue one additional lease for that exact fork. The fork is a
+  push destination only: canonical repository identity, `origin`, issue lookup, and pull-request
+  targeting remain unchanged. Executor-owned identities are opaque and do not receive a
+  workspace-authored destination binding.
 - Every newly created workspace attempts to persist **Inherit executor Git credentials** as its
   initial task policy. After a successful settings write, if creation is performed by an internal
   trusted caller, an auth-disabled synthetic administrator, or a real administrator while host
@@ -83,6 +89,9 @@ automation under different GitHub Apps without operating separate Kandev deploym
   that result for primary-repository configuration, multi-repository configuration, and credential
   routing. Origin reconciliation is serialized per managed checkout, compares the current and
   desired canonical URLs, and performs no write when they already match.
+- Repository preparation validates any contribution destination before issuing credentials, adds a
+  collision-resistant dedicated fork remote, and reconstructs it on launch and resume. It never
+  accepts a fork inferred from the checkout's current remotes or a caller-provided repository name.
 - Git failures while inspecting or reconciling a managed checkout preserve a bounded,
   credential-redacted diagnostic. Git's dubious-ownership failure is classified as a service/data
   ownership mismatch with guidance to restore the intended Kandev service account or reconcile the
@@ -92,6 +101,10 @@ automation under different GitHub Apps without operating separate Kandev deploym
   only in memory. PAT/CLI tokens retain their provider-granted scope once delivered to a trusted
   agent subprocess. GitHub HTTPS and the broker-aware `gh` shim fail closed rather than consulting
   another ambient helper after a managed-helper failure.
+- A managed pre-PR fork destination must be writable by the same workspace automation source that
+  supplies the task leases. Human PAT and named CLI automation actors may own or create their fork.
+  An App installation without direct target write access is not silently paired with a user's
+  personal fork or personal token.
 - Managed Git helper execution does not depend on the post-startup `PATH`: Git resolves an
   absolute Kandev-owned `agentctl` executable published before the first managed Git operation.
   Local and Worktree preparation binds the helper to the standalone launcher's absolute executable
@@ -429,6 +442,10 @@ post-signature processing failures produce `failing`; a later valid successful d
 - The effective task Git environment is runtime-only. It is copied only after the existing
   task/session or task-environment ownership check, is never persisted in task metadata or terminal
   records, and is never written to logs, errors, browser payloads, or process arguments.
+- The broker accepts a fork owner/repository only when it exactly matches a valid
+  `contribution_destination` or `remote_contribution` on the same authorized task-repository
+  attachment. Unknown binding versions, malformed URLs, cross-workspace rows, unrelated forks, and
+  target mismatches fail closed.
 - Indexed Git configuration is validated and composed as a single ordered block at environment
   merge boundaries. Kandev never replaces a complete inherited block merely by assigning its own
   `GIT_CONFIG_COUNT`; managed helper reset semantics are expressed as later Git config entries.
@@ -448,6 +465,9 @@ post-signature processing failures produce `failing`; a later valid successful d
   account; selecting another stored login fails with guidance to activate it or upgrade the CLI.
 - If the managed `agentctl` helper, broker, or `gh` shim is unavailable, the command fails with a
   managed-credential error and does not fall through to another HTTPS helper or interactive prompt.
+- If a contribution task cannot prove direct target write access or prepare an exact fork writable
+  by the workspace automation connection, task creation fails before launch. A same-name repository
+  that is not a fork of the canonical target is reported as a conflict and is never overwritten.
 - If an authorized task terminal, passthrough PTY, or task-scoped command cannot receive its
   effective managed Git environment, Kandev fails that process start before it runs the requested
   command. It does not silently fall back to an ambient credential helper or host `gh` login.

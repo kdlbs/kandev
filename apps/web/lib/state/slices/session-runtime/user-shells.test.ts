@@ -51,6 +51,32 @@ describe("userShells reducers", () => {
     expect(list?.[0].terminalId).toBe("b");
   });
 
+  it("keeps an optimistically removed shell out of a deferred stale list response", async () => {
+    store.getState().setUserShells(ENV, [shell("a"), shell("b")]);
+    let resolveList!: (shells: UserShellInfo[]) => void;
+    const deferredList = new Promise<UserShellInfo[]>((resolve) => {
+      resolveList = resolve;
+    });
+    const applyList = deferredList.then((shells) => store.getState().setUserShells(ENV, shells));
+
+    store.getState().removeUserShell(ENV, "a");
+    resolveList([shell("a"), shell("b")]);
+    await applyList;
+
+    expect(
+      store.getState().userShells.byEnvironmentId[ENV]?.map((item) => item.terminalId),
+    ).toEqual(["b"]);
+  });
+
+  it("keeps an optimistically removed shell out of stale add events", () => {
+    store.getState().setUserShells(ENV, [shell("a")]);
+    store.getState().removeUserShell(ENV, "a");
+
+    store.getState().addUserShell(ENV, shell("a"));
+
+    expect(store.getState().userShells.byEnvironmentId[ENV]).toEqual([]);
+  });
+
   it("updateUserShell patches the matching row", () => {
     store.getState().setUserShells(ENV, [shell("a", { customName: null })]);
     store.getState().updateUserShell(ENV, "a", { customName: "build watcher" });

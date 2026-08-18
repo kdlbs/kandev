@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
+import { useTranslation } from "react-i18next";
 
 const ALL_REPOSITORIES = "__all_repositories__";
 
@@ -30,19 +31,25 @@ export function IntegrationRepositoryFilter({
   onValueChange,
   options,
   ariaLabel,
-  allLabel = "All repositories",
-  searchPlaceholder = "Filter repositories...",
-  emptyMessage = "No repositories found.",
+  allLabel,
+  searchPlaceholder,
+  emptyMessage,
   testId,
   dropdownTestId,
   triggerClassName,
   className,
 }: IntegrationRepositoryFilterProps) {
+  const { t } = useTranslation();
+  // Resolved here rather than as parameter defaults: a destructuring default is
+  // evaluated before the component body runs, so `t` is not yet in scope there.
+  const allRepositoriesLabel = allLabel ?? t("integrations:allRepositories");
+  const searchPlaceholderText = searchPlaceholder ?? t("integrations:filterRepositories");
+  const emptyMessageText = emptyMessage ?? t("integrations:noRepositoriesFound");
   const comboboxOptions = useMemo<ComboboxOption[]>(
     () => [
       {
         value: ALL_REPOSITORIES,
-        label: allLabel,
+        label: allRepositoriesLabel,
         keywords: ["all", "repositories", "repos"],
       },
       ...options.map((option) => ({
@@ -51,7 +58,7 @@ export function IntegrationRepositoryFilter({
         keywords: option.keywords ?? [option.label],
       })),
     ],
-    [allLabel, options],
+    [allRepositoriesLabel, options],
   );
 
   return (
@@ -64,9 +71,9 @@ export function IntegrationRepositoryFilter({
       }}
       options={comboboxOptions}
       ariaLabel={ariaLabel}
-      placeholder={allLabel}
-      searchPlaceholder={searchPlaceholder}
-      emptyMessage={emptyMessage}
+      placeholder={allRepositoriesLabel}
+      searchPlaceholder={searchPlaceholderText}
+      emptyMessage={emptyMessageText}
       triggerClassName={triggerClassName}
       className={className}
       testId={testId}

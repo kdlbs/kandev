@@ -53,6 +53,7 @@ const AZURE_DEVOPS_ROUTE = "/azure-devops";
 // `newPreset` in components/github/default-queries-section.tsx. The seeded WIQL
 // is Azure DevOps' query language, not copy.
 function newQuery(kind: QueryKind): AzureDevOpsQueryPreset {
+  // i18n-exempt: persisted, editable preset label. See the comment above.
   return {
     id: `query_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     label: "New query",

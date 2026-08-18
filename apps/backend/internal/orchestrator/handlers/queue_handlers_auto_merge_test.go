@@ -91,6 +91,51 @@ func TestWsQueueMessage_AutoMergeBlocksLaterAdmissionUntilClaimFinalizes(t *test
 	require.Equal(t, "first\n\nsecond\n\nthird", status.Entries[0].Content)
 }
 
+func TestWsQueueMessage_AutoMergeFoldsAdmissionAtFullQueue(t *testing.T) {
+	handlers, service := setupQueueHandlers(t)
+	// Fill the queue with auto-merge disabled so the session actually reaches
+	// capacity, then enable it: the next compatible message must fold into the
+	// tail instead of surfacing "queue full".
+	service.SetMaxPerSession(1)
+	service.SetAutoMergeEnabled(false)
+	_, err := service.QueueMessage(context.Background(), "session", "task", "first", "", messagequeue.QueuedByUser, false, nil)
+	require.NoError(t, err)
+	service.SetAutoMergeEnabled(true)
+
+	response, err := handlers.wsQueueMessage(context.Background(), createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
+		"session_id": "session",
+		"task_id":    "task",
+		"content":    "second",
+	}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	var queued messagequeue.QueuedMessage
+	require.NoError(t, json.Unmarshal(response.Payload, &queued))
+	require.Equal(t, "first\n\nsecond", queued.Content)
+	status := service.GetStatus(context.Background(), "session")
+	require.Equal(t, 1, status.Count)
+	require.Equal(t, "first\n\nsecond", status.Entries[0].Content)
+}
+
+func TestWsQueueMessage_AutoMergeAtFullQueueRejectsIncompatible(t *testing.T) {
+	handlers, service := setupQueueHandlers(t)
+	service.SetMaxPerSession(1)
+	service.SetAutoMergeEnabled(false)
+	_, err := service.QueueMessage(context.Background(), "session", "task", "first", "", messagequeue.QueuedByUser, false, nil)
+	require.NoError(t, err)
+	service.SetAutoMergeEnabled(true)
+
+	response, err := handlers.wsQueueMessage(context.Background(), createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
+		"session_id": "session",
+		"task_id":    "task",
+		"content":    "second",
+		"model":      "other-model",
+	}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, response.Type)
+	require.Equal(t, messagequeue.QueueFullErrorCode, parseError(t, response).Code)
+}
+
 type blockingQueueAttachmentClaimer struct {
 	started chan struct{}
 	release chan struct{}

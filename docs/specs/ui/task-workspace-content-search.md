@@ -55,7 +55,13 @@ repositories.
   raw transport identity.
 - Selecting a result opens or activates that repository's file and places the
   cursor at the result's one-based line and column. Both Monaco and CodeMirror
-  reveal the location, including when the editor is mounted after selection.
+  center the result line after the target file model is active, including when
+  an existing preview tab swaps from another cached file without remounting the
+  editor.
+- The selected result line receives a one-shot whole-line highlight for about
+  1.2 seconds so the destination is easy to locate. Selecting the result again
+  restarts the highlight. Reduced-motion users see the same bounded highlight
+  without a fade animation.
 - Empty-query, searching, no-match, unavailable-session, and failed-search
   states are distinguishable without closing the palette.
 - Search is bounded: a query contains at most 200 characters, each repository
@@ -156,6 +162,13 @@ repositories without parsing path strings.
 - **GIVEN** two repositories with the same relative path, **WHEN** the user
   selects the result from the second repository, **THEN** Kandev opens the
   second repository's file at the returned line and column.
+- **GIVEN** a result file was previously opened and its preview tab now shows a
+  different cached file, **WHEN** the user selects an off-screen content result
+  with **Enter**, **THEN** the target model becomes active, the returned line is
+  centered in the editor, and its one-shot line highlight appears and clears.
+- **GIVEN** either Monaco or CodeMirror displays a selected content result,
+  **WHEN** the same result is selected again, **THEN** its one-shot line
+  highlight restarts without changing file contents.
 - **GIVEN** an untracked non-ignored text file and an ignored text file,
   **WHEN** both contain the query, **THEN** only the untracked non-ignored file
   appears.
@@ -174,4 +187,6 @@ repositories without parsing path strings.
   terminal output, or files outside attached repositories.
 - Regular-expression, whole-word, case-sensitive, replace, or persistent search
   options.
+- Persistent editor markers or highlighting every fuzzy-match character in the
+  source line.
 - A persistent full-text index or external search service.

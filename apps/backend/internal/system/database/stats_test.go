@@ -205,7 +205,7 @@ func newTestService(t *testing.T) (*Service, *jobs.Tracker, *stubBus, string) {
 			t.Fatalf("write sentinel: %v", err)
 		}
 	}
-	svc := NewService(pool, dataDir, dirs, tracker, log)
+	svc := NewService(pool, filepath.Join(dataDir, "kandev.db"), dirs, tracker, log)
 	return svc, tracker, stub, dataDir
 }
 
@@ -264,7 +264,7 @@ func TestStats_ReturnsPathSizeAndSchemaVersion(t *testing.T) {
 
 func TestStats_PostgresDoesNotUseSQLitePragmas(t *testing.T) {
 	dataDir := t.TempDir()
-	svc := NewService(newFakePostgresStatsPool(t), dataDir, ResetDirs{}, nil, nil)
+	svc := NewService(newFakePostgresStatsPool(t), filepath.Join(dataDir, "kandev.db"), ResetDirs{}, nil, nil)
 
 	stats, err := svc.Stats()
 	if err != nil {

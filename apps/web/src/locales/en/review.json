@@ -88,5 +88,10 @@
   "findingQueuedForAgent": "Finding queued for the agent",
   "findingSentToAgent": "Finding sent to the agent",
   "walkthroughRequestQueued": "Walkthrough request queued",
-  "walkthroughRequestSent": "Walkthrough request sent"
+  "walkthroughRequestSent": "Walkthrough request sent",
+  "couldNotStartReview": "Could not start the review",
+  "severityBlocker": "Blocker",
+  "severityMajor": "Major",
+  "severityMinor": "Minor",
+  "severityNit": "Nit"
 }

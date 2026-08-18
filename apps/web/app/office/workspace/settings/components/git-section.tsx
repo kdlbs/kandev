@@ -102,6 +102,7 @@ export function GitSection() {
     () =>
       runOp(
         async () => {
+          // i18n-exempt: becomes the git commit message. See the comment below.
           await officeApi.gitPush(activeWorkspaceId, {
             // Literal: this becomes the git COMMIT MESSAGE, so it is persisted
             // content rather than UI copy. The input placeholder that shows it

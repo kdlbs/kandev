@@ -16,14 +16,15 @@ artifact set.
 - npm runtime packages: `@kdlbs/runtime-{platform}@X.Y.Z` (5 platforms; declared as `optionalDependencies` in main package)
 - Git tag: `vX.Y.Z` (three-part; legacy `vM.m` tags normalize to `M.m.0`)
 - Homebrew formula: `kdlbs/homebrew-kandev` `Formula/kandev.rb` `version "X.Y.Z"`
+- Scoop bucket: `kdlbs/scoop-kandev` `bucket/kandev.json` version, URL, and hash
 - GitHub release: `vX.Y.Z` with platform tarballs `kandev-{platform}.tar.gz` + `.sha256`
 
-**npm and Homebrew are sibling channels**, not chained. Both consume the same GitHub release artifacts; neither depends on the other.
+**npm, Homebrew, and Scoop are sibling channels**, not chained. All three consume the same GitHub release artifacts; none depends on another package-manager channel.
 
 For npm Nightly, Stable `X.Y.Z` plus a full `main` SHA produces
 `X.Y.(Z+1)-nightly.sha<first-12-lowercase-hex>`. `kandev` and all five runtime packages publish at
 that exact version under npm's `nightly` dist-tag. Nightly never moves `latest` and creates no Git
-tag, GitHub Release, Homebrew formula, Desktop feed/build, or container tag.
+tag, GitHub Release, Homebrew formula, Scoop bucket update, Desktop feed/build, or container tag.
 
 ## Release flow
 
@@ -35,15 +36,32 @@ Stable runs entirely in CI via `.github/workflows/release.yml`, triggered by a m
 4. `publish-release` creates the GitHub release with platform tarballs + sha256 + auto-generated notes.
 5. `publish-npm` publishes 5 `@kdlbs/runtime-*` packages + main `kandev` package to npmjs.
 6. `update-homebrew-tap` pushes updated `Formula/kandev.rb` to `kdlbs/homebrew-kandev` via SSH deploy key.
+7. `update-scoop-bucket` pushes updated `bucket/kandev.json` to `kdlbs/scoop-kandev` via its SSH deploy key.
+
+## Release PR ruleset bypass
+
+A normal Stable release creates its branch and pull request with `GITHUB_TOKEN`.
+It uses `RELEASE_PR_BYPASS_TOKEN` only for an exact-head `gh pr merge --admin`.
+
+Store this fine-grained personal access token in the protected `release`
+environment. Its owner must remain an organization administrator. Select only
+`kdlbs/kandev` and grant `contents: write` repository permission.
+
+Record the token owner and expiration date. Rotate the environment secret before
+the token expires or the owner loses administrator access. The workflow must
+stop before tag creation when the token is missing or cannot bypass the ruleset.
+
+After the merge, use `GITHUB_TOKEN` to read the PR state. Tag only the merge
+commit that GitHub reports after it appears on `origin/main`.
 
 **Workflow-control invariant:** When a channel intentionally skips a job, every
 downstream job reachable through that dependency chain must use a status function
 such as `!cancelled()` plus explicit `needs.<job>.result == 'success'` checks.
 For a partial Stable release, preserve the existing signed tag and rerun with
 `backfill_tag`; never run a normal bump against an existing tag. Declare Stable
-complete only after `publish-release`, `publish-npm`, and `update-homebrew-tap`
-each succeed and their artifacts are verified—an aggregate green run can hide
-skipped publication jobs.
+complete only after `publish-release`, `publish-npm`, `update-homebrew-tap`, and
+`update-scoop-bucket` each succeed and their artifacts are verified—an aggregate
+green run can hide skipped publication jobs.
 
 Stable has no local release driver; the entire Stable flow runs in GHA. The Nightly metadata and
 publication revalidation state machine lives in `scripts/release/nightly-release.sh`, which GHA
@@ -84,7 +102,7 @@ whose fingerprint matches that variable; never commit private key material.
 `backfill_tag` repairs publication for an already-signed existing tag only and
 does not bypass the normal-release signing checks.
 
-Desktop signing is automatic. Complete macOS/Windows signing and notarization secrets produce signed artifacts; missing or incomplete signing inputs produce unsigned desktop artifacts and the GitHub release notes get an unsigned-artifact warning. `desktop_validation_only=true` builds artifacts from the current workflow ref for maintainer inspection and skips the release PR, tag, GitHub release, npm publish, Homebrew update, and public container tags.
+Desktop signing is automatic. Complete macOS/Windows signing and notarization secrets produce signed artifacts; missing or incomplete signing inputs produce unsigned desktop artifacts and the GitHub release notes get an unsigned-artifact warning. `desktop_validation_only=true` builds artifacts from the current workflow ref for maintainer inspection and skips the release PR, tag, GitHub release, npm publish, Homebrew update, Scoop update, and public container tags.
 
 ## Runtime resolution
 

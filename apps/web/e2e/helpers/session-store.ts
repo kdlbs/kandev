@@ -5,6 +5,7 @@ type E2EStoreWindow = Window & {
     getState: () => {
       taskSessions: { items: Record<string, Record<string, unknown>> };
       tasks: { activeSessionId: string | null };
+      sessionAgentctl: { itemsBySessionId: Record<string, { status?: string }> };
       setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
     };
     setState: (
@@ -20,6 +21,22 @@ type AvailableCommand = {
   description?: string;
   input_hint?: string;
 };
+
+/** Wait until the session agentctl is ready for controls that require it. */
+export async function waitForSessionAgentctlReady(
+  page: Page,
+  sessionId: string,
+  timeout = 60_000,
+): Promise<void> {
+  await page.waitForFunction(
+    (sid) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      return store?.getState().sessionAgentctl.itemsBySessionId[sid]?.status === "ready";
+    },
+    sessionId,
+    { timeout, message: `agentctl did not become ready for session ${sessionId}` },
+  );
+}
 
 export async function waitForActiveSessionForegroundActivity(
   page: Page,

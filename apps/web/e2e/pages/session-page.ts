@@ -13,6 +13,8 @@ function sectionLabelToStateTestId(label: string): string {
   return "task-state-backlog";
 }
 
+const TERMINAL_READY_TIMEOUT = 30_000;
+
 export class SessionPage {
   readonly chat: Locator;
   readonly sidebar: Locator;
@@ -469,7 +471,28 @@ export class SessionPage {
 
   /** Clarification overlay (visible when a clarification request is pending). */
   clarificationOverlay(): Locator {
-    return this.page.getByTestId("clarification-overlay");
+    return this.activeChat().getByTestId("clarification-overlay");
+  }
+
+  /**
+   * The persistent bar wrapping the clarification overlay. Stays mounted
+   * (collapsed to a header row) while the bundle is pending, even after the
+   * user dismisses it with Escape or the collapse toggle.
+   */
+  clarificationBar(): Locator {
+    return this.activeChat().getByTestId("clarification-overlay-container");
+  }
+
+  /** Expand/collapse toggle in the clarification bar's header row. */
+  clarificationCollapseToggle(): Locator {
+    // The expanded overlay stays mounted but is hidden when the compact bar
+    // is shown, so scope this locator to the one visible toggle.
+    return this.activeChat().locator('[data-testid="clarification-collapse-toggle"]:visible');
+  }
+
+  /** Shared context shown once above the active clarification question. */
+  clarificationContext(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-context");
   }
 
   /** A specific clarification option button by its text label. */
@@ -621,6 +644,16 @@ export class SessionPage {
     return this.page.getByTestId("recovery-fresh-button");
   }
 
+  /** Terminal-state banner shown when the active session has completed. */
+  completedSessionBanner(): Locator {
+    return this.activeChat().getByTestId("completed-session-banner");
+  }
+
+  /** "New Agent" action shown for a completed session. */
+  completedSessionNewAgentButton(): Locator {
+    return this.completedSessionBanner().getByTestId("completed-session-new-agent-button");
+  }
+
   /** "Cancel" button shown on the yellow transient-retry (529 Overloaded) card. */
   recoveryCancelRetryButton(): Locator {
     return this.page.getByTestId("recovery-cancel-retry-button");
@@ -700,7 +733,7 @@ export class SessionPage {
   }
 
   stepperStep(name: string): Locator {
-    return this.page.getByTestId(`workflow-step-${name}`);
+    return this.page.locator(`[data-testid="workflow-step-${name}"][aria-current="step"]`);
   }
 
   /** PR button in the topbar (visible only when a PR is associated). */
@@ -1252,8 +1285,12 @@ export class SessionPage {
    * disappears — i.e. the WebSocket actually opened for that env terminal.
    * Use this to detect the "terminal hangs forever on Connecting" bug.
    */
-  async expectTerminalConnected(timeout = 15_000): Promise<void> {
-    await this.terminal.getByTestId("passthrough-loading").waitFor({ state: "hidden", timeout });
+  async expectTerminalConnected(timeout = TERMINAL_READY_TIMEOUT): Promise<void> {
+    await this.page
+      .locator("[data-testid='terminal-panel']:visible")
+      .first()
+      .getByTestId("passthrough-loading")
+      .waitFor({ state: "hidden", timeout });
   }
 
   /**
@@ -1261,9 +1298,10 @@ export class SessionPage {
    * the prompt), then type a command and press Enter.
    */
   async typeInTerminal(command: string): Promise<void> {
+    await this.expectTerminalConnected();
     await expect
       .poll(async () => (await this.readXtermBuffer("terminal-panel")).length > 0, {
-        timeout: 15_000,
+        timeout: TERMINAL_READY_TIMEOUT,
         message: "Waiting for terminal shell to connect",
       })
       .toBe(true);

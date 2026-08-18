@@ -56,6 +56,7 @@ function checkSummary(checks: ChangeRequestDetailCheck[]) {
   ].filter(Boolean);
 }
 
+// i18n-exempt: builds the message body sent to the agent, not UI copy.
 function buildCheckContext(check: ChangeRequestDetailCheck) {
   return [
     `CI check **${check.name}** failed (${checkConclusionLabel(check)}).`,

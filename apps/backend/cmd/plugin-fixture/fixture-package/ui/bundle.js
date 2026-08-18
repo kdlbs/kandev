@@ -244,7 +244,28 @@
 
       function MainTopBarSlot(props) {
         var slotProps = props.slotProps || {};
-        return jsx("span", { id: "hello-main-top-bar" }, "Hello " + slotProps.currentPage);
+        var label = "Hello " + slotProps.currentPage;
+        return jsx(
+          ui.Button,
+          {
+            id: "hello-main-top-bar",
+            variant: "outline",
+            size: "icon-sm",
+            "aria-label": label,
+          },
+          jsx(
+            "svg",
+            {
+              className: "h-4 w-4",
+              viewBox: "0 0 24 24",
+              fill: "none",
+              stroke: "currentColor",
+              "aria-hidden": "true",
+            },
+            jsx("path", { d: "M5 12h14M12 5l7 7l-7 7" }),
+          ),
+          jsx("span", { className: "sr-only" }, label),
+        );
       }
 
       // Debounce delay for the Notes panel's autosave — short, so e2e specs
@@ -353,6 +374,29 @@
           "span",
           { "data-testid": "e2e-card-tags", "data-task-id": slotProps.taskId },
           "tags",
+        );
+      }
+
+      function WorkspaceActionsSlot(props) {
+        var slotProps = props.slotProps || {};
+        return jsx(
+          "button",
+          {
+            type: "button",
+            "data-testid": "e2e-sidebar-workspace-actions",
+            "data-workspace-id": slotProps.workspaceId,
+            "data-workspace-label": slotProps.workspaceLabel || "",
+            "data-presentation": slotProps.presentation || "unknown",
+            "aria-label": "Fixture workspace action",
+            className:
+              slotProps.presentation === "mobile"
+                ? "flex h-11 w-11 cursor-pointer items-center justify-center rounded-md border"
+                : "flex h-6 w-6 cursor-pointer items-center justify-center rounded-md border",
+            onClick: function (event) {
+              event.currentTarget.setAttribute("data-clicked", "true");
+            },
+          },
+          "W",
         );
       }
 
@@ -494,6 +538,41 @@
         path: "/plugins/e2e-hello",
         section: "main",
       });
+      registry.registerNavItem({
+        id: "e2e-insights-tools",
+        label: "E2E Insights Tools",
+        path: "/plugins/e2e-hello",
+        section: "sidebar-footer",
+      });
+      // Three more sidebar-footer items so this one plugin install alone
+      // produces P = 4 (budget MAX_INLINE_PLUGIN_FOOTER_ITEMS = 3, plus one
+      // over-budget item) — enough to drive the desktop footer's overflow
+      // trigger and menu with the real Radix DropdownMenu in a browser (see
+      // plugins.spec.ts's overflow test). The budget counts destinations,
+      // not distinct plugins, so one plugin registering 4 items exercises
+      // the same partition as 4 plugins registering 1 each. Labeled
+      // "E2E Overflow Item N" rather than a numbered suffix of the first
+      // item's own label ("E2E Insights Tools") so Playwright's default
+      // substring name matching can't accidentally match more than one of
+      // these from an existing test written against the first item's label.
+      registry.registerNavItem({
+        id: "e2e-insights-tools-2",
+        label: "E2E Overflow Item 2",
+        path: "/plugins/e2e-hello",
+        section: "sidebar-footer",
+      });
+      registry.registerNavItem({
+        id: "e2e-insights-tools-3",
+        label: "E2E Overflow Item 3",
+        path: "/plugins/e2e-hello",
+        section: "sidebar-footer",
+      });
+      registry.registerNavItem({
+        id: "e2e-insights-tools-4",
+        label: "E2E Overflow Item 4",
+        path: "/plugins/e2e-hello",
+        section: "sidebar-footer",
+      });
       registry.registerRoute("/plugins/e2e-hello", PluginPage);
       registry.registerComponent("task-sidebar", SidebarSlot);
       registry.registerComponent("main-top-bar", MainTopBarSlot);
@@ -602,6 +681,7 @@
       registry.registerComponent("new-session-input-actions", ComposerAction);
       registry.registerComponent("task-card-indicators", CardIndicator);
       registry.registerComponent("task-card-tags", CardTags);
+      registry.registerComponent("sidebar-workspace-actions", WorkspaceActionsSlot);
       registry.registerTaskMenuAction({
         id: "enhance-notes",
         label: "Enhance notes",

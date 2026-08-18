@@ -1093,8 +1093,9 @@ func TestBootRouteDataTaskDetailIncludesPersistedSessionModels(t *testing.T) {
 		Metadata: map[string]interface{}{
 			models.SessionMetaKeyACPConfigBaseline: map[string]string{"effort": "medium"},
 			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
-				CurrentModelID: "gpt-5.6-sol",
-				Models:         []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"}},
+				CurrentModelID:       "gpt-5.6-sol",
+				Models:               []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"}},
+				ConfigOptionsSettled: true,
 				ConfigOptions: []streams.ConfigOption{{
 					Type: "select", ID: "effort", Name: "Reasoning effort",
 					Description: "Provider option help", CurrentValue: "high",
@@ -1130,7 +1131,8 @@ func TestBootRouteDataTaskDetailIncludesPersistedSessionModels(t *testing.T) {
 							CurrentValue string                      `json:"currentValue"`
 							Options      []streams.ConfigOptionValue `json:"options"`
 						} `json:"configOptions"`
-						ConfigBaseline map[string]string `json:"configBaseline"`
+						ConfigOptionsSettled bool              `json:"configOptionsSettled"`
+						ConfigBaseline       map[string]string `json:"configBaseline"`
 					} `json:"bySessionId"`
 				} `json:"sessionModels"`
 			} `json:"initialState"`
@@ -1151,6 +1153,9 @@ func TestBootRouteDataTaskDetailIncludesPersistedSessionModels(t *testing.T) {
 	}
 	if got.ConfigBaseline["effort"] != "medium" {
 		t.Fatalf("boot config baseline = %#v, want effort=medium", got.ConfigBaseline)
+	}
+	if !got.ConfigOptionsSettled {
+		t.Fatal("boot config settlement marker = false, want true")
 	}
 }
 
@@ -1975,6 +1980,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 			Sessions:         taskRepo,
 			GitSnapshots:     taskRepo,
 			RepoEntities:     taskRepo,
+			RepositorySets:   taskRepo,
 			Executors:        taskRepo,
 			Environments:     taskRepo,
 			TaskEnvironments: taskRepo,

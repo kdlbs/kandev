@@ -6,6 +6,7 @@ import { listBranches, listRepositoryBranches } from "@/lib/api";
 import type { Branch } from "@/lib/types/http";
 
 const EMPTY_BRANCHES: Branch[] = [];
+const BRANCH_LIST_RETRY_DELAYS_MS = [100, 250, 500, 1_000] as const;
 
 /**
  * Source of branches for a row: either a workspace repo (by id) or an
@@ -22,6 +23,25 @@ export type BranchSource =
 function cacheKeyFor(source: BranchSource | null): string {
   if (!source) return "";
   return source.kind === "id" ? source.repositoryId : `path::${source.workspaceId}::${source.path}`;
+}
+
+async function listBranchesUntilSettled(source: BranchSource): Promise<Branch[]> {
+  for (const retryDelayMs of BRANCH_LIST_RETRY_DELAYS_MS) {
+    try {
+      const response =
+        source.kind === "id"
+          ? await listBranches(source.workspaceId, { repositoryId: source.repositoryId })
+          : await listBranches(source.workspaceId, { path: source.path });
+      return response.branches;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
+  }
+  const response =
+    source.kind === "id"
+      ? await listBranches(source.workspaceId, { repositoryId: source.repositoryId })
+      : await listBranches(source.workspaceId, { path: source.path });
+  return response.branches;
 }
 
 /**
@@ -62,14 +82,12 @@ export function useBranches(source: BranchSource | null, enabled = true): UseBra
     inFlightKeysRef.current.add(key);
     setRepositoryBranchesLoading(key, true);
 
-    const promise =
-      source.kind === "id"
-        ? listBranches(source.workspaceId, { repositoryId: source.repositoryId })
-        : listBranches(source.workspaceId, { path: source.path });
-
-    promise
-      .then((response) => setRepositoryBranches(key, response.branches))
-      .catch(() => setRepositoryBranches(key, []))
+    listBranchesUntilSettled(source)
+      .then((branches) => setRepositoryBranches(key, branches))
+      .catch(() => {
+        // Keep the cache unloaded after a failed request. A transient branch
+        // endpoint failure must not permanently disable the branch pill.
+      })
       .finally(() => {
         inFlightKeysRef.current.delete(key);
         setRepositoryBranchesLoading(key, false);

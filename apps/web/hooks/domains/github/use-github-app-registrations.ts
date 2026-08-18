@@ -17,6 +17,7 @@ import type {
   PrepareGitHubAppImportRequest,
   StartGitHubAppManifestRequest,
 } from "@/lib/types/github";
+import { t } from "@/lib/i18n";
 
 const requestVersions = new Map<string, number>();
 
@@ -31,7 +32,7 @@ function isCurrentRequest(workspaceId: string, version: number) {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "GitHub App registrations are unavailable";
+  return error instanceof Error ? error.message : t("github:appRegistrationsUnavailable");
 }
 
 export function parseGitHubCallbackResult(

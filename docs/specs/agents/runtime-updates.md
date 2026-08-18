@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-07-26
-updated: 2026-08-12
+updated: 2026-08-16
 owner: Kandev
 ---
 
@@ -14,6 +14,12 @@ release. They also need a UI recovery path when the newest npm release is
 partly published, incompatible with ACP, or otherwise cannot start. Rebuilding
 an npm cache is not sufficient when an unversioned command selects the same
 broken release again.
+
+Managed runtimes can also fail when npm has stale package metadata. In that
+case, npm can report `ETARGET` and `No matching version found` for a dependency
+that the configured registry now contains. Kandev currently reports the later
+ACP disconnect instead of the npm cause. The user then has no useful recovery
+action unless they inspect backend logs.
 
 ## What
 
@@ -40,8 +46,17 @@ broken release again.
   metadata. A caller can submit only a version returned by the trusted
   package's npm metadata. Tags, prereleases, package specs, registry URLs, and
   shell text are rejected.
+- Managed runtime resolution changes only the structured ACP command surfaces.
+  When an agent's interactive passthrough CLI is distributed separately from
+  its ACP adapter, passthrough keeps its own package, executable, and install
+  recipe.
 - Jobs for one agent are idempotent while queued or running. Installation and
   version management for the same agent cannot run concurrently.
+- A host-local managed runtime launch detects a strict npm `ETARGET` version
+  resolution failure before ACP initialization. Kandev refreshes npm metadata
+  and retries the same trusted package and version once.
+- If the retry also fails, Kandev reports an npm runtime preparation error and
+  offers one runtime retry action. The user does not need to understand ACP.
 
 The managed package set is:
 
@@ -197,11 +212,40 @@ version while its current probe is unknown produces a repair job.
   sessionless utility prompts use the same active-version resolver.
 - Native-binary preference continues to win when an agent deliberately selects
   its supported native binary path.
+- Passthrough command construction does not receive or apply the active managed
+  ACP version. It continues to use the agent's declared interactive CLI.
 - SSH and container command builders receive no host version override.
 - A saved selection read error fails the new host command with an actionable
   error. It does not fall back to an unversioned package.
 - Candidate validation bypasses the active selection only for the trusted exact
   candidate command created by the version job.
+
+## Launch-time stale metadata recovery
+
+- Normal host-local managed runtime commands continue to use
+  `--prefer-offline`.
+- Kandev inspects bounded process stderr when ACP initialization ends before a
+  response. Automatic recovery requires both npm `ETARGET` and a matching
+  `No matching version found for package@version` message.
+- Kandev classifies the npm error from stderr. It does not build a command from
+  package names, versions, paths, or registry values found in stderr.
+- Recovery removes only the deterministic `_npx` execution tree for the
+  trusted built-in package specification. It never clears npm's full cache.
+- Kandev starts the same managed runtime once with `--prefer-online`. The
+  command keeps the same trusted package, exact active version when one exists,
+  ACP arguments, configured npm registry, command prefix, permissions, model,
+  and session identity.
+- Recovery is limited to one retry for each launch attempt. A delayed event
+  from the first child process cannot fail or complete the replacement process.
+- User cancellation and backend shutdown stop recovery. Kandev does not retry
+  a remote executor, a native runtime, a passthrough command, an unrelated npm
+  error, or a second failed online attempt.
+- A successful retry continues the original session without a failure card.
+  Kandev records structured recovery telemetry without exposing host paths or
+  raw process logs.
+- A failed retry emits a stable npm runtime failure code and bounded sanitized
+  details. This evidence is stored with the last agent error so the focused UI
+  survives a page reload.
 
 ## Failure and recovery behavior
 
@@ -218,6 +262,8 @@ version while its current probe is unknown produces a repair job.
 - Browser disconnect does not cancel a running job. The jobs endpoint can
   recover process-local progress while the backend remains running.
 - Active sessions are never restarted, replaced, or hot-swapped.
+- A launch-time stale metadata retry is not a version rollback. It prepares the
+  same package selection again and does not change the active version.
 
 ## Persistence guarantees
 
@@ -235,6 +281,9 @@ version while its current probe is unknown produces a repair job.
   version again; it must not advance to another version.
 - Dialog selection, output, and result remain page-local after a browser page
   restart.
+- A terminal launch-time npm resolution error stores its stable failure code
+  and bounded sanitized details in `last_agent_error`. No database migration is
+  required because the record is JSON metadata with optional fields.
 
 ## Desktop and mobile behavior
 
@@ -250,6 +299,16 @@ version while its current probe is unknown produces a repair job.
   output remain viewport-contained.
 - Selection state, preview loading, operation labels, request payloads, and
   terminal results are shared across desktop and mobile presentations.
+- A failed automatic launch retry uses the existing inline recovery card in
+  Kanban chat and Office chat. It does not open a dialog or drawer.
+- The card states that npm could not prepare the agent runtime. It states that
+  Kandev refreshed package data and retried once. Technical details are
+  collapsed initially.
+- The card offers one **Retry runtime** action. When a resume token exists, the
+  action resumes the session. Otherwise, it starts a replacement run. The card
+  does not present session history loss as a fix for an npm problem.
+- Phone actions stack when needed, remain at least 44 px high, and do not add a
+  second scroll container.
 
 ## Scenarios
 
@@ -271,13 +330,34 @@ version while its current probe is unknown produces a repair job.
   and does not run a second candidate concurrently.
 - **GIVEN** an SSH or container session, **WHEN** the host active version
   changes, **THEN** that executor's command remains unchanged.
+- **GIVEN** an agent whose interactive passthrough CLI is separate from its
+  managed ACP adapter, **WHEN** the host active ACP version changes, **THEN**
+  later passthrough sessions still launch the declared interactive CLI and do
+  not launch the ACP package under a PTY.
 - **GIVEN** a phone viewport and a long version catalogue or process log,
   **WHEN** the operator selects and activates a version, **THEN** the drawer
   remains contained and the primary action remains touch-reachable.
+- **GIVEN** a host-local managed runtime exits before ACP initialization with
+  npm `ETARGET` and a matching missing dependency version, **WHEN** Kandev
+  reads the captured stderr, **THEN** it removes only the trusted package's
+  deterministic `_npx` tree and retries the same runtime once with current npm
+  metadata.
+- **GIVEN** that online retry starts successfully, **WHEN** ACP initialization
+  completes, **THEN** the original session continues and no recovery card is
+  shown.
+- **GIVEN** that online retry fails with the same npm resolution error,
+  **WHEN** the failure reaches Kanban or Office chat, **THEN** the UI explains
+  the npm cause, keeps sanitized technical details collapsed, and offers only
+  **Retry runtime**.
+- **GIVEN** a native, SSH, container, passthrough, or unrelated failed launch,
+  **WHEN** Kandev classifies the error, **THEN** this automatic npm recovery
+  does not run.
 
 ## Out of scope
 
 - Scheduled or automatic updates and automatic rollback after launch failure.
+- Global npm cache cleanup, registry replacement, dependency substitution, or
+  automatic selection of another package version.
 - Prerelease, tag, arbitrary package-spec, registry, or shell-command input.
 - Kandev-owned npm artifact retention or a package lockfile.
 - Applying host selections to SSH, container, or other remote runtimes.

@@ -426,7 +426,7 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 	reviewState := summarizeReviewState(raw.Reviews.Nodes)
 	checksState := ""
 	if len(raw.Commits.Nodes) > 0 && raw.Commits.Nodes[0].Commit.StatusCheckRollup != nil {
-		checksState = strings.ToLower(raw.Commits.Nodes[0].Commit.StatusCheckRollup.State)
+		checksState = normalizeGraphQLCheckRollupState(raw.Commits.Nodes[0].Commit.StatusCheckRollup.State)
 	}
 	unresolved := 0
 	for _, t := range raw.ReviewThreads.Nodes {
@@ -444,6 +444,23 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		ReviewCountsPopulated:            true,
 		UnresolvedReviewThreads:          unresolved,
 		UnresolvedReviewThreadsPopulated: true,
+	}
+}
+
+// normalizeGraphQLCheckRollupState converts GitHub's GraphQL status-rollup
+// enum to the smaller contract shared by REST and TaskPR persistence.
+func normalizeGraphQLCheckRollupState(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return ""
+	case checkStatusSuccess:
+		return checkStatusSuccess
+	case checkConclusionFail, "error":
+		return checkConclusionFail
+	case "expected", checkStatusPending:
+		return checkStatusPending
+	default:
+		return ""
 	}
 }
 
@@ -830,14 +847,35 @@ func decodeBatchedPRChunk(
 	return continuations, nil
 }
 
+// branchBatchResult is the outcome of one batched branch lookup.
+//
+// Statuses holds the branches that resolved to exactly one OPEN PR, keyed by
+// graphqlBranchKey. ResolvedEmpty holds the branch keys whose repository alias
+// resolved and reported ZERO open PRs — a definitive "no PR on this branch"
+// that callers must NOT re-ask one watch at a time. A branch in neither set is
+// unknown: its alias did not resolve, or it carried several open PRs and
+// selectBatchedBranchPRNode deliberately refused to guess.
+//
+// Both maps are read-only at the call sites (they are shared through the
+// service singleflight).
+type branchBatchResult struct {
+	Statuses      map[string]*PRStatus
+	ResolvedEmpty map[string]struct{}
+}
+
 // runBatchedBranchQuery executes the branch-lookup query in chunks and maps
 // each branch name to its unambiguous OPEN PR (if any). Result keys are
 // "owner/repo/branch" so callers can index by their input refs.
-func runBatchedBranchQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQLBranchRef) (map[string]*PRStatus, error) {
+func runBatchedBranchQuery(
+	ctx context.Context, exec GraphQLExecutor, refs []graphQLBranchRef,
+) (branchBatchResult, error) {
 	if exec == nil || len(refs) == 0 {
-		return nil, nil
+		return branchBatchResult{}, nil
 	}
-	result := make(map[string]*PRStatus, len(refs))
+	out := branchBatchResult{
+		Statuses:      make(map[string]*PRStatus, len(refs)),
+		ResolvedEmpty: make(map[string]struct{}, len(refs)),
+	}
 	// Same accumulation pattern as runBatchedPRQuery — see that function
 	// for the rationale (one dead-repo chunk must not drop later chunks).
 	var allMissing []repoRef
@@ -849,22 +887,31 @@ func runBatchedBranchQuery(ctx context.Context, exec GraphQLExecutor, refs []gra
 			Errors []graphQLError             `json:"errors"`
 		}
 		if err := exec.ExecuteGraphQL(ctx, query, vars, &resp); err != nil {
-			return nil, err
+			return branchBatchResult{}, err
 		}
 		missing, residual := classifyBatchedErrors(resp.Errors, aliasMapForBranchRefs(chunk))
-		if err := decodeBatchedBranchChunk(chunk, resp.Data, result); err != nil {
-			return nil, err
+		if err := decodeBatchedBranchChunk(chunk, resp.Data, &out); err != nil {
+			return branchBatchResult{}, err
 		}
 		allMissing = append(allMissing, missing...)
 		allResidual = append(allResidual, residual...)
 	}
-	return finishBatchedQuery(ctx, exec, result, allMissing, allResidual, nil)
+	statuses, err := finishBatchedQuery(ctx, exec, out.Statuses, allMissing, allResidual, nil)
+	if statuses == nil {
+		// finishBatchedQuery dropped the partial decode (residual errors, or a
+		// failed review-thread continuation). The negatives decoded alongside
+		// it are no longer trustworthy as a whole-response answer, so surface
+		// nothing rather than let a caller skip a fallback on their strength.
+		return branchBatchResult{}, err
+	}
+	out.Statuses = statuses
+	return out, err
 }
 
 func decodeBatchedBranchChunk(
 	refs []graphQLBranchRef,
 	data map[string]json.RawMessage,
-	result map[string]*PRStatus,
+	out *branchBatchResult,
 ) error {
 	for i, ref := range refs {
 		alias := fmt.Sprintf("b%d", i)
@@ -882,10 +929,16 @@ func decodeBatchedBranchChunk(
 		}
 		node, ok := selectBatchedBranchPRNode(inner.PullRequests.Nodes)
 		if !ok {
+			// Zero nodes is a definitive answer: the repository resolved and
+			// has no open PR on this branch. Two or more is ambiguous and
+			// stays unknown so the caller keeps its per-watch fallback.
+			if len(inner.PullRequests.Nodes) == 0 {
+				out.ResolvedEmpty[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = struct{}{}
+			}
 			continue
 		}
 		status := convertBatchedPRResult(&node.batchedPRResult, ref.Owner, ref.Repo, node.Number)
-		result[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = status
+		out.Statuses[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = status
 	}
 	return nil
 }

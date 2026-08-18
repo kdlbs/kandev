@@ -84,6 +84,8 @@ type UseTipTapEditorOptions = {
   onBlur?: () => void;
   sessionId: string | null;
   onImagePaste?: (files: File[], issue?: ImagePasteIssue) => void;
+  onTextInput?: (from: number, to: number, text: string) => void;
+  onBeforeInput?: (inputType: string) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   mentionSuggestion: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -116,6 +118,8 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
   const disabledRef = useRef(opts.disabled);
   const onChangeRef = useRef(opts.onChange);
   const onImagePasteRef = useRef(opts.onImagePaste);
+  const onTextInputRef = useRef(opts.onTextInput);
+  const onBeforeInputRef = useRef(opts.onBeforeInput);
   const sessionIdRef = useRef(opts.sessionId);
   const planModeEnabledRef = useRef(opts.planModeEnabled);
   const onPlanModeChangeRef = useRef(opts.onPlanModeChange);
@@ -133,6 +137,8 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
     disabledRef.current = opts.disabled;
     onChangeRef.current = opts.onChange;
     onImagePasteRef.current = opts.onImagePaste;
+    onTextInputRef.current = opts.onTextInput;
+    onBeforeInputRef.current = opts.onBeforeInput;
     sessionIdRef.current = opts.sessionId;
     planModeEnabledRef.current = opts.planModeEnabled;
     onPlanModeChangeRef.current = opts.onPlanModeChange;
@@ -149,6 +155,8 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
     disabledRef,
     onChangeRef,
     onImagePasteRef,
+    onTextInputRef,
+    onBeforeInputRef,
     sessionIdRef,
     planModeEnabledRef,
     onPlanModeChangeRef,
@@ -204,6 +212,8 @@ function buildEditorProps(args: {
   onFocus: (() => void) | undefined;
   onBlur: (() => void) | undefined;
   onImagePasteRef: React.RefObject<((files: File[], issue?: ImagePasteIssue) => void) | undefined>;
+  onTextInputRef: React.RefObject<((from: number, to: number, text: string) => void) | undefined>;
+  onBeforeInputRef: React.RefObject<((inputType: string) => void) | undefined>;
 }) {
   return {
     attributes: {
@@ -220,6 +230,15 @@ function buildEditorProps(args: {
     },
     handlePaste: (view: import("@tiptap/pm/view").EditorView, event: ClipboardEvent) =>
       handleEditorPaste(view, event, args.onImagePasteRef),
+    handleTextInput: (
+      _view: import("@tiptap/pm/view").EditorView,
+      from: number,
+      to: number,
+      text: string,
+    ) => {
+      args.onTextInputRef.current?.(from, to, text);
+      return false;
+    },
     handleDOMEvents: {
       focus: () => {
         args.onFocus?.();
@@ -227,6 +246,11 @@ function buildEditorProps(args: {
       },
       blur: () => {
         args.onBlur?.();
+        return false;
+      },
+      beforeinput: (_view: import("@tiptap/pm/view").EditorView, event: Event) => {
+        const inputType = (event as InputEvent).inputType;
+        if (inputType?.startsWith("delete")) args.onBeforeInputRef.current?.(inputType);
         return false;
       },
     },
@@ -271,6 +295,8 @@ export function useTipTapEditor(opts: UseTipTapEditorOptions) {
       onFocus: opts.onFocus,
       onBlur: opts.onBlur,
       onImagePasteRef: refs.onImagePasteRef,
+      onTextInputRef: refs.onTextInputRef,
+      onBeforeInputRef: refs.onBeforeInputRef,
     }),
     onUpdate: ({ editor: e }) => {
       if (isSyncingRef.current || !initialSyncDoneRef.current) return;

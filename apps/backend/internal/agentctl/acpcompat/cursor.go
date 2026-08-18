@@ -116,3 +116,29 @@ func MigrateCursorModel(
 	}
 	return bareModelID, merged, true
 }
+
+// NormalizeCommandDescription drops cursor-agent's placeholder slash-command
+// description. cursor-agent emits a bare dash run ("---") as the description
+// for project/user slash commands that have no real description; passing it
+// through renders a meaningless "---" in the command palette, so treat it as
+// absent. The rewrite is Cursor-scoped: another agent may legitimately
+// advertise a dashes-only description, so descriptions from non-Cursor agents
+// are returned unchanged.
+//
+// This lives here, rather than next to either caller, because both the live
+// session adapter and the host-utility capability probe surface the same
+// commands and must agree; a cleanup applied to only one path leaves the other
+// rendering the placeholder.
+func NormalizeCommandDescription(agentID, description string) string {
+	if agentID != CursorAgentID {
+		return description
+	}
+	trimmed := strings.TrimSpace(description)
+	if trimmed == "" {
+		return description
+	}
+	if strings.Trim(trimmed, "-") == "" {
+		return ""
+	}
+	return description
+}

@@ -25,16 +25,24 @@ import { TaskChangesPanel } from "./task-changes-panel";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
 import { TerminalPanel } from "./terminal-panel";
+import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
 import { VscodePanel } from "./vscode-panel";
+import { useTranslation } from "react-i18next";
 
-export const CHAT_PANEL_FALLBACK_LABEL = "Agent";
-
-export function resolveChatPanelTitle(agentLabel: string | null | undefined): string {
-  return agentLabel || CHAT_PANEL_FALLBACK_LABEL;
+/** Resolve the chat panel's tab title: the session's agent label when present,
+ *  otherwise the translated default label. */
+export function resolveChatPanelTitle(
+  agentLabel: string | null | undefined,
+  translate: (key: string) => string,
+): string {
+  return agentLabel || translate("task:panelAgent");
 }
 
+/** Derive the chat session's label (user session name, then profile label)
+ *  and push it as the panel title, re-running on locale changes. */
 function useChatSessionTitle(panelId: string, sessionId: string | null) {
+  const { t } = useTranslation();
   const agentLabel = useAppStore((state) => {
     if (!sessionId) return null;
     const session = state.taskSessions.items[sessionId];
@@ -49,11 +57,15 @@ function useChatSessionTitle(panelId: string, sessionId: string | null) {
     const parts = profile.label.split(" \u2022 ");
     return parts[1] || parts[0] || profile.label;
   });
+  // `t` is a dependency: a locale switch changes the title with no change to
+  // the panel or the label, and without it the tab keeps the old language.
   useEffect(() => {
-    setPanelTitle(panelId, resolveChatPanelTitle(agentLabel));
-  }, [panelId, agentLabel]);
+    setPanelTitle(panelId, resolveChatPanelTitle(agentLabel, t));
+  }, [panelId, agentLabel, t]);
 }
 
+/** Render the chat panel for the session from `params` or the active session,
+ *  or a passthrough toolbar for passthrough sessions. */
 function ChatContent({ panelId, params }: { panelId: string; params: Record<string, unknown> }) {
   const paramSessionId = params?.sessionId as string | undefined;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
@@ -84,10 +96,13 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
       onOpenFileAtLine={openFile}
       hideSessionsDropdown
       isVisible={isVisible}
+      panelId={panelId}
     />
   );
 }
 
+/** Render the changes/diff viewer for the panel's params (`kind` "all" or
+ *  "file"), closing the panel when it becomes empty. */
 function DiffViewerContent({
   panelId,
   params,
@@ -126,7 +141,10 @@ function DiffViewerContent({
   );
 }
 
+/** Render the changes list panel with a tab title showing the pending change
+ *  count (files + commits), wiring up diff/file/commit/review handlers. */
 function ChangesContent({ panelId }: { panelId: string }) {
+  const { t } = useTranslation();
   const addDiffViewerPanel = useDockviewStore((s) => s.addDiffViewerPanel);
   const addFileDiffPanel = useDockviewStore((s) => s.addFileDiffPanel);
   const addCommitDetailPanel = useDockviewStore((s) => s.addCommitDetailPanel);
@@ -138,9 +156,10 @@ function ChangesContent({ panelId }: { panelId: string }) {
   const totalCount = useSessionChangesCount(activeSessionId);
 
   useEffect(() => {
-    const title = totalCount > 0 ? `Changes (${totalCount})` : "Changes";
+    const title =
+      totalCount > 0 ? `${t("task:panelChanges")} (${totalCount})` : t("task:panelChanges");
     setPanelTitle(panelId, title);
-  }, [totalCount, panelId]);
+  }, [totalCount, panelId, t]);
 
   const handleEditFile = useCallback(
     (path: string, repo?: string) => openFile(path, repo),
@@ -175,6 +194,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
   );
 }
 
+/** Render the workspace files panel, opening the selected file in the editor. */
 function FilesContent() {
   const { openFile } = useFileEditors();
   const handleOpenFile = useCallback(
@@ -184,6 +204,7 @@ function FilesContent() {
   return <FilesPanel onOpenFile={handleOpenFile} />;
 }
 
+/** Render the plan panel for the active task. */
 function PlanContent() {
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
   return <TaskPlanPanel taskId={taskId} visible />;
@@ -194,6 +215,8 @@ const COMPONENT_ALIASES: Record<string, string> = {
   "all-files": "files",
 };
 
+/** Resolve a legacy component alias to its current name, passing through
+ *  unknown names unchanged. */
 function resolveComponent(component: string): string {
   return COMPONENT_ALIASES[component] ?? component;
 }
@@ -218,6 +241,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   vscode: (panelId) => <VscodePanel panelId={panelId} />,
   plan: () => <PlanContent />,
   todos: () => <TodosContent />,
+  "prompt-history": () => <PromptHistoryContent />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
   ),
@@ -240,6 +264,8 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   ),
 };
 
+/** Render a dockview panel's portal content by looking up its (alias-resolved)
+ *  component renderer; falls back to an "unknown panel" placeholder. */
 export function renderPanel(
   panelId: string,
   component: string,

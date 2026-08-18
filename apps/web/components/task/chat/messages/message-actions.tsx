@@ -189,6 +189,11 @@ function MetadataValue({ value }: { value: unknown }) {
   );
 }
 
+/**
+ * Debug dialog exposing a message's persisted and turn-derived metadata. The
+ * entries area is a keyboard-focusable scroll region so long fields (e.g.
+ * `turn_metadata`) stay reachable on every input modality.
+ */
 function MessageDebugDialog({
   message,
   turn,
@@ -214,11 +219,16 @@ function MessageDebugDialog({
           <IconInfoCircle className="h-full w-full" />
         </button>
       </DialogTrigger>
-      <DialogContent className="max-h-[85vh] overflow-hidden sm:max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{t("task:messageMetadataTitle")}</DialogTitle>
         </DialogHeader>
-        <div className="grid gap-3 overflow-auto pr-1">
+        <div
+          role="region"
+          aria-label={t("task:messageMetadataEntries")}
+          tabIndex={0}
+          className="grid min-h-0 flex-1 gap-3 overflow-auto pr-1 outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        >
           {Object.entries(entries).map(([key, value]) => (
             <div key={key} className="grid gap-1">
               <div className="font-mono text-[10px] uppercase text-muted-foreground">{key}</div>

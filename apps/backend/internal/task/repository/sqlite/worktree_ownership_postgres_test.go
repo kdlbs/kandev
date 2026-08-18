@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,6 +70,57 @@ func TestCutoverPostgres_NormalizesLegacyFlatEnvironment(t *testing.T) {
 	}
 	if jobCount != 1 {
 		t.Fatalf("postgres cleanup jobs after cutover = %d, want 1", jobCount)
+	}
+}
+
+// TestCutoverPostgres_OrphanedSessionWorktreeUsesFlatOwner proves PostgreSQL
+// uses the shared recoverable-orphan classification during cutover.
+func TestCutoverPostgres_OrphanedSessionWorktreeUsesFlatOwner(t *testing.T) {
+	db := openLegacyPostgres(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{envID: "env-pg-orphan", taskID: "task-pg-orphan", repoID: "repo-pg-orphan", sessionID: "sess-pg-orphan"}
+	seedLegacyTask(t, db, seed, now)
+	seedLegacyFlatEnv(t, db, seed, "wt-pg-orphan", "/tasks/pg-orphan/current", "feature/current", now)
+	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-pg-orphan", seed.repoID, "",
+		"/tasks/pg-orphan/stale", "feature/stale", "active", now)
+	deleteLegacySession(t, db, seed.sessionID)
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("postgres cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if len(env.Repos) != 1 || env.Repos[0].WorktreeID != "wt-pg-orphan" ||
+		env.Repos[0].WorktreePath != "/tasks/pg-orphan/current" ||
+		env.Repos[0].WorktreeBranch != "feature/current" {
+		t.Fatalf("normalized postgres repos = %+v", env.Repos)
+	}
+}
+
+func TestCutoverPostgres_ActiveOrphanedSessionWorktreeFailsClosed(t *testing.T) {
+	db := openLegacyPostgres(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{taskID: "task-pg-orphan-unique", sessionID: "sess-pg-orphan-unique"}
+	seedLegacyTask(t, db, seed, now)
+	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-pg-orphan-unique", "repo-pg-orphan-unique", "",
+		"/tasks/pg-orphan-unique/repo", "feature/unique", "active", now)
+	deleteLegacySession(t, db, seed.sessionID)
+
+	if _, err := NewWithDB(db, db, nil); err == nil ||
+		!strings.Contains(err.Error(), "references missing session "+seed.sessionID) {
+		t.Fatalf("postgres cutover error = %v, want missing-session conflict", err)
+	}
+	var tableCount int
+	if err := db.Get(&tableCount, `
+		SELECT COUNT(*) FROM information_schema.tables
+		WHERE table_name = 'task_session_worktrees' AND table_schema = current_schema()`); err != nil {
+		t.Fatalf("count legacy table: %v", err)
+	}
+	if tableCount != 1 {
+		t.Fatal("failed postgres cutover must leave the legacy table intact")
 	}
 }
 

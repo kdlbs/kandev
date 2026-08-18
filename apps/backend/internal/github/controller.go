@@ -133,9 +133,19 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 
 func (c *Controller) httpGetStatus(ctx *gin.Context) {
 	workspaceID := ctx.Query("workspace_id")
-	status, err := c.service.GetWorkspaceAuthStatus(
-		ctx.Request.Context(), workspaceID, currentGitHubUserID(ctx),
+	var (
+		status *WorkspaceAuthStatus
+		err    error
 	)
+	if ctx.Query("refresh_rate_limit") == "true" {
+		status, err = c.service.RefreshWorkspaceRateLimit(
+			ctx.Request.Context(), workspaceID, currentGitHubUserID(ctx),
+		)
+	} else {
+		status, err = c.service.GetWorkspaceAuthStatus(
+			ctx.Request.Context(), workspaceID, currentGitHubUserID(ctx),
+		)
+	}
 	if err != nil {
 		writeGitHubAuthError(ctx, err)
 		return
@@ -749,7 +759,7 @@ func (c *Controller) httpMergePR(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "merge_method must be merge, squash, or rebase"})
 		return
 	}
-	principal, err := c.service.MergePRForWorkspace(
+	principal, outcome, err := c.service.MergePRForWorkspace(
 		ctx.Request.Context(), ctx.Query("workspace_id"), currentGitHubUserID(ctx),
 		owner, repo, number, req.MergeMethod,
 	)
@@ -761,6 +771,8 @@ func (c *Controller) httpMergePR(ctx *gin.Context) {
 		var apiErr *GitHubAPIError
 		if errors.As(err, &apiErr) {
 			switch apiErr.StatusCode {
+			case http.StatusBadRequest:
+				status = http.StatusBadRequest
 			case http.StatusMethodNotAllowed, http.StatusConflict:
 				status = http.StatusConflict
 			case http.StatusUnauthorized:
@@ -774,7 +786,7 @@ func (c *Controller) httpMergePR(ctx *gin.Context) {
 		ctx.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"merged": true, "principal": principal})
+	ctx.JSON(http.StatusOK, gin.H{"status": outcome, "principal": principal})
 }
 
 func (c *Controller) httpListPRWatches(ctx *gin.Context) {

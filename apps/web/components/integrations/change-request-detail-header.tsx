@@ -159,16 +159,20 @@ export function ChangeRequestDetailHeader({
   const state = detail.draft && detail.state === "open" ? "draft" : detail.state;
   return (
     <div className="space-y-2 p-3">
-      <div className="flex items-start gap-2">
+      <div className="flex flex-wrap items-start gap-2">
         <a
+          data-testid="change-request-detail-title"
           href={detail.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="min-w-0 flex-1 truncate text-sm font-medium hover:underline"
+          className="min-w-0 grow basis-auto break-words text-sm font-medium hover:underline"
         >
           {detail.title}
         </a>
-        <div className="flex flex-wrap justify-end gap-1.5">
+        <div
+          data-testid="change-request-detail-actions"
+          className="flex min-w-0 max-w-full shrink flex-wrap justify-start gap-1.5"
+        >
           {actions.map((action) => (
             <ChangeRequestActionButton
               key={action.id}

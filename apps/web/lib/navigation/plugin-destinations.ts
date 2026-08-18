@@ -34,8 +34,9 @@ export function pluginDestinationId(pluginId: string, itemId: string): string {
 }
 
 /**
- * `section: "settings"` items are skipped — those render in the settings tree's
- * `PluginSlot`, not as destinations.
+ * `section: "settings"` items are skipped — they are accepted and rendered on
+ * no surface. (A plugin settings page is a separate API: `registerSettingsRoute`
+ * / `registerComponent("settings-nav", …)`, not this field.)
  */
 export function pluginDestinations(items: PluginNavRegistration[]): Destination[] {
   return items
@@ -45,11 +46,29 @@ export function pluginDestinations(items: PluginNavRegistration[]): Destination[
       pluginItemId: item.id,
       label: item.label,
       icon: resolvePluginIcon(item.icon),
-      section: item.section === "integrations" ? ("integrations" as const) : ("plugins" as const),
+      section: sectionFor(item.section),
       href: item.path,
-      // Plugins reach the palette through `registerShortcut`, not as nav
-      // commands, so plugin destinations stay off that surface.
+      // No API lets a plugin declare the `palette` surface, so plugin
+      // destinations never carry it — every section maps to `sidebar` +
+      // `mobileMenu` only.
       surfaces: SIDEBAR_AND_MENU,
       source: "plugin" as const,
     }));
+}
+
+/**
+ * `"integrations"` keeps its own manifest section; `"sidebar-footer"` (the
+ * plugin-facing vocabulary) maps to the host's internal `"insights"` section.
+ * Everything else — `"main"`, omitted, an unrecognised string an untyped
+ * bundle might pass, or the literal `"insights"` (the host's own internal
+ * name, deliberately not accepted as an alias — see spec's "insights is not
+ * accepted, and not an alias") — degrades to `"plugins"`, the plugin rail /
+ * Plugins group placement.
+ */
+function sectionFor(
+  section: PluginNavRegistration["section"],
+): "integrations" | "insights" | "plugins" {
+  if (section === "integrations") return "integrations";
+  if (section === "sidebar-footer") return "insights";
+  return "plugins";
 }

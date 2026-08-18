@@ -175,6 +175,34 @@ describe("repository source changes", () => {
     expect(fs.setExecutorId).toHaveBeenCalledWith("");
     expect(fs.setExecutorProfileId).toHaveBeenCalledWith("");
   });
+
+  it("clears the executor when leaving repository-less mode", () => {
+    const setNoRepository = vi.fn();
+    const setUseRemote = vi.fn();
+    const setExecutorId = vi.fn();
+    const setExecutorProfileId = vi.fn();
+    const setWorkspacePath = vi.fn();
+    const fs = {
+      noRepository: true,
+      useRemote: false,
+      executorId: "executor-local",
+      executorProfileId: LOCAL_PROFILE_ID,
+      repositories: [],
+      setNoRepository,
+      setUseRemote,
+      setExecutorId,
+      setExecutorProfileId,
+      setWorkspacePath,
+    } as unknown as DialogFormState;
+    const { result } = renderHook(() => useDialogHandlers(fs, []));
+
+    act(() => result.current.handleToggleNoRepository());
+
+    expect(setNoRepository).toHaveBeenCalledWith(false);
+    expect(setWorkspacePath).toHaveBeenCalledWith("");
+    expect(setExecutorId).toHaveBeenCalledWith("");
+    expect(setExecutorProfileId).toHaveBeenCalledWith("");
+  });
 });
 
 describe("task title handling", () => {

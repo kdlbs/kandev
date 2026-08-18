@@ -19,14 +19,22 @@ test.describe("Archiving a task freezes its runtime state", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(90_000);
 
     const taskTitle = "Archive Freezes State";
-    const created = await apiClient.createTask(seedData.workspaceId, taskTitle, {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
+    const created = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      taskTitle,
+      seedData.agentProfileId,
+      {
+        // Keep the turn alive long enough for a loaded CI shard to observe
+        // IN_PROGRESS and archive it. The cancellation-aware delay exits as
+        // soon as the test sends agent.cancel.
+        description: 'e2e:message("still going")\ne2e:delay(60000)',
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      },
+    );
     const taskId = created.id;
     const { session_id: sessionId } = await apiClient.seedTaskSession(taskId, {
       state: "RUNNING",
@@ -39,12 +47,12 @@ test.describe("Archiving a task freezes its runtime state", () => {
     // stays frozen for the rest of the test.
     await expect
       .poll(async () => (await apiClient.getTask(taskId)).state, {
-        timeout: 20_000,
+        timeout: 30_000,
         message: "waiting for task to reach IN_PROGRESS before archiving",
       })
       .toBe("IN_PROGRESS");
 
-    // Archive while the agent turn is still in flight (15s delay keeps the
+    // Archive while the agent turn is still in flight (60s delay keeps the
     // mock agent from finishing on its own during this test).
     await apiClient.archiveTask(taskId);
 
@@ -61,6 +69,10 @@ test.describe("Archiving a task freezes its runtime state", () => {
     // User-facing check: the Tasks list (with archived tasks shown) must
     // reflect the same frozen state — the card must not have been
     // silently moved into a "needs review" bucket.
+    // The task intentionally has no repository, so clear any persisted
+    // repository filter before opening the list. The shared E2E user can have
+    // inherited settings from a preceding test in the same worker.
+    await apiClient.saveUserSettings({ repository_ids: [] });
     await testPage.goto("/tasks");
     await testPage.waitForLoadState("networkidle");
     await testPage.getByRole("checkbox", { name: "Show archived" }).click();

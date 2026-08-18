@@ -334,6 +334,170 @@ func TestProjectorDerivesBoundedStatusAcrossSources(t *testing.T) {
 	}
 }
 
+func TestProjectorLastActivityTracksBoundedSourcesMonotonically(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-last-activity-projector"
+	const sessionID = "session-last-activity-projector"
+
+	publishProjectorEvent(t, eventBus, events.TaskCreated, events.TaskCreated, map[string]interface{}{
+		"task_id":      taskID,
+		"workspace_id": "workspace-1",
+		"created_at":   "2026-08-01T18:01:00Z",
+		"updated_at":   "2026-08-01T18:01:00Z",
+	})
+	assertProjectedLastActivity(t, store.summary(taskID), "2026-08-01T18:01:00Z")
+
+	// Focus and subscription changes are operational state, not task activity.
+	publishProjectorEvent(t, eventBus, events.TaskSessionActivityChanged, events.TaskSessionActivityChanged, map[string]interface{}{
+		"task_id":             taskID,
+		"workspace_id":        "workspace-1",
+		"session_id":          sessionID,
+		"foreground_activity": "background",
+		"updated_at":          "2026-08-01T18:02:00Z",
+	})
+	assertProjectedLastActivity(t, store.summary(taskID), "2026-08-01T18:01:00Z")
+
+	// Provider polling can refresh a PR summary without making the task active.
+	publishProjectorEvent(t, eventBus, events.GitHubTaskPRUpdated, events.GitHubTaskPRUpdated, map[string]interface{}{
+		"task_id":       taskID,
+		"workspace_id":  "workspace-1",
+		"repository_id": "repo-last-activity",
+		"state":         "open",
+		"pr_number":     12,
+		"pr_url":        "https://example.test/pr/12",
+		"updated_at":    "2026-08-01T18:03:00Z",
+	})
+	assertProjectedLastActivity(t, store.summary(taskID), "2026-08-01T18:01:00Z")
+
+	// Agent-authored output and streamed/message-update bookkeeping do not move
+	// activity. The user-authored message below is the first message source that
+	// should move it.
+	publishProjectorEvent(t, eventBus, events.MessageAdded, events.MessageAdded, map[string]interface{}{
+		"task_id":      taskID,
+		"workspace_id": "workspace-1",
+		"session_id":   sessionID,
+		"author_type":  "agent",
+		"type":         "text",
+		"created_at":   "2026-08-01T18:04:00Z",
+	})
+	publishProjectorEvent(t, eventBus, events.MessageUpdated, events.MessageUpdated, map[string]interface{}{
+		"task_id":      taskID,
+		"workspace_id": "workspace-1",
+		"session_id":   sessionID,
+		"author_type":  "agent",
+		"type":         "text",
+		"updated_at":   "2026-08-01T18:04:30Z",
+	})
+	assertProjectedLastActivity(t, store.summary(taskID), "2026-08-01T18:01:00Z")
+
+	publishProjectorEvent(t, eventBus, events.MessageAdded, events.MessageAdded, map[string]interface{}{
+		"task_id":      taskID,
+		"workspace_id": "workspace-1",
+		"session_id":   sessionID,
+		"author_type":  "user",
+		"type":         "text",
+		"created_at":   "2026-08-01T18:05:00Z",
+	})
+	assertProjectedLastActivity(t, store.summary(taskID), "2026-08-01T18:05:00Z")
+
+	publishProjectorEvent(t, eventBus, events.TurnStarted, events.TurnStarted, map[string]interface{}{
+		"task_id":      taskID,
+		"workspace_id": "workspace-1",
+		"session_id":   sessionID,
+		"started_at":   "2026-08-01T18:06:00Z",
+	})
+	assertProjectedLastActivity(t, store.summary(taskID), "2026-08-01T18:06:00Z")
+
+	publishProjectorEvent(t, eventBus, events.TurnCompleted, events.TurnCompleted, map[string]interface{}{
+		"task_id":      taskID,
+		"workspace_id": "workspace-1",
+		"session_id":   sessionID,
+		"completed_at": "2026-08-01T18:07:00Z",
+	})
+	assertProjectedLastActivity(t, store.summary(taskID), "2026-08-01T18:07:00Z")
+
+	// State-only transitions are activity even when they carry no other
+	// bounded-summary field.
+	publishProjectorEvent(t, eventBus, events.TaskStateChanged, events.TaskStateChanged, map[string]interface{}{
+		"task_id":      taskID,
+		"workspace_id": "workspace-1",
+		"new_state":    "in_progress",
+		"updated_at":   "2026-08-01T18:08:00Z",
+	})
+	assertProjectedLastActivity(t, store.summary(taskID), "2026-08-01T18:08:00Z")
+
+	// Queue bookkeeping is deliberately ignored, and an older persisted update
+	// cannot move the monotonic maximum backwards.
+	publishProjectorEvent(t, eventBus, events.MessageQueueStatusChanged, events.MessageQueueStatusChanged, map[string]interface{}{
+		"task_id":      taskID,
+		"workspace_id": "workspace-1",
+		"updated_at":   "2026-08-01T18:09:00Z",
+	})
+	publishProjectorEvent(t, eventBus, events.TaskUpdated, events.TaskUpdated, map[string]interface{}{
+		"task_id":      taskID,
+		"workspace_id": "workspace-1",
+		"updated_at":   "2026-08-01T18:07:30Z",
+	})
+	assertProjectedLastActivity(t, store.summary(taskID), "2026-08-01T18:08:00Z")
+
+	publishProjectorEvent(t, eventBus, events.TaskUpdated, events.TaskUpdated, map[string]interface{}{
+		"task_id":      taskID,
+		"workspace_id": "workspace-1",
+		"updated_at":   "2026-08-01T18:10:00Z",
+	})
+	assertProjectedLastActivity(t, store.summary(taskID), "2026-08-01T18:10:00Z")
+}
+
+func TestProjectorLastActivityRehydratesFromDurableLoader(t *testing.T) {
+	const taskID = "task-last-activity-rehydrate"
+	want := time.Date(2026, 8, 1, 18, 11, 0, 0, time.UTC)
+	store := newProjectorTestStore()
+	store.rows[taskID] = &StoredTaskStatusSummary{
+		TaskID:      taskID,
+		WorkspaceID: "workspace-1",
+		Summary: TaskStatusSummary{
+			Revision:  4,
+			UpdatedAt: want.Add(-time.Minute),
+		},
+	}
+	var calls atomic.Int64
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			return "workspace-1", nil
+		},
+		LoadTaskActivity: func(context.Context, string) (*time.Time, error) {
+			calls.Add(1)
+			return &want, nil
+		},
+	})
+
+	state, err := projector.ensureState(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("restore projector state: %v", err)
+	}
+	if state.lastActivityAt == nil || !state.lastActivityAt.Equal(want) {
+		t.Fatalf("rehydrated last activity = %v, want %v", state.lastActivityAt, want)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("durable activity loader calls = %d, want 1", calls.Load())
+	}
+}
+
+func assertProjectedLastActivity(t *testing.T, summary *TaskStatusSummary, want string) {
+	t.Helper()
+	if summary == nil || summary.LastActivityAt == nil {
+		t.Fatalf("projected last activity = %+v, want %s", summary, want)
+	}
+	expected, err := time.Parse(time.RFC3339, want)
+	if err != nil {
+		t.Fatalf("parse expected activity %q: %v", want, err)
+	}
+	if !summary.LastActivityAt.Equal(expected) {
+		t.Fatalf("projected last activity = %s, want %s", summary.LastActivityAt.Format(time.RFC3339), want)
+	}
+}
+
 // Session events carry a `session_metadata` snapshot taken when the publisher
 // read the session, so one taken before the error was cleared must not re-arm an
 // error this projection already cleared.
@@ -602,6 +766,72 @@ func TestProjectorRetainsStoredDomainsUntilTheirFirstObservation(t *testing.T) {
 	}
 	if got.Git == nil || got.Git.ChangedFiles != 3 || got.PullRequest == nil || got.PullRequest.Number != 12 {
 		t.Fatalf("stored source domains after replay = git=%+v pr=%+v", got.Git, got.PullRequest)
+	}
+}
+
+func TestProjectorStaleDismissedClearsRestoredPendingAction(t *testing.T) {
+	store := newProjectorTestStore()
+	storedAt := time.Date(2026, 8, 1, 17, 59, 0, 0, time.UTC)
+	store.rows["task-stale-dismiss-restart"] = &StoredTaskStatusSummary{
+		TaskID:      "task-stale-dismiss-restart",
+		WorkspaceID: "workspace-1",
+		Summary: TaskStatusSummary{
+			Revision:      8,
+			UpdatedAt:     storedAt,
+			PendingAction: pendingClarification,
+		},
+	}
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		Now:   func() time.Time { return storedAt.Add(time.Minute) },
+	})
+
+	err := projector.HandleEvent(context.Background(), bus.NewEvent(
+		events.ClarificationStaleDismissed,
+		"test",
+		map[string]interface{}{
+			"task_id":      "task-stale-dismiss-restart",
+			"workspace_id": "workspace-1",
+			"session_id":   "session-stale-dismiss-restart",
+		},
+	))
+	if err != nil {
+		t.Fatalf("project stale dismissal after restart: %v", err)
+	}
+
+	got := store.summary("task-stale-dismiss-restart")
+	if got == nil || got.PendingAction != "" || got.Revision != 9 {
+		t.Fatalf("summary after stale dismissal = %+v, want empty pending action at revision 9", got)
+	}
+}
+
+func TestProjectorStaleDismissedKeepsDifferentPendingClarification(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-stale-dismiss-current"
+	const sessionID = "session-stale-dismiss-current"
+
+	publishSessionState(t, eventBus, taskID, sessionID, nil)
+	publishProjectorEvent(t, eventBus, events.MessageAdded, events.MessageAdded, map[string]interface{}{
+		"task_id":        taskID,
+		"workspace_id":   "workspace-1",
+		"session_id":     sessionID,
+		"type":           messageTypeClarificationRequest,
+		"requests_input": true,
+		"metadata": map[string]interface{}{
+			"status":     statusPending,
+			"pending_id": "pending-current",
+		},
+	})
+	publishProjectorEvent(t, eventBus, events.ClarificationStaleDismissed, events.ClarificationStaleDismissed, map[string]interface{}{
+		"task_id":      taskID,
+		"workspace_id": "workspace-1",
+		"session_id":   sessionID,
+		"pending_id":   "pending-older",
+	})
+
+	got := store.summary(taskID)
+	if got == nil || got.PendingAction != pendingClarification {
+		t.Fatalf("pending action after different stale dismissal = %+v, want clarification", got)
 	}
 }
 

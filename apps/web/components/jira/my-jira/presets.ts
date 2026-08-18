@@ -107,6 +107,7 @@ export function toTaskPreset(stored: JiraStoredPreset): JiraTaskPreset {
 // into user settings on the first save, so a locale-dependent value would be
 // written into the user's data and stay there after a locale switch. The prompt
 // templates are also sent to the agent as instructions rather than shown as copy.
+// i18n-exempt: persisted preset seed. Localizing needs a key/value split in the preset type.
 export const DEFAULT_JIRA_PRESETS: JiraStoredPreset[] = [
   {
     id: "implement",

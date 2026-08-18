@@ -70,6 +70,7 @@
   "transientRetryReasonProviderOverloaded": "Ƥŕōvĩďēŕ ōvēŕĺōàďēď",
   "transientRetryReasonProviderUnavailable": "Ƥŕōvĩďēŕ ţēḿƥōŕàŕĩĺŷ ũńàvàĩĺàƀĺē",
   "transientRetryReasonRateLimited": "Ŕàţē ĺĩḿĩţēď",
+  "transientRetryReasonAgentTransportLost": "Àĝēńţ ćōńńēćţĩōń ĺōśţ",
   "transientRetryReasonGeneric": "Ƥŕōvĩďēŕ ēŕŕōŕ",
   "transientRetryIn": "Ŕēţŕŷĩńĝ ĩń {{countdown}}",
   "transientRetryNow": "Ŕēţŕŷĩńĝ ńōŵ…",
@@ -129,6 +130,9 @@
   "sendNowReferenceOverflow": "Ćōḿƀĩńēď ēńţĩţŷ ŕēƒēŕēńćēś ēxćēēď ţĥē ḿēśśàĝē ĺĩḿĩţ.",
   "sortable": "śōŕţàƀĺē",
   "technicalDetails": "Ţēćĥńĩćàĺ ďēţàĩĺś",
+  "managedRuntimeNpmTitle": "ńƥḿ ćōũĺď ńōţ ƥŕēƥàŕē ţĥē ŕũńţĩḿē",
+  "managedRuntimeNpmBody": "Ķàńďēv ŕēƒŕēśĥēď ƥàćķàĝē ďàţà àńď ŕēţŕĩēď ţĥē śàḿē ŕũńţĩḿē ōńćē.",
+  "managedRuntimeRetry": "Ŕēţŕŷ ŕũńţĩḿē",
   "theAssociatedWorktree": "Ţĥē àśśōćĩàţēď ŵōŕķţŕēē",
   "theTaskAndItsData": "Ţĥē ţàśķ àńď ĩţś ďàţà",
   "thisActionCannotBeUndone": "Ţĥĩś àćţĩōń ćàńńōţ ƀē ũńďōńē.",
@@ -137,5 +141,9 @@
   "composerSteerPlaceholder": "Śēńď ńōŵ; ďēĺĩvēŕēď ţō ţĥē ŕũńńĩńĝ ţũŕń",
   "unknownError": "Ũńķńōŵń ēŕŕōŕ",
   "useWorkspaceDefault": "Ũśē ŵōŕķśƥàćē ďēƒàũĺţ...",
-  "useWorkspaceDefaultOption": "Ũśē ŵōŕķśƥàćē ďēƒàũĺţ"
+  "useWorkspaceDefaultOption": "Ũśē ŵōŕķśƥàćē ďēƒàũĺţ",
+  "emptyTurnKnownCommand": "`/{{command}}` ŕàń ƀũţ ƥŕōďũćēď ńō ōũţƥũţ. {{hint}}",
+  "emptyTurnNoOutput": "Ţĥē àĝēńţ ƒĩńĩśĥēď ŵĩţĥōũţ ƥŕōďũćĩńĝ àńŷ ōũţƥũţ.",
+  "emptyTurnResendHint": "Ţŕŷ ŕēśēńďĩńĝ ŷōũŕ ŕēqũēśţ àś à ńōŕḿàĺ ḿēśśàĝē, ŵĩţĥōũţ ţĥē ĺēàďĩńĝ śĺàśĥ.",
+  "emptyTurnUnknownCommand": "`/{{command}}` ĩśń'ţ à ćōḿḿàńď ţĥĩś àĝēńţ ŕēćōĝńĩźēś, śō ĩţ ŕēţũŕńēď ńō ōũţƥũţ. {{hint}}"
 }

@@ -142,8 +142,11 @@ func validateRemoteContributionRefs(binding RemoteContribution) error {
 // to provider-authored identity fields and the credential-free source URL, so
 // two validated bindings cannot accidentally alias different forks.
 func (c RemoteContribution) ContributionRemoteName() string {
-	identity := c.Provider + "|" + c.SourceRepository.Host + "|" +
-		c.SourceRepository.Path + "|" + c.SourceRepository.RemoteURL
+	return contributionRemoteName(c.Provider, c.SourceRepository)
+}
+
+func contributionRemoteName(provider string, repository RemoteContributionRepository) string {
+	identity := provider + "|" + repository.Host + "|" + repository.Path + "|" + repository.RemoteURL
 	sum := sha256.Sum256([]byte(identity))
 	return "contrib-" + hex.EncodeToString(sum[:])[:12]
 }
@@ -259,36 +262,53 @@ func PutRemoteContribution(metadata map[string]interface{}, binding *RemoteContr
 	return nil
 }
 
-// LoadRemoteContribution decodes and validates a binding from typed or
-// JSON-rehydrated metadata. A missing key is not an error.
-func LoadRemoteContribution(metadata map[string]interface{}) (RemoteContribution, bool, error) {
+func loadValidatedMetadata[T any](
+	metadata map[string]interface{},
+	key string,
+	label string,
+	nilMessage string,
+	validate func(T) error,
+) (T, bool, error) {
+	var zero T
 	if metadata == nil {
-		return RemoteContribution{}, false, nil
+		return zero, false, nil
 	}
-	raw, ok := metadata[RemoteContributionMetadataKey]
+	raw, ok := metadata[key]
 	if !ok || raw == nil {
-		return RemoteContribution{}, false, nil
+		return zero, false, nil
 	}
-	var binding RemoteContribution
-	switch value := raw.(type) {
-	case RemoteContribution:
-		binding = value
-	case *RemoteContribution:
-		if value == nil {
-			return RemoteContribution{}, false, errors.New("remote contribution binding is nil")
+	var value T
+	switch typed := raw.(type) {
+	case *T:
+		if typed == nil {
+			return zero, false, errors.New(nilMessage)
 		}
-		binding = *value
+		value = *typed
+	case T:
+		value = typed
 	default:
 		data, err := json.Marshal(raw)
 		if err != nil {
-			return RemoteContribution{}, false, fmt.Errorf("encode remote contribution: %w", err)
+			return zero, false, fmt.Errorf("encode %s: %w", label, err)
 		}
-		if err := json.Unmarshal(data, &binding); err != nil {
-			return RemoteContribution{}, false, fmt.Errorf("decode remote contribution: %w", err)
+		if err := json.Unmarshal(data, &value); err != nil {
+			return zero, false, fmt.Errorf("decode %s: %w", label, err)
 		}
 	}
-	if err := binding.Validate(); err != nil {
-		return RemoteContribution{}, false, err
+	if err := validate(value); err != nil {
+		return zero, false, err
 	}
-	return binding, true, nil
+	return value, true, nil
+}
+
+// LoadRemoteContribution decodes and validates a binding from typed or
+// JSON-rehydrated metadata. A missing key is not an error.
+func LoadRemoteContribution(metadata map[string]interface{}) (RemoteContribution, bool, error) {
+	return loadValidatedMetadata(
+		metadata,
+		RemoteContributionMetadataKey,
+		"remote contribution",
+		"remote contribution binding is nil",
+		RemoteContribution.Validate,
+	)
 }

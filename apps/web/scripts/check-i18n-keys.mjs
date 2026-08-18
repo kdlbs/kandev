@@ -11,46 +11,49 @@
  *   - every catalog entry is referenced somewhere -> orphans are a WARNING
  *   - `en` and `pseudo` have the same key sets -> drift is an ERROR
  *   - real locales (anything that is not `en`/`pseudo`, discovered from the
- *     directory listing rather than named here) -> parity issues are a WARNING
+ *     directory listing rather than named here) -> parity issues are an ERROR
  *
- * ## Why real locales only warn
+ * ## Why real locales gate too
  *
- * `en` and `pseudo` are ours: English is authored in the same PR as the code,
- * and `pseudo` is GENERATED from it by `pnpm run i18n:pseudo`. A mismatch there
- * is always the author's to fix in the change that caused it, so it gates.
+ * They did not used to. Gating them meant an ordinary English-only PR failed CI
+ * for work nobody in the merge path could do - #2261 added 13 `en` chat keys and
+ * left `main` red because #2243 had introduced `zh-cn` 20 minutes earlier. So
+ * the pass was advisory, and the cost of that showed up exactly where you would
+ * expect: pt-pt was 312 keys short and zh-hk/zh-tw 415, none of it visible in a
+ * green build.
  *
- * Real-locale catalogs are translated OUT OF BAND, by a third party, on their
- * own cadence. Gating on them means an ordinary English-only PR fails CI for
- * work nobody in the merge path can do — and that is not hypothetical: #2261
- * added 13 `en` chat keys and left `main` red, because #2243 had introduced
- * `zh-cn` and the gate 20 minutes earlier. So these are reported loudly, for
- * whoever owns the translation, and do not block a merge.
+ * The four catalogs are now complete, so the failure mode is the other one: a
+ * PR that adds an `en` key and no translation silently re-opens the gap. This
+ * gates, and the cost is that adding user-facing copy means adding it in five
+ * languages. That is the actual cost of shipping five languages.
  *
- * ## What this check is NOT
+ * ## The identical-to-English check
  *
- * The real-locale pass is STRUCTURAL, not translational. It compares shapes, so
- * a green run does not mean "translated" — measured against `main`:
- *
- *   caught:     missing key, extra key, missing/extra namespace, empty or
- *               non-string value, dropped `{{placeholder}}`, dropped `<n>` tag
- *   NOT caught: a value identical to English, a whole catalog copy-pasted from
- *               `en`, and swapped `_one`/`_other` forms
- *
- * The identical-to-English tolerance is deliberate — brand nouns and technical
- * literals (`Kandev`, `GitHub`, `Webhook URL`) must stay verbatim, so there is
- * no sound automatic rule here. Reviewing a translation is a human job.
+ * The structural pass compares SHAPES, so a catalog copy-pasted wholesale from
+ * `en` passes every part of it. `untranslatedValueIssues` closes that, in two
+ * tiers (see `scripts/lib/i18n-catalogs.mjs`): values the shared `looksLikeCopy`
+ * predicate says are not copy need no explanation, and the prose that survives
+ * it is declared in a `_verbatim.json` registry with a reason. Stale registry
+ * entries are themselves an error, so the files cannot rot into the shrinking
+ * allowlist this was meant not to be.
  *
  * Usage: node scripts/check-i18n-keys.mjs [--strict-orphans]
  */
 import fs from "node:fs";
 import path from "node:path";
 
+import { noLiteralStringOptions } from "../eslint.i18n.options.mjs";
 import {
   discoverRealLocales,
   formatParityIssue,
+  formatVerbatimIssue,
   readLocaleNamespaces,
+  readVerbatimRegistry,
   realLocaleParityIssues,
+  staleVerbatimEntries,
+  untranslatedValueIssues,
 } from "./lib/i18n-catalogs.mjs";
+import { looksLikeCopy } from "./lib/looks-like-copy.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const LOCALES = path.join(ROOT, "src", "locales");
@@ -135,9 +138,38 @@ const pseudoMissing = [...enKeys].filter((k) => !pseudoKeys.has(k));
 const pseudoExtra = [...pseudoKeys].filter((k) => !enKeys.has(k));
 const sourceNamespaces = readLocaleNamespaces(LOCALES, "en");
 const realLocales = discoverRealLocales(LOCALES);
-const realLocaleIssues = realLocales.flatMap((locale) =>
-  realLocaleParityIssues(sourceNamespaces, readLocaleNamespaces(LOCALES, locale), locale),
+const localeNamespaces = new Map(
+  realLocales.map((locale) => [locale, readLocaleNamespaces(LOCALES, locale)]),
 );
+const excludes = noLiteralStringOptions.words?.exclude ?? [];
+const isCopy = (value) => looksLikeCopy(value, excludes);
+const sharedVerbatim = readVerbatimRegistry(LOCALES);
+const ownVerbatim = new Map(
+  realLocales.map((locale) => [locale, readVerbatimRegistry(LOCALES, locale)]),
+);
+const realLocaleIssues = realLocales.flatMap((locale) => [
+  ...realLocaleParityIssues(sourceNamespaces, localeNamespaces.get(locale), locale),
+  ...untranslatedValueIssues(sourceNamespaces, localeNamespaces.get(locale), locale, isCopy, {
+    shared: sharedVerbatim,
+    own: ownVerbatim.get(locale),
+  }),
+]);
+
+// Registry hygiene, so a `_verbatim.json` cannot outlive what it explains.
+const flatLocales = realLocales.map((locale) => ({
+  locale,
+  flat: new Map(
+    [...localeNamespaces.get(locale)].flatMap(([ns, messages]) =>
+      [...messages].map(([key, value]) => [`${ns}:${key}`, value]),
+    ),
+  ),
+}));
+const verbatimIssues = [
+  ...staleVerbatimEntries(sharedVerbatim, en, flatLocales),
+  ...realLocales.flatMap((locale) =>
+    staleVerbatimEntries(ownVerbatim.get(locale), en, flatLocales, locale),
+  ),
+];
 
 let failed = false;
 
@@ -159,15 +191,28 @@ if (pseudoMissing.length || pseudoExtra.length) {
   );
 }
 
-// Advisory, never fatal — see the "Why real locales only warn" note at the top.
-// Deliberately NOT gated behind --strict-orphans or any flag: the point is that
-// no invocation of this script can be made to fail on a translation catalog.
 if (realLocaleIssues.length) {
-  console.warn(
-    `\n⚠ ${realLocaleIssues.length} real-locale catalog parity issue(s) ` +
-      `— advisory, does not fail the build:`,
+  failed = true;
+  console.error(`\n✖ ${realLocaleIssues.length} real-locale catalog issue(s):\n`);
+  for (const issue of realLocaleIssues.slice(0, 60)) {
+    console.error(`  ${formatParityIssue(issue)}`);
+  }
+  if (realLocaleIssues.length > 60) {
+    console.error(`  … and ${realLocaleIssues.length - 60} more`);
+  }
+  console.error(
+    `\n  Add the translation, or - if the value is prose that reads the same in\n` +
+      `  that language - declare it in src/locales/<locale>/_verbatim.json with a\n` +
+      `  reason. Brand nouns, acronyms and placeholder-only frames need neither.\n` +
+      `  For zh-tw / zh-hk run: pnpm run i18n:zh-hant\n`,
   );
-  for (const issue of realLocaleIssues) console.warn(`  ${formatParityIssue(issue)}`);
+}
+
+if (verbatimIssues.length) {
+  failed = true;
+  console.error(`\n✖ ${verbatimIssues.length} stale verbatim registry entr(ies):\n`);
+  for (const issue of verbatimIssues) console.error(`  ${formatVerbatimIssue(issue)}`);
+  console.error("");
 }
 
 if (orphans.length) {
@@ -185,12 +230,10 @@ if (!failed) {
   // zh-cn in sync", which was misleading twice over: it implied a real locale
   // gates the build, and it read as "translated" for a check that cannot see
   // English left inside a translated value.
-  const advisory = realLocales.length
-    ? ` ${realLocaleIssues.length} advisory ${realLocales.join(", ")} issue(s).`
-    : "";
+  const gated = realLocales.length ? ` ${realLocales.join(", ")} complete.` : "";
   console.log(
     `✓ i18n keys OK — ${used.size} key(s) referenced, ${en.size} en entr(ies), ` +
-      `${orphans.length} orphan(s), pseudo in sync.${advisory}`,
+      `${orphans.length} orphan(s), pseudo in sync.${gated}`,
   );
 }
 process.exit(failed ? 1 : 0);

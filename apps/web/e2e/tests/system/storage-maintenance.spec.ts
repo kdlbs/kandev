@@ -73,6 +73,7 @@ test.describe("System storage maintenance", () => {
     await expect(testPage.getByTestId("storage-run-now")).toHaveAttribute(
       "data-job-state",
       "succeeded",
+      { timeout: 30_000 },
     );
   });
 

@@ -9,7 +9,13 @@ import type { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint"
 import type { AppState } from "@/lib/state/store";
 import type * as PluginSDK from "@kandev/plugin-sdk";
 import type { PluginUIApi } from "@kandev/plugin-sdk";
-export type { PluginContextApi, PluginHostRepository, PluginUIApi } from "@kandev/plugin-sdk";
+export type {
+  PluginContextApi,
+  PluginHostRepository,
+  MainTopBarSlotProps,
+  PluginNavSection,
+  PluginUIApi,
+} from "@kandev/plugin-sdk";
 export type { PluginIcon } from "@kandev/plugin-sdk";
 
 /** Entry in the boot payload's `plugins` array (backend `ActivePlugin`). */
@@ -32,9 +38,13 @@ export interface NavItem {
   /**
    * Where the item renders: "main" (default) as a top-level sidebar entry,
    * "integrations" inside the sidebar's Integrations section alongside the
-   * first-party integration links.
+   * first-party integration links, "sidebar-footer" as an icon button in the
+   * sidebar footer's icon row and as a labelled row in the phone menu's
+   * Utilities group (subject to the footer's inline budget — an over-budget
+   * item is reached through the footer's overflow menu instead), "settings"
+   * accepted but rendered on no surface.
    */
-  section?: "main" | "settings" | "integrations";
+  section?: PluginSDK.PluginNavSection;
 }
 
 /**
@@ -92,6 +102,10 @@ export interface IntegrationSettingsRegistration {
   /** Curated icon name or plugin-owned component. */
   icon?: PluginSDK.PluginIcon;
   Component: ReactType.ComponentType<PluginIntegrationSettingsProps>;
+  /** Optional header action (e.g. an enable toggle) rendered in the host's
+   * SettingsSection header action slot, mirroring built-in integrations.
+   * Receives `{ workspaceId?: string }` so it can operate per-workspace. */
+  action?: ReactType.ComponentType<{ workspaceId?: string }>;
 }
 
 /**
@@ -104,7 +118,12 @@ export interface IntegrationSettingsRegistration {
  * sessionIds }`), "main-top-bar" (status/actions in the default app top bar on
  * the Home / Kanban / Tasks views, beside the CPU/DB metrics and the
  * view/display controls — the app-wide, task-agnostic counterpart to
- * "chat-top-bar"; receives `{ workspaceId, workspaceLabel, currentPage }`),
+ * "chat-top-bar"; receives `{ workspaceId, workspaceLabel, currentPage,
+ * presentation }`). On phones, `presentation` is "mobile": contributions
+ * join the horizontally scrollable middle action strip between the fixed
+ * Kandev link and menu button. Use the host `ui.Button` icon-button contract
+ * there: a 32px box with a 16px SVG icon. Desktop contributions retain their
+ * existing sizing.
  * "app-status-bar-left" / "app-status-bar-right" (receives
  * `AppStatusBarSlotProps` as `slotProps`), and
  * "plugin-settings" (inline UI on a plugin's own settings
@@ -115,11 +134,15 @@ export interface IntegrationSettingsRegistration {
  * another plugin's page and authors don't gate on the current id themselves.
  * "task-card-indicators" (small icon/badge rendered beside the PR status icon
  * on every kanban card — receives `{ taskId, workspaceId, workflowStepId }`
- * as `slotProps`), and "task-card-tags" (its own row on every kanban card,
+ * as `slotProps`), "task-card-tags" (its own row on every kanban card,
  * rendered below the badges row — for contributions too wide for the cramped
  * title-row `task-card-indicators` spot, e.g. a row of tag chips — receives
- * `TaskCardTagsSlotProps` as `slotProps`). Not a closed union — hosts may
- * register additional slot names.
+ * `TaskCardTagsSlotProps` as `slotProps`), and "sidebar-workspace-actions"
+ * (icon-button cluster in the sidebar's New Task row, after the built-in
+ * Quick Terminal and Quick Chat actions, with the same action group exposed
+ * through mobile navigation — receives `SidebarWorkspaceActionsSlotProps`
+ * as `slotProps`). Not a closed union — hosts may register additional slot
+ * names.
  */
 export type PluginSlotName = string;
 
@@ -142,6 +165,16 @@ export type TaskCardTagsSlotProps = {
   taskId: string;
   workspaceId: string | null;
   workflowStepId: string | null;
+};
+
+/** Context the host forwards to every `sidebar-workspace-actions` component. */
+export type SidebarWorkspaceActionsSlotProps = {
+  /** Active workspace for the current navigation surface. */
+  workspaceId: string;
+  /** Human-readable label of that workspace, when known. */
+  workspaceLabel?: string;
+  /** Desktop sidebar cluster or phone navigation action group. */
+  presentation: "desktop" | "mobile";
 };
 
 /** Component registered for a named slot; receives host-provided `slotProps`. */

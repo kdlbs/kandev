@@ -24,6 +24,19 @@ The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, 
 
 Hermes launches with `hermes acp`. Install the required `hermes` executable from its **Settings > Agents** card, which runs the official Hermes installer. Hermes currently supports task and workspace sessions. Office-assigned skill injection is not yet supported.
 
+### Pi command surfaces
+
+Pi uses separate executables for its two Kandev modes:
+
+- Structured ACP sessions and one-shot inference use `npx -y pi-acp`.
+- CLI Passthrough starts the globally installed `pi` executable.
+- The Pi install action runs `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`.
+
+After installation, select **Rescan**. Kandev detects Pi when `pi` is on the
+`PATH` of the backend process and responds to the non-interactive `--version`
+check. The `pi-acp` adapter is not the interactive terminal CLI, and managed
+ACP runtime selection does not replace the passthrough command.
+
 1. Select **Rescan** after installing or updating a CLI.
 2. If the card offers an install action, review the command before running it. Installation runs on the Kandev host.
 3. If the card reports that login is required, open its login terminal or authenticate the CLI as the same operating-system user that runs Kandev.
@@ -55,6 +68,27 @@ configuration options, commands, and runtime version without a page reload.
 - Passthrough agents, authentication helpers, remote executors, and running containers are unchanged.
 - If preparation, ACP validation, authentication, or persistence fails, Kandev keeps the previous active version and capability catalogue. Select another stable version or retry the same target.
 - Kandev may prepare the exact version again if npm removes its cache entry. Kandev does not own an offline package inventory, and global npm cache cleanup is not required.
+
+#### Recover a stale npm runtime lookup
+
+Host-local managed runtimes normally start with npm's offline-preferred lookup.
+If npm has stale package metadata and cannot resolve the selected
+`package@version`, the first ACP startup can fail even though the configured
+registry contains that exact version. Kandev recognizes this specific npm
+resolution error, removes only the deterministic `_npx` execution tree for the
+selected package and version, then retries the same command once with an
+online-preferred metadata lookup.
+
+The retry keeps the selected package, exact version, command prefix, model,
+permissions, and session identity. It does not change the npm registry or
+silently select another version. When the retry succeeds, no recovery card is
+shown. When it fails again, Kanban and Office show one **Retry runtime** action
+with collapsed technical details.
+
+Do not use `npm cache clean --force` as the normal recovery step. It removes
+unrelated npm data and does not target the stale execution tree. If the
+specialized retry cannot resolve the runtime, check that the Kandev service
+uses the expected npm installation and configured registry. Run `npm config get registry` as the Kandev service user to inspect the registry used by that process. Then use the runtime update controls to select and prepare another trusted stable version.
 
 <details>
 <summary>Add a custom terminal agent</summary>
@@ -92,6 +126,24 @@ agent can therefore show a different option set for each model. If a model
 change makes a saved option value unsupported, Kandev removes that value after
 a successful resolution; a failed resolution keeps the draft unchanged so you
 can retry it.
+
+### Host probes and executor model catalogs
+
+The model list shown while editing a profile comes from a host probe. It is an
+editing hint, not a launch gate. A profile remains selectable when its saved
+model is missing from that host list.
+
+At task launch, the selected executor's ACP catalog is authoritative. Kandev
+sends the requested model only when the executor advertises it. If it does
+not, Kandev uses an advertised fallback when available, or sends no model
+request and continues with the agent's current or default model. Kandev stores
+one warning in task chat with the requested model and the effective model when
+known. The warning also identifies the agent and executor and asks you to
+check credentials, copied configuration, and the agent version.
+
+The saved profile model is not changed. Optional portable configuration can
+copy selected allowlisted files into a remote executor, but it cannot guarantee
+that the host and executor expose the same model catalog.
 
 ### Monitor capability and subscription status
 
@@ -237,6 +289,7 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
 - **Login required:** use the agent card's login terminal or sign in under Kandev's operating-system user; signing in as another user does not help the service.
 - **Model, mode, or command probe fails:** authenticate first, refresh discovery, and choose a value advertised by the installed version.
 - **Launch fails after editing flags:** inspect the command preview, remove stale arguments, and correct unmatched quotes or trailing escapes.
+- **Managed npm runtime cannot resolve its selected version:** Kandev checks the configured registry and retries the same version once after refreshing its exact `_npx` execution tree. If the retry fails, verify the service user's npm configuration and registry, then use **Settings > Agents** to prepare another trusted stable version. Do not start with `npm cache clean --force`.
 - **Environment value is absent:** confirm the secret still exists, the key is not reserved, and an executor/runtime variable is not already taking precedence.
 - **MCP server is absent:** confirm agent MCP support, valid JSON, transport mode, executor policy, and the session warning logs.
 - **MCP tools are missing from one agent session:** open the neutral plug button in that session's chat toolbar. **Delivered** means Kandev included the server in the agent launch but cannot yet observe a connection; **Connected** means the built-in server saw MCP initialize; **Active** means it served `tools/list`. A gray filtered/unavailable row explains an intentional omission, while red is reserved for an explicit sanitized error. Third-party profile servers normally remain Delivered because they connect directly to the agent and Kandev cannot inspect them. The report is scoped to that session and its current execution, so compare the affected agent's own toolbar rather than another agent on the task.

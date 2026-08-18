@@ -25,8 +25,24 @@ the stack traces suggest a crash where none occurred.
 - The go-plugin subprocess exiting because Kandev killed it during shutdown
   SHALL NOT surface as a library ERROR (`plugin process exited ... signal:
   terminated`).
-- No change to control flow, task/session state transitions, returned errors,
-  or WS responses. This is a logging-severity change only.
+- On platforms where the supervised root can be signaled without orphaning a
+  wrapper's descendants, the launcher SHALL deliver the first
+  graceful-shutdown signal only to that root. This gives the backend and its
+  owned runtimes, including plugins, an opportunity to run their cleanup paths
+  before forced descendant cleanup. For the Unix dev wrapper, the launcher
+  SHALL target the backend PID written by the backend binary and validate that
+  it remains in the wrapper's process group. If that target is unavailable, or
+  root-only signaling is unsafe for a platform's wrapper process, the launcher
+  SHALL retain its tree-wide graceful fallback so descendants are not orphaned.
+  On platforms with process-group support, the complete shutdown MUST still
+  terminate the supervised process tree, including descendants left after the
+  root exits. Platforms without portable process-group support only guarantee
+  cleanup through their available supervised-root operation.
+- No change to backend/plugin lifecycle control flow, task/session state
+  transitions, returned errors, or WS responses. Launcher sequencing changes
+  only at the graceful-signal versus forced-cleanup boundary, so the complete
+  supervised process tree still terminates on platforms with process-group
+  support.
 
 ## Affected log sites and target behavior
 Classification reuses existing helpers/sentinels wherever possible.
@@ -48,8 +64,18 @@ Classification reuses existing helpers/sentinels wherever possible.
 3. `internal/plugins/runtime/manager.go` (`hcplugin.NewClient`, L394). go-plugin
    is constructed with no `Logger`, so its default hclog logger prints the
    process exit at ERROR when `client.Kill()` runs during `StopAll`. Supply an
-   hclog logger routed through Kandev's logger and silence it for the
-   deliberate kill so an expected `signal: terminated` is not an ERROR.
+   hclog logger routed through Kandev's logger and downgrade the deliberate
+   kill so an expected `signal: terminated` is not an ERROR. The launcher must
+   signal the supervised backend root first; otherwise a process-group
+   SIGTERM reaches the plugin before this intentional-stop marker is set.
+4. `internal/launcher/process.go` graceful child shutdown. On platforms with a
+   safe root-only signal, the first signal SHALL target only the supervised
+   root process. The Unix dev wrapper SHALL use the backend PID handoff for
+   this target. If the root does not exit within the existing grace period, or
+   a second interrupt arrives, the launcher SHALL use process-group force
+   cleanup to reap the complete tree, including descendants after root exit.
+   Platforms with an unsafe wrapper process SHALL use the existing tree-wide
+   graceful fallback.
 
 ## Log sites reviewed and deliberately left unchanged
 - `internal/agent/runtime/lifecycle/manager_events.go:544` "agent updates
@@ -90,9 +116,24 @@ Classification reuses existing helpers/sentinels wherever possible.
 - **GIVEN** the plugin manager `StopAll` kills a running plugin during shutdown,
   **WHEN** the subprocess exits with `signal: terminated`, **THEN** no ERROR log
   line for that expected exit is emitted.
+- **GIVEN** a supervised backend has plugin subprocesses in the same process
+  group, **WHEN** the launcher receives the first Ctrl+C, **THEN** it signals
+  the backend root first on platforms with safe root-only signaling, using the
+  backend PID handoff when the managed process is a Unix dev wrapper. The
+  backend can invoke plugin cleanup, and the plugin subprocesses are not
+  directly terminated by the launcher's initial graceful signal. Platforms
+  with an unsafe wrapper use the existing tree-wide graceful fallback.
+- **GIVEN** the supervised root ignores the graceful signal or a second Ctrl+C
+  arrives, **WHEN** the launcher's grace/force path runs, **THEN** the existing
+  process-group force cleanup terminates the root and all descendants, even if
+  the root exits before a descendant does.
 
 ## Out of scope
-- Changing shutdown ordering, timeouts, or which subprocesses are killed.
+- Changing the existing grace duration or second-signal force-kill policy.
+- Changing which processes the final forced cleanup terminates; on platforms
+  with process-group support, the complete supervised process tree remains
+  covered by process-group force cleanup. Unsupported platforms retain their
+  existing root-only limitation.
 - Changing WS responses or task/session state on launch failure.
 - Suppressing agentctl child stderr relay during shutdown.
 - Any non-shutdown logging severity review.

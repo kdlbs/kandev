@@ -15,13 +15,18 @@ type GitHubStatusProvider interface {
 
 // GitHubConnectionHealth is an aggregate of persisted workspace-owned
 // connections. It intentionally contains no process-global auth state.
+//
+// Every field counts connection rows, never workspaces. A workspace with no
+// connection at all appears nowhere here: it uses Azure DevOps, or no code
+// host, and never had a GitHub connection to lose. Counting those as
+// "disconnected" is what made this warning permanent for anyone using GitHub
+// in some workspaces but not all, so the type no longer carries a field that
+// could be folded back into a degraded tally.
 type GitHubConnectionHealth struct {
-	WorkspaceCount int
-	Active         int
-	Disconnected   int
-	Invalid        int
-	Suspended      int
-	Revoked        int
+	Active    int
+	Invalid   int
+	Suspended int
+	Revoked   int
 }
 
 // GitHubRateLimitProvider exposes per-resource exhaustion state so the health
@@ -88,25 +93,34 @@ func (c *GitHubChecker) Check(ctx context.Context) []Issue {
 		}}, c.rateLimitIssues()...)
 	}
 	issues := make([]Issue, 0, 1)
-	unhealthy := health.Disconnected + health.Invalid + health.Suspended + health.Revoked
-	if health.WorkspaceCount == 0 || (health.Active == 0 && unhealthy == health.WorkspaceCount) {
+	degraded := health.Invalid + health.Suspended + health.Revoked
+	// Active is the question that decides which issue to emit, because a
+	// non-active connection cannot authenticate anything: the credential
+	// resolver rejects it outright. Zero active connections therefore means
+	// "no usable GitHub credential", whether that is because none was ever
+	// configured or because every one of them broke. Callers gating a flow on
+	// GitHub access key off this issue, so folding both cases into it keeps
+	// them from proceeding with credentials that will fail later.
+	if health.Active == 0 {
 		issues = append(issues, Issue{
 			ID:       "github_not_authenticated",
 			Category: "github",
 			Title:    "GitHub not authenticated",
-			Message:  "Configure a GitHub connection for a workspace.",
+			Message:  noActiveConnectionMessage(health, degraded),
 			Severity: SeverityWarning,
 			FixURL:   "/settings/integrations/github",
 			FixLabel: "Configure GitHub",
 		})
-	} else if unhealthy > 0 {
+	} else if degraded > 0 {
+		// At least one connection works, so this is advisory: it names the
+		// broken ones without blocking flows the working one can serve.
 		issues = append(issues, Issue{
 			ID:       "github_workspace_connections_unhealthy",
 			Category: "github",
 			Title:    "GitHub workspace connections need attention",
 			Message: fmt.Sprintf(
-				"%d of %d GitHub workspace connections need attention (%d disconnected, %d invalid, %d suspended, %d revoked).",
-				unhealthy, health.WorkspaceCount, health.Disconnected, health.Invalid, health.Suspended, health.Revoked,
+				"%d of %d configured GitHub workspace connections need attention (%d invalid, %d suspended, %d revoked).",
+				degraded, health.Active+degraded, health.Invalid, health.Suspended, health.Revoked,
 			),
 			Severity: SeverityWarning,
 			FixURL:   "/settings/integrations/github",
@@ -114,6 +128,20 @@ func (c *GitHubChecker) Check(ctx context.Context) []Issue {
 		})
 	}
 	return append(issues, c.rateLimitIssues()...)
+}
+
+// noActiveConnectionMessage distinguishes the two ways a deployment ends up
+// with no usable credential. Both block the same flows, but only one of them
+// is fixed by reconnecting an existing connection rather than creating one.
+func noActiveConnectionMessage(health GitHubConnectionHealth, degraded int) string {
+	if degraded == 0 {
+		return "Configure a GitHub connection for a workspace."
+	}
+	return fmt.Sprintf(
+		"No working GitHub connection: all %d configured connections need attention "+
+			"(%d invalid, %d suspended, %d revoked).",
+		degraded, health.Invalid, health.Suspended, health.Revoked,
+	)
 }
 
 // rateLimitIssues materializes one Issue per exhausted resource bucket.

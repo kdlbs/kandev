@@ -184,6 +184,51 @@ func TestGitOperatorRemoteContributionPullsFromSourceRemote(t *testing.T) {
 	}
 }
 
+func TestGitOperatorContributionDestinationPushesWithoutChangingPullRemote(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	targetDir := t.TempDir()
+	runGit(t, targetDir, "init", "--bare")
+	runGit(t, repoDir, "remote", "add", "contrib-destination", targetDir)
+	runGit(t, repoDir, "checkout", "-b", "feature/destination")
+	writeFile(t, repoDir, "destination.txt", "destination\n")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "destination")
+
+	destination := &taskmodels.ContributionDestination{
+		Version:  taskmodels.ContributionDestinationVersion,
+		Provider: taskmodels.ContributionDestinationProviderGitHub,
+		SourceRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "agent/kandev", ProviderID: "200", RemoteURL: "https://github.com/agent/kandev.git",
+		},
+	}
+	if err := destination.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "config", "url."+targetDir+".insteadOf", destination.TargetRepository.RemoteURL)
+	// The model derives the actual deterministic remote name. Rename the test
+	// remote after binding so the operator exercises the server-authored name.
+	runGit(t, repoDir, "remote", "rename", "contrib-destination", destination.ContributionRemoteName())
+	runGit(t, repoDir, "remote", "set-url", "--push", destination.ContributionRemoteName(), destination.TargetRepository.RemoteURL)
+
+	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+	operator.setContributionDestination(destination)
+	pushed, err := operator.Push(context.Background(), false, false)
+	if err != nil || !pushed.Success {
+		t.Fatalf("Push = %+v, err = %v", pushed, err)
+	}
+	if got := strings.TrimSpace(runGit(t, targetDir, "rev-parse", "refs/heads/feature/destination")); got == "" {
+		t.Fatal("destination branch was not pushed")
+	}
+	if got := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin")); got == "" {
+		t.Fatal("origin remote was removed or rewritten")
+	}
+}
+
 func TestGitOperatorPush_PreservesExistingUpstream(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
 	defer cleanup()

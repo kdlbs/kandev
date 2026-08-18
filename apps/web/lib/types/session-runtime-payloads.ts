@@ -46,7 +46,26 @@ export type SessionModelsPayload = {
   current_model_id: string;
   models: SessionModelInfoPayload[];
   config_options: ConfigOptionPayload[];
+  config_options_settled?: boolean;
   config_baseline?: Record<string, string>;
+  timestamp: string;
+};
+
+export type SessionModelSelectionWarningPayload = {
+  task_id: string;
+  session_id: string;
+  agent_id: string;
+  warning: {
+    kind: string;
+    decision_id: string;
+    reason: string;
+    requested_model?: string;
+    effective_model?: string;
+    fallback_model?: string;
+    agent_id: string;
+    executor_type: string;
+    executor_profile_id: string;
+  };
   timestamp: string;
 };
 

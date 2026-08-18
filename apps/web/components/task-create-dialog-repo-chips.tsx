@@ -4,13 +4,16 @@ import { useRef, useState } from "react";
 import { IconGitFork } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import type { Repository } from "@/lib/types/http";
-import type { DialogFormState } from "@/components/task-create-dialog-types";
+import type { Repository, RepositorySet } from "@/lib/types/http";
+import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
 import { RemoteRepoChipsRow } from "@/components/task-create-dialog-remote-repo-chips";
 import { FolderPicker } from "@/components/folder-picker";
 import { SourceModeSwitch } from "@/components/task-create-dialog-source-mode";
 import { WorkspaceRepoChips } from "@/components/task-create-dialog-workspace-repo-chips";
 import { CreateLocalRepositorySurface } from "@/components/create-local-repository-surface";
+import { RepositorySetsControl } from "@/components/task-create-dialog-repository-sets-control";
+import { SaveRepositorySetDialog } from "@/components/task-create-dialog-repository-sets-save";
+import { SaveRepositorySetMenuAction } from "@/components/task-create-dialog-repository-sets-save-action";
 import type { DirectLocalExecutorSelection } from "@/components/task-create-dialog-handlers";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
@@ -60,6 +63,23 @@ type RepoChipsRowProps = {
   };
   onRefreshRepositories?: () => void;
   repositoriesRefreshing?: boolean;
+  /**
+   * The workspace's repository sets, plus how to apply one. Grouped into a single
+   * prop so both surfaces that render this row (task create, new subtask) opt in
+   * with one line, and Quick Chat - which renders WorkspaceRepoChips directly -
+   * is untouched.
+   */
+  repositorySets?: {
+    sets: RepositorySet[];
+    onApply: (set: RepositorySet) => void;
+    /** Present when the current selection can be saved as a new set. */
+    save?: {
+      workspaceId: string;
+      rows: TaskRepoRow[];
+      open: boolean;
+      setOpen: (open: boolean) => void;
+    } | null;
+  };
 };
 
 export function RepoChipsRow({
@@ -81,6 +101,7 @@ export function RepoChipsRow({
   localRepositoryCreation,
   onRefreshRepositories,
   repositoriesRefreshing,
+  repositorySets,
 }: RepoChipsRowProps) {
   const chipRowRef = useRef<HTMLDivElement>(null);
   const [creatingForRowKey, setCreatingForRowKey] = useState<string | null>(null);
@@ -147,6 +168,15 @@ export function RepoChipsRow({
         onRefreshRepositories={onRefreshRepositories}
         repositoriesRefreshing={repositoriesRefreshing}
       />
+      {/* Sets select workspace repositories, so they are offered only in the mode
+          that selects those: not in Remote URL or No repository. */}
+      {repositorySets && !fs.useRemote && !fs.noRepository ? (
+        <RepositorySetsSurface
+          repositorySets={repositorySets}
+          repositories={repositories}
+          rows={fs.repositories}
+        />
+      ) : null}
       <SourceModeSwitch
         useRemote={fs.useRemote}
         noRepository={fs.noRepository}
@@ -165,6 +195,43 @@ export function RepoChipsRow({
         />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The Sets control plus its save dialog. Extracted so RepoChipsRow stays under
+ * the function-length cap.
+ */
+function RepositorySetsSurface({
+  repositorySets,
+  repositories,
+  rows,
+}: {
+  repositorySets: NonNullable<RepoChipsRowProps["repositorySets"]>;
+  repositories: Repository[];
+  rows: TaskRepoRow[];
+}) {
+  const save = repositorySets.save;
+  return (
+    <>
+      <RepositorySetsControl
+        sets={repositorySets.sets}
+        repositories={repositories}
+        rows={rows}
+        onApply={repositorySets.onApply}
+        footerActions={
+          save ? <SaveRepositorySetMenuAction onSelect={() => save.setOpen(true)} /> : null
+        }
+      />
+      {save ? (
+        <SaveRepositorySetDialog
+          open={save.open}
+          onOpenChange={save.setOpen}
+          workspaceId={save.workspaceId}
+          rows={save.rows}
+        />
+      ) : null}
+    </>
   );
 }
 

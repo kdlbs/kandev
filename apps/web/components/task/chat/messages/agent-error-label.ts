@@ -21,6 +21,7 @@ export const ENVIRONMENT_SETUP_FAILED_KEY = "task:environmentSetupFailed";
 // backend: `environment preparation failed:` (manager_launch.go), the launch
 // race ("already has an agent running" / "race resolved during register"),
 // container launch failures, and branch/fresh-branch prep errors.
+// i18n-exempt: substrings matched against backend error text, not copy.
 const SETUP_FAILURE_SIGNATURES = [
   "environment preparation failed",
   "failed to launch container",

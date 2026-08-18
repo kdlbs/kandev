@@ -252,6 +252,7 @@ function purgeEnvScopedRuntime(state: SessionRuntimeSliceState, envKey: string) 
   delete state.sessionCommits.loading[envKey];
   delete state.sessionCommits.refetchTrigger[envKey];
   delete state.userShells.byEnvironmentId[envKey];
+  delete state.userShells.dismissedByEnvironmentId[envKey];
   delete state.userShells.loading[envKey];
   delete state.userShells.loaded[envKey];
 }
@@ -288,7 +289,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   sessionMcpStatus: { bySessionId: {} },
   promptUsage: { bySessionId: {} },
   sessionTodos: { bySessionId: {} },
-  userShells: { byEnvironmentId: {}, loading: {}, loaded: {} },
+  userShells: { byEnvironmentId: {}, dismissedByEnvironmentId: {}, loading: {}, loaded: {} },
   prepareProgress: { bySessionId: {} },
   sessionPollMode: { bySessionId: {} },
   embeddedVscodeSupport: { bySessionId: {} },
@@ -425,7 +426,10 @@ function buildUserShellActions(set: ImmerSet) {
     ) =>
       set((draft) => {
         if (!environmentId) return;
-        draft.userShells.byEnvironmentId[environmentId] = shells;
+        const dismissed = draft.userShells.dismissedByEnvironmentId[environmentId];
+        draft.userShells.byEnvironmentId[environmentId] = dismissed
+          ? shells.filter((shell) => !dismissed[shell.terminalId])
+          : shells;
         draft.userShells.loaded[environmentId] = true;
         draft.userShells.loading[environmentId] = false;
       }),
@@ -440,6 +444,8 @@ function buildUserShellActions(set: ImmerSet) {
     ) =>
       set((draft) => {
         if (!environmentId) return;
+        const dismissed = draft.userShells.dismissedByEnvironmentId[environmentId];
+        if (dismissed?.[shell.terminalId]) return;
         const existing = draft.userShells.byEnvironmentId[environmentId] || [];
         if (!existing.some((s) => s.terminalId === shell.terminalId)) {
           draft.userShells.byEnvironmentId[environmentId] = [...existing, shell];
@@ -448,6 +454,8 @@ function buildUserShellActions(set: ImmerSet) {
     removeUserShell: (environmentId: string, terminalId: string) =>
       set((draft) => {
         if (!environmentId) return;
+        const dismissed = (draft.userShells.dismissedByEnvironmentId[environmentId] ??= {});
+        dismissed[terminalId] = true;
         const existing = draft.userShells.byEnvironmentId[environmentId] || [];
         draft.userShells.byEnvironmentId[environmentId] = existing.filter(
           (s) => s.terminalId !== terminalId,
@@ -500,6 +508,7 @@ export function migrateEnvKeyedData(
   migrate(draft.shell.outputs);
   migrate(draft.shell.statuses);
   migrate(draft.userShells.byEnvironmentId);
+  migrate(draft.userShells.dismissedByEnvironmentId);
   migrate(draft.userShells.loading);
   migrate(draft.userShells.loaded);
 }

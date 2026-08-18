@@ -1236,11 +1236,17 @@ func (s *Service) DeleteRepository(ctx context.Context, id string) error {
 	if active {
 		return ErrActiveTaskSessions
 	}
+	// Captured before the delete, because deleting prunes the membership rows
+	// that identify the affected sets.
+	affectedSetIDs := s.repositorySetIDsHolding(ctx, id)
 	if err := s.repoEntities.DeleteRepository(ctx, id); err != nil {
 		s.logger.Error("failed to delete repository", zap.String("repository_id", id), zap.Error(err))
 		return err
 	}
 	s.publishRepositoryEvent(ctx, events.RepositoryDeleted, repository)
+	// A client that already loaded the workspace only reacts to repository_set.*
+	// events, so without this it keeps offering the deleted member until reload.
+	s.publishRepositorySetsAfterMembershipChange(ctx, affectedSetIDs)
 	s.logger.Info("repository deleted", zap.String("repository_id", id))
 	return nil
 }

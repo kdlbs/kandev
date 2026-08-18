@@ -143,6 +143,7 @@ func provideOrchestrator(
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)
+	orchestratorSvc.SetSubagentContextRecorder(&subagentContextAdapter{svc: taskSvc})
 
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
 
@@ -150,6 +151,10 @@ func provideOrchestrator(
 	// owns the canonical rich payload. Covers workflow transitions, workflow
 	// step moves, and the primary-session-set callback below.
 	orchestratorSvc.SetTaskEventPublisher(taskSvc)
+	// Feeder promotion after an admitted manual move must wait for the
+	// orchestrator's task lifecycle. The task service keeps ownership of the
+	// candidate filter and promotion rules.
+	orchestratorSvc.SetFeederPullReconciler(taskSvc)
 
 	// Let the task service read the live per-session busy substate so it can
 	// compute the task-level MOST-ACTIVE-WINS activity aggregate carried on the

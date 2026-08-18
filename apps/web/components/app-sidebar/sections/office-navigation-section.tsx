@@ -11,6 +11,7 @@ import {
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeDashboard } from "@/lib/state/slices/office/selectors";
 import { APP_SIDEBAR_SECTION_IDS } from "../app-sidebar-constants";
 import { AppSidebarNavItem } from "../app-sidebar-nav-item";
 import { AppSidebarSection } from "../app-sidebar-section";
@@ -40,7 +41,7 @@ export function OfficeNavigationSection({
   section = "all",
 }: OfficeNavigationSectionProps) {
   const { t } = useTranslation();
-  const dashboard = useAppStore((s) => s.office.dashboard);
+  const dashboard = useAppStore(selectOfficeDashboard);
   const taskCount = dashboard?.task_count ?? 0;
   const routineCount = dashboard?.routine_count ?? 0;
   const skillCount = dashboard?.skill_count ?? 0;

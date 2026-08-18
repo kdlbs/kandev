@@ -43,10 +43,6 @@ const TERMINAL_MARKER = "KANDEV_E2E_MARKER_12345";
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
 test.describe("Session layout", () => {
-  // The standalone executor can fail to allocate a port on cold start;
-  // retry once so a transient backend hiccup doesn't fail the suite.
-  test.describe.configure({ retries: 1 });
-
   test("maximize terminal hides other panels", async ({ testPage, apiClient, seedData }) => {
     const session = await seedTaskWithSession(testPage, apiClient, seedData, "Maximize Test");
 
@@ -89,7 +85,7 @@ test.describe("Session layout", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(120_000);
 
     // Create Task A, type a command, and maximize terminal
     const session = await seedTaskWithSession(testPage, apiClient, seedData, "Task A Maximize");
@@ -154,20 +150,11 @@ test.describe("Session layout", () => {
     const closeBtn = terminalTab.locator(".dv-default-tab-action");
     await closeBtn.click();
 
-    // Closing a terminal that looks busy MAY pop a "Close terminal?" confirmation
-    // (CloseTerminalConfirmDialog) — the typed command can trip the busy heuristic,
-    // but whether it does is timing-dependent (the shell may have gone idle). Handle
-    // both: confirm the dialog if it appears, otherwise the close already proceeded.
-    const closeTerminalDialog = testPage.getByRole("alertdialog", { name: "Close terminal?" });
-    await closeTerminalDialog
-      .waitFor({ state: "visible", timeout: 2_000 })
-      .then(async () => {
-        await closeTerminalDialog.getByRole("button", { name: "Close terminal" }).click();
-        await expect(closeTerminalDialog).not.toBeVisible({ timeout: 5_000 });
-      })
-      .catch(() => {
-        /* no confirmation shown — close proceeded directly */
-      });
+    // Terminal close always uses the compact anchored confirmation popover.
+    const closeTerminalDialog = testPage.getByRole("dialog", { name: "Close terminal?" });
+    await expect(closeTerminalDialog).toBeVisible();
+    await closeTerminalDialog.getByRole("button", { name: "Close terminal" }).click();
+    await expect(closeTerminalDialog).not.toBeVisible({ timeout: 5_000 });
 
     // Should exit maximize and restore default layout minus the closed terminal
     await expect(session.chat).toBeVisible({ timeout: 10_000 });

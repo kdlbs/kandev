@@ -86,6 +86,12 @@ test.describe("GitHub workspace settings", () => {
     ]);
     await stubGitHubRateLimits(testPage, workspaceId);
     await testPage.goto(`/settings/workspaces/${workspaceId}/integrations/github`);
+    const accessCard = testPage.getByTestId("github-workspace-access-card");
+    const accessContent = accessCard.locator('[data-slot="card-content"]');
+    const accessContentPaddingTop = await accessContent.evaluate(
+      (element) => getComputedStyle(element).paddingTop,
+    );
+    expect(Number.parseFloat(accessContentPaddingTop)).toBeLessThan(24);
     const automation = testPage.getByTestId("github-workspace-automation");
     await expect(automation.getByTestId("github-task-access-summary")).toContainText(
       "Inherit executor Git credentials",
@@ -114,14 +120,20 @@ test.describe("GitHub workspace settings", () => {
     ).toBeVisible();
     const rateLimitHelp = automation.getByRole("button", { name: "Show GitHub API limits" });
     await expect(rateLimitHelp).toBeVisible();
+    await expect(rateLimitHelp.getByTestId("github-rate-limit-icon")).toHaveClass(
+      /tabler-icon-gauge/,
+    );
     await rateLimitHelp.hover();
     const rateLimitTooltip = testPage.getByRole("tooltip", { name: /API rate limit/ });
     await expect(rateLimitTooltip).toContainText(
-      "API rate limit: 4,321 of 5,000 requests remaining",
+      "API rate limit: 3,210 of 5,000 requests remaining",
     );
     await expect(rateLimitTooltip).toContainText(
-      "GraphQL query limit: 4,900 of 5,000 points remaining",
+      "GraphQL query limit: 4,789 of 5,000 points remaining",
     );
+    await prCapture.screenshot("desktop-github-rate-limit-tooltip", {
+      caption: "GitHub API rate limits refresh on hover",
+    });
 
     await automation.getByRole("button", { name: "Change connection" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Change GitHub connection" });

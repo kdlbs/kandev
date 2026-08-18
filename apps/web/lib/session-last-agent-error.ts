@@ -6,6 +6,8 @@ export type LastAgentError = {
   agentExecutionId?: string;
   /** Adapter-validated provider remediation URL; never derived from prose. */
   remediationUrl?: string;
+  code?: string;
+  details?: string;
   dismissedAt?: string;
 };
 
@@ -49,17 +51,35 @@ export function readLastAgentError(metadata: Record<string, unknown> | null | un
   const record = raw as Record<string, unknown>;
   const message = typeof record.message === "string" ? record.message : "";
   if (!message) return null;
-  const dismissedAt =
-    readOptionalString(record.dismissed_at) ?? readOptionalString(record.dismissedAt);
+  const dismissedAt = readFirstOptionalString(record, ["dismissed_at", "dismissedAt"]);
   if (dismissedAt) return null;
   return {
     message,
-    occurredAt: readOptionalString(record.occurred_at) ?? readOptionalString(record.occurredAt),
-    agentExecutionId:
-      readOptionalString(record.agent_execution_id) ?? readOptionalString(record.agentExecutionId),
-    remediationUrl:
-      readOptionalString(record.remediation_url) ?? readOptionalString(record.remediationUrl),
+    occurredAt: readFirstOptionalString(record, ["occurred_at", "occurredAt"]),
+    agentExecutionId: readFirstOptionalString(record, ["agent_execution_id", "agentExecutionId"]),
+    remediationUrl: readFirstOptionalString(record, ["remediation_url", "remediationUrl"]),
+    ...readStructuredFailureMetadata(record),
   } satisfies LastAgentError;
+}
+
+function readStructuredFailureMetadata(record: Record<string, unknown>) {
+  return {
+    code: readFirstOptionalString(record, ["code", "failure_code", "failureCode"]),
+    details: readFirstOptionalString(record, [
+      "details",
+      "failure_details",
+      "failureDetails",
+      "error_output",
+    ]),
+  };
+}
+
+function readFirstOptionalString(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = readOptionalString(record[key]);
+    if (value) return value;
+  }
+  return undefined;
 }
 
 /**

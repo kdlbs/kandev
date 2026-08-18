@@ -1,7 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
+import { i18n } from "@/lib/i18n";
 import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
 
 const AGENT_STOP_LINE = "Any running agent sessions will be stopped.";
+
+afterEach(async () => {
+  await i18n.changeLanguage("en");
+});
 
 describe("getCleanupSummary (single task)", () => {
   it("reassures the user that local executor leaves the repo untouched", () => {
@@ -117,5 +122,32 @@ describe("getBulkCleanupSummary", () => {
 
   it("returns only the generic line for an empty input", () => {
     expect(getBulkCleanupSummary([]).lines).toEqual([AGENT_STOP_LINE]);
+  });
+});
+
+describe("localization", () => {
+  it("resolves at call time, so a locale switch changes the copy", async () => {
+    await i18n.changeLanguage("pseudo");
+    const { lines } = getCleanupSummary("worktree");
+    // Every line, not just the first — the generic trailer used to be a separate
+    // module constant and would have stayed English while the rest translated.
+    for (const line of lines) expect(line).toMatch(/[^\p{ASCII}]/u);
+  });
+
+  it("routes the bulk counts through catalog plurals rather than English suffixes", async () => {
+    await i18n.changeLanguage("pseudo");
+    const { lines } = getBulkCleanupSummary(["worktree", "worktree"]);
+    // The count is interpolated, so it survives pseudo; the words around it must
+    // not. A locally-built `n === 1 ? "worktree" : "worktrees"` would leave the
+    // noun in plain English here.
+    const worktreeLine = lines.find((line) => line.includes("2"));
+    expect(worktreeLine).toBeDefined();
+    expect(worktreeLine).not.toMatch(/worktrees/);
+    expect(worktreeLine).toMatch(/[^\p{ASCII}]/u);
+  });
+
+  it("picks the singular catalog form for a group of one", () => {
+    const { lines } = getBulkCleanupSummary(["sprites"]);
+    expect(lines[0]).toBe("1 Sprites sandbox will be destroyed (uncommitted work lost).");
   });
 });

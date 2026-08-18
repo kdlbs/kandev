@@ -1,42 +1,25 @@
 name: Frontend Tests
 
+# No trigger-level `paths:` filter, deliberately. A workflow skipped by one
+# reports no conclusion at all, and a required check that never reports leaves
+# a pull request unable to enter a merge queue and a merge group unable to
+# leave it. `merge_group` cannot carry a `paths:` filter in the first place.
+# The filter lives in the `changes` job below instead, and `frontend-gate`
+# reports the single conclusion the queue waits on. See docs/ci-merge-queue.md.
 on:
   push:
     branches: [main]
-    paths:
-      - "apps/cli/**"
-      - "apps/package.json"
-      - "apps/prettier.config.mjs"
-      - "apps/.prettierignore"
-      - "apps/web/**"
-      - "apps/packages/**"
-      - "apps/pnpm-lock.yaml"
-      - "apps/backend/go.mod"
-      - "apps/backend/go.sum"
-      - ".github/workflows/frontend-tests.yml"
-      - "!**/*.md"
-      - "!**/*.mdx"
-      - "!**/*.markdown"
   pull_request:
     branches: [main]
-    paths:
-      - "apps/cli/**"
-      - "apps/package.json"
-      - "apps/prettier.config.mjs"
-      - "apps/.prettierignore"
-      - "apps/web/**"
-      - "apps/packages/**"
-      - "apps/pnpm-lock.yaml"
-      - "apps/backend/go.mod"
-      - "apps/backend/go.sum"
-      - ".github/workflows/frontend-tests.yml"
-      - "!**/*.md"
-      - "!**/*.mdx"
-      - "!**/*.markdown"
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a merge-queue run. Its ref is unique per queue entry, so a
+  # cancellation here could only come from a mis-keyed group, and the queue
+  # would read the cancelled check as a failure and eject the pull request.
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 # Least-privilege: the `frontend` job only reads source and runs tests.
 # `packages: read` lets the container job pull the kandev-ci image from GHCR.
@@ -45,8 +28,82 @@ permissions:
   packages: read
 
 jobs:
+  # The former trigger-level `paths:` list, applied one level down so a skip
+  # still produces a conclusion. `.github/scripts/changed-paths.py` implements
+  # the same last-match-wins semantics GitHub applies to `paths:`.
+  changes:
+    name: Detect relevant changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.detect.outputs.run }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # The base commit has to be present locally for the diff below. Every
+          # other job in this workflow already pays for a full clone.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect relevant changes
+        id: detect
+        env:
+          PATTERNS: |
+            apps/cli/**
+            apps/package.json
+            apps/prettier.config.mjs
+            apps/.prettierignore
+            apps/web/**
+            apps/packages/**
+            apps/pnpm-lock.yaml
+            apps/backend/go.mod
+            apps/backend/go.sum
+            .github/workflows/frontend-tests.yml
+            .github/scripts/changed-paths.py
+            !**/*.md
+            !**/*.mdx
+            !**/*.markdown
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          case "${EVENT_NAME}" in
+            # The checkout is the merge ref, whose first parent is the base
+            # branch tip. Diffing against that tip directly collapses to a
+            # two-dot diff over everything main landed since the PR opened, so
+            # take the fork point -- the same correction the steps below make.
+            pull_request) BASE="$(git merge-base HEAD "origin/${BASE_REF}")" ;;
+            # The queue branch is cut from this commit, so it is a true ancestor.
+            merge_group) BASE="${MERGE_GROUP_BASE_SHA}" ;;
+            push) BASE="${PUSH_BEFORE}" ;;
+            *) BASE="" ;;
+          esac
+
+          # Fail open. A first push to a branch, a force push, or an unknown
+          # event leaves no usable base, and running the suite needlessly is
+          # cheaper than merging something no job ever looked at.
+          if [[ -z "${BASE}" || "${BASE}" == "0000000000000000000000000000000000000000" ]] \
+             || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "No usable base commit for '${EVENT_NAME}'; running everything."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # `-z`, not plain --name-only: git quotes non-ASCII paths under its
+          # default core.quotePath, and a quoted path matches no pattern, so a
+          # change to one would skip every job and still report success.
+          git diff --name-only -z "${BASE}" HEAD \
+            | python3 .github/scripts/changed-paths.py
+
   frontend:
     name: Run Frontend Lint, Tests, and Build
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     # Pre-baked image bundles Node 24, pnpm 9.15.9, Go, and go-licenses —
     # see .github/docker/ci-base/Dockerfile.
@@ -101,6 +158,11 @@ jobs:
 
       - name: Check formatting
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
 
@@ -112,10 +174,16 @@ jobs:
           # extra files are already formatted), but it is the same trap the i18n
           # ratchet below hit for real, so do not copy the old idiom. The fork
           # point is what "changed in this PR" actually means.
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            BASE_SHA="$(git merge-base HEAD "origin/${{ github.base_ref }}")"
+          #
+          # `merge_group` has no PR context at all. Its own base_sha is the
+          # commit the queue branch was cut from, which is already the fork
+          # point, so no correction is needed there.
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            BASE_SHA="$(git merge-base HEAD "origin/${BASE_REF}")"
+          elif [[ "${EVENT_NAME}" == "merge_group" ]]; then
+            BASE_SHA="${MERGE_GROUP_BASE_SHA}"
           else
-            BASE_SHA="${{ github.event.before }}"
+            BASE_SHA="${PUSH_BEFORE}"
           fi
 
           if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
@@ -183,6 +251,10 @@ jobs:
         shell: bash
         # The job defaults to `apps`; these scripts live one level deeper.
         working-directory: apps/web
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
 
@@ -194,14 +266,23 @@ jobs:
           # (#2160). The scripts' own default, `merge-base HEAD origin/main`,
           # resolves to the merge ref's base-side parent and is correct here;
           # origin/main is present because the checkout is fetch-depth: 0.
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
             node scripts/run-i18n-ratchet.mjs
             exit 0
           fi
 
-          # push: HEAD *is* the new base branch tip, so there is no fork point to
-          # find and the previous tip is the only meaningful base.
-          BASE_SHA="${{ github.event.before }}"
+          # merge_group: the queue branch is cut from base_sha and carries only
+          # the queued pull requests on top, so that IS the fork point. The
+          # scripts' `origin/main` default is wrong here — main may already have
+          # moved past what this merge group was built on.
+          if [[ "${EVENT_NAME}" == "merge_group" ]]; then
+            BASE_SHA="${MERGE_GROUP_BASE_SHA}"
+          else
+            # push: HEAD *is* the new base branch tip, so there is no fork point to
+            # find and the previous tip is the only meaningful base.
+            BASE_SHA="${PUSH_BEFORE}"
+          fi
+
           if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
             echo "No usable base SHA; skipping the new-code ratchet."
             exit 0
@@ -223,15 +304,24 @@ jobs:
       - name: Run E2E sleep ratchet
         shell: bash
         working-directory: apps/web
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
 
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
             node scripts/check-new-e2e-sleeps.mjs
             exit 0
           fi
 
-          BASE_SHA="${{ github.event.before }}"
+          if [[ "${EVENT_NAME}" == "merge_group" ]]; then
+            BASE_SHA="${MERGE_GROUP_BASE_SHA}"
+          else
+            BASE_SHA="${PUSH_BEFORE}"
+          fi
+
           if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
             echo "No usable base SHA; skipping the E2E sleep ratchet."
             exit 0
@@ -256,3 +346,34 @@ jobs:
 
       - name: Build
         run: pnpm --filter @kandev/web build
+
+  # The required check. Runs on every event, including the ones where the
+  # `frontend` job above is correctly skipped, so the merge queue always has a
+  # conclusion to read instead of a check that stays pending forever.
+  frontend-gate:
+    name: Frontend Tests Passed
+    runs-on: ubuntu-latest
+    needs: [changes, frontend]
+    if: always()
+
+    steps:
+      - name: Require the frontend job to have passed or been skipped
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+        run: |
+          set -euo pipefail
+
+          # `skipped` is a pass: the change-detection job decided nothing this
+          # workflow covers was touched. `cancelled` is not — a cancelled job
+          # never reached a verdict, and treating that as a pass would let an
+          # untested merge group through.
+          if [[ "${CHANGES_RESULT}" != "success" ]]; then
+            echo "Change detection finished with result: ${CHANGES_RESULT}" >&2
+            exit 1
+          fi
+          if [[ "${FRONTEND_RESULT}" != "success" && "${FRONTEND_RESULT}" != "skipped" ]]; then
+            echo "Frontend job finished with result: ${FRONTEND_RESULT}" >&2
+            exit 1
+          fi
+          echo "Change detection: ${CHANGES_RESULT}; frontend: ${FRONTEND_RESULT}"

@@ -196,6 +196,8 @@ export function useClarificationGroup(
     [pendingId, questionIds, storeApi],
   );
 
+  // i18n-exempt: the default reason is POSTed as the clarification answer and
+  // reaches the agent verbatim; it is not rendered in the UI.
   const skipAll = useCallback(
     async (reason?: string) => {
       if (!pendingId) return;

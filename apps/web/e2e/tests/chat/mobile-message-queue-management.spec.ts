@@ -48,7 +48,12 @@ test("mobile full queue stays usable while removing and clearing messages", asyn
   apiClient,
   seedData,
 }) => {
-  const session = await seedFullQueueTask(testPage, apiClient, seedData, "Mobile queue management");
+  const { session } = await seedFullQueueTask(
+    testPage,
+    apiClient,
+    seedData,
+    "Mobile queue management",
+  );
 
   await expectFullQueueScrolls(session);
 
