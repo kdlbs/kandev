@@ -30,7 +30,8 @@ one contained horizontal scroll owner with directional fades.
 ### Scrollable phone action strip
 
 - Add `apps/web/components/kanban/mobile-topbar-action-strip.tsx`. It owns the horizontal viewport,
-  content row, hidden scrollbar, and left and right fades.
+  content row, hidden scrollbar, and left and right fades. When the content fits, the row aligns
+  its actions against the fixed menu; overflow retains the same horizontal scroll order.
 - Observe both the viewport and content row with `ResizeObserver`. Recalculate the fades after
   content changes, viewport changes, and horizontal scrolling.
 - Show each fade only while content remains hidden in that direction. Use the gradient treatment
@@ -70,7 +71,7 @@ one contained horizontal scroll owner with directional fades.
 - **Nearest exemplars:** the mobile chat-input toolbar supplies the fade. The task sidebar supplies
   conditional cue measurement after content and viewport changes.
 - **Hierarchy:** Kandev is fixed on the left. Menu is fixed on the right. Page context and workspace
-  actions scroll between them, and their current order remains unchanged.
+  actions scroll between them, align against the menu when they fit, and retain their current order.
 - **Presentation:** the actions stay inline because they are frequent, shallow controls. A drawer
   hides direct actions and adds an extra interaction.
 - **Scroll owner:** only the middle strip scrolls horizontally. The document and board do not gain
@@ -122,6 +123,8 @@ one contained horizontal scroll owner with directional fades.
 - Managed Pixel 5 E2E: 1 test passed for the real plugin and metrics overflow scenario, including
   actual 44px terminal/chat hit-target checks when each action is in view.
 - Managed Pixel 5 quick-terminal regression: 1 test passed with relational header geometry.
+- Follow-up alignment fix: fitting action rows use right justification against the fixed menu; the
+  focused action-strip suite passed 3 tests and focused ESLint passed.
 
 ## Implementation Waves And Parallel Candidates
 

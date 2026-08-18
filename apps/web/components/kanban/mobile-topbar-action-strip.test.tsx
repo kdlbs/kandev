@@ -50,6 +50,7 @@ describe("MobileTopbarActionStrip", () => {
     );
 
     const viewport = screen.getByTestId(VIEWPORT_TEST_ID);
+    expect((viewport.firstElementChild as HTMLElement).className).toContain("justify-end");
     setScrollMetrics(viewport, { clientWidth: 200, scrollWidth: 200, scrollLeft: 0 });
     act(() => observers[0]?.trigger());
 

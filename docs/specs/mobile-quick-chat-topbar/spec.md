@@ -27,8 +27,9 @@ must remain usable when resource metrics and plugin actions add more controls th
   content at the right edge.
 - A non-Home title, its workspace label, plugin actions, resource metrics, `Quick Terminal`,
   `Quick Chat`, and search use one horizontal strip between the fixed controls.
-- The middle strip scrolls horizontally only when its content does not fit. It does not add
-  horizontal scrolling to the page.
+- When the strip content fits, its actions are aligned against the fixed menu on the right. The
+  middle strip scrolls horizontally only when its content does not fit. It does not add horizontal
+  scrolling to the page.
 - A fade appears at each strip edge only when more actions exist beyond that edge. The fade
   disappears when the strip reaches that edge.
 - Native icon buttons in this header use the same 32 by 32 CSS-pixel visible box and 16 CSS-pixel
@@ -52,8 +53,9 @@ must remain usable when resource metrics and plugin actions add more controls th
   mobile header renders, **THEN** the Kandev link and menu remain fixed while the strip scrolls.
 - **GIVEN** a scrollable middle strip, **WHEN** hidden actions exist to the left or right, **THEN**
   only the corresponding directional fade is visible.
-- **GIVEN** a middle strip whose actions fit, **WHEN** the mobile header renders, **THEN** no
-  overflow fade is visible and the document has no horizontal overflow.
+- **GIVEN** a middle strip whose actions fit, **WHEN** the mobile header renders, **THEN** its
+  actions align against the menu, no overflow fade is visible, and the document has no horizontal
+  overflow.
 - **GIVEN** a mobile non-Home workbench page, **WHEN** the user activates the Kandev wordmark,
   **THEN** the app navigates to that workspace's Home board.
 - **GIVEN** no active workspace, **WHEN** the mobile header renders, **THEN** it does not show an

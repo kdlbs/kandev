@@ -99,3 +99,5 @@ Update this task and `plan.md` in the same conversation.
 - No blockers. The E2E task provides the remaining production-build coverage.
 - Review fixup: exported `MainTopBarSlotProps` from the public SDK, kept the host type canonical, and
   added a Pixel 5 `elementFromPoint` regression for the 44px terminal/chat hit areas.
+- Follow-up alignment fix: fitting action rows right-align against the fixed menu while overflowing
+  rows retain their contained horizontal scroll behavior.
