@@ -182,6 +182,27 @@ export type ListSessionStepHistoryResponse = {
   total: number;
 };
 
+/**
+ * Coordinator plugin monitoring policy for a single workflow step: whether the
+ * Coordinator watches the step, and an optional coordinator-specific prompt.
+ * Host-owned storage (Settings > Workspace > Workflow configuration); the
+ * Coordinator plugin only reads this through a capability-scoped Host API.
+ */
+export type CoordinatorStepMonitorEntry = {
+  workflow_step_id: string;
+  selected: boolean;
+  prompt: string;
+};
+
+export type ListCoordinatorMonitoringResponse = {
+  entries: CoordinatorStepMonitorEntry[];
+};
+
+export type SetCoordinatorMonitoringRequest = {
+  workspace_id: WorkspaceId;
+  entries: CoordinatorStepMonitorEntry[];
+};
+
 export type TaskSessionState =
   | "CREATED"
   | "STARTING"
