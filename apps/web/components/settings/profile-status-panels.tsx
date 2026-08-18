@@ -145,7 +145,7 @@ export function NoAuthPanel({
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground cursor-help"
+                  className="inline-flex min-h-11 items-center gap-1 text-xs font-medium normal-case text-muted-foreground hover:text-foreground cursor-help md:min-h-7"
                   data-testid="profile-no-auth-details"
                 >
                   <IconAlertCircle className="h-3 w-3" />

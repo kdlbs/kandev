@@ -12,15 +12,19 @@ import (
 	"github.com/kandev/kandev/internal/githubauth"
 )
 
-var ErrGitHubCredentialBrokerUnreachable = errors.New("GitHub credential broker is unreachable from executor")
+var ErrGitCredentialBrokerUnreachable = errors.New("git credential broker is unreachable from executor")
+
+// ErrGitHubCredentialBrokerUnreachable remains an alias for callers which
+// predate provider-neutral leases.
+var ErrGitHubCredentialBrokerUnreachable = ErrGitCredentialBrokerUnreachable
 
 const brokerReachabilityScript = `if ! command -v curl >/dev/null 2>&1; then
-  echo "curl is required to reach the Kandev GitHub credential broker" >&2
+  echo "curl is required to reach the Kandev Git credential broker" >&2
   exit 69
 fi
 broker_status=$(curl -sS --connect-timeout 5 --max-time 10 -o /dev/null -w '%{http_code}' "$KANDEV_GITHUB_CREDENTIAL_BROKER_URL") || exit 69
 if [ "$broker_status" != "204" ]; then
-  echo "Kandev GitHub credential broker readiness returned HTTP $broker_status" >&2
+  echo "Kandev Git credential broker readiness returned HTTP $broker_status" >&2
   exit 69
 fi`
 
@@ -31,7 +35,7 @@ func runBrokerReachabilityPreflight(
 	env map[string]string,
 	run brokerCommandRunner,
 ) error {
-	if !hasManagedGitHubBrokerEnv(env) {
+	if !hasManagedGitCredentialBrokerEnv(env) {
 		return nil
 	}
 	probeEnv := map[string]string{
@@ -39,7 +43,7 @@ func runBrokerReachabilityPreflight(
 	}
 	output, err := run(ctx, brokerReachabilityScript, probeEnv)
 	if err != nil {
-		return fmt.Errorf("%w: %s: %v", ErrGitHubCredentialBrokerUnreachable,
+		return fmt.Errorf("%w: %s: %v", ErrGitCredentialBrokerUnreachable,
 			strings.TrimSpace(string(output)), err)
 	}
 	return nil

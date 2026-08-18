@@ -1,6 +1,7 @@
 ---
 status: complete
 created: 2026-08-01
+updated: 2026-08-11
 owner: Kandev
 ---
 
@@ -14,6 +15,7 @@ Long task titles crowd navigation and task chrome, especially when a remote pull
 
 - New and renamed task titles must contain no more than 60 characters.
 - Every editable task-title field enforces the same limit, including the shared create/edit dialog, task rename dialog, subtask form, and Office new-task dialog on desktop and mobile.
+- Enforcing the limit never disturbs the user's caret: while a field's value is at the limit, typing mid-title keeps the caret immediately after the inserted characters instead of resetting it to the end of the field.
 - When a remote pull request, merge request, or issue supplies a title longer than 60 characters, the task dialog uses the first 59 characters followed by `…`. The full remote title remains available in the generated task description or linked remote item; only the task title is shortened.
 - The `create_task_kandev` MCP tool advertises and enforces the 60-character limit and asks agents to use a concise, few-word title.
 - Backend task creation and title updates reject titles longer than 60 characters regardless of whether the caller uses HTTP, WebSocket, MCP, Office, automation, or another service adapter.
@@ -38,6 +40,7 @@ Long task titles crowd navigation and task chrome, especially when a remote pull
 
 - **GIVEN** the create-task dialog on desktop or mobile, **WHEN** a user types or pastes more than 60 characters into the title field, **THEN** the field contains at most 60 characters and a valid title can be submitted.
 - **GIVEN** any other task-title editor, **WHEN** a user types or pastes more than 60 characters, **THEN** the field contains at most 60 characters.
+- **GIVEN** a task-title field whose current value is at the 60-character limit (for example a remote-imported title shortened with `…`), **WHEN** the user places the caret mid-title and types, **THEN** the inserted characters appear in place, the field stays at 60 characters, and the caret remains immediately after the inserted text instead of jumping to the end of the field.
 - **GIVEN** a remote pull request, merge request, or issue whose proposed task title exceeds 60 characters, **WHEN** the create-task dialog opens, **THEN** its title field contains the first 59 characters plus `…` and the complete remote context remains in the description or remote link.
 - **GIVEN** an MCP caller supplies a title of 60 characters, **WHEN** it calls `create_task_kandev`, **THEN** task creation proceeds subject to the existing validation rules.
 - **GIVEN** an MCP caller supplies a title longer than 60 characters, **WHEN** it calls `create_task_kandev`, **THEN** the call returns a validation error and creates no task.
@@ -55,4 +58,4 @@ Long task titles crowd navigation and task chrome, especially when a remote pull
 
 ## Implementation plan
 
-See [the implementation plan](../../plans/task-title-length-limit/plan.md).
+See [the implementation plan](../../plans/task-title-length-limit/plan.md) and the [caret-preservation fix plan](../../plans/task-title-caret/plan.md).

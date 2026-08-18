@@ -13,7 +13,7 @@ Stable is the default release channel. A verified Kandev-managed npm/npx user se
 the npm Nightly channel from **Settings → System → Updates**. Desktop, Homebrew, and system services
 remain Stable-only.
 
-> **Network security:** the backend listens on `0.0.0.0` by default and ships with authentication **disabled**. Before allowing remote access, enable [opt-in authentication](authentication.md) (the **Authentication & users** feature toggle, or `KANDEV_FEATURES_AUTH=true`) and terminate TLS in a reverse proxy — authentication does not replace HTTPS. A server bound to non-loopback interfaces without authentication logs a startup warning. See [server configuration](configuration.md#root-and-server).
+> **Network security:** the backend listens on `0.0.0.0` by default and ships with authentication **disabled**. Before allowing remote access, enable [opt-in authentication](authentication.md) (the **Authentication & users** feature toggle, or `KANDEV_FEATURES_AUTH=true`) and terminate TLS in a reverse proxy; authentication does not replace HTTPS. A server bound to non-loopback interfaces without authentication logs a startup warning. See [server configuration](configuration.md#root-and-server).
 
 ## Quick path
 
@@ -158,7 +158,7 @@ On macOS, installation writes the plist, removes an already loaded job, bootstra
 
 If the target unit/plist already exists and lacks Kandev's managed marker, installation saves it as `<path>.bak` before replacing it. Review that backup; uninstall does not restore or remove it.
 
-The service manager starts the control plane only. Agents still need their configured executor dependencies and credentials—for example Docker access for a Docker profile or network reachability and keys for SSH. See [Executors](executors.md).
+The service manager starts the control plane only. Agents still need their configured executor dependencies and credentials, for example Docker access for a Docker profile or network reachability and keys for SSH. See [Executors](executors.md).
 
 ## Operate and inspect
 

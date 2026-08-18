@@ -77,6 +77,7 @@ type CreateRepositoryRequest struct {
 	Provider               string
 	ProviderRepoID         string
 	ProviderHost           string
+	ProviderScope          string
 	ProviderOwner          string
 	ProviderName           string
 	DefaultBranch          string
@@ -97,6 +98,7 @@ type UpdateRepositoryRequest struct {
 	Provider               *string
 	ProviderRepoID         *string
 	ProviderHost           *string
+	ProviderScope          *string
 	ProviderOwner          *string
 	ProviderName           *string
 	DefaultBranch          *string

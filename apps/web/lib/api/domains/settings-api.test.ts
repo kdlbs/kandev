@@ -42,8 +42,14 @@ describe("message queue settings api", () => {
   it("fetches the current setting without cache", async () => {
     fetchSpy.mockResolvedValueOnce(
       jsonResponse({
-        settings: { max_per_session: 10 },
-        effective: { max_per_session: 10, source: "default", locked: false },
+        settings: { max_per_session: 10, merge_enabled: true, auto_merge_enabled: true },
+        effective: {
+          max_per_session: 10,
+          source: "default",
+          locked: false,
+          merge_enabled: true,
+          auto_merge_enabled: true,
+        },
       }),
     );
 
@@ -58,8 +64,14 @@ describe("message queue settings api", () => {
   it("PATCHes the requested per-session maximum", async () => {
     fetchSpy.mockResolvedValueOnce(
       jsonResponse({
-        settings: { max_per_session: 25 },
-        effective: { max_per_session: 25, source: "setting", locked: false },
+        settings: { max_per_session: 25, merge_enabled: true, auto_merge_enabled: true },
+        effective: {
+          max_per_session: 25,
+          source: "setting",
+          locked: false,
+          merge_enabled: true,
+          auto_merge_enabled: true,
+        },
       }),
     );
 
@@ -71,6 +83,25 @@ describe("message queue settings api", () => {
     expect(lastCall().url).toBe(BASE);
     expect(lastCall().init?.method).toBe("PATCH");
     expect(lastCall().init?.body).toBe(JSON.stringify({ max_per_session: 25 }));
+  });
+
+  it("PATCHes automatic merge without changing other queue settings", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        settings: { max_per_session: 10, merge_enabled: true, auto_merge_enabled: false },
+        effective: {
+          max_per_session: 10,
+          source: "default",
+          locked: false,
+          merge_enabled: true,
+          auto_merge_enabled: false,
+        },
+      }),
+    );
+
+    await updateMessageQueueSettings({ auto_merge_enabled: false });
+
+    expect(lastCall().init?.body).toBe(JSON.stringify({ auto_merge_enabled: false }));
   });
 });
 

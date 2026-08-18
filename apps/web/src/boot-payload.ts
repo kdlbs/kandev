@@ -1,7 +1,7 @@
 import type { AppState } from "@/lib/state/store";
 import { getBackendConfig } from "@/lib/config";
 import type { FetchedSessionData } from "@/lib/ssr/session-page-state";
-import type { Repository, Task, Workflow, WorkflowStep } from "@/lib/types/http";
+import type { Repository, RepositorySet, Task, Workflow, WorkflowStep } from "@/lib/types/http";
 import type { ActivePlugin } from "@/lib/plugins/types";
 
 export type { ActivePlugin };
@@ -42,12 +42,14 @@ export type BootRouteData = {
     workflows?: Workflow[];
     steps?: WorkflowStep[];
     repositories?: Repository[];
+    repositorySets?: RepositorySet[];
   };
   tasksPage?: {
     activeWorkspaceId?: string | null;
     workflows?: Workflow[];
     steps?: WorkflowStep[];
     repositories?: Repository[];
+    repositorySets?: RepositorySet[];
     tasks?: Task[];
     total?: number;
     tasksListSort?: string;
@@ -110,7 +112,16 @@ function readPlugin(value: Record<string, unknown>): ActivePlugin | undefined {
   const styleUrls = Array.isArray(value.styleUrls)
     ? value.styleUrls.filter((entry): entry is string => typeof entry === "string")
     : undefined;
-  return { id, name, bundleUrl, styleUrls };
+  const repositoryProviderIds = Array.isArray(value.repositoryProviderIds)
+    ? value.repositoryProviderIds.filter((entry): entry is string => typeof entry === "string")
+    : undefined;
+  return {
+    id,
+    name,
+    bundleUrl,
+    styleUrls,
+    ...(repositoryProviderIds ? { repositoryProviderIds } : {}),
+  };
 }
 
 export async function loadBootPayload(

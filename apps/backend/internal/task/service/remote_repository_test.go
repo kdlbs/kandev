@@ -1,6 +1,11 @@
 package service
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
+)
 
 func TestParseRemoteRepositoryURL(t *testing.T) {
 	t.Parallel()
@@ -55,5 +60,91 @@ func TestParseRemoteRepositoryURLAcceptsProviderHintForSelfManagedGitLab(t *test
 	}
 	if host := remoteProviderHost(provider, canonical); host != "https://gitlab.internal:8443" {
 		t.Fatalf("provider host = %q", host)
+	}
+}
+
+func TestResolveRepositoryRef_TrustedDescriptorPreservesCustomProviderCloneURL(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	repositoryID, baseBranch, created, err := svc.ResolveRepositoryRef(ctx, "ws-1", TaskRepositoryInput{
+		RemoteURL:                 "https://forge.example.test/context/scm/TEAM/widgets.git",
+		Provider:                  "custom-provider",
+		ProviderHost:              "https://forge.example.test/context",
+		ProviderScope:             "forge-instance-a",
+		ProviderRepoID:            "repo-99",
+		ProviderOwner:             "TEAM",
+		ProviderName:              "widgets",
+		DefaultBranch:             "main",
+		BaseBranch:                "release/1.0",
+		TrustedProviderDescriptor: true,
+	})
+	if err != nil {
+		t.Fatalf("ResolveRepositoryRef() unexpected error: %v", err)
+	}
+	if !created || baseBranch != "release/1.0" {
+		t.Fatalf("ResolveRepositoryRef() created=%v base=%q, want true/release/1.0", created, baseBranch)
+	}
+	stored, err := repo.GetRepository(ctx, repositoryID)
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if stored.Provider != "custom-provider" || stored.ProviderHost != "https://forge.example.test" || stored.ProviderScope != "forge-instance-a" ||
+		stored.RemoteURL != "https://forge.example.test/context/scm/TEAM/widgets.git" {
+		t.Fatalf("stored repository = %+v, want custom descriptor with exact clone URL", stored)
+	}
+}
+
+func TestResolveRepositoryRef_TrustedDescriptorSeparatesProviderScopesAndRejectsLegacyAdoption(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "legacy", WorkspaceID: "ws-1", Name: "TEAM/widgets", SourceType: sourceTypeProvider,
+		Provider: "bitbucket", ProviderHost: "https://forge.example.test", ProviderRepoID: "42",
+		ProviderOwner: "TEAM", ProviderName: "widgets",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resolve := func(scope, cloneURL string) string {
+		t.Helper()
+		id, _, _, err := svc.ResolveRepositoryRef(ctx, "ws-1", TaskRepositoryInput{
+			RemoteURL: cloneURL, Provider: "bitbucket", ProviderHost: "https://forge.example.test",
+			ProviderScope: scope, ProviderRepoID: "42", ProviderOwner: "TEAM", ProviderName: "widgets",
+			DefaultBranch: "main", TrustedProviderDescriptor: true,
+		})
+		if err != nil {
+			t.Fatalf("ResolveRepositoryRef(%q): %v", scope, err)
+		}
+		return id
+	}
+
+	first := resolve("https://forge.example.test/dc-a", "https://forge.example.test/dc-a/scm/TEAM/widgets.git")
+	second := resolve("https://forge.example.test/dc-b", "https://forge.example.test/dc-b/scm/TEAM/widgets.git")
+	if first == "legacy" || second == "legacy" || first == second {
+		t.Fatalf("provider scopes reused unsafe rows: legacy=%q first=%q second=%q", "legacy", first, second)
+	}
+}
+
+func TestResolveRepositoryRef_TrustedDescriptorRejectsCredentialsAndIncompleteIdentity(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	_, _, _, err := svc.ResolveRepositoryRef(ctx, "ws-1", TaskRepositoryInput{
+		RemoteURL: "https://token@forge.example.test/context/scm/TEAM/widgets.git",
+		Provider:  "custom-provider", ProviderHost: "https://forge.example.test", ProviderScope: "forge-instance-a", ProviderOwner: "TEAM", ProviderName: "widgets",
+		TrustedProviderDescriptor: true,
+	})
+	if err == nil {
+		t.Fatal("ResolveRepositoryRef() accepted credential-bearing/incomplete descriptor")
 	}
 }

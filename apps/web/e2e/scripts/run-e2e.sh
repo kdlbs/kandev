@@ -105,7 +105,9 @@ build_fe() {
 
 build_backend_host() {
   log "building backend (host)"
-  make -C "$BACKEND_DIR" build >/dev/null || die "backend build failed"
+  local targets=(build)
+  [[ "$PROJECT" == containers ]] && targets+=(build-agentctl-linux build-mock-agent-linux)
+  make -C "$BACKEND_DIR" "${targets[@]}" >/dev/null || die "backend build failed"
 }
 
 # Packages the plugin-fixture SDK plugin (cmd/plugin-fixture) into

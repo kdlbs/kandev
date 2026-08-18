@@ -9,10 +9,10 @@ Kandev lets you assign repository work to coding agents, review the result, and 
 
 ## Start here
 
-1. [Get started](use-kandev.md) — install Kandev, add a repository, and run a first task.
-2. [Tasks and workflows](tasks-and-workflows.md) — create work, choose a workflow, and use plans.
-3. [Sessions and review](sessions-and-review.md) — supervise an agent, inspect changes, and finish safely.
-4. [Security and trust](security.md) — choose an appropriate access boundary before sharing Kandev with others.
+1. [Get started](use-kandev.md); install Kandev, add a repository, and run a first task.
+2. [Tasks and workflows](tasks-and-workflows.md); create work, choose a workflow, and use plans.
+3. [Sessions and review](sessions-and-review.md); supervise an agent, inspect changes, and finish safely.
+4. [Security and trust](security.md); choose an appropriate access boundary before sharing Kandev with others.
 
 <details>
 <summary>More guides for running work</summary>
@@ -29,7 +29,7 @@ Choose the guide that matches the job in front of you:
 - [Agents and profiles](agents-and-profiles.md): configure agent CLIs, models, modes, permissions, environment, passthrough, and credentials.
 - [Executors](executors.md): choose local, worktree, Docker, SSH, or Sprites execution and understand the isolation boundary.
 - [Integrations](integrations.md): configure Azure DevOps, GitHub, GitLab, Jira, Linear, and Sentry for a workspace.
-- [Developer tools](developer-tools.md): use quick chat, prompts, utility agents, voice input, editors, terminal, shortcuts, and notifications.
+- [Developer tools](developer-tools.md): use quick chat, prompts, utility agents, editors, terminal, shortcuts, and notifications.
 - [Automation and MCP](automation-and-mcp.md): create scheduled or event-driven work, use task MCP, and connect an external MCP client.
 - [Feature status](feature-status.md): check support boundaries, dependencies, experimental features, and unfinished work.
 - [Security and trust](security.md): choose a safe deployment boundary, constrain agent access, protect credentials, and preserve human review.

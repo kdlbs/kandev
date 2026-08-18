@@ -2,10 +2,33 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/settings/models"
 )
+
+var (
+	// ErrProfileChanged is returned by DuplicateAgentProfile when a source
+	// row changed between the caller's read and the transactional insert, so
+	// the copy would not reflect a consistent snapshot. Callers retry on a
+	// fresh read.
+	ErrProfileChanged = errors.New("source profile changed during duplicate")
+	// ErrSourceProfileNotFound is returned by DuplicateAgentProfile when the
+	// source profile row no longer exists (deleted mid-flight).
+	ErrSourceProfileNotFound = errors.New("source profile not found")
+)
+
+// DuplicateAgentProfileInput carries everything the atomic duplicate needs:
+// the copy rows the caller built (Profile, McpConfig) plus the source rows
+// they were built from (Source, SourceMcp) so the transaction can verify the
+// copy reflects one consistent snapshot.
+type DuplicateAgentProfileInput struct {
+	Source    *models.AgentProfile
+	SourceMcp *models.AgentProfileMcpConfig // nil when the source has no MCP row
+	Profile   *models.AgentProfile
+	McpConfig *models.AgentProfileMcpConfig // nil when SourceMcp is nil
+}
 
 type Repository interface {
 	CreateAgent(ctx context.Context, agent *models.Agent) error
@@ -20,6 +43,13 @@ type Repository interface {
 	UpsertAgentProfileMcpConfig(ctx context.Context, config *models.AgentProfileMcpConfig) error
 
 	CreateAgentProfile(ctx context.Context, profile *models.AgentProfile) error
+	// DuplicateAgentProfile creates an independent copy of a profile in one
+	// transaction: the row is inserted with the caller-provided Enabled state
+	// and the MCP config row is upserted when non-nil. A failure rolls back
+	// and leaves no partial copy. The source rows are re-read inside the
+	// transaction and must still match the revisions the copy was built from;
+	// otherwise ErrProfileChanged is returned and no row is created.
+	DuplicateAgentProfile(ctx context.Context, input DuplicateAgentProfileInput) error
 	UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error
 	UpdateAgentProfileEnabled(ctx context.Context, id string, enabled bool) (time.Time, error)
 	DeleteAgentProfile(ctx context.Context, id string) error

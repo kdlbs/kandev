@@ -85,5 +85,6 @@
   "switchToUnifiedView": "Switch to unified view",
   "toggleCode": "Toggle code",
   "toggleWordWrap": "Toggle word wrap",
-  "underlineCmdU": "Underline (Cmd+U)"
+  "underlineCmdU": "Underline (Cmd+U)",
+  "failedToOpenEditor": "Failed to open editor"
 }

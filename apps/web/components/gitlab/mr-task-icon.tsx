@@ -15,28 +15,60 @@ const SKY_400 = "text-sky-400";
 const EMERALD_400 = "text-emerald-400";
 
 /**
+ * The eight-state MR chip status derivation (spec: gitlab-mr-status-chip,
+ * State machine). Total function, evaluated in this exact priority order —
+ * first match wins. `getMRStatusColor` below is re-expressed as a lookup
+ * from this so exactly one priority table exists (was previously its own
+ * copy of the same if-chain).
+ */
+export type MRChipStatus =
+  | "merged"
+  | "closed"
+  | "failed"
+  | "draft"
+  | "ready"
+  | "awaiting_approval"
+  | "running"
+  | "neutral";
+
+export function mrChipStatus(mr: TaskMR): MRChipStatus {
+  if (mr.state === "merged") return "merged";
+  if (mr.state === "closed" || mr.state === "locked") return "closed";
+  if (mr.pipeline_state === "failure") return "failed";
+  if (mr.draft) return "draft";
+  if (mr.approval_state === "approved" && mr.pipeline_state === "success") return "ready";
+  if (mr.approval_state === "pending") return "awaiting_approval";
+  if (mr.pipeline_state === "pending") return "running";
+  return "neutral";
+}
+
+const MR_CHIP_STATUS_COLOR: Record<MRChipStatus, string> = {
+  merged: PURPLE_500,
+  closed: MUTED_FOREGROUND,
+  failed: RED_500,
+  draft: MUTED_FOREGROUND,
+  ready: EMERALD_400,
+  awaiting_approval: SKY_400,
+  running: YELLOW_500,
+  neutral: MUTED_FOREGROUND,
+};
+
+/**
  * The single source of MR status colour for the GitLab directory (C10, Q5).
  * Consumed by both the Kanban card badge (MRTaskIcon, below) and the MR
  * topbar button (mr-topbar-button.tsx) — previously two private,
- * disagreeing copies (statusTextColor / MRStatusIcon). Evaluated in this
- * exact priority order (first match wins); see plan AC35 for the table this
- * mirrors row-for-row.
+ * disagreeing copies (statusTextColor / MRStatusIcon). See plan AC35 for
+ * the table this mirrors row-for-row.
  */
 export function getMRStatusColor(mr: TaskMR): string {
-  if (mr.state === "merged") return PURPLE_500;
-  if (mr.state === "closed") return MUTED_FOREGROUND;
-  if (mr.state === "locked") return MUTED_FOREGROUND;
-  if (mr.pipeline_state === "failure") return RED_500;
-  if (mr.draft) return MUTED_FOREGROUND;
-  if (mr.approval_state === "approved" && mr.pipeline_state === "success") return EMERALD_400;
-  if (mr.approval_state === "pending") return SKY_400;
-  if (mr.pipeline_state === "pending") return YELLOW_500;
-  return MUTED_FOREGROUND;
+  return MR_CHIP_STATUS_COLOR[mrChipStatus(mr)];
 }
 
-const STATUS_RANK: Record<string, number> = {
-  // Higher = more attention-worthy. Drives the aggregated badge colour when
-  // a task has multiple MRs (mirrors github's aggregatePRStatusColor).
+// Higher = more attention-worthy. Drives the aggregated badge colour when a
+// task has multiple MRs (mirrors github's aggregatePRStatusColor). Exported
+// so a test can assert order-equivalence against MR_CHIP_STATUS_RANK below
+// without hand-restating either table (spec round-4 finding F34).
+export const STATUS_RANK: Record<string, number> = {
   [RED_500]: 4,
   [YELLOW_500]: 3,
   [SKY_400]: 2,
@@ -44,6 +76,72 @@ const STATUS_RANK: Record<string, number> = {
   [PURPLE_500]: 0,
   [MUTED_FOREGROUND]: 0,
 };
+
+// Ranks the eight chip statuses by attention-worthiness for selectChipMR's
+// rank filter (step 2). A separate table from STATUS_RANK above: this one is
+// keyed by status, that one by colour, and they serve different callers —
+// they are required only to be order-equivalent under the colour map, not
+// identical (spec: State machine, "Rank, and why aggregation has no tiebreak
+// of its own").
+export const MR_CHIP_STATUS_RANK: Record<MRChipStatus, number> = {
+  failed: 5,
+  running: 4,
+  awaiting_approval: 3,
+  ready: 2,
+  merged: 0,
+  closed: 0,
+  draft: 0,
+  neutral: 0,
+};
+
+/**
+ * Total order over MRs used to break rank ties deterministically:
+ * `mr_iid` ascending, then `project_path` ascending (byte-wise `<`), then
+ * `id` ascending. `id` is the association primary key, so this is total.
+ * Shared by selectChipMR (below) and the chip's badge-selection rule, which
+ * uses the identical tiebreak (spec: Selection and ordering).
+ */
+export function compareChipMR(a: TaskMR, b: TaskMR): number {
+  if (a.mr_iid !== b.mr_iid) return a.mr_iid - b.mr_iid;
+  if (a.project_path !== b.project_path) return a.project_path < b.project_path ? -1 : 1;
+  if (a.id === b.id) return 0;
+  return a.id < b.id ? -1 : 1;
+}
+
+function isChipMRBetter(candidate: TaskMR, current: TaskMR): boolean {
+  const candidateRank = MR_CHIP_STATUS_RANK[mrChipStatus(candidate)];
+  const currentRank = MR_CHIP_STATUS_RANK[mrChipStatus(current)];
+  if (candidateRank !== currentRank) return candidateRank > currentRank;
+  return compareChipMR(candidate, current) < 0;
+}
+
+/**
+ * Deterministically picks the one MR the chip renders and acts on: restrict
+ * to `state === "open"` exactly, keep the maximum MR_CHIP_STATUS_RANK, then
+ * tiebreak via compareChipMR. Pure and non-mutating — it never sorts or
+ * otherwise reorders `mrs` in place, so a caller holding the same array
+ * reference (useTaskMRs returns the store array by reference) never has it
+ * silently reordered under it (spec round-4 finding F30).
+ */
+export function selectChipMR(mrs: TaskMR[]): TaskMR | null {
+  let best: TaskMR | null = null;
+  for (const mr of mrs) {
+    if (mr.state !== "open") continue;
+    if (!best || isChipMRBetter(mr, best)) best = mr;
+  }
+  return best;
+}
+
+/**
+ * `aggregateMRChipStatus(mrs)` is defined as the composition
+ * `mrChipStatus(selectChipMR(mrs))`, returning `neutral` when selectChipMR
+ * returns null. It has no tiebreak rule of its own — see State machine,
+ * "Rank, and why aggregation has no tiebreak of its own".
+ */
+export function aggregateMRChipStatus(mrs: TaskMR[]): MRChipStatus {
+  const selected = selectChipMR(mrs);
+  return selected ? mrChipStatus(selected) : "neutral";
+}
 
 /**
  * Best-effort client-side approximation of the backend's

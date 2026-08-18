@@ -116,6 +116,94 @@ func nextOverloadedAttempt(sid acp.SessionId) int {
 	return next
 }
 
+// transportLostErrorData is the exact data payload the acp-go-sdk emits when
+// the peer disconnects before a response (see acp.ErrPeerDisconnected /
+// newInternalErrorWithCause in connection.go) — the production signature the
+// orchestrator's routingerr classifier matches on ("peer disconnected").
+var transportLostErrorData = map[string]any{"error": "peer disconnected before response"}
+
+// transportLostCmdRe matches `/transport-lost` or `/e2e:transport-lost`,
+// optionally followed by `:N` — the number of consecutive prompts to fail
+// with the ACP peer-disconnected signature before recovering (default 1).
+// Use a large N (e.g. `/transport-lost:9`) to exhaust the retry budget and
+// fall through to the red recovery banner.
+var transportLostCmdRe = regexp.MustCompile(`(?i)^/(?:e2e:)?transport-lost(?::(\d+))?$`)
+
+// parseTransportLostCmd reports whether the prompt is the /transport-lost
+// command and, if so, how many consecutive prompts it should fail before
+// recovering (default 1). Returns ok=false for any other prompt.
+func parseTransportLostCmd(prompt string) (failTimes int, ok bool) {
+	cmd := stripKandevSystem(strings.TrimSpace(prompt))
+	m := transportLostCmdRe.FindStringSubmatch(cmd)
+	if m == nil {
+		return 0, false
+	}
+	failTimes = 1
+	if m[1] != "" {
+		if n, err := strconv.Atoi(m[1]); err == nil && n >= 0 {
+			failTimes = n
+		}
+	}
+	return failTimes, true
+}
+
+// handleTransportLost implements the /transport-lost scenario: it returns a
+// real prompt-time ACP error carrying the production "peer disconnected
+// before response" signature for the first N prompts of a session, then
+// recovers with a normal text response. Returns handled=false when the
+// prompt is not the transport-lost command.
+func (a *mockAgent) handleTransportLost(ctx context.Context, sid acp.SessionId, prompt string) (acp.PromptResponse, error, bool) {
+	failTimes, ok := parseTransportLostCmd(prompt)
+	if !ok {
+		return acp.PromptResponse{}, nil, false
+	}
+
+	// Same rationale as handleOverloaded: persist the attempt count in a temp
+	// file keyed by the resume-stable session id so fail-then-recover
+	// survives the orchestrator's tear-down/relaunch between retries.
+	attempt := nextTransportLostAttempt(sid)
+
+	if attempt <= failTimes {
+		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: emitting peer-disconnected error for session %s (failure %d/%d)\n",
+			os.Getpid(), sid, attempt, failTimes)
+		return acp.PromptResponse{}, &acp.RequestError{
+			Code:    -32603,
+			Message: "Internal error",
+			Data:    transportLostErrorData,
+		}, true
+	}
+
+	// Recovered: clear the counter and emit a normal success response so the
+	// turn completes (and the orchestrator clears the retry budget).
+	_ = os.Remove(transportLostCounterPath(sid))
+	e := &emitter{ctx: ctx, conn: a.conn, sid: sid}
+	e.text(fmt.Sprintf("Agent connection recovered after %d transient failure(s). Here is your response.", failTimes))
+	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil, true
+}
+
+// transportLostCounterPath returns the temp-file path tracking how many times
+// the /transport-lost scenario has fired for a session. Keyed by the
+// resume-stable ACP session id so the count survives process relaunch across
+// backoff retries.
+func transportLostCounterPath(sid acp.SessionId) string {
+	safe := strings.NewReplacer("/", "_", "\\", "_", "..", "_").Replace(string(sid))
+	return filepath.Join(os.TempDir(), "kandev-mock-transport-lost-"+safe+".count")
+}
+
+// nextTransportLostAttempt increments and returns the persisted attempt count.
+func nextTransportLostAttempt(sid acp.SessionId) int {
+	path := transportLostCounterPath(sid)
+	prev := 0
+	if raw, err := os.ReadFile(path); err == nil {
+		if n, convErr := strconv.Atoi(strings.TrimSpace(string(raw))); convErr == nil {
+			prev = n
+		}
+	}
+	next := prev + 1
+	_ = os.WriteFile(path, []byte(strconv.Itoa(next)), 0o600)
+	return next
+}
+
 // bulkCmdRe matches `/bulk` or `/e2e:bulk`, optionally followed by `:N` or ` N`
 // — the number of agent messages to emit (default 120, capped at 1000). Used to
 // populate a long chat history for manually testing scrollback and the "Load
@@ -128,6 +216,9 @@ const (
 	// Tool-input/output map keys, shared to avoid repeating the literals.
 	toolKeyFilePath = "file_path"
 	toolKeyContent  = "content"
+	toolKeyTaskID   = "task_id"
+	toolKeyError    = "error"
+	toolKeyResult   = "result"
 )
 
 // parseBulkCmd reports whether the prompt is the /bulk command and, if so, how
@@ -229,7 +320,7 @@ var kandevSystemRegex = regexp.MustCompile(`<kandev-system>[\s\S]*?</kandev-syst
 
 var autopilotParentReplyRegex = regexp.MustCompile(`task_id=([0-9a-fA-F-]+), reply_to_question_id=([0-9a-fA-F-]+)`)
 
-const autopilotParentReplyDelayMillis = 5_000
+const autopilotParentReplyDelayMillis = 15_000
 
 // handleAutopilotParentQuestion makes the mock parent follow the production
 // parent-question protocol. The prompt is generated by Kandev, so this keeps
@@ -244,25 +335,26 @@ func handleAutopilotParentQuestion(e *emitter, prompt string) bool {
 		return true
 	}
 	childTaskID, questionID := matches[1], matches[2]
-	// Keep the pending state visible long enough for the desktop and mobile
-	// specs to observe the question icon before the deterministic answer.
+	// The child pause cancels its active turn asynchronously. Keep the pending
+	// state visible long enough for that lifecycle transition and for the
+	// desktop and mobile specs to observe the question icon before answering.
 	waitForDelay(e.ctx, autopilotParentReplyDelayMillis)
 	toolID := nextToolID()
 	e.startTool(toolID, "message_task_kandev", acp.ToolKindOther, map[string]any{
-		"task_id":              childTaskID,
+		toolKeyTaskID:          childTaskID,
 		"reply_to_question_id": questionID,
 	})
 	result, err := callMCPTool("kandev", "message_task_kandev", map[string]any{
-		"task_id":              childTaskID,
-		"prompt":               "Use the first safe option and continue.",
+		toolKeyTaskID:          childTaskID,
+		clarificationPromptKey: "Use the first safe option and continue.",
 		"reply_to_question_id": questionID,
 	})
 	if err != nil {
-		e.completeTool(toolID, map[string]any{"error": err.Error()})
+		e.completeTool(toolID, map[string]any{toolKeyError: err.Error()})
 		e.text("Mock parent could not answer the autopilot question.")
 		return true
 	}
-	e.completeTool(toolID, map[string]any{"result": result})
+	e.completeTool(toolID, map[string]any{toolKeyResult: result})
 	e.text("Answered the autopilot child question.")
 	return true
 }
@@ -645,11 +737,11 @@ func emitCreateSubtask(e *emitter, cmd, model string) {
 
 	result, err := callMCPTool("kandev", "create_task_kandev", args)
 	if err != nil {
-		e.completeTool(toolID, map[string]any{"error": "MCP error: " + err.Error()})
+		e.completeTool(toolID, map[string]any{toolKeyError: "MCP error: " + err.Error()})
 		e.text(fmt.Sprintf("Failed to create subtask: %v", err))
 		return
 	}
-	e.completeTool(toolID, map[string]any{"result": result})
+	e.completeTool(toolID, map[string]any{toolKeyResult: result})
 	e.text(fmt.Sprintf("Created subtask %q under the current task.", title))
 }
 

@@ -31,7 +31,7 @@ export type WorkspaceRepositorySourceRequest = {
   repository_id?: string;
   local_path?: string;
   remote_url?: string;
-  provider?: "github" | "gitlab" | "azure_devops";
+  provider?: string;
   provider_repo_id?: string;
   provider_owner?: string;
   provider_name?: string;

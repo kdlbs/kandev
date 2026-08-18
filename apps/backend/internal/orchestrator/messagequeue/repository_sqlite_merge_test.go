@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/entityrefs"
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
@@ -200,6 +201,8 @@ func TestSQLiteRepository_MergeDrainOrdering_MergeWins(t *testing.T) {
 func TestSQLiteRepository_MergeIntoAbove_UserMergesIntoUser(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()
+	targetAt := time.Date(2026, 8, 18, 10, 0, 0, 0, time.UTC)
+	sourceAt := targetAt.Add(time.Minute)
 
 	target := insertTestEntry(t, repo, "s1", "t1", "first", "user",
 		[]MessageAttachment{{Type: "image", Data: "a", MimeType: "image/png"}},
@@ -211,6 +214,12 @@ func TestSQLiteRepository_MergeIntoAbove_UserMergesIntoUser(t *testing.T) {
 		map[string]interface{}{
 			MetadataEntityReferences: entityRefs("1", "2"),
 		})
+	sqliteRepo := repo.(*sqliteRepository)
+	for id, queuedAt := range map[string]time.Time{target.ID: targetAt, source.ID: sourceAt} {
+		if _, err := sqliteRepo.db.ExecContext(ctx, `UPDATE queued_messages SET queued_at = ? WHERE id = ?`, queuedAt, id); err != nil {
+			t.Fatalf("set queued_at for %s: %v", id, err)
+		}
+	}
 
 	merged, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "user")
 	if err != nil {
@@ -221,6 +230,9 @@ func TestSQLiteRepository_MergeIntoAbove_UserMergesIntoUser(t *testing.T) {
 	}
 	if merged.ID != target.ID {
 		t.Errorf("merged id = %s, want target id %s", merged.ID, target.ID)
+	}
+	if !merged.QueuedAt.Equal(sourceAt) {
+		t.Errorf("merged queued_at = %s, want %s", merged.QueuedAt, sourceAt)
 	}
 	if merged.Content != "first\n\nsecond" {
 		t.Errorf("merged content = %q, want %q", merged.Content, "first\n\nsecond")
@@ -234,6 +246,13 @@ func TestSQLiteRepository_MergeIntoAbove_UserMergesIntoUser(t *testing.T) {
 	}
 	if merged.QueuedBy != "user" {
 		t.Errorf("merged queued_by = %q, want user", merged.QueuedBy)
+	}
+	entries, err := repo.ListBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list merged row: %v", err)
+	}
+	if len(entries) != 1 || !entries[0].QueuedAt.Equal(sourceAt) {
+		t.Fatalf("persisted merged queued_at = %#v, want %s", entries, sourceAt)
 	}
 	count, _ := repo.CountBySession(ctx, "s1")
 	if count != 1 {

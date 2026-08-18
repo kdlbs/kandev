@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import {
   fileDiffTab,
   getDiffsContainer,
@@ -425,8 +426,12 @@ test.describe("Untracked file diff update", () => {
       session.chat.getByText("untracked-file-modify complete", { exact: false }),
     ).toBeVisible({ timeout: 45_000 });
 
-    // Wait for git polling to detect the file change (polling interval is ~1-2s)
-    await testPage.waitForTimeout(3_000);
+    await dwell(
+      testPage,
+      3_000,
+      "poll-interval",
+      "git status is discovered by a ~1-2s backend poll rather than pushed, so the file change becomes visible on the poll's schedule and there is no event marking the sweep that will find it",
+    );
 
     // Switch back to Changes tab and click on the diff file again
     await openChangesTab(testPage);

@@ -1,6 +1,6 @@
 ---
 id: "20-role-aware-automation-controls"
-title: "Review follow-up PR automation controls"
+title: "PR events automation controls"
 status: done
 wave: 12
 depends_on:
@@ -9,7 +9,7 @@ plan: "plan.md"
 spec: "../../specs/ui/ci-pr-automation.md"
 ---
 
-# Task 20: Review follow-up PR automation controls
+# Task 20: PR events automation controls
 
 ## Intent
 
@@ -27,7 +27,7 @@ noise by grouping the three agent lifecycle prompt switches together.
 
 - Auto-fix and auto-merge remain in the primary automation list for every task.
 - Review-request, merged, and closed prompt switches are reachable together
-  under a `Review follow-up` disclosure for every task.
+  under a `PR events` disclosure for every task.
 - The disclosure is presentation only and does not mutate stored options.
 - A disclosure containing any enabled option opens so active automation is not
   concealed.

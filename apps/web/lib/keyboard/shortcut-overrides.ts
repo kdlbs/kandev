@@ -14,7 +14,6 @@ export type ConfigurableShortcutId =
   | "TOGGLE_PLAN_MODE"
   | "TASK_SWITCHER"
   | "TASK_SWITCHER_REVERSE"
-  | "VOICE_INPUT_TOGGLE"
   | "REVERSE_SEARCH"
   | "OPEN_TASK_PR"
   | "WORKSPACE_PICKER";
@@ -37,31 +36,51 @@ export function isUnboundShortcut(shortcut: KeyboardShortcut | undefined | null)
 
 export const CONFIGURABLE_SHORTCUTS: Record<
   ConfigurableShortcutId,
-  { label: string; default: KeyboardShortcut }
+  { labelKey: string; default: KeyboardShortcut }
 > = {
-  SEARCH: { label: "Command Panel", default: SHORTCUTS.SEARCH },
-  FILE_SEARCH: { label: "File Search", default: SHORTCUTS.FILE_SEARCH },
-  CONTENT_SEARCH: { label: "Search Task Contents", default: SHORTCUTS.CONTENT_SEARCH },
-  QUICK_CHAT: { label: "Quick Chat", default: SHORTCUTS.QUICK_CHAT },
-  BOTTOM_TERMINAL: { label: "Toggle Bottom Terminal", default: SHORTCUTS.BOTTOM_TERMINAL },
-  TOGGLE_SIDEBAR: { label: "Toggle Sidebar", default: UNBOUND_SHORTCUT },
-  COMMAND_PANEL: { label: "Command Panel (Alt)", default: SHORTCUTS.COMMAND_PANEL },
-  NEW_TASK: { label: "New Task", default: SHORTCUTS.NEW_TASK },
-  FOCUS_INPUT: { label: "Focus Chat Input", default: SHORTCUTS.FOCUS_INPUT },
+  SEARCH: { labelKey: "settings:shortcutCommandPanel", default: SHORTCUTS.SEARCH },
+  FILE_SEARCH: { labelKey: "settings:shortcutFileSearch", default: SHORTCUTS.FILE_SEARCH },
+  CONTENT_SEARCH: {
+    labelKey: "settings:shortcutTaskContentSearch",
+    default: SHORTCUTS.CONTENT_SEARCH,
+  },
+  QUICK_CHAT: { labelKey: "settings:shortcutQuickChat", default: SHORTCUTS.QUICK_CHAT },
+  BOTTOM_TERMINAL: {
+    labelKey: "settings:shortcutBottomTerminal",
+    default: SHORTCUTS.BOTTOM_TERMINAL,
+  },
+  TOGGLE_SIDEBAR: { labelKey: "settings:shortcutToggleSidebar", default: UNBOUND_SHORTCUT },
+  COMMAND_PANEL: { labelKey: "settings:shortcutCommandPanelAlt", default: SHORTCUTS.COMMAND_PANEL },
+  NEW_TASK: { labelKey: "settings:shortcutNewTask", default: SHORTCUTS.NEW_TASK },
+  FOCUS_INPUT: { labelKey: "settings:shortcutFocusChatInput", default: SHORTCUTS.FOCUS_INPUT },
   FOCUS_PASSTHROUGH_INPUT: {
-    label: "Focus CLI Chat Input",
+    labelKey: "settings:shortcutFocusCliChatInput",
     default: SHORTCUTS.FOCUS_PASSTHROUGH_INPUT,
   },
-  TOGGLE_PLAN_MODE: { label: "Toggle Plan Mode", default: SHORTCUTS.TOGGLE_PLAN_MODE },
-  TASK_SWITCHER: { label: "Recent Task Switcher", default: SHORTCUTS.TASK_SWITCHER },
+  TOGGLE_PLAN_MODE: {
+    labelKey: "settings:shortcutTogglePlanMode",
+    default: SHORTCUTS.TOGGLE_PLAN_MODE,
+  },
+  TASK_SWITCHER: {
+    labelKey: "settings:shortcutRecentTaskSwitcher",
+    default: SHORTCUTS.TASK_SWITCHER,
+  },
   TASK_SWITCHER_REVERSE: {
-    label: "Recent Task Switcher (Backward)",
+    labelKey: "settings:shortcutRecentTaskSwitcherBackward",
     default: SHORTCUTS.TASK_SWITCHER_REVERSE,
   },
-  VOICE_INPUT_TOGGLE: { label: "Voice Input", default: SHORTCUTS.VOICE_INPUT_TOGGLE },
-  REVERSE_SEARCH: { label: "Reverse Chat Search", default: SHORTCUTS.REVERSE_SEARCH },
-  OPEN_TASK_PR: { label: "Open Task Pull Request", default: SHORTCUTS.OPEN_TASK_PR },
-  WORKSPACE_PICKER: { label: "Open Workspace Picker", default: SHORTCUTS.WORKSPACE_PICKER },
+  REVERSE_SEARCH: {
+    labelKey: "settings:shortcutReverseChatSearch",
+    default: SHORTCUTS.REVERSE_SEARCH,
+  },
+  OPEN_TASK_PR: {
+    labelKey: "settings:shortcutOpenTaskPullRequest",
+    default: SHORTCUTS.OPEN_TASK_PR,
+  },
+  WORKSPACE_PICKER: {
+    labelKey: "settings:shortcutOpenWorkspacePicker",
+    default: SHORTCUTS.WORKSPACE_PICKER,
+  },
 };
 
 export function getShortcut(

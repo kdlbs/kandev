@@ -15,6 +15,8 @@ export function PerRepoPullMenu({
   onRepoPull,
   onRepoRebase,
   onRepoMerge,
+  pullDisabled,
+  pullDisabledReason,
   repoDisplayName,
 }: {
   repoNames: string[];
@@ -22,6 +24,8 @@ export function PerRepoPullMenu({
   onRepoPull: (repo: string) => void;
   onRepoRebase: (repo: string) => void;
   onRepoMerge: (repo: string) => void;
+  pullDisabled?: boolean;
+  pullDisabledReason?: string;
   repoDisplayName?: (repositoryName: string) => string | undefined;
 }) {
   const { t } = useTranslation();
@@ -30,7 +34,7 @@ export function PerRepoPullMenu({
     <>
       {repoNames.map((repo, idx) => {
         const s = statusByName.get(repo);
-        const behind = s?.behind ?? 0;
+        const behind = s?.pullBehind ?? 0;
         const label = repoDisplayName?.(repo) || repo || t("task:repository2");
         return (
           <div key={repo || "__no_repo__"}>
@@ -46,6 +50,12 @@ export function PerRepoPullMenu({
             <DropdownMenuItem
               onClick={() => onRepoPull(repo)}
               className="cursor-pointer text-xs gap-2"
+              disabled={pullDisabled}
+              title={
+                pullDisabled
+                  ? (pullDisabledReason ?? t("task:divergedActionsUnavailable"))
+                  : undefined
+              }
             >
               <IconCloudDownload className="h-3.5 w-3.5 text-muted-foreground" />
               {t("task:pull")}

@@ -54,9 +54,18 @@ test.describe("Configuration Chat", () => {
     const initial = await apiClient.getUserSettings();
     const initialLayout = initial.settings.changes_panel_layout === "tree" ? "tree" : "flat";
     const nextLayout = initialLayout === "tree" ? "flat" : "tree";
+    expect(initial.settings.app_status_bar_enabled).toBe(false);
 
     try {
-      await testPage.goto("/settings/general/appearance");
+      await testPage.goto("/settings/preferences/appearance");
+      await expect(testPage.getByTestId("app-status-bar")).toHaveCount(0);
+      await expect
+        .poll(() =>
+          testPage.evaluate(() =>
+            getComputedStyle(document.documentElement).getPropertyValue("--app-status-bar-height"),
+          ),
+        )
+        .toBe("0px");
       const layout = testPage.getByTestId("changes-panel-layout-select");
       await layout.click();
       await testPage

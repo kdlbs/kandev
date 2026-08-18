@@ -232,8 +232,9 @@ test.describe("Markdown preview", () => {
     expect(mdTab).toBeTruthy();
     expect(mdTab.markdownPreview).toBe(true);
 
-    // Brief pause to let the sessionStorage write settle before reload
-    await testPage.waitForTimeout(500);
+    // No settle needed before the reload: the assertions above already read
+    // the flag back out of sessionStorage, so the write has demonstrably
+    // landed by the time we get here.
 
     // Reload the page — sessionStorage survives same-URL reload.
     // After reload, the restored file tab becomes active (not the chat),

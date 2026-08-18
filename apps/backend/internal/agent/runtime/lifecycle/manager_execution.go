@@ -32,11 +32,6 @@ var ErrSessionWorkspaceNotReady = errors.New("session workspace not ready")
 // will never recover an execution.
 var ErrSessionTerminal = errors.New("session is terminal")
 
-// coalescedExecutionCreationTimeout matches the runtime's 60-second agentctl
-// startup window while preventing blocked instance I/O from owning the shared
-// session slot and its activity lease for the lifetime of the manager.
-const coalescedExecutionCreationTimeout = time.Minute
-
 // ResolveSessionRuntime returns the runtime selected for a session without
 // creating or resuming its execution. Session-scoped handlers can use this to
 // reject unsupported runtimes before GetOrEnsureExecution starts resources.
@@ -223,7 +218,10 @@ func (m *Manager) doCoalescedExecution(
 }
 
 func (m *Manager) coalescedExecutionContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	sharedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), coalescedExecutionCreationTimeout)
+	// The shared context owns caller-independent cancellation only. Runtime
+	// launch phases start their own deadlines after environment resolution, and
+	// setup scripts derive a separate preparation budget inside those phases.
+	sharedCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	if m.stopCh == nil {
 		return sharedCtx, cancel
 	}
@@ -348,6 +346,24 @@ func (m *Manager) GetExecutionIDForSession(_ context.Context, sessionID string) 
 		return execution.ID, nil
 	}
 	return "", fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
+}
+
+// GetACPSessionIDForSession returns the ACP conversation currently owned by a
+// live execution. The orchestrator uses this optional accessor after a context
+// reset to persist the new conversation immediately, instead of depending on
+// an asynchronous session-created event arriving before a backend restart.
+func (m *Manager) GetACPSessionIDForSession(sessionID string) (string, bool) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists || execution == nil {
+		return "", false
+	}
+	var acpSessionID string
+	if err := m.executionStore.WithRLock(execution.ID, func(exec *AgentExecution) {
+		acpSessionID = exec.ACPSessionID
+	}); err != nil || acpSessionID == "" {
+		return "", false
+	}
+	return acpSessionID, true
 }
 
 // IsAgentCommandConfigured reports whether an execution has been promoted from
@@ -574,11 +590,13 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	if err != nil {
 		return nil, err
 	}
-	if err := resumeRemoteInstancePreflight(ctx, rt, preparation.request); err != nil {
+	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
+	defer launchCancel()
+	if err := resumeRemoteInstancePreflight(launchCtx, rt, preparation.request); err != nil {
 		return nil, err
 	}
 
-	runtimeInstance, err := rt.CreateInstance(ctx, preparation.request)
+	runtimeInstance, err := rt.CreateInstance(launchCtx, preparation.request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)
 	}
@@ -685,6 +703,10 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if err != nil {
 		return nil, err
 	}
+	contributionDestinations, err := contributionDestinationsFromMetadata(metadata)
+	if err != nil {
+		return nil, err
+	}
 	autoApprove := false
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -713,6 +735,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
 			BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
 			RemoteContributions:            remoteContributions,
+			ContributionDestinations:       contributionDestinations,
 		},
 		profileInfo: profileInfo,
 	}, nil
@@ -859,7 +882,8 @@ func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string
 			WorktreeID: repository.WorktreeID, TaskDirName: info.TaskDirName, WorkspaceID: info.WorkspaceID,
 			RepoName: repository.RepoName, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
 			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
-			BranchSlug: repository.BranchSlug, BranchIdentitySlug: repository.BranchIdentitySlug,
+			RemoteSyncHandled: repository.RemoteSyncHandled,
+			BranchSlug:        repository.BranchSlug, BranchIdentitySlug: repository.BranchIdentitySlug,
 		}); err != nil {
 			return fmt.Errorf("recreate workspace worktree %q: %w", repository.RepoName, err)
 		}

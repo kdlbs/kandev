@@ -3,11 +3,17 @@ package backendapp
 import (
 	"context"
 	"errors"
+	"os"
 	"time"
 
 	agentdocker "github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/system/storage/dockerstore"
+)
+
+const (
+	e2eDockerScopeEnv   = "KANDEV_E2E_DOCKER_SCOPE"
+	e2eDockerScopeLabel = "kandev.e2e.run"
 )
 
 type lazyStorageDocker struct {
@@ -43,7 +49,7 @@ func (d *lazyStorageDocker) ListContainers(
 	if err != nil {
 		return nil, err
 	}
-	return client.ListContainers(ctx, labels)
+	return client.ListContainers(ctx, scopedDockerLabels(labels))
 }
 
 func (d *lazyStorageDocker) RemoveContainer(ctx context.Context, id string, force bool) error {
@@ -59,7 +65,39 @@ func (d *lazyStorageDocker) DiskUsage(ctx context.Context) (agentdocker.DiskUsag
 	if err != nil {
 		return agentdocker.DiskUsage{}, err
 	}
-	return client.DiskUsage(ctx)
+	usage, err := client.DiskUsage(ctx)
+	if err != nil {
+		return agentdocker.DiskUsage{}, err
+	}
+	return scopeDockerUsage(usage), nil
+}
+
+func scopedDockerLabels(labels map[string]string) map[string]string {
+	scope := os.Getenv(e2eDockerScopeEnv)
+	if scope == "" {
+		return labels
+	}
+	scoped := make(map[string]string, len(labels)+1)
+	for key, value := range labels {
+		scoped[key] = value
+	}
+	scoped[e2eDockerScopeLabel] = scope
+	return scoped
+}
+
+func scopeDockerUsage(usage agentdocker.DiskUsage) agentdocker.DiskUsage {
+	scope := os.Getenv(e2eDockerScopeEnv)
+	if scope == "" {
+		return usage
+	}
+	containers := make([]agentdocker.ContainerUsage, 0, len(usage.Containers))
+	for _, container := range usage.Containers {
+		if container.Labels[e2eDockerScopeLabel] == scope {
+			containers = append(containers, container)
+		}
+	}
+	usage.Containers = containers
+	return usage
 }
 
 func (d *lazyStorageDocker) PruneBuildCache(

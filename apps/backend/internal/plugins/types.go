@@ -137,3 +137,10 @@ type Deliverer interface {
 	// OnStatusChange callback.
 	Flush(pluginID string)
 }
+
+// AgentToolCatalogListener is notified after plugin lifecycle changes that
+// may alter the set of tools exposed to agent MCP sessions. Implementations
+// must return quickly and perform any rebuild asynchronously.
+type AgentToolCatalogListener interface {
+	NotifyAgentToolCatalogChanged()
+}

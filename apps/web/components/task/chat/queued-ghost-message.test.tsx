@@ -3,6 +3,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueuedGhostMessage, canMergeEntry, canMergeWithAbove } from "./queued-ghost-message";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
+import {
+  ClarificationEscapeGuardProvider,
+  type ClarificationEscapeGuardEntry,
+  type ClarificationEscapeGuardRegistry,
+} from "@/hooks/use-clarification-escape-guard";
 import { entityReferenceMarkdown } from "@/lib/entity-references/message-references";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
@@ -79,6 +84,22 @@ function renderWithProviders(node: React.ReactNode) {
       <ToastProvider>{node}</ToastProvider>
     </StateProvider>,
   );
+}
+
+function withEscapeGuardRegistry(node: React.ReactNode) {
+  const holder: { entry: ClarificationEscapeGuardEntry } = { entry: null };
+  const registry: ClarificationEscapeGuardRegistry = {
+    register: (_id, predicate) => {
+      holder.entry = { test: predicate };
+    },
+    unregister: () => {
+      holder.entry = null;
+    },
+  };
+  render(
+    <ClarificationEscapeGuardProvider value={registry}>{node}</ClarificationEscapeGuardProvider>,
+  );
+  return holder;
 }
 
 describe("QueuedGhostMessage reorder handle", () => {
@@ -177,6 +198,18 @@ describe("QueuedGhostMessage reorder handle", () => {
   });
 });
 
+describe("QueuedGhostMessage Escape handling", () => {
+  it("claims Escape at dialog capture time while editing", () => {
+    const holder = withEscapeGuardRegistry(
+      <QueuedGhostMessage entry={entry()} canEdit onSave={async () => {}} onRemove={() => {}} />,
+    );
+
+    fireEvent.click(screen.getByTestId(EDIT_TESTID));
+
+    expect(holder.entry?.test(new KeyboardEvent("keydown", { key: "Escape" }))).toBe(true);
+  });
+});
+
 describe("QueuedGhostMessage workflow badge", () => {
   it("renders workflow metadata as a workflow step badge", () => {
     render(
@@ -218,7 +251,60 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
     expect(img.src).toBe(`data:image/png;base64,${PNG_BASE64}`);
     expect(trigger.className).toContain("cursor-pointer");
   });
+});
 
+describe("QueuedGhostMessage queued attachment sources", () => {
+  it("renders staged image descriptors through the authenticated content URL", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry({
+          attachments: [
+            {
+              type: "image",
+              attachment_id: "attachment-staged-1",
+              mime_type: "image/png",
+              name: "diagram.png",
+            },
+          ],
+        })}
+        canEdit
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: OPEN_ATTACHMENT_1_LABEL }));
+
+    expect(screen.getByAltText(FULL_SIZE_ATTACHMENT_1_ALT).getAttribute("src")).toContain(
+      "/api/v1/attachments/attachment-staged-1/content",
+    );
+  });
+
+  it("does not render a broken image when an image has no source", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry({
+          content: "",
+          attachments: [
+            {
+              type: "image",
+              mime_type: "image/png",
+              name: "missing.png",
+            },
+          ],
+        })}
+        canEdit
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: OPEN_ATTACHMENT_1_LABEL })).toBeNull();
+    expect(screen.getByText("missing.png")).toBeTruthy();
+  });
+});
+
+describe("QueuedGhostMessage attachment thumbnails", () => {
   it("renders a file chip for non-image (resource) attachments", () => {
     render(
       <QueuedGhostMessage

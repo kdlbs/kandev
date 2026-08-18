@@ -9,6 +9,7 @@ import type { KanbanState } from "@/lib/state/slices";
 import {
   buildArchivedValue,
   buildDebugEntries,
+  buildTaskFromKanban,
   hasResolvedTaskDetails,
   resolveEffectiveTask,
   resolveTaskContentState,
@@ -29,7 +30,7 @@ function makeArchivedTaskDetails(overrides: Partial<Task> = {}): Task {
     state: "TODO",
     workspace_id: "ws-1",
     workflow_id: "wf-1",
-    priority: 0,
+    priority: "medium",
     repositories: [],
     created_at: "",
     updated_at: ARCHIVED_AT,
@@ -198,14 +199,17 @@ describe("syncActiveTaskSession", () => {
     const setActiveSessionAuto = vi.fn();
     const setActiveTask = vi.fn();
 
-    syncActiveTaskSession({
+    const applied = syncActiveTaskSession({
       initialTaskId: "task-1",
       fallbackTaskId: null,
       initialSessionId: "session-1",
+      activeTaskId: null,
+      previousRouteTaskId: undefined,
       setActiveSessionAuto,
       setActiveTask,
     });
 
+    expect(applied).toBe(true);
     expect(setActiveSessionAuto).toHaveBeenCalledWith("task-1", "session-1");
     expect(setActiveTask).not.toHaveBeenCalled();
   });
@@ -214,20 +218,85 @@ describe("syncActiveTaskSession", () => {
     const setActiveSessionAuto = vi.fn();
     const setActiveTask = vi.fn();
 
-    syncActiveTaskSession({
+    const applied = syncActiveTaskSession({
       initialTaskId: "task-1",
       fallbackTaskId: null,
       initialSessionId: null,
+      activeTaskId: null,
+      previousRouteTaskId: undefined,
       setActiveSessionAuto,
       setActiveTask,
     });
 
+    expect(applied).toBe(true);
     expect(setActiveTask).toHaveBeenCalledWith("task-1");
     expect(setActiveSessionAuto).not.toHaveBeenCalled();
+  });
+
+  it("applies a changed route over the previous active task", () => {
+    const setActiveSessionAuto = vi.fn();
+    const setActiveTask = vi.fn();
+
+    const applied = syncActiveTaskSession({
+      initialTaskId: "task-2",
+      fallbackTaskId: null,
+      initialSessionId: "session-2",
+      activeTaskId: "task-1",
+      previousRouteTaskId: "task-1",
+      setActiveSessionAuto,
+      setActiveTask,
+    });
+
+    expect(applied).toBe(true);
+    expect(setActiveSessionAuto).toHaveBeenCalledWith("task-2", "session-2");
+    expect(setActiveTask).not.toHaveBeenCalled();
+  });
+
+  it("adopts a session that arrives for the current route", () => {
+    const setActiveSessionAuto = vi.fn();
+    const setActiveTask = vi.fn();
+
+    const applied = syncActiveTaskSession({
+      initialTaskId: "task-1",
+      fallbackTaskId: null,
+      initialSessionId: "session-1",
+      activeTaskId: "task-1",
+      previousRouteTaskId: "task-1",
+      setActiveSessionAuto,
+      setActiveTask,
+    });
+
+    expect(applied).toBe(true);
+    expect(setActiveSessionAuto).toHaveBeenCalledWith("task-1", "session-1");
+    expect(setActiveTask).not.toHaveBeenCalled();
+  });
+
+  it("does not restore an unchanged route over an in-place sibling selection", () => {
+    const setActiveSessionAuto = vi.fn();
+    const setActiveTask = vi.fn();
+    const applied = syncActiveTaskSession({
+      initialTaskId: "missing-task",
+      fallbackTaskId: null,
+      initialSessionId: "sibling-session",
+      activeTaskId: "sibling-task",
+      previousRouteTaskId: "missing-task",
+      setActiveSessionAuto,
+      setActiveTask,
+    });
+
+    expect(applied).toBe(false);
+    expect(setActiveSessionAuto).not.toHaveBeenCalled();
+    expect(setActiveTask).not.toHaveBeenCalled();
   });
 });
 
 describe("resolveEffectiveTask archived state", () => {
+  it("preserves a non-default priority for kanban-only tasks", () => {
+    const resolved = buildTaskFromKanban(makeKanbanTask({ priority: "high" }));
+
+    expect(resolved.priority).toBe("high");
+  });
+
   it("builds a kanban-only task with its metadata", () => {
     const metadata = { port_forwarding_enabled: true };
     const resolved = resolveEffectiveTask(null, null, makeKanbanTask({ metadata }), "task-1");

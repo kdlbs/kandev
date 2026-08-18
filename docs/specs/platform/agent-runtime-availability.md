@@ -1,6 +1,7 @@
 ---
 status: draft
 created: 2026-08-08
+updated: 2026-08-11
 owner: kandev
 ---
 
@@ -31,8 +32,9 @@ data.
   persistent, non-dismissible alert explaining that the local agent runtime
   stopped, agent actions and workspace tools may not update, saved data remains
   intact, and Kandev must restart to recover.
-- The alert is independent of the optional App status bar and remains visible
-  when route data is empty or stale. It is not a transient toast.
+- The alert is independent of the **Show status bar** Appearance preference and
+  remains visible when route data is empty or stale. It is not a transient
+  toast.
 - When the local restart capability is supported, the alert offers **Restart
   Kandev** and reuses the existing supervised restart progress flow. Otherwise
   it gives localized terminal or service-manager guidance. A failed restart
@@ -125,7 +127,7 @@ message, and session persistence is unchanged.
 - **GIVEN** the runtime became unavailable before a browser connected, **WHEN**
   the browser loads or subscribes after WebSocket reconnect, **THEN** it receives
   the current unavailable snapshot and shows the same alert.
-- **GIVEN** the App status bar feature is disabled, **WHEN** the runtime becomes
+- **GIVEN** **Show status bar** is off, **WHEN** the runtime becomes
   unavailable, **THEN** the alert is still visible on every authenticated route.
 - **GIVEN** supervised restart is supported, **WHEN** the user chooses **Restart
   Kandev**, **THEN** the existing restart flow waits for a changed `boot_id` and

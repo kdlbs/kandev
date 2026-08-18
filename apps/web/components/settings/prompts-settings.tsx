@@ -20,6 +20,7 @@ import { useToast } from "@/components/toast-provider";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useAppStore } from "@/components/state-provider";
 import { createPrompt, deletePrompt, updatePrompt } from "@/lib/api";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { useRequest } from "@/lib/http/use-request";
 import { t } from "@/lib/i18n";
 import type { CustomPrompt } from "@/lib/types/http";
@@ -536,13 +537,14 @@ export function PromptsSettings() {
         </Trans>
       </div>
       <div className="space-y-6 mt-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="text-sm font-medium text-foreground">
             {t("settings:promptsCustomHeading")}
           </div>
           <Button
             onClick={startCreate}
             disabled={isBusy || isEditing || showCreate}
+            className={settingsActionClassName()}
             data-testid="prompt-create-button"
           >
             {t("settings:promptAdd")}

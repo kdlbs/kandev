@@ -34,6 +34,11 @@ function findCurrentActionableFailure(
   return footerActionMessages.at(-1);
 }
 
+/**
+ * Footer rendered below the transcript rows: the agent status summary plus
+ * any footer action messages (actionable failures / recovery), with
+ * missing-branch recovery owning the failure presentation when present.
+ */
 export function MessageListFooter({
   sessionState,
   sessionId,

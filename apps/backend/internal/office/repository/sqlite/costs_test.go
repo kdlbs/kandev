@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -35,12 +36,32 @@ func seedTasksTable(t *testing.T, repo *sqlite.Repository, taskID, workspaceID s
 	}
 }
 
+// TestCreateCostTables_IndexesSessionID guards the boot-time cost of
+// internal/task/repository/sqlite's BackfillSessionTokensCachedIn, which
+// correlates task_sessions against office_cost_events on session_id. Without
+// this index that correlated subquery falls back to a full table scan per
+// task_sessions row (a measured ~450x slowdown at 4,000 sessions / 80,000
+// events - 76.72s vs 0.17s). The index lives here, not in the task
+// repository, because it indexes a table this repository owns.
+func TestCreateCostTables_IndexesSessionID(t *testing.T) {
+	repo := newTestRepo(t)
+
+	var name string
+	err := repo.ReaderDB().QueryRow(
+		`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'office_cost_events' AND sql LIKE '%session_id%'`,
+	).Scan(&name)
+	if err != nil {
+		t.Fatalf("expected an index on office_cost_events(session_id) to exist after repo init, got: %v", err)
+	}
+}
+
 func TestCostEvent_CreateAndList(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
 	seedTasksTable(t, repo, "task-1", "ws-1")
 
+	tokensOut := int64(500)
 	event := &models.CostEvent{
 		SessionID:      "session-1",
 		TaskID:         "task-1",
@@ -48,7 +69,7 @@ func TestCostEvent_CreateAndList(t *testing.T) {
 		Model:          "claude-4-sonnet",
 		Provider:       "anthropic",
 		TokensIn:       1000,
-		TokensOut:      500,
+		TokensOut:      &tokensOut,
 		CostSubcents:   10,
 		OccurredAt:     time.Now().UTC(),
 	}
@@ -65,6 +86,99 @@ func TestCostEvent_CreateAndList(t *testing.T) {
 	}
 	if costs[0].CostSubcents != 10 {
 		t.Errorf("cost_subcents = %d, want 10", costs[0].CostSubcents)
+	}
+	if costs[0].TokensOut == nil || *costs[0].TokensOut != 500 {
+		t.Errorf("tokens_out = %v, want 500", costs[0].TokensOut)
+	}
+}
+
+// TestCostEvent_TokensOutNullRoundTrips confirms a NULL TokensOut (the
+// "never measured" shape — see costContractVersion's v2→v3 doc comment in
+// prompt_usage_cost.go) survives INSERT and SELECT as nil, not a silent 0.
+func TestCostEvent_TokensOutNullRoundTrips(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	seedTasksTable(t, repo, "task-null-out", "ws-null-out")
+
+	event := &models.CostEvent{
+		SessionID:      "session-null-out",
+		TaskID:         "task-null-out",
+		AgentProfileID: "cost-agent-null-out",
+		Model:          "opus",
+		Provider:       "anthropic",
+		TokensIn:       1000,
+		TokensOut:      nil,
+		CostSubcents:   767,
+		Estimated:      true,
+		OccurredAt:     time.Now().UTC(),
+	}
+	if err := repo.CreateCostEvent(ctx, event); err != nil {
+		t.Fatalf("create cost: %v", err)
+	}
+
+	costs, err := repo.ListCostEvents(ctx, "ws-null-out")
+	if err != nil {
+		t.Fatalf("list costs: %v", err)
+	}
+	if len(costs) != 1 {
+		t.Fatalf("cost count = %d, want 1", len(costs))
+	}
+	if costs[0].TokensOut != nil {
+		t.Errorf("tokens_out = %v, want nil (NULL round-trip)", *costs[0].TokensOut)
+	}
+	if costs[0].CostSubcents != 767 {
+		t.Errorf("cost_subcents = %d, want 767 (real money attached to an unmeasured tokens_out row)", costs[0].CostSubcents)
+	}
+}
+
+// TestCreateCostEvent_DuplicateUsageEventID confirms redelivery of the same
+// prompt-usage bus event (same UsageEventID) is reported as
+// ErrDuplicateUsageEvent rather than inserting a second row or a raw driver
+// error, and that unrelated rows with a NULL UsageEventID never collide.
+func TestCreateCostEvent_DuplicateUsageEventID(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	seedTasksTable(t, repo, "task-dup", "ws-dup")
+
+	usageEventID := "usage-evt-1"
+	first := &models.CostEvent{
+		TaskID:       "task-dup",
+		CostSubcents: 10,
+		UsageEventID: &usageEventID,
+		OccurredAt:   time.Now().UTC(),
+	}
+	if err := repo.CreateCostEvent(ctx, first); err != nil {
+		t.Fatalf("create first: %v", err)
+	}
+
+	second := &models.CostEvent{
+		TaskID:       "task-dup",
+		CostSubcents: 10,
+		UsageEventID: &usageEventID,
+		OccurredAt:   time.Now().UTC(),
+	}
+	err := repo.CreateCostEvent(ctx, second)
+	if !errors.Is(err, sqlite.ErrDuplicateUsageEvent) {
+		t.Fatalf("create second (duplicate) err = %v, want ErrDuplicateUsageEvent", err)
+	}
+
+	costs, err := repo.ListCostEvents(ctx, "ws-dup")
+	if err != nil {
+		t.Fatalf("list costs: %v", err)
+	}
+	if len(costs) != 1 {
+		t.Fatalf("cost count = %d, want 1 (duplicate must not insert)", len(costs))
+	}
+
+	// Two rows with no UsageEventID (manual entries, or rows predating this
+	// field) must not collide with each other.
+	for i := 0; i < 2; i++ {
+		if err := repo.CreateCostEvent(ctx, &models.CostEvent{
+			TaskID: "task-dup", CostSubcents: 5, OccurredAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("create nil-usage-event row %d: %v", i, err)
+		}
 	}
 }
 

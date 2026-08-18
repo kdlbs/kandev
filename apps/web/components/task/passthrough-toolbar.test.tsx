@@ -120,8 +120,28 @@ vi.mock("@/components/github/pr-status-chip", () => ({
   PRStatusChip: () => null,
 }));
 
+vi.mock("@/components/gitlab/mr-status-chip", () => ({
+  MRStatusChip: () => null,
+}));
+
 vi.mock("@/components/azure-devops/azure-devops-task-pull-request-chip", () => ({
   AzureDevOpsTaskPullRequestChip: () => null,
+}));
+
+vi.mock("@/components/integrations/registered-change-request-status", () => ({
+  RegisteredChangeRequestStatus: ({
+    taskId,
+    sessionId,
+    surface,
+  }: {
+    taskId: string;
+    sessionId: string;
+    surface: string;
+  }) => (
+    <span data-testid={`registered-change-request-${surface}`}>
+      {taskId}:{sessionId}
+    </span>
+  ),
 }));
 
 vi.mock("./chat/pr-archive-banners", () => ({
@@ -146,6 +166,7 @@ vi.mock("./chat/use-chat-panel-state", () => ({
     taskId: TASK_ID,
     task: { id: TASK_ID, title: "Task title" },
     taskDescription: "Task description",
+    isCompleted: mockSessionState === "COMPLETED",
     planModeEnabled: mockPlanModeEnabled,
     planModeAvailable: true,
     mcpServers: ["kandev"],
@@ -293,6 +314,22 @@ describe("PassthroughToolbar – default state", () => {
     const toggle = screen.getByTestId(TID_TOGGLE_COMMENTS) as HTMLButtonElement;
     expect(toggle.disabled).toBe(true);
   });
+
+  it("mounts plugin change-request status in composer chrome", () => {
+    renderToolbar();
+
+    expect(screen.getByTestId("registered-change-request-composer").textContent).toBe(
+      `${TASK_ID}:${SESSION_ID}`,
+    );
+  });
+
+  it("allows the status row and right-side controls to wrap as complete items", () => {
+    renderToolbar();
+
+    const row = screen.getByTestId("passthrough-status-row");
+    expect(row.className).toContain("flex-wrap");
+    expect(row.lastElementChild?.className).toContain("flex-wrap");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -422,6 +459,23 @@ describe("PassthroughToolbar – composer toggle", () => {
     } finally {
       xterm.remove();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Completed session state
+// ---------------------------------------------------------------------------
+
+describe("PassthroughToolbar – completed session", () => {
+  beforeEach(resetMocks);
+  afterEach(cleanup);
+
+  it("passes completed session state to the passthrough composer", async () => {
+    mockSessionState = "COMPLETED";
+    renderToolbar();
+    await openComposer();
+
+    expect(latestChatInputProps().isCompleted).toBe(true);
   });
 });
 

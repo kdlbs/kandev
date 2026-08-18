@@ -15,8 +15,34 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
+
+func seedAutopilotTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string, sessionState models.TaskSessionState) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Test Workflow", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: taskID, WorkspaceID: "ws1", WorkflowID: "wf1", Title: "Test Task",
+		State: v1.TaskStateInProgress, ParentID: "parent-task", Autopilot: true,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create autopilot task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: sessionState, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task session: %v", err)
+	}
+}
 
 func TestAutoStartStepPrompt_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	ctx := context.Background()
@@ -105,6 +131,79 @@ func TestAutoStartStepPrompt_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	}
 }
 
+func TestAutoStartStepPrompt_ResetContextInjectsCompletionContractForReusedSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedAutopilotTaskAndSession(t, repo, "task-reused", "session-reused", models.TaskSessionStateWaitingForInput)
+	task, err := repo.GetTask(ctx, "task-reused")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	session, _ := repo.GetTaskSession(ctx, "session-reused")
+	session.AgentExecutionID = "execution-reused"
+	session.AgentProfileID = "profile-review"
+	_ = repo.UpdateTaskSession(ctx, session)
+	seedExecutorRunning(t, repo, session.ID, task.ID, session.AgentExecutionID)
+	step := &wfmodels.WorkflowStep{ID: "step-review", WorkflowID: "wf1", Name: "Review", AutoAdvanceRequiresSignal: true, Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterResetAgentContext}, {Type: wfmodels.OnEnterAutoStartAgent}}}}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[step.ID] = step
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
+	messages := &mockMessageCreator{}
+	svc := createTestServiceWithScheduler(repo, stepGetter, newMockTaskRepo(), agentMgr)
+	svc.messageCreator = messages
+	err = svc.autoStartStepPrompt(ctx, "task-reused", session, step, "Review the change", false, false)
+	if err != nil {
+		t.Fatalf("autoStartStepPrompt returned error: %v", err)
+	}
+	if len(messages.userMessages) != 1 || !strings.Contains(messages.userMessages[0].content, "step_complete_kandev") {
+		t.Fatalf("reused reset-context prompt lacks completion contract: %#v", messages.userMessages)
+	}
+	if len(agentMgr.capturedPromptCalls) != 1 || !strings.Contains(agentMgr.capturedPromptCalls[0].Prompt, "step_complete_kandev") {
+		t.Fatalf("executor prompt lacks completion contract: %#v", agentMgr.capturedPromptCalls)
+	}
+	if !strings.Contains(messages.userMessages[0].content, "ask_parent_question_kandev") || strings.Contains(messages.userMessages[0].content, "ask_user_question_kandev") {
+		t.Fatalf("reused autopilot prompt has the wrong question contract: %s", messages.userMessages[0].content)
+	}
+}
+
+func TestAutoStartStepPrompt_ResetContextPreservesOfficeModeForReusedSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-office-reused", "session-office-reused", models.TaskSessionStateWaitingForInput)
+	task, err := repo.GetTask(ctx, "task-office-reused")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	task.ProjectID = "project-office"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("set Office ownership: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-office-reused")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentExecutionID = "execution-office-reused"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, session.ID, task.ID, session.AgentExecutionID)
+	step := &wfmodels.WorkflowStep{ID: "step-office-reused", WorkflowID: "wf1", Name: "Office", Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterResetAgentContext}, {Type: wfmodels.OnEnterAutoStartAgent}}}}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[step.ID] = step
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
+	messages := &mockMessageCreator{}
+	svc := createTestServiceWithScheduler(repo, stepGetter, newMockTaskRepo(), agentMgr)
+	svc.messageCreator = messages
+	if err := svc.autoStartStepPrompt(ctx, task.ID, session, step, "Run the Office task", false, false); err != nil {
+		t.Fatalf("autoStartStepPrompt returned error: %v", err)
+	}
+	if len(messages.userMessages) != 1 {
+		t.Fatalf("recorded messages = %d, want 1", len(messages.userMessages))
+	}
+	if !strings.Contains(messages.userMessages[0].content, "KANDEV OFFICE MCP TOOLS") || strings.Contains(messages.userMessages[0].content, "list_workspaces_kandev") {
+		t.Fatalf("reused Office prompt has the wrong tool contract: %s", messages.userMessages[0].content)
+	}
+}
 func TestResolveStepAgentProfile(t *testing.T) {
 	t.Run("returns step profile when set", func(t *testing.T) {
 		svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
@@ -159,6 +258,243 @@ func TestResolveStepAgentProfile(t *testing.T) {
 			t.Errorf("expected profile-step, got %q", got)
 		}
 	})
+}
+
+func TestPrepareWorkflowStepSession_PreservesMatchingProfileSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = "profile-a"
+	session.IsPrimary = true
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	step := &wfmodels.WorkflowStep{
+		ID:             "step1",
+		WorkflowID:     "wf1",
+		AgentProfileID: "profile-a",
+	}
+	stepGetter.steps[step.ID] = step
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+
+	effective, switched, err := svc.prepareWorkflowStepSession(ctx, "t1", session, step)
+	if err != nil {
+		t.Fatalf("prepareWorkflowStepSession returned error: %v", err)
+	}
+	if switched {
+		t.Fatal("matching profile must not switch sessions")
+	}
+	if effective.ID != session.ID {
+		t.Fatalf("effective session = %q, want %q", effective.ID, session.ID)
+	}
+	updated, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if !updated.IsPrimary {
+		t.Fatal("matching profile session must remain primary")
+	}
+}
+
+func TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step2")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = "profile-a"
+	session.ExecutorID = "exec-local"
+	session.ExecutorProfileID = "executor-profile"
+	session.IsPrimary = true
+	session.TaskEnvironmentID = "env-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID:             "step2",
+		WorkflowID:     "wf1",
+		AgentProfileID: "profile-b",
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{
+			Type:   wfmodels.OnEnterSetSessionMode,
+			Config: map[string]any{"mode": "acceptEdits"},
+		}}},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", WorkflowID: "wf1", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	log := testLogger()
+	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	svc.logger = log
+	svc.executor = exec
+	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(10), exec, taskRepo, log, scheduler.SchedulerConfig{})
+	svc.initWorkflowEngine()
+
+	if err := switchWorkflowDispatcher(svc)(ctx, "t1", "s1", engine.TriggerOnEnter, "op-1"); err != nil {
+		t.Fatalf("dispatcher returned error: %v", err)
+	}
+
+	sessions, err := repo.ListTaskSessions(ctx, "t1")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	var destination *models.TaskSession
+	for _, candidate := range sessions {
+		if candidate.AgentProfileID == "profile-b" {
+			destination = candidate
+			break
+		}
+	}
+	if destination == nil {
+		t.Fatal("expected destination profile session")
+	}
+	if !destination.IsPrimary {
+		t.Fatal("destination profile session must be primary")
+	}
+	if destination.TaskEnvironmentID != "env-1" {
+		t.Fatalf("destination TaskEnvironmentID = %q, want env-1", destination.TaskEnvironmentID)
+	}
+	if len(agentMgr.setSessionModeCalls) != 1 || agentMgr.setSessionModeCalls[0].SessionID != destination.ID {
+		t.Fatalf("set_session_mode calls = %+v, want destination session %q", agentMgr.setSessionModeCalls, destination.ID)
+	}
+	old, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("reload initiating session: %v", err)
+	}
+	if old.State != models.TaskSessionStateCompleted {
+		t.Fatalf("initiating session state = %s, want completed", old.State)
+	}
+}
+
+func TestSwitchWorkflowDispatcherSkipsPreflightForAppliedOperation(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step2")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = "profile-a"
+	session.ExecutorID = "exec-local"
+	session.ExecutorProfileID = "executor-profile"
+	session.IsPrimary = true
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID:             "step2",
+		WorkflowID:     "wf1",
+		AgentProfileID: "profile-b",
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{
+			Type:   wfmodels.OnEnterSetSessionMode,
+			Config: map[string]any{"mode": "acceptEdits"},
+		}}},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", WorkflowID: "wf1", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	log := testLogger()
+	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	svc.logger = log
+	svc.executor = exec
+	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(10), exec, taskRepo, log, scheduler.SchedulerConfig{})
+	svc.initWorkflowEngine()
+	if err := svc.workflowStore.MarkOperationApplied(ctx, "op-replay"); err != nil {
+		t.Fatalf("mark operation applied: %v", err)
+	}
+
+	if err := switchWorkflowDispatcher(svc)(ctx, "t1", "s1", engine.TriggerOnEnter, "op-replay"); err != nil {
+		t.Fatalf("dispatcher returned error: %v", err)
+	}
+
+	sessions, err := repo.ListTaskSessions(ctx, "t1")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("session count = %d, want original session only", len(sessions))
+	}
+	unchanged, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("reload initiating session: %v", err)
+	}
+	if unchanged.State != models.TaskSessionStateRunning {
+		t.Fatalf("initiating session state = %s, want running", unchanged.State)
+	}
+	if len(agentMgr.setSessionModeCalls) != 0 {
+		t.Fatalf("set_session_mode calls = %+v, want none", agentMgr.setSessionModeCalls)
+	}
+}
+
+type workflowMetaProbeCallback struct {
+	svc             *Service
+	step            *wfmodels.WorkflowStep
+	resolvedProfile string
+}
+
+func (c *workflowMetaProbeCallback) Execute(ctx context.Context, _ engine.ActionInput) (engine.ActionResult, error) {
+	c.resolvedProfile = c.svc.resolveStepAgentProfile(ctx, c.step)
+	return engine.ActionResult{}, nil
+}
+
+func TestSwitchWorkflowDispatcherSharesWorkflowMetaCacheWithAutoStart(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step2")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = "profile-a"
+	session.IsPrimary = true
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowAgentProfiles = []string{"profile-a", "profile-b"}
+	stepGetter.workflowPrompts["wf1"] = "workflow instructions"
+	step := &wfmodels.WorkflowStep{
+		ID:         "step2",
+		WorkflowID: "wf1",
+		Events:     wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}}},
+	}
+	stepGetter.steps["step2"] = step
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", WorkflowID: "wf1", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	svc.initWorkflowEngine()
+	probe := &workflowMetaProbeCallback{svc: svc, step: step}
+	svc.workflowEngine = engine.New(svc.workflowStore, engine.MapRegistry{
+		engine.ActionAutoStartAgent: probe,
+	})
+
+	if err := switchWorkflowDispatcher(svc)(ctx, "t1", "s1", engine.TriggerOnEnter, "op-1"); err != nil {
+		t.Fatalf("dispatcher returned error: %v", err)
+	}
+	if got := stepGetter.metaCalls(); got != 1 {
+		t.Fatalf("GetWorkflowMeta calls = %d, want 1 shared read", got)
+	}
+	if probe.resolvedProfile != "profile-a" {
+		t.Fatalf("callback resolved profile = %q, want cached profile-a", probe.resolvedProfile)
+	}
 }
 
 func TestSwitchSessionForStep(t *testing.T) {

@@ -34,7 +34,7 @@ export function buildEditMenuEntry({
       kind: "item",
       key: "edit",
       icon,
-      label: "Edit",
+      label: t("common:edit"),
       disabled: disabled || !onEdit,
       onSelect: onEdit,
     };
@@ -45,7 +45,7 @@ export function buildEditMenuEntry({
     key: "edit",
     testId: "kanban-edit-submenu",
     icon,
-    label: "Edit",
+    label: t("common:edit"),
     disabled,
     children: [
       {

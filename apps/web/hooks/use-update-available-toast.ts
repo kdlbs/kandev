@@ -22,8 +22,7 @@ export function useUpdateAvailableToast() {
 
     const title = notification.title || t("task:kandevUpdateAvailable");
     const body =
-      notification.body ||
-      `Kandev ${notification.version} is available. Open Settings > System > Updates to review it.`;
+      notification.body || t("task:updateAvailableToast", { version: notification.version });
     toast({ title, description: body });
 
     if (nativeNotifications.isAvailable()) {

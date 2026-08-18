@@ -19,7 +19,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"simple-message":          scenarioSimpleMessage,
 	"read-and-edit":           scenarioReadAndEdit,
 	"permission-flow":         scenarioPermissionFlow,
-	"error":                   scenarioError,
+	toolKeyError:              scenarioError,
 	"subagent":                scenarioSubagent,
 	"all-tools":               scenarioAllTools,
 	"multi-turn":              scenarioMultiTurn,
@@ -80,7 +80,7 @@ func scenarioSteerDeferSetup(e *emitter) {
 	// (or an e2e assertion) would see nothing until the turn eventually ends.
 	flushID := nextToolID()
 	e.startTool(flushID, "Acknowledge predecessor answer", acp.ToolKindOther, map[string]any{})
-	e.completeTool(flushID, map[string]any{"result": "ok"})
+	e.completeTool(flushID, map[string]any{toolKeyResult: "ok"})
 	waitForDelay(e.ctx, steerSetupHoldMillis)
 }
 
@@ -150,9 +150,9 @@ func scenarioReadAndEdit(e *emitter) {
 
 	fixedDelay(50)
 	if allowed {
-		e.completeTool(editID, map[string]any{"result": "File edited successfully: " + f.absPath})
+		e.completeTool(editID, map[string]any{toolKeyResult: "File edited successfully: " + f.absPath})
 	} else {
-		e.completeTool(editID, map[string]any{"result": "Edit was denied"})
+		e.completeTool(editID, map[string]any{toolKeyResult: "Edit was denied"})
 		e.text("Edit was denied.")
 	}
 
@@ -208,7 +208,7 @@ func scenarioKandevMCPPermission(e *emitter) {
 			"total":      1,
 		})
 	} else {
-		e.completeTool(id, map[string]any{"error": "denied"})
+		e.completeTool(id, map[string]any{toolKeyError: "denied"})
 	}
 
 	fixedDelay(50)
@@ -303,7 +303,7 @@ func scenarioAllTools(e *emitter) {
 	fixedDelay(50)
 	webID := nextToolID()
 	e.startTool(webID, "Fetch example.com", acp.ToolKindFetch,
-		map[string]any{"url": "https://example.com", "prompt": "Summarize"})
+		map[string]any{"url": "https://example.com", clarificationPromptKey: "Summarize"})
 	fixedDelay(50)
 	e.completeTool(webID, map[string]any{"content": "Example page content"})
 
@@ -347,9 +347,9 @@ func scenarioAllToolsEditBash(e *emitter, editFile fileInfo) {
 	allowed := e.requestPermission(editID, "Edit "+editFile.relPath, acp.ToolKindEdit, editInput)
 	fixedDelay(50)
 	if allowed {
-		e.completeTool(editID, map[string]any{"result": "File edited successfully: " + editFile.absPath})
+		e.completeTool(editID, map[string]any{toolKeyResult: "File edited successfully: " + editFile.absPath})
 	} else {
-		e.completeTool(editID, map[string]any{"result": "Edit denied"})
+		e.completeTool(editID, map[string]any{toolKeyResult: "Edit denied"})
 		e.text("Edit denied.")
 	}
 
@@ -399,19 +399,16 @@ func scenarioDiffExpansionSetup(e *emitter) {
 	}
 
 	runGitCmd := makeGitRunner(wd)
-	_ = runGitCmd("rm", "--force", filePath)
-	_ = runGitCmd("commit", "-m", "cleanup expansion_test.go")
-
-	if err := os.WriteFile(filePath, []byte(original), 0o644); err != nil {
-		e.text("diff-expansion-setup: re-write failed: " + err.Error())
-		return
-	}
-
+	// Add the canonical content directly. `--allow-empty` makes retries
+	// idempotent when a reused worktree already has the same file at HEAD;
+	// overwriting before `git add` also repairs a worktree left with the prior
+	// scenario's modified content. The old rm/cleanup commit sequence could
+	// fail under concurrent git setup and left the real fixture commit absent.
 	if err := runGitCmd("add", filePath); err != nil {
 		e.text("diff-expansion-setup: git add failed")
 		return
 	}
-	if err := runGitCmd("commit", "-m", "add expansion_test.go for e2e diff expansion test"); err != nil {
+	if err := runGitCmd("commit", "--allow-empty", "-m", "add expansion_test.go for e2e diff expansion test"); err != nil {
 		e.text("diff-expansion-setup: git commit failed")
 		return
 	}
@@ -759,7 +756,10 @@ func clarificationMultiQuestionArgs() map[string]any {
 				},
 			},
 		},
-		"context": "Picking the foundational stack: answer all three so we can move forward.",
+		"context_paragraphs": []string{
+			"Picking the foundational stack.",
+			"Answer all three so we can move forward.",
+		},
 	}
 }
 
@@ -1038,11 +1038,11 @@ func emitWalkthroughTour(e *emitter, doneText string) {
 	e.startTool(toolID, toolName, acp.ToolKindOther, args)
 	result, err := callMCPTool("kandev", toolName, args)
 	if err != nil {
-		e.completeTool(toolID, map[string]any{"error": "MCP error: " + err.Error()})
+		e.completeTool(toolID, map[string]any{toolKeyError: "MCP error: " + err.Error()})
 		e.text(fmt.Sprintf("show_walkthrough failed: %s", err))
 		return
 	}
-	e.completeTool(toolID, map[string]any{"result": result})
+	e.completeTool(toolID, map[string]any{toolKeyResult: result})
 	fixedDelay(50)
 	e.text(doneText)
 }
@@ -1129,18 +1129,40 @@ func makeGitRunner(wd string) func(args ...string) error {
 		"GIT_COMMITTER_EMAIL=mock@test.local",
 	)
 	return func(args ...string) error {
-		cmd := subproc.NewGitCommand(context.Background(), append([]string{
-			"-c", "commit.gpgsign=false",
-			"-c", "tag.gpgsign=false",
-		}, args...)...)
-		cmd.Dir = wd
-		cmd.Env = gitEnv
-		out, cmdErr := subproc.RunGitCombinedOutputClass(context.Background(), subproc.GitLifecycle, cmd)
-		if cmdErr != nil {
-			_, _ = fmt.Fprintf(logOutput, "mock-agent: git %v failed: %v\nOutput: %s\n", args, cmdErr, out)
+		for attempt := 0; attempt < 5; attempt++ {
+			cmd := subproc.NewGitCommand(context.Background(), append([]string{
+				"-c", "commit.gpgsign=false",
+				"-c", "tag.gpgsign=false",
+			}, args...)...)
+			cmd.Dir = wd
+			cmd.Env = gitEnv
+			out, cmdErr := subproc.RunGitCombinedOutputClass(context.Background(), subproc.GitLifecycle, cmd)
+			if cmdErr == nil {
+				return nil
+			}
+			if !retryableGitSetupOutput(string(out)) || attempt == 4 {
+				_, _ = fmt.Fprintf(logOutput, "mock-agent: git %v failed: %v\nOutput: %s\n", args, cmdErr, out)
+				return cmdErr
+			}
+			time.Sleep(time.Duration(50*(1<<attempt)) * time.Millisecond)
 		}
-		return cmdErr
+		return fmt.Errorf("git %v failed after retries", args)
 	}
+}
+
+func retryableGitSetupOutput(output string) bool {
+	lower := strings.ToLower(output)
+	for _, marker := range []string{
+		"index.lock",
+		"could not lock",
+		"another git process",
+		"unable to create",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // contextWithTimeout creates a context with timeout in seconds.

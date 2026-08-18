@@ -75,6 +75,12 @@ type TaskExecutionStopper interface {
 	RegisterExecutionStopOwner(sessionID, executionID string, force bool)
 }
 
+// TerminalClarificationCanceller expires durable input requests after a task
+// service-owned terminal transition, such as archive cancellation.
+type TerminalClarificationCanceller interface {
+	ExpireSessionAndNotify(ctx context.Context, sessionID string) (int, error)
+}
+
 // TaskRowLivenessProber classifies an executors_running row's backing-process
 // liveness in a runtime-aware way (a local process check is never applied to a
 // remote/SSH row). It is optional and satisfied by the lifecycle adapter. When
@@ -195,6 +201,30 @@ type StartStepResolver interface {
 	ResolveFirstStep(ctx context.Context, workflowID string) (string, error)
 }
 
+// StepHistoryRecorder persists an ADR 0015 session-step transition audit
+// row. Optional — when unset, MoveTaskWithOptions records nothing. Errors
+// are logged and swallowed by the caller: the audit trail must never fail
+// the move it is recording.
+type StepHistoryRecorder interface {
+	CreateStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) error
+}
+
+type asyncStepHistoryRecorder interface {
+	EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{})
+}
+
+// ContributionDestinationPreparer is an internal creation-time hook for a
+// server-owned publication route. It runs after request/workflow validation
+// and external-ID deduplication, but before the task row is inserted.
+type ContributionDestinationPreparer interface {
+	PrepareContributionDestination(
+		ctx context.Context,
+		req *CreateTaskRequest,
+		workflow *models.Workflow,
+		repositories []*models.Repository,
+	) error
+}
+
 var (
 	ErrActiveTaskSessions        = errors.New("active agent sessions exist")
 	ErrWIPLimitExceeded          = wfmodels.ErrWIPLimitExceeded
@@ -241,6 +271,7 @@ type Repos struct {
 	Sessions          repository.SessionRepository
 	GitSnapshots      repository.GitSnapshotRepository
 	RepoEntities      repository.RepositoryEntityRepository
+	RepositorySets    repository.RepositorySetRepository
 	RepositoryCleanup repository.RepositoryCleanupRepository
 	Executors         repository.ExecutorRepository
 	Environments      repository.EnvironmentRepository
@@ -248,62 +279,75 @@ type Repos struct {
 	Reviews           repository.ReviewRepository
 	ResourceCleanups  repository.TaskResourceCleanupRepository
 	StatusSummaries   repository.TaskStatusSummaryRepository
+	TaskActivity      repository.TaskActivityRepository
+	SubagentContexts  repository.SubagentContextRepository
 }
 
 // Service provides task business logic
 type Service struct {
-	workspaces                  repository.WorkspaceRepository
-	tasks                       repository.TaskRepository
-	taskRepos                   repository.TaskRepoRepository
-	workspaceFolders            repository.TaskWorkspaceFolderRepository
-	workflows                   repository.WorkflowRepository
-	messages                    repository.MessageRepository
-	attachments                 repository.AttachmentRepository
-	turns                       repository.TurnRepository
-	sessions                    repository.SessionRepository
-	gitSnapshots                repository.GitSnapshotRepository
-	repoEntities                repository.RepositoryEntityRepository
-	repositoryCleanup           repository.RepositoryCleanupRepository
-	executors                   repository.ExecutorRepository
-	environments                repository.EnvironmentRepository
-	taskEnvironments            repository.TaskEnvironmentRepository
-	reviews                     repository.ReviewRepository
-	resourceCleanups            repository.TaskResourceCleanupRepository
-	statusSummaries             repository.TaskStatusSummaryRepository
-	attachmentSvc               *AttachmentService
-	statusSummaryPRs            TaskStatusSummaryPRReader
-	queuedPromptCounter         QueuedPromptCounter
-	eventBus                    bus.EventBus
-	logger                      *logger.Logger
-	discoveryConfig             RepositoryDiscoveryConfig
-	worktreeCleanup             WorktreeCleanup
-	executionStopper            TaskExecutionStopper
-	rowLivenessProber           TaskRowLivenessProber
-	contextWindowResetter       func(context.Context, string) error
-	cleanupActivity             TaskResourceCleanupActivityGate
-	branchMaterializer          BranchMaterializer
-	workspaceSourceMaterializer WorkspaceSourceMaterializer
-	workspaceSourceLocksMu      sync.Mutex
-	workspaceSourceLocks        map[string]*sync.Mutex
-	providerProber              ProviderDefaultBranchProber
-	gitArchiveCapture           GitArchiveCapture
-	workflowStepCreator         WorkflowStepCreator
-	workspaceBootstrapper       WorkspaceBootstrapper
-	workflowStepGetter          WorkflowStepGetter
-	startStepResolver           StartStepResolver
-	prTaskResolver              PRTaskResolver
-	quickChatDir                string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
-	branchFetcher               *branchFetcher
-	envDestroyer                EnvironmentDestroyer
-	sessionRunningChecker       SessionRunningChecker
-	remoteBranchLister          RemoteBranchLister
-	repoCloneLocation           RepoCloneLocation
-	blockers                    BlockerRepository
-	comments                    CommentRepository
-	secretStore                 secrets.SecretStore
-	workspaceSecretDeleter      WorkspaceSecretDeleter
-	baseBranchPusher            AgentBaseBranchPusher
-	runtimeOverridesMu          sync.Mutex
+	workspaces                      repository.WorkspaceRepository
+	tasks                           repository.TaskRepository
+	taskRepos                       repository.TaskRepoRepository
+	workspaceFolders                repository.TaskWorkspaceFolderRepository
+	workflows                       repository.WorkflowRepository
+	messages                        repository.MessageRepository
+	attachments                     repository.AttachmentRepository
+	turns                           repository.TurnRepository
+	sessions                        repository.SessionRepository
+	gitSnapshots                    repository.GitSnapshotRepository
+	repoEntities                    repository.RepositoryEntityRepository
+	repositorySets                  repository.RepositorySetRepository
+	repositoryCleanup               repository.RepositoryCleanupRepository
+	executors                       repository.ExecutorRepository
+	environments                    repository.EnvironmentRepository
+	taskEnvironments                repository.TaskEnvironmentRepository
+	reviews                         repository.ReviewRepository
+	resourceCleanups                repository.TaskResourceCleanupRepository
+	statusSummaries                 repository.TaskStatusSummaryRepository
+	taskActivity                    repository.TaskActivityRepository
+	subagentContexts                repository.SubagentContextRepository
+	attachmentSvc                   *AttachmentService
+	statusSummaryPRs                TaskStatusSummaryPRReader
+	statusSummaryProjector          TaskStatusSummaryEventProjector
+	queuedPromptCounter             QueuedPromptCounter
+	eventBus                        bus.EventBus
+	logger                          *logger.Logger
+	discoveryConfig                 RepositoryDiscoveryConfig
+	worktreeCleanup                 WorktreeCleanup
+	executionStopper                TaskExecutionStopper
+	clarificationCanceller          TerminalClarificationCanceller
+	rowLivenessProber               TaskRowLivenessProber
+	contextWindowResetter           func(context.Context, string) error
+	cleanupActivity                 TaskResourceCleanupActivityGate
+	branchMaterializer              BranchMaterializer
+	workspaceSourceMaterializer     WorkspaceSourceMaterializer
+	workspaceSourceLocksMu          sync.Mutex
+	workspaceSourceLocks            map[string]*sync.Mutex
+	providerProber                  ProviderDefaultBranchProber
+	gitArchiveCapture               GitArchiveCapture
+	workflowStepCreator             WorkflowStepCreator
+	workspaceBootstrapper           WorkspaceBootstrapper
+	workflowStepGetter              WorkflowStepGetter
+	startStepResolver               StartStepResolver
+	stepHistoryRecorder             StepHistoryRecorder
+	contributionDestinationPreparer ContributionDestinationPreparer
+	prTaskResolver                  PRTaskResolver
+	quickChatDir                    string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
+	branchFetcher                   *branchFetcher
+	envDestroyer                    EnvironmentDestroyer
+	sessionRunningChecker           SessionRunningChecker
+	remoteBranchLister              RemoteBranchLister
+	repoCloneLocation               RepoCloneLocation
+	blockers                        BlockerRepository
+	// dependencyEdgeMu serializes validate-then-insert for dependency edges so
+	// two concurrent adds cannot each pass a cycle walk that predates the
+	// other's insert and commit a cycle between them.
+	dependencyEdgeMu       sync.Mutex
+	comments               CommentRepository
+	secretStore            secrets.SecretStore
+	workspaceSecretDeleter WorkspaceSecretDeleter
+	baseBranchPusher       AgentBaseBranchPusher
+	runtimeOverridesMu     sync.Mutex
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 
@@ -339,6 +383,12 @@ type Service struct {
 	// within this backend process only — this backend is single-process per
 	// SQLite database, so that is the complete threat model today.
 	repoResolveMu sync.Mutex
+	// pendingActionProjectionMu guards the durable-generation logical clock
+	// shared by REST snapshots and semantic message events. Revisions are
+	// reserved before each repository read so delayed results stay ordered.
+	pendingActionProjectionMu       sync.Mutex
+	pendingActionProjectionEpoch    string
+	pendingActionProjectionSequence uint64
 }
 
 // SetAttachmentService wires the file-backed prompt attachment owner into the
@@ -387,6 +437,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		sessions:              repos.Sessions,
 		gitSnapshots:          repos.GitSnapshots,
 		repoEntities:          repos.RepoEntities,
+		repositorySets:        repos.RepositorySets,
 		repositoryCleanup:     repos.RepositoryCleanup,
 		executors:             repos.Executors,
 		environments:          repos.Environments,
@@ -394,12 +445,17 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		reviews:               repos.Reviews,
 		resourceCleanups:      repos.ResourceCleanups,
 		statusSummaries:       repos.StatusSummaries,
+		taskActivity:          repos.TaskActivity,
+		subagentContexts:      repos.SubagentContexts,
 		eventBus:              eventBus,
 		logger:                log,
 		discoveryConfig:       discoveryConfig,
 		branchFetcher:         newBranchFetcher(log.Zap()),
 		lastTaskActivity:      make(map[string]v1.ForegroundActivity),
 		lastTaskSubagentCount: make(map[string]int),
+		// Focused service tests do not run backend composition. Production
+		// replaces this fallback with a database-allocated generation.
+		pendingActionProjectionEpoch: "1",
 	}
 }
 
@@ -448,6 +504,12 @@ func (s *Service) SetProviderDefaultBranchProber(p ProviderDefaultBranchProber) 
 // SetExecutionStopper wires the task execution stopper (orchestrator).
 func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 	s.executionStopper = stopper
+}
+
+// SetClarificationCanceller wires terminal clarification cleanup for session
+// transitions owned by the task service.
+func (s *Service) SetClarificationCanceller(canceller TerminalClarificationCanceller) {
+	s.clarificationCanceller = canceller
 }
 
 // SetRowLivenessProber wires the runtime-aware executors_running liveness probe
@@ -506,6 +568,18 @@ func (s *Service) SetStartStepResolver(resolver StartStepResolver) {
 	s.startStepResolver = resolver
 }
 
+// SetStepHistoryRecorder wires the ADR 0015 audit-trail writer for manual
+// step transitions (MoveTaskWithOptions). Optional.
+func (s *Service) SetStepHistoryRecorder(recorder StepHistoryRecorder) {
+	s.stepHistoryRecorder = recorder
+}
+
+// SetContributionDestinationPreparer wires the optional server-side
+// publication-route preparation used by managed Improve Kandev tasks.
+func (s *Service) SetContributionDestinationPreparer(preparer ContributionDestinationPreparer) {
+	s.contributionDestinationPreparer = preparer
+}
+
 // SetPRTaskResolver wires the GitHub PR→task resolver for PR-number search.
 // Optional — when unset, search by PR number is a no-op.
 func (s *Service) SetPRTaskResolver(resolver PRTaskResolver) {
@@ -518,16 +592,29 @@ func (s *Service) SetQuickChatDir(dir string) {
 	s.quickChatDir = dir
 }
 
-// RemoteBranchLister fetches branches from a provider's remote (e.g. GitHub
-// API) without needing a local clone. Used by ListBranches so a repo that is
+// RemoteBranchSource is the host-verified identity of a provider-backed
+// workspace repository. Callers must derive it from persisted repository data.
+type RemoteBranchSource struct {
+	WorkspaceID          string
+	Provider             string
+	ProviderHost         string
+	ProviderScope        string
+	ProviderRepositoryID string
+	Owner                string
+	Name                 string
+	RemoteURL            string
+	DefaultBranch        string
+}
+
+// RemoteBranchLister fetches branches from a provider's remote API without
+// needing a local clone. Used by ListBranches so a repo that is
 // registered as remote ("Remote" badge in the UI) can serve branches before
 // or even without the orchestrator finishing its clone.
 type RemoteBranchLister interface {
-	ListRepoBranches(ctx context.Context, workspaceID, owner, repo string) ([]Branch, error)
+	ListRepoBranches(ctx context.Context, source RemoteBranchSource) ([]Branch, error)
 }
 
-// SetRemoteBranchLister wires the remote branch source. Currently only GitHub
-// is plumbed; other providers can be added by extending the adapter.
+// SetRemoteBranchLister wires the provider-neutral remote branch source.
 func (s *Service) SetRemoteBranchLister(lister RemoteBranchLister) {
 	s.remoteBranchLister = lister
 }

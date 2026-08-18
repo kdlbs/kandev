@@ -319,6 +319,35 @@ export function findAbsenceClaims(content) {
 }
 
 /**
+ * Split prose into sentence-sized claim scopes. API names elsewhere in the
+ * same wrapped Markdown paragraph must not inherit an unrelated absence claim.
+ * Dots inside identifiers such as `host.storage` are preserved because a
+ * boundary requires following whitespace or the end of the paragraph.
+ *
+ * @param {string} text Paragraph text.
+ * @returns {string[]} Sentence-sized fragments.
+ */
+function splitClaimScopes(text) {
+  return text.split(/[.!?](?:\s+|$)/).filter(Boolean);
+}
+
+/**
+ * API claims in harness Markdown name contracts as inline code. Restricting
+ * matching to those spans prevents common host words such as `context` from
+ * being attributed to unrelated phrases like "thread context is unavailable."
+ *
+ * @param {string} scope Sentence-sized absence-claim scope.
+ * @param {RegExp} boundary Escaped live-name matcher.
+ * @returns {boolean} Whether an inline-code span names the live API.
+ */
+function scopeMentionsLiveAPI(scope, boundary) {
+  for (const match of scope.matchAll(/`([^`]+)`/g)) {
+    if (boundary.test(match[1])) return true;
+  }
+  return false;
+}
+
+/**
  * Resolve the fixed set of harness files this guard scans, de-duplicated by
  * physical (symlink-resolved) path.
  *
@@ -423,11 +452,14 @@ export async function validatePluginApiClaims({
 
     const relFile = path.relative(root, file);
     for (const claim of claims) {
+      const claimScopes = splitClaimScopes(claim.text).filter((scope) =>
+        CLAIM_PATTERNS.some((pattern) => pattern.test(scope)),
+      );
       for (const name of liveNames) {
         const boundary = new RegExp(
           `\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
         );
-        if (boundary.test(claim.text)) {
+        if (claimScopes.some((scope) => scopeMentionsLiveAPI(scope, boundary))) {
           findings.push({ file: relFile, line: claim.line, api: name });
         }
       }

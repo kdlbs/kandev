@@ -107,7 +107,7 @@ func (a *ClaudeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *ClaudeACP) BuildCommand(opts CommandOptions) Command {
-	return a.ManagedNPMRuntime().CachedACPCommand()
+	return a.ManagedNPMRuntime().ACPCommand(opts.ManagedRuntimeVersion)
 }
 
 func (a *ClaudeACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
@@ -136,6 +136,7 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
 			SessionDirTemplate:  "{home}/.claude",
+			SessionDirTarget:    "/root/.claude",
 		},
 	}
 }
@@ -159,6 +160,22 @@ chmod 600 "${HOME}/.claude.json"`,
 			},
 		},
 	}
+}
+
+func (a *ClaudeACP) PortableConfig() *PortableConfig {
+	return &PortableConfig{Bundles: []PortableConfigBundle{
+		{
+			ID:    "claude.settings",
+			Label: "Copy Claude settings",
+			Files: []PortableConfigFile{
+				{SourcePaths: map[string]string{
+					"darwin":  ".claude/settings.json",
+					"linux":   ".claude/settings.json",
+					"windows": ".claude/settings.json",
+				}, TargetPath: ".claude/settings.json"},
+			},
+		},
+	}}
 }
 
 // Verified: `claude --help` documents `claude auth login` as the dedicated

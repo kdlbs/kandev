@@ -8,7 +8,13 @@ Scoped guidance for `apps/backend/cmd/mock-agent/`. The mock agent satisfies the
 
 `handler.go` routes any prompt starting with `/e2e:` to `emitPredefinedScenario(e, name)`, which looks `name` up in `scenarioRegistry` (`scenarios.go`). The registry is the single source of truth for scenario names — to add a scenario, add one map entry and one `scenario<Name>(e *emitter)` function.
 
-Friendly aliases live in `handler.go` next to the dispatcher: `/ask-single`, `/ask-multiple`, `/crash`, `/todo`, `/mermaid`, `/markdown`, `/sleep [n]`, `/tool:<name>`, `/subagent`, `/subtask`, `/bulk[:N]`, `/background [n]`, `/detached-background [n]`, `/async-subagent-lifecycle [n]`, `/async-subagent-teardown`.
+Friendly aliases live in `handler.go` next to the dispatcher: `/ask-single`, `/ask-multiple`, `/crash`, `/todo`, `/mermaid`, `/markdown`, `/sleep [n]`, `/slow [duration]`, `/tool:<name>`, `/subagent`, `/subtask`, `/bulk[:N]`, `/background [n]`, `/detached-background [n]`, `/async-subagent-lifecycle [n]`, `/async-subagent-teardown`.
+
+`/slow [duration]` uses seconds for positive bare numbers and accepts explicit
+Go duration units. Omitted, invalid, or non-positive values use the 5-second
+fallback. Handler-path tests should use a short explicit duration such as
+`50ms`; parser tests should cover long bare values without making the handler
+wait for seconds.
 
 The four `background`/`async-subagent` aliases emit the foreground-yield and detached-workload frame shapes behind the fine-grained busy signal (ADR-0049): `/background` spawns a subagent while the foreground goes idle, `/detached-background` launches work that outlives the turn, and the `async-subagent-*` pair replays Claude's async Agent lifecycle with and without its completion frame.
 
@@ -35,6 +41,8 @@ This avoids burning real-agent tokens, gives you a deterministic payload to iter
 Scenarios in `scenarioRegistry` can only emit `SessionUpdate` notifications — they cannot make the prompt itself fail. When you need a real JSON-RPC error response (the kind the backend turns into `agent.failed` with a populated `data.ErrorMessage`), intercept the command in the `Prompt` method (`main.go`) and return a non-nil `error` — typically `&acp.RequestError{Code, Message, Data}`, whose `Error()` serializes the exact `{"code":...,"message":...,"data":...}` envelope a real agent sends.
 
 `/overloaded[:N]` is the reference example (`handler.go: handleOverloaded`): it returns the production `529 Overloaded` error for the first `N` prompts of a session (default 1), then recovers with a normal text response. The orchestrator's backoff retry tears the agent process down and relaunches it between attempts, so the fail-count is persisted in a **temp file** keyed by the session id (`overloadedCounterPath`) rather than an in-memory map — it survives the relaunch (and is cleaned up on recovery and in `CloseSession`). Use `/overloaded` to demo the yellow retry status, or a large `N` like `/overloaded:9` to keep failing so the retry loop stays visible / exhausts to the red recovery banner.
+
+`/transport-lost[:N]` (`handler.go: handleTransportLost`) follows the same shape for the ACP wire-level transport-death signature (`peer disconnected before response` — the acp-go-sdk's own `ErrPeerDisconnected` payload shape), which `routingerr`'s `acp.transport_lost.v1` rule classifies as `CodeAgentTransportLost` and admits to the short-retry ladder. Use `/transport-lost` or a large `N` like `/transport-lost:9` the same way as `/overloaded`.
 
 ## Emitter helpers worth knowing
 

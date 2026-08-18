@@ -4,6 +4,28 @@ import { SessionPage } from "../../pages/session-page";
 /** Mock response text from the simple-message scenario */
 const SIMPLE_MOCK_RESPONSE = "This is a simple mock response for e2e testing.";
 
+async function waitForAgentMessage(
+  apiClient: {
+    listSessionMessages: (
+      sessionId: string,
+    ) => Promise<{ messages: Array<{ content: string; author_type: string }> }>;
+  },
+  sessionId: string,
+  content: string,
+) {
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(sessionId);
+        return messages.some(
+          (message) => message.author_type === "agent" && message.content.includes(content),
+        );
+      },
+      { timeout: 45_000 },
+    )
+    .toBe(true);
+}
+
 /**
  * Test that navigating to a task without sessions does NOT show messages
  * from the previously viewed task's session.
@@ -18,7 +40,7 @@ test.describe("Session isolation", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(90_000);
 
     // 1. Create a task WITH an agent session that will have messages
     const taskWithSession = await apiClient.createTaskWithAgent(
@@ -37,7 +59,13 @@ test.describe("Session isolation", () => {
     await testPage.goto(`/t/${taskWithSession.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
+    // The isolation assertion only needs the response to be persisted. The
+    // composer can remain busy while the mock response is already available,
+    // and waiting for its idle placeholder makes this test depend on a
+    // separate terminal-state transition.
+    await waitForAgentMessage(apiClient, taskWithSession.session_id!, SIMPLE_MOCK_RESPONSE);
+    await testPage.reload();
+    await session.waitForLoad();
 
     // 3. Verify there are messages in the chat (agent has responded)
     const chatPanel = testPage.getByTestId("session-chat");

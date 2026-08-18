@@ -15,6 +15,7 @@ import (
 
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -27,6 +28,64 @@ type taskSessionExecutor interface {
 
 // CreateTurn creates a new turn
 func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
+	stampTurnDefaults(turn)
+	return r.insertTurnWithSessionLock(ctx, turn)
+}
+
+// CreateTurnWithStepStamp is documented on the TurnRepository interface. It
+// reads the task's current step inside a transaction that takes the same
+// readTaskStepInTx lock a step move takes, so the read and the turn insert
+// are serialized against concurrent movers of the same task row rather than
+// racing a plain unlocked GetTask against a later, separate insert. A
+// failure to open a transaction or read the step degrades to a plain,
+// unstamped insert — see the spec's failure-modes table: turn creation must
+// never fail because telemetry could not be resolved.
+func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.Turn) (bool, error) {
+	stampTurnDefaults(turn)
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, r.insertTurnWithSessionLock(ctx, turn)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), turn.TaskSessionID); err != nil {
+		return false, err
+	}
+	_, stepID, found, stepErr := r.readTaskStepInTx(ctx, tx, turn.TaskID)
+	if stepErr != nil {
+		_ = tx.Rollback()
+		committed = true
+		return false, r.insertTurnWithSessionLock(ctx, turn)
+	}
+
+	stamped := false
+	if found && stepID != "" {
+		if turn.Metadata == nil {
+			turn.Metadata = map[string]interface{}{}
+		}
+		turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart] = stepID
+		stamped = true
+	}
+
+	if err := r.insertTurnRow(ctx, tx, turn); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	committed = true
+	return stamped, nil
+}
+
+// stampTurnDefaults fills in the ID/timestamp defaults CreateTurn and
+// CreateTurnWithStepStamp both need before inserting.
+func stampTurnDefaults(turn *models.Turn) {
 	if turn.ID == "" {
 		turn.ID = uuid.New().String()
 	}
@@ -38,7 +97,12 @@ func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
 		turn.CreatedAt = now
 	}
 	turn.UpdatedAt = now
+}
 
+// insertTurnRow inserts turn's row via execer, which is either r.db (a plain,
+// non-transactional insert) or a *sql.Tx (participating in the caller's
+// transaction).
+func (r *Repository) insertTurnRow(ctx context.Context, execer taskSessionExecutor, turn *models.Turn) error {
 	metadataJSON := "{}"
 	if turn.Metadata != nil {
 		metadataBytes, err := json.Marshal(turn.Metadata)
@@ -48,19 +112,83 @@ func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
 		metadataJSON = string(metadataBytes)
 	}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err := execer.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`), turn.ID, turn.TaskSessionID, turn.TaskID, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt)
-
 	return err
 }
 
-func scanTurnRow(row *sql.Row) (*models.Turn, error) {
+// insertTurnWithSessionLock serializes successor-turn creation with every
+// current-turn clarification decision on PostgreSQL. SQLite's writer pool
+// already provides the equivalent serialization.
+func (r *Repository) insertTurnWithSessionLock(ctx context.Context, turn *models.Turn) error {
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		return r.insertTurnRow(ctx, r.db, turn)
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin turn creation: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), turn.TaskSessionID); err != nil {
+		return err
+	}
+	if err := r.insertTurnRow(ctx, tx, turn); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit turn creation: %w", err)
+	}
+	return nil
+}
+
+// DeleteTurnIfUnreferenced removes a rejected pre-dispatch turn only while it
+// has no messages. The message guard preserves an ambiguously accepted prompt.
+func (r *Repository) DeleteTurnIfUnreferenced(
+	ctx context.Context,
+	sessionID, turnID string,
+) (bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin turn rollback: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM task_session_turns
+		WHERE id = ?
+		  AND task_session_id = ?
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM task_session_messages
+			WHERE turn_id = task_session_turns.id
+		  )
+	`), turnID, sessionID)
+	if err != nil {
+		return false, fmt.Errorf("delete unreferenced turn: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("inspect unreferenced turn deletion: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit turn rollback: %w", err)
+	}
+	return deleted == 1, nil
+}
+
+type turnScanner interface {
+	Scan(dest ...interface{}) error
+}
+
+func scanTurn(scanner turnScanner) (*models.Turn, error) {
 	turn := &models.Turn{}
 	var metadataJSON string
 	var completedAt sql.NullTime
-	err := row.Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
+	err := scanner.Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +203,10 @@ func scanTurnRow(row *sql.Row) (*models.Turn, error) {
 	return turn, nil
 }
 
+func scanTurnRow(row *sql.Row) (*models.Turn, error) {
+	return scanTurn(row)
+}
+
 // GetTurn retrieves a turn by ID
 func (r *Repository) GetTurn(ctx context.Context, id string) (*models.Turn, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
@@ -86,35 +218,184 @@ func (r *Repository) GetTurn(ctx context.Context, id string) (*models.Turn, erro
 
 // GetActiveTurnBySessionID gets the currently active (non-completed) turn for a session
 func (r *Repository) GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error) {
-	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+	query := fmt.Sprintf(`
 		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
-		FROM task_session_turns
-		WHERE task_session_id = ? AND completed_at IS NULL
-		ORDER BY started_at DESC LIMIT 1
-	`), sessionID)
+		FROM task_session_turns turn_row
+		WHERE turn_row.task_session_id = ?
+		  AND turn_row.completed_at IS NULL
+		  AND %s
+		ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+		LIMIT 1
+	`, turnAuthorityPredicate(r.ro.DriverName(), "turn_row"))
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID)
 	return scanTurnRow(row)
 }
 
 // UpdateTurn updates an existing turn
 func (r *Repository) UpdateTurn(ctx context.Context, turn *models.Turn) error {
-	turn.UpdatedAt = time.Now().UTC()
-
-	metadataJSON := "{}"
-	if turn.Metadata != nil {
-		metadataBytes, err := json.Marshal(turn.Metadata)
-		if err != nil {
-			return fmt.Errorf("failed to serialize turn metadata: %w", err)
-		}
-		metadataJSON = string(metadataBytes)
+	metadataJSON, err := serializeTurnMetadata(turn.Metadata)
+	if err != nil {
+		return err
 	}
-
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin turn update: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), turn.TaskSessionID); err != nil {
+		return err
+	}
+	updatedAt := r.nowUTC()
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_session_turns
 		SET completed_at = ?, metadata = ?, updated_at = ?
-		WHERE id = ?
-	`), turn.CompletedAt, metadataJSON, turn.UpdatedAt, turn.ID)
+		WHERE id = ? AND task_session_id = ? AND updated_at = ?
+	`), turn.CompletedAt, metadataJSON, updatedAt, turn.ID, turn.TaskSessionID, turn.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect turn update: %w", err)
+	}
+	if affected != 1 {
+		return fmt.Errorf("update turn %s: stale metadata snapshot", turn.ID)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit turn update: %w", err)
+	}
+	turn.UpdatedAt = updatedAt
+	return nil
+}
 
-	return err
+// UpdateActiveTurnMetadata applies a narrow metadata patch without copying a
+// caller's stale snapshot over unrelated fields or a concurrently completed turn.
+func (r *Repository) UpdateActiveTurnMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+	updates map[string]interface{},
+	removeKeys []string,
+) (bool, map[string]interface{}, time.Time, error) {
+	return r.patchTurnMetadata(ctx, sessionID, turnID, updates, removeKeys, true)
+}
+
+// PatchTurnMetadata merges metadata into an active or completed turn.
+func (r *Repository) PatchTurnMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+	updates map[string]interface{},
+) (bool, time.Time, error) {
+	updated, _, updatedAt, err := r.patchTurnMetadata(ctx, sessionID, turnID, updates, nil, false)
+	return updated, updatedAt, err
+}
+
+// ClearTurnPromptDispatchMetadata removes durable recovery state only after
+// turn.started publication succeeds. It intentionally accepts a completed
+// turn because provider output can settle a fast turn while publication is in
+// progress; clearing metadata must never reopen or otherwise alter completion.
+func (r *Repository) ClearTurnPromptDispatchMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+) (bool, map[string]interface{}, time.Time, error) {
+	return r.patchTurnMetadata(ctx, sessionID, turnID, nil, []string{
+		models.TurnMetaKeyPromptDispatchPending,
+		models.TurnMetaKeyPromptDispatchAttempted,
+		models.TurnMetaKeyPromptDispatchClarificationPendingID,
+		models.TurnMetaKeyPromptDispatchClarificationTurnID,
+		models.TurnMetaKeyPromptDispatchClarificationMessageIDs,
+		models.TurnMetaKeyPromptDispatchStartEventPending,
+	}, false)
+}
+
+func (r *Repository) patchTurnMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+	updates map[string]interface{},
+	removeKeys []string,
+	activeOnly bool,
+) (bool, map[string]interface{}, time.Time, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, nil, time.Time{}, fmt.Errorf("begin active turn metadata update: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return false, nil, time.Time{}, err
+	}
+	activeClause := ""
+	if activeOnly {
+		activeClause = " AND completed_at IS NULL"
+	}
+	selectQuery := fmt.Sprintf(`
+		SELECT metadata
+		FROM task_session_turns
+		WHERE id = ? AND task_session_id = ?%s
+	`, activeClause)
+	var metadataJSON string
+	err = tx.QueryRowContext(ctx, r.db.Rebind(selectQuery), turnID, sessionID).Scan(&metadataJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil, time.Time{}, nil
+	}
+	if err != nil {
+		return false, nil, time.Time{}, fmt.Errorf("read active turn metadata: %w", err)
+	}
+	metadata, metadataJSON, err := applyTurnMetadataPatch(metadataJSON, updates, removeKeys)
+	if err != nil {
+		return false, nil, time.Time{}, err
+	}
+	updatedAt := r.nowUTC()
+	updateQuery := fmt.Sprintf(`
+		UPDATE task_session_turns
+		SET metadata = ?, updated_at = ?
+		WHERE id = ? AND task_session_id = ?%s
+	`, activeClause)
+	result, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), metadataJSON, updatedAt, turnID, sessionID)
+	if err != nil {
+		return false, nil, time.Time{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, nil, time.Time{}, fmt.Errorf("inspect active turn metadata update: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, nil, time.Time{}, fmt.Errorf("commit active turn metadata update: %w", err)
+	}
+	if affected != 1 {
+		return false, nil, time.Time{}, nil
+	}
+	return true, metadata, updatedAt, nil
+}
+
+func applyTurnMetadataPatch(
+	metadataJSON string,
+	updates map[string]interface{},
+	removeKeys []string,
+) (map[string]interface{}, string, error) {
+	metadata := make(map[string]interface{})
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+			return nil, "", fmt.Errorf("deserialize turn metadata patch: %w", err)
+		}
+	}
+	for key, value := range updates {
+		metadata[key] = value
+	}
+	for _, key := range removeKeys {
+		delete(metadata, key)
+	}
+	serialized, err := serializeTurnMetadata(metadata)
+	return metadata, serialized, err
+}
+
+func serializeTurnMetadata(metadata map[string]interface{}) (string, error) {
+	if metadata == nil {
+		return "{}", nil
+	}
+	metadataBytes, err := json.Marshal(metadata)
+	if err != nil {
+		return "", fmt.Errorf("failed to serialize turn metadata: %w", err)
+	}
+	return string(metadataBytes), nil
 }
 
 // CompleteTurn marks a turn as completed with the current time
@@ -147,10 +428,13 @@ func (r *Repository) AbandonTurn(ctx context.Context, id string) error {
 func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTurnsBySession")
 	defer span.End()
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+	query := fmt.Sprintf(`
 		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
-		FROM task_session_turns WHERE task_session_id = ? ORDER BY started_at ASC
-	`), sessionID)
+		FROM task_session_turns turn_row
+		WHERE turn_row.task_session_id = ? AND %s
+		ORDER BY turn_row.started_at ASC, turn_row.created_at ASC, turn_row.id ASC
+	`, turnHistoryPredicate(r.ro.DriverName(), "turn_row"))
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -158,20 +442,9 @@ func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) (
 
 	var result []*models.Turn
 	for rows.Next() {
-		turn := &models.Turn{}
-		var metadataJSON string
-		var completedAt sql.NullTime
-		err := rows.Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
+		turn, err := scanTurn(rows)
 		if err != nil {
 			return nil, err
-		}
-		if completedAt.Valid {
-			turn.CompletedAt = &completedAt.Time
-		}
-		if metadataJSON != "" && metadataJSON != "{}" {
-			if err := json.Unmarshal([]byte(metadataJSON), &turn.Metadata); err != nil {
-				return nil, fmt.Errorf("failed to deserialize turn metadata: %w", err)
-			}
 		}
 		result = append(result, turn)
 	}
@@ -229,6 +502,90 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 		return err
 	}
 	return tx.Commit()
+}
+
+// CreateTaskSessionWithInitialRuntimeSeed claims the task's launch-only
+// runtime seed while creating the session. The task lock / SQLite writer
+// transaction makes the session count, seed read, session insert, and seed
+// removal one serialized operation, so a concurrent launch or replacement
+// session cannot inherit the seed a second time.
+func (r *Repository) CreateTaskSessionWithInitialRuntimeSeed(ctx context.Context, session *models.TaskSession) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
+		return err
+	}
+
+	initialRuntimeConfig, hasInitialRuntimeConfig, initialRuntimeConfigProfileID, hasInitialRuntimeSeedKey, err := r.loadInitialSessionRuntimeSeedTx(ctx, tx, session.TaskID)
+	if err != nil {
+		return err
+	}
+
+	var sessionCount int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT COUNT(*) FROM task_sessions WHERE task_id = ?`,
+	), session.TaskID).Scan(&sessionCount); err != nil {
+		return fmt.Errorf("check task sessions before initial runtime session: %w", err)
+	}
+	if sessionCount == 0 {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
+		if hasInitialRuntimeConfig && initialRuntimeConfigProfileID == session.AgentProfileID {
+			session.Metadata[models.SessionMetaKeyRuntimeConfigOverrides] = initialRuntimeConfig
+		}
+	} else if models.IsOriginalTaskSession(session.Metadata) {
+		// PrepareSession performs a read before this transaction. If another
+		// launch won the race, do not persist the stale origin marker.
+		delete(session.Metadata, models.SessionMetaKeyOrigin)
+	}
+
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	if hasInitialRuntimeSeedKey {
+		if _, err := r.removeTaskMetadataKeyWithExecutor(ctx, tx, session.TaskID, models.MetaKeyInitialSessionRuntimeConfig); err != nil {
+			return fmt.Errorf("consume initial runtime seed: %w", err)
+		}
+		if _, err := r.removeTaskMetadataKeyWithExecutor(ctx, tx, session.TaskID, models.MetaKeyInitialSessionRuntimeConfigProfileID); err != nil {
+			return fmt.Errorf("consume initial runtime seed profile: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) loadInitialSessionRuntimeSeedTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+) (models.SessionRuntimeConfig, bool, string, bool, error) {
+	var metadataJSON sql.NullString
+	err := tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT metadata FROM tasks WHERE id = ?`,
+	), taskID).Scan(&metadataJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.SessionRuntimeConfig{}, false, "", false, fmt.Errorf("task not found: %s", taskID)
+	}
+	if err != nil {
+		return models.SessionRuntimeConfig{}, false, "", false, fmt.Errorf("load task metadata for initial runtime seed: %w", err)
+	}
+
+	metadata := make(map[string]interface{})
+	raw := strings.TrimSpace(metadataJSON.String)
+	if metadataJSON.Valid && raw != "" && raw != "null" && raw != "{}" {
+		if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+			return models.SessionRuntimeConfig{}, false, "", false, fmt.Errorf("decode task metadata for initial runtime seed: %w", err)
+		}
+	}
+	seed, ok := models.LoadInitialSessionRuntimeConfig(metadata)
+	profileID := models.LoadInitialSessionRuntimeConfigProfileID(metadata)
+	_, hasSeedKey := metadata[models.MetaKeyInitialSessionRuntimeConfig]
+	return seed, ok, profileID, hasSeedKey, nil
 }
 
 // CreateOfficeTaskSession creates an Office session and atomically marks it as
@@ -1209,6 +1566,35 @@ func (r *Repository) SetSessionMetadataKeyIfAbsent(
 	return rows > 0, nil
 }
 
+// SetSessionMetadataKeyIfAbsentOrDifferentStep atomically writes a metadata
+// key when it is absent or its stored value has a different step_id. The
+// returned bool reports whether this call stored the value.
+func (r *Repository) SetSessionMetadataKeyIfAbsentOrDifferentStep(
+	ctx context.Context,
+	sessionID, key, stepID string,
+	value interface{},
+) (bool, error) {
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize metadata value: %w", err)
+	}
+	now := time.Now().UTC()
+	driver := r.db.DriverName()
+	path := key
+	stepPath := key
+	if !dialect.IsPostgres(driver) {
+		path = "$." + key
+		stepPath = path + ".step_id"
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(setSessionMetadataKeyIfAbsentOrDifferentStepQuery(driver)),
+		path, string(valueJSON), now, sessionID, stepPath, stepID)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows > 0, nil
+}
+
 // SetSessionMetadataKeyIfAbsentIfState atomically claims a metadata key only
 // while the session remains in expectedState. It is used when a terminal
 // transition owns a one-time side effect that must not be emitted by a stale
@@ -1283,6 +1669,34 @@ func setSessionMetadataKeyIfAbsentQuery(driver string) string {
 			updated_at = ?
 		WHERE id = ?
 			AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) IS NULL
+	`
+}
+
+func setSessionMetadataKeyIfAbsentOrDifferentStepQuery(driver string) string {
+	if dialect.IsPostgres(driver) {
+		base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END"
+		return `
+			UPDATE task_sessions
+			SET metadata = jsonb_set(
+				` + base + `,
+				ARRAY[?]::text[],
+				?::jsonb,
+				true
+			)::text,
+				updated_at = ?
+			WHERE id = ?
+				AND jsonb_extract_path_text(` + base + `, ?, 'step_id') IS DISTINCT FROM ?
+		`
+	}
+	base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END"
+	return `
+		UPDATE task_sessions
+		SET metadata = json_set(` + base + `, ?, json(?)),
+			updated_at = ?
+		WHERE id = ?
+			AND (
+				json_extract(` + base + `, ?) IS NOT ?
+			)
 	`
 }
 
@@ -1390,24 +1804,51 @@ func (r *Repository) GetLastAgentMessage(ctx context.Context, sessionID string) 
 }
 
 // IncrementTaskSessionUsage adds the given deltas to the cumulative
-// tokens / cost columns on task_sessions. Used by the office cost
-// subscriber after a cost event lands so the per-session totals stay
-// in sync without re-summing office_cost_events. The model + DTO
+// tokens / cost columns on task_sessions, including cached input tokens
+// (tokens_cached_in mirrors office_cost_events.tokens_cached_in and is kept
+// separate from tokens_in because it is priced differently). Used by the
+// office cost subscriber after a cost event lands so the per-session totals
+// stay in sync without re-summing office_cost_events. The model + DTO
 // don't surface these columns yet (DB-only per the office-costs
 // wedge); the cost explorer follow-up will expose them.
+//
+// Delegates to IncrementTaskSessionUsageTx using r.db as the executor; a
+// caller that needs this atomic with another write (e.g. the office cost
+// subscriber's ledger insert) should call the Tx variant directly with a
+// shared transaction instead.
 func (r *Repository) IncrementTaskSessionUsage(
-	ctx context.Context, sessionID string, tokensIn, tokensOut, costSubcents int64,
+	ctx context.Context, sessionID string, tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
+) error {
+	return r.IncrementTaskSessionUsageTx(ctx, nil, sessionID, tokensIn, tokensCachedIn, tokensOut, costSubcents)
+}
+
+// IncrementTaskSessionUsageTx implements shared.SessionUsageWriterTx: same
+// write as IncrementTaskSessionUsage, but executed against tx when non-nil
+// (falling back to r.db, the shared writer connection, when tx is nil) so a
+// caller can make this atomic with another write in the same transaction.
+func (r *Repository) IncrementTaskSessionUsageTx(
+	ctx context.Context, tx *sqlx.Tx, sessionID string, tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
 ) error {
 	if sessionID == "" {
 		return nil
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	var exec interface {
+		ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+		Rebind(query string) string
+	}
+	if tx != nil {
+		exec = tx
+	} else {
+		exec = r.db
+	}
+	_, err := exec.ExecContext(ctx, exec.Rebind(`
 		UPDATE task_sessions
-		   SET tokens_in     = COALESCE(tokens_in, 0)     + ?,
-		       tokens_out    = COALESCE(tokens_out, 0)    + ?,
-		       cost_subcents = COALESCE(cost_subcents, 0) + ?
+		   SET tokens_in        = COALESCE(tokens_in, 0)        + ?,
+		       tokens_cached_in = COALESCE(tokens_cached_in, 0) + ?,
+		       tokens_out       = COALESCE(tokens_out, 0)       + ?,
+		       cost_subcents    = COALESCE(cost_subcents, 0)    + ?
 		 WHERE id = ?
-	`), tokensIn, tokensOut, costSubcents, sessionID)
+	`), tokensIn, tokensCachedIn, tokensOut, costSubcents, sessionID)
 	return err
 }
 
@@ -1892,18 +2333,32 @@ func unmarshalSessionSnapshots(
 	return unmarshalSessionJSON(repositorySnapshotJSON, &session.RepositorySnapshot, "repository snapshot")
 }
 
-// DeleteTaskSession deletes an agent session by ID
+// DeleteTaskSession deletes an agent session by ID and any pending queue rows
+// keyed to that session. Without the queue purge, orphan rows keep inflating
+// task-scoped queued_prompt_count after the session is gone.
 func (r *Repository) DeleteTaskSession(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_sessions WHERE id = ?`), id)
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = tx.Rollback() }()
 
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_sessions WHERE id = ?`), id)
+	if err != nil {
+		return err
+	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("agent session not found: %s", id)
 	}
-	return nil
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE session_id = ?`), id); err != nil {
+		// Isolated unit tests may omit the messagequeue schema. Production
+		// always has queued_messages; treat a missing table as already-purged.
+		if !db.IsMissingTableError(err) {
+			return fmt.Errorf("purge queued messages for session %s: %w", id, err)
+		}
+	}
+	return tx.Commit()
 }
 
 // Task Session Worktree operations

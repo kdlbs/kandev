@@ -45,4 +45,28 @@ describe("Azure DevOps presets", () => {
       filters: { status: "active", reviewer: "team-id", creator: "@me" },
     });
   });
+
+  it("translates unchanged built-in labels but preserves customized labels", () => {
+    const translate = (key: string) => `translated:${key}`;
+    expect(presetsForKind("work_item", undefined, translate)[0].label).toBe(
+      "translated:azuredevops:defaultQueryRecentlyUpdated",
+    );
+
+    const customized = presetsForKind(
+      "work_item",
+      {
+        workItems: [
+          {
+            id: "recent",
+            label: "My recent work",
+            group: "inbox",
+            filters: { wiql: "SELECT [System.Id] FROM WorkItems", top: 10 },
+          },
+        ],
+        pullRequests: [],
+      },
+      translate,
+    );
+    expect(customized[0].label).toBe("My recent work");
+  });
 });

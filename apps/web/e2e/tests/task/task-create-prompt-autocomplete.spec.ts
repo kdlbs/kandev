@@ -1,9 +1,18 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
+import type { Page } from "@playwright/test";
 
 const PROMPT_NAME = "e2e-bug-template";
 const PROMPT_CONTENT = "Reproduce, isolate, fix with a regression test.";
 const MENU_TITLE = /Mention tasks, files, prompts/i;
+
+async function clearTaskCreateDrafts(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    for (const key of Object.keys(window.sessionStorage)) {
+      if (key.startsWith("kandev.taskCreateDraft.")) window.sessionStorage.removeItem(key);
+    }
+  });
+}
 
 test.describe("Task creation: custom prompt autocomplete", () => {
   test.afterEach(async ({ apiClient }) => {
@@ -25,18 +34,26 @@ test.describe("Task creation: custom prompt autocomplete", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
+    await clearTaskCreateDrafts(testPage);
     await kanban.createTaskButton.first().click();
 
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
 
     const textarea = testPage.getByTestId("task-description-input");
+    // A draft can be restored by the dialog after the storage cleanup above
+    // if the previous dialog-close save is still settling. This scenario is
+    // specifically about inserting into an empty composer, so establish that
+    // user-visible starting state before typing the mention.
+    await textarea.fill("");
     await textarea.click();
     await textarea.pressSequentially("@e2e-bu");
 
     const menu = testPage.getByText(MENU_TITLE);
     await expect(menu).toBeVisible({ timeout: 5_000 });
-    await expect(testPage.getByRole("option", { name: new RegExp(PROMPT_NAME) })).toBeVisible();
+    const promptOption = testPage.getByRole("option").filter({ hasText: PROMPT_NAME });
+    await expect(promptOption).toBeVisible();
+    await expect(promptOption).toHaveAttribute("aria-selected", "true");
 
     await textarea.press("Enter");
 
@@ -51,6 +68,7 @@ test.describe("Task creation: custom prompt autocomplete", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
+    await clearTaskCreateDrafts(testPage);
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
@@ -70,10 +88,12 @@ test.describe("Task creation: custom prompt autocomplete", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
+    await clearTaskCreateDrafts(testPage);
     await kanban.createTaskButton.first().click();
 
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
+    await expect(testPage.getByTestId("task-description-input")).toHaveValue("");
 
     // Fill title so the form would be otherwise submittable.
     await testPage.getByTestId("task-title-input").fill("autocomplete-enter-test");
@@ -86,9 +106,14 @@ test.describe("Task creation: custom prompt autocomplete", () => {
     // pressing Enter against an empty/half-open menu lets the key fall through
     // to the form submit, which closes the dialog and fails the assertions
     // below. Gating on the option (not just the title) is the condition that
-    // makes the selection deterministic.
+    // makes the selection deterministic. Also wait for the filtered result to
+    // become the active item: the menu opens on the bare `@` trigger before
+    // the async frame that applies the typed query, so an early Enter could
+    // still select the first built-in prompt.
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await expect(testPage.getByRole("option", { name: new RegExp(PROMPT_NAME) })).toBeVisible();
+    const promptOption = testPage.getByRole("option").filter({ hasText: PROMPT_NAME });
+    await expect(promptOption).toBeVisible();
+    await expect(promptOption).toHaveAttribute("aria-selected", "true");
     await textarea.press("Enter");
 
     // Dialog must still be open — Enter selected the menu item, not the form submit.

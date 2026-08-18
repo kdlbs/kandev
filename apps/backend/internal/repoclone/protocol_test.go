@@ -33,11 +33,6 @@ func TestCloneURL(t *testing.T) {
 			"git@gitlab.com:owner/repo.git", false,
 		},
 		{
-			"bitbucket HTTPS",
-			"bitbucket", "owner", "repo", ProtocolHTTPS,
-			"https://bitbucket.org/owner/repo.git", false,
-		},
-		{
 			"unsupported provider",
 			"unknown", "owner", "repo", ProtocolSSH,
 			"", true,
@@ -124,7 +119,7 @@ func TestProviderHost(t *testing.T) {
 		{"GitHub", "github.com", false},
 		{"", "github.com", false},
 		{"gitlab", "gitlab.com", false},
-		{"bitbucket", "bitbucket.org", false},
+		{"bitbucket", "", true},
 		{"unknown", "", true},
 	}
 

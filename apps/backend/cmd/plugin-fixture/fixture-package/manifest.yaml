@@ -24,9 +24,62 @@ runtime:
 
 capabilities:
   events: ["task.created"]
+  api_write: ["tasks"]
   state: true
   secrets: true
   user_state: true
+
+# These provider-neutral declarations keep the package fixture useful as a
+# second-provider contract: the labels and canned data resemble a Bitbucket
+# pull-request integration, while the host only sees generic provider IDs,
+# authenticated actions, and composer source descriptors.
+repository_providers: ["fixture-source-control"]
+
+actions:
+  - key: "connection-status"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "link-pull-request"
+    scope: "task"
+    max_body_bytes: 4096
+  - key: "watch-create-task"
+    scope: "workspace"
+    max_body_bytes: 4096
+
+reference_sources:
+  - source: "fixture-pull-requests"
+    provider: "fixture-source-control"
+    kind: "pull_request"
+    display_name: "Bitbucket Pull Requests"
+    kind_label: "Pull request"
+    order: 50
+
+agent_tools:
+  - name: test_echo
+    description: Echoes test input and invocation context for plugin MCP tests
+    surfaces: [kanban-task, office-task]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [value]
+      properties:
+        value:
+          type: string
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [value, task_id, surface]
+      properties:
+        value:
+          type: string
+        task_id:
+          type: string
+        surface:
+          type: string
+    annotations:
+      read_only_hint: true
+      destructive_hint: false
+      idempotent_hint: true
 
 webhooks:
   - key: "test-hook"

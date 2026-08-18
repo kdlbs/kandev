@@ -7,7 +7,7 @@ status: experimental
 # Plugin Marketplace
 
 The marketplace is a discoverable, curated catalog of kandev plugins you can
-browse and install from inside the app — no tarball URL required. It is
+browse and install from inside the app, no tarball URL required. It is
 assembled from one or more **sources**: kandev ships with the official source
 enabled by default, and you can add team or corporate sources alongside it.
 
@@ -18,7 +18,7 @@ pipeline, enable/disable, and security posture work, see
 plugin](plugins-authoring.md).
 
 Like the rest of plugins, the marketplace ships in the base product with no
-feature flag to turn on — **Settings > Plugins** is always available in the
+feature flag to turn on; **Settings > Plugins** is always available in the
 sidebar.
 
 ## Quick path
@@ -30,16 +30,16 @@ sidebar.
 
 > **Sideloading still works.** The marketplace only adds *discovery*. Installing
 > a plugin by URL or by uploading a `.tar.gz` is unchanged and always available,
-> even with every source disabled or offline — see
+> even with every source disabled or offline, see
 > [Plugins → Installing a plugin](plugins.md#installing-a-plugin).
 
 ## Using the marketplace
 
 **Settings > Plugins** has two tabs:
 
-- **Installed** — the plugins on this instance, with Enable / Disable /
+- **Installed**: the plugins on this instance, with Enable / Disable /
   Uninstall and an **Update** button when a newer version is available.
-- **Browse** — the merged catalog across all enabled sources.
+- **Browse**: the merged catalog across all enabled sources.
 
 ### Browse and install
 
@@ -47,19 +47,19 @@ Open **Settings > Plugins > Browse**. Each plugin shows as a card with its
 name, description, author, categories, source repository link, latest version,
 and GitHub star count. To narrow the list:
 
-- **Search** — type in the search box to match plugin name or description.
-- **Category** — filter to a single category with the category dropdown.
-- **Sort** — **Most stars** (default), **Recently updated** (by latest release
+- **Search**: type in the search box to match plugin name or description.
+- **Category**: filter to a single category with the category dropdown.
+- **Sort**: **Most stars** (default), **Recently updated** (by latest release
   / repo activity), or **Name**.
 
 Stars are a **sort hint, not a quality score**. kandev collects no download or
-usage telemetry, so there is no "most installed" metric — ranking is GitHub
+usage telemetry, so there is no "most installed" metric; ranking is GitHub
 stars only, and "Recently updated" surfaces new or actively maintained plugins
 that high-star incumbents would otherwise bury.
 
 Click **Install** on a card to install it. This resolves the entry to its
 latest release tarball and runs the same verified install pipeline as
-install-by-URL (`POST /api/plugins/install`) — see [Plugins → Installing a
+install-by-URL (`POST /api/plugins/install`), see [Plugins → Installing a
 plugin](plugins.md#installing-a-plugin) for the exact steps and integrity
 checks. A card for a plugin you already have at the latest version shows
 **Installed** instead of an install button.
@@ -75,7 +75,7 @@ installed, the **Installed** tab shows an **Update to v`<version>`** button on
 that plugin's row. Clicking it reinstalls the newer tarball through the normal
 pipeline; Enable, Disable, and Uninstall are unchanged.
 
-Updates are never automatic — kandev surfaces the newer version and waits for
+Updates are never automatic; kandev surfaces the newer version and waits for
 an explicit click. There are no update channels and no background auto-update.
 
 ### Add a team or corporate source
@@ -100,7 +100,7 @@ Notes:
   configured source wins** (the official source is always first); later
   duplicates are hidden.
 - A source that is unreachable or serves malformed JSON is reported as
-  **degraded** — its entries are omitted, but the healthy sources still load.
+  **degraded**: its entries are omitted, but the healthy sources still load.
 - Configured sources persist across restarts; the fetched catalog itself is a
   short-lived cache and is re-fetched on demand.
 
@@ -123,23 +123,23 @@ Package your plugin as usual (see [Authoring a plugin →
 Packaging](plugins-authoring.md#packaging)) and cut a GitHub **Release**. One
 asset is required; a second is optional:
 
-- `<id>-<version>.tar.gz` (**required**) — the plugin package. It carries its
+- `<id>-<version>.tar.gz` (**required**); the plugin package. It carries its
   own internal `checksums.txt` covering every packaged file, which the install
   pipeline verifies on extraction.
-- `checksums.txt` (optional) — the sha256 of the tarball itself. Advisory
+- `checksums.txt` (optional); the sha256 of the tarball itself. Advisory
   provenance: the catalog reserves a `package_sha256` field for it, but the
   index builder does not populate or enforce the digest yet, so it is included
   only for forward compatibility.
 
 The release must pass the standard package integrity gate. The
 [`kdlbs/kandev-plugin-template`](https://github.com/kdlbs/kandev-plugin-template)
-starter repo is the recommended way to bootstrap a repo with the right layout —
+  starter repo is the recommended way to bootstrap a repo with the right layout.
 its `.github/workflows/release.yml` produces both assets automatically when you
 push a version tag.
 
 ### 2. Add an icon (optional)
 
-Add an `icon:` field to your `manifest.yaml` — a **package-relative path** to an
+Add an `icon:` field to your `manifest.yaml`; a **package-relative path** to an
 image your package ships (for example `icon.svg`). The catalog resolves it to
 your icon and renders it on the plugin card; without it, the card shows a letter
 tile. See the [Plugin manifest reference](plugins-manifest.md#field-reference).
@@ -164,18 +164,18 @@ a PR that lists it.
    release package `<id>-<version>.tar.gz` to match, so the index resolves the
    right asset. `categories` here are free-form curation tags for catalog
    filtering (not the manifest's category enum). `featured` is a maintainer-only
-   pin — leave it out of submissions. The pointer-list shape is defined by
+   pin; leave it out of submissions. The pointer-list shape is defined by
    [`plugin-registry/schema.json`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/schema.json).
 2. Open a pull request. The registry index-build workflow runs on your PR
    (build + tests, no Pages deploy), resolving your entry against the GitHub API
-   — your repo must have a latest release that publishes a `.tar.gz` package
+   Your repo must have a latest release that publishes a `.tar.gz` package
    asset (an accompanying `checksums.txt` asset is optional). An entry whose repo
    has no release or no package asset is skipped.
-3. A maintainer reviews and merges — maintainer approval is what gates the
+3. A maintainer reviews and merges; maintainer approval is what gates the
    official catalog. The index-build workflow then picks up your entry and your
    plugin appears in the in-app catalog on the next build.
 
-Ranking in the catalog is **GitHub stars only** — there is no download or usage
+Ranking in the catalog is **GitHub stars only**: there is no download or usage
 telemetry to game. Full submission details are in
 [`plugin-registry/README.md`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/README.md).
 
@@ -191,11 +191,11 @@ Any URL that serves an `index.json` document of the catalog shape can be added
 as a marketplace source (see [Add a team or corporate
 source](#add-a-team-or-corporate-source)), and its plugins merge into the Browse
 tab alongside the official ones. This is the recommended path for a team or
-corporate registry — no PR to the main repo.
+corporate registry, no PR to the main repo.
 
 The `index.json` document is the fetch contract between a source and kandev. The
 simplest way to produce one is to copy the official registry's
-`plugin-registry/` directory into your own repo — its `plugins.yaml` +
+`plugin-registry/` directory into your own repo; its `plugins.yaml` +
 [`build-index.mjs`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/build-index.mjs)
 build script (zero-dependency Node) + GitHub Action resolve each listed repo's
 latest release into a full catalog record and publish the generated

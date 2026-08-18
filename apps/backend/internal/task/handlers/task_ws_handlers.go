@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -35,22 +36,16 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 		h.logger.Error("failed to list task sessions", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)
 	}
-	pendingActionsBySession, pendingErr := pendingActionsForInputCapableSessions(
-		ctx,
-		h.service,
-		map[string][]*models.TaskSession{taskID: sessions},
-	)
-	if pendingErr != nil {
-		h.logger.Warn("get task session pending actions failed", zap.Error(pendingErr))
-		pendingActionsBySession = map[string]models.TaskPendingAction{}
-	}
-	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
-	for _, session := range sessions {
-		summary := dto.FromTaskSessionSummary(session)
-		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
-		dto.EnrichCancellationPendingSummary(&summary, h.cancellationPending)
-		summary.PendingAction = pendingActionPtr(&session.ID, pendingActionsBySession)
-		sessionDTOs = append(sessionDTOs, summary)
+	sessionDTOs, projectionErr := h.taskSessionSummariesWithPendingActions(ctx, sessions)
+	if projectionErr != nil {
+		h.logger.Error("get task session pending actions failed", zap.Error(projectionErr))
+		return ws.NewError(
+			msg.ID,
+			msg.Action,
+			ws.ErrorCodeInternalError,
+			"Failed to load task session pending actions",
+			nil,
+		)
 	}
 	resp := dto.ListTaskSessionSummariesResponse{
 		Sessions: sessionDTOs,
@@ -409,7 +404,7 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		req.WorkflowID,
 		req.WorkflowStepID,
 		req.Position,
-		service.MoveTaskOptions{AllowActivePrimarySession: true},
+		service.MoveTaskOptions{AllowActivePrimarySession: true, StepHistoryActor: wfmodels.StepTransitionActorHuman},
 	)
 	if err != nil {
 		h.logger.Error("failed to move task", zap.Error(err))

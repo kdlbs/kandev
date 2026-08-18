@@ -253,7 +253,7 @@ export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }
         title={t("github:githubIntegration")}
         titleTestId="github-integration-heading"
         description={t("github:chooseTheAutomationAndPersonalIdentities")}
-        action={<GitHubEnabledControl />}
+        action={<GitHubEnabledControl workspaceId={workspaceId} />}
       >
         <GitHubCallbackNotice workspaceId={workspaceId} />
         <SettingsSection
@@ -261,7 +261,7 @@ export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }
           description={t("github:credentialUsedForRepositorySyncWatches")}
         >
           <Card data-testid="github-workspace-access-card">
-            <CardContent className="pt-6">
+            <CardContent className="pt-0">
               <GitHubAutomationSettings workspaceId={workspaceId} />
             </CardContent>
           </Card>

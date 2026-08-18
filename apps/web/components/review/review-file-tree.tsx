@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, useRef } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import {
   IconChevronDown,
   IconChevronRight,
@@ -37,6 +37,19 @@ const REVIEW_GET_PATH = (n: FileTreeNode) => n.path;
 const REVIEW_GET_CHILDREN = (n: FileTreeNode) => n.children;
 const REVIEW_IS_DIR = (n: FileTreeNode) => Boolean(n.isDir);
 
+function collectDirPaths(nodes: FileTreeNode[]): string[] {
+  const paths: string[] = [];
+  const walk = (list: FileTreeNode[]) => {
+    for (const node of list) {
+      if (!node.isDir) continue;
+      paths.push(node.path);
+      if (node.children) walk(node.children);
+    }
+  };
+  walk(nodes);
+  return paths;
+}
+
 export const ReviewFileTree = memo(function ReviewFileTree({
   files,
   reviewedFiles,
@@ -51,13 +64,28 @@ export const ReviewFileTree = memo(function ReviewFileTree({
   const inputRef = useRef<HTMLInputElement>(null);
   const tree = useMemo(() => buildFileTree(files), [files]);
 
-  const { visibleRows, toggle } = useTree<FileTreeNode>({
+  const { visibleRows, toggle, setExpanded } = useTree<FileTreeNode>({
     nodes: tree,
     getPath: REVIEW_GET_PATH,
     getChildren: REVIEW_GET_CHILDREN,
     isDir: REVIEW_IS_DIR,
     defaultExpanded: "all",
   });
+
+  // Auto-expand directories that arrive with a later review-source update.
+  // Existing directories keep the reviewer's explicit collapsed state.
+  const seenDirPathsRef = useRef<Set<string>>(new Set(collectDirPaths(tree)));
+  useEffect(() => {
+    const current = collectDirPaths(tree);
+    const newDirs = current.filter((path) => !seenDirPathsRef.current.has(path));
+    if (newDirs.length === 0) return;
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      for (const path of newDirs) next.add(path);
+      return next;
+    });
+    for (const path of newDirs) seenDirPathsRef.current.add(path);
+  }, [tree, setExpanded]);
 
   return (
     <div className="flex flex-col h-full text-sm">

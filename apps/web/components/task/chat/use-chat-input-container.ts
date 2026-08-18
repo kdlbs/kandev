@@ -155,7 +155,7 @@ function computeDerivedState(params: {
   // transition for local quick-chat sessions doesn't deserve its own
   // tooltip — the editor is disabled, that's the signal.
   const submitDisabledReason =
-    isDisabled && params.isPreparingEnvironment ? "The agent is still being set up." : undefined;
+    isDisabled && params.isPreparingEnvironment ? t("task:agentStillBeingSetUp") : undefined;
   const hasPendingComments = !!(
     params.pendingCommentsByFile && Object.keys(params.pendingCommentsByFile).length > 0
   );

@@ -86,6 +86,7 @@ export function linearIssueWatchPlaceholders(t: TFunction): ScriptPlaceholder[] 
 // would keep that locale's prompt forever, and the agent reads it as an
 // instruction rather than as UI copy — it also has to keep matching the backend
 // .md, which has no locale at all.
+// i18n-exempt: default watch prompt, persisted and sent verbatim to the agent.
 export const DEFAULT_LINEAR_ISSUE_WATCH_PROMPT = `You have been assigned a Linear issue to work on.
 
 **Issue:** {{issue.url}}

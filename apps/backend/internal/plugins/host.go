@@ -39,6 +39,11 @@ type pluginHost struct {
 
 	pluginID     string
 	capabilities manifest.Capabilities
+	// repositoryProviders is the manifest-declared set of provider IDs this
+	// plugin owns. Only these IDs may use the trusted remote-descriptor path
+	// when creating a task; a plugin cannot claim another provider merely by
+	// naming it in a write request.
+	repositoryProviders []string
 
 	// configSchema is the plugin's manifest config_schema, used by
 	// GetConfig to know which fields are secret (and therefore stored as

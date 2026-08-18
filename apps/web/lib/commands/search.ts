@@ -69,6 +69,18 @@ export function findFirstMatchingCommand(
   );
 }
 
+/**
+ * Picks the highlighted row for content search, which publishes its results
+ * incrementally while later retry attempts are still running. A selection the
+ * user moved is kept as long as it still points at a row: resetting to the
+ * first result whenever a late repository appends would pull focus back and
+ * open a different file than the highlighted one.
+ */
+export function selectContentSearchResult(resultValues: string[], preferredValue?: string): string {
+  if (preferredValue && resultValues.includes(preferredValue)) return preferredValue;
+  return resultValues[0] ?? "";
+}
+
 export function selectCommandSearchResult(
   commands: CommandItem[],
   search: string,

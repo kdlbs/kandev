@@ -73,31 +73,31 @@ func TestPATClient_SubmitReview_ErrorIncludesStatusAndBody(t *testing.T) {
 func TestPATClient_MergePR(t *testing.T) {
 	t.Run("sends the merge method", func(t *testing.T) {
 		c, requests := newRecordingPATServerFunc(t, func(*http.Request) (int, string) {
-			return http.StatusOK, `{"merged":true}`
+			return http.StatusOK, `{"status":"merged"}`
 		})
-		if err := c.MergePR(context.Background(), "acme", "widget", 42, "squash"); err != nil {
+		if _, err := c.MergePR(context.Background(), "acme", "widget", 42, "squash"); err != nil {
 			t.Fatalf("MergePR: %v", err)
 		}
 		got := (*requests)[0]
 		if got.Method != http.MethodPut {
 			t.Errorf("method = %q, want PUT", got.Method)
 		}
-		if got.Path != "/repos/acme/widget/pulls/42/merge" {
+		if got.Path != "/repos/acme/widget/pulls/42/merge-async" {
 			t.Errorf("path = %q", got.Path)
 		}
-		if got.Body != `{"merge_method":"squash"}` {
-			t.Errorf("body = %q, want the merge_method payload", got.Body)
+		if got.Body != `{"merge_action":"default","merge_method":"squash"}` {
+			t.Errorf("body = %q, want queue-aware merge payload", got.Body)
 		}
 	})
 	t.Run("omits the merge method when unset", func(t *testing.T) {
 		c, requests := newRecordingPATServerFunc(t, func(*http.Request) (int, string) {
-			return http.StatusOK, `{"merged":true}`
+			return http.StatusOK, `{"status":"merged"}`
 		})
-		if err := c.MergePR(context.Background(), "acme", "widget", 42, ""); err != nil {
+		if _, err := c.MergePR(context.Background(), "acme", "widget", 42, ""); err != nil {
 			t.Fatalf("MergePR: %v", err)
 		}
-		if (*requests)[0].Body != `{}` {
-			t.Errorf("body = %q, want an empty object so GitHub picks its default",
+		if (*requests)[0].Body != `{"merge_action":"default"}` {
+			t.Errorf("body = %q, want GitHub to choose direct or queued merge",
 				(*requests)[0].Body)
 		}
 	})
@@ -111,7 +111,7 @@ func TestPATClient_MergePR_StatusIsRecoverable(t *testing.T) {
 			c, _ := newRecordingPATServerFunc(t, func(*http.Request) (int, string) {
 				return status, `{"message":"Pull Request is not mergeable"}`
 			})
-			err := c.MergePR(context.Background(), "acme", "widget", 42, "merge")
+			_, err := c.MergePR(context.Background(), "acme", "widget", 42, "merge")
 			var apiErr *GitHubAPIError
 			if !errors.As(err, &apiErr) {
 				t.Fatalf("err = %v, want a *GitHubAPIError", err)
@@ -119,13 +119,26 @@ func TestPATClient_MergePR_StatusIsRecoverable(t *testing.T) {
 			if apiErr.StatusCode != status {
 				t.Errorf("status = %d, want %d", apiErr.StatusCode, status)
 			}
-			if apiErr.Endpoint != "/repos/acme/widget/pulls/42/merge" {
+			if apiErr.Endpoint != "/repos/acme/widget/pulls/42/merge-async" {
 				t.Errorf("endpoint = %q", apiErr.Endpoint)
 			}
 			if !strings.Contains(apiErr.Body, "not mergeable") {
 				t.Errorf("body = %q, want the upstream message", apiErr.Body)
 			}
 		})
+	}
+}
+
+func TestPATClient_MergePR_AlreadyQueuedIsIdempotent(t *testing.T) {
+	c, _ := newRecordingPATServerFunc(t, func(r *http.Request) (int, string) {
+		if r.Method == http.MethodGet {
+			return http.StatusOK, `{"status":"enqueued","uuid":"request-1"}`
+		}
+		return http.StatusConflict, `{"status":"pending","uuid":"request-1"}`
+	})
+	outcome, err := c.MergePR(context.Background(), "acme", "widget", 42, "squash")
+	if err != nil || outcome != MergeOutcomeQueued {
+		t.Fatalf("outcome = %q, err = %v, want queued", outcome, err)
 	}
 }
 
@@ -421,6 +434,32 @@ func TestPATClient_ListPRCommits(t *testing.T) {
 	}
 	if !strings.Contains((*requests)[0].Query, "per_page=100") {
 		t.Errorf("query = %q, want per_page=100", (*requests)[0].Query)
+	}
+}
+
+func TestPATClient_ListPRCommits_FollowsLinkHeaderPages(t *testing.T) {
+	c, requests := newLinkPaginatedPATServer(t, "/repos/acme/widget/pulls/42/commits", []string{
+		`[
+			{"sha":"aaa","commit":{"message":"first","author":{"date":"2026-01-07T10:00:00Z"}}},
+			{"sha":"bbb","commit":{"message":"second","author":{"date":"2026-01-08T10:00:00Z"}}}
+		]`,
+		`[
+			{"sha":"ccc","commit":{"message":"provider head","author":{"date":"2026-01-09T10:00:00Z"}}}
+		]`,
+	})
+
+	commits, err := c.ListPRCommits(context.Background(), "acme", "widget", 42)
+	if err != nil {
+		t.Fatalf("ListPRCommits: %v", err)
+	}
+	if len(commits) != 3 {
+		t.Fatalf("commits = %d, want all pages (3)", len(commits))
+	}
+	if commits[2].SHA != "ccc" {
+		t.Errorf("last commit = %q, want the second-page provider head", commits[2].SHA)
+	}
+	if len(*requests) != 2 {
+		t.Fatalf("requests = %d, want 2 pages", len(*requests))
 	}
 }
 

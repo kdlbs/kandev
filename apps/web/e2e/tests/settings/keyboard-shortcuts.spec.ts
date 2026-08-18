@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 
-const KEYBOARD_SETTINGS_PATH = "/settings/general/keyboard-shortcuts";
+const KEYBOARD_SETTINGS_PATH = "/settings/preferences/keyboard-shortcuts";
 
 test.describe("Keyboard Shortcuts Settings", () => {
   test.describe.configure({ retries: 1 });

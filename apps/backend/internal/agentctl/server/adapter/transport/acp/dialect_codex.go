@@ -3,6 +3,8 @@ package acp
 import (
 	"path"
 	"strings"
+
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 const (
@@ -26,7 +28,33 @@ const (
 // operations through the same envelope, so only spawnAgent and the matching
 // "started" activity are creation signals.
 func newCodexACPDialect() acpDialect {
-	return acpDialect{subagentFrame: parseCodexSubagentFrame}
+	return acpDialect{
+		subagentFrame:        parseCodexSubagentFrame,
+		normalizePromptUsage: normalizeCodexPromptUsage,
+	}
+}
+
+// normalizeCodexPromptUsage marks codex-acp's typed usage frame as
+// estimated. codex-acp 1.4.0 does emit a typed usage block on the prompt
+// response, but its three response-construction sites (normal end_turn,
+// cancelled, terminal failure) all hardcode it to
+// sessionState.lastTokenUsage — the LAST model request of the turn, not a
+// per-turn total (sessionState.totalTokenUsage is tracked internally but
+// never crosses the ACP boundary). A turn making N requests reports only
+// request N's counts: verified against codex's own rollout log on both a
+// 22-request turn (recorded 410 output tokens vs a true 8813) and a
+// 4-request turn (recorded 9 vs a true 219). Estimated is the existing
+// signal for "not an authoritative per-turn frame" (streams.PromptUsage's
+// doc comment), so this keeps the row honest until codex-acp emits a
+// genuine per-turn total upstream.
+func normalizeCodexPromptUsage(
+	usage *streams.PromptUsage,
+	_ map[string]any,
+) *streams.PromptUsage {
+	if usage != nil {
+		usage.Estimated = true
+	}
+	return usage
 }
 
 // codexSystemErrorMeta reports the explicit thread-status marker emitted by

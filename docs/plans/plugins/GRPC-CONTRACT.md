@@ -28,6 +28,7 @@ var Handshake = plugin.HandshakeConfig{
 ```
 
 Env kandev injects into the subprocess:
+
 - `KANDEV_PLUGIN_DATA_DIR` — per-plugin writable dir (`~/.kandev/plugins/<id>/data`).
 
 ## 3. Proto (`apps/backend/proto/kandev/plugin/v1/plugin.proto`)
@@ -41,6 +42,14 @@ import "google/protobuf/struct.proto";
 service Plugin {
   rpc DeliverEvent(Event) returns (EventAck);
   rpc HandleWebhook(WebhookRequest) returns (WebhookResponse);
+  // Browser calls pass through host-authenticated declared actions only.
+  rpc HandleAction(PluginActionRequest) returns (PluginActionResponse);
+  // Manifest-owned dynamic composer reference source operations.
+  rpc SearchEntityReferences(SearchEntityReferencesRequest) returns (SearchEntityReferencesResponse);
+  rpc AuthorizeEntityReference(AuthorizeEntityReferenceRequest) returns (AuthorizeEntityReferenceResponse);
+  // Optional provider-neutral credential resolver for declared repository providers.
+  rpc ResolveGitCredential(ResolveGitCredentialRequest) returns (ResolveGitCredentialResponse);
+  rpc GetGitCredentialBinding(GitCredentialBindingRequest) returns (GitCredentialBindingResponse);
 }
 
 // Implemented by KANDEV (served back over the go-plugin broker).
@@ -81,6 +90,7 @@ service Host {
   rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
   rpc ListWorkflowSteps(ListWorkflowStepsRequest) returns (ListWorkflowStepsResponse);
   rpc ListAgentProfiles(ListAgentProfilesRequest) returns (ListAgentProfilesResponse);
+  rpc ListExecutorProfiles(ListExecutorProfilesRequest) returns (ListExecutorProfilesResponse);
   rpc ListRepositories(ListRepositoriesRequest) returns (ListRepositoriesResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListSessionCodeStats(ListSessionCodeStatsRequest) returns (ListSessionCodeStatsResponse);
@@ -93,6 +103,8 @@ service Host {
   rpc CreateTask(CreateTaskRequest) returns (Task);
   rpc UpdateTask(UpdateTaskRequest) returns (Task);
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+  rpc PreviewPluginOwnedTaskTree(PreviewPluginOwnedTaskTreeRequest) returns (PreviewPluginOwnedTaskTreeResponse);
+  rpc DeletePluginOwnedTaskTree(DeletePluginOwnedTaskTreeRequest) returns (DeletePluginOwnedTaskTreeResponse);
 }
 
 message Event {
@@ -113,6 +125,39 @@ message WebhookRequest {
   bytes body = 6;
 }
 message WebhookResponse { int32 status = 1; map<string, string> headers = 2; bytes body = 3; }
+
+// The host derives resources and actor after normal HTTP auth/authorization. Body is
+// untrusted JSON bounded by the manifest declaration; plugins must not infer authority
+// from it. Response headers are filtered by the host allowlist.
+message PluginActionRequest {
+  string action_key = 1;
+  VerifiedActionContext context = 2;
+  bytes body = 3;
+}
+message VerifiedActionContext {
+  string actor_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string repository_id = 4;
+  string session_id = 5;
+  string head_branch = 6;
+}
+// status=0 preserves legacy 200. Otherwise the host accepts 200..599 and
+// projects the status after filtering headers and enforcing the body limit.
+message PluginActionResponse { bytes body = 1; map<string, string> headers = 2; int32 status = 3; }
+
+message SearchEntityReferencesRequest { string source = 1; string workspace_id = 2; string query = 3; int32 limit = 4; }
+message SearchEntityReferencesResponse { repeated EntityReferenceCandidate candidates = 1; }
+message EntityReferenceCandidate { string provider_local_id = 1; string title = 2; string url = 3; google.protobuf.Struct attributes = 4; }
+message AuthorizeEntityReferenceRequest { string source = 1; string workspace_id = 2; string purpose = 3; google.protobuf.Struct reference = 4; }
+message AuthorizeEntityReferenceResponse { bool allowed = 1; string reason = 2; }
+
+// Scope is host-verified. The credential value is transient; it must never be written
+// into a host URL, task state, command argument, log, or executor environment.
+message ResolveGitCredentialRequest { string provider_id = 1; string workspace_id = 2; string task_id = 3; string session_id = 4; string repository_id = 5; string host = 6; string path = 7; }
+message ResolveGitCredentialResponse { string username = 1; string secret = 2; string expires_at = 3; }
+message GitCredentialBindingRequest { string provider_id = 1; string workspace_id = 2; string task_id = 3; string session_id = 4; string repository_id = 5; string host = 6; string path = 7; }
+message GitCredentialBindingResponse { string binding = 1; }
 
 message GetStateRequest { string scope = 1; string scope_id = 2; string key = 3; }
 message GetStateResponse { bool found = 1; google.protobuf.Struct value = 2; }
@@ -145,6 +190,15 @@ Notes: scope ∈ instance|workspace|task|agent (empty scope_id for instance —
 matches the state store). The plugin never passes its own id; the Host service
 instance is bound to the plugin's record at spawn time.
 
+`DeletePluginOwnedTaskTree` is partial-progress aware. A successful response
+carries every deleted task ID. If deletion stops after removing descendants,
+the non-OK status includes a `DeletePluginOwnedTaskTreeProgress` detail with
+those IDs. The Go SDK preserves them in the returned `([]string, error)` so a
+plugin can reconcile completed deletions before retrying idempotent cleanup;
+callers must not discard progress merely because the error is non-nil. An absent root
+is a successful no-op, so a retry after a completed or externally removed tree remains
+safe.
+
 ### 3a. Host data API (ADR 0043)
 
 Read/write RPCs let plugins read and write kandev's own domain data —
@@ -162,16 +216,17 @@ capability gating, and cross-cutting conventions. See ADR 0043
 **Readable resources.** Each read RPC requires `api_read:<resource>` in the
 plugin's manifest:
 
-| RPC | Capability | Resource |
-|---|---|---|
-| `ListTasks` / `GetTask` | `api_read:tasks` | tasks |
-| `ListWorkspaces` | `api_read:workspaces` | workspaces |
-| `ListWorkflows` | `api_read:workflows` | workflows |
-| `ListWorkflowSteps` | `api_read:workflows` | workflows |
-| `ListAgentProfiles` | `api_read:agent_profiles` | agent_profiles |
-| `ListRepositories` | `api_read:repositories` | repositories |
-| `ListSessions` | `api_read:sessions` | sessions |
-| `ListSessionCodeStats` | `api_read:sessions` | sessions |
+| RPC                     | Capability                   | Resource          |
+| ----------------------- | ---------------------------- | ----------------- |
+| `ListTasks` / `GetTask` | `api_read:tasks`             | tasks             |
+| `ListWorkspaces`        | `api_read:workspaces`        | workspaces        |
+| `ListWorkflows`         | `api_read:workflows`         | workflows         |
+| `ListWorkflowSteps`     | `api_read:workflows`         | workflows         |
+| `ListAgentProfiles`     | `api_read:agent_profiles`    | agent_profiles    |
+| `ListExecutorProfiles`  | `api_read:executor_profiles` | executor_profiles |
+| `ListRepositories`      | `api_read:repositories`      | repositories      |
+| `ListSessions`          | `api_read:sessions`          | sessions          |
+| `ListSessionCodeStats`  | `api_read:sessions`          | sessions          |
 
 An undeclared capability returns gRPC `PermissionDenied` with message
 `capability 'api_read:tasks' not declared` (substituting the actual resource) —
@@ -281,12 +336,58 @@ type Host interface {                                        // injected before 
     AgentProfiles() AgentProfileReader
     Repositories() RepositoryReader
 }
+// Optional Host extension, discovered without breaking existing Host implementations.
+type ExecutorProfileHost interface {
+    ExecutorProfiles() ExecutorProfileReader
+}
+func ExecutorProfiles(host Host) (ExecutorProfileReader, bool)
 func Serve(p Plugin, opts ...Option)     // blocks; wires go-plugin server + broker
 // Optional embeddable no-op base: sdk.UnimplementedPlugin
 // Optional embeddable no-op base for Host data accessors (every method
 // PermissionDenied/Unimplemented): sdk.UnimplementedHostData — used on the
 // kandev side, not by plugin authors.
 ```
+
+### Provider extensions (additive)
+
+`Plugin` remains source-compatible. `Serve` detects optional handler interfaces and
+returns `Unimplemented` only when a plugin has not opted into the corresponding
+manifest declaration:
+
+```go
+type ActionHandler interface {
+    HandleAction(context.Context, *PluginActionRequest) (*PluginActionResponse, error)
+}
+type EntityReferenceHandler interface {
+    SearchEntityReferences(context.Context, *SearchEntityReferencesRequest) (*SearchEntityReferencesResponse, error)
+    AuthorizeEntityReference(context.Context, *AuthorizeEntityReferenceRequest) (*AuthorizeEntityReferenceResponse, error)
+}
+type GitCredentialResolver interface {
+    ResolveGitCredential(context.Context, *ResolveGitCredentialRequest) (*ResolveGitCredentialResponse, error)
+}
+type GitCredentialBinder interface {
+    GetGitCredentialBinding(context.Context, *GitCredentialBindingRequest) (*GitCredentialBindingResponse, error)
+}
+```
+
+`HandleAction` receives host-verified actor/resource context and bounded untrusted body
+separately. For task actions, an optional session selector is verified against the task;
+when paired with a verified repository selector, `head_branch` is resolved from that
+session's exact repository worktree. Browser body JSON cannot select or override it.
+`SearchEntityReferences` candidates are untrusted: the host injects
+descriptor identity and constructs canonical reference fields. `AuthorizeEntityReference`
+runs for search and submission. `ResolveGitCredential` receives an exact host-verified
+scope for both initial host materialization and helper-lease redemption, and returns
+only a transient credential consumed by the host Git process. Initial materialization
+and strict pre-worktree refresh carry the same task/session/repository scope; after a
+successful refresh the worktree layer uses local refs and performs no second network operation.
+Credential requests must include workspace, task, active session, repository, exact host, and exact path;
+an incomplete plugin-provider scope fails closed.
+`GetGitCredentialBinding` receives the same scope and returns an opaque, non-secret
+generation checked before and after redemption; missing or changed bindings fail closed.
+Disabling, failing, or uninstalling a plugin immediately revokes leases for all
+manifest-declared provider IDs. Repository host and path matching are exact and
+case-sensitive. The broker does not add, remove, or equate a trailing `.git`.
 
 SDK types mirror proto but use `map[string]any` for Struct fields. The SDK owns
 all go-plugin/grpc plumbing (handshake, broker for Host, conversions).
@@ -325,6 +426,10 @@ type AgentProfileReader interface {
     List(ctx context.Context, page Page) ([]AgentProfile, *PageInfo, error)
 }
 
+type ExecutorProfileReader interface {
+    List(ctx context.Context, page Page) ([]ExecutorProfile, *PageInfo, error)
+}
+
 type RepositoryReader interface {
     List(ctx context.Context, workspaceID string, page Page) ([]Repository, *PageInfo, error)
 }
@@ -335,6 +440,16 @@ type RepositoryReader interface {
 structs in `pluginsdk` (field-for-field mirrors of the proto messages, PascalCase
 Go names for the proto's snake_case fields, `*string` for `optional string`) —
 authors never see the generated `pluginv1.*` types.
+
+`Repository` additionally carries credential-free provider origin identity:
+`source_type`, `provider_id`, `provider_repository_id`, `provider_host`, `provider_scope`,
+`owner_or_project`, `provider_name`, and `remote_url`. The Host never exposes a
+local checkout path, scripts, or credentials through this DTO.
+
+`provider_scope` is opaque and credential-free. For provider-backed repositories,
+the strong identity is workspace + provider + scope + immutable provider repository
+ID. Host/name/owner fields remain routing and display metadata; scoped descriptors do
+not adopt legacy unscoped rows.
 
 **Authoring example** — a plugin declaring `api_read: ["sessions"]` and reading
 computed per-session code stats instead of opening the kandev database:
@@ -378,8 +493,8 @@ the API, never the DB.
   converts the HTTP request to WebhookRequest and relays the WebhookResponse.
 - **Health**: go-plugin client `Ping()` every 30s (injectable), 3 consecutive
   failures → status `error` (+ restart attempt with backoff), recovery → `active`
-  + delivery flush. Crash (process exit) → immediate restart with backoff
-  (max 5 attempts, then `error`).
+  - delivery flush. Crash (process exit) → immediate restart with backoff
+    (max 5 attempts, then `error`).
 - **Capability gating**: each Host RPC checks the plugin's manifest capabilities
   before doing any work — `state` for `GetState`/`SetState`/`DeleteState`/
   `ListState`, `secrets` for `RevealSecret`, `api_read:<resource>` for each Host
@@ -410,7 +525,7 @@ runtime:
     linux-amd64: server/plugin-linux-amd64
     darwin-arm64: server/plugin-darwin-arm64
     # ... any subset
-min_kandev_version: "0.78.0"     # optional
+min_kandev_version: "0.78.0" # optional
 ```
 
 Install pipeline: `POST /api/plugins/install` with JSON `{"url": "..."}` OR
@@ -427,5 +542,13 @@ multipart field `package` → verify checksums.txt covers all files & hashes mat
   kandev **from the extracted package dir** (no reverse proxy, no upstream).
 - Management page: "Register plugin" (manifest paste) is replaced by "Install
   plugin" (URL input + file upload). No credentials are ever displayed.
-- Boot payload `plugins: [{id,name,bundleUrl,styleUrls}]` unchanged.
+- Boot payload `plugins: [{id,name,bundleUrl,styleUrls,repositoryProviderIds?}]`.
+  `repositoryProviderIds` is JSON camelCase copied from manifest
+  `repository_providers`; frontend loader records it before bundle initialization so
+  provider/review registration can enforce declared ownership. Omission remains
+  compatible with older payloads. Failed or timed-out initialization rolls back partial
+  registrations and fences late callbacks from the expired activation attempt.
+
+```
+
 ```

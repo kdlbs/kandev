@@ -161,7 +161,8 @@ func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositor
 			BaseBranch: spec.BaseBranch, DefaultBranch: spec.DefaultBranch, CheckoutBranch: spec.CheckoutBranch,
 			WorktreeID: spec.WorktreeID, WorktreeBranchPrefix: spec.WorktreeBranchPrefix,
 			WorktreeBranchTemplate: spec.WorktreeBranchTemplate, PullBeforeWorktree: spec.PullBeforeWorktree,
-			BranchSlug: spec.BranchSlug, BranchIdentitySlug: spec.BranchIdentitySlug,
+			RemoteSyncHandled: spec.RemoteSyncHandled,
+			BranchSlug:        spec.BranchSlug, BranchIdentitySlug: spec.BranchIdentitySlug,
 		})
 	}
 	return result

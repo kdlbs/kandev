@@ -175,7 +175,8 @@ type CreateRequest struct {
 
 	// RemoteContribution identifies an existing provider contribution whose
 	// source branch must be fetched from its own remote and verified by SHA.
-	RemoteContribution *models.RemoteContribution
+	RemoteContribution      *models.RemoteContribution
+	ContributionDestination *models.ContributionDestination
 
 	// WorktreeBranchPrefix is the prefix to use for the worktree branch name.
 	// If empty, the default prefix is used.
@@ -190,6 +191,11 @@ type CreateRequest struct {
 
 	// PullBeforeWorktree indicates whether to pull from remote before creating the worktree.
 	PullBeforeWorktree bool
+
+	// RemoteSyncHandled means the caller already refreshed origin through an
+	// authenticated provider seam. Worktree creation must use local/remote-
+	// tracking refs only and must not perform another network operation.
+	RemoteSyncHandled bool
 
 	// WorktreeID is the ID of an existing worktree to reuse (optional).
 	// If provided and valid, the existing worktree is returned instead of creating a new one.
@@ -253,6 +259,11 @@ func (r *CreateRequest) Validate() error {
 	}
 	if err := r.validateRemoteContribution(); err != nil {
 		return err
+	}
+	if r.ContributionDestination != nil {
+		if err := r.ContributionDestination.Validate(); err != nil {
+			return fmt.Errorf("invalid contribution destination: %w", err)
+		}
 	}
 	if r.BaseBranch == "" {
 		// Defence-in-depth: prefer the explicit FallbackBaseBranch (typically

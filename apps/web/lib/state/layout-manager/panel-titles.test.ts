@@ -1,9 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
 import i18n from "i18next";
 
-import { canonicalPanelTitle, panel, PANEL_REGISTRY } from "./constants";
+import {
+  canonicalPanelTitle,
+  panel,
+  PANEL_REGISTRY,
+  REUSABLE_PANEL_IDS,
+  KNOWN_PANEL_IDS,
+  PROMPT_HISTORY_PANEL_ID,
+} from "./constants";
 import { panelTitle } from "./panel-title";
 import { toSerializedDockview } from "./serializer";
+
 import type { LayoutState } from "./types";
 
 /**
@@ -20,6 +28,7 @@ afterEach(async () => {
   await i18n.changeLanguage("en");
 });
 
+/** Builds a one-column, one-group LayoutState whose panel list uses the given registry panel ids. */
 function layoutWith(panelIds: string[]): LayoutState {
   return {
     columns: [{ id: "col", groups: [{ id: "group", panels: panelIds.map(panel) }] }],
@@ -68,9 +77,26 @@ describe("panelTitle", () => {
     const leaked = Object.keys(PANEL_REGISTRY).filter((id) => panelTitle(id).includes(":"));
     expect(leaked).toEqual([]);
   });
+
+  it("resolves the prompt-history panel title and canonical title", async () => {
+    expect(panelTitle(PROMPT_HISTORY_PANEL_ID)).toBe("Prompt history");
+    expect(canonicalPanelTitle(PROMPT_HISTORY_PANEL_ID)).toBe("Prompt History");
+
+    await i18n.changeLanguage("pseudo");
+    expect(panelTitle(PROMPT_HISTORY_PANEL_ID)).not.toBe("Prompt history");
+    expect(panelTitle(PROMPT_HISTORY_PANEL_ID)).toMatch(/[^\x20-\x7E]/);
+    // Storage stays canonical whatever the locale.
+    expect(canonicalPanelTitle(PROMPT_HISTORY_PANEL_ID)).toBe("Prompt History");
+  });
+
+  it("keeps the prompt-history panel in the reusable and known panel sets", () => {
+    expect(REUSABLE_PANEL_IDS).toContain(PROMPT_HISTORY_PANEL_ID);
+    expect(KNOWN_PANEL_IDS.has(PROMPT_HISTORY_PANEL_ID)).toBe(true);
+  });
 });
 
 describe("layout round trip", () => {
+  /** Serializes the given layout and returns the title map dockview stores per panel. */
   const titlesOf = (state: LayoutState) => {
     const serialized = toSerializedDockview(state, 1000, 800, new Map());
     return (serialized as unknown as { panels: Record<string, { title: string }> }).panels;

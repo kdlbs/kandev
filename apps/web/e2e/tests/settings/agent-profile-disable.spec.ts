@@ -6,8 +6,9 @@ import { KanbanPage } from "../../pages/kanban-page";
  *
  * - The profile settings header toggle persists across reload.
  * - A disabled profile is hidden from the new-task dialog agent selector.
- * - The /settings/agents profile list shows the toggle and re-enabling there
- *   restores the profile to task creation.
+ * - The /settings/agents profile list reports the result as a Disabled badge on
+ *   the row, and re-enabling restores the profile to task creation. The list has
+ *   no toggle of its own: the header toggle is the single control.
  *
  * Uses the seeded default profile (like agent-profile-acp.spec.ts) rather
  * than creating one — the profile editor page reads from the agents list
@@ -91,7 +92,7 @@ test.describe("Agent profile — enable/disable", () => {
     }
   });
 
-  test("settings list toggle disables and re-enables the profile", async ({
+  test("the settings list reflects disabling and re-enabling a profile", async ({
     testPage,
     apiClient,
   }) => {
@@ -101,32 +102,48 @@ test.describe("Agent profile — enable/disable", () => {
     const agent = agents[0];
     const profile = agent.profiles[0];
 
+    // The list row is a card whose whole surface is an overlay link named by
+    // the profile; matching the card through that link keeps the row unique
+    // even when one profile's name is a prefix of another's.
+    const row = testPage
+      .getByTestId("agent-profile-row")
+      .filter({ has: testPage.getByRole("link", { name: profile.name, exact: true }) });
+    const disabledBadge = row.getByText("Disabled", { exact: true });
+
+    // The list carries no toggle of its own — the header toggle on the profile
+    // page is the single control, and the row reports the result as a badge.
+    const setEnabledFromProfilePage = async (enable: boolean) => {
+      await row.getByTestId("agent-profile-row-link").click();
+      await expect(testPage).toHaveURL(new RegExp(`/settings/agents/.+/profiles/${profile.id}$`));
+      const headerToggle = testPage.getByTestId("profile-enabled-toggle");
+      await expect(headerToggle).toBeVisible({ timeout: 15_000 });
+      await expect(headerToggle).toHaveAttribute("data-state", enable ? "unchecked" : "checked");
+      await headerToggle.click();
+      await expect(headerToggle).toHaveAttribute("data-state", enable ? "checked" : "unchecked");
+
+      const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i });
+      await expect(saveButton).toBeEnabled({ timeout: 10_000 });
+      await saveButton.click();
+      await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
+
+      await testPage.goto("/settings/agents");
+      await expect(row).toBeVisible({ timeout: 15_000 });
+    };
+
     try {
       await testPage.goto("/settings/agents");
-      const rowToggle = testPage.getByTestId(`profile-enabled-toggle-${profile.id}`);
-      await expect(rowToggle).toBeVisible({ timeout: 15_000 });
-      await expect(rowToggle).toHaveAttribute("data-state", "checked");
+      await expect(row).toBeVisible({ timeout: 15_000 });
+      await expect(disabledBadge).toHaveCount(0);
 
-      // Disabling from the list saves immediately (no save button) and must
-      // not navigate away from the page.
-      await rowToggle.click();
-      await expect(rowToggle).toHaveAttribute("data-state", "unchecked");
-      await expect(testPage).toHaveURL(/\/settings\/agents$/);
+      await setEnabledFromProfilePage(false);
+      await expect(disabledBadge).toBeVisible();
 
       // Persisted across reload.
       await testPage.reload();
-      await expect(testPage.getByTestId(`profile-enabled-toggle-${profile.id}`)).toHaveAttribute(
-        "data-state",
-        "unchecked",
-        { timeout: 15_000 },
-      );
+      await expect(disabledBadge).toBeVisible({ timeout: 15_000 });
 
-      // Re-enable from the list and confirm the state flips back.
-      await testPage.getByTestId(`profile-enabled-toggle-${profile.id}`).click();
-      await expect(testPage.getByTestId(`profile-enabled-toggle-${profile.id}`)).toHaveAttribute(
-        "data-state",
-        "checked",
-      );
+      await setEnabledFromProfilePage(true);
+      await expect(disabledBadge).toHaveCount(0);
 
       // Re-enabling restores the profile to task creation. With a single
       // enabled profile the dialog auto-selects it and hides the selector;

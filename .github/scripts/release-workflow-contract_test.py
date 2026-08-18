@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "release.yml"
 DIAGNOSTICS_PATH = REPO_ROOT / ".github" / "scripts" / "collect-macos-desktop-diagnostics.sh"
 PUBLISH_NPM_PATH = REPO_ROOT / "scripts" / "release" / "publish-npm.sh"
+UPDATE_SCOOP_BUCKET_PATH = REPO_ROOT / "scripts" / "release" / "update-scoop-bucket.sh"
 NPM_PACKAGES_PATH = REPO_ROOT / "scripts" / "release" / "npm-packages.sh"
 PUBLIC_KEY_PATH = REPO_ROOT / ".github" / "release-signing-key.asc"
 RELEASE_PROCESS_PATH = REPO_ROOT / "docs" / "public" / "release-process.md"
@@ -19,6 +20,7 @@ LINT_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.
 WORKFLOW = WORKFLOW_PATH.read_text()
 DIAGNOSTICS = DIAGNOSTICS_PATH.read_text()
 PUBLISH_NPM = PUBLISH_NPM_PATH.read_text()
+UPDATE_SCOOP_BUCKET = UPDATE_SCOOP_BUCKET_PATH.read_text()
 NPM_PACKAGES = NPM_PACKAGES_PATH.read_text()
 RELEASE_PROCESS = RELEASE_PROCESS_PATH.read_text()
 LINT_WORKFLOW = LINT_WORKFLOW_PATH.read_text()
@@ -152,6 +154,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "publish-release",
             "publish-npm",
             "update-homebrew-tap",
+            "update-scoop-bucket",
         ):
             block = job_block(name)
             self.assertIn("github.event_name == 'workflow_dispatch'", block)
@@ -175,10 +178,14 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         direct_dependencies = {
             "build-desktop": ("prepare", "build-bundles"),
             "docker-amd64": ("prepare", "build-bundles"),
-            "docker-arm64": ("prepare", "build-bundles"),
+            "docker-arm64": ("prepare", "build-bundles", "docker-amd64"),
             "docker-manifest": ("prepare", "docker-amd64", "docker-arm64"),
             "docker-universal-amd64": ("prepare", "docker-manifest"),
-            "docker-universal-arm64": ("prepare", "docker-manifest"),
+            "docker-universal-arm64": (
+                "prepare",
+                "docker-manifest",
+                "docker-universal-amd64",
+            ),
             "docker-universal-manifest": (
                 "prepare",
                 "docker-universal-amd64",
@@ -192,6 +199,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             ),
             "publish-npm": ("prepare", "publish-release"),
             "update-homebrew-tap": ("prepare", "publish-release"),
+            "update-scoop-bucket": ("prepare", "publish-release"),
         }
 
         for name, dependencies in direct_dependencies.items():
@@ -251,6 +259,30 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn('CLI_PACKAGE_BACKUP="$WORK_DIR/cli-package.json"', PUBLISH_NPM)
         self.assertIn('cp "$CLI_PACKAGE_BACKUP" "$CLI_PACKAGE_JSON"', PUBLISH_NPM)
 
+    def test_scoop_publication_uses_current_control_revision_and_deploy_key(self) -> None:
+        scoop = job_block("update-scoop-bucket")
+        self.assertIn("needs: [prepare, publish-release]", scoop)
+        self.assertIn("ref: ${{ github.workflow_sha }}", scoop)
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", scoop)
+        self.assertIn(
+            "SCOOP_BUCKET_DEPLOY_KEY: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}",
+            scoop,
+        )
+        self.assertIn("bash scripts/release/update-scoop-bucket.sh", scoop)
+        self.assertIn('"${{ needs.prepare.outputs.version }}"', scoop)
+        self.assertIn('"${{ needs.prepare.outputs.tag }}"', scoop)
+        self.assertIn("!inputs.dry_run", scoop)
+        self.assertIn("!inputs.desktop_validation_only", scoop)
+        self.assertNotIn("inputs.backfill_tag == ''", scoop)
+
+        preflight = step_block("Require Scoop bucket deploy key")
+        self.assertIn('if [ -z "$SCOOP_BUCKET_DEPLOY_KEY" ]', preflight)
+        self.assertIn("SCOOP_BUCKET_DEPLOY_KEY is required", preflight)
+
+        self.assertIn("SCOOP_BUCKET_DEPLOY_KEY", UPDATE_SCOOP_BUCKET)
+        self.assertIn("git push origin HEAD:main", UPDATE_SCOOP_BUCKET)
+        self.assertIn('CHECKSUM_NAME="${ARCHIVE_NAME}.sha256"', UPDATE_SCOOP_BUCKET)
+
     def test_publish_npm_rejects_version_dist_tag_mismatches(self) -> None:
         cases = (
             (
@@ -296,12 +328,54 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("CURRENT_REF: ${{ github.ref }}", guard)
         self.assertIn('if [ "$CURRENT_REF" != "refs/heads/main" ]', guard)
 
+    def test_normal_release_uses_admin_token_only_for_exact_head_merge(self) -> None:
+        create = step_block("Create release PR")
+        merge = step_block("Merge release PR with administrator token")
+        select = step_block("Select merged release commit")
+
+        for step in (create, merge, select):
+            self.assertIn(NORMAL_RELEASE_IF, step)
+
+        self.assertIn("id: release_pr", create)
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", create)
+        self.assertIn('MSG="release: publish $NEXT"', create)
+        self.assertIn('HEAD_SHA="$(git rev-parse HEAD)"', create)
+        self.assertIn('echo "url=$PR_URL" >> "$GITHUB_OUTPUT"', create)
+        self.assertIn('echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"', create)
+        self.assertNotIn("RELEASE_PR_BYPASS_TOKEN", create)
+
+        self.assertIn(
+            "GH_TOKEN: ${{ secrets.RELEASE_PR_BYPASS_TOKEN }}",
+            merge,
+        )
+        self.assertIn("PR_URL: ${{ steps.release_pr.outputs.url }}", merge)
+        self.assertIn("EXPECTED_HEAD: ${{ steps.release_pr.outputs.head }}", merge)
+        self.assertIn('if [ -z "$GH_TOKEN" ]', merge)
+        self.assertIn("RELEASE_PR_BYPASS_TOKEN is required", merge)
+        self.assertIn('gh pr merge "$PR_URL"', merge)
+        self.assertIn("--admin", merge)
+        self.assertIn("--squash", merge)
+        self.assertIn('--match-head-commit "$EXPECTED_HEAD"', merge)
+        self.assertNotIn("--delete-branch", merge)
+        self.assertNotIn("--auto", merge)
+
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", select)
+        self.assertNotIn("RELEASE_PR_BYPASS_TOKEN", select)
+        self.assertIn("--json state,mergedAt,mergeCommit,headRefOid", select)
+        self.assertIn('if [ "$PR_STATE" != "MERGED" ]', select)
+        self.assertIn('if [ "$PR_HEAD" != "$EXPECTED_HEAD" ]', select)
+        self.assertIn('[[ "$MERGE_COMMIT" =~ ^[0-9a-f]{40}$ ]]', select)
+        self.assertIn('git merge-base --is-ancestor "$MERGE_COMMIT" origin/main', select)
+        self.assertIn('git checkout --detach "$MERGE_COMMIT"', select)
+
     def test_normal_release_preflights_and_revalidates_signing_key_around_merge(
         self,
     ) -> None:
         prepare = job_block("prepare")
         bump = step_block("Bump version + generate CHANGELOG (in working tree)")
-        merge = step_block("Create release PR + squash-merge")
+        create_pr = step_block("Create release PR")
+        merge = step_block("Merge release PR with administrator token")
+        select = step_block("Select merged release commit")
         preflight_public_key = step_block("Validate committed release signing public key")
         preflight = step_block("Preflight release tag signing fingerprint")
         merged_public_key = step_block("Validate merged release signing public key")
@@ -387,8 +461,10 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
         self.assertLess(prepare.index(preflight_public_key), prepare.index(preflight))
         self.assertLess(prepare.index(preflight), prepare.index(bump))
-        self.assertLess(prepare.index(bump), prepare.index(merge))
-        self.assertLess(prepare.index(merge), prepare.index(merged_public_key))
+        self.assertLess(prepare.index(bump), prepare.index(create_pr))
+        self.assertLess(prepare.index(create_pr), prepare.index(merge))
+        self.assertLess(prepare.index(merge), prepare.index(select))
+        self.assertLess(prepare.index(select), prepare.index(merged_public_key))
         self.assertLess(prepare.index(merged_public_key), prepare.index(signing))
         self.assertLess(prepare.index(merge), prepare.index(signing))
         self.assertLess(prepare.index(signing), prepare.index(validate))
@@ -437,33 +513,45 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIsNotNone(documented_fingerprint)
         self.assertEqual(primary_fingerprints[0], documented_fingerprint.group(1))
 
+    def test_release_documentation_declares_the_pr_bypass_token_contract(self) -> None:
+        for requirement in (
+            "RELEASE_PR_BYPASS_TOKEN",
+            "fine-grained personal access token",
+            "Contents: Read and write",
+            "organization administrator",
+            "Only select repositories",
+            "expiration date",
+        ):
+            self.assertIn(requirement, RELEASE_PROCESS)
+
     def test_release_contract_ci_runs_when_key_or_release_documentation_changes(self) -> None:
-        for trigger in ("push", "pull_request"):
+        """This contract must run on every change, not a listed subset.
+
+        `lint-action-pinning.yml` used to name each subject of this file --
+        the signing key, the release docs, every `scripts/release/` helper --
+        in a hand-maintained `paths:` list, so that changing one brought the
+        job up. That list is gone: the workflow now triggers on every push and
+        every pull request, which covers every subject here and every one added
+        later without anybody remembering to extend a list.
+
+        The change was forced by the merge queue. A workflow skipped by a
+        `paths:` filter reports no conclusion at all, and a required check that
+        never reports blocks a pull request from entering the queue.
+        """
+        for trigger in ("push", "pull_request", "merge_group"):
             trigger_block = re.search(
                 rf"  {trigger}:\n.*?(?=\n  [a-z_]+:|\nconcurrency:)",
                 LINT_WORKFLOW,
                 re.DOTALL,
             )
             self.assertIsNotNone(trigger_block)
-            self.assertIn('".github/release-signing-key.asc"', trigger_block.group(0))
-            self.assertIn('"docs/public/release-process.md"', trigger_block.group(0))
-            self.assertIn('"scripts/release/package-npm-runtime.sh"', trigger_block.group(0))
-            self.assertIn('"scripts/release/publish-npm.sh"', trigger_block.group(0))
-            self.assertIn('"scripts/release/publish-npm.test.mjs"', trigger_block.group(0))
-            self.assertIn('"scripts/release/npm-packages.sh"', trigger_block.group(0))
-            self.assertIn('"scripts/release/npm-view-version.sh"', trigger_block.group(0))
-            self.assertIn('"scripts/release/npm-view-version.test.mjs"', trigger_block.group(0))
-            self.assertIn('"scripts/release/nightly-version.mjs"', trigger_block.group(0))
-            self.assertIn('"scripts/release/nightly-version.test.mjs"', trigger_block.group(0))
-            self.assertIn('"scripts/release/nightly-release.sh"', trigger_block.group(0))
-            self.assertIn('"scripts/release/nightly-release.test.mjs"', trigger_block.group(0))
-            self.assertIn('"Makefile"', trigger_block.group(0))
-            self.assertIn('"apps/backend/Makefile"', trigger_block.group(0))
-            self.assertIn('"scripts/release/package-bundle.sh"', trigger_block.group(0))
-            self.assertIn('"scripts/release/runtime-bundle.test.sh"', trigger_block.group(0))
-            self.assertIn(
-                '"scripts/release/validate-darwin-arm64-helper.mjs"',
+            self.assertNotIn(
+                "    paths:",
                 trigger_block.group(0),
+                f"lint-action-pinning.yml's {trigger} trigger must stay "
+                "unfiltered. A `paths:` list there both un-guards every "
+                "subject it omits and makes the check unreportable in a merge "
+                "queue.",
             )
 
         setup_node = (
@@ -487,7 +575,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "node --test scripts/release/nightly-version.test.mjs "
             "scripts/release/nightly-release.test.mjs "
             "scripts/release/npm-view-version.test.mjs "
-            "scripts/release/publish-npm.test.mjs",
+            "scripts/release/publish-npm.test.mjs "
+            "scripts/release/update-scoop-bucket.test.mjs",
             LINT_WORKFLOW,
         )
 
@@ -540,7 +629,9 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
         for name in (
             "Bump version + generate CHANGELOG (in working tree)",
-            "Create release PR + squash-merge",
+            "Create release PR",
+            "Merge release PR with administrator token",
+            "Select merged release commit",
             "Import release tag signing key",
             "Validate release tag signing identity",
             "Create and push signed release tag",
@@ -561,6 +652,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "publish-release",
             "publish-npm",
             "update-homebrew-tap",
+            "update-scoop-bucket",
         ):
             block = job_block(name)
             self.assertRegex(
@@ -690,6 +782,63 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("bundle_dmg.sh", DIAGNOSTICS)
         self.assertIn('cp "$bundle_root/dmg/bundle_dmg.sh"', DIAGNOSTICS)
         self.assertIn("|| true", DIAGNOSTICS)
+
+    def test_ghcr_builds_retry_transient_failures_and_publish_digests(self) -> None:
+        for job, name in (
+            ("docker-amd64", "Build and push (amd64 staging tag)"),
+            ("docker-arm64", "Build and push (arm64 staging tag)"),
+            (
+                "docker-universal-amd64",
+                "Build and push (universal amd64 staging tag)",
+            ),
+            (
+                "docker-universal-arm64",
+                "Build and push (universal arm64 staging tag)",
+            ),
+        ):
+            build = step_block(name)
+            job_text = job_block(job)
+            with self.subTest(step=name):
+                runtime_setup = "crazy-max/ghaction-github-runtime@"
+                self.assertIn(runtime_setup, job_text)
+                self.assertLess(
+                    job_text.index(runtime_setup),
+                    job_text.index(f"- name: {name}"),
+                )
+                self.assertIn("bash scripts/release/retry-ghcr-command.sh", build)
+                self.assertIn("docker buildx build", build)
+                self.assertIn("--metadata-file", build)
+                self.assertIn("containerimage.digest", build)
+                self.assertIn('echo "digest=$digest" >> "$GITHUB_OUTPUT"', build)
+                self.assertNotIn("docker/build-push-action@", build)
+
+    def test_ghcr_manifest_mutations_retry_and_can_load_shared_helper(self) -> None:
+        for job, step in (
+            ("docker-manifest", "Combine arch images into multi-arch tags"),
+            ("docker-universal-manifest", "Promote staging to final tags"),
+        ):
+            block = job_block(job)
+            mutation = step_block(step)
+            with self.subTest(job=job):
+                self.assertIn("actions/checkout@", block)
+                self.assertIn("ref: ${{ needs.prepare.outputs.ref }}", block)
+                self.assertIn("bash scripts/release/retry-ghcr-command.sh", mutation)
+                self.assertIn("docker buildx imagetools create", mutation)
+
+    def test_ghcr_architecture_jobs_are_serialized(self) -> None:
+        self.assertIn(
+            "needs: [prepare, build-bundles, docker-amd64]",
+            job_block("docker-arm64"),
+        )
+        self.assertIn(
+            "needs: [prepare, docker-manifest, docker-universal-amd64]",
+            job_block("docker-universal-arm64"),
+        )
+
+    def test_release_validation_runs_ghcr_retry_regression(self) -> None:
+        self.assertIn("scripts/release/retry-ghcr-command.test.sh", LINT_WORKFLOW)
+        makefile = (REPO_ROOT / "Makefile").read_text()
+        self.assertIn("bash scripts/release/retry-ghcr-command.test.sh", makefile)
 
 
 if __name__ == "__main__":

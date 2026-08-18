@@ -1,6 +1,7 @@
 ---
 status: approved
 created: 2026-07-30
+updated: 2026-08-11
 owner: kandev
 ---
 
@@ -28,15 +29,15 @@ showing permanent healthy-state chrome or flashing for harmless reconnects.
 - Color is never the only signal. The active surface exposes the matching detail as an accessible
   status name and through hover/focus on fine-pointer layouts or tap on phone.
 - Desktop and tablet show exactly one warning:
-  - When **App status bar** is enabled, its built-in connection item is problem-only: absent while
+  - When **Show status bar** is on, its built-in connection item is problem-only: absent while
     healthy or in grace, yellow while unstable, and red while lost.
-  - When **App status bar** is disabled, a problem-only connection indicator appears in the persistent
+  - When **Show status bar** is off, a problem-only connection indicator appears in the persistent
     app-sidebar footer beside the theme control. The fallback is absent while healthy or in grace.
 - Phone uses its existing native Status paths rather than adding a persistent bar or overlay:
   - Existing Status entry points receive yellow/red warning treatment.
   - Route chrome that leads to a nested Status action, such as the Home or Settings menu, carries
     the same warning treatment so the issue is visible before opening the menu.
-  - When **App status bar** is disabled, these paths appear only during an active warning and open a
+  - When **Show status bar** is off, these paths appear only during an active warning and open a
     connection-only Status drawer. Plugin contributions and metrics stay disabled.
 - The warning does not alter reconnect attempts, WebSocket subscriptions, queued requests, or
   last-known application data.
@@ -57,8 +58,9 @@ interval; no outage timestamp or warning history persists.
 
 - If the reconnect client exhausts its attempts, the warning remains red until a later
   `connected` transition or page reload. It does not claim that retries are still running.
-- If the optional App status surface is disabled, an active warning bypasses only its visibility
-  gate. It does not mount metrics, plugin status contributions, or a desktop/tablet status bar.
+- If the App status surface is hidden by the Appearance preference, an active warning bypasses
+  only its visibility gate. It does not mount metrics, plugin status contributions, or a
+  desktop/tablet status bar.
 - If a responsive presentation changes during an outage, the current severity moves to the new
   canonical surface without resetting its offline interval or rendering duplicate warnings.
 - If the warning timer owner unmounts, it cancels pending thresholds and does not update stale
@@ -91,12 +93,12 @@ interval; no outage timestamp or warning history persists.
   the warning disappears immediately and a later outage receives a fresh grace interval.
 - **GIVEN** reconnect attempts cycle through non-connected raw statuses, **WHEN** the continuous
   outage crosses a threshold, **THEN** the threshold is measured from the original disconnect.
-- **GIVEN** App status bar enabled on desktop or tablet, **WHEN** connection severity changes,
+- **GIVEN** **Show status bar** is on for desktop or tablet, **WHEN** connection severity changes,
   **THEN** only its built-in connection item reflects the warning and no sidebar fallback appears.
-- **GIVEN** App status bar disabled on desktop or tablet, **WHEN** connection severity becomes
+- **GIVEN** **Show status bar** is off for desktop or tablet, **WHEN** connection severity becomes
   unstable or lost, **THEN** one warning indicator appears beside the sidebar theme control and exposes
   the matching detail on hover and focus.
-- **GIVEN** App status bar disabled on phone, **WHEN** connection severity becomes unstable or
+- **GIVEN** **Show status bar** is off on phone, **WHEN** connection severity becomes unstable or
   lost, **THEN** persistent route chrome signals the issue and its Status path opens a
   connection-only, touch-sized drawer without metrics or plugin contributions.
 - **GIVEN** a phone warning, **WHEN** the user opens and dismisses Status, **THEN** the connection

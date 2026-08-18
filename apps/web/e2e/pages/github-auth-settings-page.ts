@@ -5,7 +5,7 @@ export class GitHubAuthSettingsPage {
 
   async goto(workspaceId: string, query = "") {
     await this.page.goto(
-      `/settings/workspace/${encodeURIComponent(workspaceId)}/integrations/github${query}`,
+      `/settings/workspaces/${encodeURIComponent(workspaceId)}/integrations/github${query}`,
     );
   }
 

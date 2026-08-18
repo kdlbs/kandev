@@ -210,6 +210,7 @@ func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
 		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
 		WorktreeBranchTicket:   req.WorktreeBranchTicket,
 		PullBeforeWorktree:     req.PullBeforeWorktree,
+		RemoteSyncHandled:      req.RemoteSyncHandled,
 		CopyFiles:              req.CopyFiles,
 		BranchIdentitySlug:     topLevelBranchIdentitySlug(req),
 	}, true

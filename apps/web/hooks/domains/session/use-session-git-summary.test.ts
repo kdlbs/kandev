@@ -6,6 +6,7 @@ type StatusByRepo = Parameters<typeof deriveMultiRepoSummary>[0];
 const ROOT_SCOPE = "";
 const OUTER_SCOPE = "vendor/outer";
 const INNER_SCOPE = "vendor/outer/vendor/inner";
+const NEW_BRANCH = "new-branch";
 
 function status(overrides: Partial<GitStatusEntry> = {}): GitStatusEntry {
   return {
@@ -75,6 +76,52 @@ describe("deriveMultiRepoSummary", () => {
     expect(result.repoNamesForControls).toEqual([OUTER_SCOPE]);
     expect(result.perRepoStatus).toEqual([
       expect.objectContaining({ repository_name: OUTER_SCOPE, hasUnstaged: true }),
+    ]);
+  });
+
+  it("keeps base divergence separate from upstream push and pull counts", () => {
+    const result = deriveMultiRepoSummary(
+      [
+        repoStatus("contribution", {
+          ahead: 7,
+          behind: 2,
+          remote_branch: "contributor/feature",
+          remote_ahead: 1,
+          remote_behind: 0,
+        }),
+      ],
+      [file("contribution")],
+      ["contribution"],
+    );
+
+    expect(result.perRepoStatus).toEqual([
+      expect.objectContaining({
+        repository_name: "contribution",
+        ahead: 7,
+        behind: 2,
+        remoteAhead: 1,
+        remoteBehind: 0,
+        pushAhead: 1,
+        pullBehind: 0,
+        hasUpstream: true,
+      }),
+    ]);
+  });
+
+  it("falls back to base-ahead only when no upstream exists", () => {
+    const result = deriveMultiRepoSummary(
+      [repoStatus(NEW_BRANCH, { ahead: 3, behind: 0, remote_branch: null })],
+      [file(NEW_BRANCH)],
+      [NEW_BRANCH],
+    );
+
+    expect(result.perRepoStatus).toEqual([
+      expect.objectContaining({
+        repository_name: NEW_BRANCH,
+        pushAhead: 3,
+        pullBehind: 0,
+        hasUpstream: false,
+      }),
     ]);
   });
 });

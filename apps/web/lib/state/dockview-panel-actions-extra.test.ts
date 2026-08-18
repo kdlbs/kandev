@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { DockviewApi } from "dockview-react";
-import { buildExtraPanelActions } from "./dockview-panel-actions";
+import { reviewPanelId } from "./dockview-panel-actions";
+import { buildExtraPanelActions } from "./dockview-extra-panel-actions";
 import { CENTER_GROUP } from "./layout-manager";
 import { makeApi, makeStore } from "./dockview-panel-actions.test-utils";
 import type { MockPanel } from "./dockview-panel-actions.test-utils";
+
+const PR_DETAILS_TITLE = "PR Details";
 
 describe("addPRPanel — dedup with legacy auto-shown panel", () => {
   const PR_KEY = "testorg/testrepo/101";
@@ -14,7 +17,7 @@ describe("addPRPanel — dedup with legacy auto-shown panel", () => {
 
   function buildExtra(api: DockviewApi) {
     const store = makeStore(api);
-    return { api, actions: buildExtraPanelActions(store.get) };
+    return { api, actions: buildExtraPanelActions(store.set, store.get) };
   }
 
   /** Canonical PR Details panels retain the key currently shown for the task. */
@@ -94,10 +97,11 @@ describe("addPRPanel — layout-owned group placement", () => {
   const SESSION_PANEL_ID = `session:${SESSION_ID}`;
   const SESSION_GROUP = "group-session-host";
   const PR_DETAILS_GROUP = "group-configured-pr-details";
+  const REQUESTED_GROUP = "group-invoking-add-menu";
 
   function buildExtra(api: DockviewApi) {
     const store = makeStore(api);
-    return { api, actions: buildExtraPanelActions(store.get) };
+    return { api, actions: buildExtraPanelActions(store.set, store.get) };
   }
 
   function seedSessionInGroup(api: DockviewApi, groupId: string): void {
@@ -141,6 +145,26 @@ describe("addPRPanel — layout-owned group placement", () => {
     expect(pr.group.id).toBe(CENTER_GROUP);
   });
 
+  it("opens in the explicitly requested group when no PR Details panel exists", () => {
+    const { api, actions } = buildExtra(makeApi({ extraGroupIds: [REQUESTED_GROUP] }));
+
+    actions.addPRPanel(PR_KEY, { groupId: REQUESTED_GROUP });
+
+    const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
+    expect(pr).toBeDefined();
+    expect(pr.group.id).toBe(REQUESTED_GROUP);
+  });
+
+  it("prefers the explicitly requested group over another canonical group", () => {
+    const { api, actions } = buildExtra(makeApi({ extraGroupIds: [REQUESTED_GROUP] }));
+    seedCanonicalPRDetails(api);
+
+    actions.addPRPanel(PR_KEY, { groupId: REQUESTED_GROUP });
+
+    const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
+    expect(pr.group.id).toBe(REQUESTED_GROUP);
+  });
+
   it("focuses an existing keyed PR tab without relocating it", () => {
     const { api, actions } = buildExtra(makeApi());
     seedCanonicalPRDetails(api);
@@ -167,7 +191,7 @@ describe("addMRPanel — layout-owned review tabs", () => {
 
   function buildExtra(api: DockviewApi) {
     const store = makeStore(api);
-    return { api, actions: buildExtraPanelActions(store.get) };
+    return { api, actions: buildExtraPanelActions(store.set, store.get) };
   }
 
   function seedLegacyPanel(api: DockviewApi, mrKey: string): void {
@@ -208,6 +232,16 @@ describe("addMRPanel — layout-owned review tabs", () => {
     expect(keyed.group.id).toBe("group-configured-pr-details");
     expect(api.panels.filter((panel) => panel.id.startsWith(LEGACY_MR_ID))).toHaveLength(2);
   });
+
+  it("opens a new MR panel in the explicitly requested group", () => {
+    const requestedGroup = "group-invoking-add-menu";
+    const { api, actions } = buildExtra(makeApi({ extraGroupIds: [requestedGroup] }));
+
+    actions.addMRPanel(MR_KEY, { groupId: requestedGroup });
+
+    const panel = api.getPanel(`${LEGACY_MR_ID}|${MR_KEY}`) as unknown as MockPanel;
+    expect(panel.group.id).toBe(requestedGroup);
+  });
 });
 
 const PLUGIN_ID = "kandev-plugin-notes";
@@ -218,7 +252,7 @@ const PLUGIN_PANEL_ID = "plugin:kandev-plugin-notes:notes";
 describe("addPluginPanel / closePluginPanels", () => {
   function buildExtra(api: DockviewApi) {
     const store = makeStore(api);
-    return { api, actions: buildExtraPanelActions(store.get) };
+    return { api, actions: buildExtraPanelActions(store.set, store.get) };
   }
 
   it("opens a plugin panel beside chat by default, with the shared plugin-panel component/tab", () => {
@@ -265,5 +299,105 @@ describe("addPluginPanel / closePluginPanels", () => {
 
     expect(api.getPanel(PLUGIN_PANEL_ID)).toBeUndefined();
     expect(api.getPanel("plugin:kandev-plugin-other:widget")).toBeDefined();
+  });
+});
+
+describe("addReviewPanel", () => {
+  const providerId = "bitbucket";
+  const reviewKey = "project/repository/42";
+  const repositoryId = "repository-uuid";
+  const connectionScope = "https://bitbucket.example.test";
+  const changeRequestNumber = 42;
+  const title = "Bitbucket Pull Request";
+  const review = {
+    providerId,
+    reviewKey,
+    connectionScope,
+    repositoryId,
+    changeRequestNumber,
+    title,
+  };
+  const panelId = reviewPanelId(review);
+
+  it("opens a provider-neutral panel with normalized params in the canonical review group", () => {
+    const api = makeApi();
+    const store = makeStore(api);
+    const actions = buildExtraPanelActions(store.set, store.get);
+    api.addPanel({
+      id: "pr-detail",
+      component: "pr-detail",
+      title: PR_DETAILS_TITLE,
+      position: { referenceGroup: "provider-review-group" },
+    });
+
+    actions.addReviewPanel(review);
+
+    const panel = api.getPanel(panelId) as unknown as MockPanel;
+    expect(panel.title).toBe(title);
+    expect(panel.params).toEqual({
+      providerId,
+      reviewKey,
+      connectionScope,
+      repositoryId,
+      changeRequestNumber,
+    });
+    expect(panel.group.id).toBe("provider-review-group");
+  });
+
+  it("focuses the canonical review panel when it already renders the requested review", () => {
+    const api = makeApi();
+    const store = makeStore(api);
+    const actions = buildExtraPanelActions(store.set, store.get);
+    api.addPanel({
+      id: "pr-detail",
+      component: "pr-detail",
+      title: PR_DETAILS_TITLE,
+      params: { providerId, reviewKey, connectionScope, repositoryId, changeRequestNumber },
+    });
+
+    actions.addReviewPanel(review);
+
+    expect((api.getPanel("pr-detail") as unknown as MockPanel).isActive).toBe(true);
+    expect(api.getPanel(panelId)).toBeUndefined();
+  });
+
+  it("opens a new provider-neutral review in the explicitly requested group", () => {
+    const requestedGroup = "group-invoking-add-menu";
+    const api = makeApi({ extraGroupIds: [requestedGroup] });
+    const store = makeStore(api);
+    const actions = buildExtraPanelActions(store.set, store.get);
+
+    actions.addReviewPanel(review, { groupId: requestedGroup });
+
+    const panel = api.getPanel(panelId) as unknown as MockPanel;
+    expect(panel.group.id).toBe(requestedGroup);
+  });
+
+  it("does not collide when provider IDs or review keys contain panel delimiters", () => {
+    const api = makeApi();
+    const store = makeStore(api);
+    const actions = buildExtraPanelActions(store.set, store.get);
+
+    const first = {
+      providerId: "a|b",
+      reviewKey: "mutable",
+      connectionScope: "https://one.example.test",
+      repositoryId: "c",
+      changeRequestNumber: 1,
+      title: "First",
+    };
+    const second = {
+      providerId: "a",
+      reviewKey: "mutable",
+      connectionScope: "https://two.example.test",
+      repositoryId: "b|c",
+      changeRequestNumber: 1,
+      title: "Second",
+    };
+    actions.addReviewPanel(first);
+    actions.addReviewPanel(second);
+
+    expect(api.getPanel(reviewPanelId(first))).toBeDefined();
+    expect(api.getPanel(reviewPanelId(second))).toBeDefined();
   });
 });

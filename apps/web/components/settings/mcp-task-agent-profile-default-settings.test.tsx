@@ -8,7 +8,7 @@ import { SettingsSaveProvider } from "./settings-save-provider";
 
 const updateUserSettings = vi.fn();
 const ARIA_CHECKED = "aria-checked";
-const CURRENT_TASK_LABEL = "Current task profile";
+const CURRENT_TASK_LABEL = "Creating session profile";
 const WORKSPACE_DEFAULT_LABEL = "Workspace default profile";
 
 vi.mock("@/lib/api", () => ({
@@ -63,10 +63,11 @@ describe("MCPTaskAgentProfileDefaultSettings", () => {
     expect(
       screen.getByRole("radio", { name: WORKSPACE_DEFAULT_LABEL }).getAttribute(ARIA_CHECKED),
     ).toBe("false");
-    screen.getByText(/follow-up work needs the same model and agent setup/i);
-    screen.getByText(/may reuse a more expensive profile/i);
-    screen.getByText(/workflow profile when one is set/i);
-    screen.getByText(/keep agent-created tasks on your standard workspace model/i);
+    screen.getByText(/effective model, mode, and options/i);
+    screen.getByText(/workflow-selected profiles win first/i);
+    screen.getByText(/higher-cost setup/i);
+    screen.getByText(/skips the creating session and source or parent task profiles/i);
+    screen.getByText(/consistent cost policy/i);
   });
 
   it("explains why session creation does not use this preference", async () => {

@@ -84,3 +84,15 @@ describe("migrateSidebarViewDraft archived compatibility", () => {
     expect(migrateSidebarViewDraft(draft)).toEqual(draft);
   });
 });
+
+describe("migrate sidebar activity sort", () => {
+  it("preserves lastActivityAt on saved views and drafts", () => {
+    const view = makeSidebarView("view-activity", "Recent activity");
+    view.sort = { key: "lastActivityAt", direction: "desc" };
+    const draft = makeSidebarDraft("view-activity");
+    draft.sort = { key: "lastActivityAt", direction: "asc" };
+
+    expect(migrateView(view).sort).toEqual(view.sort);
+    expect(migrateSidebarViewDraft(draft).sort).toEqual(draft.sort);
+  });
+});

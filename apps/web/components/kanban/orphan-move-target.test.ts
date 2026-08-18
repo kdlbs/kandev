@@ -22,7 +22,7 @@ describe("getStepAdjacency", () => {
   ];
   const stepsWithOrphan: WorkflowStep[] = [
     ...realSteps,
-    { id: ORPHAN_STEP_ID, title: "Needs Reassignment", color: "#f59e0b" },
+    { id: ORPHAN_STEP_ID, title: "", color: "#f59e0b" },
   ];
 
   it("offers both neighbors for a middle real step with no orphan present", () => {

@@ -116,6 +116,20 @@ type Repository interface {
 	// missing source returns ErrEntryNotFound.
 	MergeIntoAbove(ctx context.Context, sessionID, sourceID, queuedBy string) (*QueuedMessage, error)
 
+	// AutoMergeIntoAbove attempts to fold the exact source entry into its
+	// immediate predecessor. A compatible merge returns the surviving target
+	// and true. A missing source, missing predecessor, or incompatible pair is a
+	// successful skip and returns false without mutating either row.
+	AutoMergeIntoAbove(ctx context.Context, sessionID, sourceID string) (*QueuedMessage, bool, error)
+
+	// AutoMergeCandidateIntoAbove folds a not-yet-admitted candidate message
+	// into the session's tail entry when compatible, without inserting it. Used
+	// by admission at full capacity: the fold itself is the admission, so a
+	// message that would merge anyway is accepted instead of rejected with
+	// ErrQueueFull. A missing tail or incompatible pair is a successful skip
+	// and returns false without mutating any row.
+	AutoMergeCandidateIntoAbove(ctx context.Context, candidate *QueuedMessage) (*QueuedMessage, bool, error)
+
 	// ReorderEntries atomically rewrites the FIFO positions of the session's
 	// pending entries to match orderedIDs. The submitted list must be an exact
 	// permutation of the currently visible pending (not reserved-in-flight)

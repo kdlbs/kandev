@@ -294,6 +294,54 @@ func TestLocalPreparer_CheckoutBranchPriorityOverBaseBranch(t *testing.T) {
 	}
 }
 
+func TestLocalPreparer_UsesAuthenticatedRefreshWithoutSecondFetch(t *testing.T) {
+	isolateGitEnv(t)
+	repoDir := initGitRepo(t)
+	env := newIsolatedGitEnv()
+	for _, args := range [][]string{
+		{"checkout", "-b", "feature/refreshed"},
+		{"commit", "--allow-empty", "-m", "refreshed branch"},
+		{"checkout", "main"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %s", args, out)
+		}
+	}
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakeBin := t.TempDir()
+	fetchMarker := filepath.Join(t.TempDir(), "unexpected-fetch")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = fetch ]; then : > \"$FETCH_MARKER\"; exit 99; fi\n" +
+		"exec \"$REAL_GIT\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("REAL_GIT", realGit)
+	t.Setenv("FETCH_MARKER", fetchMarker)
+
+	result, err := NewLocalPreparer(newTestLocalLogger()).Prepare(context.Background(), &EnvPrepareRequest{
+		TaskID: "task-1", RepositoryPath: repoDir, CheckoutBranch: "feature/refreshed",
+		RemoteSyncHandled: true,
+	}, nil)
+	if err != nil || !result.Success {
+		t.Fatalf("Prepare() = success %v, error %v", result.Success, err)
+	}
+	if _, err := os.Stat(fetchMarker); !os.IsNotExist(err) {
+		t.Fatal("local preparer performed a second unauthenticated fetch")
+	}
+	if got := currentBranch(t, repoDir); got != "feature/refreshed" {
+		t.Fatalf("branch = %q, want feature/refreshed", got)
+	}
+}
+
 // TestLocalPreparer_CheckoutFailureSurfaces ensures actual checkout failures
 // (e.g. trying to switch branches with a dirty workdir) bubble up as a
 // failed step + non-nil error so the orchestrator marks the task FAILED.

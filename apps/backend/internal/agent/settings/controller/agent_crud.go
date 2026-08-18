@@ -1,10 +1,12 @@
 package controller
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -47,7 +49,46 @@ func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, e
 		c.applyBillingType(&entry, agent.Name)
 		payload = append(payload, entry)
 	}
+	c.sortAgentsByDisplayOrder(payload)
 	return &dto.ListAgentsResponse{Agents: payload, Total: len(payload)}, nil
+}
+
+// sortAgentsByDisplayOrder puts saved agents in the same order the rest of the
+// app presents agents in — each agent implementation's DisplayOrder, which is
+// also what GET /agents/discovery is sorted by.
+//
+// The store returns newest-configured-first, which is setup history rather than
+// an order anyone chose. That reached the UI: the settings menu ranks agents by
+// discovery, so until the scan lands it had nothing but this order to show and
+// the list reshuffled underneath the reader. Sorting here means the order is
+// already right the moment the agents arrive, scan or no scan.
+//
+// Agents the registry does not know (a removed CLI, a custom row) keep their
+// store order after the ranked ones: the comparator groups them last and the
+// stable sort leaves their relative order untouched.
+func (c *Controller) sortAgentsByDisplayOrder(payload []dto.AgentDTO) {
+	if c.agentRegistry == nil {
+		return
+	}
+	known := c.agentRegistry.List()
+	rank := make(map[string]int, len(known))
+	for _, ag := range known {
+		rank[ag.ID()] = ag.DisplayOrder()
+	}
+	slices.SortStableFunc(payload, func(a, b dto.AgentDTO) int {
+		aOrder, aKnown := rank[a.Name]
+		bOrder, bKnown := rank[b.Name]
+		if aKnown != bKnown {
+			if aKnown {
+				return -1
+			}
+			return 1
+		}
+		if !aKnown {
+			return 0
+		}
+		return cmp.Compare(aOrder, bOrder)
+	})
 }
 
 // filterGlobalProfiles drops workspace-scoped (office) rows from a profile

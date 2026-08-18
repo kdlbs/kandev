@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 func TestReviewWatchOperationsAuthorizeWorkspaceAtServiceBoundary(t *testing.T) {
@@ -34,6 +36,30 @@ func TestReviewWatchOperationsAuthorizeWorkspaceAtServiceBoundary(t *testing.T) 
 	}
 	if err := svc.DeleteReviewWatch(context.Background(), watch.ID); !errors.Is(err, denied) {
 		t.Fatalf("DeleteReviewWatch() error = %v, want authorization denial", err)
+	}
+}
+
+func TestTaskCIOptionsResolveAndAuthorizeOwningWorkspace(t *testing.T) {
+	store := newTestStore(t)
+	svc := NewService(nil, AuthMethodNone, nil, store, nil, testLogger(t))
+	svc.SetTaskIssueStore(&fakeTaskIssueStore{
+		task: &taskmodels.Task{ID: "task-a", WorkspaceID: "workspace-a"},
+	})
+	var authorized string
+	svc.SetWorkspaceAuthorizer(func(_ context.Context, workspaceID string) error {
+		authorized = workspaceID
+		return nil
+	})
+
+	response, err := svc.GetTaskCIOptionsResponse(context.Background(), "task-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authorized != "workspace-a" {
+		t.Fatalf("authorized workspace = %q, want workspace-a", authorized)
+	}
+	if response.WorkspaceID != "workspace-a" || response.GetWorkspaceID() != "workspace-a" {
+		t.Fatalf("response workspace = %q, want workspace-a", response.WorkspaceID)
 	}
 }
 

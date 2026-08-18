@@ -186,6 +186,13 @@ function clearStaleContextWindow(state: AppState, sessionId: string, currentMode
   }
 }
 
+function resolvedConfigOptionsSettled(
+  payload: SessionModelsPayload,
+  existing: SessionModelsState["bySessionId"][string] | undefined,
+): boolean | undefined {
+  return payload.config_options_settled ?? existing?.configOptionsSettled;
+}
+
 // resolveModelsUpdatedState computes the convergence target for a
 // models_updated event: which model becomes current, whether the update is
 // an empty relaunch echo, and whether the previously settled config options
@@ -247,6 +254,9 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
         currentModelId: payload.fallback_model,
         models: existing?.models ?? [],
         configOptions: existing?.configOptions ?? [],
+        ...(existing?.configOptionsSettled === undefined
+          ? {}
+          : { configOptionsSettled: existing.configOptionsSettled }),
         configBaseline: existing?.configBaseline,
         fallbackModel: payload.fallback_model,
       });
@@ -278,6 +288,7 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
         payload,
         pendingRuntime,
       );
+      const configOptionsSettled = resolvedConfigOptionsSettled(payload, resolved.existingEntry);
 
       state.setSessionModels(sessionId, {
         currentModelId: resolved.currentModelId,
@@ -290,6 +301,7 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
           meta: m.meta,
         })),
         configOptions,
+        ...(configOptionsSettled === undefined ? {} : { configOptionsSettled }),
         configBaseline:
           payload.config_baseline ??
           persisted.baseline ??

@@ -21,6 +21,8 @@ import {
   runRepositoryScopeWaves,
 } from "./use-session-git-repository-order";
 import { useMultiRepoSummary } from "./use-session-git-summary";
+import { deriveSessionGitValues } from "./use-session-git-derived";
+import { useScopedStageOperations } from "./use-scoped-stage-operations";
 
 /**
  * Per-repo result emitted by frontend-side fan-outs (commit, push, pull,
@@ -54,8 +56,14 @@ export type SessionGit = {
   // Branch info
   branch: string | null;
   remoteBranch: string | null;
+  headCommit: string | null;
+  remoteHeadCommit: string | null;
   ahead: number;
   behind: number;
+  remoteAhead: number;
+  remoteBehind: number;
+  pushAhead: number;
+  pullBehind: number;
 
   // Files (raw FileInfo from store)
   allFiles: FileInfo[];
@@ -76,7 +84,8 @@ export type SessionGit = {
   hasAnything: boolean; // hasChanges || hasCommits
   canStageAll: boolean; // hasUnstaged
   canCommit: boolean; // hasStaged
-  canPush: boolean; // ahead > 0
+  canPush: boolean; // pushAhead > 0
+  canPull: boolean; // pullBehind > 0
   canCreatePR: boolean; // hasCommits
 
   // Operation state
@@ -104,6 +113,11 @@ export type SessionGit = {
     branch: string | null;
     ahead: number;
     behind: number;
+    remoteAhead: number;
+    remoteBehind: number;
+    pushAhead: number;
+    pullBehind: number;
+    hasUpstream: boolean;
     hasStaged: boolean;
     hasUnstaged: boolean;
   }>;
@@ -497,7 +511,7 @@ function usePerRepoPendingClear(
 type RemoteOpsArgs = {
   gitOps: ReturnType<typeof useGitOperations>;
   repoNamesForControls: string[];
-  perRepoStatus: Array<{ repository_name: string; ahead: number }>;
+  perRepoStatus: Array<{ repository_name: string; pushAhead: number }>;
 };
 
 /**
@@ -515,7 +529,7 @@ function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: Rem
   const isMultiRepo = repoNamesForControls.length > 1;
   const aheadByRepo = useMemo(() => {
     const m = new Map<string, number>();
-    for (const s of perRepoStatus) m.set(s.repository_name, s.ahead);
+    for (const s of perRepoStatus) m.set(s.repository_name, s.pushAhead);
     return m;
   }, [perRepoStatus]);
 
@@ -648,11 +662,6 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     perRepoStatus,
   } = useFileDerivations(statusByRepo, gitStatus);
   usePerRepoPendingClear(statusByRepo, allFiles, setPendingStageFiles);
-  const ahead = gitStatus?.ahead ?? 0;
-  const statusLoaded = Boolean(gitStatus || statusByRepo.length > 0);
-  const hasUnstaged = unstagedFiles.length > 0;
-  const hasStaged = stagedFiles.length > 0;
-  const hasCommits = commits.length > 0;
 
   const stageOps = useStageDispatch({
     gitOps,
@@ -662,17 +671,28 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     setPendingStageFiles,
   });
   const { stageAll, unstageAll, commit, stageFile, unstageFile, discard } = stageOps;
+  const derived = deriveSessionGitValues(
+    gitStatus,
+    statusByRepo.length > 0,
+    unstagedFiles,
+    stagedFiles,
+    commits,
+  );
   const remoteOps = useRemoteOpsFanOut({
     gitOps,
     repoNamesForControls,
     perRepoStatus,
   });
+  const scopedStageOperations = useScopedStageOperations(
+    gitOps,
+    stageAll,
+    stageFile,
+    unstageAll,
+    unstageFile,
+  );
 
   return {
-    branch: gitStatus?.branch ?? null,
-    remoteBranch: gitStatus?.remote_branch ?? null,
-    ahead,
-    behind: gitStatus?.behind ?? 0,
+    ...derived,
     repoNames: repoNamesForControls,
     perRepoStatus,
 
@@ -683,17 +703,6 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     commits,
     cumulativeDiff,
     commitsLoading: commitsLoading ?? false,
-
-    statusLoaded,
-    hasUnstaged,
-    hasStaged,
-    hasCommits,
-    hasChanges: hasUnstaged || hasStaged,
-    hasAnything: hasUnstaged || hasStaged || hasCommits,
-    canStageAll: hasUnstaged,
-    canCommit: hasStaged,
-    canPush: ahead > 0,
-    canCreatePR: hasCommits,
 
     isLoading: gitOps.isLoading,
     loadingOperation: gitOps.loadingOperation,
@@ -709,18 +718,10 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     // for that single repo (one agentctl call). Without `repo`, we fan out
     // across every repo with files (multi-repo) or hit the workspace root
     // (single-repo). With paths, we route to the right repo per file.
-    stage: (paths?: string[], repo?: string) => {
-      if (paths && paths.length > 0) return stageFile(paths, repo);
-      if (repo !== undefined) return gitOps.stage(undefined, repo);
-      return stageAll();
-    },
+    stage: scopedStageOperations.stage,
     stageFile,
     stageAll,
-    unstage: (paths?: string[], repo?: string) => {
-      if (paths && paths.length > 0) return unstageFile(paths, repo);
-      if (repo !== undefined) return gitOps.unstage(undefined, repo);
-      return unstageAll();
-    },
+    unstage: scopedStageOperations.unstage,
     unstageFile,
     unstageAll,
     discard,

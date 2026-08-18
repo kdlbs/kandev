@@ -1,7 +1,28 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import path from "node:path";
 import { createSubmoduleReviewFixture, readGitValue } from "./submodule-review-helpers";
+
+test.describe("Submodule review fixture", () => {
+  test("cleans source repositories when setup fails", async ({ apiClient, seedData, backend }) => {
+    const tempRoot = fs.mkdtempSync(path.join(backend.tmpDir, "submodule-review-failure-"));
+    try {
+      await expect(
+        createSubmoduleReviewFixture(
+          apiClient,
+          { ...seedData, workspaceId: crypto.randomUUID() },
+          tempRoot,
+          "Failing submodule fixture E2E",
+        ),
+      ).rejects.toThrow();
+      expect(fs.readdirSync(tempRoot)).toEqual([]);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+});
 
 test.describe("Nested submodule Review", () => {
   test.describe.configure({ retries: 1, timeout: 180_000 });

@@ -1,7 +1,16 @@
-import { IconLayoutList, IconPlayerPlay, IconSend, IconTrash, IconX } from "@tabler/icons-react";
+import {
+  IconLayoutList,
+  IconPin,
+  IconPinned,
+  IconPlayerPlay,
+  IconSend,
+  IconTrash,
+  IconX,
+} from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui";
 import { cn } from "@/lib/utils";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 export type QueuePanelHeaderProps = {
   count: number;
@@ -10,9 +19,11 @@ export type QueuePanelHeaderProps = {
   canDrain: boolean;
   isLoading: boolean;
   cancellationPending: boolean;
+  pinned: boolean;
   onClear: () => void;
   onDrain: () => void;
   onSendNow: () => void;
+  onTogglePin: () => void;
   onClose: () => void;
 };
 
@@ -23,12 +34,17 @@ export function QueuePanelHeader({
   canDrain,
   isLoading,
   cancellationPending,
+  pinned,
   onClear,
   onDrain,
   onSendNow,
+  onTogglePin,
   onClose,
 }: QueuePanelHeaderProps) {
   const { t } = useTranslation();
+  // The pin is a desktop-only convenience: on phone viewports the queue panel
+  // keeps its existing controls and the pin is not rendered.
+  const { isMobile } = useResponsiveBreakpoint();
   const capacityText =
     max > 0
       ? t(isFull ? "chat:queueCapacityFull" : "chat:queueCapacity", { count, max })
@@ -78,6 +94,19 @@ export function QueuePanelHeader({
           <IconTrash className="mr-1 h-3 w-3" />
           {t("chat:clearAll")}
         </Button>
+        {!isMobile && (
+          <button
+            type="button"
+            onClick={onTogglePin}
+            aria-pressed={pinned}
+            aria-label={t(pinned ? "chat:unpinQueuedMessages" : "chat:pinQueuedMessages")}
+            title={t(pinned ? "chat:unpinQueuedMessages" : "chat:pinQueuedMessages")}
+            data-testid="queue-pin"
+            className="inline-flex h-6 w-6 items-center justify-center text-muted-foreground hover:text-foreground cursor-pointer rounded p-1 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+          >
+            {pinned ? <IconPinned className="h-3.5 w-3.5" /> : <IconPin className="h-3.5 w-3.5" />}
+          </button>
+        )}
         <button
           type="button"
           onClick={onClose}

@@ -131,7 +131,7 @@ func TestHTTPListStates_RoutesThroughService(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if err := ctrl.service.secrets.Set(ctx, SecretKey, "linear", "tok"); err != nil {
+	if err := ctrl.service.secrets.Set(ctx, SecretKeyForWorkspace("default"), "linear", "tok"); err != nil {
 		t.Fatalf("set secret: %v", err)
 	}
 	var seenTeam string
@@ -168,7 +168,7 @@ func TestHTTPListLabels_RoutesThroughService(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if err := ctrl.service.secrets.Set(ctx, SecretKey, "linear", "tok"); err != nil {
+	if err := ctrl.service.secrets.Set(ctx, SecretKeyForWorkspace("default"), "linear", "tok"); err != nil {
 		t.Fatalf("set secret: %v", err)
 	}
 	var seenTeam string
@@ -205,7 +205,7 @@ func TestHTTPListUsers_RoutesThroughService(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if err := ctrl.service.secrets.Set(ctx, SecretKey, "linear", "tok"); err != nil {
+	if err := ctrl.service.secrets.Set(ctx, SecretKeyForWorkspace("default"), "linear", "tok"); err != nil {
 		t.Fatalf("set secret: %v", err)
 	}
 	var seenTeam string
@@ -232,7 +232,7 @@ func TestHTTPSearchIssues_RejectsBadNumericParams(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if err := ctrl.service.secrets.Set(ctx, SecretKey, "linear", "tok"); err != nil {
+	if err := ctrl.service.secrets.Set(ctx, SecretKeyForWorkspace("default"), "linear", "tok"); err != nil {
 		t.Fatalf("set secret: %v", err)
 	}
 	cases := map[string]string{

@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForLatestSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
@@ -24,12 +25,23 @@ function startConfigSession(apiClient: ApiClient, seedData: SeedData, prompt: st
 /** Navigate to session page and wait for the final marker message. */
 async function runAndWait(
   testPage: import("@playwright/test").Page,
+  apiClient: ApiClient,
   taskId: string,
   marker: string,
 ) {
+  await waitForLatestSessionDone(
+    apiClient,
+    taskId,
+    1,
+    `config chat session should complete before reading ${marker}`,
+    30_000,
+  );
   await testPage.goto(`/t/${taskId}`);
   const page = new SessionPage(testPage);
   await page.waitForLoad();
+  // The API completion is the readiness signal. The idle wait allows the
+  // config-chat WS subscription to replay the completed turn into the UI.
+  await page.waitForChatIdle({ timeout: 30_000 });
   await expect(page.activeChat().getByText(marker, { exact: true })).toBeVisible({
     timeout: 60_000,
   });
@@ -66,7 +78,7 @@ test.describe("Config-mode MCP — workflow management", () => {
       ].join("\n"),
     );
 
-    const page = await runAndWait(testPage, session.task_id, "Done listing");
+    const page = await runAndWait(testPage, apiClient, session.task_id, "Done listing");
     await expandToolCallGroups(page);
     await expect(page.chat.getByText("Kandev: List Workspaces")).toBeVisible({ timeout: 10_000 });
     await expect(page.chat.getByText("Kandev: List Workflows")).toBeVisible({ timeout: 10_000 });
@@ -86,7 +98,7 @@ test.describe("Config-mode MCP — workflow management", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, session.task_id, "Steps listed");
+    await runAndWait(testPage, apiClient, session.task_id, "Steps listed");
 
     // Verify via API
     const { steps } = await apiClient.listWorkflowSteps(workflow.id);
@@ -125,7 +137,7 @@ test.describe("Config-mode MCP — workflow management", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, session.task_id, "Step created");
+    await runAndWait(testPage, apiClient, session.task_id, "Step created");
 
     // Verify all fields via API
     const { steps } = await apiClient.listWorkflowSteps(workflow.id);
@@ -150,7 +162,7 @@ test.describe("Config-mode MCP — workflow management", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, session.task_id, "Workflow created");
+    await runAndWait(testPage, apiClient, session.task_id, "Workflow created");
 
     // Verify workflow was created via API.
     // Filter by both name and description since the seed workflow shares the same name.
@@ -174,7 +186,7 @@ test.describe("Config-mode MCP — workflow management", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, session.task_id, "Workflow updated");
+    await runAndWait(testPage, apiClient, session.task_id, "Workflow updated");
 
     // Verify via API
     const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
@@ -200,7 +212,7 @@ test.describe("Config-mode MCP — workflow management", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, session.task_id, "Workflow deleted");
+    await runAndWait(testPage, apiClient, session.task_id, "Workflow deleted");
 
     // Verify workflow was deleted via API
     const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
@@ -234,7 +246,7 @@ test.describe("Config-mode MCP — workflow management", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, session.task_id, "Step updated");
+    await runAndWait(testPage, apiClient, session.task_id, "Step updated");
 
     // Verify via API
     const { steps } = await apiClient.listWorkflowSteps(workflow.id);
@@ -269,7 +281,7 @@ test.describe("Config-mode MCP — agent management", () => {
       ].join("\n"),
     );
 
-    const page = await runAndWait(testPage, session.task_id, "Agents listed");
+    const page = await runAndWait(testPage, apiClient, session.task_id, "Agents listed");
     await expandToolCallGroups(page);
     await expect(page.chat.getByText("Kandev: List Agents")).toBeVisible({ timeout: 10_000 });
     await expect(page.chat.getByText("Kandev: List Agent Profiles")).toBeVisible({
@@ -297,7 +309,7 @@ test.describe("Config-mode MCP — agent management", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, createSession.task_id, "Profile created");
+    await runAndWait(testPage, apiClient, createSession.task_id, "Profile created");
 
     // Verify profile was created via API
     const { agents: afterCreate } = await apiClient.listAgents();
@@ -320,7 +332,7 @@ test.describe("Config-mode MCP — agent management", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, deleteSession.task_id, "Profile deleted");
+    await runAndWait(testPage, apiClient, deleteSession.task_id, "Profile deleted");
 
     // Verify profile was deleted via API
     const { agents: afterDelete } = await apiClient.listAgents();
@@ -343,7 +355,7 @@ test.describe("Config-mode MCP — agent management", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, session.task_id, "Agent updated");
+    await runAndWait(testPage, apiClient, session.task_id, "Agent updated");
 
     // Verify via API
     const { agents: updated } = await apiClient.listAgents();
@@ -362,7 +374,7 @@ test.describe("Config-mode MCP — agent management", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, session.task_id, "Profile updated");
+    await runAndWait(testPage, apiClient, session.task_id, "Profile updated");
 
     // Verify via API
     const { agents } = await apiClient.listAgents();
@@ -393,7 +405,7 @@ test.describe("Config-mode MCP — agent management", () => {
         ].join("\n"),
       );
 
-      await runAndWait(testPage, session.task_id, "Profile settings updated");
+      await runAndWait(testPage, apiClient, session.task_id, "Profile settings updated");
 
       // Verify via API
       const profile = await apiClient.getAgentProfile(seedData.agentProfileId);
@@ -421,7 +433,7 @@ test.describe("Config-mode MCP — MCP server configuration", () => {
       ].join("\n"),
     );
 
-    const page = await runAndWait(testPage, session.task_id, "MCP config updated");
+    const page = await runAndWait(testPage, apiClient, session.task_id, "MCP config updated");
     await expandToolCallGroups(page);
     await expect(page.chat.getByText("Kandev: Get MCP Config")).toBeVisible({ timeout: 10_000 });
     await expect(page.chat.getByText("Kandev: Update MCP Config")).toBeVisible({ timeout: 10_000 });
@@ -455,7 +467,7 @@ test.describe("Config-mode MCP — task management", () => {
       ].join("\n"),
     );
 
-    const page = await runAndWait(testPage, session.task_id, "Tasks listed");
+    const page = await runAndWait(testPage, apiClient, session.task_id, "Tasks listed");
     await expandToolCallGroups(page);
     await expect(page.chat.getByText("Kandev: List Tasks").first()).toBeVisible({
       timeout: 10_000,
@@ -483,7 +495,7 @@ test.describe("Config-mode MCP — task management", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, session.task_id, "Task moved");
+    await runAndWait(testPage, apiClient, session.task_id, "Task moved");
 
     // Verify the task is now in the target step
     const { tasks } = await apiClient.listTasks(seedData.workspaceId);
@@ -507,7 +519,7 @@ test.describe("Config-mode MCP — task management", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, session.task_id, "Task archived");
+    await runAndWait(testPage, apiClient, session.task_id, "Task archived");
 
     // Verify the task no longer appears in active task list
     const { tasks } = await apiClient.listTasks(seedData.workspaceId);
@@ -530,7 +542,7 @@ test.describe("Config-mode MCP — task management", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, session.task_id, "Task deleted");
+    await runAndWait(testPage, apiClient, session.task_id, "Task deleted");
 
     // Verify the task is gone
     const { tasks } = await apiClient.listTasks(seedData.workspaceId);
@@ -554,7 +566,7 @@ test.describe("Config-mode MCP — executor management", () => {
       ].join("\n"),
     );
 
-    const page = await runAndWait(testPage, session.task_id, "Executors listed");
+    const page = await runAndWait(testPage, apiClient, session.task_id, "Executors listed");
     await expandToolCallGroups(page);
     await expect(page.chat.getByText("Kandev: List Executors", { exact: true })).toBeVisible({
       timeout: 10_000,
@@ -581,7 +593,7 @@ test.describe("Config-mode MCP — executor management", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, createSession.task_id, "Executor profile created");
+    await runAndWait(testPage, apiClient, createSession.task_id, "Executor profile created");
 
     // Verify via API
     ({ executors } = await apiClient.listExecutors());
@@ -600,7 +612,7 @@ test.describe("Config-mode MCP — executor management", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, deleteSession.task_id, "Executor profile deleted");
+    await runAndWait(testPage, apiClient, deleteSession.task_id, "Executor profile deleted");
 
     // Verify deleted
     const { executors: afterDelete } = await apiClient.listExecutors();
@@ -634,7 +646,7 @@ test.describe("Config-mode MCP — multi-tool workflow", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, session.task_id, "Multi-tool config complete");
+    await runAndWait(testPage, apiClient, session.task_id, "Multi-tool config complete");
 
     // Verify the step was actually created
     const { steps } = await apiClient.listWorkflowSteps(workflow.id);
@@ -666,7 +678,7 @@ test.describe("Config-mode MCP — multi-tool workflow", () => {
       ].join("\n"),
     );
 
-    await runAndWait(testPage, session.task_id, "Full setup complete");
+    await runAndWait(testPage, apiClient, session.task_id, "Full setup complete");
 
     // Verify workflow step
     const { steps } = await apiClient.listWorkflowSteps(workflow.id);

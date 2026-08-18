@@ -171,6 +171,122 @@ func TestCreateOfficeTaskSessionMarksOnlyTheFirstConcurrentSessionAsOrigin(t *te
 	}
 }
 
+func TestCreateTaskSessionWithInitialRuntimeSeedConsumesOnceAcrossConcurrentAndReplacementSessions(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-initial-runtime-seed-race"
+	seed := models.SessionRuntimeConfig{
+		Model:         "mock-smart",
+		Mode:          "plan-mock",
+		ConfigOptions: map[string]string{"effort": "max"},
+	}
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:    taskID,
+		Title: "Initial runtime seed race",
+		Metadata: map[string]interface{}{
+			models.MetaKeyInitialSessionRuntimeConfig:          seed,
+			models.MetaKeyInitialSessionRuntimeConfigProfileID: "profile-1",
+		},
+	}))
+
+	sessions := []*models.TaskSession{
+		{ID: "initial-runtime-session-1", TaskID: taskID, AgentProfileID: "profile-1", State: models.TaskSessionStateCreated},
+		{ID: "initial-runtime-session-2", TaskID: taskID, AgentProfileID: "profile-1", State: models.TaskSessionStateCreated},
+	}
+	errs := make([]error, len(sessions))
+	var wg sync.WaitGroup
+	for i, session := range sessions {
+		wg.Add(1)
+		go func(i int, session *models.TaskSession) {
+			defer wg.Done()
+			errs[i] = repo.CreateTaskSessionWithInitialRuntimeSeed(ctx, session)
+		}(i, session)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		require.NoError(t, err, "CreateTaskSessionWithInitialRuntimeSeed(%d)", i)
+	}
+
+	created, err := repo.ListTaskSessions(ctx, taskID)
+	require.NoError(t, err)
+	require.Len(t, created, len(sessions))
+	initialCount := 0
+	initialSessionID := ""
+	for _, session := range created {
+		if overrides, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata); ok {
+			initialCount++
+			initialSessionID = session.ID
+			require.Equal(t, seed.Model, overrides.Model)
+			require.Equal(t, seed.Mode, overrides.Mode)
+			require.Equal(t, "max", overrides.ConfigOptions["effort"])
+		}
+	}
+	require.Equal(t, 1, initialCount)
+
+	task, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	if _, ok := task.Metadata[models.MetaKeyInitialSessionRuntimeConfig]; ok {
+		t.Fatalf("initial runtime seed remained in task metadata: %#v", task.Metadata)
+	}
+	if _, ok := task.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID]; ok {
+		t.Fatalf("initial runtime seed profile remained in task metadata: %#v", task.Metadata)
+	}
+
+	require.NoError(t, repo.DeleteTaskSession(ctx, initialSessionID))
+	replacement := &models.TaskSession{
+		ID:             "initial-runtime-session-replacement",
+		TaskID:         taskID,
+		AgentProfileID: "profile-replacement",
+		State:          models.TaskSessionStateCreated,
+	}
+	require.NoError(t, repo.CreateTaskSessionWithInitialRuntimeSeed(ctx, replacement))
+	createdReplacement, err := repo.GetTaskSession(ctx, replacement.ID)
+	require.NoError(t, err)
+	if _, ok := models.LoadSessionRuntimeConfigOverrides(createdReplacement.Metadata); ok {
+		t.Fatalf("replacement session unexpectedly received initial runtime overrides: %#v", createdReplacement.Metadata)
+	}
+}
+
+func TestCreateTaskSessionWithInitialRuntimeSeedConsumesMismatchedProfile(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-initial-runtime-seed-profile-mismatch"
+	seed := models.SessionRuntimeConfig{
+		Model:         "mock-smart",
+		Mode:          "plan-mock",
+		ConfigOptions: map[string]string{"effort": "max"},
+	}
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:    taskID,
+		Title: "Initial runtime seed profile mismatch",
+		Metadata: map[string]interface{}{
+			models.MetaKeyInitialSessionRuntimeConfig:          seed,
+			models.MetaKeyInitialSessionRuntimeConfigProfileID: "profile-owner",
+			models.MetaKeyAgentProfileID:                       "profile-selected",
+		},
+	}))
+
+	mismatched := &models.TaskSession{
+		ID:             "initial-runtime-session-mismatched-profile",
+		TaskID:         taskID,
+		AgentProfileID: "profile-selected",
+		State:          models.TaskSessionStateCreated,
+	}
+	require.NoError(t, repo.CreateTaskSessionWithInitialRuntimeSeed(ctx, mismatched))
+
+	created, err := repo.GetTaskSession(ctx, mismatched.ID)
+	require.NoError(t, err)
+	_, hasOverrides := models.LoadSessionRuntimeConfigOverrides(created.Metadata)
+	require.False(t, hasOverrides, "mismatched profile must not receive the creator runtime seed")
+
+	task, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	_, hasSeed := task.Metadata[models.MetaKeyInitialSessionRuntimeConfig]
+	require.False(t, hasSeed, "mismatched profile must consume the launch-only seed")
+	_, hasOwner := task.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID]
+	require.False(t, hasOwner, "mismatched profile must consume the seed owner")
+}
+
 func TestPostgresCreateOfficeTaskSessionMarksOnlyTheFirstConcurrentSessionAsOrigin(t *testing.T) {
 	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 2)
 	repo, err := NewWithDB(db, db, nil)
@@ -645,6 +761,37 @@ func TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce(t *testing.T) {
 	}
 }
 
+func TestSetSessionMetadataKeyIfAbsentOrDifferentStepSQLiteReplacesOnlyStaleStep(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-step-claim", "session-step-claim", "turn-step-claim")
+	ctx := context.Background()
+
+	first := models.PendingStepCompletionSignal{StepID: "step-1", Summary: "first"}
+	stored, err := repo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
+		ctx, "session-step-claim", models.SessionMetaKeyPendingStepCompletion, "step-1", first)
+	require.NoError(t, err)
+	require.True(t, stored, "an empty signal bag should be claimed")
+
+	second := models.PendingStepCompletionSignal{StepID: "step-2", Summary: "second"}
+	stored, err = repo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
+		ctx, "session-step-claim", models.SessionMetaKeyPendingStepCompletion, "step-2", second)
+	require.NoError(t, err)
+	require.True(t, stored, "a signal from an older step should be replaced")
+
+	third := models.PendingStepCompletionSignal{StepID: "step-2", Summary: "third"}
+	stored, err = repo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
+		ctx, "session-step-claim", models.SessionMetaKeyPendingStepCompletion, "step-2", third)
+	require.NoError(t, err)
+	require.False(t, stored, "a signal for the current step should keep the first payload")
+
+	session, err := repo.GetTaskSession(ctx, "session-step-claim")
+	require.NoError(t, err)
+	signal, ok := models.LoadPendingStepSignal(session.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "step-2", signal.StepID)
+	require.Equal(t, "second", signal.Summary)
+}
+
 func TestUpdateSessionContextWindowSQLiteCountsStrictUsageDrops(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -697,6 +844,16 @@ func TestSetSessionMetadataKeyIfAbsentQueryUsesPostgresJSONB(t *testing.T) {
 	}
 	if !strings.Contains(query, "jsonb_set") || !strings.Contains(query, "jsonb_extract_path") {
 		t.Fatalf("postgres write-once query must use JSONB set/existence operations: %s", query)
+	}
+}
+
+func TestSetSessionMetadataKeyIfAbsentOrDifferentStepQueryUsesPostgresJSONB(t *testing.T) {
+	query := setSessionMetadataKeyIfAbsentOrDifferentStepQuery(dialect.PGX)
+	if strings.Contains(query, "json_set") || strings.Contains(query, "json_extract") || strings.Contains(query, "json(?)") {
+		t.Fatalf("postgres step-aware claim query uses SQLite JSON functions: %s", query)
+	}
+	if !strings.Contains(query, "jsonb_set") || !strings.Contains(query, "jsonb_extract_path_text") || !strings.Contains(query, "IS DISTINCT FROM") {
+		t.Fatalf("postgres step-aware claim query must use atomic JSONB comparison: %s", query)
 	}
 }
 
@@ -944,10 +1101,10 @@ func TestIncrementTaskSessionUsage_AccumulatesAcrossCalls(t *testing.T) {
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-usage", "sess-usage", "turn-usage")
 
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-usage", 100, 200, 50); err != nil {
+	if err := repo.IncrementTaskSessionUsage(ctx, "sess-usage", 100, 0, 200, 50); err != nil {
 		t.Fatalf("first increment: %v", err)
 	}
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-usage", 10, 20, 5); err != nil {
+	if err := repo.IncrementTaskSessionUsage(ctx, "sess-usage", 10, 0, 20, 5); err != nil {
 		t.Fatalf("second increment: %v", err)
 	}
 
@@ -967,7 +1124,7 @@ func TestIncrementTaskSessionUsage_AccumulatesAcrossCalls(t *testing.T) {
 // missing row (subscriber may race against session creation).
 func TestIncrementTaskSessionUsage_UnknownSessionNoError(t *testing.T) {
 	repo := newRepoForSessionTests(t)
-	if err := repo.IncrementTaskSessionUsage(context.Background(), "no-such", 1, 2, 3); err != nil {
+	if err := repo.IncrementTaskSessionUsage(context.Background(), "no-such", 1, 1, 2, 3); err != nil {
 		t.Errorf("expected no error for unknown session, got %v", err)
 	}
 }
@@ -976,7 +1133,7 @@ func TestIncrementTaskSessionUsage_UnknownSessionNoError(t *testing.T) {
 // orchestrator publishing a usage event before SessionID is set.
 func TestIncrementTaskSessionUsage_EmptySessionIDNoOp(t *testing.T) {
 	repo := newRepoForSessionTests(t)
-	if err := repo.IncrementTaskSessionUsage(context.Background(), "", 1, 2, 3); err != nil {
+	if err := repo.IncrementTaskSessionUsage(context.Background(), "", 1, 1, 2, 3); err != nil {
 		t.Errorf("empty session id should be a no-op, got %v", err)
 	}
 }
@@ -1042,19 +1199,19 @@ func TestMigrateSessionsAddCostColumns_BackfillsLegacySchema(t *testing.T) {
 	seedForMsgTest(t, repo, "task-mig", "sess-mig", "turn-mig")
 
 	// Precondition: this is the reported bug on a legacy schema.
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 1, 2, 3); err == nil {
+	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 1, 1, 2, 3); err == nil {
 		t.Fatal("expected missing-column error before backfill")
 	}
 
 	repo.migrateSessionsAddCostColumns()
 
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 1, 2, 3); err != nil {
+	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 1, 1, 2, 3); err != nil {
 		t.Fatalf("IncrementTaskSessionUsage after backfill: %v", err)
 	}
 
 	// Idempotent: a second pass over a table that already has the columns is a no-op.
 	repo.migrateSessionsAddCostColumns()
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 10, 20, 30); err != nil {
+	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 10, 10, 20, 30); err != nil {
 		t.Fatalf("IncrementTaskSessionUsage after second pass: %v", err)
 	}
 }
@@ -1635,7 +1792,7 @@ func sessionCancellationMetadata(t *testing.T, repo *Repository, sessionID strin
 
 func assertReapedSession(t *testing.T, repo *Repository, sessionID string, reapedAfter time.Time) {
 	t.Helper()
-	if got := sessionState(t, repo, sessionID); got != "CANCELLED" {
+	if got := sessionState(t, repo, sessionID); got != sessionStateCancelled {
 		t.Errorf("%s = %q, want CANCELLED", sessionID, got)
 	}
 	errorMessage, completedAt, updatedAt := sessionCancellationMetadata(t, repo, sessionID)
@@ -1895,6 +2052,108 @@ func TestGetActiveTurnBySessionIDPicksNewestOpenTurn(t *testing.T) {
 	}
 }
 
+func TestGetActiveTurnBySessionIDUsesDeterministicTieBreak(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-turn-tie"
+	const sessionID = "session-turn-tie"
+	seedSessionForTurns(t, repo, taskID, sessionID)
+
+	startedAt := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	createdAt := startedAt.Add(time.Minute)
+	for _, id := range []string{"turn-tie-z", "turn-tie-a"} {
+		if err := repo.CreateTurn(ctx, &models.Turn{
+			ID: id, TaskSessionID: sessionID, TaskID: taskID,
+			StartedAt: startedAt, CreatedAt: createdAt,
+		}); err != nil {
+			t.Fatalf("CreateTurn(%s): %v", id, err)
+		}
+	}
+
+	active, err := repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetActiveTurnBySessionID: %v", err)
+	}
+	if active.ID != "turn-tie-z" {
+		t.Fatalf("GetActiveTurnBySessionID = %q, want turn-tie-z", active.ID)
+	}
+
+	listed, err := repo.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListTurnsBySession: %v", err)
+	}
+	wantOrder := []string{"turn-tie-a", "turn-tie-z"}
+	if len(listed) != len(wantOrder) {
+		t.Fatalf("ListTurnsBySession returned %d turns, want %d", len(listed), len(wantOrder))
+	}
+	for index, wantID := range wantOrder {
+		if listed[index].ID != wantID {
+			t.Fatalf("ListTurnsBySession[%d] = %q, want %q", index, listed[index].ID, wantID)
+		}
+	}
+}
+
+func TestTurnReadsHideEmptyUnpublishedReservationUntilMessageEvidence(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-turn-reserved"
+	const sessionID = "session-turn-reserved"
+	seedSessionForTurns(t, repo, taskID, sessionID)
+	base := time.Date(2026, 8, 15, 18, 0, 0, 0, time.UTC)
+	for _, turn := range []*models.Turn{
+		{ID: "turn-accepted", TaskSessionID: sessionID, TaskID: taskID, StartedAt: base},
+		{
+			ID: "turn-unpublished", TaskSessionID: sessionID, TaskID: taskID,
+			StartedAt: base.Add(time.Minute),
+			Metadata: map[string]interface{}{
+				models.TurnMetaKeyPromptDispatchPending:   true,
+				models.TurnMetaKeyPromptDispatchAttempted: true,
+			},
+		},
+	} {
+		if err := repo.CreateTurn(ctx, turn); err != nil {
+			t.Fatalf("CreateTurn(%s): %v", turn.ID, err)
+		}
+	}
+
+	active, err := repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetActiveTurnBySessionID: %v", err)
+	}
+	if active.ID != "turn-unpublished" {
+		t.Fatalf("active turn = %q, want attempted reservation", active.ID)
+	}
+	listed, err := repo.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListTurnsBySession: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != "turn-accepted" {
+		t.Fatalf("listed turns = %#v, want only accepted predecessor", listed)
+	}
+
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID: "message-reserved-output", TaskSessionID: sessionID, TaskID: taskID,
+		TurnID: "turn-unpublished", AuthorType: models.MessageAuthorAgent,
+		Type: models.MessageTypeMessage, Content: "accepted output", CreatedAt: base.Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	active, err = repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetActiveTurnBySessionID after output: %v", err)
+	}
+	if active.ID != "turn-unpublished" {
+		t.Fatalf("active turn after output = %q, want ambiguous accepted reservation", active.ID)
+	}
+	listed, err = repo.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListTurnsBySession after output: %v", err)
+	}
+	if len(listed) != 2 || listed[1].ID != "turn-unpublished" {
+		t.Fatalf("listed turns after output = %#v, want reservation restored", listed)
+	}
+}
+
 func TestUpdateTurnWritesCompletionAndMetadata(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -1941,6 +2200,48 @@ func TestUpdateTurnWritesCompletionAndMetadata(t *testing.T) {
 	}
 	if got.Metadata != nil {
 		t.Errorf("Metadata = %#v, want nil after being cleared", got.Metadata)
+	}
+}
+
+func TestUpdateTurnRejectsSnapshotStaleBehindMetadataPatch(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedSessionForTurns(t, repo, "task-turn-stale", "session-turn-stale")
+	turn := &models.Turn{
+		ID: "turn-stale", TaskSessionID: "session-turn-stale", TaskID: "task-turn-stale",
+		Metadata: map[string]interface{}{"initial": true},
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	stale, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn(stale snapshot): %v", err)
+	}
+	updated, _, _, err := repo.UpdateActiveTurnMetadata(
+		ctx,
+		turn.TaskSessionID,
+		turn.ID,
+		map[string]interface{}{models.TurnMetaKeyPromptDispatchAttempted: true},
+		nil,
+	)
+	if err != nil || !updated {
+		t.Fatalf("UpdateActiveTurnMetadata: updated=%v err=%v", updated, err)
+	}
+	stale.Metadata["prompt_usage"] = map[string]interface{}{"input_tokens": float64(1)}
+
+	if err := repo.UpdateTurn(ctx, stale); err == nil {
+		t.Fatal("UpdateTurn accepted a stale full metadata snapshot")
+	}
+	persisted, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn(persisted): %v", err)
+	}
+	if attempted, _ := persisted.Metadata[models.TurnMetaKeyPromptDispatchAttempted].(bool); !attempted {
+		t.Fatalf("stale update dropped dispatch-attempt marker: %#v", persisted.Metadata)
+	}
+	if _, exists := persisted.Metadata["prompt_usage"]; exists {
+		t.Fatalf("stale update committed prompt metadata: %#v", persisted.Metadata)
 	}
 }
 

@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
 	usermodels "github.com/kandev/kandev/internal/user/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -232,11 +233,12 @@ func buildTaskDTOsWithSessionInfo(
 		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
 	}
 	if summaryErr == nil && pendingErr == nil {
-		statusSummaries, err = svc.HydrateMissingTaskStatusSummaries(
+		reconciledSummaries, reconcileErr := svc.ReconcileTaskStatusSummaries(
 			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
 		)
-		if err != nil {
-			log.Warn("failed to repair missing task status summaries", zap.Error(err))
+		statusSummaries = reconciledSummaries
+		if reconcileErr != nil {
+			log.Warn("failed to reconcile task status summaries", zap.Error(reconcileErr))
 		}
 	}
 	// Stamp the authoritative per-task queued prompt count onto every summary.
@@ -249,6 +251,10 @@ func buildTaskDTOsWithSessionInfo(
 	if queuedErr != nil {
 		log.Warn("failed to load queued prompt counts for task list, omitting badges", zap.Error(queuedErr))
 	}
+	// Dependency state is derived, never stored, so it is computed per read. One
+	// batched call for the whole list: a per-task query would add a round trip
+	// per card to every board load.
+	dependencyViews := svc.BuildDependencyViews(ctx, tasks)
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		sessions := sessionsByTask[task.ID]
@@ -280,7 +286,8 @@ func buildTaskDTOsWithSessionInfo(
 		)
 		taskDTO.TaskPendingAction = taskPendingActionPtr(sessions, pendingActionsBySession)
 		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
-		taskDTO.StatusSummary = statusSummaries[task.ID]
+		dto.EnrichTaskDependencies(&taskDTO, dependencyProjection(dependencyViews[task.ID]), task)
+		dto.EnrichTaskStatusSummary(&taskDTO, task.ID, statusSummaries)
 		if taskDTO.StatusSummary != nil {
 			switch {
 			case queuedErr != nil:
@@ -409,19 +416,33 @@ func pendingActionPtr(
 	return &value
 }
 
+func pendingActionRevisionPtr(
+	sessionID string,
+	revisionsBySession map[string]models.PendingActionRevision,
+) *models.PendingActionRevision {
+	revision, ok := revisionsBySession[sessionID]
+	if !ok {
+		return nil
+	}
+	return &revision
+}
+
 func (h *TaskHandlers) taskSessionDTO(ctx context.Context, session *models.TaskSession) dto.TaskSessionDTO {
 	result := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&result, h.cancellationPending)
-	if !isInputCapableSession(session) {
-		return result
-	}
-	actions, err := h.service.GetPendingActionsForSessions(ctx, []string{session.ID})
+	actions, revisions, err := h.service.GetPendingActionProjectionsForSessions(
+		ctx,
+		[]string{session.ID},
+	)
 	if err != nil {
 		h.logger.Warn("get task session pending action failed",
 			zap.String("session_id", session.ID), zap.Error(err))
 		return result
 	}
-	result.PendingAction = pendingActionPtr(&session.ID, actions)
+	if isInputCapableSession(session) {
+		result.PendingAction = pendingActionPtr(&session.ID, actions)
+	}
+	result.PendingActionRevision = pendingActionRevisionPtr(session.ID, revisions)
 	return result
 }
 
@@ -451,24 +472,15 @@ func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task sessions not found")
 		return
 	}
-	pendingActionsBySession, pendingErr := pendingActionsForInputCapableSessions(
-		ctx,
-		h.service,
-		map[string][]*models.TaskSession{c.Param("id"): sessions},
-	)
-	if pendingErr != nil {
-		h.logger.Warn("get task session pending actions failed", zap.Error(pendingErr))
-		pendingActionsBySession = map[string]models.TaskPendingAction{}
+	sessionDTOs, projectionErr := h.taskSessionSummariesWithPendingActions(ctx, sessions)
+	if projectionErr != nil {
+		h.logger.Error("get task session pending actions failed", zap.Error(projectionErr))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load task session pending actions"})
+		return
 	}
-	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
-	ids := make([]string, 0, len(sessions))
-	for _, session := range sessions {
-		summary := dto.FromTaskSessionSummary(session)
-		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
-		dto.EnrichCancellationPendingSummary(&summary, h.cancellationPending)
-		summary.PendingAction = pendingActionPtr(&session.ID, pendingActionsBySession)
-		sessionDTOs = append(sessionDTOs, summary)
-		ids = append(ids, session.ID)
+	ids := make([]string, 0, len(sessionDTOs))
+	for _, summary := range sessionDTOs {
+		ids = append(ids, summary.ID)
 	}
 	// Resolve the per-session tool_call counts so the frontend can render
 	// the "ran N commands" segment without fetching every session's full
@@ -751,10 +763,14 @@ type httpCreateTaskRequest struct {
 	ParentID          string                    `json:"parent_id,omitempty"`
 	WorkspacePath     string                    `json:"workspace_path,omitempty"`
 	BlockedBy         []string                  `json:"blocked_by,omitempty"`
-	ProjectID         string                    `json:"project_id,omitempty"`
+	// StartWhenUnblocked records the agent start as an intent consumed by
+	// dependency resolution. nil derives it from StartAgent when BlockedBy is set.
+	StartWhenUnblocked *bool  `json:"start_when_unblocked,omitempty"`
+	ProjectID          string `json:"project_id,omitempty"`
 	// ExternalID is a caller-supplied identity used for create-idempotency
 	// (docs/specs/tasks/external-id-idempotency/spec.md).
-	ExternalID string `json:"external_id,omitempty"`
+	ExternalID string   `json:"external_id,omitempty"`
+	Labels     []string `json:"labels,omitempty"`
 	// Office task-handoffs phase 5 — workspace policy. Optional; same
 	// shape as the MCP create_task_kandev fields.
 	WorkspaceMode         string `json:"workspace_mode,omitempty"`
@@ -787,6 +803,30 @@ var allowedAttachmentTypes = map[string]struct{}{
 	"image":    {},
 	"audio":    {},
 	"resource": {},
+}
+
+func encodeTaskLabels(labels []string) (string, error) {
+	normalized := make([]string, 0, len(labels))
+	seen := make(map[string]struct{}, len(labels))
+	for _, label := range labels {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			continue
+		}
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		normalized = append(normalized, label)
+	}
+	if len(normalized) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 func validateAttachments(items []v1.MessageAttachment) error {
@@ -841,6 +881,12 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	var body httpCreateTaskRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	labels, err := encodeTaskLabels(body.Labels)
+	if err != nil {
+		h.logger.Error("failed to encode task labels", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode task labels"})
 		return
 	}
 	if err := validateAttachments(body.Attachments); err != nil {
@@ -901,25 +947,27 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	}
 
 	result, err := h.service.CreateTask(c.Request.Context(), &service.CreateTaskRequest{
-		WorkspaceID:    body.WorkspaceID,
-		WorkflowID:     body.WorkflowID,
-		WorkflowStepID: body.WorkflowStepID,
-		Title:          title,
-		Description:    description,
-		AutoTitle:      body.AutoTitle,
-		Autopilot:      body.Autopilot,
-		Priority:       body.Priority,
-		State:          body.State,
-		Repositories:   convertToServiceRepos(repos),
-		Position:       body.Position,
-		Metadata:       metadata,
-		DeferredLaunch: deferredLaunch,
-		PlanMode:       body.PlanMode && !body.StartAgent,
-		ParentID:       body.ParentID,
-		WorkspacePath:  body.WorkspacePath,
-		BlockedBy:      body.BlockedBy,
-		ProjectID:      body.ProjectID,
-		ExternalID:     body.ExternalID,
+		WorkspaceID:        body.WorkspaceID,
+		WorkflowID:         body.WorkflowID,
+		WorkflowStepID:     body.WorkflowStepID,
+		Title:              title,
+		Description:        description,
+		AutoTitle:          body.AutoTitle,
+		Autopilot:          body.Autopilot,
+		Priority:           body.Priority,
+		State:              body.State,
+		Repositories:       convertToServiceRepos(repos),
+		Position:           body.Position,
+		Metadata:           metadata,
+		DeferredLaunch:     deferredLaunch,
+		PlanMode:           body.PlanMode && !body.StartAgent,
+		ParentID:           body.ParentID,
+		WorkspacePath:      body.WorkspacePath,
+		BlockedBy:          body.BlockedBy,
+		StartWhenUnblocked: body.StartWhenUnblocked,
+		ProjectID:          body.ProjectID,
+		Labels:             labels,
+		ExternalID:         body.ExternalID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
@@ -986,7 +1034,19 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	// prepareTaskSession's doc comment for why. dispatch is nil unless a
 	// start_agent create genuinely prepared a session; it is only ever acted
 	// on below once settlement has succeeded.
-	dispatch := h.prepareTaskSession(c, &response, taskDTO.ID, body, resolvedStepID, task.QueuedForStepID == "")
+	// A create that declared dependencies records its start as a
+	// start-when-unblocked intent instead of launching now; dependency
+	// resolution consumes it later.
+	startWhenUnblocked := service.ResolveStartWhenUnblocked(&service.CreateTaskRequest{
+		BlockedBy: body.BlockedBy, StartWhenUnblocked: body.StartWhenUnblocked,
+	})
+	response.StartWhenUnblocked = startWhenUnblocked
+
+	// Blockers suppress the immediate launch regardless of start_when_unblocked:
+	// that flag governs the deferred launch only, so `false` must not mean
+	// "start the blocked task now".
+	dispatch := h.prepareTaskSession(c, &response, taskDTO.ID, body, resolvedStepID,
+		task.QueuedForStepID == "" && len(body.BlockedBy) == 0)
 
 	// Settlement (create-sequence step 7): after all required synchronous
 	// work above — including session prepare — and before any asynchronous
@@ -1635,7 +1695,7 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 	result, err := h.service.MoveTaskWithOptions(
 		c.Request.Context(), c.Param("id"),
 		body.WorkflowID, body.WorkflowStepID, body.Position,
-		service.MoveTaskOptions{AllowActivePrimarySession: true},
+		service.MoveTaskOptions{AllowActivePrimarySession: true, StepHistoryActor: wfmodels.StepTransitionActorHuman},
 	)
 	if err != nil {
 		handleSelectedMoveError(c, h.logger, err)

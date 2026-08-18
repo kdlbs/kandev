@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -351,6 +352,14 @@ func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
 		return
 	}
 
+	if rebindErr := p.service.rebindPRWatchRepository(ctx, watch, pr); rebindErr != nil {
+		p.logger.Error("failed to rebind PR watch to detected repository",
+			zap.String("watch_id", watch.ID),
+			zap.Int("pr_number", pr.Number),
+			zap.Error(rebindErr))
+		return
+	}
+
 	// Found a PR — update the watch and create association
 	if updateErr := p.service.store.UpdatePRWatchPRNumber(ctx, watch.ID, pr.Number); updateErr != nil {
 		p.logger.Error("failed to update PR watch with detected PR",
@@ -521,8 +530,8 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 		}
 		// Clean up tasks for merged/closed PRs that the user hasn't opened.
 		if cleaned, err := p.service.CleanupMergedReviewTasks(ctx, watch); err != nil {
-			p.logger.Warn("failed to cleanup merged review tasks",
-				zap.String("watch_id", watch.ID), zap.Error(err))
+			p.logCleanupError("failed to cleanup merged review tasks", err,
+				zap.String("watch_id", watch.ID))
 		} else if cleaned > 0 {
 			p.logger.Info("cleaned up merged review tasks",
 				zap.String("watch_id", watch.ID), zap.Int("deleted", cleaned))
@@ -533,10 +542,23 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 	// would never be re-examined, since the per-watch loop only iterates
 	// enabled watches.
 	if cleaned, err := p.service.CleanupAllOrphanedReviewTasks(ctx); err != nil {
-		p.logger.Warn("failed to sweep orphaned review tasks", zap.Error(err))
+		p.logCleanupError("failed to sweep orphaned review tasks", err)
 	} else if cleaned > 0 {
 		p.logger.Info("swept orphaned review tasks", zap.Int("deleted", cleaned))
 	}
+}
+
+// logCleanupError logs a poller cleanup failure at WARN, except when the error
+// is a context cancellation. That happens when the poll cycle is interrupted by
+// backend shutdown, which is expected teardown rather than a fault, so it is
+// downgraded to DEBUG to keep shutdown logs quiet.
+func (p *Poller) logCleanupError(msg string, err error, fields ...zap.Field) {
+	fields = append(fields, zap.Error(err))
+	if errors.Is(err, context.Canceled) {
+		p.logger.Debug(msg+" (context canceled during shutdown)", fields...)
+		return
+	}
+	p.logger.Warn(msg, fields...)
 }
 
 // issueWatchLoop polls issue watches for new GitHub issues.

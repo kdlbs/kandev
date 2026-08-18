@@ -75,6 +75,11 @@ func (m *MockRepository) CreateAgentProfile(ctx context.Context, profile *models
 	return nil
 }
 
+// DuplicateAgentProfile implements the settings store interface for the resolver test fakes.
+func (m *MockRepository) DuplicateAgentProfile(ctx context.Context, input store.DuplicateAgentProfileInput) error {
+	return nil
+}
+
 func (m *MockRepository) UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
 	if m.updateAgentProfileFn != nil {
 		return m.updateAgentProfileFn(ctx, profile)

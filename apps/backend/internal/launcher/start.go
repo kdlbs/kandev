@@ -92,7 +92,7 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	supervisor := newSupervisorFn()
 	attachSignalsFn(supervisor)
 	shutdownDebugf("runManagedApp signal handler attached")
-	healthToken, err := newHealthToken()
+	healthToken, err := launchHealthToken()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
@@ -134,6 +134,10 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 func logStartup(header string, ports portConfig, dbPath, logLevel string) {
 	fmt.Println("[kandev] " + header)
 	fmt.Println("[kandev] url:", ports.BackendURL)
+	hosts := networkAddressesForBindHost(listHostNetworkAddresses(), os.Getenv("KANDEV_SERVER_HOST"))
+	for _, url := range networkURLsForPort(ports.BackendPort, hosts) {
+		fmt.Println("[kandev]   network:", url)
+	}
 	fmt.Println("[kandev] mcp:", ports.BackendURL+"/mcp")
 	if dbPath != "" {
 		fmt.Println("[kandev] db:", dbPath)

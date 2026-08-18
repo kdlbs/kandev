@@ -2,7 +2,6 @@ import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import "@/app/globals.css";
 import { setOnUnauthorized } from "@/lib/api/client";
-import { PluginModalHost } from "@/components/plugins/plugin-modal-host";
 import { useAppStoreApi, StateProvider } from "@/components/state-provider";
 import { PluginBootBridge } from "@/lib/plugins/plugin-boot-bridge";
 import { preloadLocale } from "@/lib/i18n";
@@ -14,10 +13,12 @@ import type { BootPayload } from "./boot-payload";
 import { RootErrorBoundary, RouteErrorBoundary } from "./app-error-boundary";
 import { SpaRoutes } from "./spa-routes";
 import { installVitePreloadRecovery } from "./vite-preload-recovery";
+import { installBfcacheRestoreReload } from "./bfcache-restore-reload";
 import { markRenderingEngine } from "@/lib/browser/rendering-engine";
 import { applyTitlePrefix } from "@/lib/browser/document-title";
 
 installVitePreloadRecovery();
+installBfcacheRestoreReload();
 markRenderingEngine(document.documentElement);
 
 const AUTH_ROUTE_PATHS = new Set(["/login", "/setup", "/invite"]);
@@ -46,7 +47,6 @@ function AppBody({ payload }: { payload: BootPayload }) {
   return (
     <>
       <PluginBootBridge plugins={payload.plugins} />
-      <PluginModalHost />
       <AppShell>
         <RouteErrorBoundary>
           <SpaRoutes routeData={payload.routeData} />

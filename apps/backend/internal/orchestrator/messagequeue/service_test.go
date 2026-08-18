@@ -24,7 +24,11 @@ func setupService(t *testing.T) *Service {
 		OutputPath: "stderr",
 	})
 	require.NoError(t, err)
-	return NewServiceMemory(log)
+	service := NewServiceMemory(log)
+	// Most legacy service tests exercise explicit FIFO mutation contracts and
+	// intentionally require separate compatible rows.
+	service.SetAutoMergeEnabled(false)
+	return service
 }
 
 func TestQueueMessage(t *testing.T) {
@@ -87,6 +91,7 @@ func TestLoweredQueueCapacityBlocksAdmissionsWithoutPruning(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
 	require.NoError(t, err)
 	svc := NewService(NewMemoryRepository(), 2, log)
+	svc.SetAutoMergeEnabled(false)
 	ctx := context.Background()
 
 	for _, content := range []string{"first", "second"} {
@@ -104,6 +109,7 @@ func TestRestoreMessageBypassesLoweredCapacity(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
 	require.NoError(t, err)
 	svc := NewService(NewMemoryRepository(), 2, log)
+	svc.SetAutoMergeEnabled(false)
 	ctx := context.Background()
 
 	_, err = svc.QueueMessage(ctx, "s", "t", "first", "", QueuedByUser, false, nil)
@@ -134,6 +140,7 @@ func TestRequeueMessageBypassesLoweredCapacity(t *testing.T) {
 			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
 			require.NoError(t, err)
 			svc := NewService(NewMemoryRepository(), 2, log)
+			svc.SetAutoMergeEnabled(false)
 			ctx := context.Background()
 
 			var first *QueuedMessage
@@ -842,9 +849,10 @@ func TestRestoreSession(t *testing.T) {
 	svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"})
 
 	require.NoError(t, svc.RestoreSession(ctx, "s", []QueuedMessage{*original}, &PendingMove{
-		TaskID:         "task-1",
-		WorkflowStepID: "step-a",
-		QueuedAt:       original.QueuedAt,
+		TaskID:          "task-1",
+		WorkflowStepID:  "step-a",
+		QueuedAt:        original.QueuedAt,
+		SenderSessionID: "sender-s",
 	}))
 
 	status := svc.GetStatus(ctx, "s")
@@ -858,6 +866,7 @@ func TestRestoreSession(t *testing.T) {
 	move, ok := svc.TakePendingMove(ctx, "s")
 	require.True(t, ok)
 	assert.Equal(t, "step-a", move.WorkflowStepID)
+	assert.Equal(t, "sender-s", move.SenderSessionID)
 }
 
 func TestPendingMove(t *testing.T) {
@@ -865,13 +874,14 @@ func TestPendingMove(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-2", Position: 3})
+		svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-2", Position: 3, SenderSessionID: "sender-s"})
 
 		got, ok := svc.TakePendingMove(ctx, "s")
 		require.True(t, ok)
 		assert.Equal(t, "t1", got.TaskID)
 		assert.Equal(t, "step-2", got.WorkflowStepID)
 		assert.Equal(t, 3, got.Position)
+		assert.Equal(t, "sender-s", got.SenderSessionID)
 		assert.NotZero(t, got.QueuedAt)
 
 		_, ok = svc.TakePendingMove(ctx, "s")
@@ -981,12 +991,14 @@ func TestMemoryRepository_MergeIntoAbove(t *testing.T) {
 
 	target := &QueuedMessage{
 		SessionID: "s1", TaskID: "t1", Content: "first", QueuedBy: "alice",
+		QueuedAt:    time.Date(2026, 8, 18, 10, 0, 0, 0, time.UTC),
 		Attachments: []MessageAttachment{{Type: "image", Data: "a", MimeType: "image/png"}},
 		Metadata:    map[string]interface{}{MetadataEntityReferences: []apiv1.EntityReference{ref}},
 	}
 	require.NoError(t, repo.Insert(ctx, target, 0))
 	source := &QueuedMessage{
 		SessionID: "s1", TaskID: "t1", Content: "second", QueuedBy: "alice",
+		QueuedAt:    target.QueuedAt.Add(time.Minute),
 		Attachments: []MessageAttachment{{Type: "file", Data: "b", MimeType: "text/plain"}},
 		Metadata:    map[string]interface{}{MetadataEntityReferences: []apiv1.EntityReference{ref}},
 	}
@@ -996,6 +1008,7 @@ func TestMemoryRepository_MergeIntoAbove(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, target.ID, merged.ID)
 	assert.Equal(t, "first\n\nsecond", merged.Content)
+	assert.Equal(t, source.QueuedAt, merged.QueuedAt)
 	assert.Len(t, merged.Attachments, 2)
 	assert.Len(t, entityrefs.NormalizePersisted(merged.Metadata[MetadataEntityReferences]), 1)
 
@@ -1003,6 +1016,7 @@ func TestMemoryRepository_MergeIntoAbove(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, entries, 1)
 	assert.Equal(t, "first\n\nsecond", entries[0].Content)
+	assert.Equal(t, source.QueuedAt, entries[0].QueuedAt)
 }
 
 // TestMemoryRepository_MergeIntoAbove_MixedKindsRejected covers the memory repo

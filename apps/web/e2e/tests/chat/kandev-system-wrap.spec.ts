@@ -23,14 +23,23 @@ async function waitForUserMessage(
   sessionId: string,
   timeoutMs = 20_000,
 ): Promise<{ content: string; raw_content?: string; metadata?: Record<string, unknown> }> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const { messages } = await apiClient.listSessionMessages(sessionId);
-    const user = messages.find((m) => m.author_type === "user");
-    if (user) return user;
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  throw new Error(`No user message recorded on session ${sessionId} within ${timeoutMs}ms`);
+  let user:
+    | Awaited<ReturnType<typeof apiClient.listSessionMessages>>["messages"][number]
+    | undefined;
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(sessionId);
+        user = messages.find((m) => m.author_type === "user");
+        return Boolean(user);
+      },
+      {
+        timeout: timeoutMs,
+        message: `No user message recorded on session ${sessionId}`,
+      },
+    )
+    .toBe(true);
+  return user!;
 }
 
 test.describe("Kandev system prompt wrap on first launch", () => {

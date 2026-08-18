@@ -37,6 +37,10 @@ Task arrives
 `-- Release/versioning? --------------------> /release
 ```
 
+When runtime-flag work also matches new behavior or validation, compose
+`/runtime-feature-flags` with `/spec-driven-development` and `/tdd` as needed.
+Use the smallest covering set and state the order.
+
 ## Operating Rules
 
 1. Work in the user-started primary conversation; do not create a worker session.
@@ -51,6 +55,10 @@ Task arrives
 8. Keep all repository work in the primary conversation. Use durable spec,
    plan, and task files as the user-controlled handoff when switching models.
 9. Product media always invokes `/product-demo-seeding` before `/product-video-capture`, even when a prior seed or capture exists. Re-prove current `origin/main`, disposable runtime/data, and teardown; never capture a developer instance or database.
+10. In Kandev repos, local `/commit`, `/push`, and `/pr` workflows, the repository
+    PR template, and `.github/AGENTS.md` are authoritative for publication.
+    External `github:yeet` is transport fallback only and must still use the
+    local template and checklist; never replace them with a hand-composed body.
 
 ## Upstream Name Mapping
 

@@ -1,7 +1,7 @@
 ---
 status: accepted
 created: 2026-07-27
-updated: 2026-07-29
+updated: 2026-08-12
 owner: kandev
 ---
 
@@ -41,9 +41,10 @@ GitHub-specific retry logic.
   the WIP limit is reached. Same-step promotion clears the queued state without
   changing columns. Feeder promotion moves the task into the destination step
   and clears the queued state.
-- Promotion order is deterministic: position ascending, priority rank
-  (`critical`, `high`, `medium`, `low`, none/unknown), queue time ascending,
-  then task ID ascending.
+- Destination-resident queued tasks are admitted before feeder-resident tasks.
+  Each pool uses position ascending, priority rank (`critical`, `high`,
+  `medium`, `low`, none/unknown), queue time ascending, creation time
+  ascending, then task ID ascending.
 - A promoted task follows the destination step's normal `on_enter` behavior.
   If the original create request explicitly requested an agent start, that
   deferred launch intent also becomes eligible when the task is promoted.
@@ -53,15 +54,38 @@ GitHub-specific retry logic.
   must not both launch. This applies whether the destination has capacity at
   creation (direct admission) or opens capacity during the same create call
   (feeder placement immediately promoted). See "Auto-start idempotency" below.
-- The Kanban board shows queued state on each affected task and continues to
-  show WIP consumption as `admitted/limit`. The total number of cards may be
-  larger than the admitted count.
+- The Kanban board shows admitted cards and queued cards in separate areas of
+  each limited step. It continues to show WIP consumption as
+  `admitted/limit`. The total number of cards may be larger than the admitted
+  count.
+- The initial server-rendered Kanban boot state includes each step's WIP limit
+  and each task's admission and queue metadata, so the admitted count is
+  correct on first paint and does not depend on a later snapshot refresh.
+- The task sidebar shows a queue icon for a destination-resident queued task.
+  Hover or focus on the icon shows the task position, queue size, and
+  destination step. The same focusable icon and tooltip work on touch devices.
 - The rule applies to task creation through the UI, HTTP, WebSocket, MCP, and
   integration watchers, including requests that resolve the workflow start
   step implicitly.
-- Manual moves, drag/drop moves, bulk moves, and workflow-engine transitions
-  into a full limited step retain the existing capacity conflict. This feature
-  changes creation overflow, not explicit move semantics.
+- A task move into a limited step uses the same admission boundary as task
+  creation. If capacity is available, the task is admitted. If the step is
+  full, the task moves into that destination and becomes queued there.
+- Queue admission applies to stepper moves, drag/drop, move menus, bulk moves,
+  HTTP, WebSocket, MCP, approved transitions, and workflow-engine transitions.
+- An automatic workflow transition into a full limited step moves the task into
+  that step's queue. The task waits for admission before Kandev runs the
+  destination step's entry behavior.
+- A move never routes through the destination's configured feeder. A feeder
+  remains an optional automatic intake source for workflows that want it.
+- `pull_from_step_id` is optional. When it is empty, the step does not pull
+  tasks automatically from another step. Direct moves and automatic workflow
+  transitions still queue in the destination when it is full.
+- The workflow step settings page explains that `Pull from` controls automatic
+  feeder intake through an info tooltip. Its help text also explains
+  destination-queue priority and is available by tap or focus on touch
+  devices.
+- A queued move processes the source step's `on_exit` behavior immediately.
+  The destination step's `on_enter` behavior runs only after admission.
 - Ephemeral tasks remain outside workflow WIP and queue behavior.
 
 ### One-hop feeder assumption
@@ -154,6 +178,8 @@ adapters gain:
 - `workflow_step_id` always reports the task's actual visible column.
 - `queued_for_step_id` is omitted or empty for an admitted task.
 - Create responses return success for both admitted and queued tasks.
+- Move responses return success for both admitted and queued tasks. The
+  returned task contains the committed queue metadata.
 - HTTP, WebSocket, and MCP return the existing conflict classification only
   when one-hop placement cannot succeed, such as a configured feeder that is
   also full.
@@ -182,6 +208,14 @@ create for full target without feeder
 
 create for full target with full feeder
   -> conflict + no task
+
+move to target with capacity
+  -> leave source + admitted in target
+
+manual or automatic move to full target
+  -> leave source + resident in target + queued for target
+  -> destination capacity opens
+  -> admitted in place + clear queue
 ```
 
 Capacity reconciliation runs after every event that can open or add slots:
@@ -197,10 +231,14 @@ Reconciliation is idempotent and transactionally claims one slot and one queue
 candidate at a time. Concurrent reconcilers cannot over-admit a step or launch
 the same deferred intent twice.
 
-If a user manually moves a queued task away from its current column, Kandev
-cancels its queue destination and deferred auto-start intent before applying the
-move. The explicit move then follows normal WIP admission rules at the new
-destination.
+If a user moves a queued task away from its current column, Kandev cancels its
+queue destination and deferred auto-start intent before it applies admission at
+the new destination.
+
+A queued move leaves the source step when the move commits. Kandev processes
+the source `on_exit` behavior once. Kandev defers destination `on_enter`,
+auto-start, plan-mode, context-reset, and terminal-step effects until queue
+promotion.
 
 ## Permissions
 
@@ -224,6 +262,8 @@ destination.
   returns the typed conflict without exceeding either admitted limit.
 - If promotion loses a race for the destination slot, the task stays queued and
   is eligible for the next reconciliation.
+- If a move loses a race for the last destination slot, the move still succeeds
+  and commits the task as queued in the destination.
 - If deferred launch fails after promotion, the task remains admitted and the
   launch intent remains retryable and visible through existing task/session
   error reporting. It is not silently returned to the queue.
@@ -273,6 +313,35 @@ destination.
 - **GIVEN** a full destination and a configured feeder that is also WIP-full,
   **WHEN** a new task targets the destination, **THEN** creation returns a
   conflict and no task is persisted; a second feeder is not traversed.
+- **GIVEN** a full WIP-1 `Test` step, **WHEN** a user moves a task from
+  `Improve` to `Test`, **THEN** the move succeeds and the task appears in the
+  queued area of `Test` without consuming WIP.
+- **GIVEN** a full WIP-1 `Test` step, **WHEN** the workflow automatically
+  transitions a task from `Improve` to `Test`, **THEN** the task appears in the
+  queued area of `Test` and waits for admission before `Test` entry behavior.
+- **GIVEN** a step with no `Pull from` selection, **WHEN** a direct or automatic
+  transition targets that full step, **THEN** the task still queues in the
+  destination and no feeder is required.
+- **GIVEN** a user edits a workflow step, **WHEN** the user opens the
+  `Pull from` info tooltip, **THEN** the help identifies it as optional
+  automatic intake and explains destination-queue priority.
+- **GIVEN** two tasks queued in `Test`, **WHEN** capacity opens, **THEN** Kandev
+  admits the first destination-resident queued task before it pulls work from a
+  configured feeder.
+- **GIVEN** a queued task with an existing session, **WHEN** the queue move
+  commits, **THEN** Kandev runs source `on_exit` once and does not run target
+  `on_enter`.
+- **GIVEN** that queued task, **WHEN** Kandev admits it, **THEN** Kandev runs
+  target `on_enter` once and applies the destination's normal state behavior.
+- **GIVEN** a limited Kanban step with admitted and queued tasks, **WHEN** a user
+  views the board, **THEN** the column shows separate active and queued areas
+  with the queued cards in promotion order.
+- **GIVEN** a destination-resident queued task, **WHEN** a user hovers over or
+  focuses its sidebar queue icon, **THEN** the tooltip shows its one-based
+  position, total queue size, and destination step.
+- **GIVEN** the same task on a touch viewport, **WHEN** the task appears in the
+  mobile task switcher, **THEN** focusing or tapping the queue icon exposes the
+  same tooltip without a hover-only action or horizontal page overflow.
 - **GIVEN** an auto-start `Review` step with a WIP limit and a `pull_from_step_id`
   feeder that has capacity, **WHEN** a GitHub review watch creates a task that is
   placed in the feeder and immediately promoted into `Review` during the same
@@ -286,7 +355,7 @@ destination.
   **THEN** its queue destination and deferred auto-start intent are cancelled
   and the move follows the new step's normal WIP rule.
 - **GIVEN** a full limited step, **WHEN** a user drags an unrelated task into
-  it, **THEN** the move is rejected and rolled back as it is today.
+  it, **THEN** the move succeeds and the task becomes queued in that step.
 - **GIVEN** a step with `wip_limit: 0`, **WHEN** tasks are created or moved into
   it, **THEN** they are admitted immediately and no WIP queue is created.
 - **GIVEN** a narrow mobile viewport, **WHEN** the user opens a feeder or
@@ -299,15 +368,18 @@ destination.
 - Replacing `agent_profiles.max_concurrent_sessions`.
 - Recursive feeder-chain routing.
 - Automatically creating feeder steps.
-- Redirecting manual or workflow-engine moves into queues.
 - A GitHub-specific `max_inflight_tasks` replacement; watcher throttles remain
   independent safeguards.
 - Reordering queued tasks through a new dedicated queue-management UI.
+- Moving queued cards between positions inside the queue.
 
 ## Decision
 
 See
 [`../../decisions/2026-07-28-visible-wip-overflow-queues.md`](../../decisions/2026-07-28-visible-wip-overflow-queues.md).
+
+Destination queue admission for task moves:
+[`../../decisions/2026-08-12-queue-task-moves-at-wip-capacity.md`](../../decisions/2026-08-12-queue-task-moves-at-wip-capacity.md).
 
 ## Implementation plan
 
@@ -316,3 +388,6 @@ See
 
 Auto-start idempotency repair (single agent per review task):
 [`../../plans/review-watcher-double-autostart/plan.md`](../../plans/review-watcher-double-autostart/plan.md).
+
+Queued task moves and queue presentation:
+[`../../plans/queued-task-moves/plan.md`](../../plans/queued-task-moves/plan.md).

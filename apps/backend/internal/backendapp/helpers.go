@@ -89,8 +89,6 @@ import (
 	userhandlers "github.com/kandev/kandev/internal/user/handlers"
 	utilitycontroller "github.com/kandev/kandev/internal/utility/controller"
 	utilityhandlers "github.com/kandev/kandev/internal/utility/handlers"
-	voicehandlers "github.com/kandev/kandev/internal/voice/handlers"
-	"github.com/kandev/kandev/internal/voice/transcribe"
 	"github.com/kandev/kandev/internal/webapp"
 	webembedded "github.com/kandev/kandev/internal/webapp/embedded"
 	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
@@ -106,6 +104,14 @@ const (
 	agentShutdownTimeout     = 20 * time.Second
 	httpShutdownTimeout      = 10 * time.Second
 	tracingShutdownTimeout   = 5 * time.Second
+	addedFieldKey            = "added"
+	branchFieldKey           = "branch"
+	branchAdditionsFieldKey  = "branch_additions"
+	branchDeletionsFieldKey  = "branch_deletions"
+	deletedFieldKey          = "deleted"
+	versionFieldKey          = "version"
+	kandevName               = "kandev"
+	startingStatus           = "starting"
 )
 
 // buildSessionDataProvider constructs the session data provider function used by the WebSocket hub
@@ -334,19 +340,24 @@ func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, s
 // stores it under byEnvironmentRepo[envKey][repository_name].
 func buildGitStatusNotification(sessionID, repositoryName string, status client.GitStatusResult) *ws.Message {
 	statusPayload := map[string]interface{}{
-		"branch":           status.Branch,
-		"remote_branch":    status.RemoteBranch,
-		"ahead":            status.Ahead,
-		"behind":           status.Behind,
-		"files":            status.Files,
-		"modified":         status.Modified,
-		"added":            status.Added,
-		"deleted":          status.Deleted,
-		"untracked":        status.Untracked,
-		"renamed":          status.Renamed,
-		"branch_additions": status.BranchAdditions,
-		"branch_deletions": status.BranchDeletions,
-		"is_submodule":     status.IsSubmodule,
+		branchFieldKey:          status.Branch,
+		"remote_branch":         status.RemoteBranch,
+		"head_commit":           status.HeadCommit,
+		"base_commit":           status.BaseCommit,
+		"ahead":                 status.Ahead,
+		"behind":                status.Behind,
+		"remote_ahead":          status.RemoteAhead,
+		"remote_behind":         status.RemoteBehind,
+		"remote_head_commit":    status.RemoteHeadCommit,
+		"files":                 status.Files,
+		"modified":              status.Modified,
+		addedFieldKey:           status.Added,
+		deletedFieldKey:         status.Deleted,
+		"untracked":             status.Untracked,
+		"renamed":               status.Renamed,
+		branchAdditionsFieldKey: status.BranchAdditions,
+		branchDeletionsFieldKey: status.BranchDeletions,
+		"is_submodule":          status.IsSubmodule,
 	}
 	if repositoryName != "" {
 		statusPayload["repository_name"] = repositoryName
@@ -392,18 +403,18 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 		"session_id": sessionID,
 		"timestamp":  metadata["timestamp"],
 		"status": map[string]interface{}{
-			"branch":           latestSnapshot.Branch,
-			"remote_branch":    latestSnapshot.RemoteBranch,
-			"ahead":            latestSnapshot.Ahead,
-			"behind":           latestSnapshot.Behind,
-			"files":            latestSnapshot.Files,
-			"modified":         metadata["modified"],
-			"added":            metadata["added"],
-			"deleted":          metadata["deleted"],
-			"untracked":        metadata["untracked"],
-			"renamed":          metadata["renamed"],
-			"branch_additions": metadata["branch_additions"],
-			"branch_deletions": metadata["branch_deletions"],
+			branchFieldKey:          latestSnapshot.Branch,
+			"remote_branch":         latestSnapshot.RemoteBranch,
+			"ahead":                 latestSnapshot.Ahead,
+			"behind":                latestSnapshot.Behind,
+			"files":                 latestSnapshot.Files,
+			"modified":              metadata["modified"],
+			addedFieldKey:           metadata[addedFieldKey],
+			deletedFieldKey:         metadata[deletedFieldKey],
+			"untracked":             metadata["untracked"],
+			"renamed":               metadata["renamed"],
+			branchAdditionsFieldKey: metadata[branchAdditionsFieldKey],
+			branchDeletionsFieldKey: metadata[branchDeletionsFieldKey],
 		},
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)
@@ -489,13 +500,15 @@ func appendSessionModelsMessage(sessionID string, session *models.TaskSession, l
 	if modelState == nil || (modelState.CurrentModelID == "" && len(modelState.Models) == 0) {
 		return result
 	}
+	snapshot, _ := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
 	notification, err := ws.NewNotification(ws.ActionSessionModelsUpdated, lifecycle.SessionModelsEventPayload{
-		TaskID:         session.TaskID,
-		SessionID:      sessionID,
-		CurrentModelID: modelState.CurrentModelID,
-		Models:         modelState.Models,
-		ConfigOptions:  modelState.ConfigOptions,
-		ConfigBaseline: sessionACPConfigBaseline(session),
+		TaskID:               session.TaskID,
+		SessionID:            sessionID,
+		CurrentModelID:       modelState.CurrentModelID,
+		Models:               modelState.Models,
+		ConfigOptions:        modelState.ConfigOptions,
+		ConfigOptionsSettled: modelState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled,
+		ConfigBaseline:       sessionACPConfigBaseline(session),
 	})
 	if err == nil {
 		result = append(result, notification)
@@ -554,7 +567,6 @@ type routeParams struct {
 	devMode                       bool
 	httpPort                      int
 	features                      config.FeaturesConfig
-	voice                         config.VoiceConfig
 	homeDir                       string
 	interimSettingsInterlockToken string
 	log                           *logger.Logger
@@ -567,8 +579,9 @@ func registerRoutes(p routeParams) {
 	// Per-user task scoping for plan reads/writes (opt-in auth).
 	planService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
 	clarificationStore := clarification.NewStore(2 * time.Hour)
-	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.eventBus, p.log)
+	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.taskSvc, p.log)
 	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
+	p.taskSvc.SetClarificationCanceller(clarificationCanceller)
 
 	// Wire pending clarification requests into the office inbox.
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
@@ -761,9 +774,9 @@ func healthHandler(p routeParams) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !ready.Load() {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"status":  "starting",
-				"service": "kandev",
-				"version": version,
+				"status":        startingStatus,
+				"service":       kandevName,
+				versionFieldKey: version,
 			})
 			return
 		}
@@ -771,10 +784,10 @@ func healthHandler(p routeParams) gin.HandlerFunc {
 			c.Header(desktopHealthTokenHeader, token)
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"status":  "ok",
-			"service": "kandev",
-			"mode":    "websocket+http",
-			"version": version,
+			"status":        "ok",
+			"service":       kandevName,
+			"mode":          "websocket+http",
+			versionFieldKey: version,
 		})
 	}
 }
@@ -860,12 +873,18 @@ func bootActivePlugins(p routeParams) []webapp.ActivePluginPayload {
 	records := p.services.Plugins.ActiveUIPlugins()
 	out := make([]webapp.ActivePluginPayload, 0, len(records))
 	for _, rec := range records {
-		out = append(out, webapp.ActivePluginPayload{
+		entry := webapp.ActivePluginPayload{
 			ID:        rec.ID,
 			Name:      rec.DisplayName,
 			BundleURL: pluginBundleURL(rec),
 			StyleURLs: pluginStyleURLs(rec),
-		})
+		}
+		if rec.RepositoryProviders != nil {
+			providerIDs := make([]string, len(rec.RepositoryProviders))
+			copy(providerIDs, rec.RepositoryProviders)
+			entry.RepositoryProviderIDs = &providerIDs
+		}
+		out = append(out, entry)
 	}
 	return out
 }
@@ -1045,6 +1064,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		})
 	}
 	taskhandlers.RegisterRepositoryRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	taskhandlers.RegisterRepositorySetRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorProfileRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.agentList, p.log)
 	taskhandlers.RegisterEnvironmentRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
@@ -1113,15 +1133,19 @@ func registerSecondaryRoutes(
 	utilityhandlers.RegisterRoutes(p.router, p.utilityCtrl, p.lifecycleMgr, p.hostUtilityMgr, p.services.User, p.log)
 	p.log.Debug("Registered Utility Agents handlers (HTTP)")
 
-	// Voice transcription fallback. The route always mounts, but returns 503
-	// when no API key is configured so the frontend can hide the path.
-	voicehandlers.RegisterRoutes(p.router, transcribe.New(p.voice.OpenAIAPIKey), p.log)
-	p.log.Debug("Registered Voice handlers (HTTP)")
-
 	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log)
 	p.log.Debug("Registered Agent Capabilities handlers (HTTP)")
 
-	clarification.RegisterRoutes(p.router, clarificationStore, p.gateway.Hub, p.msgCreator, p.taskRepo, p.eventBus, p.log)
+	clarification.RegisterRoutes(
+		p.router,
+		clarificationStore,
+		p.gateway.Hub,
+		p.msgCreator,
+		p.taskRepo,
+		p.eventBus,
+		p.orchestratorSvc,
+		p.log,
+	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
 
 	if p.secretsSvc != nil {
@@ -1223,6 +1247,9 @@ func registerSecondaryRoutes(
 			}
 		}
 		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, ghCopier, resolveDefaultWorkspace, p.version, p.log)
+		if p.services.GitHub != nil {
+			ikHandler.SetManagedGitHubForkProber(p.services.GitHub)
+		}
 		ikHandler.SetTemporaryArtifactRegistry(p.temporaryArtifacts)
 		if p.systemSvc != nil {
 			ikHandler.SetLogBundles(p.systemSvc.LogBundles)
@@ -1439,12 +1466,10 @@ func (a githubWorkspaceHealthAdapter) GitHubConnectionHealth(
 		return health.GitHubConnectionHealth{}, err
 	}
 	return health.GitHubConnectionHealth{
-		WorkspaceCount: summary.WorkspaceCount,
-		Active:         summary.Active,
-		Disconnected:   summary.Disconnected,
-		Invalid:        summary.Invalid,
-		Suspended:      summary.Suspended,
-		Revoked:        summary.Revoked,
+		Active:    summary.Active,
+		Invalid:   summary.Invalid,
+		Suspended: summary.Suspended,
+		Revoked:   summary.Revoked,
 	}, nil
 }
 
@@ -1524,6 +1549,7 @@ func registerMCPAndDebugRoutes(
 		p.taskSvc, wfCtrl,
 		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
+	mcpHandlers.SetPluginService(p.services.Plugins)
 	mcpHandlers.SetRemoteContributionService(newRemoteContributionCoordinator(p.services.GitHub, p.services.GitLab))
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)

@@ -19,6 +19,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+func int64Ptr(v int64) *int64 { return &v }
+
 // ── fakes for the narrow Host data API interfaces ───────────────────────
 
 type fakeTaskDataSource struct {
@@ -28,6 +30,10 @@ type fakeTaskDataSource struct {
 	repositories     map[string][]*taskmodels.Repository
 	sessionsByTask   map[string][]*taskmodels.TaskSession
 	executorRunning  map[string]*taskmodels.ExecutorRunning
+	executorProfiles []*taskmodels.ExecutorProfile
+	executors        map[string]*taskmodels.Executor
+	executorErrors   map[string]error
+	executorCalls    int
 
 	// gotIncludeArchived records the includeArchived flag of every
 	// ListTasksByWorkspace call, in call order.
@@ -93,6 +99,18 @@ func (f *fakeTaskDataSource) GetExecutorRunningBySessionID(_ context.Context, se
 		return nil, taskmodels.ErrExecutorRunningNotFound
 	}
 	return running, nil
+}
+
+func (f *fakeTaskDataSource) ListAllExecutorProfiles(context.Context) ([]*taskmodels.ExecutorProfile, error) {
+	return f.executorProfiles, nil
+}
+
+func (f *fakeTaskDataSource) GetExecutor(_ context.Context, id string) (*taskmodels.Executor, error) {
+	f.executorCalls++
+	if err := f.executorErrors[id]; err != nil {
+		return nil, err
+	}
+	return f.executors[id], nil
 }
 
 type fakeWorkflowLister struct {
@@ -166,6 +184,8 @@ type fakeTaskWriter struct {
 	updated     *taskmodels.Task
 	createErr   error
 	updateErr   error
+	deletedIDs  []string
+	deleteErr   error
 }
 
 func (f *fakeTaskWriter) CreateTask(_ context.Context, in TaskCreateInput) (*taskmodels.Task, error) {
@@ -190,6 +210,14 @@ func (f *fakeTaskWriter) UpdateTask(_ context.Context, in TaskUpdateInput) (*tas
 		return f.updated, nil
 	}
 	return &taskmodels.Task{ID: in.ID, Title: "updated"}, nil
+}
+
+func (f *fakeTaskWriter) DeleteTask(_ context.Context, id string) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	f.deletedIDs = append(f.deletedIDs, id)
+	return nil
 }
 
 // fakeMessenger records SendMessage calls, standing in for the backendapp
@@ -218,14 +246,16 @@ func (f *fakeMessenger) SendMessage(_ context.Context, taskID, sessionID, text, 
 
 // fakeTaskStarter records StartTask calls behind CreateTask's start_agent.
 type fakeTaskStarter struct {
-	calls  int
-	lastID string
-	err    error
+	calls      int
+	lastID     string
+	lastLaunch TaskLaunchInput
+	err        error
 }
 
-func (f *fakeTaskStarter) StartTask(_ context.Context, taskID string) error {
+func (f *fakeTaskStarter) StartTask(_ context.Context, taskID string, launch TaskLaunchInput) error {
 	f.calls++
 	f.lastID = taskID
+	f.lastLaunch = launch
 	return f.err
 }
 
@@ -324,6 +354,82 @@ func TestPluginHost_AgentProfiles_DeniedWithoutCapability(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{})
 	_, _, err := d.host.AgentProfiles().List(context.Background(), pluginsdk.Page{})
 	assertPermissionDenied(t, err, "api_read:agent_profiles")
+}
+
+func TestPluginHost_ExecutorProfiles_DeniedWithoutCapability(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{})
+	profiles, ok := pluginsdk.ExecutorProfiles(d.host)
+	if !ok {
+		t.Fatal("plugin host must expose executor-profile reader")
+	}
+	_, _, err := profiles.List(context.Background(), pluginsdk.Page{})
+	assertPermissionDenied(t, err, "api_read:executor_profiles")
+}
+
+func TestPluginHost_ExecutorProfiles_ListsProfilesWithExecutorType(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"executor_profiles"}})
+	d.tasks.executorProfiles = []*taskmodels.ExecutorProfile{{ID: "profile-1", ExecutorID: "executor-1", Name: "Remote default"}}
+	d.tasks.executors = map[string]*taskmodels.Executor{
+		"executor-1": {ID: "executor-1", Type: taskmodels.ExecutorTypeRemoteDocker},
+	}
+
+	profiles, ok := pluginsdk.ExecutorProfiles(d.host)
+	if !ok {
+		t.Fatal("plugin host must expose executor-profile reader")
+	}
+	got, info, err := profiles.List(context.Background(), pluginsdk.Page{})
+	if err != nil {
+		t.Fatalf("List() unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "profile-1" || got[0].DisplayName != "Remote default" || got[0].ExecutorType != "remote_docker" {
+		t.Fatalf("List() = %+v, want mapped executor profile", got)
+	}
+	if info == nil || info.HasMore {
+		t.Fatalf("PageInfo = %+v, want final page", info)
+	}
+}
+
+func TestPluginHost_ExecutorProfiles_KeepsProfileWhenExecutorWasDeleted(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"executor_profiles"}})
+	d.tasks.executorProfiles = []*taskmodels.ExecutorProfile{{ID: "profile-1", ExecutorID: "deleted", Name: "Deleted executor"}}
+	d.tasks.executorErrors = map[string]error{
+		"deleted": fmt.Errorf("lookup: %w", taskmodels.ErrExecutorNotFound),
+	}
+
+	profiles, _ := pluginsdk.ExecutorProfiles(d.host)
+	got, _, err := profiles.List(context.Background(), pluginsdk.Page{})
+	if err != nil {
+		t.Fatalf("List() unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "profile-1" || got[0].ExecutorType != "" {
+		t.Fatalf("List() = %+v, want profile with an empty executor type", got)
+	}
+}
+
+func TestPluginHost_ExecutorProfiles_EnrichesOnlyRequestedPage(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"executor_profiles"}})
+	d.tasks.executorProfiles = []*taskmodels.ExecutorProfile{
+		{ID: "profile-1", ExecutorID: "executor-1"},
+		{ID: "profile-2", ExecutorID: "executor-2"},
+		{ID: "profile-3", ExecutorID: "executor-3"},
+	}
+	d.tasks.executors = map[string]*taskmodels.Executor{
+		"executor-1": {ID: "executor-1", Type: taskmodels.ExecutorTypeLocalDocker},
+		"executor-2": {ID: "executor-2", Type: taskmodels.ExecutorTypeRemoteDocker},
+		"executor-3": {ID: "executor-3", Type: taskmodels.ExecutorTypeSSH},
+	}
+
+	profiles, _ := pluginsdk.ExecutorProfiles(d.host)
+	got, info, err := profiles.List(context.Background(), pluginsdk.Page{Limit: 1})
+	if err != nil {
+		t.Fatalf("List() unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "profile-1" || info == nil || !info.HasMore {
+		t.Fatalf("List() = %+v, info = %+v, want first of three profiles", got, info)
+	}
+	if d.tasks.executorCalls != 1 {
+		t.Fatalf("GetExecutor() calls = %d, want 1 for the returned page", d.tasks.executorCalls)
+	}
 }
 
 func TestPluginHost_Repositories_DeniedWithoutCapability(t *testing.T) {
@@ -445,15 +551,32 @@ func TestPluginHost_Repositories_SucceedsWithCapability(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"repositories"}})
 	branch := "main"
 	d.tasks.repositories = map[string][]*taskmodels.Repository{
-		"ws-1": {{ID: "repo-1", WorkspaceID: "ws-1", Name: "kandev", DefaultBranch: branch}},
+		"ws-1": {{
+			ID: "repo-1", WorkspaceID: "ws-1", Name: "team/kandev", DefaultBranch: branch,
+			SourceType: "provider", Provider: "example-vcs", ProviderRepoID: "repo-42", ProviderHost: "code.example.test",
+			ProviderOwner: "team", ProviderName: "kandev", RemoteURL: "https://code.example.test/scm/team/kandev.git",
+			LocalPath: "/private/checkout", SetupScript: "secret setup", CleanupScript: "secret cleanup", DevScript: "secret dev", CopyFiles: ".env",
+		}},
 	}
 
 	repos, _, err := d.host.Repositories().List(context.Background(), "ws-1", pluginsdk.Page{})
 	if err != nil {
 		t.Fatalf("List() unexpected error: %v", err)
 	}
-	if len(repos) != 1 || repos[0].Name != "kandev" || repos[0].DefaultBranch == nil || *repos[0].DefaultBranch != "main" {
+	if len(repos) != 1 || repos[0].Name != "team/kandev" || repos[0].DefaultBranch == nil || *repos[0].DefaultBranch != "main" {
 		t.Fatalf("List() = %+v, want one kandev repo on main", repos)
+	}
+	if repos[0].SourceType != "provider" || repos[0].ProviderID != "example-vcs" || repos[0].ProviderRepositoryID != "repo-42" || repos[0].ProviderHost != "code.example.test" || repos[0].OwnerOrProject != "team" || repos[0].ProviderName != "kandev" || repos[0].RemoteURL != "https://code.example.test/scm/team/kandev.git" {
+		t.Fatalf("List() = %+v, want provider origin identity", repos[0])
+	}
+}
+
+func TestRepositoryModelToDTO_StripsRemoteURLCredentials(t *testing.T) {
+	dto := repositoryModelToDTO(&taskmodels.Repository{
+		RemoteURL: "https://user:secret@code.example.test/team/repo.git",
+	})
+	if dto.RemoteURL != "https://code.example.test/team/repo.git" {
+		t.Fatalf("RemoteURL = %q, want credential-free URL", dto.RemoteURL)
 	}
 }
 
@@ -634,7 +757,7 @@ func TestPluginHost_Sessions_PaginatesBeforeResolvingACPSessionID(t *testing.T) 
 func TestPluginHost_SessionsCodeStats_DelegatesToAnalyticsService(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"sessions"}})
 	d.codeStats.stats = []*analyticsmodels.SessionCodeStats{
-		{SessionID: "session-1", LinesAddedCommitted: 10, LinesDeletedCommitted: 2, LinesAddedPeakPending: 5, LinesDeletedPeakPending: 1},
+		{SessionID: "session-1", LinesAddedCommitted: int64Ptr(10), LinesDeletedCommitted: int64Ptr(2), LinesAddedPeakPending: 5, LinesDeletedPeakPending: 1},
 	}
 
 	filter := pluginsdk.SessionFilter{TaskIDs: []string{"task-1"}, WorkspaceIDs: []string{"ws-1"}, States: []string{"RUNNING"}}
@@ -659,7 +782,8 @@ func TestPluginHost_SessionsCodeStats_DelegatesToAnalyticsService(t *testing.T) 
 	if d.codeStats.lastFilter.Limit != 11 {
 		t.Errorf("filter.Limit = %d, want 11 (requested 10 + 1 probe row)", d.codeStats.lastFilter.Limit)
 	}
-	if len(stats) != 1 || stats[0].SessionID != "session-1" || stats[0].LinesAddedCommitted != 10 {
+	if len(stats) != 1 || stats[0].SessionID != "session-1" ||
+		!stats[0].CommittedLinesAvailable || stats[0].LinesAddedCommitted != 10 {
 		t.Fatalf("CodeStats() = %+v, want session-1 passed through unchanged", stats)
 	}
 	if info == nil || info.HasMore {
@@ -791,7 +915,7 @@ func TestTaskModelToDTO_MapsFields(t *testing.T) {
 		Identifier:  "KAN-1",
 		IsEphemeral: false,
 		Repositories: []*taskmodels.TaskRepository{
-			{ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0},
+			{ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0, CheckoutBranch: "feature/fix"},
 		},
 		Metadata: map[string]any{"k": "v"},
 	}
@@ -807,7 +931,7 @@ func TestTaskModelToDTO_MapsFields(t *testing.T) {
 	if dto.ParentID == nil || *dto.ParentID != "parent-1" {
 		t.Errorf("ParentID = %v, want parent-1", dto.ParentID)
 	}
-	if len(dto.Repositories) != 1 || dto.Repositories[0].RepositoryID != "repo-1" {
+	if len(dto.Repositories) != 1 || dto.Repositories[0].RepositoryID != "repo-1" || dto.Repositories[0].CheckoutBranch != "feature/fix" {
 		t.Errorf("Repositories = %+v, want one repo-1", dto.Repositories)
 	}
 	if dto.Metadata["k"] != "v" {

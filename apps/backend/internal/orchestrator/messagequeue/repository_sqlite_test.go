@@ -23,11 +23,31 @@ func newTestSQLiteRepo(t *testing.T) Repository {
 	raw.SetMaxIdleConns(1)
 	db := sqlx.NewDb(raw, "sqlite3")
 	t.Cleanup(func() { _ = db.Close() })
+	// Minimal task_sessions table so CountPendingByTaskIDs can join live sessions.
+	// Production shares the task repo schema; the queue package only needs id.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS task_sessions (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("create task_sessions stub: %v", err)
+	}
 	repo, err := NewSQLiteRepository(db, db)
 	if err != nil {
 		t.Fatalf("NewSQLiteRepository: %v", err)
 	}
 	return repo
+}
+
+// seedLiveSessions inserts stub task_sessions rows so queue counts that join
+// live sessions treat these session IDs as present.
+func seedLiveSessions(t *testing.T, repo Repository, sessionIDs ...string) {
+	t.Helper()
+	sqlRepo, ok := repo.(*sqliteRepository)
+	if !ok {
+		t.Fatalf("seedLiveSessions requires *sqliteRepository, got %T", repo)
+	}
+	for _, id := range sessionIDs {
+		if _, err := sqlRepo.db.Exec(`INSERT OR IGNORE INTO task_sessions (id) VALUES (?)`, id); err != nil {
+			t.Fatalf("seed session %s: %v", id, err)
+		}
+	}
 }
 
 func TestSQLiteRepository_InsertList(t *testing.T) {
@@ -60,6 +80,31 @@ func TestSQLiteRepository_InsertList(t *testing.T) {
 	}
 	if entries[0].Position >= entries[1].Position || entries[1].Position >= entries[2].Position {
 		t.Errorf("positions not monotonic: %d, %d, %d", entries[0].Position, entries[1].Position, entries[2].Position)
+	}
+}
+
+func TestSQLiteRepository_HasTaskActivityIndex(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	sqliteRepo := repo.(*sqliteRepository)
+	rows, err := sqliteRepo.db.Queryx(`PRAGMA index_info('idx_queued_messages_task_activity')`)
+	if err != nil {
+		t.Fatalf("inspect task activity index: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	wantColumns := []string{"task_id", "queued_by", "queued_at"}
+	for index, want := range wantColumns {
+		if !rows.Next() {
+			t.Fatalf("task activity index ended at column %d, want %q", index, want)
+		}
+		var seqno, columnID int
+		var column string
+		if err := rows.Scan(&seqno, &columnID, &column); err != nil {
+			t.Fatalf("scan task activity index column %d: %v", index, err)
+		}
+		if column != want {
+			t.Fatalf("task activity index column %d = %q, want %q", index, column, want)
+		}
 	}
 }
 
@@ -754,9 +799,11 @@ func TestSQLiteRepository_ReplaceSessionPreservesQueuedIdentity(t *testing.T) {
 	}
 
 	if err := repo.ReplaceSession(ctx, "s1", []QueuedMessage{*original}, &PendingMove{
-		TaskID:         "t1",
-		WorkflowStepID: "step-a",
-		QueuedAt:       original.QueuedAt,
+		MoveID:          "move-restore",
+		TaskID:          "t1",
+		WorkflowStepID:  "step-a",
+		QueuedAt:        original.QueuedAt,
+		SenderSessionID: "sender-s1",
 	}); err != nil {
 		t.Fatalf("replace session: %v", err)
 	}
@@ -780,6 +827,12 @@ func TestSQLiteRepository_ReplaceSessionPreservesQueuedIdentity(t *testing.T) {
 	if move == nil || move.WorkflowStepID != "step-a" {
 		t.Fatalf("pending move = %#v, want step-a", move)
 	}
+	if move.MoveID != "move-restore" {
+		t.Fatalf("pending move move_id = %q, want move-restore", move.MoveID)
+	}
+	if move.SenderSessionID != "sender-s1" {
+		t.Fatalf("pending move sender_session_id = %q, want sender-s1", move.SenderSessionID)
+	}
 }
 
 func TestSQLiteRepository_PendingMove(t *testing.T) {
@@ -790,12 +843,13 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 		t.Fatalf("expected nil move on empty, got %v err=%v", move, err)
 	}
 
-	move := &PendingMove{TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-A", Position: 0}
+	move := &PendingMove{MoveID: "move-a", TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-A", Position: 0, Actor: "agent", SenderSessionID: "sender-s1"}
 	if err := repo.SetPendingMove(ctx, "s1", move); err != nil {
 		t.Fatalf("set pending: %v", err)
 	}
 
 	// Upsert: replace with new target.
+	move.MoveID = "move-b"
 	move.WorkflowStepID = "step-B"
 	if err := repo.SetPendingMove(ctx, "s1", move); err != nil {
 		t.Fatalf("upsert pending: %v", err)
@@ -808,11 +862,65 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 	if got == nil || got.WorkflowStepID != "step-B" {
 		t.Errorf("expected step-B after upsert, got %+v", got)
 	}
+	if got == nil || got.MoveID != "move-b" {
+		t.Errorf("expected move-b move ID after upsert, got %+v", got)
+	}
+	if got == nil || got.Actor != "agent" {
+		t.Errorf("expected agent actor after upsert, got %+v", got)
+	}
+	if got == nil || got.SenderSessionID != "sender-s1" {
+		t.Errorf("expected sender-s1 sender session after upsert, got %+v", got)
+	}
 
 	// Take again -> nil.
 	got, err = repo.TakePendingMove(ctx, "s1")
 	if err != nil || got != nil {
 		t.Errorf("expected empty after take, got %+v err=%v", got, err)
+	}
+}
+
+func TestSQLiteRepository_PendingMoveSenderSessionMigration(t *testing.T) {
+	raw, err := sql.Open("sqlite3", "file:pending-move-migration?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`
+		CREATE TABLE pending_moves (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL UNIQUE,
+			task_id TEXT NOT NULL DEFAULT '',
+			workflow_id TEXT NOT NULL DEFAULT '',
+			workflow_step_id TEXT NOT NULL DEFAULT '',
+			step_position INTEGER NOT NULL DEFAULT 0,
+			queued_at TIMESTAMP NOT NULL,
+			actor TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+		t.Fatalf("create legacy pending_moves table: %v", err)
+	}
+
+	repo, err := NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	ctx := context.Background()
+	if err := repo.SetPendingMove(ctx, "s1", &PendingMove{
+		MoveID: "move-migrated", TaskID: "t1", WorkflowStepID: "step-a", SenderSessionID: "sender-s1",
+	}); err != nil {
+		t.Fatalf("set migrated pending move: %v", err)
+	}
+	move, err := repo.TakePendingMove(ctx, "s1")
+	if err != nil {
+		t.Fatalf("take migrated pending move: %v", err)
+	}
+	if move == nil || move.SenderSessionID != "sender-s1" {
+		t.Fatalf("migrated pending move = %#v, want sender-s1", move)
+	}
+	if move.MoveID != "move-migrated" {
+		t.Fatalf("migrated pending move move_id = %q, want move-migrated", move.MoveID)
 	}
 }
 

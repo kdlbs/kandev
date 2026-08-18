@@ -19,6 +19,11 @@ import (
 const (
 	parentQuestionStatusPending  = "pending"
 	parentQuestionStatusAnswered = "answered"
+	agentAuthorType              = "agent"
+	parentQuestionIDKey          = "question_id"
+	parentQuestionsKey           = "questions"
+	senderSessionIDKey           = "sender_session_id"
+	senderTaskIDKey              = "sender_task_id"
 )
 
 type parentQuestionRequest struct {
@@ -127,7 +132,7 @@ func (h *Handlers) handleAskParentQuestion(ctx context.Context, msg *ws.Message)
 		TaskSessionID: target.childSession.ID,
 		TaskID:        target.childTask.ID,
 		Content:       req.Questions[0].Prompt,
-		AuthorType:    "agent",
+		AuthorType:    agentAuthorType,
 		Type:          string(models.MessageTypeClarificationRequest),
 		Metadata:      questionMetadata,
 		RequestsInput: true,
@@ -136,37 +141,40 @@ func (h *Handlers) handleAskParentQuestion(ctx context.Context, msg *ws.Message)
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to persist parent question: "+err.Error(), nil)
 	}
 
+	// Establish the child's durable pause before notifying the parent. Parent
+	// replies resume the child immediately, so delivering the question first
+	// lets an answer race the cancellation of the turn that asked it.
+	h.setSessionWaitingForInput(ctx, target.childTask.ID, target.childSession.ID)
+	if h.inputPauser != nil {
+		if _, pauseErr := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), target.childSession.ID); pauseErr != nil {
+			h.logger.Warn("failed to pause autopilot child before parent question delivery",
+				zap.String("question_id", questionID), zap.String("session_id", target.childSession.ID), zap.Error(pauseErr))
+		}
+	}
+
+	// The hard pause cancels the agent turn's request context. Keep delivery
+	// operations independent of that cancellation so the parent still receives
+	// the durable question after the child has been paused.
+	deliveryCtx := context.WithoutCancel(ctx)
 	parentPrompt := formatParentQuestionPrompt(questionID, target.parentTask, target.childTask, req.Questions, req.Context)
 	parentMetadata := map[string]interface{}{
 		models.MetaKeyParentQuestionID:       questionID,
 		models.MetaKeyParentQuestion:         true,
 		models.MetaKeyParentQuestionParentID: target.parentTask.ID,
 		models.MetaKeyParentQuestionChildID:  target.childTask.ID,
-		"sender_task_id":                     target.childTask.ID,
+		senderTaskIDKey:                      target.childTask.ID,
 		"sender_task_title":                  target.childTask.Title,
-		"sender_session_id":                  target.childSession.ID,
+		senderSessionIDKey:                   target.childSession.ID,
 	}
-	if _, dispatchErr := h.dispatchTaskMessage(ctx, target.parentTask.ID, target.parentSession, parentPrompt, parentMetadata, false, false); dispatchErr != nil {
-		_ = h.taskSvc.DeleteMessage(ctx, question.ID)
+	if _, dispatchErr := h.dispatchTaskMessage(deliveryCtx, target.parentTask.ID, target.parentSession, parentPrompt, parentMetadata, false, false); dispatchErr != nil {
+		_ = h.taskSvc.DeleteMessage(deliveryCtx, question.ID)
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to send question to direct parent: "+dispatchErr.Error(), nil)
 	}
 
-	// Mark the child as waiting before asking the orchestrator to cancel the
-	// active turn. The pause is best effort because the durable message and
-	// parent delivery are already committed; a later lifecycle watchdog can
-	// still reconcile the session if the process exits during the race.
-	h.setSessionWaitingForInput(ctx, target.childTask.ID, target.childSession.ID)
-	if h.inputPauser != nil {
-		if _, pauseErr := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), target.childSession.ID); pauseErr != nil {
-			h.logger.Warn("failed to pause autopilot child after parent question",
-				zap.String("question_id", questionID), zap.String("session_id", target.childSession.ID), zap.Error(pauseErr))
-		}
-	}
-
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"question_id":    questionID,
-		"status":         "waiting_for_parent",
-		"parent_task_id": target.parentTask.ID,
+		parentQuestionIDKey: questionID,
+		stopTaskStatusKey:   "waiting_for_parent",
+		"parent_task_id":    target.parentTask.ID,
 	})
 }
 
@@ -222,7 +230,7 @@ func (h *Handlers) markParentQuestionAnswered(ctx context.Context, question *mod
 		return errors.New("parent question is not available")
 	}
 	metadata := cloneTaskMessageMetadataMap(question.Metadata)
-	metadata["status"] = parentQuestionStatusAnswered
+	metadata[stopTaskStatusKey] = parentQuestionStatusAnswered
 	metadata[models.MetaKeyParentQuestionStatus] = parentQuestionStatusAnswered
 	metadata[models.MetaKeyParentQuestionResponse] = answer
 	metadata["parent_question_answered_at"] = time.Now().UTC().Format(time.RFC3339Nano)
@@ -236,7 +244,7 @@ func (h *Handlers) restoreParentQuestionPending(ctx context.Context, question *m
 		return errors.New("parent question is not available")
 	}
 	metadata := cloneTaskMessageMetadataMap(question.Metadata)
-	metadata["status"] = parentQuestionStatusPending
+	metadata[stopTaskStatusKey] = parentQuestionStatusPending
 	metadata[models.MetaKeyParentQuestionStatus] = parentQuestionStatusPending
 	delete(metadata, models.MetaKeyParentQuestionResponse)
 	delete(metadata, "parent_question_answered_at")
@@ -249,10 +257,10 @@ func parentQuestionMetadata(questionID string, parentTask, childTask *models.Tas
 	questionData := make([]clarification.Question, len(questions))
 	copy(questionData, questions)
 	return map[string]interface{}{
-		"status":                             parentQuestionStatusPending,
+		stopTaskStatusKey:                    parentQuestionStatusPending,
 		"pending_id":                         questionID,
-		"question_id":                        questionID,
-		"questions":                          questionData,
+		parentQuestionIDKey:                  questionID,
+		parentQuestionsKey:                   questionData,
 		"question":                           questions[0],
 		"context":                            questionContext,
 		models.MetaKeyParentQuestionID:       questionID,

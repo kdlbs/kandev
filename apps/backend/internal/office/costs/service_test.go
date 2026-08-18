@@ -99,6 +99,8 @@ func newTestCostService(t *testing.T) (*costs.CostService, func(string, ...inter
 	return svc, execSQL
 }
 
+func int64Ptr(v int64) *int64 { return &v }
+
 // TestRecordCostEvent_StoresCallerValues confirms that RecordCostEvent
 // is a verbatim writer post-refactor: cost computation moved to the
 // office subscriber (Layer A / B lookup). The helper now records
@@ -112,7 +114,7 @@ func TestRecordCostEvent_StoresCallerValues(t *testing.T) {
 	event, err := svc.RecordCostEvent(ctx,
 		"sess-1", "task-1", "agent-1", "proj-1",
 		"claude-sonnet-4", "anthropic",
-		int64(1_000_000), int64(500_000), int64(100_000), int64(465),
+		int64(1_000_000), int64(500_000), int64Ptr(100_000), int64(465),
 		false,
 	)
 	if err != nil {
@@ -123,6 +125,12 @@ func TestRecordCostEvent_StoresCallerValues(t *testing.T) {
 	}
 	if event.Estimated {
 		t.Error("estimated should be false")
+	}
+	if event.TokensOut == nil || *event.TokensOut != 100_000 {
+		t.Errorf("tokens_out = %v, want 100000", event.TokensOut)
+	}
+	if event.CostContractVersion == nil || *event.CostContractVersion != models.CostContractVersion {
+		t.Errorf("cost_contract_version = %v, want %d", event.CostContractVersion, models.CostContractVersion)
 	}
 }
 
@@ -135,7 +143,7 @@ func TestRecordCostEvent_FlagsEstimated(t *testing.T) {
 	event, err := svc.RecordCostEvent(ctx,
 		"sess-1", "task-1", "agent-1", "proj-1",
 		"codex-acp-model", "openai",
-		int64(500), int64(0), int64(0), int64(0),
+		int64(500), int64(0), nil, int64(0),
 		true,
 	)
 	if err != nil {
@@ -143,6 +151,33 @@ func TestRecordCostEvent_FlagsEstimated(t *testing.T) {
 	}
 	if !event.Estimated {
 		t.Error("estimated should be true for synthesised codex-acp delta")
+	}
+	if event.TokensOut != nil {
+		t.Errorf("tokens_out = %v, want nil (estimated with unobserved output)", *event.TokensOut)
+	}
+	if event.CostContractVersion == nil || *event.CostContractVersion != models.CostContractVersion {
+		t.Errorf("cost_contract_version = %v, want %d (a manually-recorded row must never read as legacy)",
+			event.CostContractVersion, models.CostContractVersion)
+	}
+}
+
+func TestRecordCostEvent_PreservesObservedZero(t *testing.T) {
+	svc, execSQL := newTestCostService(t)
+	ctx := context.Background()
+
+	execSQL(`INSERT OR IGNORE INTO tasks (id, workspace_id) VALUES ('task-1', 'ws-1')`)
+
+	event, err := svc.RecordCostEvent(ctx,
+		"sess-1", "task-1", "agent-1", "proj-1",
+		"codex-acp-model", "openai",
+		int64(500), int64(0), int64Ptr(0), int64(0),
+		true,
+	)
+	if err != nil {
+		t.Fatalf("RecordCostEvent: %v", err)
+	}
+	if event.TokensOut == nil || *event.TokensOut != 0 {
+		t.Fatalf("tokens_out = %v, want non-nil 0", event.TokensOut)
 	}
 }
 
@@ -156,13 +191,13 @@ func TestGetCostSummary(t *testing.T) {
 	_, _ = svc.RecordCostEvent(ctx,
 		"sess-1", "task-1", "agent-1", "proj-1",
 		"claude-sonnet-4", "anthropic",
-		int64(1_000_000), int64(0), int64(0), int64(300),
+		int64(1_000_000), int64(0), int64Ptr(0), int64(300),
 		false,
 	)
 	_, _ = svc.RecordCostEvent(ctx,
 		"sess-2", "task-2", "agent-1", "proj-1",
 		"claude-sonnet-4", "anthropic",
-		int64(2_000_000), int64(0), int64(0), int64(600),
+		int64(2_000_000), int64(0), int64Ptr(0), int64(600),
 		false,
 	)
 
@@ -188,13 +223,13 @@ func TestGetCostsBreakdown_ReturnsAllViews(t *testing.T) {
 	_, _ = svc.RecordCostEvent(ctx,
 		"sess-1", "task-1", "agent-A", "proj-X",
 		"claude-sonnet-4", "anthropic",
-		int64(1_000_000), int64(0), int64(0), int64(300),
+		int64(1_000_000), int64(0), int64Ptr(0), int64(300),
 		false,
 	)
 	_, _ = svc.RecordCostEvent(ctx,
 		"sess-2", "task-2", "agent-B", "proj-Y",
 		"claude-sonnet-4", "anthropic",
-		int64(2_000_000), int64(0), int64(0), int64(600),
+		int64(2_000_000), int64(0), int64Ptr(0), int64(600),
 		false,
 	)
 
@@ -231,7 +266,7 @@ func TestRecordCostEvent_PersistsRoutedProviderAndModel(t *testing.T) {
 	event, err := svc.RecordCostEvent(ctx,
 		"sess-1", "task-1", "agent-1", "proj-1",
 		"claude-sonnet-4", "anthropic",
-		int64(1_000_000), int64(0), int64(100_000), int64(300),
+		int64(1_000_000), int64(0), int64Ptr(100_000), int64(300),
 		false,
 	)
 	if err != nil {

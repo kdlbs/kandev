@@ -9,6 +9,8 @@ import (
 )
 
 const healthTokenBytes = 32
+const desktopNativeNotificationsEnabled = "true"
+const backendPIDFileEnv = "KANDEV_BACKEND_PID_FILE"
 
 func newHealthToken() (string, error) {
 	token := make([]byte, healthTokenBytes)
@@ -16,6 +18,15 @@ func newHealthToken() (string, error) {
 		return "", fmt.Errorf("generate backend health token: %w", err)
 	}
 	return hex.EncodeToString(token), nil
+}
+
+func launchHealthToken() (string, error) {
+	if os.Getenv("KANDEV_DESKTOP_NATIVE_NOTIFICATIONS") == desktopNativeNotificationsEnabled {
+		if token := os.Getenv("KANDEV_DESKTOP_HEALTH_TOKEN"); token != "" {
+			return token, nil
+		}
+	}
+	return newHealthToken()
 }
 
 func backendEnv(ports portConfig, logLevel, consoleLogLevel string, debug bool, healthToken string, extra []string) []string {
@@ -54,6 +65,16 @@ func upsertEnv(env []string, key, value string) []string {
 		}
 	}
 	return append(env, prefix+value)
+}
+
+func processEnvValue(env []string, key string) string {
+	prefix := key + "="
+	for _, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			return strings.TrimPrefix(item, prefix)
+		}
+	}
+	return ""
 }
 
 func setEnvIfUnset(env []string, key, value string) []string {

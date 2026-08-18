@@ -18,6 +18,7 @@ export const defaultKanbanState: KanbanSliceState = {
     activeSessionId: null,
     pinnedSessionId: null,
     lastSessionByTaskId: {},
+    resumeSkippedSessionIds: {},
   },
 };
 
@@ -91,6 +92,61 @@ function createSidebarArchivedTaskActions(set: KanbanSliceSet): SidebarArchivedT
   };
 }
 
+type TaskActions = Pick<
+  KanbanSliceActions,
+  | "setActiveTask"
+  | "setActiveSession"
+  | "setActiveSessionAuto"
+  | "clearActiveSession"
+  | "setResumeSkipped"
+>;
+
+function createTaskActions(set: KanbanSliceSet): TaskActions {
+  return {
+    setActiveTask: (taskId) =>
+      set((draft) => {
+        draft.tasks.activeTaskId = taskId;
+        draft.tasks.activeSessionId = null;
+        // New task → drop any pin; the pin only applies within a single task.
+        draft.tasks.pinnedSessionId = null;
+      }),
+    setActiveSession: (taskId, sessionId) =>
+      set((draft) => {
+        draft.tasks.activeTaskId = taskId;
+        draft.tasks.activeSessionId = sessionId;
+        // User-initiated selection: pin so WS auto-replace handoff respects it.
+        draft.tasks.pinnedSessionId = sessionId;
+        draft.tasks.lastSessionByTaskId[taskId] = sessionId;
+      }),
+    setActiveSessionAuto: (taskId, sessionId) =>
+      set((draft) => {
+        if (draft.tasks.activeTaskId !== taskId) {
+          draft.tasks.pinnedSessionId = null;
+        }
+        draft.tasks.activeTaskId = taskId;
+        draft.tasks.activeSessionId = sessionId;
+        draft.tasks.lastSessionByTaskId[taskId] = sessionId;
+      }),
+    clearActiveSession: () =>
+      set((draft) => {
+        draft.tasks.activeSessionId = null;
+        draft.tasks.pinnedSessionId = null;
+      }),
+    setResumeSkipped: (sessionId, skipped) =>
+      set((draft) => {
+        if (skipped) {
+          // Recording is guarded at the call site (use-session-resumption's
+          // skip branch reads the live session row with typed store access),
+          // so a stale status can never mark a starting/running session as
+          // resume-skipped. The slice stays a plain keyed write.
+          draft.tasks.resumeSkippedSessionIds[sessionId] = true;
+        } else {
+          delete draft.tasks.resumeSkippedSessionIds[sessionId];
+        }
+      }),
+  };
+}
+
 export const createKanbanSlice: StateCreator<
   KanbanSlice,
   [["zustand/immer", never]],
@@ -99,6 +155,7 @@ export const createKanbanSlice: StateCreator<
 > = (set) => ({
   ...defaultKanbanState,
   ...createSidebarArchivedTaskActions(set),
+  ...createTaskActions(set),
   resetKanbanWorkspaceContext: () =>
     set((draft) => {
       const nextGeneration = draft.workspaceContextGeneration + 1;
@@ -125,35 +182,6 @@ export const createKanbanSlice: StateCreator<
         if (!workflowIds.includes(item.id)) reordered.push(item);
       }
       draft.workflows.items = reordered;
-    }),
-  setActiveTask: (taskId) =>
-    set((draft) => {
-      draft.tasks.activeTaskId = taskId;
-      draft.tasks.activeSessionId = null;
-      // New task → drop any pin; the pin only applies within a single task.
-      draft.tasks.pinnedSessionId = null;
-    }),
-  setActiveSession: (taskId, sessionId) =>
-    set((draft) => {
-      draft.tasks.activeTaskId = taskId;
-      draft.tasks.activeSessionId = sessionId;
-      // User-initiated selection: pin so WS auto-replace handoff respects it.
-      draft.tasks.pinnedSessionId = sessionId;
-      draft.tasks.lastSessionByTaskId[taskId] = sessionId;
-    }),
-  setActiveSessionAuto: (taskId, sessionId) =>
-    set((draft) => {
-      if (draft.tasks.activeTaskId !== taskId) {
-        draft.tasks.pinnedSessionId = null;
-      }
-      draft.tasks.activeTaskId = taskId;
-      draft.tasks.activeSessionId = sessionId;
-      draft.tasks.lastSessionByTaskId[taskId] = sessionId;
-    }),
-  clearActiveSession: () =>
-    set((draft) => {
-      draft.tasks.activeSessionId = null;
-      draft.tasks.pinnedSessionId = null;
     }),
   setWorkflowSnapshot: (workflowId, data) =>
     set((draft) => {

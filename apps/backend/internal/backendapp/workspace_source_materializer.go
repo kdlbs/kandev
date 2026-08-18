@@ -122,7 +122,7 @@ func (m *workspaceSourceMaterializer) MaterializeWorkspaceSources(ctx context.Co
 }
 
 func (m *workspaceSourceMaterializer) materializeHostWorkspaceSources(ctx context.Context, taskID string, state *workspaceSourceMaterializationState, batch *models.WorkspaceSourceBatch) (_ *taskservice.WorkspaceSourceMaterializationResult, err error) {
-	if err := m.ensureHostRepositoryPaths(ctx, state); err != nil {
+	if err := m.ensureHostRepositoryPaths(ctx, taskID, state); err != nil {
 		return nil, err
 	}
 	materialization, err := m.prepareHostWorkspaceMaterialization(ctx, taskID, state, batch)
@@ -403,7 +403,10 @@ func workspaceSourceBatchIDs(batch *models.WorkspaceSourceBatch) (map[string]boo
 	return repositories, folders
 }
 
-func (m *workspaceSourceMaterializer) ensureHostRepositoryPaths(ctx context.Context, state *workspaceSourceMaterializationState) error {
+func (m *workspaceSourceMaterializer) ensureHostRepositoryPaths(
+	ctx context.Context, taskID string, state *workspaceSourceMaterializationState,
+) error {
+	sessionID := workspaceSourceCredentialSessionID(state.sessions)
 	for _, taskRepository := range state.repositories {
 		repository := state.entities[taskRepository.RepositoryID]
 		if repository == nil || repository.LocalPath != "" {
@@ -415,7 +418,10 @@ func (m *workspaceSourceMaterializer) ensureHostRepositoryPaths(ctx context.Cont
 		if m.hostCloner == nil {
 			return fmt.Errorf("host repository cloner is unavailable for %q", repository.Name)
 		}
-		path, err := m.hostCloner.EnsureRepositoryCloned(ctx, repository)
+		if sessionID == "" {
+			return fmt.Errorf("active task session is unavailable for repository %q", repository.Name)
+		}
+		path, err := m.hostCloner.EnsureRepositoryClonedForSession(ctx, taskID, sessionID, repository)
 		if err != nil {
 			return fmt.Errorf("clone repository %q: %w", repository.Name, err)
 		}
@@ -425,6 +431,20 @@ func (m *workspaceSourceMaterializer) ensureHostRepositoryPaths(ctx context.Cont
 		repository.LocalPath = path
 	}
 	return nil
+}
+
+func workspaceSourceCredentialSessionID(sessions []*models.TaskSession) string {
+	for _, session := range sessions {
+		if session != nil && session.IsPrimary && session.ID != "" {
+			return session.ID
+		}
+	}
+	for _, session := range sessions {
+		if session != nil && session.ID != "" {
+			return session.ID
+		}
+	}
+	return ""
 }
 
 func (m *workspaceSourceMaterializer) loadMaterializationState(ctx context.Context, taskID string) (*workspaceSourceMaterializationState, error) {

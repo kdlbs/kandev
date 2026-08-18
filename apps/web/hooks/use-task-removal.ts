@@ -7,11 +7,19 @@ import { linkToTaskOverview, replaceTaskUrl } from "@/lib/links";
 import { fetchTask, listTaskSessions } from "@/lib/api";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import { getRecentTasks } from "@/lib/recent-tasks";
+import { createAbortError, isAbortError } from "@/lib/utils/abort-error";
 
 type TaskRemovalOptions = {
   store: StoreApi<AppState>;
   /** Whether to call performLayoutSwitch when switching sessions (desktop sidebar uses this) */
   useLayoutSwitch?: boolean;
+};
+
+export type TaskSessionLoadOptions = {
+  /** Ignore the local task-session cache and request an authoritative snapshot. */
+  force?: boolean;
+  /** Cancel the authoritative request when its task selection is superseded. */
+  signal?: AbortSignal;
 };
 
 type RemoveFromBoardOptions = {
@@ -28,67 +36,124 @@ type RemoveFromBoardOptions = {
   wasActiveSessionId?: string | null;
   /** Switch away from the task without removing it from board state yet. */
   switchOnly?: boolean;
+  /** Exclude the removed task and every cached descendant from candidates. */
+  excludeTaskTree?: boolean;
+  /** Reuse the tree captured before an archive can prune cached descendants. */
+  excludedTaskIds?: ReadonlySet<string>;
 };
 
 type RemoveFromBoardResult = {
   switchedTaskId: string | null;
+  excludedTaskIds?: ReadonlySet<string>;
 };
+
+const taskSessionLoadGenerations = new WeakMap<StoreApi<AppState>, Map<string, number>>();
+
+function beginTaskSessionLoad(store: StoreApi<AppState>, taskId: string): number {
+  let generations = taskSessionLoadGenerations.get(store);
+  if (!generations) {
+    generations = new Map();
+    taskSessionLoadGenerations.set(store, generations);
+  }
+  const generation = (generations.get(taskId) ?? 0) + 1;
+  generations.set(taskId, generation);
+  return generation;
+}
+
+function taskSessionLoadIsCurrent(
+  store: StoreApi<AppState>,
+  taskId: string,
+  generation: number,
+): boolean {
+  return taskSessionLoadGenerations.get(store)?.get(taskId) === generation;
+}
 
 function cachedSessionsHaveEnvIds(sessions: TaskSession[]): boolean {
   return sessions.length === 0 || sessions.every((session) => !!session.task_environment_id);
 }
 
+function taskSessionListRequestOptions(signal?: AbortSignal) {
+  return signal ? { cache: "no-store" as const, init: { signal } } : { cache: "no-store" as const };
+}
+
+function commitTaskSessionLoad(
+  store: StoreApi<AppState>,
+  taskId: string,
+  generation: number,
+  sessions: TaskSession[],
+  force: boolean,
+): TaskSession[] {
+  if (taskSessionLoadIsCurrent(store, taskId, generation)) {
+    store.getState().setTaskSessionsForTask(taskId, sessions);
+    return sessions;
+  }
+  // Forced callers use this result to choose a pending-action owner. Never
+  // let a superseded response escape even though its cache write was gated.
+  if (force) {
+    throw createAbortError("Task session load was superseded");
+  }
+  return store.getState().taskSessionsByTask.itemsByTaskId[taskId] ?? [];
+}
+
 async function loadTaskSessionsForTaskFromStore(
   store: StoreApi<AppState>,
   taskId: string,
+  options?: TaskSessionLoadOptions,
 ): Promise<TaskSession[]> {
   const state = store.getState();
+  const force = options?.force === true;
+  const signal = options?.signal;
   const cachedSessions = state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
-  if (state.taskSessionsByTask.loadedByTaskId[taskId]) {
+  if (!force && state.taskSessionsByTask.loadedByTaskId[taskId]) {
     if (cachedSessionsHaveEnvIds(cachedSessions)) return cachedSessions;
   }
-  if (state.taskSessionsByTask.loadingByTaskId[taskId]) {
+  if (!force && state.taskSessionsByTask.loadingByTaskId[taskId]) {
     return cachedSessions;
   }
+  const loadGeneration = beginTaskSessionLoad(store, taskId);
   store.getState().setTaskSessionsLoading(taskId, true);
   try {
-    const response = await listTaskSessions(taskId, { cache: "no-store" });
-    store.getState().setTaskSessionsForTask(taskId, response.sessions ?? []);
-    return response.sessions ?? [];
+    const response = await listTaskSessions(taskId, taskSessionListRequestOptions(signal));
+    const sessions = response.sessions ?? [];
+    return commitTaskSessionLoad(store, taskId, loadGeneration, sessions, force);
   } catch (error) {
-    console.error("Failed to load task sessions:", error);
-    store.getState().setTaskSessionsForTask(taskId, []);
-    return [];
+    if (!isAbortError(error)) console.error("Failed to load task sessions:", error);
+    if (force) throw error;
+    return cachedSessions;
   } finally {
-    store.getState().setTaskSessionsLoading(taskId, false);
+    if (taskSessionLoadIsCurrent(store, taskId, loadGeneration)) {
+      store.getState().setTaskSessionsLoading(taskId, false);
+    }
   }
 }
 
-function removeTaskFromSnapshots(store: StoreApi<AppState>, taskId: string): void {
+function removeTasksFromSnapshots(store: StoreApi<AppState>, taskIds: ReadonlySet<string>): void {
   const currentSnapshots = store.getState().kanbanMulti.snapshots;
   for (const [wfId, snapshot] of Object.entries(currentSnapshots)) {
-    const hadTask = snapshot.tasks.some((t: KanbanState["tasks"][number]) => t.id === taskId);
+    const hadTask = snapshot.tasks.some((t: KanbanState["tasks"][number]) => taskIds.has(t.id));
     if (hadTask) {
       store.getState().setWorkflowSnapshot(wfId, {
         ...snapshot,
-        tasks: snapshot.tasks.filter((t: KanbanState["tasks"][number]) => t.id !== taskId),
+        tasks: snapshot.tasks.filter((t: KanbanState["tasks"][number]) => !taskIds.has(t.id)),
       });
     }
   }
 
   const currentKanbanTasks = store.getState().kanban.tasks;
-  if (currentKanbanTasks.some((t: KanbanState["tasks"][number]) => t.id === taskId)) {
+  if (currentKanbanTasks.some((t: KanbanState["tasks"][number]) => taskIds.has(t.id))) {
     store.setState((state) => ({
       ...state,
       kanban: {
         ...state.kanban,
-        tasks: state.kanban.tasks.filter((t: KanbanState["tasks"][number]) => t.id !== taskId),
+        tasks: state.kanban.tasks.filter((t: KanbanState["tasks"][number]) => !taskIds.has(t.id)),
       },
     }));
   }
 }
 
 function collectRemainingTasks(store: StoreApi<AppState>): KanbanState["tasks"] {
+  // Keep candidate ordering snapshot-first; task-tree exclusion follows the
+  // same precedence and uses kanban.tasks only to fill missing rows.
   const allRemainingTasks: KanbanState["tasks"] = [];
   for (const snapshot of Object.values(store.getState().kanbanMulti.snapshots)) {
     allRemainingTasks.push(...snapshot.tasks);
@@ -99,6 +164,52 @@ function collectRemainingTasks(store: StoreApi<AppState>): KanbanState["tasks"] 
   return allRemainingTasks;
 }
 
+function collectTaskTreeIds(
+  rootTaskId: string,
+  taskLists: Array<KanbanState["tasks"]>,
+): ReadonlySet<string> {
+  const tasksById = new Map<string, KanbanState["tasks"][number]>();
+  for (const tasks of taskLists) {
+    for (const task of tasks) {
+      if (!tasksById.has(task.id)) tasksById.set(task.id, task);
+    }
+  }
+
+  const childrenByParentId = new Map<string, string[]>();
+  for (const task of tasksById.values()) {
+    if (!task.parentTaskId) continue;
+    const children = childrenByParentId.get(task.parentTaskId) ?? [];
+    children.push(task.id);
+    childrenByParentId.set(task.parentTaskId, children);
+  }
+
+  const excludedTaskIds = new Set<string>([rootTaskId]);
+  const pendingParentIds = [rootTaskId];
+  while (pendingParentIds.length > 0) {
+    const parentId = pendingParentIds.pop();
+    if (!parentId) continue;
+    for (const childId of childrenByParentId.get(parentId) ?? []) {
+      if (excludedTaskIds.has(childId)) continue;
+      excludedTaskIds.add(childId);
+      pendingParentIds.push(childId);
+    }
+  }
+  return excludedTaskIds;
+}
+
+function collectTaskTreeIdsFromStore(
+  store: StoreApi<AppState>,
+  rootTaskId: string,
+): ReadonlySet<string> {
+  const state = store.getState();
+  return collectTaskTreeIds(rootTaskId, [
+    ...Object.values(state.kanbanMulti.snapshots).map((snapshot) => snapshot.tasks),
+    // Snapshots are the optimistic source used by the task switchers. The
+    // canonical board fills gaps without overriding a duplicate snapshot row.
+    state.kanban.tasks,
+  ]);
+}
+
 /**
  * Orders next-task candidates by recent use, then board order, without trusting
  * either list as proof that a task still exists.
@@ -106,8 +217,11 @@ function collectRemainingTasks(store: StoreApi<AppState>): KanbanState["tasks"] 
 function orderedTaskCandidates(
   remainingTasks: KanbanState["tasks"],
   removedTaskId: string,
+  excludedTaskIds?: ReadonlySet<string>,
 ): KanbanState["tasks"] {
-  const candidates = remainingTasks.filter((task) => task.id !== removedTaskId);
+  const candidates = remainingTasks.filter(
+    (task) => task.id !== removedTaskId && !excludedTaskIds?.has(task.id),
+  );
   const remainingById = new Map(candidates.map((task) => [task.id, task]));
   const ordered: KanbanState["tasks"] = [];
   for (const recent of getRecentTasks()) {
@@ -139,8 +253,9 @@ export async function selectNextTaskAfterRemoval(
   remainingTasks: KanbanState["tasks"],
   removedTaskId: string,
   isLive: (taskId: string) => Promise<boolean> = taskIsLive,
+  excludedTaskIds?: ReadonlySet<string>,
 ): Promise<KanbanState["tasks"][number] | null> {
-  for (const task of orderedTaskCandidates(remainingTasks, removedTaskId)) {
+  for (const task of orderedTaskCandidates(remainingTasks, removedTaskId, excludedTaskIds)) {
     if (await isLive(task.id)) return task;
   }
   return null;
@@ -236,7 +351,8 @@ function shouldSwitchAfterRemoval(
  */
 export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOptions) {
   const loadTaskSessionsForTask = useCallback(
-    (taskId: string) => loadTaskSessionsForTaskFromStore(store, taskId),
+    (taskId: string, options?: TaskSessionLoadOptions) =>
+      loadTaskSessionsForTaskFromStore(store, taskId, options),
     [store],
   );
 
@@ -253,15 +369,29 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
    */
   const removeTaskFromBoard = useCallback(
     async (taskId: string, opts?: RemoveFromBoardOptions): Promise<RemoveFromBoardResult> => {
-      if (!opts?.switchOnly) removeTaskFromSnapshots(store, taskId);
+      const excludedTaskIds = opts?.excludeTaskTree
+        ? (opts.excludedTaskIds ?? collectTaskTreeIdsFromStore(store, taskId))
+        : undefined;
+      if (!opts?.switchOnly) {
+        // A cascade archive publishes one task.updated event per descendant,
+        // but those events can arrive after the archive request resolves. The
+        // cached tree is already known to be removed at this point, so prune
+        // it optimistically and let WS updates reconcile any other clients.
+        removeTasksFromSnapshots(store, excludedTaskIds ?? new Set([taskId]));
+      }
       const allRemainingTasks = collectRemainingTasks(store);
 
       if (!shouldSwitchAfterRemoval(store, taskId, opts)) {
-        return { switchedTaskId: null };
+        return { switchedTaskId: null, excludedTaskIds };
       }
 
       const oldEnvId = resolveOldEnvId(store, opts);
-      const nextTask = await selectNextTaskAfterRemoval(allRemainingTasks, taskId);
+      const nextTask = await selectNextTaskAfterRemoval(
+        allRemainingTasks,
+        taskId,
+        taskIsLive,
+        excludedTaskIds,
+      );
       if (nextTask) {
         await switchToNextTask({
           store,
@@ -270,11 +400,14 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
           useLayoutSwitch,
           loadTaskSessionsForTask,
         });
-        return { switchedTaskId: nextTask.id };
+        return { switchedTaskId: nextTask.id, excludedTaskIds };
       }
 
+      // When switchOnly=true and no safe candidate exists, defer Home until
+      // the post-archive cleanup confirms that the request succeeded.
+      if (opts?.switchOnly) return { switchedTaskId: null, excludedTaskIds };
       window.location.href = linkToTaskOverview();
-      return { switchedTaskId: null };
+      return { switchedTaskId: null, excludedTaskIds };
     },
     [store, useLayoutSwitch, loadTaskSessionsForTask],
   );

@@ -309,17 +309,17 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
       try {
         const result = await discard([path], repositoryName);
         if (result.success)
-          toast({ title: "Changes discarded", description: path, variant: "success" });
+          toast({ title: t("review:changesDiscarded"), description: path, variant: "success" });
         else
           toast({
-            title: "Discard failed",
+            title: t("review:discardFailed"),
             description: result.error || t("common:anErrorOccurred"),
             variant: "error",
           });
       } catch (e) {
         toast({
-          title: "Discard failed",
-          description: e instanceof Error ? e.message : "An error occurred",
+          title: t("review:discardFailed"),
+          description: e instanceof Error ? e.message : t("common:anErrorOccurred"),
           variant: "error",
         });
       }

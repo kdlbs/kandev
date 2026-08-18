@@ -258,5 +258,22 @@
   "user": "Utilizador",
   "usesTheLocalDockerDaemonOn": "Usa o daemon local do Docker nesta máquina.",
   "value": "Valor",
-  "verifyingConnection": "A verificar a ligação..."
+  "verifyingConnection": "A verificar a ligação...",
+  "profileNameExample": "Produção, Desenvolvimento",
+  "portableConfigAvailable": "Disponível",
+  "portableConfigBundleClaudeSettings": "Copiar definições do Claude",
+  "portableConfigBundleCodexConfig": "Copiar configuração do Codex",
+  "portableConfigBundleGeneric": "Configuração do agente ({{id}})",
+  "portableConfigBundleMockSettings": "Copiar definições do agente simulado",
+  "portableConfigBundleOpenCodeConfig": "Copiar configuração do OpenCode",
+  "portableConfigFileMapping": "{{source}} para {{target}}",
+  "portableConfigInfoCopyTiming": "O Kandev copia os ficheiros selecionados sem alterações apenas durante o aprovisionamento de raiz ou a reinicialização do ambiente. Uma cópia nova pode substituir um ficheiro de destino existente. As retomas a quente mantêm o ambiente existente.",
+  "portableConfigInfoErrors": "Ficheiros opcionais em falta ou ilegíveis são ignorados com um aviso e não impedem o arranque. Os ficheiros podem conter segredos ou valores de ambiente.",
+  "portableConfigInfoLabel": "Detalhes da configuração portátil do agente",
+  "portableConfigInfoScope": "Apenas os ficheiros da lista de permissões são copiados. Um ficheiro pode adicionar hooks ou comandos, alterar modelos, permissões, servidores MCP ou endpoints, e conter caminhos do anfitrião que não funcionam no executor. Os ficheiros de autenticação e os pacotes de configuração são escolhas separadas.",
+  "portableConfigInfoSsh": "Em SSH, o destino é a pasta pessoal partilhada do utilizador remoto configurado e pode substituir configuração usada por outros processos nesse anfitrião.",
+  "portableConfigInfoTitle": "Configuração portátil do agente",
+  "portableConfigNotFound": "Não encontrado",
+  "portableConfigNotFoundHint": "Isto é uma sugestão de edição. Pode guardar o perfil e adicionar o ficheiro mais tarde.",
+  "portableConfigTitle": "Configuração do agente"
 }

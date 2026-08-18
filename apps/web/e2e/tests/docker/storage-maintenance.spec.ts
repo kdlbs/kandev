@@ -1,8 +1,16 @@
 import { execFileSync } from "node:child_process";
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/docker-test-base";
-import { E2E_IMAGE_TAG, removeKandevContainers } from "../../fixtures/docker-probe";
-import { dockerInspectExists, dockerRemove } from "../../helpers/docker";
+import {
+  E2E_DOCKER_SCOPE,
+  E2E_IMAGE_TAG,
+  waitForScopedKandevContainersRemoved,
+} from "../../fixtures/docker-probe";
+import {
+  dockerInspectExists,
+  dockerRemove,
+  waitForDockerContainerRemoved,
+} from "../../helpers/docker";
 
 function createStoppedContainer(labels: string[]): string {
   const args = ["create"];
@@ -23,7 +31,7 @@ async function openStorageSettings(page: Page): Promise<void> {
   // document request once if the first load is interrupted under CI load.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await page.goto("/settings/system/storage", {
+      await page.goto("/settings/system/data-storage", {
         waitUntil: "commit",
         timeout: 20_000,
       });
@@ -52,32 +60,68 @@ async function refreshStorageOverview(page: Page): Promise<void> {
   });
 }
 
+test.describe.serial("process-scoped container cleanup", () => {
+  let previousTestContainer = "";
+
+  // Keep this boundary local to the serial regression too. The first test
+  // intentionally leaves a stopped container behind, and the next test must
+  // begin only after the process-scoped sweep has completed.
+  test.afterEach(async () => {
+    await waitForScopedKandevContainersRemoved(E2E_DOCKER_SCOPE, 60_000);
+  });
+
+  test.afterAll(() => {
+    if (previousTestContainer && dockerInspectExists(previousTestContainer)) {
+      dockerRemove(previousTestContainer);
+    }
+  });
+
+  test("allows a test to leave a process-owned container", () => {
+    previousTestContainer = createStoppedContainer([
+      "kandev.managed=true",
+      `kandev.e2e.run=${E2E_DOCKER_SCOPE}`,
+      "kandev.task_id=e2e-cleanup-boundary",
+    ]);
+    expect(dockerInspectExists(previousTestContainer)).toBe(true);
+  });
+
+  test("starts the next test without the previous process-owned container", async () => {
+    await waitForDockerContainerRemoved(
+      previousTestContainer,
+      "previous process-owned container was not removed",
+    );
+  });
+});
+
 test("removes only stopped Kandev-labeled containers and gates daemon-wide cleanup", async ({
   testPage,
   apiClient,
   seedData,
 }) => {
+  // Resources carry a process-unique ownership label. The storage API scopes
+  // managed-container usage to this process, so the count excludes another
+  // shard's containers while still exercising the exact cleanup contract.
+  const scopeLabel = `kandev.e2e.run=${E2E_DOCKER_SCOPE}`;
   test.setTimeout(240_000);
-
-  // This test asserts the *global* count of kandev.managed=true containers the
-  // daemon reports ("2 managed containers"). The containers project shares one
-  // Docker daemon across all specs in the worker and only sweeps managed
-  // containers at worker teardown, so a sibling Docker-executor spec (or one of
-  // its retries) can leave managed containers behind and inflate the count —
-  // the flake seen in CI was "5 managed containers" instead of 2. Sweep any
-  // stray managed containers first so this test counts only its own fixtures.
-  removeKandevContainers();
   const activeTask = await apiClient.createTask(seedData.workspaceId, "Retain active container", {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
   });
   const managed = createStoppedContainer([
     "kandev.managed=true",
+    scopeLabel,
     `kandev.task_id=e2e-storage-missing-${Date.now()}`,
   ]);
-  const active = createStoppedContainer(["kandev.managed=true", `kandev.task_id=${activeTask.id}`]);
-  const unrelated = createStoppedContainer(["e2e.storage=unrelated"]);
+  const active = createStoppedContainer([
+    "kandev.managed=true",
+    scopeLabel,
+    `kandev.task_id=${activeTask.id}`,
+  ]);
+  const unrelated = createStoppedContainer([scopeLabel, "e2e.storage=unrelated"]);
   try {
+    expect(dockerInspectExists(managed)).toBe(true);
+    expect(dockerInspectExists(active)).toBe(true);
+    expect(dockerInspectExists(unrelated)).toBe(true);
     await openStorageSettings(testPage);
     // The first overview can race Docker client startup and cache an
     // unavailable result. Analyze after creating the fixtures so this test

@@ -18,7 +18,7 @@ import { PromptSection } from "./prompt-section";
 import { RequiredFieldLabel } from "./required-field-label";
 import { TriggersSection } from "./triggers-section";
 import { WebhookCreatedDialog } from "./webhook-created-dialog";
-import { clampTaskTitleInput } from "@/lib/task-title";
+import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
 
 type UpdateField = <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 
@@ -141,6 +141,7 @@ export function ThenSection({
   updateField: UpdateField;
 }) {
   const { t } = useTranslation();
+  const { inputRef, clampChange } = useTaskTitleSelectionRestore(form.taskTitleTemplate);
   const dirtyFields: Array<keyof FormState> = [
     "taskTitleTemplate",
     "prompt",
@@ -165,11 +166,10 @@ export function ThenSection({
         <div className="space-y-1.5">
           <Label className="text-xs">{t("automations:taskTitleLabel")}</Label>
           <Input
+            ref={inputRef}
             value={form.taskTitleTemplate}
             data-settings-dirty={isAutomationFieldDirty(form, savedForm, "taskTitleTemplate")}
-            onChange={(event) =>
-              updateField("taskTitleTemplate", clampTaskTitleInput(event.target.value))
-            }
+            onChange={(event) => updateField("taskTitleTemplate", clampChange(event))}
             // defaultTaskTitle is the backend trigger type's own template — a
             // persisted value, not copy. The fallback is the example hint.
             placeholder={defaultTaskTitle || t("automations:taskTitlePlaceholder")}

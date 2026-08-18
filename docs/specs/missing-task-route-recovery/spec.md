@@ -29,6 +29,11 @@ the desktop sidebar is hidden.
 - When the resolved workspace contains other visible tasks, the desktop task
   sidebar shows them and its rows remain usable navigation targets. The invalid
   route ID is not synthesized as a sidebar task.
+- When a visible sibling has a loaded session, selecting its sidebar row keeps
+  that sibling active after later session and WebSocket updates.
+- When a task has multiple sessions, selecting a non-primary session, visiting
+  another task, and returning to the first task restores the selected session
+  instead of reapplying the route's primary session.
 - The unavailable state includes a visible action back to the task overview for
   the resolved workspace. The action is keyboard accessible, touch reachable,
   and usable when no workspace can be resolved.
@@ -46,6 +51,12 @@ the desktop sidebar is hidden.
   the user cold-loads `/t/<missing-id>`, **THEN** the unavailable state appears,
   the desktop sidebar lists the other task instead of **No tasks yet**, and
   selecting that row opens the valid task.
+- **GIVEN** a visible sibling with a loaded primary session, **WHEN** the user
+  selects it from a missing task route, **THEN** the sibling route and workbench
+  stay active after session hydration and WebSocket updates.
+- **GIVEN** task A has a selected non-primary session, **WHEN** the user
+  switches to task B and returns to task A, **THEN** task A keeps that selected
+  session active.
 - **GIVEN** the active-workspace cookie and user settings identify different
   authorized workspaces, **WHEN** a missing task route is cold-loaded, **THEN**
   fallback task data comes from the cookie-selected workspace according to the
@@ -81,6 +92,7 @@ the desktop sidebar is hidden.
 - Changing Office task-detail not-found behavior under `/office/tasks/:id`.
 - Retrying backend failures beyond the existing task-detail client retry.
 
-## Implementation plan
+## Implementation plans
 
 - [Missing task route recovery](../../plans/missing-task-route-recovery/plan.md)
+- [Missing task session navigation repair](../../plans/missing-task-session-navigation/plan.md)

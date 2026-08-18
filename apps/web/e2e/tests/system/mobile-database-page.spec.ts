@@ -2,9 +2,9 @@ import { test, expect } from "../../fixtures/test-base";
 
 test.describe("Mobile System Database page", () => {
   test("renders database stats and maintenance controls", async ({ testPage }) => {
-    await testPage.goto("/settings/system/database");
+    await testPage.goto("/settings/system/data-storage");
 
-    await expect(testPage.getByTestId("system-page-title")).toHaveText("Database");
+    await expect(testPage.getByTestId("system-page-title")).toHaveText("Data & Logs");
     await expect(testPage.getByTestId("system-database-card")).toBeVisible();
 
     // Maintenance buttons are only rendered for SQLite; this spec assumes a SQLite backend.

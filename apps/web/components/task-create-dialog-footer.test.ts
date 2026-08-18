@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   computeDisabledReason,
+  isNativeSubmitDisabled,
   resolveDisabledReason,
   REASON_NO_COMPATIBLE_AGENT,
   REASON_TITLE,
@@ -46,6 +47,20 @@ function makeProps(
     ...overrides,
   };
 }
+
+describe("isNativeSubmitDisabled", () => {
+  it("matches pending uploads and other externally blocked native submissions", () => {
+    expect(isNativeSubmitDisabled(makeProps({ submitBlockedReason: "upload pending" }))).toBe(true);
+  });
+
+  it("matches missing-profile rejection for the start-task path", () => {
+    expect(isNativeSubmitDisabled(makeProps({ agentProfileId: "" }))).toBe(true);
+  });
+
+  it("allows a complete native submission", () => {
+    expect(isNativeSubmitDisabled(makeProps())).toBe(false);
+  });
+});
 
 describe("computeDisabledReason (start-task)", () => {
   it("returns null when nothing is missing", () => {

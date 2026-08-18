@@ -46,6 +46,25 @@ func parseTimeString(s string) time.Time {
 	return time.Time{}
 }
 
+// rangeStartArg turns a range boundary into a value the timestamp columns can
+// actually be compared against, and into an untyped nil for an open-ended range
+// so the `? IS NULL` arm of each predicate matches.
+//
+// It has to bind the time.Time rather than a formatted string. These columns are
+// written by handing the driver a time.Time, which SQLite stores as
+// "2006-01-02 15:04:05.999999999-07:00", and their TIMESTAMP declaration gives
+// them NUMERIC affinity — a text bound parameter is never coerced, so `>=` is a
+// plain string comparison. Formatting the boundary as RFC3339 put a "T" where
+// every stored value has a space, and "T" sorts above " ", so rows dated on the
+// boundary day compared below the threshold whatever their time: each range
+// silently lost its first day.
+func rangeStartArg(start *time.Time) any {
+	if start == nil {
+		return nil
+	}
+	return start.UTC()
+}
+
 // GetTaskStats retrieves aggregated statistics for tasks in a workspace.
 func (r *Repository) GetTaskStats(
 	ctx context.Context,
@@ -53,10 +72,7 @@ func (r *Repository) GetTaskStats(
 	start *time.Time,
 	limit int,
 ) ([]*models.TaskStats, error) {
-	var startArg any
-	if start != nil {
-		startArg = start.UTC().Format(time.RFC3339)
-	}
+	startArg := rangeStartArg(start)
 	if limit <= 0 {
 		limit = 200
 	}
@@ -175,10 +191,7 @@ const (
 // index-only message-count subquery per qualifying turn (kept correlated to
 // stay portable between the SQLite and Postgres dialects).
 func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, start *time.Time) (*models.GlobalStats, error) {
-	var startArg any
-	if start != nil {
-		startArg = start.UTC().Format(time.RFC3339)
-	}
+	startArg := rangeStartArg(start)
 
 	drv := r.ro.DriverName()
 	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
@@ -394,10 +407,7 @@ func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID s
 
 // GetRepositoryStats retrieves aggregated statistics for repositories in a workspace
 func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string, start *time.Time) ([]*models.RepositoryStats, error) {
-	var startArg any
-	if start != nil {
-		startArg = start.UTC().Format(time.RFC3339)
-	}
+	startArg := rangeStartArg(start)
 
 	query := buildRepositoryStatsQuery(r.ro.DriverName())
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query),
@@ -504,37 +514,47 @@ func buildRepositoryStatsQuery(drv string) string {
 	`, dur)
 }
 
-// GetAgentUsage retrieves usage statistics per agent profile
-func (r *Repository) GetAgentUsage(ctx context.Context, workspaceID string, limit int, start *time.Time) ([]*models.AgentUsage, error) {
-	var startArg any
-	if start != nil {
-		startArg = start.UTC().Format(time.RFC3339)
-	}
+// GetModelUsage retrieves usage statistics per model.
+//
+// Grouping on the model itself is what keeps two ranges consistent. Grouping on
+// the agent profile did not: a profile's snapshot name and model change every
+// time the user reconfigures it, so the group spans several of them and the
+// engine was free to label it from any row it liked — the same profile then
+// reported a different model per range, and per run.
+//
+// Sessions whose snapshot records no model are skipped rather than collected
+// under a blank label, mirroring how sessions with no agent profile were
+// already left out.
+func (r *Repository) GetModelUsage(ctx context.Context, workspaceID string, limit int, start *time.Time) ([]*models.ModelUsage, error) {
+	startArg := rangeStartArg(start)
 
 	drv := r.ro.DriverName()
 	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
-	jeName := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "name")
-	jeDisplay := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "agent_display_name")
 	jeModel := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "model")
 	jeModelName := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "model_name")
 	jeLLM := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "llm")
 
 	query := fmt.Sprintf(`
+		WITH scoped AS (
+			SELECT
+				s.id,
+				COALESCE(%s, %s, %s, '') as model
+			FROM task_sessions s
+			JOIN tasks t ON t.id = s.task_id
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
+		)
 		SELECT
-			s.agent_profile_id,
-			COALESCE(%s, %s, s.agent_profile_id) as agent_profile_name,
-			COALESCE(%s, %s, %s, '') as agent_model,
-			COUNT(DISTINCT s.id) as session_count,
+			scoped.model,
+			COUNT(DISTINCT scoped.id) as session_count,
 			COUNT(DISTINCT turn.id) as turn_count,
 			COALESCE(SUM(CASE WHEN turn.completed_at IS NOT NULL THEN %s ELSE 0 END), 0) as total_duration_ms
-		FROM task_sessions s
-		JOIN tasks t ON t.id = s.task_id
-		LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
-		WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND s.agent_profile_id != '' AND (? IS NULL OR s.started_at >= ?)
-		GROUP BY s.agent_profile_id
-		ORDER BY session_count DESC
+		FROM scoped
+		LEFT JOIN task_session_turns turn ON turn.task_session_id = scoped.id
+		WHERE scoped.model != ''
+		GROUP BY scoped.model
+		ORDER BY session_count DESC, turn_count DESC, scoped.model ASC
 		LIMIT ?
-	`, jeName, jeDisplay, jeModel, jeModelName, jeLLM, dur)
+	`, jeModel, jeModelName, jeLLM, dur)
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), workspaceID, startArg, startArg, limit)
 	if err != nil {
@@ -542,13 +562,12 @@ func (r *Repository) GetAgentUsage(ctx context.Context, workspaceID string, limi
 	}
 	defer func() { _ = rows.Close() }()
 
-	var results []*models.AgentUsage
+	var results []*models.ModelUsage
 	for rows.Next() {
-		var usage models.AgentUsage
+		var usage models.ModelUsage
 		var totalDurationMs float64
 		err := rows.Scan(
-			&usage.AgentProfileID, &usage.AgentProfileName, &usage.AgentModel,
-			&usage.SessionCount, &usage.TurnCount, &totalDurationMs,
+			&usage.Model, &usage.SessionCount, &usage.TurnCount, &totalDurationMs,
 		)
 		if err != nil {
 			return nil, err
@@ -562,10 +581,7 @@ func (r *Repository) GetAgentUsage(ctx context.Context, workspaceID string, limi
 
 // GetGitStats retrieves aggregated git statistics for a workspace
 func (r *Repository) GetGitStats(ctx context.Context, workspaceID string, start *time.Time) (*models.GitStats, error) {
-	var startArg any
-	if start != nil {
-		startArg = start.UTC().Format(time.RFC3339)
-	}
+	startArg := rangeStartArg(start)
 
 	query := `
 		SELECT
@@ -595,6 +611,14 @@ func (r *Repository) GetGitStats(ctx context.Context, workspaceID string, start 
 // does not specify one, mirroring GetTaskStats' default page size.
 const defaultSessionCodeStatsLimit = 500
 
+// commitCaptureActivatedAtMetaKey mirrors the kandev_meta key
+// task/repository/sqlite.migrateSessionCommitsDedupeAndActivation publishes
+// (same literal string; this package has its own read-only handle onto the
+// same database, and there is no shared cross-package helper for kandev_meta
+// reads — every owning package re-embeds the literal query, matching the
+// existing idiom in internal/persistence and internal/system/database).
+const commitCaptureActivatedAtMetaKey = "commit_capture_activated_at"
+
 // ListSessionCodeStats returns, per session, committed LOC (summed from
 // task_session_commits) and PEAK pending-diff LOC (the largest single
 // task_session_git_snapshots snapshot, not the latest — the latest snapshot
@@ -602,6 +626,17 @@ const defaultSessionCodeStatsLimit = 500
 // per-session line-of-code aggregation the kandev-plugin-agent-stats plugin
 // used to compute by reading the SQLite file directly (see ADR 0043); the
 // SQL here mirrors that plugin's sessionsQuery.
+//
+// lines_added_committed / lines_deleted_committed are NULL, not 0, for a
+// session with no observed commit rows that started before
+// commit_capture_activated_at (kandev_meta, published by
+// task/repository/sqlite.migrateSessionCommitsDedupeAndActivation): capture
+// wasn't running yet for that session, so zero cannot be told apart from
+// unknown. A session with any observed commit, or one that started after
+// activation, always gets a real sum (activation absent entirely — should
+// not happen once boot has completed successfully — falls through to the
+// pre-existing zero behavior via SQL's three-valued NULL comparison logic).
+// Peak-pending is unrelated to this marker and is always a real int64.
 //
 // Portability: the committed-sum half of this query is plain SQL and works
 // unchanged on both drivers. The peak-pending half must walk each snapshot's
@@ -630,11 +665,28 @@ func (r *Repository) ListSessionCodeStats(
 	// origin; the Host data API is one, so a plugin must not see through it
 	// what the UI deliberately does not show.
 	where += andNotAutomationOriginT
+	// Compare normalized forms, not the raw text or a naive cast on either
+	// side. ts.started_at is a naive TIMESTAMP column (no embedded zone) that
+	// is always written as UTC wall-clock time (time.Now().UTC()) — use
+	// NaiveUTCTimestampOf, not DateTimeOf, or Postgres reinterprets it in the
+	// session's timezone GUC and silently shifts it. activation.value is text
+	// formatted via time.RFC3339Nano, which already carries an explicit "Z" —
+	// use DateTimeOf, which respects that embedded zone.
+	startedAtNormalized := dialect.NaiveUTCTimestampOf(driver, "ts.started_at")
+	activationNormalized := dialect.DateTimeOf(driver, "activation.value")
 	query := fmt.Sprintf(`
 		SELECT
 			ts.id AS session_id,
-			COALESCE(commit_stats.insertions, 0) AS lines_added_committed,
-			COALESCE(commit_stats.deletions, 0) AS lines_deleted_committed,
+			CASE
+				WHEN commit_stats.session_id IS NOT NULL THEN commit_stats.insertions
+				WHEN %[1]s < %[2]s THEN NULL
+				ELSE 0
+			END AS lines_added_committed,
+			CASE
+				WHEN commit_stats.session_id IS NOT NULL THEN commit_stats.deletions
+				WHEN %[1]s < %[2]s THEN NULL
+				ELSE 0
+			END AS lines_deleted_committed,
 			COALESCE(peak_stats.peak_additions, 0) AS lines_added_peak_pending,
 			COALESCE(peak_stats.peak_deletions, 0) AS lines_deleted_peak_pending
 		FROM task_sessions ts
@@ -646,11 +698,12 @@ func (r *Repository) ListSessionCodeStats(
 			FROM task_session_commits c
 			GROUP BY c.session_id
 		) commit_stats ON commit_stats.session_id = ts.id
-		LEFT JOIN (%s) peak_stats ON peak_stats.session_id = ts.id
-		WHERE %s
+		LEFT JOIN (%[3]s) peak_stats ON peak_stats.session_id = ts.id
+		LEFT JOIN kandev_meta activation ON activation.key = '%[4]s'
+		WHERE %[5]s
 		ORDER BY ts.started_at ASC, ts.id ASC
 		LIMIT ? OFFSET ?
-	`, peakPendingSnapshotSubquery(driver), where)
+	`, startedAtNormalized, activationNormalized, peakPendingSnapshotSubquery(driver), commitCaptureActivatedAtMetaKey, where)
 
 	inQuery, inArgs, err := sqlx.In(query, args...)
 	if err != nil {

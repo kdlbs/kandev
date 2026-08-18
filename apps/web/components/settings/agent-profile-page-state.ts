@@ -12,26 +12,47 @@
 import { useMemo, useState } from "react";
 import { permissionsToProfilePatch } from "@/lib/agent-permissions";
 import { deleteAgentProfileAction, updateAgentProfileAction } from "@/app/actions/agents";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { isProfileDirty } from "@/components/settings/agent-profile-dirty";
 import type { useToast } from "@/components/toast-provider";
 import type { AgentProfileDeleteConflict } from "@/components/settings/agent-profile-delete-dialog";
 import { t as translate } from "@/lib/i18n";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import {
+  mergeOptionsByNewest,
+  toAgentProfileOption,
+  type AgentProfileOption,
+} from "@/lib/state/slices/settings/types";
 import { ApiError } from "@/lib/api/client";
 import type { Agent, AgentProfile, PermissionSetting } from "@/lib/types/http";
 
 export type SaveStatus = "idle" | "loading" | "success" | "error";
 
+/**
+ * Reconcile the options slice with the next agent list by ID: options the
+ * rebuild does not represent (e.g. profiles the WS handler delivered for
+ * agents temporarily absent from `settingsAgents`) are preserved, and rebuilt
+ * options replace any stale versions. Same rule as
+ * `applyProfileDuplicated` in the duplicate hook — a save must never wipe
+ * orphan options.
+ */
+export function reconcileAgentProfileOptions(
+  previousOptions: AgentProfileOption[],
+  nextAgents: Agent[],
+): AgentProfileOption[] {
+  const rebuiltOptions = nextAgents.flatMap((agentItem) =>
+    agentItem.profiles.map((agentProfile) => toAgentProfileOption(agentItem, agentProfile)),
+  );
+  return mergeOptionsByNewest(previousOptions, rebuiltOptions);
+}
+
 export function useSyncAgentsToStore() {
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
+  const storeApi = useAppStoreApi();
   return (nextAgents: Agent[]) => {
     setSettingsAgents(nextAgents);
     setAgentProfiles(
-      nextAgents.flatMap((agentItem) =>
-        agentItem.profiles.map((agentProfile) => toAgentProfileOption(agentItem, agentProfile)),
-      ),
+      reconcileAgentProfileOptions(storeApi.getState().agentProfiles.items, nextAgents),
     );
   };
 }

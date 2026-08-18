@@ -7,6 +7,8 @@ import type {
   UseRemoteRepositoriesResult,
 } from "@/hooks/domains/integrations/use-remote-repositories";
 import { RemoteRepoChip } from "./task-create-dialog-remote-repo-chip";
+import { RemoteRepositoryProviderIcon } from "./task-create-dialog-remote-repo-provider-tabs";
+import { pluginRegistry } from "@/lib/plugins/registry";
 
 const AZURE_PROVIDER = "azure_devops" as const;
 const AZURE_PROVIDER_LABEL = "Azure DevOps";
@@ -46,7 +48,25 @@ const GITLAB_REPO: RemoteRepository = {
   private: false,
 };
 
-afterEach(cleanup);
+const BITBUCKET_REPO: RemoteRepository = {
+  provider: "bitbucket",
+  id: "web-42",
+  owner: "PLATFORM",
+  name: "web",
+  fullName: "PLATFORM/web",
+  url: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
+  defaultBranch: "main",
+  private: true,
+};
+
+function PluginProviderIcon({ className }: { className?: string }) {
+  return <svg className={className} data-testid="plugin-provider-icon" />;
+}
+
+afterEach(() => {
+  cleanup();
+  pluginRegistry.unregisterPlugin("bitbucket-plugin");
+});
 
 function accessibleRepos(
   repos: RemoteRepository[],
@@ -84,6 +104,30 @@ function activateProvider(name: string) {
 }
 
 describe("RemoteRepoChip provider tabs", () => {
+  it("uses a registered provider icon in native repository surfaces", () => {
+    pluginRegistry.forPlugin("bitbucket-plugin").registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      icon: PluginProviderIcon,
+      listRepositories: async () => [],
+      matchesURL: () => false,
+      listBranches: async () => [],
+      inspectURL: async () => null,
+    });
+
+    render(<RemoteRepositoryProviderIcon provider="bitbucket" />);
+
+    expect(screen.getByTestId("plugin-provider-icon")).not.toBeNull();
+  });
+
+  it("renders a registered-provider-style tab without requiring a built-in union member", () => {
+    renderPicker(accessibleRepos([GITHUB_REPO, BITBUCKET_REPO], ["github", "bitbucket"]));
+
+    expect(screen.getByRole("tab", { name: "Bitbucket" })).toBeTruthy();
+    activateProvider("Bitbucket");
+    expect(screen.getByText("PLATFORM/web")).toBeTruthy();
+  });
+
   it("shows bottom tabs and filters repositories when multiple providers are available", () => {
     renderPicker(
       accessibleRepos([GITHUB_REPO, GITLAB_REPO, AZURE_REPO], ["github", "gitlab", AZURE_PROVIDER]),

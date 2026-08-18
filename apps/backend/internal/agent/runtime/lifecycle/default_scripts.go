@@ -1,5 +1,7 @@
 package lifecycle
 
+const executorTypeSSH = "ssh"
+
 // DefaultPrepareScript returns the default prepare script for a given executor type string.
 func DefaultPrepareScript(executorType string) string {
 	switch executorType {
@@ -11,7 +13,7 @@ func DefaultPrepareScript(executorType string) string {
 		return defaultDockerPrepareScript
 	case "sprites":
 		return defaultSpritesPrepareScript
-	case "ssh":
+	case executorTypeSSH:
 		return defaultSSHPrepareScript
 	default:
 		return ""

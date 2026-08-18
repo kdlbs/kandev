@@ -309,7 +309,9 @@ test.describe("Automations settings page", () => {
     await apiClient.seedAutomationRun(automation.id, "skipped");
 
     // Navigate to the editor page for this automation.
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/automations/${automation.id}`);
+    await testPage.goto(
+      `/settings/workspaces/${seedData.workspaceId}/automations/${automation.id}`,
+    );
     await testPage.getByTestId("automation-editor").waitFor({ state: "visible", timeout: 15_000 });
 
     // Scroll to the bottom to ensure Recent Runs is visible.
@@ -358,6 +360,65 @@ test.describe("Automations settings page", () => {
     await expect(testPage.getByText("No runs yet")).toBeVisible({ timeout: 5_000 });
   });
 
+  test("delete all only removes the runs in the active status view", async ({
+    testPage,
+    seedData,
+    apiClient,
+  }) => {
+    // Seed mixed-status runs: the delete-all control must be scoped to the
+    // active filter, so clearing the Skipped view leaves the succeeded run
+    // alone instead of wiping the whole automation.
+    const automation = await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: "Filtered Run Delete Test",
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+    });
+    await apiClient.seedAutomationRun(automation.id, "skipped");
+    await apiClient.seedAutomationRun(automation.id, "skipped");
+    await apiClient.seedAutomationRun(automation.id, "succeeded");
+
+    await testPage.goto(
+      `/settings/workspaces/${seedData.workspaceId}/automations/${automation.id}`,
+    );
+    await testPage.getByTestId("automation-editor").waitFor({ state: "visible", timeout: 15_000 });
+
+    const scrollContainer = testPage.getByTestId("settings-scroll-container");
+    await scrollContainer.evaluate((el) => (el.scrollTop = el.scrollHeight));
+
+    const recentRunsButton = testPage.locator("button", { hasText: /Recent Runs/ });
+    await recentRunsButton.waitFor({ state: "visible", timeout: 10_000 });
+    await recentRunsButton.click();
+
+    const tbody = testPage.locator("table tbody");
+    await tbody.waitFor({ state: "visible", timeout: 5_000 });
+    await expect(tbody.locator("tr")).toHaveCount(3, { timeout: 10_000 });
+
+    // Filter to Skipped: only the two skipped rows remain visible.
+    await testPage.getByTestId("run-filter-skipped").click();
+    await expect(tbody.locator("tr")).toHaveCount(2, { timeout: 5_000 });
+
+    // The delete-all control lives in the table header, aligned with the
+    // per-row delete buttons, not beside the Recent Runs heading.
+    const thead = testPage.locator("table thead");
+    await expect(thead.getByTestId("delete-all-runs")).toBeVisible();
+
+    // The confirmation names the scoped status rather than promising every
+    // run record for the automation.
+    await thead.getByTestId("delete-all-runs").click();
+    await expect(
+      testPage.getByText(/permanently remove the Skipped runs shown in this view/),
+    ).toBeVisible();
+    await testPage.getByTestId("delete-all-runs-confirm").click();
+
+    // Only the skipped runs are gone; the succeeded run survives.
+    await expect(tbody.locator("tr")).toHaveCount(1, { timeout: 5_000 });
+
+    // Switching back to All still shows the succeeded run.
+    await testPage.getByTestId("run-filter-all").click();
+    await expect(tbody.locator("tr")).toHaveCount(1, { timeout: 5_000 });
+  });
+
   test("archived task's run shows Archived, cancelled task's run shows Cancelled", async ({
     testPage,
     seedData,
@@ -400,7 +461,9 @@ test.describe("Automations settings page", () => {
     await apiClient.archiveTask(archivedTask.id);
     await apiClient.seedAutomationTaskSession(cancelledTask.id, "CANCELLED");
 
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/automations/${automation.id}`);
+    await testPage.goto(
+      `/settings/workspaces/${seedData.workspaceId}/automations/${automation.id}`,
+    );
     await testPage.getByTestId("automation-editor").waitFor({ state: "visible", timeout: 15_000 });
 
     const scrollContainer = testPage.getByTestId("settings-scroll-container");

@@ -79,6 +79,7 @@ function openStepDeleteDialog({
 // `name` becomes the step's stored name and `color` its Tailwind class — so
 // neither is translated; translating the name would write a localized string
 // into the database.
+// i18n-exempt: persisted workflow step name, same contract as DEFAULT_CUSTOM_STEPS.
 const NEW_STEP_DEFAULTS = { name: "New Step", color: "bg-slate-500" } as const;
 
 function createDraftStep(workflow: Workflow, position: number): WorkflowStep {
@@ -316,6 +317,7 @@ async function createMissingSteps(
       name: step.name,
       position: step.position,
       color: step.color,
+      stage_type: step.stage_type ?? "custom",
       cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,
     });
     mappings.set(step.id, created.id);
@@ -392,6 +394,7 @@ function stepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
     name: step.name,
     position: step.position,
     color: step.color,
+    stage_type: step.stage_type ?? "custom",
     prompt: step.prompt ?? "",
     events: step.events ?? {},
     allow_manual_move: step.allow_manual_move ?? true,

@@ -11,6 +11,7 @@ type Task = KanbanState["tasks"][number];
 function task(id: string, foregroundActivity?: ForegroundActivity | null): Task {
   return {
     id,
+    workflowId: "wf-1",
     workflowStepId: "step-1",
     title: id,
     position: 0,

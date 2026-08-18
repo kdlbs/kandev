@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"slices"
 	"sort"
 	"strings"
@@ -354,39 +355,90 @@ func (m *mockBlockerRepo) ListTasksBlockedBy(_ context.Context, blockerTaskID st
 	return ids, nil
 }
 
+func (m *mockBlockerRepo) ListBlockersForTasks(_ context.Context, taskIDs []string) (map[string][]string, error) {
+	want := make(map[string]struct{}, len(taskIDs))
+	for _, id := range taskIDs {
+		want[id] = struct{}{}
+	}
+	out := map[string][]string{}
+	for _, b := range m.blockers {
+		if _, ok := want[b.TaskID]; ok {
+			out[b.TaskID] = append(out[b.TaskID], b.BlockerTaskID)
+		}
+	}
+	return out, nil
+}
+
+func (m *mockBlockerRepo) ListDependentsForTasks(_ context.Context, blockerTaskIDs []string) (map[string][]string, error) {
+	want := make(map[string]struct{}, len(blockerTaskIDs))
+	for _, id := range blockerTaskIDs {
+		want[id] = struct{}{}
+	}
+	out := map[string][]string{}
+	for _, b := range m.blockers {
+		if _, ok := want[b.BlockerTaskID]; ok {
+			out[b.BlockerTaskID] = append(out[b.BlockerTaskID], b.TaskID)
+		}
+	}
+	return out, nil
+}
+
 func TestBlocker_CRUD(t *testing.T) {
-	svc, _, _ := createTestService(t)
+	svc, _ := setupOfficeTest(t)
 	svc.SetBlockerRepository(&mockBlockerRepo{})
 	ctx := context.Background()
 
-	if err := svc.AddBlocker(ctx, "task-1", "task-2"); err != nil {
+	// Both ends must exist: the single edge validator resolves each task so it
+	// can enforce the same-workspace rule and refuse an edge to a task that is
+	// not there (which would leave the dependent blocked forever).
+	one := mustSeedTask(t, svc, "Task 1")
+	two := mustSeedTask(t, svc, "Task 2")
+
+	if err := svc.AddBlocker(ctx, one.ID, two.ID); err != nil {
 		t.Fatalf("AddBlocker: %v", err)
 	}
 
-	ids, err := svc.GetBlockers(ctx, "task-1")
+	ids, err := svc.GetBlockers(ctx, one.ID)
 	if err != nil {
 		t.Fatalf("GetBlockers: %v", err)
 	}
-	if len(ids) != 1 || ids[0] != "task-2" {
-		t.Errorf("expected [task-2], got %v", ids)
+	if len(ids) != 1 || ids[0] != two.ID {
+		t.Errorf("expected [%s], got %v", two.ID, ids)
 	}
 
-	if err := svc.RemoveBlocker(ctx, "task-1", "task-2"); err != nil {
+	if err := svc.RemoveBlocker(ctx, one.ID, two.ID); err != nil {
 		t.Fatalf("RemoveBlocker: %v", err)
 	}
-	ids, _ = svc.GetBlockers(ctx, "task-1")
+	ids, _ = svc.GetBlockers(ctx, one.ID)
 	if len(ids) != 0 {
 		t.Errorf("expected empty, got %v", ids)
 	}
 }
 
+// mustSeedTask creates a task in the office test workspace so dependency-edge
+// tests have real IDs on both ends of an edge.
+func mustSeedTask(t *testing.T, svc *Service, title string) *models.Task {
+	t.Helper()
+	result, err := svc.CreateTask(context.Background(), &CreateTaskRequest{
+		WorkspaceID: "ws-1", Title: title, ProjectID: "proj-1",
+	})
+	if err != nil {
+		t.Fatalf("seed task %q: %v", title, err)
+	}
+	return result.Task
+}
+
 func TestGetBlocking_ReverseLookup(t *testing.T) {
-	svc, _, _ := createTestService(t)
+	svc, _ := setupOfficeTest(t)
 	svc.SetBlockerRepository(&mockBlockerRepo{})
 	ctx := context.Background()
+	t1 := mustSeedTask(t, svc, "Task 1").ID
+	t2 := mustSeedTask(t, svc, "Task 2").ID
+	t3 := mustSeedTask(t, svc, "Task 3").ID
+	t4 := mustSeedTask(t, svc, "Task 4").ID
 
 	// No blocker edges at all.
-	ids, err := svc.GetBlocking(ctx, "task-1")
+	ids, err := svc.GetBlocking(ctx, t1)
 	if err != nil {
 		t.Fatalf("GetBlocking: %v", err)
 	}
@@ -398,50 +450,53 @@ func TestGetBlocking_ReverseLookup(t *testing.T) {
 	}
 
 	// One blocked task: task-2 is blocked by task-1.
-	if err := svc.AddBlocker(ctx, "task-2", "task-1"); err != nil {
+	if err := svc.AddBlocker(ctx, t2, t1); err != nil {
 		t.Fatalf("AddBlocker: %v", err)
 	}
-	ids, err = svc.GetBlocking(ctx, "task-1")
+	ids, err = svc.GetBlocking(ctx, t1)
 	if err != nil {
 		t.Fatalf("GetBlocking: %v", err)
 	}
-	if len(ids) != 1 || ids[0] != "task-2" {
+	if len(ids) != 1 || ids[0] != t2 {
 		t.Errorf("expected [task-2], got %v", ids)
 	}
 
 	// The reverse direction must not be confused with the forward one:
 	// task-2 blocks nothing, and task-1 is the blocker of task-2.
-	if ids, err = svc.GetBlocking(ctx, "task-2"); err != nil || len(ids) != 0 {
+	if ids, err = svc.GetBlocking(ctx, t2); err != nil || len(ids) != 0 {
 		t.Errorf("GetBlocking(task-2) = %v, %v; want empty", ids, err)
 	}
-	if ids, err = svc.GetBlockers(ctx, "task-2"); err != nil || len(ids) != 1 || ids[0] != "task-1" {
+	if ids, err = svc.GetBlockers(ctx, t2); err != nil || len(ids) != 1 || ids[0] != t1 {
 		t.Errorf("GetBlockers(task-2) = %v, %v; want [task-1]", ids, err)
 	}
 
 	// Several blocked tasks.
-	for _, blocked := range []string{"task-3", "task-4"} {
-		if err := svc.AddBlocker(ctx, blocked, "task-1"); err != nil {
+	for _, blocked := range []string{t3, t4} {
+		if err := svc.AddBlocker(ctx, blocked, t1); err != nil {
 			t.Fatalf("AddBlocker(%s): %v", blocked, err)
 		}
 	}
-	ids, err = svc.GetBlocking(ctx, "task-1")
+	ids, err = svc.GetBlocking(ctx, t1)
 	if err != nil {
 		t.Fatalf("GetBlocking: %v", err)
 	}
 	sort.Strings(ids)
-	want := []string{"task-2", "task-3", "task-4"}
+	want := []string{t2, t3, t4}
+	sort.Strings(want)
 	if !slices.Equal(ids, want) {
 		t.Errorf("expected %v, got %v", want, ids)
 	}
 
 	// Removing an edge removes it from the reverse lookup too.
-	if err := svc.RemoveBlocker(ctx, "task-3", "task-1"); err != nil {
+	if err := svc.RemoveBlocker(ctx, t3, t1); err != nil {
 		t.Fatalf("RemoveBlocker: %v", err)
 	}
-	ids, _ = svc.GetBlocking(ctx, "task-1")
+	ids, _ = svc.GetBlocking(ctx, t1)
 	sort.Strings(ids)
-	if !slices.Equal(ids, []string{"task-2", "task-4"}) {
-		t.Errorf("expected [task-2 task-4] after removal, got %v", ids)
+	wantAfter := []string{t2, t4}
+	sort.Strings(wantAfter)
+	if !slices.Equal(ids, wantAfter) {
+		t.Errorf("expected %v after removal, got %v", wantAfter, ids)
 	}
 }
 
@@ -499,19 +554,35 @@ func TestGetBlocking_IncludesArchivedTasks(t *testing.T) {
 }
 
 func TestBlocker_CircularDetection(t *testing.T) {
-	svc, _, _ := createTestService(t)
+	svc, _ := setupOfficeTest(t)
 	svc.SetBlockerRepository(&mockBlockerRepo{})
 	ctx := context.Background()
+	a := mustSeedTask(t, svc, "Task A").ID
+	b := mustSeedTask(t, svc, "Task B").ID
+	c := mustSeedTask(t, svc, "Task C").ID
 
-	_ = svc.AddBlocker(ctx, "task-A", "task-B")
-	_ = svc.AddBlocker(ctx, "task-B", "task-C")
-
-	err := svc.AddBlocker(ctx, "task-C", "task-A")
-	if err == nil {
-		t.Fatal("expected circular dependency error")
+	if err := svc.AddBlocker(ctx, a, b); err != nil {
+		t.Fatalf("AddBlocker(a,b): %v", err)
 	}
-	if !strings.Contains(err.Error(), "circular dependency") {
-		t.Errorf("expected 'circular dependency' in error, got: %v", err)
+	if err := svc.AddBlocker(ctx, b, c); err != nil {
+		t.Fatalf("AddBlocker(b,c): %v", err)
+	}
+
+	err := svc.AddBlocker(ctx, c, a)
+	if err == nil {
+		t.Fatal("expected cycle error")
+	}
+	// The error must carry the traversal path so the UI can render
+	// "A → B → C → A" rather than a bare "there is a cycle".
+	var cycle *CycleError
+	if !errors.As(err, &cycle) {
+		t.Fatalf("expected *CycleError, got %T: %v", err, err)
+	}
+	if len(cycle.Path) < 3 {
+		t.Errorf("expected a cycle path naming the loop, got %v", cycle.Path)
+	}
+	if cycle.Path[0] != c || cycle.Path[len(cycle.Path)-1] != c {
+		t.Errorf("cycle path should start and end at the new dependent %s, got %v", c, cycle.Path)
 	}
 }
 

@@ -98,8 +98,8 @@ describe("the live allowlist", () => {
    * the "exact duplicates only" test is no longer pinning a real decision.
    */
   it("still carries the deliberate storage redundancy the check must tolerate", () => {
-    expect(i18nGuardFiles).toContain("app/settings/system/**/*.{ts,tsx}");
-    expect(i18nGuardFiles).toContain("app/settings/system/storage/**/*.{ts,tsx}");
+    expect(i18nGuardFiles).toContain("components/settings/system/**/*.{ts,tsx}");
+    expect(i18nGuardFiles).toContain("components/settings/system/storage/**/*.{ts,tsx}");
   });
 });
 

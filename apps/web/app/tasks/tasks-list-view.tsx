@@ -70,8 +70,9 @@ export function TasksListView({
   handleDelete,
   onRefresh,
 }: TasksListViewProps) {
+  // Not a <main>: AppShell owns that landmark, one per page.
   const content = (
-    <main className="flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6">
+    <div className="flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6">
       <div className="space-y-4">
         <TasksListControls
           showArchived={showArchived}
@@ -101,7 +102,7 @@ export function TasksListView({
           onPaginationChange={setPagination}
         />
       </div>
-    </main>
+    </div>
   );
   return onRefresh ? <PullToRefresh onRefresh={onRefresh}>{content}</PullToRefresh> : content;
 }

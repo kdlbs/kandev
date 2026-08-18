@@ -39,12 +39,16 @@ test.describe("Office workspace deletion fallback navigation", () => {
     await confirmButton.click();
 
     await expect(testPage).toHaveURL(
-      (url) => url.pathname === "/" && url.searchParams.get("workspaceId") === seedData.workspaceId,
+      (url) => url.pathname === "/" && Boolean(url.searchParams.get("workspaceId")),
       { timeout: 10_000 },
     );
     await expect(testPage).not.toHaveURL(/\/office\/setup/);
 
+    const destinationWorkspaceId = new URL(testPage.url()).searchParams.get("workspaceId");
     const { workspaces } = await apiClient.listWorkspaces();
     expect(workspaces.some((item) => item.id === onboarded.workspaceId)).toBe(false);
+    const destinationWorkspace = workspaces.find((item) => item.id === destinationWorkspaceId);
+    expect(destinationWorkspace).toBeDefined();
+    expect(destinationWorkspace?.office_workflow_id).toBeFalsy();
   });
 });

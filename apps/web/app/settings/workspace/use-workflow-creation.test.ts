@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Workflow, WorkflowTemplate, Workspace } from "@/lib/types/http";
+import type { Workflow, WorkflowStep, WorkflowTemplate, Workspace } from "@/lib/types/http";
 import { createDraftWorkflowSteps, useWorkflowCreation } from "./use-workflow-creation";
 
 const workspace = { id: "workspace-1", name: "Workspace" } as Workspace;
@@ -18,13 +18,21 @@ const template = {
   ],
 } as WorkflowTemplate;
 
-function renderCreationHook(workflowTemplates: WorkflowTemplate[] = []) {
-  let workflows: Workflow[] = [];
+function renderCreationHook(
+  workflowTemplates: WorkflowTemplate[] = [],
+  initialWorkflows: Workflow[] = [],
+) {
+  let workflows: Workflow[] = initialWorkflows;
   const setWorkflowItems = vi.fn((update: React.SetStateAction<Workflow[]>) => {
     workflows = typeof update === "function" ? update(workflows) : update;
   });
   const view = renderHook(() =>
-    useWorkflowCreation({ workspace, workflowTemplates, setWorkflowItems }),
+    useWorkflowCreation({
+      workspace,
+      workflowItems: workflows,
+      workflowTemplates,
+      setWorkflowItems,
+    }),
   );
   return { ...view, setWorkflowItems, getWorkflows: () => workflows };
 }
@@ -111,5 +119,50 @@ describe("useWorkflowCreation", () => {
       color: "bg-blue-500",
       cancel_triggers_turn_complete: true,
     });
+  });
+});
+
+describe("useWorkflowCreation duplication", () => {
+  it("inserts a duplicated workflow after its source and keeps its steps local", () => {
+    const source = {
+      id: "workflow-source",
+      workspace_id: workspace.id,
+      name: "Source Workflow",
+      description: "Source description",
+      created_at: "saved",
+      updated_at: "saved",
+    } as Workflow;
+    const sourceSteps = [
+      {
+        id: "step-source",
+        workflow_id: source.id,
+        name: "Source Step",
+        position: 0,
+        color: "bg-blue-500",
+        created_at: "saved",
+        updated_at: "saved",
+      },
+    ] as WorkflowStep[];
+    const { result, getWorkflows } = renderCreationHook([], [source]);
+    const duplicate = (
+      result.current as typeof result.current & {
+        handleDuplicateWorkflow: (workflow: Workflow, steps: WorkflowStep[]) => void;
+      }
+    ).handleDuplicateWorkflow;
+
+    expect(duplicate).toEqual(expect.any(Function));
+    if (typeof duplicate !== "function") return;
+
+    act(() => duplicate(source, sourceSteps));
+
+    expect(getWorkflows().map((workflow) => workflow.name)).toEqual([
+      "Source Workflow",
+      "Source Workflow (copy)",
+    ]);
+    const copied = getWorkflows()[1];
+    expect(copied.id).toMatch(/^temp-workflow-/);
+    expect(result.current.initialStepsByWorkflowId.get(copied.id)).toEqual([
+      expect.objectContaining({ name: "Source Step", workflow_id: copied.id }),
+    ]);
   });
 });

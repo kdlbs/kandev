@@ -1,6 +1,7 @@
 ---
 status: shipped
 created: 2026-07-15
+updated: 2026-08-12
 owner: kandev
 ---
 
@@ -17,6 +18,11 @@ Frequent task archiving makes a mandatory confirmation dialog costly for users w
 - When enabled, archive actions continue to show the existing cleanup summary and optional subtask cascade control before archiving.
 - When disabled, archive actions from every UI surface archive immediately without rendering the confirmation dialog.
 - Confirmation-free archive actions do not cascade to subtasks. Users who need to archive subtasks together can temporarily enable confirmation and use the existing cascade control.
+- When an active task is archived, the rendered task and the task ID in the URL change together.
+- If another live task remains, Kandev opens a task that is not part of the archive operation.
+- If no task remains outside the archive operation, Kandev opens the task overview after the archive succeeds.
+- A cascade archive never uses the parent or one of its descendants as the temporary or final navigation target.
+- Desktop and mobile task switchers use the same post-archive navigation behavior.
 - Delete confirmations and programmatic archive operations are unaffected.
 
 ## Data model
@@ -38,6 +44,8 @@ No archive endpoint contract changes.
 - If saving the preference fails, the settings control returns to its previous value and archive behavior remains unchanged.
 - If user settings have not loaded or omit the field, the client requires confirmation.
 - Archive API failures continue to use each archive surface's existing error handling.
+- If an active task was temporarily replaced before an archive request fails, the client restores that task and its URL.
+- If no safe replacement task exists, the client stays on the active task until the archive request succeeds.
 
 ## Persistence guarantees
 
@@ -49,6 +57,10 @@ The preference survives backend and client restarts as part of the existing user
 - **GIVEN** confirmation is enabled, **WHEN** the user cancels the archive dialog, **THEN** the task remains active.
 - **GIVEN** confirmation is disabled, **WHEN** the user requests an archive from the sidebar, task banner, task card, list, pipeline, mobile task switcher, or bulk action, **THEN** the archive starts immediately and no archive confirmation dialog appears.
 - **GIVEN** confirmation is disabled and a task has active subtasks, **WHEN** the user archives the task, **THEN** the parent is archived with cascade disabled and the subtasks remain active.
+- **GIVEN** an active parent has subtasks plus an unrelated live task, **WHEN** the user enables cascade archive, **THEN** Kandev opens the unrelated task, not a doomed descendant.
+- **GIVEN** the active parent tree contains all live tasks, **WHEN** the user enables cascade archive, **THEN** Kandev waits for success and then opens the task overview.
+- **GIVEN** an archive completes on desktop or mobile, **WHEN** the user opens another task, **THEN** the URL and rendered task update without a hard refresh.
+- **GIVEN** an archive request fails after Kandev opened a replacement task, **WHEN** failure handling completes, **THEN** Kandev restores the original active task and URL.
 - **GIVEN** saving the preference fails, **WHEN** the request completes, **THEN** the control and archive behavior revert to the previously persisted value.
 
 ## Out of scope
@@ -56,7 +68,9 @@ The preference survives backend and client restarts as part of the existing user
 - Disabling confirmation for task deletion or other destructive actions.
 - Adding a per-archive cascade default when confirmation is disabled.
 - Changing API, CLI, MCP, automation, or agent-driven archive behavior.
+- Changing the task switcher layout, archive dialog, or mobile composition.
 
 ## Implementation plan
 
 - [Archive Confirmation Preference](../../plans/archive-confirmation-preference/plan.md)
+- [Cascade Archive Navigation](../../plans/cascade-archive-navigation/plan.md)

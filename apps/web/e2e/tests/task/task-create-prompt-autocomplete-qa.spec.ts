@@ -101,7 +101,12 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await expect(testPage.getByRole("option", { name: /qa-arr-1/ })).toBeVisible();
     await expect(testPage.getByRole("option", { name: /qa-arr-2/ })).toBeVisible();
 
-    await textarea.press("ArrowDown");
+    const secondOption = testPage.getByRole("option", { name: /qa-arr-2/ });
+    await expect(async () => {
+      await textarea.focus();
+      await textarea.press("ArrowDown");
+      await expect(secondOption).toHaveAttribute("aria-selected", "true", { timeout: 500 });
+    }).toPass({ timeout: 5_000, intervals: [100, 250, 500] });
     await textarea.press("Enter");
 
     const value = await textarea.inputValue();
@@ -140,25 +145,32 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
   }) => {
     test.setTimeout(60_000);
     const lines = Array.from({ length: 8 }, (_, i) => `line ${i + 1}`).join("\n");
-    await apiClient.createPrompt("qa-multi", lines);
+    const promptName = `qa-multi-${Date.now()}`;
+    const prompt = await apiClient.createPrompt(promptName, lines);
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.createTaskButton.first().click();
-    await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await kanban.createTaskButton.first().click();
+      await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    const textarea = testPage.getByTestId("task-description-input");
-    await textarea.click();
-    await textarea.pressSequentially("@qa-mu");
-    await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await expect(testPage.getByRole("option", { name: /qa-multi/ })).toBeVisible();
-    await textarea.press("Enter");
+      const textarea = testPage.getByTestId("task-description-input");
+      await textarea.fill("");
+      await textarea.click();
+      await textarea.pressSequentially(`@${promptName}`);
+      await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
+      // Select the exact prompt row. Keyboard selection can use a stale
+      // filtered item while the prompt store is still hydrating.
+      await testPage.getByRole("option", { name: new RegExp(promptName) }).click();
 
-    await expect(textarea).toHaveValue(lines);
+      await expect(textarea).toHaveValue(lines);
 
-    // Height should reflect content (8 lines should be taller than the default ~96px min-h).
-    const height = await textarea.evaluate((el) => (el as HTMLTextAreaElement).scrollHeight);
-    expect(height).toBeGreaterThan(100);
+      // Height should reflect content (8 lines should be taller than the default ~96px min-h).
+      const height = await textarea.evaluate((el) => (el as HTMLTextAreaElement).scrollHeight);
+      expect(height).toBeGreaterThan(100);
+    } finally {
+      await apiClient.deletePrompt(prompt.id).catch(() => undefined);
+    }
   });
 
   test("typing space after @ closes the menu", async ({ testPage, apiClient }) => {

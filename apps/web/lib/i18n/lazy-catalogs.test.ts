@@ -43,7 +43,7 @@ describe("catalog loading", () => {
     expect(i18n.hasResourceBundle("en", SETTINGS_NS)).toBe(true);
     expect(i18n.t(`${SETTINGS_NS}:${DISPLAY_LANGUAGE}`)).toBe("Display language");
 
-    for (const locale of ["pt-pt", "zh-cn", "pseudo"]) {
+    for (const locale of ["pt-pt", "zh-cn", "zh-tw", "zh-hk", "pseudo"]) {
       expect(
         i18n.hasResourceBundle(locale, SETTINGS_NS),
         `${locale} must not be in the initial bundle`,

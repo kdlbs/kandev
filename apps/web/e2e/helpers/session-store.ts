@@ -1,10 +1,11 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 type E2EStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
     getState: () => {
       taskSessions: { items: Record<string, Record<string, unknown>> };
       tasks: { activeSessionId: string | null };
+      sessionAgentctl: { itemsBySessionId: Record<string, { status?: string }> };
       setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
     };
     setState: (
@@ -20,6 +21,22 @@ type AvailableCommand = {
   description?: string;
   input_hint?: string;
 };
+
+/** Wait until the session agentctl is ready for controls that require it. */
+export async function waitForSessionAgentctlReady(
+  page: Page,
+  sessionId: string,
+  timeout = 60_000,
+): Promise<void> {
+  await page.waitForFunction(
+    (sid) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      return store?.getState().sessionAgentctl.itemsBySessionId[sid]?.status === "ready";
+    },
+    sessionId,
+    { timeout, message: `agentctl did not become ready for session ${sessionId}` },
+  );
+}
 
 export async function waitForActiveSessionForegroundActivity(
   page: Page,
@@ -103,4 +120,34 @@ export async function seedAvailableCommands(
     },
     { sid: sessionId, commandList: commands },
   );
+}
+
+/**
+ * Wait until `sessionId` is the active session AND has stopped changing.
+ *
+ * Clicking a session tab settles asynchronously, and the flicker specs install
+ * their observers straight afterwards: starting to observe mid-settle records
+ * the tail of the switch as if it were oscillation. Requiring two consecutive
+ * agreeing samples gives those specs the quiet baseline the fixed sleeps were
+ * approximating, while returning immediately once the switch is genuinely done.
+ */
+export async function waitForStableActiveSession(
+  page: Page,
+  sessionId: string,
+  timeout = 15_000,
+): Promise<void> {
+  let previous: string | null = null;
+  await expect
+    .poll(
+      async () => {
+        const current = await page.evaluate(
+          () => (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState().tasks.activeSessionId,
+        );
+        const stable = current === sessionId && previous === sessionId;
+        previous = current ?? null;
+        return stable;
+      },
+      { timeout, message: `active session did not settle on ${sessionId}` },
+    )
+    .toBe(true);
 }

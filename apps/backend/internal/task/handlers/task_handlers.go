@@ -166,6 +166,12 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/:id/unarchive", h.httpUnarchiveTask)
 	api.GET("/tasks/:id/subtask-count", h.httpTaskSubtaskCount)
 
+	// Task dependencies ("this task is blocked by that one"). Task-scoped
+	// equivalents of the Office-only blocker routes; both go through the single
+	// validator in the task service.
+	api.POST("/tasks/:id/dependencies", h.httpAddTaskDependency)
+	api.DELETE("/tasks/:id/dependencies/:depId", h.httpRemoveTaskDependency)
+
 	api.POST("/tasks/bulk-move", h.httpBulkMoveTasks)
 	api.GET("/workflows/:id/task-count", h.httpGetWorkflowTaskCount)
 	api.GET("/workflow/steps/:id/task-count", h.httpGetStepTaskCount)

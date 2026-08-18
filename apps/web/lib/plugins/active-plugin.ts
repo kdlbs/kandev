@@ -33,6 +33,7 @@ export function toActivePlugin(record: PluginRecord): ActivePlugin | null {
     name: record.display_name,
     bundleUrl: `/api/plugins/${record.id}/bundle?v=${encodeURIComponent(record.version)}`,
     styleUrls: pluginStyleURLs(record),
+    ...(record.repository_providers ? { repositoryProviderIds: record.repository_providers } : {}),
   };
 }
 

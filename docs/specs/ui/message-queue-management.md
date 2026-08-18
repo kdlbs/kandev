@@ -26,6 +26,9 @@ remains full. Those same rows have no individual remove action.
 - Removal does not change provenance rules for other operations. Only
   user-owned messages may be edited. Merge behavior remains defined by
   [Merge Enqueued Messages Individually](message-queue-merge.md), and
+  admission-time compaction is defined by
+  [Automatically Merge Consecutive Queued Messages](message-queue-auto-merge.md).
+  The two merge settings are independent. The
   interrupt-and-dispatch behavior is defined by
   [Send Queued Messages Now](message-queue-send-now.md).
 - Successful removal publishes the existing
@@ -41,8 +44,9 @@ remains full. Those same rows have no individual remove action.
 
 ### Capacity setting
 
-- **Settings > General > Message Queue** exposes the maximum number of persisted
-  messages allowed per session.
+- **Settings > Task Behavior > Message Queue** exposes the maximum number of
+  persisted messages allowed per session alongside independent manual and
+  automatic merge switches.
 - The default is `10`. A positive integer sets a cap; `0` means unlimited.
 - A saved setting applies immediately to later admissions. Existing entries
   are never trimmed. If a queue already exceeds a newly lowered limit, new
@@ -90,9 +94,15 @@ GET response and PATCH response:
 
 ```json
 {
-  "settings": { "max_per_session": 10 },
+  "settings": {
+    "max_per_session": 10,
+    "merge_enabled": true,
+    "auto_merge_enabled": true
+  },
   "effective": {
     "max_per_session": 10,
+    "merge_enabled": true,
+    "auto_merge_enabled": true,
     "source": "default",
     "locked": false
   }
@@ -106,9 +116,11 @@ persisted value, or the default when no override exists. PATCH accepts:
 { "max_per_session": 25 }
 ```
 
-PATCH rejects negative values with `400`, rejects a valid environment lock
-with `409`, and requires the admin role. GET requires an authenticated install
-user under the existing system-route middleware.
+PATCH is partial: omitted capacity, manual-merge, and automatic-merge fields
+remain unchanged. It rejects negative capacity with `400`, rejects a valid
+environment capacity lock with `409` only when the patch names
+`max_per_session`, and requires the admin role. GET requires an authenticated
+install user under the existing system-route middleware.
 
 ## Data Model
 
@@ -116,7 +128,11 @@ No queue-table migration is required. Capacity uses the existing install-wide
 `settings` table under key `message_queue` with JSON value:
 
 ```json
-{ "max_per_session": 25 }
+{
+  "max_per_session": 25,
+  "merge_enabled": true,
+  "auto_merge_enabled": true
+}
 ```
 
 `queued_by` stays unchanged as immutable provenance. The existing
@@ -210,8 +226,9 @@ starts accepting work.
   **THEN** no capacity error is produced solely by queue length and the page
   explains that the queue is unlimited.
 - **GIVEN** a phone viewport, **WHEN** the user opens the queue panel and the
-  General settings menu, **THEN** remove/clear are touch-sized and Message Queue
-  is reachable without horizontal overflow or a second page scroll owner.
+  Task Behavior settings menu, **THEN** remove/clear are touch-sized and Message
+  Queue is reachable without horizontal overflow or a second page scroll
+  owner.
 
 ## Out of Scope
 

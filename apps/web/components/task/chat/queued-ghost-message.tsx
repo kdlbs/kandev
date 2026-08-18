@@ -10,7 +10,7 @@ import {
   useState,
 } from "react";
 import type { ReactNode } from "react";
-import { IconCheck, IconFile, IconInfoCircle, IconRobot, IconUser } from "@tabler/icons-react";
+import { IconCheck, IconInfoCircle, IconRobot, IconUser } from "@tabler/icons-react";
 import ReactMarkdown from "react-markdown";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -22,7 +22,6 @@ import { Textarea } from "@kandev/ui/textarea";
 import { cn } from "@/lib/utils";
 import { QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
 import { stripSystemTags } from "@/lib/utils/system-tags";
-import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import {
   SenderTaskBadge,
   type SenderTaskInfo,
@@ -41,52 +40,9 @@ import {
 } from "@/lib/entity-references/message-references";
 import { buildEntityReferenceMarkdownComponents } from "@/components/task/chat/messages/entity-reference-chip";
 import { QueuedGhostRowActions } from "@/components/task/chat/queued-ghost-row-actions";
+import { AttachmentRow, type QueuedAttachment } from "@/components/task/chat/queued-attachment-row";
 import { t } from "@/lib/i18n";
-
-type QueuedAttachment = NonNullable<QueuedMessage["attachments"]>[number];
-
-type AttachmentRowProps = {
-  attachments: QueuedAttachment[];
-  interactive: boolean;
-};
-
-/**
- * Renders queued-message attachments as compact thumbnails (images) and chips
- * (other resources). Used in both display and edit views; `interactive=false`
- * disables the click-to-open behavior so it stays a passive context cue while
- * editing the message text.
- */
-function AttachmentRow({ attachments, interactive }: AttachmentRowProps) {
-  const { t } = useTranslation();
-  if (attachments.length === 0) return null;
-  const images = attachments.filter((a) => a.type === "image");
-  const files = attachments.filter((a) => a.type !== "image");
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {images.map((att, i) => (
-        <ImagePreviewDialog
-          key={`img-${i}`}
-          src={`data:${att.mime_type};base64,${att.data}`}
-          alt={t("task:attachmentIndexed", { index: i + 1 })}
-          interactive={interactive}
-          thumbnailClassName={cn(
-            "h-10 w-10 rounded-md border border-border object-cover",
-            interactive && "transition-opacity hover:opacity-90",
-          )}
-        />
-      ))}
-      {files.map((_, i) => (
-        <span
-          key={`file-${i}`}
-          className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground"
-        >
-          <IconFile className="h-3 w-3" />
-          {t("task:attachment")}
-        </span>
-      ))}
-    </div>
-  );
-}
+import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 
 /** Imperative handle for the ghost row, used by chat input "edit last queued" affordance. */
 export type QueuedGhostMessageHandle = {
@@ -237,6 +193,10 @@ function EditView({
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
+      // Claim the key here: once this edit is cancelled, nothing further up
+      // the tree (e.g. a clarification panel's own Escape-collapses handler)
+      // should also react to the same keypress.
+      event.stopPropagation();
       onCancel();
     } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
@@ -552,6 +512,29 @@ function useFocusQueuedEdit(
   }, [editing, textareaRef]);
 }
 
+function useQueuedGhostEditEscapeGuard(
+  editing: boolean,
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>,
+): void {
+  const editEscapeGuard = useCallback(
+    (event: KeyboardEvent) => {
+      if (!editing || event.key !== "Escape") return false;
+      const textarea = textareaRef.current;
+      if (!textarea) return false;
+      const target = event.target;
+      return (
+        target === textarea ||
+        (target instanceof Node && textarea.contains(target)) ||
+        document.activeElement === textarea
+      );
+    },
+    [editing, textareaRef],
+  );
+  // Radix dialogs inspect Escape during document capture, before the
+  // textarea's bubble-phase handler can cancel the edit.
+  useClarificationEscapeGuard(editing ? editEscapeGuard : null);
+}
+
 type QueuedGhostSaveArgs = {
   value: string;
   entryContent: string;
@@ -625,6 +608,7 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
     const [value, setValue] = useState(entry.content);
     const [saving, setSaving] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    useQueuedGhostEditEscapeGuard(editing, textareaRef);
     const entityReferences = useMemo(
       () => entityReferencesFromMetadata(entry.metadata),
       [entry.metadata],

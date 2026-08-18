@@ -1,17 +1,21 @@
 package plugins
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
 	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/pkg/pluginsdk"
@@ -24,15 +28,37 @@ import (
 // use to exhaust backend memory. 4 MiB comfortably covers realistic webhook
 // payloads (GitHub/Slack/Jira event bodies are KB-sized) while bounding
 // worst-case memory use per request.
-const maxWebhookBodyBytes = 4 << 20 // 4 MiB
+const maxWebhookBodyBytes = manifest.DefaultWebhookMaxBodyBytes
+
+const (
+	// maxPluginActionEnvelopeBytes bounds the complete browser request before
+	// its declared action-specific body cap is available. The small allowance
+	// covers the resource selectors and JSON envelope around the largest legal
+	// action body without allowing arbitrary envelope growth.
+	maxPluginActionEnvelopeBytes = manifest.MaxActionBodyBytes + 4096
+	maxPluginActionResponseBytes = 1 << 20 // 1 MiB
+	contentTypeHeader            = "Content-Type"
+)
+
+var pluginActionTimeout = 15 * time.Second
+
+// actionInvoker is deliberately narrower than Service so the HTTP boundary
+// can be tested without a subprocess while production dispatch remains the
+// Service's runtime-mediated RPC call.
+type actionInvoker interface {
+	InvokeAction(
+		context.Context, string, pluginDispatchGeneration, *pluginsdk.PluginActionRequest,
+	) (*pluginsdk.PluginActionResponse, error)
+}
 
 // Controller holds the plugin HTTP handlers: operator-facing management
 // (install/list/get/config/uninstall/enable/disable), the bundle/UI
 // static-file serving (from the extracted package on disk), and the
 // external webhook relay (HTTP -> Host RPC over the live subprocess).
 type Controller struct {
-	svc *Service
-	log *logger.Logger
+	svc           *Service
+	log           *logger.Logger
+	actionInvoker actionInvoker
 }
 
 // RegisterRoutes wires the plugin HTTP surface. deliverer is accepted for
@@ -40,10 +66,10 @@ type Controller struct {
 // alongside this call) — no handler in this file calls it directly, since
 // Service already notifies it on every install/status change.
 func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.Logger) {
-	ctrl := &Controller{svc: svc, log: log}
+	ctrl := &Controller{svc: svc, log: log, actionInvoker: svc}
 
 	api := router.Group("/api/plugins")
-	api.POST("/install", ctrl.install)
+	api.POST("/install", authn.RequireAdmin(), ctrl.install)
 	api.POST("/sync", ctrl.sync)
 	// Register the static /marketplace and /settings routes before the /:id
 	// wildcard, matching the /install and /sync ordering — some gin/httprouter
@@ -63,6 +89,7 @@ func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.L
 
 	api.GET("/:id/bundle", ctrl.bundle)
 	api.GET("/:id/ui/*path", ctrl.ui)
+	api.POST("/:id/actions/:key", ctrl.action)
 	// Registered before the /:id/webhooks/:key wildcard for the same reason
 	// /settings is registered before /:id above: some gin/httprouter tree
 	// versions reject a static-ish sibling added after an existing wildcard.
@@ -346,7 +373,7 @@ func (c *Controller) ui(ctx *gin.Context) {
 // auto-detects when the header is unset).
 func serveInstalledFile(ctx *gin.Context, root, relPath, contentType string) {
 	if contentType != "" {
-		ctx.Writer.Header().Set("Content-Type", contentType)
+		ctx.Writer.Header().Set(contentTypeHeader, contentType)
 	}
 	req := ctx.Request.Clone(ctx.Request.Context())
 	req.URL.Path = relPath
@@ -372,12 +399,19 @@ func (c *Controller) webhook(ctx *gin.Context) {
 	}
 
 	key := ctx.Param("key")
-	if !manifestDeclaresWebhookKey(record, key) {
+	declaration, ok := findWebhookDeclaration(record, key)
+	if !ok {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("plugin %q has no webhook %q", id, key)})
 		return
 	}
+	if declaration.EffectiveAccess() == manifest.WebhookAccessAuthenticated {
+		if _, authenticated := authn.FromGin(ctx); !authenticated {
+			ctx.JSON(http.StatusUnauthorized, gin.H{actionErrorField: authenticationRequiredMessage})
+			return
+		}
+	}
 
-	body, err := readCappedWebhookBody(ctx)
+	body, err := readCappedWebhookBody(ctx, declaration.EffectiveMaxBodyBytes())
 	if err != nil {
 		return // readCappedWebhookBody already wrote the error response
 	}
@@ -386,7 +420,7 @@ func (c *Controller) webhook(ctx *gin.Context) {
 		WebhookKey: key,
 		Method:     ctx.Request.Method,
 		Query:      ctx.Request.URL.RawQuery,
-		Headers:    flattenHeaders(ctx.Request.Header),
+		Headers:    flattenWebhookHeaders(ctx.Request.Header),
 		Body:       body,
 	}
 
@@ -479,13 +513,18 @@ func (c *Controller) applyAuthLogin(ctx *gin.Context, record *store.Record, raw 
 
 // manifestDeclaresWebhookKey reports whether record's manifest declares a
 // webhooks[] entry with the given key.
-func manifestDeclaresWebhookKey(record *store.Record, key string) bool {
+func findWebhookDeclaration(record *store.Record, key string) (manifest.Webhook, bool) {
 	for _, wh := range record.Webhooks {
 		if wh.Key == key {
-			return true
+			return wh, true
 		}
 	}
-	return false
+	return manifest.Webhook{}, false
+}
+
+func manifestDeclaresWebhookKey(record *store.Record, key string) bool {
+	_, ok := findWebhookDeclaration(record, key)
+	return ok
 }
 
 // readCappedWebhookBody reads ctx.Request.Body bounded at
@@ -493,14 +532,14 @@ func manifestDeclaresWebhookKey(record *store.Record, key string) bool {
 // itself (and returning a non-nil error as a sentinel to the caller) when
 // the body exceeds the cap, so a single external webhook POST cannot
 // exhaust backend memory via an unbounded io.ReadAll.
-func readCappedWebhookBody(ctx *gin.Context) ([]byte, error) {
-	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxWebhookBodyBytes)
+func readCappedWebhookBody(ctx *gin.Context, maxBytes int64) ([]byte, error) {
+	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxBytes)
 	body, err := io.ReadAll(ctx.Request.Body)
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			ctx.JSON(http.StatusRequestEntityTooLarge, gin.H{
-				"error": fmt.Sprintf("webhook body exceeds max size of %d bytes", maxWebhookBodyBytes),
+				"error": fmt.Sprintf("webhook body exceeds max size of %d bytes", maxBytes),
 			})
 			return nil, err
 		}
@@ -520,4 +559,11 @@ func flattenHeaders(h http.Header) map[string]string {
 		out[k] = strings.Join(v, ", ")
 	}
 	return out
+}
+
+func flattenWebhookHeaders(h http.Header) map[string]string {
+	safe := h.Clone()
+	safe.Del("Authorization")
+	safe.Del("Cookie")
+	return flattenHeaders(safe)
 }

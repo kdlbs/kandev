@@ -1,6 +1,7 @@
 ---
 status: shipped
 created: 2026-08-03
+updated: 2026-08-11
 owner: kandev
 ---
 
@@ -20,12 +21,29 @@ to do so. Users need a Settings option to enable or disable a persistent
 
 ## What
 
-- `Settings > General` exposes a single boolean preference, "Show agent todo
-  list panel" (default **off**, preserving today's behavior for every existing
-  user). The preference is a true, unconditional visibility gate: while it is
-  off, no task's right panel ever shows a Todos tab, regardless of what any
-  saved layout or profile records for that panel. While it is on, every open
-  and subsequently opened desktop task's right panel shows a Todos tab.
+- `Settings > General > Task Actions` exposes a boolean preference, "Show agent
+  todo list panel" (default **off**, preserving today's behavior for every
+  existing user). Its description states explicitly that it automatically
+  pins the agent's live todo checklist as a Todos tab in the right panel, and
+  that the Todos tab can always be added manually even while the preference is
+  off. The preference remains the master visibility gate: while it is off, no
+  task's right panel ever shows a Todos tab automatically, regardless of what
+  any saved layout or profile records for that panel. While it is on, every
+  open and subsequently opened desktop task's right panel shows a Todos tab,
+  subject to the sub-option below.
+- A sub-option, "Only pin when todo list is not empty" (default **off**), is
+  rendered beneath the main toggle and appears only while the main preference
+  is on. It is never rendered disabled: turning the main preference off
+  inhibits it (hides it entirely) while preserving its saved value, so
+  re-enabling the main preference restores the sub-option in its previous
+  state. When the sub-option is on, the automatic pin adds the Todos tab only
+  when the active session's todo list is not empty — "not empty" meaning the
+  same two-source fallback the panel content uses: live
+  `sessionTodos.bySessionId` entries, or the latest persisted `todo`-type
+  message (`buildTodoItems`) when the session completed before the page
+  loaded. The sub-option gates only the automatic pin: it never removes an
+  already-open Todos tab, and it never affects the workbench "+" menu's
+  always-available manual Todos row.
 - The **Todos** panel is registered as a new reusable, single-instance panel
   id (`todos`), alongside Agent, Files, Changes, PR Details, Terminal, Plan,
   Browser, and VS Code (`REUSABLE_PANEL_IDS`/`KNOWN_PANEL_IDS`,
@@ -50,7 +68,10 @@ to do so. Users need a Settings option to enable or disable a persistent
     `todos`, add it as an inactive tab (so it never steals focus) in the group
     and tab index configured by the user's custom Default layout when that
     layout configures a `todos` placement, otherwise beside Files and Changes
-    in the pinned right column's top group.
+    in the pinned right column's top group. When the "Only pin when todo list
+    is not empty" sub-option is on, the add is suppressed while the active
+    session's todo list is empty; the sync re-runs (and then adds) as soon as
+    todo entries arrive, either live via WS or via persisted message history.
   - **Off:** if the active task's live layout contains `todos`, remove it.
 - Once present, the Todos tab has a normal close control and normal
   drag/reorder/split behavior — no special restriction is introduced. Closing
@@ -97,11 +118,12 @@ to do so. Users need a Settings option to enable or disable a persistent
 
 No new entity. Reuses the existing per-user settings JSON blob
 (`apps/backend/internal/user/models/models.go`'s `UserSettings` struct,
-persisted in SQLite) by adding one field:
+persisted in SQLite) by adding two boolean fields:
 
 | Field | Type | Constraint |
 |---|---|---|
 | `ShowTodoListPanel` (Go) / `showTodoListPanel` (frontend) / `show_todo_list_panel` (wire) | boolean | Defaults to `false` for new and existing users; no migration needed since the JSON blob is read with per-field defaults. |
+| `ShowTodoListPanelOnlyWhenNotEmpty` (Go) / `showTodoListPanelOnlyWhenNotEmpty` (frontend) / `show_todo_list_panel_only_when_not_empty` (wire) | boolean | Defaults to `false`. Independent of `ShowTodoListPanel`: turning the master preference off preserves this value, which is what lets the sub-option reappear in its saved state. |
 
 Reuses the existing `sessionTodos.bySessionId: Record<sessionId, PlanEntry[]>`
 frontend store slice (`apps/web/lib/state/slices/session-runtime/session-runtime-slice.ts`)
@@ -119,21 +141,25 @@ alongside `pr-detail`; it carries no task-specific keyed variant (unlike
 
 No new endpoint. Extends the existing per-user settings contract:
 
-- `GET /api/v1/user/settings` response gains `show_todo_list_panel: boolean`.
-- `PATCH /api/v1/user/settings` accepts `show_todo_list_panel?: boolean` as a
-  partial update, following the same merge-patch semantics as every other
-  boolean field on that endpoint (e.g. `show_transcript_auto_scroll_control`).
+- `GET /api/v1/user/settings` response gains `show_todo_list_panel: boolean`
+  and `show_todo_list_panel_only_when_not_empty: boolean`.
+- `PATCH /api/v1/user/settings` accepts `show_todo_list_panel?: boolean` and
+  `show_todo_list_panel_only_when_not_empty?: boolean` as partial updates,
+  following the same merge-patch semantics as every other boolean field on
+  that endpoint (e.g. `show_transcript_auto_scroll_control`). Each field is
+  merged independently, so the sub-option can be persisted while the master
+  preference is off.
 - The boot/hydration payload (`apps/backend/internal/backendapp/boot_state_routes.go`)
-  gains `showTodoListPanel` alongside the other camelCase display-preference
-  fields it already returns.
+  gains `showTodoListPanel` and `showTodoListPanelOnlyWhenNotEmpty` alongside
+  the other camelCase display-preference fields it already returns.
 - No new WebSocket event type. The existing user-settings WS sync path
   (`apps/web/lib/ws/handlers/users.ts`) carries the new field like every other
   settings field.
 
 ## Failure modes
 
-- If the settings PATCH fails, the Settings page keeps the unsaved toggle
-  state and reports the error; the previously persisted value and the
+- If the settings PATCH fails, the Settings page keeps the unsaved state of
+  both toggles and reports the error; the previously persisted values and the
   workbench's current tab state are unchanged (matching the existing Settings
   save-contributor failure behavior used by every other toggle on the page).
 - If the active task has no open Dockview API yet (task still loading) when
@@ -174,7 +200,31 @@ No new endpoint. Extends the existing per-user settings contract:
   `TodoIndicator` popover shows for that session.
 - **GIVEN** the preference is on and the active session has not emitted any
   todo entries yet, **WHEN** the user selects the Todos tab, **THEN** it shows
-  an empty state rather than being absent.
+  an empty state rather than being absent (with the "Only pin when todo list
+  is not empty" sub-option off).
+- **GIVEN** the preference is off, **WHEN** the user opens
+  `Settings > General > Task Actions`, **THEN** only the main "Show agent todo
+  list panel" toggle is rendered; the "Only pin when todo list is not empty"
+  option is not shown.
+- **GIVEN** the preference is off and "Only pin when todo list is not empty"
+  was previously saved on, **WHEN** the user turns the main preference on and
+  saves, **THEN** the sub-option reappears in its previously saved (on) state
+  and remains independently toggleable.
+- **GIVEN** the preference is on and "Only pin when todo list is not empty"
+  is on, **WHEN** a task whose active session has no todo entries (no live
+  `sessionTodos` and no persisted `todo` message) opens, **THEN** no Todos tab
+  is auto-pinned.
+- **GIVEN** the preference is on and "Only pin when todo list is not empty"
+  is on, **WHEN** a task whose active session has todo entries (live or in
+  persisted message history) opens, **THEN** the Todos tab is auto-pinned
+  beside Files and Changes.
+- **GIVEN** the preference is on and "Only pin when todo list is not empty"
+  is off, **WHEN** a task with an empty todo list opens, **THEN** the Todos
+  tab is auto-pinned (unchanged v1 behavior).
+- **GIVEN** the preference is off and "Only pin when todo list is not empty"
+  is on (saved), **WHEN** the user adds the Todos tab from the task
+  workbench's "+" menu, **THEN** the tab opens normally, because manual adds
+  are never gated by either option.
 - **GIVEN** the preference is on, **WHEN** the user turns it off and saves,
   **THEN** the Todos tab disappears from every currently open task's right
   panel immediately, without requiring a reload, even for a task whose saved
@@ -206,9 +256,11 @@ No new endpoint. Extends the existing per-user settings contract:
   parsing, `SessionTodosEventPayload`).
 - Removing, hiding, or changing the existing inline `TodoIndicator` chip or
   `TodoMessage` transcript cards.
-- Auto-showing the tab only when the session actually has todo entries (the
-  preference is a manual on/off switch, not a content-driven auto-show like
-  PR Details' review-linkage trigger).
+- Content-driven auto-show by default: the master preference stays a manual
+  on/off switch, not a content-driven auto-show like PR Details' review-linkage
+  trigger. Only the opt-in "Only pin when todo list is not empty" sub-option
+  gates the automatic pin on content, and it gates only adds — it never
+  auto-removes an already-open Todos tab when the list empties.
 - A closed-for-session suppression memory analogous to PR Details' — closing
   the tab while the preference is on is temporary, not sticky.
 - An "unseen update" badge/dot on the Todos tab (Plan's `PlanTab` has one;

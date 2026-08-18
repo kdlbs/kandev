@@ -5,6 +5,7 @@ import { useRequest } from "@/lib/http/use-request";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { openFileInVscode } from "@/lib/api/domains/vscode-api";
 import { useToast } from "@/components/toast-provider";
+import { t } from "@/lib/i18n";
 
 type OpenEditorOptions = {
   filePath?: string;
@@ -88,8 +89,8 @@ export function useOpenSessionInEditor(sessionId?: string | null) {
         return await request.run(options);
       } catch (error) {
         toast({
-          title: "Failed to open editor",
-          description: error instanceof Error ? error.message : "Request failed",
+          title: t("editors:failedToOpenEditor"),
+          description: error instanceof Error ? error.message : t("common:requestFailed"),
           variant: "error",
         });
         return null;

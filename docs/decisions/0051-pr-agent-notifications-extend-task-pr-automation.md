@@ -143,7 +143,20 @@ error.
 
 ## Consequences
 
-- PR automation has one task-level control plane for users and agents.
+- ~~PR automation has one task-level control plane for users and agents.~~
+  **Superseded (2026-08-10):** the five automation switches
+  (`auto_fix_enabled`, `auto_merge_enabled`, `prompt_on_review_requested`,
+  `prompt_on_merged`, `prompt_on_closed`) are now scoped per linked PR —
+  `github_task_pr_automation_options`, keyed `(task_id, repository_id,
+  pr_number)` — because a task with multiple linked PRs (e.g. one repo's
+  feature branch and its backport) needs independent auto-fix/auto-merge
+  configuration per PR, and users editing one PR's tab in the multi-PR
+  popover were confused to see the same values change on every other tab
+  for the task. `auto_fix_prompt_override` and the resolved reviewer login
+  remain the one task-level control plane described below; only the five
+  boolean switches moved. MCP callers that omit PR identity keep today's
+  fan-out-to-every-linked-PR behavior. See `docs/specs/ui/ci-pr-automation.md`
+  and the GitLab MR automation follow-up for the mirrored change.
 - Lifecycle evaluation runs inside the single CI automation pass — one goroutine
   and one in-flight map handle auto-fix, auto-merge, and lifecycle for a PR.
 - Lifecycle rows remain durable until executor acceptance, so restart recovery

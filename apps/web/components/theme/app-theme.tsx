@@ -11,7 +11,7 @@ import {
 } from "react";
 
 type Theme = "light" | "dark" | "system";
-type ResolvedTheme = "light" | "dark";
+export type ResolvedTheme = "light" | "dark";
 
 type ThemeContextValue = {
   theme: Theme;

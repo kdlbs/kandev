@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useAppStore } from "@/components/state-provider";
@@ -125,7 +125,6 @@ export function useMobileMenuSheetState({
 >) {
   const contentRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
-  const [improveOpen, setImproveOpen] = useState(false);
   const { isMobile } = useResponsiveBreakpoint();
   const {
     workflows,
@@ -189,21 +188,6 @@ export function useMobileMenuSheetState({
     event.preventDefault();
     contentRef.current?.focus({ preventScroll: true });
   };
-  const openImproveKandev = () => {
-    onOpenChange(false);
-    requestAnimationFrame(() => setImproveOpen(true));
-  };
 
-  return {
-    contentRef,
-    router,
-    improveOpen,
-    setImproveOpen,
-    isMobile,
-    viewValue,
-    handleViewChange,
-    displayOptions,
-    focusMenu,
-    openImproveKandev,
-  };
+  return { contentRef, isMobile, viewValue, handleViewChange, displayOptions, focusMenu };
 }

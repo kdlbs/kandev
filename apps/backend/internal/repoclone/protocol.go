@@ -81,9 +81,6 @@ func providerHost(provider string) (string, error) {
 		return "github.com", nil
 	case "gitlab":
 		return "gitlab.com", nil
-	case "bitbucket":
-		// TODO: Bitbucket support is not yet implemented
-		return "bitbucket.org", nil
 	default:
 		return "", fmt.Errorf("unsupported git provider: %q", provider)
 	}

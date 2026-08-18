@@ -25,56 +25,32 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
     expect(ids).toContain("TOGGLE_PLAN_MODE");
     expect(ids).toContain("TASK_SWITCHER");
     expect(ids).toContain("TASK_SWITCHER_REVERSE");
-    expect(ids).toContain("VOICE_INPUT_TOGGLE");
     expect(ids).toContain("REVERSE_SEARCH");
     expect(ids).toContain("OPEN_TASK_PR");
     expect(ids).toContain("WORKSPACE_PICKER");
-    expect(ids).toHaveLength(17);
+    expect(ids).toHaveLength(16);
   });
 
-  it("each entry has a label and default matching SHORTCUTS", () => {
-    expect(CONFIGURABLE_SHORTCUTS.CONTENT_SEARCH.label).toBe("Search Task Contents");
+  it("each entry has a catalog key and default matching SHORTCUTS", () => {
+    for (const entry of Object.values(CONFIGURABLE_SHORTCUTS)) {
+      expect(entry.labelKey).toMatch(/^settings:shortcut/);
+    }
     expect(CONFIGURABLE_SHORTCUTS.CONTENT_SEARCH.default).toBe(SHORTCUTS.CONTENT_SEARCH);
-    expect(CONFIGURABLE_SHORTCUTS.BOTTOM_TERMINAL.label).toBe("Toggle Bottom Terminal");
     expect(CONFIGURABLE_SHORTCUTS.BOTTOM_TERMINAL.default).toBe(SHORTCUTS.BOTTOM_TERMINAL);
-
-    expect(CONFIGURABLE_SHORTCUTS.TOGGLE_SIDEBAR.label).toBe("Toggle Sidebar");
     expect(CONFIGURABLE_SHORTCUTS.TOGGLE_SIDEBAR.default).toBe(UNBOUND_SHORTCUT);
-
-    expect(CONFIGURABLE_SHORTCUTS.COMMAND_PANEL.label).toBe("Command Panel (Alt)");
     expect(CONFIGURABLE_SHORTCUTS.COMMAND_PANEL.default).toBe(SHORTCUTS.COMMAND_PANEL);
-
-    expect(CONFIGURABLE_SHORTCUTS.NEW_TASK.label).toBe("New Task");
     expect(CONFIGURABLE_SHORTCUTS.NEW_TASK.default).toBe(SHORTCUTS.NEW_TASK);
-
-    expect(CONFIGURABLE_SHORTCUTS.FOCUS_INPUT.label).toBe("Focus Chat Input");
     expect(CONFIGURABLE_SHORTCUTS.FOCUS_INPUT.default).toBe(SHORTCUTS.FOCUS_INPUT);
-
-    expect(CONFIGURABLE_SHORTCUTS.FOCUS_PASSTHROUGH_INPUT.label).toBe("Focus CLI Chat Input");
     expect(CONFIGURABLE_SHORTCUTS.FOCUS_PASSTHROUGH_INPUT.default).toBe(
       SHORTCUTS.FOCUS_PASSTHROUGH_INPUT,
     );
-
-    expect(CONFIGURABLE_SHORTCUTS.TOGGLE_PLAN_MODE.label).toBe("Toggle Plan Mode");
     expect(CONFIGURABLE_SHORTCUTS.TOGGLE_PLAN_MODE.default).toBe(SHORTCUTS.TOGGLE_PLAN_MODE);
-
-    expect(CONFIGURABLE_SHORTCUTS.TASK_SWITCHER.label).toBe("Recent Task Switcher");
     expect(CONFIGURABLE_SHORTCUTS.TASK_SWITCHER.default).toBe(SHORTCUTS.TASK_SWITCHER);
-
-    expect(CONFIGURABLE_SHORTCUTS.TASK_SWITCHER_REVERSE.label).toBe(
-      "Recent Task Switcher (Backward)",
-    );
     expect(CONFIGURABLE_SHORTCUTS.TASK_SWITCHER_REVERSE.default).toBe(
       SHORTCUTS.TASK_SWITCHER_REVERSE,
     );
-
-    expect(CONFIGURABLE_SHORTCUTS.REVERSE_SEARCH.label).toBe("Reverse Chat Search");
     expect(CONFIGURABLE_SHORTCUTS.REVERSE_SEARCH.default).toBe(SHORTCUTS.REVERSE_SEARCH);
-
-    expect(CONFIGURABLE_SHORTCUTS.OPEN_TASK_PR.label).toBe("Open Task Pull Request");
     expect(CONFIGURABLE_SHORTCUTS.OPEN_TASK_PR.default).toBe(SHORTCUTS.OPEN_TASK_PR);
-
-    expect(CONFIGURABLE_SHORTCUTS.WORKSPACE_PICKER.label).toBe("Open Workspace Picker");
     expect(CONFIGURABLE_SHORTCUTS.WORKSPACE_PICKER.default).toBe(SHORTCUTS.WORKSPACE_PICKER);
   });
 });

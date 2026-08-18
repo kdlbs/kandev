@@ -13,7 +13,7 @@ import {
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { readCookies } from "@/lib/server/cookies";
 import type { AppState } from "@/lib/state/store";
-import { OfficeTopbar } from "./components/office-topbar";
+import { OfficeShell } from "./components/office-shell";
 
 function resolveActiveOfficeWorkspaceId(
   workspaceItems: { id: string }[],
@@ -53,6 +53,65 @@ function mapWorkspaceItem(ws: {
     office_workflow_id: ws.office_workflow_id ?? null,
     created_at: ws.created_at,
     updated_at: ws.updated_at,
+  };
+}
+
+/**
+ * Wraps a workspace-scoped value in the `Record<workspaceId, T>` shape the
+ * office slice stores. No active workspace means no entry at all, rather than
+ * data filed under an empty-string key that nothing would ever read.
+ */
+function keyByWorkspace<T>(workspaceId: string | null, value: T): Record<string, T> {
+  return workspaceId ? { [workspaceId]: value } : {};
+}
+
+/**
+ * The office slice as this layout hydrates it: the four workspace-scoped
+ * collections filed under the workspace they were fetched for, and every other
+ * field at its default. `meta` is supplied by the caller.
+ */
+function officeHydrationState({
+  activeWorkspaceId,
+  agents,
+  projects,
+  inboxItems,
+  inboxCount,
+}: {
+  activeWorkspaceId: string | null;
+  agents: AppState["office"]["agentProfilesByWorkspaceId"][string];
+  projects: AppState["office"]["projectsByWorkspaceId"][string];
+  inboxItems: AppState["office"]["inboxItemsByWorkspaceId"][string];
+  inboxCount: number;
+}): Omit<AppState["office"], "meta"> {
+  return {
+    agentProfilesByWorkspaceId: keyByWorkspace(activeWorkspaceId, agents),
+    skills: [],
+    projectsByWorkspaceId: keyByWorkspace(activeWorkspaceId, projects),
+    approvals: [],
+    activity: [],
+    costSummary: null,
+    budgetPolicies: [],
+    routines: [],
+    inboxItemsByWorkspaceId: keyByWorkspace(activeWorkspaceId, inboxItems),
+    inboxCountByWorkspaceId: keyByWorkspace(activeWorkspaceId, inboxCount),
+    runs: [],
+    dashboardByWorkspaceId: {},
+    tasks: {
+      items: [],
+      filters: { statuses: [], priorities: [], assigneeIds: [], projectIds: [], search: "" },
+      viewMode: "list",
+      sortField: "updated",
+      sortDir: "desc",
+      groupBy: "none",
+      nestingEnabled: true,
+      isLoading: false,
+    },
+    isLoading: false,
+    refetchTrigger: null,
+    routing: { byWorkspace: {}, knownProviders: [], preview: { byWorkspace: {} } },
+    providerHealth: { byWorkspace: {} },
+    runAttempts: { byRunId: {} },
+    agentRouting: { byAgentId: {} },
   };
 }
 
@@ -130,35 +189,14 @@ export default async function OfficeLayout({ children }: { children: React.React
       workspaceId: activeWorkspaceId,
     },
     office: {
-      agentProfiles: agentsResponse.agents as AppState["office"]["agentProfiles"],
-      skills: [],
-      projects: projectsResponse.projects as AppState["office"]["projects"],
-      approvals: [],
-      activity: [],
-      costSummary: null,
-      budgetPolicies: [],
-      routines: [],
-      inboxItems: inboxResponse.items as AppState["office"]["inboxItems"],
-      inboxCount: inboxResponse.total_count,
-      runs: [],
-      dashboard: null,
-      tasks: {
-        items: [],
-        filters: { statuses: [], priorities: [], assigneeIds: [], projectIds: [], search: "" },
-        viewMode: "list",
-        sortField: "updated",
-        sortDir: "desc",
-        groupBy: "none",
-        nestingEnabled: true,
-        isLoading: false,
-      },
+      ...officeHydrationState({
+        activeWorkspaceId,
+        agents: agentsResponse.agents as AppState["office"]["agentProfilesByWorkspaceId"][string],
+        projects: projectsResponse.projects as AppState["office"]["projectsByWorkspaceId"][string],
+        inboxItems: inboxResponse.items as AppState["office"]["inboxItemsByWorkspaceId"][string],
+        inboxCount: inboxResponse.total_count,
+      }),
       meta: metaResponse,
-      isLoading: false,
-      refetchTrigger: null,
-      routing: { byWorkspace: {}, knownProviders: [], preview: { byWorkspace: {} } },
-      providerHealth: { byWorkspace: {} },
-      runAttempts: { byRunId: {} },
-      agentRouting: { byAgentId: {} },
     },
   };
 
@@ -166,8 +204,7 @@ export default async function OfficeLayout({ children }: { children: React.React
     <TooltipProvider>
       <StateHydrator initialState={initialState} />
       <div className="flex h-full min-h-0 flex-col">
-        <OfficeTopbar />
-        <main className="flex-1 min-h-0 overflow-y-auto">{children}</main>
+        <OfficeShell>{children}</OfficeShell>
       </div>
     </TooltipProvider>
   );

@@ -63,6 +63,195 @@ test.describe("Quick Chat", () => {
     ).toHaveAttribute("data-active", "true");
   });
 
+  test("Escape collapses the clarification panel before closing the modal", async ({
+    testPage,
+  }) => {
+    const dialog = await openQuickChatWithAgent(testPage);
+    await sendQuickChatMessage(dialog, testPage, "/e2e:clarification-multi");
+
+    const clarification = dialog.getByTestId("clarification-overlay");
+    await expect(clarification).toBeVisible({ timeout: 30_000 });
+
+    const bar = dialog.getByTestId("clarification-overlay-container");
+
+    // The collapse shortcut only fires for keydowns targeting the shortcut
+    // scope (quick-chat-content), same as the numeric-step shortcut above.
+    await dialog.getByTestId("quick-chat-messages").click({ position: { x: 8, y: 8 } });
+    await expect(dialog.getByTestId("quick-chat-content")).toBeFocused();
+
+    await testPage.keyboard.press("Escape");
+
+    // First Escape: a pending, expanded clarification collapses in place and
+    // the modal stays open, matching the main task chat panel's two-stage
+    // Escape after #2729 — this is what distinguishes it from Radix's default
+    // (close-on-Escape) DismissableLayer behavior.
+    await expect(dialog).toBeVisible();
+    await expect(clarification).not.toBeVisible();
+    await expect(bar).toBeVisible();
+
+    await testPage.keyboard.press("Escape");
+
+    // Second Escape is now unguarded: it closes the whole modal.
+    await expect(dialog).not.toBeVisible();
+  });
+
+  test("Escape collapses the clarification panel with focus left in the composer after sending", async ({
+    testPage,
+  }) => {
+    const dialog = await openQuickChatWithAgent(testPage);
+    await sendQuickChatMessage(dialog, testPage, "/e2e:clarification-multi");
+
+    const clarification = dialog.getByTestId("clarification-overlay");
+    await expect(clarification).toBeVisible({ timeout: 30_000 });
+
+    // Focus the composer directly instead of an inert part of the message
+    // list: this is the ordinary post-send state, and the composer is an
+    // editable target the collapse shortcut must still claim Escape for.
+    const editor = dialog.locator(".tiptap.ProseMirror");
+    await editor.click();
+    await expect(editor).toBeFocused();
+
+    await testPage.keyboard.press("Escape");
+
+    await expect(dialog).toBeVisible();
+    await expect(clarification).not.toBeVisible();
+    await expect(dialog.getByTestId("clarification-overlay-container")).toBeVisible();
+  });
+
+  test("Escape closes the modal immediately when focus is outside the clarification's shortcut scope", async ({
+    testPage,
+  }) => {
+    const dialog = await openQuickChatWithAgent(testPage);
+    await sendQuickChatMessage(dialog, testPage, "/e2e:clarification-multi");
+
+    const clarification = dialog.getByTestId("clarification-overlay");
+    await expect(clarification).toBeVisible({ timeout: 30_000 });
+
+    // The tab bar sits outside quick-chat-content (the clarification's
+    // shortcut scope), e.g. the resize handles or a mouse-focused tab.
+    await dialog
+      .locator('[data-testid="quick-chat-tab"] button:not([aria-label^="Close"])')
+      .focus();
+
+    await testPage.keyboard.press("Escape");
+
+    // A pending, still-expanded clarification does not block Escape here: the
+    // guard predicate only claims Escape for keydowns inside its scope.
+    await expect(dialog).not.toBeVisible();
+  });
+
+  test("Escape closes the open entity-reference suggestion popup without collapsing the clarification panel", async ({
+    testPage,
+  }) => {
+    // Regression coverage for the real ProseMirror Suggestion keydown path:
+    // earlier rounds only exercised a synthetic in-scope listener, which
+    // stayed green while Radix's Dialog capture-phase preventDefault() on
+    // Escape silently starved prosemirror-view's own keydown handling (and
+    // therefore the Suggestion plugin's onKeyDown) on Quick Chat specifically.
+    const dialog = await openQuickChatWithAgent(testPage);
+    await sendQuickChatMessage(dialog, testPage, "/e2e:clarification-multi");
+
+    const clarification = dialog.getByTestId("clarification-overlay");
+    await expect(clarification).toBeVisible({ timeout: 30_000 });
+    const bar = dialog.getByTestId("clarification-overlay-container");
+
+    const editor = dialog.locator(".tiptap.ProseMirror");
+    await editor.click();
+    await editor.pressSequentially("#");
+
+    // PopupMenu always portals to document.body (see popup-menu.tsx), outside
+    // the Dialog's own DOM subtree, so this must be queried at the page level
+    // -- mirrors entity-reference-composer.spec.ts's non-Quick-Chat usage.
+    const menu = testPage.getByTestId("entity-reference-menu");
+    await expect(menu).toBeVisible({ timeout: 10_000 });
+
+    await testPage.keyboard.press("Escape");
+
+    // The suggestion popup owns this Escape: it closes, the clarification
+    // panel stays exactly as it was (neither collapsed nor closed), and the
+    // modal stays open -- the fallback in tiptap-input.tsx claimed the event
+    // via stopPropagation() before Quick Chat's own carousel/collapse
+    // listener ever saw it. clarification-overlay-container wraps both the
+    // collapsed and expanded states with nonzero height, so it stays visible
+    // throughout; `clarification` (clarification-overlay) is the element that
+    // actually reflects collapsed vs. expanded.
+    await expect(menu).not.toBeVisible();
+    await expect(dialog).toBeVisible();
+    await expect(clarification).toBeVisible();
+    await expect(bar).toBeVisible();
+
+    // Escape resumes its normal two-stage behavior on the next press: the
+    // fallback only acts while a suggestion menu is open.
+    await testPage.keyboard.press("Escape");
+    await expect(clarification).not.toBeVisible();
+    await expect(bar).toBeVisible();
+    await expect(dialog).toBeVisible();
+
+    await testPage.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+  });
+
+  test("Escape closes the open entity-reference suggestion popup without closing the dialog when no clarification is pending", async ({
+    testPage,
+  }) => {
+    // Companion to the clarification-pending case above. Radix's
+    // DismissableLayer auto-dismisses the whole dialog on Escape unless
+    // something already called preventDefault() during the capture phase --
+    // with no clarification mounted, the carousel's own guard never arms, so
+    // this proves the suggestion-menu-open guard registered in
+    // use-suggestion-escape-fallback.ts is what keeps the dialog open here.
+    const dialog = await openQuickChatWithAgent(testPage);
+
+    const editor = dialog.locator(".tiptap.ProseMirror");
+    await editor.click();
+    await editor.pressSequentially("#");
+
+    const menu = testPage.getByTestId("entity-reference-menu");
+    await expect(menu).toBeVisible({ timeout: 10_000 });
+
+    await testPage.keyboard.press("Escape");
+
+    await expect(menu).not.toBeVisible();
+    await expect(dialog).toBeVisible();
+
+    await testPage.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+  });
+
+  test("reverse-search overlay opens, filters by typing, and closes on Escape inside Quick Chat", async ({
+    testPage,
+  }) => {
+    // Regression coverage for message-history-search.tsx portaling outside
+    // the Dialog's FocusScope: previously the overlay's own focus() and
+    // Escape/typing handlers never fired on Quick Chat because the Dialog's
+    // focus trap reverted focus away from the document.body-portaled input.
+    const dialog = await openQuickChatWithAgent(testPage);
+    await sendQuickChatMessage(dialog, testPage, "first reverse search message");
+    await expect(dialog.getByText("first reverse search message", { exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
+
+    const editor = dialog.locator(".tiptap.ProseMirror");
+    await editor.click();
+    // REVERSE_SEARCH defaults to plain Ctrl (not ctrlOrCmd) even on macOS, so
+    // Cmd+R keeps triggering the browser's native refresh shortcut.
+    await testPage.keyboard.press("Control+r");
+
+    const overlay = dialog.getByTestId("history-search-overlay");
+    await expect(overlay).toBeVisible({ timeout: 10_000 });
+    const input = dialog.getByTestId("history-search-input");
+    await expect(input).toBeFocused();
+
+    await input.pressSequentially("reverse search");
+    await expect(
+      overlay.getByTestId("history-search-row").filter({ hasText: "first reverse search message" }),
+    ).toBeVisible();
+
+    await testPage.keyboard.press("Escape");
+    await expect(overlay).not.toBeVisible();
+    await expect(dialog).toBeVisible();
+  });
+
   test("offers configuration chat in setup and hides it once one exists", async ({
     testPage,
     apiClient,

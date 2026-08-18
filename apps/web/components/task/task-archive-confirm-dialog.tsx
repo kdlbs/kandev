@@ -18,6 +18,11 @@ import { useSubtaskCount } from "@/hooks/use-subtask-count";
 import { useTaskInFlight } from "@/hooks/use-task-in-flight";
 import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
 import { StillWorkingWarning } from "./task-still-working-warning";
+import {
+  TASK_CONFIRM_CLASS,
+  TASK_CONFIRM_HEADER_CLASS,
+  stopDialogPropagation,
+} from "./task-confirm-dialog-shared";
 import { useTranslation } from "react-i18next";
 
 type TaskArchiveConfirmDialogProps = {
@@ -129,10 +134,10 @@ export function TaskArchiveConfirmDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
-      <AlertDialogContent onClick={(e) => e.stopPropagation()}>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription asChild>
+      <AlertDialogContent size="lg" className={TASK_CONFIRM_CLASS} onClick={stopDialogPropagation}>
+        <AlertDialogHeader className={TASK_CONFIRM_HEADER_CLASS}>
+          <AlertDialogTitle className="text-base font-semibold">{title}</AlertDialogTitle>
+          <AlertDialogDescription asChild className="text-sm leading-6">
             <div>
               <p>{firstLine}</p>
               {cleanup.lines.map((line, i) => (
@@ -154,17 +159,19 @@ export function TaskArchiveConfirmDialog({
             />
             <span>
               {t("task:alsoArchiveSubtasks", { count: subtaskCount })}
-              <span className="block text-xs text-muted-foreground">
+              <span className="block text-sm text-muted-foreground">
                 {t("task:subtasksStayActiveUnlessYouTick")}
               </span>
             </span>
           </label>
         )}
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer !text-sm">
+            {t("common:cancel")}
+          </AlertDialogCancel>
           <AlertDialogAction
             disabled={isArchiving}
-            className="cursor-pointer"
+            className="cursor-pointer !text-sm"
             data-testid={confirmTestId}
             onClick={() => {
               if (isArchiving) return;

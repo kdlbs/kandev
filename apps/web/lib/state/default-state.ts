@@ -17,9 +17,10 @@ import {
   defaultSystemState,
   defaultReviewState,
 } from "./slices";
-import { applyStoredQuickChatNames } from "@/lib/state/slices/ui/quick-chat-sync";
+import { mergeHydratedQuickChatSessions } from "@/lib/state/slices/ui/quick-chat-sync";
 import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
 import type { HydrationState } from "./store";
+import { seedSettledSessionBoundaries } from "@/lib/state/slices/session/turn-actions";
 import { migrateSidebarViewDraft, migrateView } from "./slices/ui/ui-slice";
 
 export const defaultState = {
@@ -30,6 +31,7 @@ export const defaultState = {
   tasks: defaultKanbanState.tasks,
   workspaces: defaultWorkspaceState.workspaces,
   repositories: defaultWorkspaceState.repositories,
+  repositorySets: defaultWorkspaceState.repositorySets,
   repositoryBranches: defaultWorkspaceState.repositoryBranches,
   repositoryScripts: defaultWorkspaceState.repositoryScripts,
   executors: defaultSettingsState.executors,
@@ -127,6 +129,7 @@ export const defaultState = {
 
 export type DefaultState = typeof defaultState;
 
+/** Merge the code-host slice fields (MRs, watches, presets, stats, status, Azure DevOps PRs/work items) from hydration state over defaults. */
 function mergeCodeHostFields(
   d: DefaultState,
   s: HydrationState,
@@ -161,16 +164,22 @@ function mergeCodeHostFields(
   };
 }
 
+/** Merge quick-chat state from hydration over defaults, applying locally stored chat names to the SSR-provided sessions. */
 function mergeQuickChatState(initialState: HydrationState): DefaultState["quickChat"] {
-  const quickChat = { ...defaultState.quickChat, ...initialState.quickChat };
-  if (!initialState.quickChat?.sessions) return quickChat;
-
-  return {
-    ...quickChat,
-    sessions: applyStoredQuickChatNames(initialState.quickChat.sessions),
+  const { sessions, ...hydratedQuickChat } = initialState.quickChat ?? {};
+  const quickChat = {
+    ...defaultState.quickChat,
+    ...hydratedQuickChat,
+    unseenIdleByWorkspace: {},
+    lastSettledAtBySession: {},
+    sessionOwnership: {},
+    syncRevisionByWorkspace: {},
+    tombstonedSessions: {},
   };
+  return sessions ? mergeHydratedQuickChatSessions(quickChat, sessions) : quickChat;
 }
 
+/** Merge sidebar view state, preferring the server-provided views, active view, and draft from user settings when present. */
 function mergeSidebarViewState(initialState: HydrationState): DefaultState["sidebarViews"] {
   const sidebarViews = { ...defaultState.sidebarViews, ...initialState.sidebarViews };
   const userSettings = initialState.userSettings;
@@ -191,6 +200,7 @@ function mergeSidebarViewState(initialState: HydrationState): DefaultState["side
   return sidebarViews;
 }
 
+/** Merge sidebar task prefs, copying the server-provided pinned, ordered, and subtask-order lists from user settings over defaults. */
 function mergeSidebarTaskPrefsState(
   initialState: HydrationState,
 ): DefaultState["sidebarTaskPrefs"] {
@@ -214,6 +224,7 @@ function mergeSidebarTaskPrefsState(
   };
 }
 
+/** Merge review-PR selection state, deep-merging the per-task selected keys from hydration over defaults. */
 function mergeReviewPRSelectionState(
   initialState: HydrationState,
 ): DefaultState["reviewPRSelection"] {
@@ -227,6 +238,7 @@ function mergeReviewPRSelectionState(
   };
 }
 
+/** Return the hydrated session-failure notification, or the default when none is provided. */
 function mergeSessionFailureNotification(initialState: HydrationState) {
   return initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification;
 }
@@ -242,6 +254,8 @@ function mergeAgentReviewArtifacts(initialState: HydrationState) {
   };
 }
 
+/** Merges the GitHub slices for initial (SSR/boot) hydration. */
+/** Merges the GitHub slices for initial (SSR/boot) hydration. */
 function mergeGitHubState(initialState: HydrationState) {
   return {
     githubStatus: { ...defaultState.githubStatus, ...initialState.githubStatus },
@@ -252,6 +266,39 @@ function mergeGitHubState(initialState: HydrationState) {
   };
 }
 
+/**
+ * Merges the turns slice for initial (SSR/boot) hydration. The server-side
+ * turn lists are complete per-session snapshots, so every session the payload
+ * installs is marked `loadedBySession`; without the marker, turn-derived UI
+ * would mistake WS-seeded live turns for the full history (the debug
+ * metadata dialog's `turn_metadata` regression). Settled sessions also seed
+ * their settled boundary from `updated_at` (monotonically) so an
+ * old/unknown delayed WS start arriving before any session-list refresh is
+ * rejected.
+ */
+function mergeTurnsState(
+  current: DefaultState["turns"],
+  incoming: HydrationState["turns"],
+  sessions: HydrationState["taskSessions"],
+): DefaultState["turns"] {
+  const merged = { ...current, ...incoming };
+  const settledBoundaryBySession = { ...merged.settledBoundaryBySession };
+  // One shared seeding invariant (turn-actions) with the production
+  // StateHydrator path, so the SSR and hydration boundary rules cannot drift.
+  seedSettledSessionBoundaries(settledBoundaryBySession, Object.values(sessions?.items ?? {}));
+  if (!incoming?.bySession) return { ...merged, settledBoundaryBySession };
+  const loadedBySession: Record<string, boolean> = {};
+  for (const sessionId of Object.keys(incoming.bySession)) {
+    loadedBySession[sessionId] = true;
+  }
+  return { ...merged, loadedBySession, settledBoundaryBySession };
+}
+
+/**
+ * Builds the full default state from the SSR/boot hydration payload, merging
+ * per-slice (kanban, turns, settings, ...) so partial payloads never clobber
+ * the client's live defaults.
+ */
 export function mergeInitialState(initialState?: HydrationState): DefaultState {
   if (!initialState) return defaultState;
   return {
@@ -263,6 +310,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     tasks: { ...defaultState.tasks, ...initialState.tasks },
     workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
     repositories: { ...defaultState.repositories, ...initialState.repositories },
+    repositorySets: { ...defaultState.repositorySets, ...initialState.repositorySets },
     repositoryBranches: { ...defaultState.repositoryBranches, ...initialState.repositoryBranches },
     repositoryScripts: { ...defaultState.repositoryScripts, ...initialState.repositoryScripts },
     executors: { ...defaultState.executors, ...initialState.executors },
@@ -281,7 +329,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     sleepInhibition: { ...defaultState.sleepInhibition, ...initialState.sleepInhibition },
     userSettings: { ...defaultState.userSettings, ...initialState.userSettings },
     messages: { ...defaultState.messages, ...initialState.messages },
-    turns: { ...defaultState.turns, ...initialState.turns },
+    turns: mergeTurnsState(defaultState.turns, initialState.turns, initialState.taskSessions),
     taskSessions: { ...defaultState.taskSessions, ...initialState.taskSessions },
     taskSessionsByTask: { ...defaultState.taskSessionsByTask, ...initialState.taskSessionsByTask },
     sessionAgentctl: { ...defaultState.sessionAgentctl, ...initialState.sessionAgentctl },
@@ -348,6 +396,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
 // Split out of mergeInitialState to stay under the per-function line limit —
 // these fields are the UI/panel slice of the merge and have no cross-field
 // dependencies on the rest of DefaultState.
+/** Merge the UI/panel slice fields (panels, quick chat, sidebar views/task prefs, review selection, notification) from hydration state over defaults. */
 function mergeUIPanelState(initialState: HydrationState) {
   return {
     previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },

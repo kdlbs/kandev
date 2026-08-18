@@ -222,12 +222,12 @@ func (s *GitHubPRMergedSubscriber) checkMergedTrigger(
 		mergedAt = pr.MergedAt.UTC().Format(time.RFC3339)
 	}
 	data, _ := json.Marshal(map[string]interface{}{
-		"task_id":     pr.TaskID,
-		"repo":        fmt.Sprintf("%s/%s", pr.Owner, pr.Repo),
-		"pr_number":   pr.PRNumber,
-		"pr_url":      pr.PRURL,
-		"base_branch": pr.BaseBranch,
-		"merged_at":   mergedAt,
+		"task_id":               pr.TaskID,
+		automationRepoKey:       fmt.Sprintf("%s/%s", pr.Owner, pr.Repo),
+		"pr_number":             pr.PRNumber,
+		"pr_url":                pr.PRURL,
+		automationBaseBranchKey: pr.BaseBranch,
+		"merged_at":             mergedAt,
 	})
 
 	// Pass the dedup key so FireTrigger's store-level check prevents duplicate

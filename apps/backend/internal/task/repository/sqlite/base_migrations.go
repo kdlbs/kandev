@@ -2,6 +2,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -39,6 +40,84 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 	r.migrate.Apply("task_sessions.cost_subcents", `ALTER TABLE task_sessions ADD COLUMN cost_subcents INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.tokens_in", `ALTER TABLE task_sessions ADD COLUMN tokens_in INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.tokens_out", `ALTER TABLE task_sessions ADD COLUMN tokens_out INTEGER NOT NULL DEFAULT 0`)
+	// BIGINT, not INTEGER: office_cost_events.tokens_cached_in routinely
+	// accumulates well past int4's 2,147,483,647 ceiling over a long-running
+	// session (the reported bug measured up to 98,805,109 on one already-
+	// completed task). SQLite's INTEGER is 64-bit regardless, but on Postgres
+	// INTEGER is int4 - an overflowing session would abort the single
+	// multi-column UPDATE in IncrementTaskSessionUsage and the single
+	// table-wide UPDATE in BackfillSessionTokensCachedIn, silently taking
+	// tokens_in/tokens_out/cost_subcents down with it for that session.
+	r.migrate.Apply("task_sessions.tokens_cached_in", `ALTER TABLE task_sessions ADD COLUMN tokens_cached_in BIGINT NOT NULL DEFAULT 0`)
+}
+
+// BackfillSessionTokensCachedIn recomputes task_sessions.tokens_cached_in from
+// the office_cost_events ledger. The rollup is purely derived from the ledger,
+// so recomputing from it is restoring data, not inventing it.
+//
+// Deliberately NOT called from runMigrations(): office_cost_events is owned and
+// created by internal/office/repository/sqlite, a separate repository that
+// shares this database but initializes independently, and on a fresh boot the
+// task repository's own migrations run first (internal/backendapp/storage.go).
+// An earlier version of this method guarded on the ledger table's existence to
+// tolerate that ordering from inside runMigrations(); that guard, and the table
+// existence it checked, both went away in favor of the caller in
+// internal/backendapp/storage.go, which only invokes this after office.Provide
+// has already succeeded — construction order guarantees office_cost_events
+// exists by then, so no guard is needed here. This keeps the task repository
+// from having to know office's schema/table-existence details, and lets the
+// office_cost_events(session_id) index it depends on live with the table it
+// indexes (internal/office/repository/sqlite/base.go createCostTables).
+//
+// Deliberately unconditional per session it touches (assignment, not
+// increment, so it is idempotent across replays) rather than gated on
+// "already nonzero": the rollup can go out of sync with the ledger without
+// erroring — a live IncrementTaskSessionUsage call is a best-effort
+// UPDATE ... WHERE id = ? that silently matches zero rows if the session row
+// doesn't exist yet (see the "missing row" case in
+// TestIncrementTaskSessionUsage_UnknownSessionNoError), and
+// event_subscribers.go only logs a Warn when the rollup write fails while the
+// ledger insert has already committed. A "skip if nonzero" guard would make
+// exactly that drift permanent instead of self-healing it on the next boot.
+// (If the ledger for a session was deleted separately from the session row
+// itself - see the two-transaction delete in workspace_deletion.go - this
+// recompute correctly zeroes that session's tokens_cached_in, since an empty
+// ledger sums to zero; the rollup's only contract is to equal the ledger sum.)
+//
+// The WHERE clause below is a boot-cost optimization, not a correctness gate:
+// it restricts the write to sessions that either have ledger rows (need a
+// possible recompute) or already hold a nonzero value (need a possible
+// zeroing, per the paragraph above). Every row it excludes has
+// tokens_cached_in = 0 AND no ledger rows, so the unconditional
+// COALESCE(NULL, 0) = 0 this statement would otherwise compute for it is
+// already what the row holds — excluding it is a provable no-op, never a
+// skip of a row that needs correcting. This runs unconditionally on every
+// boot (no run-once tracking - see MigrateLogger.Apply, which this method
+// deliberately does not use so a real failure propagates instead of being
+// swallowed as a Warn), so office_cost_events(session_id) must already be
+// indexed: an unindexed correlated subquery here is quadratic in
+// (sessions x ledger rows), measured at 76.72s at a modest 4,000 sessions /
+// 80,000 events versus 0.17s indexed.
+//
+// Returns the number of task_sessions rows the WHERE clause matched, so a
+// caller can log it for boot-time observability; not otherwise used for
+// correctness.
+func (r *Repository) BackfillSessionTokensCachedIn(ctx context.Context) (int64, error) {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE task_sessions
+		   SET tokens_cached_in = COALESCE(
+		       (SELECT SUM(e.tokens_cached_in) FROM office_cost_events e
+		         WHERE e.session_id = task_sessions.id), 0)
+		 WHERE EXISTS (SELECT 1 FROM office_cost_events e WHERE e.session_id = task_sessions.id)
+		    OR tokens_cached_in <> 0`)
+	if err != nil {
+		return 0, fmt.Errorf("backfill task_sessions.tokens_cached_in: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("backfill task_sessions.tokens_cached_in: rows affected: %w", err)
+	}
+	return affected, nil
 }
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
@@ -47,6 +126,9 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 	if err := r.ensureTaskWorkspaceFoldersSchema(); err != nil {
+		return err
+	}
+	if err := r.ensureRepositorySetsSchema(); err != nil {
 		return err
 	}
 	r.migrate.Apply("task_sessions.execution_profile_id", `ALTER TABLE task_sessions ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
@@ -130,13 +212,17 @@ func (r *Repository) runMigrations() error {
 		ON repository_secret_bindings(repository_id)`)
 	r.migrate.Apply("repositories.remote_url", `ALTER TABLE repositories ADD COLUMN remote_url TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.provider_host", `ALTER TABLE repositories ADD COLUMN provider_host TEXT DEFAULT ''`)
+	r.migrate.Apply("repositories.provider_scope", `ALTER TABLE repositories ADD COLUMN provider_scope TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.provider_host.github_backfill", `
 		UPDATE repositories
 		SET provider_host = 'https://github.com'
 		WHERE LOWER(TRIM(provider)) = 'github'
 			AND TRIM(COALESCE(provider_host, '')) = ''`)
-	r.migrate.Apply("repositories.worktree_branch_template", `ALTER TABLE repositories ADD COLUMN worktree_branch_template TEXT DEFAULT 'feature/{title}-{suffix}'`)
-	r.migrate.Apply("repositories.worktree_branch_template.backfill", `UPDATE repositories SET worktree_branch_template = COALESCE(NULLIF(TRIM(worktree_branch_prefix), ''), 'feature/') || '{title}-{suffix}'`)
+	r.migrate.Apply("repositories.worktree_branch_template", `ALTER TABLE repositories ADD COLUMN worktree_branch_template TEXT DEFAULT ''`)
+	r.migrate.Apply("repositories.worktree_branch_template.backfill", `
+		UPDATE repositories
+		SET worktree_branch_template = COALESCE(NULLIF(TRIM(worktree_branch_prefix), ''), 'feature/') || '{title}-{suffix}'
+		WHERE TRIM(COALESCE(worktree_branch_template, '')) = ''`)
 	r.migrate.Apply("task_plans.implementation_started_at", `ALTER TABLE task_plans ADD COLUMN implementation_started_at TIMESTAMP`)
 	r.migrate.Apply("task_plans.implementation_started_session_id", `ALTER TABLE task_plans ADD COLUMN implementation_started_session_id TEXT`)
 	r.migrate.Apply("task_plans.implementation_started_by", `ALTER TABLE task_plans ADD COLUMN implementation_started_by TEXT`)
@@ -150,10 +236,24 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_session_messages.updated_at.backfill", `UPDATE task_session_messages SET updated_at = created_at WHERE updated_at IS NULL`)
 	r.migrate.Apply("idx_messages_session_updated", `CREATE INDEX IF NOT EXISTS idx_messages_session_updated ON task_session_messages(task_session_id, updated_at)`)
 
+	// task_session_commits gains a uniqueness constraint before its writer
+	// starts firing from more than just archive capture (CreateSessionCommit
+	// was previously a plain INSERT). Must dedupe existing duplicates first:
+	// CREATE UNIQUE INDEX fails on a duplicate pair, and MigrateLogger.Apply
+	// swallows non-"already exists" errors, so an unhandled duplicate would
+	// silently leave both the index and every future ON CONFLICT missing.
+	if err := r.migrateSessionCommitsDedupeAndActivation(); err != nil {
+		return err
+	}
+
 	// Backfill the per-session cost/token columns. Runs after the gated
 	// task_sessions rebuilds above so it repairs legacy DBs whose schema can no
 	// longer trigger a rebuild (see migrateSessionsAddCostColumns).
 	r.migrateSessionsAddCostColumns()
+	// BackfillSessionTokensCachedIn is deliberately NOT called here - see its
+	// doc comment. It runs from internal/backendapp/storage.go, after both
+	// this repository and the office repository (which owns office_cost_events)
+	// have finished initializing.
 
 	// Office task extensions - net-new columns on existing main tables.
 	// Idempotent ALTERs; main upgrades pick them up at first boot.
@@ -191,9 +291,9 @@ func (r *Repository) runMigrations() error {
 
 	// Office session cost tracking extensions are declared in
 	// initSessionWorktreeSchema's CREATE TABLE (cost_subcents, tokens_in,
-	// tokens_out). task_sessions.agent_profile_id existed on main as
-	// NOT NULL; migrateSessionsRemoveAgentExecutionID rebuilds the table
-	// with the column nullable and the cost columns added.
+	// tokens_cached_in, tokens_out). task_sessions.agent_profile_id existed
+	// on main as NOT NULL; migrateSessionsRemoveAgentExecutionID rebuilds the
+	// table with the column nullable and the cost columns added.
 
 	r.migrate.Apply("workflows.is_system", `ALTER TABLE workflows ADD COLUMN is_system INTEGER DEFAULT 0`)
 
@@ -257,6 +357,13 @@ func (r *Repository) runMigrations() error {
 	if err := r.clearRecoveredAgentErrors(); err != nil {
 		return err
 	}
+
+	// The execution-aware task_session_subagents schema is created directly by
+	// initSubagentContextSchema. The predecessor change that introduced the
+	// table is not part of the supported upgrade path, so there is no
+	// intermediate-shape rebuild to run here. Only the historical-message
+	// backfill belongs in the migration phase.
+	r.migrateSubagentContextBackfill()
 
 	return nil
 }
@@ -364,6 +471,46 @@ func jsonRemoveKey(postgres bool, column, key string) string {
 	return "json_remove(" + base + ", '$." + key + "')"
 }
 
+// jsonKey extracts a text value at a JSON path from a TEXT-typed JSON column.
+// key may itself be dot-separated ("normalized.kind") to reach a field nested
+// several levels deep — jsonInt and jsonBoolToInt build on this by folding
+// their parent/key pair into one such path before extracting.
+func jsonKey(postgres bool, column, key string) string {
+	base := jsonColumn(postgres, column)
+	segments := strings.Join(strings.Split(key, "."), ",")
+	if postgres {
+		return "(" + base + " #>> '{" + segments + "}')"
+	}
+	return "json_extract(" + base + ", '$." + strings.ReplaceAll(segments, ",", ".") + "')"
+}
+
+// jsonInt extracts a nested numeric field and normalizes it the way every
+// unreported-or-invalid metric in this table normalizes: NULL, never a
+// fabricated 0 for "not reported" and never a negative count (AC-7, AC-9,
+// AC-23). Postgres casts to BIGINT, SQLite to INTEGER.
+func jsonInt(postgres bool, column, parent, key string) string {
+	extracted := jsonKey(postgres, column, parent+"."+key)
+	castType := "INTEGER"
+	if postgres {
+		castType = "BIGINT"
+	}
+	cast := "CAST(NULLIF(" + extracted + ", '') AS " + castType + ")"
+	return "(CASE WHEN " + cast + " < 0 THEN NULL ELSE " + cast + " END)"
+}
+
+// jsonBoolToInt normalizes is_async's dialect-inconsistent boolean spelling —
+// Postgres's #>> text extraction yields 'true'/'false', SQLite's json_extract
+// on a JSON boolean yields '1'/'0' — into the single 1/0 the column stores.
+// An absent or false field yields 0, matching the column's own DEFAULT 0.
+func jsonBoolToInt(postgres bool, column, parent, key string) string {
+	extracted := jsonKey(postgres, column, parent+"."+key)
+	// SQLite's json_extract returns a JSON boolean as the storage-class
+	// INTEGER 1/0, not the text '1'/'0' — comparing that INTEGER against a
+	// TEXT literal via IN never matches (SQLite orders INTEGER < TEXT by
+	// storage class), so the extracted value must be cast to TEXT first.
+	return "(CASE WHEN CAST(" + extracted + " AS TEXT) IN ('1', 'true') THEN 1 ELSE 0 END)"
+}
+
 // ensureImproveKandevWorkflowTemplateUniqueness removes the broad index from
 // the initial implementation, reconciles legacy bootstrap duplicates, then
 // enforces uniqueness only for the two hidden workflows created by this flow.
@@ -434,6 +581,16 @@ func (r *Repository) ensureTaskWorkspaceFoldersSchema() error {
 			ON task_workspace_folders(task_id, position);
 	`); err != nil {
 		return fmt.Errorf("create task workspace folders schema: %w", err)
+	}
+	return nil
+}
+
+// ensureRepositorySetsSchema upgrades databases created before repository sets
+// existed. It replays the same DDL as the schema-init step; CREATE TABLE/INDEX
+// IF NOT EXISTS is replay-safe on SQLite and Postgres.
+func (r *Repository) ensureRepositorySetsSchema() error {
+	if _, err := r.db.Exec(repositorySetsSchemaDDL); err != nil {
+		return fmt.Errorf("create repository sets schema: %w", err)
 	}
 	return nil
 }
@@ -593,6 +750,94 @@ func (r *Repository) backfillExecutorsRunningFromTaskSessions() error {
 	return nil
 }
 
+// commitCaptureActivatedAtMetaKey is the kandev_meta key published by
+// migrateSessionCommitsDedupeAndActivation.
+const commitCaptureActivatedAtMetaKey = "commit_capture_activated_at"
+
+// migrateSessionCommitsDedupeAndActivation enforces uniqueness on
+// task_session_commits(session_id, commit_sha) and publishes the point in
+// time commit capture started firing from more than just archive capture, so
+// downstream readers (the Rill extract, ListSessionCodeStats) can tell
+// "capture wasn't running yet" apart from "session made zero commits" -
+// both previously read as a plain 0.
+//
+// Dedup keeps the earliest-observed row per (session_id, commit_sha), ties
+// broken by id: task_session_commits is an append-only observation ledger
+// (a rebase/squash adds new SHAs, it never retroactively changes which row
+// was first seen), so "earliest seen" is the row future replays preserve.
+//
+// Rebase/squash decision: immutable observation history, not the final
+// branch object set. A rebase that drops a previously-observed commit SHA
+// from reachable history leaves that row in place - it is not deleted or
+// reconciled against the current branch. Same tradeoff the task brief
+// already accepts for summed commit diffstats counting churn and reverts
+// (task_session_git_snapshots deltas are the net-branch-growth answer;
+// commit rows are the observation-history answer, published side by side,
+// not merged into one number). Live capture makes this more visible than
+// the old archive-only design (which only ever ran GetGitLog once, at
+// archive time, so it naturally reflected whatever was reachable from HEAD
+// at that instant) - continuous capture can now persist a commit that a
+// later rebase makes unreachable. Accepted rather than reconciled: pruning
+// on every rebase/force-push would require diffing against live git state
+// on every sweep, and "what got captured" is itself useful observability
+// (e.g. abandoned work), not just noise.
+//
+// Must run before CreateSessionCommit starts firing from more than archive -
+// CREATE UNIQUE INDEX fails on an existing duplicate pair, and
+// MigrateLogger.Apply swallows non-"already exists" errors, so an unhandled
+// duplicate would silently leave both the index and every future
+// ON CONFLICT missing. That is exactly why these two statements, unlike most
+// migrations in this file, do NOT go through r.migrate.Apply: the writer's
+// ON CONFLICT (session_id, commit_sha) target hard-requires this index to
+// exist, so a failure here must abort boot (propagated below) rather than
+// leave every future commit insert failing silently forever.
+func (r *Repository) migrateSessionCommitsDedupeAndActivation() error {
+	if _, err := r.db.Exec(`
+		DELETE FROM task_session_commits
+		WHERE id NOT IN (
+			SELECT id FROM (
+				SELECT id,
+					ROW_NUMBER() OVER (
+						PARTITION BY session_id, commit_sha
+						ORDER BY created_at ASC, id ASC
+					) AS rn
+				FROM task_session_commits
+			) ranked
+			WHERE rn = 1
+		)
+	`); err != nil {
+		return fmt.Errorf("dedupe task_session_commits: %w", err)
+	}
+	if _, err := r.db.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_commits_session_sha ON task_session_commits(session_id, commit_sha)`,
+	); err != nil {
+		return fmt.Errorf("create uniq_session_commits_session_sha: %w", err)
+	}
+	if r.log != nil {
+		r.log.Info("migration applied", zap.String("name", "task_session_commits.dedupe_and_unique_index"))
+	}
+
+	// kandev_meta already exists by the time repository migrations run in
+	// production (persistence.Provide creates it before opening any
+	// repository), but repo-level tests build a bare DB via NewWithDB where
+	// it does not, so recreate it defensively.
+	if _, err := r.db.Exec(`
+		CREATE TABLE IF NOT EXISTS kandev_meta (
+			key   TEXT PRIMARY KEY,
+			value TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+		return fmt.Errorf("ensure kandev_meta: %w", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := r.db.Exec(r.db.Rebind(`
+		INSERT INTO kandev_meta (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO NOTHING
+	`), commitCaptureActivatedAtMetaKey, now); err != nil {
+		return fmt.Errorf("write %s: %w", commitCaptureActivatedAtMetaKey, err)
+	}
+	return nil
+}
+
 // migrateSessionsRemoveAgentExecutionID drops the agent_execution_id and
 // container_id columns from task_sessions. After this migration, executors_running
 // is the single source of truth for both fields — no more denormalization.
@@ -631,6 +876,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			task_environment_id TEXT DEFAULT '',
 			cost_subcents INTEGER NOT NULL DEFAULT 0,
 			tokens_in INTEGER NOT NULL DEFAULT 0,
+			tokens_cached_in BIGINT NOT NULL DEFAULT 0,
 			tokens_out INTEGER NOT NULL DEFAULT 0,
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
@@ -641,7 +887,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			state, error_message, metadata, started_at, completed_at, updated_at,
 			is_primary, is_passthrough, review_status,
 			COALESCE(base_commit_sha, ''), COALESCE(task_environment_id, ''),
-			0, 0, 0
+			0, 0, 0, 0
 		FROM task_sessions`,
 		`DROP TABLE task_sessions`,
 		`ALTER TABLE task_sessions_new RENAME TO task_sessions`,

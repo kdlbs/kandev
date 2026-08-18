@@ -1,5 +1,4 @@
 {
-  "account": "Conta",
   "archivedLoadFailed": "Não foi possível carregar as tarefas arquivadas",
   "retry": "Tentar novamente",
   "activeWorkspaceBadge": "Ativa",
@@ -69,7 +68,9 @@
   "projects": "Projetos",
   "queuedPromptCount_one": "{{count}} prompt em fila",
   "queuedPromptCount_other": "{{count}} prompts em fila",
+  "wipQueuePosition": "Posição {{position}} de {{total}} na fila de {{step}}",
   "quickChat": "Chat rápido",
+  "quickChatUnseen": "Chat rápido, nova resposta",
   "quickTerminal": "Terminal rápido",
   "quickChatTerminals": "Terminais",
   "quickChatNewAgent": "Novo agente",
@@ -105,5 +106,15 @@
   "viewLabel": "Vista: {{name}}",
   "whatsNew": "Novidades",
   "work": "Trabalho",
-  "workspaceFallback": "Área de trabalho"
+  "workspaceFallback": "Área de trabalho",
+  "taskPreferences": "Preferências de tarefas da barra lateral",
+  "views": "Vistas da barra lateral",
+  "collapseAllBranches": "Fechar tudo",
+  "failedToLoadArchivedTasks": "Falha ao carregar as tarefas arquivadas",
+  "failedToSyncSidebarTaskPrefs": "Falha ao sincronizar as preferências de tarefas da barra lateral",
+  "failedToSyncSidebarViews": "Falha ao sincronizar as vistas da barra lateral",
+  "morePluginItems": "Mais itens de plugins",
+  "newViewNumbered": "Nova vista {{suffix}}",
+  "orgChart": "Organograma",
+  "untitledView": "Vista sem título"
 }

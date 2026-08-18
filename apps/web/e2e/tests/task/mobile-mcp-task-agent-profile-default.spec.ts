@@ -5,12 +5,14 @@ test.describe("MCP-created task agent profile default on mobile", () => {
     testPage,
     apiClient,
   }) => {
-    await testPage.goto("/settings/general");
-    const taskActionsLink = testPage.getByRole("link", { name: /Task Actions/ });
-    await expect(taskActionsLink).toBeVisible({ timeout: 15_000 });
-    await taskActionsLink.tap();
+    await testPage.goto("/settings");
+    // Task Actions is a section inside the Task Behavior page now; the menu row
+    // that reaches it is the page, not the section.
+    const taskBehaviorLink = testPage.getByRole("link", { name: /Task Behavior/ });
+    await expect(taskBehaviorLink).toBeVisible({ timeout: 15_000 });
+    await taskBehaviorLink.tap();
 
-    await expect(testPage).toHaveURL(/\/settings\/general\/task-actions$/);
+    await expect(testPage).toHaveURL(/\/settings\/preferences\/task-behavior$/);
     await expect(
       testPage.getByRole("heading", { name: "Task Actions", exact: true }),
     ).toBeVisible();
@@ -19,6 +21,11 @@ test.describe("MCP-created task agent profile default on mobile", () => {
     ).toBeVisible();
     await expect(testPage.getByText("create_task_kandev", { exact: true })).toBeVisible();
     await expect(testPage.getByText("spawn_session_kandev", { exact: true })).toBeVisible();
+    await expect(testPage.getByText(/effective model, mode, and options/i)).toBeVisible();
+    await expect(testPage.getByText(/workflow-selected profiles win first/i)).toBeVisible();
+    await expect(
+      testPage.getByText(/skips the creating session and source or parent task profiles/i),
+    ).toBeVisible();
 
     await testPage.getByRole("button", { name: "About affected Kandev MCP tools" }).tap();
     await expect(testPage.getByRole("tooltip")).toContainText(
@@ -26,7 +33,7 @@ test.describe("MCP-created task agent profile default on mobile", () => {
     );
     await testPage.getByRole("heading", { name: "Task Actions", exact: true }).tap();
 
-    const currentTask = testPage.getByRole("radio", { name: "Current task profile" });
+    const currentTask = testPage.getByRole("radio", { name: "Creating session profile" });
     const workspaceDefault = testPage.getByRole("radio", {
       name: "Workspace default profile",
     });

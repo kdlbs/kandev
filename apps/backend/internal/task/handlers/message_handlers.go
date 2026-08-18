@@ -31,7 +31,8 @@ type OrchestratorService interface {
 	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error)
 	ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error
 	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference) error
-	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
+	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error)
+	QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error
 	StepRequiresCompletionSignal(ctx context.Context, taskID string) bool
 	// ForegroundActivity is already filtered by the orchestrator's runtime flag
 	// and persisted provider identity. Background therefore means this exact
@@ -362,6 +363,8 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
 	}
 
+	var turnStartResult orchestrator.ProcessOnTurnStartResult
+
 	// Run on_turn_start synchronously BEFORE wrapping the prompt with the
 	// Kandev MCP system block. A workflow step transition fired by
 	// on_turn_start changes which step's `auto_advance_requires_signal`
@@ -370,11 +373,13 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// first turn. dispatchPromptAsync no longer calls ProcessOnTurnStart;
 	// it forwards the (now correctly-wrapped) prompt to the agent.
 	if h.orchestrator != nil {
-		if err := h.orchestrator.ProcessOnTurnStart(ctx, req.TaskID, req.TaskSessionID); err != nil {
+		var turnStartErr error
+		turnStartResult, turnStartErr = h.orchestrator.ProcessOnTurnStart(ctx, req.TaskID, req.TaskSessionID)
+		if turnStartErr != nil {
 			h.logger.Warn("failed to process on_turn_start",
 				zap.String("task_id", req.TaskID),
 				zap.String("session_id", req.TaskSessionID),
-				zap.Error(err))
+				zap.Error(turnStartErr))
 		}
 		var err error
 		sessionResp, err = h.resolveSessionAfterTurnStart(ctx, req.TaskID, req.TaskSessionID, sessionResp)
@@ -476,6 +481,25 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		h.logger.Error("failed to create message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
+	if turnStartResult.Queued {
+		if err := h.orchestrator.QueueUserPrompt(
+			ctx,
+			req.TaskID,
+			req.TaskSessionID,
+			req.Content,
+			req.Model,
+			req.PlanMode,
+			req.Attachments,
+			meta.ToMap(),
+			true,
+		); err != nil {
+			h.logger.Warn("failed to queue prompt until workflow promotion",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.TaskSessionID),
+				zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue prompt", nil)
+		}
+	}
 
 	apiMsg := message.ToAPI()
 	response, err := ws.NewResponse(msg.ID, msg.Action, apiMsg)
@@ -486,7 +510,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// Auto-forward message as prompt to running agent if orchestrator is available.
 	// This runs async so the WS request can respond immediately.
 	// Use context.WithoutCancel so the prompt continues even if the WebSocket client disconnects.
-	if h.orchestrator != nil {
+	if h.orchestrator != nil && !turnStartResult.Queued {
 		h.dispatchPromptAsync(ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer)
 	}
 

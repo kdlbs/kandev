@@ -44,8 +44,10 @@ import {
   useEnsureUserSettings,
 } from "./use-ensure-user-settings";
 
+/** Builds a full default user-settings state marked as not loaded. */
 function makeUnloadedSettings(): UserSettingsState {
   return {
+    revision: null,
     workspaceId: null,
     workflowId: null,
     kanbanViewMode: null,
@@ -61,6 +63,7 @@ function makeUnloadedSettings(): UserSettingsState {
     chatSubmitKey: "cmd_enter",
     reviewAutoMarkOnScroll: true,
     confirmTaskArchive: true,
+    preventAutoStartAgentOnOpen: false,
     unreadDivider: true,
     agentGeneratedTaskTitles: false,
     mcpTaskAgentProfileDefault: "current_task",
@@ -69,6 +72,7 @@ function makeUnloadedSettings(): UserSettingsState {
     showScrollToStart: false,
     showTranscriptAutoScrollControl: true,
     showTodoListPanel: false,
+    showTodoListPanelOnlyWhenNotEmpty: false,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     savedLayouts: [],
@@ -95,16 +99,10 @@ function makeUnloadedSettings(): UserSettingsState {
     terminalFontFamily: null,
     terminalFontSize: null,
     changesPanelLayout: "tree",
+    lastSeenDisplay: "absolute",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
+    appStatusBarEnabled: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
-    voiceMode: {
-      enabled: true,
-      engine: "auto",
-      language: "auto",
-      mode: "toggle",
-      autoSend: false,
-      whisperWebModel: "base",
-    },
     lspAutoStartLanguages: [],
     lspAutoInstallLanguages: [],
     lspServerConfigs: {},
@@ -114,6 +112,7 @@ function makeUnloadedSettings(): UserSettingsState {
   };
 }
 
+/** Builds a mock settings API response wrapping the given task-create last-used payload. */
 function userSettingsResponse(taskCreateLastUsed = {}) {
   return {
     shell_options: [],

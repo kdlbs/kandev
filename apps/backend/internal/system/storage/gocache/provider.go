@@ -64,6 +64,8 @@ type Analysis struct {
 // CleanupResult describes one cache rotation.
 type CleanupResult struct {
 	Path            string                   `json:"path"`
+	Skipped         bool                     `json:"skipped"`
+	Reason          string                   `json:"reason,omitempty"`
 	BytesBefore     int64                    `json:"bytes_before"`
 	BytesAfter      int64                    `json:"bytes_after"`
 	ReclaimedBytes  int64                    `json:"reclaimed_bytes"`
@@ -187,6 +189,13 @@ func (p *Provider) cleanup(ctx context.Context, explicit bool) (CleanupResult, e
 	}
 	entry, err := p.rotate(ctx, cachePath, result.BytesBefore, settings.QuarantineRetentionHours, adopted)
 	if err != nil {
+		var activeErr *storage.ActiveQuarantineIntentError
+		if errors.As(err, &activeErr) {
+			result.BytesAfter = result.BytesBefore
+			result.Skipped = true
+			result.Reason = "active_quarantine"
+			return result, nil
+		}
 		return result, err
 	}
 	result.QuarantineEntry = entry

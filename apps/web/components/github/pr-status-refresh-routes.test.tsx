@@ -117,6 +117,7 @@ function taskState(prs: TaskPR[], activeTask = false): Partial<AppState> {
             activeSessionId: null,
             pinnedSessionId: null,
             lastSessionByTaskId: {},
+            resumeSkippedSessionIds: {},
           },
         }
       : {}),

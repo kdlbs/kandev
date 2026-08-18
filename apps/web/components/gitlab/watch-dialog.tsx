@@ -21,7 +21,7 @@ import { WatcherRepositoryFields } from "@/components/watcher-repository-fields"
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
 import { useWorkflows } from "@/hooks/use-workflows";
-import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
+import { STEP_DEFAULT, resolveProfileId } from "@/lib/watcher-profile-default";
 import type {
   CreateIssueWatchRequest,
   CreateReviewWatchRequest,
@@ -205,6 +205,7 @@ type FormFieldsProps = {
 
 function AutomationFields({ kind, form, setForm }: FormFieldsProps) {
   const { t } = useTranslation();
+  const stepDefaultLabel = t("common:useStepDefaultOption");
   const data = useDialogData(form.workspaceId, form.workflowId);
   return (
     <div className="space-y-4">
@@ -247,9 +248,9 @@ function AutomationFields({ kind, form, setForm }: FormFieldsProps) {
           onChange={(value) =>
             setForm((current) => ({ ...current, agentProfileId: resolveProfileId(value) }))
           }
-          placeholder={STEP_DEFAULT_LABEL}
+          placeholder={stepDefaultLabel}
           items={[
-            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            { id: STEP_DEFAULT, label: stepDefaultLabel },
             ...data.agentProfiles.map((item) => ({ id: item.id, label: item.label })),
           ]}
         />
@@ -260,9 +261,9 @@ function AutomationFields({ kind, form, setForm }: FormFieldsProps) {
           onChange={(value) =>
             setForm((current) => ({ ...current, executorProfileId: resolveProfileId(value) }))
           }
-          placeholder={STEP_DEFAULT_LABEL}
+          placeholder={stepDefaultLabel}
           items={[
-            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            { id: STEP_DEFAULT, label: stepDefaultLabel },
             ...data.executorProfiles.map((item) => ({ id: item.id, label: item.name })),
           ]}
         />

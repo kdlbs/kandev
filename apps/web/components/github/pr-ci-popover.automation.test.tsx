@@ -52,6 +52,8 @@ vi.mock("@/hooks/domains/github/use-task-ci-options", () => ({
 import { PRCIPopover } from "./pr-ci-popover";
 import { MultiPRCIPopover } from "./multi-pr-ci-popover";
 
+const AUTO_FIX_LABEL = "Auto-fix CI and address comments";
+const AUTO_MERGE_LABEL = "Auto-merge when ready";
 const MERGED_PROMPT_LABEL = "PR merged";
 const CLOSED_PROMPT_LABEL = "PR closed without merging";
 const REVIEW_REQUEST_PROMPT_LABEL = "Your review is requested";
@@ -59,17 +61,42 @@ const REVIEW_FOLLOW_UP_TRIGGER = "ci-review-follow-up-trigger";
 const REMOVE_FIRST_PR_LABEL = "Remove r #1 from task";
 const BACKEND_UNAVAILABLE = "backend unavailable";
 
+// The five automation switches are per-PR; pr_options defaults to one entry
+// for makePR()'s default identity (task-1 / repository_id "" / #1) mirroring
+// whichever top-level switch overrides the caller passed, so existing
+// `makeOptions({ prompt_on_merged: true })`-style overrides still drive the
+// rendered switch state without every call site building pr_options by hand.
 function makeOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAutomationOptions {
-  return {
+  const base = {
     task_id: "task-1",
     auto_fix_enabled: false,
     auto_merge_enabled: false,
     auto_fix_prompt_override: null,
     effective_auto_fix_prompt: "Default CI fix prompt",
     using_default_prompt: true,
+    prompt_on_review_requested: false,
+    prompt_on_merged: false,
+    prompt_on_closed: false,
     updated_at: "2026-06-18T10:00:00Z",
     pr_states: [],
     ...overrides,
+  };
+  return {
+    ...base,
+    pr_options: overrides.pr_options ?? [
+      {
+        task_id: base.task_id,
+        repository_id: "",
+        pr_number: 1,
+        auto_fix_enabled: base.auto_fix_enabled,
+        auto_merge_enabled: base.auto_merge_enabled,
+        prompt_on_review_requested: base.prompt_on_review_requested,
+        prompt_on_merged: base.prompt_on_merged,
+        prompt_on_closed: base.prompt_on_closed,
+        created_at: "",
+        updated_at: "",
+      },
+    ],
   };
 }
 
@@ -118,6 +145,21 @@ function renderPopover() {
   );
 }
 
+function makePROption(prNumber: number, enabled: boolean) {
+  return {
+    task_id: "task-1",
+    repository_id: "",
+    pr_number: prNumber,
+    auto_fix_enabled: enabled,
+    auto_merge_enabled: enabled,
+    prompt_on_review_requested: false,
+    prompt_on_merged: false,
+    prompt_on_closed: false,
+    created_at: "",
+    updated_at: "",
+  };
+}
+
 function resetHookMocks() {
   hookMocks.error = null;
   hookMocks.options = null;
@@ -141,18 +183,24 @@ describe("PRCIPopover automation toggles", () => {
     renderPopover();
 
     expect(screen.getByLabelText("Explain CI automation options")).not.toBeNull();
-    fireEvent.click(screen.getByLabelText("Auto-fix CI and address comments"));
-    fireEvent.click(screen.getByLabelText("Auto-merge when ready"));
+    fireEvent.click(screen.getByLabelText(AUTO_FIX_LABEL));
+    fireEvent.click(screen.getByLabelText(AUTO_MERGE_LABEL));
     fireEvent.click(screen.getByTestId(REVIEW_FOLLOW_UP_TRIGGER));
     fireEvent.click(screen.getByLabelText(REVIEW_REQUEST_PROMPT_LABEL));
     fireEvent.click(screen.getByLabelText(MERGED_PROMPT_LABEL));
     fireEvent.click(screen.getByLabelText(CLOSED_PROMPT_LABEL));
 
-    expect(hookMocks.updateMock).toHaveBeenCalledWith({ auto_fix_enabled: true });
-    expect(hookMocks.updateMock).toHaveBeenCalledWith({ auto_merge_enabled: true });
-    expect(hookMocks.updateMock).toHaveBeenCalledWith({ prompt_on_review_requested: true });
-    expect(hookMocks.updateMock).toHaveBeenCalledWith({ prompt_on_merged: true });
-    expect(hookMocks.updateMock).toHaveBeenCalledWith({ prompt_on_closed: true });
+    // Every switch patch carries this PR's identity so the backend applies
+    // the change to this PR only, instead of fanning out to every linked PR.
+    const identity = { repository_id: "", pr_number: 1 };
+    expect(hookMocks.updateMock).toHaveBeenCalledWith({ ...identity, auto_fix_enabled: true });
+    expect(hookMocks.updateMock).toHaveBeenCalledWith({ ...identity, auto_merge_enabled: true });
+    expect(hookMocks.updateMock).toHaveBeenCalledWith({
+      ...identity,
+      prompt_on_review_requested: true,
+    });
+    expect(hookMocks.updateMock).toHaveBeenCalledWith({ ...identity, prompt_on_merged: true });
+    expect(hookMocks.updateMock).toHaveBeenCalledWith({ ...identity, prompt_on_closed: true });
   });
 
   it("keeps review follow-up collapsed until opened while auto-fix and auto-merge stay primary", () => {
@@ -160,8 +208,8 @@ describe("PRCIPopover automation toggles", () => {
     const trigger = screen.getByTestId(REVIEW_FOLLOW_UP_TRIGGER);
 
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.getByLabelText("Auto-fix CI and address comments")).not.toBeNull();
-    expect(screen.getByLabelText("Auto-merge when ready")).not.toBeNull();
+    expect(screen.getByLabelText(AUTO_FIX_LABEL)).not.toBeNull();
+    expect(screen.getByLabelText(AUTO_MERGE_LABEL)).not.toBeNull();
     expect(screen.queryByLabelText(REVIEW_REQUEST_PROMPT_LABEL)).toBeNull();
     expect(screen.queryByLabelText(MERGED_PROMPT_LABEL)).toBeNull();
     expect(screen.queryByLabelText(CLOSED_PROMPT_LABEL)).toBeNull();
@@ -173,12 +221,12 @@ describe("PRCIPopover automation toggles", () => {
     expect(screen.getByLabelText(CLOSED_PROMPT_LABEL)).not.toBeNull();
     expect(
       screen.getByLabelText(REVIEW_REQUEST_PROMPT_LABEL).getAttribute("aria-describedby"),
-    ).toBe("task-pr-review-requested-prompt-task-1-description");
+    ).toBe("task-pr-review-requested-prompt-task-1-none-1-description");
     expect(screen.getByLabelText(MERGED_PROMPT_LABEL).getAttribute("aria-describedby")).toBe(
-      "task-pr-terminal-help-task-1",
+      "task-pr-terminal-help-task-1-none-1",
     );
     expect(screen.getByLabelText(CLOSED_PROMPT_LABEL).getAttribute("aria-describedby")).toBe(
-      "task-pr-terminal-help-task-1",
+      "task-pr-terminal-help-task-1-none-1",
     );
     expect(
       screen.getByText("Wake the agent for any new request, including re-review after changes."),
@@ -291,6 +339,38 @@ describe("PRCIPopover automation status", () => {
     expect(onOpenDetailPanel).toHaveBeenCalledTimes(1);
     expect(onOpenDetailPanel).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }));
     expect(screen.queryByText("Open PR details")).toBeNull();
+  });
+
+  it("keeps each linked PR's automation switches independent across tabs (AC1-AC3)", () => {
+    hookMocks.options = makeOptions({
+      pr_options: [makePROption(1, true), makePROption(2, false)],
+    });
+    render(
+      <TooltipProvider>
+        <StateProvider>
+          <ToastProvider>
+            <MultiPRCIPopover
+              prs={[
+                makePR({ id: "a", pr_number: 1, pr_title: "First PR" }),
+                makePR({ id: "b", pr_number: 2, pr_title: "Second PR" }),
+              ]}
+              enabled={true}
+            />
+          </ToastProvider>
+        </StateProvider>
+      </TooltipProvider>,
+    );
+    const checkedState = () => [
+      screen.getByLabelText(AUTO_FIX_LABEL).getAttribute("aria-checked"),
+      screen.getByLabelText(AUTO_MERGE_LABEL).getAttribute("aria-checked"),
+    ];
+
+    // PR #1's tab is selected by default (worst status) — its switches are on.
+    expect(checkedState()).toEqual(["true", "true"]);
+
+    // Switching to PR #2's tab shows its own, independently off, state.
+    fireEvent.click(screen.getByTestId("pr-popover-tab-o-r-2"));
+    expect(checkedState()).toEqual(["false", "false"]);
   });
 });
 

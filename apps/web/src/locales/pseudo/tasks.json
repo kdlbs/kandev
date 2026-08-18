@@ -47,8 +47,8 @@
   "taskArchivedDescription": "Ţĥē ţàśķ ĥàś ƀēēń àŕćĥĩvēď śũććēśśƒũĺĺŷ.",
   "taskUnarchived": "Ţàśķ ũńàŕćĥĩvēď",
   "unarchive": "Ũńàŕćĥĩvē",
-  "unarchivedBranchesMissing_one": "Ɓŕàńćĥ {{branches}} ńō ĺōńĝēŕ ēxĩśţś ĺōćàĺĺŷ ōŕ ōń ţĥē ŕēḿōţē. ţĥē ńēxţ śēśśĩōń śţàŕţś ƒŕēśĥ ƒŕōḿ ţĥē ƀàśē ƀŕàńćĥ.",
-  "unarchivedBranchesMissing_other": "Ɓŕàńćĥēś {{branches}} ńō ĺōńĝēŕ ēxĩśţ ĺōćàĺĺŷ ōŕ ōń ţĥē ŕēḿōţē. ţĥē ńēxţ śēśśĩōń śţàŕţś ƒŕēśĥ ƒŕōḿ ţĥē ƀàśē ƀŕàńćĥ.",
+  "unarchivedBranchesMissing_one": "Ɓŕàńćĥ {{branches}} ńō ĺōńĝēŕ ēxĩśţś ĺōćàĺĺŷ ōŕ ōń ţĥē ŕēḿōţē. Ţĥē ńēxţ śēśśĩōń śţàŕţś ƒŕēśĥ ƒŕōḿ ţĥē ƀàśē ƀŕàńćĥ.",
+  "unarchivedBranchesMissing_other": "Ɓŕàńćĥēś {{branches}} ńō ĺōńĝēŕ ēxĩśţ ĺōćàĺĺŷ ōŕ ōń ţĥē ŕēḿōţē. Ţĥē ńēxţ śēśśĩōń śţàŕţś ƒŕēśĥ ƒŕōḿ ţĥē ƀàśē ƀŕàńćĥ.",
   "unarchivedTaskRestored": "Ţĥē ţàśķ ĥàś ƀēēń ŕēśţōŕēď.",
   "unarchiveTask": "Ũńàŕćĥĩvē ţàśķ"
 }

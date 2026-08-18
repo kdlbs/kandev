@@ -52,6 +52,21 @@ describe("getWorkspaceSourceCapabilities", () => {
       { provider: "github", provider_owner: "acme", provider_name: "api" },
       true,
     ],
+    [
+      "a future provider with an explicit host, owner, and name",
+      {
+        provider: "example-vcs",
+        provider_host: "code.example.test",
+        provider_owner: "acme",
+        provider_name: "api",
+      },
+      true,
+    ],
+    [
+      "an unknown provider without an explicit host",
+      { provider: "example-vcs", provider_owner: "acme", provider_name: "api" },
+      false,
+    ],
     ["a provider ID without owner and name", { provider: "github", provider_repo_id: "42" }, false],
     ["no remote locator", {}, false],
   ])("recognizes %s as cloneable: %s", (_, repository, expected) => {

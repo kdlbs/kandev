@@ -23,7 +23,7 @@ test.describe("Mobile GitHub authentication settings", () => {
     });
 
     await testPage.setViewportSize({ width: 390, height: 844 });
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
     const automation = testPage.getByTestId("github-workspace-automation");
     await expect(automation.getByText("mobile-refresh-user", { exact: true })).toBeVisible({
       timeout: 15_000,
@@ -64,7 +64,7 @@ test.describe("Mobile GitHub authentication settings", () => {
     });
 
     await testPage.setViewportSize({ width: 390, height: 844 });
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
 
     await expect(testPage.getByRole("heading", { name: "Workspace GitHub access" })).toBeVisible({
       timeout: 15_000,
@@ -133,7 +133,7 @@ test.describe("Mobile GitHub authentication settings", () => {
     });
 
     await testPage.setViewportSize({ width: 390, height: 844 });
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
 
     const automation = testPage.getByTestId("github-workspace-automation");
     const personal = testPage.getByTestId("github-personal-identity");

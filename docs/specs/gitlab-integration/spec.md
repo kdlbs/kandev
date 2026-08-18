@@ -108,13 +108,16 @@ workflows are not usable end to end.
   switches — `Auto-fix CI and address comments` and `Auto-merge when ready` —
   above a collapsible `Review follow-up` group holding the three lifecycle
   notification switches (`Your review is requested`, `MR merged`, `MR closed
-  without merging`) introduced for MR lifecycle notifications. All five
-  switches are task-level and apply to every linked MR; auto-fix and auto-merge
-  additionally track per-MR round/attempt state. See "Automation (lifecycle,
+  without merging`) introduced for MR lifecycle notifications. These switches
+  currently use task-level settings, so changing one linked MR's control also
+  affects the task's other linked MRs. Per-MR switch scoping, including
+  per-MR round/attempt state and identity-aware `PATCH`/MCP updates, is tracked
+  in the "Scope GitLab MR automation switches per MR" follow-up task. The
+  auto-fix prompt override remains task-level. See "Automation (lifecycle,
   auto-fix, auto-merge)" below.
 - `Auto-fix CI and address comments` sends or queues an agent prompt when a
   linked MR's pipeline has a new or changed failing job, or a new or changed
-  unresolved discussion note, capped at 10 accepted rounds per task/MR.
+  unresolved discussion note, capped at 10 accepted rounds per task.
   `Auto-merge when ready` merges a linked MR only when it is open, not a
   draft, its pipeline succeeded, it has zero unresolved discussions, and
   GitLab's own merge-readiness verdict agrees.
@@ -162,6 +165,8 @@ into the secret store.
 - `gitlab_task_mrs` remains the durable task-to-MR association. Its unique key
   is `(task_id, repository_id, project_path, mr_iid)`; `task_id` and a non-empty
   `repository_id` must belong to the same workspace as the resolved connection.
+  Associations survive restart and archive/unarchive, but hard task deletion
+  removes them and their refresh watches. Decision: ADR-2026-08-13-hard-delete-task-contribution-links.
 - `gitlab_review_watches` and `gitlab_issue_watches` are workspace-owned durable
   automation definitions. Their workflow, workflow step, repository (when
   present), agent profile, and executor profile must belong to that workspace.
@@ -418,6 +423,8 @@ protocol action name for compatibility.
 
 - Workspace config rows, PAT secrets, watch definitions, dedup reservations,
   task-to-MR associations, and last known MR status survive backend restarts.
+- Archived tasks retain task-to-MR associations for later unarchive; hard task
+  deletion removes task-owned associations and refresh watches.
 - The startup migration moves the legacy global host/token to the active
   workspace, or the earliest-created workspace when no active workspace is
   available. It is idempotent and never duplicates automation watches.

@@ -174,7 +174,13 @@ test.describe("Sidebar — cross-workspace isolation", () => {
     await dialog
       .getByTestId("task-description-input")
       .fill("Created after switching away from an open task");
-    await expect(dialog.getByTestId("submit-start-agent-chevron")).toBeEnabled();
+    const agentProfileSelector = dialog.getByTestId("agent-profile-selector");
+    await expect(agentProfileSelector).toBeVisible({ timeout: 30_000 });
+    await expect(agentProfileSelector).toBeEnabled({ timeout: 30_000 });
+    await expect(agentProfileSelector).not.toContainText("Select agent", { timeout: 30_000 });
+    await expect(dialog.getByTestId("submit-start-agent-chevron")).toBeEnabled({
+      timeout: 30_000,
+    });
 
     const createdResponse = testPage.waitForResponse(
       (response) =>

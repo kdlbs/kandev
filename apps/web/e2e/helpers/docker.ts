@@ -54,6 +54,25 @@ export function dockerCurrentBranch(containerID: string): string {
   return res.stdout.trim();
 }
 
+export function dockerFileContent(containerID: string, filePath: string): string {
+  const res = spawnSync("docker", ["exec", containerID, "cat", filePath], {
+    encoding: "utf8",
+  });
+  if (res.status !== 0) {
+    const logs = spawnSync("docker", ["logs", "--tail", "40", containerID], {
+      encoding: "utf8",
+    });
+    throw new Error(
+      [
+        `failed to read ${filePath} from Docker container ${containerID}`,
+        `stderr=${res.stderr.trim()}`,
+        `logs=${logs.stdout.trim()} ${logs.stderr.trim()}`,
+      ].join("\n"),
+    );
+  }
+  return res.stdout;
+}
+
 export async function waitForDockerContainerRemoved(
   containerID: string,
   message: string,

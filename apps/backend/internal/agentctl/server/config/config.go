@@ -31,6 +31,11 @@ import (
 	"github.com/kandev/kandev/pkg/agent"
 )
 
+const (
+	windowsOS  = "windows"
+	pathEnvKey = "PATH"
+)
+
 // Config is the agentctl configuration.
 // agentctl always exposes the same instance management API regardless of
 // deployment context (Docker container or host machine).
@@ -256,7 +261,8 @@ type InstanceConfig struct {
 
 	// RemoteContributions maps workspace repository subpaths to the
 	// server-authored contribution binding used for source-routed writes.
-	RemoteContributions map[string]models.RemoteContribution
+	RemoteContributions      map[string]models.RemoteContribution
+	ContributionDestinations map[string]models.ContributionDestination
 
 	// WorkspaceSourceRoots are canonical durable source roots permitted for
 	// linked workspace file operations.
@@ -454,6 +460,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if len(overrides.RemoteContributions) > 0 {
 		cfg.RemoteContributions = cloneRemoteContributions(overrides.RemoteContributions)
 	}
+	if len(overrides.ContributionDestinations) > 0 {
+		cfg.ContributionDestinations = cloneContributionDestinations(overrides.ContributionDestinations)
+	}
 	if overrides.WorkspaceSourceRoots != nil {
 		cfg.WorkspaceSourceRoots = append([]string(nil), overrides.WorkspaceSourceRoots...)
 	}
@@ -478,29 +487,30 @@ func applyApprovalOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 
 // InstanceOverrides allows overriding default values when creating an instance
 type InstanceOverrides struct {
-	InstanceID             string
-	Protocol               agent.Protocol
-	AgentCommand           string
-	WorkDir                string
-	AutoStart              *bool
-	Env                    []string
-	AutoApprovePermissions *bool
-	ApprovalPolicy         string
-	AgentType              string
-	McpServers             []McpServerConfig
-	SessionID              string
-	TaskID                 string
-	DisableAskQuestion     bool
-	AssumeMcpSse           bool
-	AssumeMcpHttp          bool
-	McpMode                string
-	McpProviders           []string
-	McpProfile             *mcpprofile.Context
-	RequiresProcessKill    bool
-	StripEnv               []string
-	BaseBranches           map[string]string
-	RemoteContributions    map[string]models.RemoteContribution
-	WorkspaceSourceRoots   []string
+	InstanceID               string
+	Protocol                 agent.Protocol
+	AgentCommand             string
+	WorkDir                  string
+	AutoStart                *bool
+	Env                      []string
+	AutoApprovePermissions   *bool
+	ApprovalPolicy           string
+	AgentType                string
+	McpServers               []McpServerConfig
+	SessionID                string
+	TaskID                   string
+	DisableAskQuestion       bool
+	AssumeMcpSse             bool
+	AssumeMcpHttp            bool
+	McpMode                  string
+	McpProviders             []string
+	McpProfile               *mcpprofile.Context
+	RequiresProcessKill      bool
+	StripEnv                 []string
+	BaseBranches             map[string]string
+	RemoteContributions      map[string]models.RemoteContribution
+	ContributionDestinations map[string]models.ContributionDestination
+	WorkspaceSourceRoots     []string
 }
 
 func cloneRemoteContributions(values map[string]models.RemoteContribution) map[string]models.RemoteContribution {
@@ -508,6 +518,17 @@ func cloneRemoteContributions(values map[string]models.RemoteContribution) map[s
 		return nil
 	}
 	cloned := make(map[string]models.RemoteContribution, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func cloneContributionDestinations(values map[string]models.ContributionDestination) map[string]models.ContributionDestination {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]models.ContributionDestination, len(values))
 	for key, value := range values {
 		cloned[key] = value
 	}
@@ -579,7 +600,7 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 		return nil, fmt.Errorf("compose indexed Git config: %w", err)
 	}
 	if envMap[githubauth.CredentialBrokerURLEnv] != "" {
-		prependPathEntry(envMap, envMap[githubauth.CredentialCLIShimDirEnv], runtime.GOOS == "windows")
+		prependPathEntry(envMap, envMap[githubauth.CredentialCLIShimDirEnv], runtime.GOOS == windowsOS)
 		configureGitHubCLIStartupEnv(envMap)
 	}
 
@@ -592,7 +613,7 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 }
 
 func configureGitHubCLIStartupEnv(env map[string]string) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsOS {
 		return
 	}
 	startupEnv := env[githubauth.CredentialCLIBashEnvEnv]
@@ -700,17 +721,17 @@ func prependPathEntry(env map[string]string, entry string, caseInsensitive bool)
 // testable on every runner. An exact "PATH" always wins, so a caller-supplied
 // key still takes precedence over an inherited case variant.
 func searchPathKey(env map[string]string, caseInsensitive bool) string {
-	if _, ok := env["PATH"]; ok {
-		return "PATH"
+	if _, ok := env[pathEnvKey]; ok {
+		return pathEnvKey
 	}
 	if caseInsensitive {
 		for key := range env {
-			if strings.EqualFold(key, "PATH") {
+			if strings.EqualFold(key, pathEnvKey) {
 				return key
 			}
 		}
 	}
-	return "PATH"
+	return pathEnvKey
 }
 
 func envBool(env []string, key string) bool {

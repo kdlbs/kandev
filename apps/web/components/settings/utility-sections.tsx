@@ -3,20 +3,41 @@
 import { useTranslation } from "react-i18next";
 import { IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { CardAction, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
-import { Label } from "@kandev/ui/label";
+import { CardContent } from "@kandev/ui/card";
 import type { UtilityAgent } from "@/lib/api/domains/utility-api";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { SettingsCard } from "@/components/settings/settings-card";
-import { STANDALONE_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/standalone";
+import { SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/standalone";
 import { isUtilityAgentDirty } from "@/components/settings/utility-dirty";
 import {
   UtilityAgentProfilePicker,
   utilityProfileEligibility,
 } from "@/components/settings/utility-agent-profile-picker";
+import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import { SettingsFieldLabel } from "@/components/settings/settings-typography";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 export const USE_DEFAULT = "__USE_DEFAULT__";
 const UNCONFIGURED = "__UNCONFIGURED__";
+
+export type BuiltinActionProfileSelection = {
+  value: string;
+  unavailableValue?: string;
+};
+
+export function getBuiltinActionProfileSelection(
+  agent: UtilityAgent,
+): BuiltinActionProfileSelection {
+  const profileId = agent.agent_profile_id || "";
+  if (agent.profile_binding_state === "unconfigured") {
+    const unavailableValue = profileId || UNCONFIGURED;
+    return { value: unavailableValue, unavailableValue };
+  }
+  if (agent.profile_binding_state !== "inherit" && profileId) {
+    return { value: profileId };
+  }
+  return { value: USE_DEFAULT };
+}
 
 export function DefaultModelSection({
   profiles,
@@ -35,22 +56,16 @@ export function DefaultModelSection({
   return (
     <SettingsCard
       isDirty={isDirty}
-      discoveryTargetId={STANDALONE_SETTINGS_TARGETS.utilityDefaultModel}
+      discoveryTargetId={SETTINGS_TARGETS.utilityDefaultModel}
       data-testid="utility-default-model-card"
     >
-      <CardHeader>
-        <CardTitle className="text-base font-semibold leading-5">
-          <h3>{t("settings:utilityDefaultModelTitle")}</h3>
-        </CardTitle>
-      </CardHeader>
+      <SettingsCardHeader title={t("settings:utilityDefaultModelTitle")} />
       <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">
           {t("settings:utilityDefaultModelDescription")}
         </p>
         <div className="space-y-2">
-          <Label className="text-xs font-medium text-muted-foreground">
-            {t("settings:utilityAgentProfile")}
-          </Label>
+          <SettingsFieldLabel>{t("settings:utilityAgentProfile")}</SettingsFieldLabel>
           <UtilityAgentProfilePicker
             profiles={profiles}
             value={profileId || USE_DEFAULT}
@@ -85,12 +100,7 @@ export function BuiltinActionRow({
   isDirty: boolean;
 }) {
   const { t } = useTranslation();
-  let currentValue = USE_DEFAULT;
-  if (agent.profile_binding_state === "unconfigured") {
-    currentValue = UNCONFIGURED;
-  } else if (agent.profile_binding_state !== "inherit" && agent.agent_profile_id) {
-    currentValue = agent.agent_profile_id;
-  }
+  const selection = getBuiltinActionProfileSelection(agent);
   return (
     <div
       className="flex flex-col gap-2 py-2 px-2 rounded hover:bg-muted/50 md:flex-row md:items-center md:gap-4"
@@ -104,12 +114,12 @@ export function BuiltinActionRow({
       <div className="flex items-center gap-2">
         <UtilityAgentProfilePicker
           profiles={profiles}
-          value={currentValue}
+          value={selection.value}
           onValueChange={(value) => onProfileChange(agent, value)}
           fallback={{ value: USE_DEFAULT, label: defaultLabel }}
-          unavailableValue={currentValue === UNCONFIGURED ? currentValue : undefined}
+          unavailableValue={selection.unavailableValue}
           unavailableLabel={
-            currentValue === UNCONFIGURED ? t("settings:utilityProfileNeedsRepair") : undefined
+            selection.unavailableValue ? t("settings:utilityProfileNeedsRepair") : undefined
           }
           testId={`utility-profile-picker-action-${agent.id}`}
           triggerClassName="min-w-0 flex-1 md:w-[280px] md:flex-none"
@@ -152,14 +162,10 @@ export function PerActionOverridesSection({
           savedBuiltins.find((saved) => saved.id === agent.id),
         ),
       )}
-      discoveryTargetId={STANDALONE_SETTINGS_TARGETS.utilityActions}
+      discoveryTargetId={SETTINGS_TARGETS.utilityActions}
       data-testid="utility-actions-card"
     >
-      <CardHeader>
-        <CardTitle className="text-base font-semibold leading-5">
-          <h3>{t("settings:utilityActionsTitle")}</h3>
-        </CardTitle>
-      </CardHeader>
+      <SettingsCardHeader title={t("settings:utilityActionsTitle")} />
       <CardContent className="space-y-0">
         <p className="pb-3 text-sm text-muted-foreground">
           {t("settings:utilityActionsDescription")}
@@ -243,20 +249,18 @@ export function CustomAgentsSection({
   const { t } = useTranslation();
   return (
     <SettingsCard
-      discoveryTargetId={STANDALONE_SETTINGS_TARGETS.utilityCustomAgents}
+      discoveryTargetId={SETTINGS_TARGETS.utilityCustomAgents}
       data-testid="utility-custom-agents-card"
     >
-      <CardHeader>
-        <CardTitle className="text-base font-semibold leading-5">
-          <h3>{t("settings:utilityCustomAgentsTitle")}</h3>
-        </CardTitle>
-        <CardAction>
-          <Button onClick={onAdd} size="sm" className="cursor-pointer">
+      <SettingsCardHeader
+        title={t("settings:utilityCustomAgentsTitle")}
+        actions={
+          <Button onClick={onAdd} size="sm" className={settingsActionClassName("cursor-pointer")}>
             <IconPlus className="h-4 w-4 mr-1" />
             {t("settings:utilityAddCustomAgent")}
           </Button>
-        </CardAction>
-      </CardHeader>
+        }
+      />
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
           {t("settings:utilityCustomAgentsDescription")}

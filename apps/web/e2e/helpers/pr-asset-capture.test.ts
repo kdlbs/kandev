@@ -31,9 +31,8 @@ describe("PrAssetCapture.screenshot", () => {
     expect(primary.screenshot).toHaveBeenCalledTimes(1);
   });
 
-  // A cross-device spec drives two clients from one capture instance: a second
-  // instance cannot work, because flush() clears the spec's existing manifest
-  // entries and the last flush would drop the first screenshot.
+  // A cross-device test can drive two clients from one capture instance. Tests
+  // with separate capture lifecycles use distinct captureKey values instead.
   it("shoots the page override so one instance can capture several clients", async () => {
     const primary = fakePage();
     const secondary = fakePage();
@@ -62,5 +61,28 @@ describe("PrAssetCapture.screenshot", () => {
 
     expect(primary.screenshot).not.toHaveBeenCalled();
     expect(secondary.screenshot).not.toHaveBeenCalled();
+  });
+
+  it("keeps assets from separate capture keys in one spec file", async () => {
+    const page = fakePage();
+    const desktop = new PrAssetCapture(page, "packaged-plugin.spec.ts", {
+      outputDir,
+      captureKey: "desktop",
+    });
+    const mobile = new PrAssetCapture(page, "packaged-plugin.spec.ts", {
+      outputDir,
+      captureKey: "mobile",
+    });
+
+    await desktop.screenshot("workbench");
+    desktop.flush();
+    await mobile.screenshot("filters");
+    mobile.flush();
+
+    const manifest = JSON.parse(fs.readFileSync(path.join(outputDir, "manifest.json"), "utf-8"));
+    expect(manifest.assets.map((asset: { name: string }) => asset.name)).toEqual([
+      "workbench",
+      "filters",
+    ]);
   });
 });

@@ -6,7 +6,7 @@ test.describe("System Logs mobile", () => {
     prCapture,
   }) => {
     await testPage.setViewportSize({ width: 390, height: 844 });
-    await testPage.goto("/settings/system/logs");
+    await testPage.goto("/settings/system/data-storage");
 
     const action = testPage.getByTestId("customize-diagnostic-bundle");
     await expect(action).toBeVisible();
@@ -29,7 +29,7 @@ test.describe("System Logs mobile", () => {
     testPage,
   }) => {
     await testPage.setViewportSize({ width: 390, height: 844 });
-    await testPage.goto("/settings/system/logs");
+    await testPage.goto("/settings/system/data-storage");
 
     const customize = testPage.getByTestId("customize-diagnostic-bundle");
     await expect(customize).toBeVisible();

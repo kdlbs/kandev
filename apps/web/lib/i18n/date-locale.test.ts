@@ -70,6 +70,8 @@ describe("resolveDateLocale", () => {
     ["en", "en-US"],
     ["pt-pt", "pt"],
     ["zh-cn", "zh-CN"],
+    ["zh-tw", "zh-TW"],
+    ["zh-hk", "zh-HK"],
   ])("maps %j to the %j date-fns locale", async (locale, code) => {
     const resolved = await resolveDateLocale(locale as "en");
     expect(resolved.code).toBe(code);

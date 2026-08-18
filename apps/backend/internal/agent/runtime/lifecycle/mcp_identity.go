@@ -6,6 +6,7 @@ import (
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -25,13 +26,23 @@ type MCPIdentityScoper func(ctx context.Context, taskID string) (context.Context
 // payload session_id would let it name another user's session and inherit
 // their identity — turning the scoping fix into a privilege escalation.
 type taskScopedMCPHandler struct {
-	inner  agentctl.MCPHandler
-	scope  MCPIdentityScoper
-	taskID string
-	logger *logger.Logger
+	inner       agentctl.MCPHandler
+	scope       MCPIdentityScoper
+	executionID string
+	taskID      string
+	sessionID   string
+	logger      *logger.Logger
 }
 
 func (h *taskScopedMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	ctx = streams.WithMCPExecutionContext(ctx, streams.MCPExecutionContext{
+		ExecutionID: h.executionID,
+		TaskID:      h.taskID,
+		SessionID:   h.sessionID,
+	})
+	if h.scope == nil {
+		return h.inner.Dispatch(ctx, msg)
+	}
 	scoped, err := h.scope(ctx, h.taskID)
 	if err != nil {
 		h.logger.Error("denying in-session MCP request: cannot resolve the task owner",
@@ -44,18 +55,19 @@ func (h *taskScopedMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*
 	return h.inner.Dispatch(scoped, msg)
 }
 
-// mcpHandlerFor returns the MCP handler for one execution's stream, scoped to
-// the task's owning user when per-user scoping has been wired. Without a
-// scoper (tests, or the runtime tier used standalone) the handler is passed
-// through unchanged.
+// mcpHandlerFor returns the MCP handler for one execution's stream. The
+// backend-owned execution identity is always attached; user identity is also
+// attached when per-user scoping has been wired.
 func (sm *StreamManager) mcpHandlerFor(execution *AgentExecution) agentctl.MCPHandler {
-	if sm.mcpHandler == nil || sm.mcpIdentityScoper == nil || execution.TaskID == "" {
+	if sm.mcpHandler == nil || execution.TaskID == "" {
 		return sm.mcpHandler
 	}
 	return &taskScopedMCPHandler{
-		inner:  sm.mcpHandler,
-		scope:  sm.mcpIdentityScoper,
-		taskID: execution.TaskID,
-		logger: sm.logger,
+		inner:       sm.mcpHandler,
+		scope:       sm.mcpIdentityScoper,
+		executionID: execution.ID,
+		taskID:      execution.TaskID,
+		sessionID:   execution.SessionID,
+		logger:      sm.logger,
 	}
 }

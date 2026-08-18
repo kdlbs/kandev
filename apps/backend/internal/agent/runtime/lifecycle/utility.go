@@ -83,13 +83,20 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
-	ia, ok := m.registry.GetInferenceAgent(profile.AgentID)
+	// The registry is keyed by the agent name (claude-acp, codex-acp, ...),
+	// while AgentID is the agents row's generated UUID. AgentName is empty only
+	// for resolvers that never populated it, whose AgentID is already a name.
+	agentName := profile.AgentName
+	if agentName == "" {
+		agentName = profile.AgentID
+	}
+	ia, ok := m.registry.GetInferenceAgent(agentName)
 	if !ok {
-		return nil, fmt.Errorf("agent %q does not support inference", profile.AgentID)
+		return nil, fmt.Errorf("agent %q does not support inference", agentName)
 	}
 	cfg := ia.InferenceConfig()
 	if cfg == nil || !cfg.Supported {
-		return nil, fmt.Errorf("agent %q inference not supported", profile.AgentID)
+		return nil, fmt.Errorf("agent %q inference not supported", agentName)
 	}
 	execution, err := m.GetOrEnsureExecution(ctx, sessionID)
 	if err != nil {
@@ -121,7 +128,7 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 	}
 	autoApprove := profile.AutoApprove
 	return client.InferencePrompt(ctx, &utility.PromptRequest{
-		Prompt: prompt, AgentID: profile.AgentID, Model: profile.Model, Mode: profile.Mode,
+		Prompt: prompt, AgentID: agentName, Model: profile.Model, Mode: profile.Mode,
 		AutoApprovePermissions: &autoApprove,
 		InferenceConfig: &utility.InferenceConfigDTO{
 			Command: cfg.Command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: execution.WorkspacePath,

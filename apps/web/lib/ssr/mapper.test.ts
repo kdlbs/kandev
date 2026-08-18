@@ -37,7 +37,7 @@ function snapshotWithPendingAction(action: unknown): WorkflowSnapshot {
         title: "Task",
         description: "",
         state: "TODO",
-        priority: 0,
+        priority: "medium",
         primary_session_pending_action: action,
         created_at: now,
         updated_at: now,
@@ -82,6 +82,19 @@ describe("snapshotToState", () => {
     const state = snapshotToState(snapshot);
 
     expect(state.kanban?.tasks[0]?.activeSubagentCount).toBe(expected);
+  });
+
+  it("hydrates the task status summary into the initial kanban state", () => {
+    const snapshot = snapshotWithPendingAction(undefined);
+    snapshot.tasks[0].status_summary = {
+      revision: 4,
+      updated_at: now,
+      primary_session: { id: "session-1", state: "WAITING_FOR_INPUT" },
+    };
+
+    const state = snapshotToState(snapshot);
+
+    expect(state.kanban?.tasks[0]?.statusSummary).toEqual(snapshot.tasks[0].status_summary);
   });
 
   it("preserves workflow step WIP fields", () => {

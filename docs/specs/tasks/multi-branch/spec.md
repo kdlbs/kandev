@@ -56,6 +56,7 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 - Marked options remain selectable so users can intentionally create a multi-branch task from one repository. Removing or changing the other row removes the marker immediately.
 - Repository-chip tooltips keep long local paths inside a viewport-safe, wrapping surface. Closing a repository picker does not reveal its tooltip until the pointer leaves and deliberately hovers the chip again.
 - Review surfaces expose one linked pull request at a time when a task has multiple PRs. A task-scoped selector defaults to the primary (oldest) PR, remembers an in-session override, and falls back to the primary PR when that override disappears.
+- The Changes timeline keeps the last resolved PR file list visible while a background PR synchronization refresh is pending. A successful refresh replaces the list atomically, and a failed refresh retains the last resolved list; switching workspace/task or removing a PR must not expose files from the previous scope.
 - Selecting a PR changes the remote PR diff contribution while preserving the existing source precedence: uncommitted worktree changes, then cumulative committed changes, then the selected PR. PR-only views and PR timeline rows resolve the exact PR rather than the task primary.
 - The selector is available on desktop, phone, and coarse-pointer tablet. Phone uses a touch-sized bottom-menu treatment inside the existing Review surface; switching keeps Review open and exposes selected-PR loading, empty, and retry states.
 - Full "+ Branch" UI affordance and grouped repo > branch tabs are deferred — agents drive multi-branch via the MCP tool today.
@@ -74,6 +75,9 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 - **GIVEN** no GitHub or GitLab integration is configured, **WHEN** the user submits a public `github.com` or `gitlab.com` repository URL, **THEN** Kandev can discover its branches and create the task; private repositories continue to require credentials.
 - **GIVEN** a selected repository has a long unbroken local path, **WHEN** its tooltip opens, **THEN** the tooltip wraps the path and remains within the viewport instead of covering adjacent repository controls.
 - **GIVEN** a user selects a repository from a repository-chip picker, **WHEN** the picker closes while the pointer remains over the chip, **THEN** no repository tooltip opens until the pointer leaves and deliberately hovers the chip again.
+- **GIVEN** the Changes timeline displays resolved files for a linked PR, **WHEN** background synchronization advances that PR's sync timestamp and the replacement file request is still pending, **THEN** the existing PR Changes section and count remain visible without moving or remounting.
+- **GIVEN** a background PR file refresh completes, **WHEN** the replacement response belongs to the current workspace, task, and PR, **THEN** the PR Changes section atomically displays the replacement file list without retaining removed files.
+- **GIVEN** the Changes timeline displays resolved files for a linked PR, **WHEN** a background refresh fails, **THEN** the last resolved PR Changes section and count remain visible.
 
 ## Non-goals
 

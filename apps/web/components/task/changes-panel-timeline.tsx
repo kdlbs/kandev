@@ -145,12 +145,16 @@ type CommitsSectionProps = {
   repoDisplayName?: (repositoryName: string) => string | undefined;
   /** The session's base branch — passed through to the per-repo PR dialog. */
   repoBaseBranch?: string;
-  /** Per-repo branch / ahead / behind summary; used for the "ahead" indicator. */
-  perRepoStatus?: Array<{ repository_name: string; ahead: number }>;
+  /** Per-repo branch / upstream summary; used for the Push indicator. */
+  perRepoStatus?: Array<{ repository_name: string; pushAhead?: number; ahead?: number }>;
   /** Existing PR URL keyed by repository_name; "" key for single-repo. */
   prByRepo?: Record<string, string | undefined>;
   /** Initial collapse state. Defaults to collapsed; the panel expands it when it is the first visible section. */
   defaultCollapsed?: boolean;
+  label?: string;
+  testId?: string;
+  pushDisabled?: boolean;
+  showActions?: boolean;
 };
 
 // Commits grouping shares the helper above with files — see @/lib/group-by-repo.
@@ -168,10 +172,16 @@ export function CommitsSection({
   perRepoStatus,
   prByRepo,
   defaultCollapsed = true,
+  label,
+  testId = "commits-section",
+  pushDisabled = false,
+  showActions = true,
 }: CommitsSectionProps) {
   const { t } = useTranslation();
   const groups = groupByRepositoryName(commits, (c) => c.repository_name);
-  const aheadByRepo = new Map((perRepoStatus ?? []).map((s) => [s.repository_name, s.ahead]));
+  const aheadByRepo = new Map(
+    (perRepoStatus ?? []).map((s) => [s.repository_name, s.pushAhead ?? s.ahead ?? 0]),
+  );
   // Single-repo: drop the per-repo sub-header (CommitsRepoGroup with
   // showHeader=false renders flat) and lift the Push / PR buttons into the
   // section header.
@@ -182,8 +192,8 @@ export function CommitsSection({
       aheadCount={aheadByRepo.get("") ?? 0}
       prExists={!!prByRepo?.[""]}
       canCreatePR={!!onRepoCreatePR && !prByRepo?.[""]}
-      onRepoPush={onRepoPush}
-      onRepoCreatePR={onRepoCreatePR}
+      onRepoPush={showActions && !pushDisabled ? onRepoPush : undefined}
+      onRepoCreatePR={showActions ? onRepoCreatePR : undefined}
       stop={(e) => e.stopPropagation()}
     />
   ) : undefined;
@@ -191,10 +201,10 @@ export function CommitsSection({
   return (
     <TimelineSection
       dotColor={DOT_COLORS.commits}
-      label={t("task:commits")}
+      label={label ?? t("task:commits")}
       count={commits.length}
       defaultCollapsed={defaultCollapsed}
-      data-testid="commits-section"
+      data-testid={testId}
       action={sectionAction}
     >
       <ul data-testid="commits-list" className="space-y-0.5">
@@ -212,8 +222,8 @@ export function CommitsSection({
             onAmendCommit={onAmendCommit}
             onRevertCommit={onRevertCommit}
             onResetToCommit={onResetToCommit}
-            onRepoPush={onRepoPush}
-            onRepoCreatePR={onRepoCreatePR}
+            onRepoPush={showActions && !pushDisabled ? onRepoPush : undefined}
+            onRepoCreatePR={showActions ? onRepoCreatePR : undefined}
           />
         ))}
       </ul>

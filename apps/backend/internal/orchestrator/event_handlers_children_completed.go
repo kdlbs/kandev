@@ -24,6 +24,10 @@ func (s *Service) handleTaskStateChanged(ctx context.Context, data watcher.TaskE
 	}
 
 	s.processParentChildrenCompletedForTaskState(ctx, data.TaskID, *data.NewState)
+	// Peer dependencies react to the same terminal transitions, but with a
+	// stricter definition of "done": on_children_completed counts FAILED as
+	// terminal, dependency resolution requires success. Keep the two separate.
+	s.handleTaskDependenciesForTerminalState(ctx, data.TaskID, *data.NewState)
 }
 
 func (s *Service) processParentChildrenCompletedForTaskState(ctx context.Context, taskID string, state v1.TaskState) {

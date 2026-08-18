@@ -31,6 +31,25 @@ func newRepoForEntityTests(t *testing.T) *Repository {
 	return repo
 }
 
+func TestRepositoryCloseHonorsDatabaseOwnership(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "owned-close.db")
+	dbConn, err := db.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	repo, err := newRepository(sqlxDB, sqlxDB, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := sqlxDB.Ping(); err == nil {
+		t.Fatal("owned database remains open")
+	}
+}
+
 func seedWorkspace(t *testing.T, repo *Repository, id string) {
 	t.Helper()
 	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{ID: id, Name: id}); err != nil {

@@ -79,6 +79,7 @@ func (s *Service) handleTaskPRCIAutomationWithRefresh(ctx context.Context, pr *g
 		s.logger.Debug("load CI automation options failed", zap.String("task_id", pr.TaskID), zap.Error(err))
 		return nil
 	}
+	options = resolvePRScopedCIOptions(options, pr)
 	freshlySynced := ciAutomationHasFreshPRStatus(pr)
 	if refresh && (options.AutoFixEnabled || options.AutoMergeEnabled) {
 		refreshed, synced, syncErr := s.refreshTaskPRForCIAutomation(ctx, pr)
@@ -114,6 +115,30 @@ func (s *Service) handleTaskPRCIAutomationWithRefresh(ctx context.Context, pr *g
 		s.publishTaskCIOptionsState(ctx, pr.TaskID)
 	}
 	return nil
+}
+
+// resolvePRScopedCIOptions overlays this PR's own automation switches onto a
+// copy of the task-scoped response, so the auto-fix, auto-merge, and
+// lifecycle-prompt automation below acts on this PR's per-PR configuration
+// instead of the task-wide aggregate. Task-level fields (reviewer login,
+// effective prompts, prompt override) are left as returned.
+func resolvePRScopedCIOptions(options *github.TaskCIOptionsResponse, pr *github.TaskPR) *github.TaskCIOptionsResponse {
+	if options == nil || pr == nil {
+		return options
+	}
+	scoped := *options
+	for _, opt := range options.PROptions {
+		if opt == nil || opt.RepositoryID != pr.RepositoryID || opt.PRNumber != pr.PRNumber {
+			continue
+		}
+		scoped.AutoFixEnabled = opt.AutoFixEnabled
+		scoped.AutoMergeEnabled = opt.AutoMergeEnabled
+		scoped.PromptOnReviewRequested = opt.PromptOnReviewRequested
+		scoped.PromptOnMerged = opt.PromptOnMerged
+		scoped.PromptOnClosed = opt.PromptOnClosed
+		break
+	}
+	return &scoped
 }
 
 func (s *Service) handleTaskPRLifecycleAutomation(ctx context.Context, pr *github.TaskPR, options *github.TaskCIOptionsResponse) {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Trans } from "react-i18next";
 import { ImproveKandevDialog } from "./improve-kandev-dialog";
 import {
   IMPROVE_KANDEV_SKIP_INTRO_KEY,
@@ -10,6 +11,8 @@ import type { ImproveKandevBootstrapResponse } from "@/lib/api/domains/improve-k
 const ACTIVE_WORKSPACE = { id: "ws-active", name: "Active Workspace" };
 const IMPROVE_WORKSPACE = { id: "ws-improve", name: IMPROVE_KANDEV_WORKSPACE_NAME };
 const WORKSPACE_CHOICE_CONFIRM_TESTID = "improve-kandev-create-workspace-confirm";
+// The health check's own remediation sentence, rendered verbatim after the copy.
+const GH_AUTH_MESSAGE = "Run gh auth login.";
 
 const mocks = vi.hoisted(() => ({
   bootstrap: vi.fn(),
@@ -178,16 +181,121 @@ describe("ImproveKandevDialog bootstrap workspace wiring", () => {
   });
 });
 
-import { Trans } from "react-i18next";
+function githubIssue(id: string, message: string) {
+  return {
+    id,
+    category: "github",
+    title: "GitHub",
+    message,
+    severity: "warning",
+    fix_url: "/settings/integrations/github",
+    fix_label: "Configure GitHub",
+  };
+}
+
+// The dialog renders through a Radix portal, so its markup lands on
+// document.body rather than the render container.
+async function waitForProceedEnabled() {
+  await waitFor(() => {
+    const proceed = screen.getByTestId("improve-kandev-proceed");
+    expect(proceed.hasAttribute("disabled")).toBe(false);
+  });
+}
+
+describe("ImproveKandevDialog GitHub gate", () => {
+  // The gate must ask "is there any GitHub credential at all", not "is every
+  // workspace's connection healthy". A user on GitHub in one workspace and
+  // another code host elsewhere carries this issue permanently, and it used to
+  // lock the dialog behind a warning about workspaces this flow never touches.
+  it("does not block on a connection that is unhealthy in another workspace", async () => {
+    setStoreWorkspaces([ACTIVE_WORKSPACE, IMPROVE_WORKSPACE]);
+    mocks.health.mockResolvedValue({
+      issues: [
+        githubIssue(
+          "github_workspace_connections_unhealthy",
+          "1 of 2 configured GitHub workspace connections need attention (1 invalid, 0 suspended, 0 revoked).",
+        ),
+      ],
+    });
+    renderDialog();
+
+    await waitForProceedEnabled();
+    expect(screen.queryByText(/needs the/)).toBeNull();
+  });
+
+  it("does not block on an exhausted rate limit", async () => {
+    setStoreWorkspaces([ACTIVE_WORKSPACE, IMPROVE_WORKSPACE]);
+    mocks.health.mockResolvedValue({
+      issues: [githubIssue("github_rate_limit_core", "PR/issue checks are paused.")],
+    });
+    renderDialog();
+
+    await waitForProceedEnabled();
+  });
+
+  it("still blocks when no GitHub connection is configured anywhere", async () => {
+    setStoreWorkspaces([ACTIVE_WORKSPACE, IMPROVE_WORKSPACE]);
+    mocks.health.mockResolvedValue({
+      issues: [
+        githubIssue("github_not_authenticated", "Configure a GitHub connection for a workspace."),
+      ],
+    });
+    renderDialog();
+
+    await waitFor(() => expect(screen.queryByTestId("improve-kandev-proceed")).toBeNull());
+  });
+
+  // Every configured connection being broken means no usable credential, so
+  // the health check reports it as github_not_authenticated and the gate must
+  // block. Letting it through would fail at the PR step, after the user has
+  // already written the contribution.
+  it("blocks when every configured connection is unhealthy", async () => {
+    setStoreWorkspaces([ACTIVE_WORKSPACE, IMPROVE_WORKSPACE]);
+    mocks.health.mockResolvedValue({
+      issues: [
+        githubIssue(
+          "github_not_authenticated",
+          "No working GitHub connection: all 2 configured connections need attention " +
+            "(1 invalid, 0 suspended, 1 revoked).",
+        ),
+      ],
+    });
+    renderDialog();
+
+    await waitFor(() =>
+      expect(document.body.textContent).toContain("No working GitHub connection"),
+    );
+    expect(screen.queryByTestId("improve-kandev-proceed")).toBeNull();
+  });
+
+  // Rendered through the component, not a hand-fed <Trans>: the catalog string
+  // interpolates the binary name inside its <code> element, so a values object
+  // missing `binary` ships the literal "{{binary}}" to the user. A test that
+  // supplies the values itself cannot see that.
+  it("renders the gh-auth notice with no un-interpolated placeholder", async () => {
+    setStoreWorkspaces([ACTIVE_WORKSPACE, IMPROVE_WORKSPACE]);
+    mocks.health.mockResolvedValue({
+      issues: [githubIssue("github_not_authenticated", GH_AUTH_MESSAGE)],
+    });
+    renderDialog();
+
+    await waitFor(() => expect(document.body.textContent).toContain(GH_AUTH_MESSAGE));
+    expect(document.body.textContent).not.toContain("{{");
+    expect(
+      Array.from(document.body.querySelectorAll("code")).map((node) => node.textContent),
+    ).toContain("gh");
+  });
+});
+
 describe("improve-kandev dialog <Trans> copy", () => {
   it("renders the gh-auth notice byte-identically to the old literal", () => {
     const { container } = render(
       <Trans
         i18nKey="common:theFinalStepOpensAPullRequest"
-        values={{ binary: "gh", message: "Run gh auth login." }}
+        values={{ binary: "gh", message: GH_AUTH_MESSAGE }}
       >
         The final step of this workflow opens a pull request, which needs the <code>gh</code> CLI to
-        be authenticated. {"Run gh auth login."}
+        be authenticated. {GH_AUTH_MESSAGE}
       </Trans>,
     );
 

@@ -528,7 +528,7 @@ test.describe("automations — Pull request merged trigger", () => {
       workflowStepId: seedData.startStepId,
       // e2e:delay gives the test time to delete the target before the archive call
       prompt:
-        'e2e:delay(500)\ne2e:mcp:kandev:archive_task_kandev({"task_id":"{{data.task_id}}"})\ne2e:message("deleted-done")',
+        'e2e:delay(1000)\ne2e:mcp:kandev:archive_task_kandev({"task_id":"{{data.task_id}}"})\ne2e:message("deleted-done")',
       agentProfileId: seedData.agentProfileId,
     });
     await apiClient.seedTrigger({
@@ -538,16 +538,15 @@ test.describe("automations — Pull request merged trigger", () => {
       enabled: true,
     });
 
-    // Start the fire concurrently with the delete so the target is gone
-    // before the agent's archive call fires.
-    const firePromise = apiClient.firePRMerged({
+    // Wait until the event has created the automation run, then delete the
+    // source task while the delay keeps the agent before its archive call.
+    const { run_task_id } = await apiClient.firePRMerged({
       taskId: target.id,
       automationId: automation.id,
       owner: "acme",
       repo: "api",
     });
     await apiClient.deleteTask(target.id);
-    const { run_task_id } = await firePromise;
 
     // Run must still complete cleanly — MCP error on a deleted task must not crash the turn
     await testPage.goto(`/t/${run_task_id}`);

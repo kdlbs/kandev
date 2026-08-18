@@ -149,6 +149,26 @@ func (s *ExecutionStore) OwnsPromptGeneration(sessionID, executionID string, gen
 	return exists && generation != 0 && execution.promptGeneration == generation
 }
 
+// OwnsPromptActivity reports whether the execution still owns the prompt and
+// its activity has not changed since the watchdog captured its snapshot.
+func (s *ExecutionStore) OwnsPromptActivity(
+	sessionID, executionID string,
+	generation, activityEpoch uint64,
+) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	currentExecutionID, exists := s.bySession[sessionID]
+	if !exists || currentExecutionID != executionID {
+		return false
+	}
+	execution, exists := s.executions[currentExecutionID]
+	if !exists || generation == 0 || activityEpoch == 0 || execution.promptGeneration != generation {
+		return false
+	}
+	return execution.promptActivityEpochSnapshot() == activityEpoch
+}
+
 // ActivePromptGeneration returns the generation of the prompt that is dispatched
 // and still in flight for executionID, or 0 if there is none. A steer reuses this
 // exact generation so the folded completion is attributed to the predecessor's
@@ -268,6 +288,7 @@ func (s *ExecutionStore) MarkPromptDispatched(executionID string, generation uin
 		return
 	}
 	execution.dispatchedPromptGeneration = generation
+	execution.armPromptActivity()
 }
 
 // UpdateError updates the error message of an agent execution and sets its status to failed.

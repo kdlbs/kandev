@@ -55,6 +55,16 @@ async function addTitleFilter(testPage: Page, sheet: Locator, value: string): Pr
   await popover.getByTestId("filter-value-input").fill(value);
 }
 
+async function taskRowOrder(sheet: Locator, taskIds: string[]) {
+  const rows = await sheet.locator("[data-task-row-id]").all();
+  const order: string[] = [];
+  for (const row of rows) {
+    const id = await row.getAttribute("data-task-row-id");
+    if (id && taskIds.includes(id)) order.push(id);
+  }
+  return order;
+}
+
 test.describe("Mobile sidebar — view system", () => {
   test("direct creation stays touch-reachable, viewport-safe, and persists", async ({
     testPage,
@@ -242,6 +252,63 @@ test.describe("Mobile sidebar — view system", () => {
     await chipRow.getByTestId("sidebar-view-chip").filter({ hasText: "All tasks" }).click();
     await expect(sheet.getByText("Update deps")).toBeVisible();
     await expect(sheet.getByText("Fix auth bug")).toBeVisible();
+  });
+
+  test("mobile last activity sort is touch reachable, persistent, and contained", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, [
+      "Mobile activity old",
+      "Mobile activity new",
+    ]);
+    const listed = await apiClient.listTasks(seedData.workspaceId);
+    const oldTask = listed.tasks.find((task) => task.title === "Mobile activity old");
+    const newTask = listed.tasks.find((task) => task.title === "Mobile activity new");
+    expect(oldTask?.id).toBeTruthy();
+    expect(newTask?.id).toBeTruthy();
+    await apiClient.updateTaskTitle(oldTask!.id, "Mobile activity old touched");
+
+    const gear = sheet.getByTestId("sidebar-filter-gear");
+    await gear.tap();
+    const popover = testPage.getByTestId("sidebar-filter-popover");
+    await expect(popover).toBeVisible();
+    await popover.getByTestId("sort-key-select").tap();
+    await testPage.getByRole("option", { name: "Last activity", exact: true }).tap();
+    const direction = popover.getByTestId("sort-direction-toggle");
+    if ((await direction.getAttribute("data-direction")) !== "desc") await direction.tap();
+    await popover.getByTestId("view-save-as-button").tap();
+    await popover.getByTestId("view-save-as-name-input").fill("Mobile last activity");
+    await popover.getByTestId("view-save-as-confirm").tap();
+    await testPage.keyboard.press("Escape");
+
+    const taskIds = [oldTask!.id, newTask!.id];
+    await expect.poll(() => taskRowOrder(sheet, taskIds)).toEqual(taskIds);
+    const viewport = testPage.viewportSize();
+    const list = sheet.getByTestId("mobile-task-switcher-list");
+    const sheetBox = await sheet.boundingBox();
+    const listBox = await list.boundingBox();
+    expect(viewport).not.toBeNull();
+    expect(sheetBox).not.toBeNull();
+    expect(listBox).not.toBeNull();
+    expect(listBox!.x).toBeGreaterThanOrEqual(sheetBox!.x);
+    expect(listBox!.x + listBox!.width).toBeLessThanOrEqual(sheetBox!.x + sheetBox!.width);
+    await expect(list).toHaveCSS("overflow-y", "auto");
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+    await testPage.getByTestId("mobile-session-menu").tap();
+    const reloadedSheet = testPage.getByRole("dialog", { name: "Tasks" });
+    await expect(
+      reloadedSheet.getByTestId("sidebar-view-chip").filter({ hasText: "Mobile last activity" }),
+    ).toHaveAttribute("data-active", "true");
+    await expect.poll(() => taskRowOrder(reloadedSheet, taskIds)).toEqual(taskIds);
   });
 
   test("many saved views scroll without covering fixed actions", async ({

@@ -10,7 +10,7 @@ import { fetchSystemMetricsSettings, updateSystemMetricsSettings } from "@/lib/a
 import type { SystemMetricId, SystemMetricsGlobalSettings } from "@/lib/types/system";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { SettingsCard } from "./settings-card";
-import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { useTranslation } from "react-i18next";
 
 const METRIC_OPTIONS: Array<{ id: SystemMetricId; labelKey: string }> = [

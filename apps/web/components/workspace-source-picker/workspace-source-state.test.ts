@@ -64,7 +64,9 @@ describe("workspace source state payloads and validation", () => {
       updateWorkspaceSourceRow([invalid, valid], "bad", { remoteUrl: "https://x/y.git" }),
     ).toEqual([{ ...invalid, remoteUrl: "https://x/y.git" }, valid]);
   });
+});
 
+describe("workspace source state provider validation", () => {
   it("accepts task-create's supported SCP remotes and rejects unsupported hosts", () => {
     const rows = [
       {
@@ -89,6 +91,16 @@ describe("workspace source state payloads and validation", () => {
         key: "unsupported",
         kind: "repository" as const,
         remoteUrl: "https://bitbucket.org/acme/api.git",
+        baseBranch: "main",
+      },
+      {
+        key: "plugin-authorized",
+        kind: "repository" as const,
+        remoteUrl: "https://bitbucket.example.test/scm/acme/api.git",
+        provider: "bitbucket",
+        providerRepoId: "api-42",
+        providerOwner: "acme",
+        providerName: "api",
         baseBranch: "main",
       },
     ];

@@ -47,6 +47,10 @@ pull behavior.
 Manual moves and workflow-engine transitions into a full step continue to
 return capacity conflicts. This decision changes creation overflow only.
 
+That move rule is replaced by
+[ADR-2026-08-12-queue-task-moves-at-wip-capacity](2026-08-12-queue-task-moves-at-wip-capacity.md).
+The creation and feeder rules in this decision remain accepted.
+
 ## Consequences
 
 - All accepted integration work is immediately visible and durable.

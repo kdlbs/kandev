@@ -1,6 +1,7 @@
 import type { ForegroundActivity, TaskSessionState, TaskState } from "@/lib/types/http";
 import type { GroupedSidebarList } from "@/lib/sidebar/apply-view";
 import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
+import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 
 export type StepDef = {
   id: string;
@@ -28,11 +29,14 @@ export type TaskSwitcherItem = {
   workflowStepTitle?: string;
   repositoryPath?: string;
   repositories?: string[];
+  /** Persisted task-to-repository links used by host-owned plugin task actions. */
+  repositoryLinks?: Array<{ repository_id: string; position?: number }>;
   diffStats?: { additions: number; deletions: number };
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string;
   remoteExecutorName?: string;
   updatedAt?: string;
+  lastActivityAt?: string;
   createdAt?: string;
   isArchived?: boolean;
   primarySessionId?: string | null;
@@ -44,6 +48,8 @@ export type TaskSwitcherItem = {
   prInfo?: { number: number; state: string; aggregateState?: string };
   /** Number of prompts currently en-queued for this task (mail badge). */
   queuedCount?: number;
+  /** Destination-resident WIP queue position, separate from queued prompts. */
+  wipQueue?: WipQueueStatus;
   isPRReview?: boolean;
   isIssueWatch?: boolean;
   issueInfo?: { url: string; number: number };
@@ -86,6 +92,7 @@ export type TaskSwitcherProps = {
   onRetryLoad?: () => void;
   retryLabel?: string;
   totalTaskCount?: number;
+  showActivityTime?: boolean;
   // Multi-select (cmd/shift click). When the selection is non-empty, plain
   // clicks toggle instead of navigating; the context menu acts on the selection.
   selectedTaskIds?: Set<string>;

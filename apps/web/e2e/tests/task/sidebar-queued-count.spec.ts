@@ -10,6 +10,9 @@
  */
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
+
+registerSeparateQueueRows(test);
 
 const stepOpts = (seedData: { workflowId: string; startStepId: string }) => ({
   workflow_id: seedData.workflowId,

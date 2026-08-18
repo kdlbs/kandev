@@ -11,7 +11,7 @@ import { test, expect } from "../../fixtures/test-base";
  * See docs/specs/platform/i18n.md and docs/i18n.md.
  */
 
-const APPEARANCE_URL = "/settings/general/appearance";
+const APPEARANCE_URL = "/settings/preferences/appearance";
 
 /** Latin letters carrying diacritics, as produced by scripts/generate-pseudo-locale.mjs. */
 const ACCENTED = /[À-ɏ]/;
@@ -68,6 +68,62 @@ test.describe("i18n language switcher", () => {
     await expect(testPage.locator("html")).toHaveAttribute("lang", "en", { timeout: 10_000 });
     await expect(testPage.getByLabel("Display language")).toBeVisible({ timeout: 10_000 });
   });
+
+  for (const locale of [
+    {
+      id: "zh-tw",
+      option: "繁體中文（台灣）",
+      displayLanguage: "顯示語言",
+      screenshot: "traditional-chinese-taiwan-locale-desktop",
+      caption: "Settings > General > Appearance with Traditional Chinese (Taiwan) active",
+    },
+    {
+      id: "zh-hk",
+      option: "繁體中文（香港）",
+      displayLanguage: "顯示語言",
+      screenshot: "traditional-chinese-hong-kong-locale-desktop",
+      caption: "Settings > General > Appearance with Traditional Chinese (Hong Kong) active",
+    },
+  ] as const) {
+    test(`switching to ${locale.option} persists through reload and can restore English`, async ({
+      testPage,
+      prCapture,
+    }) => {
+      await testPage.goto(APPEARANCE_URL);
+
+      const select = testPage.getByLabel("Display language");
+      await expect(select).toBeVisible({ timeout: 10_000 });
+      await select.click();
+      await testPage.getByRole("listbox").getByRole("option", { name: locale.option }).click();
+
+      await expect(testPage.locator("html")).toHaveAttribute("lang", locale.id, {
+        timeout: 10_000,
+      });
+      await expect(testPage.getByLabel(locale.displayLanguage)).toBeVisible({ timeout: 10_000 });
+      await expect
+        .poll(async () => {
+          const cookies = await testPage.context().cookies();
+          return cookies.find((cookie) => cookie.name === "kandev_locale")?.value;
+        })
+        .toBe(locale.id);
+
+      await prCapture.screenshot(locale.screenshot, {
+        caption: locale.caption,
+      });
+
+      await testPage.reload();
+      await expect(testPage.locator("html")).toHaveAttribute("lang", locale.id, {
+        timeout: 10_000,
+      });
+      await expect(testPage.getByLabel(locale.displayLanguage)).toBeVisible({ timeout: 10_000 });
+
+      const selectAfter = testPage.getByLabel(locale.displayLanguage);
+      await selectAfter.click();
+      await testPage.getByRole("listbox").getByRole("option", { name: "English" }).click();
+      await expect(testPage.locator("html")).toHaveAttribute("lang", "en", { timeout: 10_000 });
+      await expect(testPage.getByLabel("Display language")).toBeVisible({ timeout: 10_000 });
+    });
+  }
 
   test("switching to pseudo re-renders accented copy and survives reload", async ({
     testPage,

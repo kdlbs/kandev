@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
@@ -19,14 +20,15 @@ import { useTaskReviewShortcut } from "./use-task-review-shortcut";
  */
 export function TaskPRShortcut({ taskId }: { taskId: string | null }) {
   const { toast } = useToast();
+  const { t } = useTranslation("task");
   const { prs } = useTaskPR(taskId);
   const mrs = useTaskMRs(taskId);
   const overrides = useAppStore((s) => s.userSettings.keyboardShortcuts);
   const shortcut = getShortcut("OPEN_TASK_PR", overrides);
   const targets = useMemo(() => buildTaskReviewTargets(prs, mrs), [mrs, prs]);
   const onNoTargets = useCallback(
-    () => toast({ description: "No pull request or merge request linked to this task" }),
-    [toast],
+    () => toast({ description: t("task:noPullOrMergeRequestLinked") }),
+    [t, toast],
   );
   const onOpenTarget = useCallback((target: TaskReviewTarget) => {
     void openExternalLink(target.url).catch(() => undefined);

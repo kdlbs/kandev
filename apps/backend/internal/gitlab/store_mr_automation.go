@@ -69,22 +69,22 @@ func (s *Store) createMRAutomationTables() error {
 // that already have those tables from before this task.
 func (s *Store) migrateMRAutomationAutomationColumns() error {
 	optionsColumns := []struct{ name, ddl string }{
-		{"auto_fix_enabled", "BOOLEAN NOT NULL DEFAULT 0"},
-		{"auto_merge_enabled", "BOOLEAN NOT NULL DEFAULT 0"},
+		{"auto_fix_enabled", sqlBooleanDefaultFalse},
+		{"auto_merge_enabled", sqlBooleanDefaultFalse},
 		{"auto_fix_prompt_override", "TEXT"},
 	}
 	if err := addMissingColumns(s, "gitlab_task_mr_options", optionsColumns); err != nil {
 		return err
 	}
 	stateColumns := []struct{ name, ddl string }{
-		{"last_fix_signature", "TEXT NOT NULL DEFAULT ''"},
-		{"last_fix_checkpoint_json", "TEXT NOT NULL DEFAULT ''"},
-		{"last_fix_enqueued_at", "DATETIME"},
+		{"last_fix_signature", sqlTextDefaultEmpty},
+		{"last_fix_checkpoint_json", sqlTextDefaultEmpty},
+		{"last_fix_enqueued_at", sqlDateTime},
 		{"last_fix_session_id", "TEXT"},
-		{"auto_fix_round_count", "INTEGER NOT NULL DEFAULT 0"},
-		{"auto_fix_exhausted_at", "DATETIME"},
-		{"last_merge_signature", "TEXT NOT NULL DEFAULT ''"},
-		{"last_merge_attempt_at", "DATETIME"},
+		{"auto_fix_round_count", sqlIntegerDefaultZero},
+		{"auto_fix_exhausted_at", sqlDateTime},
+		{"last_merge_signature", sqlTextDefaultEmpty},
+		{"last_merge_attempt_at", sqlDateTime},
 	}
 	return addMissingColumns(s, "gitlab_task_mr_state", stateColumns)
 }

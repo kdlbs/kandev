@@ -14,12 +14,19 @@ import (
 // PassthroughHandlers provides WebSocket handlers for agent CLI passthrough operations.
 // These handlers route stdin to the agent process in passthrough mode.
 type PassthroughHandlers struct {
-	lifecycleMgr *lifecycle.Manager
+	lifecycleMgr passthroughLifecycle
 	logger       *logger.Logger
 }
 
+type passthroughLifecycle interface {
+	CheckSessionAccess(context.Context, string) error
+	GetExecutionBySessionID(string) (*lifecycle.AgentExecution, bool)
+	WritePassthroughStdin(context.Context, string, string) error
+	ResizePassthroughPTY(context.Context, string, uint16, uint16) error
+}
+
 // NewPassthroughHandlers creates a new PassthroughHandlers instance
-func NewPassthroughHandlers(lifecycleMgr *lifecycle.Manager, log *logger.Logger) *PassthroughHandlers {
+func NewPassthroughHandlers(lifecycleMgr passthroughLifecycle, log *logger.Logger) *PassthroughHandlers {
 	return &PassthroughHandlers{
 		lifecycleMgr: lifecycleMgr,
 		logger:       log.WithFields(zap.String("component", "passthrough_handlers")),

@@ -13,7 +13,7 @@ type Repository interface {
 	GetGlobalStats(ctx context.Context, workspaceID string, start *time.Time) (*models.GlobalStats, error)
 	GetDailyActivity(ctx context.Context, workspaceID string, days int) ([]*models.DailyActivity, error)
 	GetCompletedTaskActivity(ctx context.Context, workspaceID string, days int) ([]*models.CompletedTaskActivity, error)
-	GetAgentUsage(ctx context.Context, workspaceID string, limit int, start *time.Time) ([]*models.AgentUsage, error)
+	GetModelUsage(ctx context.Context, workspaceID string, limit int, start *time.Time) ([]*models.ModelUsage, error)
 	GetRepositoryStats(ctx context.Context, workspaceID string, start *time.Time) ([]*models.RepositoryStats, error)
 	GetGitStats(ctx context.Context, workspaceID string, start *time.Time) (*models.GitStats, error)
 	ListSessionCodeStats(ctx context.Context, filter models.SessionCodeStatsFilter) ([]*models.SessionCodeStats, error)

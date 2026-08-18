@@ -84,11 +84,11 @@ func TestPipelineJobBucket(t *testing.T) {
 		want string
 	}{
 		{"success", PipelineJob{Status: "success"}, pipelineJobBucketPassed},
-		{"skipped", PipelineJob{Status: "skipped"}, pipelineJobBucketPassed},
+		{pipelineStatusSkipped, PipelineJob{Status: pipelineStatusSkipped}, pipelineJobBucketPassed},
 		{"failed", PipelineJob{Status: "failed"}, pipelineJobBucketFailed},
 		{"failed-allow-failure", PipelineJob{Status: "failed", AllowFailure: true}, pipelineJobBucketPassed},
-		{"canceled", PipelineJob{Status: "canceled"}, pipelineJobBucketFailed},
-		{"canceled-allow-failure", PipelineJob{Status: "canceled", AllowFailure: true}, pipelineJobBucketPassed},
+		{pipelineStatusCanceled, PipelineJob{Status: pipelineStatusCanceled}, pipelineJobBucketFailed},
+		{"canceled-allow-failure", PipelineJob{Status: pipelineStatusCanceled, AllowFailure: true}, pipelineJobBucketPassed},
 		{"running", PipelineJob{Status: "running"}, pipelineJobBucketInProgress},
 		{"pending", PipelineJob{Status: "pending"}, pipelineJobBucketInProgress},
 		{"manual", PipelineJob{Status: "manual"}, pipelineJobBucketInProgress},

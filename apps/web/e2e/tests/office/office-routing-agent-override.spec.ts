@@ -92,22 +92,23 @@ test.describe("Office provider routing — agent override", () => {
     // PATCH the assignee to fire the task_assigned dispatcher.
     await officeApi.assignTask(task.id!, officeSeed.agentId);
 
-    const deadline = Date.now() + 20_000;
     let attempts: Array<{ provider_id: string; outcome: string }> = [];
-    while (Date.now() < deadline) {
-      const runs = (await officeApi.listRuns(officeSeed.workspaceId)) as {
-        runs?: Array<{ id: string; task_id?: string }>;
-      };
-      const run = (runs.runs ?? []).find((r) => r.task_id === task.id);
-      if (run?.id) {
-        const list = await officeApi.listRouteAttempts(run.id);
-        attempts = list.attempts;
-        if (attempts.length > 0) break;
-      }
-      await new Promise((r) => setTimeout(r, 500));
-    }
-
-    expect(attempts.length).toBeGreaterThan(0);
+    // `attempts` is captured on each poll so the assertions below read the last
+    // observed value rather than needing another request.
+    await expect
+      .poll(
+        async () => {
+          const runs = (await officeApi.listRuns(officeSeed.workspaceId)) as {
+            runs?: Array<{ id: string; task_id?: string }>;
+          };
+          const run = (runs.runs ?? []).find((r) => r.task_id === task.id);
+          if (!run?.id) return 0;
+          attempts = (await officeApi.listRouteAttempts(run.id)).attempts;
+          return attempts.length;
+        },
+        { timeout: 20_000, message: "run never recorded a route attempt" },
+      )
+      .toBeGreaterThan(0);
     // No codex-acp attempt — override is single-provider.
     expect(attempts.every((a) => a.provider_id === "claude-acp")).toBe(true);
   });

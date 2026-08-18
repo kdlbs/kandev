@@ -28,7 +28,7 @@ test.describe("Mobile layout profiles", () => {
     // before the user ever chose anything. See layout-editor-toolbar.tsx
     // AddPanelAction for the fix (deferred, click-driven open state).
     const layouts = new LayoutSettingsPage(testPage);
-    await layouts.openFromMobileMenu();
+    await layouts.openFromSettingsIndex();
     const trigger = testPage.getByTestId("layout-editor-add-panel").getByRole("button", {
       name: "Add panel",
     });
@@ -43,7 +43,7 @@ test.describe("Mobile layout profiles", () => {
     prCapture,
   }) => {
     const layouts = new LayoutSettingsPage(testPage);
-    await layouts.openFromMobileMenu();
+    await layouts.openFromSettingsIndex();
 
     await expect(layouts.editor.locator(".dv-tab", { hasText: "PR Details" })).toHaveCount(0);
     await layouts.addPanel("PR Details", true);
@@ -78,7 +78,7 @@ test.describe("Mobile layout profiles", () => {
     apiClient,
   }) => {
     const layouts = new LayoutSettingsPage(testPage);
-    await layouts.openFromMobileMenu();
+    await layouts.openFromSettingsIndex();
     await assertNoDocumentHorizontalOverflow(testPage, "layouts page");
     await assertNoDescendantOverflowsRight(layouts.root, "layouts settings");
 

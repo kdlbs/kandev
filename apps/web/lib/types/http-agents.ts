@@ -26,6 +26,20 @@ export type TUIConfig = {
   description?: string;
   command_args?: string[];
   wait_for_terminal: boolean;
+  /**
+   * How kandev injects its per-session MCP server into the wrapped CLI.
+   * Empty/absent means no injection — the agent gets no kandev task tools.
+   * Keys come from `GET /api/v1/agents/tui/mcp-strategies`; never hardcode a
+   * list here, or a strategy added in Go silently stops being selectable.
+   */
+  mcp_strategy?: string;
+};
+
+/** One selectable MCP injection mechanism, served by the backend. */
+export type MCPStrategyOption = {
+  key: string;
+  /** The strategy's own description of the mechanism it uses. */
+  description: string;
 };
 
 export type Agent = {
@@ -217,6 +231,7 @@ export type RuntimeUpdate = {
   supported: boolean;
   package: string;
   current_version?: string;
+  active_version?: string;
 };
 
 export type AvailableAgent = {
@@ -411,10 +426,8 @@ export type CompletedTaskActivityDTO = {
   completed_tasks: number;
 };
 
-export type AgentUsageDTO = {
-  agent_profile_id: string;
-  agent_profile_name: string;
-  agent_model: string;
+export type ModelUsageDTO = {
+  model: string;
   session_count: number;
   turn_count: number;
   total_duration_ms: number;
@@ -450,7 +463,7 @@ export type StatsResponse = {
   task_stats: TaskStatsDTO[];
   daily_activity: DailyActivityDTO[];
   completed_activity: CompletedTaskActivityDTO[];
-  agent_usage: AgentUsageDTO[];
+  model_usage: ModelUsageDTO[];
   repository_stats: RepositoryStatsDTO[];
   git_stats: GitStatsDTO;
 };

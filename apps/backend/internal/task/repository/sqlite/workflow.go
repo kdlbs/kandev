@@ -10,23 +10,103 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// AddTaskToWorkflow adds a task to a workflow with placement
+// AddTaskToWorkflow adds a task to a workflow with placement. Wrapped in a
+// transaction (it previously ran as a bare ExecContext) so the ledger row
+// commits atomically with the UPDATE.
 func (r *Repository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, workflowStepID string, position int) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, taskID)
+	if err != nil {
+		return err
+	}
+
+	updatedAt := time.Now().UTC()
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET workflow_id = ?, workflow_step_id = ?, position = ?, wip_admitted = 1, queued_for_step_id = '', queued_at = NULL, updated_at = ? WHERE id = ?
-	`), workflowID, workflowStepID, position, time.Now().UTC(), taskID)
-	return err
+	`), workflowID, workflowStepID, position, updatedAt, taskID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	// A nonexistent taskID matches no row: a benign no-op, matching the bare
+	// ExecContext this function used before the ledger was added. Skipping
+	// recordStepTransition here also matters beyond the no-op case — without
+	// it, fromWorkflowStepID="" (from readTaskStepInTx's not-found result)
+	// paired with a non-empty toWorkflowStepID would bypass the same-value
+	// no-op guard in recordStepTransition and attempt an INSERT whose task_id
+	// violates the ledger's FK to tasks, turning a harmless no-op into a
+	// transaction-failing error. Matches RemoveTaskFromWorkflow's guard.
+	if rows == 0 {
+		return tx.Commit()
+	}
+
+	if err := r.recordStepTransition(ctx, tx, stepTransitionInput{
+		taskID:             taskID,
+		fromWorkflowID:     fromWorkflowID,
+		fromWorkflowStepID: fromStepID,
+		toWorkflowID:       workflowID,
+		toWorkflowStepID:   workflowStepID,
+		occurredAt:         updatedAt,
+	}); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
-// RemoveTaskFromWorkflow removes a task from a workflow
+// RemoveTaskFromWorkflow removes a task from a workflow. Wrapped in a
+// transaction (it previously ran as a bare ExecContext) so the ledger row
+// commits atomically with the UPDATE.
 func (r *Repository) RemoveTaskFromWorkflow(ctx context.Context, taskID, workflowID string) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, taskID)
+	if err != nil {
+		return err
+	}
+
+	updatedAt := time.Now().UTC()
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET workflow_id = '', workflow_step_id = '', position = 0, wip_admitted = 1, queued_for_step_id = '', queued_at = NULL, updated_at = ? WHERE id = ? AND workflow_id = ?
-	`), time.Now().UTC(), taskID, workflowID)
-	return err
+	`), updatedAt, taskID, workflowID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return tx.Commit()
+	}
+
+	detachCtx := steptelemetry.WithAttribution(ctx, detachAttribution(ctx))
+	if err := r.recordStepTransition(detachCtx, tx, stepTransitionInput{
+		taskID:             taskID,
+		fromWorkflowID:     fromWorkflowID,
+		fromWorkflowStepID: fromStepID,
+		occurredAt:         updatedAt,
+	}); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // Workflow operations

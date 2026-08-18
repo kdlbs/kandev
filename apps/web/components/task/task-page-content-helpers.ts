@@ -155,7 +155,7 @@ export function buildTaskFromKanban(kanbanTask: KanbanState["tasks"][number]): T
     state: kanbanTask.state ?? "CREATED",
     workspace_id: toWorkspaceId(""),
     workflow_id: toWorkflowId(""),
-    priority: 0,
+    priority: kanbanTask.priority ?? "medium",
     repositories: [],
     created_at: "",
     updated_at: kanbanTask.updatedAt ?? "",
@@ -201,13 +201,18 @@ export function syncActiveTaskSession(params: {
   initialTaskId: string | undefined;
   fallbackTaskId: string | null | undefined;
   initialSessionId: string | null;
+  activeTaskId: string | null;
+  previousRouteTaskId: string | null | undefined;
   setActiveSessionAuto: (taskId: string, sessionId: string) => void;
   setActiveTask: (taskId: string) => void;
-}) {
+}): boolean {
   const taskId = params.initialTaskId ?? params.fallbackTaskId;
-  if (!taskId) return;
+  if (!taskId) return false;
+  const routeChanged = params.previousRouteTaskId !== taskId;
+  if (!routeChanged && params.activeTaskId !== taskId) return false;
   if (params.initialSessionId) params.setActiveSessionAuto(taskId, params.initialSessionId);
   else params.setActiveTask(taskId);
+  return true;
 }
 
 export function resolveTaskIds(task: Task | null) {

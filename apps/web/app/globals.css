@@ -132,10 +132,8 @@
   --git-deletion: 244 112 103;
 }
 
-@media (min-width: 640px) {
-  :root {
-    --app-status-bar-height: 1.5rem;
-  }
+:root[data-app-status-bar-visible="true"] {
+  --app-status-bar-height: 1.5rem;
 }
 
 .dark {
@@ -1849,6 +1847,26 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   }
   100% {
     background-color: transparent;
+  }
+}
+
+/* One-shot destination cue for workspace content-search editor reveals. */
+.editor-content-search-flash {
+  background-color: color-mix(in oklab, var(--warning) 34%, transparent);
+  /* Keep duration in sync with EDITOR_CONTENT_SEARCH_FLASH_DURATION_MS. */
+  animation: editor-content-search-flash 1.2s ease-out forwards;
+}
+@keyframes editor-content-search-flash {
+  from {
+    background-color: color-mix(in oklab, var(--warning) 34%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .editor-content-search-flash {
+    animation: none;
   }
 }
 

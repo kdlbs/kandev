@@ -329,6 +329,33 @@ func TestReleaseFailedQuarantineIntentRequiresProvenUnmovedState(t *testing.T) {
 	}
 }
 
+func TestReleaseFailedQuarantineIntentClassifiesActiveIntent(t *testing.T) {
+	conn := newSQLite(t)
+	store := newStorageStore(t, db.NewPool(conn, conn))
+	original := filepath.Join(t.TempDir(), "original")
+	entry := testQuarantineEntry("active-entry")
+	entry.ResourceType = ResourceTypeGoCache
+	entry.OriginalPath = original
+	entry.State = QuarantineStateQuarantined
+	if err := store.CreateQuarantineEntry(context.Background(), &entry); err != nil {
+		t.Fatalf("create active intent: %v", err)
+	}
+
+	_, err := ReleaseFailedQuarantineIntent(
+		context.Background(), store, ResourceTypeGoCache, original,
+	)
+	var activeErr *ActiveQuarantineIntentError
+	if !errors.As(err, &activeErr) {
+		t.Fatalf("ReleaseFailedQuarantineIntent error = %v, want ActiveQuarantineIntentError", err)
+	}
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("ReleaseFailedQuarantineIntent error = %v, want ErrConflict", err)
+	}
+	if activeErr.OriginalPath != original {
+		t.Fatalf("active intent original path = %q, want %q", activeErr.OriginalPath, original)
+	}
+}
+
 func TestStoreAllowsEveryQuarantineStateTransition(t *testing.T) {
 	tests := []struct {
 		name  string

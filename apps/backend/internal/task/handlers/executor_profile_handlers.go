@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/remoteauth"
+	"github.com/kandev/kandev/internal/agent/remoteconfig"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
@@ -45,6 +46,7 @@ func (h *ExecutorProfileHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/executor-profiles", h.httpListAllProfiles)
 	api.GET("/executor-profiles/default-script", h.httpGetDefaultScript)
 	api.GET("/remote-credentials", h.httpListRemoteCredentials)
+	api.GET("/agent-config-bundles", h.httpListAgentConfigBundles)
 	api.GET("/git/identity", h.httpGetGitIdentity)
 	api.GET("/script-placeholders", h.httpListScriptPlaceholders)
 	api.GET("/executors/:id/profiles", h.httpListProfiles)
@@ -118,6 +120,10 @@ func (h *ExecutorProfileHandlers) httpListRemoteCredentials(c *gin.Context) {
 	})
 }
 
+func (h *ExecutorProfileHandlers) httpListAgentConfigBundles(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"bundles": h.buildAgentConfigBundles()})
+}
+
 func (h *ExecutorProfileHandlers) httpGetGitIdentity(c *gin.Context) {
 	name := firstNonEmptyGitConfig("user.name")
 	email := firstNonEmptyGitConfig("user.email")
@@ -151,6 +157,13 @@ func (h *ExecutorProfileHandlers) buildRemoteAuthSpecs() []remoteauth.Spec {
 		return remoteauth.BuildCatalog(nil).Specs
 	}
 	return remoteauth.BuildCatalog(h.agentList.ListEnabled()).Specs
+}
+
+func (h *ExecutorProfileHandlers) buildAgentConfigBundles() []remoteconfig.Bundle {
+	if h.agentList == nil {
+		return remoteconfig.BuildCatalog(nil).Bundles
+	}
+	return remoteconfig.BuildCatalog(h.agentList.ListEnabled()).Bundles
 }
 
 func (h *ExecutorProfileHandlers) httpListProfiles(c *gin.Context) {

@@ -67,7 +67,7 @@ func (h *Handlers) handleSpawnSession(ctx context.Context, msg *ws.Message) (*ws
 		"task_id":          req.TaskID,
 		"session_id":       resp.SessionID,
 		"state":            resp.State,
-		"agent_profile_id": profileID,
+		"agent_profile_id": resp.AgentProfileID,
 	})
 }
 

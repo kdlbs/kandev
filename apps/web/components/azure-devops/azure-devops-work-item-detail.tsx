@@ -28,6 +28,7 @@ import type {
 } from "@/lib/types/azure-devops";
 import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 import { useTranslation } from "react-i18next";
+import { azureActionDisplayCopy } from "./azure-devops-workspace-defaults";
 
 type BoardContext = {
   board: AzureDevOpsBoard;
@@ -215,18 +216,21 @@ function QuickActions({
     <div className="space-y-2" data-testid="azure-work-item-quick-actions">
       <Label>{t("azuredevops:taskActions")}</Label>
       <div className="flex flex-wrap gap-2">
-        {actions.map((action) => (
-          <Button
-            key={action.id}
-            type="button"
-            variant="outline"
-            className="min-h-11 cursor-pointer"
-            onClick={() => onStartTask(item, action)}
-          >
-            <IconPlus className="h-4 w-4" />
-            {action.label}
-          </Button>
-        ))}
+        {actions.map((action) => {
+          const copy = azureActionDisplayCopy("work_item", action, t);
+          return (
+            <Button
+              key={action.id}
+              type="button"
+              variant="outline"
+              className="min-h-11 cursor-pointer"
+              onClick={() => onStartTask(item, action)}
+            >
+              <IconPlus className="h-4 w-4" />
+              {copy.label}
+            </Button>
+          );
+        })}
       </div>
     </div>
   );

@@ -440,6 +440,20 @@ func TestPostgresNormalizeTaskWorktreeOwnershipIsNoOpOnFreshSchema(t *testing.T)
 	}
 }
 
+func TestPostgresCutoverHybridNormalizedEnvironmentWithLegacySessionWorktrees(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("seed final postgres schema: %v", err)
+	}
+	seed := seedHybridCutoverState(t, db, "postgres")
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("upgrade hybrid postgres schema: %v", err)
+	}
+	assertHybridCutoverResult(t, repo, seed)
+}
+
 func TestPostgresWorkflowHiddenRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))

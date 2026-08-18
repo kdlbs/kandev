@@ -101,6 +101,12 @@ is usually a superseded GitHub run, not a code failure. Confirm the
 non-cancelled run for the same head SHA passed, then trigger one clean run
 (rebase onto main + force-push, or `gh run rerun <id>`).
 
+**Required job timeout cancellation:** If a required job is cancelled at its
+configured `timeout-minutes`, inspect its concrete steps and logs. When the
+race/test step has no assertion failure and one rerun repeats the same timeout,
+classify it as CI infrastructure, stop rerunning, and report the exact check,
+timeout, and pending-state evidence.
+
 **Manual-review event provenance:** For an unexpected zero-duration or no-op
 manual bot-mention run, inspect the workflow at the repository default branch
 and the event payload before assuming the PR is behind `main`. Privileged
@@ -173,6 +179,18 @@ past a valid race, leak, or product defect because it appears unrelated; fix it
 and exercise the affected package without retry masking. Only an evidenced
 external dependency or infrastructure fault is exempt from code remediation.
 
+If a Backend Tests shard log names only `fail: github.com/.../package` without
+the test name, download its matching `backend-test-results-<shard>` artifact:
+
+```bash
+gh run download <run-id> --name backend-test-results-<shard> --dir <temp>
+rg -n '"Action":"fail"' <temp>
+```
+
+The artifact JSONL may start with `go: downloading ...` or other non-JSON
+preamble lines; skip those lines when parsing so the recorded test name can be
+reproduced exactly.
+
 ## E2E Failures
 
 If any failing check is an E2E test:
@@ -183,6 +201,12 @@ If any failing check is an E2E test:
 4. Run the exact failed spec/title locally before a full shard. CI logs hide
    in-DOM React render errors that often show up in
    `e2e/test-results/<test>/error-context.md`.
+
+Before attributing an E2E failure to product code, compare the failed run SHA
+and `checks_head_sha` with local `HEAD`. PR workflows may test GitHub's
+synthetic merge commit, so reproduce the exact base-plus-head merge (or checked
+merge ref) with CI environment, retries disabled, and the same shard/order;
+verify the checkout SHA before interpreting the result.
 
 Useful focused commands:
 
@@ -215,3 +239,17 @@ instead of repeatedly dumping the full checks table:
 gh run view <run-id> --json status,conclusion,jobs \
   --jq '{status, conclusion, remaining: [.jobs[] | select(.status != "completed" or .conclusion != "success") | {name, status, conclusion}]}'
 ```
+
+For an explicit user requirement that an E2E run contain no flakes or retries,
+run the deterministic blob audit after the exact-head E2E merge report
+completes:
+
+```bash
+python3 scripts/playwright-blob-audit <downloaded-blob-report-dir>
+```
+
+It recursively reads `report-*.zip` and `report.jsonl` artifacts, reports
+attempts, retry attempts, `onTestEnd` status counts, and results with errors,
+and exits nonzero for retries, errors, parse failures, or unexpected statuses.
+Do not make this extra artifact audit part of ordinary PR fixup; a normal green
+aggregate check is sufficient unless the no-flakes requirement is explicit.

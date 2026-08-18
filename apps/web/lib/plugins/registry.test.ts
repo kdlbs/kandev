@@ -1,12 +1,30 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { pluginRegistry } from "./registry";
+import type { RepositoryProviderRegistration } from "./types";
+import { i18n } from "@/lib/i18n";
 
 const TASK_SIDEBAR_SLOT = "task-sidebar";
 const TASK_CREATED_ACTION = "task.created";
 const APP_STATUS_LEFT_SLOT = "app-status-bar-left";
-
+const PRIMARY_PLUGIN_ID = "plugin-a";
+const SECONDARY_PLUGIN_ID = "plugin-b";
+const SOURCE_CONTROL_PROVIDER_ID = "source-control";
 function cleanup(...pluginIds: string[]) {
   pluginIds.forEach((id) => pluginRegistry.unregisterPlugin(id));
+}
+function repositoryProvider(
+  id: string,
+  overrides: Partial<RepositoryProviderRegistration> = {},
+): RepositoryProviderRegistration {
+  return {
+    id,
+    label: id,
+    listRepositories: async () => [],
+    matchesURL: () => false,
+    listBranches: async () => [],
+    inspectURL: async () => null,
+    ...overrides,
+  };
 }
 
 describe("pluginRegistry", () => {
@@ -29,6 +47,37 @@ describe("pluginRegistry", () => {
       Component: Page,
       options: undefined,
     });
+  });
+
+  it("invalidates registration consumers when the host locale changes", async () => {
+    const originalLocale = i18n.language;
+    const listener = vi.fn();
+    const unsubscribe = pluginRegistry.subscribe(listener);
+    try {
+      await i18n.changeLanguage(originalLocale === "pt-pt" ? "en" : "pt-pt");
+      expect(listener).toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+      await i18n.changeLanguage(originalLocale);
+    }
+  });
+
+  it("invalidates consumers when a plugin replaces or removes its translation catalog", () => {
+    const listener = vi.fn();
+    const unsubscribe = pluginRegistry.subscribe(listener);
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    try {
+      scoped.registerTranslations({ en: { greeting: "Hello" } });
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      scoped.registerTranslations({ en: { greeting: "Welcome" } });
+      expect(listener).toHaveBeenCalledTimes(2);
+
+      pluginRegistry.unregisterPlugin("plugin-a");
+      expect(listener).toHaveBeenCalledTimes(3);
+    } finally {
+      unsubscribe();
+    }
   });
 
   it("registers and returns a nav item", () => {
@@ -67,6 +116,12 @@ describe("pluginRegistry", () => {
       path: "/settings/plugins/plugin-a",
       Component: Settings,
     });
+  });
+});
+
+describe("pluginRegistry — slots", () => {
+  afterEach(() => {
+    cleanup("plugin-a", "plugin-b");
   });
 
   it("registers a slot component and only returns it for the matching slot", () => {
@@ -464,5 +519,108 @@ describe("pluginRegistry — keybinding handlers", () => {
 
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+});
+
+function cleanupProviderContracts() {
+  cleanup(PRIMARY_PLUGIN_ID, SECONDARY_PLUGIN_ID);
+}
+
+describe("pluginRegistry — repository provider contracts", () => {
+  afterEach(cleanupProviderContracts);
+
+  it("keeps repository provider ownership with its registering plugin", () => {
+    const provider = repositoryProvider(SOURCE_CONTROL_PROVIDER_ID);
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(provider);
+
+    expect(pluginRegistry.getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)).toMatchObject({
+      pluginId: PRIMARY_PLUGIN_ID,
+      id: SOURCE_CONTROL_PROVIDER_ID,
+      label: SOURCE_CONTROL_PROVIDER_ID,
+    });
+  });
+
+  it("preserves lazy provider labels so locale changes do not require plugin reload", () => {
+    let label = "Source control";
+    const provider = repositoryProvider(SOURCE_CONTROL_PROVIDER_ID);
+    Object.defineProperty(provider, "label", {
+      enumerable: true,
+      get: () => label,
+    });
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(provider);
+
+    expect(pluginRegistry.getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)?.label).toBe(
+      "Source control",
+    );
+    label = "Controlo de código-fonte";
+    expect(pluginRegistry.getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)?.label).toBe(
+      "Controlo de código-fonte",
+    );
+  });
+
+  it("rejects a repository provider not declared for its plugin when declarations are available", () => {
+    pluginRegistry.setDeclaredRepositoryProviderIds(PRIMARY_PLUGIN_ID, ["declared-source-control"]);
+
+    expect(() =>
+      pluginRegistry
+        .forPlugin(PRIMARY_PLUGIN_ID)
+        .registerRepositoryProvider(repositoryProvider("other-source-control")),
+    ).toThrow('does not declare repository provider "other-source-control"');
+  });
+
+  it("rejects duplicate active provider ownership deterministically", () => {
+    pluginRegistry
+      .forPlugin(PRIMARY_PLUGIN_ID)
+      .registerRepositoryProvider(repositoryProvider(SOURCE_CONTROL_PROVIDER_ID));
+
+    expect(() =>
+      pluginRegistry
+        .forPlugin(SECONDARY_PLUGIN_ID)
+        .registerRepositoryProvider(repositoryProvider(SOURCE_CONTROL_PROVIDER_ID)),
+    ).toThrow(
+      `provider "${SOURCE_CONTROL_PROVIDER_ID}" is already owned by "${PRIMARY_PLUGIN_ID}"`,
+    );
+
+    expect(pluginRegistry.getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)?.pluginId).toBe(
+      PRIMARY_PLUGIN_ID,
+    );
+  });
+
+  it("rejects provider IDs owned by first-party integrations", () => {
+    expect(() =>
+      pluginRegistry
+        .forPlugin(PRIMARY_PLUGIN_ID)
+        .registerRepositoryProvider(repositoryProvider("github")),
+    ).toThrow('provider "github" is reserved by the host');
+  });
+
+  it("rejects non-canonical provider IDs", () => {
+    expect(() =>
+      pluginRegistry
+        .forPlugin(PRIMARY_PLUGIN_ID)
+        .registerRepositoryProvider(repositoryProvider("Bitbucket")),
+    ).toThrow('provider "Bitbucket" must be a canonical lowercase identifier');
+  });
+});
+
+describe("pluginRegistry — task action contracts", () => {
+  afterEach(cleanupProviderContracts);
+
+  it("registers placement-aware task actions and revokes them with their owner", () => {
+    const action = {
+      id: "link-change",
+      label: "Link change request",
+      placement: "link" as const,
+      group: "Link",
+      run: async () => {},
+    };
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerTaskAction(action);
+
+    expect(pluginRegistry.getTaskActions("link")).toEqual([
+      { ...action, pluginId: PRIMARY_PLUGIN_ID },
+    ]);
+
+    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
+    expect(pluginRegistry.getTaskActions("link")).toEqual([]);
   });
 });

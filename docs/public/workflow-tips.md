@@ -35,6 +35,29 @@ The template prompts are product behavior, not merely sample text. Review them b
 
 Choose this for short implementation work with a simple run-and-review loop.
 
+## Duplicate a workflow
+
+Use **Duplicate** to create a new workflow from a saved workflow. The copy starts as a local draft.
+
+1. Save the source workflow before you select **Duplicate**.
+2. Select **Duplicate** on the source workflow card.
+3. Review and edit the copied workflow and its steps.
+4. Select the route-level **Save changes** action to persist the copy.
+
+Kandev places the draft after the source workflow. The first copy uses `<name> (copy)`.
+If that name exists, Kandev uses the lowest available number. For example, the next name can be `<name> (copy 2)`.
+
+The copy includes these settings:
+
+- workflow description, prompt, and default agent profile
+- step prompts, colors, positions, transitions, and start-step state
+- command-panel visibility, manual-move policy, and auto-archive policy
+- step agent profiles, completion-signal policy, cancellation policy, WIP limits, and pull-from relationships
+
+The copy does not include tasks, task sessions, execution history, workflow history, template identity, or sync ownership. A copy of a sync-managed workflow becomes an independent manual workflow. The source remains unchanged.
+
+If you remove or discard the draft, or reload before you save it, Kandev does not create a workflow.
+
 ### Plan & Build
 
 **Todo → Plan → Implementation → Done**
@@ -112,8 +135,14 @@ Workflow-level settings include the name and default agent profile. A step can o
 | Auto-archive | Archives eligible tasks after the configured number of hours. `0` disables it; the background sweep runs every five minutes and uses task `updated_at`, so timing is approximate. |
 | Wait for agent completion signal | With an `on_turn_complete` transition, waits for the agent to call `step_complete_kandev`. A halt without the signal leaves the task on the current step; retry or reconnect the agent, or move the task through the normal workflow UI. Without this setting, a normal turn end counts as completion. Default is off. |
 | Run completion actions when a turn is cancelled | Also runs the step's `on_turn_complete` actions after an explicit user cancellation settles. A pending clarification, silent interruption, parent/task stop, provider failure, crash, or runtime teardown does not qualify. If the destination has `on_enter: auto_start_agent`, another agent turn can begin immediately. Default is off for custom steps; the built-in Kanban workflow enables it on Backlog and In Progress for newly created workflows; existing workflows are not backfilled. |
-| WIP limit | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited; visible overflow is queued. A full target rejects manual moves. |
-| Pull from | Optional one-hop feeder step. When capacity opens, Kandev promotes queued destination work first, then feeder work. A full feeder rejects new overflow creation. |
+| WIP limit | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited; visible overflow is queued. A manual move into a full target succeeds and queues in that target. |
+| Pull from | Optional one-hop feeder step. When capacity opens, Kandev promotes queued destination work first, then feeder work. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
+
+The Kanban column shows the admitted count and limit, followed by a **Queued**
+section when overflow exists. The task sidebar shows a queue icon for each
+queued task; hover or focus gives its position in the destination queue.
+Queued tasks do not start destination entry actions or consume WIP until
+promotion.
 
 Pull candidates are selected by board position, then priority, queue time, creation time, and ID. A candidate that cannot be moved is skipped. Pulling runs for every limited step; a feeder is only needed for overflow created outside the destination step.
 
@@ -133,7 +162,7 @@ The standard Kanban editor exposes these events:
 
 The portable format also recognizes `set_session_mode`, `clear_decisions`, `queue_run`, and `queue_run_for_each_participant` in `on_enter`; these are advanced/runtime-dependent actions and most are not offered by the Kanban editor. Office event triggers have a broader model, but do not round-trip through Kanban import/export. See the exact boundary in [Workflow Import / Export](workflow-import-export.md).
 
-Keep one transition action per event. A “next” action on the last step or “previous” on the first has nowhere to go and leaves the task in place. WIP rejection, a missing target step, a failed agent launch, or missing credentials can also prevent the intended progression; inspect the task/session error and backend logs before changing the workflow.
+Keep one transition action per event. A “next” action on the last step or “previous” on the first has nowhere to go and leaves the task in place. A missing target step, a failed agent launch, missing credentials, or a full feeder can prevent the intended progression; inspect the task/session error and backend logs before changing the workflow. A full destination step queues the task instead of rejecting the move.
 
 Cancellation policy is deliberately narrow: it is evaluated only for the visible user **Cancel** action while a turn is working. It reuses the normal turn-complete pipeline after the runtime settles, but does not reinterpret every way a session can stop as a completion.
 
@@ -163,9 +192,9 @@ Cancellation policy is deliberately narrow: it is evaluated only for the visible
 
 A step's Prompt field accepts `@name` references to [saved prompts](developer-tools.md#saved-prompts) (**Settings > Prompts**), the same way task chat does. Type `@` and select a prompt, or type the name directly.
 
-- The reference is resolved when the step prompt runs, not when it is saved. Editing the saved prompt's content later automatically changes what every step referencing it sends next time — there is nothing to update on the step itself.
+- The reference is resolved when the step prompt runs, not when it is saved. Editing the saved prompt's content later automatically changes what every step referencing it sends next time: there is nothing to update on the step itself.
 - The `@name` mention stays visible in the prompt/chat. Kandev attaches the referenced prompt's content as hidden context for the agent; it is not shown as part of the visible conversation.
-- `{{task_prompt}}` is only interpolated in the step prompt field itself. If a referenced saved prompt's content contains `{{task_prompt}}`, it is **not** expanded — it is sent to the agent as literal text.
+- `{{task_prompt}}` is only interpolated in the step prompt field itself. If a referenced saved prompt's content contains `{{task_prompt}}`, it is **not** expanded; it is sent to the agent as literal text.
 
 The same `@name` syntax and resolution apply to a GitHub Review Watch's prompt field. See [Integrations](integrations.md#configure-and-use-the-workspace).
 

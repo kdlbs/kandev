@@ -165,11 +165,41 @@ func pickAvailablePortExcept(preferred int, used map[int]bool) (int, error) {
 	return 0, fmt.Errorf("unable to find a free port")
 }
 
+// connectProbeTimeout bounds each loopback connect probe so a silently dropped
+// SYN (for example under WSL2 mirrored networking to an unbound loopback port)
+// cannot hang port selection. A timed-out connect counts as "nothing listening".
+const connectProbeTimeout = 500 * time.Millisecond
+
+// canBind reports whether a port is available. It is available only when a
+// dual-stack loopback connect finds nothing listening AND a fresh loopback bind
+// succeeds. The connect probe is required because a running backend binds the
+// wildcard address (0.0.0.0 and [::]): on macOS/BSD a specific 127.0.0.1 bind
+// succeeds against an active wildcard listener (Go also sets SO_REUSEADDR), so a
+// bind-only check would falsely report the busy port as free. The bind probe is
+// retained because it catches reservations a connect misses (Windows phantom
+// reservations, TIME_WAIT).
 func canBind(port int) bool {
+	if portHasListener(port) {
+		return false
+	}
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		return false
 	}
 	_ = ln.Close()
 	return true
+}
+
+// portHasListener reports whether anything answers a loopback connect on either
+// the IPv4 or IPv6 loopback address. The existing backend may hold only the IPv6
+// wildcard socket, so both families are probed.
+func portHasListener(port int) bool {
+	for _, host := range []string{"127.0.0.1", "::1"} {
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), connectProbeTimeout)
+		if err == nil {
+			_ = conn.Close()
+			return true
+		}
+	}
+	return false
 }

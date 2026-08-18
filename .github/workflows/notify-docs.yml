@@ -9,6 +9,8 @@ on:
     branches: [main]
     paths:
       - "docs/public/**"
+      - "apps/web/scripts/check-no-em-dash-ui.mjs"
+      - "apps/web/scripts/check-no-em-dash-ui.test.ts"
       - "scripts/validate-public-docs.mjs"
       - "scripts/validate-public-docs.test.mjs"
       - "scripts/notify-docs-workflow.test.mjs"

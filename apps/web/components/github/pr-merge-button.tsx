@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { IconChevronDown, IconGitMerge } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -16,7 +16,7 @@ import { useRepoMergeMethods } from "@/hooks/domains/github/use-repo-merge-metho
 import { mergePR } from "@/lib/api/domains/github-api";
 import { getGitHubMutationActor } from "@/lib/github-auth";
 import type { MergeMethod, TaskPR } from "@/lib/types/github";
-import { isPRReadyToMerge } from "./pr-task-icon";
+import { canAttemptPRMerge } from "./pr-task-icon";
 import { useTranslation } from "react-i18next";
 
 function MutationActor({ actor }: { actor: string | null }) {
@@ -89,25 +89,20 @@ export function PRMergeButton({
   const { t } = useTranslation();
   const { toast } = useToast();
   const [merging, setMerging] = useState(false);
-  // After a successful merge we stay hidden until the store catches up to
-  // state="merged" — otherwise the button briefly re-enables during the async
-  // refresh window and a double-click would hit the GitHub API again.
-  const [merged, setMerged] = useState(false);
+  // After GitHub accepts a direct or queued merge, stay hidden until refreshed
+  // provider state catches up so a repeat click cannot submit a second request.
+  const [acceptedFor, setAcceptedFor] = useState<string | null>(null);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const methods = useRepoMergeMethods(workspaceId, taskPR.owner, taskPR.repo);
   const { status } = useGitHubStatus(workspaceId);
   const mutationActor = getGitHubMutationActor(status);
 
-  // If the same component instance ever renders a different PR (e.g. the user
-  // switches the active task while the panel/popover stays mounted), the
-  // sticky `merged` flag from a previous merge would hide the button for an
-  // unrelated, still-mergeable PR. Reset it whenever the underlying PR id
-  // changes.
-  useEffect(() => {
-    setMerged(false);
-  }, [taskPR.id]);
+  // Reset after switching PRs or after GitHub reports an observable lifecycle
+  // or mergeability transition, including a PR ejected from a merge queue.
+  const signature = `${taskPR.id}:${taskPR.state}:${taskPR.mergeable_state}`;
+  const accepted = acceptedFor === signature;
 
-  if (merged || !isPRReadyToMerge(taskPR)) return null;
+  if (accepted || !canAttemptPRMerge(taskPR)) return null;
   // `methods` may be null on first render, on lookup failure, or after the
   // 5-minute cache window. We still render the button — clicking with no
   // method routes through the backend's GetRepoMergeMethods resolver, so
@@ -119,11 +114,23 @@ export function PRMergeButton({
 
   const runMerge = async (method?: MergeMethod) => {
     if (!workspaceId) return;
+    const submittedSignature = signature;
     setMerging(true);
     try {
-      await mergePR(workspaceId, taskPR.owner, taskPR.repo, taskPR.pr_number, method);
-      setMerged(true);
-      toast({ description: t("github:prMerged"), variant: "success" });
+      const result = await mergePR(
+        workspaceId,
+        taskPR.owner,
+        taskPR.repo,
+        taskPR.pr_number,
+        method,
+      );
+      setAcceptedFor(submittedSignature);
+      toast({
+        description: t(
+          result.status === "queued" ? "github:prAddedToMergeQueue" : "github:prMerged",
+        ),
+        variant: "success",
+      });
       onMerged?.();
     } catch (err) {
       toast({
@@ -144,11 +151,21 @@ export function PRMergeButton({
   return (
     <MergeButtonShell
       compact={compact}
-      label={merging ? t("github:merging") : t(mergeLabelKey(primary))}
+      label={
+        merging
+          ? t("github:merging")
+          : t(
+              taskPR.mergeable_state === "blocked"
+                ? "github:mergeMethodDefault"
+                : mergeLabelKey(primary),
+            )
+      }
       disabled={merging}
       actor={mutationActor}
       onPrimaryClick={handlePrimary}
-      extraMethods={allowed.filter((m) => m !== primary)}
+      extraMethods={
+        taskPR.mergeable_state === "blocked" ? [] : allowed.filter((m) => m !== primary)
+      }
       onPickMethod={(m) => void runMerge(m)}
     />
   );
@@ -197,7 +214,7 @@ function MergeButtonShell({
     <Button
       data-testid="pr-merge-button"
       size="sm"
-      className={`cursor-pointer gap-1.5 border-0 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 ${showDropdown ? "rounded-r-none" : ""}`}
+      className={`min-h-11 cursor-pointer gap-1.5 border-0 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 ${showDropdown ? "rounded-r-none" : ""}`}
       onClick={onPrimaryClick}
       disabled={disabled}
     >

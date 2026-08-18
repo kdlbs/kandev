@@ -41,6 +41,7 @@ RUN apt-get update \
         make \
         jq \
         tar \
+        unzip \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
 

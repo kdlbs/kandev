@@ -455,7 +455,7 @@ func TestProcessOnEnterConfigureSessionAmbiguousAgentFamilyWarns(t *testing.T) {
 
 			shadowed := registry.NewRegistry(testLogger())
 			shadowed.LoadDefaults()
-			if err := shadowed.RegisterCustomTUIAgent(tc.slug, tc.displayName, "claude-tui", "", "", nil); err != nil {
+			if err := shadowed.RegisterCustomTUIAgent(registry.CustomTUIAgentSpec{Slug: tc.slug, DisplayName: tc.displayName, Command: "claude-tui"}); err != nil {
 				t.Fatalf("register custom agent: %v", err)
 			}
 			svc.agentFamilyResolver = shadowed
@@ -495,7 +495,7 @@ func TestProcessOnEnterConfigureSessionUnrelatedAmbiguousRuleStillApplies(t *tes
 	shadowed := registry.NewRegistry(testLogger())
 	shadowed.LoadDefaults()
 	// "Claude" now names both claude-acp and this agent — and neither is codex-acp.
-	if err := shadowed.RegisterCustomTUIAgent("aaa-claude", "Claude", "claude-tui", "", "", nil); err != nil {
+	if err := shadowed.RegisterCustomTUIAgent(registry.CustomTUIAgentSpec{Slug: "aaa-claude", DisplayName: "Claude", Command: "claude-tui"}); err != nil {
 		t.Fatalf("register custom agent: %v", err)
 	}
 	svc.agentFamilyResolver = shadowed
@@ -561,7 +561,7 @@ func TestProcessOnEnterConfigureSessionRelevantAmbiguityRefusesDespiteExactRule(
 
 			shadowed := registry.NewRegistry(testLogger())
 			shadowed.LoadDefaults()
-			if err := shadowed.RegisterCustomTUIAgent("aaa-claude", "Claude", "claude-tui", "", "", nil); err != nil {
+			if err := shadowed.RegisterCustomTUIAgent(registry.CustomTUIAgentSpec{Slug: "aaa-claude", DisplayName: "Claude", Command: "claude-tui"}); err != nil {
 				t.Fatalf("register custom agent: %v", err)
 			}
 			svc.agentFamilyResolver = shadowed
@@ -603,7 +603,7 @@ func TestProcessOnEnterConfigureSessionAmbiguousSessionFamilyRefuses(t *testing.
 	shadowed := registry.NewRegistry(testLogger())
 	shadowed.LoadDefaults()
 	// "Claude" now answers for both claude-acp and this agent.
-	if err := shadowed.RegisterCustomTUIAgent("aaa-claude", "Claude", "claude-tui", "", "", nil); err != nil {
+	if err := shadowed.RegisterCustomTUIAgent(registry.CustomTUIAgentSpec{Slug: "aaa-claude", DisplayName: "Claude", Command: "claude-tui"}); err != nil {
 		t.Fatalf("register custom agent: %v", err)
 	}
 	svc.agentFamilyResolver = shadowed

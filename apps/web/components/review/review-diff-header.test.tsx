@@ -126,6 +126,37 @@ describe("ReviewDiffHeader external context", () => {
   });
 });
 
+describe("ReviewDiffHeader path direction", () => {
+  it.each([
+    { viewport: "desktop", isMobile: false },
+    { viewport: "mobile", isMobile: true },
+  ])("keeps dot-prefixed directories left-to-right on $viewport", ({ isMobile }) => {
+    mocks.isMobile = isMobile;
+    render(
+      <ReviewDiffHeader
+        file={{ ...file, path: ".agents/skills/pr-fixup/SKILL.md" }}
+        isReviewed={false}
+        isStale={false}
+        sessionId={SESSION_ID}
+        collapsed={false}
+        wordWrap={false}
+        expandUnchanged={false}
+        baseBranchByRepo={{ frontend: "main" }}
+        onCheckboxChange={vi.fn()}
+        onDiscard={vi.fn()}
+        onToggleCollapse={vi.fn()}
+        onToggleExpandUnchanged={vi.fn()}
+        onToggleWordWrap={vi.fn()}
+      />,
+    );
+
+    const directory = document.querySelector("[data-review-file-directory]");
+    expect(directory).not.toBeNull();
+    expect(directory?.querySelector('bdi[dir="ltr"]')?.textContent).toBe(".agents/skills/pr-fixup");
+    expect(document.querySelector("[data-review-file-name]")?.textContent).toBe("SKILL.md");
+  });
+});
+
 describe("ReviewDiffHeader responsive composition", () => {
   it("uses one compact mobile header with the toolbar embedded as the overflow trigger", () => {
     mocks.isMobile = true;

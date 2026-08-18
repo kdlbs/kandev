@@ -43,6 +43,11 @@ without repairing it.
 - If request assembly, credential issuance, or launch fails after that early
   transition, Kandev restores the prior recoverable session state unless
   another terminal transition won the race.
+- A completed turn remains represented by the task's review state while its
+  persisted response and session lifecycle state settle. After a backend
+  restart and automatic resume, the prior transcript remains visible and the
+  task returns to the Turn Finished review bucket once the session is again
+  `WAITING_FOR_INPUT`; it does not settle in Backlog or Running.
 - The explicit managed-runtime update path may invalidate only the
   deterministic `_npx` execution directory for the selected built-in package
   after an initial update failure, then retry once and run the normal ACP
@@ -83,6 +88,11 @@ without repairing it.
 - **GIVEN** that request construction, credential issuance, or launch fails
   after the early `STARTING` transition, **WHEN** recovery handling completes,
   **THEN** the session is recoverable and no stale `STARTING` state remains.
+- **GIVEN** a task whose completed-turn response is persisted before its
+  session lifecycle reaches its settled state, **WHEN** the backend restarts
+  and the task page reloads, **THEN** the prior transcript remains visible and,
+  after automatic resume settles at `WAITING_FOR_INPUT`, the task is shown in
+  the Turn Finished review bucket rather than Backlog or Running.
 - **GIVEN** an extracted managed npm runtime is corrupt, **WHEN** the first
   explicit update attempt fails, **THEN** only that package's deterministic
   execution directory is invalidated, the update runs once more, and success

@@ -1,15 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { WorkspaceSettingsHeader } from "@/app/settings/workspace/workspace-settings-header";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconGitBranch } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { RepositoryCard } from "@/components/settings/repository-card";
+import { WorkspaceRepositorySetsSection } from "./workspace-repository-sets-section";
+import { AddLocalRepositoryDialog } from "./workspace-add-local-repository-dialog";
 import { generateUUID } from "@/lib/utils";
 import {
   createRepositoryAction,
@@ -31,16 +31,14 @@ import {
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
-import {
-  DiscoverRepoDialog,
-  type ManualValidation,
-} from "@/app/settings/workspace/workspace-repositories-dialog";
+import type { ManualValidation } from "@/app/settings/workspace/workspace-repositories-dialog";
 import { WorkspaceNotFoundCard } from "@/app/settings/workspace/workspace-not-found-card";
 import {
   areRepositoryScriptsDirty,
   cloneRepository,
   isRepositoryDirty,
   mergeSavedRepositoryDraft,
+  persistedRepositoryItems,
   type RepositoryWithScripts,
 } from "@/app/settings/workspace/workspace-repositories-dirty";
 import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
@@ -61,8 +59,10 @@ function buildDraftRepo(
   manualRepoPath: string,
 ): RepositoryItem {
   const path = selectedRepo?.path ?? manualValidation.path ?? manualRepoPath.trim();
+  // i18n-exempt: persisted repository name. See the comment below.
   // "New Repository" is PERSISTED as the repository's name, not rendered copy —
   // a stored name must not depend on the locale it was created in.
+  // i18n-exempt: persisted repository name. See the comment above.
   const name =
     selectedRepo?.name ?? path.split("/").filter(Boolean).slice(-1)[0] ?? "New Repository";
   return {
@@ -110,6 +110,7 @@ async function saveNewRepository(
 ) {
   const created = await createRepositoryAction({
     workspace_id: workspace?.id ?? repo.workspace_id,
+    // i18n-exempt: persisted repository name, same contract as buildDraftRepo above.
     name: repo.name.trim() || "New Repository",
     source_type: repo.source_type || "local",
     local_path: repo.local_path,
@@ -131,6 +132,7 @@ async function saveNewRepository(
   // Like the repository name above, the seeded script name and command are
   // PERSISTED and sent to a shell verbatim, so both stay in English.
   const scripts = await Promise.all(
+    // i18n-exempt: persisted script name, sent to a shell verbatim. See the comment above.
     repo.scripts.map((script, index) =>
       createRepositoryScriptAction({
         repository_id: created.id,
@@ -197,6 +199,7 @@ async function saveExistingRepository({
       if (script.id.startsWith("temp-script-"))
         return createRepositoryScriptAction({
           repository_id: repoId,
+          // i18n-exempt: persisted script name, sent to a shell verbatim.
           name: script.name.trim() || "New Script",
           command: script.command.trim() || 'echo ""',
           position: script.position ?? index,
@@ -421,7 +424,7 @@ function useDiscoverDialog(
     discoveredRepositories,
   };
 }
-function useWorkspaceRepositoriesPage(
+export function useWorkspaceRepositoriesPage(
   workspace: Workspace | null,
   repositories: RepositoryWithScripts[],
 ) {
@@ -523,10 +526,9 @@ export function WorkspaceRepositoriesClient({
   isImproveWorkspace = false,
 }: WorkspaceRepositoriesClientProps) {
   const { t } = useTranslation();
-  const pageDescription = isImproveWorkspace
-    ? t("workspaces:repositoriesReadOnlyImprove")
-    : t("workspaces:manageRepositoriesConnected");
   const state = useWorkspaceRepositoriesPage(workspace, repositories);
+  // The add-local-repository dialog reads the rest of `state` directly, so only
+  // what this component renders is destructured here.
   const {
     router,
     repositoryItems,
@@ -537,35 +539,26 @@ export function WorkspaceRepositoriesClient({
     handleDeleteRepositoryScript,
     handleSaveRepository,
     handleDeleteRepository,
-    localRepoDialogOpen,
-    setLocalRepoDialogOpen,
-    filteredRepositories,
-    repoSearch,
-    setRepoSearch,
-    selectedRepoPath,
-    handleSelectRepoPath,
-    manualRepoPath,
-    handleManualRepoPathChange,
-    manualValidation,
-    handleValidateManualPath,
-    isValidating,
-    isDiscovering,
-    canSave,
     openDialog,
-    handleConfirmLocalRepository,
   } = state;
 
   if (!workspace)
-    return <WorkspaceNotFoundCard onBack={() => router.push("/settings/workspace")} />;
+    return <WorkspaceNotFoundCard onBack={() => router.push("/settings/workspaces")} />;
 
   return (
     <div className="space-y-8">
-      <WorkspaceSettingsHeader workspace={workspace} description={pageDescription} />
-      <Separator />
+      {/* No section header: the Repositories section below already carries the
+          name, mark and description, and the tab strip above says which tab you
+          are on. A second copy of all three read as the page repeating itself. */}
       <SettingsSection
+        divided
         icon={<IconGitBranch className="h-5 w-5" />}
         title={t("workspaces:repositories")}
-        description={t("workspaces:repositoriesInThisWorkspace")}
+        description={
+          isImproveWorkspace
+            ? t("workspaces:repositoriesReadOnlyImprove")
+            : t("workspaces:repositoriesInThisWorkspace")
+        }
         action={
           isImproveWorkspace ? undefined : (
             <Button size="sm" className="cursor-pointer" onClick={openDialog}>
@@ -594,25 +587,16 @@ export function WorkspaceRepositoriesClient({
           ))}
         </div>
       </SettingsSection>
-      {!isImproveWorkspace && (
-        <DiscoverRepoDialog
-          open={localRepoDialogOpen}
-          onOpenChange={setLocalRepoDialogOpen}
-          isLoading={isDiscovering}
-          filteredRepositories={filteredRepositories}
-          repoSearch={repoSearch}
-          onRepoSearchChange={setRepoSearch}
-          selectedRepoPath={selectedRepoPath}
-          onSelectRepoPath={handleSelectRepoPath}
-          manualRepoPath={manualRepoPath}
-          onManualRepoPathChange={handleManualRepoPathChange}
-          manualValidation={manualValidation}
-          onValidateManualPath={handleValidateManualPath}
-          isValidating={isValidating}
-          canSave={canSave}
-          onConfirm={handleConfirmLocalRepository}
-        />
-      )}
+      {/* Sets group the repositories listed above, so they belong on this page
+          rather than on a tab of their own. */}
+      <WorkspaceRepositorySetsSection
+        workspaceId={workspace.id}
+        // Keep the member picker in sync with repository edits on this page,
+        // while excluding temporary rows that do not exist server-side.
+        repositories={persistedRepositoryItems(repositoryItems)}
+        readOnly={isImproveWorkspace}
+      />
+      {!isImproveWorkspace && <AddLocalRepositoryDialog state={state} />}
     </div>
   );
 }

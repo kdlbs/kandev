@@ -17,6 +17,7 @@ import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-sta
 import { useSaveDeleteActions } from "./use-file-save-delete";
 import { buildRepoScopedItemId, PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
 import { useOpenFileWorkspaceSync } from "./file-editors-sync";
+import { t } from "@/lib/i18n";
 import {
   fetchFileEditorState,
   getPreviewItemIdToRemoveOnReplace,
@@ -410,8 +411,8 @@ function useOpenFileAction({
         setFileState(fileKey, state);
       } catch (error) {
         toast({
-          title: "Failed to open file",
-          description: error instanceof Error ? error.message : "Unknown error",
+          title: t("task:failedToOpenFile"),
+          description: error instanceof Error ? error.message : t("common:unknownError"),
           variant: "error",
         });
       }
@@ -489,8 +490,8 @@ function useMarkdownPreviewAction({
         setFileState(fileKey, { ...state, markdownPreview: true });
       } catch (error) {
         toast({
-          title: "Failed to open file",
-          description: error instanceof Error ? error.message : "Unknown error",
+          title: t("task:failedToOpenFile"),
+          description: error instanceof Error ? error.message : t("common:unknownError"),
           variant: "error",
         });
       }

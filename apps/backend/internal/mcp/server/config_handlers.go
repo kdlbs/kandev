@@ -284,6 +284,10 @@ func (s *Server) registerConfigTaskTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("delete_task_kandev",
 			mcp.WithDescription("Delete a task permanently."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithIdempotentHintAnnotation(false),
+			mcp.WithOpenWorldHintAnnotation(false),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete")),
 		),
 		s.wrapHandler("delete_task_kandev", s.deleteTaskHandler()),
@@ -291,6 +295,10 @@ func (s *Server) registerConfigTaskTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("archive_task_kandev",
 			mcp.WithDescription("Archive a task."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to archive")),
 		),
 		s.wrapHandler("archive_task_kandev", s.archiveTaskHandler()),
@@ -579,10 +587,15 @@ func (s *Server) moveTaskHandler() server.ToolHandlerFunc {
 		}
 		// prompt is optional — only relevant when handing off mid-turn from one
 		// agent to another. Admin/config moves of idle tasks omit it.
+		// sender_session_id is injected from the server's own bound session, the
+		// same pattern messageTaskHandler/spawnSessionHandler use, so the backend
+		// can attribute this move's ledger row to the agent that actually called
+		// the tool rather than guessing from the target task's own session.
 		payload := map[string]interface{}{
-			"task_id":          taskID,
-			"workflow_id":      workflowID,
-			"workflow_step_id": stepID,
+			"task_id":           taskID,
+			"workflow_id":       workflowID,
+			"workflow_step_id":  stepID,
+			"sender_session_id": s.sessionID,
 		}
 		if prompt := req.GetString("prompt", ""); prompt != "" {
 			payload["prompt"] = prompt

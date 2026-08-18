@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { i18n } from "@/lib/i18n";
 import {
   extractRepoName,
+  formatPreciseTime,
   formatRelativeTime,
   formatUserHomePath,
   generateUUID,
@@ -180,6 +182,29 @@ describe("formatRelativeTime", () => {
   it("says 'just now' below the 10s boundary", () => {
     expect(formatRelativeTime(ago(0))).toBe("just now");
     expect(formatRelativeTime(ago(9 * SECOND))).toBe("just now");
+  });
+
+  it("localizes EVERY branch, so a timestamp does not change language as it ages", async () => {
+    // The regression: "just now" was routed through the catalog while the rungs
+    // below it stayed hardcoded, so a non-English locale showed a translated
+    // string for ten seconds and then flipped back to English `10s ago`.
+    //
+    // Asserted as "none of the English we used to hardcode survives" rather than
+    // "the output is accented": the oldest branch of each ladder is a frame of
+    // nothing but `{{date}}` and `{{time}}`, whose values come from
+    // `toLocaleDateString` and are correctly ASCII under the pseudo-locale.
+    const HARDCODED = /\b(ago|yesterday|today|now)\b/i;
+    await i18n.changeLanguage("pseudo");
+    try {
+      for (const at of [0, 10 * SECOND, MINUTE, HOUR, DAY, 3 * DAY, 400 * DAY]) {
+        expect(formatRelativeTime(ago(at))).not.toMatch(HARDCODED);
+      }
+      for (const at of [0, 10 * SECOND, MINUTE, 5 * HOUR, DAY, 400 * DAY]) {
+        expect(formatPreciseTime(ago(at))).not.toMatch(HARDCODED);
+      }
+    } finally {
+      await i18n.changeLanguage("en");
+    }
   });
 
   it("switches to seconds at 10s and holds until the 60s boundary", () => {

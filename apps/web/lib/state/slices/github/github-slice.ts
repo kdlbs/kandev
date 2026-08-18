@@ -17,6 +17,20 @@ export const defaultGitHubState: GitHubSliceState = {
 
 const PR_FEEDBACK_CACHE_LIMIT = 20;
 
+function shouldApplyTaskCIAutomationOptions(
+  current: GitHubSlice["taskCIAutomation"]["byTaskId"][string] | undefined,
+  incoming: GitHubSlice["taskCIAutomation"]["byTaskId"][string],
+) {
+  if (!current) return true;
+  const currentUpdatedAt = Date.parse(current.updated_at ?? "");
+  const incomingUpdatedAt = Date.parse(incoming.updated_at ?? "");
+  if (!Number.isFinite(incomingUpdatedAt)) return false;
+  if (!Number.isFinite(currentUpdatedAt)) return true;
+  // Equal versions are intentionally first-writer-wins so replay order cannot
+  // make two payloads carrying the same version produce different state.
+  return incomingUpdatedAt > currentUpdatedAt;
+}
+
 type ImmerSet = Parameters<
   StateCreator<GitHubSlice, [["zustand/immer", never]], [], GitHubSlice>
 >[0];
@@ -319,6 +333,8 @@ function createTaskCIAutomationActions(
   return {
     setTaskCIAutomationOptions: (taskId, options) =>
       set((draft) => {
+        const current = draft.taskCIAutomation.byTaskId[taskId];
+        if (!shouldApplyTaskCIAutomationOptions(current, options)) return;
         draft.taskCIAutomation.byTaskId[taskId] = options;
       }),
     setTaskCIAutomationLoading: (taskId, loading) =>

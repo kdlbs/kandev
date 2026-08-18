@@ -168,10 +168,27 @@ function useSelectedTask(
       kanbanTasks.find((t: KanbanState["tasks"][number]) => t.id === selectedTaskId) ??
       findTaskInSnapshots(selectedTaskId, snapshots);
     if (!task) return null;
+    // Boot-hydrated snapshot tasks (backend `mapKanbanTaskState` entries) do
+    // not carry workflowId, and useAllWorkflowSnapshots keeps those snapshots
+    // as already-loaded instead of normalizing them. Derive the workflow id
+    // from the snapshot key so the prevent-auto-start gate resolves the
+    // task's OWN workflow steps — otherwise a non-active-workflow task would
+    // be checked against the active workflow's steps and could auto-start a
+    // terminal-step task despite the preference.
+    let workflowId = task.workflowId;
+    if (!workflowId) {
+      for (const [snapshotWorkflowId, snapshot] of Object.entries(snapshots)) {
+        if (snapshot.tasks.some((t) => t.id === selectedTaskId)) {
+          workflowId = snapshotWorkflowId;
+          break;
+        }
+      }
+    }
     return {
       id: task.id,
       title: task.title,
       workflowStepId: task.workflowStepId,
+      workflowId,
       state: task.state,
       description: task.description,
       position: task.position,

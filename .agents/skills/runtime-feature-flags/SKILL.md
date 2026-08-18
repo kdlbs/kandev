@@ -22,7 +22,10 @@ those subtrees.
 - Use one identity across layers: `features.<camelCaseKey>`,
   `KANDEV_FEATURES_<UPPER_SNAKE_CASE>`, a Go `FeaturesConfig` field, its JSON tag,
   and the matching frontend key. Never add a parallel flag map or switch.
-- Never reuse an identity listed in `retiredRuntimeFlagIdentities`.
+- Never reuse an identity recorded in the repository's append-only retired
+  registry. Before relying on retirement, verify that `retiredRuntimeFlagIdentities`
+  and its collision/completeness test exist; if they do not, add that
+  runtimeflags infrastructure before removing a live flag.
 
 ## Add a flag
 
@@ -34,13 +37,15 @@ Update these layers in the same change:
    exception.
 2. **Backend config:** add a `bool` field with explicit `mapstructure` and
    `json` tags to `apps/backend/internal/common/config/config.go`.
-3. **Registry binding:** add exactly one complete registration to
+3. **Registry/config binding:** add exactly one metadata registration to
    `apps/backend/internal/runtimeflags/registry.go`: key, env var, kind, label,
-   description, stability, risk metadata, restart/mutability metadata, typed
-   `read`, and typed `apply` functions.
-4. **Backend gates:** gate construction and every enabled-only entry path at
-   the narrow composition boundary. Do not only hide the frontend; direct
-   callers must receive the legacy behavior or a safe rejection.
+   description, stability, risk, and restart/mutability metadata. The registry
+   definition is metadata-only; add the key/env constants and update
+   `OptionsFromConfig`, `ValuesFromConfig`, and `ApplyStatesToConfig` in
+   `runtimeflags/config.go` for typed config wiring.
+4. **Backend gates:** gate construction and every enabled-only entry path at the
+   narrow composition boundary. Do not only hide the frontend; direct callers
+   must receive the legacy behavior or a safe rejection.
 5. **Frontend contract:** add the all-off key to
    `apps/web/lib/state/slices/features/types.ts`. Use `useFeature()` for client
    surfaces and `notFound()` from the relevant server layout/page when a route
@@ -77,8 +82,9 @@ behavior unconditional and remove the live flag end-to-end:
 - remove flag-specific tests and documentation while keeping permanent behavior
   coverage.
 
-Before removing the registration, append its exact key and environment variable
-to `retiredRuntimeFlagIdentities` in `registry.go`:
+Before removing the registration, verify the append-only
+`retiredRuntimeFlagIdentities` registry and its collision/completeness test
+exist, then append the exact key and environment variable in `registry.go`:
 
 ```go
 {key: "features.example", envVar: "KANDEV_FEATURES_EXAMPLE"},
@@ -92,12 +98,14 @@ state from reactivating a future feature. Never reuse either the key or env var.
 
 Run the focused checks appropriate to the change:
 
-- from `apps/backend`: `rtk go test ./internal/runtimeflags ./internal/common/config ./internal/profiles`;
-- from the repository root: `rtk make -C apps/backend lint`;
-- from `apps`: `rtk pnpm --filter @kandev/web test -- lib/state/slices/features/features-contract.test.ts`;
-- from `apps/web`: `rtk pnpm run typecheck` and `rtk pnpm run lint`;
+- In a fresh worktree, run `pnpm install --frozen-lockfile` from `apps/` before
+  any pnpm-based checks, tests, lint, or commits.
+- from `apps/backend`: `go test ./internal/runtimeflags ./internal/common/config ./internal/profiles`;
+- from the repository root: `make -C apps/backend lint`;
+- from `apps`: `pnpm --filter @kandev/web test -- lib/state/slices/features/features-contract.test.ts`;
+- from `apps/web`: `pnpm run typecheck` and `pnpm run lint`;
 - run affected E2E coverage when the gated surface is user-visible;
-- run `rtk git diff --check` before handoff.
+- run `git diff --check` before handoff.
 
 Report the flag key/env identity, profile defaults, every gated entry path,
 disabled/enabled test evidence, restart requirements, and whether the change is

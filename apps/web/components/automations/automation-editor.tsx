@@ -51,6 +51,7 @@ type AutomationEditorProps = {
 // verbatim, and it is compared with `===` in useAutoPromptUpdate to decide
 // whether the user has edited it. Both make it protocol, not copy — the same
 // call the Jira (#2177), Linear (#2179) and Sentry (#2182) migrations made.
+// i18n-exempt: persisted prompt, sent to the agent and compared with ===. See the comment above.
 const DEFAULT_PROMPT = "Run scheduled automation.\n\nTrigger: {{trigger.type}}";
 
 const defaultForm: FormState = {
@@ -175,7 +176,7 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
         } else {
           toast.success(t("automations:automationCreated"));
           runWithNavigationBlockerBypassed(() =>
-            router.push(`/settings/workspace/${workspaceId}/automations`),
+            router.push(`/settings/workspaces/${workspaceId}/automations`),
           );
         }
       } else if (currentId) {
@@ -219,7 +220,7 @@ function useLoadAutomation(opts: LoadAutomationOpts) {
         onLoaded(loadedForm, loadedTriggers);
       })
       .catch(() => {
-        router.push(`/settings/workspace/${workspaceId}/automations`);
+        router.push(`/settings/workspaces/${workspaceId}/automations`);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [automationId]);
@@ -306,7 +307,7 @@ function useRemoveAutomation(
     try {
       await remove(currentId);
       runWithNavigationBlockerBypassed(() =>
-        router.push(`/settings/workspace/${workspaceId}/automations`),
+        router.push(`/settings/workspaces/${workspaceId}/automations`),
       );
     } catch (error) {
       onError(error);
@@ -458,7 +459,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         details={createdWebhook}
         onClose={() => {
           setCreatedWebhook(null);
-          router.push(`/settings/workspace/${workspaceId}/automations`);
+          router.push(`/settings/workspaces/${workspaceId}/automations`);
         }}
       />
     </div>

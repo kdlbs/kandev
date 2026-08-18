@@ -72,6 +72,11 @@ export type GitStatusEntry = {
   renamed: string[];
   ahead: number;
   behind: number;
+  head_commit?: string;
+  base_commit?: string;
+  remote_ahead?: number;
+  remote_behind?: number;
+  remote_head_commit?: string;
   files: Record<string, FileInfo>;
   timestamp: string | null;
   branch_additions?: number;
@@ -250,6 +255,7 @@ export type SessionModelsState = {
       currentModelId: string;
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
+      configOptionsSettled?: boolean;
       configBaseline?: Record<string, string>;
       /** Set when the session started on the profile's fallback model. */
       fallbackModel?: string;
@@ -338,6 +344,8 @@ export type UserShellInfo = {
 export type UserShellsState = {
   /** User shells keyed by environmentId (shared across sessions in the same environment). */
   byEnvironmentId: Record<string, UserShellInfo[]>;
+  /** Optimistically dismissed IDs hidden from stale list responses until this env is purged. */
+  dismissedByEnvironmentId: Record<string, Record<string, true>>;
   /** Keyed by environmentId (same key strategy as byEnvironmentId). */
   loading: Record<string, boolean>;
   /** Keyed by environmentId (same key strategy as byEnvironmentId). */

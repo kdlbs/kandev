@@ -7,6 +7,26 @@ import type { ApiClient } from "../../helpers/api-client";
 export const AGENT_REPLY = "The settled answer contains a useful detail.";
 export const SELECTED_REPLY_TEXT = "settled answer";
 
+export async function waitForAgentSessionInput(
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
+) {
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(taskId);
+        const state = sessions.find((session) => session.id === sessionId)?.state;
+        return state === "IDLE" || state === "WAITING_FOR_INPUT";
+      },
+      {
+        timeout: 45_000,
+        message: `agent session ${sessionId} never became ready for direct input`,
+      },
+    )
+    .toBe(true);
+}
+
 export async function expectAgentMessageHighlight(body: Locator, expectedCount: number) {
   const highlightName = await body.getAttribute("data-agent-message-highlight-name");
   if (!highlightName) throw new Error("Expected an agent message highlight name");
@@ -71,7 +91,22 @@ export async function openSeededAgentReply(
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
-  await session.waitForChatIdle({ timeout: 45_000 });
+  // The seeded reply only needs the first agent message to be durable. A
+  // running status can outlive that message on mobile, where waiting for the
+  // idle composer would make comment-only coverage depend on terminal timing.
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(task.session_id!);
+        return messages.some(
+          (message) => message.author_type === "agent" && message.content.trim() === "ready",
+        );
+      },
+      { timeout: 45_000 },
+    )
+    .toBe(true);
+  await page.reload();
+  await session.waitForLoad();
   await apiClient.seedSessionMessage(task.session_id, {
     type: "message",
     content: AGENT_REPLY,

@@ -6,7 +6,9 @@ import {
   openWideTask,
   expectApproxWidth,
   getDockviewGroupWidth,
+  getDockviewContainerWidth,
   resizeColumnViaSplitview,
+  waitForDockviewViewportResize,
 } from "../../helpers/dockview-resize";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
@@ -42,13 +44,15 @@ test.describe("Right pane resize — container-proportional cap", () => {
     const largeWidth = await getDockviewGroupWidth(testPage, "files");
     expectApproxWidth(largeWidth, 450, 12);
 
+    const wideContainer = await getDockviewContainerWidth(testPage);
     await testPage.setViewportSize({ width: 1280, height: 900 });
-    await testPage.waitForTimeout(500);
+    await waitForDockviewViewportResize(testPage, wideContainer);
     const laptopWidth = await getDockviewGroupWidth(testPage, "files");
     expectApproxWidth(laptopWidth, 288, 12);
 
+    const laptopContainer = await getDockviewContainerWidth(testPage);
     await testPage.setViewportSize({ width: 2200, height: 900 });
-    await testPage.waitForTimeout(500);
+    await waitForDockviewViewportResize(testPage, laptopContainer);
     expectApproxWidth(await getDockviewGroupWidth(testPage, "files"), largeWidth, 12);
   });
 
@@ -64,12 +68,19 @@ test.describe("Right pane resize — container-proportional cap", () => {
     const manualWidth = await resizeColumnViaSplitview(testPage, "right", 360);
     expectApproxWidth(manualWidth, 360, 12);
 
+    // The assertion is that this width does *not* move, so there is nothing to
+    // poll for: the expected value is already there. Waiting for the container
+    // to take the new viewport is what gives a regression somewhere to happen,
+    // since the recompute that could clobber the manual width runs in that same
+    // layout pass.
+    const wideContainer = await getDockviewContainerWidth(testPage);
     await testPage.setViewportSize({ width: 1280, height: 900 });
-    await testPage.waitForTimeout(500);
+    await waitForDockviewViewportResize(testPage, wideContainer);
     expectApproxWidth(await getDockviewGroupWidth(testPage, "files"), manualWidth, 12);
 
+    const laptopContainer = await getDockviewContainerWidth(testPage);
     await testPage.setViewportSize({ width: 2200, height: 900 });
-    await testPage.waitForTimeout(500);
+    await waitForDockviewViewportResize(testPage, laptopContainer);
     expectApproxWidth(await getDockviewGroupWidth(testPage, "files"), manualWidth, 12);
   });
 
@@ -186,11 +197,12 @@ test.describe("Right pane resize — container-proportional cap", () => {
     const wideWidth = await resizeColumnViaSplitview(testPage, "right", 900);
     expect(wideWidth).toBeGreaterThan(700);
 
+    // Do not call the resize helper here: it reapplies constraints and would
+    // mask a failure to update them automatically on viewport changes. Wait for
+    // the container instead, which is where the pinned-target enforcement runs.
+    const wideContainer = await getDockviewContainerWidth(testPage);
     await testPage.setViewportSize({ width: 1100, height: 800 });
-    // Allow the container ResizeObserver and pinned-target enforcement to
-    // settle. Do not call the resize helper here: it reapplies constraints and
-    // would mask a failure to update them automatically on viewport changes.
-    await testPage.waitForTimeout(500);
+    await waitForDockviewViewportResize(testPage, wideContainer);
 
     const dockviewBox = await testPage.locator(".dv-dockview").boundingBox();
     expect(dockviewBox).not.toBeNull();
@@ -259,13 +271,18 @@ test.describe("Right pane width — per-task isolation", () => {
       timeout: 15_000,
     });
     await expect(testPage.locator(".dv-dockview")).toBeVisible({ timeout: 15_000 });
-    // Allow fromJSON + fixups-capture + enforcePinnedTargets to settle.
-    await testPage.waitForTimeout(500);
 
-    const widthB = await getDockviewGroupWidth(testPage, "files");
-    expect(
-      widthB,
-      `Task B right width ${widthB} should be the default (>350), not Task A's narrow ${narrowedA}`,
-    ).toBeGreaterThan(350);
+    // Poll rather than sleep-then-read: the width is Task A's narrow value
+    // until fromJSON + fixups-capture + enforcePinnedTargets have run, so this
+    // still fails if the leak comes back. Sampled every frame through a real
+    // switch, the width makes exactly one move (240 -> 384 at ~180ms) and then
+    // holds for the next 5.8s, so there is no transient correct value for the
+    // poll to latch onto early.
+    await expect
+      .poll(() => getDockviewGroupWidth(testPage, "files"), {
+        timeout: 10_000,
+        message: `Task B right width should be the default (>350), not Task A's narrow ${narrowedA}`,
+      })
+      .toBeGreaterThan(350);
   });
 });

@@ -20,16 +20,21 @@ type TaskRepositoryInput struct {
 	GitHubURL      string `json:"github_url,omitempty"`
 	RemoteURL      string `json:"remote_url,omitempty"`
 	Provider       string `json:"provider,omitempty"`
+	ProviderHost   string `json:"provider_host,omitempty"`
+	ProviderScope  string `json:"provider_scope,omitempty"`
 	ProviderRepoID string `json:"provider_repo_id,omitempty"`
 	ProviderOwner  string `json:"provider_owner,omitempty"`
 	ProviderName   string `json:"provider_name,omitempty"`
-	ProviderHost   string `json:"provider_host,omitempty"`
 
 	// RemoteContribution is server-authored after provider resolution. It is
 	// intentionally excluded from JSON request surfaces; callers must not be
 	// able to forge a writable source binding.
 	RemoteContribution *models.RemoteContribution `json:"-"`
-	TrustedRemote      bool                       `json:"-"`
+	// ContributionDestination is server-authored during managed Improve
+	// Kandev task preparation. It is never accepted from REST, WebSocket, or
+	// MCP JSON request bodies.
+	ContributionDestination *models.ContributionDestination `json:"-"`
+	TrustedRemote           bool                            `json:"-"`
 
 	// ResolveProviderDefaults opts the GitHub-URL resolution path into a
 	// synchronous default-branch probe (git ls-remote --symref) when neither
@@ -39,6 +44,12 @@ type TaskRepositoryInput struct {
 	// backfillRepoDefaultBranch). Left zero by create_task so the pinned
 	// "empty default_branch is filled at clone time" contract stays intact.
 	ResolveProviderDefaults bool `json:"-"`
+
+	// TrustedProviderDescriptor is an internal-only marker for a complete
+	// provider descriptor already authorized by the plugin host. It is never
+	// accepted from REST/MCP JSON; callers must still supply every identity and
+	// exact credential-free clone URL field above.
+	TrustedProviderDescriptor bool `json:"-"`
 }
 
 // CreateTaskRequest contains the data for creating a new task
@@ -72,6 +83,16 @@ type CreateTaskRequest struct {
 	ProjectID              string   `json:"project_id,omitempty"`
 	Labels                 string   `json:"labels,omitempty"`
 	BlockedBy              []string `json:"blocked_by,omitempty"`
+
+	// StartWhenUnblocked records the requested agent start as a deferred launch
+	// intent that dependency resolution consumes, instead of launching now.
+	//
+	// nil means "derive from the request's start intent": a create that asked to
+	// start an agent AND declared BlockedBy is describing a chain step, not a
+	// task to run immediately. Automated callers pass start_agent=true by habit,
+	// so deriving is what makes an agent-built chain run in order rather than
+	// launching every step at once.
+	StartWhenUnblocked *bool `json:"start_when_unblocked,omitempty"`
 }
 
 // UpdateTaskRequest contains the data for updating a task
@@ -136,6 +157,7 @@ type FindOrCreateRepositoryRequest struct {
 	WorkspaceID    string `json:"workspace_id"`
 	Provider       string `json:"provider"`
 	ProviderHost   string `json:"provider_host"`
+	ProviderScope  string `json:"provider_scope"`
 	ProviderOwner  string `json:"provider_owner"`
 	ProviderName   string `json:"provider_name"`
 	ProviderRepoID string `json:"provider_repo_id"`
@@ -153,6 +175,7 @@ type CreateRepositoryRequest struct {
 	Provider               string                         `json:"provider"`
 	ProviderRepoID         string                         `json:"provider_repo_id"`
 	ProviderHost           string                         `json:"provider_host"`
+	ProviderScope          string                         `json:"provider_scope"`
 	ProviderOwner          string                         `json:"provider_owner"`
 	ProviderName           string                         `json:"provider_name"`
 	RemoteURL              string                         `json:"remote_url"`
@@ -189,6 +212,7 @@ type UpdateRepositoryRequest struct {
 	Provider               *string `json:"provider,omitempty"`
 	ProviderRepoID         *string `json:"provider_repo_id,omitempty"`
 	ProviderHost           *string `json:"provider_host,omitempty"`
+	ProviderScope          *string `json:"provider_scope,omitempty"`
 	ProviderOwner          *string `json:"provider_owner,omitempty"`
 	ProviderName           *string `json:"provider_name,omitempty"`
 	DefaultBranch          *string `json:"default_branch,omitempty"`

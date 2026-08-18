@@ -1,7 +1,24 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
+import {
+  captureAppStatusBarSettings,
+  restoreAppStatusBarSettings,
+  setAppStatusBarEnabled,
+  type AppStatusBarSettingsBaseline,
+} from "../../helpers/app-status-bar-settings";
 
 test.describe("WebSocket connectivity warning", () => {
+  let baseline: AppStatusBarSettingsBaseline | undefined;
+
+  test.beforeEach(async ({ apiClient }) => {
+    baseline = await captureAppStatusBarSettings(apiClient);
+    await setAppStatusBarEnabled(apiClient, true);
+  });
+
+  test.afterEach(async ({ apiClient }) => {
+    await restoreAppStatusBarSettings(apiClient, baseline);
+  });
+
   test("shows one bottom-bar warning while the app status bar is enabled", async ({
     testPage,
     prCapture,
@@ -30,9 +47,12 @@ test.describe("WebSocket connectivity warning", () => {
     await expect(warning).toHaveCount(0);
   });
 
-  test("uses the sidebar fallback when the app status bar is disabled", async ({ testPage }) => {
+  test("uses the sidebar fallback when the app status bar is disabled", async ({
+    testPage,
+    apiClient,
+  }) => {
+    await setAppStatusBarEnabled(apiClient, false);
     await testPage.goto("/");
-    await setAppStatusBarEnabled(testPage, false);
     await setConnectionIssueSeverity(testPage, "unstable");
 
     await expect(testPage.getByTestId("app-status-bar")).toHaveCount(0);
@@ -55,10 +75,11 @@ test.describe("WebSocket connectivity warning", () => {
   // 768px and 1024px, which no Playwright project emulates yet.
   test("keeps a connection-only warning reachable below the sidebar boundary", async ({
     testPage,
+    apiClient,
   }) => {
     await testPage.setViewportSize({ width: 700, height: 900 });
+    await setAppStatusBarEnabled(apiClient, false);
     await testPage.goto("/stats");
-    await setAppStatusBarEnabled(testPage, false);
     await setConnectionIssueSeverity(testPage, "unstable");
 
     await expect(testPage.getByTestId("app-status-bar")).toHaveCount(0);
@@ -78,8 +99,6 @@ test.describe("WebSocket connectivity warning", () => {
 
 type E2EStore = {
   getState: () => {
-    features: Record<string, boolean>;
-    setFeatures: (features: Record<string, boolean>) => void;
     setConnectionIssueSeverity: (severity: "none" | "unstable" | "lost") => void;
   };
 };
@@ -90,13 +109,4 @@ async function setConnectionIssueSeverity(page: Page, severity: "none" | "unstab
     if (!store) throw new Error("E2E store bridge missing");
     store.getState().setConnectionIssueSeverity(nextSeverity);
   }, severity);
-}
-
-async function setAppStatusBarEnabled(page: Page, enabled: boolean) {
-  await page.evaluate((nextEnabled) => {
-    const store = (window as Window & { __KANDEV_E2E_STORE__?: E2EStore }).__KANDEV_E2E_STORE__;
-    if (!store) throw new Error("E2E store bridge missing");
-    const state = store.getState();
-    state.setFeatures({ ...state.features, appStatusBar: nextEnabled });
-  }, enabled);
 }

@@ -20,11 +20,11 @@ const integrationLabels: Record<IntegrationSlug, string> = {
 };
 
 // integrationFromPathname returns the integration slug for a settings pathname
-// like /settings/integrations/jira or
-// /settings/workspace/<id>/integrations/jira, or null when the current page is
-// not a copyable integration page.
+// like /settings/workspaces/<id>/integrations/jira (or the legacy
+// /settings/workspace/<id>/... and /settings/integrations/... spellings), or
+// null when the current page is not a copyable integration page.
 export function integrationFromPathname(pathname: string): IntegrationSlug | null {
-  const match = pathname.match(/^\/settings(?:\/workspace\/[^/]+)?\/integrations\/([^/]+)/);
+  const match = pathname.match(/^\/settings(?:\/workspaces?\/[^/]+)?\/integrations\/([^/]+)/);
   const slug = match?.[1];
   if (slug && Object.prototype.hasOwnProperty.call(integrationLabels, slug)) {
     return slug as IntegrationSlug;

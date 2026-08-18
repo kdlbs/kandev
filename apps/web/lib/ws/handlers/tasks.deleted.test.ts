@@ -49,6 +49,7 @@ describe("task.deleted cleanup", () => {
         activeSessionId: SESS_PINNED,
         pinnedSessionId: SESS_PINNED,
         lastSessionByTaskId: { t1: SESS_PINNED, t2: SESS_OTHER },
+        resumeSkippedSessionIds: {},
       },
       environmentIdBySessionId: {},
     });
@@ -110,6 +111,7 @@ describe("task.deleted live notification + redirect", () => {
         activeSessionId: null,
         pinnedSessionId: null,
         lastSessionByTaskId: {},
+        resumeSkippedSessionIds: {},
       },
       environmentIdBySessionId: {},
     } as unknown as Partial<AppState>);

@@ -107,3 +107,36 @@ func TestMigrateCursorModel_PreservesExplicitOptions(t *testing.T) {
 		t.Error("MigrateCursorModel mutated the input options")
 	}
 }
+
+func TestNormalizeCommandDescription_CursorClearsDashPlaceholder(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "single dash", in: "---", want: ""},
+		{name: "padded dash run", in: "  ---  ", want: ""},
+		{name: "one dash", in: "-", want: ""},
+		{name: "real description", in: "Commit changes", want: "Commit changes"},
+		{name: "already empty", in: "", want: ""},
+		{name: "dash in text kept", in: "foo - bar", want: "foo - bar"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := NormalizeCommandDescription(CursorAgentID, tc.in); got != tc.want {
+				t.Errorf("NormalizeCommandDescription(cursor, %q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// A dashes-only description from a non-Cursor agent is legitimate and must be
+// returned unchanged; the placeholder cleanup is Cursor-scoped.
+func TestNormalizeCommandDescription_OtherAgentsUnchanged(t *testing.T) {
+	for _, agentID := range []string{"claude-acp", "codex-acp", GrokAgentID, ""} {
+		if got := NormalizeCommandDescription(agentID, "---"); got != "---" {
+			t.Errorf("NormalizeCommandDescription(%q, %q) = %q, want %q (non-Cursor untouched)",
+				agentID, "---", got, "---")
+		}
+	}
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it, afterEach } from "vitest";
 import { cleanup, render } from "@testing-library/react";
-import { getMRStatusColor, MRStatusIcon } from "./mr-task-icon";
+import { aggregateMRStatusColor, getMRStatusColor, MRStatusIcon } from "./mr-task-icon";
 import type { TaskMR } from "@/lib/types/gitlab";
 
 afterEach(() => cleanup());
@@ -71,4 +71,15 @@ describe("MR status colour parity (AC36)", () => {
       expect(getMRStatusColor(mr)).toBe(want);
     },
   );
+
+  // spec Constraints: aggregateMRStatusColor's first-in-input-order tie is
+  // frozen, not fixed, by the MR status chip feature — this pins it in both
+  // input orders so the chip's own array-order-independent selectChipMR
+  // can never accidentally end up sharing this function's behaviour.
+  it("aggregateMRStatusColor's all-terminal tie is decided by array order, in both orders", () => {
+    const merged = makeMR({ id: "a", state: "merged" });
+    const closed = makeMR({ id: "b", state: "closed" });
+    expect(aggregateMRStatusColor([merged, closed])).toBe("text-purple-500");
+    expect(aggregateMRStatusColor([closed, merged])).toBe(MUTED);
+  });
 });

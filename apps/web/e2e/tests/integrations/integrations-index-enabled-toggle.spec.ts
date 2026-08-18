@@ -3,12 +3,16 @@ import { test, expect } from "../../fixtures/test-base";
 // Covers docs/specs/integrations/enable-disable-toggle.md's index-page slider
 // scenarios: every integration row has a working slider, toggling it never
 // navigates, and the toggle stays in sync with that integration's own
-// settings page (the shared install-wide `useXEnabled` state).
+// settings page (the shared per-workspace `useXEnabled` state).
 test.describe("integrations index page enable/disable sliders", () => {
   test("every integration row has a slider, toggling it does not navigate, and it stays in sync with the own-page slider", async ({
     testPage,
   }) => {
+    // The install-level index redirects to the active workspace's integrations
+    // tab — that page is now the integrations index the spec describes.
     await testPage.goto("/settings/integrations");
+    await expect(testPage).toHaveURL(/\/settings\/workspaces\/[^/]+\/integrations$/);
+    const indexUrl = testPage.url();
 
     // One slider per integration row.
     const slugs = ["azure-devops", "github", "gitlab", "jira", "linear", "sentry"];
@@ -22,7 +26,7 @@ test.describe("integrations index page enable/disable sliders", () => {
     // Toggling the slider must not navigate away from the index page.
     await githubSwitch.click();
     await expect(githubSwitch).toHaveAttribute("aria-checked", "false");
-    await expect(testPage).toHaveURL(/\/settings\/integrations$/);
+    await expect(testPage).toHaveURL(indexUrl);
 
     await testPage
       .getByTestId("settings-floating-save")

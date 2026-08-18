@@ -1,10 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { StateProvider } from "@/components/state-provider";
-import { pluginRegistry } from "@/lib/plugins/registry";
+import type { HydrationState } from "@/lib/state/store";
+import type { TaskPR } from "@/lib/types/github";
+import type { TaskMR } from "@/lib/types/gitlab";
 import { TaskItem } from "./task-item";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { formatRelativeTime } from "@/lib/utils";
 
 const TURN_FINISHED_ICON_TEST_ID = "task-state-turn-finished";
 const WORKFLOW_COMPLETE_ICON_TEST_ID = "task-state-workflow-complete";
@@ -23,17 +26,85 @@ const PREPARING_SPINNER_CLASS = "text-muted-foreground/40";
 const SPIN_CLASS = "animate-spin";
 const SLOW_SPIN_CLASS = "[animation-duration:2s]";
 const TASK_ACTIONS_LABEL = "Task actions";
+const PR_ICON_TEST_ID = "pr-task-icon-t1";
+const MR_ICON_TEST_ID = "mr-task-icon-t1";
 
 afterEach(() => cleanup());
 
-function renderTaskItem(props: Partial<ComponentProps<typeof TaskItem>> = {}) {
+function renderTaskItem(
+  props: Partial<ComponentProps<typeof TaskItem>> = {},
+  initialState: HydrationState = {},
+) {
   return render(
-    <StateProvider>
+    <StateProvider initialState={initialState}>
       <TooltipProvider>
         <TaskItem title="Needs answer" state="REVIEW" {...props} />
       </TooltipProvider>
     </StateProvider>,
   );
+}
+
+function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
+  return {
+    id: "id",
+    task_id: "t1",
+    owner: "o",
+    repo: "r",
+    pr_number: 1,
+    pr_url: "",
+    pr_title: "Test PR",
+    head_branch: "feat",
+    base_branch: "main",
+    author_login: "alice",
+    state: "open",
+    review_state: "",
+    checks_state: "",
+    mergeable_state: "",
+    review_count: 0,
+    pending_review_count: 0,
+    comment_count: 0,
+    unresolved_review_threads: 0,
+    checks_total: 0,
+    checks_passing: 0,
+    additions: 0,
+    deletions: 0,
+    created_at: "",
+    merged_at: null,
+    closed_at: null,
+    last_synced_at: null,
+    updated_at: "",
+    ...overrides,
+  };
+}
+
+function makeMR(overrides: Partial<TaskMR> = {}): TaskMR {
+  return {
+    id: "mr-1",
+    task_id: "t1",
+    host: "https://gitlab.com",
+    project_path: "acme/api",
+    mr_iid: 1,
+    mr_url: "",
+    mr_title: "Test MR",
+    head_branch: "feat",
+    base_branch: "main",
+    author_username: "alice",
+    state: "open",
+    approval_state: "",
+    pipeline_state: "",
+    merge_status: "",
+    draft: false,
+    approval_count: 0,
+    required_approvals: 0,
+    pipeline_jobs_total: 0,
+    pipeline_jobs_pass: 0,
+    reviewer_count: 0,
+    unapproved_reviewers: 0,
+    unresolved_discussions: 0,
+    created_at: "",
+    updated_at: "",
+    ...overrides,
+  };
 }
 
 function expectPreparingSpinner(): void {
@@ -172,6 +243,21 @@ describe("TaskItem status icon", () => {
     expect(errorIcon).not.toBeNull();
     expect(errorIcon.classList.contains("cursor-help")).toBe(true);
     expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).not.toBeNull();
+  });
+});
+
+describe("TaskItem queue status", () => {
+  it("shows WIP queue status without replacing the queued prompt badge", () => {
+    renderTaskItem({
+      queuedCount: 2,
+      wipQueue: { position: 2, total: 4, destinationTitle: "Review" },
+    });
+
+    expect(screen.getByTestId("sidebar-task-queued-count")).not.toBeNull();
+    const queueStatus = screen.getByTestId("sidebar-task-wip-queue");
+    expect(queueStatus.querySelector("svg")).not.toBeNull();
+    expect(queueStatus.textContent).toBe("");
+    expect(queueStatus.getAttribute("aria-label")).toBe("Position 2 of 4 in Review queue");
   });
 });
 
@@ -492,70 +578,121 @@ describe("TaskItem queued prompt count badge", () => {
   });
 });
 
-describe("TaskItem — task-row-tags slot", () => {
-  const PLUGIN_ID = "kandev-plugin-tags";
-  const TAGS_TEST_ID = "plugin-row-tags";
-  const SLOT = "task-row-tags";
+describe("TaskItem activity timestamp", () => {
+  it("shows activity time only when the active view sorts by activity", () => {
+    const activityAt = "2026-07-20T00:00:00Z";
+    const updatedAt = "2026-07-24T00:00:00Z";
+    const { rerender } = renderTaskItem({
+      updatedAt,
+      lastActivityAt: activityAt,
+      showActivityTime: true,
+    });
 
-  function SlotPropsProbe({ slotProps }: { slotProps?: unknown }) {
-    const props = slotProps as {
-      taskId: string;
-      workspaceId: string | null;
-      workflowStepId: string | null;
-      surface: string;
-    };
-    return (
-      <span data-testid={TAGS_TEST_ID}>
-        {props.taskId}|{props.workspaceId}|{props.workflowStepId}|{props.surface}
-      </span>
+    expect(screen.getByTestId("sidebar-task-time").textContent).toBe(
+      formatRelativeTime(activityAt),
     );
-  }
 
-  afterEach(() => {
-    pluginRegistry.unregisterPlugin(PLUGIN_ID);
-  });
-
-  it("renders the slot with taskId/workspaceId/workflowStepId/surface: 'sidebar'", () => {
-    pluginRegistry.forPlugin(PLUGIN_ID).registerComponent(SLOT, SlotPropsProbe);
-
-    render(
-      <StateProvider initialState={{ workspaces: { items: [], activeId: "ws-1" } }}>
+    rerender(
+      <StateProvider>
         <TooltipProvider>
-          <TaskItem title="Needs answer" state="REVIEW" taskId="task-1" workflowStepId="step-1" />
+          <TaskItem
+            title="Needs answer"
+            state="REVIEW"
+            updatedAt={updatedAt}
+            lastActivityAt={activityAt}
+            showActivityTime={false}
+          />
         </TooltipProvider>
       </StateProvider>,
     );
+    expect(screen.getByTestId("sidebar-task-time").textContent).toBe(formatRelativeTime(updatedAt));
+  });
+});
 
-    expect(screen.getByTestId(TAGS_TEST_ID).textContent).toBe("task-1|ws-1|step-1|sidebar");
+describe("TaskItem contribution badges", () => {
+  it("renders the PR badge before the MR badge when the task has both (AC2)", () => {
+    renderTaskItem(
+      { taskId: "t1" },
+      {
+        taskPRs: { byTaskId: { t1: [makePR()] } },
+        taskMRs: { byWorkspaceId: { ws1: { t1: [makeMR()] } } },
+        workspaces: { items: [], activeId: "ws1" },
+      },
+    );
+
+    const prIcon = screen.getByTestId(PR_ICON_TEST_ID);
+    const mrIcon = screen.getByTestId(MR_ICON_TEST_ID);
+    expect(prIcon.compareDocumentPosition(mrIcon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("renders nothing when no plugin is registered for the slot", () => {
-    renderTaskItem({ taskId: "task-1", workflowStepId: "step-1" });
+  it("renders the MR badge alone when the task has an MR and no PR (AC3)", () => {
+    renderTaskItem(
+      { taskId: "t1" },
+      {
+        taskMRs: { byWorkspaceId: { ws1: { t1: [makeMR()] } } },
+        workspaces: { items: [], activeId: "ws1" },
+      },
+    );
 
-    expect(screen.queryByTestId(TAGS_TEST_ID)).toBeNull();
+    expect(screen.getByTestId(MR_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(PR_ICON_TEST_ID)).toBeNull();
   });
 
-  it("renders nothing for a row with no taskId, even with a plugin registered", () => {
-    pluginRegistry.forPlugin(PLUGIN_ID).registerComponent(SLOT, SlotPropsProbe);
+  it("renders the prInfo fallback PR badge followed by the MR badge (AC4)", () => {
+    renderTaskItem(
+      { taskId: "t1", prInfo: { number: 7, state: "Open" } },
+      {
+        taskMRs: { byWorkspaceId: { ws1: { t1: [makeMR()] } } },
+        workspaces: { items: [], activeId: "ws1" },
+      },
+    );
 
-    renderTaskItem({});
-
-    expect(screen.queryByTestId(TAGS_TEST_ID)).toBeNull();
+    const prIcon = screen.getByTestId(PR_ICON_TEST_ID);
+    const mrIcon = screen.getByTestId(MR_ICON_TEST_ID);
+    expect(prIcon.compareDocumentPosition(mrIcon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("isolates a throwing slot component so the rest of the row still renders", () => {
-    function ThrowingTags(): never {
-      throw new Error("boom");
-    }
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      pluginRegistry.forPlugin(PLUGIN_ID).registerComponent(SLOT, ThrowingTags);
+  it("renders no MR badge when the task has no MRs (AC6)", () => {
+    renderTaskItem(
+      { taskId: "t1" },
+      {
+        taskPRs: { byTaskId: { t1: [makePR()] } },
+        workspaces: { items: [], activeId: "ws1" },
+      },
+    );
 
-      renderTaskItem({ taskId: "task-1", workflowStepId: "step-1" });
+    expect(screen.getByTestId(PR_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(MR_ICON_TEST_ID)).toBeNull();
+  });
 
-      expect(screen.getByText("Needs answer")).not.toBeNull();
-    } finally {
-      consoleError.mockRestore();
-    }
+  it("orders PR, then MR, then the issue badge (AC22)", () => {
+    renderTaskItem(
+      { taskId: "t1", issueInfo: { url: "https://example.com/issues/42", number: 42 } },
+      {
+        taskPRs: { byTaskId: { t1: [makePR()] } },
+        taskMRs: { byWorkspaceId: { ws1: { t1: [makeMR()] } } },
+        workspaces: { items: [], activeId: "ws1" },
+      },
+    );
+
+    const prIcon = screen.getByTestId(PR_ICON_TEST_ID);
+    const mrIcon = screen.getByTestId(MR_ICON_TEST_ID);
+    const issueIcon = screen.getByTestId("issue-task-icon");
+    expect(prIcon.compareDocumentPosition(mrIcon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      mrIcon.compareDocumentPosition(issueIcon) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("renders no MR badge with no active workspace, even when the task has MRs elsewhere (AC21)", () => {
+    renderTaskItem(
+      { taskId: "t1" },
+      {
+        taskMRs: { byWorkspaceId: { ws1: { t1: [makeMR()] } } },
+        workspaces: { items: [], activeId: null },
+      },
+    );
+
+    expect(screen.queryByTestId(MR_ICON_TEST_ID)).toBeNull();
   });
 });

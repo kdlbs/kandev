@@ -97,14 +97,70 @@ func switchWorkflowDispatcher(svc *Service) engine.DispatchTriggerFn {
 		if eng == nil {
 			return nil // engine not initialised; treat as no-op
 		}
+		// Direct on_enter preflight can create/promote sessions and retire the
+		// initiating session, so it must not run for a replayed operation. The
+		// engine performs the same check before executing actions, but that is
+		// necessarily after this dispatcher-side preparation.
+		if operationID != "" && svc.workflowStore != nil {
+			applied, err := svc.workflowStore.IsOperationApplied(ctx, operationID)
+			if err != nil {
+				return err
+			}
+			if applied {
+				return nil
+			}
+		}
+		ctx = withWorkflowMetaCache(ctx)
+		var preloadedState *engine.MachineState
+		if trigger == engine.TriggerOnEnter {
+			var err error
+			sessionID, preloadedState, err = svc.prepareDirectWorkflowStepEntry(ctx, taskID, sessionID)
+			if err != nil {
+				return err
+			}
+		}
 		_, err := eng.HandleTrigger(ctx, engine.HandleInput{
-			TaskID:      taskID,
-			SessionID:   sessionID,
-			Trigger:     trigger,
-			OperationID: operationID,
+			TaskID:         taskID,
+			SessionID:      sessionID,
+			Trigger:        trigger,
+			OperationID:    operationID,
+			PreloadedState: preloadedState,
 		})
 		return err
 	}
+}
+
+func (s *Service) prepareDirectWorkflowStepEntry(
+	ctx context.Context, taskID, sessionID string,
+) (string, *engine.MachineState, error) {
+	ctx = withWorkflowMetaCache(ctx)
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return "", nil, fmt.Errorf("load task for workflow step entry: %w", err)
+	}
+	if task == nil {
+		return "", nil, fmt.Errorf("task %s not found for workflow step entry", taskID)
+	}
+	if s.workflowStepGetter == nil || task.WorkflowStepID == "" {
+		return "", nil, fmt.Errorf("workflow step is not available for task %s", taskID)
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil {
+		return "", nil, fmt.Errorf("load destination workflow step: %w", err)
+	}
+	if step == nil {
+		return "", nil, fmt.Errorf("destination workflow step %s not found", task.WorkflowStepID)
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return "", nil, fmt.Errorf("load session for workflow step entry: %w", err)
+	}
+	effectiveSession, _, err := s.prepareWorkflowStepSession(ctx, taskID, session, step)
+	if err != nil {
+		return "", nil, fmt.Errorf("prepare session for workflow step entry: %w", err)
+	}
+	state := s.buildMachineState(ctx, task, effectiveSession)
+	return effectiveSession.ID, &state, nil
 }
 
 // enablePlanModeCallback enables plan mode on the session.

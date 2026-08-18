@@ -18,41 +18,83 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
 // Turn operations
 
-const runtimeModelConfigID = "model"
+const (
+	runtimeModelConfigID = "model"
+	turnEventMetadataKey = "metadata"
+)
 
 // StartTurn creates a new turn for a session and publishes the turn.started event.
 // Returns the created turn.
 func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	return s.createTurn(ctx, sessionID, true, nil)
+}
+
+// ReserveTurn durably creates a turn before an external prompt dispatch, but
+// delays turn.started until the dispatch is acknowledged.
+func (s *Service) ReserveTurn(
+	ctx context.Context,
+	sessionID string,
+	recovery *models.PromptDispatchRecovery,
+) (*models.Turn, error) {
+	if recovery == nil {
+		recovery = &models.PromptDispatchRecovery{}
+	}
+	return s.createTurn(ctx, sessionID, false, recovery)
+}
+
+func (s *Service) createTurn(
+	ctx context.Context,
+	sessionID string,
+	publishStarted bool,
+	recovery *models.PromptDispatchRecovery,
+) (*models.Turn, error) {
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
+	if session == nil {
+		return nil, fmt.Errorf("task session %s not found", sessionID)
+	}
 	unlock := s.lockWorkspaceSources(session.TaskID)
 	defer unlock()
 
+	metadata := turnStartRuntimeMetadata(session)
+	if recovery != nil {
+		metadata[models.TurnMetaKeyPromptDispatchPending] = true
+		metadata[models.TurnMetaKeyPromptDispatchClarificationPendingID] = recovery.PendingID
+		metadata[models.TurnMetaKeyPromptDispatchClarificationTurnID] = recovery.TurnID
+		metadata[models.TurnMetaKeyPromptDispatchClarificationMessageIDs] = recovery.MessageIDs
+	}
 	turn := &models.Turn{
 		ID:            uuid.New().String(),
 		TaskSessionID: sessionID,
 		TaskID:        session.TaskID,
 		StartedAt:     time.Now().UTC(),
-		Metadata:      runtimeConfigSnapshotMetadata(session),
+		Metadata:      metadata,
 		CreatedAt:     time.Now().UTC(),
 		UpdatedAt:     time.Now().UTC(),
 	}
 
-	if err := s.turns.CreateTurn(ctx, turn); err != nil {
+	stamped, err := s.turns.CreateTurnWithStepStamp(ctx, turn)
+	if err != nil {
 		s.logger.Error("failed to create turn", zap.Error(err))
 		return nil, err
 	}
+	// Recorded only once the turn is durably persisted — the counter's
+	// "turns created" framing must not count a turn CreateTurn rejected.
+	steptelemetry.RecordTurnStamp(s.logger, stamped)
 
-	// had_output is only meaningful on turn.completed; omit it from turn.started.
-	s.publishTurnEvent(events.TurnStarted, turn, nil)
+	if publishStarted {
+		// had_output is only meaningful on turn.completed; omit it from turn.started.
+		_ = s.publishTurnEvent(events.TurnStarted, turn, nil)
+	}
 
 	s.logger.Debug("started turn",
 		zap.String("turn_id", turn.ID),
@@ -60,6 +102,168 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 		zap.String("task_id", turn.TaskID))
 
 	return turn, nil
+}
+
+// MarkReservedTurnDispatchAttempted establishes an at-most-once boundary
+// immediately before external dispatch. Startup fails closed on this marker
+// because a crash can no longer prove whether agentctl accepted the prompt.
+// On success it refreshes the supplied turn's metadata and update time from
+// the persisted row so PublishReservedTurn can consume the durable marker.
+func (s *Service) MarkReservedTurnDispatchAttempted(ctx context.Context, turn *models.Turn) error {
+	if turn == nil {
+		return errors.New("cannot mark nil reserved turn attempted")
+	}
+	updated, persistedMetadata, updatedAt, err := s.turns.UpdateActiveTurnMetadata(
+		ctx,
+		turn.TaskSessionID,
+		turn.ID,
+		map[string]interface{}{models.TurnMetaKeyPromptDispatchAttempted: true},
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("mark reserved turn %s dispatch attempted: %w", turn.ID, err)
+	}
+	if !updated {
+		return fmt.Errorf("mark reserved turn %s dispatch attempted: turn is no longer active", turn.ID)
+	}
+	durable, _ := persistedMetadata[models.TurnMetaKeyPromptDispatchAttempted].(bool)
+	if !durable {
+		return fmt.Errorf("verify reserved turn %s dispatch attempt: marker missing", turn.ID)
+	}
+	turn.Metadata = persistedMetadata
+	turn.UpdatedAt = updatedAt
+	return nil
+}
+
+// PublishReservedTurn makes a durably attempted reservation authoritative.
+// Recovery metadata stays durable until the event bus accepts turn.started, so
+// a failed publication remains discoverable by startup reconciliation.
+func (s *Service) PublishReservedTurn(ctx context.Context, turn *models.Turn) error {
+	if turn == nil {
+		return errors.New("cannot publish nil reserved turn")
+	}
+	if attempted, _ := turn.Metadata[models.TurnMetaKeyPromptDispatchAttempted].(bool); !attempted {
+		return fmt.Errorf("cannot publish unattempted reserved turn %s", turn.ID)
+	}
+	// Re-read under session turn-write authority before revealing anything. A
+	// no-op patch gives publication a current, active durable snapshot without
+	// copying the caller's potentially stale metadata over concurrent fields.
+	updated, persistedMetadata, updatedAt, err := s.turns.UpdateActiveTurnMetadata(
+		ctx,
+		turn.TaskSessionID,
+		turn.ID,
+		nil,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("publish reserved turn %s: %w", turn.ID, err)
+	}
+	if !updated {
+		persisted, getErr := s.turns.GetTurn(ctx, turn.ID)
+		if errors.Is(getErr, sql.ErrNoRows) {
+			return fmt.Errorf("publish reserved turn %s: reservation missing: %w", turn.ID, getErr)
+		}
+		if getErr != nil {
+			return fmt.Errorf("inspect unpublished reserved turn %s: %w", turn.ID, getErr)
+		}
+		if persisted.CompletedAt == nil {
+			return fmt.Errorf("publish reserved turn %s: active metadata update was rejected", turn.ID)
+		}
+		turn.Metadata = persisted.Metadata
+		turn.CompletedAt = persisted.CompletedAt
+		turn.UpdatedAt = persisted.UpdatedAt
+		return nil
+	}
+	if pending, _ := persistedMetadata[models.TurnMetaKeyPromptDispatchPending].(bool); !pending {
+		return fmt.Errorf("publish reserved turn %s: durable reservation marker missing", turn.ID)
+	}
+	if attempted, _ := persistedMetadata[models.TurnMetaKeyPromptDispatchAttempted].(bool); !attempted {
+		return fmt.Errorf("publish reserved turn %s: durable dispatch attempt marker missing", turn.ID)
+	}
+
+	publicTurn := *turn
+	publicTurn.Metadata = maps.Clone(persistedMetadata)
+	models.ClearPromptDispatchMetadata(publicTurn.Metadata)
+	publicTurn.UpdatedAt = updatedAt
+	if err := s.publishTurnEvent(events.TurnStarted, &publicTurn, nil); err != nil {
+		return fmt.Errorf("publish reserved turn %s start event: %w", turn.ID, err)
+	}
+
+	cleared, publishedMetadata, publishedAt, err := s.turns.ClearTurnPromptDispatchMetadata(
+		ctx,
+		turn.TaskSessionID,
+		turn.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("clear published reserved turn %s recovery metadata: %w", turn.ID, err)
+	}
+	if !cleared {
+		return fmt.Errorf("clear published reserved turn %s recovery metadata: reservation missing", turn.ID)
+	}
+	turn.Metadata = publishedMetadata
+	turn.UpdatedAt = publishedAt
+	return nil
+}
+
+// ReconcileUnpublishedPromptTurns restores unhanded clarification responses
+// and claims whose empty successor never reached agentctl, or accepts
+// reservations with output proof.
+func (s *Service) ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error) {
+	if s.turns == nil {
+		return 0, errors.New("cannot reconcile unpublished prompt turns without a turn repository")
+	}
+	reconciled, err := s.turns.ReconcileUnpublishedPromptTurns(ctx)
+	if err != nil {
+		return reconciled, err
+	}
+	turns, err := s.turns.ListTurnsPendingStartEvent(ctx)
+	if err != nil {
+		return reconciled, fmt.Errorf("list recovered turns pending start-event replay: %w", err)
+	}
+	var replayErrs []error
+	for _, turn := range turns {
+		if err := s.replayRecoveredTurnEvents(ctx, turn); err != nil {
+			replayErrs = append(replayErrs, err)
+		}
+	}
+	return reconciled, errors.Join(replayErrs...)
+}
+
+func (s *Service) replayRecoveredTurnEvents(ctx context.Context, turn *models.Turn) error {
+	if turn == nil {
+		return errors.New("cannot replay events for nil recovered turn")
+	}
+	if err := s.publishTurnEvent(events.TurnStarted, turn, nil); err != nil {
+		return fmt.Errorf("replay recovered turn %s start event: %w", turn.ID, err)
+	}
+	if turn.CompletedAt != nil {
+		hadOutput := s.turnHadOutput(ctx, turn)
+		if err := s.publishTurnEvent(events.TurnCompleted, turn, &hadOutput); err != nil {
+			return fmt.Errorf("replay recovered turn %s completion event: %w", turn.ID, err)
+		}
+	}
+	cleared, _, _, err := s.turns.ClearTurnPromptDispatchMetadata(
+		ctx,
+		turn.TaskSessionID,
+		turn.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("clear recovered turn %s event marker: %w", turn.ID, err)
+	}
+	if !cleared {
+		return fmt.Errorf("clear recovered turn %s event marker: turn missing", turn.ID)
+	}
+	return nil
+}
+
+// RollbackReservedTurn removes only an empty rejected reservation. If output
+// already references the row, the prompt was ambiguously accepted and the
+// durable turn is preserved.
+func (s *Service) RollbackReservedTurn(
+	ctx context.Context,
+	sessionID, turnID string,
+) (bool, error) {
+	return s.turns.DeleteTurnIfUnreferenced(ctx, sessionID, turnID)
 }
 
 // createCompletedTurn persists a synthetic turn that is never observable as
@@ -76,14 +280,32 @@ func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskS
 		TaskID:        session.TaskID,
 		StartedAt:     now,
 		CompletedAt:   &now,
-		Metadata:      runtimeConfigSnapshotMetadata(session),
+		Metadata:      turnStartRuntimeMetadata(session),
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
-	if err := s.turns.CreateTurn(ctx, turn); err != nil {
+	stamped, err := s.turns.CreateTurnWithStepStamp(ctx, turn)
+	if err != nil {
 		return nil, fmt.Errorf("failed to create completed turn: %w", err)
 	}
+	// Recorded only once the turn is durably persisted — the counter's
+	// "turns created" framing must not count a turn CreateTurn rejected.
+	steptelemetry.RecordTurnStamp(s.logger, stamped)
 	return turn, nil
+}
+
+// turnStartRuntimeMetadata composes the turn's immutable start-of-turn
+// runtime-config-snapshot metadata. The workflow-step-at-start stamp is
+// added separately by CreateTurnWithStepStamp, which reads the task's
+// current step inside the same transaction as the turn insert — see that
+// method's doc comment for why the read can no longer happen here, ahead of
+// and unlocked against the insert.
+func turnStartRuntimeMetadata(session *models.TaskSession) map[string]interface{} {
+	metadata := runtimeConfigSnapshotMetadata(session)
+	if metadata == nil {
+		return map[string]interface{}{}
+	}
+	return metadata
 }
 
 func runtimeConfigSnapshotMetadata(session *models.TaskSession) map[string]interface{} {
@@ -98,13 +320,7 @@ func runtimeConfigSnapshotMetadata(session *models.TaskSession) map[string]inter
 }
 
 func buildTurnRuntimeConfigSnapshot(session *models.TaskSession) models.TurnRuntimeConfigSnapshot {
-	effective := runtimeConfigFromProfileSnapshot(session.AgentProfileSnapshot)
-	if runtime, ok := models.LoadSessionRuntimeConfig(session.Metadata); ok {
-		mergeRuntimeConfig(&effective, runtime)
-	}
-	if overrides, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata); ok {
-		mergeRuntimeConfig(&effective, overrides)
-	}
+	effective, _ := models.LoadEffectiveSessionRuntimeConfig(session)
 	baseline, _ := models.LoadSessionACPConfigBaseline(session.Metadata)
 	result := models.TurnRuntimeConfigSnapshot{
 		Model:          effective.Model,
@@ -164,20 +380,18 @@ func selectedTurnConfigOption(
 	}, true
 }
 
-func runtimeConfigFromProfileSnapshot(snapshot map[string]interface{}) models.SessionRuntimeConfig {
-	config := models.SessionRuntimeConfig{}
-	if snapshot == nil {
-		return config
+func selectedConfigValueName(options []streams.ConfigOptionValue, value string) string {
+	for _, option := range options {
+		if option.Value == value {
+			return option.Name
+		}
 	}
-	config.Model = models.StringFromAny(snapshot[runtimeModelConfigID])
-	config.Mode = models.StringFromAny(snapshot["mode"])
-	config.ConfigOptions = stringConfigOptions(snapshot["config_options"])
-	if config.ConfigOptions == nil {
-		config.ConfigOptions = stringConfigOptions(snapshot["configOptions"])
-	}
-	return config
+	return value
 }
 
+// stringConfigOptions decodes the profile option shapes used by persisted
+// task-service metadata. Keep this package-local decoder available for the
+// service coverage tests that exercise both in-memory and JSON-like values.
 func stringConfigOptions(raw interface{}) map[string]string {
 	switch values := raw.(type) {
 	case map[string]string:
@@ -193,33 +407,6 @@ func stringConfigOptions(raw interface{}) map[string]string {
 	default:
 		return nil
 	}
-}
-
-func mergeRuntimeConfig(target *models.SessionRuntimeConfig, source models.SessionRuntimeConfig) {
-	if source.Model != "" {
-		target.Model = source.Model
-	}
-	if source.Mode != "" {
-		target.Mode = source.Mode
-	}
-	if source.ConfigOptions == nil {
-		return
-	}
-	if target.ConfigOptions == nil {
-		target.ConfigOptions = make(map[string]string)
-	}
-	for key, value := range source.ConfigOptions {
-		target.ConfigOptions[key] = value
-	}
-}
-
-func selectedConfigValueName(options []streams.ConfigOptionValue, value string) string {
-	for _, option := range options {
-		if option.Value == value {
-			return option.Name
-		}
-	}
-	return value
 }
 
 // GetTurn returns a turn by ID.
@@ -261,7 +448,7 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 	}
 
 	hadOutput := s.turnHadOutput(ctx, turn)
-	s.publishTurnEvent(events.TurnCompleted, turn, &hadOutput)
+	_ = s.publishTurnEvent(events.TurnCompleted, turn, &hadOutput)
 
 	s.logger.Debug("completed turn",
 		zap.String("turn_id", turnID),
@@ -287,6 +474,22 @@ func (s *Service) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 		return nil
 	}
 	return s.turns.UpdateTurn(ctx, turn)
+}
+
+// PatchTurnMetadata atomically merges metadata into an active or completed turn.
+func (s *Service) PatchTurnMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+	updates map[string]interface{},
+) error {
+	updated, _, err := s.turns.PatchTurnMetadata(ctx, sessionID, turnID, updates)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return fmt.Errorf("patch turn %s metadata: turn not found in session %s", turnID, sessionID)
+	}
+	return nil
 }
 
 // AbandonOpenTurns closes any open turns for a session by setting their
@@ -341,7 +544,7 @@ func (s *Service) AbandonOpenTurns(ctx context.Context, sessionID string) error 
 			// Report had_output=true so the frontend never shows an "empty turn"
 			// notice for them — only genuine live completions should trigger it.
 			hadOutput := true
-			s.publishTurnEvent(events.TurnCompleted, refreshed, &hadOutput)
+			_ = s.publishTurnEvent(events.TurnCompleted, refreshed, &hadOutput)
 		}
 		s.logger.Info("abandoned orphan turn on session resume",
 			zap.String("turn_id", turn.ID),
@@ -385,28 +588,40 @@ func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models
 // turn.completed events (the frontend uses it to surface an "empty turn"
 // notice). Pass nil for turn.started so the field is omitted entirely rather
 // than carrying a misleading "false" on a turn that has not completed.
-func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutput *bool) {
+func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutput *bool) error {
 	if s.eventBus == nil {
-		return
+		return errors.New("turn event bus is unavailable")
 	}
 	if turn == nil {
 		s.logger.Warn("publishTurnEvent: turn is nil, skipping", zap.String("event_type", eventType))
-		return
+		return nil
 	}
+	// Prompt-dispatch fields are private recovery state. A fast completion can
+	// race start-event publication before the durable cleanup commits, so every
+	// public event must sanitize its own metadata snapshot.
+	metadata := maps.Clone(turn.Metadata)
+	models.ClearPromptDispatchMetadata(metadata)
 	payload := map[string]interface{}{
 		"id":           turn.ID,
 		"session_id":   turn.TaskSessionID,
 		"task_id":      turn.TaskID,
 		"started_at":   turn.StartedAt,
 		"completed_at": turn.CompletedAt,
-		"metadata":     turn.Metadata,
 		"created_at":   turn.CreatedAt,
 		"updated_at":   turn.UpdatedAt,
 	}
+	payload[turnEventMetadataKey] = metadata
 	if hadOutput != nil {
 		payload["had_output"] = *hadOutput
 	}
-	_ = s.eventBus.Publish(context.Background(), eventType, bus.NewEvent(eventType, "task-service", payload))
+	if err := s.eventBus.Publish(context.Background(), eventType, bus.NewEvent(eventType, "task-service", payload)); err != nil {
+		s.logger.Error("failed to publish turn event",
+			zap.String("event_type", eventType),
+			zap.String("turn_id", turn.ID),
+			zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 // turnHadOutput reports whether a completed turn produced any agent output.

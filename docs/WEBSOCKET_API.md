@@ -1780,6 +1780,77 @@ The orchestrator coordinates task execution, managing the workflow between tasks
 
 ---
 
+## Session Actions
+
+Session lifecycle is managed idempotently: clients ask the backend to ensure a
+session exists for a task, and the backend resolves the agent profile and
+decides whether to prepare or start the agent.
+
+### `session.ensure`
+
+**Purpose:** Ensure a task has at least one session, creating one if needed.
+Idempotent: returns the task's existing primary (or newest) session when one
+already exists. The backend resolves the agent profile from task metadata,
+workflow step, workflow, or workspace default, and chooses `prepare` vs
+`start` based on the workflow step's `auto_start_agent` action unless the
+client overrides it with `auto_start`.
+
+**Flow Position:** Called when opening a task so the chat has a session to
+attach to.
+
+**Request:**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "type": "request",
+  "action": "session.ensure",
+  "payload": {
+    "task_id": "task-uuid",
+    "auto_start": false
+  }
+}
+```
+
+| Payload Field | Type | Required | Description |
+|--------------|------|----------|-------------|
+| `task_id` | string | ✅ | Task to ensure a session for |
+| `auto_start` | boolean | ❌ | Optional override of the workflow step's auto-start decision. `false` prepares the session (`created_prepare`) without launching the agent; `true` forces a start (`created_start`). Omitting it defers to the workflow step's `auto_start_agent` action. |
+
+**Response:**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "type": "response",
+  "action": "session.ensure",
+  "payload": {
+    "success": true,
+    "task_id": "task-uuid",
+    "session_id": "session-uuid",
+    "state": "CREATED",
+    "agent_profile_id": "profile-uuid",
+    "source": "created_prepare",
+    "newly_created": true
+  }
+}
+```
+
+| Response Field | Type | Description |
+|---------------|------|-------------|
+| `success` | boolean | Whether the ensure succeeded |
+| `task_id` | string | The task the session belongs to |
+| `session_id` | string | The ensured session |
+| `state` | string | Session state (`CREATED` for a prepared session, `STARTING`/`RUNNING` when the agent is launching) |
+| `agent_profile_id` | string | Resolved agent profile |
+| `source` | string | Where the session came from: `existing_primary`, `existing_newest`, `created_prepare`, or `created_start` |
+| `newly_created` | boolean | Whether the session was created by this call |
+| `workspace_path` | string | Worktree path (present when a workspace was prepared) |
+
+**Effect:** With `auto_start: false` the agent stays stopped and the client
+shows a manual "Start agent" affordance; with `auto_start: true` (or the
+workflow step's `auto_start_agent` action) the agent launches immediately.
+
+---
+
 ## Permission Actions
 
 Agents may request user permission for certain operations. The permission flow uses notifications and responses.

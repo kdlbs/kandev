@@ -8,7 +8,11 @@ import {
   ReviewProgressBar,
   PRFilesSection,
 } from "./changes-panel-timeline";
-import { mergeCommits, firstVisibleSection } from "./changes-panel-helpers";
+import {
+  firstVisibleSection,
+  mergeCommits,
+  separateCommitHistories,
+} from "./changes-panel-helpers";
 import type { ChangesPanelBodyProps } from "./changes-panel-data";
 import { useTranslation } from "react-i18next";
 
@@ -51,6 +55,12 @@ type TimelineProps = Pick<
   | "hasStaged"
   | "hasCommits"
   | "hasPRFiles"
+  | "relation"
+  | "resolution"
+  | "resolutionTarget"
+  | "providerPRNumber"
+  | "pushDisabled"
+  | "pullDisabled"
   | "canPush"
   | "canCreatePR"
   | "existingPrUrl"
@@ -165,18 +175,97 @@ function WorkingTreeSections(props: WorkingTreeProps) {
   );
 }
 
-function ChangesPanelTimeline(props: TimelineProps) {
+function CommitHistorySections({
+  props,
+  isDiverged,
+  defaultCollapsed,
+  mergedCommits,
+  separated,
+}: {
+  props: TimelineProps;
+  isDiverged: boolean;
+  defaultCollapsed: boolean;
+  mergedCommits: ReturnType<typeof mergeCommits>;
+  separated: ReturnType<typeof separateCommitHistories>;
+}) {
   const { t } = useTranslation();
-  if (!props.hasAnything) {
+  if (isDiverged) {
     return (
-      <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-        {t("task:yourChangedFilesWillAppearHere")}
-      </div>
+      <>
+        {separated.localCommits.length > 0 && (
+          <CommitsSection
+            commits={separated.localCommits}
+            label={t("task:localCheckoutCommits")}
+            testId="local-checkout-commits-section"
+            defaultCollapsed={defaultCollapsed}
+            pushDisabled={props.pushDisabled}
+            onOpenCommitDetail={props.onOpenCommitDetail}
+            onRevertCommit={props.onRevertCommit}
+            onAmendCommit={props.dialogs.handleOpenAmendDialog}
+            onResetToCommit={props.dialogs.handleOpenResetDialog}
+            onRepoPush={props.onRepoPush}
+            onRepoCreatePR={props.onRepoCreatePR}
+            repoDisplayName={props.repoDisplayName}
+            perRepoStatus={props.perRepoStatus}
+            prByRepo={props.prByRepo}
+          />
+        )}
+        {separated.providerCommits.length > 0 && (
+          <CommitsSection
+            commits={separated.providerCommits}
+            label={t("task:prNumberVersion", { number: props.providerPRNumber ?? "" })}
+            testId="current-pr-commits-section"
+            defaultCollapsed
+            showActions={false}
+            onOpenCommitDetail={props.onOpenCommitDetail}
+            repoDisplayName={props.repoDisplayName}
+            perRepoStatus={props.perRepoStatus}
+          />
+        )}
+      </>
     );
   }
 
-  const mergedCommits = mergeCommits(props.commits, props.prCommits);
-  const hasMergedCommits = mergedCommits.length > 0;
+  return (
+    <CommitsSection
+      commits={mergedCommits}
+      defaultCollapsed={defaultCollapsed}
+      onOpenCommitDetail={props.onOpenCommitDetail}
+      onRevertCommit={props.onRevertCommit}
+      onAmendCommit={props.dialogs.handleOpenAmendDialog}
+      onResetToCommit={props.dialogs.handleOpenResetDialog}
+      onRepoPush={props.onRepoPush}
+      onRepoCreatePR={props.onRepoCreatePR}
+      repoDisplayName={props.repoDisplayName}
+      perRepoStatus={props.perRepoStatus}
+      prByRepo={props.prByRepo}
+      pushDisabled={props.pushDisabled}
+    />
+  );
+}
+
+function EmptyChangesPanel() {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
+      {t("task:yourChangedFilesWillAppearHere")}
+    </div>
+  );
+}
+
+function ChangesPanelTimeline(props: TimelineProps) {
+  if (!props.hasAnything) {
+    return <EmptyChangesPanel />;
+  }
+
+  const isDiverged = props.relation.presentation === "separate";
+  const separated = isDiverged
+    ? separateCommitHistories(props.commits, props.prCommits)
+    : { providerCommits: [], localCommits: [] };
+  const mergedCommits = isDiverged ? [] : mergeCommits(props.commits, props.prCommits);
+  const hasMergedCommits = isDiverged
+    ? separated.providerCommits.length > 0 || separated.localCommits.length > 0
+    : mergedCommits.length > 0;
   const hasLocalChanges = props.hasUnstaged || props.hasStaged;
   const showCommitsList = props.hasStaged || hasMergedCommits;
   // Auto-expand the first (topmost) visible section so the panel never opens
@@ -217,18 +306,12 @@ function ChangesPanelTimeline(props: TimelineProps) {
       )}
 
       {showCommitsList && (
-        <CommitsSection
-          commits={mergedCommits}
+        <CommitHistorySections
+          props={props}
+          isDiverged={isDiverged}
           defaultCollapsed={firstSection !== "commits"}
-          onOpenCommitDetail={props.onOpenCommitDetail}
-          onRevertCommit={props.onRevertCommit}
-          onAmendCommit={props.dialogs.handleOpenAmendDialog}
-          onResetToCommit={props.dialogs.handleOpenResetDialog}
-          onRepoPush={props.onRepoPush}
-          onRepoCreatePR={props.onRepoCreatePR}
-          repoDisplayName={props.repoDisplayName}
-          perRepoStatus={props.perRepoStatus}
-          prByRepo={props.prByRepo}
+          mergedCommits={mergedCommits}
+          separated={separated}
         />
       )}
     </div>

@@ -29,7 +29,7 @@ import { LayoutProfileList } from "./layout-profile-list";
 import { useLayoutSettings } from "./use-layout-settings";
 import { useTranslation } from "react-i18next";
 import { SettingsTarget } from "@/components/settings/settings-target";
-import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 
 type Controller = ReturnType<typeof useLayoutSettings>;
 

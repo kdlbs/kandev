@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -12,6 +13,8 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -104,6 +107,89 @@ func TestHandleSpawnSession_ExplicitProfile(t *testing.T) {
 	require.Len(t, orch.launchCalls, 1)
 	assert.Equal(t, "agent-profile-2", orch.launchCalls[0].AgentProfileID)
 	assert.Empty(t, orch.renameCalls)
+}
+
+func TestHandleSpawnSessionReportsEffectiveAgentProfile(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.launchResponseProfileID = "workflow-default-profile"
+
+	payload := spawnPayload(target.ID, "work with the workflow profile", target.ID, sess.ID)
+	payload["agent_profile_id"] = "requested-profile"
+	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, payload)
+	resp, err := h.handleSpawnSession(context.Background(), msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var out map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &out))
+	assert.Equal(t, "workflow-default-profile", out["agent_profile_id"])
+	assert.Equal(t, "requested-profile", orch.launchCalls[0].AgentProfileID)
+}
+
+func TestHandleSpawnSessionReportsStepPinnedAgentProfile(t *testing.T) {
+	svc, repo, _, workflowRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	workflowProfileID := "workflow-default-profile"
+	_, err := svc.UpdateWorkflow(ctx, workflow.ID, &service.UpdateWorkflowRequest{
+		AgentProfileID: &workflowProfileID,
+	})
+	require.NoError(t, err)
+	step := seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID:      workflow.ID,
+		Name:            "Pinned",
+		Position:        0,
+		IsStartStep:     true,
+		AgentProfileID:  "step-pinned-profile",
+		AllowManualMove: true,
+	})
+	now := time.Now().UTC()
+	target := &models.Task{
+		ID:             "task-pinned-target",
+		WorkspaceID:    workspace.ID,
+		WorkflowID:     workflow.ID,
+		WorkflowStepID: step.ID,
+		Title:          "Target task",
+		State:          v1.TaskStateInProgress,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	sender := &models.Task{
+		ID:          "task-pinned-sender",
+		WorkspaceID: workspace.ID,
+		WorkflowID:  workflow.ID,
+		Title:       "Sender task",
+		State:       v1.TaskStateInProgress,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	require.NoError(t, repo.CreateTask(ctx, target))
+	require.NoError(t, repo.CreateTask(ctx, sender))
+	session := &models.TaskSession{
+		ID:             "sess-pinned",
+		TaskID:         target.ID,
+		AgentProfileID: "sender-profile",
+		IsPrimary:      true,
+		State:          models.TaskSessionStateRunning,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, session))
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	orch.launchResponseProfileID = step.AgentProfileID
+	payload := spawnPayload(target.ID, "use the pinned profile", sender.ID, session.ID)
+	payload["agent_profile_id"] = "explicit-profile"
+	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, payload)
+	resp, err := h.handleSpawnSession(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var out map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &out))
+	assert.Equal(t, "step-pinned-profile", out["agent_profile_id"])
+	assert.Equal(t, "explicit-profile", orch.launchCalls[0].AgentProfileID)
 }
 
 // Cross-task spawns (sender session belongs to another task) fall back to the

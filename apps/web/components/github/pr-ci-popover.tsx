@@ -1,25 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import {
-  IconCheck,
-  IconCircleCheck,
-  IconCircleDot,
-  IconCircleX,
-  IconExternalLink,
-  IconGitPullRequest,
-  IconLoader2,
-  IconMessageCircle,
-  IconPlus,
-} from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
+import { useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import type { PRFeedbackComment } from "@/lib/state/slices/comments";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { usePRCIPopover } from "@/hooks/domains/github/use-pr-ci-popover";
-import { openExternalLink } from "@/lib/desktop/external-links";
 import {
   bucketCheck,
   bucketCheckCounts,
@@ -31,7 +19,16 @@ import type { CheckRun, TaskPR } from "@/lib/types/github";
 import { PRCIAutomationControls } from "./pr-ci-automation-controls";
 import { PRMergeButton } from "./pr-merge-button";
 import { PRMergeabilityRow } from "./pr-mergeability-row";
-import { useTranslation } from "react-i18next";
+import {
+  ChangeRequestCIPopoverFrame,
+  ChangeRequestChecksSection,
+  ChangeRequestCommentsRow,
+  ChangeRequestPopoverFooter,
+  ChangeRequestPopoverHeader,
+  ChangeRequestReviewRow,
+  CHANGE_REQUEST_CI_DESKTOP_SCROLL_CLASS,
+  type ChangeRequestCheckRow,
+} from "@/components/integrations/change-request-ci-anatomy";
 
 type CountsView = {
   passed: number;
@@ -41,14 +38,19 @@ type CountsView = {
 
 const CHECK_GROUP_ORDER: CheckBucket[] = ["passed", "in_progress", "failed"];
 
-export const PR_CI_DESKTOP_POPOVER_SCROLL_CLASS =
-  "max-h-[min(28rem,calc(100vh-8rem))] overflow-y-auto overscroll-contain";
-
-function countForBucket(counts: CountsView, kind: CheckBucket): number {
-  if (kind === "passed") return counts.passed;
-  if (kind === "in_progress") return counts.inProgress;
-  return counts.failed;
+function normalizedCheckState(kind: CheckBucket): ChangeRequestCheckRow["state"] {
+  if (kind === "passed") return "success";
+  if (kind === "failed") return "failure";
+  return "pending";
 }
+
+function normalizedReviewState(pr: TaskPR): "approved" | "changes_requested" | "pending" {
+  if (pr.review_state === "approved") return "approved";
+  if (pr.review_state === "changes_requested") return "changes_requested";
+  return "pending";
+}
+
+export const PR_CI_DESKTOP_POPOVER_SCROLL_CLASS = CHANGE_REQUEST_CI_DESKTOP_SCROLL_CLASS;
 
 export function deriveAggregateCounts(pr: TaskPR): CountsView {
   // Pre-load coarse split from aggregate fields; lazy PRFeedback fetch replaces it.
@@ -84,39 +86,6 @@ export function hasNoChecksAtAll(
   );
 }
 
-function PRPopoverTitle({
-  title,
-  onOpenDetailPanel,
-}: {
-  title: string;
-  onOpenDetailPanel?: () => void;
-}) {
-  const { t } = useTranslation();
-  const className = "min-w-0 truncate text-sm font-medium";
-  if (!onOpenDetailPanel) {
-    return (
-      <span data-testid="pr-popover-title" className={className} title={title}>
-        {title}
-      </span>
-    );
-  }
-  return (
-    <button
-      type="button"
-      data-testid="pr-popover-title"
-      className={`${className} cursor-pointer text-left hover:underline`}
-      title={title}
-      aria-label={t("github:openDetails", { title })}
-      onClick={(e) => {
-        e.stopPropagation();
-        onOpenDetailPanel();
-      }}
-    >
-      {title}
-    </button>
-  );
-}
-
 function PRCIPopoverHeader({
   pr,
   onOpenDetailPanel,
@@ -125,132 +94,19 @@ function PRCIPopoverHeader({
   onOpenDetailPanel?: () => void;
 }) {
   const { t } = useTranslation();
-  const title = `#${pr.pr_number} ${pr.pr_title || t("github:untitledPr")}`;
+  const title = pr.pr_title || t("github:untitledPr");
   return (
-    <div
-      data-testid="pr-popover-header"
-      className="flex items-center justify-between gap-2 border-b border-border/50 pb-2"
-    >
-      <div className="flex min-w-0 items-center gap-1.5">
-        <PRPopoverTitle title={title} onOpenDetailPanel={onOpenDetailPanel} />
-      </div>
-      <a
-        data-testid="pr-popover-pr-link"
-        href={pr.pr_url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="cursor-pointer text-muted-foreground hover:text-foreground"
-        aria-label={t("github:viewPullRequestOnGithub")}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <IconGitPullRequest className="h-3.5 w-3.5" />
-      </a>
-    </div>
+    <ChangeRequestPopoverHeader
+      number={pr.pr_number}
+      title={title}
+      url={pr.pr_url}
+      onOpenReview={onOpenDetailPanel}
+      openDetailsLabel={t("github:openDetails", { title: `#${pr.pr_number} ${title}` })}
+      externalLabel={t("github:viewPullRequestOnGithub")}
+    />
   );
 }
 
-function CheckGroupIcon({ kind }: { kind: CheckBucket }) {
-  if (kind === "passed") return <IconCircleCheck className="h-3.5 w-3.5 text-emerald-500" />;
-  if (kind === "in_progress")
-    return <IconCircleDot className="h-3.5 w-3.5 text-yellow-500 animate-pulse" />;
-  return <IconCircleX className="h-3.5 w-3.5 text-red-500" />;
-}
-
-/** `kind` is the persisted CheckBucket; only the catalog key is copy. */
-const BUCKET_LABEL_KEYS: Record<CheckBucket, string> = {
-  passed: "github:checkBucketPassed",
-  in_progress: "github:checkBucketInProgress",
-  failed: "github:checkBucketFailed",
-};
-
-function CheckGroupHeader({ kind, count }: { kind: CheckBucket; count: number }) {
-  const { t } = useTranslation();
-  const label = t(BUCKET_LABEL_KEYS[kind]);
-  return (
-    <div className="flex items-center justify-between gap-2 px-1 py-1">
-      <div className="flex items-center gap-1.5">
-        <CheckGroupIcon kind={kind} />
-        <span className="text-xs font-medium">{label}</span>
-      </div>
-      <span
-        data-testid="pr-check-group-count"
-        className="text-xs tabular-nums text-muted-foreground"
-      >
-        {count}
-      </span>
-    </div>
-  );
-}
-
-function PRWorkflowRow({
-  group,
-  onAddAsContext,
-}: {
-  group: WorkflowGroup;
-  onAddAsContext: ((message: string) => void) | null;
-}) {
-  const { t } = useTranslation();
-  // For an in-progress workflow, "0/1 ran" reads as "nothing finished"
-  // and confuses people: did it start? It's clearer to just report how
-  // many jobs are running. (Failed workflows go to a different bucket,
-  // so an in_progress group never has failed jobs.)
-  const badge =
-    group.bucket === "in_progress"
-      ? `${group.inProgress} running`
-      : `${group.passed}/${group.total} passed`;
-  return (
-    <div
-      data-testid="pr-workflow-row"
-      data-workflow={group.workflow}
-      data-bucket={group.bucket}
-      className="flex items-center gap-2 px-2 py-1 rounded-sm hover:bg-accent/50 cursor-pointer"
-      onClick={() => {
-        if (group.htmlUrl) void openExternalLink(group.htmlUrl).catch(() => undefined);
-      }}
-    >
-      <span className="text-xs font-medium truncate min-w-0 flex-1" title={group.workflow}>
-        {group.workflow}
-      </span>
-      <span className="text-[10px] text-muted-foreground shrink-0">{badge}</span>
-      {group.htmlUrl && (
-        <Button
-          data-testid="pr-workflow-open"
-          size="sm"
-          variant="ghost"
-          className="h-5 w-5 p-0 cursor-pointer"
-          onClick={(e) => {
-            e.stopPropagation();
-            void openExternalLink(group.htmlUrl).catch(() => undefined);
-          }}
-          aria-label={t("github:openOnGithub", { workflow: group.workflow })}
-        >
-          <IconExternalLink className="h-3 w-3" />
-        </Button>
-      )}
-      {group.bucket === "failed" && onAddAsContext && (
-        <Button
-          data-testid="pr-workflow-add-context"
-          size="sm"
-          variant="ghost"
-          className="h-5 w-5 p-0 cursor-pointer"
-          onClick={(e) => {
-            e.stopPropagation();
-            onAddAsContext(buildWorkflowMessage(group));
-          }}
-          aria-label={t("github:addFailuresToChatContext", { workflow: group.workflow })}
-        >
-          <IconPlus className="h-3 w-3" />
-        </Button>
-      )}
-    </div>
-  );
-}
-
-/**
- * Agent-facing content, not UI copy: the returned string is queued into the chat
- * by `addAsContext` and sent to the agent verbatim, so it stays English for the
- * same reason the integration prompt templates do.
- */
 function buildWorkflowMessage(group: WorkflowGroup): string {
   const failed = group.jobs.filter((j) => bucketCheck(j) === "failed");
   const lines: string[] = [
@@ -264,104 +120,6 @@ function buildWorkflowMessage(group: WorkflowGroup): string {
   }
   lines.push("", "Please investigate and fix.");
   return lines.join("\n");
-}
-
-function PRCheckGroup({
-  kind,
-  count,
-  workflows,
-  isLoading,
-  onAddAsContext,
-}: {
-  kind: CheckBucket;
-  count: number;
-  workflows?: WorkflowGroup[];
-  isLoading: boolean;
-  onAddAsContext: ((message: string) => void) | null;
-}) {
-  if (count <= 0 && (!workflows || workflows.length === 0)) return null;
-  const showRows = kind !== "passed";
-  const hasWorkflows = !!workflows && workflows.length > 0;
-  return (
-    <div data-testid="pr-check-group" data-kind={kind} className="flex flex-col">
-      <CheckGroupHeader kind={kind} count={count} />
-      {showRows && (
-        <div className="flex flex-col pl-5">
-          {hasWorkflows &&
-            workflows!.map((g) => (
-              <PRWorkflowRow
-                key={`${g.workflow}-${g.bucket}`}
-                group={g}
-                onAddAsContext={kind === "failed" ? onAddAsContext : null}
-              />
-            ))}
-          {!hasWorkflows && isLoading
-            ? Array.from({ length: Math.min(2, count || 1) }).map((_, i) => (
-                <div
-                  key={`skel-${i}`}
-                  data-testid="pr-workflow-row-skeleton"
-                  className="h-5 my-0.5 rounded-sm bg-muted animate-pulse"
-                />
-              ))
-            : null}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Stacked progress bar mirroring TodoIndicator's bar but split into three
- * segments — green (passed), yellow (in_progress), red (failed) — each
- * sized proportionally to its count. The leading "pass rate" label gives
- * the same at-a-glance number TodoIndicator shows ("6/10 (60%)").
- *
- * Skipped/cancelled-but-not-failed jobs aren't counted toward the total
- * (they never enter any bucket), so the bar always reflects the actionable
- * picture: how close are we to "all green".
- */
-function PRChecksProgressBar({ counts }: { counts: CountsView }) {
-  const { t } = useTranslation();
-  const total = counts.passed + counts.inProgress + counts.failed;
-  if (total === 0) return null;
-  const pct = (n: number) => (n / total) * 100;
-  const passedPct = pct(counts.passed);
-  const inProgressPct = pct(counts.inProgress);
-  const failedPct = pct(counts.failed);
-  const completePct = Math.round(passedPct);
-  return (
-    <div data-testid="pr-checks-progress" className="flex flex-col gap-1.5 px-1 pt-1 pb-1.5">
-      <div className="flex items-center justify-between text-xs">
-        <span className="font-medium text-foreground">{t("github:passRate")}</span>
-        <span className="text-muted-foreground tabular-nums">
-          {counts.passed}/{total} ({completePct}%)
-        </span>
-      </div>
-      <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted/70">
-        {passedPct > 0 && (
-          <div
-            data-segment="passed"
-            className="h-full bg-green-500 transition-[width]"
-            style={{ width: `${passedPct}%` }}
-          />
-        )}
-        {inProgressPct > 0 && (
-          <div
-            data-segment="in_progress"
-            className="h-full bg-yellow-500 transition-[width]"
-            style={{ width: `${inProgressPct}%` }}
-          />
-        )}
-        {failedPct > 0 && (
-          <div
-            data-segment="failed"
-            className="h-full bg-red-500 transition-[width]"
-            style={{ width: `${failedPct}%` }}
-          />
-        )}
-      </div>
-    </div>
-  );
 }
 
 function PRChecksSection({
@@ -401,34 +159,36 @@ function PRChecksSection({
   }, [feedback]);
 
   const counts = precise ?? aggregateCounts;
-  // "No checks at all": the lazy fetch has settled (not isFetching) and there
-  // are no checks anywhere — neither in PRFeedback nor in the aggregate.
-  if (hasNoChecksAtAll(pr, feedback, isFetching)) {
-    return (
-      <div data-testid="pr-checks-section" className="flex flex-col">
-        <div data-testid="pr-checks-empty" className="px-1 py-2 text-xs text-muted-foreground">
-          {t("github:noChecksHaveStarted")}
-        </div>
-      </div>
-    );
-  }
+  const rows: ChangeRequestCheckRow[] = byBucket
+    ? CHECK_GROUP_ORDER.flatMap((kind) =>
+        byBucket[kind].map((group) => ({
+          id: `${kind}:${group.workflow}`,
+          label: group.workflow,
+          state: normalizedCheckState(kind),
+          detail:
+            kind === "in_progress"
+              ? `${group.inProgress} running`
+              : `${group.passed}/${group.total} passed`,
+          ...(group.htmlUrl ? { url: group.htmlUrl } : {}),
+          ...(kind === "failed" && onAddAsContext
+            ? { onAddAsContext: () => onAddAsContext(buildWorkflowMessage(group)) }
+            : {}),
+        })),
+      )
+    : [];
   return (
-    <div data-testid="pr-checks-section" className="flex flex-col gap-1">
-      <PRChecksProgressBar counts={counts} />
-      {CHECK_GROUP_ORDER.map((kind) => {
-        const value = countForBucket(counts, kind);
-        return (
-          <PRCheckGroup
-            key={kind}
-            kind={kind}
-            count={value}
-            workflows={byBucket?.[kind]}
-            isLoading={isFetching && !byBucket}
-            onAddAsContext={kind === "failed" ? onAddAsContext : null}
-          />
-        );
-      })}
-    </div>
+    <ChangeRequestChecksSection
+      counts={{ passed: counts.passed, pending: counts.inProgress, failed: counts.failed }}
+      rows={rows}
+      loading={isFetching && !byBucket}
+      emptyLabel={t("github:noChecksHaveStarted")}
+      passRateLabel={t("github:passRate")}
+      groupLabels={{
+        success: t("github:checkBucketPassed"),
+        pending: t("github:checkBucketInProgress"),
+        failure: t("github:checkBucketFailed"),
+      }}
+    />
   );
 }
 
@@ -437,61 +197,22 @@ function PRReviewRow({ pr }: { pr: TaskPR }) {
   const approved = pr.review_count;
   const requested = pr.pending_review_count;
 
-  let label: string;
-  let icon: ReactNode;
-  if (pr.review_state === "approved") {
-    icon = <IconCheck className="h-3.5 w-3.5 text-emerald-500" />;
-    label = "Approved";
-  } else if (pr.review_state === "changes_requested") {
-    icon = <IconCircleX className="h-3.5 w-3.5 text-red-500" />;
-    label = "Changes requested";
-  } else {
-    // Default branch covers "no reviews yet", "review pending", and any
-    // unknown state. Always rendered (no early-return) so a fresh PR
-    // still surfaces its review status.
-    icon = <IconCircleDot className="h-3.5 w-3.5 text-muted-foreground" />;
-    label = "Awaiting review";
-  }
-  // Counts live on the right edge, mirroring the check-group rows.
-  // Use "K / M" when a required-minimum is known, otherwise just the
-  // approved count. The "(K requested)" suffix slides in when reviewers
-  // have been pinged but haven't submitted a review.
-  let countText: string;
-  if (required != null) countText = `${approved} / ${required}`;
-  else countText = `${approved}`;
-  if (requested > 0) countText += ` · ${requested} requested`;
   return (
-    <div
-      data-testid="pr-review-row"
-      className="flex items-center justify-between gap-2 px-1 py-1 text-xs"
-    >
-      <div className="flex items-center gap-1.5 min-w-0">
-        {icon}
-        <span className="truncate">{label}</span>
-      </div>
-      <span className="shrink-0 text-muted-foreground tabular-nums">{countText}</span>
-    </div>
+    <ChangeRequestReviewRow
+      state={normalizedReviewState(pr)}
+      approved={approved}
+      required={required ?? undefined}
+      requested={requested}
+    />
   );
 }
 
 function PRCommentsRow({ pr }: { pr: TaskPR }) {
   const { t } = useTranslation();
-  if (!pr.unresolved_review_threads || pr.unresolved_review_threads <= 0) return null;
+  const count = pr.unresolved_review_threads ?? 0;
   return (
-    <div data-testid="pr-comments-row" className="flex items-center gap-1.5 px-1 py-1 text-xs">
-      <IconMessageCircle className="h-3.5 w-3.5 text-muted-foreground" />
-      <span>{t("github:unresolvedComments", { count: pr.unresolved_review_threads })}</span>
-    </div>
+    <ChangeRequestCommentsRow count={count} label={t("github:unresolvedComments", { count })} />
   );
-}
-
-function elapsedLabel(
-  elapsed: number | null,
-  t: (k: string, v?: Record<string, unknown>) => string,
-): string {
-  if (elapsed == null) return "";
-  if (elapsed === 0) return t("github:updatedJustNow");
-  return t("github:updatedAgo", { elapsed: formatElapsedShort(elapsed) });
 }
 
 function PRPopoverFooter({
@@ -502,46 +223,17 @@ function PRPopoverFooter({
   isRefreshing: boolean;
 }) {
   const { t } = useTranslation();
-  // Capture a "now" snapshot only inside the setInterval callback (an event
-  // handler — no impurity in render, no setState during commit). When no
-  // tick has fired yet, fall back to lastUpdatedAt so the rendered elapsed
-  // is 0 ("just now").
-  const [now, setNow] = useState<number | null>(null);
-  useEffect(() => {
-    if (lastUpdatedAt == null) return;
-    const id = setInterval(() => setNow(Date.now()), 10_000);
-    return () => clearInterval(id);
-  }, [lastUpdatedAt]);
-  const elapsed =
-    lastUpdatedAt == null
-      ? null
-      : Math.max(0, Math.floor(((now ?? lastUpdatedAt) - lastUpdatedAt) / 1000));
-  // The first open of a PR has no cache entry yet — that's the slowest fetch of
-  // all, so the footer has to exist for the spinner even with nothing to date.
-  if (lastUpdatedAt == null && !isRefreshing) return null;
   return (
-    <div
-      data-testid="pr-popover-footer"
-      className="flex items-center justify-end border-t border-border/50 pt-1.5"
-    >
-      {isRefreshing ? (
-        <span
-          data-testid="pr-popover-updating"
-          role="status"
-          className="flex items-center gap-1.5 text-[10px] text-muted-foreground"
-        >
-          <IconLoader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
-          {t("github:updatingStatus")}
-        </span>
-      ) : (
-        <span
-          data-testid="pr-popover-updated-at"
-          className="text-[10px] text-muted-foreground tabular-nums"
-        >
-          {elapsedLabel(elapsed, t)}
-        </span>
-      )}
-    </div>
+    <ChangeRequestPopoverFooter
+      updatedAt={lastUpdatedAt ?? undefined}
+      isRefreshing={isRefreshing}
+      updatingLabel={t("github:updatingStatus")}
+      formatElapsed={(seconds) =>
+        seconds === 0
+          ? t("github:updatedJustNow")
+          : t("github:updatedAgo", { elapsed: formatElapsedShort(seconds) })
+      }
+    />
   );
 }
 
@@ -549,8 +241,7 @@ function formatElapsedShort(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h`;
+  return `${Math.floor(minutes / 60)}h`;
 }
 
 function ReconnectGitHubBlock() {
@@ -595,11 +286,7 @@ export function PRCIPopover({
   const onAddAsContext = useAddCheckToContext(pr);
 
   return (
-    <div
-      data-testid="pr-topbar-popover-inner"
-      className="flex flex-col gap-2"
-      onClick={(e) => e.stopPropagation()}
-    >
+    <ChangeRequestCIPopoverFrame>
       <PRCIPopoverHeader pr={pr} onOpenDetailPanel={onOpenDetailPanel} />
       {authLost ? (
         <ReconnectGitHubBlock />
@@ -621,7 +308,7 @@ export function PRCIPopover({
         </>
       )}
       <PRPopoverFooter lastUpdatedAt={lastUpdatedAt} isRefreshing={isRefreshing} />
-    </div>
+    </ChangeRequestCIPopoverFrame>
   );
 }
 
@@ -653,7 +340,7 @@ function useAddCheckToContext(pr: TaskPR): ((message: string) => void) | null {
       addComment(comment);
       toast({ description: t("github:addedToChatContext") });
     },
-    [sessionId, prNumber, addComment, toast],
+    [sessionId, prNumber, addComment, toast, t],
   );
   return sessionId ? handler : null;
 }

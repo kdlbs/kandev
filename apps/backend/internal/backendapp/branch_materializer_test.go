@@ -231,7 +231,7 @@ func setupMaterializerScenario(t *testing.T) (repoPath, taskRoot, primaryPath st
 	if err := os.MkdirAll(taskRoot, 0o755); err != nil {
 		t.Fatalf("mkdir taskRoot: %v", err)
 	}
-	primaryPath = filepath.Join(taskRoot, "kandev")
+	primaryPath = filepath.Join(taskRoot, kandevName)
 	// Simulate the existing primary worktree by adding it as a git worktree
 	// off the repo. The materializer doesn't depend on this being a real
 	// worktree (it only looks at task_environments.workspace_path), but
@@ -293,7 +293,7 @@ func seedMaterializerTask(t *testing.T, ctx context.Context, repo *sqliterepo.Re
 		t.Fatalf("CreateWorkflow: %v", err)
 	}
 	if err := repo.CreateRepository(ctx, &models.Repository{
-		ID: "repo-1", WorkspaceID: "ws-1", Name: "kandev",
+		ID: "repo-1", WorkspaceID: "ws-1", Name: kandevName,
 		LocalPath: repoPath, DefaultBranch: "main", WorktreeBranchPrefix: "feature/",
 	}); err != nil {
 		t.Fatalf("CreateRepository: %v", err)

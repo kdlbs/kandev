@@ -1,6 +1,7 @@
 "use client";
 
 import { useTheme } from "@/components/theme/app-theme";
+import { getThemeToggleLabelKey, getThemeToggleTarget } from "@/components/theme/theme-toggle";
 import { IconMoon, IconSun } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useSyncExternalStore } from "react";
@@ -8,7 +9,9 @@ import { useTranslation } from "react-i18next";
 
 export function ThemeToggle() {
   const { t } = useTranslation();
-  const { theme, setTheme } = useTheme();
+  const { resolvedTheme, setTheme } = useTheme();
+  const targetTheme = getThemeToggleTarget(resolvedTheme);
+  const labelKey = getThemeToggleLabelKey(resolvedTheme);
   const mounted = useSyncExternalStore(
     () => () => {},
     () => true,
@@ -23,11 +26,16 @@ export function ThemeToggle() {
     <Button
       variant="ghost"
       size="sm"
-      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+      onClick={() => setTheme(targetTheme)}
       className="h-9 w-9 p-0"
+      aria-label={t(labelKey)}
+      aria-pressed={resolvedTheme === "dark"}
     >
-      {theme === "dark" ? <IconSun className="h-4 w-4" /> : <IconMoon className="h-4 w-4" />}
-      <span className="sr-only">{t("sidebar:toggleTheme")}</span>
+      {resolvedTheme === "dark" ? (
+        <IconSun className="h-4 w-4" />
+      ) : (
+        <IconMoon className="h-4 w-4" />
+      )}
     </Button>
   );
 }

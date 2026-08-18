@@ -7,8 +7,12 @@ owner: kandev
 # Merge Enqueued Messages Individually
 
 Queue-wide removal and capacity behavior is defined separately by
-[Manage Pending Message Queues](message-queue-management.md). This spec governs
-only the merge operation.
+[Manage Pending Message Queues](message-queue-management.md), and admission-time
+compaction is defined by
+[Automatically Merge Consecutive Queued Messages](message-queue-auto-merge.md).
+This spec governs only the manual merge operation. Its `merge_enabled` setting
+does not control automatic merging, and `auto_merge_enabled` does not change
+the behavior or compatibility rules below.
 
 ## Why
 

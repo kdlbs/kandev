@@ -8,6 +8,7 @@ import type {
   AttachTaskWorkspaceSourcesRequest,
   AttachTaskWorkspaceSourcesResponse,
   Task,
+  TaskPriority,
   MoveTaskResponse,
 } from "@/lib/types/http";
 
@@ -74,7 +75,9 @@ export async function createTask(
       default_branch?: string;
       github_url?: string;
       remote_url?: string;
-      provider?: "github" | "gitlab" | "azure_devops";
+      provider?: string;
+      provider_host?: string;
+      provider_scope?: string;
       provider_repo_id?: string;
       provider_owner?: string;
       provider_name?: string;
@@ -99,8 +102,15 @@ export async function createTask(
       delivery_mode?: "prompt" | "path";
     }>;
     parent_id?: string;
+    /**
+     * Task IDs this task depends on. With these set, an agent-start request is
+     * recorded as a start-when-unblocked intent rather than launching now.
+     */
+    blocked_by?: string[];
+    /** Explicitly opt out of (false) or into (true) the auto-start-on-unblock intent. */
+    start_when_unblocked?: boolean;
     workspace_path?: string;
-    priority?: string;
+    priority?: TaskPriority;
     project_id?: string;
     metadata?: Record<string, unknown>;
     /** Office task-handoffs phase 4/5 — workspace policy. */

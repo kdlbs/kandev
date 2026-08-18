@@ -4,11 +4,13 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	workflowcfg "github.com/kandev/kandev/config/workflows"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/models"
@@ -25,13 +27,34 @@ type WorkflowProvider interface {
 
 // Service provides workflow business logic
 type Service struct {
-	repo              *repository.Repository
-	logger            *logger.Logger
-	workflowProvider  WorkflowProvider
-	workspaceProvider WorkspaceProvider
-	resolveProfile    models.AgentProfileResolver
-	matchProfile      models.AgentProfileMatcher
-	syncOps           SyncWorkflowOps
+	repo                 *repository.Repository
+	logger               *logger.Logger
+	workflowProvider     WorkflowProvider
+	workspaceProvider    WorkspaceProvider
+	resolveProfile       models.AgentProfileResolver
+	matchProfile         models.AgentProfileMatcher
+	syncOps              SyncWorkflowOps
+	sessionAccessChecker func(context.Context, string) error
+	historyQueue         chan historyWrite
+	historyStop          chan struct{}
+	historyDone          chan struct{}
+	historyCloseOnce     sync.Once
+	historyMu            sync.RWMutex
+	historyClosed        bool
+}
+
+type historyWrite struct {
+	sessionID, fromStepID, toStepID string
+	trigger                         models.StepTransitionTrigger
+	actorID                         *string
+	metadata                        map[string]interface{}
+}
+
+// SetSessionAccessChecker wires the task-domain authorization check. The
+// workflow package owns the history read, but the task package owns session
+// and workspace permissions.
+func (s *Service) SetSessionAccessChecker(checker func(context.Context, string) error) {
+	s.sessionAccessChecker = checker
 }
 
 // WorkspaceProvider resolves a workspace by ID so the read-only guard can tell
@@ -59,10 +82,98 @@ func (s *Service) SetAgentProfileFuncs(resolve models.AgentProfileResolver, matc
 
 // NewService creates a new workflow service
 func NewService(repo *repository.Repository, log *logger.Logger) *Service {
-	return &Service{
-		repo:   repo,
-		logger: log.WithFields(zap.String("component", "workflow-service")),
+	s := &Service{
+		repo:         repo,
+		logger:       log.WithFields(zap.String("component", "workflow-service")),
+		historyQueue: make(chan historyWrite, 256),
+		historyStop:  make(chan struct{}),
+		historyDone:  make(chan struct{}),
 	}
+	go s.runHistoryWriter()
+	return s
+}
+
+func (s *Service) runHistoryWriter() {
+	defer close(s.historyDone)
+	for {
+		select {
+		case write := <-s.historyQueue:
+			ctx, cancel := context.WithTimeout(context.Background(), constants.StepHistoryWriteTimeout)
+			if err := s.CreateStepTransition(ctx, write.sessionID, write.fromStepID, write.toStepID, write.trigger, write.actorID, write.metadata); err != nil {
+				s.logger.Warn("failed to write queued step transition", zap.Error(err))
+			}
+			cancel()
+		case <-s.historyStop:
+			s.drainHistoryQueue()
+			return
+		}
+	}
+}
+
+// drainHistoryQueue flushes whatever is left in the queue at shutdown under a
+// single bounded deadline shared by every remaining row, rather than a fresh
+// StepHistoryWriteTimeout per row — a stalled database and a full 256-row
+// queue would otherwise be able to block graceful shutdown for minutes. Rows
+// that don't fit inside the deadline are dropped; this audit trail is
+// best-effort and must never hold up shutdown.
+func (s *Service) drainHistoryQueue() {
+	ctx, cancel := context.WithTimeout(context.Background(), constants.StepHistoryWriteTimeout)
+	defer cancel()
+	for {
+		select {
+		case write := <-s.historyQueue:
+			if err := s.CreateStepTransition(ctx, write.sessionID, write.fromStepID, write.toStepID, write.trigger, write.actorID, write.metadata); err != nil {
+				s.logger.Warn("failed to write queued step transition during shutdown", zap.Error(err))
+			}
+		case <-ctx.Done():
+			if dropped := len(s.historyQueue); dropped > 0 {
+				s.logger.Warn("dropped queued step transitions at shutdown deadline", zap.Int("dropped", dropped))
+			}
+			return
+		default:
+			return
+		}
+	}
+}
+
+// EnqueueStepTransition records transition history outside the caller's
+// event-reader path. The queue is bounded. A full queue, or an enqueue after
+// Close has begun, is logged as a dropped best-effort telemetry row while the
+// workflow mutation itself succeeds.
+func (s *Service) EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger models.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) {
+	if sessionID == "" {
+		return
+	}
+	s.historyMu.RLock()
+	defer s.historyMu.RUnlock()
+	if s.historyClosed {
+		s.logger.Warn("dropped step transition enqueued after shutdown", zap.String("session_id", sessionID))
+		return
+	}
+	select {
+	case s.historyQueue <- historyWrite{sessionID: sessionID, fromStepID: fromStepID, toStepID: toStepID, trigger: trigger, actorID: actorID, metadata: metadata}:
+	default:
+		s.logger.Warn("step transition history queue is full", zap.String("session_id", sessionID))
+	}
+}
+
+// Close stops accepting new history writes, drains the queue under a bounded
+// deadline, and waits for the writer goroutine to exit. The closed flag is
+// set under the same lock EnqueueStepTransition holds across its
+// check-and-send, so no enqueue can land in the queue after a concurrent
+// Close has started shutting it down.
+func (s *Service) Close() error {
+	if s.historyStop == nil {
+		return nil
+	}
+	s.historyCloseOnce.Do(func() {
+		s.historyMu.Lock()
+		s.historyClosed = true
+		s.historyMu.Unlock()
+		close(s.historyStop)
+	})
+	<-s.historyDone
+	return nil
 }
 
 // ============================================================================
@@ -430,13 +541,17 @@ func (s *Service) ReorderSteps(ctx context.Context, workflowID string, stepIDs [
 // History Operations
 // ============================================================================
 
-// CreateStepTransition creates a new step transition history entry.
-func (s *Service) CreateStepTransition(ctx context.Context, sessionID string, fromStepID, toStepID string, trigger models.StepTransitionTrigger, actorID *string) error {
+// CreateStepTransition creates a new step transition history entry. metadata
+// is optional (nil for a plain move) and carries the ADR 0015 consumed-signal
+// shape ({"signal_source", "signal_summary"}) when a completion signal drove
+// the transition.
+func (s *Service) CreateStepTransition(ctx context.Context, sessionID string, fromStepID, toStepID string, trigger models.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) error {
 	history := &models.SessionStepHistory{
 		SessionID: sessionID,
 		ToStepID:  toStepID,
 		Trigger:   trigger,
 		ActorID:   actorID,
+		Metadata:  metadata,
 	}
 
 	if fromStepID != "" {
@@ -462,6 +577,11 @@ func (s *Service) CreateStepTransition(ctx context.Context, sessionID string, fr
 
 // ListHistoryBySession returns all step history entries for a session.
 func (s *Service) ListHistoryBySession(ctx context.Context, sessionID string) ([]*models.SessionStepHistory, error) {
+	if s.sessionAccessChecker != nil {
+		if err := s.sessionAccessChecker(ctx, sessionID); err != nil {
+			return nil, err
+		}
+	}
 	history, err := s.repo.ListHistoryBySession(ctx, sessionID)
 	if err != nil {
 		s.logger.Error("failed to list history by session", zap.String("session_id", sessionID), zap.Error(err))
@@ -586,7 +706,7 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 	// any step. This keeps imports atomic with respect to validation failures.
 	steps := make([]*models.WorkflowStep, 0, len(pw.Steps))
 	for _, sp := range pw.Steps {
-		step := s.stepFromPortable("pending-workflow", sp, posToID)
+		step := s.stepFromPortable("pending-workflow", sp, posToID, "")
 		if err := models.ValidateWorkflowStep(step); err != nil {
 			return nil, fmt.Errorf("validate step %q: %w", sp.Name, err)
 		}
@@ -601,7 +721,7 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 	needsUpdate := false
 	// Match workflow-level agent profile if present.
 	if pw.AgentProfile != nil && s.matchProfile != nil {
-		if profileID := s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode); profileID != "" {
+		if profileID := s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode, ""); profileID != "" {
 			wf.AgentProfileID = profileID
 			needsUpdate = true
 		}
@@ -627,8 +747,19 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 
 // stepFromPortable builds a WorkflowStep from its portable form, remapping
 // position-based references to the step IDs in posToID and matching the
-// step-level agent profile when a matcher is wired.
-func (s *Service) stepFromPortable(workflowID string, sp models.StepPortable, posToID map[int]string) *models.WorkflowStep {
+// step-level agent profile when a matcher is wired. existingProfileID is the
+// profile already bound to this step (by name) before sync, or "" for a step
+// with no prior binding (including at import time) - it lets the matcher
+// preserve a disabled-but-still-matching binding instead of treating
+// disablement as a rebind.
+func (s *Service) stepFromPortable(workflowID string, sp models.StepPortable, posToID map[int]string, existingProfileID string) *models.WorkflowStep {
+	return s.stepFromPortableWithMatcher(workflowID, sp, posToID, s.matchProfile, existingProfileID)
+}
+
+// stepFromPortableWithMatcher lets workflow sync use a matcher that preserves
+// profile IDs embedded in existing review actions while imports use the normal
+// matcher directly.
+func (s *Service) stepFromPortableWithMatcher(workflowID string, sp models.StepPortable, posToID map[int]string, matchProfile models.AgentProfileMatcher, existingProfileID string) *models.WorkflowStep {
 	step := &models.WorkflowStep{
 		ID:                         posToID[sp.Position],
 		WorkflowID:                 workflowID,
@@ -636,7 +767,7 @@ func (s *Service) stepFromPortable(workflowID string, sp models.StepPortable, po
 		Position:                   sp.Position,
 		Color:                      sp.Color,
 		Prompt:                     sp.Prompt,
-		Events:                     models.ConvertReviewProfileToID(models.ConvertPositionToStepID(sp.Events, posToID), s.matchProfile),
+		Events:                     models.ConvertReviewProfileToID(models.ConvertPositionToStepID(sp.Events, posToID), matchProfile),
 		IsStartStep:                sp.IsStartStep,
 		ShowInCommandPanel:         sp.ShowInCommandPanel,
 		AllowManualMove:            sp.AllowManualMove,
@@ -646,8 +777,8 @@ func (s *Service) stepFromPortable(workflowID string, sp models.StepPortable, po
 		WIPLimit:                   sp.WIPLimit,
 		PullFromStepID:             sp.PullFromStepID(posToID),
 	}
-	if sp.AgentProfile != nil && s.matchProfile != nil {
-		step.AgentProfileID = s.matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode)
+	if sp.AgentProfile != nil && matchProfile != nil {
+		step.AgentProfileID = matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode, existingProfileID)
 	}
 	return step
 }

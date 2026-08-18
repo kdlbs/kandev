@@ -27,6 +27,13 @@ const (
 	ActionRepositoryUpdate = "repository.update"
 	ActionRepositoryDelete = "repository.delete"
 
+	// Repository Set actions
+	ActionRepositorySetList   = "repository_set.list"
+	ActionRepositorySetCreate = "repository_set.create"
+	ActionRepositorySetGet    = "repository_set.get"
+	ActionRepositorySetUpdate = "repository_set.update"
+	ActionRepositorySetDelete = "repository_set.delete"
+
 	// Repository Script actions
 	ActionRepositoryScriptList   = "repository.script.list"
 	ActionRepositoryScriptCreate = "repository.script.create"
@@ -179,79 +186,89 @@ const (
 
 	// Native code review. The *.run / *.cancel / *.get / *.finding.update /
 	// *.clear actions are client requests; the rest are server notifications.
-	ActionTaskReviewRun               = "task.review.run"
-	ActionTaskReviewCancel            = "task.review.cancel"
-	ActionTaskReviewGet               = "task.review.get"
-	ActionTaskReviewFindingUpdate     = "task.review.finding.update"
-	ActionTaskReviewClear             = "task.review.clear"
-	ActionTaskReviewRunUpdated        = "task.review.run_updated"
-	ActionTaskReviewFindingsPublished = "task.review.findings_published"
-	ActionTaskReviewFindingUpdated    = "task.review.finding_updated"
-	ActionTaskReviewCleared           = "task.review.cleared"
-	ActionAgentUpdated                = "agent.updated"
-	ActionAgentAvailableUpdated       = "agent.available.updated"
-	ActionAgentInstallStarted         = "agent.install.started"
-	ActionAgentInstallOutput          = "agent.install.output"
-	ActionAgentInstallFinished        = "agent.install.finished"
-	ActionAgentUpdateStarted          = "agent.update.started"
-	ActionAgentUpdateOutput           = "agent.update.output"
-	ActionAgentUpdateFinished         = "agent.update.finished"
-	ActionWorkspaceCreated            = "workspace.created"
-	ActionWorkspaceUpdated            = "workspace.updated"
-	ActionWorkspaceDeleted            = "workspace.deleted"
-	ActionWorkflowCreated             = "workflow.created"
-	ActionWorkflowUpdated             = "workflow.updated"
-	ActionWorkflowDeleted             = "workflow.deleted"
-	ActionWorkflowStepCreated         = "workflow.step.created"
-	ActionWorkflowStepUpdated         = "workflow.step.updated"
-	ActionWorkflowStepDeleted         = "workflow.step.deleted"
-	ActionSessionMessageAdded         = "session.message.added"
-	ActionSessionMessageUpdated       = "session.message.updated"
-	ActionSessionMessageDeleted       = "session.message.deleted"
-	ActionSessionStateChanged         = "session.state_changed"
-	ActionSessionActivityChanged      = "session.activity_changed"
-	ActionSessionCancellationChanged  = "session.cancellation_changed"
-	ActionTaskStatusSummaryUpdated    = "task.status_summary.updated"
-	ActionSessionAgentctlStarting     = "session.agentctl_starting"
-	ActionSessionAgentctlReady        = "session.agentctl_ready"
-	ActionSessionAgentctlError        = "session.agentctl_error"
-	ActionSessionTurnStarted          = "session.turn.started"
-	ActionSessionTurnCompleted        = "session.turn.completed"
-	ActionSessionAvailableCommands    = "session.available_commands"
-	ActionSessionModeChanged          = "session.mode_changed"
-	ActionSessionAgentCapabilities    = "session.agent_capabilities"
-	ActionSessionModelsUpdated        = "session.models_updated"
-	ActionSessionModelFallback        = "session.model_fallback"
-	ActionSessionMCPStatusUpdated     = "session.mcp_status_updated"
-	ActionSessionInfoUpdated          = "session.info_updated"
-	ActionSessionSetMode              = "session.set_mode"
-	ActionSessionTodosUpdated         = "session.todos_updated"
-	ActionSessionPromptUsage          = "session.prompt_usage"
-	ActionSessionPollModeChanged      = "session.poll_mode_changed"
-	ActionInputRequested              = "input.requested"
-	ActionRepositoryCreated           = "repository.created"
-	ActionRepositoryUpdated           = "repository.updated"
-	ActionRepositoryDeleted           = "repository.deleted"
-	ActionRepositoryScriptCreated     = "repository.script.created"
-	ActionRepositoryScriptUpdated     = "repository.script.updated"
-	ActionRepositoryScriptDeleted     = "repository.script.deleted"
-	ActionExecutorCreated             = "executor.created"
-	ActionExecutorUpdated             = "executor.updated"
-	ActionExecutorDeleted             = "executor.deleted"
-	ActionEnvironmentCreated          = "environment.created"
-	ActionEnvironmentUpdated          = "environment.updated"
-	ActionEnvironmentDeleted          = "environment.deleted"
-	ActionExecutorProfileCreated      = "executor.profile.created"
-	ActionExecutorProfileUpdated      = "executor.profile.updated"
-	ActionExecutorProfileDeleted      = "executor.profile.deleted"
-	ActionExecutorPrepareProgress     = "executor.prepare.progress"
-	ActionExecutorPrepareCompleted    = "executor.prepare.completed"
-	ActionSystemMetricsUpdated        = "system.metrics.updated"
-	ActionUpdateAvailable             = "system.update_available"
+	ActionTaskReviewRun                = "task.review.run"
+	ActionTaskReviewCancel             = "task.review.cancel"
+	ActionTaskReviewGet                = "task.review.get"
+	ActionTaskReviewFindingUpdate      = "task.review.finding.update"
+	ActionTaskReviewClear              = "task.review.clear"
+	ActionTaskReviewRunUpdated         = "task.review.run_updated"
+	ActionTaskReviewFindingsPublished  = "task.review.findings_published"
+	ActionTaskReviewFindingUpdated     = "task.review.finding_updated"
+	ActionTaskReviewCleared            = "task.review.cleared"
+	ActionAgentUpdated                 = "agent.updated"
+	ActionAgentAvailableUpdated        = "agent.available.updated"
+	ActionAgentInstallStarted          = "agent.install.started"
+	ActionAgentInstallOutput           = "agent.install.output"
+	ActionAgentInstallFinished         = "agent.install.finished"
+	ActionAgentUpdateStarted           = "agent.update.started"
+	ActionAgentUpdateOutput            = "agent.update.output"
+	ActionAgentUpdateFinished          = "agent.update.finished"
+	ActionWorkspaceCreated             = "workspace.created"
+	ActionWorkspaceUpdated             = "workspace.updated"
+	ActionWorkspaceDeleted             = "workspace.deleted"
+	ActionWorkflowCreated              = "workflow.created"
+	ActionWorkflowUpdated              = "workflow.updated"
+	ActionWorkflowDeleted              = "workflow.deleted"
+	ActionWorkflowStepCreated          = "workflow.step.created"
+	ActionWorkflowStepUpdated          = "workflow.step.updated"
+	ActionWorkflowStepDeleted          = "workflow.step.deleted"
+	ActionSessionMessageAdded          = "session.message.added"
+	ActionSessionMessageUpdated        = "session.message.updated"
+	ActionSessionMessageDeleted        = "session.message.deleted"
+	ActionSessionStateChanged          = "session.state_changed"
+	ActionSessionActivityChanged       = "session.activity_changed"
+	ActionSessionCancellationChanged   = "session.cancellation_changed"
+	ActionTaskStatusSummaryUpdated     = "task.status_summary.updated"
+	ActionSessionAgentctlStarting      = "session.agentctl_starting"
+	ActionSessionAgentctlReady         = "session.agentctl_ready"
+	ActionSessionAgentctlError         = "session.agentctl_error"
+	ActionSessionTurnStarted           = "session.turn.started"
+	ActionSessionTurnCompleted         = "session.turn.completed"
+	ActionSessionAvailableCommands     = "session.available_commands"
+	ActionSessionModeChanged           = "session.mode_changed"
+	ActionSessionAgentCapabilities     = "session.agent_capabilities"
+	ActionSessionModelsUpdated         = "session.models_updated"
+	ActionSessionModelFallback         = "session.model_fallback"
+	ActionSessionModelSelectionWarning = "session.model_selection_warning"
+	ActionSessionMCPStatusUpdated      = "session.mcp_status_updated"
+	ActionSessionInfoUpdated           = "session.info_updated"
+	ActionSessionSetMode               = "session.set_mode"
+	ActionSessionTodosUpdated          = "session.todos_updated"
+	ActionSessionPromptUsage           = "session.prompt_usage"
+	ActionSessionPollModeChanged       = "session.poll_mode_changed"
+	ActionInputRequested               = "input.requested"
+	ActionRepositoryCreated            = "repository.created"
+	ActionRepositoryUpdated            = "repository.updated"
+	ActionRepositoryDeleted            = "repository.deleted"
+	ActionRepositorySetCreated         = "repository_set.created"
+	ActionRepositorySetUpdated         = "repository_set.updated"
+	ActionRepositorySetDeleted         = "repository_set.deleted"
+	ActionRepositoryScriptCreated      = "repository.script.created"
+	ActionRepositoryScriptUpdated      = "repository.script.updated"
+	ActionRepositoryScriptDeleted      = "repository.script.deleted"
+	ActionExecutorCreated              = "executor.created"
+	ActionExecutorUpdated              = "executor.updated"
+	ActionExecutorDeleted              = "executor.deleted"
+	ActionEnvironmentCreated           = "environment.created"
+	ActionEnvironmentUpdated           = "environment.updated"
+	ActionEnvironmentDeleted           = "environment.deleted"
+	ActionExecutorProfileCreated       = "executor.profile.created"
+	ActionExecutorProfileUpdated       = "executor.profile.updated"
+	ActionExecutorProfileDeleted       = "executor.profile.deleted"
+	ActionExecutorPrepareProgress      = "executor.prepare.progress"
+	ActionExecutorPrepareCompleted     = "executor.prepare.completed"
+	ActionSystemMetricsUpdated         = "system.metrics.updated"
+	ActionUpdateAvailable              = "system.update_available"
 
 	ActionAgentProfileDeleted = "agent.profile.deleted"
 	ActionAgentProfileCreated = "agent.profile.created"
 	ActionAgentProfileUpdated = "agent.profile.updated"
+
+	// ActionAgentSettingsUpdated carries a full agent settings record
+	// (dto.AgentDTO) after a settings-side change such as a custom TUI agent's
+	// MCP strategy. Distinct from ActionAgentUpdated, which is a runtime status
+	// ping keyed by {agentId, status} and feeds a different store slice.
+	ActionAgentSettingsUpdated = "agent.settings.updated"
 
 	// Permission request actions (agent -> user -> agent)
 	ActionPermissionRequested = "permission.requested" // Agent requesting permission
@@ -309,19 +326,21 @@ const (
 	ActionSessionProcessStatus = "session.process.status"
 
 	// Git worktree actions
-	ActionWorktreePull         = "worktree.pull"          // Pull from remote
-	ActionWorktreePush         = "worktree.push"          // Push to remote
-	ActionWorktreeRebase       = "worktree.rebase"        // Rebase onto base branch
-	ActionWorktreeMerge        = "worktree.merge"         // Merge base branch into worktree
-	ActionWorktreeAbort        = "worktree.abort"         // Abort in-progress merge or rebase
-	ActionWorktreeCommit       = "worktree.commit"        // Commit changes
-	ActionWorktreeStage        = "worktree.stage"         // Stage files for commit
-	ActionWorktreeUnstage      = "worktree.unstage"       // Unstage files from index
-	ActionWorktreeDiscard      = "worktree.discard"       // Discard changes to files
-	ActionWorktreeCreatePR     = "worktree.create_pr"     // Create a pull request
-	ActionWorktreeRevertCommit = "worktree.revert_commit" // Revert a commit (staged, no new commit)
-	ActionWorktreeRenameBranch = "worktree.rename_branch" // Rename the current branch
-	ActionWorktreeReset        = "worktree.reset"         // Reset HEAD to a commit (soft/hard)
+	ActionWorktreePull                = "worktree.pull"                 // Pull from remote
+	ActionWorktreePush                = "worktree.push"                 // Push to remote
+	ActionWorktreeReplaceContribution = "worktree.replace_contribution" // Replace the bound contribution branch
+	ActionWorktreeUseContribution     = "worktree.use_contribution"     // Adopt the bound contribution version
+	ActionWorktreeRebase              = "worktree.rebase"               // Rebase onto base branch
+	ActionWorktreeMerge               = "worktree.merge"                // Merge base branch into worktree
+	ActionWorktreeAbort               = "worktree.abort"                // Abort in-progress merge or rebase
+	ActionWorktreeCommit              = "worktree.commit"               // Commit changes
+	ActionWorktreeStage               = "worktree.stage"                // Stage files for commit
+	ActionWorktreeUnstage             = "worktree.unstage"              // Unstage files from index
+	ActionWorktreeDiscard             = "worktree.discard"              // Discard changes to files
+	ActionWorktreeCreatePR            = "worktree.create_pr"            // Create a pull request
+	ActionWorktreeRevertCommit        = "worktree.revert_commit"        // Revert a commit (staged, no new commit)
+	ActionWorktreeRenameBranch        = "worktree.rename_branch"        // Rename the current branch
+	ActionWorktreeReset               = "worktree.reset"                // Reset HEAD to a commit (soft/hard)
 
 	// User actions
 	ActionUserGet             = "user.get"
@@ -358,6 +377,8 @@ const (
 	ActionSecretUpdate = "secrets.update"
 	ActionSecretDelete = "secrets.delete"
 	ActionSecretReveal = "secrets.reveal"
+	ActionSecretCopy   = "secrets.copy"
+	ActionSecretMove   = "secrets.move"
 
 	// Sprites actions
 	ActionSpritesStatus              = "sprites.status"
@@ -379,6 +400,8 @@ const (
 	ActionMCPUpdateTaskPRAutomation     = "mcp.update_task_pr_automation"
 	ActionMCPGetTaskMRAutomation        = "mcp.get_task_mr_automation"
 	ActionMCPUpdateTaskMRAutomation     = "mcp.update_task_mr_automation"
+	ActionMCPAddTaskDependency          = "mcp.add_task_dependency"
+	ActionMCPRemoveTaskDependency       = "mcp.remove_task_dependency"
 	ActionMCPAddBranchToTask            = "mcp.add_branch_to_task"
 	ActionMCPAddWorkspaceSources        = "mcp.add_workspace_sources"
 	ActionMCPUpdateRepositoryBaseBranch = "mcp.update_repository_base_branch"
@@ -402,6 +425,8 @@ const (
 	ActionMCPListTaskDocuments = "mcp.list_task_documents"
 	ActionMCPGetTaskDocument   = "mcp.get_task_document"
 	ActionMCPWriteTaskDocument = "mcp.write_task_document"
+	ActionMCPListPluginTools   = "mcp.list_plugin_tools"
+	ActionMCPInvokePluginTool  = "mcp.invoke_plugin_tool"
 
 	// Config-mode MCP actions (agent-native configuration)
 	ActionMCPCreateWorkflow = "mcp.create_workflow"

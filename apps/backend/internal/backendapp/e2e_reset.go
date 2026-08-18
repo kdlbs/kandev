@@ -24,9 +24,13 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
-// errKey is the JSON field used for error responses from the E2E endpoints.
-const errKey = "error"
-const statusKey = "status"
+const (
+	// errKey is the JSON field used for error responses from the E2E endpoints.
+	errKey            = "error"
+	statusKey         = "status"
+	e2eResetSourceKey = "source"
+	e2eResetTypeKey   = "type"
+)
 
 // registerE2EResetRoutes registers the E2E test-only endpoints.
 // The endpoints are available when KANDEV_MOCK_AGENT is "true" or "only" (dev/E2E modes).
@@ -122,6 +126,17 @@ func handleE2EReset(
 		}
 		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM runtime_flag_overrides`); err != nil {
 			log.Warn("e2e reset: runtime flag override cleanup failed", zap.Error(err))
+		}
+		// Repository sets outlive the tasks a reset removes, so a set seeded by
+		// one spec would still be offered in the next spec's create dialog. The
+		// items cascade from the set row.
+		for _, q := range []string{
+			`DELETE FROM repository_set_items WHERE repository_set_id IN (SELECT id FROM repository_sets WHERE workspace_id = ?)`,
+			`DELETE FROM repository_sets WHERE workspace_id = ?`,
+		} {
+			if _, err := repo.DB().ExecContext(ctx, q, workspaceID); err != nil {
+				log.Warn("e2e reset: repository set cleanup failed", zap.String("sql", q), zap.Error(err))
+			}
 		}
 		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM github_workspace_settings WHERE workspace_id = ?`, workspaceID); err != nil {
 			log.Warn("e2e reset: GitHub workspace settings cleanup failed", zap.Error(err))
@@ -668,7 +683,7 @@ func handleE2EAutomationManualTrigger(svc *automation.Service, log *logger.Logge
 		}
 
 		// Build manual trigger data matching the production path.
-		data, _ := json.Marshal(map[string]string{"source": "manual"})
+		data, _ := json.Marshal(map[string]string{e2eResetSourceKey: "manual"})
 		triggerID := ""
 		if len(a.Triggers) > 0 {
 			triggerID = a.Triggers[0].ID
@@ -750,7 +765,7 @@ func handleE2EAddTrigger(svc *automation.Service, log *logger.Logger) gin.Handle
 		c.JSON(http.StatusCreated, gin.H{
 			"id":            t.ID,
 			"automation_id": t.AutomationID,
-			"type":          t.Type,
+			e2eResetTypeKey: t.Type,
 			"enabled":       t.Enabled,
 		})
 	}

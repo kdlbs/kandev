@@ -3,7 +3,9 @@ package controller
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -34,39 +37,68 @@ func (f *fakeCapReader) Get(agentType string) (hostutility.AgentCapabilities, bo
 
 // fakeStore implements just enough of store.Repository for the reconciler.
 type fakeStore struct {
-	agents        map[string]*models.Agent          // keyed by DB ID
-	byName        map[string]*models.Agent          // keyed by Name
-	profiles      map[string][]*models.AgentProfile // keyed by DB agent ID (live)
-	deleted       map[string][]*models.AgentProfile // keyed by DB agent ID (soft-deleted)
-	created       []*models.AgentProfile
-	updated       []*models.AgentProfile
-	softDeleted   []string
-	nextAgentID   int
-	nextProfID    int
-	getByNameErr  error
-	listAgentsErr error
-	listProfErr   map[string]error
+	agents               map[string]*models.Agent                 // keyed by DB ID
+	byName               map[string]*models.Agent                 // keyed by Name
+	profiles             map[string][]*models.AgentProfile        // keyed by DB agent ID (live)
+	deleted              map[string][]*models.AgentProfile        // keyed by DB agent ID (soft-deleted)
+	mcpConfigs           map[string]*models.AgentProfileMcpConfig // keyed by profile ID
+	created              []*models.AgentProfile
+	updated              []*models.AgentProfile
+	softDeleted          []string
+	nextAgentID          int
+	nextProfID           int
+	getByNameErr         error
+	listAgentsErr        error
+	listProfErr          map[string]error
+	duplicateProfErr     error
+	duplicateChangedOnce bool
 }
 
 func newFakeStore() *fakeStore {
 	return &fakeStore{
-		agents:   map[string]*models.Agent{},
-		byName:   map[string]*models.Agent{},
-		profiles: map[string][]*models.AgentProfile{},
-		deleted:  map[string][]*models.AgentProfile{},
+		agents:     map[string]*models.Agent{},
+		byName:     map[string]*models.Agent{},
+		profiles:   map[string][]*models.AgentProfile{},
+		deleted:    map[string][]*models.AgentProfile{},
+		mcpConfigs: map[string]*models.AgentProfileMcpConfig{},
 	}
+}
+
+// copyAgent deep-copies an agent so the fake store behaves like a real one:
+// callers get a snapshot, not a handle on stored state.
+//
+// This matters more than it looks. When Get returned the stored pointer and
+// UpdateAgent was a no-op, a controller could mutate a nested field, never
+// persist it, and every assertion still passed — the test was reading the same
+// struct it had just written through. That masked UpdateAgent silently dropping
+// the tui_config column. Round-tripping through JSON forces writes to go through
+// UpdateAgent to be observable, the same as SQL.
+func copyAgent(a *models.Agent) *models.Agent {
+	if a == nil {
+		return nil
+	}
+	data, err := json.Marshal(a)
+	if err != nil {
+		panic("fakeStore: marshal agent: " + err.Error())
+	}
+	var out models.Agent
+	if err := json.Unmarshal(data, &out); err != nil {
+		panic("fakeStore: unmarshal agent: " + err.Error())
+	}
+	return &out
 }
 
 func (f *fakeStore) CreateAgent(_ context.Context, a *models.Agent) error {
 	f.nextAgentID++
 	a.ID = "agent-" + strconv.Itoa(f.nextAgentID)
-	f.agents[a.ID] = a
-	f.byName[a.Name] = a
+	stored := copyAgent(a)
+	f.agents[a.ID] = stored
+	f.byName[a.Name] = stored
 	return nil
 }
 
 func (f *fakeStore) GetAgent(_ context.Context, id string) (*models.Agent, error) {
-	return f.agents[id], nil
+	return copyAgent(f.agents[id]), nil
 }
 
 func (f *fakeStore) GetAgentByName(_ context.Context, name string) (*models.Agent, error) {
@@ -74,13 +106,28 @@ func (f *fakeStore) GetAgentByName(_ context.Context, name string) (*models.Agen
 		return nil, f.getByNameErr
 	}
 	if a, ok := f.byName[name]; ok {
-		return a, nil
+		return copyAgent(a), nil
 	}
 	return nil, sql.ErrNoRows
 }
 
-func (f *fakeStore) UpdateAgent(context.Context, *models.Agent) error { return nil }
-func (f *fakeStore) DeleteAgent(context.Context, string) error        { return nil }
+func (f *fakeStore) UpdateAgent(_ context.Context, a *models.Agent) error {
+	existing, ok := f.agents[a.ID]
+	if !ok {
+		return fmt.Errorf("agent not found: %s", a.ID)
+	}
+	stored := copyAgent(a)
+	// Mirror the real store's column list so the fake cannot accept a write the
+	// database would reject or ignore.
+	existing.WorkspaceID = stored.WorkspaceID
+	existing.SupportsMCP = stored.SupportsMCP
+	existing.MCPConfigPath = stored.MCPConfigPath
+	existing.TUIConfig = stored.TUIConfig
+	f.byName[existing.Name] = existing
+	return nil
+}
+
+func (f *fakeStore) DeleteAgent(context.Context, string) error { return nil }
 
 func (f *fakeStore) ListAgents(_ context.Context) ([]*models.Agent, error) {
 	if f.listAgentsErr != nil {
@@ -97,10 +144,17 @@ func (f *fakeStore) ListTUIAgents(context.Context) ([]*models.Agent, error) {
 	return nil, nil
 }
 
-func (f *fakeStore) GetAgentProfileMcpConfig(context.Context, string) (*models.AgentProfileMcpConfig, error) {
+// GetAgentProfileMcpConfig implements the settings store interface for the reconciler test fakes.
+func (f *fakeStore) GetAgentProfileMcpConfig(_ context.Context, profileID string) (*models.AgentProfileMcpConfig, error) {
+	if cfg, ok := f.mcpConfigs[profileID]; ok {
+		return cfg, nil
+	}
 	return nil, nil
 }
-func (f *fakeStore) UpsertAgentProfileMcpConfig(context.Context, *models.AgentProfileMcpConfig) error {
+
+// UpsertAgentProfileMcpConfig implements the settings store interface for the reconciler test fakes.
+func (f *fakeStore) UpsertAgentProfileMcpConfig(_ context.Context, config *models.AgentProfileMcpConfig) error {
+	f.mcpConfigs[config.ProfileID] = config
 	return nil
 }
 
@@ -109,6 +163,50 @@ func (f *fakeStore) CreateAgentProfile(_ context.Context, p *models.AgentProfile
 	p.ID = "profile-" + strconv.Itoa(f.nextProfID)
 	f.profiles[p.AgentID] = append(f.profiles[p.AgentID], p)
 	f.created = append(f.created, p)
+	return nil
+}
+
+// DuplicateAgentProfile implements the settings store interface for the reconciler test fakes.
+func (f *fakeStore) DuplicateAgentProfile(_ context.Context, input store.DuplicateAgentProfileInput) error {
+	if f.duplicateProfErr != nil {
+		return f.duplicateProfErr
+	}
+	if f.duplicateChangedOnce {
+		f.duplicateChangedOnce = false
+		// Simulate a concurrent writer: the stored source row changes between
+		// the controller's first read and its duplicate attempt, so a retry
+		// must re-read the source and copy the NEW state.
+		input.Source.Name = "Changed Name"
+		input.Source.UpdatedAt = input.Source.UpdatedAt.Add(time.Second)
+		return store.ErrProfileChanged
+	}
+	// Version check mirrors the sqlite store: the stored source rows must
+	// still match the revisions the copy was built from.
+	if f.profiles[input.Source.AgentID] != nil {
+		for _, p := range f.profiles[input.Source.AgentID] {
+			if p.ID == input.Source.ID && !p.UpdatedAt.Equal(input.Source.UpdatedAt) {
+				return store.ErrProfileChanged
+			}
+		}
+	}
+	if input.SourceMcp != nil {
+		mcp, ok := f.mcpConfigs[input.Source.ID]
+		if !ok || !mcp.UpdatedAt.Equal(input.SourceMcp.UpdatedAt) {
+			return store.ErrProfileChanged
+		}
+	}
+	p := input.Profile
+	f.nextProfID++
+	p.ID = "profile-" + strconv.Itoa(f.nextProfID)
+	now := time.Now().UTC()
+	p.CreatedAt = now
+	p.UpdatedAt = now
+	f.profiles[p.AgentID] = append(f.profiles[p.AgentID], p)
+	f.created = append(f.created, p)
+	if input.McpConfig != nil {
+		input.McpConfig.ProfileID = p.ID
+		f.mcpConfigs[p.ID] = input.McpConfig
+	}
 	return nil
 }
 

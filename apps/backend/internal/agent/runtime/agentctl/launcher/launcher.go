@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -456,16 +457,72 @@ func (l *Launcher) waitForHealthy(ctx context.Context) error {
 	return fmt.Errorf("timeout waiting for agentctl to become healthy")
 }
 
-// pipeOutput reads from a scanner and logs each line.
-// stderr is logged at WARN level for visibility; stdout remains at DEBUG.
+// pipeOutput reads from a scanner and logs each line. stdout is diagnostic
+// noise (ACP travels over the socket, not stdout) so it stays at DEBUG.
+// stderr carries the child's own structured logs; rather than flatten every
+// line to WARN — which turns routine child INFO/DEBUG into shutdown noise in
+// the parent log — it is forwarded at the level the child already tagged it
+// with. Lines without a recognizable level fall back to WARN so unstructured
+// panics/tracebacks stay visible.
 func (l *Launcher) pipeOutput(name string, scanner *bufio.Scanner) {
 	for scanner.Scan() {
 		line := scanner.Text()
-		if name == "stderr" {
-			l.logger.Warn(line, zap.String("stream", name))
-		} else {
+		if name != "stderr" {
 			l.logger.Debug(line, zap.String("stream", name))
+			continue
 		}
+		switch childLogLevel(line) {
+		case "DEBUG":
+			l.logger.Debug(line, zap.String("stream", name))
+		case "INFO":
+			l.logger.Info(line, zap.String("stream", name))
+		case "ERROR", "FATAL", "PANIC", "DPANIC":
+			l.logger.Error(line, zap.String("stream", name))
+		default:
+			l.logger.Warn(line, zap.String("stream", name))
+		}
+	}
+}
+
+// childLogLevel extracts the level token from a line emitted by the agentctl
+// child's console-format zap logger: "<ts>\t<LEVEL>\t<caller>\t<msg>", where
+// LEVEL is capitalized and may be wrapped in ANSI color codes. It returns the
+// uppercased level ("INFO"/"WARN"/…) or "" when the line does not match that
+// shape.
+func childLogLevel(line string) string {
+	// A well-formed console record is "<ts>\t<LEVEL>\t<caller>\t<msg>", so the
+	// level token must be bounded by at least a following caller field. Requiring
+	// three segments rejects truncated lines (e.g. "<ts>\t<token>") whose second
+	// field is not actually a level, so they fall back to WARN.
+	fields := strings.SplitN(line, "\t", 4)
+	if len(fields) < 3 {
+		return ""
+	}
+	level := strings.ToUpper(stripANSI(fields[1]))
+	switch level {
+	case "DEBUG", "INFO", "WARN", "ERROR", "FATAL", "PANIC", "DPANIC":
+		return level
+	default:
+		return ""
+	}
+}
+
+// stripANSI removes ANSI SGR escape sequences (e.g. the color codes the
+// console encoder wraps the level token in) so the bare token can be matched.
+func stripANSI(s string) string {
+	for {
+		start := strings.IndexByte(s, 0x1b)
+		if start < 0 {
+			return s
+		}
+		end := strings.IndexByte(s[start:], 'm')
+		if end < 0 {
+			// Unterminated escape: leave the raw ESC byte in place rather than
+			// dropping the tail, so a truncated token (e.g. "INFO\x1b[34") does
+			// not collapse into a valid level and instead falls back to WARN.
+			return s
+		}
+		s = s[:start] + s[start+end+1:]
 	}
 }
 

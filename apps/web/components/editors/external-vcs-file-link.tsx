@@ -12,6 +12,7 @@ import {
   useSessionGitStatusByRepo,
 } from "@/hooks/domains/session/use-session-git-status";
 import type { ExternalVcsProvider } from "@/lib/utils/external-vcs-file-url";
+import { t } from "@/lib/i18n";
 
 export type ExternalVcsFileLinkProps = UseExternalVcsFileLinkInput & {
   size?: "xs" | "sm" | "touch";
@@ -66,7 +67,7 @@ export function useExternalVcsFileStatus(
 }
 
 function externalLinkLabel(provider: ExternalVcsProvider): string {
-  return `Open file in ${providerNames[provider]}`;
+  return t("task:openFileInProvider", { provider: providerNames[provider] });
 }
 
 export function ExternalVcsFileLink({ size = "xs", ...input }: ExternalVcsFileLinkProps) {

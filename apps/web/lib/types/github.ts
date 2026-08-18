@@ -286,8 +286,25 @@ export type TaskCIPRAutomationState = {
   updated_at: string;
 };
 
+// TaskPRAutomationOptions holds the five automation switches for one linked
+// PR. This is the per-PR source of truth; the aggregated booleans on
+// TaskCIAutomationOptions only report "every linked PR has this on".
+export type TaskPRAutomationOptions = {
+  task_id: string;
+  repository_id: string;
+  pr_number: number;
+  auto_fix_enabled: boolean;
+  auto_merge_enabled: boolean;
+  prompt_on_review_requested: boolean;
+  prompt_on_merged: boolean;
+  prompt_on_closed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type TaskCIAutomationOptions = {
   task_id: string;
+  workspace_id?: string;
   auto_fix_enabled: boolean;
   auto_merge_enabled: boolean;
   auto_fix_prompt_override: string | null;
@@ -300,9 +317,14 @@ export type TaskCIAutomationOptions = {
   review_reviewer_login?: string;
   updated_at: string;
   pr_states: TaskCIPRAutomationState[];
+  pr_options: TaskPRAutomationOptions[];
 };
 
 export type TaskCIAutomationPatch = {
+  // Target one linked PR's automation switches; omit both to apply the
+  // switches to every PR currently linked to the task.
+  repository_id?: string;
+  pr_number?: number;
   auto_fix_enabled?: boolean;
   auto_merge_enabled?: boolean;
   auto_fix_prompt_override?: string | null;

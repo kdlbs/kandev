@@ -1,5 +1,6 @@
 import { expect } from "@playwright/test";
 import { backendFixture as test } from "../../fixtures/backend";
+import { dwell } from "../../helpers/causal-waits";
 import {
   acceptInvite,
   createInviteToken,
@@ -201,7 +202,12 @@ test.describe.serial("opt-in authentication", () => {
     );
     expect(renamed.ok()).toBeTruthy();
 
-    await memberPage.waitForTimeout(1500);
+    await dwell(
+      memberPage,
+      1500,
+      "negative-assertion",
+      "asserts the member's socket never receives the admin's workspace traffic; a frame that must not arrive publishes nothing, so the check needs real time on the wire before sampling",
+    );
     const frames = await memberPage.evaluate(
       () => (window as unknown as { __wsFrames: string[] }).__wsFrames,
     );

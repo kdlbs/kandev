@@ -37,6 +37,9 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	}
 
 	if wt, handled, err := m.tryReuseExisting(ctx, req); handled {
+		if err == nil && wt != nil {
+			err = m.configureContributionDestination(ctx, req.RepositoryPath, wt.Path, wt.Branch, req.ContributionDestination)
+		}
 		return wt, err
 	}
 
@@ -70,6 +73,9 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	}
 	wt, err := m.createInTaskDir(ctx, req, baseRef, fallbackWarning, fallbackDetail)
 	if err != nil {
+		return nil, err
+	}
+	if err := m.configureContributionDestination(ctx, req.RepositoryPath, wt.Path, wt.Branch, req.ContributionDestination); err != nil {
 		return nil, err
 	}
 	return wt, nil
@@ -176,7 +182,9 @@ func requestBranchIdentitySlug(req CreateRequest) string {
 // returned for surfacing on the resulting worktree record.
 func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateRequest) (baseRef, warning, detail string, err error) {
 	baseRef = req.BaseBranch
-	if req.PullBeforeWorktree {
+	if req.RemoteSyncHandled {
+		baseRef = m.preferRefreshedRemoteRef(ctx, req.RepositoryPath, req.BaseBranch)
+	} else if req.PullBeforeWorktree {
 		baseRef = m.pullBaseBranch(ctx, req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
 	}
 
@@ -200,7 +208,9 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 	// remote-tracking ref (e.g. "main" -> "origin/main") which we must use
 	// for the existence check and downstream git operations.
 	resolvedFallback := fallback
-	if req.PullBeforeWorktree {
+	if req.RemoteSyncHandled {
+		resolvedFallback = m.preferRefreshedRemoteRef(ctx, req.RepositoryPath, fallback)
+	} else if req.PullBeforeWorktree {
 		resolvedFallback = m.pullBaseBranch(ctx, req.RepositoryPath, fallback, nil)
 	}
 	fallbackExists, fallbackErr := m.branchExists(ctx, req.RepositoryPath, resolvedFallback)
@@ -248,34 +258,45 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 		return m.createContributionInTaskDir(ctx, req, worktreePath, fallbackWarning, fallbackDetail)
 	}
 	if req.CheckoutBranch != "" {
-		// PRNumber != 0 means the caller wants the refs/pull/<N>/head ref;
-		// fork PR branches don't exist as plain refs locally or under
-		// origin/<branch>, so the existence probe must be skipped and the
-		// fetch path always runs.
-		//
-		// When PRNumber == 0 and the named branch is absent locally and on
-		// origin, the caller's intent is "create a new branch with this
-		// name" rather than "fetch this existing ref" — the historical
-		// fetch-then-check-out path errored ("not found locally or on
-		// remote") in that case and rolled back. We drop CheckoutBranch
-		// from the request copy and pass the desired name as the fallback
-		// (new) branch name so gitAddWorktree creates it from baseRef.
-		if req.PRNumber == 0 && !m.checkoutBranchExistsAnywhere(ctx, req.RepositoryPath, req.CheckoutBranch) {
-			m.logger.Info("checkout branch missing locally and on origin; creating new branch with this name",
-				zap.String("repository_path", req.RepositoryPath),
-				zap.String("requested_branch", req.CheckoutBranch),
-				zap.String("base_ref", baseRef))
-			branchName = req.CheckoutBranch
-			checkoutMode.CheckoutBranch = ""
-		} else {
-			fetchResult, err = m.fetchBranchToLocal(ctx, req.RepositoryPath, req.CheckoutBranch, req.PRNumber)
-			if err != nil {
-				return nil, err
+		if req.RemoteSyncHandled {
+			prepared, prepareErr := m.prepareCheckoutFromRefreshedOrigin(ctx, req.RepositoryPath, req.CheckoutBranch)
+			if prepareErr != nil {
+				return nil, prepareErr
 			}
-			if fetchResult.StartPoint != "" {
-				startPoint = fetchResult.StartPoint
+			if !prepared {
+				branchName = req.CheckoutBranch
+				checkoutMode.CheckoutBranch = ""
+			}
+		} else {
+			// PRNumber != 0 means the caller wants the refs/pull/<N>/head ref;
+			// fork PR branches don't exist as plain refs locally or under
+			// origin/<branch>, so the existence probe must be skipped and the
+			// fetch path always runs.
+			//
+			// When PRNumber == 0 and the named branch is absent locally and on
+			// origin, the caller's intent is "create a new branch with this
+			// name" rather than "fetch this existing ref" — the historical
+			// fetch-then-check-out path errored ("not found locally or on
+			// remote") in that case and rolled back. We drop CheckoutBranch
+			// from the request copy and pass the desired name as the fallback
+			// (new) branch name so gitAddWorktree creates it from baseRef.
+			if req.PRNumber == 0 && !m.checkoutBranchExistsAnywhere(ctx, req.RepositoryPath, req.CheckoutBranch) {
+				m.logger.Info("checkout branch missing locally and on origin; creating new branch with this name",
+					zap.String("repository_path", req.RepositoryPath),
+					zap.String("requested_branch", req.CheckoutBranch),
+					zap.String("base_ref", baseRef))
+				branchName = req.CheckoutBranch
+				checkoutMode.CheckoutBranch = ""
 			} else {
-				startPoint = req.CheckoutBranch
+				fetchResult, err = m.fetchBranchToLocal(ctx, req.RepositoryPath, req.CheckoutBranch, req.PRNumber)
+				if err != nil {
+					return nil, err
+				}
+				if fetchResult.StartPoint != "" {
+					startPoint = fetchResult.StartPoint
+				} else {
+					startPoint = req.CheckoutBranch
+				}
 			}
 		}
 	}
@@ -459,7 +480,7 @@ func (m *Manager) setUpstreamIfExists(ctx context.Context, worktreePath, localBr
 type FetchBranchResult struct {
 	StartPoint    string // Ref to use as worktree start point (e.g., "origin/branch"); empty = use local branch
 	Warning       string // User-friendly warning (non-empty when fell back to local)
-	WarningDetail string // Raw git command output for debugging
+	WarningDetail string // Raw git command output for debugging, or the probe that produced the warning when no git command failed
 }
 
 // fetchBranchToLocal ensures a branch exists locally and is up-to-date.
@@ -556,7 +577,54 @@ func (m *Manager) retryFetchAsRemoteTrackingRef(ctx context.Context, repoPath, b
 		// caller to fall back to req.CheckoutBranch.
 		return &FetchBranchResult{}
 	}
-	return &FetchBranchResult{StartPoint: "origin/" + branch}
+	return m.resolveRetryStartPoint(ctx, repoPath, branch)
+}
+
+// resolveRetryStartPoint picks the start point after the remote-tracking retry
+// succeeded. The retry refreshed origin/<branch> but deliberately left the
+// local branch alone — that is the whole point of dropping the
+// `<branch>:<branch>` refspec — so origin/<branch> is the better start point
+// only while it already contains every local commit.
+//
+// The first fetch is refused whenever the branch is checked out, which for a
+// user's own repository is the normal state of the branch they work on. If it
+// carries commits they have not pushed, adopting the remote ref drops them from
+// the new worktree, and Create still succeeds so nothing surfaces the loss.
+// Being slightly stale is recoverable; losing unpushed work is not. A probe
+// that cannot answer keeps the local branch for the same reason.
+//
+// This also matches the sibling fallbacks: the direct-checkout path in
+// addWorktreeForBranch checks out the local branch, and so do
+// handleFetchFallback and the non-current-branch path in resolveLocalBaseRef.
+func (m *Manager) resolveRetryStartPoint(ctx context.Context, repoPath, branch string) *FetchBranchResult {
+	remoteRef := "origin/" + branch
+	if m.refContains(ctx, repoPath, remoteRef, branch) {
+		return &FetchBranchResult{StartPoint: remoteRef}
+	}
+	m.logger.Info("using local branch (remote-tracking ref does not contain all local commits)",
+		zap.String("branch", branch),
+		zap.String("remote_ref", remoteRef))
+
+	// Being ahead of the remote ref costs the worktree nothing — the local
+	// branch is then a strict superset, so there is nothing to warn about.
+	// Every other shape does: the refs have diverged, or the probe could not
+	// answer (origin/<branch> absent because the remote has no standard fetch
+	// refspec, or the probe itself was bounded). In those cases the worktree
+	// really may miss commits that are on origin, so the existing FetchWarning
+	// surface has to say so rather than report a clean success. The wording
+	// covers both, because this branch cannot tell them apart.
+	if m.refContains(ctx, repoPath, branch, remoteRef) {
+		return &FetchBranchResult{}
+	}
+	return &FetchBranchResult{
+		Warning: fmt.Sprintf(
+			"Could not confirm that %s contains every commit on local branch %q. Using the local version so unpushed commits are kept; it may not include the latest changes from origin.",
+			remoteRef, branch),
+		// No git command failed here, so there is no raw output to carry: the
+		// probe ran and answered "no" (or could not answer). Name the probe
+		// rather than inventing a fake error string.
+		WarningDetail: fmt.Sprintf("git merge-base --is-ancestor %s %s reported non-zero", branch, remoteRef),
+	}
 }
 
 // gitAddWorktreeExisting creates a worktree that checks out an existing local branch.

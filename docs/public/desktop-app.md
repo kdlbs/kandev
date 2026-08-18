@@ -115,7 +115,7 @@ Desktop inherits normal backend configuration. By default, persistent data lives
 
 Only one desktop instance runs per OS user/application scope. Launching the app a second time shows, unminimizes, and focuses the existing main window; it does not start a second backend.
 
-Closing the main OS window or choosing **Quit Kandev** quits the application and stops the backend it owns. There is no tray/background mode or desktop autostart service. On Unix, shutdown sends a graceful termination and force-kills after five seconds if needed; on Windows it terminates the owned process tree. Active external executor resources may have their own lifecycle—check [Executors](./executors.md) before manual cleanup.
+Closing the main OS window or choosing **Quit Kandev** quits the application and stops the backend it owns. There is no tray/background mode or desktop autostart service. On Unix, shutdown sends a graceful termination and force-kills after five seconds if needed; on Windows it terminates the owned process tree. Active external executor resources may have their own lifecycle, check [Executors](./executors.md) before manual cleanup.
 
 The application menu exposes New Task, Settings (`Cmd/Ctrl+,`), contextual Close (`Cmd/Ctrl+W`), zoom, full-screen, Help, update, and Quit actions. Contextual Close asks the web UI to close its top dialog or eligible file/diff/commit/preview tab; if nothing is closeable it does not shut down the window or backend. The desktop shell saves window geometry in its platform app-data directory and clamps restored geometry to an available display.
 

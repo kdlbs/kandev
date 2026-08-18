@@ -31,7 +31,7 @@ import {
   jiraIssueWatchPlaceholders,
   DEFAULT_JIRA_ISSUE_WATCH_PROMPT,
 } from "@/components/jira/jira-issue-watch-placeholders";
-import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
+import { STEP_DEFAULT, resolveProfileId } from "@/lib/watcher-profile-default";
 import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
 import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
 import type {
@@ -94,6 +94,7 @@ function parseMaxInflightTasks(raw: string): number | null | "invalid" {
 // `status`, `created`), operators and a project key — and the string is
 // persisted on the watch and sent upstream verbatim. Translating any of it would
 // produce a query Jira rejects.
+// i18n-exempt: JQL is Jira's query language, not prose.
 const DEFAULT_JQL = `project = PROJ AND status = "Open" ORDER BY created DESC`;
 
 function makeEmptyForm(workspaceId: string): FormState {
@@ -339,6 +340,7 @@ function AutomationFields({
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
 }) {
   const { t } = useTranslation();
+  const stepDefaultLabel = t("common:useStepDefaultOption");
   const { workflows, agentProfiles, allExecutorProfiles } = useFormData(form.workspaceId);
   const { steps, loading: stepsLoading } = useWorkflowSteps(form.workflowId);
   return (
@@ -377,9 +379,9 @@ function AutomationFields({
           description={t("jira:optionalFallsBackToStepDefault")}
           value={form.agentProfileId || STEP_DEFAULT}
           onChange={(v) => setForm((p) => ({ ...p, agentProfileId: resolveProfileId(v) }))}
-          placeholder={STEP_DEFAULT_LABEL}
+          placeholder={stepDefaultLabel}
           items={[
-            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            { id: STEP_DEFAULT, label: stepDefaultLabel },
             ...agentProfiles.map((p) => ({
               id: p.id,
               label: p.label,
@@ -392,9 +394,9 @@ function AutomationFields({
           description={t("jira:optionalFallsBackToStepDefault")}
           value={form.executorProfileId || STEP_DEFAULT}
           onChange={(v) => setForm((p) => ({ ...p, executorProfileId: resolveProfileId(v) }))}
-          placeholder={STEP_DEFAULT_LABEL}
+          placeholder={stepDefaultLabel}
           items={[
-            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            { id: STEP_DEFAULT, label: stepDefaultLabel },
             ...allExecutorProfiles.map((p) => ({ id: p.id, label: p.name })),
           ]}
         />

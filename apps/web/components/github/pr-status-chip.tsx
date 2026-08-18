@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   IconCircleCheckFilled,
   IconCircleXFilled,
@@ -10,17 +11,8 @@ import {
   IconPointFilled,
   IconAlertTriangleFilled,
   IconShield,
-  IconX,
 } from "@tabler/icons-react";
-import {
-  Drawer,
-  DrawerClose,
-  DrawerContent,
-  DrawerDescription,
-  DrawerHeader,
-  DrawerTitle,
-} from "@kandev/ui/drawer";
-import { Button } from "@kandev/ui/button";
+import { Drawer } from "@kandev/ui/drawer";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useHoverPopover } from "@/hooks/domains/github/use-hover-popover";
@@ -39,16 +31,27 @@ import {
   pickDefaultPR,
 } from "@/components/github/pr-task-icon";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
-import { autoFixRoundForState, findCIAutomationStateForPR } from "@/lib/github/ci-automation";
-import type { AutoFixRoundInfo } from "@/lib/github/ci-automation";
-import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
-import { useTranslation } from "react-i18next";
+import {
+  ChangeRequestStatusChip,
+  ChangeRequestStatusChipHoverArea,
+  ChangeRequestStatusDrawerContent,
+  useChangeRequestStatusChipTriggerGuard,
+} from "@/components/integrations/change-request-status-chrome";
+import {
+  AutomationFlagBadges,
+  automationAriaSuffix,
+  automationForPR,
+  automationForPRs,
+} from "@/components/github/pr-status-automation-badges";
+import type { AutomationFlags } from "@/components/github/pr-status-automation-badges";
+import type { TaskPR } from "@/lib/types/github";
+import type { TFunction } from "i18next";
 
 const HOVER_OPEN_DELAY_MS = 150;
 const HOVER_CLOSE_DELAY_MS = 150;
 
-// Terminal states (merged / closed) are omitted from CI status aggregation,
-// but remain in multi-PR surfaces so users can unlink old associations.
+// Terminal states (merged / closed) never reach here — PRStatusChip returns
+// null for them before rendering — so the chip status union omits them.
 type ChipStatus =
   | "passed"
   | "failed"
@@ -59,11 +62,6 @@ type ChipStatus =
   | "waiting"
   | "in_progress"
   | "neutral";
-type AutomationFlags = {
-  autoFix: boolean;
-  autoMerge: boolean;
-  autoFixRound: AutoFixRoundInfo | null;
-};
 type TriggerRef = { current: HTMLButtonElement | null };
 type SingleChipProps = {
   pr: TaskPR;
@@ -81,8 +79,7 @@ type MultiChipProps = {
 };
 
 function focusAfterCollapse(triggerRef?: TriggerRef) {
-  if (!triggerRef) return;
-  setTimeout(() => triggerRef.current?.focus(), 0);
+  if (triggerRef) setTimeout(() => triggerRef.current?.focus(), 0);
 }
 
 function chipStatus(pr: TaskPR): ChipStatus {
@@ -133,9 +130,6 @@ export function aggregateChipStatus(prs: TaskPR[]): ChipStatus {
   return worst;
 }
 
-const CHIP_BUTTON_CLASS =
-  "cursor-pointer inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs";
-
 /**
  * Radix HoverCard treats the trigger as outside the content's bounding box, so
  * a click on the chip would auto-close the popover. This guard filters out
@@ -143,20 +137,6 @@ const CHIP_BUTTON_CLASS =
  * via hover. Returns the trigger ref plus a memoised handler that reads the ref
  * lazily (inside the callback, never during render).
  */
-function useChipTriggerGuard(externalRef?: TriggerRef) {
-  const fallbackRef = useRef<HTMLButtonElement>(null);
-  const ref = externalRef ?? fallbackRef;
-  const onPointerDownOutside = useCallback(
-    (e: { target: EventTarget | null; preventDefault: () => void }) => {
-      if (ref.current && ref.current.contains(e.target as Node)) {
-        e.preventDefault();
-      }
-    },
-    [],
-  );
-  return { ref, onPointerDownOutside };
-}
-
 // Hover-bridge lifecycle for the chip's desktop popover. Delegates to the
 // shared hook so the chip and the top-bar PR button keep identical
 // trigger->content bridge behavior (the popover must survive the cursor
@@ -183,10 +163,9 @@ function useChipPopoverInteractions() {
  * Mobile: tapping opens the same popover content inside a bottom-sheet Drawer
  * — hover is unreachable on touch devices.
  *
- * Returns null when the task has no PR yet, or when its only PR is terminal
- * (merged / closed). With multiple associations, terminal PRs stay in the
- * multi-PR surface so old links can still be removed while CI status continues
- * to reflect open PRs only.
+ * Returns null when the task has no PR yet, or once the PR reaches a terminal
+ * state (merged / closed) — the chat-input banner already conveys that, so the
+ * CI chip would be redundant.
  */
 export function PRStatusChip({ taskId }: { taskId: string | null }) {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
@@ -195,9 +174,10 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   // Defensive Array.isArray: a partial hydration can briefly seed the store
   // with a non-array value (same guard as PRTaskIcon).
+  // Only open PRs are worth a CI chip — terminal PRs (merged/closed) are
+  // already conveyed by the chat-input banner. With multiple PRs the chip
+  // stays visible as long as at least one is still open.
   const allPRs = Array.isArray(prs) ? prs : [];
-  // Terminal PRs are excluded from CI status and background warming, but are
-  // kept in the multi-PR association list so old links remain unlinkable.
   const openPRs = allPRs.filter((p) => p.state !== "merged" && p.state !== "closed");
   // Subscribe at the chip level so the cache warms even when the top-bar PR
   // button isn't mounted (e.g. small viewport that hides it). Warm the PR the
@@ -227,50 +207,6 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
   );
 }
 
-function automationForPR(
-  options: TaskCIAutomationOptions | null | undefined,
-  pr: TaskPR,
-): AutomationFlags {
-  return {
-    autoFix: Boolean(options?.auto_fix_enabled),
-    autoMerge: Boolean(options?.auto_merge_enabled),
-    autoFixRound: options?.auto_fix_enabled
-      ? autoFixRoundForState(
-          findCIAutomationStateForPR(options.pr_states, pr),
-          options.auto_fix_max_rounds,
-        )
-      : null,
-  };
-}
-
-function automationForPRs(
-  options: TaskCIAutomationOptions | null | undefined,
-  prs: TaskPR[],
-): AutomationFlags {
-  const roundInfos = options?.auto_fix_enabled
-    ? prs.map((pr) =>
-        autoFixRoundForState(
-          findCIAutomationStateForPR(options.pr_states, pr),
-          options.auto_fix_max_rounds,
-        ),
-      )
-    : [];
-  return {
-    autoFix: Boolean(options?.auto_fix_enabled),
-    autoMerge: Boolean(options?.auto_merge_enabled),
-    autoFixRound: pickAttentionRound(roundInfos),
-  };
-}
-
-function pickAttentionRound(roundInfos: AutoFixRoundInfo[]): AutoFixRoundInfo | null {
-  if (roundInfos.length === 0) return null;
-  return roundInfos.reduce((best, next) => {
-    if (next.exhausted && !best.exhausted) return next;
-    if (next.exhausted === best.exhausted && next.current > best.current) return next;
-    return best;
-  });
-}
-
 type ChipButtonAttrs = {
   "data-testid": "pr-status-chip";
   "data-pr-number": number;
@@ -278,23 +214,13 @@ type ChipButtonAttrs = {
   "data-status": ChipStatus;
   "data-pr-ready-to-merge": "true" | "false";
   "aria-label": string;
-  className: string;
 };
-
-function automationAriaSuffix(automation: AutomationFlags): string {
-  const flags = [
-    automation.autoFix
-      ? `auto-fix enabled${automation.autoFixRound ? ` ${automation.autoFixRound.current} of ${automation.autoFixRound.max} rounds used` : ""}`
-      : null,
-    automation.autoMerge ? "auto-merge enabled" : null,
-  ].filter(Boolean);
-  return flags.length > 0 ? `, ${flags.join(", ")}` : "";
-}
 
 function chipButtonAttrs(
   pr: TaskPR,
   status: ChipStatus,
   automation: AutomationFlags,
+  t: TFunction,
 ): ChipButtonAttrs {
   return {
     "data-testid": "pr-status-chip",
@@ -302,41 +228,11 @@ function chipButtonAttrs(
     "data-pr-state": pr.state,
     "data-status": status,
     "data-pr-ready-to-merge": isPRReadyToMerge(pr) ? "true" : "false",
-    "aria-label": `Pull request #${pr.pr_number} CI status${automationAriaSuffix(automation)}`,
-    className: CHIP_BUTTON_CLASS,
+    "aria-label": t("github:pullRequestCiStatusAria", {
+      number: pr.pr_number,
+      automation: automationAriaSuffix(automation, t),
+    }),
   };
-}
-
-function AutomationFlagBadges({ automation }: { automation: AutomationFlags }) {
-  const { t } = useTranslation();
-  if (!automation.autoFix && !automation.autoMerge) return null;
-  const autoFixRound = automation.autoFixRound;
-  return (
-    <>
-      {automation.autoFix && autoFixRound && (
-        <span
-          data-testid="pr-status-auto-fix-chip"
-          data-auto-fix-round={`${autoFixRound.current}/${autoFixRound.max}`}
-          data-auto-fix-exhausted={autoFixRound.exhausted ? "true" : "false"}
-          className={`rounded-sm px-1 py-0.5 text-[9px] font-medium leading-none ${
-            autoFixRound.exhausted
-              ? "bg-yellow-500/15 text-yellow-500"
-              : "bg-emerald-500/15 text-emerald-500"
-          }`}
-        >
-          {t("github:autoFix")} {autoFixRound.current}/{autoFixRound.max}
-        </span>
-      )}
-      {automation.autoMerge && (
-        <span
-          data-testid="pr-status-auto-merge-chip"
-          className="rounded-sm bg-sky-500/15 px-1 py-0.5 text-[9px] font-medium leading-none text-sky-500"
-        >
-          {t("github:autoMerge")}
-        </span>
-      )}
-    </>
-  );
 }
 
 function PRStatusChipInner(props: SingleChipProps) {
@@ -346,33 +242,22 @@ function PRStatusChipInner(props: SingleChipProps) {
 }
 
 function PRStatusChipHoverCard({ pr, automation, refreshTaskPR, triggerRef }: SingleChipProps) {
+  const { t } = useTranslation();
   const status = chipStatus(pr);
-  const { ref, onPointerDownOutside } = useChipTriggerGuard(triggerRef);
+  const { ref, onPointerDownOutside } = useChangeRequestStatusChipTriggerGuard(triggerRef);
   const { open, onOpenChange, onTriggerEnter, onTriggerLeave, onContentEnter, onContentLeave } =
     useChipPopoverInteractions();
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
-      <span
-        className="inline-flex"
-        onMouseOver={onTriggerEnter}
-        onMouseEnter={onTriggerEnter}
-        onMouseMove={onTriggerEnter}
-        onPointerOver={onTriggerEnter}
-        onPointerEnter={onTriggerEnter}
-        onPointerMove={onTriggerEnter}
-        onMouseLeave={onTriggerLeave}
-        onPointerLeave={onTriggerLeave}
-        onFocus={onTriggerEnter}
-        onBlur={onTriggerLeave}
-      >
+      <ChangeRequestStatusChipHoverArea handlers={{ onTriggerEnter, onTriggerLeave }}>
         <PopoverAnchor asChild>
-          <button ref={ref} type="button" {...chipButtonAttrs(pr, status, automation)}>
+          <ChangeRequestStatusChip ref={ref} {...chipButtonAttrs(pr, status, automation, t)}>
             <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
             <ChipStatusGlyph status={status} />
             <AutomationFlagBadges automation={automation} />
-          </button>
+          </ChangeRequestStatusChip>
         </PopoverAnchor>
-      </span>
+      </ChangeRequestStatusChipHoverArea>
       <PopoverContent
         side="top"
         align="start"
@@ -401,20 +286,22 @@ type MultiChipButtonAttrs = {
   "data-pr-count": number;
   "data-status": ChipStatus;
   "aria-label": string;
-  className: string;
 };
 
 function multiChipButtonAttrs(
   prs: TaskPR[],
   status: ChipStatus,
   automation: AutomationFlags,
+  t: TFunction,
 ): MultiChipButtonAttrs {
   return {
     "data-testid": "pr-status-chip",
     "data-pr-count": prs.length,
     "data-status": status,
-    "aria-label": `${prs.length} pull requests CI status${automationAriaSuffix(automation)}`,
-    className: CHIP_BUTTON_CLASS,
+    "aria-label": t("github:pullRequestCountCiStatusAria", {
+      count: prs.length,
+      automation: automationAriaSuffix(automation, t),
+    }),
   };
 }
 
@@ -445,31 +332,20 @@ function PRStatusChipMultiHoverCard({
   onRemovePR,
   triggerRef,
 }: MultiChipProps) {
+  const { t } = useTranslation();
   const status = aggregateChipStatus(statusPrs ?? prs);
-  const { ref, onPointerDownOutside } = useChipTriggerGuard(triggerRef);
+  const { ref, onPointerDownOutside } = useChangeRequestStatusChipTriggerGuard(triggerRef);
   const { open, onOpenChange, onTriggerEnter, onTriggerLeave, onContentEnter, onContentLeave } =
     useChipPopoverInteractions();
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
-      <span
-        className="inline-flex"
-        onMouseOver={onTriggerEnter}
-        onMouseEnter={onTriggerEnter}
-        onMouseMove={onTriggerEnter}
-        onPointerOver={onTriggerEnter}
-        onPointerEnter={onTriggerEnter}
-        onPointerMove={onTriggerEnter}
-        onMouseLeave={onTriggerLeave}
-        onPointerLeave={onTriggerLeave}
-        onFocus={onTriggerEnter}
-        onBlur={onTriggerLeave}
-      >
+      <ChangeRequestStatusChipHoverArea handlers={{ onTriggerEnter, onTriggerLeave }}>
         <PopoverAnchor asChild>
-          <button ref={ref} type="button" {...multiChipButtonAttrs(prs, status, automation)}>
+          <ChangeRequestStatusChip ref={ref} {...multiChipButtonAttrs(prs, status, automation, t)}>
             <MultiChipGlyph prs={prs} status={status} automation={automation} />
-          </button>
+          </ChangeRequestStatusChip>
         </PopoverAnchor>
-      </span>
+      </ChangeRequestStatusChipHoverArea>
       <PopoverContent
         side="top"
         align="start"
@@ -506,46 +382,30 @@ function PRStatusChipMultiDrawer({
   const [open, setOpen] = useState(false);
   return (
     <Drawer open={open} onOpenChange={setOpen}>
-      <button
+      <ChangeRequestStatusChip
         ref={triggerRef}
-        type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(true)}
-        {...multiChipButtonAttrs(prs, status, automation)}
+        {...multiChipButtonAttrs(prs, status, automation, t)}
       >
         <MultiChipGlyph prs={prs} status={status} automation={automation} />
-      </button>
-      <DrawerContent data-testid="pr-status-chip-drawer" className="max-h-[80vh] flex flex-col">
-        <DrawerHeader className="flex flex-row items-center justify-between border-b py-2">
-          <DrawerTitle className="text-sm">
-            {t("github:pullRequestCount", { count: prs.length })}
-          </DrawerTitle>
-          <DrawerDescription className="sr-only">
-            {t("github:pullRequestCiStatusReviewsAnd")}
-          </DrawerDescription>
-          <DrawerClose asChild>
-            <Button
-              data-testid="pr-status-chip-drawer-close"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t("github:closePrStatus")}
-              className="cursor-pointer"
-            >
-              <IconX className="h-4 w-4" />
-            </Button>
-          </DrawerClose>
-        </DrawerHeader>
-        <div className="flex-1 min-h-0 overflow-y-auto p-3" data-vaul-no-drag>
-          <MultiPRCIPopover
-            prs={prs}
-            enabled={open}
-            refreshTaskPR={refreshTaskPR}
-            onRemovePR={onRemovePR}
-            onCollapseFocus={() => focusAfterCollapse(triggerRef)}
-          />
-        </div>
-      </DrawerContent>
+      </ChangeRequestStatusChip>
+      <ChangeRequestStatusDrawerContent
+        testId="pr-status-chip-drawer"
+        closeTestId="pr-status-chip-drawer-close"
+        title={t("github:pullRequestCount", { count: prs.length })}
+        description={t("github:pullRequestCiStatusReviewsAnd")}
+        closeLabel={t("github:closePrStatus")}
+      >
+        <MultiPRCIPopover
+          prs={prs}
+          enabled={open}
+          refreshTaskPR={refreshTaskPR}
+          onRemovePR={onRemovePR}
+          onCollapseFocus={() => focusAfterCollapse(triggerRef)}
+        />
+      </ChangeRequestStatusDrawerContent>
     </Drawer>
   );
 }
@@ -556,43 +416,26 @@ function PRStatusChipDrawer({ pr, automation, refreshTaskPR, triggerRef }: Singl
   const [open, setOpen] = useState(false);
   return (
     <Drawer open={open} onOpenChange={setOpen}>
-      <button
+      <ChangeRequestStatusChip
         ref={triggerRef}
-        type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(true)}
-        {...chipButtonAttrs(pr, status, automation)}
+        {...chipButtonAttrs(pr, status, automation, t)}
       >
         <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
         <ChipStatusGlyph status={status} />
         <AutomationFlagBadges automation={automation} />
-      </button>
-      <DrawerContent data-testid="pr-status-chip-drawer" className="max-h-[80vh] flex flex-col">
-        <DrawerHeader className="flex flex-row items-center justify-between border-b py-2">
-          <DrawerTitle className="text-sm">
-            {t("github:pr")}
-            {pr.pr_number}
-          </DrawerTitle>
-          <DrawerDescription className="sr-only">
-            {t("github:pullRequestCiStatusReviewsAnd")}
-          </DrawerDescription>
-          <DrawerClose asChild>
-            <Button
-              data-testid="pr-status-chip-drawer-close"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t("github:closePrStatus")}
-              className="cursor-pointer"
-            >
-              <IconX className="h-4 w-4" />
-            </Button>
-          </DrawerClose>
-        </DrawerHeader>
-        <div className="flex-1 min-h-0 overflow-y-auto p-3" data-vaul-no-drag>
-          <PRCIPopover pr={pr} enabled={open} refreshTaskPR={refreshTaskPR} />
-        </div>
-      </DrawerContent>
+      </ChangeRequestStatusChip>
+      <ChangeRequestStatusDrawerContent
+        testId="pr-status-chip-drawer"
+        closeTestId="pr-status-chip-drawer-close"
+        title={`${t("github:pr")}${pr.pr_number}`}
+        description={t("github:pullRequestCiStatusReviewsAnd")}
+        closeLabel={t("github:closePrStatus")}
+      >
+        <PRCIPopover pr={pr} enabled={open} refreshTaskPR={refreshTaskPR} />
+      </ChangeRequestStatusDrawerContent>
     </Drawer>
   );
 }

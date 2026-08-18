@@ -31,6 +31,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
       const primary = primaryTaskRepository(task.repositories);
       return {
         id: task.id,
+        workflowId: snapshot.workflow.id,
         workflowStepId,
         title: task.title,
         description: task.description ?? undefined,
@@ -53,6 +54,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         activeSubagentCount: task.active_subagent_count ?? undefined,
         sessionCount: task.session_count ?? undefined,
         reviewStatus: task.review_status ?? undefined,
+        statusSummary: task.status_summary,
         parentTaskId: task.parent_id ?? undefined,
         metadata: task.metadata,
         workspaceMode: workspaceModeFromMetadata(task.metadata),
@@ -100,6 +102,7 @@ export function taskToState(
       activeSessionId: resolvedSessionId,
       pinnedSessionId: null,
       lastSessionByTaskId: resolvedSessionId ? { [task.id]: resolvedSessionId } : {},
+      resumeSkippedSessionIds: {},
     },
     messages:
       resolvedSessionId && messages

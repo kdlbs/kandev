@@ -650,6 +650,7 @@ func (r *memoryRepository) MergeIntoAbove(_ context.Context, sessionID, sourceID
 	target.Content = content
 	target.Attachments = attachments
 	target.Metadata = metadata
+	target.QueuedAt = latestQueuedAt(target.QueuedAt, source.QueuedAt)
 	r.entries[sessionID] = append(list[:sourceIndex], list[sourceIndex+1:]...)
 	if len(r.entries[sessionID]) == 0 {
 		delete(r.entries, sessionID)
@@ -658,6 +659,73 @@ func (r *memoryRepository) MergeIntoAbove(_ context.Context, sessionID, sourceID
 
 	merged := *target
 	return &merged, nil
+}
+
+// AutoMergeIntoAbove folds one exact source into its immediate compatible
+// predecessor. Incompatibility and missing candidates are successful skips.
+func (r *memoryRepository) AutoMergeIntoAbove(_ context.Context, sessionID, sourceID string) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	list := r.entries[sessionID]
+	sourceIndex := -1
+	for index, message := range list {
+		if message.ID == sourceID {
+			sourceIndex = index
+			break
+		}
+	}
+	if sourceIndex < 0 {
+		return nil, false, nil
+	}
+	source := list[sourceIndex]
+	var target *QueuedMessage
+	for _, message := range list {
+		if message.Position < source.Position && (target == nil || message.Position > target.Position) {
+			target = message
+		}
+	}
+	if target == nil {
+		return cloneQueuedMessage(source), false, nil
+	}
+	values, compatible := buildAutoMergedEntry(target, source)
+	if !compatible {
+		return cloneQueuedMessage(source), false, nil
+	}
+	target.Content = values.content
+	target.Attachments = values.attachments
+	target.Metadata = values.metadata
+	target.QueuedAt = values.queuedAt
+	r.entries[sessionID] = append(list[:sourceIndex], list[sourceIndex+1:]...)
+	return cloneQueuedMessage(target), true, nil
+}
+
+// AutoMergeCandidateIntoAbove folds a not-yet-admitted candidate into the
+// session's tail entry when compatible, without inserting it. Incompatibility
+// and missing tails are successful skips.
+func (r *memoryRepository) AutoMergeCandidateIntoAbove(_ context.Context, candidate *QueuedMessage) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	list := r.entries[candidate.SessionID]
+	var target *QueuedMessage
+	for _, message := range list {
+		if target == nil || message.Position > target.Position {
+			target = message
+		}
+	}
+	if target == nil {
+		return nil, false, nil
+	}
+	values, compatible := buildAutoMergedEntry(target, candidate)
+	if !compatible {
+		return nil, false, nil
+	}
+	target.Content = values.content
+	target.Attachments = values.attachments
+	target.Metadata = values.metadata
+	target.QueuedAt = values.queuedAt
+	return cloneQueuedMessage(target), true, nil
 }
 
 // ReorderEntries rewrites the session's visible pending order to match

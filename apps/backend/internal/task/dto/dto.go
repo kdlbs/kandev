@@ -54,6 +54,7 @@ type RepositoryDTO struct {
 	Provider               string                       `json:"provider"`
 	ProviderRepoID         string                       `json:"provider_repo_id"`
 	ProviderHost           string                       `json:"provider_host"`
+	ProviderScope          string                       `json:"provider_scope"`
 	ProviderOwner          string                       `json:"provider_owner"`
 	ProviderName           string                       `json:"provider_name"`
 	RemoteURL              string                       `json:"remote_url"`
@@ -74,6 +75,25 @@ type RepositoryDTO struct {
 type RepositorySecretBindingDTO struct {
 	Key      string `json:"key"`
 	SecretID string `json:"secret_id"`
+}
+
+// RepositorySetDTO is a named group of workspace repositories on the wire.
+// Repositories is always an array, never null: the web store indexes it without
+// a nil check, and a set whose members were all deleted is legitimately empty.
+type RepositorySetDTO struct {
+	ID           string                 `json:"id"`
+	WorkspaceID  string                 `json:"workspace_id"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description"`
+	Repositories []RepositorySetItemDTO `json:"repositories"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+}
+
+// RepositorySetItemDTO is one repository's membership, in apply order.
+type RepositorySetItemDTO struct {
+	RepositoryID string `json:"repository_id"`
+	Position     int    `json:"position"`
 }
 
 type RepositoryScriptDTO struct {
@@ -188,6 +208,22 @@ type TaskDTO struct {
 	// metadata key at DTO conversion time (see FromTaskWithSessionInfo).
 	Interrupted bool `json:"interrupted,omitempty"`
 
+	// Dependency projection. Derived on every read from task_blockers plus each
+	// related task's own state — never persisted, because a stale copy would be
+	// read by the auto-start gate. Stamped by EnrichTaskDependencies.
+	Blocked bool `json:"blocked,omitempty"`
+	// BlockedReason is "pending", "failed", or "unknown"; omitted when the task
+	// is not blocked.
+	BlockedReason string `json:"blocked_reason,omitempty"`
+	// DependsOn lists direct predecessors, DependsOn/Blocks are not transitive.
+	DependsOn []TaskDependencyRefDTO `json:"depends_on,omitempty"`
+	// Blocks lists direct dependents so the dependency chip can render both
+	// directions without a second round trip.
+	Blocks []TaskDependencyRefDTO `json:"blocks,omitempty"`
+	// StartWhenUnblocked reports that a launch intent is waiting on dependency
+	// resolution. Read-only here; set through the create request or the picker.
+	StartWhenUnblocked bool `json:"start_when_unblocked,omitempty"`
+
 	// Office extensions
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
 	Origin                 string `json:"origin,omitempty"`
@@ -216,6 +252,10 @@ type TaskDTO struct {
 	// It is loaded in batches and is absent when no projection exists yet; the
 	// existing coarse fields above remain the compatibility fallback.
 	StatusSummary *statussummary.TaskStatusSummary `json:"status_summary,omitempty"`
+	// StatusSummaryInvalidated distinguishes a known-stale summary from an
+	// ordinarily omitted partial projection so clients clear their cache and
+	// expose the coarse compatibility fallback.
+	StatusSummaryInvalidated bool `json:"status_summary_invalidated,omitempty"`
 }
 
 type TaskRepositoryDTO struct {
@@ -304,8 +344,9 @@ type TaskSessionDTO struct {
 	SupportsSteering bool `json:"supports_steering,omitempty"`
 	// PendingAction is the compact per-session projection used when the
 	// session transcript is not loaded in the client.
-	PendingAction       *string `json:"pending_action,omitempty"`
-	ActiveSubagentCount int     `json:"active_subagent_count"`
+	PendingAction         *string                       `json:"pending_action"`
+	PendingActionRevision *models.PendingActionRevision `json:"pending_action_revision,omitempty"`
+	ActiveSubagentCount   int                           `json:"active_subagent_count"`
 	// LastReadMessageID is the session's Slack-style read cursor — the id of
 	// the newest message the frontend has marked as read. Used by the
 	// transcript to position the unread ("New") divider.
@@ -362,9 +403,10 @@ type TaskSessionSummaryDTO struct {
 	SupportsSteering bool `json:"supports_steering,omitempty"`
 	// PendingAction is the compact per-session projection used when the
 	// session transcript is not loaded in the client.
-	PendingAction       *string `json:"pending_action"`
-	ActiveSubagentCount int     `json:"active_subagent_count"`
-	LastReadMessageID   string  `json:"last_read_message_id,omitempty"`
+	PendingAction         *string                       `json:"pending_action"`
+	PendingActionRevision *models.PendingActionRevision `json:"pending_action_revision,omitempty"`
+	ActiveSubagentCount   int                           `json:"active_subagent_count"`
+	LastReadMessageID     string                        `json:"last_read_message_id,omitempty"`
 	// CommandCount is the number of tool_call messages on this session,
 	// surfaced inline in the timeline entry header ("ran N commands").
 	// Populated by ListTaskSessions; defaults to 0 for callers that don't
@@ -455,6 +497,11 @@ type ListWorkspacesResponse struct {
 type ListRepositoriesResponse struct {
 	Repositories []RepositoryDTO `json:"repositories"`
 	Total        int             `json:"total"`
+}
+
+type ListRepositorySetsResponse struct {
+	RepositorySets []RepositorySetDTO `json:"repository_sets"`
+	Total          int                `json:"total"`
 }
 
 type ListRepositoryScriptsResponse struct {
@@ -593,6 +640,7 @@ func FromRepository(repository *models.Repository) RepositoryDTO {
 		Provider:               repository.Provider,
 		ProviderRepoID:         repository.ProviderRepoID,
 		ProviderHost:           repository.ProviderHost,
+		ProviderScope:          repository.ProviderScope,
 		ProviderOwner:          repository.ProviderOwner,
 		ProviderName:           repository.ProviderName,
 		RemoteURL:              repository.RemoteURL,
@@ -607,6 +655,25 @@ func FromRepository(repository *models.Repository) RepositoryDTO {
 		SecretBindings:         bindings,
 		CreatedAt:              repository.CreatedAt,
 		UpdatedAt:              repository.UpdatedAt,
+	}
+}
+
+func FromRepositorySet(set *models.RepositorySet) RepositorySetDTO {
+	items := make([]RepositorySetItemDTO, 0, len(set.Items))
+	for _, item := range set.Items {
+		items = append(items, RepositorySetItemDTO{
+			RepositoryID: item.RepositoryID,
+			Position:     item.Position,
+		})
+	}
+	return RepositorySetDTO{
+		ID:           set.ID,
+		WorkspaceID:  set.WorkspaceID,
+		Name:         set.Name,
+		Description:  set.Description,
+		Repositories: items,
+		CreatedAt:    set.CreatedAt,
+		UpdatedAt:    set.UpdatedAt,
 	}
 }
 
@@ -1081,11 +1148,13 @@ func TaskPlanRevisionMetaFromModel(rev *models.TaskPlanRevision) *TaskPlanRevisi
 	return meta
 }
 
+const turnTimestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
 // FromTurn converts a Turn model to a TurnDTO.
 func FromTurn(turn *models.Turn) TurnDTO {
 	var completedAt *string
 	if turn.CompletedAt != nil {
-		formatted := turn.CompletedAt.UTC().Format(time.RFC3339)
+		formatted := turn.CompletedAt.UTC().Format(turnTimestampLayout)
 		completedAt = &formatted
 	}
 
@@ -1093,10 +1162,10 @@ func FromTurn(turn *models.Turn) TurnDTO {
 		ID:          turn.ID,
 		SessionID:   turn.TaskSessionID,
 		TaskID:      turn.TaskID,
-		StartedAt:   turn.StartedAt.UTC().Format(time.RFC3339),
+		StartedAt:   turn.StartedAt.UTC().Format(turnTimestampLayout),
 		CompletedAt: completedAt,
 		Metadata:    turn.Metadata,
-		CreatedAt:   turn.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:   turn.UpdatedAt.UTC().Format(time.RFC3339),
+		CreatedAt:   turn.CreatedAt.UTC().Format(turnTimestampLayout),
+		UpdatedAt:   turn.UpdatedAt.UTC().Format(turnTimestampLayout),
 	}
 }

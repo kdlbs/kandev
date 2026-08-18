@@ -15,6 +15,7 @@ import (
 	quickterminalrepository "github.com/kandev/kandev/internal/quickterminal/repository"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/telemetrycontract"
 	terminalrepo "github.com/kandev/kandev/internal/terminal/repository"
 	utilitystore "github.com/kandev/kandev/internal/utility/store"
 	workflowrepository "github.com/kandev/kandev/internal/workflow/repository"
@@ -69,6 +70,13 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 		return nil, nil, nil, fmt.Errorf("office repo: %w", err)
 	}
 	cleanups = append(cleanups, officeCleanup)
+	// Must run after office.Provide succeeds: it reconciles task_sessions
+	// against office's office_cost_events ledger, and construction order is
+	// what guarantees that table exists now - see the doc comment on
+	// sqlite.Repository.BackfillSessionTokensCachedIn.
+	if err := backfillSessionCachedTokens(ctx, taskRepoImpl, log); err != nil {
+		return nil, nil, nil, err
+	}
 	terminalRepoImpl, err := terminalrepo.NewWithDB(writer, reader, log)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("terminal repo: %w", err)
@@ -96,6 +104,10 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 	}
 	cleanups = append(cleanups, cleanup)
 
+	// All repositories have finished their initSchema calls, so every
+	// telemetry contract's backing objects are known to exist (or not).
+	activateTelemetryContracts(ctx, writer, reader, log)
+
 	// All repositories have finished their initSchema calls. Record the
 	// current binary version so the next boot can detect upgrades correctly.
 	recordSchemaVersion(writer, cfg.Database.Driver, version, log)
@@ -119,6 +131,30 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 		Auth:          authRepo,
 	}
 	return pool, repos, cleanups, nil
+}
+
+// sessionCachedTokenBackfiller is the narrow slice of *sqlite.Repository
+// (internal/task/repository/sqlite) this composition root needs, defined
+// locally so this file doesn't have to import that subpackage just for one
+// call. See sqlite.Repository.BackfillSessionTokensCachedIn's doc comment
+// for why this call lives here rather than inside the task repository's own
+// runMigrations(): it reconciles task_sessions against the office
+// repository's office_cost_events ledger, and only this composition root
+// knows both repositories have finished initializing.
+type sessionCachedTokenBackfiller interface {
+	BackfillSessionTokensCachedIn(ctx context.Context) (int64, error)
+}
+
+// backfillSessionCachedTokens triggers the task repository's cached-token
+// reconciliation and logs how many task_sessions rows it reconciled.
+// Extracted out of provideRepositories to keep it within the funlen limit.
+func backfillSessionCachedTokens(ctx context.Context, taskRepo sessionCachedTokenBackfiller, log *logger.Logger) error {
+	affected, err := taskRepo.BackfillSessionTokensCachedIn(ctx)
+	if err != nil {
+		return err
+	}
+	log.Info("reconciled task_sessions.tokens_cached_in against office_cost_events", zap.Int64("rows", affected))
+	return nil
 }
 
 // supportRepositorySet groups the lighter-weight support repositories
@@ -179,6 +215,26 @@ func provideSupportRepos(ctx context.Context, writer, reader *sqlx.DB) (supportR
 	return repos, cleanups, nil
 }
 
+// activateTelemetryContracts writes the boot activation row for any
+// newly-active telemetry contract and logs one health line per registered
+// contract. Neither step is fatal: a failure logs and boot continues,
+// matching recordSchemaVersion's contract directly below.
+func activateTelemetryContracts(ctx context.Context, writer, reader *sqlx.DB, log *logger.Logger) {
+	store, err := telemetrycontract.NewWithDB(writer, reader)
+	if err != nil {
+		if log != nil {
+			log.Warn("failed to initialize telemetry_activations", zap.Error(err))
+		}
+		return
+	}
+	if err := store.Activate(ctx); err != nil {
+		if log != nil {
+			log.Warn("failed to activate telemetry contracts", zap.Error(err))
+		}
+	}
+	store.LogHealth(ctx, log)
+}
+
 // recordSchemaVersion writes the current binary version into kandev_meta so the
 // next boot can detect upgrades. A failure here is non-fatal: the stored
 // version stays at the previous value and the next boot will take a fresh
@@ -194,6 +250,6 @@ func recordSchemaVersion(writer *sqlx.DB, _ string, version string, log *logger.
 		return
 	}
 	if log != nil {
-		log.Info("schema version recorded", zap.String("version", version))
+		log.Info("schema version recorded", zap.String(versionFieldKey, version))
 	}
 }

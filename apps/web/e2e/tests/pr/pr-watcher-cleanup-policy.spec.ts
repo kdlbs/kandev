@@ -535,7 +535,9 @@ test.describe("PR watcher cleanup policy", () => {
       },
     ]);
 
-    await testPage.goto("/settings/integrations/github");
+    // Pin the seed workspace: cleanup runs against the routed workspace, and
+    // the install-level path redirects to whichever workspace is active.
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
     const cleanupButton = testPage.getByRole("button", { name: /clean up merged/i });
     await expect(cleanupButton).toBeVisible({ timeout: 10_000 });
     await cleanupButton.click();

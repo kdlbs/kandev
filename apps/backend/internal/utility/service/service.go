@@ -55,7 +55,8 @@ func (s *Service) ListAgents(ctx context.Context) ([]*models.UtilityAgent, error
 }
 
 // ClearAgentProfileBindings marks utility agents that reference a deleted
-// profile as unconfigured. This keeps forced profile deletion fail-closed.
+// profile as unconfigured. The stale profile ID is retained so forced profile
+// deletion remains diagnosable and fail-closed.
 func (s *Service) ClearAgentProfileBindings(ctx context.Context, profileID string) error {
 	agents, err := s.repo.ListAgents(ctx)
 	if err != nil {
@@ -63,26 +64,6 @@ func (s *Service) ClearAgentProfileBindings(ctx context.Context, profileID strin
 	}
 	for _, agent := range agents {
 		if agent == nil || agent.AgentProfileID != profileID {
-			continue
-		}
-		agent.AgentProfileID = ""
-		agent.ProfileBindingState = models.ProfileBindingUnconfigured
-		if err := s.repo.UpdateAgent(ctx, agent); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ClearInheritedProfileBindings marks built-in agents that inherit a deleted
-// default profile as unconfigured.
-func (s *Service) ClearInheritedProfileBindings(ctx context.Context) error {
-	agents, err := s.repo.ListAgents(ctx)
-	if err != nil {
-		return err
-	}
-	for _, agent := range agents {
-		if agent == nil || agent.ProfileBindingState != models.ProfileBindingInherit {
 			continue
 		}
 		agent.ProfileBindingState = models.ProfileBindingUnconfigured
@@ -95,7 +76,8 @@ func (s *Service) ClearInheritedProfileBindings(ctx context.Context) error {
 
 // MigrateLegacyBindings upgrades old agent/model selections after profile
 // reconciliation. The operation is idempotent and leaves explicit bindings
-// untouched. A built-in row with inherit state is also left untouched.
+// untouched. An empty unconfigured built-in is normalized to inherit because
+// no concrete override remains to preserve.
 func (s *Service) MigrateLegacyBindings(ctx context.Context) (int, error) {
 	if s.profileResolver == nil {
 		return 0, nil
@@ -106,9 +88,24 @@ func (s *Service) MigrateLegacyBindings(ctx context.Context) (int, error) {
 	}
 	updated := 0
 	for _, agent := range agents {
+		// Skip already-inherited rows and any row that still carries a concrete
+		// profile ID. The latter includes stale/unconfigured overrides whose
+		// original intent must remain available for explicit user repair.
 		if agent == nil || agent.AgentProfileID != "" ||
-			agent.ProfileBindingState == models.ProfileBindingInherit ||
-			agent.ProfileBindingState == models.ProfileBindingUnconfigured {
+			agent.ProfileBindingState == models.ProfileBindingInherit {
+			continue
+		}
+		if agent.ProfileBindingState == models.ProfileBindingUnconfigured {
+			if !agent.Builtin {
+				continue
+			}
+			changed, err := s.repo.NormalizeEmptyBuiltinBinding(ctx, agent.ID)
+			if err != nil {
+				return updated, err
+			}
+			if changed {
+				updated++
+			}
 			continue
 		}
 		profile, matchErr := s.profileResolver.MatchLegacy(ctx, agent.AgentID, agent.Model)
@@ -117,11 +114,19 @@ func (s *Service) MigrateLegacyBindings(ctx context.Context) (int, error) {
 			agent.AgentProfileID = profile.ID
 			agent.ProfileBindingState = models.ProfileBindingExplicit
 		case errors.Is(matchErr, profilebinding.ErrLegacyBindingAmbiguous):
-			agent.ProfileBindingState = models.ProfileBindingUnconfigured
+			if agent.Builtin {
+				agent.ProfileBindingState = models.ProfileBindingInherit
+			} else {
+				agent.ProfileBindingState = models.ProfileBindingUnconfigured
+			}
 		case matchErr != nil:
 			return updated, matchErr
 		default:
-			agent.ProfileBindingState = models.ProfileBindingUnconfigured
+			if agent.Builtin {
+				agent.ProfileBindingState = models.ProfileBindingInherit
+			} else {
+				agent.ProfileBindingState = models.ProfileBindingUnconfigured
+			}
 		}
 		if err := s.repo.UpdateAgent(ctx, agent); err != nil {
 			return updated, err
@@ -319,13 +324,17 @@ func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tm
 
 	if s.profileResolver != nil {
 		var profileID string
-		switch agent.ProfileBindingState {
-		case models.ProfileBindingUnconfigured:
-			return nil, ErrProfileUnconfigured
-		case models.ProfileBindingInherit:
+		switch {
+		case models.UsesDefaultProfile(agent):
 			if defaults != nil {
 				profileID = defaults.ProfileID
 			}
+		case agent.ProfileBindingState == models.ProfileBindingUnconfigured:
+			return nil, ErrProfileUnconfigured
+		case agent.ProfileBindingState == models.ProfileBindingInherit:
+			// inherit with a non-empty profile ID is an inconsistent state that
+			// UpdateAgent prevents; fail closed rather than silently resolving it.
+			return nil, ErrProfileRequired
 		default:
 			profileID = agent.AgentProfileID
 		}

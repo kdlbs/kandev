@@ -167,6 +167,8 @@ export type BuildCreatePayloadArgs = {
   parentId?: string;
   workspacePath?: string;
   autopilot?: boolean;
+  /** Task IDs this task must wait for. */
+  blockedBy?: string[];
 };
 
 export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTaskParams {
@@ -187,6 +189,10 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     parent_id: args.parentId || undefined,
     workspace_path: args.workspacePath || undefined,
     autopilot: args.autopilot || undefined,
+    // Dependencies declared at creation time. With edges present the backend
+    // records the requested agent start as a start-when-unblocked intent rather
+    // than launching now, so a chain runs in order instead of all at once.
+    blocked_by: args.blockedBy && args.blockedBy.length > 0 ? args.blockedBy : undefined,
   };
 }
 
@@ -244,6 +250,19 @@ export function findDuplicateRemoteRepo(remoteRepos: TaskRemoteRepoRow[]): strin
     const existing = seen.get(key);
     if (existing) return existing;
     seen.set(key, label);
+  }
+  return null;
+}
+
+/** Returns the first plugin-owned URL whose authorized descriptor is not ready yet. */
+export function findUnresolvedProviderRemote(
+  remoteRepos: TaskRemoteRepoRow[],
+  matchesProviderURL: (url: string) => boolean,
+): TaskRemoteRepoRow | null {
+  for (const row of remoteRepos) {
+    const url = row.url.trim();
+    if (!url || row.provider) continue;
+    if (matchesProviderURL(url)) return row;
   }
   return null;
 }
@@ -421,14 +440,23 @@ function remoteRepositoryLocator(
   url: string,
 ): Pick<
   CreateTaskRepositoryPayload,
-  "github_url" | "remote_url" | "provider" | "provider_repo_id" | "provider_owner" | "provider_name"
+  | "github_url"
+  | "remote_url"
+  | "provider"
+  | "provider_host"
+  | "provider_scope"
+  | "provider_repo_id"
+  | "provider_owner"
+  | "provider_name"
 > {
   if (!row.provider || row.provider === "github") {
     return { github_url: url };
   }
   return {
-    remote_url: url,
+    remote_url: row.remoteUrl?.trim() || url,
     provider: row.provider,
+    provider_host: row.providerHost,
+    provider_scope: row.providerScope,
     provider_repo_id: row.providerRepoId,
     provider_owner: row.providerOwner,
     provider_name: row.providerName,
