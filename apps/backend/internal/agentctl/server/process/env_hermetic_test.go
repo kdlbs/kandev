@@ -35,7 +35,9 @@ var ambientEnvNotScrubbed = []string{
 // of these variables still set it explicitly with t.Setenv.
 func clearAmbientGitLabEnv() {
 	for _, name := range ambientGitLabEnvVars {
-		_ = os.Unsetenv(name)
+		if err := os.Unsetenv(name); err != nil {
+			panic("process tests: unset " + name + ": " + err.Error())
+		}
 	}
 }
 
