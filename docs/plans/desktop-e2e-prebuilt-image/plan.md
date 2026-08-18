@@ -50,7 +50,9 @@ the workflow summary.
 Update the `desktop-e2e` job in `.github/workflows/e2e-tests.yml` to use
 `ghcr.io/kdlbs/kandev-ci:desktop-latest` as its job container. Add the safe Git
 directory step and the pnpm-store cache pattern from the existing container
-jobs.
+jobs. Use `--ipc=host` so WebKit receives the same shared-memory configuration
+as the validated local smoke command. Include the image Dockerfile and
+publisher workflow in the job's in-workflow change patterns.
 
 Remove the pnpm setup, Node.js setup, Rust setup, and system-package steps.
 Keep the Rust build cache, workspace install, and desktop smoke command. Reduce
@@ -71,6 +73,11 @@ the timeout only if a measured image-based run supports a smaller limit.
 - **What:** the contract test remains part of a required, unfiltered check.
   **File:** `.github/workflows/lint-action-pinning.yml`
   **How:** add the contract test to the existing workflow-contract test steps.
+- **What:** the desktop job keeps the validated IPC setting and runs when its
+  image inputs change.
+  **File:** `.github/scripts/e2e-tests-workflow-contract_test.py`
+  **How:** assert `options: --ipc=host` and the image paths in the E2E change
+  detection block.
 
 The regression test must fail against the current workflow because the desktop
 image and its publisher do not exist. It must also report the current live

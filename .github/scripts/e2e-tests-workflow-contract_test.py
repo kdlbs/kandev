@@ -66,7 +66,8 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
         workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
         desktop_job = job_block(workflow, "desktop-e2e", "e2e-report")
 
-        self.assertIn("container: ghcr.io/kdlbs/kandev-ci:desktop-latest", desktop_job)
+        self.assertIn("image: ghcr.io/kdlbs/kandev-ci:desktop-latest", desktop_job)
+        self.assertIn("options: --ipc=host", desktop_job)
         self.assertIn("git config --global --add safe.directory", desktop_job)
         self.assertIn("path: ~/.local/share/pnpm/store", desktop_job)
         self.assertIn("pnpm install --frozen-lockfile", desktop_job)
@@ -80,6 +81,13 @@ class DesktopE2EWorkflowContractTest(unittest.TestCase):
             "sudo",
         ):
             self.assertNotIn(forbidden, desktop_job)
+
+        changes_job = job_block(workflow, "changes", "build")
+        for pattern in (
+            ".github/docker/ci-base/**",
+            ".github/workflows/ci-base-image.yml",
+        ):
+            self.assertIn(pattern, changes_job)
 
     def test_contract_runs_in_the_unfiltered_required_workflow(self) -> None:
         workflow = LINT_WORKFLOW.read_text(encoding="utf-8")

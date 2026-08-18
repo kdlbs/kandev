@@ -14,6 +14,8 @@ spec: "../../specs/e2e-duration-aware-sharding/spec.md"
 
 - `Desktop E2E Smoke` uses `ghcr.io/kdlbs/kandev-ci:desktop-latest` and contains
   no live Node.js, pnpm, Rust toolchain, or Ubuntu package setup step.
+- The container uses `--ipc=host`, and E2E change detection includes the image
+  Dockerfile and publisher workflow.
 - The job retains the pnpm and Rust caches, workspace install, and real desktop
   smoke command.
 - The branch image publish and the image-based desktop smoke job succeed, with
@@ -63,6 +65,9 @@ the synchronized task and plan status.
 
 - The desktop workflow contract passed (`4 tests`) after the image consumer was
   added.
+- Review remediation added the host IPC setting and image paths to change
+  detection; the contract test first failed on the missing IPC mapping and
+  then passed after both changes.
 - The local desktop image smoke passed in the container. `pnpm install
   --frozen-lockfile` completed, the Tauri application built both DEB and RPM
   bundles, and `node e2e/desktop-launch-smoke.mjs` reported a successful
