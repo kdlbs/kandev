@@ -7,9 +7,11 @@ import {
   buildMcpExplorerServers,
   getMcpCatalogState,
   getMcpToolCounts,
+  getMcpToolSchemaState,
   isKandevMcpServer,
   mcpStatusLabelKey,
   selectMcpServerName,
+  selectMcpToolName,
 } from "./mcp-explorer-view-model";
 
 function server(overrides: Partial<MCPAttachmentServer>): MCPAttachmentServer {
@@ -67,5 +69,44 @@ describe("MCP explorer view model", () => {
     expect(isKandevMcpServer(server({ name: "kandev", source: "kandev" }))).toBe(true);
     expect(isKandevMcpServer(server({ name: "kandev", source: "profile" }))).toBe(false);
     expect(isKandevMcpServer(server({ name: "filesystem", source: "profile" }))).toBe(false);
+  });
+
+  it("selects a tool and clears a selection removed by live evidence", () => {
+    const selectedServer = server({
+      tools: [{ name: "create_task_kandev" }, { name: "message_task_kandev" }],
+    });
+    expect(selectMcpToolName(selectedServer, "message_task_kandev")).toBe("message_task_kandev");
+    expect(selectMcpToolName(selectedServer, "deleted_tool")).toBeNull();
+    expect(selectMcpToolName(null, "create_task_kandev")).toBeNull();
+  });
+
+  it("projects common object properties as argument rows", () => {
+    expect(
+      getMcpToolSchemaState({
+        name: "create_task_kandev",
+        input_schema: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "Short task title" },
+            labels: { type: "array", items: { type: "string" } },
+          },
+          required: ["title"],
+        },
+      }),
+    ).toEqual({
+      kind: "schema",
+      arguments: [
+        { name: "labels", type: "array", required: false },
+        { name: "title", type: "string", required: true, description: "Short task title" },
+      ],
+      showJSON: true,
+    });
+  });
+
+  it("distinguishes no arguments from a schema removed by limits", () => {
+    expect(getMcpToolSchemaState({ name: "empty" })).toEqual({ kind: "none" });
+    expect(getMcpToolSchemaState({ name: "large", input_schema_truncated: true })).toEqual({
+      kind: "too_large",
+    });
   });
 });

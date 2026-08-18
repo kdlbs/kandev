@@ -114,6 +114,122 @@ func TestMCPAttachmentHistorySupersededAttemptDropsCatalogButKeepsCount(t *testi
 	}
 }
 
+func TestMCPAttachmentCatalogRetainsBoundedSchemaAndEstimatorMetadata(t *testing.T) {
+	history := MCPAttachmentHistory{}
+	history.StartAttempt(MCPAttachmentAttempt{AttemptID: "attempt-1"})
+	raw := []byte(`{
+		"attachment_attempt_id":"attempt-1",
+		"server_name":"kandev",
+		"kind":"tools_list_observed",
+		"tool_count":1,
+		"tool_token_estimator":"o200k_base:mcp-tool-json-v1",
+		"tools":[{
+			"name":"create_task_kandev",
+			"input_schema":{"type":"object","properties":{"title":{"type":"string"}}},
+			"estimated_tokens":42
+		}]
+	}`)
+	var evidence MCPAttachmentEvidence
+	if err := json.Unmarshal(raw, &evidence); err != nil {
+		t.Fatalf("unmarshal evidence: %v", err)
+	}
+	if !history.Apply(evidence) {
+		t.Fatal("Apply() rejected catalog evidence")
+	}
+
+	server, _ := history.CurrentServer("kandev")
+	encoded, err := json.Marshal(server)
+	if err != nil {
+		t.Fatalf("marshal server: %v", err)
+	}
+	for _, expected := range []string{
+		`"tool_token_estimator":"o200k_base:mcp-tool-json-v1"`,
+		`"input_schema":{"type":"object","properties":{"title":{"type":"string"}}}`,
+		`"estimated_tokens":42`,
+	} {
+		if !strings.Contains(string(encoded), expected) {
+			t.Fatalf("server JSON = %s, want %s", encoded, expected)
+		}
+	}
+
+	history.StartAttempt(MCPAttachmentAttempt{AttemptID: "attempt-2"})
+	previous, err := json.Marshal(history.Previous[0])
+	if err != nil {
+		t.Fatalf("marshal previous attempt: %v", err)
+	}
+	for _, forbidden := range []string{"input_schema", "estimated_tokens", "tool_token_estimator"} {
+		if strings.Contains(string(previous), forbidden) {
+			t.Fatalf("historical attempt retained %q: %s", forbidden, previous)
+		}
+	}
+}
+
+func TestMCPAttachmentCatalogOmitsSchemasOverPerToolAndCombinedLimits(t *testing.T) {
+	history := MCPAttachmentHistory{}
+	history.StartAttempt(MCPAttachmentAttempt{AttemptID: "attempt-1"})
+	largeValue := strings.Repeat("x", 64*1024)
+	tools := []map[string]any{{
+		"name":         "oversized",
+		"input_schema": map[string]any{"type": "object", "description": largeValue},
+	}}
+	for index := 0; index < 9; index++ {
+		tools = append(tools, map[string]any{
+			"name":         "combined-" + string(rune('a'+index)),
+			"input_schema": map[string]any{"type": "object", "description": strings.Repeat("y", 60*1024)},
+		})
+	}
+	raw, err := json.Marshal(map[string]any{
+		"attachment_attempt_id": history.Current.AttemptID,
+		"server_name":           "kandev",
+		"kind":                  MCPAttachmentEvidenceToolsListObserved,
+		"tool_count":            len(tools),
+		"tools":                 tools,
+	})
+	if err != nil {
+		t.Fatalf("marshal evidence: %v", err)
+	}
+	var evidence MCPAttachmentEvidence
+	if err := json.Unmarshal(raw, &evidence); err != nil {
+		t.Fatalf("unmarshal evidence: %v", err)
+	}
+	if !history.Apply(evidence) {
+		t.Fatal("Apply() rejected catalog evidence")
+	}
+
+	server, _ := history.CurrentServer("kandev")
+	encoded, err := json.Marshal(server)
+	if err != nil {
+		t.Fatalf("marshal server: %v", err)
+	}
+	var decoded struct {
+		Tools []struct {
+			Name                 string          `json:"name"`
+			InputSchema          json.RawMessage `json:"input_schema"`
+			InputSchemaTruncated bool            `json:"input_schema_truncated"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal server: %v", err)
+	}
+	var storedBytes int
+	var omitted int
+	for _, tool := range decoded.Tools {
+		storedBytes += len(tool.InputSchema)
+		if tool.InputSchemaTruncated {
+			omitted++
+			if len(tool.InputSchema) != 0 {
+				t.Fatalf("truncated tool %q retained partial schema", tool.Name)
+			}
+		}
+	}
+	if omitted < 2 {
+		t.Fatalf("omitted schemas = %d, want per-tool and combined omissions", omitted)
+	}
+	if storedBytes > 512*1024 {
+		t.Fatalf("stored schema bytes = %d, want at most %d", storedBytes, 512*1024)
+	}
+}
+
 func applyCatalogEvidenceJSON(t *testing.T, attemptID string, toolCount int, tools []map[string]string, history *MCPAttachmentHistory) {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{

@@ -13,9 +13,15 @@ func TestLoadMCPAttachmentHistoryDecodesTypedAndJSONMetadata(t *testing.T) {
 		Current: streams.MCPAttachmentAttempt{
 			AttemptID: "attempt-1",
 			Servers: []streams.MCPServerAttachment{{
-				Name:   "kandev",
-				Status: streams.MCPAttachmentStatusActive,
-				Tools:  []streams.MCPToolSummary{{Name: "create_task_kandev", Description: "Create a task"}},
+				Name:               "kandev",
+				Status:             streams.MCPAttachmentStatusActive,
+				ToolTokenEstimator: "o200k_base:mcp-tool-json-v1",
+				Tools: []streams.MCPToolSummary{{
+					Name:            "create_task_kandev",
+					Description:     "Create a task",
+					InputSchema:     json.RawMessage(`{"type":"object"}`),
+					EstimatedTokens: 23,
+				}},
 			}},
 		},
 	}
@@ -25,7 +31,14 @@ func TestLoadMCPAttachmentHistoryDecodesTypedAndJSONMetadata(t *testing.T) {
 		if !ok {
 			t.Fatalf("LoadMCPAttachmentHistory(%T) returned false", raw)
 		}
-		if got.Current.AttemptID != want.Current.AttemptID || len(got.Current.Servers) != 1 || got.Current.Servers[0].Status != streams.MCPAttachmentStatusActive || len(got.Current.Servers[0].Tools) != 1 || got.Current.Servers[0].Tools[0].Name != "create_task_kandev" {
+		if len(got.Current.Servers) != 1 {
+			t.Fatalf("history = %+v, want one server", got)
+		}
+		server := got.Current.Servers[0]
+		if len(server.Tools) != 1 {
+			t.Fatalf("history = %+v, want one tool", got)
+		}
+		if got.Current.AttemptID != want.Current.AttemptID || server.Status != streams.MCPAttachmentStatusActive || server.Tools[0].Name != "create_task_kandev" || server.Tools[0].EstimatedTokens != 23 || string(server.Tools[0].InputSchema) != `{"type":"object"}` || server.ToolTokenEstimator != "o200k_base:mcp-tool-json-v1" {
 			t.Fatalf("history = %+v, want %+v", got, want)
 		}
 	}

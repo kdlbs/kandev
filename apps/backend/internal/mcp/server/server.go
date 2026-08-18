@@ -18,6 +18,7 @@ import (
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/mcp/toolschema"
+	"github.com/kandev/kandev/internal/mcp/tooltokens"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -297,9 +298,37 @@ func (s *Server) observeMCPConnection(connectionID string, kind streams.MCPAttac
 func (s *Server) observeMCPToolsList(connectionID string, tools []mcp.Tool) {
 	summaries := make([]streams.MCPToolSummary, 0, len(tools))
 	for _, tool := range tools {
-		summaries = append(summaries, streams.MCPToolSummary{Name: tool.Name, Description: tool.Description})
+		summaries = append(summaries, summarizeMCPTool(tool))
 	}
 	s.observeMCPConnectionWithTools(connectionID, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", summaries)
+}
+
+func summarizeMCPTool(tool mcp.Tool) streams.MCPToolSummary {
+	summary := streams.MCPToolSummary{
+		Name:        tool.Name,
+		Description: tool.Description,
+		InputSchema: mcpToolInputSchema(tool),
+	}
+	definition, err := json.Marshal(tool)
+	if err != nil {
+		return summary
+	}
+	summary.EstimatedTokens, _ = tooltokens.EstimateToolJSON(definition)
+	return summary
+}
+
+func mcpToolInputSchema(tool mcp.Tool) json.RawMessage {
+	if tool.RawInputSchema != nil {
+		if !json.Valid(tool.RawInputSchema) {
+			return nil
+		}
+		return append(json.RawMessage(nil), tool.RawInputSchema...)
+	}
+	schema, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		return nil
+	}
+	return schema
 }
 
 func (s *Server) observeMCPConnectionWithTools(
@@ -372,16 +401,26 @@ func (s *Server) reportMCPConnectionWithTools(
 		tools, _ = streams.NormalizeMCPToolCatalog(tools, toolCount)
 	}
 	reporter(streams.MCPAttachmentEvidence{
-		AttemptID:    attempt.AttemptID,
-		ServerName:   "kandev",
-		Kind:         kind,
-		OccurredAt:   time.Now().UTC(),
-		Source:       streams.MCPServerSourceKandev,
-		ConnectionID: opaqueMCPConnectionID(connectionID),
-		ToolCount:    toolCount,
-		Tools:        tools,
-		Summary:      streams.SanitizeMCPErrorSummary(summary),
+		AttemptID:          attempt.AttemptID,
+		ServerName:         "kandev",
+		Kind:               kind,
+		OccurredAt:         time.Now().UTC(),
+		Source:             streams.MCPServerSourceKandev,
+		ConnectionID:       opaqueMCPConnectionID(connectionID),
+		ToolCount:          toolCount,
+		Tools:              tools,
+		ToolTokenEstimator: toolTokenEstimator(tools),
+		Summary:            streams.SanitizeMCPErrorSummary(summary),
 	})
+}
+
+func toolTokenEstimator(tools []streams.MCPToolSummary) string {
+	for _, tool := range tools {
+		if tool.EstimatedTokens > 0 {
+			return tooltokens.Estimator
+		}
+	}
+	return ""
 }
 
 func mcpConnectionID(ctx context.Context) string {

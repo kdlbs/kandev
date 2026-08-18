@@ -274,6 +274,9 @@ export type MCPAttachmentStatus =
 export type MCPToolSummary = {
   name: string;
   description?: string;
+  input_schema?: unknown;
+  input_schema_truncated?: boolean;
+  estimated_tokens?: number;
 };
 
 export type MCPAttachmentServer = {
@@ -289,6 +292,7 @@ export type MCPAttachmentServer = {
   tools_listed_at?: string;
   tools?: MCPToolSummary[];
   tool_catalog_truncated?: boolean;
+  tool_token_estimator?: string;
 };
 
 export type MCPAttachmentHistory = {

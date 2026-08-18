@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   MCPAttachmentHistory,
@@ -10,6 +10,10 @@ const testCopy = vi.hoisted(() => ({
   thirdPartyCatalogUnavailable: "Kandev does not inspect tools from this server.",
 }));
 const MCP_STATUS_TRIGGER_TEST_ID = "mcp-status-trigger";
+const CREATE_TASK_DESCRIPTION = "Create a task";
+const BACK_TO_TOOLS = "Back to tools";
+const TOOLS_OBSERVED_AT = "2026-08-16T00:01:00Z";
+const MCP_TOOL_DETAIL_TEST_ID = "mcp-tool-detail";
 
 const responsiveMock = vi.hoisted(() => ({
   breakpoint: "desktop" as "mobile" | "tablet" | "desktop",
@@ -44,7 +48,17 @@ vi.mock("react-i18next", () => ({
         "task:mcpStoredToolCount": `Showing ${values?.count ?? 0}`,
         "task:mcpNoTools": "No tools were reported.",
         "task:mcpBackToServers": "Back to servers",
+        "task:mcpBackToTools": BACK_TO_TOOLS,
         "task:mcpClose": "Close",
+        "task:mcpConnectionDetails": "Connection details",
+        "task:mcpArguments": "Arguments",
+        "task:mcpRequired": "Required",
+        "task:mcpOptional": "Optional",
+        "task:mcpNoArguments": "No arguments",
+        "task:mcpSchemaTooLarge": "Schema too large to display",
+        "task:mcpJsonSchema": "JSON schema",
+        "task:mcpTokenEstimate": `~${values?.count ?? 0} tokens`,
+        "task:mcpTokenEstimateHelp": "Estimated with o200k_base. Actual usage varies by model.",
         "task:mcpTransport": "Transport",
         "task:mcpTarget": "Target",
         "task:mcpConnectionId": "Connection ID",
@@ -62,7 +76,9 @@ vi.mock("react-i18next", () => ({
 vi.mock("@kandev/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipContent: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+    <div {...props}>{children}</div>
+  ),
 }));
 
 vi.mock("@kandev/ui/dialog", async () => {
@@ -92,12 +108,19 @@ vi.mock("@kandev/ui/dialog", async () => {
     DialogContent: ({
       children,
       enterConfirms: _enterConfirms,
+      showCloseButton = true,
       ...props
-    }: React.HTMLAttributes<HTMLDivElement> & { enterConfirms?: boolean }) => {
+    }: React.HTMLAttributes<HTMLDivElement> & {
+      enterConfirms?: boolean;
+      showCloseButton?: boolean;
+    }) => {
       const context = React.useContext(DialogContext);
       return context?.open ? (
         <div role="dialog" {...props}>
           {children}
+          {showCloseButton && (
+            <button type="button" aria-label="Close" onClick={() => context.onOpenChange(false)} />
+          )}
         </div>
       ) : null;
     },
@@ -167,8 +190,22 @@ const attachmentHistory: MCPAttachmentHistory = {
         name: "kandev",
         source: "kandev",
         status: "active",
-        tools_listed_at: "2026-08-16T00:01:00Z",
-        tools: [{ name: "create_task_kandev", description: "Create a task" }],
+        tools_listed_at: TOOLS_OBSERVED_AT,
+        tool_token_estimator: "o200k_base:mcp-tool-json-v1",
+        tools: [
+          {
+            name: "create_task_kandev",
+            description: CREATE_TASK_DESCRIPTION,
+            estimated_tokens: 42,
+            input_schema: {
+              type: "object",
+              properties: {
+                title: { type: "string", description: "Short task title" },
+              },
+              required: ["title"],
+            },
+          },
+        ],
         tool_count: 1,
       },
       {
@@ -205,17 +242,45 @@ beforeEach(() => {
 });
 
 describe("MCP server explorer", () => {
-  it("opens a wide desktop explorer and changes the detail server", () => {
+  it("shows the rich status tooltip and one desktop close control", () => {
     render(
       <McpIndicator mcpServers={["kandev", "filesystem"]} attachmentHistory={attachmentHistory} />,
     );
 
+    const tooltip = screen.getByTestId("mcp-status-popover");
+    expect(within(tooltip).getByText("kandev")).toBeTruthy();
+    expect(within(tooltip).getByText("Active")).toBeTruthy();
+    expect(within(tooltip).getByText("Connection delivered")).toBeTruthy();
+
     fireEvent.click(screen.getByTestId(MCP_STATUS_TRIGGER_TEST_ID));
-    expect(screen.getByRole("dialog").getAttribute("data-testid")).toBe("mcp-server-explorer");
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.getAttribute("data-testid")).toBe("mcp-server-explorer");
+    expect(within(dialog).getAllByRole("button", { name: "Close" })).toHaveLength(1);
+  });
+
+  it("opens a tool page and returns focus to its list row", async () => {
+    render(
+      <McpIndicator mcpServers={["kandev", "filesystem"]} attachmentHistory={attachmentHistory} />,
+    );
+    fireEvent.click(screen.getByTestId(MCP_STATUS_TRIGGER_TEST_ID));
     expect(screen.getByText("create_task_kandev")).toBeTruthy();
+    expect(screen.getByText("~42 tokens")).toBeTruthy();
+    expect(screen.queryByText(CREATE_TASK_DESCRIPTION)).toBeNull();
+
+    screen.getByTestId("mcp-tool-list-scroll").scrollTop = 173;
+    fireEvent.click(screen.getByRole("button", { name: /create_task_kandev/ }));
+    expect(screen.getByText(CREATE_TASK_DESCRIPTION)).toBeTruthy();
+    expect(screen.getByText("Short task title")).toBeTruthy();
+    expect(screen.getByText("Required")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: BACK_TO_TOOLS }));
+    const toolRow = screen.getByRole("button", { name: /create_task_kandev/ });
+    await waitFor(() => expect(document.activeElement).toBe(toolRow));
+    expect(screen.getByTestId("mcp-tool-list-scroll").scrollTop).toBe(173);
+
     fireEvent.click(screen.getByTestId("mcp-server-row-filesystem"));
     expect(screen.getByText(testCopy.thirdPartyCatalogUnavailable)).toBeTruthy();
-    expect(screen.queryByText("Create a task")).toBeNull();
+    expect(screen.queryByText(CREATE_TASK_DESCRIPTION)).toBeNull();
 
     fireEvent.click(screen.getByTestId("mcp-explorer-close"));
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -246,6 +311,25 @@ describe("MCP server explorer", () => {
     expect(screen.getByText(testCopy.thirdPartyCatalogUnavailable)).toBeTruthy();
   });
 
+  it("returns to the fallback server tools when the selected server disappears", () => {
+    const { rerender } = render(
+      <McpIndicator mcpServers={["kandev", "filesystem"]} attachmentHistory={attachmentHistory} />,
+    );
+    fireEvent.click(screen.getByTestId(MCP_STATUS_TRIGGER_TEST_ID));
+    fireEvent.click(screen.getByTestId("mcp-server-row-filesystem"));
+    expect(screen.getByText(testCopy.thirdPartyCatalogUnavailable)).toBeTruthy();
+
+    const kandev = attachmentHistory.current.servers?.[0];
+    if (!kandev) throw new Error("missing test server");
+    rerender(
+      <McpIndicator mcpServers={["kandev"]} attachmentHistory={historyForServers([kandev])} />,
+    );
+    expect(screen.getByTestId("mcp-tool-row-create_task_kandev")).toBeTruthy();
+    expect(screen.queryByTestId(MCP_TOOL_DETAIL_TEST_ID)).toBeNull();
+  });
+});
+
+describe("MCP explorer catalog states and touch navigation", () => {
   it("explains an unloaded Kandev catalog", () => {
     renderOpenExplorer([{ name: "kandev", source: "kandev", status: "unknown" }]);
     expect(screen.getByText("The tool catalog is not loaded yet.")).toBeTruthy();
@@ -262,7 +346,7 @@ describe("MCP server explorer", () => {
         name: "kandev",
         source: "kandev",
         status: "active",
-        tools_listed_at: "2026-08-16T00:01:00Z",
+        tools_listed_at: TOOLS_OBSERVED_AT,
         tools: [],
         tool_count: 0,
       },
@@ -276,8 +360,8 @@ describe("MCP server explorer", () => {
         name: "kandev",
         source: "kandev",
         status: "active",
-        tools_listed_at: "2026-08-16T00:01:00Z",
-        tools: [{ name: "create_task_kandev", description: "Create a task" }],
+        tools_listed_at: TOOLS_OBSERVED_AT,
+        tools: [{ name: "create_task_kandev", description: CREATE_TASK_DESCRIPTION }],
         tool_count: 129,
         tool_catalog_truncated: true,
       },
@@ -286,7 +370,24 @@ describe("MCP server explorer", () => {
     expect(screen.getByText("Only the first tools are shown.")).toBeTruthy();
   });
 
-  it("uses a phone list-to-detail flow with a visible Back control", () => {
+  it("distinguishes tools without arguments from schemas removed by limits", () => {
+    renderOpenExplorer([
+      {
+        name: "kandev",
+        source: "kandev",
+        status: "active",
+        tools_listed_at: TOOLS_OBSERVED_AT,
+        tools: [{ name: "no_arguments" }, { name: "large_schema", input_schema_truncated: true }],
+      },
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: /no_arguments/ }));
+    expect(screen.getByText("No arguments")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: BACK_TO_TOOLS }));
+    fireEvent.click(screen.getByRole("button", { name: /large_schema/ }));
+    expect(screen.getByText("Schema too large to display")).toBeTruthy();
+  });
+
+  it("uses a phone server-to-tools-to-tool flow with two Back actions", () => {
     responsiveMock.breakpoint = "mobile";
     render(
       <McpIndicator mcpServers={["kandev", "filesystem"]} attachmentHistory={attachmentHistory} />,
@@ -295,9 +396,33 @@ describe("MCP server explorer", () => {
     fireEvent.click(screen.getByTestId(MCP_STATUS_TRIGGER_TEST_ID));
     expect(screen.getByTestId("mcp-server-list")).toBeTruthy();
     fireEvent.click(screen.getByTestId("mcp-server-row-kandev"));
-    expect(screen.getByTestId("mcp-server-detail")).toBeTruthy();
+    expect(screen.getByTestId("mcp-tool-list")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Back to servers" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /create_task_kandev/ }));
+    expect(screen.getByTestId(MCP_TOOL_DETAIL_TEST_ID)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: BACK_TO_TOOLS }));
+    expect(screen.getByTestId("mcp-tool-list")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Back to servers" }));
     expect(screen.getByTestId("mcp-server-list")).toBeTruthy();
+  });
+
+  it("returns to the tools page when live evidence removes the selected tool", () => {
+    const { rerender } = render(
+      <McpIndicator mcpServers={["kandev"]} attachmentHistory={attachmentHistory} />,
+    );
+    fireEvent.click(screen.getByTestId(MCP_STATUS_TRIGGER_TEST_ID));
+    fireEvent.click(screen.getByRole("button", { name: /create_task_kandev/ }));
+    expect(screen.getByTestId(MCP_TOOL_DETAIL_TEST_ID)).toBeTruthy();
+
+    const kandev = attachmentHistory.current.servers?.[0];
+    if (!kandev) throw new Error("missing test server");
+    rerender(
+      <McpIndicator
+        mcpServers={["kandev"]}
+        attachmentHistory={historyForServers([{ ...kandev, tools: [], tool_count: 0 }])}
+      />,
+    );
+    expect(screen.queryByTestId(MCP_TOOL_DETAIL_TEST_ID)).toBeNull();
+    expect(screen.getByTestId("mcp-tool-list")).toBeTruthy();
   });
 });

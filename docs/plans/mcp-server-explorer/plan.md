@@ -3,7 +3,7 @@ spec: docs/specs/mcp-session-observability/spec.md
 decision: docs/decisions/2026-08-18-session-mcp-tool-definition-details.md
 created: 2026-08-16
 updated: 2026-08-18
-status: planned
+status: implemented
 ---
 
 # Implementation Plan: MCP Server Explorer
@@ -270,11 +270,20 @@ on every row.
 
 ## Verification Results
 
-All baseline verification passed. Tasks 01 through 04 contain the exact
-commands, results, and inspected PR assets.
+All baseline and follow-up verification passed. Tasks 01 through 08 contain
+the exact commands, RED evidence, final results, and inspected assets.
 
-Follow-up verification is pending. Tasks 05 through 08 will replace this note
-with their exact commands, results, assets, and binary-size evidence.
+The backend focused suites, known `o200k_base` vectors, and release build pass.
+The exact offline tokenizer adds about 3.0 MB to the compressed `kandev`
+binary and 2.9 MB to the compressed `agentctl` binary.
+
+The frontend focused suite passes 31 tests. Type checking, localization checks,
+the localization ratchet, and focused lint pass. Fresh production E2E runs pass
+on desktop Chromium and mobile Chrome. The inspected assets show the compact
+tool list, desktop tool detail, and mobile tool detail.
+
+The public documentation test suite passes 61 tests, and the validator accepts
+all 41 published pages.
 
 ## Implementation Waves And Parallel Candidates
 
@@ -299,16 +308,16 @@ for subagents.
 
 Follow-up wave 1:
 
-- [ ] [Task 05: Capture tool definitions and estimates](task-05-capture-tool-definitions.md)
+- [x] [Task 05: Capture tool definitions and estimates](task-05-capture-tool-definitions.md)
 
 Follow-up wave 2:
 
-- [ ] [Task 06: Refine explorer navigation and layout](task-06-refine-explorer-ux.md)
+- [x] [Task 06: Refine explorer navigation and layout](task-06-refine-explorer-ux.md)
 
 Follow-up wave 3:
 
-- [ ] [Task 07: Prove the revised browser flows](task-07-prove-revised-browser-flows.md)
-- [ ] [Task 08: Update explorer documentation](task-08-update-explorer-docs.md)
+- [x] [Task 07: Prove the revised browser flows](task-07-prove-revised-browser-flows.md)
+- [x] [Task 08: Update explorer documentation](task-08-update-explorer-docs.md)
 
 Tasks 07 and 08 are parallel-safe after Task 06. They own separate E2E and
 public-doc files.

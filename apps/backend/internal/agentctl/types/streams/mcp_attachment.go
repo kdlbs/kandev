@@ -2,6 +2,7 @@ package streams
 
 import (
 	"context"
+	"encoding/json"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -55,6 +56,12 @@ const (
 
 	// MaxMCPToolDescriptionBytes bounds one stored tool description.
 	MaxMCPToolDescriptionBytes = 1024
+
+	// MaxMCPToolInputSchemaBytes bounds one complete stored input schema.
+	MaxMCPToolInputSchemaBytes = 64 * 1024
+
+	// MaxMCPToolInputSchemasBytes bounds all schemas stored for one server.
+	MaxMCPToolInputSchemasBytes = 512 * 1024
 )
 
 // MCPAttachmentStatus is the strongest user-visible attachment evidence for a
@@ -96,11 +103,13 @@ const (
 	MCPServerSourceProfile MCPServerSource = "profile"
 )
 
-// MCPToolSummary is the safe catalog projection sent to the frontend.
-// Schemas, annotations, arguments, and results are intentionally excluded.
+// MCPToolSummary is the bounded catalog projection sent to the frontend.
 type MCPToolSummary struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	Name                 string          `json:"name"`
+	Description          string          `json:"description,omitempty"`
+	InputSchema          json.RawMessage `json:"input_schema,omitempty"`
+	InputSchemaTruncated bool            `json:"input_schema_truncated,omitempty"`
+	EstimatedTokens      int             `json:"estimated_tokens,omitempty"`
 }
 
 // MCPAttachmentTestResult records a user-requested endpoint reachability test.
@@ -135,24 +144,26 @@ type MCPServerAttachment struct {
 	EndpointTest         *MCPAttachmentTestResult `json:"endpoint_test,omitempty"`
 	Tools                []MCPToolSummary         `json:"tools,omitempty"`
 	ToolCatalogTruncated bool                     `json:"tool_catalog_truncated,omitempty"`
+	ToolTokenEstimator   string                   `json:"tool_token_estimator,omitempty"`
 }
 
 // MCPAttachmentEvidence is a safe normalized event. The producer may supply a
 // raw network/stdio target or error summary, but Apply persists only the
 // sanitized projection.
 type MCPAttachmentEvidence struct {
-	AttemptID    string                    `json:"attachment_attempt_id"`
-	ServerName   string                    `json:"server_name,omitempty"`
-	Kind         MCPAttachmentEvidenceKind `json:"kind"`
-	OccurredAt   time.Time                 `json:"occurred_at"`
-	Source       MCPServerSource           `json:"source,omitempty"`
-	Transport    string                    `json:"transport,omitempty"`
-	Target       string                    `json:"target,omitempty"`
-	ConnectionID string                    `json:"connection_id,omitempty"`
-	ToolCount    int                       `json:"tool_count,omitempty"`
-	Tools        []MCPToolSummary          `json:"tools,omitempty"`
-	ReasonCode   string                    `json:"reason_code,omitempty"`
-	Summary      string                    `json:"summary,omitempty"`
+	AttemptID          string                    `json:"attachment_attempt_id"`
+	ServerName         string                    `json:"server_name,omitempty"`
+	Kind               MCPAttachmentEvidenceKind `json:"kind"`
+	OccurredAt         time.Time                 `json:"occurred_at"`
+	Source             MCPServerSource           `json:"source,omitempty"`
+	Transport          string                    `json:"transport,omitempty"`
+	Target             string                    `json:"target,omitempty"`
+	ConnectionID       string                    `json:"connection_id,omitempty"`
+	ToolCount          int                       `json:"tool_count,omitempty"`
+	Tools              []MCPToolSummary          `json:"tools,omitempty"`
+	ToolTokenEstimator string                    `json:"tool_token_estimator,omitempty"`
+	ReasonCode         string                    `json:"reason_code,omitempty"`
+	Summary            string                    `json:"summary,omitempty"`
 }
 
 // MCPAttachmentAttempt is one ACP new/load/reset or passthrough process start.
@@ -222,6 +233,7 @@ func (h *MCPAttachmentHistory) Apply(evidence MCPAttachmentEvidence) bool {
 	// of every evidence event preserves the bounded timeline when tools/list is
 	// observed more than once.
 	storedEvidence.Tools = nil
+	storedEvidence.ToolTokenEstimator = ""
 	h.Current.Evidence = appendBoundedMCPAttachmentEvidence(h.Current.Evidence, storedEvidence)
 	if evidence.ServerName == "" {
 		if evidence.Kind == MCPAttachmentEvidenceExplicitError {
@@ -278,6 +290,7 @@ func (s *MCPServerAttachment) applyEvidenceDetails(evidence MCPAttachmentEvidenc
 		// independent of the event value.
 		s.Tools = append([]MCPToolSummary(nil), evidence.Tools...)
 		s.ToolCatalogTruncated = catalogTruncated
+		s.ToolTokenEstimator = evidence.ToolTokenEstimator
 	}
 	if evidence.ReasonCode != "" {
 		s.ReasonCode = evidence.ReasonCode
@@ -297,6 +310,7 @@ func NormalizeMCPToolCatalog(tools []MCPToolSummary, totalToolCount int) ([]MCPT
 			continue
 		}
 		tool.Description = truncateMCPToolDescription(tool.Description)
+		tool.InputSchema = cloneValidMCPInputSchema(tool.InputSchema, &tool.InputSchemaTruncated)
 		normalized = append(normalized, tool)
 	}
 	sort.Slice(normalized, func(i, j int) bool { return normalized[i].Name < normalized[j].Name })
@@ -305,7 +319,35 @@ func NormalizeMCPToolCatalog(tools []MCPToolSummary, totalToolCount int) ([]MCPT
 		normalized = append([]MCPToolSummary(nil), normalized[:MaxMCPAttachmentTools]...)
 		truncated = true
 	}
+	boundCombinedMCPInputSchemas(normalized)
 	return normalized, truncated
+}
+
+func cloneValidMCPInputSchema(schema json.RawMessage, truncated *bool) json.RawMessage {
+	if len(schema) == 0 {
+		return nil
+	}
+	if len(schema) > MaxMCPToolInputSchemaBytes || !json.Valid(schema) {
+		*truncated = true
+		return nil
+	}
+	return append(json.RawMessage(nil), schema...)
+}
+
+func boundCombinedMCPInputSchemas(tools []MCPToolSummary) {
+	remaining := MaxMCPToolInputSchemasBytes
+	for index := range tools {
+		schemaBytes := len(tools[index].InputSchema)
+		if schemaBytes == 0 {
+			continue
+		}
+		if schemaBytes > remaining {
+			tools[index].InputSchema = nil
+			tools[index].InputSchemaTruncated = true
+			continue
+		}
+		remaining -= schemaBytes
+	}
 }
 
 func truncateMCPToolDescription(description string) string {
@@ -326,12 +368,14 @@ func historicalMCPAttachmentAttempt(attempt MCPAttachmentAttempt) MCPAttachmentA
 		for index := range attempt.Servers {
 			attempt.Servers[index].Tools = nil
 			attempt.Servers[index].ToolCatalogTruncated = false
+			attempt.Servers[index].ToolTokenEstimator = ""
 		}
 	}
 	if len(attempt.Evidence) > 0 {
 		attempt.Evidence = append([]MCPAttachmentEvidence(nil), attempt.Evidence...)
 		for index := range attempt.Evidence {
 			attempt.Evidence[index].Tools = nil
+			attempt.Evidence[index].ToolTokenEstimator = ""
 		}
 	}
 	return attempt

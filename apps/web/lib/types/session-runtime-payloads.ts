@@ -82,8 +82,12 @@ export type MCPAttachmentServerPayload = {
   tools?: Array<{
     name: string;
     description?: string;
+    input_schema?: unknown;
+    input_schema_truncated?: boolean;
+    estimated_tokens?: number;
   }>;
   tool_catalog_truncated?: boolean;
+  tool_token_estimator?: string;
 };
 
 export type MCPAttachmentAttemptPayload = {

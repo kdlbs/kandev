@@ -1,7 +1,7 @@
 ---
 id: "06-refine-explorer-ux"
 title: "Refine explorer navigation and layout"
-status: pending
+status: done
 wave: 2
 depends_on: ["05-capture-tool-definitions"]
 plan: "plan.md"
@@ -72,4 +72,45 @@ and the plan status in the same session.
 
 ## Results
 
-Pending.
+Implemented a shared three-level explorer model. Desktop keeps the server rail
+visible and switches the main pane between the tools page and one tool page.
+Phone and coarse-pointer tablet surfaces show one level at a time: servers,
+tools, then one tool. Back returns from the tool to its tools and then to the
+server list on touch surfaces.
+
+The precise-pointer tooltip again lists every current server with its status
+dot, name, localized status, and summary. Active Kandev servers use the green
+status color. The desktop `DialogContent` now disables its built-in close
+button because the fixed explorer header owns the single 44px close control.
+
+The tools page has one constrained scroll owner. Tool rows show the tool name
+and localized `~N tokens` estimate without the long description. Selecting a
+row stores its scroll offset. Back restores the offset and keyboard focus.
+Live evidence preserves valid selections, returns to the tools page when a
+selected tool disappears, and falls back to Kandev when a selected server
+disappears.
+
+Connection transport, target, ID, and observation time now use a compact
+disclosure. The tool page renders the full plain-text description, common
+object properties as argument rows, and JSON for nested or composed schemas.
+It distinguishes **No arguments** from **Schema too large to display**.
+
+Added all copy to the six task catalogs. Pseudo and Traditional Chinese files
+were generated with the repository scripts. No status, server name, tool name,
+description, or schema data is translated.
+
+The RED view-model run failed three expected assertions. The RED component run
+failed four expected flows. The final focused run passed 31 tests in three
+files. Verification passed:
+
+```text
+pnpm install --frozen-lockfile
+pnpm --filter @kandev/web exec vitest run components/task/chat/mcp-explorer components/task/chat/chat-input-toolbar.test.tsx
+pnpm run typecheck
+pnpm run i18n:check
+pnpm run i18n:ratchet
+pnpm exec eslint components/task/chat/mcp-explorer
+```
+
+Browser geometry, safe-area, and production-build behavior remain assigned to
+Task 07.

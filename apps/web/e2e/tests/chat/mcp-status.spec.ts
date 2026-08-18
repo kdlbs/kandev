@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
@@ -42,7 +42,38 @@ async function loadKandevCatalog(session: SessionPage) {
   await session.waitForChatIdle({ timeout: 30_000 });
 }
 
-test("desktop MCP explorer shows Kandev tools and third-party limits", async ({
+async function expectRichStatusTooltip(testPage: Page, trigger: Locator) {
+  await trigger.hover();
+  const tooltip = testPage.getByRole("tooltip").getByTestId("mcp-status-popover");
+  await expect(tooltip).toBeVisible();
+  const kandev = tooltip.getByTestId("mcp-tooltip-server-kandev");
+  await expect(kandev).toContainText("kandev");
+  await expect(kandev).toContainText("Active");
+  await expect(kandev.locator("span").first()).toHaveClass(/bg-emerald-500/);
+}
+
+async function expectScrollAndFocusReturn(explorer: Locator) {
+  const scroll = explorer.getByTestId("mcp-tool-list-scroll");
+  const header = explorer.getByTestId("mcp-server-detail");
+  const headerBefore = await header.boundingBox();
+  const maxScroll = await scroll.evaluate((element) => element.scrollHeight - element.clientHeight);
+  expect(maxScroll).toBeGreaterThan(0);
+  await scroll.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  const headerAfter = await header.boundingBox();
+  expect(Math.abs((headerAfter?.y ?? 0) - (headerBefore?.y ?? 0))).toBeLessThanOrEqual(1);
+
+  const lastTool = explorer.locator('[data-testid^="mcp-tool-row-"]').last();
+  await lastTool.click();
+  await expect(explorer.getByTestId("mcp-tool-detail")).toBeVisible();
+  await explorer.getByRole("button", { name: "Back to tools" }).click();
+  await expect(lastTool).toBeFocused();
+  await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+}
+
+test("desktop MCP explorer drills into tools and preserves list context", async ({
   testPage,
   apiClient,
   seedData,
@@ -54,23 +85,38 @@ test("desktop MCP explorer shows Kandev tools and third-party limits", async ({
   try {
     const session = await openChat(testPage, apiClient, seedData);
     await loadKandevCatalog(session);
-
     const trigger = testPage.getByTestId("mcp-status-trigger");
     await expect(trigger).toBeVisible();
+    await expectRichStatusTooltip(testPage, trigger);
     await trigger.click();
 
     const explorer = testPage.getByTestId("mcp-server-explorer");
     await expect(explorer).toBeVisible();
+    await expect(explorer.getByRole("button", { name: "Close", exact: true })).toHaveCount(1);
     await expect(explorer.getByTestId("mcp-server-row-kandev")).toHaveAttribute(
       "aria-current",
       "true",
     );
-    const toolRow = explorer.getByTestId("mcp-tool-row-create_task_kandev");
-    await expect(toolRow).toBeVisible({ timeout: 30_000 });
-    await expect(toolRow.locator("p")).toHaveText(/\S+/);
-    await prCapture.screenshot("desktop-mcp-explorer-kandev", {
-      caption: "Desktop MCP server explorer with the Kandev tool catalog",
+    const createTask = explorer.getByTestId("mcp-tool-row-create_task_kandev");
+    await expect(createTask).toBeVisible({ timeout: 30_000 });
+    await expect(createTask.getByText(/^~\d+ tokens?$/)).toBeVisible();
+    await expect(createTask.locator("p")).toHaveCount(0);
+    await prCapture.screenshot("desktop-mcp-explorer-tools", {
+      caption: "Desktop MCP explorer with compact tool rows and token estimates",
     });
+
+    await createTask.click();
+    const detail = explorer.getByTestId("mcp-tool-detail");
+    await expect(detail).toBeVisible();
+    await expect(detail.getByText(/^~\d+ tokens?$/)).toBeVisible();
+    await expect(detail.locator("section").first().locator("p")).toHaveText(/\S+/);
+    await expect(detail.getByText("title", { exact: true })).toBeVisible();
+    await prCapture.screenshot("desktop-mcp-explorer-tool-detail", {
+      caption: "Desktop MCP tool detail with description and arguments",
+    });
+    await detail.getByRole("button", { name: "Back to tools" }).click();
+    await expect(createTask).toBeFocused();
+    await expectScrollAndFocusReturn(explorer);
 
     await explorer.getByTestId("mcp-server-row-filesystem").click();
     await expect(

@@ -1,7 +1,7 @@
 ---
 id: "07-prove-revised-browser-flows"
 title: "Prove the revised browser flows"
-status: pending
+status: done
 wave: 3
 depends_on: ["06-refine-explorer-ux"]
 plan: "plan.md"
@@ -59,4 +59,42 @@ the same session.
 
 ## Results
 
-Pending.
+Implemented the revised desktop and mobile flows in the two planned E2E
+specifications. The first desktop run failed because the old test expected a
+description paragraph in each tool row. The compact rows intentionally omit
+descriptions. A later run exposed a duplicate hidden Radix tooltip node, so the
+test now reads the visible tooltip portal. The first mobile geometry check
+sampled Vaul during its entry transition. It now polls until the drawer settles
+and still requires the final bottom edge to stay inside the viewport.
+
+Final verification passed:
+
+```text
+cd apps/web && pnpm e2e:run tests/chat/mcp-status.spec.ts -- --project=chromium
+1 passed
+
+cd apps/web && CAPTURE_PR_ASSETS=1 pnpm e2e:run tests/chat/mobile-mcp-status.spec.ts -- --project=mobile-chrome
+1 passed
+
+cd apps/web && pnpm exec eslint e2e/tests/chat/mcp-status.spec.ts e2e/tests/chat/mobile-mcp-status.spec.ts
+passed
+
+cd apps/web && pnpm run e2e:sleep-ratchet
+passed
+```
+
+The desktop test confirms one close control, the green Active Kandev status,
+an independently scrollable tool list, a fixed summary header, token values,
+tool arguments, focus return, scroll restoration, and third-party limits. The
+mobile test confirms the servers-to-tools-to-tool path, both Back actions,
+controls of at least 44px, a full-height settled drawer, internal tool-list
+overflow, and no document overflow.
+
+Fresh inspected captures:
+
+- `mcp-status--desktop-mcp-explorer-tools.png`
+- `mcp-status--desktop-mcp-explorer-tool-detail.png`
+- `mobile-mcp-status--mobile-mcp-explorer-tool-detail.png`
+
+No blockers remain. The tests depend on stable accessible names and MCP test
+fixtures, which is intentional browser-level contract coverage.

@@ -1,7 +1,13 @@
+import { type Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
-test("mobile MCP explorer uses a full-height list-to-detail drawer", async ({
+async function expectMinTouchHeight(control: Locator) {
+  const box = await control.boundingBox();
+  expect(box?.height).toBeGreaterThanOrEqual(44);
+}
+
+test("mobile MCP explorer uses servers, tools, and tool detail pages", async ({
   testPage,
   apiClient,
   seedData,
@@ -28,49 +34,61 @@ test("mobile MCP explorer uses a full-height list-to-detail drawer", async ({
 
   const trigger = testPage.getByTestId("mcp-status-trigger");
   await expect(trigger).toBeVisible();
-  const triggerBox = await trigger.boundingBox();
-  expect(triggerBox?.height).toBeGreaterThanOrEqual(44);
+  await expectMinTouchHeight(trigger);
   await trigger.tap();
 
   const drawer = testPage.getByTestId("mcp-server-explorer");
   await expect(drawer).toBeVisible();
-  const drawerBox = await drawer.boundingBox();
   const viewport = testPage.viewportSize();
+  await expect
+    .poll(async () => {
+      const box = await drawer.boundingBox();
+      return (box?.y ?? 0) + (box?.height ?? 0);
+    })
+    .toBeLessThanOrEqual(viewport?.height ?? 0);
+  const drawerBox = await drawer.boundingBox();
   expect(drawerBox?.height).toBeGreaterThanOrEqual((viewport?.height ?? 0) * 0.9);
-  await expect(drawer.getByTestId("mcp-server-list")).toBeVisible();
-  await expect(drawer.getByTestId("mcp-server-row-kandev")).toBeVisible();
+  expect((drawerBox?.y ?? 0) + (drawerBox?.height ?? 0)).toBeLessThanOrEqual(viewport?.height ?? 0);
 
-  await drawer.getByTestId("mcp-server-row-kandev").tap();
-  const detail = drawer.getByTestId("mcp-server-detail");
-  await expect(detail).toBeVisible();
-  await expect(detail.getByTestId("mcp-tool-row-create_task_kandev")).toBeVisible({
-    timeout: 30_000,
-  });
-  const detailScroll = drawer.getByTestId("mcp-server-detail-scroll");
-  const maxScrollTop = await detailScroll.evaluate(
+  const serverRow = drawer.getByTestId("mcp-server-row-kandev");
+  await expect(serverRow).toBeVisible();
+  await expectMinTouchHeight(serverRow);
+  await serverRow.tap();
+
+  const toolList = drawer.getByTestId("mcp-tool-list");
+  await expect(toolList).toBeVisible();
+  const backToServers = toolList.getByRole("button", { name: "Back to servers" });
+  await expectMinTouchHeight(backToServers);
+  const toolScroll = toolList.getByTestId("mcp-tool-list-scroll");
+  const maxScroll = await toolScroll.evaluate(
     (element) => element.scrollHeight - element.clientHeight,
   );
-  expect(maxScrollTop).toBeGreaterThan(0);
-  const initialScrollTop = await detailScroll.evaluate((element) => element.scrollTop);
-  await detailScroll.hover();
-  await testPage.mouse.wheel(0, Math.min(400, maxScrollTop));
-  await expect
-    .poll(() => detailScroll.evaluate((element) => element.scrollTop))
-    .toBeGreaterThan(initialScrollTop);
-  const back = detail.getByRole("button", { name: "Back to servers" });
-  await expect(back).toBeVisible();
-  const backBox = await back.boundingBox();
-  expect(backBox?.height).toBeGreaterThanOrEqual(44);
-  await prCapture.screenshot("mobile-mcp-explorer-kandev", {
-    caption: "Mobile MCP server explorer with a focused Kandev tool catalog",
+  expect(maxScroll).toBeGreaterThan(0);
+
+  const createTask = toolList.getByTestId("mcp-tool-row-create_task_kandev");
+  await createTask.scrollIntoViewIfNeeded();
+  await expectMinTouchHeight(createTask);
+  await createTask.tap();
+  const detail = drawer.getByTestId("mcp-tool-detail");
+  await expect(detail).toBeVisible();
+  await expect(detail.getByText(/^~\d+ tokens?$/)).toBeVisible();
+  await expect(detail.getByText("title", { exact: true })).toBeVisible();
+  const backToTools = detail.getByRole("button", { name: "Back to tools" });
+  await expectMinTouchHeight(backToTools);
+  await prCapture.screenshot("mobile-mcp-explorer-tool-detail", {
+    caption: "Mobile MCP tool detail with focused description and arguments",
   });
 
-  await back.tap();
+  await backToTools.tap();
+  await expect(toolList).toBeVisible();
+  await backToServers.tap();
   await expect(drawer.getByTestId("mcp-server-list")).toBeVisible();
-  await expect(drawer.getByTestId("mcp-server-detail")).toHaveCount(0);
+  await expect(drawer.getByTestId("mcp-tool-list")).toHaveCount(0);
   expect(
     await testPage.evaluate(
-      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      () =>
+        document.documentElement.scrollWidth <= document.documentElement.clientWidth &&
+        document.documentElement.scrollHeight <= document.documentElement.clientHeight,
     ),
   ).toBe(true);
   prCapture.flush();

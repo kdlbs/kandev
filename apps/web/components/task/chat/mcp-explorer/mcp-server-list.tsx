@@ -6,16 +6,7 @@ import type { MCPAttachmentServer } from "@/lib/state/slices/session-runtime/typ
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { mcpStatusLabelKey } from "./mcp-explorer-view-model";
-
-const STATUS_DOT_CLASS: Record<MCPAttachmentServer["status"], string> = {
-  active: "bg-emerald-500",
-  connected: "bg-amber-500",
-  delivered: "bg-amber-500",
-  failed: "bg-destructive",
-  filtered: "bg-muted-foreground/50",
-  unavailable: "bg-muted-foreground/50",
-  unknown: "bg-muted-foreground/50",
-};
+import { McpStatusDot } from "./mcp-status-presentation";
 
 function mcpStatusIcon(status: MCPAttachmentServer["status"]) {
   switch (status) {
@@ -75,10 +66,7 @@ export function McpServerList({
                   selected && "bg-muted/60",
                 )}
               >
-                <span
-                  className={cn("h-2 w-2 shrink-0 rounded-full", STATUS_DOT_CLASS[server.status])}
-                  aria-hidden="true"
-                />
+                <McpStatusDot status={server.status} />
                 <span className="min-w-0 flex-1 truncate">{server.name}</span>
                 <StatusIcon
                   className={cn("h-3.5 w-3.5 shrink-0", mcpStatusIconClass(server.status))}

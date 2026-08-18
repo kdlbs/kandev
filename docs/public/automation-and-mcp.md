@@ -449,17 +449,34 @@ explorer shows attachment status for the current session and execution. On
 desktop, it opens a wide dialog. On touch devices, it opens a full-height
 drawer.
 
-Select `kandev` to view its tool catalog after Kandev serves `tools/list`. Each
-entry shows only a tool name and description. The catalog is bounded and sorted
-by tool name. A truncation notice appears when the full catalog is larger than
-the stored catalog.
+The explorer has server, tool-list, and tool-detail levels. On desktop, the
+server list stays visible beside the active level. On touch devices, select a
+server to open its tool list. Select **Back to servers** to return.
+
+Select `kandev` after Kandev serves `tools/list`. The tool list is sorted and
+scrolls independently from the explorer header. Each row shows the tool name
+and an estimated token value. Select a tool to open its description and
+arguments. Select **Back to tools** to return to the same list position.
+
+The tool page shows common object properties as argument rows. It also shows
+plain JSON for nested or composed schemas. A tool without an input schema shows
+**No arguments**. A schema that exceeds a storage limit shows **Schema too
+large to display**.
+
+Kandev stores at most 64 KiB for one input schema and 512 KiB for all schemas
+in one catalog. It stores at most 128 tools and 1,024 UTF-8 bytes for each
+description. Notices identify truncated catalogs or schemas.
+
+The `~N tokens` value uses `o200k_base` on the complete compact MCP tool JSON.
+It is an estimate, not a provider context count or billing count. The agent can
+use a different tokenizer or tool-loading format.
 
 A profile server can show **Delivered, connection unverified**. That server
 connects directly to the agent, so Kandev cannot inspect its `tools/list`
-result. The explorer still shows safe status metadata. The built-in Kandev
-server becomes **Connected** after MCP initialize and **Active** after it serves
-`tools/list`. Missing observation is not a failure. Red appears only for an
-explicit sanitized error.
+result, descriptions, schemas, or token estimates. The explorer still shows
+safe status metadata. The built-in Kandev server becomes **Connected** after
+MCP initialize. It becomes **Active** after it serves `tools/list`. Missing
+observation is not a failure. Red appears only for an explicit sanitized error.
 
 The report is per Kandev session and execution. It stores only bounded,
 sanitized attachment facts. It does not store MCP headers, environment values,

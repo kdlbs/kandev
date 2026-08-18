@@ -1,7 +1,7 @@
 ---
 id: "05-capture-tool-definitions"
 title: "Capture tool definitions and estimates"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -67,4 +67,46 @@ status in the same session.
 
 ## Results
 
-Pending.
+Implemented the current-attempt tool-definition projection. Each tool can now
+carry a complete valid `input_schema`, an `input_schema_truncated` marker, and
+an `estimated_tokens` value. The Kandev server reports
+`o200k_base:mcp-tool-json-v1` when estimates are available. Superseded attempts
+remove the schemas, estimates, estimator name, and catalog entries while they
+retain the tool count.
+
+The projection keeps the existing 128-tool and 1,024-byte description limits.
+It omits a complete schema when it exceeds 64 KiB or when storing it would
+exceed the 512 KiB combined limit. It never stores partial or invalid JSON.
+Token estimates use the complete compact JSON produced by
+`mcp.Tool.MarshalJSON` before the bounded projection removes any fields.
+
+Added `github.com/tiktoken-go/tokenizer` v0.8.1. It embeds the `o200k_base`
+vocabulary and works without a network connection. The first focused RED run
+failed nine assertions across wire retention, schema limits, MCP observation,
+and known tokenizer vectors. The GREEN run passed 322 tests in the three
+focused packages.
+
+Release-size evidence from `make build`:
+
+- `bin/kandev`: 61,703,688 bytes before and 74,025,960 bytes after. The raw
+  increase is 12,322,272 bytes.
+- `bin/agentctl`: 31,918,536 bytes before and 43,769,224 bytes after. The raw
+  increase is 11,850,688 bytes.
+- Comparable gzip output increased by 3,035,259 bytes for `kandev` and
+  2,925,001 bytes for `agentctl`.
+
+The compressed increase is close to the required vocabulary size. A smaller
+alternative would download data at runtime, use an inexact heuristic, or add a
+shared external-data contract to every launcher. The implementation keeps the
+reviewed exact offline behavior.
+
+Verification passed from `apps/backend`:
+
+```text
+go test ./internal/agentctl/types/streams ./internal/mcp/server ./internal/mcp/tooltokens ./internal/agent/runtime/lifecycle ./internal/orchestrator
+go test ./internal/mcp/tooltokens -run TestKnownO200kVectors -count=1
+make build
+```
+
+The build completed with the existing warnings that cross-built Darwin
+`agentctl` binaries were not code-signed locally.

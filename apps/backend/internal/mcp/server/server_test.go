@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	"github.com/kandev/kandev/internal/mcp/tooltokens"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	mcpsrv "github.com/mark3labs/mcp-go/server"
@@ -58,14 +59,13 @@ func TestMCPAttachmentObserverPublishesToolSummaries(t *testing.T) {
 
 	s.registerMCPConnection("connection-1")
 	<-events
-	s.observeMCPToolsList("connection-1", []mcplib.Tool{
-		{
-			Name:           "create_task_kandev",
-			Description:    "Create a task",
-			RawInputSchema: []byte(`{"type":"object","properties":{"secret":{"type":"string"}}}`),
-			Meta:           &mcplib.Meta{AdditionalFields: map[string]any{"secret": "must not persist"}},
-		},
-	})
+	tool := mcplib.Tool{
+		Name:           "create_task_kandev",
+		Description:    "Create a task",
+		RawInputSchema: []byte(`{"type":"object","properties":{"secret":{"type":"string"}}}`),
+		Meta:           &mcplib.Meta{AdditionalFields: map[string]any{"private_note": "must not persist"}},
+	}
+	s.observeMCPToolsList("connection-1", []mcplib.Tool{tool})
 
 	evidence := <-events
 	if evidence.Kind != streams.MCPAttachmentEvidenceToolsListObserved || evidence.ToolCount != 1 {
@@ -76,7 +76,39 @@ func TestMCPAttachmentObserverPublishesToolSummaries(t *testing.T) {
 	}
 	encoded, err := json.Marshal(evidence)
 	require.NoError(t, err)
-	assert.NotContains(t, string(encoded), "secret")
+	assert.Contains(t, string(encoded), `"input_schema":{"type":"object","properties":{"secret":{"type":"string"}}}`)
+	assert.Contains(t, string(encoded), `"tool_token_estimator":"o200k_base:mcp-tool-json-v1"`)
+	assert.NotContains(t, string(encoded), "must not persist")
+	definition, err := json.Marshal(tool)
+	require.NoError(t, err)
+	wantTokens, err := tooltokens.EstimateToolJSON(definition)
+	require.NoError(t, err)
+	assert.Equal(t, wantTokens, evidence.Tools[0].EstimatedTokens)
+}
+
+func TestMCPAttachmentObserverPublishesStructuredInputSchema(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	events := make(chan streams.MCPAttachmentEvidence, 4)
+	s.SetAttachmentReporter(func(evidence streams.MCPAttachmentEvidence) { events <- evidence })
+	s.SetAttachmentAttempt(streams.MCPAttachmentAttempt{AttemptID: "attempt-1"})
+	s.registerMCPConnection("connection-1")
+	<-events
+
+	s.observeMCPToolsList("connection-1", []mcplib.Tool{{
+		Name: "structured",
+		InputSchema: mcplib.ToolInputSchema{
+			Type:       "object",
+			Properties: map[string]any{"title": map[string]any{"type": "string"}},
+			Required:   []string{"title"},
+		},
+	}})
+	evidence := <-events
+	require.Len(t, evidence.Tools, 1)
+	assert.JSONEq(t, `{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}`, string(evidence.Tools[0].InputSchema))
+	assert.Positive(t, evidence.Tools[0].EstimatedTokens)
 }
 
 func TestMCPAttachmentObserverKeepsConnectionAttemptAcrossRollover(t *testing.T) {
