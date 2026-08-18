@@ -40,6 +40,11 @@ type ContainerConfig struct {
 	Labels       map[string]string
 	AutoRemove   bool
 	PortBindings []PortBindingConfig
+	// SecurityOpt specifies Docker SecurityOpt values. Each entry is a
+	// "<key>=<value>" string accepted by the Docker daemon, such as
+	// "seccomp=<profile>" or "apparmor=<profile>". A nil or empty slice
+	// leaves SecurityOpt unset (nil), preserving Docker defaults.
+	SecurityOpt []string
 }
 
 // PortBindingConfig describes a container port to publish on the Docker host.
@@ -259,18 +264,7 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 		zap.String("image", cfg.Image),
 	)
 
-	// Build mounts
-	mounts := make([]mount.Mount, 0, len(cfg.Mounts))
-	for _, m := range cfg.Mounts {
-		mounts = append(mounts, mount.Mount{
-			Type:     mount.TypeBind,
-			Source:   m.Source,
-			Target:   m.Target,
-			ReadOnly: m.ReadOnly,
-		})
-	}
-
-	// Container configuration
+	mounts := buildDockerMounts(cfg.Mounts)
 	exposedPorts, portBindings, err := buildDockerPortBindings(cfg.PortBindings)
 	if err != nil {
 		return "", fmt.Errorf("failed to create container %s: %w", cfg.Name, err)
@@ -285,17 +279,7 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 		ExposedPorts: exposedPorts,
 	}
 
-	// Host configuration
-	hostCfg := &container.HostConfig{
-		Mounts:       mounts,
-		NetworkMode:  container.NetworkMode(cfg.NetworkMode),
-		AutoRemove:   cfg.AutoRemove,
-		PortBindings: portBindings,
-		Resources: container.Resources{
-			Memory:   cfg.Memory,
-			CPUQuota: cfg.CPUQuota,
-		},
-	}
+	hostCfg := buildHostConfig(cfg, mounts, portBindings)
 
 	resp, err := c.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config:     containerCfg,
@@ -312,6 +296,39 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 
 	c.logger.Info("Container created", zap.String("id", resp.ID), zap.String("name", cfg.Name))
 	return resp.ID, nil
+}
+
+// buildDockerMounts converts MountConfig entries to Docker SDK mount.Mount values.
+func buildDockerMounts(configs []MountConfig) []mount.Mount {
+	mounts := make([]mount.Mount, 0, len(configs))
+	for _, m := range configs {
+		mounts = append(mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   m.Source,
+			Target:   m.Target,
+			ReadOnly: m.ReadOnly,
+		})
+	}
+	return mounts
+}
+
+// buildHostConfig constructs a container.HostConfig from a ContainerConfig,
+// pre-built mounts, and port bindings.
+func buildHostConfig(cfg ContainerConfig, mounts []mount.Mount, portBindings network.PortMap) *container.HostConfig {
+	hc := &container.HostConfig{
+		Mounts:       mounts,
+		NetworkMode:  container.NetworkMode(cfg.NetworkMode),
+		AutoRemove:   cfg.AutoRemove,
+		PortBindings: portBindings,
+		Resources: container.Resources{
+			Memory:   cfg.Memory,
+			CPUQuota: cfg.CPUQuota,
+		},
+	}
+	if len(cfg.SecurityOpt) > 0 {
+		hc.SecurityOpt = cfg.SecurityOpt
+	}
+	return hc
 }
 
 func buildDockerPortBindings(bindings []PortBindingConfig) (network.PortSet, network.PortMap, error) {
@@ -726,17 +743,7 @@ func (c *Client) CreateContainerInteractive(ctx context.Context, cfg ContainerCo
 		zap.String("image", cfg.Image),
 	)
 
-	// Build mounts
-	mounts := make([]mount.Mount, 0, len(cfg.Mounts))
-	for _, m := range cfg.Mounts {
-		mounts = append(mounts, mount.Mount{
-			Type:     mount.TypeBind,
-			Source:   m.Source,
-			Target:   m.Target,
-			ReadOnly: m.ReadOnly,
-		})
-	}
-
+	mounts := buildDockerMounts(cfg.Mounts)
 	// Container configuration with stdin attached. Mirror CreateContainer's
 	// handling of ContainerConfig fields — including Entrypoint — so the same
 	// config struct produces consistent container behavior on both paths.
@@ -760,17 +767,7 @@ func (c *Client) CreateContainerInteractive(ctx context.Context, cfg ContainerCo
 		Tty:          false, // Important: no TTY for JSON-RPC
 	}
 
-	// Host configuration
-	hostCfg := &container.HostConfig{
-		Mounts:       mounts,
-		NetworkMode:  container.NetworkMode(cfg.NetworkMode),
-		AutoRemove:   cfg.AutoRemove,
-		PortBindings: portBindings,
-		Resources: container.Resources{
-			Memory:   cfg.Memory,
-			CPUQuota: cfg.CPUQuota,
-		},
-	}
+	hostCfg := buildHostConfig(cfg, mounts, portBindings)
 
 	resp, err := c.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config:     containerCfg,

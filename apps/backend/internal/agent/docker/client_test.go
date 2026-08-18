@@ -130,3 +130,56 @@ func TestParseHostPort(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildHostConfig_SecurityOptNilWhenEmpty(t *testing.T) {
+	cfg := ContainerConfig{
+		Memory:      256,
+		CPUQuota:    100000,
+		NetworkMode: "bridge",
+		AutoRemove:  true,
+	}
+	hc := buildHostConfig(cfg, nil, nil)
+	if hc.SecurityOpt != nil {
+		t.Errorf("SecurityOpt = %v, want nil", hc.SecurityOpt)
+	}
+}
+
+func TestBuildHostConfig_SecurityOptSetWhenProvided(t *testing.T) {
+	cfg := ContainerConfig{
+		Memory:      256,
+		CPUQuota:    100000,
+		NetworkMode: "bridge",
+		AutoRemove:  true,
+		SecurityOpt: []string{
+			`seccomp={"defaultAction":"SCMP_ACT_ALLOW","architectures":["SCMP_ARCH_X86_64"]}`,
+			"apparmor=unconfined",
+		},
+	}
+	hc := buildHostConfig(cfg, nil, nil)
+	if len(hc.SecurityOpt) != 2 {
+		t.Fatalf("SecurityOpt = %v, want 2 entries", hc.SecurityOpt)
+	}
+	if hc.SecurityOpt[0] != cfg.SecurityOpt[0] {
+		t.Errorf("SecurityOpt[0] = %q, want %q", hc.SecurityOpt[0], cfg.SecurityOpt[0])
+	}
+	if hc.SecurityOpt[1] != cfg.SecurityOpt[1] {
+		t.Errorf("SecurityOpt[1] = %q, want %q", hc.SecurityOpt[1], cfg.SecurityOpt[1])
+	}
+}
+
+func TestBuildDockerMounts(t *testing.T) {
+	in := []MountConfig{
+		{Source: "/src", Target: "/dst", ReadOnly: true},
+		{Source: "/data", Target: "/var/data", ReadOnly: false},
+	}
+	mounts := buildDockerMounts(in)
+	if len(mounts) != 2 {
+		t.Fatalf("got %d mounts, want 2", len(mounts))
+	}
+	if mounts[0].Source != "/src" || mounts[0].Target != "/dst" || !mounts[0].ReadOnly {
+		t.Errorf("mount 0 = %+v, want source=/src target=/dst readOnly=true", mounts[0])
+	}
+	if mounts[1].Source != "/data" || mounts[1].Target != "/var/data" || mounts[1].ReadOnly {
+		t.Errorf("mount 1 = %+v, want source=/data target=/var/data readOnly=false", mounts[1])
+	}
+}
