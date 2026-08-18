@@ -597,6 +597,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"appStatusBarEnabled":   settings.AppStatusBarEnabled,
 		"appStatusBarOrder":     mapAppStatusBarOrder(settings.AppStatusBarOrder),
 		"hiddenWorkflowStepIds": stringSliceMap(settings.KanbanHiddenStepIDs),
+		"autoHideEmptyWorkflowIds": append([]string(nil), settings.KanbanAutoHideEmptyWorkflowIDs...),
 		"loaded":                true,
 	}
 }

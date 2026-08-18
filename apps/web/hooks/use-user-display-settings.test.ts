@@ -27,6 +27,18 @@ function settingsWithHidden(hiddenWorkflowStepIds: Record<string, string[]>): Us
   } as unknown as UserSettingsState;
 }
 
+function settingsWithAutoHide(autoHideEmptyWorkflowIds: string[]): UserSettingsState {
+  return {
+    loaded: true,
+    workspaceId: "workspace-1",
+    workflowId: null,
+    repositoryIds: [],
+    tasksListShowDetails: false,
+    hiddenWorkflowStepIds: {},
+    autoHideEmptyWorkflowIds,
+  } as unknown as UserSettingsState;
+}
+
 describe("isSettingsUnchanged", () => {
   it("detects a details-only preference change", () => {
     expect(isSettingsUnchanged(settings(true), settings(false))).toBe(false);
@@ -88,6 +100,13 @@ describe("buildSettingsUpdatePayload", () => {
     const normalized = settingsWithHidden({});
     expect(buildSettingsUpdatePayload(normalized)).toMatchObject({
       kanban_hidden_step_ids: {},
+    });
+  });
+
+  it("sends the per-workflow auto-hide preference under its wire key", () => {
+    const normalized = settingsWithAutoHide(["wf-b", "wf-a"]);
+    expect(buildSettingsUpdatePayload(normalized)).toMatchObject({
+      kanban_auto_hide_empty_workflow_ids: ["wf-b", "wf-a"],
     });
   });
 });

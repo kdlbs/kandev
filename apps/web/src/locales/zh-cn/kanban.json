@@ -94,6 +94,8 @@
   "workflow": "工作流",
   "workflowStepFallback": "工作流步骤 {{stepId}}",
   "columns": "列",
+  "autoHideEmptyColumns": "自动隐藏空列",
+  "autoHideEmptyColumnsDescription": "移动任务时重新显示空步骤。",
   "columnsForWorkflow": "{{name}} 的列",
   "needsReassignment": "需要重新分配",
   "blockedByCount_one": "被 {{count}} 项阻塞",

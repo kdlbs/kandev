@@ -92,6 +92,8 @@ function buildColumnsSection({
   snapshots,
   hiddenWorkflowStepIds,
   onToggleStepVisibility,
+  autoHideEmptyWorkflowIds,
+  onToggleAutoHideEmpty,
 }: {
   isMobile: boolean;
   currentPage: "kanban" | "tasks";
@@ -100,6 +102,8 @@ function buildColumnsSection({
   snapshots: Record<string, { steps?: Array<{ id: string; title: string; position: number }> }>;
   hiddenWorkflowStepIds: Record<string, string[]>;
   onToggleStepVisibility: (workflowId: string, stepId: string) => void;
+  autoHideEmptyWorkflowIds: string[];
+  onToggleAutoHideEmpty: (workflowId: string) => void;
 }): MobileColumnsSection | null {
   if (!isMobile || currentPage !== "kanban" || !focusedWorkflowId) return null;
   const workflow = eligibleWorkflows.find((item) => item.id === focusedWorkflowId);
@@ -110,6 +114,8 @@ function buildColumnsSection({
     steps: snapshots[workflow.id]?.steps ?? [],
     hiddenStepIds: hiddenWorkflowStepIds[workflow.id] ?? [],
     onToggle: onToggleStepVisibility,
+    autoHideEmpty: autoHideEmptyWorkflowIds.includes(workflow.id),
+    onToggleAutoHide: onToggleAutoHideEmpty,
   };
 }
 
@@ -145,6 +151,8 @@ export function useMobileMenuSheetState({
     snapshots,
     hiddenWorkflowStepIds,
     onToggleStepVisibility,
+    autoHideEmptyWorkflowIds,
+    onToggleAutoHideEmpty,
   } = useKanbanDisplaySettings();
   const focusedWorkflowId = useAppStore((state) => state.mobileKanban.focusedWorkflowId);
   const columnsSection = buildColumnsSection({
@@ -155,6 +163,8 @@ export function useMobileMenuSheetState({
     snapshots,
     hiddenWorkflowStepIds,
     onToggleStepVisibility,
+    autoHideEmptyWorkflowIds,
+    onToggleAutoHideEmpty,
   });
   const repositoryValue = allRepositoriesSelected ? "all" : (selectedRepositoryId ?? "all");
   const viewValue = currentPage === "tasks" ? "list" : effectiveTaskListingView;

@@ -106,6 +106,7 @@ export type UserSettings = {
   app_status_bar_enabled?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
   kanban_hidden_step_ids?: Record<string, string[]>;
+  kanban_auto_hide_empty_workflow_ids?: string[];
   revision?: number;
   updated_at: string;
 };
@@ -171,4 +172,5 @@ export type UserSettingsUpdatePayload = {
   app_status_bar_enabled?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
   kanban_hidden_step_ids?: Record<string, string[]>;
+  kanban_auto_hide_empty_workflow_ids?: string[];
 };

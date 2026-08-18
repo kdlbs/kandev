@@ -107,6 +107,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		AppStatusBarEnabled:               req.AppStatusBarEnabled,
 		AppStatusBarOrder:                 req.AppStatusBarOrder,
 		KanbanHiddenStepIDs:               req.KanbanHiddenStepIDs,
+		KanbanAutoHideEmptyWorkflowIDs:    req.KanbanAutoHideEmptyWorkflowIDs,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err

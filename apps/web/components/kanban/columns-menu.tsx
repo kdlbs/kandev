@@ -23,6 +23,8 @@ export type ColumnsMenuProps = {
   /** Persisted hidden ids for this workflow; ids with no live step are inert. */
   hiddenStepIds: string[];
   onToggle: (workflowId: string, stepId: string) => void;
+  autoHideEmpty: boolean;
+  onToggleAutoHide: (workflowId: string) => void;
   /**
    * Phone rows must clear 44 CSS px. Content is identical either way — this
    * only relaxes menu density for touch.
@@ -45,6 +47,8 @@ export function ColumnsMenu({
   steps,
   hiddenStepIds,
   onToggle,
+  autoHideEmpty,
+  onToggleAutoHide,
   touchTargets = false,
 }: ColumnsMenuProps) {
   const { t } = useTranslation();
@@ -72,6 +76,20 @@ export function ColumnsMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>{t("kanban:columns")}</DropdownMenuLabel>
+        <DropdownMenuCheckboxItem
+          data-testid={`columns-menu-auto-hide-empty-${workflowId}`}
+          className={touchTargets ? "min-h-11" : undefined}
+          checked={autoHideEmpty}
+          onCheckedChange={() => onToggleAutoHide(workflowId)}
+          onSelect={(event) => event.preventDefault()}
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block truncate">{t("kanban:autoHideEmptyColumns")}</span>
+            <span className="block text-xs text-muted-foreground">
+              {t("kanban:autoHideEmptyColumnsDescription")}
+            </span>
+          </span>
+        </DropdownMenuCheckboxItem>
         {orderedSteps.map((step) => (
           <DropdownMenuCheckboxItem
             key={step.id}

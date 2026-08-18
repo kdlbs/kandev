@@ -25,6 +25,7 @@ export function getGraph2DisplayState(
 export function SwimlaneGraph2Content({
   workflowId,
   steps,
+  moveTargetSteps,
   tasks,
   onPreviewTask,
   onOpenTask,
@@ -82,7 +83,7 @@ export function SwimlaneGraph2Content({
           <Graph2TaskPipeline
             key={task.id}
             task={task}
-            steps={displaySteps}
+            steps={moveTargetSteps}
             onMoveTask={handleMoveTask}
             onPreviewTask={onPreviewTask}
             onOpenTask={onOpenTask}

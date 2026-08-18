@@ -1,7 +1,7 @@
 ---
 id: "01-persist-preference"
 title: "Persist the per-workflow auto-hide preference"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

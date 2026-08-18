@@ -1,7 +1,7 @@
 ---
 id: "03-drag-targets"
 title: "Restore auto-hidden steps as move targets"
-status: pending
+status: done
 wave: 3
 depends_on: ["02-derived-visibility"]
 plan: "plan.md"

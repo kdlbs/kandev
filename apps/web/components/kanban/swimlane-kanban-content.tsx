@@ -60,6 +60,7 @@ export function isOrphanMoveTarget(targetStepId: string): boolean {
 export type SwimlaneKanbanContentProps = {
   workflowId: string;
   steps: WorkflowStep[];
+  moveTargetSteps: WorkflowStep[];
   tasks: Task[];
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
@@ -515,6 +516,7 @@ function renderKanbanLayout({
 export function SwimlaneKanbanContent({
   workflowId,
   steps,
+  moveTargetSteps,
   tasks,
   onPreviewTask,
   onOpenTask,
@@ -546,14 +548,19 @@ export function SwimlaneKanbanContent({
   );
   const { sensors, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToStep, activeTask } =
     useSwimlaneKanbanDnd({ tasks: displayTasks, workflowId, onMoveError });
+  const dragDisplaySteps = useMemo(() => {
+    if (!activeTask) return displaySteps;
+    const orphan = displaySteps.find((step) => step.id === ORPHAN_STEP_ID);
+    return orphan ? [...moveTargetSteps, orphan] : moveTargetSteps;
+  }, [activeTask, displaySteps, moveTargetSteps]);
 
   // Memoized so the layout components don't re-render from a fresh props object
   // on every parent render. Declared before the early return to keep hook order
   // stable.
   const sharedProps = useMemo(
     () => ({
-      steps: displaySteps,
-      moveTargetSteps: steps,
+      steps: dragDisplaySteps,
+      moveTargetSteps,
       tasks: displayTasks,
       onPreviewTask,
       onOpenTask,
@@ -571,8 +578,8 @@ export function SwimlaneKanbanContent({
       externalLinkAvailability,
     }),
     [
-      displaySteps,
-      steps,
+      dragDisplaySteps,
+      moveTargetSteps,
       displayTasks,
       onPreviewTask,
       onOpenTask,

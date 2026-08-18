@@ -1,7 +1,7 @@
 ---
 id: "02-derived-visibility"
 title: "Derive and render empty-column visibility"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-persist-preference"]
 plan: "plan.md"

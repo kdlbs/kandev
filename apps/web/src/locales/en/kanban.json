@@ -99,6 +99,8 @@
   "workflow": "Workflow",
   "workflowStepFallback": "workflow step {{stepId}}",
   "columns": "Columns",
+  "autoHideEmptyColumns": "Auto-hide empty columns",
+  "autoHideEmptyColumnsDescription": "Show empty steps again while moving tasks.",
   "columnsForWorkflow": "Columns for {{name}}",
   "needsReassignment": "Needs Reassignment",
   "noTasksYet": "No tasks yet",

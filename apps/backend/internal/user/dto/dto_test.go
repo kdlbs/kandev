@@ -101,6 +101,27 @@ func TestKanbanHiddenStepIDsRequestDecode(t *testing.T) {
 	})
 }
 
+func TestKanbanAutoHideEmptyWorkflowIDsContract(t *testing.T) {
+	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("KanbanAutoHideEmptyWorkflowIDs")
+	if !ok || field.Tag.Get("json") != "kanban_auto_hide_empty_workflow_ids,omitempty" {
+		t.Fatalf("KanbanAutoHideEmptyWorkflowIDs patch field = %+v, want JSON preference field", field)
+	}
+
+	want := []string{"wf-a", "wf-b"}
+	source := &models.UserSettings{}
+	sourceField := reflect.ValueOf(source).Elem().FieldByName("KanbanAutoHideEmptyWorkflowIDs")
+	if !sourceField.IsValid() {
+		t.Fatal("models.UserSettings.KanbanAutoHideEmptyWorkflowIDs field is absent")
+	}
+	sourceField.Set(reflect.ValueOf(want))
+	settings := FromUserSettings(source)
+	value := reflect.ValueOf(settings)
+	mapped := value.FieldByName("KanbanAutoHideEmptyWorkflowIDs")
+	if !mapped.IsValid() || !reflect.DeepEqual(mapped.Interface(), want) {
+		t.Fatalf("KanbanAutoHideEmptyWorkflowIDs = %#v, want %#v", mapped, want)
+	}
+}
+
 // TestTasksListShowDetailsDTO verifies the DTO mapping and the nil-versus-explicit-false patch semantics.
 func TestTasksListShowDetailsDTO(t *testing.T) {
 	if !FromUserSettings(&models.UserSettings{TasksListShowDetails: true}).TasksListShowDetails {

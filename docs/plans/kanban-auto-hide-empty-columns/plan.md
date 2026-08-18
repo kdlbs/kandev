@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/kanban-auto-hide-empty-columns/spec.md
 created: 2026-08-18
-status: pending
+status: building
 ---
 
 # Implementation Plan: Auto-hide empty Kanban columns
@@ -94,9 +94,9 @@ Update the feature-spec index with the new spec.
 
 ## Implementation tasks
 
-- [ ] [Task 01 - Persist the per-workflow preference](task-01-persist-preference.md)
-- [ ] [Task 02 - Derive and render empty-column visibility](task-02-derived-visibility.md)
-- [ ] [Task 03 - Restore auto-hidden move targets](task-03-drag-targets.md)
+- [x] [Task 01 - Persist the per-workflow preference](task-01-persist-preference.md)
+- [x] [Task 02 - Derive and render empty-column visibility](task-02-derived-visibility.md)
+- [x] [Task 03 - Restore auto-hidden move targets](task-03-drag-targets.md)
 - [ ] [Task 04 - Prove end-to-end behavior and document it](task-04-e2e-docs.md)
 
 All tasks are sequential. Tasks 02-04 depend on the contracts established by the preceding task and

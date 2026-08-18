@@ -19,6 +19,8 @@ function baseProps(overrides: Partial<React.ComponentProps<typeof ColumnsMenu>> 
     ],
     hiddenStepIds: [] as string[],
     onToggle: vi.fn(),
+    autoHideEmpty: false,
+    onToggleAutoHide: vi.fn(),
     ...overrides,
   };
 }
@@ -75,6 +77,16 @@ describe("ColumnsMenu — one workflow's steps", () => {
     fireEvent.click(screen.getByTestId(STEP_Z_ITEM));
 
     expect(onToggle).toHaveBeenCalledExactlyOnceWith(WF.id, "step-z");
+  });
+
+  it("reports the workflow when automatic empty-column hiding is toggled", () => {
+    const onToggleAutoHide = vi.fn();
+    render(<ColumnsMenu {...baseProps({ onToggleAutoHide })} />);
+    openMenu();
+
+    fireEvent.click(screen.getByTestId(`columns-menu-auto-hide-empty-${WF.id}`));
+
+    expect(onToggleAutoHide).toHaveBeenCalledExactlyOnceWith(WF.id);
   });
 
   it("ignores a hidden id that no longer matches a live step", () => {

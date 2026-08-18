@@ -1,7 +1,7 @@
 ---
 id: "04-e2e-docs"
 title: "Prove end-to-end behavior and document it"
-status: pending
+status: in_progress
 wave: 4
 depends_on: ["03-drag-targets"]
 plan: "plan.md"
