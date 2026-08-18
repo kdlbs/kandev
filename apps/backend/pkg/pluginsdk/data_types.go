@@ -1087,3 +1087,95 @@ func messageDispatchFromProto(p *pluginv1.SendMessageResponse) *MessageDispatch 
 	}
 	return &MessageDispatch{SessionID: p.GetSessionId(), Status: p.GetStatus()}
 }
+
+// ── Agent conversations ─────────────────────────────────────────────────
+
+// AgentConversationSpec controls how Ensure creates a conversation.
+type AgentConversationSpec struct {
+	WorkspaceID       string
+	ConversationKey   string
+	BasePrompt        string
+	AgentProfileID    string
+	ExecutorProfileID string
+}
+
+func (s AgentConversationSpec) toProto() *pluginv1.AgentConversationSpec {
+	return &pluginv1.AgentConversationSpec{
+		WorkspaceId:       s.WorkspaceID,
+		ConversationKey:   s.ConversationKey,
+		BasePrompt:        s.BasePrompt,
+		AgentProfileId:    s.AgentProfileID,
+		ExecutorProfileId: s.ExecutorProfileID,
+	}
+}
+
+func agentConversationSpecFromProto(p *pluginv1.AgentConversationSpec) AgentConversationSpec {
+	if p == nil {
+		return AgentConversationSpec{}
+	}
+	return AgentConversationSpec{
+		WorkspaceID:       p.GetWorkspaceId(),
+		ConversationKey:   p.GetConversationKey(),
+		BasePrompt:        p.GetBasePrompt(),
+		AgentProfileID:    p.GetAgentProfileId(),
+		ExecutorProfileID: p.GetExecutorProfileId(),
+	}
+}
+
+// AgentConversationDescriptor identifies an existing conversation.
+type AgentConversationDescriptor struct {
+	TaskID          string
+	SessionID       string
+	WorkspaceID     string
+	ConversationKey string
+	AgentProfileID  string
+}
+
+func (d AgentConversationDescriptor) toProto() *pluginv1.AgentConversationDescriptor {
+	return &pluginv1.AgentConversationDescriptor{
+		TaskId:          d.TaskID,
+		SessionId:       d.SessionID,
+		WorkspaceId:     d.WorkspaceID,
+		ConversationKey: d.ConversationKey,
+		AgentProfileId:  d.AgentProfileID,
+	}
+}
+
+func agentConversationDescriptorFromProto(p *pluginv1.AgentConversationDescriptor) AgentConversationDescriptor {
+	if p == nil {
+		return AgentConversationDescriptor{}
+	}
+	return AgentConversationDescriptor{
+		TaskID:          p.GetTaskId(),
+		SessionID:       p.GetSessionId(),
+		WorkspaceID:     p.GetWorkspaceId(),
+		ConversationKey: p.GetConversationKey(),
+		AgentProfileID:  p.GetAgentProfileId(),
+	}
+}
+
+// AgentConversationDispatch is the outcome of DispatchAgentConversation.
+type AgentConversationDispatch struct {
+	SessionID  string
+	Status     string
+	Descriptor AgentConversationDescriptor
+}
+
+func (d AgentConversationDispatch) toProto() *pluginv1.DispatchAgentConversationResponse {
+	return &pluginv1.DispatchAgentConversationResponse{
+		SessionId:      d.SessionID,
+		Status:         d.Status,
+		ConvDescriptor: d.Descriptor.toProto(),
+	}
+}
+
+func agentConversationDispatchFromProto(p *pluginv1.DispatchAgentConversationResponse) AgentConversationDispatch {
+	if p == nil {
+		return AgentConversationDispatch{}
+	}
+	return AgentConversationDispatch{
+		SessionID:  p.GetSessionId(),
+		Status:     p.GetStatus(),
+		Descriptor: agentConversationDescriptorFromProto(p.GetConvDescriptor()),
+	}
+}
