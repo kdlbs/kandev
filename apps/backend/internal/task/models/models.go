@@ -107,6 +107,17 @@ const (
 	// after queue promotion. It prevents duplicate task.queue_promoted events
 	// from repeating on_enter or auto-start behavior.
 	MetaKeyQueuePromotionPending = "queue_promotion_pending"
+	// MetaKeyManualMoveLifecyclePending identifies an admitted manual move whose
+	// task.moved lifecycle must finish before feeder reconciliation. Its value
+	// records the source step so stale deliveries cannot run the wrong exit.
+	MetaKeyManualMoveLifecyclePending = "manual_move_lifecycle_pending"
+	// MetaKeyManualMoveLifecycleCompleted records that the admitted manual move
+	// lifecycle finished. It remains as an idempotency marker until the next
+	// step-changing move replaces it.
+	MetaKeyManualMoveLifecycleCompleted = "manual_move_lifecycle_completed"
+	// MetaKeyAppliedDeferredMoves stores deferred move IDs that have already
+	// been applied, preventing a stale queue rollback from replaying one.
+	MetaKeyAppliedDeferredMoves = "applied_deferred_moves"
 	// DeferredLaunchStartWhenUnblockedKey marks a deferred launch intent as
 	// belonging to a task dependency chain rather than to WIP overflow. The
 	// record itself is identical; the flag lets dependency resolution recognise

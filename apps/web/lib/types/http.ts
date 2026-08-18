@@ -28,6 +28,7 @@ export type {
   TaskCreateLastUsedApi,
   AppStatusBarOrderApi,
   LspStatusLocation,
+  LastSeenDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
   UserSettings,
@@ -72,6 +73,8 @@ export type TaskState =
   | "COMPLETED"
   | "FAILED"
   | "CANCELLED";
+
+export type TaskPriority = "critical" | "high" | "medium" | "low";
 
 // Workflow Review Status
 export type WorkflowReviewStatus = "pending" | "approved" | "changes_requested" | "rejected";
@@ -339,7 +342,7 @@ export type Task = ActiveSubagentCountFields & {
   /** True when the task was created in autopilot mode. Immutable after creation. */
   autopilot?: boolean;
   state: TaskState;
-  priority: number;
+  priority: TaskPriority;
   wip_admitted?: boolean;
   queued_for_step_id?: string;
   queued_at?: string | null;

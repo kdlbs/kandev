@@ -160,18 +160,13 @@ describe("hydrateUI — quick chat lifecycle", () => {
     expect(result.quickChat.activeTerminalTabId).toBe(TERMINAL_TAB_ID);
   });
 
-  it("clears stale quick chat sessions when the backend returns none", () => {
+  it("preserves live quick chat sessions omitted by stale hydration", () => {
     const result = produce(makeDraft(), (draft: Draft<AppState>) => {
       draft.quickChat = {
+        ...draft.quickChat,
         isOpen: true,
         activeSessionId: "stale-session",
-        sessions: [
-          { sessionId: "stale-session", workspaceId: "ws-1", name: "Stale", kind: "chat" },
-        ],
-        terminalTabs: [],
-        activeKind: "conversation",
-        activeTerminalTabId: null,
-        lastTerminalTabIdByWorkspace: {},
+        sessions: [{ sessionId: "stale-session", workspaceId: "ws-1", name: "Live", kind: "chat" }],
       };
       hydrateUI(draft, {
         quickChat: {
@@ -182,14 +177,15 @@ describe("hydrateUI — quick chat lifecycle", () => {
       });
     });
 
-    expect(result.quickChat.sessions).toEqual([]);
-    expect(result.quickChat.isOpen).toBe(false);
-    expect(result.quickChat.activeSessionId).toBeNull();
+    expect(result.quickChat.sessions).toHaveLength(1);
+    expect(result.quickChat.sessions[0].sessionId).toBe("stale-session");
+    expect(result.quickChat.isOpen).toBe(true);
   });
 
   it("preserves browser-local terminal tabs when server conversations resync", () => {
     const result = produce(makeDraft(), (draft: Draft<AppState>) => {
       draft.quickChat = {
+        ...draft.quickChat,
         isOpen: true,
         activeSessionId: "chat-1",
         sessions: [{ sessionId: "chat-1", workspaceId: "ws-1", kind: "chat" }],
@@ -215,7 +211,7 @@ describe("hydrateUI — quick chat lifecycle", () => {
       });
     });
 
-    expect(result.quickChat.sessions).toEqual([]);
+    expect(result.quickChat.sessions).toHaveLength(1);
     expect(result.quickChat.terminalTabs).toHaveLength(1);
     expect(result.quickChat.activeKind).toBe("terminal");
     expect(result.quickChat.activeTerminalTabId).toBe(TERMINAL_TAB_ID);
@@ -227,6 +223,7 @@ describe("hydrateUI — terminal descriptor reconciliation", () => {
   it("treats an empty server terminal list as authoritative during hydration", () => {
     const result = produce(makeDraft(), (draft: Draft<AppState>) => {
       draft.quickChat = {
+        ...draft.quickChat,
         isOpen: true,
         activeSessionId: null,
         sessions: [],

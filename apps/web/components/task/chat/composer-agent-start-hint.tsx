@@ -11,7 +11,7 @@ import { useTranslation } from "react-i18next";
  * The extra gates mirror the composer's own send-availability signals: a
  * session in recovery (needsRecovery — WAITING_FOR_INPUT with an error
  * message) disables the editor, an unavailable executor environment
- * replaces it with the FailedSessionBanner, and a pending clarification
+ * replaces it with the stopped-session banner, and a pending clarification
  * routes every submission to the message queue (which only persists —
  * it does not resume the stopped agent). In all three cases no message can
  * be delivered to the agent, so promising that sending will start it would

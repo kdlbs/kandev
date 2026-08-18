@@ -2,15 +2,20 @@ package store
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kandev/kandev/internal/user/models"
 )
+
+// ErrUserSettingsRevisionConflict reports a conditional settings write that
+// matched no rows because the expected revision was stale.
+var ErrUserSettingsRevisionConflict = errors.New("user settings revision conflict")
 
 type Repository interface {
 	GetUser(ctx context.Context, id string) (*models.User, error)
 	GetDefaultUser(ctx context.Context) (*models.User, error)
 	GetUserSettings(ctx context.Context, userID string) (*models.UserSettings, error)
-	UpsertUserSettingsPreservingTaskCreateLastUsed(ctx context.Context, settings *models.UserSettings, patch *models.TaskCreateLastUsed) (*models.UserSettings, error)
+	UpsertUserSettingsPreservingTaskCreateLastUsed(ctx context.Context, settings *models.UserSettings, patch *models.TaskCreateLastUsed, expectedRevision int64) (*models.UserSettings, error)
 	UpdateTaskCreateLastUsed(ctx context.Context, userID string, patch models.TaskCreateLastUsed) (*models.UserSettings, error)
 	Close() error
 }

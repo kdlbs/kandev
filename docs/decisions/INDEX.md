@@ -173,4 +173,5 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-13-hard-delete-task-contribution-links | [Hard delete owns task contribution links](2026-08-13-hard-delete-task-contribution-links.md) | accepted | backend | 2026-08-13 |
 | 2026-08-15-office-mode-follows-active-workspace | [Office Mode Follows the Active Workspace](2026-08-15-office-mode-follows-active-workspace.md) | accepted | frontend, backend | 2026-08-15 |
 | 2026-08-16-session-mcp-tool-catalog | [Keep MCP Tool Catalogs Session Owned](2026-08-16-session-mcp-tool-catalog.md) | accepted | backend, agentctl, frontend, protocol, security | 2026-08-16 |
+| 2026-08-17-separate-task-activity-from-summary-freshness | [Separate Task Activity From Summary Freshness](2026-08-17-separate-task-activity-from-summary-freshness.md) | accepted | backend, frontend, protocol | 2026-08-17 |
 | 2026-08-17-release-pr-ruleset-bypass | [Give Stable Release PRs an Administrator Token Bypass](2026-08-17-release-pr-ruleset-bypass.md) | accepted | infra, workflow, security | 2026-08-17 |

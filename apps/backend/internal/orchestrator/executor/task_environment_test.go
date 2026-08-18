@@ -7,8 +7,34 @@ import (
 	"strings"
 	"testing"
 
+	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+type environmentSourceResolver func(context.Context, environmentSource) (string, error)
+
+// resolveEnvironmentSources is test-only: it exists to exercise
+// runtimeenv.Resolve against the environmentSource shape without a
+// task/session context to log or count overrides against. It discards the
+// OverrideRecords Resolve returns and SHALL NOT log or count on its own.
+func resolveEnvironmentSources(
+	ctx context.Context, sources []environmentSource, resolve environmentSourceResolver,
+) (map[string]string, error) {
+	definitions := make([]runtimeenv.Definition, 0, len(sources))
+	for _, source := range sources {
+		definitions = append(definitions, runtimeenv.Definition{
+			Key: source.key, Literal: source.literal, SecretID: source.secretID,
+			Origin: source.origin, WorkspaceID: source.workspaceID,
+		})
+	}
+	resolved, _, err := runtimeenv.Resolve(ctx, definitions, func(ctx context.Context, definition runtimeenv.Definition) (string, error) {
+		return resolve(ctx, environmentSource{
+			key: definition.Key, literal: definition.Literal, secretID: definition.SecretID,
+			origin: definition.Origin, workspaceID: definition.WorkspaceID,
+		})
+	})
+	return resolved, err
+}
 
 func TestResolveEnvironmentSources_DeduplicatesSameSecretAndIgnoresOrder(t *testing.T) {
 	resolver := func(_ context.Context, source environmentSource) (string, error) {

@@ -15,6 +15,7 @@ import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-s
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
 import { workspaceHomeHref } from "@/lib/navigation/workspace-home";
+import { selectQuickChatHasUnseenIdle } from "@/lib/state/slices/ui/quick-chat-unseen-selectors";
 import { cn } from "@/lib/utils";
 
 type KanbanHeaderMobileProps = {
@@ -39,6 +40,39 @@ function MobileBrandLink({ workspaceId }: Pick<KanbanHeaderMobileProps, "workspa
     >
       Kandev
     </Link>
+  );
+}
+
+function MobileQuickChatButton({
+  workspaceId,
+  onClick,
+}: {
+  workspaceId: string;
+  onClick: () => void;
+}) {
+  const { t } = useTranslation();
+  const dot = useAppStore((state) => selectQuickChatHasUnseenIdle(state, workspaceId));
+  const quickChatLabel = t(dot ? "sidebar:quickChatUnseen" : "sidebar:quickChat");
+  return (
+    <Button
+      variant="outline"
+      size="icon-lg"
+      onClick={onClick}
+      className="!size-11 cursor-pointer"
+      aria-label={quickChatLabel}
+      data-testid="mobile-quick-chat-button"
+    >
+      <span className="relative flex">
+        <IconMessageCircle className="h-4 w-4" />
+        {dot && (
+          <span
+            aria-hidden="true"
+            className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-background"
+            data-testid="quick-chat-unseen-dot"
+          />
+        )}
+      </span>
+    </Button>
   );
 }
 
@@ -88,16 +122,7 @@ function MobileHeaderActions({
         </Button>
       )}
       {workspaceId && (
-        <Button
-          variant="outline"
-          size="icon-lg"
-          onClick={handleOpenQuickChat}
-          className="!size-11 cursor-pointer"
-          aria-label={t("sidebar:quickChat")}
-          data-testid="mobile-quick-chat-button"
-        >
-          <IconMessageCircle className="h-4 w-4" />
-        </Button>
+        <MobileQuickChatButton workspaceId={workspaceId} onClick={handleOpenQuickChat} />
       )}
       {onSearchChange && (
         <Button

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, type CSSProperties } from "react";
+import { memo, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
@@ -15,6 +15,7 @@ import { QuickTabAddMenu } from "./quick-tab-add-menu";
 import { QuickChatSetup } from "./quick-chat-setup";
 import { useQuickChatModal } from "./use-quick-chat-modal";
 import { useQuickChatWidth } from "@/hooks/use-quick-chat-width";
+import { ClarificationEscapeGuardProvider } from "@/hooks/use-clarification-escape-guard";
 import { ConfigChatSetup } from "@/components/config-chat/config-chat-setup";
 import { useConfigChat } from "@/components/config-chat/use-config-chat";
 import type { QuickChatSession, QuickTerminalTab } from "@/lib/state/slices/ui/types";
@@ -240,14 +241,21 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
   const quickChat = useQuickChatModal(workspaceId, configChat.reset);
   const setQuickChatInitialPrompt = useAppStore((state) => state.setQuickChatInitialPrompt);
   const { width, leftResizeHandleProps, rightResizeHandleProps } = useQuickChatWidth();
+  const [clarificationEscapeGuarded, setClarificationEscapeGuarded] = useState(false);
   return (
-    <>
+    <ClarificationEscapeGuardProvider value={setClarificationEscapeGuarded}>
       <Dialog open={quickChat.isOpen} onOpenChange={quickChat.handleOpenChange}>
         <DialogContent
           className="!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 flex flex-col gap-0 p-0 pt-safe pb-safe shadow-2xl sm:!left-1/2 sm:!top-1/2 sm:!h-[85vh] sm:!max-h-[85vh] sm:!w-[var(--quick-chat-width)] sm:!max-w-[calc(100vw-2rem)] sm:!-translate-x-1/2 sm:!-translate-y-1/2"
           style={{ "--quick-chat-width": `${width}px` } as CSSProperties}
           showCloseButton={false}
           overlayClassName="bg-black/20"
+          onEscapeKeyDown={(event) => {
+            // A pending, expanded clarification collapses first; the modal
+            // stays open. A second Escape (now unguarded) closes it, matching
+            // the main task chat panel's two-stage Escape after #2729.
+            if (clarificationEscapeGuarded) event.preventDefault();
+          }}
         >
           <DialogTitle className="sr-only">{t("common:commandQuickChat")}</DialogTitle>
           <QuickChatResizeHandle edge="left" {...leftResizeHandleProps} />
@@ -266,6 +274,6 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
         onOpenChange={(open) => !open && quickChat.setSessionToClose(null)}
         onConfirm={quickChat.handleConfirmClose}
       />
-    </>
+    </ClarificationEscapeGuardProvider>
   );
 });

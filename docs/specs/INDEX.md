@@ -198,6 +198,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [sidebar-task-completion-icons](ui/sidebar-task-completion-icons.md) | shipped |
 | [sidebar-queued-prompt-count](ui/sidebar-queued-prompt-count.md) | shipped |
 | [session-tab-delete-feedback](ui/session-tab-delete-feedback.md) | shipped |
+| [terminal-close-feedback](ui/terminal-close-feedback.md) | shipped |
 | [message-favorite-star-mobile-size](ui/message-favorite-star-mobile-size.md) | shipped |
 | [message-metadata-overflow](ui/message-metadata-overflow.md) | shipped |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
@@ -232,6 +233,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [external-vcs-file-links](ui/external-vcs-file-links.md) | shipped |
 | [task-listing-display-preferences](ui/task-listing-display-preferences.md) | shipped |
 | [sidebar-archived-filter](ui/sidebar-archived-filter.md) | draft |
+| [sidebar-last-activity-sort](ui/sidebar-last-activity-sort.md) | draft |
 | [task-workspace-content-search](ui/task-workspace-content-search.md) | shipped |
 | [file-tree-chat-context](ui/file-tree-chat-context.md) | shipped |
 | [task-review-shortcut](ui/task-review-shortcut.md) | approved |
@@ -284,6 +286,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [claude-fork-review-allowlist](claude-fork-review-allowlist/spec.md) | building |
 | [workflow-settings-autosave](workflow-settings-autosave/spec.md) | archived; superseded by settings-manual-save |
 | [mobile-quick-chat-topbar](mobile-quick-chat-topbar/spec.md) | building |
+| [quick-chat-idle-dot](quick-chat-idle-dot/spec.md) | draft |
 | [native-code-review](native-code-review/spec.md) | building |
 | [missing-task-route-recovery](missing-task-route-recovery/spec.md) | draft |
 | [browser-inspect-annotations-save](browser-inspect-annotations-save/spec.md) | shipped |
@@ -294,6 +297,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [e2e-duration-aware-sharding](e2e-duration-aware-sharding/spec.md) | implemented |
 | [board-step-visibility-filter](board-step-visibility-filter/spec.md) | draft |
 | [shutdown-turn-failure-suppression](shutdown-turn-failure-suppression/spec.md) | draft |
+| [executor-profile-env-precedence](executor-profile-env-precedence/spec.md) | building |
 
 ---
 

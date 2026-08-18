@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,8 +15,10 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/user/controller"
 	"github.com/kandev/kandev/internal/user/dto"
+	"github.com/kandev/kandev/internal/user/models"
 	"github.com/kandev/kandev/internal/user/service"
 	userstore "github.com/kandev/kandev/internal/user/store"
+	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
@@ -169,5 +172,78 @@ func TestHTTPUpdateUserSettingsBodyTooLarge(t *testing.T) {
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("PATCH oversized body status = %d, want %d: %s", response.Code, http.StatusRequestEntityTooLarge, response.Body.String())
+	}
+}
+
+// conflictSettingsRepository forces every conditional settings write to
+// exercise the service retry limit without requiring a live database race.
+type conflictSettingsRepository struct {
+	userstore.Repository
+}
+
+func (conflictSettingsRepository) GetUserSettings(_ context.Context, userID string) (*models.UserSettings, error) {
+	return &models.UserSettings{UserID: userID}, nil
+}
+
+func (conflictSettingsRepository) UpsertUserSettingsPreservingTaskCreateLastUsed(
+	context.Context,
+	*models.UserSettings,
+	*models.TaskCreateLastUsed,
+	int64,
+) (*models.UserSettings, error) {
+	return nil, userstore.ErrUserSettingsRevisionConflict
+}
+
+func newConflictHandlers(t *testing.T) *Handlers {
+	t.Helper()
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("create logger: %v", err)
+	}
+	svc := service.NewService(conflictSettingsRepository{}, nil, log)
+	return NewHandlers(controller.NewController(svc), log)
+}
+
+func TestHTTPUpdateUserSettingsRevisionConflict(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	newConflictHandlers(t).registerHTTP(router)
+
+	request := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/user/settings",
+		bytes.NewReader([]byte(`{"last_seen_display":"relative"}`)),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("PATCH revision conflict status = %d, want %d: %s", response.Code, http.StatusConflict, response.Body.String())
+	}
+}
+
+func TestWSUpdateUserSettingsRevisionConflict(t *testing.T) {
+	h := newConflictHandlers(t)
+	msg, err := ws.NewRequest("settings-1", ws.ActionUserSettingsUpdate, map[string]string{
+		"last_seen_display": "relative",
+	})
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+
+	response, err := h.wsUpdateUserSettings(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("wsUpdateUserSettings returned error: %v", err)
+	}
+	if response.Type != ws.MessageTypeError {
+		t.Fatalf("response type = %q, want %q", response.Type, ws.MessageTypeError)
+	}
+	var payload ws.ErrorPayload
+	if err := response.ParsePayload(&payload); err != nil {
+		t.Fatalf("parse error payload: %v", err)
+	}
+	if payload.Code != ws.ErrorCodeConflict {
+		t.Fatalf("error code = %q, want %q", payload.Code, ws.ErrorCodeConflict)
 	}
 }

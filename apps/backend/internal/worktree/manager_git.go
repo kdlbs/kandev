@@ -168,12 +168,6 @@ func (m *Manager) BranchRecoveryStatus(ctx context.Context, repoPath, branch str
 // wait, timeout, missing ref) returns false, and callers must treat that as
 // "cannot rule out loss": being slightly stale is recoverable, silently
 // dropping the user's unpushed commits is not.
-//
-// NOTE: PR #2654 adds an equivalent `isAncestor` helper on the
-// pullCurrentBranchOrFallback path, with the arguments in the opposite order.
-// The two are deliberately named differently so both can land in either order
-// without a duplicate-symbol build failure; whichever merges second should
-// collapse them into one helper.
 func (m *Manager) refContains(ctx context.Context, repoPath, container, contained string) bool {
 	// Same Acquire-then-build-execCtx ordering as branchExists.
 	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
@@ -338,14 +332,27 @@ func (m *Manager) pullCurrentBranchOrFallback(
 	output, err, execCtxErr := m.runGitCombinedAfterAcquire(ctx, m.pullTimeout, repoPath, "pull", "--ff-only", "origin", baseBranch)
 	if err != nil {
 		reason := classifyGitFallbackReason(err, string(output), execCtxErr)
-		m.logger.Warn("git pull failed before worktree creation; continuing with remote ref",
+		// The preceding fetch succeeded, so origin/<branch> holds the latest
+		// remote state and is normally the better start point. It is only
+		// better when it is *ahead* of the local branch, though: if the local
+		// branch carries commits origin does not have, starting from the
+		// remote ref silently drops them from the new worktree, and creation
+		// still succeeds so nothing surfaces the loss. Keep the local branch
+		// in that case, matching handleFetchFallback and the non-current-branch
+		// path in resolveLocalBaseRef, which both resolve to it on failure.
+		fallbackRef := remoteRef
+		if !m.refContains(ctx, repoPath, remoteRef, baseBranch) {
+			fallbackRef = baseBranch
+		}
+		m.logger.Warn("git pull failed before worktree creation; continuing with fallback ref",
 			zap.String("branch", baseBranch),
 			zap.String("reason", reason),
 			zap.String("remote_ref", remoteRef),
+			zap.String("fallback_ref", fallbackRef),
 			zap.String("output", string(output)),
 			zap.Error(err))
-		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Pull %s; using %s", reason, remoteRef), string(output))
-		return remoteRef
+		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Pull %s; using %s", reason, fallbackRef), string(output))
+		return fallbackRef
 	}
 	m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", baseBranch), "")
 	return baseBranch

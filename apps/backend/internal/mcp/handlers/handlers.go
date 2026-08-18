@@ -185,6 +185,13 @@ type MessageQueuer interface {
 	TakeQueued(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, bool)
 }
 
+// messageMetadataQueuer is an optional extension implemented by the
+// production queue service. Keeping metadata out of MessageQueuer preserves
+// compatibility with lightweight test and alternate queue implementations.
+type messageMetadataQueuer interface {
+	QueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment, metadata map[string]interface{}) (*messagequeue.QueuedMessage, error)
+}
+
 // PromptReferenceResolver expands saved prompt references that appear inside
 // agent-sent prompts while preserving the original @mentions in the visible
 // prompt body.

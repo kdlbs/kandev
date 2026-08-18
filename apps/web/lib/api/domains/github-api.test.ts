@@ -52,12 +52,9 @@ import * as githubAuthApi from "./github-auth-api";
 const workspaceID = "ws/1";
 const appRegistrationID = "registration/one";
 const publicKandevURL = "https://kandev.example";
-
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
-
 const fetchSpy = vi.fn<(...args: [FetchInput, FetchInit?]) => Promise<Response>>();
-
 beforeEach(() => {
   fetchSpy.mockReset();
   vi.stubGlobal("fetch", fetchSpy);

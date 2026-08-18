@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-08-01
-updated: 2026-08-15
+updated: 2026-08-17
 owner: kandev
 ---
 
@@ -52,6 +52,7 @@ The initial contract is:
 | Field                                          | Meaning                                                             | Bound                                |
 | ---------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------ |
 | `revision`, `updated_at`                       | Monotonic task-local version and projection time                    | Constant                             |
+| `last_activity_at`                             | Latest durable task, user-prompt, or turn milestone                 | Constant                             |
 | `primary_session`                              | Primary session ID and lifecycle state                              | One session                          |
 | `foreground_activity`, `active_subagent_count` | Existing task-level busy aggregate                                  | Constant                             |
 | `pending_action`                               | `permission`, `clarification`, or absent                            | Constant                             |
@@ -115,6 +116,14 @@ remain during migration, but switchers use the summary when present.
 - A semantic no-op does not increment `revision` or emit an update.
 - Clients ignore a summary delta whose revision is not newer than the stored
   revision.
+- `last_activity_at` is separate from projection freshness. Task creation,
+  persisted task mutations, user-authored prompts, and turn start or completion
+  advance it by source time. Focus, subscriptions, Git or pull-request polling,
+  queue bookkeeping, summary repair, and streamed chunks do not advance it.
+- Missing and older summaries rebuild `last_activity_at` in one batch from
+  task, user-message, and turn records. Live and rebuilt values use a monotonic
+  maximum, so replay and repair cannot move activity backward. See
+  [ADR-2026-08-17-separate-task-activity-from-summary-freshness](../../decisions/2026-08-17-separate-task-activity-from-summary-freshness.md).
 
 ## API and event surface
 
@@ -254,6 +263,9 @@ intermediate replacement.
   changes its Git tree, or receives a PR update, **WHEN** its summary revision
   arrives, **THEN** desktop and mobile rows update without a session
   subscription.
+- **GIVEN** an idle task receives Git or pull-request summary changes, **WHEN**
+  its replacement summary arrives, **THEN** `updated_at` can advance while
+  `last_activity_at` remains unchanged.
 - **GIVEN** a recoverable error is dismissed or followed by a newer agent
   response, **WHEN** the projector processes that occurrence, **THEN** the
   independent error indicator clears on both task switchers.

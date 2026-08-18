@@ -162,6 +162,13 @@ type TaskEventPublisher interface {
 	PublishTaskActivityIfChanged(ctx context.Context, taskID string)
 }
 
+// FeederPullReconciler wakes task-service feeder pulls after a manual move's
+// lifecycle has completed. The task service remains the owner of candidate
+// selection and promotion rules.
+type FeederPullReconciler interface {
+	ReconcileFeederPulls(ctx context.Context, workflowID, feederStepID string)
+}
+
 type taskQueuePromotionPublisher interface {
 	PublishTaskQueuePromoted(ctx context.Context, task *models.Task)
 }
@@ -492,7 +499,8 @@ type Service struct {
 
 	// Task event publisher for emitting task.updated events.
 	// Task service owns the rich payload; orchestrator delegates.
-	taskEvents TaskEventPublisher
+	taskEvents  TaskEventPublisher
+	feederPulls FeederPullReconciler
 
 	// sessionAccessCheck enforces per-user workspace scoping on the
 	// session-keyed WS actions. Nil = unscoped. See SetSessionAccessChecker.
@@ -546,6 +554,9 @@ type Service struct {
 	onQueuedMoveExitStart             func()
 	onQueuedMoveExitComplete          func()
 	onTaskQueuePromotionEntryComplete func()
+	// onManualMoveLifecycleStart blocks the admitted manual-move lifecycle in
+	// package tests so feeder promotion ordering can be asserted.
+	onManualMoveLifecycleStart func()
 	// queuedMoveLifecycleLocks serializes source-exit work per task. The
 	// completion marker remains durable so a restart can safely resume work.
 	queuedMoveLifecycleLocks sync.Map
@@ -1198,6 +1209,12 @@ func (s *Service) SetTurnService(turnService TurnService) {
 // on those paths). Task service's own publishTaskEvent calls are unaffected.
 func (s *Service) SetTaskEventPublisher(publisher TaskEventPublisher) {
 	s.taskEvents = publisher
+}
+
+// SetFeederPullReconciler wires the task-service reconciliation callback used
+// after an admitted manual move lifecycle has completed.
+func (s *Service) SetFeederPullReconciler(reconciler FeederPullReconciler) {
+	s.feederPulls = reconciler
 }
 
 // SetSessionAccessChecker installs the per-user workspace scoping check used by

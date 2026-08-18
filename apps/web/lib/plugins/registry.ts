@@ -89,6 +89,16 @@ class PluginRegistryStore {
   private routes: Owned<RouteRegistration>[] = [];
   private settingsRoutes: Owned<RouteRegistration>[] = [];
   private integrationSettings = new Map<string, Owned<IntegrationSettingsRegistration>>();
+  /**
+   * Plugin integration enabled state: integrationId -> (workspaceId ->
+   * enabled). The registration owner is checked before a write, so two
+   * integrations from one plugin cannot share a badge state and one plugin
+   * cannot publish another plugin's state. Kept here — not in localStorage —
+   * so it is workspace-scoped, survives via the plugin's own persisted
+   * storage, and is reactive through the registry's existing notify/subscribe
+   * cycle.
+   */
+  private integrationEnabled = new Map<string, Map<string, boolean>>();
   private navItems: Owned<NavItem>[] = [];
   private slotComponents: Owned<SlotRegistration>[] = [];
   private wsHandlers: Owned<WsHandlerRegistration>[] = [];
@@ -133,6 +143,38 @@ class PluginRegistryStore {
   getPluginLifecycle(pluginId: string): PluginLifecycleSnapshot | undefined {
     const snapshot = this.pluginLifecycles.get(pluginId);
     return snapshot ? { ...snapshot } : undefined;
+  }
+
+  /**
+   * Sets one plugin's integration enabled state for one workspace. No-op
+   * (no notify) when the value is unchanged: plugins boot-sync every
+   * workspace on initialize, and re-notifying identical values would
+   * re-render every registry consumer — the sidebar badge flicker.
+   */
+  setIntegrationEnabled(
+    pluginId: string,
+    integrationId: string,
+    workspaceId: string,
+    enabled: boolean,
+  ): void {
+    if (this.integrationSettings.get(integrationId)?.pluginId !== pluginId) return;
+
+    let byWorkspace = this.integrationEnabled.get(integrationId);
+    if (!byWorkspace) {
+      byWorkspace = new Map();
+      this.integrationEnabled.set(integrationId, byWorkspace);
+    }
+    if (byWorkspace.get(workspaceId) === enabled) return;
+    byWorkspace.set(workspaceId, enabled);
+    this.notify();
+  }
+
+  getIntegrationEnabled(integrationId: string, workspaceId: string): boolean | undefined {
+    return this.integrationEnabled.get(integrationId)?.get(workspaceId);
+  }
+
+  isIntegrationEnabled(integrationId: string, workspaceId: string): boolean {
+    return this.getIntegrationEnabled(integrationId, workspaceId) === true;
   }
 
   markPluginLoading(pluginId: string, generation: number): void {
@@ -327,8 +369,12 @@ class PluginRegistryStore {
     const before = this.totalCount();
     this.routes = removeByPlugin(this.routes, pluginId);
     this.settingsRoutes = removeByPlugin(this.settingsRoutes, pluginId);
+    const removedIntegrationIds: string[] = [];
     this.integrationSettings.forEach((entry, id) => {
-      if (entry.pluginId === pluginId) this.integrationSettings.delete(id);
+      if (entry.pluginId === pluginId) {
+        this.integrationSettings.delete(id);
+        removedIntegrationIds.push(id);
+      }
     });
     this.navItems = removeByPlugin(this.navItems, pluginId);
     this.slotComponents = removeByPlugin(this.slotComponents, pluginId);
@@ -351,7 +397,11 @@ class PluginRegistryStore {
     this.taskFilters = removeByPlugin(this.taskFilters, pluginId);
     this.pluginNames.delete(pluginId);
     this.declaredKeybindingIds.delete(pluginId);
-    if (removedTranslations || this.totalCount() !== before) this.notify();
+    const removedEnabledState = removedIntegrationIds.reduce(
+      (removed, integrationId) => this.integrationEnabled.delete(integrationId) || removed,
+      false,
+    );
+    if (removedEnabledState || removedTranslations || this.totalCount() !== before) this.notify();
   }
 
   getRoutes(): PluginRouteRegistration[] {

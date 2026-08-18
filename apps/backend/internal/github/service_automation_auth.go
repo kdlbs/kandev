@@ -197,7 +197,8 @@ func (s *Service) MergePRForAutomation(
 	if err := requireGitHubCapability(resolved, CapabilityPullRequestWrite); err != nil {
 		return err
 	}
-	return s.mergePRWithClient(
+	_, err = s.mergePRWithClient(
 		ctx, resolved.Client, resolved.CacheScope, owner, repo, number, mergeMethod,
 	)
+	return err
 }

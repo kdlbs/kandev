@@ -63,6 +63,38 @@ test.describe("Quick Chat", () => {
     ).toHaveAttribute("data-active", "true");
   });
 
+  test("Escape collapses the clarification panel before closing the modal", async ({
+    testPage,
+  }) => {
+    const dialog = await openQuickChatWithAgent(testPage);
+    await sendQuickChatMessage(dialog, testPage, "/e2e:clarification-multi");
+
+    const clarification = dialog.getByTestId("clarification-overlay");
+    await expect(clarification).toBeVisible({ timeout: 30_000 });
+
+    const bar = dialog.getByTestId("clarification-overlay-container");
+
+    // The collapse shortcut only fires for keydowns targeting the shortcut
+    // scope (quick-chat-content), same as the numeric-step shortcut above.
+    await dialog.getByTestId("quick-chat-messages").click({ position: { x: 8, y: 8 } });
+    await expect(dialog.getByTestId("quick-chat-content")).toBeFocused();
+
+    await testPage.keyboard.press("Escape");
+
+    // First Escape: a pending, expanded clarification collapses in place and
+    // the modal stays open, matching the main task chat panel's two-stage
+    // Escape after #2729 — this is what distinguishes it from Radix's default
+    // (close-on-Escape) DismissableLayer behavior.
+    await expect(dialog).toBeVisible();
+    await expect(clarification).not.toBeVisible();
+    await expect(bar).toBeVisible();
+
+    await testPage.keyboard.press("Escape");
+
+    // Second Escape is now unguarded: it closes the whole modal.
+    await expect(dialog).not.toBeVisible();
+  });
+
   test("offers configuration chat in setup and hides it once one exists", async ({
     testPage,
     apiClient,

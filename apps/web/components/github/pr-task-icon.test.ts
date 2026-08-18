@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  canAttemptPRMerge,
   aggregatePRStatusColor,
   getPRAggregateStatusColor,
   areAllOpenPRsReadyToMerge,
@@ -123,7 +124,7 @@ describe("isPRReadyToMerge", () => {
     ).toBe(false);
   });
 
-  it("is false when mergeable_state is blocked", () => {
+  it("does not claim readiness for GitHub's overloaded blocked state", () => {
     expect(
       isPRReadyToMerge(
         makePR({
@@ -164,6 +165,21 @@ describe("isPRReadyToMerge", () => {
       ).toBe(false);
     },
   );
+});
+
+describe("canAttemptPRMerge", () => {
+  it("allows GitHub to decide whether a locally green blocked PR enters a queue", () => {
+    expect(
+      canAttemptPRMerge(
+        makePR({
+          state: "open",
+          review_state: "approved",
+          checks_state: "success",
+          mergeable_state: "blocked",
+        }),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("isPRReadyToMerge — aggregate counts", () => {
@@ -261,9 +277,7 @@ describe("getPRStatusColor", () => {
     expect(getPRStatusColor(pr)).toBe(EMERALD_400);
   });
 
-  it("returns muted for approved+success but mergeable_state blocked (branch protection)", () => {
-    // Branch protection is a normal repository-rule wait after CI passes, not
-    // a warning state.
+  it("keeps an approved blocked PR neutral until GitHub accepts it", () => {
     const pr = makePR({
       state: "open",
       review_state: "approved",

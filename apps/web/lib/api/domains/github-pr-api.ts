@@ -73,7 +73,7 @@ export async function mergePR(
   number: number,
   mergeMethod?: MergeMethod,
 ) {
-  return fetchJson<{ merged: boolean }>(
+  return fetchJson<{ status: "merged" | "queued" }>(
     `/api/v1/github/prs/${owner}/${repo}/${number}/merge?${workspaceQuery(workspaceId)}`,
     {
       init: {

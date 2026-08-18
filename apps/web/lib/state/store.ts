@@ -360,6 +360,10 @@ export type AppState = KanbanSlice & {
   syncQuickTerminalTabs: UIA["syncQuickTerminalTabs"];
   upsertQuickChatSessionFromEvent: UIA["upsertQuickChatSessionFromEvent"];
   removeQuickChatSessionsForTask: UIA["removeQuickChatSessionsForTask"];
+  markQuickChatUnseenIdle: UIA["markQuickChatUnseenIdle"];
+  clearQuickChatUnseenIdle: UIA["clearQuickChatUnseenIdle"];
+  recordQuickChatSettled: UIA["recordQuickChatSettled"];
+  removeQuickChatSession: UIA["removeQuickChatSession"];
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string, workspaceId: string) => void;
@@ -376,20 +380,30 @@ export type AppState = KanbanSlice & {
     messages: Message[],
     meta?: { hasMore?: boolean; oldestCursor?: string | null },
   ) => void;
+  /** Adds a message to a session, merging fields when the message already exists. */
   addMessage: (message: Message) => void;
   mergeMessages: (
     sessionId: string,
     messages: Message[],
     meta?: { hasMore?: boolean; oldestCursor?: string | null },
   ) => void;
+  /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
+  /** Merges a complete REST snapshot and reconciles its marker atomically. */
+  mergeTurnsSnapshot: (sessionId: string, turns: Turn[], hydrationEpoch: number) => void;
   completeTurn: (
     sessionId: string,
     turnId: string,
     completedAt: string,
     metadata?: Record<string, unknown>,
+    updatedAt?: string,
   ) => void;
+  /** Marks a turn as the session's active turn (or null to clear it). */
   setActiveTurn: (sessionId: string, turnId: string | null) => void;
+  /** Reconciles the active-turn marker after REST hydration, epoch-guarded. */
+  reconcileActiveTurnAfterHydration: (sessionId: string, hydrationEpoch: number) => void;
+  /** Records that the session's full persisted turn history is in the store. */
+  markTurnsLoaded: (sessionId: string) => void;
   updateMessage: (message: Message) => void;
   removeMessage: (sessionId: string, messageId: string) => void;
   prependMessages: (

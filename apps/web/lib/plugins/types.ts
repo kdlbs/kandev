@@ -101,6 +101,10 @@ export interface IntegrationSettingsRegistration {
   /** Curated icon name or plugin-owned component. */
   icon?: PluginSDK.PluginIcon;
   Component: ReactType.ComponentType<PluginIntegrationSettingsProps>;
+  /** Optional header action (e.g. an enable toggle) rendered in the host's
+   * SettingsSection header action slot, mirroring built-in integrations.
+   * Receives `{ workspaceId?: string }` so it can operate per-workspace. */
+  action?: ReactType.ComponentType<{ workspaceId?: string }>;
 }
 
 /**

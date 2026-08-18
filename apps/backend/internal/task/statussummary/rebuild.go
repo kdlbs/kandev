@@ -50,6 +50,7 @@ type RebuildInput struct {
 	Sessions         []RebuildSession
 	PendingActions   map[string]string
 	ActivityObserved bool
+	LastActivityAt   *time.Time
 	Git              []RebuildGit
 	GitObserved      bool
 	PullRequests     []PullRequestInput
@@ -112,7 +113,12 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 	}
 	applyPullRequestInputs(state, input.PullRequests)
 	state.queuedCount = maxInt(input.QueuedPromptCount, 0)
-	return deriveSummary(state)
+	summary := deriveSummary(state)
+	if input.LastActivityAt != nil {
+		lastActivityAt := input.LastActivityAt.UTC()
+		summary.LastActivityAt = &lastActivityAt
+	}
+	return summary
 }
 
 func normalizeRebuildError(input *ActiveErrorSummary, now time.Time) *ActiveErrorSummary {

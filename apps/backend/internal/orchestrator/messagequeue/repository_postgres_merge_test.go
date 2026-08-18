@@ -756,9 +756,17 @@ func TestPostgresRepository_MergeDrainOrdering_DrainWins(t *testing.T) {
 func TestPostgresRepository_MergeDrainOrdering_MergeWins(t *testing.T) {
 	repo := newTestPostgresRepo(t)
 	ctx := context.Background()
+	targetAt := time.Date(2026, 8, 18, 10, 0, 0, 0, time.UTC)
+	sourceAt := targetAt.Add(time.Minute)
 
 	target := insertTestEntry(t, repo, "s1", "t1", "first", "user", nil, nil)
 	source := insertTestEntry(t, repo, "s1", "t1", "second", "user", nil, nil)
+	sqlRepo := repo.(*sqliteRepository)
+	for id, queuedAt := range map[string]time.Time{target.ID: targetAt, source.ID: sourceAt} {
+		if _, err := sqlRepo.db.ExecContext(ctx, sqlRepo.db.Rebind(`UPDATE queued_messages SET queued_at = ? WHERE id = ?`), queuedAt, id); err != nil {
+			t.Fatalf("set queued_at for %s: %v", id, err)
+		}
+	}
 
 	merged, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "user")
 	if err != nil {
@@ -773,6 +781,9 @@ func TestPostgresRepository_MergeDrainOrdering_MergeWins(t *testing.T) {
 	}
 	if drained.Content != "first\n\nsecond" {
 		t.Errorf("drained content = %q, want combined content", drained.Content)
+	}
+	if !merged.QueuedAt.Equal(sourceAt) || !drained.QueuedAt.Equal(sourceAt) {
+		t.Errorf("merged queued_at = %s, drained queued_at = %s, want %s", merged.QueuedAt, drained.QueuedAt, sourceAt)
 	}
 }
 

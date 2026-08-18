@@ -70,6 +70,7 @@
   "queuedPromptCount_other": "{{count}} prompts em fila",
   "wipQueuePosition": "Posição {{position}} de {{total}} na fila de {{step}}",
   "quickChat": "Chat rápido",
+  "quickChatUnseen": "Chat rápido, nova resposta",
   "quickTerminal": "Terminal rápido",
   "quickChatTerminals": "Terminais",
   "quickChatNewAgent": "Novo agente",

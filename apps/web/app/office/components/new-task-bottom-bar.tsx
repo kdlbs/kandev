@@ -13,12 +13,21 @@ import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
+import type { TaskPriority } from "@/lib/types/http";
+import type { PriorityMeta } from "@/lib/state/slices/office/types";
 import type { IssueDraft } from "./new-task-draft";
 import { PRIORITY_LABEL_KEYS, STATUS_LABEL_KEYS } from "../lib/label-keys";
 import { useTranslation } from "react-i18next";
 
 type StatusOption = { value: string; label: string; className: string };
-type PriorityOption = { value: string; label: string; icon: typeof IconMinus; className: string };
+type PriorityOption = {
+  value: TaskPriority;
+  label: string;
+  icon: typeof IconMinus;
+  className: string;
+};
+
+type FallbackPriorityOption = Omit<PriorityOption, "label"> & { labelKey: string };
 
 // The fallback tables carry `labelKey`, not `label`: they are module scope, so a
 // `t()` here would resolve once at import and freeze at the boot locale. The
@@ -45,7 +54,7 @@ const PRIORITY_ICONS: Record<string, typeof IconMinus> = {
   low: IconArrowDown,
 };
 
-const FALLBACK_PRIORITY_OPTIONS = [
+const FALLBACK_PRIORITY_OPTIONS: FallbackPriorityOption[] = [
   {
     value: "critical",
     labelKey: PRIORITY_LABEL_KEYS.critical,
@@ -71,6 +80,37 @@ const FALLBACK_PRIORITY_OPTIONS = [
     className: "text-blue-600",
   },
 ];
+
+function isTaskPriority(value: string): value is TaskPriority {
+  return value === "critical" || value === "high" || value === "medium" || value === "low";
+}
+
+function isTaskPriorityMeta(value: PriorityMeta): value is PriorityMeta & { id: TaskPriority } {
+  return isTaskPriority(value.id);
+}
+
+export function buildPriorityOptions(
+  priorities: PriorityMeta[] | null | undefined,
+  translate: (key: string) => string,
+): PriorityOption[] {
+  if (!priorities) {
+    return FALLBACK_PRIORITY_OPTIONS.map((o) => ({
+      value: o.value,
+      label: translate(o.labelKey),
+      icon: o.icon,
+      className: o.className,
+    }));
+  }
+
+  // Exclude "none" from the creation picker. Labels come from the workspace's
+  // own priority metadata, so they travel as-is.
+  return priorities.filter(isTaskPriorityMeta).map((p) => ({
+    value: p.id,
+    label: p.label,
+    icon: PRIORITY_ICONS[p.id] ?? IconMinus,
+    className: p.color,
+  }));
+}
 
 type Props = {
   draft: IssueDraft;
@@ -126,24 +166,7 @@ function StatusChip({ draft, onUpdate }: Props) {
 function usePriorityOptions(): PriorityOption[] {
   const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
-  if (!meta) {
-    return FALLBACK_PRIORITY_OPTIONS.map((o) => ({
-      value: o.value,
-      label: t(o.labelKey),
-      icon: o.icon,
-      className: o.className,
-    }));
-  }
-  // Exclude "none" from the creation picker. Labels come from the workspace's
-  // own priority metadata, so they travel as-is.
-  return meta.priorities
-    .filter((p) => p.id !== "none")
-    .map((p) => ({
-      value: p.id,
-      label: p.label,
-      icon: PRIORITY_ICONS[p.id] ?? IconMinus,
-      className: p.color,
-    }));
+  return buildPriorityOptions(meta?.priorities, t);
 }
 
 function PriorityChip({ draft, onUpdate }: Props) {

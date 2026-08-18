@@ -63,7 +63,13 @@ function wrapper(
       <StateProvider
         initialState={{
           messages: { bySession: messagesBySession, metaBySession: {} },
-          turns: { bySession: turnsBySession, activeBySession: {} },
+          turns: {
+            bySession: turnsBySession,
+            activeBySession: {},
+            loadedBySession: {},
+            reconcileEpochBySession: {},
+            settledBoundaryBySession: {},
+          },
           taskSessions: {
             items: Object.fromEntries(sessions.map((item) => [item.id, item])),
           },

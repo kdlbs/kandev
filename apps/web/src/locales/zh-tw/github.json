@@ -377,6 +377,7 @@
   "prClosedWithoutMerging": "PR 已關閉且未合併",
   "prEvents": "PR 事件",
   "reviewFollowUp": "審查跟進",
+  "prAddedToMergeQueue": "PR 已新增到合併佇列",
   "prMerged": "PR 已合併",
   "prTaskStatusCi": "CI",
   "prTaskStatusMerge": "合併",

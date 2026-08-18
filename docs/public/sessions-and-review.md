@@ -125,6 +125,8 @@ Each desktop split's **+** menu lists a linked review only while that exact revi
 
 All panels for a task point at the same task environment. In a multi-repository task, check the repository label before editing, committing, or reviewing. A preview also requires the application to listen on a reachable interface and expose a forwarded port.
 
+When the repository defines a dev script, the desktop header shows a dev server control. Starting it runs the script in the task workspace, opens the browser preview, and opens a read-only **Dev Server** panel with the script's output. While the script runs, the same control becomes **Stop dev server preview** and terminates the process and its children. Kandev also stops a running dev script when its task is archived or deleted, so a preview cannot outlive the task that started it. A script that detaches itself from Kandev, for example by daemonizing or calling `setsid`, escapes that cleanup and must be stopped by hand.
+
 Structured shell-command activity keeps the command, working directory, status, and output size in the chat row. Expand **Output** to fetch the transcript; Kandev continues refreshing an open, running command and stops when it reaches a terminal state. The disclosure separates standard output and errors, reports truncation and the exit code when known, and offers **Retry** when the transcript request fails. Historical command transcripts are loaded only when opened, which keeps long conversations responsive without discarding the stored output.
 
 The ring in the chat-input toolbar shows the active session's context-window use
