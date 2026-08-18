@@ -411,6 +411,46 @@ func TestHandleAnswerQuestion_Answers_ClaimsAndReturnsNormalizedResponse(t *test
 	require.Equal(t, "trimmed", first["custom_text"]) // rule 3: trimmed
 }
 
+// TestHandleAnswerQuestion_M6_StrayRejectReasonDiscardedOnAnsweredPath proves
+// M6 end-to-end through the handler: a full answers submission
+// (rejected:false) that also carries a reject_reason must have that stray
+// field discarded from the stored/returned response, not merely rejected by
+// validation.
+func TestHandleAnswerQuestion_M6_StrayRejectReasonDiscardedOnAnsweredPath(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	seedBundle(t, ctx, svc, repo, "pending-m6-1")
+
+	store := clarification.NewStore(time.Minute)
+	resolver := newTestResolver(t, store, repo, svc)
+	h := &Handlers{taskSvc: svc, clarificationResolver: resolver, clarificationBundles: repo, logger: testLogger(t)}
+
+	resp, err := h.handleAnswerQuestion(ctx, makeWSMessage(t, ws.ActionMCPAnswerQuestion, map[string]interface{}{
+		"pending_id": "pending-m6-1",
+		"answers": []map[string]interface{}{
+			{"question_id": "q1", "selected_options": []string{"opt-a"}},
+			{"question_id": "q2", "selected_options": []string{"opt-c"}},
+		},
+		"reject_reason": "should never be stored",
+	}))
+	require.NoError(t, err)
+
+	var body answerQuestionResponse
+	require.NoError(t, json.Unmarshal(resp.Payload, &body))
+	require.True(t, body.Claimed)
+	require.Equal(t, models.ClarificationResolutionStatusAnswered, body.Status)
+
+	var respPayload map[string]interface{}
+	require.NoError(t, json.Unmarshal(body.Response, &respPayload))
+	require.Equal(t, "", respPayload["reject_reason"])
+
+	row, err := repo.GetClarificationResolution(ctx, "pending-m6-1")
+	require.NoError(t, err)
+	var stored map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(row.Response), &stored))
+	require.Equal(t, "", stored["reject_reason"])
+}
+
 func TestHandleAnswerQuestion_SecondCaller_ClaimedFalseSameOutcome(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
