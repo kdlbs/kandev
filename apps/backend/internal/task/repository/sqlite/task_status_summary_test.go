@@ -176,11 +176,27 @@ func TestTaskLastActivityBatch(t *testing.T) {
 		t.Fatalf("initialize queue repository: %v", err)
 	}
 	queuedAt := base.Add(9 * time.Hour)
-	if err := queueRepo.Insert(ctx, &messagequeue.QueuedMessage{
+	queuedTargetAt := queuedAt.Add(-time.Minute)
+	queuedTarget := &messagequeue.QueuedMessage{
+		ID: "queued-activity-user-target", SessionID: "session-activity-queued", TaskID: "task-activity-queued",
+		Content: "queued target", QueuedAt: queuedTargetAt, QueuedBy: "user-1",
+	}
+	if err := queueRepo.Insert(ctx, queuedTarget, 10); err != nil {
+		t.Fatalf("insert queued user target: %v", err)
+	}
+	queuedSource := &messagequeue.QueuedMessage{
 		ID: "queued-activity-user", SessionID: "session-activity-queued", TaskID: "task-activity-queued",
 		Content: "queued prompt", QueuedAt: queuedAt, QueuedBy: "user-1",
-	}, 10); err != nil {
+	}
+	if err := queueRepo.Insert(ctx, queuedSource, 10); err != nil {
 		t.Fatalf("insert queued user prompt: %v", err)
+	}
+	merged, err := queueRepo.MergeIntoAbove(ctx, queuedSource.SessionID, queuedSource.ID, queuedSource.QueuedBy)
+	if err != nil {
+		t.Fatalf("merge queued user prompts: %v", err)
+	}
+	if merged == nil || !merged.QueuedAt.Equal(queuedAt) {
+		t.Fatalf("merged queued activity = %#v, want %s", merged, queuedAt)
 	}
 	if err := queueRepo.Insert(ctx, &messagequeue.QueuedMessage{
 		ID: "queued-activity-agent", SessionID: "session-activity-queued", TaskID: "task-activity-queued",

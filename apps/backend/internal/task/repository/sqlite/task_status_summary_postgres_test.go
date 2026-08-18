@@ -92,11 +92,26 @@ func TestPostgresTaskLastActivityBatch(t *testing.T) {
 		t.Fatalf("initialize postgres queue repository: %v", err)
 	}
 	queuedAt := base.Add(5 * time.Hour)
-	if err := queueRepo.Insert(ctx, &messagequeue.QueuedMessage{
+	queuedTarget := &messagequeue.QueuedMessage{
+		ID: "queued-activity-postgres-user-target", SessionID: "session-activity-postgres", TaskID: "task-activity-postgres",
+		Content: "queued target", QueuedAt: queuedAt.Add(-time.Minute), QueuedBy: "user-1",
+	}
+	if err := queueRepo.Insert(ctx, queuedTarget, 10); err != nil {
+		t.Fatalf("insert postgres queued target: %v", err)
+	}
+	queuedSource := &messagequeue.QueuedMessage{
 		ID: "queued-activity-postgres-user", SessionID: "session-activity-postgres", TaskID: "task-activity-postgres",
 		Content: "queued prompt", QueuedAt: queuedAt, QueuedBy: "user-1",
-	}, 10); err != nil {
+	}
+	if err := queueRepo.Insert(ctx, queuedSource, 10); err != nil {
 		t.Fatalf("insert postgres queued prompt: %v", err)
+	}
+	merged, err := queueRepo.MergeIntoAbove(ctx, queuedSource.SessionID, queuedSource.ID, queuedSource.QueuedBy)
+	if err != nil {
+		t.Fatalf("merge postgres queued prompts: %v", err)
+	}
+	if merged == nil || !merged.QueuedAt.Equal(queuedAt) {
+		t.Fatalf("merged postgres queued activity = %#v, want %s", merged, queuedAt)
 	}
 	if err := queueRepo.Insert(ctx, &messagequeue.QueuedMessage{
 		ID: "queued-activity-postgres-agent", SessionID: "session-activity-postgres", TaskID: "task-activity-postgres",

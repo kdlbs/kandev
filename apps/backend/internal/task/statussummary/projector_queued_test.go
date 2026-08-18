@@ -40,12 +40,12 @@ func TestProjectorQueueEventUpdatesQueuedPromptCount(t *testing.T) {
 }
 
 func TestProjectorQueueEventTracksUserPromptActivity(t *testing.T) {
-	projector, store, eventBus, _, _ := newProjectorTest(t)
+	projector, store, eventBus, updates, _ := newProjectorTest(t)
 	const taskID = "task-queued-activity"
 	queuedAt := time.Date(2026, 8, 1, 19, 0, 0, 0, time.UTC)
 
 	projector.countQueuedPrompts = func(context.Context, string) (int, error) {
-		return 0, nil
+		return 1, nil
 	}
 	publishProjectorEvent(t, eventBus, events.MessageQueueStatusChanged, events.MessageQueueStatusChanged, map[string]interface{}{
 		"task_id":   taskID,
@@ -56,6 +56,9 @@ func TestProjectorQueueEventTracksUserPromptActivity(t *testing.T) {
 	summary := store.summary(taskID)
 	if summary == nil || summary.LastActivityAt == nil || !summary.LastActivityAt.Equal(queuedAt) {
 		t.Fatalf("queued user activity = %+v, want %s", summary, queuedAt)
+	}
+	if got := updates.Load(); got != 1 {
+		t.Fatalf("queued user admission published %d summary updates, want 1", got)
 	}
 
 	// Queue status events without a user-owned admission must remain count-only
