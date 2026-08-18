@@ -2,9 +2,14 @@ package backendapp
 
 import (
 	"context"
-	"sync"
+	"database/sql"
+	"encoding/json"
+	"errors"
 
+	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/plugins/state"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -50,52 +55,66 @@ func (a agentConversationSessionAdapter) CreateTaskSession(ctx context.Context, 
 	return a.repo.CreateTaskSession(ctx, session)
 }
 
-// agentConversationMessageAdapter wraps the shared repository to satisfy the
-// narrow agentConversationMessageRepo interface.
-type agentConversationMessageAdapter struct {
+// agentConversationProfileAdapter wraps the agent settings repository to
+// satisfy the narrow agentConversationProfileRepo interface Ensure uses to
+// validate a plugin-configured agent profile before creating (or repairing)
+// any hidden task/session. GetAgentProfile already filters out soft-deleted
+// rows (deleted_at IS NULL), so sql.ErrNoRows covers both "never existed"
+// and "deleted".
+type agentConversationProfileAdapter struct {
 	repo interface {
-		CreateMessage(ctx context.Context, msg *taskmodels.Message) error
+		GetAgentProfile(ctx context.Context, id string) (*agentsettingsmodels.AgentProfile, error)
 	}
 }
 
-func (a agentConversationMessageAdapter) CreateMessage(ctx context.Context, msg *taskmodels.Message) error {
-	return a.repo.CreateMessage(ctx, msg)
+func (a agentConversationProfileAdapter) GetProfile(ctx context.Context, profileID string) (taskservice.AgentConversationProfileInfo, bool, error) {
+	profile, err := a.repo.GetAgentProfile(ctx, profileID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return taskservice.AgentConversationProfileInfo{}, false, nil
+		}
+		return taskservice.AgentConversationProfileInfo{}, false, err
+	}
+	if profile == nil {
+		return taskservice.AgentConversationProfileInfo{}, false, nil
+	}
+	return taskservice.AgentConversationProfileInfo{Enabled: profile.Enabled}, true, nil
 }
 
-// agentConversationStateAdapter provides an in-memory store for occurrence-key
-// deduplication. In production, this is a best-effort cache that restarts with
-// the process; the Host's occurrence-claim mechanism itself handles RESTART
-// recovery through the dispatch-request flow (an occurrence key is known only
-// to the scheduler that generated it, and a fresh process generates fresh
-// keys, so the old claims are effectively GC'd at restart).
-type agentConversationStateAdapter struct {
-	mu   sync.RWMutex
-	data map[string][]byte
+// agentConversationStateStoreAdapter wraps the plugin_state SQLite store
+// (internal/plugins/state.Store — already durable and shared across backend
+// instances via the DB) to satisfy the narrow agentConversationStateRepo
+// interface. Claim is atomic at the SQL level (INSERT ... ON CONFLICT DO
+// NOTHING against a UNIQUE index), unlike a process-local map: it survives a
+// backend restart and stays correct under concurrent callers, including
+// separate backend processes sharing the same database.
+type agentConversationStateStoreAdapter struct {
+	store *state.Store
 }
 
-func newAgentConversationStateAdapter() *agentConversationStateAdapter {
-	return &agentConversationStateAdapter{data: make(map[string][]byte)}
+func (a agentConversationStateStoreAdapter) Claim(ctx context.Context, pluginID, scope, scopeID, key string, value json.RawMessage) (bool, error) {
+	return a.store.Claim(ctx, pluginID, scope, scopeID, key, value)
 }
 
-func (a *agentConversationStateAdapter) Get(_ context.Context, scope, scopeID, key string) ([]byte, bool, error) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	k := scope + "/" + scopeID + "/" + key
-	v, ok := a.data[k]
-	return v, ok, nil
+// agentConversationDispatcherAdapter adapts pluginsTaskMessengerAdapter's
+// idempotent delivery primitive to the taskservice.AgentConversationService
+// dispatcher seam, so a scheduled coordinator wake reaches the same real
+// orchestrator-backed delivery path as the plugin Host's SendMessage RPC —
+// launching a never-started session or prompting/resuming an idle one —
+// instead of only persisting a message row nothing ever executes.
+type agentConversationDispatcherAdapter struct {
+	messenger pluginsTaskMessengerAdapter
 }
 
-func (a *agentConversationStateAdapter) Set(_ context.Context, scope, scopeID, key string, value []byte) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	k := scope + "/" + scopeID + "/" + key
-	a.data[k] = value
-	return nil
+func (a agentConversationDispatcherAdapter) Deliver(ctx context.Context, taskID string, session *taskmodels.TaskSession, text, source, idempotencyID string) (string, error) {
+	return a.messenger.StartOrPromptIdempotent(ctx, taskID, session, text, source, idempotencyID)
 }
 
 // NewAgentConversationService creates the managed conversation service wired
-// to the shared repository and event bus. Called during boot after the
-// task service, repository, and event bus are all available.
+// to the shared repository, agent settings repository, plugin state store,
+// and event bus. Called during boot after the task service, repository, and
+// event bus are all available. Its runtime dispatcher is wired later, once
+// the orchestrator exists — see SetAgentConversationsDispatcher.
 func NewAgentConversationService(
 	taskRepo interface {
 		ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*taskmodels.Task, int, error)
@@ -103,15 +122,30 @@ func NewAgentConversationService(
 		DeleteTask(ctx context.Context, taskID string) error
 		GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*taskmodels.TaskSession, error)
 		CreateTaskSession(ctx context.Context, session *taskmodels.TaskSession) error
-		CreateMessage(ctx context.Context, msg *taskmodels.Message) error
 	},
+	profileRepo interface {
+		GetAgentProfile(ctx context.Context, id string) (*agentsettingsmodels.AgentProfile, error)
+	},
+	stateStore *state.Store,
 	eventBus bus.EventBus,
 ) *taskservice.AgentConversationService {
 	return taskservice.NewAgentConversationService(
 		agentConversationTaskAdapter{repo: taskRepo},
 		agentConversationSessionAdapter{repo: taskRepo},
-		agentConversationMessageAdapter{repo: taskRepo},
-		newAgentConversationStateAdapter(),
+		agentConversationProfileAdapter{repo: profileRepo},
+		agentConversationStateStoreAdapter{store: stateStore},
 		eventBus,
 	)
+}
+
+// SetAgentConversationsDispatcher wires the live orchestrator-backed
+// dispatcher onto an already-constructed AgentConversationService. Deferred
+// to main.go's post-orchestrator wiring block (alongside SetWriteDeps) for
+// the same boot-ordering reason: the orchestrator is constructed after
+// StartActivePlugins spawns boot-active plugins, so it does not exist yet
+// when NewAgentConversationService runs during service construction.
+func SetAgentConversationsDispatcher(svc *taskservice.AgentConversationService, tasks messengerTaskSvc, orch messengerOrch, log *logger.Logger) {
+	svc.SetDispatcher(agentConversationDispatcherAdapter{
+		messenger: pluginsTaskMessengerAdapter{tasks: tasks, orch: orch, log: log},
+	})
 }

@@ -3,6 +3,8 @@ package state
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -298,6 +300,167 @@ func TestStoreSetStampsUpdatedAtAsRFC3339UTC(t *testing.T) {
 	}
 	if got.Before(before.Add(-time.Second)) || got.After(after.Add(time.Second)) {
 		t.Errorf("UpdatedAt %v not within expected window [%v, %v]", got, before, after)
+	}
+}
+
+// TestStoreClaimFirstCallWins pins Claim's atomic-insert contract: the first
+// caller for a (plugin, scope, scope_id, key) tuple gets claimed=true and its
+// value is persisted; Get then reflects that value.
+func TestStoreClaimFirstCallWins(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	claimed, err := store.Claim(ctx, "kandev-plugin-coordinator", "occurrence", "ws-1/coordinator", "wake:cycle:1", json.RawMessage(`{"claimed":true}`))
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if !claimed {
+		t.Fatal("expected claimed = true for the first call")
+	}
+
+	got, found, err := store.Get(ctx, "kandev-plugin-coordinator", "occurrence", "ws-1/coordinator", "wake:cycle:1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !found {
+		t.Fatal("expected the claimed value to be persisted")
+	}
+	if string(got) != `{"claimed":true}` {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// TestStoreClaimSecondCallLoses pins the duplicate-occurrence rejection: a
+// second Claim for the same tuple returns claimed=false and does not
+// overwrite the first caller's value (unlike Set's upsert semantics).
+func TestStoreClaimSecondCallLoses(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := store.Claim(ctx, "p", "occurrence", "ws-1/coordinator", "wake:cycle:1", json.RawMessage(`"first"`)); err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	claimed, err := store.Claim(ctx, "p", "occurrence", "ws-1/coordinator", "wake:cycle:1", json.RawMessage(`"second"`))
+	if err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	if claimed {
+		t.Fatal("expected claimed = false for the second call")
+	}
+
+	got, _, err := store.Get(ctx, "p", "occurrence", "ws-1/coordinator", "wake:cycle:1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if string(got) != `"first"` {
+		t.Fatalf("second claim must not overwrite the first caller's value, got %q", got)
+	}
+}
+
+// TestStoreClaimIsScopedPerPluginAndKey confirms two independent tuples
+// (different plugin, or different key) can each be claimed independently.
+func TestStoreClaimIsScopedPerPluginAndKey(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	if claimed, err := store.Claim(ctx, "plugin-a", "occurrence", "ws-1/coordinator", "wake:1", nil); err != nil || !claimed {
+		t.Fatalf("plugin-a claim: claimed=%v err=%v", claimed, err)
+	}
+	if claimed, err := store.Claim(ctx, "plugin-b", "occurrence", "ws-1/coordinator", "wake:1", nil); err != nil || !claimed {
+		t.Fatalf("plugin-b claim (different plugin, same key) should succeed: claimed=%v err=%v", claimed, err)
+	}
+	if claimed, err := store.Claim(ctx, "plugin-a", "occurrence", "ws-1/coordinator", "wake:2", nil); err != nil || !claimed {
+		t.Fatalf("plugin-a claim (different key) should succeed: claimed=%v err=%v", claimed, err)
+	}
+}
+
+// TestStoreClaimConcurrentCallersExactlyOneWins is the durability/atomicity
+// regression: N goroutines race to Claim the same occurrence key against a
+// single shared SQLite connection pool. Only one may observe claimed=true —
+// this is what makes a scheduled coordinator wake safe to dispatch from
+// multiple goroutines (or, via the same DB file, multiple processes)
+// without ever double-firing a turn.
+func TestStoreClaimConcurrentCallersExactlyOneWins(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	const attempts = 20
+	results := make([]bool, attempts)
+	var wg sync.WaitGroup
+	for i := range attempts {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			claimed, err := store.Claim(ctx, "kandev-plugin-coordinator", "occurrence", "ws-1/coordinator", "wake:cycle:concurrent", nil)
+			if err != nil {
+				t.Errorf("claim %d: %v", idx, err)
+				return
+			}
+			results[idx] = claimed
+		}(i)
+	}
+	wg.Wait()
+
+	wins := 0
+	for _, r := range results {
+		if r {
+			wins++
+		}
+	}
+	if wins != 1 {
+		t.Fatalf("expected exactly 1 winning claim out of %d concurrent attempts, got %d", attempts, wins)
+	}
+}
+
+// TestStoreClaimSurvivesRestart proves durability: a claim persisted to a
+// file-backed SQLite database is still honored by a brand-new Store instance
+// opened against the same file — modeling a backend restart between the
+// scheduler claiming an occurrence and the process going down before
+// dispatch. An in-memory adapter (the pre-fix implementation) would lose
+// this and let a restarted scheduler double-fire the occurrence.
+func TestStoreClaimSurvivesRestart(t *testing.T) {
+	dir := t.TempDir()
+	dsn := filepath.Join(dir, "plugin_state.db")
+	ctx := context.Background()
+
+	conn1, err := sqlx.Open("sqlite3", dsn)
+	if err != nil {
+		t.Fatalf("open first connection: %v", err)
+	}
+	store1, err := NewStore(db.NewPool(conn1, conn1))
+	if err != nil {
+		_ = conn1.Close()
+		t.Fatalf("new store 1: %v", err)
+	}
+	claimed, err := store1.Claim(ctx, "kandev-plugin-coordinator", "occurrence", "ws-1/coordinator", "wake:daily:2026-08-17", json.RawMessage(`{"claimed":true}`))
+	if err != nil {
+		_ = conn1.Close()
+		t.Fatalf("claim before restart: %v", err)
+	}
+	if !claimed {
+		_ = conn1.Close()
+		t.Fatalf("expected the first claim to win")
+	}
+	if err := conn1.Close(); err != nil {
+		t.Fatalf("close first connection: %v", err)
+	}
+
+	// Simulate a restart: fresh connection, fresh Store, same DB file.
+	conn2, err := sqlx.Open("sqlite3", dsn)
+	if err != nil {
+		t.Fatalf("open second connection: %v", err)
+	}
+	t.Cleanup(func() { _ = conn2.Close() })
+	store2, err := NewStore(db.NewPool(conn2, conn2))
+	if err != nil {
+		t.Fatalf("new store 2 (post-restart): %v", err)
+	}
+	claimedAgain, err := store2.Claim(ctx, "kandev-plugin-coordinator", "occurrence", "ws-1/coordinator", "wake:daily:2026-08-17", json.RawMessage(`{"claimed":true}`))
+	if err != nil {
+		t.Fatalf("claim after restart: %v", err)
+	}
+	if claimedAgain {
+		t.Fatal("expected the occurrence claim to survive a restart — a second claim must lose")
 	}
 }
 
