@@ -36,7 +36,7 @@ const defaultAgentConversationTitle = "Managed Conversation"
 // managed conversation operations.
 type agentConversationTaskRepo interface {
 	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
-	InsertTask(ctx context.Context, task *models.Task) error
+	CreateTask(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, taskID string) error
 }
 
@@ -149,7 +149,7 @@ func (s *AgentConversationService) Ensure(ctx context.Context, pluginID string, 
 		UpdatedAt:   time.Now().UTC(),
 	}
 
-	if err := s.tasks.InsertTask(ctx, task); err != nil {
+	if err := s.tasks.CreateTask(ctx, task); err != nil {
 		return pluginsdk.AgentConversationDescriptor{}, "", fmt.Errorf("failed to insert conversation task: %w", err)
 	}
 

@@ -231,6 +231,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		// build passes "dev", which the service treats as "don't enforce".
 		pluginsSvc.SetKandevVersion(version)
 		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
+		// Wire the managed agent conversation service for the agent_conversation
+		// Host capability. Wired here (not at boot time in main.go) because the
+		// task service and shared repository are both available at this point.
+		pluginsSvc.SetAgentConversations(NewAgentConversationService(repos.Task, eventBus))
 	}
 	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, cfg.GitHubCredentialBroker.ReissueSigningKey)
 	if pluginsSvc != nil {

@@ -42,7 +42,7 @@ func (f *acFakeTaskRepo) ListTasksByWorkspace(ctx context.Context, workspaceID, 
 	return filtered, len(filtered), nil
 }
 
-func (f *acFakeTaskRepo) InsertTask(_ context.Context, task *models.Task) error {
+func (f *acFakeTaskRepo) CreateTask(_ context.Context, task *models.Task) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	task.ID = f.makeID()
