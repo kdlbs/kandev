@@ -1,6 +1,6 @@
 # ADR-2026-08-16-session-mcp-tool-catalog: Keep MCP Tool Catalogs Session Owned
 
-**Status:** accepted
+**Status:** superseded by 2026-08-18-session-mcp-tool-definition-details
 **Date:** 2026-08-16
 **Area:** backend, agentctl, frontend, protocol, security
 
@@ -13,6 +13,11 @@ response, but third-party MCP servers connect directly to the agent.
 Collecting every third-party catalog requires Kandev to connect to, or proxy,
 those servers. That change expands credential, transport, and
 failure ownership beyond the existing observability boundary.
+
+The follow-up decision
+[ADR-2026-08-18-session-mcp-tool-definition-details](2026-08-18-session-mcp-tool-definition-details.md)
+supersedes this decision. It keeps session ownership but adds bounded input
+schemas and deterministic token estimates.
 
 ## Decision
 
