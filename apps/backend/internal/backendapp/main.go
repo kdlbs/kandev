@@ -745,7 +745,11 @@ func startAgentInfrastructure(
 	if _, deliveryCleanup, err := delivery.Provide(dbPool.Writer(), dbPool.Reader(), services.Task, log); err != nil {
 		log.Warn("delivery ledger sweep unavailable", zap.Error(err))
 	} else {
-		addCleanup(deliveryCleanup)
+		// Must be addRuntimeCleanup, not addCleanup: RestoreQuiesce only
+		// stops workers registered here, and a restore checkpoints, closes,
+		// and replaces the shared database pool. A five-minute sweep pass
+		// overlapping that would race the pool swap.
+		addRuntimeCleanup(deliveryCleanup)
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,

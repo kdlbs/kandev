@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/persistence"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/testutil"
 )
 
@@ -88,8 +89,15 @@ func TestRunOutcomeActivation_WrittenOnceAfterSchemaProbe(t *testing.T) {
 // twin required by ADR 0027: fresh init and replay both succeed and the
 // runs.outcome column and activation key exist. Skips unless
 // KANDEV_TEST_POSTGRES_DSN is set.
+//
+// The office schema's runs table has a foreign key onto tasks, so the tasks
+// table must exist first — initialize via taskrepo, mirroring production
+// boot order (see internal/office/repository/sqlite/workflow_test.go).
 func TestPostgresRunOutcomeMigration_AddsColumnAndActivates(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init task repo: %v", err)
+	}
 	if _, err := sqlite.NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("init postgres schema: %v", err)
 	}

@@ -135,11 +135,11 @@ func (s *Sweep) RunPass(ctx context.Context) {
 		setSessionsUnattributedGauge(n)
 	}
 
-	s.publishWriterHealth()
+	s.publishWriterHealth(ctx)
 }
 
-func (s *Sweep) publishWriterHealth() {
-	sig := s.repo.ComputeStallSignal(context.Background())
+func (s *Sweep) publishWriterHealth(ctx context.Context) {
+	sig := s.repo.ComputeStallSignal(ctx)
 	publishStallSignal(sig)
 	switch {
 	case sig.LedgerErr != nil:
@@ -272,6 +272,12 @@ func (r *Repository) SelectDuePairs(ctx context.Context, candidates []CandidateP
 	for _, pair := range candidates {
 		repoInfo, err := r.RepositoryInfo(ctx, pair.RepositoryID)
 		if err != nil {
+			// Not a spec-defined evaluation_errors_total case: this pair
+			// never reached evaluatePair, so it is not an "abandoned
+			// evaluation" under that counter's definition. Log only —
+			// self-healing, since Candidates()/SelectDuePairs reruns every
+			// pass and will pick the pair back up.
+			r.logWarn("delivery_ledger.due_selection_repository_info_failed", err)
 			continue
 		}
 		if repoInfo.DeletedAt != nil {
@@ -411,6 +417,11 @@ func (r *Repository) OrderPairs(ctx context.Context, pairs []CandidatePair) []Ca
 	for _, p := range pairs {
 		info, err := r.TaskInfo(ctx, p.TaskID)
 		if err != nil {
+			// Same rationale as SelectDuePairs' RepositoryInfo read above:
+			// not an "abandoned evaluation" (the pair never reached
+			// evaluatePair), so log rather than count. Self-healing next
+			// pass.
+			r.logWarn("delivery_ledger.ordering_task_info_failed", err)
 			continue
 		}
 		items = append(items, item{pair: p, createdAt: info.CreatedAt})
