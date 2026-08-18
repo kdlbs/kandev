@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -78,4 +79,42 @@ func TestService_CoordinatorMonitoring_RejectsForeignStepID(t *testing.T) {
 	loaded, err := svc.GetCoordinatorMonitoring(ctx, "wf-1")
 	require.NoError(t, err)
 	assert.Empty(t, loaded)
+}
+
+// The workspace stored on a coordinator monitoring row must come from the
+// workflow, not from the caller: workspace_id arrives in the request body and
+// a row whose workspace disagrees with its workflow is unusable provenance.
+func TestService_CoordinatorMonitoring_StoresWorkflowOwnWorkspace(t *testing.T) {
+	svc, db, provider := setupTestServiceWithProvider(t)
+	insertWorkflow(t, db, "wf-1", "Workflow 1")
+	provider.workflows = []*taskmodels.Workflow{{ID: "wf-1", WorkspaceID: "real-workspace"}}
+	step := &models.WorkflowStep{WorkflowID: "wf-1", Name: "Step A", Position: 0}
+	createStep(t, svc, step)
+
+	_, err := svc.SetCoordinatorMonitoring(context.Background(), "attacker-supplied-workspace", "wf-1",
+		[]models.CoordinatorStepMonitor{{WorkflowStepID: step.ID, Selected: true, Prompt: "watch"}})
+	require.NoError(t, err)
+
+	var stored string
+	require.NoError(t, db.Get(&stored,
+		"SELECT workspace_id FROM workflow_coordinator_monitoring WHERE workflow_id = ?", "wf-1"))
+	assert.Equal(t, "real-workspace", stored)
+}
+
+// Without a wired workflow provider (a bare service) the supplied value is
+// still used, so this resolution never turns into a hard dependency.
+func TestService_CoordinatorMonitoring_FallsBackWithoutProvider(t *testing.T) {
+	svc, db := setupTestService(t)
+	insertWorkflow(t, db, "wf-1", "Workflow 1")
+	step := &models.WorkflowStep{WorkflowID: "wf-1", Name: "Step A", Position: 0}
+	createStep(t, svc, step)
+
+	_, err := svc.SetCoordinatorMonitoring(context.Background(), "ws-fallback", "wf-1",
+		[]models.CoordinatorStepMonitor{{WorkflowStepID: step.ID, Selected: true, Prompt: "watch"}})
+	require.NoError(t, err)
+
+	var stored string
+	require.NoError(t, db.Get(&stored,
+		"SELECT workspace_id FROM workflow_coordinator_monitoring WHERE workflow_id = ?", "wf-1"))
+	assert.Equal(t, "ws-fallback", stored)
 }
