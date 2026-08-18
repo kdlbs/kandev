@@ -1721,5 +1721,13 @@
   "dynamicRouteRetryOrdinal_one": "重试 {{count}} 次",
   "dynamicRouteRetryOrdinal_other": "重试 {{count}} 次",
   "dynamicRouteDeadline": "下一次恢复尝试：{{deadline}}",
-  "dynamicRoutePendingOutcome": "恢复后：{{outcome}}"
+  "dynamicRoutePendingOutcome": "恢复后：{{outcome}}",
+  "collapsePrompt": "收起提示",
+  "durationUnitHours": "时",
+  "durationUnitMinutes": "分",
+  "durationUnitSeconds": "秒",
+  "expandPrompt": "展开提示",
+  "promptHistory": "提示历史",
+  "promptHistoryEmpty": "暂无提示。",
+  "scrollToPrompt": "滚动到提示"
 }

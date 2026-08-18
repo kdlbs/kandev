@@ -34,6 +34,11 @@ export const OPTIONAL_HYDRATION_TIMEOUT_MS = 5_000;
 
 type OptionalHydrationResult<T> = { status: "fulfilled"; value: T } | { status: "unavailable" };
 
+/**
+ * Starts an optional-hydration window: a shared deadline timer bounds every
+ * `load()` issued before `complete()` fires, so optional SSR fetches can never
+ * extend route loading. Returns the load/complete handle for those fetches.
+ */
 function beginOptionalHydration() {
   let deadlineTimer: ReturnType<typeof setTimeout>;
   const deadline = new Promise<void>((resolve) => {
@@ -41,9 +46,15 @@ function beginOptionalHydration() {
   });
 
   return {
+    /**
+     * Runs an optional fetch, resolving with its value if it succeeds before the
+     * shared deadline and with "unavailable" (after a console warning) on failure
+     * or timeout, so callers can seed state without those slices.
+     */
     load<T>(label: string, operation: () => Promise<T>): Promise<OptionalHydrationResult<T>> {
       return new Promise((resolve) => {
         let settled = false;
+        /** First-call-wins resolver for the load promise; later calls are ignored. */
         const settle = (value: OptionalHydrationResult<T>) => {
           if (settled) return;
           settled = true;
@@ -73,16 +84,22 @@ function beginOptionalHydration() {
         });
       });
     },
+    /** Cancels the shared deadline timer once all optional fetches are in flight. */
     complete() {
       clearTimeout(deadlineTimer);
     },
   };
 }
 
+/** Unwraps a fulfilled optional result; returns undefined when it was unavailable. */
 function optionalValue<T>(result: OptionalHydrationResult<T>): T | undefined {
   return result.status === "fulfilled" ? result.value : undefined;
 }
 
+/**
+ * Builds a Partial<AppState> from an optional value, returning {} when the value
+ * is missing so unavailable slices contribute nothing to the initial state.
+ */
 function optionalState<T>(
   value: T | undefined,
   build: (resolved: T) => Partial<AppState>,
@@ -90,6 +107,10 @@ function optionalState<T>(
   return value === undefined ? {} : build(value);
 }
 
+/**
+ * Builds the worktrees and sessionWorktreesBySessionId state slices from the
+ * sessions that carry a worktree_id.
+ */
 function buildWorktreeState(allSessions: TaskSession[]) {
   const sessionsWithWorktrees = allSessions.filter((s) => s.worktree_id);
   return {
@@ -135,6 +156,11 @@ type BuildSessionPageStateParams = {
   messagesResponse?: ListMessagesResponse | null;
 };
 
+/**
+ * Composes the full SSR initial state for a session page: task/message state
+ * plus the resource, session, worktree, prepare-progress, agent, and user
+ * settings slices, each contributed only when the corresponding data loaded.
+ */
 function buildSessionPageState(p: BuildSessionPageStateParams) {
   const { task, sessionId, snapshot, agents, allSessions, messagesResponse } = p;
   const messages = messagesResponse?.messages ? [...messagesResponse.messages].reverse() : [];
@@ -269,6 +295,7 @@ function buildSessionState(p: BuildSessionPageStateParams) {
   };
 }
 
+/** Returns the value narrowed to its string-valued entries, or undefined when none qualify. */
 function stringMap(value: unknown): Record<string, string> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const entries = Object.entries(value).filter(
@@ -277,22 +304,26 @@ function stringMap(value: unknown): Record<string, string> | undefined {
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
+/** Returns the value as a plain record when it is a non-array object; otherwise undefined. */
 function objectMap(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
 }
 
+/** Returns the value when it is a string; otherwise undefined. */
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+/** Filters an array down to its plain-object items, or returns [] for non-arrays. */
 function objectList(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value)
     ? value.filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
     : [];
 }
 
+/** Maps a raw ACP model record to the display shape, defaulting missing strings to "". */
 function mapSessionModel(model: Record<string, unknown>) {
   return {
     modelId: stringValue(model.model_id) ?? "",
@@ -302,6 +333,10 @@ function mapSessionModel(model: Record<string, unknown>) {
   };
 }
 
+/**
+ * Maps a raw ACP config option, preferring the runtime (or override) value over
+ * the option's own current_value and defaulting type to "select" when absent.
+ */
 function mapSessionConfigOption(
   option: Record<string, unknown>,
   runtimeOptions: Record<string, string>,
@@ -320,6 +355,10 @@ function mapSessionConfigOption(
   };
 }
 
+/**
+ * Extracts the ACP model-state snapshot, runtime config, and overrides from a
+ * session's metadata; returns {} when the session or its snapshot is missing.
+ */
 function sessionModelHydrationMetadata(session: TaskSession | null) {
   if (!session) return {};
   const snapshot = objectMap(session.metadata?.acp_model_state);
@@ -332,6 +371,11 @@ function sessionModelHydrationMetadata(session: TaskSession | null) {
   };
 }
 
+/**
+ * Builds the sessionModels slice (current model, available models, config
+ * options) for a session from its ACP hydration metadata; {} when nothing
+ * resolvable exists.
+ */
 function buildSessionModelsState(session: TaskSession | null) {
   const metadata = sessionModelHydrationMetadata(session);
   if (!metadata.session || !metadata.snapshot) return {};
@@ -367,6 +411,7 @@ function buildSessionModelsState(session: TaskSession | null) {
   };
 }
 
+/** Builds the prepareProgress slice from each session's prepare metadata; {} when none exists. */
 function buildPrepareProgressState(allSessions: TaskSession[]) {
   const bySessionId: Record<string, SessionPrepareState> = {};
 
@@ -386,6 +431,11 @@ export type FetchedSessionData = {
   initialTerminals: Terminal[];
 };
 
+/**
+ * SSR entry point for a session route: fetches the full session, its task, and
+ * the task's session list, then runs the shared optional-enrichment pipeline to
+ * produce the initial page state.
+ */
 export async function fetchSessionData(sessionId: string): Promise<FetchedSessionData> {
   const { fetchTaskSession } = await import("@/lib/api");
   const sessionResponse = await fetchTaskSession(sessionId, { cache: "no-store" });
@@ -406,6 +456,11 @@ export async function fetchSessionData(sessionId: string): Promise<FetchedSessio
   );
 }
 
+/**
+ * SSR entry point for a task route: resolves the primary (or first) session,
+ * seeding task-only data when no session exists yet and otherwise enriching via
+ * the shared optional-hydration pipeline.
+ */
 export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSessionData> {
   const [task, allSessionsResponse] = await Promise.all([
     fetchTask(taskId, { cache: "no-store" }),
@@ -439,6 +494,12 @@ export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSe
   );
 }
 
+/**
+ * Builds SSR data for a task with no sessions yet: fetches the optional
+ * convenience slices (snapshot, agents, repositories, workspaces, workflows,
+ * user settings) and seeds state with sessionId null so the auto-start hook can
+ * fire immediately without a client-side crash.
+ */
 async function fetchTaskDataOnly(
   task: Task,
   allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
@@ -499,6 +560,7 @@ async function fetchTaskDataOnly(
 
 type TerminalApiResponse = Awaited<ReturnType<typeof fetchTerminals>>[number];
 
+/** Whether a terminal from the API should be hydrated on SSR (skips placeholder and parked terminals). */
 function shouldHydrateTerminal(t: TerminalApiResponse): boolean {
   const id = t.id ?? t.terminal_id ?? "";
   if (!id || id === "bottom-panel") return false;
@@ -506,6 +568,7 @@ function shouldHydrateTerminal(t: TerminalApiResponse): boolean {
   return true;
 }
 
+/** Classifies a terminal as script and/or ordinary based on its kind, id prefix, and seq. */
 function classifyTerminal(
   t: TerminalApiResponse,
   id: string,
@@ -515,6 +578,10 @@ function classifyTerminal(
   return { isScript, isOrdinary };
 }
 
+/**
+ * Derives the display label for a hydrated terminal: explicit names win, then a
+ * numbered "Terminal N" for ordinary terminals, then script/terminal defaults.
+ */
 function deriveHydratedLabel(
   t: TerminalApiResponse,
   isScript: boolean,
@@ -527,6 +594,7 @@ function deriveHydratedLabel(
   return isScript ? translate("common:script") : translate("common:terminal");
 }
 
+/** Maps the classification flags to a terminal kind ("ordinary", "script", or undefined). */
 function pickTerminalKind(
   isOrdinary: boolean,
   isScript: boolean,
@@ -536,6 +604,7 @@ function pickTerminalKind(
   return undefined;
 }
 
+/** Maps a terminal API response to the Terminal model used by the session page. */
 function hydrateTerminal(t: TerminalApiResponse): Terminal {
   const id = (t.id ?? t.terminal_id ?? "") as string;
   const { isScript, isOrdinary } = classifyTerminal(t, id);
@@ -553,6 +622,12 @@ function hydrateTerminal(t: TerminalApiResponse): Terminal {
   };
 }
 
+/**
+ * Shared SSR pipeline: fans out optional enrichment requests (workflow snapshot,
+ * agents, repositories, workspaces, workflows, turns, user settings, terminals,
+ * messages) under one optional-hydration deadline, then assembles the initial
+ * state and the hydrated terminals.
+ */
 async function fetchSessionDataFromTask(
   task: Task,
   sessionId: string,
@@ -639,6 +714,7 @@ async function fetchSessionDataFromTask(
   return { task, sessionId, initialState, initialTerminals };
 }
 
+/** Returns the repositories seeded for a task's workspace, or [] when absent. */
 export function extractInitialRepositories(
   initialState: FetchedSessionData["initialState"] | null,
   task: Task | null,
@@ -646,6 +722,7 @@ export function extractInitialRepositories(
   return initialState?.repositories?.itemsByWorkspaceId?.[task?.workspace_id ?? ""] ?? [];
 }
 
+/** Returns the scripts seeded for a task's first repository, or [] when absent. */
 export function extractInitialScripts(
   initialState: FetchedSessionData["initialState"] | null,
   task: Task | null,

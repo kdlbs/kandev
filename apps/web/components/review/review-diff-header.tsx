@@ -75,6 +75,14 @@ function StaleIndicator({ compact = false }: { compact?: boolean }) {
   );
 }
 
+function ReviewFileDirectory({ directory, className }: { directory: string; className: string }) {
+  return (
+    <span aria-hidden="true" data-review-file-directory className={className}>
+      <bdi dir="ltr">{directory}</bdi>
+    </span>
+  );
+}
+
 function DesktopReviewFilePath({ path }: { path: string }) {
   const { directory, name } = splitFilePath(path);
   return (
@@ -84,12 +92,10 @@ function DesktopReviewFilePath({ path }: { path: string }) {
     >
       {directory && (
         <>
-          <span
-            aria-hidden="true"
+          <ReviewFileDirectory
+            directory={directory}
             className="min-w-0 truncate text-muted-foreground [direction:rtl] [unicode-bidi:isolate]"
-          >
-            {directory}
-          </span>
+          />
           <span aria-hidden="true" className="shrink-0 text-muted-foreground">
             /
           </span>
@@ -122,13 +128,10 @@ function MobileReviewFileDetails({ file, isStale }: { file: ReviewFile; isStale:
       </span>
       <span className="flex min-w-0 items-center gap-1 leading-4">
         {directory && (
-          <span
-            aria-hidden="true"
-            data-review-file-directory
+          <ReviewFileDirectory
+            directory={directory}
             className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground [direction:rtl] [unicode-bidi:isolate]"
-          >
-            {directory}
-          </span>
+          />
         )}
         <FileStatusIcon
           status={file.status}

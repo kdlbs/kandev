@@ -1,6 +1,7 @@
+/* eslint-disable max-lines -- native scroll behavior and regression cases share one harness. */
 import { useLayoutEffect, useRef } from "react";
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, render } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "@/lib/types/http";
 
 vi.mock("@/lib/state/dockview-store", () => ({
@@ -18,14 +19,20 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 import { useScrollToDividerOrBottom } from "./message-list-native";
-import { useAutoScroll } from "./message-list-native-scroll";
+import { useAutoScroll, useScrollToMessage } from "./message-list-native-scroll";
 
 const DIVIDER_KEY = "m2";
 const DIVIDER_SCROLL_CONTAINER_TEST_ID = "divider-scroll-container";
+const SCROLL_TO_MESSAGE_ROOT = "scroll-to-message-root";
 const MISSING_SCROLL_CONTAINER_ERROR = "scroll container did not render";
+const TARGET_MESSAGE_ID = "target";
+const HANDLE_RENDER_ERROR = "handle did not render";
+const HARNESS_RENDER_ERROR = "harness did not render";
 const TEST_MESSAGES = [{} as Message];
+/** Always returns false: the harness never locks programmatic scrolling. */
 const NEVER_LOCKED = () => false;
 
+/** Renders a scroll container wired to useScrollToDividerOrBottom with mocked divider geometry. */
 function Harness({
   itemCount,
   anchoredBarOffsetPx,
@@ -68,6 +75,7 @@ function Harness({
   );
 }
 
+/** Builds a DOMRect-like object positioned at the given top with the given height. */
 function createRect(top: number, height: number): DOMRect {
   return {
     x: 0,
@@ -82,6 +90,7 @@ function createRect(top: number, height: number): DOMRect {
   } as DOMRect;
 }
 
+/** Renders a scroll container running useAutoScroll and exposes its markNotNearBottom callback. */
 function AutoScrollHarness({
   isWorking,
   hasUnreadDivider,
@@ -107,6 +116,7 @@ function AutoScrollHarness({
   return <div ref={scrollRef} data-testid="auto-scroll-container" />;
 }
 
+/** Stubs scrollHeight (1000) and clientHeight (400) onto an element. */
 function setScrollMetrics(element: HTMLElement) {
   Object.defineProperty(element, "scrollHeight", { configurable: true, value: 1000 });
   Object.defineProperty(element, "clientHeight", { configurable: true, value: 400 });
@@ -248,5 +258,465 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
 
     expect(scrollContainer.scrollTop).toBe(150);
     vi.useRealTimers();
+  });
+});
+
+type ScrollToMessageHandle = (
+  messageId: string,
+  options?: { align?: "start" | "center" },
+) => boolean;
+
+/** Renders a scroll root containing the given message rows and reports the useScrollToMessage handle. */
+function ScrollToMessageHarness({
+  rows,
+  onHandle,
+}: {
+  rows: string[];
+  onHandle: (handle: ScrollToMessageHandle) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const handle = useScrollToMessage(scrollRef, (performScroll) => performScroll());
+  useLayoutEffect(() => {
+    onHandle(handle);
+  }, [handle, onHandle]);
+  return (
+    <div ref={scrollRef} data-testid={SCROLL_TO_MESSAGE_ROOT}>
+      {rows.map((id) => (
+        <div key={id} id={`msg-${id}`} />
+      ))}
+    </div>
+  );
+}
+
+describe("useScrollToMessage — root-scoped row lookup", () => {
+  let scrollIntoView: ReturnType<typeof vi.spyOn>;
+  let scrollReceivers: HTMLElement[];
+
+  beforeEach(() => {
+    scrollReceivers = [];
+    scrollIntoView = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      scrollReceivers.push(this);
+    });
+  });
+
+  afterEach(() => {
+    scrollIntoView.mockRestore();
+  });
+
+  /** Renders a ScrollToMessageHarness for the given rows and returns its scroll handle. */
+  function renderHandle(rows: string[]) {
+    const boxed: { current: ScrollToMessageHandle | null } = { current: null };
+    render(
+      <ScrollToMessageHarness
+        rows={rows}
+        onHandle={(next) => {
+          boxed.current = next;
+        }}
+      />,
+    );
+    const handle = boxed.current;
+    if (!handle) throw new Error("scroll handle did not render");
+    return handle;
+  }
+
+  it("returns false and does not scroll when the row is absent from the owning root", () => {
+    const handle = renderHandle(["other"]);
+
+    expect(handle("missing")).toBe(false);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("returns true and scrolls the row into view with the requested alignment", () => {
+    const handle = renderHandle([TARGET_MESSAGE_ID]);
+
+    expect(handle(TARGET_MESSAGE_ID, { align: "start" })).toBe(true);
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      block: "start",
+      behavior: "smooth",
+    });
+
+    scrollIntoView.mockClear();
+    expect(handle(TARGET_MESSAGE_ID)).toBe(true);
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      block: "center",
+      behavior: "smooth",
+    });
+  });
+
+  it("resolves and scrolls only the matching row when duplicate ids exist across mounted lists", () => {
+    const firstHandle: { current: ScrollToMessageHandle | null } = { current: null };
+    const secondHandle: { current: ScrollToMessageHandle | null } = { current: null };
+    const results = render(
+      <>
+        <ScrollToMessageHarness
+          rows={["dup"]}
+          onHandle={(next) => {
+            firstHandle.current = next;
+          }}
+        />
+        <ScrollToMessageHarness
+          rows={["dup"]}
+          onHandle={(next) => {
+            secondHandle.current = next;
+          }}
+        />
+      </>,
+    );
+    const h1 = firstHandle.current;
+    const h2 = secondHandle.current;
+    if (!h1 || !h2) throw new Error("handles did not render");
+    const rows = results.container.querySelectorAll("#msg-dup");
+
+    expect(h1("dup")).toBe(true);
+    expect(h2("dup")).toBe(true);
+    // Each handle scrolled its own list's row. A document-global
+    // implementation would resolve both handles to the SAME (first) row and
+    // still call scrollIntoView twice — pin the receivers instead: the first
+    // handle's target must live in the first root and the second handle's in
+    // the second root.
+    const roots = results.container.querySelectorAll(`[data-testid="${SCROLL_TO_MESSAGE_ROOT}"]`);
+    expect(roots).toHaveLength(2);
+    expect(scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(scrollReceivers).toHaveLength(2);
+    expect(roots[0].contains(scrollReceivers[0])).toBe(true);
+    expect(roots[0].contains(scrollReceivers[1])).toBe(false);
+    expect(roots[1].contains(scrollReceivers[1])).toBe(true);
+    expect(roots[1].contains(scrollReceivers[0])).toBe(false);
+    expect(rows).toHaveLength(2);
+  });
+});
+
+// eslint-disable-next-line max-lines-per-function -- keeps both canceled-scroll regressions together.
+describe("useScrollToMessage — canceled-scroll landing", () => {
+  it("force-lands the alignment when the smooth scroll is canceled without moving", () => {
+    // Round-12 regression: the verifier must NOT exit on the first frame of
+    // movement (or no movement). A dockview restore that cancels the smooth
+    // scroll leaves the row misaligned; the verifier watches a bounded frame
+    // window and lands the requested alignment.
+    const frames: Array<() => void> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const scrollIntoView = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    try {
+      const boxedHandle: { current: ScrollToMessageHandle | null } = { current: null };
+      const { container } = render(
+        <ScrollToMessageHarness
+          rows={[TARGET_MESSAGE_ID]}
+          onHandle={(next) => {
+            boxedHandle.current = next;
+          }}
+        />,
+      );
+      const handle = boxedHandle.current;
+      if (!handle) throw new Error(HANDLE_RENDER_ERROR);
+      const root = container.querySelector<HTMLElement>(
+        `[data-testid="${SCROLL_TO_MESSAGE_ROOT}"]`,
+      );
+      const target = container.querySelector(`#msg-${TARGET_MESSAGE_ID}`);
+      if (!root || !target) throw new Error(HARNESS_RENDER_ERROR);
+      Object.defineProperty(root, "scrollTop", {
+        configurable: true,
+        writable: true,
+        value: 0,
+      });
+      Object.defineProperty(root, "getBoundingClientRect", {
+        configurable: true,
+        value: () => createRect(0, 400),
+      });
+      // The target sits 120px below the scrollport top and moves with scroll.
+      Object.defineProperty(target, "getBoundingClientRect", {
+        configurable: true,
+        value: () => createRect(120 - root.scrollTop, 20),
+      });
+
+      expect(handle(TARGET_MESSAGE_ID, { align: "start" })).toBe(true);
+
+      // The smooth scroll never moves the container on its own; the verifier
+      // must land the alignment within its bounded window.
+      for (let i = 0; i < 10; i += 1) {
+        act(() => {
+          const pending = frames.splice(0);
+          for (const frame of pending) frame();
+        });
+      }
+      expect(root.scrollTop).toBe(120);
+    } finally {
+      vi.unstubAllGlobals();
+      scrollIntoView.mockRestore();
+    }
+  });
+
+  it("does not correct a centered row that is offset by scroll margin", () => {
+    const frames: Array<() => void> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const scrollIntoView = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      scrollMarginTop: "20px",
+    } as CSSStyleDeclaration);
+    try {
+      const boxedHandle: { current: ScrollToMessageHandle | null } = { current: null };
+      const { container } = render(
+        <ScrollToMessageHarness
+          rows={[TARGET_MESSAGE_ID]}
+          onHandle={(next) => {
+            boxedHandle.current = next;
+          }}
+        />,
+      );
+      const handle = boxedHandle.current;
+      if (!handle) throw new Error(HANDLE_RENDER_ERROR);
+      const root = container.querySelector<HTMLElement>(
+        `[data-testid="${SCROLL_TO_MESSAGE_ROOT}"]`,
+      );
+      const target = container.querySelector(`#msg-${TARGET_MESSAGE_ID}`);
+      if (!root || !target) throw new Error(HARNESS_RENDER_ERROR);
+      let scrollTop = 0;
+      let writes = 0;
+      Object.defineProperties(root, {
+        scrollTop: {
+          configurable: true,
+          get: () => scrollTop,
+          set: (value: number) => {
+            writes += 1;
+            scrollTop = value;
+          },
+        },
+        scrollHeight: { configurable: true, value: 1000 },
+        clientHeight: { configurable: true, value: 400 },
+        getBoundingClientRect: {
+          configurable: true,
+          value: () => createRect(0, 400),
+        },
+      });
+      Object.defineProperty(target, "getBoundingClientRect", {
+        configurable: true,
+        // Center alignment with a 20px scroll margin places the row center
+        // 10px below the viewport center.
+        value: () => createRect(200, 20),
+      });
+
+      expect(handle(TARGET_MESSAGE_ID)).toBe(true);
+      for (let i = 0; i < 2; i += 1) {
+        act(() => {
+          const pending = frames.splice(0);
+          for (const frame of pending) frame();
+        });
+      }
+
+      expect(writes).toBe(0);
+      expect(scrollTop).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+      scrollIntoView.mockRestore();
+    }
+  });
+
+  it("accepts the nearest reachable position when start alignment is beyond the scroll range", () => {
+    const frames: Array<() => void> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const scrollIntoView = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    try {
+      const boxedHandle: { current: ScrollToMessageHandle | null } = { current: null };
+      const { container } = render(
+        <ScrollToMessageHarness
+          rows={[TARGET_MESSAGE_ID]}
+          onHandle={(next) => {
+            boxedHandle.current = next;
+          }}
+        />,
+      );
+      const handle = boxedHandle.current;
+      if (!handle) throw new Error(HANDLE_RENDER_ERROR);
+      const root = container.querySelector<HTMLElement>(
+        `[data-testid="${SCROLL_TO_MESSAGE_ROOT}"]`,
+      );
+      const target = container.querySelector(`#msg-${TARGET_MESSAGE_ID}`);
+      if (!root || !target) throw new Error(HARNESS_RENDER_ERROR);
+      let scrollTop = 0;
+      Object.defineProperties(root, {
+        scrollTop: {
+          configurable: true,
+          get: () => scrollTop,
+          set: (value: number) => {
+            scrollTop = Math.min(value, 100);
+          },
+        },
+        scrollHeight: { configurable: true, value: 500 },
+        clientHeight: { configurable: true, value: 400 },
+        getBoundingClientRect: {
+          configurable: true,
+          value: () => createRect(0, 400),
+        },
+      });
+      Object.defineProperty(target, "getBoundingClientRect", {
+        configurable: true,
+        value: () => createRect(180 - scrollTop, 20),
+      });
+
+      expect(handle(TARGET_MESSAGE_ID, { align: "start" })).toBe(true);
+      act(() => frames.splice(0).forEach((frame) => frame()));
+      act(() => frames.splice(0).forEach((frame) => frame()));
+      act(() => frames.splice(0).forEach((frame) => frame()));
+      act(() => frames.splice(0).forEach((frame) => frame()));
+
+      expect(scrollTop).toBe(100);
+      expect(frames).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+      scrollIntoView.mockRestore();
+    }
+  });
+});
+
+describe("useScrollToMessage — superseded verifiers", () => {
+  it("lets a newer scroll supersede an in-flight verifier without stale force-landing", () => {
+    // Round-14 regression: a verifier scheduled by prompt A must not force-
+    // land the transcript after a newer prompt B consumed. The generation
+    // guard makes A's callback bail; B's lands the target.
+    const frames: Array<() => void> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const scrollIntoView = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    try {
+      const boxedHandle: { current: ScrollToMessageHandle | null } = { current: null };
+      const { container } = render(
+        <ScrollToMessageHarness
+          rows={["target-a", "target-b"]}
+          onHandle={(next) => {
+            boxedHandle.current = next;
+          }}
+        />,
+      );
+      const handle = boxedHandle.current;
+      if (!handle) throw new Error(HANDLE_RENDER_ERROR);
+      const root = container.querySelector<HTMLElement>(
+        `[data-testid="${SCROLL_TO_MESSAGE_ROOT}"]`,
+      );
+      const targetA = container.querySelector("#msg-target-a");
+      const targetB = container.querySelector("#msg-target-b");
+      if (!root || !targetA || !targetB) throw new Error(HARNESS_RENDER_ERROR);
+      Object.defineProperty(root, "scrollTop", {
+        configurable: true,
+        writable: true,
+        value: 0,
+      });
+      Object.defineProperty(root, "getBoundingClientRect", {
+        configurable: true,
+        value: () => createRect(0, 400),
+      });
+      // A sits at 120px, B at 240px below the scrollport top.
+      Object.defineProperty(targetA, "getBoundingClientRect", {
+        configurable: true,
+        value: () => createRect(120 - root.scrollTop, 20),
+      });
+      Object.defineProperty(targetB, "getBoundingClientRect", {
+        configurable: true,
+        value: () => createRect(240 - root.scrollTop, 20),
+      });
+
+      expect(handle("target-a", { align: "start" })).toBe(true);
+      // B supersedes A before A's verifier ever lands.
+      expect(handle("target-b", { align: "start" })).toBe(true);
+
+      for (let i = 0; i < 15; i += 1) {
+        act(() => {
+          const pending = frames.splice(0);
+          for (const frame of pending) frame();
+        });
+      }
+      // The transcript lands on B (240), never on the stale A (120).
+      expect(root.scrollTop).toBe(240);
+    } finally {
+      vi.unstubAllGlobals();
+      scrollIntoView.mockRestore();
+    }
+  });
+});
+
+describe("useScrollToMessage — absent superseder", () => {
+  it("invalidates an in-flight verifier even when the superseding row is absent", () => {
+    // Round-15 regression: a newer scrollToMessage whose row is not rendered
+    // yet returns false but must still advance the generation, so A's
+    // in-flight verifier can never force-land on the stale prompt.
+    const frames: Array<() => void> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const scrollIntoView = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    try {
+      const boxedHandle: { current: ScrollToMessageHandle | null } = { current: null };
+      const { container } = render(
+        <ScrollToMessageHarness
+          rows={["target-a"]}
+          onHandle={(next) => {
+            boxedHandle.current = next;
+          }}
+        />,
+      );
+      const handle = boxedHandle.current;
+      if (!handle) throw new Error(HANDLE_RENDER_ERROR);
+      const root = container.querySelector<HTMLElement>(
+        `[data-testid="${SCROLL_TO_MESSAGE_ROOT}"]`,
+      );
+      const targetA = container.querySelector("#msg-target-a");
+      if (!root || !targetA) throw new Error(HARNESS_RENDER_ERROR);
+      Object.defineProperty(root, "scrollTop", {
+        configurable: true,
+        writable: true,
+        value: 0,
+      });
+      Object.defineProperty(root, "getBoundingClientRect", {
+        configurable: true,
+        value: () => createRect(0, 400),
+      });
+      Object.defineProperty(targetA, "getBoundingClientRect", {
+        configurable: true,
+        value: () => createRect(120 - root.scrollTop, 20),
+      });
+
+      expect(handle("target-a", { align: "start" })).toBe(true);
+      // The superseding target row is absent: the call returns false but
+      // must invalidate A's pending verifier.
+      expect(handle("missing-b", { align: "start" })).toBe(false);
+
+      for (let i = 0; i < 10; i += 1) {
+        act(() => {
+          const pending = frames.splice(0);
+          for (const frame of pending) frame();
+        });
+      }
+      expect(root.scrollTop).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+      scrollIntoView.mockRestore();
+    }
   });
 });

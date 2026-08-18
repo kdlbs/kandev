@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DockviewApi } from "dockview-react";
-import { buildExtraPanelActions, reviewPanelId } from "./dockview-panel-actions";
+import { reviewPanelId } from "./dockview-panel-actions";
+import { buildExtraPanelActions } from "./dockview-extra-panel-actions";
 import { CENTER_GROUP } from "./layout-manager";
 import { makeApi, makeStore } from "./dockview-panel-actions.test-utils";
 import type { MockPanel } from "./dockview-panel-actions.test-utils";
@@ -16,7 +17,7 @@ describe("addPRPanel — dedup with legacy auto-shown panel", () => {
 
   function buildExtra(api: DockviewApi) {
     const store = makeStore(api);
-    return { api, actions: buildExtraPanelActions(store.get) };
+    return { api, actions: buildExtraPanelActions(store.set, store.get) };
   }
 
   /** Canonical PR Details panels retain the key currently shown for the task. */
@@ -100,7 +101,7 @@ describe("addPRPanel — layout-owned group placement", () => {
 
   function buildExtra(api: DockviewApi) {
     const store = makeStore(api);
-    return { api, actions: buildExtraPanelActions(store.get) };
+    return { api, actions: buildExtraPanelActions(store.set, store.get) };
   }
 
   function seedSessionInGroup(api: DockviewApi, groupId: string): void {
@@ -190,7 +191,7 @@ describe("addMRPanel — layout-owned review tabs", () => {
 
   function buildExtra(api: DockviewApi) {
     const store = makeStore(api);
-    return { api, actions: buildExtraPanelActions(store.get) };
+    return { api, actions: buildExtraPanelActions(store.set, store.get) };
   }
 
   function seedLegacyPanel(api: DockviewApi, mrKey: string): void {
@@ -251,7 +252,7 @@ const PLUGIN_PANEL_ID = "plugin:kandev-plugin-notes:notes";
 describe("addPluginPanel / closePluginPanels", () => {
   function buildExtra(api: DockviewApi) {
     const store = makeStore(api);
-    return { api, actions: buildExtraPanelActions(store.get) };
+    return { api, actions: buildExtraPanelActions(store.set, store.get) };
   }
 
   it("opens a plugin panel beside chat by default, with the shared plugin-panel component/tab", () => {
@@ -320,7 +321,8 @@ describe("addReviewPanel", () => {
 
   it("opens a provider-neutral panel with normalized params in the canonical review group", () => {
     const api = makeApi();
-    const actions = buildExtraPanelActions(makeStore(api).get);
+    const store = makeStore(api);
+    const actions = buildExtraPanelActions(store.set, store.get);
     api.addPanel({
       id: "pr-detail",
       component: "pr-detail",
@@ -344,7 +346,8 @@ describe("addReviewPanel", () => {
 
   it("focuses the canonical review panel when it already renders the requested review", () => {
     const api = makeApi();
-    const actions = buildExtraPanelActions(makeStore(api).get);
+    const store = makeStore(api);
+    const actions = buildExtraPanelActions(store.set, store.get);
     api.addPanel({
       id: "pr-detail",
       component: "pr-detail",
@@ -361,7 +364,8 @@ describe("addReviewPanel", () => {
   it("opens a new provider-neutral review in the explicitly requested group", () => {
     const requestedGroup = "group-invoking-add-menu";
     const api = makeApi({ extraGroupIds: [requestedGroup] });
-    const actions = buildExtraPanelActions(makeStore(api).get);
+    const store = makeStore(api);
+    const actions = buildExtraPanelActions(store.set, store.get);
 
     actions.addReviewPanel(review, { groupId: requestedGroup });
 
@@ -371,7 +375,8 @@ describe("addReviewPanel", () => {
 
   it("does not collide when provider IDs or review keys contain panel delimiters", () => {
     const api = makeApi();
-    const actions = buildExtraPanelActions(makeStore(api).get);
+    const store = makeStore(api);
+    const actions = buildExtraPanelActions(store.set, store.get);
 
     const first = {
       providerId: "a|b",

@@ -59,6 +59,7 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
   }
 }
 
+/** Return a new messages array with the message matching `messageId` removed. */
 function removeMessageByID(messages: Message[], messageId: string) {
   return messages.filter((message) => message.id !== messageId);
 }
@@ -263,6 +264,7 @@ export const defaultSessionState: SessionSliceState = {
 type ImmerSet = Parameters<typeof createSessionSlice>[0];
 type ImmerGet = () => SessionSlice;
 
+/** Create the message store actions (set, add, update, remove, merge, prepend, metadata) backed by the given Immer setter. */
 function buildMessageActions(set: ImmerSet) {
   return {
     setMessages: (
@@ -365,6 +367,7 @@ function buildMessageActions(set: ImmerSet) {
   };
 }
 
+/** Create the task-plan store actions (set, loading, saving, clear, seen, revisions, preview, compare) backed by the given Immer setter and getter. */
 function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
   return {
     setTaskPlan: (taskId: string, plan: Parameters<SessionSlice["setTaskPlan"]>[1]) => {
@@ -460,6 +463,7 @@ function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
   };
 }
 
+/** Create the walkthrough store actions (set, active step, seen) backed by the given Immer setter and getter. */
 function buildWalkthroughActions(set: ImmerSet, get: ImmerGet) {
   return {
     setWalkthrough: (
@@ -501,6 +505,7 @@ function buildWalkthroughActions(set: ImmerSet, get: ImmerGet) {
   };
 }
 
+/** Create the plan preview/compare actions (set preview revision, toggle and clear compare pair) backed by the given Immer setter. */
 function buildPreviewCompareActions(set: ImmerSet) {
   return {
     setPreviewRevision: (taskId: string, revisionId: string | null) =>
@@ -539,6 +544,7 @@ function nextPair(
   return [current[1], revisionId];
 }
 
+/** Create the task-session store actions (set, read cursor, remove, list, upsert from event, loading) backed by the given Immer setter. */
 function buildTaskSessionActions(set: ImmerSet) {
   return {
     setTaskSession: (session: Parameters<SessionSlice["setTaskSession"]>[0]) =>
@@ -645,6 +651,7 @@ function buildTaskSessionActions(set: ImmerSet) {
   };
 }
 
+/** Create the session slice, combining the default state with all session action builders wired to the store's Immer set/get. */
 export const createSessionSlice: StateCreator<
   SessionSlice,
   [["zustand/immer", never]],

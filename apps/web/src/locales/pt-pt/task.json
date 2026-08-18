@@ -1721,5 +1721,13 @@
   "dynamicRouteRetryOrdinal_one": "Repetição {{count}}",
   "dynamicRouteRetryOrdinal_other": "Repetições {{count}}",
   "dynamicRouteDeadline": "Próxima tentativa de recuperação: {{deadline}}",
-  "dynamicRoutePendingOutcome": "Depois da recuperação: {{outcome}}"
+  "dynamicRoutePendingOutcome": "Depois da recuperação: {{outcome}}",
+  "collapsePrompt": "Recolher prompt",
+  "durationUnitHours": "h",
+  "durationUnitMinutes": "m",
+  "durationUnitSeconds": "s",
+  "expandPrompt": "Expandir prompt",
+  "promptHistory": "Histórico de prompts",
+  "promptHistoryEmpty": "Ainda sem prompts.",
+  "scrollToPrompt": "Ir para o prompt"
 }

@@ -10,14 +10,19 @@ import { AddPanelMenuItems, type AddPanelMenuState } from "./dockview-add-panel-
 import { pluginRegistry } from "@/lib/plugins/registry";
 import { reviewItemId } from "./review-selection";
 
-const { mockAddMRPanel, mockAddPRPanel, mockAddReviewPanel, mockAddTodosPanel } = vi.hoisted(
-  () => ({
-    mockAddMRPanel: vi.fn(),
-    mockAddPRPanel: vi.fn(),
-    mockAddReviewPanel: vi.fn(),
-    mockAddTodosPanel: vi.fn(),
-  }),
-);
+const {
+  mockAddMRPanel,
+  mockAddPRPanel,
+  mockAddReviewPanel,
+  mockAddTodosPanel,
+  mockAddPromptHistoryPanel,
+} = vi.hoisted(() => ({
+  mockAddMRPanel: vi.fn(),
+  mockAddPRPanel: vi.fn(),
+  mockAddReviewPanel: vi.fn(),
+  mockAddTodosPanel: vi.fn(),
+  mockAddPromptHistoryPanel: vi.fn(),
+}));
 
 const mockDockviewStore = vi.hoisted(() => ({
   api: null as null | {
@@ -29,6 +34,7 @@ const mockDockviewStore = vi.hoisted(() => ({
   addPlanPanel: vi.fn(),
   addPluginPanel: vi.fn(),
   addTodosPanel: mockAddTodosPanel,
+  addPromptHistoryPanel: mockAddPromptHistoryPanel,
   addChangesPanel: vi.fn(),
   addFilesPanel: vi.fn(),
   addPRPanel: mockAddPRPanel,
@@ -77,10 +83,12 @@ vi.mock("./review-panel-provider", () => ({
 }));
 
 const PR_SUBMENU_TEST_ID = "add-panel-pr-submenu";
+const INVOKING_GROUP = "group-center";
 const PR_ITEM_TEST_ID_PREFIX = "add-panel-pr-item-";
 const GITLAB_ORIGIN = "https://gitlab.example";
 const TEST_TIMESTAMP = "2026-07-31T00:00:00Z";
 
+/** Builds an open TaskPR for the acme/kandev task with the given id, number, and repo. */
 function makePR(id: string, number: number, repo = "kandev"): TaskPR {
   return {
     id,
@@ -113,6 +121,7 @@ function makePR(id: string, number: number, repo = "kandev"): TaskPR {
   };
 }
 
+/** Builds an open TaskMR hosted on GITLAB_ORIGIN with the given id, number, and project path. */
 function makeMR(id: string, number: number, projectPath = "acme/kandev"): TaskMR {
   return {
     id,
@@ -142,6 +151,7 @@ function makeMR(id: string, number: number, projectPath = "acme/kandev"): TaskMR
   };
 }
 
+/** Builds an open bitbucket ReviewItemSummary for the given change request number. */
 function makeRegisteredReview(number: number): ReviewItemSummary {
   return {
     providerId: "bitbucket",
@@ -155,12 +165,14 @@ function makeRegisteredReview(number: number): ReviewItemSummary {
   };
 }
 
+/** Stubs the dockview store API so getPanel reports the given open panels and their params. */
 function setOpenPanels(panels: Record<string, Record<string, unknown>>) {
   mockDockviewStore.api = {
     getPanel: (id) => (Object.hasOwn(panels, id) ? { params: panels[id] } : undefined),
   };
 }
 
+/** Renders AddPanelMenuItems inside an open dropdown with the given menu state and target group. */
 function renderMenu(state: Partial<AddPanelMenuState> = {}, groupId = CENTER_GROUP_ID) {
   const fullState: AddPanelMenuState = {
     taskId: null,
@@ -188,6 +200,7 @@ function renderMenu(state: Partial<AddPanelMenuState> = {}, groupId = CENTER_GRO
   );
 }
 
+/** Opens the PR submenu trigger and resolves the acme-web-42 PR row once it renders. */
 async function openPRSubmenu() {
   const trigger = screen.getByTestId(PR_SUBMENU_TEST_ID);
   fireEvent.click(trigger);
@@ -201,6 +214,7 @@ beforeEach(() => {
   mockAddPRPanel.mockClear();
   mockAddReviewPanel.mockClear();
   mockAddTodosPanel.mockClear();
+  mockAddPromptHistoryPanel.mockClear();
 });
 
 afterEach(() => cleanup());
@@ -390,6 +404,7 @@ describe("AddPanelMenuItems — open review identities", () => {
 });
 
 describe("AddPanelMenuItems — plugin task panels (AC1)", () => {
+  /** Stub task-panel component that renders nothing. */
   function Notes() {
     return null;
   }
@@ -423,6 +438,7 @@ describe("AddPanelMenuItems — plugin task panels (AC1)", () => {
 });
 
 describe("AddPanelMenuItems — port forwarding preference", () => {
+  /** Builds a default AddPanelMenuState port-forwarding object, merged with the given overrides. */
   function portForwardingState(
     overrides: Partial<NonNullable<AddPanelMenuState["portForwarding"]>> = {},
   ): NonNullable<AddPanelMenuState["portForwarding"]> {
@@ -466,6 +482,22 @@ describe("AddPanelMenuItems — port forwarding preference", () => {
   });
 });
 
+describe("AddPanelMenuItems — Prompt history", () => {
+  it("renders a row that opens the panel in the invoking group", () => {
+    renderMenu();
+    const item = screen.getByTestId("add-panel-prompt-history-item");
+    expect(item.textContent).toBe("Prompt history");
+
+    fireEvent.click(item);
+    expect(mockAddPromptHistoryPanel).toHaveBeenCalledWith({ groupId: INVOKING_GROUP });
+  });
+
+  it("hides the Prompt history row for a passthrough session", () => {
+    renderMenu({ isPassthrough: true });
+    expect(screen.queryByTestId("add-panel-prompt-history-item")).toBeNull();
+  });
+});
+
 describe("AddPanelMenuItems — Todos", () => {
   it("renders an always-available Todos row that opens/focuses the panel in the invoking group", () => {
     renderMenu();
@@ -473,7 +505,7 @@ describe("AddPanelMenuItems — Todos", () => {
     expect(item).toBeTruthy();
 
     fireEvent.click(item);
-    expect(mockAddTodosPanel).toHaveBeenCalledWith({ groupId: CENTER_GROUP_ID });
+    expect(mockAddTodosPanel).toHaveBeenCalledWith({ groupId: INVOKING_GROUP });
   });
 
   it("hides the Todos row for a passthrough session, matching the Plan row's guard", () => {
