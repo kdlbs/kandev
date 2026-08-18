@@ -1,7 +1,7 @@
 ---
 id: "02-consume-and-prove-image"
 title: "Consume and prove desktop image"
-status: done
+status: pending
 wave: 2
 depends_on: ["01-prebuild-desktop-image"]
 plan: "plan.md"

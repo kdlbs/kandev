@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/e2e-duration-aware-sharding/spec.md
 created: 2026-08-18
-status: complete
+status: building
 ---
 
 # Implementation Plan: Prebuilt Desktop E2E Image
@@ -111,7 +111,7 @@ Execute sequentially in the primary session:
 
 ### Wave 2
 
-- [x] [task-02-consume-and-prove-image](task-02-consume-and-prove-image.md)
+- [ ] [task-02-consume-and-prove-image](task-02-consume-and-prove-image.md)
 
 ## Risks
 
