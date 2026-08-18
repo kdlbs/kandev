@@ -124,6 +124,7 @@ type Service struct {
 	messageData      messageDataSource
 	interactionData  interactionDataSource
 	taskWriter       taskWriter
+	agentConvs       AgentConversationService
 
 	// Utility agent invocation (ADR 0048), wired via SetUtilityAgent.
 	utilityAgents utilityAgentSource
@@ -468,6 +469,23 @@ func (s *Service) writeDependencies() (taskMessenger, taskStarter) {
 	return s.messenger, s.taskStarter
 }
 
+// SetAgentConversations wires the managed agent conversation service
+// (AgentConversationService). Wired by backendapp, guarded by s.mu against
+// concurrent reads.
+func (s *Service) SetAgentConversations(svc AgentConversationService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentConvs = svc
+}
+
+// agentConversationDeps returns the wired agent conversation service, read
+// live (not snapshotted at hostForPlugin time). Guarded by s.mu.
+func (s *Service) agentConversationDeps() AgentConversationService {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.agentConvs
+}
+
 // SetUtilityAgent wires the dependencies behind Host.InvokeUtilityAgent
 // (ADR 0048): the service that resolves the utility agent selected in plugin
 // configuration, and the sessionless runner that executes a one-shot
@@ -634,6 +652,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		utilityDeps:         s.utilityAgentDeps,
 		writeDeps:           s.writeDependencies,
 		interactionDeps:     s.interactionResponderDep,
+		agentConversations:  s.agentConversationDeps,
 	}
 }
 

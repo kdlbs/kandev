@@ -100,6 +100,13 @@ type pluginHost struct {
 	// wiring take effect without a plugin restart. nil on a bare test host.
 	// See host_utility.go.
 	utilityDeps func() (utilityAgentSource, utilityRunner)
+
+	// agentConversations provides the managed workspace agent conversation
+	// operations — EnsureAgentConversation / DispatchAgentConversation /
+	// DeleteAgentConversation. Wired by backendapp via SetAgentConversations
+	// and read through agentConversationsDeps (live, not snapshotted at
+	// hostForPlugin time, for the same late-wiring reason as writeDeps).
+	agentConversations func() AgentConversationService
 }
 
 var _ pluginsdk.Host = (*pluginHost)(nil)
@@ -313,6 +320,26 @@ func (h *pluginHost) EmitEvent(ctx context.Context, name string, payload map[str
 	subject := "plugin." + h.pluginID + "." + name
 	event := bus.NewEvent(subject, "plugin:"+h.pluginID, payload)
 	return h.bus.Publish(ctx, subject, event)
+}
+
+// AgentConversations returns the agent conversation manager, gated on the
+// agent_conversation capability. Returns nil when the capability is not
+// declared, so the grpcHostServer casting check fails gracefully.
+func (h *pluginHost) AgentConversations() pluginsdk.AgentConversationManager {
+	if !h.capabilities.AgentConversation {
+		return nil
+	}
+	if h.agentConversations == nil {
+		return nil
+	}
+	svc := h.agentConversations()
+	if svc == nil {
+		return nil
+	}
+	return &pluginHostAgentConversationManager{
+		pluginID: h.pluginID,
+		svc:      svc,
+	}
 }
 
 // unmarshalStateValue decodes a plugin_state row's JSON value into a

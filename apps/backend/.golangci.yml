@@ -64,6 +64,12 @@ linters:
       # already skips most linters here, but this is an explicit belt-and-
       # braces exclusion since this dir is committed, not gitignored.
       - proto/.*\.pb\.go$
+      # pluginsdk host + data types — the dual-direction gRPC wire adapter
+      # (client + server stubs) is inherently verbose and these files are
+      # the single source of truth for the Host RPC contract. Not worth
+      # splitting across multiple files.
+      - pkg/pluginsdk/host\.go$
+      - pkg/pluginsdk/data_types\.go$
 
 issues:
   new: true
