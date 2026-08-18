@@ -8,6 +8,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  type RefObject,
 } from "react";
 import { EditorContent } from "@tiptap/react";
 import { exitSuggestion } from "@tiptap/suggestion";
@@ -405,9 +406,13 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     workspaceId,
     sessionId,
   });
-  const { isSuggestionMenuOpen } = useSuggestionMenuOpenState(menu, entityReferences);
-  const { history, getHistory } = useChatHistory(sessionId);
   const { editorWrapperRef, ...overlay } = useReverseSearchOverlay(sessionId);
+  const { isSuggestionMenuOpen } = useSuggestionMenuOpenState(
+    menu,
+    entityReferences,
+    editorWrapperRef,
+  );
+  const { history, getHistory } = useChatHistory(sessionId);
   const { isDraining } = useDrainOlderMessages(sessionId, overlay.isReverseSearchOpen);
   const { editor, applyHistoryEntry } = useTipTapEditor({
     value,
@@ -556,6 +561,7 @@ function useChatHistory(sessionId: string | null) {
 function useSuggestionMenuOpenState(
   menu: ReturnType<typeof useMenuHandlers>,
   entityReferences: ReturnType<typeof useEntityReferenceComposer>,
+  containerRef: RefObject<HTMLElement | null>,
 ) {
   const mentionMenuOpen = menu.mentionMenu.isOpen && menu.mentionMenu.items.length > 0;
   const slashMenuOpen = menu.slashMenu.isOpen && menu.slashMenu.items.length > 0;
@@ -568,6 +574,7 @@ function useSuggestionMenuOpenState(
     closeMentionMenu: menu.handleMentionClose,
     closeSlashMenu: menu.handleSlashClose,
     closeEntityReferenceMenu: entityReferences.close,
+    containerRef,
   });
   return { isSuggestionMenuOpen, mentionMenuOpen, slashMenuOpen };
 }

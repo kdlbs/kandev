@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, type RefObject } from "react";
 import {
   useClarificationEscapeGuard,
   type ClarificationEscapePredicate,
@@ -21,7 +21,18 @@ export type SuggestionEscapeFallbackArgs = {
   closeMentionMenu: () => void;
   closeSlashMenu: () => void;
   closeEntityReferenceMenu: () => void;
+  /** This composer instance's own editor wrapper element. Escape only closes
+   *  THIS composer's popups when the keydown's target or the currently
+   *  focused element is inside it -- see the ownership note below. */
+  containerRef: RefObject<HTMLElement | null>;
 };
+
+/** True while `node` (the keydown's target, or document.activeElement) sits
+ *  inside `container`. Keyboard events target the focused element, so this
+ *  is the same check whichever of the two callers pass. */
+function isOwnedByContainer(container: HTMLElement | null, node: Node | null): boolean {
+  return !!container && !!node && container.contains(node);
+}
 
 /**
  * On Quick Chat, Radix's Dialog calls `event.preventDefault()` on Escape from
@@ -52,6 +63,20 @@ export type SuggestionEscapeFallbackArgs = {
  * sees the same keydown either -- mirroring what the Suggestion plugins' own
  * onKeyDown does when it runs normally.
  *
+ * OWNERSHIP: this document-level listener is not scoped by React tree -- it
+ * receives every Escape keydown that reaches `document`, from *any* mounted
+ * composer instance. Quick Chat is a modal layered over a still-mounted task
+ * page, so both composers can be alive at once, and `popup-menu.tsx` closes a
+ * menu only on outside `pointerdown` (no blur handler), so a menu left open in
+ * a backgrounded composer stays open indefinitely. Without an ownership check,
+ * whichever instance's listener happens to be registered first "wins" the
+ * event regardless of which composer the user is actually typing into --
+ * closing the wrong (background) menu and calling stopPropagation() before the
+ * foreground instance's own listener ever runs. `containerRef` is this
+ * composer's own editor wrapper; the handler bails unless the keydown's
+ * target or the currently focused element sits inside it, so only the
+ * composer that actually owns the keystroke acts on it.
+ *
  * On the main task chat panel there is no competing capture listener, so the
  * Suggestion plugin's own bubble-phase stopPropagation() halts the event at
  * the editor node first and this listener never fires -- verified in
@@ -65,12 +90,18 @@ export function useSuggestionEscapeFallback({
   closeMentionMenu,
   closeSlashMenu,
   closeEntityReferenceMenu,
+  containerRef,
 }: SuggestionEscapeFallbackArgs) {
   useClarificationEscapeGuard(isSuggestionMenuOpen ? CLAIM_ANY_ESCAPE : null);
   useEffect(() => {
     if (!isSuggestionMenuOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      const container = containerRef.current;
+      const owned =
+        isOwnedByContainer(container, event.target as Node | null) ||
+        isOwnedByContainer(container, document.activeElement);
+      if (!owned) return;
       if (mentionMenuOpen) closeMentionMenu();
       if (slashMenuOpen) closeSlashMenu();
       if (entityReferenceMenuOpen) closeEntityReferenceMenu();
@@ -87,5 +118,6 @@ export function useSuggestionEscapeFallback({
     closeMentionMenu,
     closeSlashMenu,
     closeEntityReferenceMenu,
+    containerRef,
   ]);
 }

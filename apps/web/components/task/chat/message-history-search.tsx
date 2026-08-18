@@ -102,24 +102,63 @@ function useScrollSelectedIntoView(
   }, [selectedIndex, listRef]);
 }
 
+export type ContainerPaddingBox = {
+  /** Padding-box left edge, in viewport coordinates. */
+  left: number;
+  /** Padding-box width (border-box width minus both border widths). */
+  width: number;
+  /** Padding-box bottom edge, in viewport coordinates. */
+  bottom: number;
+};
+
+type PaddingBoxSource = {
+  getBoundingClientRect: () => DOMRect;
+  clientLeft: number;
+  clientTop: number;
+  clientWidth: number;
+  clientHeight: number;
+};
+
 /**
- * Position math is relative to `containerRect`, the bounding rect of the
- * portal target, not the viewport. A `document.body` target has no transform
- * of its own, so `containerRect` is null there and the origin collapses to
- * (0, 0, window.innerWidth, window.innerHeight) -- identical to the previous
+ * The containing block a `position: fixed` descendant of a transformed
+ * ancestor resolves against is that ancestor's PADDING box, not its border
+ * box -- `getBoundingClientRect()` alone returns the border box. Quick Chat's
+ * `DialogContent` has a real border (`dialog.tsx`), so using the border box
+ * directly offset the overlay by the border width and left `maxWidth` short
+ * by twice it. `clientLeft`/`clientTop` are exactly the container's own
+ * border widths, so subtracting them (via the border-box rect) recovers the
+ * padding box. Takes a minimal structural source rather than `Element` so the
+ * arithmetic is unit-testable without a real layout engine (jsdom always
+ * reports 0 for client* metrics, which would silently hide this bug).
+ */
+export function containerPaddingBox(container: PaddingBoxSource): ContainerPaddingBox {
+  const rect = container.getBoundingClientRect();
+  return {
+    left: rect.left + container.clientLeft,
+    width: container.clientWidth,
+    bottom: rect.top + container.clientTop + container.clientHeight,
+  };
+}
+
+/**
+ * Position math is relative to `containerBox`, the padding box of the portal
+ * target, not the viewport. A `document.body` target has no transform of its
+ * own, so `containerBox` is null there and the origin collapses to (0, 0,
+ * window.innerWidth, window.innerHeight) -- identical to the previous
  * viewport-relative formula. Quick Chat's DialogContent carries a permanent
  * `translate` for centering, which establishes a new containing block for
  * `position: fixed` descendants portaled inside it, so once the overlay
- * renders there its rect must be computed relative to that ancestor instead.
+ * renders there its rect must be computed relative to that ancestor's padding
+ * box instead (see `containerPaddingBox` above).
  */
 export function computeStyle(
   anchorRect: DOMRect | null,
-  containerRect: DOMRect | null,
+  containerBox: ContainerPaddingBox | null,
 ): React.CSSProperties | null {
   if (!anchorRect) return null;
-  const originLeft = containerRect?.left ?? 0;
-  const originWidth = containerRect?.width ?? window.innerWidth;
-  const originBottom = containerRect?.bottom ?? window.innerHeight;
+  const originLeft = containerBox?.left ?? 0;
+  const originWidth = containerBox?.width ?? window.innerWidth;
+  const originBottom = containerBox?.bottom ?? window.innerHeight;
   const left = Math.max(8, anchorRect.left - originLeft);
   const maxWidth = Math.min(OVERLAY_MAX_WIDTH, Math.max(200, originWidth - left - 8));
   return {
@@ -131,6 +170,57 @@ export function computeStyle(
     zIndex: 60,
     pointerEvents: "auto",
   };
+}
+
+// Fallback close, independent of exact focus. The input's own onKeyDown
+// (below, in MessageHistorySearch) handles the common case, but nothing else
+// closes the overlay if focus ever leaves the input while staying inside the
+// overlay (there is no blur handler on this popup). Without this, Quick
+// Chat's `CLAIM_ANY_ESCAPE` registration (tiptap-input.tsx's
+// useReverseSearchOverlay) still suppresses Radix's auto-dismiss, but nothing
+// then closes the overlay, so Escape goes silently inert. `document`-level
+// listeners run before `window`-level ones in native bubble order, so this
+// also runs ahead of the clarification carousel's `window` listener --
+// fixing the "collapses the clarification instead of closing the overlay"
+// case that could otherwise occur depending on escape-guard registration
+// order.
+//
+// Ownership is checked against this popup's own `containerRef` first (the
+// precise case), then against `container` (the portal target) as a fallback
+// -- but ONLY when `container` is a modal's `[data-slot="dialog-content"]`,
+// not `document.body`. On Quick Chat that ancestor is unique to this one
+// composer's dialog, so it still catches focus that tabs out of the input to
+// elsewhere in the same dialog (the literal "tab out of the input" repro --
+// the reverse-search input is the overlay's only focusable element, so
+// tabbing away always leaves `containerRef`). Using `container` when it's
+// `document.body` would instead claim the entire document for whichever
+// composer's listener happens to be registered first, mishandling Escape for
+// a second, unrelated overlay -- the same cross-composer bug F10 fixed for
+// suggestion popups (see use-suggestion-escape-fallback.ts).
+function useReverseSearchEscapeFallback(
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  container: Element,
+  onClose: () => void,
+) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const el = containerRef.current;
+      if (!el) return;
+      const target = event.target as Node | null;
+      const active = document.activeElement;
+      const ownedByPopup = (target && el.contains(target)) || (active && el.contains(active));
+      const ownedByDialog =
+        container !== document.body &&
+        ((target && container.contains(target)) || (active && container.contains(active)));
+      if (!ownedByPopup && !ownedByDialog) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose, container, containerRef]);
 }
 
 export function MessageHistorySearch({
@@ -163,11 +253,12 @@ export function MessageHistorySearch({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onClose]);
 
+  useReverseSearchEscapeFallback(containerRef, container, onClose);
   useScrollSelectedIntoView(selectedIndex, listRef);
 
   if (typeof document === "undefined") return null;
-  const containerRect = container === document.body ? null : container.getBoundingClientRect();
-  const style = computeStyle(anchorRect, containerRect);
+  const containerBox = container === document.body ? null : containerPaddingBox(container);
+  const style = computeStyle(anchorRect, containerBox);
   if (!style) return null;
 
   const overlay = (

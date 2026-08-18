@@ -1,13 +1,19 @@
 import { cleanup, fireEvent, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createRef, type RefObject } from "react";
 import { useSuggestionEscapeFallback } from "./use-suggestion-escape-fallback";
 
 afterEach(cleanup);
 
-function renderFallback(overrides: { isSuggestionMenuOpen: boolean; mentionMenuOpen?: boolean }) {
+function renderFallback(overrides: {
+  isSuggestionMenuOpen: boolean;
+  mentionMenuOpen?: boolean;
+  containerRef?: RefObject<HTMLElement | null>;
+}) {
   const closeMentionMenu = vi.fn();
   const closeSlashMenu = vi.fn();
   const closeEntityReferenceMenu = vi.fn();
+  const containerRef = overrides.containerRef ?? createRef<HTMLElement>();
   const { rerender } = renderHook(
     (props: { isSuggestionMenuOpen: boolean; mentionMenuOpen: boolean }) =>
       useSuggestionEscapeFallback({
@@ -18,6 +24,7 @@ function renderFallback(overrides: { isSuggestionMenuOpen: boolean; mentionMenuO
         closeMentionMenu,
         closeSlashMenu,
         closeEntityReferenceMenu,
+        containerRef,
       }),
     {
       initialProps: {
@@ -26,7 +33,7 @@ function renderFallback(overrides: { isSuggestionMenuOpen: boolean; mentionMenuO
       },
     },
   );
-  return { closeMentionMenu, closeSlashMenu, closeEntityReferenceMenu, rerender };
+  return { closeMentionMenu, closeSlashMenu, closeEntityReferenceMenu, rerender, containerRef };
 }
 
 describe("useSuggestionEscapeFallback", () => {
@@ -42,29 +49,46 @@ describe("useSuggestionEscapeFallback", () => {
     expect(closeEntityReferenceMenu).not.toHaveBeenCalled();
   });
 
-  it("closes the open menu and claims the event when a suggestion menu is open", () => {
+  it("closes the open menu and claims the event when the keydown targets this composer's own container", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const containerRef = { current: container };
+
     const { closeMentionMenu } = renderFallback({
       isSuggestionMenuOpen: true,
       mentionMenuOpen: true,
+      containerRef,
     });
 
-    const event = fireEvent.keyDown(document, { key: "Escape", cancelable: true, bubbles: true });
+    const event = fireEvent.keyDown(container, {
+      key: "Escape",
+      cancelable: true,
+      bubbles: true,
+    });
 
     expect(closeMentionMenu).toHaveBeenCalledTimes(1);
     // fireEvent's return value is the pre-dispatch continue flag: `false` means
     // something called preventDefault() during dispatch.
     expect(event).toBe(false);
+
+    document.body.removeChild(container);
   });
 
   it("ignores non-Escape keys", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const containerRef = { current: container };
+
     const { closeMentionMenu } = renderFallback({
       isSuggestionMenuOpen: true,
       mentionMenuOpen: true,
+      containerRef,
     });
 
-    fireEvent.keyDown(document, { key: "Enter" });
+    fireEvent.keyDown(container, { key: "Enter" });
 
     expect(closeMentionMenu).not.toHaveBeenCalled();
+    document.body.removeChild(container);
   });
 
   /**
@@ -85,10 +109,12 @@ describe("useSuggestionEscapeFallback", () => {
       if (event.key === "Escape") event.stopPropagation();
     };
     editor.addEventListener("keydown", stopAtEditor);
+    const containerRef = { current: editor };
 
     const { closeMentionMenu } = renderFallback({
       isSuggestionMenuOpen: true,
       mentionMenuOpen: true,
+      containerRef,
     });
 
     fireEvent.keyDown(editor, { key: "Escape", bubbles: true, cancelable: true });
@@ -100,14 +126,57 @@ describe("useSuggestionEscapeFallback", () => {
   });
 
   it("removes its listener when the suggestion menu closes", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const containerRef = { current: container };
+
     const { closeMentionMenu, rerender } = renderFallback({
       isSuggestionMenuOpen: true,
       mentionMenuOpen: true,
+      containerRef,
     });
 
     rerender({ isSuggestionMenuOpen: false, mentionMenuOpen: false });
-    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.keyDown(container, { key: "Escape" });
 
     expect(closeMentionMenu).not.toHaveBeenCalled();
+    document.body.removeChild(container);
+  });
+
+  /**
+   * F10 repro: two composer instances mounted at once (the main task chat
+   * panel, backgrounded, plus Quick Chat's own composer in front of it), each
+   * with a suggestion menu open. Escape is dispatched from inside the SECOND
+   * (foreground) composer's own container. Without an ownership check the
+   * first-registered hook instance (background) would see the event on
+   * `document`, close its own (wrong) menu, and stopPropagation() before the
+   * second instance's listener ever ran -- leaving the actually-open,
+   * user-visible popup untouched. Real jsdom propagation, not a synthetic
+   * stand-in for either instance.
+   */
+  it("only the composer instance that owns the keydown's target closes its menu (F10: two composers open at once)", () => {
+    const backgroundContainer = document.createElement("div");
+    const foregroundContainer = document.createElement("div");
+    document.body.appendChild(backgroundContainer);
+    document.body.appendChild(foregroundContainer);
+
+    const background = renderFallback({
+      isSuggestionMenuOpen: true,
+      mentionMenuOpen: true,
+      containerRef: { current: backgroundContainer },
+    });
+    const foreground = renderFallback({
+      isSuggestionMenuOpen: true,
+      mentionMenuOpen: true,
+      containerRef: { current: foregroundContainer },
+    });
+
+    fireEvent.keyDown(foregroundContainer, { key: "Escape", bubbles: true, cancelable: true });
+
+    expect(foreground.closeMentionMenu).toHaveBeenCalledTimes(1);
+    expect(background.closeMentionMenu).not.toHaveBeenCalled();
+
+    document.body.removeChild(backgroundContainer);
+    document.body.removeChild(foregroundContainer);
   });
 });
