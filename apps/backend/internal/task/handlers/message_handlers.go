@@ -474,7 +474,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	var message *models.Message
 	var err error
 	if req.ClientMessageID != "" {
-		message, err = h.service.CreateMessageIdempotent(ctx, req.ClientMessageID, createRequest)
+		var result service.CreateMessageIdempotentResult
+		result, err = h.service.CreateMessageIdempotent(ctx, req.ClientMessageID, createRequest)
+		message = result.Message
 	} else {
 		message, err = h.service.CreateMessage(ctx, createRequest)
 	}

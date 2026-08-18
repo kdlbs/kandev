@@ -27,6 +27,9 @@ type fakeMessengerTaskSvc struct {
 	created    *taskmodels.Message
 	deleted    []string
 	waitErr    error
+
+	idempotent      map[string]*taskmodels.Message
+	idempotentCalls int
 }
 
 func (f *fakeMessengerTaskSvc) GetTaskSession(_ context.Context, id string) (*taskmodels.TaskSession, error) {
@@ -44,6 +47,20 @@ func (f *fakeMessengerTaskSvc) GetPrimarySession(_ context.Context, _ string) (*
 func (f *fakeMessengerTaskSvc) CreateMessage(_ context.Context, req *taskservice.CreateMessageRequest) (*taskmodels.Message, error) {
 	f.created = &taskmodels.Message{ID: "msg-1", TaskSessionID: req.TaskSessionID, TaskID: req.TaskID, Content: req.Content}
 	return f.created, nil
+}
+
+func (f *fakeMessengerTaskSvc) CreateMessageIdempotent(_ context.Context, id string, req *taskservice.CreateMessageRequest) (taskservice.CreateMessageIdempotentResult, error) {
+	f.idempotentCalls++
+	if f.idempotent == nil {
+		f.idempotent = map[string]*taskmodels.Message{}
+	}
+	if existing, ok := f.idempotent[id]; ok {
+		return taskservice.CreateMessageIdempotentResult{Message: existing, Created: false}, nil
+	}
+	msg := &taskmodels.Message{ID: id, TaskSessionID: req.TaskSessionID, TaskID: req.TaskID, Content: req.Content}
+	f.idempotent[id] = msg
+	f.created = msg
+	return taskservice.CreateMessageIdempotentResult{Message: msg, Created: true}, nil
 }
 
 func (f *fakeMessengerTaskSvc) DeleteMessage(_ context.Context, id string) error {
@@ -206,4 +223,64 @@ func TestPluginsMessenger_TerminalSessionRejected(t *testing.T) {
 
 	_, err := a.SendMessage(context.Background(), "t1", "", "hello", "plugin:p")
 	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+}
+
+// ── StartOrPromptIdempotent (agent-conversation dispatcher delivery) ─────
+
+func TestPluginsMessenger_IdempotentCreatedSessionStarts(t *testing.T) {
+	tasks := &fakeMessengerTaskSvc{}
+	orch := &fakeMessengerOrch{}
+	a := newMessengerAdapter(t, tasks, orch)
+	session := &taskmodels.TaskSession{ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateCreated, AgentProfileID: "prof-1"}
+
+	status, err := a.StartOrPromptIdempotent(context.Background(), "t1", session, "wake up", "plugin:coordinator", "occ-1")
+	require.NoError(t, err)
+	require.Equal(t, "started", status)
+	require.Equal(t, 1, orch.startCalls)
+	require.Equal(t, 1, tasks.idempotentCalls)
+}
+
+func TestPluginsMessenger_IdempotentWaitingSessionPrompts(t *testing.T) {
+	tasks := &fakeMessengerTaskSvc{}
+	orch := &fakeMessengerOrch{}
+	a := newMessengerAdapter(t, tasks, orch)
+	session := &taskmodels.TaskSession{ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateWaitingForInput, AgentExecutionID: "exec-1"}
+
+	status, err := a.StartOrPromptIdempotent(context.Background(), "t1", session, "check", "plugin:coordinator", "occ-1")
+	require.NoError(t, err)
+	require.Equal(t, "sent", status)
+	require.Equal(t, 1, orch.promptCalls)
+	require.Zero(t, orch.startCalls)
+}
+
+// TestPluginsMessenger_IdempotentReplayDoesNotRedispatch pins the whole
+// point of StartOrPromptIdempotent: a retried occurrence (same
+// idempotencyID) must reach the orchestrator at most once — the second call
+// replays the already-committed message and reports the same outcome
+// without a second StartCreatedSession/PromptTask call.
+func TestPluginsMessenger_IdempotentReplayDoesNotRedispatch(t *testing.T) {
+	tasks := &fakeMessengerTaskSvc{}
+	orch := &fakeMessengerOrch{}
+	a := newMessengerAdapter(t, tasks, orch)
+	session := &taskmodels.TaskSession{ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateCreated, AgentProfileID: "prof-1"}
+
+	first, err := a.StartOrPromptIdempotent(context.Background(), "t1", session, "wake up", "plugin:coordinator", "occ-1")
+	require.NoError(t, err)
+	require.Equal(t, "started", first)
+
+	second, err := a.StartOrPromptIdempotent(context.Background(), "t1", session, "wake up (retry)", "plugin:coordinator", "occ-1")
+	require.NoError(t, err)
+	require.Equal(t, "started", second, "the replay reports the same outcome")
+	require.Equal(t, 1, orch.startCalls, "a retried occurrence must not launch the agent a second time")
+}
+
+func TestPluginsMessenger_IdempotentPromptFailureDeletesRecordedMessage(t *testing.T) {
+	tasks := &fakeMessengerTaskSvc{}
+	orch := &fakeMessengerOrch{promptErr: errors.New("dispatch boom")}
+	a := newMessengerAdapter(t, tasks, orch)
+	session := &taskmodels.TaskSession{ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateWaitingForInput, AgentExecutionID: "exec-1"}
+
+	_, err := a.StartOrPromptIdempotent(context.Background(), "t1", session, "nope", "plugin:coordinator", "occ-1")
+	require.Error(t, err)
+	require.Equal(t, []string{"occ-1"}, tasks.deleted, "a failed dispatch must not leave an orphan message")
 }

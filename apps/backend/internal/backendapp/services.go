@@ -224,6 +224,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	sentrySvc := initSentryService(dbPool, eventBus, repos.Secrets, log)
 	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, gitlabSvc, workflowSvc, taskSvc, log)
 	pluginsSvc := initPluginsService(cfg, dbPool, eventBus, repos.Secrets, log)
+	var agentConversationsSvc *taskservice.AgentConversationService
 	if pluginsSvc != nil {
 		// The ldflags-injected build version, so Install can enforce a
 		// package's manifest.min_kandev_version. This is the only production
@@ -233,8 +234,12 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
 		// Wire the managed agent conversation service for the agent_conversation
 		// Host capability. Wired here (not at boot time in main.go) because the
-		// task service and shared repository are both available at this point.
-		pluginsSvc.SetAgentConversations(NewAgentConversationService(repos.Task, eventBus))
+		// task service, shared repository, agent settings repository, and
+		// plugin state store are all available at this point. Its runtime
+		// dispatcher is wired later, once the orchestrator exists — see
+		// SetAgentConversationsDispatcher in main.go.
+		agentConversationsSvc = NewAgentConversationService(repos.Task, repos.AgentSettings, pluginsSvc.StateStore(), eventBus)
+		pluginsSvc.SetAgentConversations(agentConversationsSvc)
 	}
 	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, cfg.GitHubCredentialBroker.ReissueSigningKey)
 	if pluginsSvc != nil {
@@ -318,6 +323,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Share:                    shareHTTP,
 		Automation:               automationComponents,
 		Plugins:                  pluginsSvc,
+		AgentConversations:       agentConversationsSvc,
 		GitCredentials:           gitCredentialBroker,
 		// Office is constructed later in initOfficeServices once all
 		// of its dependencies (config loader, task integrations, etc.) are available.

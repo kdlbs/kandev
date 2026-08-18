@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,6 +33,26 @@ const (
 // task board.
 const defaultAgentConversationTitle = "Managed Conversation"
 
+// agentConversationOccurrenceScope namespaces occurrence-key claims within
+// the shared state store, separate from any plugin_state key a plugin
+// writes itself through the ordinary State() RPCs.
+const agentConversationOccurrenceScope = "agent_conversation_occurrence"
+
+// Ensure's status results.
+const (
+	// AgentConversationStatusCreated is returned when Ensure created a brand
+	// new managed conversation.
+	AgentConversationStatusCreated = "created"
+	// AgentConversationStatusExists is returned when Ensure found (and, if
+	// needed, repaired) an already-managed conversation.
+	AgentConversationStatusExists = "exists"
+	// AgentConversationStatusConfigurationRequired is returned from Ensure
+	// when the requested agent profile is missing, disabled, deleted, or
+	// otherwise cannot back a new conversation. No task or session row is
+	// created.
+	AgentConversationStatusConfigurationRequired = "configuration_required"
+)
+
 // agentConversationTaskRepo is the narrow task-repository interface for
 // managed conversation operations.
 type agentConversationTaskRepo interface {
@@ -47,23 +68,55 @@ type agentConversationSessionRepo interface {
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 }
 
-// agentConversationMessageRepo is the narrow message-repository interface
-// for sending messages to managed conversation sessions.
-type agentConversationMessageRepo interface {
-	CreateMessage(ctx context.Context, msg *models.Message) error
+// AgentConversationProfileInfo is the minimal agent-profile information
+// Ensure needs to gate hidden-conversation creation on a usable profile.
+type AgentConversationProfileInfo struct {
+	Enabled bool
+}
+
+// agentConversationProfileRepo is the narrow read-only interface Ensure uses
+// to validate a plugin-configured agent profile before creating (or
+// repairing) any hidden task/session. Implemented by a backendapp adapter
+// over the agent settings repository, avoiding an
+// internal/task/service → internal/agent/settings import. ok is false when
+// profileID does not resolve to any usable profile (never existed, or
+// soft-deleted — the settings repository's GetAgentProfile already filters
+// deleted_at IS NULL, so "not found" covers both "missing" and "deleted").
+type agentConversationProfileRepo interface {
+	GetProfile(ctx context.Context, profileID string) (AgentConversationProfileInfo, bool, error)
 }
 
 // agentConversationStateRepo is the narrow state-storage interface for
-// occurrence-key deduplication.
+// durable, atomic occurrence-key deduplication. Claim must be backed by a
+// real uniqueness constraint (not a check-then-write pair) so it stays
+// correct across concurrent callers, a backend restart, and — since the
+// backing store is a shared SQLite/Postgres table, not a process-local
+// map — multiple backend instances.
 type agentConversationStateRepo interface {
-	Get(ctx context.Context, scope, scopeID, key string) ([]byte, bool, error)
-	Set(ctx context.Context, scope, scopeID, key string, value []byte) error
+	Claim(ctx context.Context, pluginID, scope, scopeID, key string, value json.RawMessage) (claimed bool, err error)
 }
 
 // agentConversationEventBus is the narrow event-bus interface for
 // publishing task.created events. Matches bus.EventBus.Publish.
 type agentConversationEventBus interface {
 	Publish(ctx context.Context, subject string, event *bus.Event) error
+}
+
+// agentConversationDispatcher performs the real orchestrator-backed message
+// delivery a scheduled wake needs: start a never-launched (CREATED) session,
+// or prompt an idle one (resuming its agent process first if it has gone,
+// e.g. after a backend restart) — the same delivery path the plugin Host's
+// SendMessage RPC uses. Implemented by a backendapp adapter wrapping the
+// task service and orchestrator, avoiding an
+// internal/task/service → internal/orchestrator import.
+//
+// Dispatch only calls Deliver once it has confirmed the session is not
+// RUNNING/STARTING (that check, and the "skipped_busy" result, stay in this
+// package); Deliver itself is responsible for idempotent message recording
+// keyed by idempotencyID, so a retried occurrence cannot create a second
+// turn or double-dispatch to the agent.
+type agentConversationDispatcher interface {
+	Deliver(ctx context.Context, taskID string, session *models.TaskSession, text, source, idempotencyID string) (status string, err error)
 }
 
 // AgentConversationService implements the managed conversation lifecycle:
@@ -78,35 +131,98 @@ type agentConversationEventBus interface {
 type AgentConversationService struct {
 	tasks   agentConversationTaskRepo
 	sess    agentConversationSessionRepo
-	msgs    agentConversationMessageRepo
+	profile agentConversationProfileRepo
 	state   agentConversationStateRepo
 	eventer agentConversationEventBus
+
+	// dispatcher delivers Dispatch's text to the real agent runtime. It is
+	// wired late (SetDispatcher), after the orchestrator exists — mirroring
+	// pluginHost's writeDeps/utilityDeps "read live, not snapshotted"
+	// pattern (internal/plugins/host.go) for the same boot-ordering reason:
+	// the orchestrator is constructed after this service. Guarded by mu so
+	// concurrent Dispatch calls observe a consistent value.
+	mu         sync.RWMutex
+	dispatcher agentConversationDispatcher
+
+	// ensureLocksMu/ensureLocks serialize Ensure per (pluginID, workspaceID,
+	// conversationKey). The metadata-backed conversation lookup
+	// (findManagedConversation) has no repository-level uniqueness
+	// constraint to close a check-then-create race on its own — two
+	// same-process callers (e.g. a browser open and the plugin's heartbeat
+	// runner firing at the same moment) can both observe "no existing
+	// conversation" and both create a task. This in-process lock closes that
+	// window for the common single-instance deployment; it does not extend
+	// across multiple backend processes sharing one database (the plan
+	// defers a dedicated uniqueness table unless that is demonstrated
+	// necessary). Entries are never evicted — the key space is bounded by
+	// the number of distinct managed conversations, which is small and
+	// long-lived for the lifetime of the process.
+	ensureLocksMu sync.Mutex
+	ensureLocks   map[string]*sync.Mutex
 }
 
 // NewAgentConversationService creates a new service with the given dependencies.
+// Call SetDispatcher once the orchestrator-backed dispatcher is available;
+// until then, Dispatch returns Unavailable.
 func NewAgentConversationService(
 	tasks agentConversationTaskRepo,
 	sess agentConversationSessionRepo,
-	msgs agentConversationMessageRepo,
+	profile agentConversationProfileRepo,
 	state agentConversationStateRepo,
 	eventer agentConversationEventBus,
 ) *AgentConversationService {
 	return &AgentConversationService{
 		tasks:   tasks,
 		sess:    sess,
-		msgs:    msgs,
+		profile: profile,
 		state:   state,
 		eventer: eventer,
 	}
 }
 
+// SetDispatcher wires the live orchestrator-backed dispatcher. See the
+// dispatcher field's doc comment for why this is deferred past construction.
+func (s *AgentConversationService) SetDispatcher(d agentConversationDispatcher) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dispatcher = d
+}
+
+func (s *AgentConversationService) getDispatcher() agentConversationDispatcher {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.dispatcher
+}
+
+// lockEnsureKey serializes Ensure calls for one (pluginID, workspaceID,
+// conversationKey) tuple. See the ensureLocks field doc comment.
+func (s *AgentConversationService) lockEnsureKey(key string) func() {
+	s.ensureLocksMu.Lock()
+	l, ok := s.ensureLocks[key]
+	if !ok {
+		l = &sync.Mutex{}
+		if s.ensureLocks == nil {
+			s.ensureLocks = make(map[string]*sync.Mutex)
+		}
+		s.ensureLocks[key] = l
+	}
+	s.ensureLocksMu.Unlock()
+	l.Lock()
+	return l.Unlock
+}
+
 // Ensure creates or repairs exactly one managed conversation per
-// (pluginID, workspaceID, conversationKey). The status string returned
-// is one of "created", "exists", or "configuration_required".
+// (pluginID, workspaceID, conversationKey). The status string returned is
+// one of "created", "exists", or AgentConversationStatusConfigurationRequired
+// (a missing, disabled, or deleted agent profile — no task or session row is
+// created or repaired in that case).
 func (s *AgentConversationService) Ensure(ctx context.Context, pluginID string, spec pluginsdk.AgentConversationSpec) (pluginsdk.AgentConversationDescriptor, string, error) {
 	if pluginID == "" || spec.WorkspaceID == "" || spec.ConversationKey == "" {
 		return pluginsdk.AgentConversationDescriptor{}, "", status.Error(codes.InvalidArgument, "plugin_id, workspace_id, and conversation_key are required")
 	}
+
+	unlock := s.lockEnsureKey(pluginID + "/" + spec.WorkspaceID + "/" + spec.ConversationKey)
+	defer unlock()
 
 	// 1. Check for an existing conversation.
 	existing, err := s.findManagedConversation(ctx, pluginID, spec.WorkspaceID, spec.ConversationKey)
@@ -117,9 +233,16 @@ func (s *AgentConversationService) Ensure(ctx context.Context, pluginID string, 
 		return s.repairIfNeeded(ctx, existing, spec)
 	}
 
-	// 2. Profile resolution is handled by the backendapp adapter that
-	// checks profile existence/status before calling Ensure. A missing
-	// or disabled profile returns configuration_required from the caller.
+	// 2. Resolve and validate the configured agent profile BEFORE creating
+	// any row. A missing, disabled, or deleted profile must leave zero
+	// partial state — no task, no session.
+	ok, err := s.validateProfile(ctx, spec.AgentProfileID)
+	if err != nil {
+		return pluginsdk.AgentConversationDescriptor{}, "", err
+	}
+	if !ok {
+		return pluginsdk.AgentConversationDescriptor{}, AgentConversationStatusConfigurationRequired, nil
+	}
 
 	// 3. Create the backing task.
 	metadata := map[string]interface{}{
@@ -168,27 +291,64 @@ func (s *AgentConversationService) Ensure(ctx context.Context, pluginID string, 
 		WorkspaceID:     spec.WorkspaceID,
 		ConversationKey: spec.ConversationKey,
 		AgentProfileID:  spec.AgentProfileID,
-	}, "created", nil
+	}, AgentConversationStatusCreated, nil
+}
+
+// validateProfile reports whether profileID can back a new or repaired
+// conversation. An empty profileID means the plugin did not request a
+// specific profile — Ensure proceeds and the orchestrator falls back to its
+// own default-profile resolution at launch time, matching the pre-existing
+// "no explicit profile" behavior. A non-empty profileID names a profile the
+// plugin explicitly configured, and must resolve to an existing, enabled
+// row or Ensure refuses to create/repair anything.
+func (s *AgentConversationService) validateProfile(ctx context.Context, profileID string) (bool, error) {
+	if profileID == "" {
+		return true, nil
+	}
+	if s.profile == nil {
+		// No validator wired (e.g. a bare test service): fail open only when
+		// the caller genuinely has no way to validate. Production wiring
+		// (backendapp) always sets this.
+		return true, nil
+	}
+	info, ok, err := s.profile.GetProfile(ctx, profileID)
+	if err != nil {
+		return false, fmt.Errorf("failed to resolve agent profile: %w", err)
+	}
+	if !ok || !info.Enabled {
+		return false, nil
+	}
+	return true, nil
 }
 
 // repairIfNeeded repairs a managed conversation whose primary session is
-// missing (e.g. after a partial creation failure) and returns "exists".
+// missing (e.g. after a partial creation failure) and returns "exists". If
+// the task's bound agent profile is no longer usable, repair is refused with
+// AgentConversationStatusConfigurationRequired rather than creating a new
+// session against an invalid profile.
 func (s *AgentConversationService) repairIfNeeded(ctx context.Context, existing *models.Task, spec pluginsdk.AgentConversationSpec) (pluginsdk.AgentConversationDescriptor, string, error) {
+	profileID := ""
+	if existing.Metadata != nil {
+		if p, ok := existing.Metadata[models.MetaKeyAgentProfileID].(string); ok {
+			profileID = p
+		}
+	}
+
 	primary, err := s.sess.GetPrimarySessionByTaskID(ctx, existing.ID)
 	if err != nil {
 		return pluginsdk.AgentConversationDescriptor{}, "", fmt.Errorf("failed to check existing conversation session: %w", err)
 	}
 	if primary == nil {
+		ok, err := s.validateProfile(ctx, profileID)
+		if err != nil {
+			return pluginsdk.AgentConversationDescriptor{}, "", err
+		}
+		if !ok {
+			return pluginsdk.AgentConversationDescriptor{}, AgentConversationStatusConfigurationRequired, nil
+		}
 		primary, err = s.createPrimarySession(ctx, existing.ID)
 		if err != nil {
 			return pluginsdk.AgentConversationDescriptor{}, "", fmt.Errorf("failed to repair conversation session: %w", err)
-		}
-	}
-
-	profileID := ""
-	if existing.Metadata != nil {
-		if p, ok := existing.Metadata[models.MetaKeyAgentProfileID].(string); ok {
-			profileID = p
 		}
 	}
 
@@ -198,7 +358,7 @@ func (s *AgentConversationService) repairIfNeeded(ctx context.Context, existing 
 		WorkspaceID:     existing.WorkspaceID,
 		ConversationKey: spec.ConversationKey,
 		AgentProfileID:  profileID,
-	}, "exists", nil
+	}, AgentConversationStatusExists, nil
 }
 
 // createPrimarySession creates a primary session row for the given task.
@@ -234,14 +394,21 @@ func (s *AgentConversationService) publishTaskCreated(ctx context.Context, task 
 	_ = s.eventer.Publish(eventCtx, events.TaskCreated, event)
 }
 
-// Dispatch sends text to an ensured conversation. occurrenceKey provides
-// stable idempotency. When the session is mid-turn, returns "skipped_busy".
+// Dispatch delivers text to an ensured conversation through the real agent
+// runtime. occurrenceKey, when non-empty, provides durable, atomic
+// idempotency: a retried occurrence (same plugin/workspace/key/occurrence,
+// whether re-sent by a concurrent caller or after a backend restart) is
+// claimed exactly once and returns "duplicate_occurrence" for every other
+// caller. When the session is mid-turn (RUNNING or STARTING), Dispatch
+// returns "skipped_busy" without touching the runtime, so a busy session
+// never accumulates queued heartbeats.
 func (s *AgentConversationService) Dispatch(ctx context.Context, pluginID, workspaceID, conversationKey, text, occurrenceKey string) (pluginsdk.AgentConversationDispatch, error) {
 	if pluginID == "" || workspaceID == "" || conversationKey == "" {
 		return pluginsdk.AgentConversationDispatch{}, status.Error(codes.InvalidArgument, "plugin_id, workspace_id, and conversation_key are required")
 	}
 
-	// 1. Claim the occurrence key for idempotency.
+	// 1. Durably and atomically claim the occurrence key.
+	idempotencyID := uuid.New().String()
 	if occurrenceKey != "" {
 		alreadyClaimed, err := s.claimOccurrenceKey(ctx, pluginID, workspaceID, conversationKey, occurrenceKey)
 		if err != nil {
@@ -252,6 +419,11 @@ func (s *AgentConversationService) Dispatch(ctx context.Context, pluginID, works
 				Status: "duplicate_occurrence",
 			}, nil
 		}
+		// Derive a stable message id from the same coordinates so the
+		// message-table primary key is a second, independent idempotency
+		// boundary — defense in depth if two callers ever raced past the
+		// occurrence claim (e.g. a state-store outage).
+		idempotencyID = deriveOccurrenceMessageID(pluginID, workspaceID, conversationKey, occurrenceKey)
 	}
 
 	// 2. Find the conversation.
@@ -268,7 +440,10 @@ func (s *AgentConversationService) Dispatch(ctx context.Context, pluginID, works
 	if err != nil {
 		return pluginsdk.AgentConversationDispatch{}, err
 	}
-	if primary != nil && primary.State == models.TaskSessionStateRunning {
+	if primary == nil {
+		return pluginsdk.AgentConversationDispatch{}, status.Error(codes.NotFound, "conversation has no session, call Ensure first")
+	}
+	if primary.State == models.TaskSessionStateRunning || primary.State == models.TaskSessionStateStarting {
 		return pluginsdk.AgentConversationDispatch{
 			SessionID: primary.ID,
 			Status:    "skipped_busy",
@@ -281,49 +456,37 @@ func (s *AgentConversationService) Dispatch(ctx context.Context, pluginID, works
 		}, nil
 	}
 
-	// 4. Create the user message.
-	sessionID := ""
-	if primary != nil {
-		sessionID = primary.ID
+	// 4. Deliver through the real agent runtime (start a never-launched
+	// session, or prompt/resume an idle one).
+	dispatcher := s.getDispatcher()
+	if dispatcher == nil {
+		return pluginsdk.AgentConversationDispatch{}, status.Error(codes.Unavailable, "agent conversation dispatch is not ready yet")
 	}
-
-	msg := createDispatchMessage(sessionID, existing.ID, text, pluginID, occurrenceKey)
-	if err := s.msgs.CreateMessage(ctx, msg); err != nil {
-		return pluginsdk.AgentConversationDispatch{}, fmt.Errorf("failed to create message: %w", err)
+	deliverStatus, err := dispatcher.Deliver(ctx, existing.ID, primary, text, "plugin:"+pluginID, idempotencyID)
+	if err != nil {
+		return pluginsdk.AgentConversationDispatch{}, fmt.Errorf("failed to deliver message: %w", err)
 	}
 
 	return pluginsdk.AgentConversationDispatch{
-		SessionID: sessionID,
-		Status:    "sent",
+		SessionID: primary.ID,
+		Status:    deliverStatus,
 		Descriptor: pluginsdk.AgentConversationDescriptor{
 			TaskID:          existing.ID,
-			SessionID:       sessionID,
+			SessionID:       primary.ID,
 			WorkspaceID:     workspaceID,
 			ConversationKey: conversationKey,
 		},
 	}, nil
 }
 
-// createDispatchMessage builds a user message for a managed conversation
-// dispatch, recording provenance and occurrence key in metadata.
-func createDispatchMessage(sessionID, taskID, text, pluginID, occurrenceKey string) *models.Message {
-	msg := &models.Message{
-		ID:            uuid.New().String(),
-		TaskSessionID: sessionID,
-		TaskID:        taskID,
-		AuthorType:    models.MessageAuthorUser,
-		Type:          models.MessageTypeMessage,
-		Content:       text,
-		Metadata: map[string]interface{}{
-			"source": "plugin:" + pluginID,
-		},
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
-	}
-	if occurrenceKey != "" {
-		msg.Metadata["occurrence_key"] = occurrenceKey
-	}
-	return msg
+// deriveOccurrenceMessageID derives a stable, collision-free message id from
+// the full occurrence coordinates, so the same occurrence always maps to the
+// same message-table primary key (across plugins/workspaces/keys, whose
+// occurrenceKey strings may otherwise collide) and repeated calls for the
+// same occurrence are naturally idempotent at the storage layer too.
+func deriveOccurrenceMessageID(pluginID, workspaceID, conversationKey, occurrenceKey string) string {
+	name := pluginID + "|" + workspaceID + "|" + conversationKey + "|" + occurrenceKey
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(name)).String()
 }
 
 // Delete removes all managed conversations owned by pluginID matching
@@ -389,30 +552,24 @@ func isManagedConversation(task *models.Task, pluginID, workspaceID, conversatio
 }
 
 // claimOccurrenceKey atomically claims an occurrence key for
-// (pluginID, workspaceID, conversationKey). Returns true when the key was
-// already claimed (duplicate), false when this call claimed it.
+// (pluginID, workspaceID, conversationKey), durably (survives a backend
+// restart) and atomically (safe under concurrent callers, including
+// multiple backend instances sharing the same store). Returns true when the
+// key was already claimed by a prior call (duplicate), false when this call
+// claimed it.
 func (s *AgentConversationService) claimOccurrenceKey(ctx context.Context, pluginID, workspaceID, conversationKey, occurrenceKey string) (bool, error) {
-	stateKey := "occurrence:" + occurrenceKey
-	scope := "plugin:" + pluginID
 	scopeID := workspaceID + "/" + conversationKey
-
-	_, found, err := s.state.Get(ctx, scope, scopeID, stateKey)
-	if err != nil {
-		return false, err
-	}
-	if found {
-		return true, nil
-	}
 	value, _ := json.Marshal(map[string]interface{}{
 		"claimed":          true,
 		"plugin_id":        pluginID,
 		"workspace_id":     workspaceID,
 		"conversation_key": conversationKey,
 	})
-	if err := s.state.Set(ctx, scope, scopeID, stateKey, value); err != nil {
+	claimed, err := s.state.Claim(ctx, pluginID, agentConversationOccurrenceScope, scopeID, occurrenceKey, value)
+	if err != nil {
 		return false, err
 	}
-	return false, nil
+	return !claimed, nil
 }
 
 // IsManagedConversationTask is a public predicate that reports whether a

@@ -3352,6 +3352,9 @@ func TestService_CreateMessageIdempotentReturnsCommittedMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first create: %v", err)
 	}
+	if !first.Created {
+		t.Fatal("expected the first call to report Created = true")
+	}
 
 	retry := *request
 	retry.Content = "the retry should not be stored"
@@ -3359,8 +3362,11 @@ func TestService_CreateMessageIdempotentReturnsCommittedMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retry create: %v", err)
 	}
-	if second.ID != first.ID || second.Content != first.Content {
-		t.Fatalf("retry returned %+v, want original %+v", second, first)
+	if second.Created {
+		t.Fatal("expected the retry to report Created = false")
+	}
+	if second.Message.ID != first.Message.ID || second.Message.Content != first.Message.Content {
+		t.Fatalf("retry returned %+v, want original %+v", second.Message, first.Message)
 	}
 	if events := eventBus.GetPublishedEvents(); len(events) != 1 {
 		t.Fatalf("published events = %d, want 1", len(events))

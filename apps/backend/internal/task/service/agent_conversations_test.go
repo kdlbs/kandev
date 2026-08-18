@@ -62,6 +62,12 @@ func (f *acFakeTaskRepo) DeleteTask(_ context.Context, id string) error {
 	return nil
 }
 
+func (f *acFakeTaskRepo) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.tasks)
+}
+
 func (f *acFakeTaskRepo) makeID() string {
 	f.nextIdx++
 	return "task-" + acItoa(f.nextIdx)
@@ -111,41 +117,135 @@ func (f *acFakeSessionRepo) CreateTaskSession(_ context.Context, session *models
 	return nil
 }
 
-type acFakeMessageRepo struct {
-	mu       sync.Mutex
-	messages []*models.Message
-}
-
-func (f *acFakeMessageRepo) CreateMessage(_ context.Context, msg *models.Message) error {
+func (f *acFakeSessionRepo) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.messages = append(f.messages, msg)
-	return nil
+	return len(f.sessions)
 }
 
+func (f *acFakeSessionRepo) setState(id string, state models.TaskSessionState) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if s, ok := f.sessions[id]; ok {
+		s.State = state
+	}
+}
+
+// acFakeProfileRepo defaults every profile ID to "found and enabled" so
+// tests that don't care about profile validation (most Ensure tests
+// predating it) need no setup. Tests exercising the configuration_required
+// gate mark specific IDs missing/disabled explicitly.
+type acFakeProfileRepo struct {
+	mu       sync.Mutex
+	missing  map[string]bool
+	disabled map[string]bool
+	calls    []string
+}
+
+func newACFakeProfileRepo() *acFakeProfileRepo {
+	return &acFakeProfileRepo{missing: map[string]bool{}, disabled: map[string]bool{}}
+}
+
+func (f *acFakeProfileRepo) GetProfile(_ context.Context, profileID string) (AgentConversationProfileInfo, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, profileID)
+	if f.missing[profileID] {
+		return AgentConversationProfileInfo{}, false, nil
+	}
+	if f.disabled[profileID] {
+		return AgentConversationProfileInfo{Enabled: false}, true, nil
+	}
+	return AgentConversationProfileInfo{Enabled: true}, true, nil
+}
+
+func (f *acFakeProfileRepo) markMissing(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.missing[id] = true
+}
+
+func (f *acFakeProfileRepo) markDisabled(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.disabled[id] = true
+}
+
+// acFakeStateRepo simulates the durable atomic Claim primitive
+// (internal/plugins/state.Store.Claim in production) with an in-process
+// mutex-guarded map — sufficient to prove AgentConversationService's own
+// concurrency handling; Store.Claim's SQL-level atomicity and restart
+// durability are proven separately in internal/plugins/state.
 type acFakeStateRepo struct {
-	mu   sync.Mutex
-	data map[string][]byte
+	mu     sync.Mutex
+	claims map[string]bool
 }
 
 func newACFakeStateRepo() *acFakeStateRepo {
-	return &acFakeStateRepo{data: make(map[string][]byte)}
+	return &acFakeStateRepo{claims: map[string]bool{}}
 }
 
-func (f *acFakeStateRepo) Get(_ context.Context, scope, scopeID, key string) ([]byte, bool, error) {
+func (f *acFakeStateRepo) Claim(_ context.Context, pluginID, scope, scopeID, key string, _ json.RawMessage) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	k := scope + "/" + scopeID + "/" + key
-	v, ok := f.data[k]
-	return v, ok, nil
+	k := pluginID + "/" + scope + "/" + scopeID + "/" + key
+	if f.claims[k] {
+		return false, nil
+	}
+	f.claims[k] = true
+	return true, nil
 }
 
-func (f *acFakeStateRepo) Set(_ context.Context, scope, scopeID, key string, value []byte) error {
+// acDeliverCall records one call reaching the fake dispatcher — i.e. one
+// call that would have reached the real agent runtime in production.
+type acDeliverCall struct {
+	taskID        string
+	sessionID     string
+	text          string
+	source        string
+	idempotencyID string
+}
+
+// acFakeDispatcher stands in for the orchestrator-backed dispatcher.
+// Recording calls here (rather than just asserting on a created message row,
+// as the pre-fix tests did) is what proves Dispatch reaches the runtime
+// delivery seam and not just message persistence.
+type acFakeDispatcher struct {
+	mu    sync.Mutex
+	calls []acDeliverCall
+	err   error
+}
+
+func newACFakeDispatcher() *acFakeDispatcher {
+	return &acFakeDispatcher{}
+}
+
+func (f *acFakeDispatcher) Deliver(_ context.Context, taskID string, session *models.TaskSession, text, source, idempotencyID string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	k := scope + "/" + scopeID + "/" + key
-	f.data[k] = value
-	return nil
+	if f.err != nil {
+		return "", f.err
+	}
+	f.calls = append(f.calls, acDeliverCall{taskID: taskID, sessionID: session.ID, text: text, source: source, idempotencyID: idempotencyID})
+	if session.State == models.TaskSessionStateCreated {
+		return "started", nil
+	}
+	return "sent", nil
+}
+
+func (f *acFakeDispatcher) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
+func (f *acFakeDispatcher) lastCall() acDeliverCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.calls) == 0 {
+		return acDeliverCall{}
+	}
+	return f.calls[len(f.calls)-1]
 }
 
 type acFakeEventBus struct {
@@ -168,20 +268,33 @@ func (f *acFakeEventBus) getPublished() []*bus.Event {
 	return out
 }
 
-func newACTestService() (*AgentConversationService, *acFakeTaskRepo, *acFakeSessionRepo, *acFakeMessageRepo, *acFakeStateRepo, *acFakeEventBus) {
-	tasks := &acFakeTaskRepo{}
-	sess := newACFakeSessionRepo()
-	msgs := &acFakeMessageRepo{}
-	state := newACFakeStateRepo()
-	eventer := &acFakeEventBus{}
-	svc := NewAgentConversationService(tasks, sess, msgs, state, eventer)
-	return svc, tasks, sess, msgs, state, eventer
+type acTestDeps struct {
+	tasks      *acFakeTaskRepo
+	sess       *acFakeSessionRepo
+	profiles   *acFakeProfileRepo
+	state      *acFakeStateRepo
+	dispatcher *acFakeDispatcher
+	eventer    *acFakeEventBus
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────
+func newACTestService() (*AgentConversationService, acTestDeps) {
+	deps := acTestDeps{
+		tasks:      &acFakeTaskRepo{},
+		sess:       newACFakeSessionRepo(),
+		profiles:   newACFakeProfileRepo(),
+		state:      newACFakeStateRepo(),
+		dispatcher: newACFakeDispatcher(),
+		eventer:    &acFakeEventBus{},
+	}
+	svc := NewAgentConversationService(deps.tasks, deps.sess, deps.profiles, deps.state, deps.eventer)
+	svc.SetDispatcher(deps.dispatcher)
+	return svc, deps
+}
+
+// ── Ensure tests ────────────────────────────────────────────────────────
 
 func TestEnsureCreatesConversation(t *testing.T) {
-	svc, _, _, _, _, eventer := newACTestService()
+	svc, deps := newACTestService()
 
 	spec := pluginsdk.AgentConversationSpec{
 		WorkspaceID:     "ws-1",
@@ -205,12 +318,11 @@ func TestEnsureCreatesConversation(t *testing.T) {
 	if desc.ConversationKey != "coordinator" {
 		t.Fatalf("ConversationKey = %q, want coordinator", desc.ConversationKey)
 	}
-	if statusStr != "created" {
+	if statusStr != AgentConversationStatusCreated {
 		t.Fatalf("status = %q, want created", statusStr)
 	}
 
-	// Verify event was published.
-	published := eventer.getPublished()
+	published := deps.eventer.getPublished()
 	if len(published) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(published))
 	}
@@ -220,7 +332,7 @@ func TestEnsureCreatesConversation(t *testing.T) {
 }
 
 func TestEnsureReturnsExistsOnSecondCall(t *testing.T) {
-	svc, _, _, _, _, _ := newACTestService()
+	svc, _ := newACTestService()
 
 	spec := pluginsdk.AgentConversationSpec{
 		WorkspaceID:     "ws-1",
@@ -236,7 +348,7 @@ func TestEnsureReturnsExistsOnSecondCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Ensure: %v", err)
 	}
-	if statusStr != "exists" {
+	if statusStr != AgentConversationStatusExists {
 		t.Fatalf("status = %q, want exists", statusStr)
 	}
 	if desc1.TaskID != desc2.TaskID {
@@ -248,7 +360,7 @@ func TestEnsureReturnsExistsOnSecondCall(t *testing.T) {
 }
 
 func TestEnsureRejectsEmptyArguments(t *testing.T) {
-	svc, _, _, _, _, _ := newACTestService()
+	svc, _ := newACTestService()
 
 	tests := []struct {
 		name   string
@@ -274,7 +386,7 @@ func TestEnsureRejectsEmptyArguments(t *testing.T) {
 }
 
 func TestEnsureRepairsMissingPrimarySession(t *testing.T) {
-	svc, tasks, sess, _, _, _ := newACTestService()
+	svc, deps := newACTestService()
 
 	spec := pluginsdk.AgentConversationSpec{
 		WorkspaceID:     "ws-1",
@@ -285,21 +397,21 @@ func TestEnsureRepairsMissingPrimarySession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Ensure: %v", err)
 	}
-	if statusStr != "created" {
+	if statusStr != AgentConversationStatusCreated {
 		t.Fatalf("status = %q, want created", statusStr)
 	}
 
 	// Delete the session to simulate a partial creation.
-	sess.mu.Lock()
-	delete(sess.sessions, desc.SessionID)
-	sess.mu.Unlock()
+	deps.sess.mu.Lock()
+	delete(deps.sess.sessions, desc.SessionID)
+	deps.sess.mu.Unlock()
 
 	// Second Ensure should repair the missing session.
 	desc2, statusStr, err := svc.Ensure(context.Background(), "plugin-coordinator", spec)
 	if err != nil {
 		t.Fatalf("second Ensure: %v", err)
 	}
-	if statusStr != "exists" {
+	if statusStr != AgentConversationStatusExists {
 		t.Fatalf("status = %q, want exists", statusStr)
 	}
 	if desc2.TaskID != desc.TaskID {
@@ -308,11 +420,10 @@ func TestEnsureRepairsMissingPrimarySession(t *testing.T) {
 	if desc2.SessionID == "" || desc2.SessionID == desc.SessionID {
 		t.Fatalf("expected new SessionID, got %q", desc2.SessionID)
 	}
-	_ = tasks
 }
 
 func TestEnsureStoresProfileIDInMetadata(t *testing.T) {
-	svc, tasks, _, _, _, _ := newACTestService()
+	svc, deps := newACTestService()
 
 	spec := pluginsdk.AgentConversationSpec{
 		WorkspaceID:     "ws-1",
@@ -324,17 +435,15 @@ func TestEnsureStoresProfileIDInMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-	if statusStr != "created" {
+	if statusStr != AgentConversationStatusCreated {
 		t.Fatalf("status = %q, want created", statusStr)
 	}
 
-	// Verify profile ID is in the return value.
 	if desc.AgentProfileID != "profile-gpt4" {
 		t.Fatalf("AgentProfileID = %q, want profile-gpt4", desc.AgentProfileID)
 	}
 
-	// Verify the task metadata stored the profile ID.
-	task, _, _ := tasks.ListTasksByWorkspace(context.Background(), "ws-1", "", "", "", 1, 100, "", false, true, true, false)
+	task, _, _ := deps.tasks.ListTasksByWorkspace(context.Background(), "ws-1", "", "", "", 1, 100, "", false, true, true, false)
 	if len(task) == 0 {
 		t.Fatal("no tasks found")
 	}
@@ -344,7 +453,7 @@ func TestEnsureStoresProfileIDInMetadata(t *testing.T) {
 }
 
 func TestEnsureProfileInDescriptorFromExistingTask(t *testing.T) {
-	svc, _, _, _, _, _ := newACTestService()
+	svc, _ := newACTestService()
 
 	spec := pluginsdk.AgentConversationSpec{
 		WorkspaceID:     "ws-1",
@@ -360,12 +469,11 @@ func TestEnsureProfileInDescriptorFromExistingTask(t *testing.T) {
 		t.Fatalf("first AgentProfileID = %q", desc.AgentProfileID)
 	}
 
-	// Ensure again with matching profile.
 	desc2, statusStr, err := svc.Ensure(context.Background(), "plugin-coordinator", spec)
 	if err != nil {
 		t.Fatalf("second Ensure: %v", err)
 	}
-	if statusStr != "exists" {
+	if statusStr != AgentConversationStatusExists {
 		t.Fatalf("status = %q, want exists", statusStr)
 	}
 	if desc2.AgentProfileID != "profile-gpt4" {
@@ -374,25 +482,23 @@ func TestEnsureProfileInDescriptorFromExistingTask(t *testing.T) {
 }
 
 func TestEnsureCrossPluginSeparation(t *testing.T) {
-	svc, _, _, _, _, _ := newACTestService()
+	svc, _ := newACTestService()
 
 	spec := pluginsdk.AgentConversationSpec{
 		WorkspaceID:     "ws-1",
 		ConversationKey: "coordinator",
 	}
 
-	// Plugin A ensures a conversation.
 	descA, _, err := svc.Ensure(context.Background(), "plugin-a", spec)
 	if err != nil {
 		t.Fatalf("plugin-a Ensure: %v", err)
 	}
 
-	// Plugin B ensures with same workspace/key — should create separate.
 	descB, statusStr, err := svc.Ensure(context.Background(), "plugin-b", spec)
 	if err != nil {
 		t.Fatalf("plugin-b Ensure: %v", err)
 	}
-	if statusStr != "created" {
+	if statusStr != AgentConversationStatusCreated {
 		t.Fatalf("plugin-b status = %q, want created (separate)", statusStr)
 	}
 	if descA.TaskID == descB.TaskID {
@@ -401,7 +507,7 @@ func TestEnsureCrossPluginSeparation(t *testing.T) {
 }
 
 func TestEnsureCrossWorkspaceSeparation(t *testing.T) {
-	svc, _, _, _, _, _ := newACTestService()
+	svc, _ := newACTestService()
 
 	desc1, _, err := svc.Ensure(context.Background(), "plugin-c", pluginsdk.AgentConversationSpec{
 		WorkspaceID:     "ws-1",
@@ -418,7 +524,7 @@ func TestEnsureCrossWorkspaceSeparation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ws-2 Ensure: %v", err)
 	}
-	if statusStr != "created" {
+	if statusStr != AgentConversationStatusCreated {
 		t.Fatalf("ws-2 status = %q, want created", statusStr)
 	}
 	if desc1.TaskID == desc2.TaskID {
@@ -426,8 +532,70 @@ func TestEnsureCrossWorkspaceSeparation(t *testing.T) {
 	}
 }
 
-func TestDispatchSendsMessage(t *testing.T) {
-	svc, _, _, msgs, _, _ := newACTestService()
+func TestConcurrentEnsureIsIdempotent(t *testing.T) {
+	svc, _ := newACTestService()
+
+	spec := pluginsdk.AgentConversationSpec{
+		WorkspaceID:     "ws-1",
+		ConversationKey: "coordinator",
+	}
+
+	var wg sync.WaitGroup
+	results := make([]struct {
+		desc pluginsdk.AgentConversationDescriptor
+		err  error
+	}, 10)
+
+	for i := range 10 {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			desc, _, err := svc.Ensure(context.Background(), "plugin-coordinator", spec)
+			results[idx] = struct {
+				desc pluginsdk.AgentConversationDescriptor
+				err  error
+			}{desc, err}
+		}(i)
+	}
+	wg.Wait()
+
+	taskIDs := make(map[string]int)
+	for _, r := range results {
+		if r.err != nil {
+			t.Fatalf("concurrent Ensure error: %v", r.err)
+		}
+		taskIDs[r.desc.TaskID]++
+	}
+	if len(taskIDs) != 1 {
+		t.Fatalf("expected 1 unique task ID, got %d: %v", len(taskIDs), taskIDs)
+	}
+}
+
+func TestStoresBasePromptInMetadata(t *testing.T) {
+	svc, deps := newACTestService()
+
+	spec := pluginsdk.AgentConversationSpec{
+		WorkspaceID:     "ws-1",
+		ConversationKey: "coordinator",
+		BasePrompt:      "You are a cycle coordinator.",
+	}
+
+	_, _, err := svc.Ensure(context.Background(), "plugin-coordinator", spec)
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	task, _, _ := deps.tasks.ListTasksByWorkspace(context.Background(), "ws-1", "", "", "", 1, 100, "", false, true, true, false)
+	if len(task) == 0 {
+		t.Fatal("no tasks")
+	}
+	if p, ok := task[0].Metadata["kandev.base_prompt"].(string); !ok || p != "You are a cycle coordinator." {
+		t.Fatalf("base_prompt = %v, want 'You are a cycle coordinator.'", task[0].Metadata["kandev.base_prompt"])
+	}
+}
+
+func TestAgentConversationTaskIsCreatedAsEphemeral(t *testing.T) {
+	svc, deps := newACTestService()
 
 	spec := pluginsdk.AgentConversationSpec{
 		WorkspaceID:     "ws-1",
@@ -437,235 +605,21 @@ func TestDispatchSendsMessage(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 
-	dispatch, err := svc.Dispatch(context.Background(), "plugin-coordinator", "ws-1", "coordinator", "Check the board", "")
-	if err != nil {
-		t.Fatalf("Dispatch: %v", err)
+	all, _, _ := deps.tasks.ListTasksByWorkspace(context.Background(), "ws-1", "", "", "", 1, 100, "", false, true, true, false)
+	if len(all) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(all))
 	}
-	if dispatch.Status != "sent" {
-		t.Fatalf("status = %q, want sent", dispatch.Status)
+	if !all[0].IsEphemeral {
+		t.Fatal("task should be ephemeral")
 	}
-	if dispatch.Descriptor.TaskID == "" {
-		t.Fatal("expected descriptor TaskID")
+	if all[0].Origin != models.TaskOriginManual {
+		t.Fatalf("origin = %q, want manual", all[0].Origin)
 	}
-
-	// Verify the message was created.
-	if len(msgs.messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs.messages))
+	if all[0].Priority != "medium" {
+		t.Fatalf("priority = %q, want medium", all[0].Priority)
 	}
-	if msgs.messages[0].Content != "Check the board" {
-		t.Fatalf("message content = %q", msgs.messages[0].Content)
-	}
-	if msgs.messages[0].AuthorType != models.MessageAuthorUser {
-		t.Fatalf("author type = %q", msgs.messages[0].AuthorType)
-	}
-}
-
-func TestDispatchBeforeEnsure(t *testing.T) {
-	svc, _, _, _, _, _ := newACTestService()
-
-	_, err := svc.Dispatch(context.Background(), "plugin-coordinator", "ws-1", "coordinator", "Hello", "")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if code := status.Code(err); code != codes.NotFound {
-		t.Fatalf("got code %v, want NotFound", code)
-	}
-}
-
-func TestDispatchWithOccurrenceKey(t *testing.T) {
-	svc, _, _, msgs, _, _ := newACTestService()
-
-	spec := pluginsdk.AgentConversationSpec{
-		WorkspaceID:     "ws-1",
-		ConversationKey: "coordinator",
-	}
-	if _, _, err := svc.Ensure(context.Background(), "plugin-coordinator", spec); err != nil {
-		t.Fatalf("Ensure: %v", err)
-	}
-
-	key := "wake:cycle:2026-08-17T10:00:00Z"
-	first, err := svc.Dispatch(context.Background(), "plugin-coordinator", "ws-1", "coordinator", "Check", key)
-	if err != nil {
-		t.Fatalf("first Dispatch: %v", err)
-	}
-	if first.Status != "sent" {
-		t.Fatalf("first status = %q, want sent", first.Status)
-	}
-
-	// Same occurrence key should be duplicate.
-	second, err := svc.Dispatch(context.Background(), "plugin-coordinator", "ws-1", "coordinator", "Check again", key)
-	if err != nil {
-		t.Fatalf("second Dispatch: %v", err)
-	}
-	if second.Status != "duplicate_occurrence" {
-		t.Fatalf("second status = %q, want duplicate_occurrence", second.Status)
-	}
-
-	// Only one message should have been created.
-	if len(msgs.messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs.messages))
-	}
-}
-
-func TestDispatchWithBusySession(t *testing.T) {
-	svc, _, sess, _, _, _ := newACTestService()
-
-	spec := pluginsdk.AgentConversationSpec{
-		WorkspaceID:     "ws-1",
-		ConversationKey: "coordinator",
-	}
-	desc, _, err := svc.Ensure(context.Background(), "plugin-coordinator", spec)
-	if err != nil {
-		t.Fatalf("Ensure: %v", err)
-	}
-
-	// Mark the session as running.
-	sess.mu.Lock()
-	if session, ok := sess.sessions[desc.SessionID]; ok {
-		session.State = models.TaskSessionStateRunning
-	}
-	sess.mu.Unlock()
-
-	dispatch, err := svc.Dispatch(context.Background(), "plugin-coordinator", "ws-1", "coordinator", "Check", "")
-	if err != nil {
-		t.Fatalf("Dispatch: %v", err)
-	}
-	if dispatch.Status != "skipped_busy" {
-		t.Fatalf("status = %q, want skipped_busy", dispatch.Status)
-	}
-}
-
-func TestDispatchRejectsEmptyArguments(t *testing.T) {
-	svc, _, _, _, _, _ := newACTestService()
-
-	tests := []struct {
-		name, plugin, ws, key, text string
-	}{
-		{"empty plugin", "", "ws-1", "key", "hello"},
-		{"empty workspace", "p", "", "key", "hello"},
-		{"empty key", "p", "ws-1", "", "hello"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := svc.Dispatch(context.Background(), tt.plugin, tt.ws, tt.key, tt.text, "")
-			if err == nil {
-				t.Fatal("expected error")
-			}
-			if code := status.Code(err); code != codes.InvalidArgument {
-				t.Fatalf("got %v, want InvalidArgument", code)
-			}
-		})
-	}
-}
-
-func TestDispatchRecordsProvenanceInMetadata(t *testing.T) {
-	svc, _, _, msgs, _, _ := newACTestService()
-
-	spec := pluginsdk.AgentConversationSpec{
-		WorkspaceID:     "ws-1",
-		ConversationKey: "coordinator",
-	}
-	if _, _, err := svc.Ensure(context.Background(), "plugin-coordinator", spec); err != nil {
-		t.Fatalf("Ensure: %v", err)
-	}
-
-	_, err := svc.Dispatch(context.Background(), "plugin-coordinator", "ws-1", "coordinator", "Check", "occ-1")
-	if err != nil {
-		t.Fatalf("Dispatch: %v", err)
-	}
-
-	if len(msgs.messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs.messages))
-	}
-	meta := msgs.messages[0].Metadata
-	if meta == nil {
-		t.Fatal("expected metadata")
-	}
-	if source, ok := meta["source"].(string); !ok || source != "plugin:plugin-coordinator" {
-		t.Fatalf("source = %v", meta["source"])
-	}
-	if key, ok := meta["occurrence_key"].(string); !ok || key != "occ-1" {
-		t.Fatalf("occurrence_key = %v", meta["occurrence_key"])
-	}
-}
-
-func TestDeleteRemovesConversation(t *testing.T) {
-	svc, tasks, _, _, _, _ := newACTestService()
-
-	spec := pluginsdk.AgentConversationSpec{
-		WorkspaceID:     "ws-1",
-		ConversationKey: "coordinator",
-	}
-	if _, _, err := svc.Ensure(context.Background(), "plugin-coordinator", spec); err != nil {
-		t.Fatalf("Ensure: %v", err)
-	}
-
-	count, err := svc.Delete(context.Background(), "plugin-coordinator", "ws-1", "coordinator")
-	if err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-	if count != 1 {
-		t.Fatalf("deleted count = %d, want 1", count)
-	}
-
-	// Verify it's gone.
-	desc, statusStr, err := svc.Ensure(context.Background(), "plugin-coordinator", spec)
-	if err != nil {
-		t.Fatalf("Ensure after delete: %v", err)
-	}
-	if statusStr != "created" {
-		t.Fatalf("status = %q, want created", statusStr)
-	}
-	if desc.TaskID != "" {
-		// A different task ID means the old one was deleted and a new one created.
-		_ = tasks
-	}
-}
-
-func TestDeleteOnlyOwnedConversations(t *testing.T) {
-	svc, _, _, _, _, _ := newACTestService()
-
-	spec := pluginsdk.AgentConversationSpec{
-		WorkspaceID:     "ws-1",
-		ConversationKey: "coordinator",
-	}
-	if _, _, err := svc.Ensure(context.Background(), "plugin-a", spec); err != nil {
-		t.Fatalf("plugin-a Ensure: %v", err)
-	}
-	if _, _, err := svc.Ensure(context.Background(), "plugin-b", spec); err != nil {
-		t.Fatalf("plugin-b Ensure: %v", err)
-	}
-
-	// Delete plugin-a's conversation only.
-	count, err := svc.Delete(context.Background(), "plugin-a", "ws-1", "coordinator")
-	if err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-	if count != 1 {
-		t.Fatalf("deleted = %d, want 1", count)
-	}
-
-	// Plugin-b's should still exist.
-	desc, statusStr, err := svc.Ensure(context.Background(), "plugin-b", spec)
-	if err != nil {
-		t.Fatalf("plugin-b Ensure: %v", err)
-	}
-	if statusStr != "exists" {
-		t.Fatalf("plugin-b status = %q, want exists", statusStr)
-	}
-	_ = desc
-}
-
-func TestDeleteIdempotent(t *testing.T) {
-	svc, _, _, _, _, _ := newACTestService()
-
-	// Delete a conversation that was never created.
-	count, err := svc.Delete(context.Background(), "plugin-nonexistent", "ws-1", "key")
-	if err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("deleted = %d, want 0", count)
+	if all[0].State != v1.TaskStateCreated {
+		t.Fatalf("state = %v, want CREATED", all[0].State)
 	}
 }
 
@@ -723,174 +677,5 @@ func TestIsManagedConversationTask(t *testing.T) {
 				t.Fatalf("IsManagedConversationTask = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestStoresBasePromptInMetadata(t *testing.T) {
-	svc, tasks, _, _, _, _ := newACTestService()
-
-	spec := pluginsdk.AgentConversationSpec{
-		WorkspaceID:     "ws-1",
-		ConversationKey: "coordinator",
-		BasePrompt:      "You are a cycle coordinator.",
-	}
-
-	_, _, err := svc.Ensure(context.Background(), "plugin-coordinator", spec)
-	if err != nil {
-		t.Fatalf("Ensure: %v", err)
-	}
-
-	task, _, _ := tasks.ListTasksByWorkspace(context.Background(), "ws-1", "", "", "", 1, 100, "", false, true, true, false)
-	if len(task) == 0 {
-		t.Fatal("no tasks")
-	}
-	if p, ok := task[0].Metadata["kandev.base_prompt"].(string); !ok || p != "You are a cycle coordinator." {
-		t.Fatalf("base_prompt = %v, want 'You are a cycle coordinator.'", task[0].Metadata["kandev.base_prompt"])
-	}
-}
-
-func TestConcurrentEnsureIsIdempotent(t *testing.T) {
-	svc, _, _, _, _, _ := newACTestService()
-
-	spec := pluginsdk.AgentConversationSpec{
-		WorkspaceID:     "ws-1",
-		ConversationKey: "coordinator",
-	}
-
-	var wg sync.WaitGroup
-	results := make([]struct {
-		desc pluginsdk.AgentConversationDescriptor
-		err  error
-	}, 10)
-
-	for i := range 10 {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			desc, _, err := svc.Ensure(context.Background(), "plugin-coordinator", spec)
-			results[idx] = struct {
-				desc pluginsdk.AgentConversationDescriptor
-				err  error
-			}{desc, err}
-		}(i)
-	}
-	wg.Wait()
-
-	// Collect unique task IDs; there should be exactly one.
-	taskIDs := make(map[string]int)
-	for _, r := range results {
-		if r.err != nil {
-			t.Fatalf("concurrent Ensure error: %v", r.err)
-		}
-		taskIDs[r.desc.TaskID]++
-	}
-	if len(taskIDs) != 1 {
-		t.Fatalf("expected 1 unique task ID, got %d: %v", len(taskIDs), taskIDs)
-	}
-}
-
-func TestOccurrenceKeyIdempotentAcrossDispatches(t *testing.T) {
-	svc, _, _, msgs, state, _ := newACTestService()
-
-	spec := pluginsdk.AgentConversationSpec{
-		WorkspaceID:     "ws-1",
-		ConversationKey: "coordinator",
-	}
-	if _, _, err := svc.Ensure(context.Background(), "plugin-coordinator", spec); err != nil {
-		t.Fatalf("Ensure: %v", err)
-	}
-
-	key := "wake:standup:2026-08-17"
-	d1, err := svc.Dispatch(context.Background(), "plugin-coordinator", "ws-1", "coordinator", "Standup", key)
-	if err != nil {
-		t.Fatalf("Dispatch 1: %v", err)
-	}
-	if d1.Status != "sent" {
-		t.Fatalf("status 1 = %q", d1.Status)
-	}
-
-	// Verify the state backend has the claim.
-	k := "plugin:plugin-coordinator"
-	sid := "ws-1/coordinator"
-	raw, found, err := state.Get(context.Background(), k, sid, "occurrence:"+key)
-	if err != nil {
-		t.Fatalf("state.Get: %v", err)
-	}
-	if !found {
-		t.Fatal("occurrence key not found in state")
-	}
-	var claim map[string]interface{}
-	if err := json.Unmarshal(raw, &claim); err != nil {
-		t.Fatalf("unmarshal claim: %v", err)
-	}
-	if claim["claimed"] != true {
-		t.Fatal("claim not true")
-	}
-
-	// Repeat with same key.
-	d2, err := svc.Dispatch(context.Background(), "plugin-coordinator", "ws-1", "coordinator", "Standup again", key)
-	if err != nil {
-		t.Fatalf("Dispatch 2: %v", err)
-	}
-	if d2.Status != "duplicate_occurrence" {
-		t.Fatalf("status 2 = %q, want duplicate_occurrence", d2.Status)
-	}
-
-	// Only 1 message across both dispatches.
-	if len(msgs.messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs.messages))
-	}
-}
-
-func TestDispatchRecordsOccurrenceInMessageMetadata(t *testing.T) {
-	svc, _, _, msgs, _, _ := newACTestService()
-
-	spec := pluginsdk.AgentConversationSpec{
-		WorkspaceID:     "ws-1",
-		ConversationKey: "coordinator",
-	}
-	if _, _, err := svc.Ensure(context.Background(), "plugin-coordinator", spec); err != nil {
-		t.Fatalf("Ensure: %v", err)
-	}
-
-	_, err := svc.Dispatch(context.Background(), "plugin-coordinator", "ws-1", "coordinator", "Run cycle", "cycle:2026-08-17T10:00")
-	if err != nil {
-		t.Fatalf("Dispatch: %v", err)
-	}
-
-	msg := msgs.messages[0]
-	if key, ok := msg.Metadata["occurrence_key"].(string); !ok || key != "cycle:2026-08-17T10:00" {
-		t.Fatalf("occurrence_key = %v, want cycle:2026-08-17T10:00", msg.Metadata["occurrence_key"])
-	}
-}
-
-// Test to ensure ManagedConversation workflow
-func TestAgentConversationTaskIsCreatedAsEphemeral(t *testing.T) {
-	svc, tasks, _, _, _, _ := newACTestService()
-
-	spec := pluginsdk.AgentConversationSpec{
-		WorkspaceID:     "ws-1",
-		ConversationKey: "coordinator",
-	}
-	if _, _, err := svc.Ensure(context.Background(), "plugin-coordinator", spec); err != nil {
-		t.Fatalf("Ensure: %v", err)
-	}
-
-	// Verify through the task repo that the task is ephemeral.
-	all, _, _ := tasks.ListTasksByWorkspace(context.Background(), "ws-1", "", "", "", 1, 100, "", false, true, true, false)
-	if len(all) != 1 {
-		t.Fatalf("expected 1 task, got %d", len(all))
-	}
-	if !all[0].IsEphemeral {
-		t.Fatal("task should be ephemeral")
-	}
-	if all[0].Origin != models.TaskOriginManual {
-		t.Fatalf("origin = %q, want manual", all[0].Origin)
-	}
-	if all[0].Priority != "medium" {
-		t.Fatalf("priority = %q, want medium", all[0].Priority)
-	}
-	if all[0].State != v1.TaskStateCreated {
-		t.Fatalf("state = %v, want CREATED", all[0].State)
 	}
 }
