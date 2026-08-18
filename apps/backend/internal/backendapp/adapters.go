@@ -1041,7 +1041,17 @@ func (a *messageCreatorAdapter) rollbackPartialBundle(ctx context.Context, ids [
 // UpdateClarificationMessage updates a clarification message's status and
 // answer. messageID identifies the exact row (R9a); pendingID/questionID are
 // carried through for the service layer's ownership check and logging.
+//
+// A nil answer must be forwarded as an untyped nil, not as a nil
+// *clarification.Answer boxed into the service method's interface{}
+// parameter (COR-001): a typed nil pointer boxed into an interface produces
+// a non-nil interface value, so the service's own `answer != nil` check
+// would fire and write a literal "response": null into every rejected or
+// cancelled clarification message's metadata.
 func (a *messageCreatorAdapter) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, messageID, questionID, status string, answer *clarification.Answer) error {
+	if answer == nil {
+		return a.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, messageID, questionID, status, nil)
+	}
 	return a.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, messageID, questionID, status, answer)
 }
 

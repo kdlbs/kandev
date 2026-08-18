@@ -300,10 +300,15 @@ func TestRegisterHandlers_ClarificationQuestionToolsOnlyWhenBothDepsSet(t *testi
 
 // svcMessageUpdater adapts service.Service.UpdateClarificationMessageForQuestion
 // to clarificationMessageUpdater (unexported in package clarification),
-// mirroring backendapp's messageCreatorAdapter for tests.
+// mirroring backendapp's messageCreatorAdapter for tests, including its
+// COR-001 nil-forwarding fix: a nil *clarification.Answer must reach the
+// service as an untyped nil, not boxed into its interface{} parameter.
 type svcMessageUpdater struct{ svc *service.Service }
 
 func (s *svcMessageUpdater) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, messageID, questionID, status string, answer *clarification.Answer) error {
+	if answer == nil {
+		return s.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, messageID, questionID, status, nil)
+	}
 	return s.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, messageID, questionID, status, answer)
 }
 
@@ -504,6 +509,22 @@ func TestHandleAnswerQuestion_Rejected(t *testing.T) {
 	require.NoError(t, json.Unmarshal(resp.Payload, &body))
 	require.True(t, body.Claimed)
 	require.Equal(t, models.ClarificationResolutionStatusRejected, body.Status)
+
+	// COR-001 regression: resolver.go's applyMessageUpdates leaves a nil
+	// *clarification.Answer for a rejected outcome, forwarded unchanged
+	// through svcMessageUpdater (which mirrors backendapp's production
+	// messageCreatorAdapter one-for-one) into the real, unmodified
+	// Service.UpdateClarificationMessageForQuestion. A nil *clarification.Answer
+	// boxed into that method's interface{} parameter must not become a
+	// non-nil interface value that gets written into metadata as
+	// "response": null.
+	msgs, err := repo.FindMessagesByPendingID(ctx, "pending-reject-1")
+	require.NoError(t, err)
+	require.NotEmpty(t, msgs)
+	for _, msg := range msgs {
+		_, hasResponse := msg.Metadata["response"]
+		require.Falsef(t, hasResponse, "message %s metadata got a response key from a rejected answer: %v", msg.ID, msg.Metadata["response"])
+	}
 }
 
 func TestHandleAnswerQuestion_UnknownPendingID_NotFound(t *testing.T) {
