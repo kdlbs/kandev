@@ -59,6 +59,62 @@ const baseProps = {
   onSetAutoUpdate: noop,
 };
 
+/** Test ids reused across these cases. */
+const REPO_LINK_TESTID = "plugin-repo-link";
+const AUTO_UPDATE_TESTID = "plugin-auto-update-acme";
+
+/** The class that lifts a control above the card's overlay link. */
+const ABOVE_OVERLAY = "z-10";
+
+describe("PluginRow settings link", () => {
+  it("covers the whole card with a named link to the plugin's settings page", () => {
+    render(<PluginRow {...baseProps} plugin={plugin()} />);
+    const link = screen.getByTestId("plugin-row-link-acme");
+    expect(link.getAttribute("href")).toBe("/settings/plugins/acme");
+    // The link carries no text of its own, so the accessible name has to come
+    // from the label — without it the card is an unnamed link.
+    expect(link.getAttribute("aria-label")).toBe("Open settings for Acme");
+    expect(link.className).toContain("absolute");
+    expect(link.className).toContain("inset-0");
+  });
+
+  it("percent-encodes a plugin id that is not URL-safe", () => {
+    render(<PluginRow {...baseProps} plugin={plugin({ id: "acme/one" })} />);
+    expect(screen.getByTestId("plugin-row-link-acme/one").getAttribute("href")).toBe(
+      "/settings/plugins/acme%2Fone",
+    );
+  });
+
+  it("keeps the row's own controls above the overlay link", () => {
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={plugin({ repo_url: "https://github.com/kdlbs/kandev-plugin-acme" })}
+      />,
+    );
+    // Anything interactive must sit at z-10; under the overlay it is unclickable.
+    expect(screen.getByTestId(REPO_LINK_TESTID).className).toContain(ABOVE_OVERLAY);
+    expect(screen.getByRole("button", { name: "Disable" }).parentElement?.className).toContain(
+      ABOVE_OVERLAY,
+    );
+    expect(screen.getByTestId(AUTO_UPDATE_TESTID).parentElement?.className).toContain(
+      ABOVE_OVERLAY,
+    );
+  });
+});
+
+describe("PluginRow setup-required badge", () => {
+  it("flags a plugin whose required settings are unset", () => {
+    render(<PluginRow {...baseProps} plugin={plugin()} needsSetup />);
+    expect(screen.getByTestId("plugin-setup-required-acme").textContent).toBe("Setup required");
+  });
+
+  it("renders no badge when the plugin needs no setup", () => {
+    render(<PluginRow {...baseProps} plugin={plugin()} />);
+    expect(screen.queryByTestId("plugin-setup-required-acme")).toBeNull();
+  });
+});
+
 describe("PluginRow update button", () => {
   it("shows an Update button with the new version and fires onUpdate", () => {
     const onUpdate = vi.fn();
@@ -85,13 +141,13 @@ describe("PluginRow repo link", () => {
         plugin={plugin({ repo_url: "https://github.com/kdlbs/kandev-plugin-acme" })}
       />,
     );
-    const link = screen.getByTestId("plugin-repo-link");
+    const link = screen.getByTestId(REPO_LINK_TESTID);
     expect(link.getAttribute("href")).toBe("https://github.com/kdlbs/kandev-plugin-acme");
   });
 
   it("renders no Repo link when the plugin declares no repo_url", () => {
     render(<PluginRow {...baseProps} plugin={plugin()} />);
-    expect(screen.queryByTestId("plugin-repo-link")).toBeNull();
+    expect(screen.queryByTestId(REPO_LINK_TESTID)).toBeNull();
   });
 
   it("renders no Repo link for a non-http(s) repo_url scheme", () => {
@@ -101,7 +157,7 @@ describe("PluginRow repo link", () => {
         plugin={plugin({ repo_url: "javascript:alert(document.cookie)" })}
       />,
     );
-    expect(screen.queryByTestId("plugin-repo-link")).toBeNull();
+    expect(screen.queryByTestId(REPO_LINK_TESTID)).toBeNull();
   });
 });
 
@@ -125,7 +181,7 @@ describe("PluginRow error recovery", () => {
 describe("PluginRow auto-update toggle", () => {
   it("reflects the global default when the plugin has no override", () => {
     render(<PluginRow {...baseProps} plugin={plugin({ auto_update: null })} autoUpdateDefault />);
-    const toggle = screen.getByTestId("plugin-auto-update-acme");
+    const toggle = screen.getByTestId(AUTO_UPDATE_TESTID);
     expect(toggle.getAttribute("aria-checked")).toBe("true");
     // No override → no "override" badge and no Reset affordance.
     expect(screen.queryByTestId("plugin-auto-update-reset-acme")).toBeNull();
@@ -133,7 +189,7 @@ describe("PluginRow auto-update toggle", () => {
 
   it("prefers the per-plugin override over the global default", () => {
     render(<PluginRow {...baseProps} plugin={plugin({ auto_update: false })} autoUpdateDefault />);
-    const toggle = screen.getByTestId("plugin-auto-update-acme");
+    const toggle = screen.getByTestId(AUTO_UPDATE_TESTID);
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     expect(screen.getByTestId("plugin-auto-update-reset-acme")).toBeTruthy();
   });
@@ -149,7 +205,7 @@ describe("PluginRow auto-update toggle", () => {
         onSetAutoUpdate={onSetAutoUpdate}
       />,
     );
-    fireEvent.click(screen.getByTestId("plugin-auto-update-acme"));
+    fireEvent.click(screen.getByTestId(AUTO_UPDATE_TESTID));
     expect(onSetAutoUpdate).toHaveBeenCalledWith(p, true);
   });
 

@@ -71,6 +71,7 @@ export const STEP_COLORS = [
 // The `prompt` bodies are deliberately NOT translated: clicking a template
 // writes the text into `WorkflowStep.prompt`, which is persisted and sent to
 // the agent verbatim. Only the button `labelKey` is copy.
+// i18n-exempt: seeded step prompts, persisted and sent verbatim to the agent.
 export const PROMPT_TEMPLATES = [
   {
     labelKey: "workflows:templatePlan",

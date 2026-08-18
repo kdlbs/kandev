@@ -91,6 +91,7 @@ const PROMPT_TITLE_TOKEN = "{{title}}";
 // the row below, so it must stay locale-neutral — the same contract as
 // `newPreset` in components/github/action-presets-section.tsx.
 function newAction(): AzureDevOpsActionPreset {
+  // i18n-exempt: persisted, editable preset label. See the comment above.
   return {
     id: `preset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     label: "New action",

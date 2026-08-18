@@ -69,6 +69,8 @@ type TaskItemProps = {
   remoteExecutorType?: string;
   remoteExecutorName?: string;
   updatedAt?: string;
+  lastActivityAt?: string;
+  showActivityTime?: boolean;
   menuOpen?: boolean;
   isDeleting?: boolean;
   taskId?: string;
@@ -313,6 +315,16 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
   );
 }
 
+function TaskItemTitle({ taskId, title }: { taskId?: string; title: string }) {
+  const content = <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>;
+  if (!taskId) return content;
+  return (
+    <TaskTitleHoverCard taskId={taskId} title={title} side="right" align="start">
+      {content}
+    </TaskTitleHoverCard>
+  );
+}
+
 function TaskItemContent({
   title,
   autopilot,
@@ -325,6 +337,8 @@ function TaskItemContent({
   isPinned,
   repositories,
   updatedAt,
+  lastActivityAt,
+  showActivityTime,
   prInfo,
   queuedCount,
   wipQueue,
@@ -342,6 +356,8 @@ function TaskItemContent({
   isPinned?: boolean;
   repositories?: string[];
   updatedAt?: string;
+  lastActivityAt?: string;
+  showActivityTime?: boolean;
   prInfo?: { number: number; state: string; aggregateState?: string };
   queuedCount?: number;
   wipQueue?: WipQueueStatus;
@@ -352,13 +368,7 @@ function TaskItemContent({
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
-        {taskId ? (
-          <TaskTitleHoverCard taskId={taskId} title={title} side="right" align="start">
-            <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
-          </TaskTitleHoverCard>
-        ) : (
-          <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
-        )}
+        <TaskItemTitle taskId={taskId} title={title} />
         {autopilot && <TaskAutopilotIcon />}
         {isPinned && (
           <IconPinFilled
@@ -391,7 +401,7 @@ function TaskItemContent({
         </span>
       )}
       <TaskItemStatsRow
-        updatedAt={updatedAt}
+        updatedAt={showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt}
         prInfo={prInfo}
         primarySessionId={primarySessionId}
         queuedCount={queuedCount}
@@ -441,6 +451,8 @@ export const TaskItem = memo(function TaskItem({
   remoteExecutorType,
   remoteExecutorName,
   updatedAt,
+  lastActivityAt,
+  showActivityTime = false,
   menuOpen = false,
   isDeleting,
   taskId,
@@ -503,6 +515,8 @@ export const TaskItem = memo(function TaskItem({
         isPinned={isPinned}
         repositories={repositories}
         updatedAt={updatedAt}
+        lastActivityAt={lastActivityAt}
+        showActivityTime={showActivityTime}
         prInfo={prInfo}
         queuedCount={queuedCount}
         wipQueue={wipQueue}

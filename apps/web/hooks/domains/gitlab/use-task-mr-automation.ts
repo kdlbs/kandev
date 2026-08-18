@@ -5,11 +5,12 @@ import { getTaskMRAutomation, updateTaskMRAutomation } from "@/lib/api/domains/g
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import type { TaskMRAutomationOptions, TaskMRAutomationPatch } from "@/lib/types/gitlab";
+import { t } from "@/lib/i18n";
 
 type AppStoreApi = ReturnType<typeof useAppStoreApi>;
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Failed to load MR automation options.";
+  return error instanceof Error ? error.message : t("gitlab:failedToLoadMrAutomationOptions");
 }
 
 // True when `requestId` is still the latest request this hook issued for

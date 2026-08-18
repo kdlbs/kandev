@@ -8,6 +8,7 @@ const (
 
 	messageTypeClarificationRequest = "clarification_request"
 	messageTypePermissionRequest    = "permission_request"
+	messageTypeUser                 = "user"
 	messageTypeError                = "error"
 	messageTypeStatus               = "status"
 	messageTypeAgent                = "agent"

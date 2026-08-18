@@ -317,6 +317,7 @@ func (b bootStateBuilder) addHomeKanbanRouteState(ctx context.Context, req *http
 		state["userSettings"] = mapUserSettingsStateWithWorkflow(settings, activeWorkspaceID, activeWorkflowID)
 	}
 	b.addRepositoriesState(ctx, state, activeWorkspaceID)
+	b.addRepositorySetsState(ctx, state, activeWorkspaceID)
 	b.addKanbanSnapshotsState(ctx, state, workflows, activeWorkflowID)
 }
 
@@ -373,6 +374,23 @@ func (b bootStateBuilder) addRepositoriesState(ctx context.Context, state map[st
 			workspaceID: true,
 		},
 	}
+}
+
+// addRepositorySetsState hydrates the home/kanban route with the workspace's
+// repository sets, so the create dialog can offer them without a fetch.
+func (b bootStateBuilder) addRepositorySetsState(ctx context.Context, state map[string]any, workspaceID string) {
+	items := repositorySetsToDTOs(nil)
+	loaded := false
+	sets, err := b.p.taskSvc.ListRepositorySets(ctx, workspaceID)
+	if err != nil {
+		// Not loaded, so the client's hook still fetches; see
+		// repositorySetsForState.
+		b.logBootError("list home repository sets", err)
+	} else {
+		items = repositorySetsToDTOs(sets)
+		loaded = true
+	}
+	state["repositorySets"] = repositorySetsState(workspaceID, items, loaded)
 }
 
 func (b bootStateBuilder) addQuickChatState(
@@ -708,11 +726,12 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		pendingActionsBySession = map[string]taskmodels.TaskPendingAction{}
 	}
 	if summaryErr == nil && pendingErr == nil {
-		statusSummaries, err = b.p.taskSvc.HydrateMissingTaskStatusSummaries(
+		reconciledSummaries, reconcileErr := b.p.taskSvc.ReconcileTaskStatusSummaries(
 			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
 		)
-		if err != nil {
-			b.logBootError("repair missing task status summaries", err)
+		statusSummaries = reconciledSummaries
+		if reconcileErr != nil {
+			b.logBootError("reconcile task status summaries", reconcileErr)
 		}
 	}
 	// Stamp the authoritative per-task queued prompt count onto every summary so
@@ -768,7 +787,7 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 			taskdto.EnrichTaskForegroundActivity(&dto, sessions, b.p.orchestratorSvc)
 		}
 		taskdto.EnrichTaskDependencies(&dto, bootDependencyProjection(dependencyViews[task.ID]), task)
-		dto.StatusSummary = statusSummaries[task.ID]
+		taskdto.EnrichTaskStatusSummary(&dto, task.ID, statusSummaries)
 		if dto.StatusSummary != nil {
 			switch {
 			case queuedErr != nil:
@@ -1177,6 +1196,9 @@ func taskSessionModelsBootState(
 		"currentModelId": snapshot.CurrentModelID,
 		"models":         models,
 		"configOptions":  options,
+	}
+	if snapshot.ConfigOptionsSettled {
+		state["configOptionsSettled"] = true
 	}
 	if len(baseline) > 0 {
 		state["configBaseline"] = baseline

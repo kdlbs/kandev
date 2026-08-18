@@ -3,6 +3,18 @@ import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
 
 export type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
 
+/**
+ * Returns the repository rows that exist on the backend.
+ *
+ * The settings page keeps unsaved local-repository rows in the same list as
+ * saved rows. Those temporary IDs must not reach repository-set membership.
+ */
+export function persistedRepositoryItems(
+  repositories: RepositoryWithScripts[],
+): RepositoryWithScripts[] {
+  return repositories.filter((repository) => !repository.id.startsWith("temp-repo-"));
+}
+
 const repositoryFields: Array<keyof RepositoryWithScripts> = [
   "name",
   "source_type",

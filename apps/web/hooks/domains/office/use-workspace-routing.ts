@@ -8,6 +8,7 @@ import {
   updateWorkspaceRouting,
 } from "@/lib/api/domains/office-extended-api";
 import type { ExecutionProfileSummary, WorkspaceRouting } from "@/lib/state/slices/office/types";
+import { t } from "@/lib/i18n";
 
 export type UseWorkspaceRoutingResult = {
   config: WorkspaceRouting | undefined;
@@ -47,7 +48,7 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
       setProfilesWorkspace(workspaceName);
     } catch (e) {
       if (version !== requestVersion.current) return;
-      setError(e instanceof Error ? e.message : "Failed to load routing config");
+      setError(e instanceof Error ? e.message : t("office:failedToLoadRoutingConfig"));
     } finally {
       if (version === requestVersion.current) setIsLoading(false);
     }

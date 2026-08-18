@@ -644,7 +644,16 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
     await expect(pluginRow).toBeVisible({ timeout: 15_000 });
 
-    await testPage.getByTestId(`plugin-row-link-${PLUGIN_ID}`).click();
+    // The fixture declares a required api_token nobody has filled in yet, so
+    // the row advertises the settings page it wants the operator to open.
+    await expect(pluginRow.getByTestId(`plugin-setup-required-${PLUGIN_ID}`)).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Click the card body, not the plugin name: the whole row is the target,
+    // and an overlay link that stops covering it would strand the settings
+    // page behind a name that no longer looks clickable.
+    await pluginRow.click({ position: { x: 600, y: 12 } });
     await expect(testPage).toHaveURL(new RegExp(`/settings/plugins/${PLUGIN_ID}$`));
     await expect(testPage.getByTestId(`plugin-detail-${PLUGIN_ID}`)).toBeVisible();
     await expect(testPage.getByTestId("plugin-manifest-card")).toBeVisible();
@@ -685,9 +694,11 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     expect(configBody.config.api_token).toBe("********");
     expect(configBody.config.greeting).toBe("hello from e2e");
 
-    // --- Saving restarted the plugin; it must be Active again. ---
+    // --- Saving restarted the plugin; it must be Active again, and the row
+    // must stop asking for setup now that the required field is stored. ---
     await testPage.goto("/settings/plugins");
     await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(pluginRow.getByTestId(`plugin-setup-required-${PLUGIN_ID}`)).toBeHidden();
 
     // --- Prove the Host GetConfig gRPC path: the webhook makes the fixture
     // binary call Host.GetConfig and snapshot the result to config.json in

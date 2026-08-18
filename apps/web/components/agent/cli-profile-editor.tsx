@@ -24,6 +24,7 @@ import {
   buildDefaultPermissions,
   PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
 } from "@/lib/agent-permissions";
+import { t } from "@/lib/i18n";
 
 export type CliProfileEditorMode = "create" | "edit";
 
@@ -235,8 +236,8 @@ export function CliProfileEditor({
 }
 
 function buttonLabel(mode: CliProfileEditorMode, saving: boolean): string {
-  if (saving) return mode === "edit" ? "Saving..." : "Creating...";
-  return mode === "edit" ? "Save profile" : "Create profile";
+  if (saving) return mode === "edit" ? t("agents:savingProfile") : t("agents:creatingProfile");
+  return mode === "edit" ? t("agents:saveProfile") : t("agents:createProfile");
 }
 
 function EditorFooter({

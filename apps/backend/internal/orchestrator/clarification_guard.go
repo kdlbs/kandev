@@ -15,7 +15,7 @@ func (s *Service) sessionHasPendingClarification(ctx context.Context, sessionID 
 	if sessionID == "" {
 		return false
 	}
-	msgs, err := s.repo.FindPendingClarificationMessagesBySessionID(ctx, sessionID)
+	msgs, err := s.repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to check pending clarifications; blocking turn-complete transition",
 			zap.String("session_id", sessionID),

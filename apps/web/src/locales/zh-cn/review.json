@@ -88,5 +88,10 @@
   "findingQueuedForAgent": "发现项已加入代理队列",
   "findingSentToAgent": "发现项已发送给代理",
   "walkthroughRequestQueued": "导览请求已排队",
-  "walkthroughRequestSent": "导览请求已发送"
+  "walkthroughRequestSent": "导览请求已发送",
+  "couldNotStartReview": "无法开始评审",
+  "severityBlocker": "阻断",
+  "severityMajor": "严重",
+  "severityMinor": "次要",
+  "severityNit": "细节"
 }

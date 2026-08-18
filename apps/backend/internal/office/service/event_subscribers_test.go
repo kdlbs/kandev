@@ -520,9 +520,9 @@ func TestPromptUsage_RecordsCostEvent(t *testing.T) {
 	// With no pricing lookup wired and no provider-reported cost, the row
 	// records 0 (Layer A miss + no Layer B), tagged cost_source=unpriced.
 	// Estimated tracks data.Usage.Estimated verbatim (unset here, so false)
-	// — it is a token-synthesis flag, distinct from cost_source, which is
+	// — it is a usage-authority flag, distinct from cost_source, which is
 	// what actually carries the "we could not resolve a price" signal. See
-	// costContractVersion's v1->v2 doc comment in prompt_usage_cost.go.
+	// costContractVersion's version history in prompt_usage_cost.go.
 	if costs[0].CostSubcents != 0 {
 		t.Fatalf("cost_subcents = %d, want 0 (no pricing lookup wired)", costs[0].CostSubcents)
 	}

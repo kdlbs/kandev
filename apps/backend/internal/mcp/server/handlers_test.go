@@ -71,22 +71,24 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 		"blocked_by", "start_when_unblocked",
 	}, propertyNames(props), "unexpected change to the advertised create_task_kandev schema")
 	assert.NotContains(t, props, "description", "legacy alias must not increase the advertised schema")
-	assert.Contains(t, tool.Tool.Description, "'prompt' is the sub-agent's initial prompt")
-	assert.NotContains(t, tool.Tool.Description, "'description' is the sub-agent's initial prompt")
+	assert.Contains(t, tool.Tool.Description, "persistent Kandev task or subtask")
+	assert.Contains(t, tool.Tool.Description, "native subagent mechanism")
+	assert.Contains(t, tool.Tool.Description, `parent_id="self"`)
+	assert.Contains(t, tool.Tool.Description, "external_id")
+	assert.NotContains(t, tool.Tool.Description, "DELEGATION POLICY")
+	parentProperty, ok := props["parent_id"].(map[string]interface{})
+	require.True(t, ok, "parent_id schema should be an object")
+	parentDescription, ok := parentProperty["description"].(string)
+	require.True(t, ok, "parent_id should have a description")
+	assert.NotContains(t, parentDescription, "delegated work")
 	promptProp, ok := props["prompt"].(map[string]interface{})
 	require.True(t, ok, "prompt schema should be an object")
 	promptDesc, ok := promptProp["description"].(string)
 	require.True(t, ok, "prompt should have a description")
+	assert.Contains(t, promptDesc, "task agent")
+	assert.NotContains(t, promptDesc, "sub-agent")
 	assert.Contains(t, promptDesc, "For auto-started subtasks")
 	assert.NotContains(t, promptDesc, "REQUIRED")
-	assert.Contains(t, tool.Tool.Description, "outranks an explicit agent_profile_id")
-	assert.Contains(t, tool.Tool.Description, "current_task")
-	assert.Contains(t, tool.Tool.Description, "workspace_default")
-	assert.Contains(t, tool.Tool.Description, "workflow")
-	assert.Contains(t, tool.Tool.Description, "verified creating session")
-	assert.Contains(t, tool.Tool.Description, "effective model, mode, and dynamic options")
-	assert.Contains(t, tool.Tool.Description, "An explicit agent_profile_id prevents creator-session runtime inheritance")
-	assert.Contains(t, tool.Tool.Description, "workspace_mode='new_workspace'")
 	assert.NotContains(t, props, "mcp_task_agent_profile_default", "saved policy must not change the tool input schema")
 
 	agentProfileProp, ok := props["agent_profile_id"].(map[string]interface{})
@@ -759,8 +761,12 @@ func TestMessageTask_DescriptionExplainsQueueInterruptAndStop(t *testing.T) {
 	assert.Contains(t, description, `delivery_mode="queued"`)
 	assert.Contains(t, description, `delivery_mode="interrupt"`)
 	assert.Contains(t, description, "stop_task_kandev")
-	assert.Contains(t, description, `safely falls back to "queued"`)
+	assert.Contains(t, description, "prompt remains queued")
 	assert.Contains(t, description, "reply_to_question_id")
+	// Terminal sessions and the session_id-less defaulting rule are both
+	// documented, so a caller does not have to discover either by trial.
+	assert.Contains(t, description, "spawn_session_kandev")
+	assert.Contains(t, description, "primary session is used")
 }
 
 func TestMessageTask_MissingTaskID_ReturnsError(t *testing.T) {
@@ -822,6 +828,11 @@ func TestStopTask_ToolSchemaIsMinimalAndDescriptionIsAccurate(t *testing.T) {
 		"not_running",
 		"message_task_kandev",
 		`delivery_mode="interrupt"`,
+		// The recovery path. A parent that stops a wedged child then tries to
+		// restart it hits "session is CANCELLED — cannot send message" and has
+		// nowhere to go unless this tool says which tool gives it a new session.
+		"spawn_session_kandev",
+		"cannot be resumed",
 	} {
 		assert.Contains(t, description, phrase)
 	}

@@ -7,11 +7,19 @@ import { linkToTaskOverview, replaceTaskUrl } from "@/lib/links";
 import { fetchTask, listTaskSessions } from "@/lib/api";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import { getRecentTasks } from "@/lib/recent-tasks";
+import { createAbortError, isAbortError } from "@/lib/utils/abort-error";
 
 type TaskRemovalOptions = {
   store: StoreApi<AppState>;
   /** Whether to call performLayoutSwitch when switching sessions (desktop sidebar uses this) */
   useLayoutSwitch?: boolean;
+};
+
+export type TaskSessionLoadOptions = {
+  /** Ignore the local task-session cache and request an authoritative snapshot. */
+  force?: boolean;
+  /** Cancel the authoritative request when its task selection is superseded. */
+  signal?: AbortSignal;
 };
 
 type RemoveFromBoardOptions = {
@@ -39,33 +47,83 @@ type RemoveFromBoardResult = {
   excludedTaskIds?: ReadonlySet<string>;
 };
 
+const taskSessionLoadGenerations = new WeakMap<StoreApi<AppState>, Map<string, number>>();
+
+function beginTaskSessionLoad(store: StoreApi<AppState>, taskId: string): number {
+  let generations = taskSessionLoadGenerations.get(store);
+  if (!generations) {
+    generations = new Map();
+    taskSessionLoadGenerations.set(store, generations);
+  }
+  const generation = (generations.get(taskId) ?? 0) + 1;
+  generations.set(taskId, generation);
+  return generation;
+}
+
+function taskSessionLoadIsCurrent(
+  store: StoreApi<AppState>,
+  taskId: string,
+  generation: number,
+): boolean {
+  return taskSessionLoadGenerations.get(store)?.get(taskId) === generation;
+}
+
 function cachedSessionsHaveEnvIds(sessions: TaskSession[]): boolean {
   return sessions.length === 0 || sessions.every((session) => !!session.task_environment_id);
+}
+
+function taskSessionListRequestOptions(signal?: AbortSignal) {
+  return signal ? { cache: "no-store" as const, init: { signal } } : { cache: "no-store" as const };
+}
+
+function commitTaskSessionLoad(
+  store: StoreApi<AppState>,
+  taskId: string,
+  generation: number,
+  sessions: TaskSession[],
+  force: boolean,
+): TaskSession[] {
+  if (taskSessionLoadIsCurrent(store, taskId, generation)) {
+    store.getState().setTaskSessionsForTask(taskId, sessions);
+    return sessions;
+  }
+  // Forced callers use this result to choose a pending-action owner. Never
+  // let a superseded response escape even though its cache write was gated.
+  if (force) {
+    throw createAbortError("Task session load was superseded");
+  }
+  return store.getState().taskSessionsByTask.itemsByTaskId[taskId] ?? [];
 }
 
 async function loadTaskSessionsForTaskFromStore(
   store: StoreApi<AppState>,
   taskId: string,
+  options?: TaskSessionLoadOptions,
 ): Promise<TaskSession[]> {
   const state = store.getState();
+  const force = options?.force === true;
+  const signal = options?.signal;
   const cachedSessions = state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
-  if (state.taskSessionsByTask.loadedByTaskId[taskId]) {
+  if (!force && state.taskSessionsByTask.loadedByTaskId[taskId]) {
     if (cachedSessionsHaveEnvIds(cachedSessions)) return cachedSessions;
   }
-  if (state.taskSessionsByTask.loadingByTaskId[taskId]) {
+  if (!force && state.taskSessionsByTask.loadingByTaskId[taskId]) {
     return cachedSessions;
   }
+  const loadGeneration = beginTaskSessionLoad(store, taskId);
   store.getState().setTaskSessionsLoading(taskId, true);
   try {
-    const response = await listTaskSessions(taskId, { cache: "no-store" });
-    store.getState().setTaskSessionsForTask(taskId, response.sessions ?? []);
-    return response.sessions ?? [];
+    const response = await listTaskSessions(taskId, taskSessionListRequestOptions(signal));
+    const sessions = response.sessions ?? [];
+    return commitTaskSessionLoad(store, taskId, loadGeneration, sessions, force);
   } catch (error) {
-    console.error("Failed to load task sessions:", error);
-    store.getState().setTaskSessionsForTask(taskId, []);
-    return [];
+    if (!isAbortError(error)) console.error("Failed to load task sessions:", error);
+    if (force) throw error;
+    return cachedSessions;
   } finally {
-    store.getState().setTaskSessionsLoading(taskId, false);
+    if (taskSessionLoadIsCurrent(store, taskId, loadGeneration)) {
+      store.getState().setTaskSessionsLoading(taskId, false);
+    }
   }
 }
 
@@ -293,7 +351,8 @@ function shouldSwitchAfterRemoval(
  */
 export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOptions) {
   const loadTaskSessionsForTask = useCallback(
-    (taskId: string) => loadTaskSessionsForTaskFromStore(store, taskId),
+    (taskId: string, options?: TaskSessionLoadOptions) =>
+      loadTaskSessionsForTaskFromStore(store, taskId, options),
     [store],
   );
 

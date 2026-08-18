@@ -20,6 +20,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import { settingsControlClassName } from "@/components/settings/settings-control";
+import { SettingsPageHeader } from "@/components/settings/settings-typography";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
 import { SystemMetricsSettingsCard } from "@/components/settings/system-metrics-settings-card";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -70,13 +73,15 @@ function ThemeSettingsCard({
       discoveryTargetId={GENERAL_SETTINGS_TARGETS.colorTheme}
       data-testid="theme-settings-card"
     >
-      <CardHeader>
-        <CardTitle className="text-base">{t("settings:colorTheme")}</CardTitle>
-      </CardHeader>
+      <SettingsCardHeader title={t("settings:colorTheme")} />
       <CardContent>
         <div className="space-y-2">
           <Select value={theme} onValueChange={(value) => onChange(value as Theme)}>
-            <SelectTrigger id="theme" data-settings-dirty={isDirty}>
+            <SelectTrigger
+              id="theme"
+              className={settingsControlClassName()}
+              data-settings-dirty={isDirty}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -428,53 +433,22 @@ function useAppearanceDraftUpdater(
   );
 }
 
-export function AppearanceSettings() {
+function AppearanceSettingsSections({
+  draft,
+  saved,
+  updateDraft,
+  previewTheme,
+  previewMenuMode,
+}: {
+  draft: AppearanceState;
+  saved: AppearanceState;
+  updateDraft: (patch: Partial<AppearanceState>) => void;
+  previewTheme: (theme: Theme) => void;
+  previewMenuMode: (mode: SettingsMenuMode) => void;
+}) {
   const { t } = useTranslation();
-  const userSettings = useAppStore((state) => state.userSettings);
-  const { savedTheme, previewTheme } = useTheme();
-  const savedMenuMode = useAppStore((state) => state.settingsMenu.savedMode);
-  const previewMenuMode = useAppStore((state) => state.previewSettingsMenuMode);
-  const [saved, setSaved] = useState(() =>
-    createAppearanceSavedState(savedTheme, savedMenuMode, userSettings),
-  );
-  const [draft, setDraft] = useState(saved);
-  const draftRef = useRef(draft);
-  const savedRef = useRef(saved);
-  const editedDuringSaveRef = useRef<Set<keyof AppearanceState> | null>(null);
-  draftRef.current = draft;
-  savedRef.current = saved;
-
-  useEffect(() => {
-    const previousSaved = savedRef.current;
-    const nextSaved = createAppearanceSavedState(
-      previousSaved.theme,
-      previousSaved.settingsMenuMode,
-      userSettings,
-    );
-    setDraft(
-      rebaseAppearanceDraft(
-        draftRef.current,
-        previousSaved,
-        nextSaved,
-        editedDuringSaveRef.current ?? undefined,
-      ),
-    );
-    setSaved(nextSaved);
-  }, [userSettings]);
-
-  useAppearanceSaveContributor({
-    draft,
-    draftRef,
-    editedDuringSaveRef,
-    saved,
-    setSaved,
-    setDraft,
-  });
-
-  const updateDraft = useAppearanceDraftUpdater(setDraft, editedDuringSaveRef);
-
   return (
-    <div className="space-y-8">
+    <>
       <AppearanceThemeSection
         theme={draft.theme}
         isDirty={draft.theme !== saved.theme}
@@ -539,6 +513,69 @@ export function AppearanceSettings() {
           onSimplifiedChange={(simplifiedMetrics) => updateDraft({ simplifiedMetrics })}
         />
       </SettingsSection>
+    </>
+  );
+}
+
+export function AppearanceSettings() {
+  const { t } = useTranslation();
+  const userSettings = useAppStore((state) => state.userSettings);
+  const { savedTheme, previewTheme } = useTheme();
+  const savedMenuMode = useAppStore((state) => state.settingsMenu.savedMode);
+  const previewMenuMode = useAppStore((state) => state.previewSettingsMenuMode);
+  const [saved, setSaved] = useState(() =>
+    createAppearanceSavedState(savedTheme, savedMenuMode, userSettings),
+  );
+  const [draft, setDraft] = useState(saved);
+  const draftRef = useRef(draft);
+  const savedRef = useRef(saved);
+  const editedDuringSaveRef = useRef<Set<keyof AppearanceState> | null>(null);
+  draftRef.current = draft;
+  savedRef.current = saved;
+
+  useEffect(() => {
+    const previousSaved = savedRef.current;
+    const nextSaved = createAppearanceSavedState(
+      previousSaved.theme,
+      previousSaved.settingsMenuMode,
+      userSettings,
+    );
+    setDraft(
+      rebaseAppearanceDraft(
+        draftRef.current,
+        previousSaved,
+        nextSaved,
+        editedDuringSaveRef.current ?? undefined,
+      ),
+    );
+    setSaved(nextSaved);
+  }, [userSettings]);
+
+  useAppearanceSaveContributor({
+    draft,
+    draftRef,
+    editedDuringSaveRef,
+    saved,
+    setSaved,
+    setDraft,
+  });
+
+  const updateDraft = useAppearanceDraftUpdater(setDraft, editedDuringSaveRef);
+
+  return (
+    <div className="space-y-8">
+      <SettingsPageHeader
+        title={t("settings:appearance")}
+        description={t("settings:customizeHowTheApplicationLooks")}
+      />
+      <Separator />
+      <AppearanceSettingsSections
+        draft={draft}
+        saved={saved}
+        updateDraft={updateDraft}
+        previewTheme={previewTheme}
+        previewMenuMode={previewMenuMode}
+      />
     </div>
   );
 }

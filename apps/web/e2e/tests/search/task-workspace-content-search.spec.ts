@@ -3,6 +3,7 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { expect, test } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 import { MODIFIER } from "./shared";
 
@@ -89,6 +90,7 @@ test("@search searches all task repositories and opens the selected match", asyn
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+  await waitForSessionAgentctlReady(testPage, task.session_id);
 
   // The global content-search shortcut must win even when an editable chat
   // surface owns focus.
@@ -276,7 +278,7 @@ test("@search reveals and flashes a cached preview content match selected with E
   await expect(dialog).toBeVisible();
   await dialog.getByRole("combobox").fill(CACHED_PREVIEW_MARKER);
   const targetResult = dialog.getByTestId("content-search-result").filter({ hasText: targetPath });
-  await expect(targetResult).toHaveCount(1);
+  await expect(targetResult).toHaveCount(1, { timeout: 30_000 });
   await testPage.keyboard.press("Enter");
   await expect(dialog).not.toBeVisible();
 

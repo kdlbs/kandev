@@ -162,25 +162,48 @@ export function WorkspaceContentSearch({
 
   const groups = groupByRepositoryName(results, (result) => result.repository_name);
   const singleRepo = isSingleRepoGroup(groups);
-  return groups.map((group) => (
-    <CommandGroup
-      key={group.repositoryName}
-      heading={
-        singleRepo
-          ? t("common:results")
-          : (getRepoDisplayName(group.repositoryName) ?? t("common:workspace"))
-      }
-      forceMount
-      data-testid="content-search-repo-group"
-      data-repository={group.repositoryName}
+  // Results are published as each retry attempt returns, so a populated list
+  // can still be growing. The spec requires the searching state to stay
+  // distinguishable from a finished one, and without this a partial list looks
+  // identical to "that is everything" while another repository is still
+  // starting up.
+  //
+  // It leads the list and sticks to the top of CommandList's own scroll box
+  // (max-h-72 overflow-y-auto): appended after the groups it fell below the
+  // fold as soon as the early matches filled the palette, which is exactly the
+  // case it exists for.
+  const stillSearching = isSearching ? (
+    <div
+      key="content-search-in-progress"
+      data-testid="content-search-in-progress"
+      className="sticky top-0 z-10 flex items-center bg-popover px-2 py-1.5 text-xs text-muted-foreground"
     >
-      {group.items.map((result) => (
-        <SearchResultRow
-          key={getContentSearchResultValue(result)}
-          result={result}
-          onSelect={onSelect}
-        />
-      ))}
-    </CommandGroup>
-  ));
+      <IconLoader2 className="mr-2 inline size-3 animate-spin" />
+      {t("common:searchingTaskWorkspace")}
+    </div>
+  ) : null;
+  return [
+    stillSearching,
+    ...groups.map((group) => (
+      <CommandGroup
+        key={group.repositoryName}
+        heading={
+          singleRepo
+            ? t("common:results")
+            : (getRepoDisplayName(group.repositoryName) ?? t("common:workspace"))
+        }
+        forceMount
+        data-testid="content-search-repo-group"
+        data-repository={group.repositoryName}
+      >
+        {group.items.map((result) => (
+          <SearchResultRow
+            key={getContentSearchResultValue(result)}
+            result={result}
+            onSelect={onSelect}
+          />
+        ))}
+      </CommandGroup>
+    )),
+  ];
 }

@@ -10,22 +10,6 @@ import (
 	"github.com/kandev/kandev/internal/office/shared"
 )
 
-// costContractVersion is the in-band activation point for the cache-split /
-// cost-provenance / turn-attribution columns (docs/specs/office/costs.md).
-// The Rill cost extract has no schema versioning of its own, so a row
-// written under a prior contract is distinguished by comparing
-// cost_contract_version, not by a date an analyst has to be told out of
-// band. Bump only if the contract's meaning changes again.
-//
-// v1 → v2: on the CostSourceUnpriced path, v1 forced Estimated=true
-// regardless of data.Usage.Estimated, conflating "we could not resolve a
-// price" with "the token counts themselves were synthesised" — two
-// different signals this same contract introduced CostSource specifically
-// to keep separate. v2 preserves data.Usage.Estimated verbatim on every
-// path (see resolveCostForUsage); cost_source=unpriced alone now carries
-// the pricing-failure signal.
-const costContractVersion int64 = 2
-
 // costResolution is resolveCostForUsage's output: the priced cost plus
 // everything needed to record provenance on the row. Kept separate from
 // models.CostEvent so this package's cost-resolution logic doesn't need to
@@ -40,7 +24,7 @@ type costResolution struct {
 
 // resolveCostForUsage applies the Layer A / Layer B lookup and records
 // which layer produced the dollar amount — CostSource, distinct from
-// Estimated (a token-synthesis flag, not cost provenance). Layer A wins
+// Estimated (a usage-authority flag, not cost provenance). Layer A wins
 // when the adapter forwarded a provider-reported cost sample, including an
 // explicit zero
 // (claude-acp's usage_update.cost.amount). Layer B (models.dev) is queried
@@ -49,7 +33,7 @@ type costResolution struct {
 // verbatim on every branch, including unpriced: whether the tokens were
 // synthesised and whether a price could be resolved are independent facts,
 // and cost_source=unpriced already carries the second one — see
-// costContractVersion's v1→v2 doc comment.
+// models.CostContractVersion's contract history.
 func (s *Service) resolveCostForUsage(ctx context.Context, data PromptUsageData) costResolution {
 	if data.Usage.ProviderReportedCostPresent || data.Usage.ProviderReportedCostSubcents > 0 {
 		return costResolution{
@@ -115,38 +99,62 @@ func (s *Service) lookupPricingWithVersion(
 // buildCostEvent assembles the office_cost_events row for a prompt-usage
 // update.
 //
+// AgentProfileID prefers sessionAgentProfileID — the stable
+// task_sessions.agent_profile_id captured when the session ran. It falls back
+// to RunnerProjection's workflow-configured runner only for legacy events that
+// have no session identity. This prevents a later workflow reassignment from
+// moving an earlier session's usage to a different profile.
+//
 // The cache split (TokensCachedRead / TokensCachedWrite) is recorded only
-// when data.Usage.Estimated is false. codex-acp's ACP bridge (and any
-// future adapter with no per-turn usage frame) synthesises InputTokens from
-// context-occupancy growth with Estimated=true and never sets the cache
-// fields — a NULL split there is honest; 0 would silently claim "no cache
-// activity" for an agent that never reported one. TokensCachedIn keeps its
-// original read+write sum on every row regardless, so existing consumers
-// (the tree-holds rollup, card 2faa29da's task_sessions fix) are
-// unaffected.
+// when the usage frame actually carries cache data (either field nonzero).
+// The context-occupancy fallback (fallbackUsageForNilTypedUsage in
+// adapter_prompt.go) never populates either field, so a NULL split there is
+// honest — it is a "no data reported" absence, not a claimed zero. Gating on
+// Estimated instead would be wrong: codex-acp's per-request typed frame sets
+// Estimated=true (it's scoped to the last model request of the turn, not
+// the whole turn — see normalizeCodexPromptUsage in dialect_codex.go) but
+// does carry real cache numbers, and discarding them would silently NULL a
+// value we actually have. TokensCachedIn keeps its original read+write sum
+// on every row regardless — a definite total whether or not the split is
+// known — so existing consumers (the tree-holds rollup, card 2faa29da's
+// task_sessions fix) are unaffected.
+//
+// TokensOut uses OutputTokensPresent to keep an observed zero distinct from
+// an absent sample. For events written before the presence flag existed, a
+// non-estimated count or a nonzero count remains observed. The only production
+// shape with no output sample is adapter_prompt.go's estimated
+// context-occupancy fallback.
 func buildCostEvent(
 	data PromptUsageData, fields *sqlite.TaskExecutionFields, projectID, provider string,
-	resolution costResolution,
+	resolution costResolution, sessionAgentProfileID string,
 ) *models.CostEvent {
+	agentProfileID := sessionAgentProfileID
+	if agentProfileID == "" {
+		agentProfileID = fields.AssigneeAgentProfileID
+	}
 	event := &models.CostEvent{
 		SessionID:      data.SessionID,
 		TaskID:         data.TaskID,
-		AgentProfileID: fields.AssigneeAgentProfileID,
+		AgentProfileID: agentProfileID,
 		ProjectID:      projectID,
 		Model:          data.Model,
 		Provider:       provider,
 		TokensIn:       data.Usage.InputTokens,
 		TokensCachedIn: data.Usage.CachedReadTokens + data.Usage.CachedWriteTokens,
-		TokensOut:      data.Usage.OutputTokens,
 		CostSubcents:   resolution.costSubcents,
 		Estimated:      resolution.estimated,
 		CostSource:     &resolution.source,
 		OccurredAt:     time.Now().UTC(),
 	}
-	contractVersion := costContractVersion
+	contractVersion := models.CostContractVersion
 	event.CostContractVersion = &contractVersion
 
-	if !data.Usage.Estimated {
+	if outputTokensObserved(data.Usage) {
+		outputTokens := data.Usage.OutputTokens
+		event.TokensOut = &outputTokens
+	}
+
+	if data.Usage.CachedReadTokens != 0 || data.Usage.CachedWriteTokens != 0 {
 		cachedRead := data.Usage.CachedReadTokens
 		cachedWrite := data.Usage.CachedWriteTokens
 		event.TokensCachedRead = &cachedRead
@@ -171,4 +179,11 @@ func buildCostEvent(
 		event.UsageEventID = &usageEventID
 	}
 	return event
+}
+
+func outputTokensObserved(usage UsageTokens) bool {
+	if usage.OutputTokensPresent != nil {
+		return *usage.OutputTokensPresent
+	}
+	return !usage.Estimated || usage.OutputTokens != 0
 }

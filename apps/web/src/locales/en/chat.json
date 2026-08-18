@@ -130,6 +130,9 @@
   "sendNowReferenceOverflow": "Combined entity references exceed the message limit.",
   "sortable": "sortable",
   "technicalDetails": "Technical details",
+  "managedRuntimeNpmTitle": "npm could not prepare the runtime",
+  "managedRuntimeNpmBody": "Kandev refreshed package data and retried the same runtime once.",
+  "managedRuntimeRetry": "Retry runtime",
   "theAssociatedWorktree": "The associated worktree",
   "theTaskAndItsData": "The task and its data",
   "thisActionCannotBeUndone": "This action cannot be undone.",
@@ -138,5 +141,9 @@
   "composerSteerPlaceholder": "Send now; delivered to the running turn",
   "unknownError": "Unknown error",
   "useWorkspaceDefault": "Use workspace default...",
-  "useWorkspaceDefaultOption": "Use workspace default"
+  "useWorkspaceDefaultOption": "Use workspace default",
+  "emptyTurnKnownCommand": "`/{{command}}` ran but produced no output. {{hint}}",
+  "emptyTurnNoOutput": "The agent finished without producing any output.",
+  "emptyTurnResendHint": "Try resending your request as a normal message, without the leading slash.",
+  "emptyTurnUnknownCommand": "`/{{command}}` isn't a command this agent recognizes, so it returned no output. {{hint}}"
 }

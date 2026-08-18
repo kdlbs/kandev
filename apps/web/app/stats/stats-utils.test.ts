@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { i18n } from "@/lib/i18n";
 import type { StatsResponse } from "@/lib/types/http";
 import {
   buildStatsSummary,
@@ -154,6 +155,20 @@ describe("getSubtitle", () => {
 
   it("prefers stats over the error flag once data arrives", () => {
     expect(getSubtitle(sampleStats.global, true)).toBe("10 tasks · 7 sessions · 1h 2m");
+  });
+
+  it("localizes the ready branch, not only the error and loading ones", async () => {
+    // The regression: the error and loading returns went through the catalog
+    // while the success subtitle kept "tasks" and "sessions" hardcoded, so the
+    // page header was half translated. `check-nonjsx-copy.mjs` cannot see it —
+    // the template's longest static chunk is " tasks · ", which `looksLikeCopy`
+    // rejects as a single lowercase word.
+    await i18n.changeLanguage("pseudo");
+    try {
+      expect(getSubtitle(sampleStats.global, false)).not.toMatch(/\b(tasks?|sessions?)\b/);
+    } finally {
+      await i18n.changeLanguage("en");
+    }
   });
 });
 

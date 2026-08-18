@@ -4,6 +4,7 @@ import { IconHome, IconInbox, IconMessageCircle } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { selectOfficeInboxCount } from "@/lib/state/slices/office/selectors";
+import { selectQuickChatHasUnseenIdle } from "@/lib/state/slices/ui/quick-chat-unseen-selectors";
 import { useOfficeModeState } from "@/hooks/use-in-office";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { homeDestinationHref } from "@/lib/navigation/core-destinations";
@@ -21,6 +22,12 @@ export function AppSidebarPrimaryNav({ collapsed }: AppSidebarPrimaryNavProps) {
   const mode = useOfficeModeState();
   const inOffice = mode === "office";
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
+  const quickChatHasUnseenIdle = useAppStore((state) =>
+    selectQuickChatHasUnseenIdle(state, workspaceId),
+  );
+  const quickChatLabel = t(
+    quickChatHasUnseenIdle ? "sidebar:quickChatUnseen" : "sidebar:quickChat",
+  );
   const homeHref = mode === "unknown" ? undefined : homeDestinationHref({ workspaceId, inOffice });
 
   return (
@@ -47,9 +54,10 @@ export function AppSidebarPrimaryNav({ collapsed }: AppSidebarPrimaryNavProps) {
       {workspaceId && collapsed && (
         <AppSidebarNavItem
           icon={IconMessageCircle}
-          label={t("sidebar:quickChat")}
+          label={quickChatLabel}
           onClick={handleOpenQuickChat}
           collapsed={collapsed}
+          dot={quickChatHasUnseenIdle}
         />
       )}
       <AppSidebarNewTaskItem collapsed={collapsed} />

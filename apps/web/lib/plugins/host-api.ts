@@ -124,6 +124,13 @@ import { TaskRowIndicator } from "@/components/integrations/task-row-indicator";
 import { IntegrationChangeRequestStatus } from "@/components/integrations/integration-change-request-status";
 import { IntegrationIcon } from "@/components/integrations/integration-icon";
 import { TaskChangeRequestLinkForm } from "@/components/integrations/task-change-request-link-form";
+import { IntegrationAuthStatusBanner } from "@/components/integrations/auth-status-banner";
+import { DraftedIntegrationEnabledControl } from "@/components/integrations/drafted-integration-enabled-control";
+import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
+import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import { getBackendConfig } from "@/lib/config";
 import { fetchJson } from "@/lib/api/client";
 import { i18n, normalizeLocale, t } from "@/lib/i18n";
@@ -136,6 +143,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { reviewItemId } from "@/components/task/review-selection";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { pluginModalManager } from "./modal-manager";
+import { pluginRegistry } from "./registry";
 import { readResolvedTheme, subscribeToThemeChanges } from "./theme";
 import { composeWriterId, subscribeToUserStateChanges } from "./user-state-sync";
 import { buildPluginContextApi } from "./plugin-context-api";
@@ -150,7 +158,7 @@ import type {
   PluginTaskReviewOptions,
   PluginTranslationOptions,
 } from "./types";
-import type { PluginUIApi } from "@kandev/plugin-sdk";
+import type { PluginUIApi, SettingsSaveContributor } from "@kandev/plugin-sdk";
 import {
   PluginStorageConflictError,
   type PluginStorageApi,
@@ -342,7 +350,39 @@ const PLUGIN_UI: PluginUIApi & Record<string, unknown> = {
   //   pixel-identical to the Plan panel. See rich-text-editor.tsx.
   RichTextEditor,
   RichTextReadOnly,
+  IntegrationAuthStatusBanner,
+  IntegrationEnabledControl: DraftedIntegrationEnabledControl,
+  SettingsSection,
+  SettingsCard,
+  WorkspaceScopedSection,
 };
+
+function pluginSettingsContributorId(pluginId: string, contributorId: string): string {
+  return `plugin:${pluginId}:${contributorId}`;
+}
+
+function createPluginSettingsSaveContributorHook(pluginId: string) {
+  return function usePluginSettingsSaveContributor(contributor: SettingsSaveContributor): void {
+    useSettingsSaveContributor({
+      ...contributor,
+      id: pluginSettingsContributorId(pluginId, contributor.id),
+    });
+  };
+}
+
+function createPluginUIApi(pluginId: string): PluginUIApi & Record<string, unknown> {
+  return {
+    ...PLUGIN_UI,
+    IntegrationEnabledControl: function PluginIntegrationEnabledControl(
+      props: React.ComponentProps<typeof DraftedIntegrationEnabledControl>,
+    ) {
+      return React.createElement(DraftedIntegrationEnabledControl, {
+        ...props,
+        id: pluginSettingsContributorId(pluginId, props.id),
+      });
+    },
+  };
+}
 
 /**
  * `host.utils` — plain functions, deliberately not on `host.ui` (a component
@@ -357,6 +397,7 @@ const PLUGIN_UTILS = {
   cn,
   formatRelativeTime,
   generateUUID,
+  integrationStatusRefreshMs: INTEGRATION_STATUS_REFRESH_MS,
 };
 
 /**
@@ -458,7 +499,7 @@ export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): Pl
         return getBackendConfig().apiBaseUrl;
       },
     },
-    ui: PLUGIN_UI,
+    ui: createPluginUIApi(pluginId),
     useResponsiveBreakpoint,
     // Getter, not a value captured at boot: a plugin built once at page load
     // would otherwise read the boot-time theme forever, and one that paints
@@ -480,6 +521,9 @@ export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): Pl
     toast: createPluginToast(pluginId),
     utils: PLUGIN_UTILS,
     storage: buildStorageApi(pluginId),
+    useSettingsSaveContributor: createPluginSettingsSaveContributorHook(pluginId),
+    setIntegrationEnabled: (integrationId, workspaceId, enabled) =>
+      pluginRegistry.setIntegrationEnabled(pluginId, integrationId, workspaceId, enabled),
   };
 }
 

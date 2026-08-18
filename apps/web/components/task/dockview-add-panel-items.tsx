@@ -7,6 +7,7 @@ import {
   IconFolder,
   IconGitBranch,
   IconGitPullRequest,
+  IconHistory,
   IconListCheck,
   IconNetwork,
 } from "@tabler/icons-react";
@@ -18,10 +19,13 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@kandev/ui/dropdown-menu";
+import type { DockviewApi } from "dockview-react";
 import { prPanelLabel, prIdentitySlug, prTaskKey } from "@/components/github/pr-utils";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { reviewPanelId } from "@/lib/state/dockview-review-panel-id";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
+import type { ReviewItemSummary } from "@/lib/plugins/types";
 import type { TaskPR } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
 import { mrTaskKey } from "@/components/gitlab/mr-detail-panel";
@@ -56,6 +60,84 @@ export const MENU_ICON_CLASS = "h-3.5 w-3.5 mr-1.5 shrink-0";
 export const MENU_ITEM_CLASS = "cursor-pointer text-xs";
 
 const PR_SUBMENU_TEST_ID = "add-panel-pr-submenu";
+
+type ReviewMenuIdentity = Pick<ReviewItemSummary, "providerId" | "reviewKey"> &
+  Partial<Pick<ReviewItemSummary, "connectionScope" | "repositoryId" | "changeRequestNumber">>;
+
+type ReviewPanelLookup = Pick<DockviewApi, "getPanel">;
+
+/** Reads the params of a live dockview panel, or undefined when no panel with
+ * that id is open. */
+function panelParams(api: ReviewPanelLookup, id: string): Record<string, unknown> | undefined {
+  return api.getPanel(id)?.params as Record<string, unknown> | undefined;
+}
+
+/** True when a panel's params identify the built-in GitHub/GitLab review —
+ * either through the legacy `prKey`/`mrKey` param or the provider + reviewKey
+ * pair. */
+function matchesBuiltInReview(
+  params: Record<string, unknown> | undefined,
+  providerId: "github" | "gitlab",
+  reviewKey: string,
+  legacyKey: "prKey" | "mrKey",
+): boolean {
+  return (
+    params?.[legacyKey] === reviewKey ||
+    ((params?.providerId === providerId || params?.provider === providerId) &&
+      params.reviewKey === reviewKey)
+  );
+}
+
+/** True when a panel's params match a fully-specified registered (non-GitHub/
+ * GitLab) review by provider, connection scope, repository, and change-request
+ * number. */
+function matchesRegisteredReview(
+  params: Record<string, unknown> | undefined,
+  review: Required<ReviewMenuIdentity>,
+): boolean {
+  return (
+    params?.providerId === review.providerId &&
+    params.connectionScope === review.connectionScope &&
+    params.repositoryId === review.repositoryId &&
+    params.changeRequestNumber !== undefined &&
+    String(params.changeRequestNumber) === String(review.changeRequestNumber)
+  );
+}
+
+/** True only when this exact review already has a canonical or keyed live panel. */
+export function isReviewPanelOpen(
+  api: ReviewPanelLookup | null,
+  review: ReviewMenuIdentity,
+): boolean {
+  if (!api) return false;
+  const canonicalParams = panelParams(api, "pr-detail");
+  if (review.providerId === "github") {
+    return (
+      Boolean(api.getPanel(`pr-detail|${review.reviewKey}`)) ||
+      matchesBuiltInReview(canonicalParams, "github", review.reviewKey, "prKey")
+    );
+  }
+  if (review.providerId === "gitlab") {
+    return (
+      Boolean(api.getPanel(`mr-detail|${review.reviewKey}`)) ||
+      matchesBuiltInReview(canonicalParams, "gitlab", review.reviewKey, "mrKey") ||
+      matchesBuiltInReview(panelParams(api, "mr-detail"), "gitlab", review.reviewKey, "mrKey")
+    );
+  }
+  const { connectionScope, repositoryId, changeRequestNumber } = review;
+  if (
+    connectionScope === undefined ||
+    repositoryId === undefined ||
+    changeRequestNumber === undefined
+  ) {
+    return false;
+  }
+  const registeredReview = { ...review, connectionScope, repositoryId, changeRequestNumber };
+  return (
+    Boolean(api.getPanel(reviewPanelId(registeredReview))) ||
+    matchesRegisteredReview(canonicalParams, registeredReview)
+  );
+}
 
 /**
  * Linked GitHub PR entries for the dockview "+" menu. A single PR renders as
@@ -135,6 +217,41 @@ function PluginTaskPanelMenuItems({ groupId }: { groupId: string }) {
   );
 }
 
+/** "+" menu row that opens a prompt-history panel in the given group. */
+function PromptHistoryPanelMenuItem({ groupId }: { groupId: string }) {
+  const { t } = useTranslation();
+  const addPromptHistoryPanel = useDockviewStore((s) => s.addPromptHistoryPanel);
+  return (
+    <DropdownMenuItem
+      data-testid="add-panel-prompt-history-item"
+      onClick={() => addPromptHistoryPanel({ groupId })}
+      className={MENU_ITEM_CLASS}
+    >
+      <IconHistory className={MENU_ICON_CLASS} />
+      {t("task:promptHistory")}
+    </DropdownMenuItem>
+  );
+}
+
+/** Filters the linked PRs/MRs down to those whose review panel isn't already
+ * open, so the "+" menu doesn't offer duplicates. */
+function missingBuiltInReviews(
+  api: ReviewPanelLookup | null,
+  state: Pick<AddPanelMenuState, "prs" | "mrs">,
+): Pick<AddPanelMenuState, "prs" | "mrs"> {
+  return {
+    prs: state.prs.filter(
+      (pr) => !isReviewPanelOpen(api, { providerId: "github", reviewKey: prTaskKey(pr) }),
+    ),
+    mrs: state.mrs.filter(
+      (mr) => !isReviewPanelOpen(api, { providerId: "gitlab", reviewKey: mrTaskKey(mr) }),
+    ),
+  };
+}
+
+/** Renders the dockview "+" menu: session/terminal reopen entries, browser,
+ * VS Code, plan, port-forwarding toggle, plugin task panels, todos, prompt
+ * history, changes/files, review panels, and repository scripts. */
 export function AddPanelMenuItems({
   groupId,
   state,
@@ -150,9 +267,7 @@ export function AddPanelMenuItems({
   const addTodosPanel = useDockviewStore((s) => s.addTodosPanel);
   const addFilesPanel = useDockviewStore((s) => s.addFilesPanel);
   const addChangesPanel = useDockviewStore((s) => s.addChangesPanel);
-  const addPRPanel = useDockviewStore((s) => s.addPRPanel);
-  const addMRPanel = useDockviewStore((s) => s.addMRPanel);
-
+  const api = useDockviewStore((s) => s.api);
   return (
     <>
       {state.taskId && (
@@ -201,6 +316,7 @@ export function AddPanelMenuItems({
           {t("common:todos")}
         </DropdownMenuItem>
       )}
+      {!state.isPassthrough && <PromptHistoryPanelMenuItem groupId={groupId} />}
       {!state.hasChanges && (
         <DropdownMenuItem onClick={() => addChangesPanel(groupId)} className={MENU_ITEM_CLASS}>
           <IconGitBranch className={MENU_ICON_CLASS} />
@@ -213,40 +329,54 @@ export function AddPanelMenuItems({
           {t("task:files")}
         </DropdownMenuItem>
       )}
-      <PRPanelMenuItems prs={state.prs} onOpenPR={(pr) => addPRPanel(prTaskKey(pr))} />
-      {state.mrs.map((mr) => (
-        <DropdownMenuItem
-          key={mr.id}
-          onClick={() => addMRPanel(mrTaskKey(mr))}
-          className={MENU_ITEM_CLASS}
-          data-testid={`add-panel-mr-item-${mr.id}`}
-        >
-          <IconGitPullRequest className={`${MENU_ICON_CLASS} text-orange-500`} />
-          {state.mrs.length > 1
-            ? `MR !${mr.mr_iid} - ${mr.project_path}`
-            : t("task:mergeRequest", { mriid: mr.mr_iid })}
-        </DropdownMenuItem>
-      ))}
-      <PluginReviewPanelMenuItems taskId={state.taskId} />
+      <ReviewPanelMenuItems groupId={groupId} state={state} api={api} />
       <RepositoryScriptsMenuItems onRunScript={onRunScript} onRunDevScript={onRunDevScript} />
     </>
   );
 }
 
-function PluginReviewPanelMenuItems({ taskId }: { taskId: string | null }) {
+/** Renders the "+" menu's review rows: linked PRs/MRs (skipping ones already
+ * open) plus registered non-GitHub/GitLab review panels. */
+function ReviewPanelMenuItems({
+  groupId,
+  state,
+  api,
+}: Pick<AddPanelMenuItemsProps, "groupId" | "state"> & { api: ReviewPanelLookup | null }) {
+  const { t } = useTranslation();
+  const addPRPanel = useDockviewStore((s) => s.addPRPanel);
+  const addMRPanel = useDockviewStore((s) => s.addMRPanel);
   const addReviewPanel = useDockviewStore((s) => s.addReviewPanel);
-  const reviews = useNormalizedTaskReviews(taskId).filter(
-    (review) => review.providerId !== "github" && review.providerId !== "gitlab",
+  const { prs, mrs } = missingBuiltInReviews(api, state);
+  const reviews = useNormalizedTaskReviews(state.taskId)
+    .filter((review) => review.providerId !== "github" && review.providerId !== "gitlab")
+    .filter((review) => !isReviewPanelOpen(api, review));
+  return (
+    <>
+      <PRPanelMenuItems prs={prs} onOpenPR={(pr) => addPRPanel(prTaskKey(pr), { groupId })} />
+      {mrs.map((mr) => (
+        <DropdownMenuItem
+          key={mr.id}
+          onClick={() => addMRPanel(mrTaskKey(mr), { groupId })}
+          className={MENU_ITEM_CLASS}
+          data-testid={`add-panel-mr-item-${mr.id}`}
+        >
+          <IconGitPullRequest className={`${MENU_ICON_CLASS} text-orange-500`} />
+          {mrs.length > 1
+            ? `MR !${mr.mr_iid} - ${mr.project_path}`
+            : t("task:mergeRequest", { mriid: mr.mr_iid })}
+        </DropdownMenuItem>
+      ))}
+      {reviews.map((review) => (
+        <DropdownMenuItem
+          key={reviewItemId(review)}
+          onClick={() => addReviewPanel(review, { groupId })}
+          className={MENU_ITEM_CLASS}
+          data-testid={`add-panel-review-item-${reviewItemId(review)}`}
+        >
+          <IconGitPullRequest className={MENU_ICON_CLASS} />
+          {review.title}
+        </DropdownMenuItem>
+      ))}
+    </>
   );
-  return reviews.map((review) => (
-    <DropdownMenuItem
-      key={reviewItemId(review)}
-      onClick={() => addReviewPanel(review)}
-      className={MENU_ITEM_CLASS}
-      data-testid={`add-panel-review-item-${reviewItemId(review)}`}
-    >
-      <IconGitPullRequest className={MENU_ICON_CLASS} />
-      {review.title}
-    </DropdownMenuItem>
-  ));
 }

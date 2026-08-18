@@ -442,6 +442,13 @@ func (s *Service) pullTasksFromNewFeederWork(ctx context.Context, workflowID, fe
 	}
 }
 
+// ReconcileFeederPulls wakes steps that pull from feederStepID. The
+// orchestrator calls this after an admitted manual move's lifecycle barrier
+// completes so selection and promotion rules stay owned by this service.
+func (s *Service) ReconcileFeederPulls(ctx context.Context, workflowID, feederStepID string) {
+	s.pullTasksFromNewFeederWork(ctx, workflowID, feederStepID)
+}
+
 func (s *Service) createTaskWithCapacity(ctx context.Context, task *models.Task) error {
 	if task.IsEphemeral || task.WorkflowStepID == "" {
 		return s.tasks.CreateTask(ctx, task)
@@ -2028,12 +2035,26 @@ func (s *Service) finalizeCancelledSessions(ctx context.Context, taskID string, 
 	// not also suppress the event publish below — event-driven clients
 	// need session.state_changed regardless of whether the archiving
 	// caller is still connected.
-	// Deliberately left unbounded (no timeout) here: publishSessionsCancelled
-	// gives each session in cancelledSessions its own independent 10s
-	// deadline around its Publish call, so one slow synchronous subscriber
-	// can no longer consume a shared batch-wide budget and starve the
-	// events for sessions later in the loop.
+	// Deliberately left unbounded at the batch level: clarification expiry and
+	// publishSessionsCancelled give each session their own independent timeout,
+	// so one slow write or synchronous subscriber cannot starve later sessions.
 	detachedCtx := context.WithoutCancel(ctx)
+	if s.clarificationCanceller != nil {
+		for _, session := range cancelledSessions {
+			if session == nil || session.ID == "" {
+				continue
+			}
+			expireCtx, cancelExpire := context.WithTimeout(detachedCtx, taskPublicationTimeout)
+			_, err := s.clarificationCanceller.ExpireSessionAndNotify(expireCtx, session.ID)
+			cancelExpire()
+			if err != nil {
+				s.logger.Error("failed to expire clarification after archive cancellation; response claims remain quarantined",
+					zap.String("task_id", taskID),
+					zap.String("session_id", session.ID),
+					zap.Error(err))
+			}
+		}
+	}
 	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledSessions, models.SessionArchiveCancelReason)
 }
 

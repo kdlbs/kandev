@@ -653,6 +653,7 @@ func isOpenCodeModelID(id string) bool {
 }
 
 type acpProbeNotificationState struct {
+	agentID             string
 	mu                  sync.Mutex
 	commands            []ProbeCommand
 	configOptions       []acp.SessionConfigOption
@@ -661,8 +662,9 @@ type acpProbeNotificationState struct {
 	gotConfigOptions    chan struct{}
 }
 
-func newACPProbeNotificationState() *acpProbeNotificationState {
+func newACPProbeNotificationState(agentID string) *acpProbeNotificationState {
 	return &acpProbeNotificationState{
+		agentID:          agentID,
 		gotCommands:      make(chan struct{}, 1),
 		gotConfigOptions: make(chan struct{}, 1),
 	}
@@ -685,7 +687,7 @@ func (s *acpProbeNotificationState) handle(n acp.SessionNotification) {
 		for _, command := range update.AvailableCommands {
 			s.commands = append(s.commands, ProbeCommand{
 				Name:        command.Name,
-				Description: command.Description,
+				Description: acpcompat.NormalizeCommandDescription(s.agentID, command.Description),
 			})
 		}
 		s.mu.Unlock()
@@ -843,7 +845,7 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	mode string,
 	requestedConfigOptions map[string]string,
 ) (*ProbeResponse, error) {
-	updates := newACPProbeNotificationState()
+	updates := newACPProbeNotificationState(agentID)
 
 	client := acpclient.NewClient(
 		acpclient.WithLogger(e.logger),

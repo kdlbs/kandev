@@ -322,6 +322,7 @@ function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
   });
 
   const canSaveCurrent = customQuery.trim().length > 0 || repoFilter.length > 0;
+  // i18n-exempt: persisted as the saved query's name, so it must not depend on the creating locale.
   const suggestedLabel = customQuery.trim() || (repoFilter ? `In ${repoFilter}` : "Saved query");
   const onOpenSaveDialog = () => canSaveCurrent && setSaveDialogOpen(true);
 

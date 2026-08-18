@@ -783,6 +783,46 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Creates a repository set. `repositoryIds` is ordered and is the order the set
+   * fills the task-creation picker.
+   */
+  async createRepositorySet(
+    workspaceId: string,
+    name: string,
+    repositoryIds: string[],
+    description = "",
+  ): Promise<{ id: string; name: string }> {
+    return this.request("POST", `/api/v1/workspaces/${workspaceId}/repository-sets`, {
+      name,
+      description,
+      repository_ids: repositoryIds,
+    });
+  }
+
+  async listRepositories(workspaceId: string): Promise<{
+    repositories: Array<{ id: string; name: string }>;
+    total: number;
+  }> {
+    return this.request("GET", `/api/v1/workspaces/${workspaceId}/repositories`);
+  }
+
+  async listRepositorySets(workspaceId: string): Promise<{
+    repository_sets: Array<{
+      id: string;
+      name: string;
+      description: string;
+      repositories: Array<{ repository_id: string; position: number }>;
+    }>;
+    total: number;
+  }> {
+    return this.request("GET", `/api/v1/workspaces/${workspaceId}/repository-sets`);
+  }
+
+  async deleteRepositorySet(setId: string): Promise<void> {
+    await this.rawRequest("DELETE", `/api/v1/repository-sets/${setId}`);
+  }
+
   async createSecret(
     name: string,
     value: string,
@@ -941,6 +981,23 @@ export class ApiClient {
     }>;
   }> {
     return this.request("GET", "/api/v1/executors");
+  }
+
+  async listAgentConfigBundles(): Promise<{
+    bundles: Array<{
+      id: string;
+      agent_id: string;
+      display_name: string;
+      label: string;
+      available: boolean;
+      files: Array<{
+        source_path: string;
+        target_path: string;
+        available: boolean;
+      }>;
+    }>;
+  }> {
+    return this.request("GET", "/api/v1/agent-config-bundles");
   }
 
   /**
@@ -1368,6 +1425,20 @@ export class ApiClient {
   async mockGitHubAddPRs(prs: MockPR[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/prs", { prs });
     await this.seedMockGitHubRepositoryAccess(prs);
+  }
+
+  async mockGitHubSetMergeOutcome(
+    owner: string,
+    repo: string,
+    number: number,
+    outcome: "merged" | "queued",
+  ): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/merge-outcomes", {
+      owner,
+      repo,
+      number,
+      outcome,
+    });
   }
 
   async mockGitHubAddIssues(issues: MockIssue[]): Promise<void> {

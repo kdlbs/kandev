@@ -81,6 +81,27 @@ Agent CLIs can also discover authentication from their normal home-directory fil
 
 See [Agents and profiles](agents-and-profiles.md) for exact profile fields and [Automation and MCP](automation-and-mcp.md) for unattended and external-client boundaries.
 
+### Treat copied agent configuration as an authority grant
+
+Portable agent configuration lets a profile copy a small allowlisted file from
+the Kandev host into a Docker, SSH, or Sprites executor. The copy is verbatim.
+It can therefore contain secrets, environment values, hooks, commands, model
+and permission settings, MCP servers, endpoints, or host paths. An agent and
+its child processes can use everything that the copied file grants.
+
+Kandev does not accept arbitrary paths or complete agent homes. It rejects
+symlinks, path traversal, non-regular files, and files above the per-file or
+per-launch size limit. It writes successful copies with owner-only mode
+`0600`, keeps raw contents out of the browser, API, and database, and reports
+optional copy failures as warnings. Fresh provisioning and **Reset
+Environment** read the current host file. Warm resume keeps the executor copy.
+
+An SSH copy is written below the configured remote user's home. A shared remote
+account can expose the file and its effects to other processes. Use a
+dedicated account when the configuration contains credentials or executable
+hooks. Review the selected bundle and the executor trust boundary before
+launching an agent.
+
 ## Treat workspace sources as access grants
 
 Adding a repository or folder gives the task access to that source. A local folder is a live host-path grant, not an upload: Kandev does not copy, move, delete, or add marker files to it. Folder sources are therefore limited to Local/Local PC and Worktree tasks and are never sent to Docker, SSH, Sprites, or Remote Docker.

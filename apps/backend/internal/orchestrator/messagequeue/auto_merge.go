@@ -3,6 +3,7 @@ package messagequeue
 import (
 	"bytes"
 	"encoding/json"
+	"time"
 
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/messageconstraints"
@@ -13,6 +14,7 @@ type autoMergedValues struct {
 	content     string
 	attachments []MessageAttachment
 	metadata    map[string]interface{}
+	queuedAt    time.Time
 }
 
 func buildAutoMergedEntry(target, source *QueuedMessage) (*autoMergedValues, bool) {
@@ -31,7 +33,15 @@ func buildAutoMergedEntry(target, source *QueuedMessage) (*autoMergedValues, boo
 		content:     joinAutoMergeContent(target.Content, source.Content),
 		attachments: attachments,
 		metadata:    metadata,
+		queuedAt:    latestQueuedAt(target.QueuedAt, source.QueuedAt),
 	}, true
+}
+
+func latestQueuedAt(first, second time.Time) time.Time {
+	if second.After(first) {
+		return second
+	}
+	return first
 }
 
 func autoMergeAllowed(target, source *QueuedMessage) bool {

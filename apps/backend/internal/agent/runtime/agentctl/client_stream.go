@@ -50,13 +50,21 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	// Register pending request
 	respCh := make(chan *ws.Message, 1)
 	c.pendingMu.Lock()
+	if c.pendingRequests == nil {
+		c.pendingRequests = make(map[string]chan *ws.Message)
+	}
+	if c.pendingRequestConns == nil {
+		c.pendingRequestConns = make(map[string]*websocket.Conn)
+	}
 	c.pendingRequests[reqID] = respCh
+	c.pendingRequestConns[reqID] = conn
 	c.pendingMu.Unlock()
 
 	// Clean up on exit
 	defer func() {
 		c.pendingMu.Lock()
 		delete(c.pendingRequests, reqID)
+		delete(c.pendingRequestConns, reqID)
 		c.pendingMu.Unlock()
 	}()
 
@@ -109,27 +117,35 @@ func (c *Client) resolvePendingRequest(msg *ws.Message) bool {
 
 	c.pendingMu.Lock()
 	ch, ok := c.pendingRequests[msg.ID]
+	if ok {
+		// Resolve while holding pendingMu so a stream cleanup cannot close the
+		// channel between the lookup and this send.
+		select {
+		case ch <- msg:
+		default:
+		}
+	}
 	c.pendingMu.Unlock()
 
 	if !ok {
 		return false
 	}
-
-	// Send response to waiting caller (non-blocking since channel is buffered)
-	select {
-	case ch <- msg:
-	default:
-	}
 	return true
 }
 
-// cleanupPendingRequests unblocks all pending requests with nil (signaling disconnect).
-func (c *Client) cleanupPendingRequests() {
+// cleanupPendingRequests unblocks pending requests owned by conn with nil
+// (signaling disconnect). A nil connection retains the all-stream cleanup
+// behavior used by tests and shutdown paths.
+func (c *Client) cleanupPendingRequests(conn *websocket.Conn) {
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
 
 	for id, ch := range c.pendingRequests {
+		if conn != nil && c.pendingRequestConns[id] != conn {
+			continue
+		}
 		close(ch)
 		delete(c.pendingRequests, id)
+		delete(c.pendingRequestConns, id)
 	}
 }

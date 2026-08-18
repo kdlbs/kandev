@@ -69,6 +69,7 @@ func TestGhMergeStatusCode(t *testing.T) {
 		{"404 Not Found phrase", errors.New("404 Not Found"), true, 404},
 		{"status 404", errors.New("request failed (status: 404)"), true, 404},
 		{"HTTP 403", errors.New("HTTP 403: Forbidden"), true, 403},
+		{"HTTP 400", errors.New("HTTP 400: Bad Request"), true, 400},
 		{"HTTP 405", errors.New("gh: HTTP 405: Method Not Allowed"), true, 405},
 		{"status 405", errors.New("status: 405"), true, 405},
 		{"405 phrase", errors.New("405 Method Not Allowed"), true, 405},

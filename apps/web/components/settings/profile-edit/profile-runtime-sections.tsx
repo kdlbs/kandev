@@ -55,6 +55,10 @@ type SpritesSectionsProps = {
   remoteCredentials: string[];
   baselineRemoteCredentials?: string[];
   onRemoteCredentialsChange: (ids: string[]) => void;
+  configBundleIds: string[];
+  baselineConfigBundleIds?: string[];
+  onConfigBundleChange: (ids: string[]) => void;
+  isSSH?: boolean;
   agentEnvVars: Record<string, string | null>;
   baselineAgentEnvVars?: Record<string, string | null>;
   onAgentEnvVarChange: (agentId: string, secretId: string | null) => void;
@@ -81,6 +85,10 @@ export function SpritesSections({
   remoteCredentials,
   baselineRemoteCredentials,
   onRemoteCredentialsChange,
+  configBundleIds,
+  baselineConfigBundleIds,
+  onConfigBundleChange,
+  isSSH,
   agentEnvVars,
   baselineAgentEnvVars,
   onAgentEnvVarChange,
@@ -104,6 +112,10 @@ export function SpritesSections({
         selectedIds={remoteCredentials}
         baselineSelectedIds={baselineRemoteCredentials}
         onChange={onRemoteCredentialsChange}
+        configBundleIds={configBundleIds}
+        baselineConfigBundleIds={baselineConfigBundleIds}
+        onConfigBundleChange={onConfigBundleChange}
+        isSSH={isSSH}
         agentEnvVars={agentEnvVars}
         baselineAgentEnvVars={baselineAgentEnvVars}
         onAgentEnvVarChange={onAgentEnvVarChange}

@@ -13,6 +13,7 @@ function formatTranscript(messages: Message[]): string {
   return messages
     .filter((m) => m.type === "message" || m.type === "content")
     .map((m) => {
+      // i18n-exempt: transcript role markers sent verbatim to the summarizing model, not shown to a user.
       const role = m.author_type === "user" ? "User" : "Agent";
       return `${role}: ${m.content}`;
     })
@@ -46,7 +47,7 @@ export function useSummarizeSession() {
     } catch (error) {
       return {
         summary: null,
-        error: error instanceof Error ? error.message : "Could not generate a summary",
+        error: error instanceof Error ? error.message : t("task:couldNotGenerateSummary"),
       };
     } finally {
       setIsSummarizing(false);

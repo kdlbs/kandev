@@ -18,15 +18,22 @@ export const SETTINGS_DISCOVERY_DEFINITIONS = [
   ...ACCOUNT_DISCOVERY_DEFINITIONS,
 ];
 
-// Exclusion reasons shared by more than one path. These are maintainer-facing
-// notes, not UI copy, so they stay untranslated.
+// i18n-exempt: maintainer-facing notes explaining why a route is out of the
+// discovery catalog. Read only by catalog.test.ts and settings-routes.test.ts;
+// never rendered.
 const TO_APPEARANCE = "Redirects to the canonical Appearance page.";
+// i18n-exempt: maintainer-facing exclusion note; read by tests only.
 const TO_DATA_STORAGE = "Redirects to the canonical Data & storage page.";
+// i18n-exempt: maintainer-facing exclusion note; read by tests only.
 const TO_KEYBOARD_SHORTCUTS = "Redirects to the canonical Keyboard Shortcuts page.";
+// i18n-exempt: maintainer-facing exclusion note; read by tests only.
 const TO_TASK_BEHAVIOR = "Redirects to the canonical Task behavior page.";
+// i18n-exempt: maintainer-facing exclusion note; read by tests only.
 const TO_TERMINAL_EDITORS = "Redirects to the canonical Terminal & Editors page.";
+// i18n-exempt: maintainer-facing exclusion note; read by tests only.
 const TO_WORKSPACE_INTEGRATIONS = "Redirects into the active workspace's Integrations tab.";
 
+// i18n-exempt: maintainer-facing exclusion notes, asserted by tests only.
 export const SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS: Record<string, string> = {
   "/settings": "Owned by the top-level Go to Settings destination.",
   "/settings/preferences": TO_APPEARANCE,

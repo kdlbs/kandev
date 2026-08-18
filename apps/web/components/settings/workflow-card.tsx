@@ -249,7 +249,7 @@ function WorkflowCardBody({
   return (
     <>
       <Label>{t("workflows:workflowDetails")}</Label>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-2">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:gap-2">
         <WorkflowNameField
           workflow={workflow}
           savedWorkflow={savedWorkflow}
@@ -257,7 +257,7 @@ function WorkflowCardBody({
           readOnly={readOnly}
           isImproveWorkspace={isImproveWorkspace}
         />
-        <div className="w-full space-y-1.5 sm:w-[240px] sm:shrink-0">
+        <div className="w-full space-y-1.5 md:w-[240px] md:shrink-0">
           <Label className="flex items-center gap-1">
             <span>{t("workflows:agentProfile")}</span>
             <HelpTip text={t("workflows:agentProfileHelp")} />

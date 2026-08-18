@@ -1,8 +1,10 @@
 import { useAppStore } from "@/components/state-provider";
-import type { Message, TaskPendingAction, TaskSession } from "@/lib/types/http";
+import type { Message, TaskPendingAction, TaskSession, Turn } from "@/lib/types/http";
 import {
+  clarificationTurnIdForSession,
   hasPendingClarificationForSession,
   hasPendingPermissionForSession,
+  type PendingClarificationScope,
 } from "@/lib/utils/pending-clarification";
 import { aggregateTaskPendingInput } from "@/lib/utils/task-pending-input";
 
@@ -15,6 +17,12 @@ export type PendingInputFallback = {
   taskPendingAction?: TaskPendingAction | null;
   primarySessionState?: string | null;
   primarySessionPendingAction?: TaskPendingAction | null;
+};
+
+type PrimarySessionProjection = {
+  id: string | null | undefined;
+  pendingAction: TaskPendingAction | null | undefined;
+  state: string | null | undefined;
 };
 
 function fallbackFlag(
@@ -33,10 +41,27 @@ function actionFlags(action: TaskPendingAction | null | undefined): PendingInput
 
 function loadedSessionFlags(
   messagesBySession: Record<string, Message[] | undefined>,
+  turnsBySession: Record<string, readonly Turn[] | undefined>,
   sessionId: string,
+  sessionState: string | null | undefined,
+  pendingAction?: TaskPendingAction | null,
 ): PendingInput {
+  const currentTurnId =
+    sessionState == null
+      ? undefined
+      : clarificationTurnIdForSession(sessionState, turnsBySession[sessionId]);
+  // With both authority signals unavailable, preserve the legacy full-message
+  // scan. Once either loads, explicit turn/action scoping applies.
+  const clarificationScope: PendingClarificationScope | undefined =
+    currentTurnId === undefined && pendingAction === undefined
+      ? undefined
+      : { currentTurnId, pendingAction };
   return {
-    clarification: hasPendingClarificationForSession(messagesBySession, sessionId),
+    clarification: hasPendingClarificationForSession(
+      messagesBySession,
+      sessionId,
+      clarificationScope,
+    ),
     permission: hasPendingPermissionForSession(messagesBySession, sessionId),
   };
 }
@@ -59,8 +84,15 @@ export function useTaskPendingInput(
     toBitmask(
       selectTaskPendingFlags(
         state.messages.bySession,
+        state.turns.bySession,
         fallback?.taskId ? state.taskSessionsByTask.itemsByTaskId[fallback.taskId] : undefined,
-        primarySessionId,
+        {
+          id: primarySessionId,
+          state: primarySessionId ? state.taskSessions.items[primarySessionId]?.state : undefined,
+          pendingAction: primarySessionId
+            ? state.taskSessions.items[primarySessionId]?.pending_action
+            : undefined,
+        },
         fallback,
       ),
     ),
@@ -74,6 +106,7 @@ function toBitmask(flags: PendingInput): number {
 
 function selectFlagsFromLoadedTaskSessions(
   messagesBySession: Record<string, Message[] | undefined>,
+  turnsBySession: Record<string, readonly Turn[] | undefined>,
   taskSessions: TaskSession[],
   fallback: PendingInputFallback | undefined,
 ): PendingInput {
@@ -81,7 +114,13 @@ function selectFlagsFromLoadedTaskSessions(
     taskSessions,
     (session) => {
       if (messagesBySession[session.id] === undefined) return undefined;
-      return loadedSessionFlags(messagesBySession, session.id);
+      return loadedSessionFlags(
+        messagesBySession,
+        turnsBySession,
+        session.id,
+        session.state,
+        session.pending_action,
+      );
     },
     fallback?.taskPendingAction,
   );
@@ -96,14 +135,23 @@ function selectFlagsFromLoadedTaskSessions(
 
 function selectFlagsFromPrimarySession(
   messagesBySession: Record<string, Message[] | undefined>,
-  primarySessionId: string | null | undefined,
+  turnsBySession: Record<string, readonly Turn[] | undefined>,
+  primarySession: PrimarySessionProjection,
   fallback: PendingInputFallback | undefined,
 ): PendingInput {
   const taskSnapshot = actionFlags(fallback?.taskPendingAction);
   if (taskSnapshot.clarification || taskSnapshot.permission) return taskSnapshot;
-  if (!primarySessionId) return NONE;
-  if (messagesBySession[primarySessionId] !== undefined) {
-    return loadedSessionFlags(messagesBySession, primarySessionId);
+  if (!primarySession.id) return NONE;
+  if (messagesBySession[primarySession.id] !== undefined) {
+    return loadedSessionFlags(
+      messagesBySession,
+      turnsBySession,
+      primarySession.id,
+      primarySession.state ?? fallback?.primarySessionState,
+      primarySession.pendingAction !== undefined
+        ? primarySession.pendingAction
+        : fallback?.primarySessionPendingAction,
+    );
   }
   return {
     clarification: fallbackFlag(fallback, "clarification"),
@@ -113,14 +161,20 @@ function selectFlagsFromPrimarySession(
 
 function selectTaskPendingFlags(
   messagesBySession: Record<string, Message[] | undefined>,
+  turnsBySession: Record<string, readonly Turn[] | undefined>,
   taskSessions: TaskSession[] | undefined,
-  primarySessionId: string | null | undefined,
+  primarySession: PrimarySessionProjection,
   fallback: PendingInputFallback | undefined,
 ): PendingInput {
   if (taskSessions?.length) {
-    return selectFlagsFromLoadedTaskSessions(messagesBySession, taskSessions, fallback);
+    return selectFlagsFromLoadedTaskSessions(
+      messagesBySession,
+      turnsBySession,
+      taskSessions,
+      fallback,
+    );
   }
-  return selectFlagsFromPrimarySession(messagesBySession, primarySessionId, fallback);
+  return selectFlagsFromPrimarySession(messagesBySession, turnsBySession, primarySession, fallback);
 }
 
 /**
@@ -132,7 +186,15 @@ export function useSessionPendingInput(sessionId: string | null | undefined): Pe
   const flags = useAppStore((state) => {
     if (!sessionId) return 0;
     if (state.messages.bySession[sessionId] !== undefined) {
-      return toBitmask(loadedSessionFlags(state.messages.bySession, sessionId));
+      return toBitmask(
+        loadedSessionFlags(
+          state.messages.bySession,
+          state.turns.bySession,
+          sessionId,
+          state.taskSessions?.items?.[sessionId]?.state,
+          state.taskSessions?.items?.[sessionId]?.pending_action,
+        ),
+      );
     }
     return toBitmask(actionFlags(state.taskSessions?.items?.[sessionId]?.pending_action));
   });

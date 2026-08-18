@@ -12,6 +12,7 @@ import type { PluginUIApi } from "@kandev/plugin-sdk";
 export type {
   PluginContextApi,
   PluginHostRepository,
+  MainTopBarSlotProps,
   PluginNavSection,
   PluginUIApi,
 } from "@kandev/plugin-sdk";
@@ -101,6 +102,10 @@ export interface IntegrationSettingsRegistration {
   /** Curated icon name or plugin-owned component. */
   icon?: PluginSDK.PluginIcon;
   Component: ReactType.ComponentType<PluginIntegrationSettingsProps>;
+  /** Optional header action (e.g. an enable toggle) rendered in the host's
+   * SettingsSection header action slot, mirroring built-in integrations.
+   * Receives `{ workspaceId?: string }` so it can operate per-workspace. */
+  action?: ReactType.ComponentType<{ workspaceId?: string }>;
 }
 
 /**
@@ -113,7 +118,12 @@ export interface IntegrationSettingsRegistration {
  * sessionIds }`), "main-top-bar" (status/actions in the default app top bar on
  * the Home / Kanban / Tasks views, beside the CPU/DB metrics and the
  * view/display controls — the app-wide, task-agnostic counterpart to
- * "chat-top-bar"; receives `{ workspaceId, workspaceLabel, currentPage }`),
+ * "chat-top-bar"; receives `{ workspaceId, workspaceLabel, currentPage,
+ * presentation }`). On phones, `presentation` is "mobile": contributions
+ * join the horizontally scrollable middle action strip between the fixed
+ * Kandev link and menu button. Use the host `ui.Button` icon-button contract
+ * there: a 32px box with a 16px SVG icon. Desktop contributions retain their
+ * existing sizing.
  * "app-status-bar-left" / "app-status-bar-right" (receives
  * `AppStatusBarSlotProps` as `slotProps`), and
  * "plugin-settings" (inline UI on a plugin's own settings

@@ -112,6 +112,7 @@ function registerStartedSession({
   // locale-dependent value that then renders unchanged after a locale switch,
   // on surfaces this directory does not own. Same call as the built-in layout
   // profile names and the seeded workflow step names.
+  // i18n-exempt: persisted as the task title. See the comment above.
   const derivedName = prompt.slice(0, 40) || "Config Chat";
   store.renameQuickChatSession(response.session_id, derivedName);
   void persistQuickChatRename(response.session_id, response.task_id, derivedName).catch(

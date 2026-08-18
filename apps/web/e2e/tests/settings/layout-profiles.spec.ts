@@ -324,6 +324,20 @@ test.describe("Task layout profile defaults", () => {
         prDetailsGroupId: "group-right-top",
         rightGroupOrder: ["files", "changes", "pr-detail"],
       });
+
+    const agentGroup = testPage.locator('.dv-groupview:has([data-testid^="session-tab-"])');
+    await agentGroup.getByTestId("dockview-add-panel-btn").click();
+    await expect(
+      testPage.getByTestId(`add-panel-pr-item-testorg-testrepo-${PR_NUMBER}`),
+    ).toHaveCount(0);
+    await expect(testPage.getByTestId("add-panel-pr-submenu")).toHaveCount(0);
+    await testPage.keyboard.press("Escape");
+    await expect
+      .poll(() => dockviewSnapshot(testPage))
+      .toMatchObject({
+        prDetailsGroupId: "group-right-top",
+        rightGroupOrder: ["files", "changes", "pr-detail"],
+      });
   });
 
   test("fresh tasks use the no-terminal default while existing tasks wait for Reset Layout", async ({

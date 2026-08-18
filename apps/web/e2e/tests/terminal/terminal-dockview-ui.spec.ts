@@ -9,6 +9,8 @@ import {
   waitForPersistedLayoutChange,
 } from "../../helpers/dockview-persistence";
 import { dwell } from "../../helpers/causal-waits";
+import { pauseNextTerminalDestroy } from "./terminal-close-pause";
+import { readTerminalHostBuffer } from "./terminal-test-helpers";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -125,7 +127,7 @@ test.describe("Terminals — dockview UI", () => {
   });
 
   /**
-   * Regression: closing a terminal tab via dockview's X button must
+   * Regression: confirming a terminal close via dockview's X button must
    * destroy the shell (PTY stopped, DB row removed), not park it.
    * After reload the closed terminal must NOT surface in the "+" menu.
    */
@@ -135,7 +137,7 @@ test.describe("Terminals — dockview UI", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    await createTaskAndWait(apiClient, seedData, "Close + Reload UI");
+    const task = await createTaskAndWait(apiClient, seedData, "Close + Reload UI");
     const session = await openTask(testPage, "Close + Reload UI");
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
@@ -150,7 +152,32 @@ test.describe("Terminals — dockview UI", () => {
       .locator(".dv-default-tab-action");
     const layoutBeforeClose = await snapshotPersistedLayouts(testPage);
     await seq2Close.click();
+    const confirmation = testPage.getByTestId("terminal-close-confirm-popover");
+    await expect(confirmation).toBeVisible();
+    await confirmation.getByRole("button", { name: "Close terminal", exact: true }).click();
     await expect(testPage.getByTestId("terminal-tab-seq-2")).toHaveCount(0, { timeout: 5_000 });
+
+    // Local removal is intentionally optimistic. Observe background teardown
+    // before reloading so the reload cannot race the server-owned shell row.
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    const environmentId = sessions[0]?.task_environment_id;
+    expect(environmentId).toBeTruthy();
+    await expect
+      .poll(
+        async () => {
+          const response = await apiClient.wsRequest<{ shells?: Array<{ seq?: number }> }>(
+            "user_shell.list",
+            {
+              task_id: task.id,
+              task_environment_id: environmentId,
+              include_parked: true,
+            },
+          );
+          return response.shells?.some((shell) => shell.seq === 2) ?? false;
+        },
+        { timeout: 10_000, message: "terminal teardown did not reach server state" },
+      )
+      .toBe(false);
 
     // The tab is gone from the DOM, but the reload below reads sessionStorage,
     // and that write is on a ~300ms debounce with no event. Wait for the write
@@ -250,7 +277,7 @@ test.describe("Terminals — dockview UI", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    await createTaskAndWait(apiClient, seedData, "Row Destroy UI");
+    const task = await createTaskAndWait(apiClient, seedData, "Row Destroy UI");
     const session = await openTask(testPage, "Row Destroy UI");
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
@@ -264,12 +291,79 @@ test.describe("Terminals — dockview UI", () => {
       .locator('[data-testid^="reopen-terminal-"]')
       .filter({ has: testPage.getByTestId("reopen-terminal-seq-2") });
     await expect(row).toHaveCount(1, { timeout: 10_000 });
+    const rowTestId = await row.getAttribute("data-testid");
+    const terminalId = rowTestId?.replace("reopen-terminal-", "");
+    expect(terminalId).toBeTruthy();
 
-    testPage.once("dialog", (d) => d.accept());
-    await row.getByTestId("destroy-terminal-row").click();
+    const [terminalRowBox, adjacentRowBox] = await Promise.all([
+      row.boundingBox(),
+      testPage.getByTestId("new-terminal-button").boundingBox(),
+    ]);
+    expect(terminalRowBox).not.toBeNull();
+    expect(adjacentRowBox).not.toBeNull();
+    expect(terminalRowBox!.height).toBeCloseTo(adjacentRowBox!.height, 1);
+
+    let nativeDialogSeen = false;
+    testPage.once("dialog", (dialog) => {
+      nativeDialogSeen = true;
+      void dialog.dismiss();
+    });
+    const destroyButton = row.getByTestId("destroy-terminal-row");
+    await destroyButton.click();
+
+    expect(nativeDialogSeen).toBe(false);
+    await expect(testPage.getByTestId("terminal-menu-close-confirmation")).toHaveCount(0);
+    const confirmation = testPage.getByTestId("terminal-close-confirm-popover");
+    await expect(confirmation).toBeVisible();
+
+    const [rowBox, buttonBox, confirmationBox] = await Promise.all([
+      row.boundingBox(),
+      destroyButton.boundingBox(),
+      confirmation.boundingBox(),
+    ]);
+    expect(rowBox).not.toBeNull();
+    expect(buttonBox).not.toBeNull();
+    expect(confirmationBox).not.toBeNull();
+    expect(
+      Math.abs(confirmationBox!.x + confirmationBox!.width - (buttonBox!.x + buttonBox!.width)),
+    ).toBeLessThanOrEqual(8);
+
+    // Radix menu rows take focus on pointer movement. Crossing the owning
+    // menu on the way to the popover must not dismiss its actions.
+    await testPage.mouse.move(rowBox!.x + 8, rowBox!.y + rowBox!.height / 2, { steps: 3 });
+    await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(confirmation).toBeHidden();
+    await expect(row).toHaveCount(1);
+
+    await destroyButton.click();
+    await expect(confirmation).toBeVisible();
+    await confirmation.getByRole("button", { name: "Close terminal", exact: true }).click();
 
     // Row vanishes from the live menu.
     await expect(row).toHaveCount(0, { timeout: 5_000 });
+
+    // Local removal is intentionally optimistic. Observe the background
+    // teardown at its server-owned list boundary before reloading, otherwise
+    // a fast reload can race the request and temporarily restore the shell.
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    const environmentId = sessions[0]?.task_environment_id;
+    expect(environmentId).toBeTruthy();
+    await expect
+      .poll(
+        async () => {
+          const response = await apiClient.wsRequest<{ shells?: Array<{ id?: string }> }>(
+            "user_shell.list",
+            {
+              task_id: task.id,
+              task_environment_id: environmentId,
+              include_parked: true,
+            },
+          );
+          return response.shells?.some((shell) => shell.id === terminalId) ?? false;
+        },
+        { timeout: 10_000, message: "terminal teardown did not reach server state" },
+      )
+      .toBe(false);
 
     // Reload and confirm it does not come back.
     // Close the open menu first by pressing Escape.
@@ -347,6 +441,80 @@ test.describe("Terminals — dockview UI", () => {
     ).toBe(before);
   });
 
+  test("tab close uses localized confirmation and removes before teardown settles", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const destroyPause = await pauseNextTerminalDestroy(testPage);
+    await createTaskAndWait(apiClient, seedData, "Busy Close UI");
+    const session = await openTask(testPage, "Busy Close UI");
+    await session.clickTab("Terminal");
+    await session.expectTerminalConnected();
+
+    await clickNewTerminalInPlusMenu(testPage, session);
+    const siblingTab = testPage.getByTestId("terminal-tab-seq-1").locator("..").locator("..");
+    const targetTab = testPage.getByTestId("terminal-tab-seq-2").locator("..").locator("..");
+    await expect(siblingTab).toBeVisible({ timeout: 10_000 });
+    await expect(targetTab).toBeVisible({ timeout: 10_000 });
+
+    const siblingTestId = await siblingTab.getAttribute("data-testid");
+    expect(siblingTestId).toMatch(/^terminal-tab-shell-/);
+    const stableSiblingTab = testPage.getByTestId(siblingTestId!);
+    const targetTestId = await targetTab.getAttribute("data-testid");
+    expect(targetTestId).toMatch(/^terminal-tab-shell-/);
+    const targetId = targetTestId!.replace("terminal-tab-", "");
+    const targetHost = testPage
+      .locator(`[data-portal-panel="${targetId}"]`)
+      .getByTestId("terminal-xterm-host");
+    await expect(targetHost).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(() => readTerminalHostBuffer(targetHost), {
+        timeout: 30_000,
+        message: "second terminal shell should connect",
+      })
+      .not.toBe("");
+
+    destroyPause.arm();
+    const closeTarget = testPage.getByTestId(`terminal-tab-close-${targetId}`);
+    await closeTarget.click();
+
+    const confirmation = testPage.getByTestId("terminal-close-confirm-popover");
+    await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await expect(confirmation).toHaveRole("dialog");
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await expect(targetTab).toBeVisible();
+    const confirmationBox = await confirmation.boundingBox();
+    expect(confirmationBox).not.toBeNull();
+    expect(confirmationBox!.width).toBeLessThanOrEqual(320);
+    expect(confirmationBox!.height).toBeLessThanOrEqual(220);
+    await confirmation.getByRole("button", { name: "Close terminal", exact: true }).click();
+    await destroyPause.waitForRequest();
+
+    // The transport is deliberately paused: disappearance must be optimistic,
+    // with no tab, spinner, or popover waiting for backend teardown.
+    await expect(confirmation).toBeHidden();
+    await expect(targetTab).toHaveCount(0);
+    // Once only one ordinary terminal remains its sequence badge disappears,
+    // so use the stable shell-id test id captured before the close.
+    await expect(stableSiblingTab).toBeVisible({ timeout: 5_000 });
+    await stableSiblingTab.click();
+
+    const siblingHost = testPage.getByTestId("terminal-panel").getByTestId("terminal-xterm-host");
+    await expect(siblingHost).toBeVisible({ timeout: 10_000 });
+    await siblingHost.click();
+    await testPage.keyboard.type("printf '%s\\n' $((71820 + 3))");
+    await testPage.keyboard.press("Enter");
+    await expect
+      .poll(() => readTerminalHostBuffer(siblingHost), {
+        timeout: 10_000,
+        message: "sibling terminal should remain interactive after confirmed close",
+      })
+      .toContain("71823");
+    destroyPause.release();
+  });
+
   /**
    * Right-click → Terminate must hard-destroy the terminal AND remove
    * its dockview tab in the same gesture. Before the fix the WS RPC
@@ -375,6 +543,11 @@ test.describe("Terminals — dockview UI", () => {
     const seq2TabTrigger = testPage.getByTestId("terminal-tab-seq-2").locator("..").locator("..");
     await seq2TabTrigger.click({ button: "right" });
     await testPage.getByRole("menuitem", { name: /^Terminate/ }).click();
+
+    const confirmation = testPage.getByTestId("terminal-close-confirm-popover");
+    await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible();
+    await confirmation.getByRole("button", { name: "Close terminal", exact: true }).click();
 
     // The seq=2 badge must disappear — proves the panel was closed.
     await expect(testPage.getByTestId("terminal-tab-seq-2")).toHaveCount(0, { timeout: 5_000 });

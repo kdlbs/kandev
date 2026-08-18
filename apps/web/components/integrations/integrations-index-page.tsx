@@ -15,6 +15,7 @@ import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
 import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
+import { SettingsPageHeader } from "@/components/settings/settings-typography";
 import { useTranslation } from "react-i18next";
 import { useDraftedIntegrationEnabled } from "@/components/integrations/use-drafted-integration-enabled";
 import { useHideDisabledIntegrationsInNav } from "@/hooks/domains/integrations/use-hide-disabled-integrations-in-nav";
@@ -134,10 +135,17 @@ export function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProp
 
   return (
     <div className="space-y-6">
-      <WorkspaceSectionHeader
-        tab="integrations"
-        description={t("settings:connectKandevToThirdPartyServices")}
-      />
+      {workspaceId ? (
+        <WorkspaceSectionHeader
+          tab="integrations"
+          description={t("settings:connectKandevToThirdPartyServices")}
+        />
+      ) : (
+        <SettingsPageHeader
+          title={t("common:integrations")}
+          description={t("settings:connectKandevToThirdPartyServices")}
+        />
+      )}
       <Separator />
       <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {INTEGRATIONS.map(({ slug, label, descriptionKey, Icon }) => {

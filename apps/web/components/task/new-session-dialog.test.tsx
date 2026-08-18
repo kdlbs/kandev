@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 
@@ -8,6 +8,8 @@ const mockBuildStartRequest = vi.fn();
 const mockLaunchSession = vi.fn();
 const mockSetActiveSession = vi.fn();
 let mockAgentSelectorValue: string | undefined;
+let mockAgentSelectorOnChange: ((value: string) => void) | undefined;
+const PLUGIN_COMPOSER_LABEL = "Plugin composer action";
 
 const BASE_PROFILE = {
   id: "profile-1",
@@ -139,7 +141,7 @@ vi.mock("@/components/task-create-dialog-selectors", async () => {
           type: "button",
           // Stands in for a plugin composer action: insert text, then ask the
           // dialog to submit the native way.
-          "aria-label": "Plugin composer action",
+          "aria-label": PLUGIN_COMPOSER_LABEL,
           onClick: () => {
             updateValue("dictated prompt");
             onComposerSubmit?.();
@@ -150,8 +152,9 @@ vi.mock("@/components/task-create-dialog-selectors", async () => {
     );
   }
   return {
-    AgentSelector: (props: { value?: string }) => {
+    AgentSelector: (props: { value?: string; onValueChange?: (value: string) => void }) => {
       mockAgentSelectorValue = props.value;
+      mockAgentSelectorOnChange = props.onValueChange;
       return null;
     },
     TaskFormInputs,
@@ -230,11 +233,13 @@ vi.mock("./session-dialog-shared", () => ({
 
 import { NewSessionDialog } from "./new-session-dialog";
 
+// eslint-disable-next-line max-lines-per-function
 describe("NewSessionDialog", () => {
   afterEach(() => {
     cleanup();
     mockState.agentProfiles.items = [BASE_PROFILE];
     mockAgentSelectorValue = undefined;
+    mockAgentSelectorOnChange = undefined;
   });
 
   beforeEach(() => {
@@ -277,13 +282,48 @@ describe("NewSessionDialog", () => {
   it("submits text a plugin composer action inserted into a blank composer", async () => {
     render(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Plugin composer action" }));
+    fireEvent.click(screen.getByRole("button", { name: PLUGIN_COMPOSER_LABEL }));
 
     await waitFor(() => expect(mockLaunchSession).toHaveBeenCalledTimes(1));
     expect(mockBuildStartRequest).toHaveBeenCalledWith(
       "task-1",
       "profile-1",
       expect.objectContaining({ prompt: "dictated prompt" }),
+    );
+  });
+
+  it("does not mark the initialized profile explicit until the picker changes", async () => {
+    render(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: PLUGIN_COMPOSER_LABEL }));
+
+    await waitFor(() =>
+      expect(mockBuildStartRequest).toHaveBeenCalledWith(
+        "task-1",
+        "profile-1",
+        expect.objectContaining({ profileExplicit: false }),
+      ),
+    );
+  });
+
+  it("marks a changed picker profile explicit", async () => {
+    mockState.agentProfiles.items = [
+      BASE_PROFILE,
+      { ...BASE_PROFILE, id: "profile-2", label: "Profile 2" },
+    ];
+    render(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+
+    await act(async () => {
+      mockAgentSelectorOnChange?.("profile-2");
+    });
+    fireEvent.click(screen.getByRole("button", { name: PLUGIN_COMPOSER_LABEL }));
+
+    await waitFor(() =>
+      expect(mockBuildStartRequest).toHaveBeenCalledWith(
+        "task-1",
+        "profile-2",
+        expect.objectContaining({ profileExplicit: true }),
+      ),
     );
   });
 

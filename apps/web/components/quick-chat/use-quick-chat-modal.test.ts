@@ -63,6 +63,7 @@ function makeAppState() {
     },
     closeQuickChat: vi.fn(),
     closeQuickChatSession: vi.fn(),
+    removeQuickChatSession: vi.fn(),
     setActiveQuickChatSession: vi.fn(),
     createQuickTerminal: vi.fn(),
     updateQuickTerminal: vi.fn(),
@@ -85,6 +86,7 @@ function makeStore(overrides: Partial<MockStore> = {}): MockStore {
     activeTerminalTabId: null,
     closeQuickChat: vi.fn(),
     closeQuickChatSession: vi.fn(),
+    removeQuickChatSession: vi.fn(),
     setActiveQuickChatSession: vi.fn(),
     createQuickTerminal: vi.fn(),
     updateQuickTerminal: vi.fn(),
@@ -274,7 +276,7 @@ describe("useQuickChatModal — persisted config lifecycle", () => {
 
     await act(async () => result.current.handleConfirmClose());
 
-    expect(mockAppState.closeQuickChatSession).toHaveBeenCalledWith(configSessionId);
+    expect(mockAppState.removeQuickChatSession).toHaveBeenCalledWith(configSessionId);
     expect(mockDeleteTask).toHaveBeenCalledWith("config-task");
   });
 

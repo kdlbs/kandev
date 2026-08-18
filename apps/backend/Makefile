@@ -45,10 +45,13 @@ endif
 ifeq ($(OS)$(MSYSTEM),Windows_NT)
   RM = cmd /c del /s /q
   RMDIR = cmd /c rmdir /s /q
-  # cmd's `mkdir` errors when the dir already exists, unlike Unix `mkdir -p`.
-  # Call sites use `-@$(MKDIR) $(BUILD_DIR)` (note the `-` prefix) so the
-  # "already exists" failure is tolerated; on Unix the prefix is a no-op.
-  MKDIR = cmd /c mkdir
+  # cmd's `mkdir` errors and prints "A subdirectory or file <dir> already
+  # exists." when the dir is already there, unlike Unix `mkdir -p`. Check for
+  # the directory first so that expected repeats stay quiet while permission
+  # and invalid-path errors keep their stderr and exit status.
+  define MKDIR
+	cmd /c if not exist "$(subst /,\,$(1))" mkdir "$(subst /,\,$(1))"
+  endef
   CGO_PREFIX = set CGO_ENABLED=1&
   DEADCODE_ENV = set GOTOOLCHAIN=$(DEADCODE_GO_TOOLCHAIN)&
   # Cross-compile prefixes for agentctl helpers bundled with the host build.
@@ -78,7 +81,9 @@ ifeq ($(OS)$(MSYSTEM),Windows_NT)
 else
   RM = rm -f
   RMDIR = rm -rf
-  MKDIR = mkdir -p
+  define MKDIR
+	mkdir -p "$(1)"
+  endef
   CGO_PREFIX = CGO_ENABLED=1
   DEADCODE_ENV = GOTOOLCHAIN=$(DEADCODE_GO_TOOLCHAIN)
   GO_LINUX_AMD64 = CGO_ENABLED=0 GOOS=linux GOARCH=amd64
@@ -104,6 +109,29 @@ else
 		echo "  WARNING: no codesign/rcodesign found; $(1) left as-is (darwin/arm64 is Go-signed; darwin/amd64 runs only on Intel Macs)" >&2; \
 	fi
   endef
+endif
+
+# CGO locale for Git Bash/MSYS on Windows.
+#
+# This mingw (WinLibs) gcc resolves its own install path, then passes it to ld/
+# collect2 across a locale-sensitive boundary. Under a UTF-8 locale, ld mis-decodes
+# the ANSI-encoded path, so a non-ASCII segment (e.g. an accented Windows
+# username under C:\Users\...) collapses to U+FFFD and the link cannot find
+# crt2.o / crtbegin.o / -lm. Forcing the C locale keeps the raw path bytes, so the
+# CGO link resolves. See docs/public/windows-support.md.
+#
+# Use LC_ALL=C, not LANG=C: LANG is the lowest-precedence locale variable
+# (LC_ALL > LC_CTYPE > LANG), so LANG=C is silently ignored when the shell already
+# exports LC_ALL or LC_CTYPE as UTF-8. LC_ALL=C overrides them all.
+#
+# Scope mirrors the shell-syntax block above: Windows but NOT native cmd, i.e.
+# $(MSYSTEM) is set, so this is Git Bash/MSYS. It is empty only on Unix and native
+# cmd. On Git Bash/MSYS the prefix is always applied: a harmless no-op on an ASCII
+# toolchain path, and the actual fix on a non-ASCII one.
+ifeq ($(OS),Windows_NT)
+  ifneq ($(OS)$(MSYSTEM),Windows_NT)
+    CGO_LOCALE := LC_ALL=C
+  endif
 endif
 
 # Build info
@@ -166,13 +194,13 @@ all: build
 ## Build the preview CLI for deploying PR preview environments to Sprites
 build-preview:
 	@echo "Building preview..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/preview$(EXE) ./cmd/preview
 
 ## Build the mock-agent binary for testing
 build-mock-agent:
 	@echo "Building mock-agent..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent$(EXE) ./cmd/mock-agent
 
 ## Build the winjob helper — wraps a subprocess in a Windows Job Object so
@@ -183,7 +211,7 @@ build-mock-agent:
 ## helper stays for any other consumer.
 build-winjob:
 	@echo "Building winjob..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/winjob$(EXE) ./cmd/winjob
 
 ## Build and run acpdbg — usage: make acpdbg ARGS="probe auggie"
@@ -193,7 +221,7 @@ acpdbg: build-acpdbg
 ## Build the acpdbg binary — raw ACP JSON-RPC debugger (see .agents/skills/acp-debug)
 build-acpdbg:
 	@echo "Building acpdbg..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/acpdbg$(EXE) ./cmd/acpdbg
 
 ## Build the complete development binary set.
@@ -214,19 +242,21 @@ build-runtime: build-agentctl build-agentctl-remote build-kandev
 ## launcher prebuild does not pull in agentctl helpers it does not use yet.
 build-kandev:
 	@echo "Building $(BINARY_NAME)..."
-	-@$(MKDIR) $(BUILD_DIR)
-	$(CGO_PREFIX) $(GO) build $(GOFLAGS) -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE) ./cmd/kandev
+	@$(call MKDIR,$(BUILD_DIR))
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) build $(GOFLAGS) -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE) ./cmd/kandev
 
 ## Build all binaries (unified + individual services + agentctl)
 build-all: build build-agentctl
 	@echo "Building individual services..."
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agent-manager$(EXE) ./cmd/agent-manager
 
-## Build the agentctl sidecar binary (includes embedded MCP server)
+## Build the agentctl sidecar binary (includes embedded MCP server). Carries
+## $(CGO_LOCALE) because agentctl imports cgo (unlike mock-agent/acpdbg/winjob),
+## so its native `go build` invokes gcc; see the CGO_LOCALE note above.
 build-agentctl:
 	@echo "Building agentctl..."
-	-@$(MKDIR) $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl$(EXE) ./cmd/agentctl
+	@$(call MKDIR,$(BUILD_DIR))
+	$(CGO_LOCALE) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl$(EXE) ./cmd/agentctl
 
 ## Build only the agentctl helpers needed by the development profile.
 build-agentctl-dev: $(DEV_AGENTCTL_TARGETS)
@@ -237,33 +267,33 @@ build-agentctl-remote: build-agentctl-linux build-agentctl-linux-arm64 build-age
 ## Build agentctl for linux/amd64 (used by Docker/Sprites and Linux SSH hosts)
 build-agentctl-linux:
 	@echo "Building agentctl for linux/amd64..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO_LINUX_AMD64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-amd64 ./cmd/agentctl
 
 ## Build agentctl for linux/arm64 (used by ARM Linux SSH hosts, e.g. Graviton)
 build-agentctl-linux-arm64:
 	@echo "Building agentctl for linux/arm64..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO_LINUX_ARM64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-arm64 ./cmd/agentctl
 
 ## Build agentctl for darwin/arm64 (used by Apple Silicon SSH hosts)
 build-agentctl-darwin-arm64:
 	@echo "Building agentctl for darwin/arm64..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO_DARWIN_ARM64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-darwin-arm64 ./cmd/agentctl
 	$(call adhoc_sign_darwin,$(BUILD_DIR)/agentctl-darwin-arm64)
 
 ## Build agentctl for darwin/amd64 (used by Intel Mac SSH hosts)
 build-agentctl-darwin-amd64:
 	@echo "Building agentctl for darwin/amd64..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO_DARWIN_AMD64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-darwin-amd64 ./cmd/agentctl
 	$(call adhoc_sign_darwin,$(BUILD_DIR)/agentctl-darwin-amd64)
 
 ## Build mock-agent for linux/amd64 (used by Docker E2E tests)
 build-mock-agent-linux:
 	@echo "Building mock-agent for linux/amd64..."
-	@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent-linux-amd64 ./cmd/mock-agent
 
 
@@ -284,7 +314,7 @@ HOST_GOARCH := $(shell $(GO) env GOARCH)
 e2e-plugin-package:
 	@echo "Packaging plugin-fixture for e2e ($(HOST_GOOS)-$(HOST_GOARCH))..."
 	@$(RMDIR) $(FIXTURE_STAGE_DIR)
-	@$(MKDIR) $(FIXTURE_STAGE_DIR)/server
+	@$(call MKDIR,$(FIXTURE_STAGE_DIR)/server)
 	cp $(FIXTURE_PACKAGE_DIR)/manifest.yaml $(FIXTURE_STAGE_DIR)/manifest.yaml
 	cp -r $(FIXTURE_PACKAGE_DIR)/ui $(FIXTURE_STAGE_DIR)/ui
 	$(GO) build $(GOFLAGS) -o $(FIXTURE_STAGE_DIR)/server/plugin-$(HOST_GOOS)-$(HOST_GOARCH)$(EXE) ./cmd/plugin-fixture
@@ -316,7 +346,7 @@ start-debug: build
 ## Run tests
 test:
 	@echo "Running tests..."
-	$(CGO_PREFIX) $(GO) test -tags fts5 ./...
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 ./...
 
 ## Run only the Windows-sensitive packages — mirrors the test-windows job in
 ## .github/workflows/backend-tests.yml. The broader suite uses Unix-only
@@ -326,11 +356,11 @@ test:
 ## runtime.GOOS guards in source.
 test-windows:
 	@echo "Running Windows-sensitive packages..."
-	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/...
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/...
 	@echo "Running Windows port-collision tests..."
-	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/common/netutil -run TestIsAddrInUse
-	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/instance -run TestAllocatePortAndListenerRetriesAddressInUse
-	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/gateway/websocket -run TestResolveAndBindReportsOccupiedPort
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/common/netutil -run TestIsAddrInUse
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/instance -run TestAllocatePortAndListenerRetriesAddressInUse
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/gateway/websocket -run TestResolveAndBindReportsOccupiedPort
 
 ## Verify run/dev/start-debug expand to the right per-shell command line across
 ## native Windows (cmd), Git Bash/MSYS, and Unix — the Make-target dispatch the
@@ -363,12 +393,12 @@ test-sprites-e2e: build-agentctl-linux
 LIFECYCLE_GOLEAK_COUNT ?= 20
 test-lifecycle-goleak:
 	@echo "Stress-running lifecycle goleak suite ($(LIFECYCLE_GOLEAK_COUNT)x)..."
-	$(CGO_PREFIX) $(GO) test -tags fts5 -race -count=$(LIFECYCLE_GOLEAK_COUNT) -timeout 600s ./internal/agent/runtime/lifecycle/ ./internal/agent/runtime/agentctl/
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -race -count=$(LIFECYCLE_GOLEAK_COUNT) -timeout 600s ./internal/agent/runtime/lifecycle/ ./internal/agent/runtime/agentctl/
 
 ## Run tests with coverage
 test-coverage:
 	@echo "Running tests with coverage..."
-	$(CGO_PREFIX) $(GO) test -tags fts5 -v -coverprofile=coverage.out ./...
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 
 ## Regenerate Go stubs from proto/kandev/plugin/v1/plugin.proto (§3 of
@@ -385,7 +415,7 @@ PROTOC_GEN_GO_GRPC_VERSION := v1.5.1
 .PHONY: proto
 proto:
 	@echo "Generating proto stubs..."
-	@$(MKDIR) $(PROTO_TOOLS_BIN)
+	@$(call MKDIR,$(PROTO_TOOLS_BIN))
 	GOBIN=$(PROTO_TOOLS_BIN) $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
 	GOBIN=$(PROTO_TOOLS_BIN) $(GO) install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
 	cd proto && PATH="$(PROTO_TOOLS_BIN):$$PATH" $(GO) run github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION) generate
@@ -401,7 +431,7 @@ lint:
 # supported target that could reach a finding before removing reported code.
 deadcode:
 	@echo "Scanning for unreachable Go functions (host configuration only; verify other targets before deleting findings; toolchain=$(DEADCODE_GO_TOOLCHAIN), override with DEADCODE_GO_TOOLCHAIN=go1.XY.Z)..."
-	$(DEADCODE_ENV) $(GO) run golang.org/x/tools/cmd/deadcode@$(DEADCODE_VERSION) -tags fts5 ./...
+	$(CGO_LOCALE) $(DEADCODE_ENV) $(GO) run golang.org/x/tools/cmd/deadcode@$(DEADCODE_VERSION) -tags fts5 ./...
 
 ## Format code
 fmt:
@@ -426,7 +456,7 @@ deps:
 ## Build for multiple platforms
 build-cross:
 	@echo "Building for multiple platforms..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 $(GO) build -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/kandev
 	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 $(GO) build -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/kandev
 	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 $(GO) build -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/kandev

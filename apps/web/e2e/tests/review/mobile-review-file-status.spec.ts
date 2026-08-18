@@ -1,9 +1,11 @@
 import { test, expect } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import { getSingleLineTextInVisualOrder } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 import path from "node:path";
 
-const MOBILE_FILE = "packages/mobile/review/surfaces/deeply/nested/mobile-review-status-added.ts";
+const MOBILE_FILE =
+  ".agents/skills/review/surfaces/with-a-deliberately-long-directory/deeply/nested/mobile-review-status-added.ts";
 const MOBILE_MOVED_FROM_FILE = "mobile-review-status-old-name.ts";
 const MOBILE_MOVED_FILE = "mobile-review-status-new-name.ts";
 
@@ -100,6 +102,16 @@ test.describe("Review file status on mobile", () => {
     const identityRow = header.getByTestId("review-file-identity");
     const fileName = identityRow.locator("[data-review-file-name]");
     await expect(fileName).toHaveText(path.basename(MOBILE_FILE));
+    const directory = identityRow.locator("[data-review-file-directory]");
+    await expect(directory).toHaveText(path.dirname(MOBILE_FILE));
+    expect(await getSingleLineTextInVisualOrder(directory)).toBe(path.dirname(MOBILE_FILE));
+    const directoryMetrics = await directory.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      direction: getComputedStyle(element).direction,
+    }));
+    expect(directoryMetrics.scrollWidth).toBeGreaterThan(directoryMetrics.clientWidth);
+    expect(directoryMetrics.direction).toBe("rtl");
     await expect(header.getByTestId("review-file-actions")).toHaveCount(0);
     const moreActions = header.getByRole("button", {
       name: `More actions for ${MOBILE_FILE}`,

@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 const SORT_OPTIONS: Array<{ key: SortKey; labelKey: string }> = [
   { key: "state", labelKey: "task:sortStatus" },
   { key: "updatedAt", labelKey: "task:sortUpdated" },
+  { key: "lastActivityAt", labelKey: "task:sortLastActivity" },
   { key: "createdAt", labelKey: "task:sortCreated" },
   { key: "title", labelKey: "task:sortTitle" },
   { key: "custom", labelKey: "task:sortCustom" },

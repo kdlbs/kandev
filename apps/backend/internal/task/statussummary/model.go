@@ -28,6 +28,7 @@ const (
 type TaskStatusSummary struct {
 	Revision            uint64                 `json:"revision"`
 	UpdatedAt           time.Time              `json:"updated_at"`
+	LastActivityAt      *time.Time             `json:"last_activity_at,omitempty"`
 	PrimarySession      *PrimarySessionSummary `json:"primary_session,omitempty"`
 	ForegroundActivity  string                 `json:"foreground_activity,omitempty"`
 	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
@@ -186,6 +187,7 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(semanticPayload{
+		LastActivityAt:      s.LastActivityAt,
 		PrimarySession:      s.PrimarySession,
 		ForegroundActivity:  s.ForegroundActivity,
 		ActiveSubagentCount: s.ActiveSubagentCount,
@@ -198,6 +200,7 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 }
 
 type semanticPayload struct {
+	LastActivityAt      *time.Time             `json:"last_activity_at,omitempty"`
 	PrimarySession      *PrimarySessionSummary `json:"primary_session,omitempty"`
 	ForegroundActivity  string                 `json:"foreground_activity,omitempty"`
 	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`

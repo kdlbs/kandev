@@ -895,6 +895,7 @@ func (m *Manager) runEnvironmentPreparerWithProgress(
 		return &EnvPrepareResult{
 			Success:      false,
 			ErrorMessage: err.Error(),
+			Error:        err,
 		}
 	}
 
@@ -985,6 +986,20 @@ func (m *Manager) launchApplyPrepareResult(
 			ErrorMessage: result.ErrorMessage,
 			Steps:        result.Steps,
 		})
+		// Prefer the typed chain on result.Error so errors.Is/errors.As reach
+		// the underlying sentinel (worktree.ErrBranchCheckedOut, etc.). Fall
+		// back to the textual ErrorMessage when the preparer did not supply a
+		// typed error. The formatted message is identical in both cases.
+		if result.Error != nil {
+			displayMessage := result.ErrorMessage
+			if displayMessage == "" {
+				displayMessage = result.Error.Error()
+			}
+			return fmt.Errorf("environment preparation failed: %w", &prepareResultError{
+				message: displayMessage,
+				cause:   result.Error,
+			})
+		}
 		return fmt.Errorf("environment preparation failed: %s", result.ErrorMessage)
 	}
 	if result.WorkspacePath != "" {
@@ -1865,7 +1880,7 @@ func runtimeEnvFromMetadata(metadata map[string]interface{}) map[string]string {
 
 // initializeAgentSession handles post-startup initialization: boot message, ACP session,
 // MCP servers. It finalizes the boot message on success or failure.
-func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentExecution, bootCommand, agentDisplayName, taskDescription string) error {
+func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentExecution, bootCommand, agentDisplayName, taskDescription, approvalPolicy string) error {
 	bootMsg, bootStopCh := m.createBootMessage(ctx, execution, bootCommand, agentDisplayName)
 
 	// Give the agent process a moment to initialize
@@ -1886,6 +1901,25 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 
 	attachments := getAttachmentsFromMetadata(execution)
 	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription, attachments, mcpServers); err != nil {
+		attempted, retryErr := m.retryManagedRuntimeStartup(
+			ctx,
+			execution,
+			err,
+			agentConfig,
+			approvalPolicy,
+			taskDescription,
+			attachments,
+			mcpServers,
+		)
+		if attempted {
+			if retryErr == nil {
+				m.finalizeBootMessage(execution, bootMsg, bootStopCh, execution.agentctl, containerStateExited)
+				return nil
+			}
+			err = retryErr
+		} else if retryErr != nil {
+			err = retryErr
+		}
 		m.finalizeBootMessage(execution, bootMsg, bootStopCh, execution.agentctl, "failed")
 		m.updateExecutionError(execution.ID, "failed to initialize ACP: "+err.Error())
 		return fmt.Errorf("failed to initialize ACP: %w", err)

@@ -30,6 +30,7 @@ import {
 import type { LinearConfig, LinearTeam, TestLinearConnectionResult } from "@/lib/types/linear";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { settingsCredentialClassName } from "@/components/settings/settings-control";
 import { LinearIssueWatchersSection } from "./linear-issue-watchers-section";
 import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
@@ -90,6 +91,7 @@ function SecretField({
         data-settings-dirty={form.secret !== baseline.secret}
         onChange={(e) => update("secret", e.target.value)}
         disabled={loading}
+        className={settingsCredentialClassName()}
       />
       <p className="text-xs text-muted-foreground">
         {t("linear:createPersonalApiKeyAt")}{" "}

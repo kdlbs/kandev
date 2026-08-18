@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -77,6 +78,24 @@ func TestManagedNPMRuntimeBuildsExactVersionCommandsAndCacheKey(t *testing.T) {
 	}
 	if got := spec.ExecutionCacheKey("1.18.5"); got != "cd439a892fc193b3" {
 		t.Fatalf("versioned ExecutionCacheKey = %q, want cd439a892fc193b3", got)
+	}
+}
+
+func TestManagedNPMRuntimeOnlineCommandChangesOnlyNpmFreshnessFlag(t *testing.T) {
+	spec := ManagedNPMRuntimeSpec{
+		Package: "@scope/managed-acp",
+		ACPArgs: []string{"--acp", "--model", "fast"},
+	}
+
+	offline := spec.ACPCommand("1.2.3").Args()
+	online := spec.ACPCommandWithNpmPreference("1.2.3", true).Args()
+	want := []string{"npx", "--yes", "--prefer-online", "@scope/managed-acp@1.2.3", "--acp", "--model", "fast"}
+	if !reflect.DeepEqual(online, want) {
+		t.Fatalf("online argv = %#v, want %#v", online, want)
+	}
+	offline[2] = "--prefer-online"
+	if !reflect.DeepEqual(offline, online) {
+		t.Fatalf("online command changed more than npm preference: offline=%#v online=%#v", offline, online)
 	}
 }
 

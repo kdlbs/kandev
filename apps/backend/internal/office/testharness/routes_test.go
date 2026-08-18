@@ -20,6 +20,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
+	officemodels "github.com/kandev/kandev/internal/office/models"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
@@ -102,6 +104,79 @@ func TestHealthRouteReturnsOK(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestSeedCostEventPreservesOutputTokenPresence(t *testing.T) {
+	taskRepo, sqlxDB := newTestRepo(t)
+	omittedTaskID := uuid.New().String()
+	zeroTaskID := uuid.New().String()
+	seedTask(t, sqlxDB, omittedTaskID)
+	seedTask(t, sqlxDB, zeroTaskID)
+
+	officeRepo, err := officesqlite.NewWithDB(sqlxDB, sqlxDB, logger.Default())
+	if err != nil {
+		t.Fatalf("new office repo: %v", err)
+	}
+	router := gin.New()
+	RegisterRoutes(router, taskRepo, officeRepo, nil, nil, nil, logger.Default())
+
+	post := func(body map[string]any) {
+		t.Helper()
+		requestBody := mustJSON(t, body)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/cost-events", bytes.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("seed cost event status=%d body=%s", res.Code, res.Body.String())
+		}
+	}
+
+	post(map[string]any{
+		"agent_profile_id": "agent-1",
+		"task_id":          omittedTaskID,
+		"tokens_in":        10,
+		"estimated":        true,
+	})
+	post(map[string]any{
+		"agent_profile_id": "agent-1",
+		"task_id":          zeroTaskID,
+		"tokens_in":        10,
+		"tokens_out":       0,
+		"estimated":        true,
+	})
+
+	events, err := officeRepo.ListCostEvents(t.Context(), "ws-1")
+	if err != nil {
+		t.Fatalf("list cost events: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("cost event count = %d, want 2", len(events))
+	}
+	byTask := make(map[string]*officemodels.CostEvent, len(events))
+	for _, event := range events {
+		byTask[event.TaskID] = event
+	}
+	omitted, ok := byTask[omittedTaskID]
+	if !ok {
+		t.Fatalf("missing cost event for task %s", omittedTaskID)
+	}
+	zero, ok := byTask[zeroTaskID]
+	if !ok {
+		t.Fatalf("missing cost event for task %s", zeroTaskID)
+	}
+	if got := omitted.TokensOut; got != nil {
+		t.Fatalf("omitted tokens_out = %v, want nil", *got)
+	}
+	if got := zero.TokensOut; got == nil || *got != 0 {
+		t.Fatalf("explicit zero tokens_out = %v, want non-nil 0", got)
+	}
+	for _, taskID := range []string{omittedTaskID, zeroTaskID} {
+		version := byTask[taskID].CostContractVersion
+		if version == nil || *version != officemodels.CostContractVersion {
+			t.Errorf("cost_contract_version for %s = %v, want %d", taskID, version, officemodels.CostContractVersion)
+		}
 	}
 }
 

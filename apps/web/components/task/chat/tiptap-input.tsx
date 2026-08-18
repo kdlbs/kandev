@@ -8,8 +8,11 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  type RefObject,
 } from "react";
 import { EditorContent } from "@tiptap/react";
+import { exitSuggestion } from "@tiptap/suggestion";
+import type { Editor } from "@tiptap/core";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -30,10 +33,17 @@ import {
   type SlashSuggestionCallbacks,
 } from "./tiptap-suggestion";
 import { useTipTapEditor, type TipTapInputHandle } from "./use-tiptap-editor";
+import { useSuggestionEscapeFallback } from "./use-suggestion-escape-fallback";
+import { getSuggestionMenuOpenState } from "./suggestion-menu-state";
+import {
+  useClarificationEscapeGuard,
+  type ClarificationEscapePredicate,
+} from "@/hooks/use-clarification-escape-guard";
 import type { MentionItem } from "@/hooks/use-inline-mention";
 import type { SlashCommand } from "./slash-command-types";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import { useEntityReferenceComposer } from "./use-entity-reference-composer";
+import { EntityReferenceSuggestionPluginKey } from "./tiptap-entity-reference-suggestion";
 import type { ImagePasteIssue } from "./clipboard-attachments";
 import { useTranslation } from "react-i18next";
 
@@ -351,6 +361,40 @@ function useMenuHandlers() {
   };
 }
 
+function useEntityReferenceMenuClose(editorRef: RefObject<Editor | null>, close: () => void) {
+  return useCallback(() => {
+    const editor = editorRef.current;
+    if (editor) {
+      exitSuggestion(editor.view, EntityReferenceSuggestionPluginKey);
+    }
+    close();
+  }, [editorRef, close]);
+}
+
+// `editorRef` is created before `editor` exists (it backs a close handler
+// composed earlier, in useSuggestionMenuOpenState) -- resync it every render
+// so callers reading `editorRef.current` always see the latest instance.
+function useEditorRefSync(editorRef: RefObject<Editor | null>, editor: Editor | null) {
+  useLayoutEffect(() => {
+    editorRef.current = editor;
+  });
+}
+
+function useReverseSearchSelectHandler(
+  applyHistoryEntry: (index: number) => void,
+  closeReverseSearch: () => void,
+  editor: Editor | null,
+) {
+  return useCallback(
+    (index: number) => {
+      applyHistoryEntry(index);
+      closeReverseSearch();
+      editor?.commands.focus("end");
+    },
+    [applyHistoryEntry, closeReverseSearch, editor],
+  );
+}
+
 // ── Component ───────────────────────────────────────────────────────
 
 export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(function TipTapInput(
@@ -388,12 +432,15 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     workspaceId,
     sessionId,
   });
-  const isSuggestionMenuOpen =
-    (menu.mentionMenu.isOpen && menu.mentionMenu.items.length > 0) ||
-    (menu.slashMenu.isOpen && menu.slashMenu.items.length > 0) ||
-    entityReferences.isOpen;
-  const { history, getHistory } = useChatHistory(sessionId);
   const { editorWrapperRef, ...overlay } = useReverseSearchOverlay(sessionId);
+  const editorRef = useRef<Editor | null>(null);
+  const { isSuggestionMenuOpen, closeEntityReferenceMenu } = useSuggestionMenuOpenState(
+    menu,
+    entityReferences,
+    editorWrapperRef,
+    editorRef,
+  );
+  const { history, getHistory } = useChatHistory(sessionId);
   const { isDraining } = useDrainOlderMessages(sessionId, overlay.isReverseSearchOpen);
   const { editor, applyHistoryEntry } = useTipTapEditor({
     value,
@@ -412,6 +459,8 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     mentionSuggestion,
     slashSuggestion,
     entityReferenceSuggestion: entityReferences.suggestion,
+    onTextInput: entityReferences.onTextInput,
+    onBeforeInput: entityReferences.onBeforeInput,
     slashCommands,
     isSuggestionMenuOpen,
     getHistory,
@@ -419,14 +468,12 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     isReverseSearchOpen: overlay.isReverseSearchOpen,
     ref,
   });
+  useEditorRefSync(editorRef, editor);
   const { closeReverseSearch } = overlay;
-  const handleReverseSearchSelect = useCallback(
-    (index: number) => {
-      applyHistoryEntry(index);
-      closeReverseSearch();
-      editor?.commands.focus("end");
-    },
-    [applyHistoryEntry, closeReverseSearch, editor],
+  const handleReverseSearchSelect = useReverseSearchSelectHandler(
+    applyHistoryEntry,
+    closeReverseSearch,
+    editor,
   );
   return (
     <>
@@ -437,6 +484,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
         history={history}
         isDraining={isDraining}
         onReverseSearchSelect={handleReverseSearchSelect}
+        onEntityReferenceClose={closeEntityReferenceMenu}
       />
       <EditorContextProvider value={{ sessionId, taskId: taskId ?? null }}>
         <div ref={editorWrapperRef} className="h-full">
@@ -457,6 +505,7 @@ type TipTapPopupsProps = {
   history: readonly MessageHistoryEntry[];
   isDraining: boolean;
   onReverseSearchSelect: (index: number) => void;
+  onEntityReferenceClose: () => void;
 };
 
 function TipTapPopups({
@@ -466,6 +515,7 @@ function TipTapPopups({
   history,
   isDraining,
   onReverseSearchSelect,
+  onEntityReferenceClose,
 }: TipTapPopupsProps) {
   return (
     <>
@@ -490,7 +540,7 @@ function TipTapPopups({
         error={entityReferences.error}
         onRetry={entityReferences.retry}
         onSelect={entityReferences.selectReference}
-        onClose={entityReferences.close}
+        onClose={onEntityReferenceClose}
         setSelectedIndex={entityReferences.setSelectedIndex}
       />
       <SlashCommandMenu
@@ -502,11 +552,12 @@ function TipTapPopups({
         onClose={menu.handleSlashClose}
         setSelectedIndex={menu.setSlashSelectedIndex}
       />
-      {overlay.isReverseSearchOpen && (
+      {overlay.isReverseSearchOpen && overlay.reverseSearchContainer && (
         <MessageHistorySearch
           history={history}
           isLoadingOlder={isDraining}
           anchorRect={overlay.reverseSearchAnchor}
+          container={overlay.reverseSearchContainer}
           onClose={overlay.closeReverseSearch}
           onSelect={onReverseSearchSelect}
         />
@@ -532,9 +583,41 @@ function useChatHistory(sessionId: string | null) {
   return { history, getHistory };
 }
 
+function useSuggestionMenuOpenState(
+  menu: ReturnType<typeof useMenuHandlers>,
+  entityReferences: ReturnType<typeof useEntityReferenceComposer>,
+  containerRef: RefObject<HTMLElement | null>,
+  editorRef: RefObject<Editor | null>,
+) {
+  const { mentionMenuOpen, slashMenuOpen, isSuggestionMenuOpen } = getSuggestionMenuOpenState({
+    mentionIsOpen: menu.mentionMenu.isOpen,
+    slashIsOpen: menu.slashMenu.isOpen,
+    slashItemCount: menu.slashMenu.items.length,
+    entityReferenceMenuOpen: entityReferences.isOpen,
+  });
+  const closeEntityReferenceMenu = useEntityReferenceMenuClose(editorRef, entityReferences.close);
+  useSuggestionEscapeFallback({
+    isSuggestionMenuOpen,
+    mentionMenuOpen,
+    slashMenuOpen,
+    entityReferenceMenuOpen: entityReferences.isOpen,
+    closeMentionMenu: menu.handleMentionClose,
+    closeSlashMenu: menu.handleSlashClose,
+    closeEntityReferenceMenu,
+    containerRef,
+  });
+  return { isSuggestionMenuOpen, closeEntityReferenceMenu };
+}
+
+// Stable reference (module scope) so the guard registry sees the same
+// predicate identity across renders while the overlay stays open, instead of
+// re-registering on every render.
+const CLAIM_ANY_ESCAPE: ClarificationEscapePredicate = () => true;
+
 function useReverseSearchOverlay(sessionId: string | null) {
   const editorWrapperRef = useRef<HTMLDivElement>(null);
   const [reverseSearchAnchor, setReverseSearchAnchor] = useState<DOMRect | null>(null);
+  const [reverseSearchContainer, setReverseSearchContainer] = useState<Element | null>(null);
   const [isReverseSearchOpen, setIsReverseSearchOpen] = useState(false);
   const sessionIdRef = useRef(sessionId);
   useLayoutEffect(() => {
@@ -542,10 +625,29 @@ function useReverseSearchOverlay(sessionId: string | null) {
   });
   const openReverseSearch = useCallback(() => {
     if (!sessionIdRef.current) return;
-    setReverseSearchAnchor(editorWrapperRef.current?.getBoundingClientRect() ?? null);
+    const wrapper = editorWrapperRef.current;
+    setReverseSearchAnchor(wrapper?.getBoundingClientRect() ?? null);
+    // Radix's Dialog traps focus within [data-slot="dialog-content"]. Portaling
+    // outside that scope (the prior document.body default) meant the overlay's
+    // own focus() and Escape/typing handlers never fired on a surface that
+    // renders this composer inside a Dialog (Quick Chat) -- the trap reverted
+    // focus every time. Render inside that scope when one wraps the composer;
+    // otherwise (the non-modal main task chat panel) keep document.body.
+    setReverseSearchContainer(
+      wrapper?.closest<HTMLElement>('[data-slot="dialog-content"]') ?? document.body,
+    );
     setIsReverseSearchOpen(true);
   }, []);
   const closeReverseSearch = useCallback(() => setIsReverseSearchOpen(false), []);
+  // On Quick Chat, Radix's DismissableLayer dismisses the whole dialog on
+  // Escape unless something already called preventDefault() during the same
+  // document-capture pass -- see use-suggestion-escape-fallback.ts for the
+  // full mechanism. The overlay's own onKeyDown (message-history-search.tsx)
+  // runs later, in the bubble phase, too late to stop that. Registering here
+  // tells the dialog this Escape is spoken for, so it stays open and lets the
+  // overlay's own handler close just the overlay. No-ops on the main task
+  // chat panel, where there is no ClarificationEscapeGuardProvider.
+  useClarificationEscapeGuard(isReverseSearchOpen ? CLAIM_ANY_ESCAPE : null);
   // The anchor rect is captured once at open time; dismiss on viewport
   // changes rather than recompute, matching how the project's other
   // fixed-position popups behave on resize/scroll. Bubbling-phase scroll
@@ -564,6 +666,7 @@ function useReverseSearchOverlay(sessionId: string | null) {
   return {
     editorWrapperRef,
     reverseSearchAnchor,
+    reverseSearchContainer,
     isReverseSearchOpen,
     openReverseSearch,
     closeReverseSearch,
