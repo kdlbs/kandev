@@ -96,9 +96,17 @@ type lifecycleAdapter struct {
 	logger   *logger.Logger
 }
 
+// orchestrator.Service.currentACPSessionID selects the generation-safety seam
+// for resetAgentContext by asserting the agent manager to this unexported
+// interface; that assertion fails silently at runtime if this method is
+// missing or its signature drifts, leaving storeResumeToken's stale-event
+// guard and the reset-failure reconcile permanently inert against a defunct
+// or dead-wrong ACP session id. Pin the exact shape here so drift is a build
+// error, not a silently-dead production guard.
 var _ interface {
 	OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
 	GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error)
+	GetACPSessionIDForSession(sessionID string) (string, bool)
 } = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
@@ -447,6 +455,14 @@ func (a *lifecycleAdapter) OwnsPromptGeneration(sessionID, executionID string, g
 
 func (a *lifecycleAdapter) GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error) {
 	return a.mgr.GetPromptGenerationForSession(ctx, sessionID)
+}
+
+// GetACPSessionIDForSession forwards to the lifecycle manager so
+// orchestrator.Service.currentACPSessionID observes the live execution's
+// actual ACP session identity in production, not just in tests against
+// mockAgentManager (see the compile-time assertion above this type).
+func (a *lifecycleAdapter) GetACPSessionIDForSession(sessionID string) (string, bool) {
+	return a.mgr.GetACPSessionIDForSession(sessionID)
 }
 
 func (a *lifecycleAdapter) GetSessionAuthMethods(sessionID string) []streams.AuthMethodInfo {
