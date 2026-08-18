@@ -1,11 +1,12 @@
 "use client";
 
-import { memo, useEffect, useId, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useRef, useState } from "react";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useSessionContextWindow } from "@/hooks/domains/session/use-session-context-window";
+import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 
 type TokenUsageDisplayProps = {
   sessionId: string | null;
@@ -45,6 +46,14 @@ function usePinnableTooltip() {
   const [open, setOpen] = useState(false);
   const pinnedRef = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const escapeGuard = useCallback(
+    (event: KeyboardEvent) => event.key === "Escape" && pinnedRef.current,
+    [],
+  );
+  // Radix dialogs inspect Escape during document capture, before the
+  // document-bubble listener below can close the pinned tooltip.
+  useClarificationEscapeGuard(escapeGuard);
 
   useEffect(() => {
     const closePinnedTooltip = () => {

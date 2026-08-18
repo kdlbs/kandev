@@ -4,8 +4,9 @@ import { createContext, useContext, useEffect, useId } from "react";
 
 export type ClarificationEscapePredicate = (event: KeyboardEvent) => boolean;
 
-// Wrapped in an object so storing a function via a registry call is never
-// mistaken for React's "updater function" overload.
+// Test-only holder shape. The production registry stores bare predicates; the
+// wrapper lets tests retain a predicate without React treating it as an
+// updater function.
 export type ClarificationEscapeGuardEntry = { test: ClarificationEscapePredicate } | null;
 
 /**

@@ -34,6 +34,7 @@ import {
 } from "./tiptap-suggestion";
 import { useTipTapEditor, type TipTapInputHandle } from "./use-tiptap-editor";
 import { useSuggestionEscapeFallback } from "./use-suggestion-escape-fallback";
+import { getSuggestionMenuOpenState } from "./suggestion-menu-state";
 import {
   useClarificationEscapeGuard,
   type ClarificationEscapePredicate,
@@ -588,9 +589,12 @@ function useSuggestionMenuOpenState(
   containerRef: RefObject<HTMLElement | null>,
   editorRef: RefObject<Editor | null>,
 ) {
-  const mentionMenuOpen = menu.mentionMenu.isOpen && menu.mentionMenu.items.length > 0;
-  const slashMenuOpen = menu.slashMenu.isOpen && menu.slashMenu.items.length > 0;
-  const isSuggestionMenuOpen = mentionMenuOpen || slashMenuOpen || entityReferences.isOpen;
+  const { mentionMenuOpen, slashMenuOpen, isSuggestionMenuOpen } = getSuggestionMenuOpenState({
+    mentionIsOpen: menu.mentionMenu.isOpen,
+    slashIsOpen: menu.slashMenu.isOpen,
+    slashItemCount: menu.slashMenu.items.length,
+    entityReferenceMenuOpen: entityReferences.isOpen,
+  });
   const closeEntityReferenceMenu = useEntityReferenceMenuClose(editorRef, entityReferences.close);
   useSuggestionEscapeFallback({
     isSuggestionMenuOpen,
@@ -602,7 +606,7 @@ function useSuggestionMenuOpenState(
     closeEntityReferenceMenu,
     containerRef,
   });
-  return { isSuggestionMenuOpen, mentionMenuOpen, slashMenuOpen, closeEntityReferenceMenu };
+  return { isSuggestionMenuOpen, closeEntityReferenceMenu };
 }
 
 // Stable reference (module scope) so the guard registry sees the same

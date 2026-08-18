@@ -1,7 +1,12 @@
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
-import { computeStyle, containerPaddingBox, MessageHistorySearch } from "./message-history-search";
+import {
+  computeStyle,
+  containerPaddingBox,
+  type ContainerPaddingBox,
+  MessageHistorySearch,
+} from "./message-history-search";
 
 afterEach(cleanup);
 
@@ -68,15 +73,15 @@ describe("computeStyle", () => {
   it("positions relative to a transformed containing block (Quick Chat's DialogContent) instead of the viewport", () => {
     // DialogContent is centered with a permanent translate, so it does not
     // sit at the viewport origin -- its rect has its own left/top/bottom.
-    const containerRect = new DOMRect(100, 80, 800, 600);
+    const containerBox: ContainerPaddingBox = { left: 100, width: 800, bottom: 680 };
     // Anchor (the composer) is inside that container, still given in
     // viewport coordinates by getBoundingClientRect().
     const anchorRect = new DOMRect(140, 600, 300, 32);
 
-    const style = computeStyle(anchorRect, containerRect);
+    const style = computeStyle(anchorRect, containerBox);
 
-    // Origin-relative: anchorRect.left - containerRect.left, and
-    // containerRect.bottom - anchorRect.top + 8, not viewport-relative.
+    // Origin-relative: anchorRect.left - containerBox.left, and
+    // containerBox.bottom - anchorRect.top + 8, not viewport-relative.
     expect(style).toMatchObject({
       position: "fixed",
       left: 140 - 100,
@@ -88,10 +93,11 @@ describe("computeStyle", () => {
     const anchorRect = new DOMRect(40, 500, 300, 32);
 
     const viewportRelative = computeStyle(anchorRect, null);
-    const explicitViewportOrigin = computeStyle(
-      anchorRect,
-      new DOMRect(0, 0, window.innerWidth, window.innerHeight),
-    );
+    const explicitViewportOrigin = computeStyle(anchorRect, {
+      left: 0,
+      width: window.innerWidth,
+      bottom: window.innerHeight,
+    });
 
     expect(viewportRelative).toEqual(explicitViewportOrigin);
   });

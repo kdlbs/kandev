@@ -90,7 +90,7 @@ describe("useSuggestionEscapeFallback", () => {
       containerRef,
     });
 
-    fireEvent.keyDown(container, { key: "Enter" });
+    fireEvent.keyDown(container, { key: "Enter", bubbles: true });
 
     expect(closeMentionMenu).not.toHaveBeenCalled();
     document.body.removeChild(container);
@@ -142,7 +142,7 @@ describe("useSuggestionEscapeFallback", () => {
     });
 
     rerender({ isSuggestionMenuOpen: false, mentionMenuOpen: false });
-    fireEvent.keyDown(container, { key: "Escape" });
+    fireEvent.keyDown(container, { key: "Escape", bubbles: true, cancelable: true });
 
     expect(closeMentionMenu).not.toHaveBeenCalled();
     document.body.removeChild(container);
