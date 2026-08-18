@@ -358,6 +358,7 @@ type SharedKanbanLayoutProps = {
   isMultiSelectMode?: boolean;
   externalLinkAvailability: KanbanExternalLinkAvailability;
   temporaryStepIds: Set<string>;
+  isDragging: boolean;
 };
 
 function TabletKanbanLayout({
@@ -441,12 +442,14 @@ function DesktopKanbanLayout({
   isMultiSelectMode,
   externalLinkAvailability,
   temporaryStepIds,
+  isDragging,
 }: SharedKanbanLayoutProps) {
   const getTasksForStep = useTasksByStep(tasks);
 
   return (
     <AdaptiveDesktopKanban
       steps={steps}
+      isDragging={isDragging}
       renderColumn={(step) => (
         <div className={cn("h-full", temporaryStepIds.has(step.id) && "opacity-70")}>
           <KanbanColumn
@@ -573,6 +576,7 @@ export function SwimlaneKanbanContent({
       isMultiSelectMode,
       externalLinkAvailability,
       temporaryStepIds: drag.temporaryStepIds,
+      isDragging: !!drag.activeTask,
     }),
     [
       drag.renderedSteps,
@@ -593,6 +597,7 @@ export function SwimlaneKanbanContent({
       isMultiSelectMode,
       externalLinkAvailability,
       drag.temporaryStepIds,
+      drag.activeTask,
     ],
   );
 
