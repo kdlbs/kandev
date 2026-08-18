@@ -107,8 +107,6 @@ export type UserSettings = {
   app_status_bar_order?: AppStatusBarOrderApi;
   kanban_hidden_step_ids?: Record<string, string[]>;
   workflow_ids_with_auto_hide_empty_steps?: string[];
-  /** @deprecated Read-only compatibility with the pre-rename settings key. */
-  kanban_auto_hide_empty_workflow_ids?: string[];
   revision?: number;
   updated_at: string;
 };

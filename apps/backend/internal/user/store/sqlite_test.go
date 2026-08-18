@@ -885,39 +885,17 @@ func TestSQLiteRepositoryKanbanHiddenStepIDsDefaultAndRoundTrip(t *testing.T) {
 	}
 }
 
-func TestScanUserSettingsWorkflowIDsWithAutoHideEmptyStepsCompatibility(t *testing.T) {
-	tests := []struct {
-		name string
-		raw  string
-		want []string
-	}{
-		{
-			name: "reads canonical key",
-			raw:  `{"workflow_ids_with_auto_hide_empty_steps":["wf-a"]}`,
-			want: []string{"wf-a"},
-		},
-		{
-			name: "reads legacy key",
-			raw:  `{"kanban_auto_hide_empty_workflow_ids":["wf-legacy"]}`,
-			want: []string{"wf-legacy"},
-		},
-		{
-			name: "canonical key wins over legacy key",
-			raw:  `{"workflow_ids_with_auto_hide_empty_steps":["wf-new"],"kanban_auto_hide_empty_workflow_ids":["wf-old"]}`,
-			want: []string{"wf-new"},
-		},
+func TestScanUserSettingsWorkflowIDsWithAutoHideEmptySteps(t *testing.T) {
+	settings, err := scanUserSettings(
+		settingsScanner{raw: `{"workflow_ids_with_auto_hide_empty_steps":["wf-a"]}`},
+		DefaultUserID,
+	)
+	if err != nil {
+		t.Fatalf("scan settings: %v", err)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
-			if err != nil {
-				t.Fatalf("scan settings: %v", err)
-			}
-			if !reflect.DeepEqual(settings.WorkflowIDsWithAutoHideEmptySteps, tt.want) {
-				t.Fatalf("WorkflowIDsWithAutoHideEmptySteps = %#v, want %#v", settings.WorkflowIDsWithAutoHideEmptySteps, tt.want)
-			}
-		})
+	want := []string{"wf-a"}
+	if !reflect.DeepEqual(settings.WorkflowIDsWithAutoHideEmptySteps, want) {
+		t.Fatalf("WorkflowIDsWithAutoHideEmptySteps = %#v, want %#v", settings.WorkflowIDsWithAutoHideEmptySteps, want)
 	}
 }
 
