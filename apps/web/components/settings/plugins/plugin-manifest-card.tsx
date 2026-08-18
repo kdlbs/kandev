@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { formatDateTime } from "@/lib/i18n/formats";
 import type { PluginRecord } from "@/lib/types/plugins";
 import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
+import { isPublicWebhook } from "./plugin-manifest-model";
 
 /**
  * Read-only view of the plugin's manifest: identity, capabilities, declared
@@ -54,8 +55,9 @@ export function PluginManifestCard({ plugin }: { plugin: PluginRecord }) {
           label={t("plugins:manifestWebhooks")}
           items={(plugin.webhooks ?? []).map((w) => ({
             key: w.key,
-            text:
-              w.access === "public" ? t("plugins:manifestWebhookPublic", { key: w.key }) : w.key,
+            text: isPublicWebhook(plugin.api_version, w.access)
+              ? t("plugins:manifestWebhookPublic", { key: w.key })
+              : w.key,
           }))}
         />
 

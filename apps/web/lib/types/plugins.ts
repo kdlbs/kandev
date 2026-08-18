@@ -20,11 +20,11 @@ export interface PluginWebhook {
   key: string;
   description?: string;
   method?: string;
-  /** True when the host relays anonymous requests to this webhook without
-   * requiring a caller identity (session or PAT). Defaults to false: the
-   * host requires a real caller identity before relaying to the plugin
-   * subprocess. See docs/public/plugins-manifest.md. */
-  public?: boolean;
+  /** API v1 defaults to "public" for compatibility. API v2 defaults to
+   * "authenticated", requiring a caller identity (session or PAT). Explicit
+   * values override either default. See docs/public/plugins-manifest.md. */
+  access?: "public" | "authenticated";
+  max_body_bytes?: number;
 }
 
 export interface PluginUIPage {

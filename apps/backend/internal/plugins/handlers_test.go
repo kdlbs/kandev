@@ -96,12 +96,8 @@ func doRequest(router *gin.Engine, method, path string, body string, headers map
 	return rec
 }
 
-// doAuthedRequest is doRequest with a real (non-synthetic) request identity
-// attached to the request context, standing in for what httpmw.Middleware
-// would set from a resolved session/PAT. authn.FromGin falls back to reading
-// the request context when the gin-context key is unset, so this is enough
-// for handlers that gate on authn.FromGin without wiring the full auth
-// middleware into these lookup/size/availability-focused tests.
+// doAuthedRequest attaches a resolved caller identity, standing in for
+// httpmw.Middleware without wiring it into focused handler tests.
 func doAuthedRequest(router *gin.Engine, method, path string, body string, headers map[string]string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "user_1", Role: authn.RoleMember}))
@@ -544,13 +540,13 @@ func TestReadCappedWebhookBodyUsesDeclaredLimit(t *testing.T) {
 
 func TestWebhookRelayHeadersStripHostCredentials(t *testing.T) {
 	headers := http.Header{
-		"Authorization": []string{"Bearer kandev-pat"},
+		"Authorization": []string{"Bearer kandev_pat_secret"},
 		"Cookie":        []string{"kandev_session=secret"},
 		"Content-Type":  []string{"audio/webm"},
 		"X-Plugin-Key":  []string{"plugin-secret"},
 	}
 
-	got := flattenWebhookHeaders(headers)
+	got := flattenHeaders(headers, "kandev_session", false)
 
 	if _, ok := got["Authorization"]; ok {
 		t.Fatal("Authorization header was forwarded to plugin")

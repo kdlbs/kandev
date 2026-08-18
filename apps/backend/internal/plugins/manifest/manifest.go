@@ -14,6 +14,15 @@ import (
 // declare. Individual actions must still declare their own smaller bound.
 const MaxActionBodyBytes = 1 << 20
 
+const (
+	// LegacyAPIVersion preserves the original webhook behavior: an omitted
+	// access field means public.
+	LegacyAPIVersion = 1
+	// CurrentAPIVersion makes omitted webhook access authenticated. Authors can
+	// still opt individual integration callbacks into public access.
+	CurrentAPIVersion = 2
+)
+
 // Manifest is the plugin registration manifest.
 type Manifest struct {
 	ID          string   `yaml:"id" json:"id"`
@@ -149,16 +158,9 @@ type AuthProvider struct {
 	Initiate    string `yaml:"initiate" json:"initiate"`
 }
 
-// Webhook is a proxied external webhook endpoint the plugin declares. Public
-// opts the endpoint out of the host's authentication gate: false (the
-// default) means the host requires a real caller identity (session or PAT,
-// or the synthetic identity injected while auth is disabled) before relaying
-// to the plugin subprocess; true means the host relays anonymous requests
-// unchecked, on the assertion that the plugin's own handler verifies the
-// caller (external signature, IdP redirect, shared secret, etc.). The host
-// can only enforce presence of a caller identity — it cannot verify that a
-// `public: true` webhook actually authenticates its callers, so this is a
-// manifest author's assertion, not a host-verified guarantee.
+// Webhook is a proxied external webhook endpoint the plugin declares. The
+// manifest api_version selects the default when Access is omitted: v1 remains
+// public for compatibility, while v2 defaults to authenticated.
 type Webhook struct {
 	Key          string `yaml:"key" json:"key"`
 	Description  string `yaml:"description,omitempty" json:"description,omitempty"`
@@ -174,9 +176,12 @@ const (
 	MaximumWebhookMaxBodyBytes int64 = 16 << 20
 )
 
-func (w Webhook) EffectiveAccess() string {
+func (w Webhook) EffectiveAccess(apiVersion int) string {
 	if w.Access == "" {
-		return WebhookAccessPublic
+		if apiVersion == LegacyAPIVersion {
+			return WebhookAccessPublic
+		}
+		return WebhookAccessAuthenticated
 	}
 	return w.Access
 }
