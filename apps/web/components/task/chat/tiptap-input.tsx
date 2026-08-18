@@ -369,6 +369,21 @@ function useEntityReferenceMenuClose(editor: Editor | null, close: () => void) {
   }, [editor, close]);
 }
 
+function useReverseSearchSelectHandler(
+  applyHistoryEntry: (index: number) => void,
+  closeReverseSearch: () => void,
+  editor: Editor | null,
+) {
+  return useCallback(
+    (index: number) => {
+      applyHistoryEntry(index);
+      closeReverseSearch();
+      editor?.commands.focus("end");
+    },
+    [applyHistoryEntry, closeReverseSearch, editor],
+  );
+}
+
 // ── Component ───────────────────────────────────────────────────────
 
 export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(function TipTapInput(
@@ -442,13 +457,10 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
   });
   const { closeReverseSearch } = overlay;
   const closeEntityReferenceMenu = useEntityReferenceMenuClose(editor, entityReferences.close);
-  const handleReverseSearchSelect = useCallback(
-    (index: number) => {
-      applyHistoryEntry(index);
-      closeReverseSearch();
-      editor?.commands.focus("end");
-    },
-    [applyHistoryEntry, closeReverseSearch, editor],
+  const handleReverseSearchSelect = useReverseSearchSelectHandler(
+    applyHistoryEntry,
+    closeReverseSearch,
+    editor,
   );
   return (
     <>
