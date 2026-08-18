@@ -1394,6 +1394,20 @@ export class ApiClient {
     await this.seedMockGitHubRepositoryAccess(prs);
   }
 
+  async mockGitHubSetMergeOutcome(
+    owner: string,
+    repo: string,
+    number: number,
+    outcome: "merged" | "queued",
+  ): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/merge-outcomes", {
+      owner,
+      repo,
+      number,
+      outcome,
+    });
+  }
+
   async mockGitHubAddIssues(issues: MockIssue[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/issues", { issues });
     await this.seedMockGitHubRepositoryAccess(issues);

@@ -137,6 +137,16 @@ export type QuickChatSession = {
 
 export type QuickChatActiveKind = "conversation" | "terminal";
 
+export type QuickChatSessionOwnership = {
+  taskId?: string;
+  workspaceId: string;
+};
+
+export type QuickChatSessionTombstone = {
+  workspaceId: string;
+  tombstonedAt: string;
+};
+
 export type QuickChatState = {
   isOpen: boolean;
   sessions: QuickChatSession[];
@@ -145,6 +155,11 @@ export type QuickChatState = {
   activeKind: QuickChatActiveKind;
   activeTerminalTabId: string | null;
   lastTerminalTabIdByWorkspace: Record<string, string>;
+  unseenIdleByWorkspace: Record<string, Record<string, true>>;
+  lastSettledAtBySession: Record<string, string>;
+  sessionOwnership: Record<string, QuickChatSessionOwnership>;
+  syncRevisionByWorkspace: Record<string, number>;
+  tombstonedSessions: Record<string, QuickChatSessionTombstone>;
 };
 
 export type SessionFailureNotification = {
@@ -335,6 +350,12 @@ export type UISliceActions = {
   upsertQuickChatSessionFromEvent: (session: QuickChatSession) => void;
   /** Drops tabs whose backing task was deleted (possibly on another device). */
   removeQuickChatSessionsForTask: (taskId: string) => void;
+  markQuickChatUnseenIdle: (sessionId: string, workspaceId: string) => void;
+  clearQuickChatUnseenIdle: (sessionId?: string, workspaceId?: string) => void;
+  /** Records a settle generation and returns whether it was not previously observed. */
+  recordQuickChatSettled: (sessionId: string, updatedAt: string) => boolean;
+  /** Removes a server-backed quick-chat session and suppresses late task events. */
+  removeQuickChatSession: (sessionId: string) => void;
   setQuickChatInitialPrompt: (sessionId: string, prompt?: string) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: TaskDeletedNotification | null) => void;

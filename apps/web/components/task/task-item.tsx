@@ -68,6 +68,8 @@ type TaskItemProps = {
   remoteExecutorType?: string;
   remoteExecutorName?: string;
   updatedAt?: string;
+  lastActivityAt?: string;
+  showActivityTime?: boolean;
   menuOpen?: boolean;
   isDeleting?: boolean;
   taskId?: string;
@@ -324,6 +326,8 @@ function TaskItemContent({
   isPinned,
   repositories,
   updatedAt,
+  lastActivityAt,
+  showActivityTime,
   prInfo,
   queuedCount,
   wipQueue,
@@ -341,6 +345,8 @@ function TaskItemContent({
   isPinned?: boolean;
   repositories?: string[];
   updatedAt?: string;
+  lastActivityAt?: string;
+  showActivityTime?: boolean;
   prInfo?: { number: number; state: string; aggregateState?: string };
   queuedCount?: number;
   wipQueue?: WipQueueStatus;
@@ -384,7 +390,7 @@ function TaskItemContent({
         </span>
       )}
       <TaskItemStatsRow
-        updatedAt={updatedAt}
+        updatedAt={showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt}
         prInfo={prInfo}
         primarySessionId={primarySessionId}
         queuedCount={queuedCount}
@@ -434,6 +440,8 @@ export const TaskItem = memo(function TaskItem({
   remoteExecutorType,
   remoteExecutorName,
   updatedAt,
+  lastActivityAt,
+  showActivityTime = false,
   menuOpen = false,
   isDeleting,
   taskId,
@@ -496,6 +504,8 @@ export const TaskItem = memo(function TaskItem({
         isPinned={isPinned}
         repositories={repositories}
         updatedAt={updatedAt}
+        lastActivityAt={lastActivityAt}
+        showActivityTime={showActivityTime}
         prInfo={prInfo}
         queuedCount={queuedCount}
         wipQueue={wipQueue}

@@ -14,6 +14,7 @@ type AppSidebarNavItemProps = {
   href?: string;
   badge?: number;
   badgeVariant?: "primary" | "muted";
+  dot?: boolean;
   onClick?: () => void;
   collapsed: boolean;
   /** Override the auto-derived active-state from pathname. */
@@ -76,6 +77,24 @@ function isPathActive(pathname: string, href: string | undefined, exactMatch: bo
   return hrefPathname !== "/" && pathname.startsWith(`${hrefPathname}/`);
 }
 
+function renderUnseenDot(dot: boolean) {
+  if (!dot) return null;
+  return (
+    <span
+      aria-hidden="true"
+      className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-background"
+      data-testid="quick-chat-unseen-dot"
+    />
+  );
+}
+
+function sidebarBadgeClass(variant: NonNullable<AppSidebarNavItemProps["badgeVariant"]>) {
+  return cn(
+    "rounded-full px-1.5 py-0.5 text-xs",
+    variant === "primary" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+  );
+}
+
 export function AppSidebarNavItem({
   icon: Icon,
   label,
@@ -89,6 +108,7 @@ export function AppSidebarNavItem({
   disabled = false,
   testId,
   className,
+  dot = false,
 }: AppSidebarNavItemProps) {
   const pathname = usePathname();
   const active = isActive ?? isPathActive(pathname, href, exactMatch);
@@ -104,21 +124,15 @@ export function AppSidebarNavItem({
 
   const inner = (
     <>
-      <Icon className="h-4 w-4 shrink-0" />
+      <span className="relative flex">
+        <Icon className="h-4 w-4 shrink-0" />
+        {renderUnseenDot(dot)}
+      </span>
       {!collapsed && (
         <>
           <span className="flex-1 truncate sidebar-fade-in">{label}</span>
           {typeof badge === "number" && badge > 0 && (
-            <Badge
-              className={cn(
-                "rounded-full px-1.5 py-0.5 text-xs",
-                badgeVariant === "primary"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground",
-              )}
-            >
-              {badge}
-            </Badge>
+            <Badge className={sidebarBadgeClass(badgeVariant)}>{badge}</Badge>
           )}
         </>
       )}

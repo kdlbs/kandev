@@ -510,11 +510,26 @@ func (s *Service) MoveTaskWithOptions(
 		}
 		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
 		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
+		delete(task.Metadata, models.MetaKeyManualMoveLifecycleCompleted)
 		if !opts.PreserveDeferredLaunch {
 			models.DropWIPDeferredLaunch(task)
 		}
 	}
 	task.UpdatedAt = time.Now().UTC()
+
+	// Keep an admitted manual move's lifecycle barrier in the same task write as
+	// the move whenever an active session exists. The admission repository removes
+	// the queued-exit marker for admitted tasks, so this separate marker carries
+	// the barrier across the task.moved event without changing WIP admission.
+	sessionID := ""
+	if stepChanged {
+		if activeSession := s.resolvePrimaryOrActiveSession(ctx, id); activeSession != nil {
+			sessionID = activeSession.ID
+			task.Metadata[models.MetaKeyManualMoveLifecyclePending] = map[string]interface{}{
+				"from_step_id": oldStepID,
+			}
+		}
+	}
 
 	var admittedState *v1.TaskState
 	if stepChanged {
@@ -541,12 +556,6 @@ func (s *Service) MoveTaskWithOptions(
 		return nil, err
 	}
 
-	// Resolve active session for the task.moved event (needed for on_exit/on_enter).
-	sessionID := ""
-	if activeSession := s.resolvePrimaryOrActiveSession(ctx, id); activeSession != nil {
-		sessionID = activeSession.ID
-	}
-
 	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowID)
 	if oldState != task.State {
 		s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
@@ -555,12 +564,22 @@ func (s *Service) MoveTaskWithOptions(
 	// Publish task.moved event so the orchestrator can process on_exit/on_enter actions
 	if stepChanged {
 		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, oldStepID, workflowStepID, sessionID)
-		s.pullNextTaskOnVacate(ctx, oldStepID, task.ID)
 		historySessionID := opts.StepHistorySessionID
 		if historySessionID == "" {
 			historySessionID = sessionID
 		}
 		s.recordManualStepTransition(ctx, historySessionID, oldStepID, workflowStepID, opts.StepHistoryTrigger, opts.StepHistoryActor)
+		s.pullNextTaskOnVacate(ctx, oldStepID, task.ID)
+		s.pullTasksFromNewFeederWork(ctx, workflowID, workflowStepID)
+		refreshed, err := s.tasks.GetTask(ctx, task.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to refresh task after feeder pull: %w", err)
+		}
+		if refreshed == nil {
+			return nil, errors.New("failed to refresh task after feeder pull: repository returned nil task")
+		}
+		refreshed.Repositories = task.Repositories
+		task = refreshed
 	}
 
 	s.logger.Info("task moved",
@@ -573,10 +592,10 @@ func (s *Service) MoveTaskWithOptions(
 
 	// Fetch the workflow step info if getter is available
 	if s.workflowStepGetter != nil {
-		step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+		step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
 		if err != nil {
 			s.logger.Warn("failed to get workflow step for MoveTask response",
-				zap.String("workflow_step_id", workflowStepID),
+				zap.String("workflow_step_id", task.WorkflowStepID),
 				zap.Error(err))
 			// Don't fail the operation, just log and continue
 		} else {
@@ -703,7 +722,7 @@ func (s *Service) promoteNextQueuedTask(ctx context.Context, targetStep *wfmodel
 		skipped[candidate.ID] = struct{}{}
 		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 	}
-	if queuedMoveExitPending(candidate) {
+	if moveLifecyclePending(candidate) {
 		skipped[candidate.ID] = struct{}{}
 		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 	}
@@ -723,6 +742,21 @@ func queuedMoveExitPending(task *models.Task) bool {
 	}
 	_, completed := task.Metadata[models.MetaKeyQueuedMoveExitCompleted]
 	return !completed
+}
+
+func manualMoveLifecyclePending(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	if _, pending := task.Metadata[models.MetaKeyManualMoveLifecyclePending]; !pending {
+		return false
+	}
+	_, completed := task.Metadata[models.MetaKeyManualMoveLifecycleCompleted]
+	return !completed
+}
+
+func moveLifecyclePending(task *models.Task) bool {
+	return queuedMoveExitPending(task) || manualMoveLifecyclePending(task)
 }
 
 func (s *Service) promoteSameStepQueuedTask(ctx context.Context, candidate *models.Task, fromStepID string, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}) bool {

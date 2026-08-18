@@ -158,6 +158,8 @@ type DockviewStore = {
   addFileEditorPanel: (path: string, name: string, opts?: OpenPanelOpts) => void;
   promotePreviewToPinned: (type: PreviewType) => void;
   addBrowserPanel: (url?: string, groupId?: string) => void;
+  /** Focus the existing preview browser, or open one when there is none. */
+  focusOrAddBrowserPanel: (groupId?: string) => void;
   openBrowserPanel: (url: string) => void;
   addVscodePanel: () => void;
   openInternalVscode: (goto_: { file: string; line: number; col: number } | null) => void;
@@ -196,6 +198,8 @@ type DockviewStore = {
     taskID?: string,
     title?: string,
   ) => void;
+  /** Read-only output panel for the repository dev script. */
+  addDevServerPanel: (groupId?: string) => void;
   selectedDiff: { path: string; content?: string } | null;
   setSelectedDiff: (diff: { path: string; content?: string } | null) => void;
   activeGroupId: string | null;

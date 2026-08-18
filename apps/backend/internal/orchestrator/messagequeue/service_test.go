@@ -991,12 +991,14 @@ func TestMemoryRepository_MergeIntoAbove(t *testing.T) {
 
 	target := &QueuedMessage{
 		SessionID: "s1", TaskID: "t1", Content: "first", QueuedBy: "alice",
+		QueuedAt:    time.Date(2026, 8, 18, 10, 0, 0, 0, time.UTC),
 		Attachments: []MessageAttachment{{Type: "image", Data: "a", MimeType: "image/png"}},
 		Metadata:    map[string]interface{}{MetadataEntityReferences: []apiv1.EntityReference{ref}},
 	}
 	require.NoError(t, repo.Insert(ctx, target, 0))
 	source := &QueuedMessage{
 		SessionID: "s1", TaskID: "t1", Content: "second", QueuedBy: "alice",
+		QueuedAt:    target.QueuedAt.Add(time.Minute),
 		Attachments: []MessageAttachment{{Type: "file", Data: "b", MimeType: "text/plain"}},
 		Metadata:    map[string]interface{}{MetadataEntityReferences: []apiv1.EntityReference{ref}},
 	}
@@ -1006,6 +1008,7 @@ func TestMemoryRepository_MergeIntoAbove(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, target.ID, merged.ID)
 	assert.Equal(t, "first\n\nsecond", merged.Content)
+	assert.Equal(t, source.QueuedAt, merged.QueuedAt)
 	assert.Len(t, merged.Attachments, 2)
 	assert.Len(t, entityrefs.NormalizePersisted(merged.Metadata[MetadataEntityReferences]), 1)
 
@@ -1013,6 +1016,7 @@ func TestMemoryRepository_MergeIntoAbove(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, entries, 1)
 	assert.Equal(t, "first\n\nsecond", entries[0].Content)
+	assert.Equal(t, source.QueuedAt, entries[0].QueuedAt)
 }
 
 // TestMemoryRepository_MergeIntoAbove_MixedKindsRejected covers the memory repo

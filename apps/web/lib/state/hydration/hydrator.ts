@@ -2,7 +2,7 @@ import type { Draft } from "immer";
 import type { AppState, HydrationState } from "../store";
 import { migrateSidebarViewDraft, migrateView } from "../slices/ui/ui-slice";
 import {
-  applyStoredQuickChatNames,
+  mergeHydratedQuickChatSessions,
   reconcileQuickTerminalTabs,
 } from "@/lib/state/slices/ui/quick-chat-sync";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
@@ -445,15 +445,11 @@ export function hydrateUI(draft: Draft<AppState>, state: HydrationState): void {
   if (state.rightPanel) deepMerge(draft.rightPanel, state.rightPanel);
   if (state.diffs) deepMerge(draft.diffs, state.diffs);
   if (state.quickChat) {
-    // Merge quick chat sessions, preserving isOpen from client
+    // SSR snapshots may arrive after live WebSocket updates. Hydration only
+    // adopts previously unseen sessions and never removes or regresses tabs.
     if (state.quickChat.sessions) {
-      const previousSessions = draft.quickChat.sessions;
-      const previousActiveSessionId = draft.quickChat.activeSessionId;
-      // Local renames live in localStorage and override the SSR-provided name
-      // (which derives from the backend task title). Apply on every hydration
-      // so a renamed chat keeps its local name across reloads and tab switches.
-      draft.quickChat.sessions = applyStoredQuickChatNames(state.quickChat.sessions);
-      restoreQuickChatSelection(draft, previousSessions, previousActiveSessionId);
+      draft.quickChat = mergeHydratedQuickChatSessions(draft.quickChat, state.quickChat.sessions);
+      restoreQuickChatSelection(draft, draft.quickChat.sessions, draft.quickChat.activeSessionId);
     }
     if (state.quickChat.terminalTabs) hydrateQuickTerminalState(draft, state.quickChat);
   }

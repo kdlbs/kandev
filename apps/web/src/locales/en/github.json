@@ -377,6 +377,7 @@
   "prClosedWithoutMerging": "PR closed without merging",
   "prEvents": "PR events",
   "reviewFollowUp": "Review follow-up",
+  "prAddedToMergeQueue": "PR added to merge queue",
   "prMerged": "PR merged",
   "prTaskStatusCi": "CI",
   "prTaskStatusMerge": "Merge",

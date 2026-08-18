@@ -564,7 +564,8 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 		return
 	}
 	queued := data.QueuedForStepID != "" && !data.WIPAdmitted
-	prerequisites, ok := s.loadTaskMovedLifecyclePrerequisites(ctx, data, queued)
+	manualBarrier := !queued && manualMoveLifecyclePending(task)
+	prerequisites, ok := s.loadTaskMovedLifecyclePrerequisites(ctx, data, queued, manualBarrier)
 	if !ok {
 		return
 	}
@@ -595,7 +596,14 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 			// run. Persist the completed no-op so promotion is not blocked by
 			// the queued-move barrier.
 			if s.persistQueuedMoveExitCompletion(ctx, task.ID) {
+				s.clearManualMoveLifecyclePending(ctx, task.ID)
 				s.continueQueuedMoveLifecycle(ctx, task.ID, data.FromStepID)
+			}
+			return
+		}
+		if manualBarrier {
+			if s.persistManualMoveLifecycleCompletion(ctx, task.ID) {
+				s.continueManualMoveLifecycle(ctx, task.ID)
 			}
 			return
 		}
@@ -608,22 +616,23 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 	}
 
 	if prerequisites != nil && prerequisites.session != nil {
-		s.handleTaskMovedWithLoadedSession(ctx, data, prerequisites.session, prerequisites.fromStep, prerequisites.targetStep)
+		s.handleTaskMovedWithLoadedSession(ctx, data, prerequisites.session, prerequisites.fromStep, prerequisites.targetStep, manualBarrier)
 		return
 	}
-	s.handleTaskMovedWithSession(ctx, data)
+	s.handleTaskMovedWithBarrier(ctx, data, manualBarrier)
 }
 
 func (s *Service) loadTaskMovedLifecyclePrerequisites(
 	ctx context.Context,
 	data watcher.TaskMovedEventData,
 	queued bool,
+	manualBarrier bool,
 ) (*taskMovedLifecyclePrerequisites, bool) {
-	if !queued && !data.QueuePromotion {
+	if !queued && !data.QueuePromotion && !manualBarrier {
 		return nil, true
 	}
 	prerequisites := &taskMovedLifecyclePrerequisites{}
-	if data.QueuePromotion {
+	if data.QueuePromotion || manualBarrier {
 		targetStep, ok := s.loadTaskMovedPromotionTarget(ctx, data)
 		if !ok {
 			return nil, false
@@ -693,8 +702,8 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 	if task.QueuedForStepID != "" || !task.WIPAdmitted {
 		return
 	}
-	if queuedMoveExitPending(task) {
-		// A queued manual move has not finished its source-step exit yet.
+	if queuedMoveExitPending(task) || manualMoveLifecyclePending(task) {
+		// A manual move has not finished its lifecycle yet.
 		// Keep the promotion token durable; source-exit completion will trigger
 		// queue reconciliation and retry destination entry.
 		return
@@ -792,13 +801,33 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 		s.logger.Warn("failed to list queue promotion tokens for recovery", zap.Error(err))
 		return
 	}
-	jobs := make(map[string]struct{}, len(pending)+len(promotions))
+	manualPending, err := lister.ListTasksWithMetadataKey(ctx, models.MetaKeyManualMoveLifecyclePending)
+	if err != nil {
+		s.logger.Warn("failed to list manual move lifecycle tokens for recovery", zap.Error(err))
+		return
+	}
+	manualCompleted, err := lister.ListTasksWithMetadataKey(ctx, models.MetaKeyManualMoveLifecycleCompleted)
+	if err != nil {
+		s.logger.Warn("failed to list completed manual move lifecycle tokens for recovery", zap.Error(err))
+		return
+	}
+	jobs := make(map[string]struct{}, len(pending)+len(promotions)+len(manualPending)+len(manualCompleted))
 	for _, task := range pending {
 		if task != nil {
 			jobs[task.ID] = struct{}{}
 		}
 	}
 	for _, task := range promotions {
+		if task != nil {
+			jobs[task.ID] = struct{}{}
+		}
+	}
+	for _, task := range manualPending {
+		if task != nil {
+			jobs[task.ID] = struct{}{}
+		}
+	}
+	for _, task := range manualCompleted {
 		if task != nil {
 			jobs[task.ID] = struct{}{}
 		}
@@ -857,6 +886,18 @@ func (s *Service) recoverTaskLifecycleAttempt(ctx context.Context, taskID string
 			return false
 		}
 	}
+	if manualMoveLifecyclePending(task) {
+		if !s.recoverManualMoveLifecycle(ctx, task) {
+			return false
+		}
+		task, err = s.repo.GetTask(ctx, taskID)
+		if err != nil || task == nil {
+			return false
+		}
+	}
+	if manualMoveLifecycleCompleted(task) {
+		s.continueManualMoveLifecycle(ctx, taskID)
+	}
 	if _, pending := task.Metadata[models.MetaKeyQueuePromotionPending]; pending {
 		s.handleTaskQueuePromoted(ctx, watcher.TaskEventData{TaskID: taskID})
 	}
@@ -864,7 +905,8 @@ func (s *Service) recoverTaskLifecycleAttempt(ctx context.Context, taskID string
 	if err != nil || latest == nil {
 		return false
 	}
-	return queuedMoveExitPending(latest) || hasQueuePromotionPending(latest)
+	return queuedMoveExitPending(latest) || manualMoveLifecyclePending(latest) ||
+		manualMoveLifecycleCompleted(latest) || hasQueuePromotionPending(latest)
 }
 
 func (s *Service) recoverQueuedMoveExit(ctx context.Context, task *models.Task) bool {
@@ -881,6 +923,42 @@ func (s *Service) recoverQueuedMoveExit(ctx context.Context, task *models.Task) 
 	// serialized lifecycle operation directly so the next attempt observes
 	// its durable completion instead of racing an unbounded detached goroutine.
 	s.processQueuedMoveExit(ctx, task.ID, session, fromStep, sourceStepID)
+	return true
+}
+
+func (s *Service) recoverManualMoveLifecycle(ctx context.Context, task *models.Task) bool {
+	if task == nil || s.workflowStepGetter == nil {
+		return false
+	}
+	sourceStepID := manualMoveLifecycleSourceStep(task)
+	if sourceStepID == "" {
+		return false
+	}
+	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, task.ID)
+	if err != nil {
+		return false
+	}
+	if session == nil {
+		if !s.persistManualMoveLifecycleCompletion(ctx, task.ID) {
+			return false
+		}
+		s.continueManualMoveLifecycle(ctx, task.ID)
+		return true
+	}
+	fromStep, err := s.workflowStepGetter.GetStep(ctx, sourceStepID)
+	if err != nil || fromStep == nil {
+		return false
+	}
+	targetStep, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil || targetStep == nil {
+		return false
+	}
+	// Startup recovery is already bounded by the caller's worker pool. Run the
+	// lifecycle directly so the next attempt observes durable completion.
+	s.processManualMoveLifecycleWithFeederBarrier(
+		ctx, task.ID, session, fromStep, targetStep,
+		sourceStepID, task.WorkflowStepID, task.Description,
+	)
 	return true
 }
 
@@ -1178,6 +1256,10 @@ func (s *Service) restoreAutoStartClaim(ctx context.Context, taskID, eventName s
 // blocks (e.g., auto_start_agent waiting for the agent turn), the MoveTask HTTP
 // handler that published the event also blocks, causing browser request timeouts.
 func (s *Service) handleTaskMovedWithSession(ctx context.Context, data watcher.TaskMovedEventData) {
+	s.handleTaskMovedWithBarrier(ctx, data, false)
+}
+
+func (s *Service) handleTaskMovedWithBarrier(ctx context.Context, data watcher.TaskMovedEventData, manualBarrier bool) {
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil {
 		s.logger.Warn("task.moved: failed to load session",
@@ -1185,7 +1267,7 @@ func (s *Service) handleTaskMovedWithSession(ctx context.Context, data watcher.T
 			zap.Error(err))
 		return
 	}
-	s.fromStepAndTargetForTaskMoved(ctx, data, session, nil, nil)
+	s.fromStepAndTargetForTaskMoved(ctx, data, session, nil, nil, manualBarrier)
 }
 
 func (s *Service) handleTaskMovedWithLoadedSession(
@@ -1193,8 +1275,9 @@ func (s *Service) handleTaskMovedWithLoadedSession(
 	data watcher.TaskMovedEventData,
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
+	manualBarrier bool,
 ) {
-	s.fromStepAndTargetForTaskMoved(ctx, data, session, fromStep, targetStep)
+	s.fromStepAndTargetForTaskMoved(ctx, data, session, fromStep, targetStep, manualBarrier)
 }
 
 func (s *Service) fromStepAndTargetForTaskMoved(
@@ -1202,6 +1285,7 @@ func (s *Service) fromStepAndTargetForTaskMoved(
 	data watcher.TaskMovedEventData,
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
+	manualBarrier bool,
 ) {
 	if session == nil {
 		return
@@ -1210,6 +1294,13 @@ func (s *Service) fromStepAndTargetForTaskMoved(
 	if data.QueuedForStepID != "" && !data.WIPAdmitted {
 		go s.processQueuedMoveExit(
 			context.WithoutCancel(ctx), data.TaskID, session, fromStep, data.FromStepID,
+		)
+		return
+	}
+	if manualBarrier {
+		go s.processManualMoveLifecycleWithFeederBarrier(
+			context.WithoutCancel(ctx), data.TaskID, session, fromStep, targetStep,
+			data.FromStepID, data.ToStepID, data.TaskDescription,
 		)
 		return
 	}
@@ -1283,6 +1374,40 @@ func queuedMoveExitCompleted(task *models.Task) bool {
 	return completed
 }
 
+func manualMoveLifecyclePending(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	if _, pending := task.Metadata[models.MetaKeyManualMoveLifecyclePending]; !pending {
+		return false
+	}
+	_, completed := task.Metadata[models.MetaKeyManualMoveLifecycleCompleted]
+	return !completed
+}
+
+func manualMoveLifecycleCompleted(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	_, completed := task.Metadata[models.MetaKeyManualMoveLifecycleCompleted]
+	return completed
+}
+
+func manualMoveLifecycleSourceStep(task *models.Task) string {
+	if task == nil || task.Metadata == nil {
+		return ""
+	}
+	value, ok := task.Metadata[models.MetaKeyManualMoveLifecyclePending]
+	if !ok {
+		return ""
+	}
+	if descriptor, ok := value.(map[string]interface{}); ok {
+		source, _ := descriptor["from_step_id"].(string)
+		return source
+	}
+	return ""
+}
+
 // processQueuedMoveExit runs the source-step side effect exactly once per
 // task. The in-memory lock serializes duplicate event deliveries, while the
 // pending/completed metadata pair makes the ordering recoverable after a
@@ -1318,6 +1443,7 @@ func (s *Service) processQueuedMoveExit(
 	if !s.persistQueuedMoveExitCompletion(ctx, taskID) {
 		return
 	}
+	s.clearManualMoveLifecyclePending(ctx, taskID)
 	if s.onQueuedMoveExitComplete != nil {
 		s.onQueuedMoveExitComplete()
 	}
@@ -1343,6 +1469,87 @@ func (s *Service) persistQueuedMoveExitCompletion(ctx context.Context, taskID st
 		}
 	}
 	return true
+}
+
+func (s *Service) clearManualMoveLifecyclePending(ctx context.Context, taskID string) {
+	remover, ok := s.repo.(taskMetadataKeyRemover)
+	if !ok {
+		return
+	}
+	if _, err := remover.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyManualMoveLifecyclePending); err != nil {
+		s.logger.Warn("failed to clear manual move lifecycle token",
+			zap.String("task_id", taskID), zap.Error(err))
+	}
+}
+
+func (s *Service) persistManualMoveLifecycleCompletion(ctx context.Context, taskID string) bool {
+	setter, ok := s.repo.(taskMetadataKeySetter)
+	if !ok {
+		s.logger.Warn("manual move lifecycle completion cannot be persisted",
+			zap.String("task_id", taskID))
+		return false
+	}
+	if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyManualMoveLifecycleCompleted, true); err != nil {
+		s.logger.Warn("failed to persist manual move lifecycle completion",
+			zap.String("task_id", taskID), zap.Error(err))
+		return false
+	}
+	s.clearManualMoveLifecyclePending(ctx, taskID)
+	return true
+}
+
+func (s *Service) continueManualMoveLifecycle(ctx context.Context, taskID string) {
+	latest, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || latest == nil {
+		return
+	}
+	if !manualMoveLifecycleCompleted(latest) {
+		return
+	}
+	if s.feederPulls == nil {
+		s.logger.Warn("manual move lifecycle has no feeder reconciler",
+			zap.String("task_id", taskID))
+		return
+	}
+	s.feederPulls.ReconcileFeederPulls(ctx, latest.WorkflowID, latest.WorkflowStepID)
+}
+
+// processManualMoveLifecycleWithFeederBarrier runs the original move lifecycle
+// before waking feeder pulls. The per-task lock and durable pending/completed
+// markers make duplicate deliveries and restart recovery safe.
+func (s *Service) processManualMoveLifecycleWithFeederBarrier(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	fromStep, targetStep *wfmodels.WorkflowStep,
+	fromStepID, toStepID, taskDescription string,
+) {
+	lockValue, _ := s.queuedMoveLifecycleLocks.LoadOrStore(taskID, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil || !manualMoveLifecyclePending(task) {
+		return
+	}
+	if sourceStepID := manualMoveLifecycleSourceStep(task); sourceStepID != "" && sourceStepID != fromStepID {
+		return
+	}
+	if task.WorkflowStepID != toStepID {
+		return
+	}
+	if s.onManualMoveLifecycleStart != nil {
+		s.onManualMoveLifecycleStart()
+	}
+	s.processStepExitAndEnterWithSteps(
+		ctx, taskID, session, fromStep, targetStep,
+		fromStepID, toStepID, taskDescription, false,
+	)
+	if !s.persistManualMoveLifecycleCompletion(ctx, taskID) {
+		return
+	}
+	s.continueManualMoveLifecycle(ctx, taskID)
 }
 
 func (s *Service) continueQueuedMoveLifecycle(ctx context.Context, taskID, vacatedStepID string) {

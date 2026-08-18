@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
@@ -195,6 +196,7 @@ func (s *Service) queueMessageWithMetadataAdmission(ctx context.Context, session
 					PlanMode:    planMode,
 					Attachments: attachments,
 					Metadata:    copyMessageMetadata(metadata, 0),
+					QueuedAt:    time.Now().UTC(),
 					QueuedBy:    userID,
 				}
 				merged, didMerge, mergeErr := s.repo.AutoMergeCandidateIntoAbove(admittedCtx, candidate)

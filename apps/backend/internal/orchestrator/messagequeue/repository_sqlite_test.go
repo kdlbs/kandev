@@ -83,6 +83,31 @@ func TestSQLiteRepository_InsertList(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_HasTaskActivityIndex(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	sqliteRepo := repo.(*sqliteRepository)
+	rows, err := sqliteRepo.db.Queryx(`PRAGMA index_info('idx_queued_messages_task_activity')`)
+	if err != nil {
+		t.Fatalf("inspect task activity index: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	wantColumns := []string{"task_id", "queued_by", "queued_at"}
+	for index, want := range wantColumns {
+		if !rows.Next() {
+			t.Fatalf("task activity index ended at column %d, want %q", index, want)
+		}
+		var seqno, columnID int
+		var column string
+		if err := rows.Scan(&seqno, &columnID, &column); err != nil {
+			t.Fatalf("scan task activity index column %d: %v", index, err)
+		}
+		if column != want {
+			t.Fatalf("task activity index column %d = %q, want %q", index, column, want)
+		}
+	}
+}
+
 func TestSQLiteRepository_InsertRejectsOverflow(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()

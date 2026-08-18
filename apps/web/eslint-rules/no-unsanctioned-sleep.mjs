@@ -61,15 +61,17 @@
  *
  * ## Severity
  *
- * An **error**, but only on {@link e2eSleepGuardFiles} — the directories already
- * converted to zero. Not a warning either: `pnpm lint` is
- * `eslint --max-warnings 0`, so a repo-wide registration at *any* severity would
- * fail the build on the ~126 sleeps that predate this rule and block every
- * unrelated PR, which is the mistake the first i18n attempt made.
+ * An **error** across {@link e2eSleepGuardFiles}, which now covers all of
+ * `e2e/`. It began as a narrow allowlist of directories already converted to
+ * zero — `pnpm lint` is `eslint --max-warnings 0`, so a repo-wide registration
+ * at *any* severity would have failed the build on the sleeps that predated the
+ * rule and blocked every unrelated PR, the mistake the first i18n attempt made.
+ * The conversion has finished, so that cost is gone and the list has graduated.
  *
- * Everywhere else the gate is `scripts/check-new-e2e-sleeps.mjs`, which judges
- * only the lines a change added. Once the conversion reaches zero the guard list
- * collapses to `e2e/**\/*.{ts,tsx}` and the ratchet becomes belt-and-braces.
+ * `scripts/check-new-e2e-sleeps.mjs` still judges only the lines a change added.
+ * It is the belt to this rule's braces: it covers anything a future `ignores`
+ * entry carves out, and it attributes a finding to the change rather than to the
+ * file it lives in.
  */
 
 /**
@@ -96,35 +98,47 @@ export const SLEEP_EXEMPT_FILES = [
 /**
  * Paths where this rule is an **error** in `eslint.config.mjs`.
  *
- * Same opt-in shape as `i18nGuardFiles`, and for the same reason: `pnpm lint` is
- * `eslint --max-warnings 0`, so a repo-wide registration at any severity fails
- * the build on the ~126 sleeps that predate the rule and blocks every unrelated
- * PR. Listing only directories already at zero means this can only ever tighten.
+ * **Graduated.** This started as an opt-in allowlist of the handful of
+ * directories the causal-waits conversion had already driven to zero, for the
+ * same reason `i18nGuardFiles` is one: `pnpm lint` is `eslint --max-warnings 0`,
+ * so a repo-wide registration at any severity would have failed the build on the
+ * ~153 sleeps that predated the rule and blocked every unrelated PR — the
+ * mistake the first i18n attempt made.
  *
- * The seed was measured, not guessed — `pnpm run e2e:waits` reports remaining
- * raw sleeps per file, and every directory below had none at the time it was
- * added. Adding a path is the only safe edit: **never remove one to make a build
- * pass.** A removal means somebody added a sleep to a directory that had none,
- * which is exactly the regression this exists to catch.
+ * The conversion has since finished. `pnpm run lint:e2e-sleeps e2e` reports zero
+ * findings across the whole tree, so the allowlist has collapsed to all of
+ * `e2e/`, which is what the list was always going to become. The cost that
+ * justified the narrow seed no longer exists: a repo-wide error now fails only
+ * a PR that *adds* a sleep, which is the entire point.
  *
- * The conversion effort is working through the directories that are *not* here
- * (`tests/{auth,chat,layout,office,session,settings,ssh,system,task,terminal,
- * workflow,…}`); each should be appended as it reaches zero. When the list would
- * cover all of `e2e/`, replace it with a plain `["e2e/**\/*.{ts,tsx}"]` — that is the
- * graduation, and at that point the diff-scanning ratchet becomes a second line
- * of defence rather than the only one.
+ * With the rule covering the tree, `scripts/check-new-e2e-sleeps.mjs` becomes a
+ * second line of defence rather than the only one. It is still worth keeping:
+ * it is what catches a sleep added to a path a future `ignores` entry carves
+ * out, and it reports against the fork point rather than the file, so its
+ * message names the line the change added.
+ *
+ * **Never narrow this back to make a build pass.** A narrowing means somebody
+ * added a sleep and deleted the guard rather than the sleep — exactly the
+ * regression this exists to catch. `e2e-sleep-wiring.test.ts` asserts coverage
+ * behaviourally, through ESLint's own config resolution, so it fails on a
+ * narrowing however the glob is rewritten.
  */
-export const e2eSleepGuardFiles = [
-  // Shard planning, flake and timing reports. Tooling rather than specs, and not
-  // in any conversion chunk's path.
-  "e2e/scripts/**/*.{ts,tsx}",
-  // Test directories measured at zero raw sleeps.
-  "e2e/tests/cli-mode/**/*.{ts,tsx}",
-  "e2e/tests/docker/**/*.{ts,tsx}",
-  "e2e/tests/github/**/*.{ts,tsx}",
-  "e2e/tests/i18n/**/*.{ts,tsx}",
-  "e2e/tests/kanban/**/*.{ts,tsx}",
-  "e2e/tests/preview/**/*.{ts,tsx}",
+export const e2eSleepGuardFiles = ["e2e/**/*.{ts,tsx}"];
+
+/**
+ * Directories that were measured at zero and listed individually before the
+ * graduation above. Retained as the wiring test's regression corpus: each must
+ * still resolve to an error, so collapsing the list cannot silently drop one.
+ */
+export const e2eSleepSeededGuardDirs = [
+  // Shard planning, flake and timing reports. Tooling rather than specs.
+  "e2e/scripts",
+  "e2e/tests/cli-mode",
+  "e2e/tests/docker",
+  "e2e/tests/github",
+  "e2e/tests/i18n",
+  "e2e/tests/kanban",
+  "e2e/tests/preview",
 ];
 
 /**

@@ -17,7 +17,7 @@ import {
   defaultSystemState,
   defaultReviewState,
 } from "./slices";
-import { applyStoredQuickChatNames } from "@/lib/state/slices/ui/quick-chat-sync";
+import { mergeHydratedQuickChatSessions } from "@/lib/state/slices/ui/quick-chat-sync";
 import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
 import type { HydrationState } from "./store";
 import { seedSettledSessionBoundaries } from "@/lib/state/slices/session/turn-actions";
@@ -163,13 +163,17 @@ function mergeCodeHostFields(
 }
 
 function mergeQuickChatState(initialState: HydrationState): DefaultState["quickChat"] {
-  const quickChat = { ...defaultState.quickChat, ...initialState.quickChat };
-  if (!initialState.quickChat?.sessions) return quickChat;
-
-  return {
-    ...quickChat,
-    sessions: applyStoredQuickChatNames(initialState.quickChat.sessions),
+  const { sessions, ...hydratedQuickChat } = initialState.quickChat ?? {};
+  const quickChat = {
+    ...defaultState.quickChat,
+    ...hydratedQuickChat,
+    unseenIdleByWorkspace: {},
+    lastSettledAtBySession: {},
+    sessionOwnership: {},
+    syncRevisionByWorkspace: {},
+    tombstonedSessions: {},
   };
+  return sessions ? mergeHydratedQuickChatSessions(quickChat, sessions) : quickChat;
 }
 
 function mergeSidebarViewState(initialState: HydrationState): DefaultState["sidebarViews"] {

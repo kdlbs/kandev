@@ -360,6 +360,10 @@ export type AppState = KanbanSlice & {
   syncQuickTerminalTabs: UIA["syncQuickTerminalTabs"];
   upsertQuickChatSessionFromEvent: UIA["upsertQuickChatSessionFromEvent"];
   removeQuickChatSessionsForTask: UIA["removeQuickChatSessionsForTask"];
+  markQuickChatUnseenIdle: UIA["markQuickChatUnseenIdle"];
+  clearQuickChatUnseenIdle: UIA["clearQuickChatUnseenIdle"];
+  recordQuickChatSettled: UIA["recordQuickChatSettled"];
+  removeQuickChatSession: UIA["removeQuickChatSession"];
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string, workspaceId: string) => void;

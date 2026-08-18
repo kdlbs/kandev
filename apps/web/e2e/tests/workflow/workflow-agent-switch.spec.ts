@@ -1,7 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
-import { dwell } from "../../helpers/causal-waits";
+import { dwell, watchWs } from "../../helpers/causal-waits";
 
 async function createProfiles(
   apiClient: InstanceType<typeof import("../../helpers/api-client").ApiClient>,
@@ -553,6 +553,81 @@ test.describe("Workflow agent profile switching", () => {
     await expect(session.sessionTabBySessionId(profileASession!.id)).toBeVisible({
       timeout: 30_000,
     });
+  });
+
+  test("manual New Agent picker overrides the pinned workflow profile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const { profileA, profileB } = await createProfiles(apiClient);
+
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Manual Profile Picker");
+    const step1 = await apiClient.createWorkflowStep(workflow.id, "Step1", 0, {
+      is_start_step: true,
+    });
+    await apiClient.createWorkflowStep(workflow.id, "Done", 1);
+    await apiClient.updateWorkflowStep(step1.id, {
+      agent_profile_id: profileA.id,
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Manual Profile Picker Task",
+      profileA.id,
+      {
+        workflow_id: workflow.id,
+        workflow_step_id: step1.id,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    const initialSessions = await pollSessions(apiClient, task.id, 1, 60_000);
+    const profileASession = initialSessions.find((item) => item.agent_profile_id === profileA.id);
+    expect(profileASession).toBeDefined();
+
+    const ws = watchWs(testPage);
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.openNewSessionDialog();
+
+    const dialog = session.newSessionDialog();
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    const selector = dialog.getByTestId("agent-profile-selector");
+    await expect(selector).toBeVisible({ timeout: 10_000 });
+    await selector.click();
+
+    const listbox = testPage.getByRole("listbox");
+    await expect(listbox.getByRole("option", { name: profileB.name, exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
+    await listbox.getByRole("option", { name: profileB.name, exact: false }).click();
+    await expect(selector).toContainText(profileB.name);
+
+    await session.newSessionPromptInput().fill("/e2e:simple-message");
+    const sessionCreated = ws.waitForEvent("session.state_changed", {
+      where: (payload) =>
+        payload.task_id === task.id &&
+        payload.agent_profile_id === profileB.id &&
+        payload.new_state === "CREATED",
+    });
+    await session.newSessionStartButton().click();
+    await expect(dialog).not.toBeVisible({ timeout: 15_000 });
+
+    const sessionCreatedFrame = await sessionCreated;
+    const profileBSessionId = String(sessionCreatedFrame.payload.session_id ?? "");
+    expect(profileBSessionId).not.toBe("");
+
+    const finalSessions = await pollSessions(apiClient, task.id, 2, 60_000);
+    const profileBSession = finalSessions.find((item) => item.id === profileBSessionId);
+    expect(profileBSession?.agent_profile_id).toBe(profileB.id);
+
+    const profileBTab = session.sessionTabBySessionId(profileBSessionId);
+    await expect(profileBTab).toBeVisible({ timeout: 30_000 });
+    await expect(profileBTab).toContainText(profileB.name);
   });
 
   /**

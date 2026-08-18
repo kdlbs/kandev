@@ -6,6 +6,7 @@ import {
   scoreCommandSearch,
   selectCommandSearchResult,
   sortCommandsForSearch,
+  selectContentSearchResult,
 } from "./search";
 
 const SHARED_TERM = "Shared term";
@@ -100,5 +101,29 @@ describe("command search", () => {
 
   it("returns no command when nothing matches", () => {
     expect(findFirstMatchingCommand([command("home", "Go Home")], "terminal")).toBeUndefined();
+  });
+});
+
+describe("selectContentSearchResult", () => {
+  const values = ["repo\u0000a.ts\u00001", "repo\u0000b.ts\u00002"];
+
+  it("keeps a selection the user moved when a later batch appends", () => {
+    // The second batch appends a row; the highlighted one must not jump back.
+    expect(selectContentSearchResult([...values, "repo\u0000c.ts\u00003"], values[1])).toBe(
+      values[1],
+    );
+  });
+
+  it("falls back to the first row when the selection is gone", () => {
+    expect(selectContentSearchResult(values, "repo\u0000removed.ts\u00009")).toBe(values[0]);
+  });
+
+  it("selects the first row when nothing is selected yet", () => {
+    expect(selectContentSearchResult(values, "")).toBe(values[0]);
+    expect(selectContentSearchResult(values, undefined)).toBe(values[0]);
+  });
+
+  it("selects nothing when there are no results", () => {
+    expect(selectContentSearchResult([], "anything")).toBe("");
   });
 });

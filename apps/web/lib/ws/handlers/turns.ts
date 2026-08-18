@@ -75,6 +75,11 @@ export function registerTurnsHandlers(
       if (!payload.session_id || !payload.id) {
         return;
       }
+      const wasCompleted = store
+        .getState()
+        .turns.bySession[
+          payload.session_id
+        ]?.some((turn) => turn.id === payload.id && Boolean(turn.completed_at));
       messageScheduler?.flush();
       debug("turn.completed", {
         sessionId: payload.session_id,
@@ -105,6 +110,24 @@ export function registerTurnsHandlers(
           payload.metadata,
           payload.updated_at,
         );
+      const quickChat = store.getState().quickChat;
+      const quickChatSession = quickChat.sessions.find(
+        (session) => session.sessionId === payload.session_id,
+      );
+      if (quickChatSession && !quickChat.isOpen && !wasCompleted) {
+        // Share the settled ledger with the state_changed path so a replay of
+        // the same completion (reconnect, delayed event) cannot re-mark after
+        // the user already saw the dot. completed_at is the stable identity of
+        // this completion; a missing value falls through to the mark.
+        if (
+          !payload.completed_at ||
+          store.getState().recordQuickChatSettled(payload.session_id, payload.completed_at)
+        ) {
+          store
+            .getState()
+            .markQuickChatUnseenIdle(payload.session_id, quickChatSession.workspaceId);
+        }
+      }
       // Surface a notice when the turn finished with no agent output.
       maybeEmitEmptyTurnNotice(store, payload);
 

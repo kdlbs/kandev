@@ -45,10 +45,13 @@ endif
 ifeq ($(OS)$(MSYSTEM),Windows_NT)
   RM = cmd /c del /s /q
   RMDIR = cmd /c rmdir /s /q
-  # cmd's `mkdir` errors when the dir already exists, unlike Unix `mkdir -p`.
-  # Call sites use `-@$(MKDIR) $(BUILD_DIR)` (note the `-` prefix) so the
-  # "already exists" failure is tolerated; on Unix the prefix is a no-op.
-  MKDIR = cmd /c mkdir
+  # cmd's `mkdir` errors and prints "A subdirectory or file <dir> already
+  # exists." when the dir is already there, unlike Unix `mkdir -p`. Check for
+  # the directory first so that expected repeats stay quiet while permission
+  # and invalid-path errors keep their stderr and exit status.
+  define MKDIR
+	cmd /c if not exist "$(subst /,\,$(1))" mkdir "$(subst /,\,$(1))"
+  endef
   CGO_PREFIX = set CGO_ENABLED=1&
   DEADCODE_ENV = set GOTOOLCHAIN=$(DEADCODE_GO_TOOLCHAIN)&
   # Cross-compile prefixes for agentctl helpers bundled with the host build.
@@ -78,7 +81,9 @@ ifeq ($(OS)$(MSYSTEM),Windows_NT)
 else
   RM = rm -f
   RMDIR = rm -rf
-  MKDIR = mkdir -p
+  define MKDIR
+	mkdir -p "$(1)"
+  endef
   CGO_PREFIX = CGO_ENABLED=1
   DEADCODE_ENV = GOTOOLCHAIN=$(DEADCODE_GO_TOOLCHAIN)
   GO_LINUX_AMD64 = CGO_ENABLED=0 GOOS=linux GOARCH=amd64
@@ -166,13 +171,13 @@ all: build
 ## Build the preview CLI for deploying PR preview environments to Sprites
 build-preview:
 	@echo "Building preview..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/preview$(EXE) ./cmd/preview
 
 ## Build the mock-agent binary for testing
 build-mock-agent:
 	@echo "Building mock-agent..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent$(EXE) ./cmd/mock-agent
 
 ## Build the winjob helper — wraps a subprocess in a Windows Job Object so
@@ -183,7 +188,7 @@ build-mock-agent:
 ## helper stays for any other consumer.
 build-winjob:
 	@echo "Building winjob..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/winjob$(EXE) ./cmd/winjob
 
 ## Build and run acpdbg — usage: make acpdbg ARGS="probe auggie"
@@ -193,7 +198,7 @@ acpdbg: build-acpdbg
 ## Build the acpdbg binary — raw ACP JSON-RPC debugger (see .agents/skills/acp-debug)
 build-acpdbg:
 	@echo "Building acpdbg..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/acpdbg$(EXE) ./cmd/acpdbg
 
 ## Build the complete development binary set.
@@ -214,7 +219,7 @@ build-runtime: build-agentctl build-agentctl-remote build-kandev
 ## launcher prebuild does not pull in agentctl helpers it does not use yet.
 build-kandev:
 	@echo "Building $(BINARY_NAME)..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(CGO_PREFIX) $(GO) build $(GOFLAGS) -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE) ./cmd/kandev
 
 ## Build all binaries (unified + individual services + agentctl)
@@ -225,7 +230,7 @@ build-all: build build-agentctl
 ## Build the agentctl sidecar binary (includes embedded MCP server)
 build-agentctl:
 	@echo "Building agentctl..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl$(EXE) ./cmd/agentctl
 
 ## Build only the agentctl helpers needed by the development profile.
@@ -237,33 +242,33 @@ build-agentctl-remote: build-agentctl-linux build-agentctl-linux-arm64 build-age
 ## Build agentctl for linux/amd64 (used by Docker/Sprites and Linux SSH hosts)
 build-agentctl-linux:
 	@echo "Building agentctl for linux/amd64..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO_LINUX_AMD64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-amd64 ./cmd/agentctl
 
 ## Build agentctl for linux/arm64 (used by ARM Linux SSH hosts, e.g. Graviton)
 build-agentctl-linux-arm64:
 	@echo "Building agentctl for linux/arm64..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO_LINUX_ARM64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-arm64 ./cmd/agentctl
 
 ## Build agentctl for darwin/arm64 (used by Apple Silicon SSH hosts)
 build-agentctl-darwin-arm64:
 	@echo "Building agentctl for darwin/arm64..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO_DARWIN_ARM64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-darwin-arm64 ./cmd/agentctl
 	$(call adhoc_sign_darwin,$(BUILD_DIR)/agentctl-darwin-arm64)
 
 ## Build agentctl for darwin/amd64 (used by Intel Mac SSH hosts)
 build-agentctl-darwin-amd64:
 	@echo "Building agentctl for darwin/amd64..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	$(GO_DARWIN_AMD64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-darwin-amd64 ./cmd/agentctl
 	$(call adhoc_sign_darwin,$(BUILD_DIR)/agentctl-darwin-amd64)
 
 ## Build mock-agent for linux/amd64 (used by Docker E2E tests)
 build-mock-agent-linux:
 	@echo "Building mock-agent for linux/amd64..."
-	@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent-linux-amd64 ./cmd/mock-agent
 
 
@@ -284,7 +289,7 @@ HOST_GOARCH := $(shell $(GO) env GOARCH)
 e2e-plugin-package:
 	@echo "Packaging plugin-fixture for e2e ($(HOST_GOOS)-$(HOST_GOARCH))..."
 	@$(RMDIR) $(FIXTURE_STAGE_DIR)
-	@$(MKDIR) $(FIXTURE_STAGE_DIR)/server
+	@$(call MKDIR,$(FIXTURE_STAGE_DIR)/server)
 	cp $(FIXTURE_PACKAGE_DIR)/manifest.yaml $(FIXTURE_STAGE_DIR)/manifest.yaml
 	cp -r $(FIXTURE_PACKAGE_DIR)/ui $(FIXTURE_STAGE_DIR)/ui
 	$(GO) build $(GOFLAGS) -o $(FIXTURE_STAGE_DIR)/server/plugin-$(HOST_GOOS)-$(HOST_GOARCH)$(EXE) ./cmd/plugin-fixture
@@ -385,7 +390,7 @@ PROTOC_GEN_GO_GRPC_VERSION := v1.5.1
 .PHONY: proto
 proto:
 	@echo "Generating proto stubs..."
-	@$(MKDIR) $(PROTO_TOOLS_BIN)
+	@$(call MKDIR,$(PROTO_TOOLS_BIN))
 	GOBIN=$(PROTO_TOOLS_BIN) $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
 	GOBIN=$(PROTO_TOOLS_BIN) $(GO) install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
 	cd proto && PATH="$(PROTO_TOOLS_BIN):$$PATH" $(GO) run github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION) generate
@@ -426,7 +431,7 @@ deps:
 ## Build for multiple platforms
 build-cross:
 	@echo "Building for multiple platforms..."
-	-@$(MKDIR) $(BUILD_DIR)
+	@$(call MKDIR,$(BUILD_DIR))
 	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 $(GO) build -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/kandev
 	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 $(GO) build -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/kandev
 	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 $(GO) build -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/kandev

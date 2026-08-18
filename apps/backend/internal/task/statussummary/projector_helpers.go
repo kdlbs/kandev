@@ -282,6 +282,10 @@ func timeValue(value interface{}) time.Time {
 	switch value := value.(type) {
 	case time.Time:
 		return value
+	case *time.Time:
+		if value != nil {
+			return *value
+		}
 	case string:
 		parsed, err := time.Parse(time.RFC3339Nano, value)
 		if err == nil {
@@ -289,6 +293,26 @@ func timeValue(value interface{}) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+func cloneTimePtr(value *time.Time) *time.Time {
+	if value == nil || value.IsZero() {
+		return nil
+	}
+	copy := value.UTC()
+	return &copy
+}
+
+func maxTimePtr(left, right *time.Time) *time.Time {
+	left = cloneTimePtr(left)
+	right = cloneTimePtr(right)
+	if left == nil {
+		return right
+	}
+	if right == nil || !right.After(*left) {
+		return left
+	}
+	return right
 }
 
 func maxInt(value, minimum int) int {

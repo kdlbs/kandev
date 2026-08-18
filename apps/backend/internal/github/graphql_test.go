@@ -220,6 +220,29 @@ func TestRunBatchedPRQuery_DecodesAliasesBackToRefs(t *testing.T) {
 	}
 }
 
+func TestNormalizeGraphQLCheckRollupState_CheckRollup(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "success", raw: "SUCCESS", want: checkStatusSuccess},
+		{name: "failure", raw: "FAILURE", want: checkConclusionFail},
+		{name: "error", raw: "ERROR", want: checkConclusionFail},
+		{name: "pending", raw: "PENDING", want: checkStatusPending},
+		{name: "expected", raw: "EXPECTED", want: checkStatusPending},
+		{name: "empty", raw: "", want: ""},
+		{name: "unknown", raw: "NEUTRAL", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeGraphQLCheckRollupState(tt.raw); got != tt.want {
+				t.Fatalf("normalizeGraphQLCheckRollupState(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRunBatchedPRQuery_PaginatesResolvedReviewThreads(t *testing.T) {
 	exec := &stubGraphQLExecutor{responses: []string{
 		batchedPRReviewThreadsResponse(t, 102, resolvedReviewThreadNodes(100), true, "cursor-1"),

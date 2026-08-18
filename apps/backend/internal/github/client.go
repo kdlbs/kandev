@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -11,6 +12,33 @@ import (
 // operation.
 type RateLimitFetcher interface {
 	FetchRateLimit(ctx context.Context) error
+}
+
+type MergeOutcome string
+
+const (
+	MergeOutcomeMerged MergeOutcome = "merged"
+	MergeOutcomeQueued MergeOutcome = "queued"
+	mergeStatusFailed               = "failed"
+)
+
+type mergeAsyncResponse struct {
+	Status  string `json:"status"`
+	UUID    string `json:"uuid"`
+	Message string `json:"message"`
+}
+
+func normalizeMergeOutcome(status string) (MergeOutcome, error) {
+	switch status {
+	case string(MergeOutcomeMerged):
+		return MergeOutcomeMerged, nil
+	case "enqueued", "queued":
+		return MergeOutcomeQueued, nil
+	case mergeStatusFailed:
+		return "", fmt.Errorf("GitHub rejected merge: %s", status)
+	default:
+		return "", fmt.Errorf("unexpected GitHub merge status %q", status)
+	}
 }
 
 // Client defines the interface for interacting with the GitHub API.
@@ -91,8 +119,8 @@ type Client interface {
 	// RequestReviewers requests reviews from GitHub users on a pull request.
 	RequestReviewers(ctx context.Context, owner, repo string, number int, reviewers []string) error
 
-	// MergePR merges a pull request. mergeMethod is one of "merge", "squash", "rebase".
-	MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error
+	// MergePR merges a pull request immediately or queues it according to GitHub policy.
+	MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error)
 
 	// ListRepoBranches lists branches for a repository.
 	ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error)

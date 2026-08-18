@@ -181,6 +181,11 @@ async function loadWorkspaceState({
         activeKind: "conversation" as const,
         activeTerminalTabId: null,
         lastTerminalTabIdByWorkspace: {},
+        unseenIdleByWorkspace: {},
+        lastSettledAtBySession: {},
+        sessionOwnership: {},
+        syncRevisionByWorkspace: {},
+        tombstonedSessions: {},
       },
     },
   };

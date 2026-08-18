@@ -20,6 +20,7 @@ function buildTaskRowProps(props: TaskSwitcherProps): TaskRowBaseProps {
     stepsByWorkflowId: props.stepsByWorkflowId,
     activeTaskId: props.activeTaskId,
     selectedTaskId: props.selectedTaskId,
+    showActivityTime: props.showActivityTime,
     onSelectTask: props.onSelectTask,
     onEditTask: props.onEditTask,
     onRenameTask: props.onRenameTask,

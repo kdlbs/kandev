@@ -73,6 +73,7 @@
   "queuedPromptCount_other": "{{count}} queued prompts",
   "wipQueuePosition": "Position {{position}} of {{total}} in {{step}} queue",
   "quickChat": "Quick Chat",
+  "quickChatUnseen": "Quick Chat, new response",
   "quickTerminal": "Quick terminal",
   "quickChatTerminals": "Terminals",
   "quickChatNewAgent": "New Agent",

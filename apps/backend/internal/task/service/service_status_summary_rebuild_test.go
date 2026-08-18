@@ -6,12 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 
 	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/statussummary"
@@ -415,6 +417,68 @@ func TestReconcileTaskStatusSummariesRepairsExistingPendingOnly(t *testing.T) {
 	}
 }
 
+func TestStatusSummaryActivityRebuildBackfillsAndPreservesNewerStoredValue(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	svc.statusSummaries = repo
+	svc.taskActivity = repo
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	if _, err := messagequeue.NewSQLiteRepository(queueDB, queueDB); err != nil {
+		t.Fatalf("initialize queue repository: %v", err)
+	}
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	base := time.Date(2026, time.August, 17, 10, 0, 0, 0, time.UTC)
+	expected := base.Add(3 * time.Hour)
+	if _, err := repo.DB().Exec(
+		`UPDATE tasks SET created_at = ?, updated_at = ? WHERE id = ?`,
+		base, expected, "task-1",
+	); err != nil {
+		t.Fatalf("set task timestamps: %v", err)
+	}
+
+	tasks := []*models.Task{{ID: "task-1", WorkspaceID: "ws-1"}}
+	got, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		tasks,
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{},
+	)
+	if err != nil {
+		t.Fatalf("rebuild missing status summary: %v", err)
+	}
+	backfilled := got["task-1"]
+	if backfilled == nil || backfilled.LastActivityAt == nil || !backfilled.LastActivityAt.Equal(expected) {
+		t.Fatalf("backfilled activity = %+v, want %v", backfilled, expected)
+	}
+
+	newer := expected.Add(time.Hour)
+	stored := statussummary.TaskStatusSummary{
+		Revision:       9,
+		LastActivityAt: &newer,
+	}
+	accepted, err := repo.CompareAndUpdateTaskStatusSummary(ctx, &statussummary.StoredTaskStatusSummary{
+		TaskID: "task-1", WorkspaceID: "ws-1", Summary: stored,
+	})
+	if err != nil || !accepted {
+		t.Fatalf("seed newer summary: accepted=%v err=%v", accepted, err)
+	}
+	got, err = svc.ReconcileTaskStatusSummaries(
+		ctx,
+		tasks,
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{"task-1": &stored},
+	)
+	if err != nil {
+		t.Fatalf("reconcile newer status summary: %v", err)
+	}
+	preserved := got["task-1"]
+	if preserved == nil || preserved.Revision != stored.Revision || preserved.LastActivityAt == nil || !preserved.LastActivityAt.Equal(newer) {
+		t.Fatalf("newer stored activity = %+v, want revision %d at %v", preserved, stored.Revision, newer)
+	}
+}
+
 func TestReconcileTaskStatusSummariesInvalidatesStaleSummaryOnRepairFailure(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	repairErr := errors.New("status summary write failed")
@@ -584,6 +648,8 @@ func TestReconcileExistingSummaryStopsBeforeRetryWhenContextIsCanceled(t *testin
 		&models.Task{ID: "task-1", WorkspaceID: "ws-1"},
 		stored,
 		"",
+		time.Time{},
+		false,
 	)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("reconcileExistingSummary error = %v, want context canceled", err)

@@ -150,20 +150,11 @@ test.describe("Session layout", () => {
     const closeBtn = terminalTab.locator(".dv-default-tab-action");
     await closeBtn.click();
 
-    // Closing a terminal that looks busy MAY pop a "Close terminal?" confirmation
-    // (CloseTerminalConfirmDialog) — the typed command can trip the busy heuristic,
-    // but whether it does is timing-dependent (the shell may have gone idle). Handle
-    // both: confirm the dialog if it appears, otherwise the close already proceeded.
-    const closeTerminalDialog = testPage.getByRole("alertdialog", { name: "Close terminal?" });
-    await closeTerminalDialog
-      .waitFor({ state: "visible", timeout: 2_000 })
-      .then(async () => {
-        await closeTerminalDialog.getByRole("button", { name: "Close terminal" }).click();
-        await expect(closeTerminalDialog).not.toBeVisible({ timeout: 5_000 });
-      })
-      .catch(() => {
-        /* no confirmation shown — close proceeded directly */
-      });
+    // Terminal close always uses the compact anchored confirmation popover.
+    const closeTerminalDialog = testPage.getByRole("dialog", { name: "Close terminal?" });
+    await expect(closeTerminalDialog).toBeVisible();
+    await closeTerminalDialog.getByRole("button", { name: "Close terminal" }).click();
+    await expect(closeTerminalDialog).not.toBeVisible({ timeout: 5_000 });
 
     // Should exit maximize and restore default layout minus the closed terminal
     await expect(session.chat).toBeVisible({ timeout: 10_000 });

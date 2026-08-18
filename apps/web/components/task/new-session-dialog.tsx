@@ -383,6 +383,7 @@ function NewSessionForm({
   const [selectedProfileId, setSelectedProfileId] = useState(
     handoffInitial?.selectedProfileId ?? initialProfileId ?? defaultProfileId,
   );
+  const [profileExplicit, setProfileExplicit] = useState(Boolean(handoff));
   const [hasPrompt, setHasPrompt] = useState(false);
   const [hasPendingAttachmentUploads, setHasPendingAttachmentUploads] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -414,6 +415,7 @@ function NewSessionForm({
     promptRef,
     taskId,
     selectedProfileId,
+    profileExplicit,
     executorId,
     contextValue,
     initialPrompt,
@@ -441,7 +443,10 @@ function NewSessionForm({
         profileOptions={profileSelection.profileOptions}
         selectedProfileId={selectedProfileId}
         isCreating={isCreating}
-        onProfileChange={setSelectedProfileId}
+        onProfileChange={(value) => {
+          setProfileExplicit(true);
+          setSelectedProfileId(value);
+        }}
       />
       <ContextSelect
         value={contextValue}

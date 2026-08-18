@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { IconX, IconMessageQuestion, IconInfoCircle, IconCheck } from "@tabler/icons-react";
-import { cn } from "@/lib/utils";
+import { IconMessageQuestion, IconInfoCircle } from "@tabler/icons-react";
 import ReactMarkdown from "react-markdown";
 import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 import type {
@@ -12,14 +11,13 @@ import type {
   ClarificationQuestion,
 } from "@/lib/types/http";
 import { useClarificationGroup } from "@/hooks/domains/session/use-clarification-group";
-import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
-import { SHORTCUTS } from "@/lib/keyboard/constants";
 import {
   ClarificationCarouselNav,
   ClarificationCustomInput,
   ClarificationOptions,
   ClarificationStepper,
 } from "./clarification-overlay-parts";
+import { ClarificationHeaderActions } from "./clarification-overlay-header";
 import { useTranslation } from "react-i18next";
 
 type ClarificationInputOverlayProps = {
@@ -27,6 +25,13 @@ type ClarificationInputOverlayProps = {
   onResolved: () => void;
   shortcutScopeRef: RefObject<HTMLElement | null>;
   keyboardShortcutsEnabled?: boolean;
+  // Called when the user presses Escape. Unlike Skip, this must not answer or
+  // reject the bundle — it only dismisses the UI (e.g. collapses the panel).
+  // The question stays pending and the agent stays blocked.
+  onDismiss: () => void;
+  // Called by the expanded header's collapse control.
+  onCollapse?: () => void;
+  collapseContentId?: string;
 };
 
 type SingleQuestionMeta = {
@@ -187,7 +192,7 @@ type CarouselShortcutArgs = {
   onPick: (index: number) => void;
   onPrev: () => void;
   onNext: () => void;
-  onSkip: () => void;
+  onDismiss: () => void;
   onSubmit: () => void;
 };
 
@@ -224,7 +229,7 @@ function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
   const { enabled, scopeRef } = args;
   const optionsCount = args.meta.question.options.length;
   const isLast = args.activeIndex === args.total - 1;
-  const { canSubmit, onPick, onPrev, onNext, onSkip, onSubmit } = args;
+  const { canSubmit, onPick, onPrev, onNext, onDismiss, onSubmit } = args;
   useEffect(() => {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
@@ -233,7 +238,7 @@ function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
       if (shouldIgnoreShortcut(e)) return;
       if (e.key === "Escape") {
         e.preventDefault();
-        onSkip();
+        onDismiss();
         return;
       }
       if (e.key === "ArrowLeft") {
@@ -264,7 +269,7 @@ function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
     onPick,
     onPrev,
     onNext,
-    onSkip,
+    onDismiss,
     onSubmit,
   ]);
   return null;
@@ -282,6 +287,7 @@ type CarouselBodyProps = {
   shortcutScopeRef: RefObject<HTMLElement | null>;
   keyboardShortcutsEnabled: boolean;
   onSubmit: () => void;
+  onDismiss: () => void;
 };
 
 type QuestionHandlerCtx = {
@@ -388,6 +394,7 @@ function ClarificationCarouselBody({
   shortcutScopeRef,
   keyboardShortcutsEnabled,
   onSubmit,
+  onDismiss,
 }: CarouselBodyProps) {
   const total = sortedMessages.length;
   const activeMessage = sortedMessages[Math.min(activeIndex, total - 1)] ?? null;
@@ -451,77 +458,10 @@ function ClarificationCarouselBody({
         onPick={(idx) => onSelectOption(meta.question.options[idx].option_id)}
         onPrev={() => setActiveIndex(Math.max(0, activeIndex - 1))}
         onNext={() => setActiveIndex(Math.min(total - 1, activeIndex + 1))}
-        onSkip={() => void group.skipAll("User skipped")}
+        onDismiss={onDismiss}
         onSubmit={onSubmit}
       />
     </>
-  );
-}
-
-function ClarificationHeaderActions({
-  total,
-  allAnswered,
-  isSubmitting,
-  onSubmit,
-  onSkip,
-}: {
-  total: number;
-  allAnswered: boolean;
-  isSubmitting: boolean;
-  onSubmit: () => void;
-  onSkip: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex items-center gap-2">
-      {total > 1 && (
-        <KeyboardShortcutTooltip
-          shortcut={SHORTCUTS.SUBMIT}
-          description={t("task:submitAnswers")}
-          enabled={!isSubmitting}
-        >
-          <span
-            className="inline-flex"
-            data-testid="clarification-submit-shortcut"
-            tabIndex={!allAnswered && !isSubmitting ? 0 : undefined}
-          >
-            <button
-              type="button"
-              onClick={onSubmit}
-              disabled={!allAnswered || isSubmitting}
-              data-testid="clarification-submit"
-              className={cn(
-                "inline-flex items-center gap-1 text-xs px-3 py-1 rounded font-medium transition-colors",
-                allAnswered && !isSubmitting
-                  ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
-                  : "bg-muted text-muted-foreground cursor-not-allowed",
-              )}
-            >
-              {isSubmitting ? t("task:submitting") : t("task:submit")}
-              <IconCheck className="h-3 w-3" />
-            </button>
-          </span>
-        </KeyboardShortcutTooltip>
-      )}
-      <KeyboardShortcutTooltip
-        shortcut={SHORTCUTS.CANCEL}
-        description={t("task:skipAllQuestions")}
-        enabled={!isSubmitting}
-      >
-        <span className="inline-flex" data-testid="clarification-skip-shortcut">
-          <button
-            type="button"
-            onClick={onSkip}
-            disabled={isSubmitting}
-            className="text-muted-foreground hover:text-foreground cursor-pointer disabled:opacity-50"
-            data-testid="clarification-skip"
-            aria-label={t("task:skipAllQuestions")}
-          >
-            <IconX className="h-4 w-4" />
-          </button>
-        </span>
-      </KeyboardShortcutTooltip>
-    </div>
   );
 }
 
@@ -530,6 +470,9 @@ export function ClarificationInputOverlay({
   onResolved,
   shortcutScopeRef,
   keyboardShortcutsEnabled = true,
+  onDismiss,
+  onCollapse,
+  collapseContentId,
 }: ClarificationInputOverlayProps) {
   const sortedMessages = useMemo(
     () => sortMessagesByQuestionIndex(resolveQuestionMessages(messages)),
@@ -565,8 +508,11 @@ export function ClarificationInputOverlay({
 
   return (
     <div className="relative" data-testid="clarification-overlay">
-      <div className="flex items-center justify-between gap-3 px-4 pt-2 pb-1">
-        <div className="flex items-center gap-3 min-w-0">
+      <div
+        className="flex min-h-11 items-center justify-between gap-3 px-4"
+        data-testid="clarification-overlay-header"
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <IconMessageQuestion className="h-4 w-4 text-blue-500 flex-shrink-0" />
           {total > 1 && (
             <ClarificationStepper
@@ -580,7 +526,7 @@ export function ClarificationInputOverlay({
           {total > 1 && (
             <span
               data-testid="clarification-group-progress"
-              className="text-xs text-muted-foreground"
+              className="min-w-0 truncate text-xs text-muted-foreground"
             >
               {group.answeredCount} of {group.total} answered
             </span>
@@ -592,6 +538,8 @@ export function ClarificationInputOverlay({
           isSubmitting={isSubmitting}
           onSubmit={handleSubmit}
           onSkip={() => void group.skipAll("User skipped")}
+          onCollapse={onCollapse}
+          collapseContentId={collapseContentId}
         />
       </div>
       {sharedContext && (
@@ -614,6 +562,7 @@ export function ClarificationInputOverlay({
         shortcutScopeRef={shortcutScopeRef}
         keyboardShortcutsEnabled={keyboardShortcutsEnabled}
         onSubmit={handleSubmit}
+        onDismiss={onDismiss}
       />
     </div>
   );

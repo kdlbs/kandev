@@ -115,6 +115,7 @@ type MockClient struct {
 	submittedReviews  []submittedReview
 	requestedReviews  []requestedReviewers
 	mergedPRs         []mergedPR
+	mergeOutcomes     map[prKey]MergeOutcome
 	mergeMethods      map[repoKey]RepoMergeMethods
 	repositoryDetails map[repoKey]*GitHubRepository
 	gists             map[string]mockGist
@@ -167,6 +168,7 @@ func NewMockClient() *MockClient {
 		prCommitsFailures: make(map[prKey]int),
 		commitDetails:     make(map[commitDetailKey]PRCommitDetail),
 		mergeMethods:      make(map[repoKey]RepoMergeMethods),
+		mergeOutcomes:     make(map[prKey]MergeOutcome),
 		repositoryDetails: make(map[repoKey]*GitHubRepository),
 		gists:             make(map[string]mockGist),
 		repoFiles:         make(map[repoKey][]repoFileEntry),
@@ -748,19 +750,32 @@ func (m *MockClient) SetRepoMergeMethods(owner, repo string, methods RepoMergeMe
 	m.mergeMethods[repoKey{owner, repo}] = methods
 }
 
-func (m *MockClient) MergePR(_ context.Context, owner, repo string, number int, mergeMethod string) error {
+func (m *MockClient) MergePR(_ context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.mergedPRs = append(m.mergedPRs, mergedPR{
 		Owner: owner, Repo: repo, Number: number, MergeMethod: mergeMethod,
 	})
+	outcome := m.mergeOutcomes[prKey{owner, repo, number}]
+	if outcome == "" {
+		outcome = MergeOutcomeMerged
+	}
+	if outcome == MergeOutcomeQueued {
+		return outcome, nil
+	}
 	now := time.Now().UTC()
 	if pr, ok := m.prs[prKey{owner, repo, number}]; ok {
 		pr.State = "merged"
 		pr.MergedAt = &now
 		pr.Mergeable = false
 	}
-	return nil
+	return outcome, nil
+}
+
+func (m *MockClient) SetMergeOutcome(owner, repo string, number int, outcome MergeOutcome) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mergeOutcomes[prKey{owner, repo, number}] = outcome
 }
 
 func (m *MockClient) CreateGist(_ context.Context, in CreateGistInput) (*GistResponse, error) {
@@ -1034,6 +1049,7 @@ func (m *MockClient) Reset() {
 	m.submittedReviews = nil
 	m.requestedReviews = nil
 	m.mergedPRs = nil
+	m.mergeOutcomes = make(map[prKey]MergeOutcome)
 	m.mergeMethods = make(map[repoKey]RepoMergeMethods)
 	m.gists = make(map[string]mockGist)
 	m.deletedGists = nil
