@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -1079,8 +1080,8 @@ func TestConvertAvailableCommands_NoDuplicates(t *testing.T) {
 	}
 }
 
-func TestConvertAvailableCommands_PlaceholderDescriptionCleared(t *testing.T) {
-	a := newTestAdapter()
+func TestConvertAvailableCommands_CursorPlaceholderDescriptionCleared(t *testing.T) {
+	a := newTestAdapterForAgent(acpcompat.CursorAgentID)
 	// cursor-agent sends a bare dash run for commands with no real description.
 	update := &acp.SessionAvailableCommandsUpdate{
 		AvailableCommands: []acp.AvailableCommand{
@@ -1111,6 +1112,27 @@ func TestConvertAvailableCommands_PlaceholderDescriptionCleared(t *testing.T) {
 	if result.AvailableCommands[3].Description != "" {
 		t.Errorf("command[3].Description = %q, want empty (already empty preserved)",
 			result.AvailableCommands[3].Description)
+	}
+}
+
+// A non-Cursor agent that legitimately advertises a dashes-only description
+// keeps it: the placeholder cleanup is Cursor-scoped.
+func TestConvertAvailableCommands_NonCursorDescriptionPreserved(t *testing.T) {
+	a := newTestAdapterForAgent("claude-acp")
+	update := &acp.SessionAvailableCommandsUpdate{
+		AvailableCommands: []acp.AvailableCommand{
+			{Name: "rule", Description: "---"},
+		},
+	}
+
+	result := a.convertAvailableCommands("session-noncursor", update)
+
+	if len(result.AvailableCommands) != 1 {
+		t.Fatalf("expected 1 command, got %d", len(result.AvailableCommands))
+	}
+	if result.AvailableCommands[0].Description != "---" {
+		t.Errorf("command[0].Description = %q, want %q (non-Cursor description untouched)",
+			result.AvailableCommands[0].Description, "---")
 	}
 }
 
