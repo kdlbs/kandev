@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@kandev/ui/switch";
 import { Textarea } from "@kandev/ui/textarea";
 import { useUtilityAgents } from "@/hooks/domains/settings/use-utility-agents";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useAppStore } from "@/components/state-provider";
 import type { PluginConfigField } from "@/lib/plugins/config-schema";
 
@@ -108,6 +109,9 @@ function ConfigFieldControl({
     );
   }
   if (field.type === "enum") {
+    // Radix Select forbids an item with value="", so an explicit "Not set"
+    // sentinel lets optional enums be cleared back to unset (serialization
+    // omits empty strings).
     return (
       <Select
         value={typeof value === "string" ? value : ""}
@@ -130,9 +134,9 @@ function ConfigFieldControl({
               {t("plugins:notSet")}
             </SelectItem>
           )}
-          {(field.enumValues ?? []).map((v) => (
-            <SelectItem key={v} value={v} className="cursor-pointer">
-              {v}
+          {(field.enumValues ?? []).map((option) => (
+            <SelectItem key={option} value={option} className="cursor-pointer">
+              {option}
             </SelectItem>
           ))}
         </SelectContent>
@@ -306,6 +310,10 @@ function AgentProfileSelect({
   onChange,
 }: ConfigFieldControlProps) {
   const { t } = useTranslation();
+  // Agent profiles are only in the store once settings data has loaded, and
+  // the plugin settings route does not otherwise fetch it — without this a
+  // direct visit or reload renders an empty picker.
+  useSettingsData(true);
   const profiles = useAppStore((state) => state.agentProfiles.items);
   const selectedID = typeof value === "string" ? value : "";
   const selectedProfile = profiles.find((p) => p.id === selectedID);
