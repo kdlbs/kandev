@@ -654,7 +654,7 @@ func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.Session
 		seen[cmd.Name] = struct{}{}
 		ac := streams.AvailableCommand{
 			Name:        cmd.Name,
-			Description: cmd.Description,
+			Description: cleanCommandDescription(cmd.Description),
 		}
 		if cmd.Input != nil && cmd.Input.Unstructured != nil {
 			ac.InputHint = cmd.Input.Unstructured.Hint
@@ -666,4 +666,19 @@ func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.Session
 		SessionID:         sessionID,
 		AvailableCommands: commands,
 	}
+}
+
+// cleanCommandDescription drops placeholder descriptions. cursor-agent emits a
+// bare dash run ("---") for project/user slash commands that have no real
+// description; passing it through would render a meaningless "---" in the
+// command palette, so treat it as absent.
+func cleanCommandDescription(desc string) string {
+	trimmed := strings.TrimSpace(desc)
+	if trimmed == "" {
+		return desc
+	}
+	if strings.Trim(trimmed, "-") == "" {
+		return ""
+	}
+	return desc
 }

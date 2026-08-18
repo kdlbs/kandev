@@ -1079,6 +1079,41 @@ func TestConvertAvailableCommands_NoDuplicates(t *testing.T) {
 	}
 }
 
+func TestConvertAvailableCommands_PlaceholderDescriptionCleared(t *testing.T) {
+	a := newTestAdapter()
+	// cursor-agent sends a bare dash run for commands with no real description.
+	update := &acp.SessionAvailableCommandsUpdate{
+		AvailableCommands: []acp.AvailableCommand{
+			{Name: "bootstrap-go-service", Description: "---"},
+			{Name: "preferences", Description: "  ---  "},
+			{Name: "commit", Description: "Commit changes"},
+			{Name: "worktree", Description: ""},
+		},
+	}
+
+	result := a.convertAvailableCommands("session-placeholder", update)
+
+	if len(result.AvailableCommands) != 4 {
+		t.Fatalf("expected 4 commands, got %d", len(result.AvailableCommands))
+	}
+	if result.AvailableCommands[0].Description != "" {
+		t.Errorf("command[0].Description = %q, want empty (dash placeholder cleared)",
+			result.AvailableCommands[0].Description)
+	}
+	if result.AvailableCommands[1].Description != "" {
+		t.Errorf("command[1].Description = %q, want empty (padded dash placeholder cleared)",
+			result.AvailableCommands[1].Description)
+	}
+	if result.AvailableCommands[2].Description != "Commit changes" {
+		t.Errorf("command[2].Description = %q, want %q (real description preserved)",
+			result.AvailableCommands[2].Description, "Commit changes")
+	}
+	if result.AvailableCommands[3].Description != "" {
+		t.Errorf("command[3].Description = %q, want empty (already empty preserved)",
+			result.AvailableCommands[3].Description)
+	}
+}
+
 // --- generated usage/session-info updates ---
 
 func TestConvertNotification_UsageUpdateFixture(t *testing.T) {
