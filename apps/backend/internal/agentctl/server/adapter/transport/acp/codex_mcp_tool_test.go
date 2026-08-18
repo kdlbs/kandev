@@ -49,10 +49,10 @@ func TestCodexMCPExecuteFrameNormalizesAsGenericToolCall(t *testing.T) {
 
 	require.NotNil(t, initial)
 	require.Equal(t, streams.EventTypeToolCall, initial.Type)
-	require.Equal(t, "show_rich_output_kandev", initial.ToolName)
+	require.Equal(t, "kandev/show_rich_output_kandev", initial.ToolName)
 	require.Equal(t, streams.ToolKindGeneric, initial.NormalizedPayload.Kind())
 	require.True(t, initial.NormalizedPayload.IsMCPTool())
-	require.Equal(t, "show_rich_output_kandev", initial.NormalizedPayload.Generic().Name)
+	require.Equal(t, "kandev/show_rich_output_kandev", initial.NormalizedPayload.Generic().Name)
 	require.Equal(t, arguments, initial.NormalizedPayload.Generic().Input)
 	require.Nil(t, initial.NormalizedPayload.ShellExec())
 
@@ -87,8 +87,30 @@ func TestCodexMCPExecuteFrameNormalizesAsGenericToolCall(t *testing.T) {
 	require.Equal(t, streams.EventTypeToolUpdate, terminal.Type)
 	require.Equal(t, toolStatusComplete, terminal.ToolStatus)
 	require.Equal(t, streams.ToolKindGeneric, terminal.NormalizedPayload.Kind())
+	require.True(t, terminal.NormalizedPayload.IsMCPTool())
 	require.Equal(t, arguments, terminal.NormalizedPayload.Generic().Input)
 	require.Equal(t, callToolResult, terminal.NormalizedPayload.Generic().Output)
+}
+
+func TestCodexMCPExecuteFramePreservesServerIdentity(t *testing.T) {
+	t.Parallel()
+
+	a := newTestAdapter()
+	a.agentID = codexAgentID
+	a.normalizer = NewNormalizer(codexAgentID)
+	a.dialect = newACPDialect(codexAgentID)
+
+	event := a.convertToolCallUpdate("session-1", &acpsdk.SessionUpdateToolCall{
+		Meta:          map[string]any{"is_mcp_tool_call": true},
+		Kind:          acpsdk.ToolKind("execute"),
+		RawInput:      map[string]any{"server": "other", "tool": "show_rich_output_kandev", "arguments": map[string]any{}},
+		SessionUpdate: "tool_call",
+		Status:        acpsdk.ToolCallStatus("in_progress"),
+		ToolCallId:    acpsdk.ToolCallId("mcp-call-foreign-server"),
+	})
+
+	require.NotNil(t, event)
+	require.Equal(t, "other/show_rich_output_kandev", event.NormalizedPayload.Generic().Name)
 }
 
 func TestCodexExecuteWithoutMCPMarkerRemainsShellExecution(t *testing.T) {

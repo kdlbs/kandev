@@ -165,12 +165,11 @@ export type ToolCallMetadata = {
 // renderer dispatch and transcript grouping cannot disagree.
 export function kandevToolStemOf(message: Message): string | null {
   const metadata = message.metadata as ToolCallMetadata | undefined;
-  const candidates = [
-    metadata?.tool_name,
-    metadata?.title,
-    message.content || undefined,
-    metadata?.normalized?.generic?.name,
-  ];
+  const normalizedName = metadata?.normalized?.generic?.name;
+  const normalizedStem = extractKandevStem(normalizedName);
+  if (normalizedStem) return normalizedStem;
+  if (normalizedName && /\/|__|\./.test(normalizedName)) return null;
+  const candidates = [metadata?.tool_name, metadata?.title, message.content || undefined];
   for (const candidate of candidates) {
     const stem = extractKandevStem(candidate);
     if (stem) return stem;

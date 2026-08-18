@@ -85,8 +85,9 @@ replay from normalized tool-call input. CSV charts reuse the existing
   the parser and in `components/task/chat/types.test.ts`.
 - **Transcript grouping:** extend `apps/web/hooks/use-processed-messages.test.ts`
   to preserve ordinary activity grouping and exempt rich output.
-- Pure UI markup is covered through focused Playwright rather than React DOM
-  component tests, following repository TDD guidance.
+- Pure UI markup uses focused React DOM coverage in
+  `rich-output-renderer.test.tsx` and `chart-block.test.tsx`; Playwright is
+  reserved for persistence, browser chart geometry, and file-viewer behavior.
 
 ## E2E Tests
 

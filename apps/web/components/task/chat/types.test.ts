@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
-import { isRichOutputMessage, kandevToolStemOf } from "./types";
+import { isRichOutputMessage, kandevToolStemOf, type ToolCallMetadata } from "./types";
 
 function toolCall(rawName: string, field: "tool_name" | "title" | "content" = "title"): Message {
   const metadata: Record<string, unknown> = {
@@ -32,6 +32,14 @@ describe("kandevToolStemOf", () => {
       "show_rich_output",
     );
   });
+
+  it("uses the normalized generic tool identity as a fallback", () => {
+    const message = toolCall("");
+    const metadata = message.metadata as ToolCallMetadata;
+    metadata.normalized!.generic!.name = "show_rich_output_kandev";
+
+    expect(kandevToolStemOf(message)).toBe("show_rich_output");
+  });
 });
 
 describe("isRichOutputMessage", () => {
@@ -39,7 +47,16 @@ describe("isRichOutputMessage", () => {
     expect(isRichOutputMessage(toolCall("mcp__kandev__show_rich_output_kandev"))).toBe(true);
     expect(isRichOutputMessage(toolCall("kandev/show_rich_output_kandev"))).toBe(true);
     expect(isRichOutputMessage(toolCall("mcp__kandev__show_walkthrough_kandev"))).toBe(false);
+    expect(isRichOutputMessage(toolCall("other/show_rich_output_kandev"))).toBe(false);
     expect(isRichOutputMessage(toolCall("mcp__other__show_rich_output"))).toBe(false);
+  });
+
+  it("treats a namespaced normalized identity as authoritative", () => {
+    const message = toolCall("mcp.kandev.show_rich_output_kandev");
+    const metadata = message.metadata as ToolCallMetadata;
+    metadata.normalized!.generic!.name = "other/show_rich_output_kandev";
+
+    expect(isRichOutputMessage(message)).toBe(false);
   });
 
   it("rejects non-tool messages", () => {

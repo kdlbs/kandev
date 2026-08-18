@@ -75,10 +75,12 @@ func parseCodexMCPToolCall(meta map[string]any, rawInput any) (mcpToolCallFrame,
 	server, _ := input["server"].(string)
 	tool, _ := input["tool"].(string)
 	arguments, ok := input["arguments"].(map[string]any)
-	if strings.TrimSpace(server) == "" || strings.TrimSpace(tool) == "" || !ok {
+	server = strings.TrimSpace(server)
+	tool = strings.TrimSpace(tool)
+	if server == "" || tool == "" || !ok {
 		return mcpToolCallFrame{}, false
 	}
-	return mcpToolCallFrame{name: tool, arguments: arguments}, true
+	return mcpToolCallFrame{name: server + "/" + tool, arguments: arguments}, true
 }
 
 // normalizeCodexMCPToolResult removes Codex's transport-only

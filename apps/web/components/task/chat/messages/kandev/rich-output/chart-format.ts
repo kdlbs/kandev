@@ -2,6 +2,14 @@ const MAX_CATEGORY_TICK_CHARACTERS = 16;
 const ISO_DATE_OR_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
 
+type YAxisFormatters = {
+  compact: Intl.NumberFormat;
+  significant: Intl.NumberFormat;
+  fixed: Intl.NumberFormat;
+};
+
+const yAxisFormatterCache = new Map<string, YAxisFormatters>();
+
 function resolveIntlLocale(locale: string): string {
   try {
     return Intl.NumberFormat.supportedLocalesOf([locale])[0] ?? "en-US";
@@ -14,6 +22,22 @@ function clipCategoryTick(value: string): string {
   const characters = Array.from(value);
   if (characters.length <= MAX_CATEGORY_TICK_CHARACTERS) return value;
   return `${characters.slice(0, MAX_CATEGORY_TICK_CHARACTERS - 1).join("")}…`;
+}
+
+function yAxisFormatters(locale: string): YAxisFormatters {
+  const supportedLocale = resolveIntlLocale(locale);
+  const cached = yAxisFormatterCache.get(supportedLocale);
+  if (cached) return cached;
+  const formatters = {
+    compact: new Intl.NumberFormat(supportedLocale, {
+      notation: "compact",
+      maximumFractionDigits: 1,
+    }),
+    significant: new Intl.NumberFormat(supportedLocale, { maximumSignificantDigits: 2 }),
+    fixed: new Intl.NumberFormat(supportedLocale, { maximumFractionDigits: 2 }),
+  };
+  yAxisFormatterCache.set(supportedLocale, formatters);
+  return formatters;
 }
 
 function parseISODate(value: string): Date | null {
@@ -56,17 +80,14 @@ export function formatYAxisTick(value: unknown, locale: string): string {
   }
 
   const absoluteValue = Math.abs(value);
-  const supportedLocale = resolveIntlLocale(locale);
+  const formatters = yAxisFormatters(locale);
   if (absoluteValue >= 1_000) {
-    return new Intl.NumberFormat(supportedLocale, {
-      notation: "compact",
-      maximumFractionDigits: 1,
-    }).format(value);
+    return formatters.compact.format(value);
   }
 
   if (absoluteValue > 0 && absoluteValue < 0.01) {
-    return new Intl.NumberFormat(supportedLocale, { maximumSignificantDigits: 2 }).format(value);
+    return formatters.significant.format(value);
   }
 
-  return new Intl.NumberFormat(supportedLocale, { maximumFractionDigits: 2 }).format(value);
+  return formatters.fixed.format(value);
 }

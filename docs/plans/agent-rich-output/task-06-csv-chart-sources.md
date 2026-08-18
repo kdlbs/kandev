@@ -59,7 +59,9 @@ spec: "../../specs/agent-rich-output/spec.md"
 - `apps/backend/config/prompts/kandev-context.md`
 - `apps/backend/config/prompts/office-context.md`
 - `apps/web/components/task/chat/messages/kandev/parse.ts`
-- `apps/web/components/task/chat/messages/kandev/rich-output/{types,parse,rich-output-renderer}.tsx`
+- `apps/web/components/task/chat/messages/kandev/rich-output/types.ts`
+- `apps/web/components/task/chat/messages/kandev/rich-output/parse.ts`
+- `apps/web/components/task/chat/messages/kandev/rich-output/rich-output-renderer.tsx`
 - `apps/web/e2e/tests/chat/rich-output*.ts`
 - `docs/public/automation-and-mcp.md`
 

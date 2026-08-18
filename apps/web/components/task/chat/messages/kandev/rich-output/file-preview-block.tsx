@@ -1,25 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useId, useState } from "react";
 import { IconChevronDown, IconChevronRight, IconExternalLink, IconFile } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import { GridSpinner } from "@/components/grid-spinner";
-import { getWebSocketClient } from "@/lib/ws/connection";
-import { requestFileContent } from "@/lib/ws/workspace-files";
 import { getFileCategory, getImageMimeType } from "@/lib/utils/file-types";
-import type { FileContentResponse } from "@/lib/types/backend";
+import {
+  useWorkspaceFilePreview,
+  type WorkspaceFilePreviewState,
+} from "@/hooks/domains/session/use-workspace-file-preview";
 import type { RichOutputFileBlock } from "./types";
 
 const TEXT_PREVIEW_CHARS = 2000;
 
-type PreviewState =
-  | { kind: "idle" }
-  | { kind: "loading" }
-  | { kind: "error" }
-  | { kind: "loaded"; response: FileContentResponse & { is_binary: boolean } };
-
-function FilePreviewContent({ block, state }: { block: RichOutputFileBlock; state: PreviewState }) {
+function FilePreviewContent({
+  block,
+  state,
+}: {
+  block: RichOutputFileBlock;
+  state: WorkspaceFilePreviewState;
+}) {
   const { t } = useTranslation();
   if (state.kind === "loading") {
     return (
@@ -76,32 +77,8 @@ type FilePreviewBlockProps = {
 export function FilePreviewBlock({ block, sessionId, onOpenFile }: FilePreviewBlockProps) {
   const { t } = useTranslation();
   const previewId = useId();
-  const requestGeneration = useRef(0);
   const [expanded, setExpanded] = useState(false);
-  const [state, setState] = useState<PreviewState>({ kind: "idle" });
-
-  useEffect(
-    () => () => {
-      requestGeneration.current += 1;
-    },
-    [],
-  );
-
-  const load = useCallback(async () => {
-    const generation = (requestGeneration.current += 1);
-    const client = getWebSocketClient();
-    if (!client || !sessionId) {
-      setState({ kind: "error" });
-      return;
-    }
-    setState({ kind: "loading" });
-    try {
-      const response = await requestFileContent(client, sessionId, block.path, block.repo);
-      if (requestGeneration.current === generation) setState({ kind: "loaded", response });
-    } catch {
-      if (requestGeneration.current === generation) setState({ kind: "error" });
-    }
-  }, [block.path, block.repo, sessionId]);
+  const { load, state } = useWorkspaceFilePreview(sessionId, block.path, block.repo);
 
   const handleToggle = useCallback(() => {
     const next = !expanded;
