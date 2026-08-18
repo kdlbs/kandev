@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
@@ -6,6 +6,7 @@ import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { ForegroundActivity, TaskPendingAction } from "@/lib/types/http";
 import { Graph2StepNode } from "./graph2-step-node";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 
 // The node renders inside the SPA router; stub it so the component mounts.
 vi.mock("@/lib/routing/client-router", () => ({
@@ -153,5 +154,40 @@ describe("Graph2StepNode — waiting-for-input variants", () => {
     expect(container.querySelector(".tabler-icon-shield-question")).not.toBeNull();
     expect(container.querySelector(ICON_CHECK)).toBeNull();
     expect(container.querySelector(ICON_LOADER2)).toBeNull();
+  });
+});
+
+describe("Graph2StepNode — hidden destination disclosure", () => {
+  function renderNextMove(nextStepHidden: boolean) {
+    render(
+      <StateProvider>
+        <TooltipProvider delayDuration={0}>
+          <Graph2StepNode
+            step={STEP}
+            phase="current"
+            task={makeTask()}
+            hasPrev={false}
+            hasNext
+            nextStepId="step-done"
+            nextStepTitle="Done"
+            nextStepHidden={nextStepHidden}
+            onMoveTask={() => undefined}
+            onPreviewTask={() => undefined}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+    const currentStep = screen.getByRole("button", { name: "In Progress" });
+    fireEvent.mouseEnter(currentStep.parentElement!);
+    return screen.getByRole("button", { name: "Move to Done" });
+  }
+
+  it("wraps the move button in a tooltip only when its destination is hidden", () => {
+    const hiddenTargetButton = renderNextMove(true);
+    expect(hiddenTargetButton.getAttribute("data-slot")).toBe("tooltip-trigger");
+
+    cleanup();
+    const visibleTargetButton = renderNextMove(false);
+    expect(visibleTargetButton.getAttribute("data-slot")).toBeNull();
   });
 });

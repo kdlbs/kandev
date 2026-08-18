@@ -12,17 +12,19 @@ spec: "../../specs/kanban-auto-hide-empty-columns/spec.md"
 
 ## Acceptance
 
-- Starting a pointer drag reveals every auto-hidden, non-manually-hidden live step as an accessible
-  droppable target with a unique real step id.
+- Starting a pointer or touch drag reveals every auto-hidden, non-manually-hidden live step as an
+  accessible droppable target with a unique real step id.
 - Cancelling or failing the drag removes temporary targets; a successful authoritative move keeps
   the occupied destination visible.
-- Bulk Move and phone move targets include auto-hidden steps and continue excluding manually hidden
-  steps.
+- Bulk Move, Pipeline move controls, and phone move targets include auto-hidden steps and continue
+  excluding manually hidden steps.
+- A Pipeline arrow shows the destination name in a tooltip only when that adjacent destination is
+  auto-hidden between visible stages.
 
 ## Likely files
 
 - `apps/web/components/kanban/swimlane-kanban-content.tsx` and focused tests
-- `apps/web/components/kanban/swimlane-graph-content.tsx` and focused tests
+- `apps/web/components/kanban/swimlane-graph2-content.tsx` and focused tests
 - `apps/web/components/kanban/mobile-drop-targets.tsx` and tests
 - `apps/web/components/kanban-board.tsx` and tests
 - shared Kanban presentation helper extracted during Task 02
@@ -38,5 +40,5 @@ cd apps/web && pnpm run typecheck && pnpm run i18n:ratchet
 
 - Ghost targets and real columns must never mount the same droppable id simultaneously.
 - DnD completion is asynchronous; local drag state cannot be treated as authoritative task state.
-- Pipeline and Kanban use different local drag state and must share semantics without forced global
-  presentation state.
+- Pipeline uses explicit move controls rather than DnD and must stay compact while retaining hidden
+  destinations in its movement model.

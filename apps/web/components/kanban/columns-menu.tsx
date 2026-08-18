@@ -7,6 +7,7 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { IconColumns3 } from "@tabler/icons-react";
@@ -75,7 +76,7 @@ export function ColumnsMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel>{t("kanban:columns")}</DropdownMenuLabel>
+        <DropdownMenuLabel>{t("kanban:displayOptions")}</DropdownMenuLabel>
         <DropdownMenuCheckboxItem
           data-testid={`columns-menu-auto-hide-empty-${workflowId}`}
           className={touchTargets ? "min-h-11" : undefined}
@@ -83,13 +84,12 @@ export function ColumnsMenu({
           onCheckedChange={() => onToggleAutoHide(workflowId)}
           onSelect={(event) => event.preventDefault()}
         >
-          <span className="min-w-0 flex-1">
-            <span className="block truncate">{t("kanban:autoHideEmptyColumns")}</span>
-            <span className="block text-xs text-muted-foreground">
-              {t("kanban:autoHideEmptyColumnsDescription")}
-            </span>
+          <span className="min-w-0 flex-1 whitespace-normal">
+            {t("kanban:autoHideEmptyColumns")}
           </span>
         </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>{t("kanban:columns")}</DropdownMenuLabel>
         {orderedSteps.map((step) => (
           <DropdownMenuCheckboxItem
             key={step.id}

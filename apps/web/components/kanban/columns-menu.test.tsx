@@ -89,6 +89,22 @@ describe("ColumnsMenu — one workflow's steps", () => {
     expect(onToggleAutoHide).toHaveBeenCalledExactlyOnceWith(WF.id);
   });
 
+  it("separates display behavior from individual column visibility", () => {
+    render(<ColumnsMenu {...baseProps()} />);
+    openMenu();
+
+    const label = screen.getByText("Auto-hide empty columns");
+    expect(label.classList.contains("whitespace-normal")).toBe(true);
+    expect(label.classList.contains("truncate")).toBe(false);
+    expect(screen.queryByText("Show empty steps again while moving tasks.")).toBeNull();
+    expect(
+      Array.from(document.querySelectorAll('[data-slot="dropdown-menu-label"]')).map(
+        (element) => element.textContent,
+      ),
+    ).toEqual(["Display Options", "Columns"]);
+    expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(1);
+  });
+
   it("ignores a hidden id that no longer matches a live step", () => {
     render(<ColumnsMenu {...baseProps({ hiddenStepIds: ["step-deleted"] })} />);
     openMenu();

@@ -120,6 +120,22 @@ func TestWorkflowIDsWithAutoHideEmptyStepsContract(t *testing.T) {
 	if !mapped.IsValid() || !reflect.DeepEqual(mapped.Interface(), want) {
 		t.Fatalf("WorkflowIDsWithAutoHideEmptySteps = %#v, want %#v", mapped, want)
 	}
+
+	var omitted UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{}`), &omitted); err != nil {
+		t.Fatalf("decode omitted preference: %v", err)
+	}
+	if omitted.WorkflowIDsWithAutoHideEmptySteps != nil {
+		t.Fatalf("omitted WorkflowIDsWithAutoHideEmptySteps = %#v, want nil", omitted.WorkflowIDsWithAutoHideEmptySteps)
+	}
+
+	var cleared UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"workflow_ids_with_auto_hide_empty_steps":[]}`), &cleared); err != nil {
+		t.Fatalf("decode cleared preference: %v", err)
+	}
+	if cleared.WorkflowIDsWithAutoHideEmptySteps == nil || len(*cleared.WorkflowIDsWithAutoHideEmptySteps) != 0 {
+		t.Fatalf("cleared WorkflowIDsWithAutoHideEmptySteps = %#v, want non-nil empty slice", cleared.WorkflowIDsWithAutoHideEmptySteps)
+	}
 }
 
 // TestTasksListShowDetailsDTO verifies the DTO mapping and the nil-versus-explicit-false patch semantics.

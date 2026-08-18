@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -362,7 +363,13 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 		settings.KanbanHiddenStepIDs = *req.KanbanHiddenStepIDs
 	}
 	if req.WorkflowIDsWithAutoHideEmptySteps != nil {
-		settings.WorkflowIDsWithAutoHideEmptySteps = *req.WorkflowIDsWithAutoHideEmptySteps
+		workflowIDs, err := normalizeWorkflowIDsWithAutoHideEmptySteps(
+			*req.WorkflowIDsWithAutoHideEmptySteps,
+		)
+		if err != nil {
+			return err
+		}
+		settings.WorkflowIDsWithAutoHideEmptySteps = workflowIDs
 	}
 	return nil
 }
@@ -379,8 +386,36 @@ const (
 	// validateKanbanHiddenStepIDs, which both the REST and WebSocket update
 	// paths call, so it isn't bypassable by whichever transport skips a
 	// transport-level guard.
-	maxKanbanHiddenStepIDsTotalBytes = maxUserPreferenceBlobBytes
+	maxKanbanHiddenStepIDsTotalBytes     = maxUserPreferenceBlobBytes
+	maxWorkflowIDsWithAutoHideEmptySteps = 200
 )
+
+func normalizeWorkflowIDsWithAutoHideEmptySteps(workflowIDs []string) ([]string, error) {
+	if len(workflowIDs) > maxWorkflowIDsWithAutoHideEmptySteps {
+		return nil, fmt.Errorf(
+			"workflow_ids_with_auto_hide_empty_steps: max %d workflow ids allowed",
+			maxWorkflowIDsWithAutoHideEmptySteps,
+		)
+	}
+	totalBytes := 0
+	unique := make(map[string]struct{}, len(workflowIDs))
+	for _, workflowID := range workflowIDs {
+		totalBytes += len(workflowID)
+		if totalBytes > maxUserPreferenceBlobBytes {
+			return nil, fmt.Errorf(
+				"workflow_ids_with_auto_hide_empty_steps: max %d bytes allowed",
+				maxUserPreferenceBlobBytes,
+			)
+		}
+		unique[workflowID] = struct{}{}
+	}
+	normalized := make([]string, 0, len(unique))
+	for workflowID := range unique {
+		normalized = append(normalized, workflowID)
+	}
+	sort.Strings(normalized)
+	return normalized, nil
+}
 
 // validateKanbanHiddenStepIDs bounds the per-workflow hidden-step-id map so a
 // single settings write cannot grow the users.settings JSON blob unboundedly

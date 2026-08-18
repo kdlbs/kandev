@@ -19,7 +19,8 @@ import { CSS } from "@dnd-kit/utilities";
 import { useAppStore } from "@/components/state-provider";
 import { useSwimlaneCollapse } from "@/hooks/domains/kanban/use-swimlane-collapse";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { filterTasksByRepositories, mapSelectedRepositoryIds } from "@/lib/kanban/filters";
+import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
+import { projectWorkflowTasks } from "@/lib/kanban/task-projections";
 import {
   selectMobileNavigatorWorkflows,
   selectWorkflowSwimlanes,
@@ -28,7 +29,10 @@ import {
 import { reorderWorkflows } from "@/lib/api";
 import { SwimlaneSection } from "./swimlane-section";
 import { ColumnsMenu } from "./columns-menu";
-import { deriveAutoHiddenStepIds } from "@/lib/kanban/auto-hide-empty-columns";
+import {
+  deriveAutoHiddenStepIds,
+  sortWorkflowStepsByPosition,
+} from "@/lib/kanban/auto-hide-empty-columns";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import {
   getEffectiveView,
@@ -94,45 +98,6 @@ function renderEmptyState(emptyMessage: string) {
       </div>
     </div>
   );
-}
-
-type FilterTasksOptions = {
-  searchQuery?: string;
-  matchesPluginTaskFilters?: (taskId: string) => boolean;
-  hiddenStepIds?: Set<string>;
-};
-
-/** Exported for unit testing; not part of the module's public component API. */
-export function filterTasks(
-  snapshots: Record<string, { tasks: Task[]; steps: { id: string }[] }>,
-  workflowId: string,
-  repoFilter: ReturnType<typeof mapSelectedRepositoryIds>,
-  options?: FilterTasksOptions,
-): Task[] {
-  const snapshot = snapshots[workflowId];
-  if (!snapshot) return [];
-  let tasks = snapshot.tasks as Task[];
-  const { hiddenStepIds, searchQuery, matchesPluginTaskFilters } = options ?? {};
-  if (hiddenStepIds && hiddenStepIds.size > 0) {
-    const liveStepIds = new Set(snapshot.steps.map((s) => s.id));
-    const effectiveHidden = new Set([...hiddenStepIds].filter((id) => liveStepIds.has(id)));
-    if (effectiveHidden.size > 0) {
-      tasks = tasks.filter((t) => !effectiveHidden.has(t.workflowStepId));
-    }
-  }
-  tasks = filterTasksByRepositories(tasks, repoFilter);
-  if (searchQuery) {
-    const q = searchQuery.toLowerCase();
-    tasks = tasks.filter(
-      (t) =>
-        t.title.toLowerCase().includes(q) ||
-        (t.description && t.description.toLowerCase().includes(q)),
-    );
-  }
-  if (matchesPluginTaskFilters) {
-    tasks = tasks.filter((t) => matchesPluginTaskFilters(t.id));
-  }
-  return tasks;
 }
 
 /** Stable identity so an unhidden workflow does not remount its menu each render. */
@@ -245,14 +210,11 @@ function WorkflowItemContent({
     ],
   );
   const moveTargetSteps = useMemo(
-    () => [...snapshot.steps].filter((step) => !hiddenSet.has(step.id)),
+    () => sortWorkflowStepsByPosition(snapshot.steps).filter((step) => !hiddenSet.has(step.id)),
     [snapshot.steps, hiddenSet],
   );
   const steps = useMemo(
-    () =>
-      moveTargetSteps
-        .filter((step) => !autoHiddenSet.has(step.id))
-        .sort((a, b) => a.position - b.position),
+    () => moveTargetSteps.filter((step) => !autoHiddenSet.has(step.id)),
     [moveTargetSteps, autoHiddenSet],
   );
   const content = (
@@ -361,24 +323,29 @@ function useSwimlaneData(
     [workflowFilter, workflows, snapshots],
   );
 
-  const getFilteredTasks = useCallback(
-    (wfId: string) => {
+  const getTaskProjection = useMemo(() => {
+    const cache = new Map<string, ReturnType<typeof projectWorkflowTasks>>();
+    return (wfId: string) => {
+      const cached = cache.get(wfId);
+      if (cached) return cached;
       const hidden = hiddenWorkflowStepIds[wfId];
       const hiddenSet = hidden && hidden.length > 0 ? new Set(hidden) : undefined;
-      return filterTasks(snapshots, wfId, repoFilter, {
+      const projection = projectWorkflowTasks(snapshots, wfId, repoFilter, {
         searchQuery,
         matchesPluginTaskFilters,
         hiddenStepIds: hiddenSet,
       });
-    },
-    [snapshots, repoFilter, searchQuery, matchesPluginTaskFilters, hiddenWorkflowStepIds],
+      cache.set(wfId, projection);
+      return projection;
+    };
+  }, [snapshots, repoFilter, searchQuery, matchesPluginTaskFilters, hiddenWorkflowStepIds]);
+  const getFilteredTasks = useCallback(
+    (wfId: string) => getTaskProjection(wfId).visibleTasks,
+    [getTaskProjection],
   );
   const getOccupancyTasks = useCallback(
-    (wfId: string) =>
-      filterTasks(snapshots, wfId, repoFilter, {
-        matchesPluginTaskFilters,
-      }),
-    [snapshots, repoFilter, matchesPluginTaskFilters],
+    (wfId: string) => getTaskProjection(wfId).occupancyTasks,
+    [getTaskProjection],
   );
 
   const hasLiveHiddenSteps = useCallback(

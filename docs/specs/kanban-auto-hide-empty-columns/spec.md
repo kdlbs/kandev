@@ -30,6 +30,8 @@ different drag-and-drop contract.
 ### Per-workflow preference
 
 - Each workflow's existing Columns menu SHALL expose an **Auto-hide empty columns** switch.
+- The adaptive display switch SHALL be visually separated from the individual manual column list
+  and SHALL not carry secondary descriptive copy.
 - The preference SHALL be user-scoped, persisted per workflow, and disabled by default.
 - Enabling it SHALL NOT change `kanban_hidden_step_ids` or the checked state of individual manual
   column toggles.
@@ -69,8 +71,10 @@ different drag-and-drop contract.
   required by the existing column-visibility contract.
 - Bulk Move and other explicit move selectors SHALL include auto-hidden steps and exclude manually
   hidden steps.
-- Keyboard and screen-reader users SHALL be able to identify the auto-hidden destinations exposed
-  during a move.
+- Pipeline arrows SHALL name an adjacent destination in a tooltip only when that destination is
+  auto-hidden; a directly visible neighboring step needs no tooltip.
+- Keyboard and screen-reader users SHALL retain access to auto-hidden destinations through the
+  existing move controls; this feature does not add keyboard drag-and-drop.
 
 ### Mobile and responsive behavior
 

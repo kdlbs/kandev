@@ -1,6 +1,24 @@
 type Step = { id: string };
 type StepTask = { workflowStepId: string | null };
 
+export function sortWorkflowStepsByPosition<T extends Step & { position: number }>(
+  steps: T[],
+): T[] {
+  return [...steps].sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
+}
+
+export function areAllEmptyStepsAutoHidden(visibleSteps: Step[], moveTargetSteps: Step[]): boolean {
+  return visibleSteps.length === 0 && moveTargetSteps.length > 0;
+}
+
+export function getAutoHiddenMoveTargets<T extends Step>(
+  visibleSteps: Step[],
+  moveTargetSteps: T[],
+): T[] {
+  const visibleStepIds = new Set(visibleSteps.map((step) => step.id));
+  return moveTargetSteps.filter((step) => !visibleStepIds.has(step.id));
+}
+
 export function deriveAutoHiddenStepIds(
   steps: Step[],
   tasks: StepTask[],

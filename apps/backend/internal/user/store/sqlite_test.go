@@ -885,17 +885,34 @@ func TestSQLiteRepositoryKanbanHiddenStepIDsDefaultAndRoundTrip(t *testing.T) {
 	}
 }
 
-func TestScanUserSettingsWorkflowIDsWithAutoHideEmptySteps(t *testing.T) {
-	settings, err := scanUserSettings(
-		settingsScanner{raw: `{"workflow_ids_with_auto_hide_empty_steps":["wf-a"]}`},
-		DefaultUserID,
-	)
+func TestSQLiteRepositoryWorkflowIDsWithAutoHideEmptyStepsDefaultAndRoundTrip(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
-		t.Fatalf("scan settings: %v", err)
+		t.Fatalf("open sqlite: %v", err)
 	}
-	want := []string{"wf-a"}
-	if !reflect.DeepEqual(settings.WorkflowIDsWithAutoHideEmptySteps, want) {
-		t.Fatalf("WorkflowIDsWithAutoHideEmptySteps = %#v, want %#v", settings.WorkflowIDsWithAutoHideEmptySteps, want)
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	if settings.WorkflowIDsWithAutoHideEmptySteps == nil || len(settings.WorkflowIDsWithAutoHideEmptySteps) != 0 {
+		t.Fatalf("default WorkflowIDsWithAutoHideEmptySteps = %#v, want non-nil empty", settings.WorkflowIDsWithAutoHideEmptySteps)
+	}
+	settings.WorkflowIDsWithAutoHideEmptySteps = []string{"wf-a", "wf-b"}
+	upsertUserSettingsForTest(t, repo, ctx, settings)
+	got, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	if !reflect.DeepEqual(got.WorkflowIDsWithAutoHideEmptySteps, settings.WorkflowIDsWithAutoHideEmptySteps) {
+		t.Fatalf("WorkflowIDsWithAutoHideEmptySteps = %#v, want %#v", got.WorkflowIDsWithAutoHideEmptySteps, settings.WorkflowIDsWithAutoHideEmptySteps)
 	}
 }
 

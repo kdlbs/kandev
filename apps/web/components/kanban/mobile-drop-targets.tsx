@@ -56,3 +56,44 @@ export function MobileDropTargets({ steps, currentStepId, isDragging }: MobileDr
     </div>
   );
 }
+
+function DesktopAutoHiddenDropTarget({ step }: { step: WorkflowStep }) {
+  const { setNodeRef, isOver } = useDroppable({ id: step.id });
+  return (
+    <div
+      ref={setNodeRef}
+      data-testid={`auto-hidden-drop-target-${step.id}`}
+      className={cn(
+        "flex min-h-12 min-w-40 shrink-0 items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-2 text-sm font-medium transition-colors",
+        isOver
+          ? "border-primary bg-primary/10 text-foreground opacity-100"
+          : "border-muted-foreground/40 bg-background/70 text-muted-foreground opacity-70",
+      )}
+    >
+      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: step.color }} />
+      <span className="max-w-40 truncate">{step.title}</span>
+    </div>
+  );
+}
+
+export function DesktopAutoHiddenDropTargets({
+  steps,
+  isDragging,
+}: {
+  steps: WorkflowStep[];
+  isDragging: boolean;
+}) {
+  if (!isDragging || steps.length === 0) return null;
+  return (
+    <div
+      data-testid="desktop-auto-hidden-drop-targets"
+      className="pointer-events-none absolute inset-x-3 bottom-3 z-40 flex justify-center"
+    >
+      <div className="pointer-events-auto flex max-w-full gap-2 overflow-x-auto rounded-xl border bg-background/85 p-2 shadow-lg backdrop-blur-sm">
+        {steps.map((step) => (
+          <DesktopAutoHiddenDropTarget key={step.id} step={step} />
+        ))}
+      </div>
+    </div>
+  );
+}

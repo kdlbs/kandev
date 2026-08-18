@@ -40,7 +40,8 @@ contract and drag behavior touches shared Kanban and Pipeline composition.
 
 ### Columns control
 
-- Add a translated switch row at the top of `ColumnsMenu` with clear explanatory text.
+- Add a translated display-behavior section at the top of `ColumnsMenu`, separated from the manual
+  column list, with no secondary description under the switch.
 - Add `autoHideEmpty`, `onToggleAutoHide`, and touch-target-safe rendering to the shared component.
 - Reuse the same component in the desktop/tablet swimlane header and phone drawer.
 
@@ -56,8 +57,9 @@ contract and drag behavior touches shared Kanban and Pipeline composition.
 ### Move presentation
 
 - Pass all non-manually-hidden live steps as move targets.
-- In Kanban and Pipeline DnD, reveal auto-hidden steps as compact droppable targets while drag state
-  is active, without duplicating droppable ids.
+- In Kanban DnD, reveal auto-hidden steps as droppable targets while drag state is active, without
+  duplicating droppable ids. Keep Pipeline compact while its existing move controls retain the full
+  non-manually-hidden step list.
 - Keep Bulk Move behavior unchanged except that auto-hidden steps remain available.
 - Reuse the existing phone drop-target surface and preserve mobile navigation.
 
@@ -66,7 +68,7 @@ contract and drag behavior touches shared Kanban and Pipeline composition.
 Add English source keys and complete `pt-pt`, `zh-cn`, `zh-hk`, and `zh-tw` catalogs for:
 
 - auto-hide toggle label;
-- explanatory help text;
+- conditional Pipeline destination tooltip copy;
 - all-columns-empty contextual state;
 - optional drag-target explanation if the existing accessible step title is insufficient.
 
