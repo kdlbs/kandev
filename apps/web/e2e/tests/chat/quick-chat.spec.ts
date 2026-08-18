@@ -129,7 +129,9 @@ test.describe("Quick Chat", () => {
 
     // The tab bar sits outside quick-chat-content (the clarification's
     // shortcut scope), e.g. the resize handles or a mouse-focused tab.
-    await dialog.getByTestId("quick-chat-tab").focus();
+    await dialog
+      .locator('[data-testid="quick-chat-tab"] button:not([aria-label^="Close"])')
+      .focus();
 
     await testPage.keyboard.press("Escape");
 
