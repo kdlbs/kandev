@@ -177,7 +177,7 @@ export function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProp
             </Card>
           );
         })}
-        {pluginIntegrations.map(({ pluginId, id, label, description, icon }) => {
+        {pluginIntegrations.map(({ pluginId, id, label, description, icon, action: Action }) => {
           const href = `${rootHref}/${id}`;
           const Icon = resolvePluginIcon(icon);
           return (
@@ -187,13 +187,18 @@ export function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProp
               className="h-full w-full transition-colors hover:border-primary/40"
             >
               <CardContent className="space-y-2">
-                <Link
-                  href={href}
-                  className="flex min-w-0 items-center gap-2 text-base font-semibold hover:underline cursor-pointer"
-                >
-                  <Icon className="h-5 w-5 shrink-0" />
-                  <span className="truncate">{label}</span>
-                </Link>
+                <div className="flex items-center justify-between gap-2">
+                  <Link
+                    href={href}
+                    className="flex min-w-0 items-center gap-2 text-base font-semibold hover:underline cursor-pointer"
+                  >
+                    <Icon className="h-5 w-5 shrink-0" />
+                    <span className="truncate">{label}</span>
+                  </Link>
+                  <div className="shrink-0">
+                    {Action ? <Action workspaceId={workspaceId} /> : null}
+                  </div>
+                </div>
                 <Link href={href} className="text-sm text-muted-foreground cursor-pointer">
                   {description}
                 </Link>
