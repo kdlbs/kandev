@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { assertBackendBinaryFresh } from "./global-setup";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import globalSetup, { assertBackendArtifactsFresh } from "./global-setup";
 
 let backendDir: string;
 let binPath: string;
@@ -23,11 +23,25 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   fs.rmSync(backendDir, { recursive: true, force: true });
 });
 
 function touch(filePath: string, mtime: Date) {
   fs.utimesSync(filePath, mtime, mtime);
+}
+
+function assertBackendBinaryFresh(
+  fixtureBackendDir: string,
+  binPaths: string[],
+  env: NodeJS.ProcessEnv,
+): void {
+  assertBackendArtifactsFresh(
+    fixtureBackendDir,
+    binPaths.map((artifactPath) => ({ path: artifactPath, rebuildTarget: "build" })),
+    env,
+  );
 }
 
 describe("assertBackendBinaryFresh", () => {
@@ -47,11 +61,11 @@ describe("assertBackendBinaryFresh", () => {
     touch(staleSource, new Date("2026-01-02T00:00:00Z"));
 
     expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).toThrow(
-      /Backend binary is older than apps\/backend sources.*Run "make -C apps\/backend build"/s,
+      /Required E2E artifact is older than apps\/backend sources.*service\.go/s,
     );
   });
 
-  it("skips the check when KANDEV_E2E_BIN is set", () => {
+  it("still checks the local mock agent when KANDEV_E2E_BIN selects a custom backend", () => {
     touch(binPath, new Date("2026-01-01T00:00:00Z"));
     touch(
       path.join(backendDir, "internal", "task", "service.go"),
@@ -60,7 +74,7 @@ describe("assertBackendBinaryFresh", () => {
 
     expect(() =>
       assertBackendBinaryFresh(backendDir, [binPath], { KANDEV_E2E_BIN: "/some/other/kandev" }),
-    ).not.toThrow();
+    ).toThrow(/service\.go/);
   });
 
   it("skips the check when KANDEV_E2E_SKIP_FRESHNESS=1", () => {
@@ -149,11 +163,57 @@ describe("assertBackendBinaryFresh", () => {
       new Date("2025-01-01T00:00:00Z"),
     );
 
-    const lookalike = path.join(backendDir, "internal", "task", "notes.output");
+    const lookalike = path.join(backendDir, "internal", "task", "notes.out");
     fs.writeFileSync(lookalike, "not a coverage profile\n");
     touch(lookalike, new Date("2026-06-01T00:00:00Z"));
 
-    expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).toThrow(/notes\.output/);
+    expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).toThrow(/notes\.out/);
+  });
+
+  it("checks every required binary when only the second binary is stale", () => {
+    const mockAgentPath = path.join(backendDir, "bin", "mock-agent");
+    fs.writeFileSync(mockAgentPath, "binary");
+    touch(
+      path.join(backendDir, "internal", "task", "service.go"),
+      new Date("2026-01-02T00:00:00Z"),
+    );
+    touch(binPath, new Date("2026-01-03T00:00:00Z"));
+    touch(mockAgentPath, new Date("2026-01-01T00:00:00Z"));
+
+    expect(() => assertBackendBinaryFresh(backendDir, [binPath, mockAgentPath], {})).toThrow(
+      /mock-agent/,
+    );
+  });
+
+  it("prints a rebuild command that works from the current directory", () => {
+    touch(binPath, new Date("2026-01-01T00:00:00Z"));
+    touch(
+      path.join(backendDir, "internal", "task", "service.go"),
+      new Date("2026-01-02T00:00:00Z"),
+    );
+
+    expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).toThrow(
+      `make -C ${JSON.stringify(backendDir)} build`,
+    );
+  });
+
+  it("uses the fixture package rebuild target when that package is stale", () => {
+    const pluginPackage = path.join(backendDir, ".build", "kandev-plugin-e2e-1.0.0.tar.gz");
+    fs.mkdirSync(path.dirname(pluginPackage), { recursive: true });
+    fs.writeFileSync(pluginPackage, "package");
+    touch(pluginPackage, new Date("2026-01-01T00:00:00Z"));
+    touch(
+      path.join(backendDir, "internal", "task", "service.go"),
+      new Date("2026-01-02T00:00:00Z"),
+    );
+
+    expect(() =>
+      assertBackendArtifactsFresh(
+        backendDir,
+        [{ path: pluginPackage, rebuildTarget: "e2e-plugin-package" }],
+        {},
+      ),
+    ).toThrow(`make -C ${JSON.stringify(backendDir)} e2e-plugin-package`);
   });
 
   it("ignores files under bin/, .build/, and testdata/ when finding the newest source", () => {
@@ -180,3 +240,48 @@ describe("assertBackendBinaryFresh", () => {
     expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).not.toThrow();
   });
 });
+
+describe("globalSetup", () => {
+  it("checks the selected custom backend path instead of the default backend", () => {
+    const customBackend = path.join(backendDir, "custom", "kandev");
+    vi.stubEnv("KANDEV_E2E_BIN", customBackend);
+    vi.stubEnv("KANDEV_E2E_SKIP_FRESHNESS", "1");
+    const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
+
+    (globalSetup as (config: unknown) => void)({ projects: [] });
+
+    expect(existsSync).toHaveBeenCalledWith(customBackend);
+    expect(existsSync).not.toHaveBeenCalledWith(path.join(backendDirForTest(), "bin", "kandev"));
+  });
+
+  it("reports a missing custom backend path", () => {
+    const customBackend = path.join(backendDir, "missing", "kandev");
+    vi.stubEnv("KANDEV_E2E_BIN", customBackend);
+    const existsSync = vi
+      .spyOn(fs, "existsSync")
+      .mockImplementation((artifactPath) => artifactPath !== customBackend);
+
+    expect(() => (globalSetup as (config: unknown) => void)({ projects: [] })).toThrow(
+      /KANDEV_E2E_BIN file does not exist/,
+    );
+    expect(existsSync).toHaveBeenCalledWith(customBackend);
+  });
+
+  it("checks Linux helper binaries when the containers project is selected", () => {
+    vi.stubEnv("KANDEV_E2E_SKIP_FRESHNESS", "1");
+    const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
+
+    (globalSetup as (config: unknown) => void)({ projects: [{ name: "containers" }] });
+
+    expect(existsSync).toHaveBeenCalledWith(
+      path.join(backendDirForTest(), "bin", "mock-agent-linux-amd64"),
+    );
+    expect(existsSync).toHaveBeenCalledWith(
+      path.join(backendDirForTest(), "bin", "agentctl-linux-amd64"),
+    );
+  });
+});
+
+function backendDirForTest(): string {
+  return path.resolve(__dirname, "../../../apps/backend");
+}

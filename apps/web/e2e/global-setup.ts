@@ -1,20 +1,49 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { FullConfig } from "@playwright/test";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "..");
 
-export default function globalSetup() {
-  const kandevBin = path.join(BACKEND_DIR, "bin", "kandev");
-  const mockAgentBin = path.join(BACKEND_DIR, "bin", "mock-agent");
+export type BackendArtifact = {
+  path: string;
+  rebuildTarget: string;
+};
 
-  for (const bin of [kandevBin, mockAgentBin]) {
-    if (!fs.existsSync(bin)) {
-      throw new Error(`Required binary not found: ${bin}\nRun "make build-backend" first.`);
-    }
+export default function globalSetup(config: FullConfig) {
+  const customKandevBin = process.env.KANDEV_E2E_BIN;
+  const kandevBin = customKandevBin ?? path.join(BACKEND_DIR, "bin", "kandev");
+  const artifacts: BackendArtifact[] = [
+    { path: path.join(BACKEND_DIR, "bin", "mock-agent"), rebuildTarget: "build" },
+    {
+      path: path.join(BACKEND_DIR, ".build", "kandev-plugin-e2e-1.0.0.tar.gz"),
+      rebuildTarget: "e2e-plugin-package",
+    },
+  ];
+
+  if (!customKandevBin) {
+    artifacts.unshift({ path: kandevBin, rebuildTarget: "build" });
+  }
+  if (isContainerRun(config, process.env)) {
+    artifacts.push(
+      {
+        path: path.join(BACKEND_DIR, "bin", "mock-agent-linux-amd64"),
+        rebuildTarget: "build-mock-agent-linux",
+      },
+      {
+        path: path.join(BACKEND_DIR, "bin", "agentctl-linux-amd64"),
+        rebuildTarget: "build-agentctl-linux",
+      },
+    );
   }
 
-  assertBackendBinaryFresh(BACKEND_DIR, [kandevBin, mockAgentBin]);
+  const requiredArtifacts = customKandevBin
+    ? [{ path: kandevBin, rebuildTarget: undefined }, ...artifacts]
+    : artifacts;
+  for (const artifact of requiredArtifacts) {
+    assertArtifactExists(artifact.path, artifact.rebuildTarget);
+  }
+  assertBackendArtifactsFresh(BACKEND_DIR, artifacts);
 
   const spaIndex = path.join(WEB_DIR, "dist", "index.html");
   if (!fs.existsSync(spaIndex)) {
@@ -22,17 +51,33 @@ export default function globalSetup() {
   }
 
   assertPseudoCatalogBundled();
+}
 
-  // tests/plugins/plugins.spec.ts installs this package through the real
-  // upload UI. Like the binaries above, this only checks existence — not
-  // freshness — so rebuild after touching cmd/plugin-fixture (see
-  // apps/backend/Makefile's e2e-plugin-package target).
-  const pluginPackage = path.join(BACKEND_DIR, ".build", "kandev-plugin-e2e-1.0.0.tar.gz");
-  if (!fs.existsSync(pluginPackage)) {
+function isContainerRun(config: FullConfig, env: NodeJS.ProcessEnv): boolean {
+  return (
+    config.projects.some(({ name }) => name === "containers" || name === "docker") ||
+    env.KANDEV_E2E_CONTAINERS === "1" ||
+    env.KANDEV_E2E_DOCKER === "1"
+  );
+}
+
+function backendMakeCommand(backendDir: string, target: string): string {
+  return `make -C ${JSON.stringify(backendDir)} ${target}`;
+}
+
+function assertArtifactExists(artifactPath: string, rebuildTarget?: string): void {
+  if (fs.existsSync(artifactPath)) return;
+
+  if (!rebuildTarget) {
     throw new Error(
-      `E2E fixture plugin package not found: ${pluginPackage}\nRun "make -C apps/backend e2e-plugin-package" first.`,
+      `The KANDEV_E2E_BIN file does not exist: ${artifactPath}\n` +
+        "Set KANDEV_E2E_BIN to an existing backend executable.",
     );
   }
+  throw new Error(
+    `Required E2E artifact not found: ${artifactPath}\n` +
+      `Run "${backendMakeCommand(BACKEND_DIR, rebuildTarget)}" first.`,
+  );
 }
 
 const BACKEND_SOURCE_SKIP_DIRS = new Set(["bin", ".build", "testdata"]);
@@ -48,7 +93,7 @@ const BACKEND_SOURCE_SKIP_DIRS = new Set(["bin", ".build", "testdata"]);
  * demanding a backend rebuild because a coverage profile — which changes
  * nothing the binary contains — is newer than the binary.
  */
-const BACKEND_SOURCE_SKIP_FILE_PATTERNS = [/\.out$/, /\.test$/, /^coverage\.html$/];
+const BACKEND_SOURCE_SKIP_FILE_PATTERNS = [/^coverage\.out$/, /\.test$/, /^coverage\.html$/];
 
 /**
  * `make sync-embedded-web` copies apps/web/dist here so the binary can serve
@@ -111,24 +156,25 @@ function findNewestBackendSource(
  * than the embedded git sha, since the sha still matches HEAD with uncommitted
  * backend edits — the more common case during local development.
  */
-export function assertBackendBinaryFresh(
+export function assertBackendArtifactsFresh(
   backendDir: string,
-  binPaths: string[],
+  artifacts: BackendArtifact[],
   env: NodeJS.ProcessEnv = process.env,
 ): void {
-  if (env.KANDEV_E2E_BIN) return;
   if (env.KANDEV_E2E_SKIP_FRESHNESS === "1") return;
 
   const newestSource = findNewestBackendSource(backendDir);
   if (!newestSource) return;
 
-  for (const binPath of binPaths) {
-    const binMtimeMs = fs.statSync(binPath).mtimeMs;
-    if (binMtimeMs < newestSource.mtimeMs) {
+  for (const artifact of artifacts) {
+    const artifactMtimeMs = fs.statSync(artifact.path).mtimeMs;
+    if (artifactMtimeMs < newestSource.mtimeMs) {
       throw new Error(
-        `Backend binary is older than apps/backend sources (${newestSource.file} is newer). ` +
-          'Run "make -C apps/backend build" — E2E runs the prebuilt binary, and pnpm run ' +
-          "build:e2e only rebuilds the frontend.",
+        `Required E2E artifact is older than apps/backend sources: ${artifact.path}. ` +
+          `${newestSource.file} is newer. Run "${backendMakeCommand(
+            backendDir,
+            artifact.rebuildTarget,
+          )}". E2E uses prebuilt backend artifacts. The frontend build does not rebuild them.`,
       );
     }
   }
@@ -172,7 +218,7 @@ function assertPseudoCatalogBundled() {
   if (markers.length === 0) {
     throw new Error(
       `KANDEV_I18N_COVERAGE=1 but no usable pseudo source catalog was found in ${catalogDir}.\n` +
-        'The coverage oracle cannot mean anything without it — run "pnpm run i18n:pseudo" ' +
+        'The coverage oracle cannot mean anything without it. Run "pnpm run i18n:pseudo" ' +
         "to regenerate it. See docs/i18n.md.",
     );
   }
