@@ -73,10 +73,15 @@ func TestResolveRepositoryIdentityRejectsGitHubOwnerNameConflictWithRemotePath(t
 // safe repository ID and a generic remediation.
 func TestResolveRepositoryIdentityRejectsCredentialBearingAndMalformedURLsWithoutLeakingSecrets(t *testing.T) {
 	for name, remoteURL := range map[string]string{
-		"userinfo":  "https://oauth2:sh_supersecret@github.com/acme/widgets.git",
-		"query":     "https://github.com/acme/widgets.git?token=sh_supersecret",
-		"fragment":  "https://github.com/acme/widgets.git#sh_supersecret",
-		"malformed": "not-a-valid-url",
+		"https userinfo":     "https://oauth2:sh_supersecret@github.com/acme/widgets.git",
+		"https query":        "https://github.com/acme/widgets.git?token=sh_supersecret",
+		"https fragment":     "https://github.com/acme/widgets.git#sh_supersecret",
+		"ssh password":       "ssh://git:sh_supersecret@github.com/acme/widgets.git",
+		"ssh query":          "ssh://git@github.com/acme/widgets.git?token=sh_supersecret",
+		"ssh fragment":       "ssh://git@github.com/acme/widgets.git#sh_supersecret",
+		"scp-style query":    "git@github.com:acme/widgets.git?token=sh_supersecret",
+		"scp-style fragment": "git@github.com:acme/widgets.git#sh_supersecret",
+		"malformed":          "not-a-valid-url",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ResolveRepositoryIdentity(RepositoryIdentityInput{RepositoryID: "repo-1", RemoteURL: remoteURL})
@@ -85,6 +90,9 @@ func TestResolveRepositoryIdentityRejectsCredentialBearingAndMalformedURLsWithou
 			}
 			if strings.Contains(err.Error(), "sh_supersecret") {
 				t.Fatalf("error leaked the credential-bearing URL: %v", err)
+			}
+			if strings.Contains(err.Error(), remoteURL) {
+				t.Fatalf("error leaked the rejected remote: %v", err)
 			}
 		})
 	}

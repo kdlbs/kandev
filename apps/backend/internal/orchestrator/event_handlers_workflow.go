@@ -1489,6 +1489,17 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 		zap.String("current_session", currentSession.ID),
 		zap.String("current_profile", currentSession.AgentProfileID),
 		zap.String("new_profile", newAgentProfileID))
+	existing, lookupErr := s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID)
+	if lookupErr != nil {
+		s.logger.Warn("failed to look up reusable session, falling through to create new",
+			zap.String("task_id", taskID),
+			zap.String("agent_profile_id", newAgentProfileID),
+			zap.Error(lookupErr))
+	}
+	targetSession := currentSession
+	if existing != nil {
+		targetSession = existing
+	}
 
 	// Validate managed-credential repository bindings before mutating either
 	// session's ownership. Reusing or replacing the current session only to
@@ -1502,7 +1513,9 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 	if dbTask == nil {
 		return nil, fmt.Errorf("task %s not found for session switch preflight", taskID)
 	}
-	if err := s.executor.PreflightManagedGitCredentials(ctx, dbTask.WorkspaceID, taskID); err != nil {
+	if err := s.executor.PreflightManagedGitCredentials(
+		ctx, dbTask.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
+	); err != nil {
 		return nil, err
 	}
 
@@ -1512,13 +1525,6 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 			zap.String("task_id", taskID), zap.Error(err))
 	}
 
-	existing, lookupErr := s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID)
-	if lookupErr != nil {
-		s.logger.Warn("failed to look up reusable session, falling through to create new",
-			zap.String("task_id", taskID),
-			zap.String("agent_profile_id", newAgentProfileID),
-			zap.Error(lookupErr))
-	}
 	if existing != nil {
 		return s.reuseSessionForStep(ctx, taskID, currentSession, existing)
 	}
@@ -1780,6 +1786,39 @@ func (s *Service) prepareWorkflowStepSession(
 		return nil, false, err
 	}
 	return newSession, true, nil
+}
+
+func (s *Service) preflightWorkflowStepCredentials(
+	ctx context.Context,
+	taskID string,
+	currentSession *models.TaskSession,
+	targetStep *wfmodels.WorkflowStep,
+) error {
+	if currentSession == nil || targetStep == nil || s.agentManager.IsPassthroughSession(ctx, currentSession.ID) {
+		return nil
+	}
+	effectiveProfile := s.resolveStepAgentProfile(ctx, targetStep)
+	if effectiveProfile == "" || effectiveProfile == currentSession.AgentProfileID {
+		return nil
+	}
+	targetSession := currentSession
+	existing, err := s.findReusableSessionForProfile(ctx, taskID, effectiveProfile, currentSession.ID)
+	if err != nil {
+		return fmt.Errorf("find reusable session for credential preflight: %w", err)
+	}
+	if existing != nil {
+		targetSession = existing
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get task for credential preflight: %w", err)
+	}
+	if task == nil {
+		return fmt.Errorf("task %s not found for credential preflight", taskID)
+	}
+	return s.executor.PreflightManagedGitCredentials(
+		ctx, task.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
+	)
 }
 
 // maybySwitchSessionForProfile preserves the legacy processOnEnter failure
@@ -3545,6 +3584,13 @@ func (s *Service) applyEngineTransition(
 			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 			return false
 		}
+	}
+	if err := s.preflightWorkflowStepCredentials(ctx, taskID, session, targetStep); err != nil {
+		s.logger.Warn("target profile credential preflight failed, skipping transition",
+			zap.String("task_id", taskID),
+			zap.String("step_id", result.ToStepID),
+			zap.Error(err))
+		return false
 	}
 
 	terminalTarget := s.workflowStepIsTerminal(ctx, targetStep.ID)

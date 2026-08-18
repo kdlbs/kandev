@@ -243,15 +243,23 @@ func (e *Executor) resolveManagedGitHubCredentials(
 // identity - a foreign/ambiguous provider host, a malformed clone URL -
 // rejects the operation before anything is mutated, rather than surfacing as
 // a doomed session created later at launch time.
-//
-// This does not model an explicit per-launch GitHub token override (an
-// executor profile secret bound to GITHUB_TOKEN/GH_TOKEN): that value is
-// only resolved later, at actual launch, from executor profile data this
-// preflight does not have. A repository whose identity fails here but would
-// have launched anyway under such an override is out of scope; the
-// workspace-level credential policy mode is the deterministic signal this
-// preflight relies on.
-func (e *Executor) PreflightManagedGitCredentials(ctx context.Context, workspaceID, taskID string) error {
+func (e *Executor) PreflightManagedGitCredentials(
+	ctx context.Context,
+	workspaceID, taskID, executorID, executorProfileID string,
+) error {
+	metadata := make(map[string]interface{})
+	if executorProfileID != "" {
+		metadata["executor_profile_id"] = executorProfileID
+	}
+	execConfig := e.resolveExecutorConfig(ctx, executorID, workspaceID, metadata)
+	return e.preflightManagedGitCredentials(ctx, workspaceID, taskID, execConfig)
+}
+
+func (e *Executor) preflightManagedGitCredentials(
+	ctx context.Context,
+	workspaceID, taskID string,
+	execConfig executorConfig,
+) error {
 	if e.gitCredentialIssuer == nil {
 		// No broker configured: the managed-credential feature is inactive, so
 		// nothing here will ever attempt to resolve a repository's identity.
@@ -260,11 +268,15 @@ func (e *Executor) PreflightManagedGitCredentials(ctx context.Context, workspace
 	policy := TaskGitCredentialPolicy{Mode: taskGitCredentialsModeManaged}
 	if e.githubCredentialPolicyResolver != nil {
 		resolved, err := e.githubCredentialPolicyResolver.ResolveTaskGitCredentialPolicy(ctx, workspaceID)
-		if err == nil {
-			policy = resolved
+		if err != nil {
+			return fmt.Errorf("resolve task Git credential policy: %w", err)
 		}
+		policy = resolved
 	}
 	if policy.Mode == taskGitCredentialsModeExecutor {
+		return nil
+	}
+	if executorProfileHasGitHubToken(execConfig) {
 		return nil
 	}
 	taskRepos, err := e.repo.ListTaskRepositories(ctx, taskID)
@@ -287,6 +299,21 @@ func (e *Executor) PreflightManagedGitCredentials(ctx context.Context, workspace
 		}
 	}
 	return nil
+}
+
+func executorProfileHasGitHubToken(execConfig executorConfig) bool {
+	if !executorNeedsResolvedCredentials(execConfig.ExecutorType) {
+		return false
+	}
+	authSecretsJSON, _ := execConfig.Metadata[profileKeyRemoteAuthSecrets].(string)
+	if authSecretsJSON == "" {
+		return false
+	}
+	var authSecrets map[string]string
+	if err := json.Unmarshal([]byte(authSecretsJSON), &authSecrets); err != nil {
+		return false
+	}
+	return strings.TrimSpace(authSecrets["gh_cli_env"]) != ""
 }
 
 func (e *Executor) issueGitCredentialScopes(
@@ -642,7 +669,7 @@ func gitCredentialCloneIdentity(repository *models.Repository, repositoryID stri
 	}
 	identity, err := gitcredentials.ResolveRepositoryIdentity(gitcredentials.RepositoryIdentityInput{
 		RepositoryID: repositoryID, Provider: repository.Provider, ProviderHost: repository.ProviderHost,
-		ProviderOwner: repository.ProviderOwner, ProviderName: repository.ProviderName, RemoteURL: repositoryCloneURL(repository),
+		ProviderOwner: repository.ProviderOwner, ProviderName: repository.ProviderName, RemoteURL: repository.RemoteURL,
 	})
 	if err != nil {
 		return "", "", "", "", err

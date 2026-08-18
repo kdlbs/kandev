@@ -23,13 +23,12 @@ type RepositoryIdentityInput struct {
 }
 
 // RepositoryIdentity is the canonical HTTPS identity used by issuers and the
-// credential broker. CanonicalURL never contains userinfo, query, or fragment.
+// credential broker.
 type RepositoryIdentity struct {
-	Host         string
-	Path         string
-	Owner        string
-	Repository   string
-	CanonicalURL string
+	Host       string
+	Path       string
+	Owner      string
+	Repository string
 }
 
 func ResolveRepositoryIdentity(input RepositoryIdentityInput) (RepositoryIdentity, error) {
@@ -74,7 +73,7 @@ func resolveParsedRepositoryIdentity(input RepositoryIdentityInput, remote parse
 	if err != nil {
 		return RepositoryIdentity{}, repositoryIdentityError(input.RepositoryID, "has an invalid clone path")
 	}
-	return RepositoryIdentity{Host: originURL.Host, Path: canonicalPath, Owner: owner, Repository: repository, CanonicalURL: origin + canonicalPath}, nil
+	return RepositoryIdentity{Host: originURL.Host, Path: canonicalPath, Owner: owner, Repository: repository}, nil
 }
 
 func canonicalIdentityPath(input RepositoryIdentityInput, remotePath string) (string, error) {
@@ -97,20 +96,44 @@ type parsedRemote struct {
 }
 
 func parseRemote(raw string) (parsedRemote, error) {
-	canonical := repoclone.CanonicalHTTPSCloneURL(raw)
+	value := strings.TrimSpace(raw)
+	canonical := repoclone.CanonicalHTTPSCloneURL(value)
 	if canonical != "" {
+		if err := validateSSHRemote(value); err != nil {
+			return parsedRemote{}, err
+		}
 		parsed, err := url.Parse(canonical)
 		if err != nil || parsed.Host == "" || parsed.Path == "" {
 			return parsedRemote{}, fmt.Errorf("invalid SSH clone URL")
 		}
 		return parsedRemote{hostname: parsed.Hostname(), path: parsed.Path, canonicalURL: canonical}, nil
 	}
-	parsed, err := url.Parse(strings.TrimSpace(raw))
+	parsed, err := url.Parse(value)
 	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Host == "" || parsed.User != nil ||
-		parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path == "" {
+		parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || parsed.Path == "" {
 		return parsedRemote{}, fmt.Errorf("invalid HTTPS clone URL")
 	}
 	return parsedRemote{hostname: parsed.Hostname(), path: parsed.Path, canonicalURL: "https://" + strings.ToLower(parsed.Host) + parsed.Path, isHTTPS: true}, nil
+}
+
+func validateSSHRemote(value string) error {
+	if !strings.Contains(value, "://") {
+		if strings.ContainsAny(value, "?#") {
+			return fmt.Errorf("invalid SSH clone URL")
+		}
+		return nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "ssh") || parsed.Hostname() == "" ||
+		parsed.Path == "" || parsed.Path == "/" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return fmt.Errorf("invalid SSH clone URL")
+	}
+	if parsed.User != nil {
+		if _, hasPassword := parsed.User.Password(); hasPassword {
+			return fmt.Errorf("invalid SSH clone URL")
+		}
+	}
+	return nil
 }
 
 func trustedOrigin(input RepositoryIdentityInput, remoteHost string) (string, error) {
