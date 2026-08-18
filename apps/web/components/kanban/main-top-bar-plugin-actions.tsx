@@ -22,6 +22,8 @@ export type MainTopBarSlotProps = {
   workspaceLabel?: string;
   /** Which listing the top bar belongs to. */
   currentPage: "kanban" | "tasks";
+  /** Desktop topbar or the phone's horizontally scrollable action strip. */
+  presentation: "desktop" | "mobile";
 };
 
 /**
@@ -36,13 +38,24 @@ export function MainTopBarPluginActions(props: {
   workspaceId?: string;
   workspaceLabel?: string;
   currentPage: "kanban" | "tasks";
+  presentation?: MainTopBarSlotProps["presentation"];
 }) {
-  const { workspaceId, workspaceLabel, currentPage } = props;
+  const { workspaceId, workspaceLabel, currentPage, presentation = "desktop" } = props;
 
   const slotProps = useMemo<MainTopBarSlotProps>(
-    () => ({ workspaceId: workspaceId ?? null, workspaceLabel, currentPage }),
-    [workspaceId, workspaceLabel, currentPage],
+    () => ({ workspaceId: workspaceId ?? null, workspaceLabel, currentPage, presentation }),
+    [workspaceId, workspaceLabel, currentPage, presentation],
   );
 
-  return <PluginSlot name="main-top-bar" slotProps={slotProps} />;
+  const content = <PluginSlot name="main-top-bar" slotProps={slotProps} />;
+  if (presentation === "desktop") return content;
+
+  return (
+    <div
+      className="flex shrink-0 items-center gap-2 [&_[data-slot=button]]:!size-8 [&_[data-slot=button]]:!p-0 [&_[data-slot=button]_svg]:!size-4"
+      data-testid="mobile-main-top-bar-plugin-actions"
+    >
+      {content}
+    </div>
+  );
 }
