@@ -38,16 +38,10 @@ export function PluginsSettings() {
     installedIds,
   );
 
-  // Sync scans the local plugins folder; it never touches the marketplace on
-  // its own. Chaining a catalog check after it is what makes the button's
-  // result (newer versions) actually show up. Skip the check when the sync
-  // itself failed against an unreachable backend — a second failure on the
-  // same root cause would just be a redundant error.
-  const handleSyncAndCheck = async () => {
-    const result = await actions.handleSync();
-    if (result.ok) {
-      await updates.checkForUpdates();
-    }
+  const handleMarketplaceInstall = async (url: string) => {
+    const result = await actions.marketplaceInstall(url);
+    if (result.ok) await updates.reload();
+    return result;
   };
 
   return (
@@ -80,12 +74,11 @@ export function PluginsSettings() {
             autoUpdate={autoUpdate}
             updates={updates}
             updateAction={updateAction}
-            onSync={handleSyncAndCheck}
           />
         </TabsContent>
 
         <TabsContent value="browse">
-          <MarketplaceBrowser onInstallUrl={actions.marketplaceInstall} />
+          <MarketplaceBrowser onInstallUrl={handleMarketplaceInstall} />
         </TabsContent>
       </Tabs>
 
@@ -113,20 +106,11 @@ type InstalledTabProps = {
   autoUpdate: ReturnType<typeof useAutoUpdateSettings>;
   updates: ReturnType<typeof usePluginUpdates>;
   updateAction: ReturnType<typeof usePluginUpdateAction>;
-  onSync: () => void;
 };
 
 /** The Installed tab: auto-update toggle, sync/install toolbar, update status, sync errors, and the plugin list. */
-function InstalledTab({
-  list,
-  actions,
-  autoUpdate,
-  updates,
-  updateAction,
-  onSync,
-}: InstalledTabProps) {
+function InstalledTab({ list, actions, autoUpdate, updates, updateAction }: InstalledTabProps) {
   const { t } = useTranslation();
-  const syncing = actions.syncBusy || updates.checking;
 
   return (
     <>
@@ -138,12 +122,22 @@ function InstalledTab({
           <Button
             data-testid="plugins-sync-button"
             variant="secondary"
-            disabled={syncing}
-            onClick={onSync}
+            disabled={actions.syncBusy}
+            onClick={actions.handleSync}
             className={settingsActionClassName("cursor-pointer")}
           >
-            <IconRefresh className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+            <IconRefresh className={`h-4 w-4 ${actions.syncBusy ? "animate-spin" : ""}`} />
             {t("plugins:sync")}
+          </Button>
+          <Button
+            data-testid="plugins-check-updates-button"
+            variant="secondary"
+            disabled={updates.checking}
+            onClick={updates.checkForUpdates}
+            className={settingsActionClassName("cursor-pointer")}
+          >
+            <IconRefresh className={`h-4 w-4 ${updates.checking ? "animate-spin" : ""}`} />
+            {t("plugins:checkForUpdates")}
           </Button>
           <Button
             data-testid="install-plugin-trigger"

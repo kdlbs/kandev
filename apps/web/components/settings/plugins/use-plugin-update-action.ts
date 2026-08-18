@@ -22,7 +22,7 @@ import type { MarketplaceEntry } from "@/lib/types/plugins";
  */
 export function usePluginUpdateAction(
   marketplaceInstall: (url: string) => Promise<{ ok: boolean; error?: string }>,
-  reloadUpdates: () => void,
+  reloadUpdates: () => Promise<void>,
   installedIds: ReadonlySet<string>,
 ) {
   // A set, not a single id: rows update independently, so two installs can be
@@ -63,13 +63,16 @@ export function usePluginUpdateAction(
           setErrorsById((prev) => new Map(prev).set(entry.id, message));
         }
       } finally {
-        setUpdatingIds((prev) => {
-          if (!prev.has(entry.id)) return prev;
-          const next = new Set(prev);
-          next.delete(entry.id);
-          return next;
-        });
-        reloadUpdates();
+        try {
+          await reloadUpdates();
+        } finally {
+          setUpdatingIds((prev) => {
+            if (!prev.has(entry.id)) return prev;
+            const next = new Set(prev);
+            next.delete(entry.id);
+            return next;
+          });
+        }
       }
     },
     [marketplaceInstall, reloadUpdates, clearError],

@@ -26,6 +26,14 @@ function source(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   getMarketplaceCatalog.mockReset();
   refreshMarketplace.mockReset();
@@ -69,7 +77,9 @@ describe("usePluginUpdates — latestById", () => {
     const { result } = renderHook(() => usePluginUpdates());
     await waitFor(() => expect(getMarketplaceCatalog).toHaveBeenCalledTimes(1));
 
-    act(() => result.current.reload());
+    await act(async () => {
+      await result.current.reload();
+    });
     await waitFor(() => expect(getMarketplaceCatalog).toHaveBeenCalledTimes(2));
   });
 });
@@ -95,6 +105,48 @@ describe("usePluginUpdates — checkForUpdates", () => {
     const refreshOrder = refreshMarketplace.mock.invocationCallOrder[0];
     const catalogOrder = getMarketplaceCatalog.mock.invocationCallOrder.at(-1);
     expect(refreshOrder).toBeLessThan(catalogOrder as number);
+  });
+
+  it("does not fetch or record a fresh catalog when cache refresh fails", async () => {
+    getMarketplaceCatalog.mockResolvedValue({ plugins: [], sources: [source()] });
+    refreshMarketplace.mockRejectedValueOnce(new Error("refresh unavailable"));
+    const { result } = renderHook(() => usePluginUpdates());
+    await waitFor(() => expect(result.current.checked).toBe(true));
+    const lastCheckedAt = result.current.lastCheckedAt;
+
+    await act(async () => {
+      await result.current.checkForUpdates();
+    });
+
+    expect(result.current.error).toBe("refresh unavailable");
+    expect(result.current.lastCheckedAt).toBe(lastCheckedAt);
+    expect(getMarketplaceCatalog).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores an older page-load response after a manual check starts", async () => {
+    const pageLoad = deferred<{ plugins: unknown[]; sources: unknown[] }>();
+    getMarketplaceCatalog.mockReturnValueOnce(pageLoad.promise);
+    getMarketplaceCatalog.mockResolvedValueOnce({
+      plugins: [entry("acme", "update_available", "2.0.0")],
+      sources: [source()],
+    });
+    const { result } = renderHook(() => usePluginUpdates());
+    await waitFor(() => expect(getMarketplaceCatalog).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      await result.current.checkForUpdates();
+    });
+    expect(result.current.latestById.get("acme")?.version).toBe("2.0.0");
+
+    await act(async () => {
+      pageLoad.resolve({
+        plugins: [entry("acme", "installed", "1.0.0")],
+        sources: [source()],
+      });
+      await pageLoad.promise;
+    });
+
+    expect(result.current.latestById.get("acme")?.version).toBe("2.0.0");
   });
 });
 

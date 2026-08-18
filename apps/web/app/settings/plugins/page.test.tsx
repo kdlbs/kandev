@@ -105,6 +105,7 @@ const PLUGIN_ID = "acme-tools";
 const PLUGIN_DISPLAY_NAME = "Acme Tools";
 const NEW_PLUGIN_ID = "new-plugin";
 const SYNC_BUTTON_TESTID = "plugins-sync-button";
+const CHECK_UPDATES_BUTTON_TESTID = "plugins-check-updates-button";
 const INSTALL_TRIGGER_TESTID = "install-plugin-trigger";
 const INSTALL_URL_INPUT_TESTID = "install-plugin-url-input";
 const INSTALL_URL_SUBMIT_TESTID = "install-plugin-url-submit";
@@ -458,6 +459,7 @@ describe("PluginsSettingsPage sync button", () => {
     const setPlugins = storeState.setPlugins as ReturnType<typeof vi.fn>;
     await vi.waitFor(() => expect(setPlugins).toHaveBeenCalledWith([]));
     await vi.waitFor(() => expect(toast.success).toHaveBeenCalledWith("Sync: 1 sideloaded"));
+    expect(refreshMarketplaceSpy).not.toHaveBeenCalled();
   });
 
   it("toasts 'Everything up to date' when the sync finds nothing to do", async () => {
@@ -505,7 +507,7 @@ describe("PluginsSettingsPage sync button", () => {
 });
 
 describe("PluginsSettingsPage marketplace updates", () => {
-  it("clicking Sync issues sync, then a marketplace refresh, then a catalog re-fetch, in order, and the row's latest-version text updates with no reload", async () => {
+  it("checks for updates without a filesystem sync and refreshes the row in place", async () => {
     setStoreState([activePlugin()]);
     getMarketplaceCatalogSpy.mockResolvedValueOnce({ plugins: [], sources: [] });
     getMarketplaceCatalogSpy.mockResolvedValueOnce({ plugins: [catalogEntry()], sources: [] });
@@ -513,7 +515,7 @@ describe("PluginsSettingsPage marketplace updates", () => {
     render(<PluginsSettingsPage />);
     await vi.waitFor(() => expect(getMarketplaceCatalogSpy).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getByTestId(SYNC_BUTTON_TESTID));
+    fireEvent.click(screen.getByTestId(CHECK_UPDATES_BUTTON_TESTID));
 
     await vi.waitFor(() =>
       expect(screen.getByTestId(`plugin-latest-version-${PLUGIN_ID}`).textContent).toContain(
@@ -522,11 +524,10 @@ describe("PluginsSettingsPage marketplace updates", () => {
     );
     expect(screen.getByTestId(`plugin-update-available-${PLUGIN_ID}`)).toBeTruthy();
 
-    const syncOrder = syncPluginsSpy.mock.invocationCallOrder[0];
     const refreshOrder = refreshMarketplaceSpy.mock.invocationCallOrder[0];
     const catalogOrder = getMarketplaceCatalogSpy.mock.invocationCallOrder[1];
-    expect(syncOrder).toBeLessThan(refreshOrder);
     expect(refreshOrder).toBeLessThan(catalogOrder);
+    expect(syncPluginsSpy).not.toHaveBeenCalled();
   });
 
   it("shows a checking indicator while a triggered check is in flight, then a last-checked timestamp", async () => {
@@ -540,7 +541,7 @@ describe("PluginsSettingsPage marketplace updates", () => {
         resolveCatalog = resolve;
       }),
     );
-    fireEvent.click(screen.getByTestId(SYNC_BUTTON_TESTID));
+    fireEvent.click(screen.getByTestId(CHECK_UPDATES_BUTTON_TESTID));
 
     await vi.waitFor(() => expect(screen.getByTestId("plugins-updates-checking")).toBeTruthy());
     resolveCatalog({ plugins: [], sources: [] });
@@ -553,7 +554,7 @@ describe("PluginsSettingsPage marketplace updates", () => {
     getMarketplaceCatalogSpy.mockRejectedValue(new Error("marketplace is unavailable"));
 
     render(<PluginsSettingsPage />);
-    fireEvent.click(screen.getByTestId(SYNC_BUTTON_TESTID));
+    fireEvent.click(screen.getByTestId(CHECK_UPDATES_BUTTON_TESTID));
 
     await vi.waitFor(() =>
       expect(screen.getByTestId("plugins-update-check-error").textContent).toContain(
@@ -561,7 +562,51 @@ describe("PluginsSettingsPage marketplace updates", () => {
       ),
     );
     expect(screen.getByText(PLUGIN_DISPLAY_NAME)).toBeTruthy();
-    await vi.waitFor(() => expect(toast.success).toHaveBeenCalledWith("Everything up to date"));
+    expect(syncPluginsSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("PluginsSettingsPage marketplace update lifecycle", () => {
+  it("reloads the Installed catalog after a successful Browse install", async () => {
+    setStoreState([]);
+    getMarketplaceCatalogSpy.mockResolvedValue({
+      plugins: [
+        catalogEntry({
+          id: NEW_PLUGIN_ID,
+          name: "New Plugin",
+          version: "1.0.0",
+          install_state: "available",
+          installed_version: undefined,
+          package_url: NEW_PLUGIN_URL,
+        }),
+      ],
+      sources: [
+        {
+          id: "official",
+          name: "Official",
+          url: "https://example.test",
+          enabled: true,
+          builtin: true,
+          healthy: true,
+        },
+      ],
+    });
+
+    render(<PluginsSettingsPage />);
+    fireEvent.mouseDown(screen.getByTestId("plugins-tab-browse"));
+    await vi.waitFor(() =>
+      expect(screen.getByTestId(`marketplace-install-${NEW_PLUGIN_ID}`)).toBeTruthy(),
+    );
+    const callsBeforeInstall = getMarketplaceCatalogSpy.mock.calls.length;
+
+    fireEvent.click(screen.getByTestId(`marketplace-install-${NEW_PLUGIN_ID}`));
+
+    await vi.waitFor(() => expect(installPluginFromUrlSpy).toHaveBeenCalledWith(NEW_PLUGIN_URL));
+    await vi.waitFor(() =>
+      expect(getMarketplaceCatalogSpy.mock.calls.length).toBeGreaterThanOrEqual(
+        callsBeforeInstall + 2,
+      ),
+    );
   });
 
   it("after a successful manual update, the version updates and the update button/badge disappear", async () => {

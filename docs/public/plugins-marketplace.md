@@ -79,14 +79,16 @@ source: if one of your sources was unreachable, or you have no source enabled
 at all, the plugins it carries are simply left blank rather than reported as
 removed, and the header explains what went wrong.
 
-This check runs once when the page loads, and again whenever you click
-**Sync**: Sync reconciles your local plugins folder first, then checks the
-marketplace for newer versions, so the button's result (the version info)
-actually shows up without reloading the page. While a check is running the
-header shows a "Checking for updates…" indicator; once it completes it shows
-when it last checked. If the marketplace can't be reached, an inline error
-explains that, but your installed plugins, and Enable/Disable/Uninstall, are
-never affected.
+This check runs once when the page loads. Select **Check for updates** to clear
+the marketplace cache and retrieve current versions without reloading the
+page. **Sync** remains a separate action that reconciles your local plugins
+folder.
+
+While a check is running, the header shows a "Checking for updates…"
+indicator. After the check completes, the header shows the last check time.
+If the marketplace cannot be reached, an inline error explains the problem.
+Your installed plugins and their Enable, Disable, and Uninstall actions remain
+available.
 
 When the marketplace advertises a newer version than the one you have
 installed, the row also shows an **Update available: v`<version>`** badge and

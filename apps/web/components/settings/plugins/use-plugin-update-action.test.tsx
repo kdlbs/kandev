@@ -33,13 +33,21 @@ type MarketplaceInstall = (url: string) => Promise<{ ok: boolean; error?: string
 // Every id these tests act on is installed unless a case says otherwise.
 const INSTALLED: ReadonlySet<string> = new Set([ENTRY_ID, "a", "b"]);
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 describe("usePluginUpdateAction", () => {
   let marketplaceInstall: ReturnType<typeof vi.fn<MarketplaceInstall>>;
-  let reloadUpdates: ReturnType<typeof vi.fn<() => void>>;
+  let reloadUpdates: ReturnType<typeof vi.fn<() => Promise<void>>>;
 
   beforeEach(() => {
     marketplaceInstall = vi.fn<MarketplaceInstall>();
-    reloadUpdates = vi.fn<() => void>();
+    reloadUpdates = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
   });
 
   it("tracks the updating id while the install is in flight, then clears it and re-checks the catalog", async () => {
@@ -82,6 +90,41 @@ describe("usePluginUpdateAction", () => {
     expect(result.current.errorsById.get(ENTRY_ID)).toBe(CHECKSUM_ERROR);
     expect(result.current.updatingIds.has(ENTRY_ID)).toBe(false);
     expect(reloadUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the row busy until the post-install catalog reload settles", async () => {
+    marketplaceInstall.mockResolvedValue({ ok: true });
+    const catalogReload = deferred<void>();
+    reloadUpdates.mockReturnValueOnce(catalogReload.promise);
+    const { result } = renderHook(() =>
+      usePluginUpdateAction(marketplaceInstall, reloadUpdates, INSTALLED),
+    );
+
+    let runPromise!: Promise<void>;
+    act(() => {
+      runPromise = result.current.runUpdate(entry());
+    });
+    await act(async () => {
+      await marketplaceInstall.mock.results[0].value;
+    });
+
+    expect(result.current.updatingIds.has(ENTRY_ID)).toBe(true);
+
+    await act(async () => {
+      catalogReload.resolve();
+      await runPromise;
+    });
+    expect(result.current.updatingIds.has(ENTRY_ID)).toBe(false);
+  });
+});
+
+describe("usePluginUpdateAction — per-plugin state", () => {
+  let marketplaceInstall: ReturnType<typeof vi.fn<MarketplaceInstall>>;
+  let reloadUpdates: ReturnType<typeof vi.fn<() => Promise<void>>>;
+
+  beforeEach(() => {
+    marketplaceInstall = vi.fn<MarketplaceInstall>();
+    reloadUpdates = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
   });
 
   it("clears a previous error at the start of a retry", async () => {
@@ -147,7 +190,11 @@ describe("usePluginUpdateAction — overlapping updates", () => {
         }),
     );
     const { result } = renderHook(() =>
-      usePluginUpdateAction(marketplaceInstall, vi.fn<() => void>(), INSTALLED),
+      usePluginUpdateAction(
+        marketplaceInstall,
+        vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        INSTALLED,
+      ),
     );
 
     let runA!: Promise<void>;
@@ -179,11 +226,11 @@ describe("usePluginUpdateAction — overlapping updates", () => {
 
 describe("usePluginUpdateAction — error lifetime", () => {
   let marketplaceInstall: ReturnType<typeof vi.fn<MarketplaceInstall>>;
-  let reloadUpdates: ReturnType<typeof vi.fn<() => void>>;
+  let reloadUpdates: ReturnType<typeof vi.fn<() => Promise<void>>>;
 
   beforeEach(() => {
     marketplaceInstall = vi.fn<MarketplaceInstall>();
-    reloadUpdates = vi.fn<() => void>();
+    reloadUpdates = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
   });
 
   // Regression: uninstalling a plugin whose update failed and installing it

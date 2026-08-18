@@ -45,11 +45,10 @@ while keeping install-by-URL and sideloading as escape hatches.
 - The **Installed** tab SHALL show each installed plugin's latest known marketplace
   version alongside its installed version — not only when an update is available — so
   an operator can see version drift without switching to Browse. This check runs once
-  on page load and again whenever **Sync** is clicked: Sync always reconciles the local
-  plugins directory first, then re-checks the marketplace (busting the server's 5-minute
-  catalog cache), so the sync button's result becomes visible without a page reload. A
-  failed check degrades to an inline "couldn't check" state and never blocks the
-  installed-plugin list, enable/disable/uninstall, or the filesystem-sync summary.
+  on page load and when the operator selects **Check for updates**. The explicit check
+  clears the server's five-minute catalog cache before it retrieves current versions.
+  **Sync** remains a separate filesystem action. A failed marketplace check degrades to
+  an inline "couldn't check" state and never blocks installed-plugin management.
 - The catalog SHALL be assembled from **one or more marketplace sources**. kandev
   ships with the **official kandev source** enabled by default; operators MAY add
   **additional sources** (a team or corporate registry) and the catalog merges them.
@@ -304,12 +303,13 @@ response but stays `enabled`.
 - **GIVEN** no marketplace source is enabled, **WHEN** a check completes, **THEN** kandev
   reports that versions can't be checked and where to enable a source, and no plugin claims
   to be missing from the marketplace — nothing was queried, so nothing was learned.
-- **GIVEN** the Installed tab, **WHEN** the operator clicks **Sync**, **THEN** kandev
-  runs the filesystem sync, then busts the marketplace cache and re-fetches the catalog,
-  in that order, and any plugin's latest-version text and **Update available** badge
-  update in place with no page reload.
+- **GIVEN** the Installed tab, **WHEN** the operator selects **Check for updates**,
+  **THEN** kandev busts the marketplace cache and re-fetches the catalog, and any
+  plugin's latest-version text and **Update available** badge update in place.
+- **GIVEN** the Installed tab, **WHEN** the operator selects **Sync**, **THEN** kandev
+  reconciles the local plugins directory without starting a marketplace refresh.
 - **GIVEN** the marketplace is unreachable or every enabled source reports unhealthy,
-  **WHEN** a check (on load or via Sync) fails, **THEN** an inline error explains the
+  **WHEN** a check on load or through **Check for updates** fails, **THEN** an inline error explains the
   check couldn't complete, while the installed-plugin list, enable/disable/uninstall,
   and the filesystem-sync summary are all unaffected.
 - **GIVEN** an installed plugin with an available update, **WHEN** the operator clicks

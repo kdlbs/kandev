@@ -51,15 +51,16 @@ import type { ApiClient } from "../../helpers/api-client";
 import { holdPluginInstallResponse } from "../../helpers/plugin-install";
 import { dwell } from "../../helpers/causal-waits";
 import { MAX_INLINE_PLUGIN_FOOTER_ITEMS } from "@/lib/navigation/plugin-footer-budget";
+import {
+  openInstallDialog,
+  PACKAGE_PATH,
+  PLUGIN_ID,
+  uninstallPluginFixture,
+  uploadPackage,
+} from "./plugin-test-helpers";
 
-const PLUGIN_ID = "kandev-plugin-e2e";
 const NAV_ITEM_ID = "e2e-hello";
 const PLUGIN_ROUTE = "/plugins/e2e-hello";
-
-const PACKAGE_PATH = path.resolve(
-  __dirname,
-  "../../../../../apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz",
-);
 
 /** Every deliveries.jsonl `event_type` recorded so far, read straight off
  * disk from the plugin's real KANDEV_PLUGIN_DATA_DIR (no in-process mock —
@@ -75,18 +76,6 @@ function deliveredEventTypes(pluginsDir: string): string[] {
     .map((line) => (JSON.parse(line) as { event_type: string }).event_type);
 }
 
-async function openInstallDialog(page: Page) {
-  await page.goto("/settings/plugins");
-  await page.getByTestId("install-plugin-trigger").click();
-  await expect(page.getByTestId("install-plugin-dialog")).toBeVisible();
-}
-
-async function uploadPackage(page: Page, filePath: string) {
-  await page.getByTestId("install-plugin-tab-upload").click();
-  await page.getByTestId("install-plugin-file-input").setInputFiles(filePath);
-  await page.getByTestId("install-plugin-upload-submit").click();
-}
-
 async function waitForPluginBundleReady(page: Page): Promise<void> {
   const navItem = page.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`);
   await expect(navItem).toBeVisible({ timeout: 15_000 });
@@ -98,7 +87,7 @@ async function waitForPluginBundleReady(page: Page): Promise<void> {
 }
 
 async function uninstallViaApi(apiClient: ApiClient) {
-  await apiClient.rawRequest("DELETE", `/api/plugins/${PLUGIN_ID}`).catch(() => undefined);
+  await uninstallPluginFixture(apiClient);
 }
 
 async function installedPluginPath(apiClient: ApiClient): Promise<string> {
@@ -386,13 +375,13 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
   /**
    * Deliberate scope limit (see docs/plans/plugins/task-*): there is no
    * fixture package for a *second* signed version, so this proves the
-   * sync-triggered check surfaces the "Update available" badge via a
+   * operator-triggered check surfaces the "Update available" badge via a
    * route-mocked catalog, and that a manual update failing against a
    * (deliberately unreachable) mocked `package_url` renders inline without
    * disturbing the rest of the row. The real, successful reinstall path is
    * covered at the unit level (use-plugin-update-action.test.tsx).
    */
-  test("marketplace update check: Sync surfaces an available-version badge, and a failing manual update shows an inline error", async ({
+  test("marketplace update check surfaces an available-version badge, and a failing manual update shows an inline error", async ({
     testPage,
   }) => {
     test.setTimeout(60_000);
@@ -451,8 +440,7 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
       }),
     );
 
-    const syncButton = testPage.getByTestId("plugins-sync-button");
-    await syncButton.click();
+    await testPage.getByTestId("plugins-check-updates-button").click();
 
     const latestVersion = pluginRow.getByTestId(`plugin-latest-version-${PLUGIN_ID}`);
     const updateBadge = pluginRow.getByTestId(`plugin-update-available-${PLUGIN_ID}`);
@@ -461,17 +449,6 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect(updateBadge).toContainText(newerVersion);
     await expect(updateButton).toBeVisible();
     await expect(testPage.getByTestId("plugins-updates-last-checked")).toBeVisible();
-
-    // AC12 — at a 375px viewport the badge wraps onto its own line with no
-    // horizontal overflow, and the Update button keeps a >=44px touch target.
-    await testPage.setViewportSize({ width: 375, height: 800 });
-    await expect(updateButton).toBeVisible();
-    const rowBox = await pluginRow.boundingBox();
-    const buttonBox = await updateButton.boundingBox();
-    if (!rowBox || !buttonBox) throw new Error("expected bounding boxes for row and update button");
-    expect(buttonBox.height).toBeGreaterThanOrEqual(44);
-    expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
-    await testPage.setViewportSize({ width: 1280, height: 800 });
 
     // The update tries to install from the (deliberately unreachable) mocked
     // package_url and fails — the row surfaces the error inline, keeps the

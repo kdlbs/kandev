@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getMarketplaceCatalog, refreshMarketplace } from "@/lib/api/domains/marketplace-api";
 import { t } from "@/lib/i18n";
 import type { MarketplaceCatalog, MarketplaceEntry } from "@/lib/types/plugins";
@@ -39,7 +39,8 @@ export function usePluginUpdates() {
   const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sourcesDegraded, setSourcesDegraded] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
+  const requestGeneration = useRef(0);
+  const checkGeneration = useRef(0);
 
   const applyCatalog = useCallback((catalog: MarketplaceCatalog) => {
     const enabledSources = catalog.sources.filter((source) => source.enabled);
@@ -84,32 +85,37 @@ export function usePluginUpdates() {
     setError(unhealthy.length > 0 ? reason() : null);
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    getMarketplaceCatalog()
-      .then((catalog) => {
-        if (!cancelled) applyCatalog(catalog);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(checkFailedMessage(err));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadKey, applyCatalog]);
+  const reload = useCallback(async () => {
+    const generation = ++requestGeneration.current;
+    try {
+      const catalog = await getMarketplaceCatalog();
+      if (generation === requestGeneration.current) applyCatalog(catalog);
+    } catch (err) {
+      if (generation === requestGeneration.current) setError(checkFailedMessage(err));
+    }
+  }, [applyCatalog]);
 
-  const reload = useCallback(() => setReloadKey((key) => key + 1), []);
+  useEffect(() => {
+    void reload();
+    return () => {
+      requestGeneration.current += 1;
+      checkGeneration.current += 1;
+    };
+  }, [reload]);
 
   const checkForUpdates = useCallback(async () => {
+    const request = ++requestGeneration.current;
+    const check = ++checkGeneration.current;
     setChecking(true);
     try {
-      await refreshMarketplace().catch(() => undefined);
+      await refreshMarketplace();
+      if (request !== requestGeneration.current) return;
       const catalog = await getMarketplaceCatalog();
-      applyCatalog(catalog);
+      if (request === requestGeneration.current) applyCatalog(catalog);
     } catch (err) {
-      setError(checkFailedMessage(err));
+      if (request === requestGeneration.current) setError(checkFailedMessage(err));
     } finally {
-      setChecking(false);
+      if (check === checkGeneration.current) setChecking(false);
     }
   }, [applyCatalog]);
 
