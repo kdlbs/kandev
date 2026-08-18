@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import {
   captureAppStatusBarSettings,
@@ -75,6 +75,8 @@ test.describe("Mobile topbar action strip", () => {
     const cpuMetric = metrics.getByLabel(/^CPU /);
     const terminal = testPage.getByTestId("mobile-quick-terminal-button");
     const quickChat = testPage.getByTestId("mobile-quick-chat-button");
+    const terminalHitTarget = testPage.getByTestId("mobile-quick-terminal-hit-target");
+    const quickChatHitTarget = testPage.getByTestId("mobile-quick-chat-hit-target");
     const search = testPage.getByTestId("mobile-search-toggle");
 
     await expect(strip).toBeVisible();
@@ -101,13 +103,28 @@ test.describe("Mobile topbar action strip", () => {
 
     const metricBox = await requireBox(metrics, "topbar metrics");
     expect(metricBox.height).toBeCloseTo(32, 0);
-    const metricIconBox = await requireBox(metrics.locator("svg").first(), "metric icon");
+    const metricIconBox = await requireBox(cpuMetric.locator("svg").first(), "CPU metric icon");
     expect(metricIconBox.width).toBeCloseTo(16, 0);
     expect(metricIconBox.height).toBeCloseTo(16, 0);
 
     const pluginIconBox = await requireBox(pluginButton.locator("svg").first(), "plugin icon");
     expect(pluginIconBox.width).toBeCloseTo(16, 0);
     expect(pluginIconBox.height).toBeCloseTo(16, 0);
+
+    const expectTouchTarget = async (target: Locator, label: string) => {
+      const targetBox = await requireBox(target, `${label} hit target`);
+      expect(targetBox.height).toBeCloseTo(44, 0);
+      expect(targetBox.width).toBeCloseTo(32, 0);
+      const hitTarget = await target.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const x = rect.left + rect.width / 2;
+        const points = [rect.top + 1, rect.bottom - 1];
+        return points.every((y) => document.elementFromPoint(x, y) === element);
+      });
+      expect(hitTarget, `${label} keeps a 44px hit area`).toBe(true);
+    };
+
+    await expectTouchTarget(terminalHitTarget, "Quick Terminal");
 
     const brandBefore = await requireBox(brand, "brand before scroll");
     const menuBefore = await requireBox(menu, "menu before scroll");
@@ -137,6 +154,7 @@ test.describe("Mobile topbar action strip", () => {
     await expect(leftFade).toBeVisible();
     await expect(rightFade).toHaveCount(0);
     await expect(search).toBeInViewport();
+    await expectTouchTarget(quickChatHitTarget, "Quick Chat");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile topbar scrolled layout");
 
     const brandAfter = await requireBox(brand, "brand after scroll");

@@ -34,6 +34,8 @@ must remain usable when resource metrics and plugin actions add more controls th
 - Native icon buttons in this header use the same 32 by 32 CSS-pixel visible box and 16 CSS-pixel
   icon. Resource metric and host-rendered plugin icons use the same 16 CSS-pixel icon size.
 - The resource metrics region uses the same 32 CSS-pixel height as the icon buttons.
+- Quick Terminal and Quick Chat retain a 44 CSS-pixel coarse-pointer hit area around their 32
+  CSS-pixel visible boxes without widening the action-strip items.
 - The tablet header and mobile task switcher retain their existing Quick Chat entry points.
 - Desktop headers do not change.
 

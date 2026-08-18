@@ -12,6 +12,7 @@ import type { PluginUIApi } from "@kandev/plugin-sdk";
 export type {
   PluginContextApi,
   PluginHostRepository,
+  MainTopBarSlotProps,
   PluginNavSection,
   PluginUIApi,
 } from "@kandev/plugin-sdk";

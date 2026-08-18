@@ -68,12 +68,15 @@ risks. Update this task and `plan.md` in the same conversation.
 
 - Added `mobile-plugin-topbar.spec.ts` to the existing `mobile-chrome` Pixel 5 project.
 - The test installs the real fixture package, enables real metrics, checks native and plugin
-  geometry, verifies all directional fade states, scroll reachability, fixed edge positions, and
-  document overflow, then restores settings and removes the fixture.
+  geometry, verifies the actual 44px terminal/chat hit areas, all directional fade states, scroll
+  reachability, fixed edge positions, and document overflow, then restores settings and removes the
+  fixture.
 - Updated the existing quick-terminal test to compare launcher geometry with the fixed menu instead
   of requiring the obsolete 44px launcher size.
 - Initial runner attempt caught a duplicate local variable in the edited test and was corrected
   before the production run.
 - Managed production E2E: 1 plugin topbar test passed with retries disabled.
 - Managed no-build regression E2E: 1 quick-terminal test passed with retries disabled.
+- Follow-up production-build E2E: 1 plugin topbar test passed with actual 44px hit-target checks;
+  the quick-terminal regression also passed against that build with no rebuild.
 - No PR screenshot artifacts were created by these test runs.

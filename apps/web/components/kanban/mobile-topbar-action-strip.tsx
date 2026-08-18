@@ -53,17 +53,17 @@ export function MobileTopbarActionStrip({ children }: { children: ReactNode }) {
 
   return (
     <div
-      className="relative min-w-0 flex-1"
+      className="relative h-8 min-w-0 flex-1"
       data-testid="mobile-topbar-action-strip"
       data-can-scroll-left={scrollCues.left}
       data-can-scroll-right={scrollCues.right}
     >
       <div
         ref={viewportRef}
-        className="min-w-0 overflow-x-auto overscroll-x-contain scrollbar-hide"
+        className="absolute inset-x-0 top-1/2 h-11 min-w-0 -translate-y-1/2 overflow-x-auto overscroll-x-contain scrollbar-hide"
         data-testid="mobile-topbar-action-strip-viewport"
       >
-        <div ref={contentRef} className="flex w-max min-w-full items-center gap-2 pr-1">
+        <div ref={contentRef} className="flex h-full w-max min-w-full items-center gap-2 pr-1">
           {children}
         </div>
       </div>

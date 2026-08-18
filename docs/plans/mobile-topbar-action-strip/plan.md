@@ -48,7 +48,12 @@ one contained horizontal scroll owner with directional fades.
 - Add a mobile presentation option to
   `apps/web/components/kanban/main-top-bar-plugin-actions.tsx`. The mobile wrapper normalizes
   `host.ui.Button` contributions to a 32px box and their SVG icons to 16px.
-- Keep desktop plugin contribution sizing unchanged. Do not change plugin slot data or lifecycle.
+- Keep Quick Terminal and Quick Chat as 32px visual buttons inside 44px interaction wrappers. The
+  wrappers keep the strip item's width at 32px while preserving a real touch target.
+- Keep desktop plugin contribution sizing unchanged. Keep existing plugin slot fields and lifecycle
+  compatible; the mobile presentation adds the `presentation` value described by the public SDK.
+- Export `MainTopBarSlotProps` from `@kandev/plugin-sdk` and assert the host binding remains an exact
+  consumer of that public type.
 
 ### Plugin contract documentation
 
@@ -71,7 +76,8 @@ one contained horizontal scroll owner with directional fades.
 - **Scroll owner:** only the middle strip scrolls horizontally. The document and board do not gain
   horizontal overflow.
 - **Touch and state:** the visible boxes match the existing compact search and menu chrome. Launch,
-  search, metrics, plugin, and menu state remain shared with wider layouts.
+  search, metrics, plugin, and menu state remain shared with wider layouts. Quick Terminal and Quick
+  Chat keep a 44px coarse-pointer hit area around their 32px visible boxes.
 - **Mobile proof:** Pixel 5 coverage enables metrics, installs the real plugin fixture, and proves
   control equality, fixed edges, directional fades, contained scrolling, and action reachability.
 
@@ -96,9 +102,10 @@ one contained horizontal scroll owner with directional fades.
 - **Scenario:** GIVEN metrics and a real plugin contribution that overflow the phone header, WHEN
   Home renders, THEN Kandev and menu stay fixed while the middle strip scrolls with correct fades.
   **File:** `apps/web/e2e/tests/plugins/mobile-plugin-topbar.spec.ts`.
-  **What to verify:** equal native button boxes, 32px metrics height, 16px metric icons, initial and
-  final fade states, successful search or launcher activation after scrolling, and no document
-  horizontal overflow. Restore user settings and uninstall the fixture in `afterEach`.
+  **What to verify:** equal native button boxes, 32px metrics height, 16px metric icons, actual
+  44px terminal/chat hit areas, initial and final fade states, successful search or launcher
+  activation after scrolling, and no document horizontal overflow. Restore user settings and
+  uninstall the fixture in `afterEach`.
 - **Scenario:** GIVEN the existing mobile terminal flow, WHEN the launcher renders, THEN its visible
   box matches search, chat, and menu instead of the old 44px expectation.
   **File:** `apps/web/e2e/tests/terminal/mobile-quick-terminal.spec.ts`.
@@ -107,11 +114,13 @@ one contained horizontal scroll owner with directional fades.
 
 ## Verification Results
 
-- Focused Vitest: 4 files and 19 tests passed.
+- Focused Vitest: 5 files and 20 tests passed after the hit-target review fix.
+- Plugin SDK typecheck: passed.
 - Focused ESLint: passed with no errors or warnings on the changed frontend files.
 - Web typecheck: passed.
 - Public documentation tests: 61 passed, 0 failed; validator covered 41 published pages.
-- Managed Pixel 5 E2E: 1 test passed for the real plugin and metrics overflow scenario.
+- Managed Pixel 5 E2E: 1 test passed for the real plugin and metrics overflow scenario, including
+  actual 44px terminal/chat hit-target checks when each action is in view.
 - Managed Pixel 5 quick-terminal regression: 1 test passed with relational header geometry.
 
 ## Implementation Waves And Parallel Candidates

@@ -116,11 +116,11 @@ describe("KanbanHeaderMobile", () => {
   it("opens quick terminal immediately before quick chat", () => {
     renderHeader("Home", ACTIVE_WORKSPACE_ID);
 
-    const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
-    const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
-    expect(terminal.nextElementSibling).toBe(quickChat);
+    const terminalTarget = screen.getByTestId("mobile-quick-terminal-hit-target");
+    const quickChatTarget = screen.getByTestId("mobile-quick-chat-hit-target");
+    expect(terminalTarget.nextElementSibling).toBe(quickChatTarget);
 
-    fireEvent.click(terminal);
+    fireEvent.click(screen.getByTestId(QUICK_TERMINAL_TEST_ID));
     expect(quickChatMocks.openQuickTerminal).toHaveBeenCalledTimes(1);
   });
 
@@ -134,7 +134,7 @@ describe("KanbanHeaderMobile", () => {
   it("places quick chat immediately before search", () => {
     renderHeader("Home", "workspace-1", vi.fn());
 
-    const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
+    const quickChat = screen.getByTestId("mobile-quick-chat-hit-target");
     const search = screen.getByTestId("mobile-search-toggle");
     expect(quickChat.nextElementSibling).toBe(search);
   });
@@ -160,6 +160,8 @@ describe("KanbanHeaderMobile", () => {
     ]) {
       expect(screen.getByTestId(id).className).not.toContain("!size-11");
     }
+    expect(screen.getByTestId("mobile-quick-terminal-hit-target").className).toContain("h-11");
+    expect(screen.getByTestId("mobile-quick-chat-hit-target").className).toContain("h-11");
   });
 
   it("describes a connectivity warning on the persistent Home menu trigger", () => {

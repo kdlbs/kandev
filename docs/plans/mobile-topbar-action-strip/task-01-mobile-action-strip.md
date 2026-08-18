@@ -18,11 +18,13 @@ the menu fixed. Normalize native, metric, and documented plugin icon geometry.
 ## Acceptance
 
 - Terminal, chat, search, and menu use 32px visible boxes with 16px icons. Topbar metric and
-  documented plugin icons also use 16px icons.
+  documented plugin icons also use 16px icons. Terminal and chat retain a 44px coarse-pointer hit
+  area without widening their visible boxes.
 - Page context, plugin actions, metrics, terminal, chat, and search use one middle strip. Kandev and
   menu stay outside that scroll owner.
 - Each directional fade appears only while content remains hidden beyond its edge.
-- Desktop and tablet header geometry, state, handlers, and public plugin slot data remain unchanged.
+- Desktop and tablet header geometry, state, handlers, and existing public plugin slot fields remain
+  unchanged. The mobile presentation is exported from the public plugin SDK.
 
 ## Files likely touched
 
@@ -35,6 +37,8 @@ the menu fixed. Normalize native, metric, and documented plugin icon geometry.
 - `apps/web/components/system-metrics/topbar-metrics.tsx`
 - `apps/web/components/system-metrics/topbar-metrics.test.tsx`
 - `apps/web/lib/plugins/types.ts`
+- `apps/packages/plugin-sdk/src/index.ts`
+- `apps/web/lib/plugins/sdk-contract.test.ts`
 - `docs/plans/plugins/PLUGIN-API.md`
 - `docs/public/plugins-authoring.md`
 
@@ -85,9 +89,13 @@ Update this task and `plan.md` in the same conversation.
 - Kept Kandev and the menu outside the scroll owner, and placed page context, plugin actions,
   metrics, terminal, chat, and search inside it.
 - Normalized native, metric, and documented host plugin icon geometry without changing desktop
-  plugin presentation or slot data.
+  plugin presentation or existing slot data.
 - Updated the plugin API reference and public authoring guide with the mobile contract.
 - TDD RED: the new focused suite initially failed 9 assertions against the old layout.
 - TDD GREEN: focused Vitest passed 4 files and 19 tests.
+- Review-fix GREEN: focused Vitest passed 5 files and 20 tests after replacing clipped pseudo-element
+  hit areas with real 44px interaction wrappers around the 32px launcher buttons.
 - Focused ESLint, web typecheck, and public documentation validation passed.
 - No blockers. The E2E task provides the remaining production-build coverage.
+- Review fixup: exported `MainTopBarSlotProps` from the public SDK, kept the host type canonical, and
+  added a Pixel 5 `elementFromPoint` regression for the 44px terminal/chat hit areas.

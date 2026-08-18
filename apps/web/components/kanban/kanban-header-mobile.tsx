@@ -2,6 +2,7 @@
 
 import { Button } from "@kandev/ui/button";
 import { IconMenu2, IconMessageCircle, IconSearch, IconTerminal2 } from "@tabler/icons-react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { PageTopbar } from "@/components/page-topbar";
@@ -45,6 +46,26 @@ function MobileBrandLink({ workspaceId }: Pick<KanbanHeaderMobileProps, "workspa
   );
 }
 
+function MobileLauncherTarget({
+  children,
+  onClick,
+  testId,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  testId: string;
+}) {
+  return (
+    <span
+      className="flex h-11 w-8 shrink-0 cursor-pointer items-center justify-center"
+      data-testid={testId}
+      onClick={onClick}
+    >
+      {children}
+    </span>
+  );
+}
+
 function MobileQuickChatButton({
   workspaceId,
   onClick,
@@ -56,25 +77,25 @@ function MobileQuickChatButton({
   const dot = useAppStore((state) => selectQuickChatHasUnseenIdle(state, workspaceId));
   const quickChatLabel = t(dot ? "sidebar:quickChatUnseen" : "sidebar:quickChat");
   return (
-    <Button
-      variant="outline"
-      size="icon-lg"
-      onClick={onClick}
-      className="!size-11 cursor-pointer"
-      aria-label={quickChatLabel}
-      data-testid="mobile-quick-chat-button"
-    >
-      <span className="relative flex">
-        <IconMessageCircle className="h-4 w-4" />
-        {dot && (
-          <span
-            aria-hidden="true"
-            className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-background"
-            data-testid="quick-chat-unseen-dot"
-          />
-        )}
-      </span>
-    </Button>
+    <MobileLauncherTarget onClick={onClick} testId="mobile-quick-chat-hit-target">
+      <Button
+        variant="outline"
+        size="icon-lg"
+        aria-label={quickChatLabel}
+        data-testid="mobile-quick-chat-button"
+      >
+        <span className="relative flex">
+          <IconMessageCircle className="h-4 w-4" />
+          {dot && (
+            <span
+              aria-hidden="true"
+              className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-background"
+              data-testid="quick-chat-unseen-dot"
+            />
+          )}
+        </span>
+      </Button>
+    </MobileLauncherTarget>
   );
 }
 
@@ -123,16 +144,19 @@ function MobileHeaderActionItems({
       />
       <TopbarMetrics size="lg" mobile />
       {workspaceId && (
-        <Button
-          variant="outline"
-          size="icon-lg"
+        <MobileLauncherTarget
           onClick={handleOpenQuickTerminal}
-          className="cursor-pointer"
-          aria-label={t("sidebar:quickTerminal")}
-          data-testid="mobile-quick-terminal-button"
+          testId="mobile-quick-terminal-hit-target"
         >
-          <IconTerminal2 className="h-4 w-4" />
-        </Button>
+          <Button
+            variant="outline"
+            size="icon-lg"
+            aria-label={t("sidebar:quickTerminal")}
+            data-testid="mobile-quick-terminal-button"
+          >
+            <IconTerminal2 className="h-4 w-4" />
+          </Button>
+        </MobileLauncherTarget>
       )}
       {workspaceId && (
         <MobileQuickChatButton workspaceId={workspaceId} onClick={handleOpenQuickChat} />
