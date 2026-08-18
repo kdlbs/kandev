@@ -663,16 +663,29 @@ func (r *Repository) SetRunRequestedAtForTest(
 // SetRunStatusForTest forces the status + timing fields for a seeded
 // run. Test-only: lets the E2E harness land non-queued rows
 // (claimed/finished/failed/cancelled) without going through the
-// production state machine.
+// production state machine. A "finished" status defaults outcome to
+// "processed", mirroring the ordinary production call site
+// (event_subscribers.go's agent-completed path) that "finished" almost
+// always represents — the same default already applied by
+// office/dashboard's seedSummaryRun test helper (docs/specs/
+// task-delivery-ledger/spec.md, "Office run outcome"). Every other
+// status writes a NULL outcome, matching FailRun and the dormant
+// SchedulerService paths. Existing callers that only cared about
+// status keep reading as succeeded under the outcome-aware bucketing
+// with no call-site changes.
 func (r *Repository) SetRunStatusForTest(
 	ctx context.Context, runID, status string,
 	claimedAt, finishedAt *time.Time,
 ) error {
+	var outcome interface{}
+	if status == "finished" {
+		outcome = "processed"
+	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE runs
-		SET status = ?, claimed_at = ?, finished_at = ?
+		SET status = ?, outcome = ?, claimed_at = ?, finished_at = ?
 		WHERE id = ?
-	`), status, claimedAt, finishedAt, runID)
+	`), status, outcome, claimedAt, finishedAt, runID)
 	return err
 }
 
