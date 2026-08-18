@@ -4,7 +4,8 @@ import { getSingleLineTextInVisualOrder } from "../../helpers/layout-assertions"
 import { SessionPage } from "../../pages/session-page";
 import path from "node:path";
 
-const MOBILE_FILE = ".agents/skills/review/surfaces/deeply/nested/mobile-review-status-added.ts";
+const MOBILE_FILE =
+  ".agents/skills/review/surfaces/with-a-deliberately-long-directory/deeply/nested/mobile-review-status-added.ts";
 const MOBILE_MOVED_FROM_FILE = "mobile-review-status-old-name.ts";
 const MOBILE_MOVED_FILE = "mobile-review-status-new-name.ts";
 
