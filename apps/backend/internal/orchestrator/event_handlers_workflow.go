@@ -2961,6 +2961,7 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		s.logger.Debug("no live agent execution for context reset, clearing persisted resume state",
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
+		s.clearResumeToken(ctx, sessionID)
 		s.clearPersistedResetState(ctx, sessionID, session)
 		return true
 	}
@@ -2974,6 +2975,11 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 	s.setSessionResetInProgress(sessionID, true)
 	defer s.setSessionResetInProgress(sessionID, false)
 
+	// Clear the resume token BEFORE the agent reset.  The new ACP session
+	// does not exist yet, so there is nothing for the async session.created
+	// event to write and nothing for clearResumeToken to race with.
+	s.clearResumeToken(ctx, sessionID)
+
 	if err := s.agentManager.ResetAgentContext(ctx, executionID); err != nil {
 		s.logger.Error("failed to reset agent context",
 			zap.String("task_id", taskID),
@@ -2983,6 +2989,11 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		return false
 	}
 
+	// Clear the remaining persisted state (ACP session metadata, context window)
+	// after the provider reset succeeds.  The resume_token was already cleared
+	// above so this call clears metadata/context only — it does NOT re-clear
+	// the resume token (clearResumeToken was extracted from the helper to avoid
+	// erasing a fresh token written by the async storeResumeToken event).
 	s.clearPersistedResetState(ctx, sessionID, session)
 	return true
 }
@@ -3001,7 +3012,6 @@ func (s *Service) clearPersistedResetState(ctx context.Context, sessionID string
 			zap.String("session_id", sessionID),
 			zap.Error(updateErr))
 	}
-	s.clearResumeToken(ctx, sessionID)
 	if updateErr := s.clearContextWindowForReset(ctx, sessionID); updateErr != nil {
 		s.logger.Warn("failed to clear context window from session metadata",
 			zap.String("session_id", sessionID),
