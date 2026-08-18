@@ -607,7 +607,7 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 
 	if fields.WorkspaceID != "" {
 		if err := s.CheckBudget(
-			ctx, fields.WorkspaceID, fields.AssigneeAgentProfileID, costEvent.ProjectID,
+			ctx, fields.WorkspaceID, costEvent.AgentProfileID, costEvent.ProjectID,
 		); err != nil {
 			s.logger.Warn("post-event budget check failed",
 				zap.String("task_id", data.TaskID), zap.Error(err))

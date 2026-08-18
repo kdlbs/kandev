@@ -627,3 +627,61 @@ func TestPromptUsage_DuplicateUsageEventIDIsIdempotent(t *testing.T) {
 		t.Fatalf("cost count = %d, want 1 (redelivery must not double-record)", len(costs))
 	}
 }
+
+// TestPromptUsage_BudgetCheckUsesSessionFallbackProfile is a regression test
+// for the companion budget-check gap: buildCostEvent already resolves the
+// session fallback into costEvent.AgentProfileID (see
+// TestPromptUsage_FallsBackToSessionAgentProfileWhenUnassigned), but the
+// post-event CheckBudget call still passed the empty
+// fields.AssigneeAgentProfileID. filterApplicablePolicies matches an
+// agent-scoped policy against that argument, so on this fallback path an
+// over-budget agent's pause_agent policy never matched and the agent was
+// never paused, no matter how much it spent.
+func TestPromptUsage_BudgetCheckUsesSessionFallbackProfile(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "codex-runner-budget")
+	policy := &models.BudgetPolicy{
+		WorkspaceID:       "ws-1",
+		ScopeType:         "agent",
+		ScopeID:           "codex-runner-budget",
+		LimitSubcents:     10,
+		Period:            "monthly",
+		AlertThresholdPct: 80,
+		ActionOnExceed:    "pause_agent",
+	}
+	if err := svc.CreateBudgetPolicy(ctx, policy); err != nil {
+		t.Fatalf("create policy: %v", err)
+	}
+
+	insertTestTask(t, svc, "task-budget-fallback", "ws-1")
+	// Deliberately no setTestTaskAssignee call: no workflow runner, so the
+	// session fallback path is exercised exactly as in
+	// TestPromptUsage_FallsBackToSessionAgentProfileWhenUnassigned.
+	insertTestTaskSession(t, svc, "session-budget-fallback", "task-budget-fallback", "codex-runner-budget")
+
+	event := bus.NewEvent(events.SessionPromptUsageUpdated, "test", map[string]interface{}{
+		"task_id":    "task-budget-fallback",
+		"session_id": "session-budget-fallback",
+		"model":      "sonnet",
+		"usage": map[string]interface{}{
+			"input_tokens":                    100,
+			"output_tokens":                   200,
+			"provider_reported_cost_subcents": 1000,
+			"provider_reported_cost_present":  true,
+		},
+	})
+	if err := eb.Publish(ctx, events.BuildSessionPromptUsageSubject("session-budget-fallback"), event); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	agent, err := svc.GetAgentInstance(ctx, "codex-runner-budget")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if agent.Status != models.AgentStatusPaused {
+		t.Errorf("agent status = %q, want %q (budget policy must apply to the session-fallback profile)",
+			agent.Status, models.AgentStatusPaused)
+	}
+}

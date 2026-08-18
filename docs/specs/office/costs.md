@@ -102,7 +102,7 @@ replaced successfully.
 - **claude-acp**: `result.usage` (camelCase, `cachedRead`/`cachedWriteTokens`), plus cumulative `usage_update.cost.amount` in USD; the adapter emits its nonnegative turn delta when present. claude-acp uses logical aliases (`sonnet`, `haiku`); provider-reported cost is the only accurate signal.
 - **opencode-acp**: `result.usage` with `inputTokens`/`outputTokens`/`thoughtTokens` (no cached tokens). Optional `usage_update.cost.amount` (often `0` on BYOK).
 - **gemini**: `result._meta.quota.token_count.{input_tokens, output_tokens}` (snake_case, no cached, no cost).
-- **codex-acp**: current context occupancy in `usage_update.used`; adapter uses nonnegative occupancy growth as a per-turn estimate and flags rows `estimated=true`. Input vs output cannot be split on the wire. Compaction or other decreases reset the estimate baseline.
+- **codex-acp**: 1.4.0+ emits a typed `result.usage` block on the prompt response, but its three response-construction sites (normal end_turn, cancelled, terminal failure) all hardcode it to the session's last model request, not a per-turn total — a turn making N requests reports only request N's counts. The adapter accepts this typed frame (input/output/cache split, when present) but always flags rows `estimated=true` until codex-acp emits a genuine per-turn total upstream. Prior to 1.4.0 (or if the frame is absent), the adapter falls back to nonnegative context-occupancy growth from `usage_update.used` as a per-turn estimate; that fallback cannot split input vs output and compaction or other decreases reset its baseline.
 - **auggie**, **copilot-acp**: not tracked. `_meta.copilotUsage` is a billing multiplier; Copilot `/usage` would require scraping.
 
 ### Disk-runner provider coverage
@@ -227,7 +227,9 @@ No TTL or retention is applied to `office_cost_events`; rows accumulate for the 
 
 - **GIVEN** a claude-acp turn that reports both cached-read and cached-write tokens, **WHEN** the cost event is recorded, **THEN** `tokens_cached_read` and `tokens_cached_write` are stored as the separate values reported (not merged), `tokens_cached_in` equals their sum, and `cost_subcents` reflects each portion priced at its own per-million rate.
 
-- **GIVEN** a codex-acp turn (no per-turn usage frame; tokens synthesised from context-occupancy growth, `estimated=true`), **WHEN** the cost event is recorded, **THEN** `tokens_cached_read` and `tokens_cached_write` are NULL (never `0`) because the split was never observed, while `tokens_cached_in` and `cost_subcents` are still recorded from the synthesised totals.
+- **GIVEN** a codex-acp turn using the context-occupancy-growth fallback (no typed usage frame available; tokens synthesised from `usage_update.used` growth, `estimated=true`), **WHEN** the cost event is recorded, **THEN** `tokens_cached_read` and `tokens_cached_write` are NULL (never `0`) because the split was never observed, while `tokens_cached_in` and `cost_subcents` are still recorded from the synthesised totals.
+
+- **GIVEN** a codex-acp 1.4.0+ turn whose typed usage frame reports a nonzero cache split, **WHEN** the cost event is recorded, **THEN** `estimated=true` (the frame is the last request only, not a per-turn total) and `tokens_cached_read`/`tokens_cached_write` are stored as the reported split. When the frame's cache fields are both zero, the split is stored as NULL rather than `0/0`, matching the "split never observed" rule above rather than distinguishing a reported zero from an absent field.
 
 - **GIVEN** a turn priced via the models.dev lookup, **WHEN** the cost event is recorded, **THEN** `cost_source=models_dev_list` and the row carries the four `rate_*_per_million` values and `pricing_catalog_version` actually applied, distinguishable from a provider-reported row (`cost_source=provider_reported`, no rate columns) and an unpriced row (`cost_source=unpriced`, `cost_subcents=0`).
 
