@@ -950,6 +950,7 @@ emitting the header without `capabilities.auth` returns 403.
 Declare both the initiate webhook and the callback webhook with `access: public`.
 Kandev checks the initiate key before it shows the login button. The manifest
 has no callback field, so your plugin must declare the callback key separately.
+Kandev logs a warning when a declared initiate webhook is not public.
 
 **You MUST only assert an `email` the IdP has verified as owned by `subject`.**
 Kandev auto-links that email to (or provisions) an account, so an unverified or

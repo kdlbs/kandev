@@ -57,6 +57,8 @@ and an SSO login directive cannot cross into a replacement plugin generation.
 `SSOProviders()` only returns a provider when its initiate webhook is effectively
 public. API v1 omission remains public. API v2 requires `access: public` for the
 initiate webhook and its callback.
+The host logs one load-time warning when a declared initiate webhook is not
+public. This gives the operator a diagnostic without logging on each boot read.
 
 ## Consequences
 

@@ -67,3 +67,65 @@ func TestLegacyWebhookWarningNamesPluginAndKeys(t *testing.T) {
 		t.Fatalf("warning fields = %#v, want plugin id and both webhook keys", fields)
 	}
 }
+
+func TestNonPublicSSOInitiateProviderIDs(t *testing.T) {
+	m := manifest.Manifest{
+		APIVersion:   manifest.CurrentAPIVersion,
+		Capabilities: manifest.Capabilities{Auth: true},
+		Webhooks: []manifest.Webhook{
+			{Key: "google", Access: manifest.WebhookAccessPublic},
+			{Key: "oidc"},
+			{Key: "saml", Access: manifest.WebhookAccessAuthenticated},
+		},
+		AuthProviders: []manifest.AuthProvider{
+			{ID: "google", Initiate: "google"},
+			{ID: "oidc", Initiate: "oidc"},
+			{ID: "saml", Initiate: "saml"},
+			{ID: "missing", Initiate: "missing"},
+		},
+	}
+
+	want := []string{"oidc", "saml"}
+	if got := nonPublicSSOInitiateProviderIDs(m); !reflect.DeepEqual(got, want) {
+		t.Fatalf("nonPublicSSOInitiateProviderIDs() = %v, want %v", got, want)
+	}
+
+	m.APIVersion = manifest.LegacyAPIVersion
+	if got := nonPublicSSOInitiateProviderIDs(m); !reflect.DeepEqual(got, []string{"saml"}) {
+		t.Fatalf("legacy nonPublicSSOInitiateProviderIDs() = %v, want [saml]", got)
+	}
+
+	m.Capabilities.Auth = false
+	if got := nonPublicSSOInitiateProviderIDs(m); got != nil {
+		t.Fatalf("non-auth plugin providers = %v, want nil", got)
+	}
+}
+
+func TestNonPublicSSOInitiateWarningNamesPluginAndProviders(t *testing.T) {
+	core, observed := observer.New(zap.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("NewFromZap: %v", err)
+	}
+	svc := &Service{log: log}
+	svc.warnNonPublicSSOInitiates(manifest.Manifest{
+		ID:           "kandev-plugin-sso",
+		APIVersion:   manifest.CurrentAPIVersion,
+		Capabilities: manifest.Capabilities{Auth: true},
+		Webhooks:     []manifest.Webhook{{Key: "oidc"}, {Key: "saml"}},
+		AuthProviders: []manifest.AuthProvider{
+			{ID: "oidc", Initiate: "oidc"},
+			{ID: "saml", Initiate: "saml"},
+		},
+	})
+
+	entries := observed.All()
+	if len(entries) != 1 {
+		t.Fatalf("warning count = %d, want 1", len(entries))
+	}
+	fields := entries[0].ContextMap()
+	if fields["plugin_id"] != "kandev-plugin-sso" ||
+		!reflect.DeepEqual(fields["auth_provider_ids"], []any{"oidc", "saml"}) {
+		t.Fatalf("warning fields = %#v, want plugin id and both provider ids", fields)
+	}
+}
