@@ -81,11 +81,33 @@ func TestPostgresLedgerWriterGenesisMoveAttachDetach(t *testing.T) {
 // other, breaking the (occurred_at, id) chain invariant only under real
 // concurrent Postgres connections (SQLite's single-writer pool serializes
 // regardless, which is why no SQLite test could have caught it).
+//
+// The two movers deliberately run on two independent *Repository instances
+// backed by two independent physical connections (repo/db and moverRepo/
+// moverDB, both pinned to the same isolated schema — see
+// openSecondPostgresConnection in turn_step_stamp_postgres_test.go).
+// testutil.OpenIsolatedPostgres caps db at one physical connection, so if
+// both UpdateTask calls below shared it, Go's connection pool alone would
+// serialize them — the two calls would never reach the Postgres server at
+// the same time, and this test would pass whether or not
+// readTaskStepInTx's FOR UPDATE clause exists at all. Two connections make
+// the calls genuinely race at the server, which is the only way this test
+// can distinguish "the lock serializes movers" from "the lock is dead
+// code": reintroducing the historical bug this test guards against (stamp
+// occurred_at before acquiring the lock) breaks the chain here but is
+// invisible to a single-shared-connection version of the same test, which
+// is exactly what made the original bug undetectable before this PR.
 func TestPostgresLedgerWriterConcurrentMovesProduceIntactChain(t *testing.T) {
-	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	dsn := testutil.PostgresDSNFromEnv(t)
+	db := testutil.OpenIsolatedPostgres(t, dsn)
 	repo, err := NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init postgres schema: %v", err)
+	}
+	moverDB := openSecondPostgresConnection(t, dsn, db)
+	moverRepo, err := NewWithDB(moverDB, moverDB, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema on second connection: %v", err)
 	}
 	ctx := steptelemetry.WithAttribution(context.Background(), steptelemetry.Attribution{
 		Trigger: steptelemetry.TriggerManualMove, ActorKind: steptelemetry.ActorHuman, ActorID: "user-pg-concurrent",
@@ -112,7 +134,7 @@ func TestPostgresLedgerWriterConcurrentMovesProduceIntactChain(t *testing.T) {
 		start.Wait()
 		moved := *task
 		moved.WorkflowStepID = "step-c"
-		return repo.UpdateTask(ctx, &moved)
+		return moverRepo.UpdateTask(ctx, &moved)
 	})
 	start.Done()
 	if err := g.Wait(); err != nil {
