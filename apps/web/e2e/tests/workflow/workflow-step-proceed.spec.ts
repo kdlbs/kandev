@@ -106,13 +106,13 @@ test.describe("Manual proceed to next workflow step", () => {
     if (!agent) {
       throw new Error("E2E mock agent is required for runtime-config reset coverage");
     }
-    const smartProfile = await apiClient.createAgentProfile(
+    const runtimeProfile = await apiClient.createAgentProfile(
       agent.id,
       "Reset Runtime Config Profile",
       {
-        model: "mock-smart",
-        mode: "plan-mock",
-        config_options: { effort: "max" },
+        model: "mock-fast",
+        mode: "default",
+        config_options: { effort: "medium" },
       },
     );
 
@@ -137,7 +137,7 @@ test.describe("Manual proceed to next workflow step", () => {
     const task = await apiClient.createTask(seedData.workspaceId, "Reset Runtime Config Task", {
       workflow_id: workflow.id,
       workflow_step_id: startStep.id,
-      agent_profile_id: smartProfile.id,
+      agent_profile_id: runtimeProfile.id,
       repository_ids: [seedData.repositoryId],
     });
 
@@ -148,8 +148,23 @@ test.describe("Manual proceed to next workflow step", () => {
 
     const modelTrigger = testPage.getByRole("button", { name: "Session model settings" });
     const modeTrigger = testPage.getByTestId("session-mode-selector");
-    await expect(modelTrigger).toHaveText("Mock Smart / Max", { timeout: 15_000 });
-    await expect(modeTrigger).toHaveText("Plan Mock", { timeout: 15_000 });
+    await expect(modelTrigger).toHaveText("Mock Fast", { timeout: 15_000 });
+    await expect(modeTrigger).toHaveText("Default", { timeout: 15_000 });
+
+    // Change the live session after launch. These values intentionally differ
+    // from the profile defaults so reset coverage exercises the live caches.
+    await modelTrigger.click();
+    await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+    await expect(modelTrigger).toContainText("Mock Smart", { timeout: 5_000 });
+    await modelTrigger.click();
+    await testPage.getByTestId("config-option-trigger-effort").click();
+    await testPage.getByRole("button", { name: "Max", exact: true }).click();
+    await expect(modelTrigger).toHaveText("Mock Smart / Max", { timeout: 5_000 });
+    await testPage.keyboard.press("Escape");
+
+    await modeTrigger.click();
+    await testPage.getByRole("menuitem", { name: /^Plan Mock/ }).click();
+    await expect(modeTrigger).toHaveText("Plan Mock", { timeout: 5_000 });
 
     await session.proceedNextStepButton().click();
     await expect(session.stepperStep("Reset")).toHaveAttribute("aria-current", "step", {

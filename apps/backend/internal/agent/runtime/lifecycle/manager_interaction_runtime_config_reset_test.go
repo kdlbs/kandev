@@ -327,7 +327,7 @@ func TestSanitizeRuntimeConfigOptionsFiltersInvalidEntries(t *testing.T) {
 	require.Equal(t, map[string]string{"effort": "max"}, options)
 }
 
-func TestManager_CaptureSessionRuntimeConfigPrefersLiveProviderOptions(t *testing.T) {
+func TestManager_CaptureSessionRuntimeConfigOverlaysPersistedStateAfterLiveState(t *testing.T) {
 	mgr := newTestManager(t)
 	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
 		infos: map[string]*WorkspaceInfo{
@@ -350,5 +350,106 @@ func TestManager_CaptureSessionRuntimeConfigPrefersLiveProviderOptions(t *testin
 
 	config := mgr.captureSessionRuntimeConfigForReset(context.Background(), exec)
 
+	require.Equal(t, map[string]string{"effort": "low"}, config.ConfigOptions)
+}
+
+func TestManager_CaptureSessionRuntimeConfigLayersLiveStateOverProfileDefaults(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{
+		Model:         "mock-fast",
+		Mode:          "default",
+		ConfigOptions: map[string]string{"effort": "low"},
+	}}
+	exec := runtimeConfigResetExecution(nil, true)
+	exec.SetModelState(&CachedModelState{
+		CurrentModelID: "mock-smart",
+		ConfigOptions:  []streams.ConfigOption{{ID: "effort", CurrentValue: "max"}},
+	})
+	exec.SetModeState(&CachedModeState{CurrentModeID: "acceptEdits"})
+
+	config := mgr.captureSessionRuntimeConfigForReset(context.Background(), exec)
+
+	require.Equal(t, "mock-smart", config.Model)
+	require.Equal(t, "acceptEdits", config.Mode)
 	require.Equal(t, map[string]string{"effort": "max"}, config.ConfigOptions)
+}
+
+func TestManager_ResetAgentContext_FallbackReusesCapturedRuntimeConfig(t *testing.T) {
+	mgr := newTestManager(t)
+	provider := runtimeConfigResetWorkspaceInfo()
+	mgr.workspaceInfoProvider = provider
+	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.failSessionReset = true
+	mock.newModelState = runtimeConfigResetModelState()
+	mock.onReset = func() {
+		provider.infos["session-1"].RuntimeModel = "mock-fast"
+		provider.infos["session-1"].SessionMode = "default"
+		provider.infos["session-1"].RuntimeConfigOptions = map[string]string{
+			"effort": "low",
+		}
+	}
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(cancel)
+
+	exec := runtimeConfigResetExecution(client, true)
+	exec.SetModelState(&CachedModelState{CurrentModelID: "mock-smart"})
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	require.NoError(t, mgr.ResetAgentContext(ctx, exec.ID))
+
+	require.Equal(t, []string{"mock-smart"}, mock.getSetModelIDs())
+	require.Equal(t, []string{"acceptEdits"}, mock.getSetModeIDs())
+	require.Equal(t, []restartConfigOption{
+		{ID: "alpha", Value: "enabled"},
+		{ID: "zeta", Value: "max"},
+	}, mock.getSetOptions())
+}
+
+func TestManager_CaptureSessionRuntimeConfigFiltersPersistedCategorizedOptions(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			"session-1": {
+				SessionID: "session-1",
+				RuntimeConfigOptions: map[string]string{
+					"primary_model":   "mock-smart",
+					"permission_mode": "acceptEdits",
+					"effort":          "max",
+				},
+				RuntimeConfigOptionsSet: true,
+			},
+		},
+	}
+	exec := runtimeConfigResetExecution(nil, true)
+	exec.SetModelState(&CachedModelState{
+		CurrentModelID: "mock-smart",
+		ConfigOptions: []streams.ConfigOption{
+			{ID: "primary_model", Category: "model", CurrentValue: "mock-smart"},
+			{ID: "permission_mode", Category: "mode", CurrentValue: "acceptEdits"},
+			{ID: "effort", CurrentValue: "max"},
+		},
+	})
+
+	config := mgr.captureSessionRuntimeConfigForReset(context.Background(), exec)
+
+	require.Equal(t, map[string]string{"effort": "max"}, config.ConfigOptions)
+}
+
+func TestSanitizeRuntimeConfigOptionsUsesCapturedOptionCategories(t *testing.T) {
+	options := sanitizeRuntimeConfigOptionsWithCatalog(map[string]string{
+		"primary_model":   "mock-smart",
+		"permission_mode": "acceptEdits",
+		"effort":          "max",
+	}, &CachedModelState{
+		ConfigOptions: []streams.ConfigOption{
+			{ID: "primary_model", Category: "model"},
+			{ID: "permission_mode", Category: "mode"},
+			{ID: "effort", Category: ""},
+		},
+	})
+
+	require.Equal(t, map[string]string{"effort": "max"}, options)
 }

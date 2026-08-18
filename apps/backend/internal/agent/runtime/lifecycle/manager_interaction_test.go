@@ -48,6 +48,7 @@ type restartMockAgentctlServer struct {
 
 	failStop           bool
 	failSessionNew     bool
+	failSessionReset   bool
 	failMode           bool
 	failModel          bool
 	failConfigOptionID string
@@ -182,6 +183,13 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 			case "agent.session.reset":
 				if m.onReset != nil {
 					m.onReset()
+				}
+				if m.failSessionReset {
+					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+						"success": false,
+						"error":   "session reset failed",
+					})
+					break
 				}
 				payload := map[string]interface{}{
 					"success":    true,

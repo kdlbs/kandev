@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -562,27 +563,35 @@ func (m *Manager) captureSessionRuntimeConfigForReset(
 	execution *AgentExecution,
 ) models.SessionRuntimeConfig {
 	profileModel, profileMode, profileOptions := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
-	model, mode, options, optionsSet := m.effectiveSessionRuntimeConfigWithPresence(
-		ctx, execution, profileModel, profileMode, profileOptions,
-	)
 	modelState := execution.GetModelState()
-	if model == "" && modelState != nil {
-		model = modelState.CurrentModelID
+	liveModel := profileModel
+	if modelState != nil && strings.TrimSpace(modelState.CurrentModelID) != "" {
+		liveModel = modelState.CurrentModelID
 	}
-	if mode == "" {
-		if modeState := execution.GetModeState(); modeState != nil {
-			mode = modeState.CurrentModeID
+	liveMode := profileMode
+	if modeState := execution.GetModeState(); modeState != nil && strings.TrimSpace(modeState.CurrentModeID) != "" {
+		liveMode = modeState.CurrentModeID
+	}
+	liveOptions := maps.Clone(profileOptions)
+	if liveStateOptions, liveOptionsKnown := liveSessionRuntimeConfigOptions(modelState); liveOptionsKnown {
+		// A settled provider snapshot is the live layer, including an empty
+		// snapshot. Keep an allocated empty map so the effective-config helper
+		// preserves that presence while persisted state can still overlay it.
+		liveOptions = make(map[string]string, len(liveStateOptions))
+		for id, value := range liveStateOptions {
+			liveOptions[id] = value
 		}
 	}
-	if liveOptions, liveOptionsKnown := liveSessionRuntimeConfigOptions(modelState); liveOptionsKnown {
-		options = liveOptions
-	} else if !optionsSet {
+	model, mode, options, optionsSet := m.effectiveSessionRuntimeConfigWithPresence(
+		ctx, execution, liveModel, liveMode, liveOptions,
+	)
+	if !optionsSet {
 		options = selectedRuntimeConfigOptions(modelState)
 	}
 	return models.SessionRuntimeConfig{
 		Model:         model,
 		Mode:          mode,
-		ConfigOptions: sanitizeRuntimeConfigOptions(options),
+		ConfigOptions: sanitizeRuntimeConfigOptionsWithCatalog(options, modelState),
 	}
 }
 
@@ -612,16 +621,49 @@ func selectedRuntimeConfigOptions(state *CachedModelState) map[string]string {
 }
 
 func sanitizeRuntimeConfigOptions(options map[string]string) map[string]string {
+	return sanitizeRuntimeConfigOptionsWithCatalog(options, nil)
+}
+
+func sanitizeRuntimeConfigOptionsWithCatalog(options map[string]string, state *CachedModelState) map[string]string {
 	if options == nil {
 		return nil
 	}
+	catalog, catalogKnown := capturedRuntimeConfigOptionCatalog(state)
 	cleaned := make(map[string]string, len(options))
 	for id, value := range options {
-		if isRestorableRuntimeConfigOption(id, "", value) {
-			cleaned[strings.TrimSpace(id)] = strings.TrimSpace(value)
+		trimmedID := strings.TrimSpace(id)
+		category := ""
+		if catalogKnown {
+			var ok bool
+			category, ok = catalog[trimmedID]
+			if !ok {
+				continue
+			}
+		}
+		if isRestorableRuntimeConfigOption(trimmedID, category, value) {
+			cleaned[trimmedID] = strings.TrimSpace(value)
 		}
 	}
 	return cleaned
+}
+
+func capturedRuntimeConfigOptionCatalog(state *CachedModelState) (map[string]string, bool) {
+	if state == nil || (!state.ConfigOptionsSettled && len(state.ConfigOptions) == 0) {
+		return nil, false
+	}
+	catalog := make(map[string]string, len(state.ConfigOptions))
+	for _, option := range state.ConfigOptions {
+		id := strings.TrimSpace(option.ID)
+		if id == "" {
+			continue
+		}
+		category := strings.TrimSpace(option.Category)
+		if previous, exists := catalog[id]; exists && previous != "" {
+			continue
+		}
+		catalog[id] = category
+	}
+	return catalog, true
 }
 
 func isRestorableRuntimeConfigOption(id, category, value string) bool {
@@ -651,7 +693,7 @@ func (m *Manager) restoreSessionRuntimeConfig(
 	if err := m.applySessionModeAfterReset(ctx, execution, sessionID, config.Mode); err != nil {
 		return fmt.Errorf("restore session runtime mode: %w", err)
 	}
-	options := sanitizeRuntimeConfigOptions(config.ConfigOptions)
+	options := sanitizeRuntimeConfigOptionsWithCatalog(config.ConfigOptions, execution.GetModelState())
 	optionIDs := make([]string, 0, len(options))
 	for id := range options {
 		optionIDs = append(optionIDs, id)
@@ -701,14 +743,14 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	if err != nil {
 		m.logger.Info("cannot resolve agent config for session reset, falling back to process restart",
 			zap.String("execution_id", executionID), zap.Error(err))
-		return m.RestartAgentProcess(ctx, executionID)
+		return m.restartAgentProcess(ctx, executionID, &runtimeConfig)
 	}
 
 	mcpServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
 	if err != nil {
 		m.logger.Warn("cannot resolve MCP servers for session reset, falling back to process restart",
 			zap.String("execution_id", executionID), zap.Error(err))
-		return m.RestartAgentProcess(ctx, executionID)
+		return m.restartAgentProcess(ctx, executionID, &runtimeConfig)
 	}
 
 	// Try session-level reset (only ACP adapters support this)
@@ -716,7 +758,7 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	if err != nil {
 		m.logger.Info("session reset not supported, falling back to process restart",
 			zap.String("execution_id", executionID), zap.Error(err))
-		return m.RestartAgentProcess(ctx, executionID)
+		return m.restartAgentProcess(ctx, executionID, &runtimeConfig)
 	}
 
 	// Success — update execution state without restarting process
@@ -896,6 +938,17 @@ func (m *Manager) StopBySessionID(ctx context.Context, sessionID string, force b
 // conversation context. For ACP agents this restarts via agentctl with a new ACP session.
 // For passthrough (TUI) agents this kills the PTY process and relaunches without --resume.
 func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) error {
+	return m.restartAgentProcess(ctx, executionID, nil)
+}
+
+// restartAgentProcess restarts an ACP process. When runtimeConfigOverride is
+// supplied, it is the immutable pre-reset snapshot and must be used instead of
+// reading state again after ResetAgentContext has cleared the old catalog.
+func (m *Manager) restartAgentProcess(
+	ctx context.Context,
+	executionID string,
+	runtimeConfigOverride *models.SessionRuntimeConfig,
+) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
@@ -910,7 +963,7 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
 
-	preparation, err := m.prepareAgentRestart(ctx, execution)
+	preparation, err := m.prepareAgentRestart(ctx, execution, runtimeConfigOverride)
 	if err != nil {
 		return err
 	}
@@ -924,12 +977,7 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 	execution.agentctl.CloseWorkspaceStream()
 
 	// 2. Stop the agent subprocess via agentctl (keeps agentctl server alive)
-	if err := execution.agentctl.Stop(ctx); err != nil {
-		m.logger.Warn("failed to stop agent subprocess during restart",
-			zap.String("execution_id", executionID),
-			zap.Error(err))
-		// Continue — the process may already be stopped
-	}
+	m.stopAgentProcessForRestart(ctx, execution)
 
 	// 3. Reset execution state after the replacement command has been validated.
 	m.resetAgentRestartState(executionID, preparation.commands)
@@ -987,6 +1035,15 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 	return nil
 }
 
+func (m *Manager) stopAgentProcessForRestart(ctx context.Context, execution *AgentExecution) {
+	if err := execution.agentctl.Stop(ctx); err != nil {
+		m.logger.Warn("failed to stop agent subprocess during restart",
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
+		// Continue — the process may already be stopped
+	}
+}
+
 type agentRestartPreparation struct {
 	agentConfig   agents.Agent
 	commands      agentCommands
@@ -994,7 +1051,11 @@ type agentRestartPreparation struct {
 }
 
 // prepareAgentRestart builds and validates the replacement before touching the current process.
-func (m *Manager) prepareAgentRestart(ctx context.Context, execution *AgentExecution) (agentRestartPreparation, error) {
+func (m *Manager) prepareAgentRestart(
+	ctx context.Context,
+	execution *AgentExecution,
+	runtimeConfigOverride *models.SessionRuntimeConfig,
+) (agentRestartPreparation, error) {
 	m.logger.Info("restarting agent process for context reset",
 		zap.String("execution_id", execution.ID),
 		zap.String("task_id", execution.TaskID),
@@ -1008,11 +1069,25 @@ func (m *Manager) prepareAgentRestart(ctx context.Context, execution *AgentExecu
 	if err != nil {
 		return agentRestartPreparation{}, fmt.Errorf("failed to rebuild agent command for restart: %w", err)
 	}
+	var runtimeConfig models.SessionRuntimeConfig
+	if runtimeConfigOverride == nil {
+		runtimeConfig = m.captureSessionRuntimeConfigForReset(ctx, execution)
+	} else {
+		runtimeConfig = cloneSessionRuntimeConfig(*runtimeConfigOverride)
+	}
 	return agentRestartPreparation{
 		agentConfig:   agentConfig,
 		commands:      commands,
-		runtimeConfig: m.captureSessionRuntimeConfigForReset(ctx, execution),
+		runtimeConfig: runtimeConfig,
 	}, nil
+}
+
+func cloneSessionRuntimeConfig(config models.SessionRuntimeConfig) models.SessionRuntimeConfig {
+	return models.SessionRuntimeConfig{
+		Model:         config.Model,
+		Mode:          config.Mode,
+		ConfigOptions: maps.Clone(config.ConfigOptions),
+	}
 }
 
 func (m *Manager) resetAgentRestartState(executionID string, commands agentCommands) {
