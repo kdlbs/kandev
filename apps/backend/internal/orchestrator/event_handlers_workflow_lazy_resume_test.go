@@ -2,16 +2,26 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
+type failResumeTokenUpdateRepo struct {
+	sessionExecutorStore
+	err error
+}
+
+func (r *failResumeTokenUpdateRepo) UpdateResumeToken(context.Context, string, string, string, string) error {
+	return r.err
+}
+
 // TestProcessOnEnterResetAgentContext_ClearsLazyResumeTokenWithoutLiveExecution
 // is the regression test for the lazy-resume reset: when no in-memory execution
-// exists, clearPersistedResetState must erase the stale resume token so the
-// next lazy launch does not reconnect to the pre-reset ACP conversation.
+// exists, resetAgentContext must erase the stale resume token so the next lazy
+// launch does not reconnect to the pre-reset ACP conversation.
 func TestProcessOnEnterResetAgentContext_ClearsLazyResumeTokenWithoutLiveExecution(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -53,9 +63,75 @@ func TestProcessOnEnterResetAgentContext_ClearsLazyResumeTokenWithoutLiveExecuti
 	}
 }
 
-// TestResetAgentContext_InterleavingB_ClearBeforeStore proves the favorable
-// interleaving: clearPersistedResetState erases the stale token before the
-// async ACP session.created event writes the fresh one.
+func TestProcessOnEnterResetAgentContext_ReportsLazyResumeTokenClearFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-lazy-resume-error", "session-lazy-resume-error", "step-work")
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:          "session-lazy-resume-error",
+		SessionID:   "session-lazy-resume-error",
+		TaskID:      "task-lazy-resume-error",
+		ResumeToken: "old-acp-session",
+		Status:      "stopped",
+	}); err != nil {
+		t.Fatalf("seed resumable execution: %v", err)
+	}
+
+	agentManager := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+	svc.repo = &failResumeTokenUpdateRepo{
+		sessionExecutorStore: repo,
+		err:                  errors.New("resume token store unavailable"),
+	}
+	session, err := repo.GetTaskSession(ctx, "session-lazy-resume-error")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+
+	if svc.resetAgentContext(ctx, "task-lazy-resume-error", session, "review") {
+		t.Fatal("expected reset to fail when lazy resume token cannot be cleared")
+	}
+	if len(agentManager.restartProcessCalls) != 0 {
+		t.Fatalf("expected no provider reset without a live execution, got %d calls", len(agentManager.restartProcessCalls))
+	}
+}
+
+func TestResetAgentContext_FailedProviderResetRetainsResumeToken(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-reset-token", "s-reset-token", "step1")
+	seedExecutorRunning(t, repo, "s-reset-token", "t-reset-token", "exec-reset-token")
+	if err := repo.UpdateResumeToken(ctx, "s-reset-token", "exec-reset-token", "old-acp-session", ""); err != nil {
+		t.Fatalf("seed stale resume token: %v", err)
+	}
+
+	svc := createTestServiceWithAgent(
+		repo,
+		newMockStepGetter(),
+		newMockTaskRepo(),
+		&mockAgentManager{
+			repoForExecutionLookup: repo,
+			restartProcessErr:      errors.New("provider reset failed"),
+		},
+	)
+	session, err := repo.GetTaskSession(ctx, "s-reset-token")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	if svc.resetAgentContext(ctx, "t-reset-token", session, "review") {
+		t.Fatal("expected provider reset to fail")
+	}
+	running, err := repo.GetExecutorRunningBySessionID(ctx, "s-reset-token")
+	if err != nil {
+		t.Fatalf("load executor row: %v", err)
+	}
+	if running.ResumeToken != "old-acp-session" {
+		t.Fatalf("failed reset must retain recovery token, got %q", running.ResumeToken)
+	}
+}
+
+// TestResetAgentContext_InterleavingB_ClearBeforeStore proves that a successful
+// reset persists the fresh token before an async session-created event arrives.
 func TestResetAgentContext_InterleavingB_ClearBeforeStore(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -63,34 +139,41 @@ func TestResetAgentContext_InterleavingB_ClearBeforeStore(t *testing.T) {
 
 	const execID = "exec-1"
 	const staleToken = "old-acp-session"
+	const freshToken = "fresh-acp-session"
 	seedExecutorRunning(t, repo, "s1", "t1", execID)
 	if err := repo.UpdateResumeToken(ctx, "s1", execID, staleToken, ""); err != nil {
 		t.Fatalf("seed stale resume token: %v", err)
 	}
 
-	agentManager := &mockAgentManager{repoForExecutionLookup: repo}
+	agentManager := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		getACPSessionIDForSessionFunc: func(string) (string, bool) {
+			return freshToken, true
+		},
+	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
 	session, err := repo.GetTaskSession(ctx, "s1")
 	if err != nil {
 		t.Fatalf("load session: %v", err)
 	}
 
-	// 1. resetAgentContext — clears stale token before the reset.
+	// 1. resetAgentContext resets the provider, clears stale state, and
+	//    persists the current ACP session synchronously.
 	if !svc.resetAgentContext(ctx, "t1", session, "test") {
 		t.Fatal("expected reset to succeed")
 	}
 
-	// 2. Verify token was cleared.
+	// 2. Verify the old token was replaced without waiting for an async event.
 	running, err := repo.GetExecutorRunningBySessionID(ctx, "s1")
 	if err != nil {
 		t.Fatalf("load executor row after reset: %v", err)
 	}
-	if running.ResumeToken != "" {
-		t.Fatalf("expected cleared resume_token after reset, got %q", running.ResumeToken)
+	if running.ResumeToken != freshToken {
+		t.Fatalf("expected fresh resume_token after reset, got %q", running.ResumeToken)
 	}
 
-	// 3. Async storeResumeToken arrives with the new ACP session ID.
-	const freshToken = "fresh-acp-session"
+	// 3. An async session-created event with the same current ID remains
+	//    idempotent.
 	svc.storeResumeToken(ctx, "t1", "s1", execID, freshToken, "")
 
 	running, err = repo.GetExecutorRunningBySessionID(ctx, "s1")
@@ -102,15 +185,9 @@ func TestResetAgentContext_InterleavingB_ClearBeforeStore(t *testing.T) {
 	}
 }
 
-// TestResetAgentContext_InterleavingA_StoreBeforeClear proves that the
-// reverse interleaving — the async ACP session.created event fires BEFORE
-// resetAgentContext's clearResumeToken runs — is safe with the fix
-// (clearResumeToken is ordered before ResetAgentContext, so the new ACP
-// session does not exist when the old token is cleared).
-//
-// This test simulates interleaving A by calling storeResumeToken with the
-// fresh ACP session ID before clearPersistedResetState. The fix ensures
-// the fresh token survives.
+// TestResetAgentContext_InterleavingA_StoreBeforeClear proves that metadata
+// cleanup does not clear a token that was already persisted by the fresh ACP
+// session event.
 func TestResetAgentContext_InterleavingA_StoreBeforeClear(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -130,9 +207,8 @@ func TestResetAgentContext_InterleavingA_StoreBeforeClear(t *testing.T) {
 		t.Fatalf("load session: %v", err)
 	}
 
-	// Simulate: the async ACP session.created event fires before
-	// clearPersistedResetState. storeResumeToken writes the fresh token
-	// first, then clearPersistedResetState must not erase it.
+	// Simulate the async ACP session.created event arriving before the remaining
+	// reset metadata is cleared. The token is handled separately and survives.
 	const freshToken = "fresh-acp-session"
 	svc.storeResumeToken(ctx, "t1", "s1", execID, freshToken, "")
 	svc.clearPersistedResetState(ctx, "s1", session)
@@ -149,18 +225,10 @@ func TestResetAgentContext_InterleavingA_StoreBeforeClear(t *testing.T) {
 	}
 }
 
-// TestResetAgentContext_InterleavingC_StaleOldEventOverwritesFresh
-// demonstrates that a stale ACP session.created event from the OLD session
-// (same execution ID, old ACP session ID) can overwrite the fresh resume
-// token. storeResumeToken's CAS keyed on agent_execution_id CANNOT
-// distinguish ACP session generations within the same execution.
-//
-// This is pre-existing: the old code had the same window for acp_session_id.
-// Our fix neither introduces nor widens it.  The correct long-term fix
-// requires a generation counter on the executors_running row (outside the
-// scope of this change).
-func TestResetAgentContext_InterleavingC_StaleOldEventOverwritesFresh(t *testing.T) {
-	t.Skip("pre-existing: storeResumeToken CAS cannot distinguish ACP generations within the same execution. Requires a generation counter on executors_running.")
+// TestResetAgentContext_InterleavingC_StaleOldEventOverwritesFresh proves that
+// the current ACP session ID filters a delayed event from the old session even
+// though both sessions share one lifecycle execution ID.
+func TestResetAgentContext_InterleavingC_StaleOldEventDoesNotOverwriteFresh(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
@@ -172,21 +240,25 @@ func TestResetAgentContext_InterleavingC_StaleOldEventOverwritesFresh(t *testing
 		t.Fatalf("seed stale resume token: %v", err)
 	}
 
-	agentManager := &mockAgentManager{repoForExecutionLookup: repo}
+	const freshToken = "fresh-acp-session"
+	agentManager := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		getACPSessionIDForSessionFunc: func(string) (string, bool) {
+			return freshToken, true
+		},
+	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
 	session, err := repo.GetTaskSession(ctx, "s1")
 	if err != nil {
 		t.Fatalf("load session: %v", err)
 	}
 
-	// 1. resetAgentContext — clears stale token before the reset, then calls
-	//    clearPersistedResetState after.
+	// 1. Reset the provider and persist the fresh ACP session.
 	if !svc.resetAgentContext(ctx, "t1", session, "test") {
 		t.Fatal("expected reset to succeed")
 	}
 
-	// 2. New session event arrives — writes fresh token.
-	const freshToken = "fresh-acp-session"
+	// 2. New session event arrives — writes the fresh token.
 	svc.storeResumeToken(ctx, "t1", "s1", execID, freshToken, "")
 
 	running, err := repo.GetExecutorRunningBySessionID(ctx, "s1")
@@ -197,8 +269,8 @@ func TestResetAgentContext_InterleavingC_StaleOldEventOverwritesFresh(t *testing
 		t.Fatalf("expected fresh token %q, got %q", freshToken, running.ResumeToken)
 	}
 
-	// 3. Stale old-session event arrives with the old ACP session ID.
-	//    Same execution ID → CAS accepts it → overwrites fresh token!
+	// 3. A stale old-session event arrives with the old ACP session ID. The
+	//    execution ID is unchanged, but the ACP generation check rejects it.
 	svc.storeResumeToken(ctx, "t1", "s1", execID, staleToken, "")
 
 	running, err = repo.GetExecutorRunningBySessionID(ctx, "s1")

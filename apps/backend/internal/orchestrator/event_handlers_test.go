@@ -322,6 +322,8 @@ type mockAgentManager struct {
 	repoForExecutionLookup interface {
 		GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
 	}
+	// Optional current ACP session lookup used by reset-token generation tests.
+	getACPSessionIDForSessionFunc func(string) (string, bool)
 
 	// CancelAgent tracking. cancelAgentCalls counts every invocation. If
 	// cancelAgentBlock is non-nil, CancelAgent blocks on it before returning;
@@ -664,6 +666,14 @@ func (m *mockAgentManager) GetExecutionIDForSession(ctx context.Context, session
 	}
 	return "", fmt.Errorf("no execution found")
 }
+
+func (m *mockAgentManager) GetACPSessionIDForSession(sessionID string) (string, bool) {
+	if m.getACPSessionIDForSessionFunc == nil {
+		return "", false
+	}
+	return m.getACPSessionIDForSessionFunc(sessionID)
+}
+
 func (m *mockAgentManager) GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int, targetBranch string) (*client.GitLogResult, error) {
 	if m.getGitLogFunc != nil {
 		return m.getGitLogFunc(ctx, sessionID, baseCommit, limit, targetBranch)

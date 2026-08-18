@@ -2947,6 +2947,11 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		return true
 	}
 
+	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
+	defer releaseLifecycleLock()
+	s.setSessionResetInProgress(sessionID, true)
+	defer s.setSessionResetInProgress(sessionID, false)
+
 	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	if err != nil || executionID == "" {
 		// No in-memory execution exists yet — most commonly a lazily-resumed
@@ -2961,7 +2966,14 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		s.logger.Debug("no live agent execution for context reset, clearing persisted resume state",
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
-		s.clearResumeToken(ctx, sessionID)
+		if err := s.clearResumeToken(ctx, sessionID); err != nil {
+			s.logger.Error("failed to clear lazy resume token before context reset",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("step_name", stepName),
+				zap.Error(err))
+			return false
+		}
 		s.clearPersistedResetState(ctx, sessionID, session)
 		return true
 	}
@@ -2972,14 +2984,6 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		zap.String("step_name", stepName),
 		zap.String("agent_execution_id", executionID))
 
-	s.setSessionResetInProgress(sessionID, true)
-	defer s.setSessionResetInProgress(sessionID, false)
-
-	// Clear the resume token BEFORE the agent reset.  The new ACP session
-	// does not exist yet, so there is nothing for the async session.created
-	// event to write and nothing for clearResumeToken to race with.
-	s.clearResumeToken(ctx, sessionID)
-
 	if err := s.agentManager.ResetAgentContext(ctx, executionID); err != nil {
 		s.logger.Error("failed to reset agent context",
 			zap.String("task_id", taskID),
@@ -2989,22 +2993,32 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		return false
 	}
 
+	// Clear the old resume token only after the provider reset succeeds. This
+	// keeps a valid recovery token when the runtime reset fails. A fresh ACP
+	// session event can race this clear, so persist the lifecycle manager's
+	// current session ID again below after the clear.
+	if err := s.clearResumeToken(ctx, sessionID); err != nil {
+		s.logger.Error("failed to clear resume token after context reset",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("step_name", stepName),
+			zap.Error(err))
+		return false
+	}
+	if acpSessionID := s.currentACPSessionID(sessionID); acpSessionID != "" {
+		s.storeResumeToken(ctx, taskID, sessionID, executionID, acpSessionID, "")
+	}
+
 	// Clear the remaining persisted state (ACP session metadata, context window)
-	// after the provider reset succeeds.  The resume_token was already cleared
-	// above so this call clears metadata/context only — it does NOT re-clear
-	// the resume token (clearResumeToken was extracted from the helper to avoid
-	// erasing a fresh token written by the async storeResumeToken event).
+	// after the provider reset succeeds. The token is handled explicitly above.
 	s.clearPersistedResetState(ctx, sessionID, session)
 	return true
 }
 
 // clearPersistedResetState clears the durable, DB-backed session state that a
 // later lazy resume would otherwise pick back up: the stored ACP session ID
-// in session metadata, the resume token on the executors_running row, and the
-// persisted context window. Runs for both the live-execution reset (after the
-// provider session is actually reset) and the no-in-memory-execution path
-// above (where there is nothing live to reset but the persisted state must
-// still be cleared before the next agent turn).
+// in session metadata and the persisted context window. The resume token is
+// cleared explicitly by resetAgentContext so a reset failure can retain it.
 func (s *Service) clearPersistedResetState(ctx context.Context, sessionID string, session *models.TaskSession) {
 	// Clear the stored ACP session ID using json_set to avoid clobbering other keys.
 	if updateErr := s.repo.SetSessionMetadataKey(ctx, sessionID, "acp_session_id", ""); updateErr != nil {
