@@ -5,7 +5,9 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
+import { Textarea } from "@kandev/ui/textarea";
 import { useUtilityAgents } from "@/hooks/domains/settings/use-utility-agents";
+import { useAppStore } from "@/components/state-provider";
 import type { PluginConfigField } from "@/lib/plugins/config-schema";
 
 /** Sentinel for the "Not set" select item — an actual enum option can never
@@ -105,11 +107,7 @@ function ConfigFieldControl({
       </div>
     );
   }
-
   if (field.type === "enum") {
-    // Radix Select forbids an item with value="", so an explicit "Not set"
-    // sentinel lets optional enums be cleared back to unset (serialization
-    // omits empty strings).
     return (
       <Select
         value={typeof value === "string" ? value : ""}
@@ -132,16 +130,15 @@ function ConfigFieldControl({
               {t("plugins:notSet")}
             </SelectItem>
           )}
-          {(field.enumValues ?? []).map((option) => (
-            <SelectItem key={option} value={option} className="cursor-pointer">
-              {option}
+          {(field.enumValues ?? []).map((v) => (
+            <SelectItem key={v} value={v} className="cursor-pointer">
+              {v}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
     );
   }
-
   if (field.type === "utility_agent") {
     return (
       <UtilityAgentSelect
@@ -154,22 +151,31 @@ function ConfigFieldControl({
       />
     );
   }
-
-  return (
-    <Input
-      id={inputId}
-      type={inputType(field)}
-      // step="1" on integer fields nudges the browser to flag non-integral
-      // input in-place; serializeConfigValues still rejects it as a backstop.
-      step={!field.secret && field.type === "integer" ? "1" : undefined}
-      value={typeof value === "string" ? value : ""}
-      disabled={disabled}
-      data-settings-dirty={isDirty}
-      autoComplete={field.secret ? "off" : undefined}
-      className="max-w-md"
-      onChange={(event) => onChange(field.name, event.target.value)}
-    />
-  );
+  if (field.type === "agent_profile") {
+    return (
+      <AgentProfileSelect
+        field={field}
+        inputId={inputId}
+        value={value}
+        isDirty={isDirty}
+        disabled={disabled}
+        onChange={onChange}
+      />
+    );
+  }
+  if (field.type === "textarea") {
+    return (
+      <TextareaField
+        field={field}
+        inputId={inputId}
+        value={value}
+        isDirty={isDirty}
+        disabled={disabled}
+        onChange={onChange}
+      />
+    );
+  }
+  return renderConfigInput({ field, inputId, value, isDirty, disabled, onChange });
 }
 
 function UtilityAgentSelect({
@@ -244,3 +250,105 @@ function inputType(field: PluginConfigField): string {
   if (field.type === "number" || field.type === "integer") return "number";
   return "text";
 }
+
+/** Renders a plain Input for string/number/integer fields, applying optional
+ * numeric minimum/maximum bounds. Extracted from ConfigFieldControl to keep
+ * that function under the eslint line/complexity limits. */
+function renderConfigInput(props: ConfigFieldControlProps) {
+  const { field, inputId, value, isDirty, disabled, onChange } = props;
+  const inputExtra: Record<string, unknown> = {};
+  if (field.type === "number" || field.type === "integer") {
+    if (field.minimum !== undefined) inputExtra.min = field.minimum;
+    if (field.maximum !== undefined) inputExtra.max = field.maximum;
+  }
+  return (
+    <Input
+      id={inputId}
+      type={inputType(field)}
+      step={!field.secret && field.type === "integer" ? "1" : undefined}
+      value={typeof value === "string" ? value : ""}
+      disabled={disabled}
+      data-settings-dirty={isDirty}
+      autoComplete={field.secret ? "off" : undefined}
+      className="max-w-md"
+      {...inputExtra}
+      onChange={(event) => onChange(field.name, event.target.value)}
+    />
+  );
+}
+
+function TextareaField({
+  field,
+  inputId,
+  value,
+  isDirty,
+  disabled,
+  onChange,
+}: ConfigFieldControlProps) {
+  return (
+    <Textarea
+      id={inputId}
+      value={typeof value === "string" ? value : ""}
+      disabled={disabled}
+      data-settings-dirty={isDirty}
+      className="max-w-lg min-h-[6rem]"
+      onChange={(event) => onChange(field.name, event.target.value)}
+    />
+  );
+}
+
+function AgentProfileSelect({
+  field,
+  inputId,
+  value,
+  isDirty,
+  disabled,
+  onChange,
+}: ConfigFieldControlProps) {
+  const { t } = useTranslation();
+  const profiles = useAppStore((state) => state.agentProfiles.items);
+  const selectedID = typeof value === "string" ? value : "";
+  const selectedProfile = profiles.find((p) => p.id === selectedID);
+  const placeholder = t("plugins:selectPlaceholder");
+
+  return (
+    <Select
+      value={selectedID}
+      disabled={disabled}
+      onValueChange={(next) =>
+        onChange(field.name, next === AGENT_PROFILE_UNSET_SENTINEL ? "" : next)
+      }
+    >
+      <SelectTrigger id={inputId} className="max-w-md cursor-pointer" data-settings-dirty={isDirty}>
+        <SelectValue placeholder={placeholder}>
+          {selectedProfile?.label ??
+            selectedProfile?.agent_name ??
+            selectedProfile?.id ??
+            undefined}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {!field.required && (
+          <SelectItem
+            value={AGENT_PROFILE_UNSET_SENTINEL}
+            className="cursor-pointer text-muted-foreground"
+          >
+            {t("plugins:notSet")}
+          </SelectItem>
+        )}
+        {profiles.map((profile) => (
+          <SelectItem
+            key={profile.id}
+            value={profile.id}
+            className="cursor-pointer"
+            disabled={!profile.enabled}
+          >
+            {profile.label ?? profile.agent_name ?? profile.id}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+const AGENT_PROFILE_UNSET_SENTINEL = "__kandev_agent_profile_unset__";

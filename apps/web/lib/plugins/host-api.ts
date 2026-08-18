@@ -165,6 +165,7 @@ import {
   type PluginStorageEntry,
   type PluginStorageScope,
 } from "./types";
+import { WorkspaceAgentChat } from "@/components/agent-conversation/workspace-agent-chat";
 
 const LazyChangeRequestDetail = React.lazy(async () => {
   const module = await import("@/components/integrations/change-request-detail");
@@ -355,6 +356,12 @@ const PLUGIN_UI: PluginUIApi & Record<string, unknown> = {
   SettingsSection,
   SettingsCard,
   WorkspaceScopedSection,
+  // - WorkspaceAgentChat: host-owned chat component for managed agent
+  //   conversations. Plugins render this on their route page with a
+  //   WorkspaceAgentChatProps descriptor to show the conversation transcript
+  //   and composer. Uses the same shared chat primitives as task and quick
+  //   chat panels.
+  WorkspaceAgentChat,
 };
 
 function pluginSettingsContributorId(pluginId: string, contributorId: string): string {
