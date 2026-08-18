@@ -1,4 +1,5 @@
 import { IconLayoutList, IconPin, IconPinned, IconTrash, IconX } from "@tabler/icons-react";
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui";
 import { Switch } from "@kandev/ui/switch";
@@ -33,6 +34,8 @@ export function QueuePanelHeader({
   onClose,
 }: QueuePanelHeaderProps) {
   const { t } = useTranslation();
+  const autoRunId = useId();
+  const autoRunHelpId = `${autoRunId}-help`;
   // The pin is a desktop-only convenience: on phone viewports the queue panel
   // keeps its existing controls and the pin is not rendered.
   const { isMobile } = useResponsiveBreakpoint();
@@ -91,24 +94,21 @@ export function QueuePanelHeader({
         </div>
       </div>
       <div className="flex min-h-9 min-w-0 items-center justify-between gap-3 py-1 [@media(pointer:coarse)]:min-h-11">
-        <label htmlFor="queue-auto-run" className="min-w-0 cursor-pointer">
+        <label htmlFor={autoRunId} className="min-w-0 cursor-pointer">
           <span className="block text-xs font-medium text-foreground">
             {t("chat:queueAutoRun")}
           </span>
-          <span
-            id="queue-auto-run-help"
-            className="block truncate text-[11px] text-muted-foreground"
-          >
+          <span id={autoRunHelpId} className="block truncate text-[11px] text-muted-foreground">
             {t(autoRun ? "chat:queueAutoRunOnHelp" : "chat:queueAutoRunOffHelp")}
           </span>
         </label>
         <Switch
-          id="queue-auto-run"
+          id={autoRunId}
           data-testid="queue-auto-run"
           checked={autoRun}
           disabled={isLoading || cancellationPending}
           onCheckedChange={onAutoRunChange}
-          aria-describedby="queue-auto-run-help"
+          aria-describedby={autoRunHelpId}
           aria-label={t("chat:queueAutoRun")}
           className="[@media(pointer:coarse)]:after:-inset-y-3.5"
         />

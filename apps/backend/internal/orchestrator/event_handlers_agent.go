@@ -156,6 +156,8 @@ func (s *Service) publishTaskQueueStatusEvent(ctx context.Context, taskID, sessi
 		eventData["entries"] = queueStatus.Entries
 		eventData["count"] = queueStatus.Count
 		eventData[queueStatusMaxField] = queueStatus.Max
+		eventData["auto_run"] = queueStatus.AutoRun
+		eventData["merge_enabled"] = queueStatus.MergeEnabled
 	}
 	s.logger.Debug("publishing task queue status changed event",
 		zap.String("task_id", taskID),

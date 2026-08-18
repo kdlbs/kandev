@@ -659,6 +659,34 @@ func (s *Service) TakeQueued(ctx context.Context, sessionID string) (*QueuedMess
 	return msg, true
 }
 
+// TakeQueuedIfAutoRun atomically checks the session policy and removes the
+// FIFO head only while Auto-run is enabled. The admission gate serializes the
+// policy read with every queue mutation made through this service.
+func (s *Service) TakeQueuedIfAutoRun(ctx context.Context, sessionID string) (*QueuedMessage, bool) {
+	var msg *QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		autoRun, err := s.repo.GetAutoRun(admittedCtx, sessionID)
+		if err != nil || !autoRun {
+			return err
+		}
+		msg, err = s.repo.TakeHead(admittedCtx, sessionID)
+		return err
+	})
+	if err != nil {
+		s.logger.Error("take Auto-run head failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil, false
+	}
+	if msg == nil {
+		return nil, false
+	}
+	s.logger.Info("Auto-run message dequeued",
+		zap.String("session_id", sessionID),
+		zap.String("entry_id", msg.ID))
+	return msg, true
+}
+
 // TakeQueuedEntry atomically removes and returns the entry identified by
 // entryID, regardless of its FIFO position. Returns nil, false, nil when
 // the entry no longer exists (already drained or removed by a concurrent

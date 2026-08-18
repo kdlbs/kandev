@@ -3400,10 +3400,12 @@ func (h *Handlers) publishQueueStatusEvent(ctx context.Context, sessionID string
 		events.MessageQueueStatusChanged,
 		"mcp-handlers",
 		map[string]interface{}{
-			"session_id": sessionID,
-			"entries":    status.Entries,
-			"count":      status.Count,
-			"max":        status.Max,
+			"session_id":    sessionID,
+			"entries":       status.Entries,
+			"count":         status.Count,
+			"max":           status.Max,
+			"auto_run":      status.AutoRun,
+			"merge_enabled": status.MergeEnabled,
 		},
 	))
 }

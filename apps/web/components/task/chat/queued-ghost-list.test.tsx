@@ -222,7 +222,9 @@ describe("QueueAffordance", () => {
 
     const autoRun = screen.getByTestId(AUTO_RUN_BUTTON_ID);
     expect(autoRun.getAttribute("data-state")).toBe("checked");
-    expect(autoRun.getAttribute("aria-describedby")).toBe("queue-auto-run-help");
+    const autoRunHelpId = autoRun.getAttribute("aria-describedby");
+    expect(autoRunHelpId).toBeTruthy();
+    expect(document.getElementById(autoRunHelpId!)).toBeTruthy();
     expect(screen.getByText("Runs queued messages one at a time.")).toBeTruthy();
     expect(autoRun.className).toContain("[@media(pointer:coarse)]:after:-inset-y-3.5");
     expect(autoRun.parentElement?.className).toContain("[@media(pointer:coarse)]:min-h-11");

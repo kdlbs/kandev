@@ -2937,17 +2937,18 @@ func (s *Service) resetSessionForFreshFallback(
 	return &reset, nil
 }
 
-// takeAndMergeHandoffMessage drains any queued hand-off message for the session
-// (set by handleMoveTask via move_task_kandev or by drainQueuedMessageForPromptableSession)
-// and merges its content + attachments into the auto-start prompt. Returns the
-// original queued message (so terminal failure paths can re-queue it via
+// takeAndMergeHandoffMessage drains an Auto-run-enabled hand-off message for
+// the session (set by handleMoveTask via move_task_kandev or by
+// drainQueuedMessageForPromptableSession) and merges its content + attachments
+// into the auto-start prompt. Paused queues keep the hand-off parked. Returns
+// the original queued message (so terminal failure paths can re-queue it via
 // requeueMessage), merged prompt, converted attachments, and structurally
 // normalized references.
 func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, basePrompt string) (*messagequeue.QueuedMessage, string, []v1.MessageAttachment, []v1.EntityReference) {
 	if s.messageQueue == nil {
 		return nil, basePrompt, nil, nil
 	}
-	msg, ok := s.messageQueue.TakeQueued(ctx, sessionID)
+	msg, ok := s.messageQueue.TakeQueuedIfAutoRun(ctx, sessionID)
 	if !ok || msg == nil || (msg.Content == "" && len(msg.Attachments) == 0) {
 		return nil, basePrompt, nil, nil
 	}

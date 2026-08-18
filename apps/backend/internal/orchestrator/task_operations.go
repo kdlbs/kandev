@@ -5834,9 +5834,10 @@ func (s *Service) finishCancelledAgentTurn(ctx context.Context, sessionID string
 	if s.messageQueue != nil {
 		paused, err := s.messageQueue.PauseAutoRunIfPending(ctx, sessionID)
 		if err != nil {
-			return fmt.Errorf("pause queued messages after cancel: %w", err)
-		}
-		if paused {
+			s.logger.Warn("failed to pause queued messages after cancel",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		} else if paused {
 			s.publishQueueStatusEvent(ctx, sessionID)
 		}
 	}
