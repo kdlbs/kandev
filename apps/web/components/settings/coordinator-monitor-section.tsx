@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
@@ -36,41 +36,15 @@ export interface CoordinatorMonitorSectionProps {
 }
 
 /**
- * Hook that manages local draft state for the coordinator monitor config.
- *
- * Returns the current draft config and a handler that updates one step at
- * a time, so the parent can integrate it with a save coordinator.
- */
-export function useCoordinatorMonitorDraft(
-  initialConfig: MonitorConfigMap,
-  onChange: (config: MonitorConfigMap) => void,
-) {
-  const [draft, setDraft] = useState<MonitorConfigMap>(initialConfig);
-  const handleStepChange = useCallback(
-    (stepId: string, patch: Partial<StepMonitorConfig>) => {
-      setDraft((prev) => {
-        const next: MonitorConfigMap = { ...prev };
-        const existing = next[stepId] ?? { selected: false, prompt: "" };
-        next[stepId] = { ...existing, ...patch };
-        onChange(next);
-        return next;
-      });
-    },
-    [onChange],
-  );
-  return { draft, setDraft, handleStepChange };
-}
-
-/**
  * Coordinator monitoring section for a single workflow.
  *
  * Renders a card listing every workflow step with a checkbox and
  * optional per-step prompt textarea.  Acts as a pure controlled
  * component: the parent owns the config state and passes it down.
  *
- * In production usage the config is persisted via the plugin's
- * user-state storage keyed by (workspace_id, workflow_id, step_id),
- * but this component only reads/writes the provided MonitorConfigMap.
+ * Persistence is host-owned (workflow_coordinator_monitoring, keyed by
+ * workflow and step); this component only reads/writes the provided
+ * MonitorConfigMap and leaves saving to useCoordinatorMonitorContributor.
  */
 export function CoordinatorMonitorSection({
   workflowId,
