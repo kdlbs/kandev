@@ -41,7 +41,7 @@ export function IntegrationCursorPagination({
       data-testid={testId}
     >
       <div className="text-xs tabular-nums text-muted-foreground">
-        {t("cursorPaginationSummary", { page, count: itemCount })}
+        {t("integrations:cursorPaginationSummary", { page, count: itemCount })}
       </div>
       <Pagination className="mx-0 w-auto justify-end">
         <PaginationContent>

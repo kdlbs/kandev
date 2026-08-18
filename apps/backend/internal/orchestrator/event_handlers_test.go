@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -270,6 +271,7 @@ type mockAgentManager struct {
 	restartProcessErr      error
 	promptErr              error
 	promptResult           *executor.PromptResult
+	promptAcceptedOnError  bool
 	promptAgentFunc        func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error)
 	launchAgentFunc        func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
 	startAgentProcessCalls []string
@@ -458,7 +460,7 @@ func (m *mockAgentManager) PromptAgent(ctx context.Context, executionID string, 
 
 func (m *mockAgentManager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
 	result, err := m.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
-	if err == nil && onDispatched != nil {
+	if (err == nil || m.promptAcceptedOnError) && onDispatched != nil {
 		onDispatched()
 	}
 	return result, err
@@ -2503,6 +2505,39 @@ func TestHandleRecoverableFailure(t *testing.T) {
 		}
 	})
 
+	t.Run("persists structured managed runtime failure fields safely", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+			ErrorMessage:     "managed npm runtime failed to prepare",
+			FailureCode:      "managed_runtime_npm_resolution",
+			FailureDetails:   "npm error code ETARGET\nsecret=super-secret-value",
+		})
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		lastErr, ok := models.LoadLastAgentError(session.Metadata)
+		if !ok {
+			t.Fatalf("expected last agent error metadata, got %#v", session.Metadata)
+		}
+		if lastErr.Code != "managed_runtime_npm_resolution" {
+			t.Fatalf("failure code = %q, want managed runtime code", lastErr.Code)
+		}
+		if !strings.Contains(lastErr.Details, "secret: ***") || strings.Contains(lastErr.Details, "super-secret-value") {
+			t.Fatalf("failure details were not sanitized: %q", lastErr.Details)
+		}
+	})
+
 	t.Run("sets session to WAITING_FOR_INPUT with error message", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
@@ -2612,6 +2647,38 @@ func TestIsOfficeSessionUsesCanonicalTaskOwnership(t *testing.T) {
 				t.Fatalf("isOfficeSession = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestClassifyManagedRuntimeNpmStartFailureUsesStructuredError(t *testing.T) {
+	err := fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
+		Code:    routingerr.CodeManagedRuntimeNpmResolution,
+		Details: "npm error code ETARGET\nnpm error notarget No matching version found for managed-acp@1.2.3",
+	})
+
+	classified := classifyManagedRuntimeNpmStartFailure(err)
+	if classified == nil {
+		t.Fatal("expected structured npm startup error to classify")
+	}
+	if classified.Code != routingerr.CodeManagedRuntimeNpmResolution {
+		t.Fatalf("code = %q, want %q", classified.Code, routingerr.CodeManagedRuntimeNpmResolution)
+	}
+	if !strings.Contains(classified.RawExcerpt, "No matching version found") {
+		t.Fatalf("raw excerpt = %q, want structured details", classified.RawExcerpt)
+	}
+
+	generic := fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
+		Code:    routingerr.CodeAgentRuntime,
+		Details: "sanitized runtime failure",
+	})
+	if classifyManagedRuntimeNpmStartFailure(generic) != nil {
+		t.Fatal("generic structured startup failure must not use the npm recovery card")
+	}
+
+	if classifyManagedRuntimeNpmStartFailure(errors.New(
+		"npm error code ETARGET\nnpm error notarget No matching version found for managed-acp@1.2.3",
+	)) != nil {
+		t.Fatal("unstructured npm text must not select the managed runtime recovery card")
 	}
 }
 

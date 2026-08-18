@@ -83,6 +83,31 @@ func TestSQLiteRepository_InsertList(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_HasTaskActivityIndex(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	sqliteRepo := repo.(*sqliteRepository)
+	rows, err := sqliteRepo.db.Queryx(`PRAGMA index_info('idx_queued_messages_task_activity')`)
+	if err != nil {
+		t.Fatalf("inspect task activity index: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	wantColumns := []string{"task_id", "queued_by", "queued_at"}
+	for index, want := range wantColumns {
+		if !rows.Next() {
+			t.Fatalf("task activity index ended at column %d, want %q", index, want)
+		}
+		var seqno, columnID int
+		var column string
+		if err := rows.Scan(&seqno, &columnID, &column); err != nil {
+			t.Fatalf("scan task activity index column %d: %v", index, err)
+		}
+		if column != want {
+			t.Fatalf("task activity index column %d = %q, want %q", index, column, want)
+		}
+	}
+}
+
 func TestSQLiteRepository_InsertRejectsOverflow(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()
@@ -774,6 +799,7 @@ func TestSQLiteRepository_ReplaceSessionPreservesQueuedIdentity(t *testing.T) {
 	}
 
 	if err := repo.ReplaceSession(ctx, "s1", []QueuedMessage{*original}, &PendingMove{
+		MoveID:          "move-restore",
 		TaskID:          "t1",
 		WorkflowStepID:  "step-a",
 		QueuedAt:        original.QueuedAt,
@@ -801,6 +827,9 @@ func TestSQLiteRepository_ReplaceSessionPreservesQueuedIdentity(t *testing.T) {
 	if move == nil || move.WorkflowStepID != "step-a" {
 		t.Fatalf("pending move = %#v, want step-a", move)
 	}
+	if move.MoveID != "move-restore" {
+		t.Fatalf("pending move move_id = %q, want move-restore", move.MoveID)
+	}
 	if move.SenderSessionID != "sender-s1" {
 		t.Fatalf("pending move sender_session_id = %q, want sender-s1", move.SenderSessionID)
 	}
@@ -814,12 +843,13 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 		t.Fatalf("expected nil move on empty, got %v err=%v", move, err)
 	}
 
-	move := &PendingMove{TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-A", Position: 0, Actor: "agent", SenderSessionID: "sender-s1"}
+	move := &PendingMove{MoveID: "move-a", TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-A", Position: 0, Actor: "agent", SenderSessionID: "sender-s1"}
 	if err := repo.SetPendingMove(ctx, "s1", move); err != nil {
 		t.Fatalf("set pending: %v", err)
 	}
 
 	// Upsert: replace with new target.
+	move.MoveID = "move-b"
 	move.WorkflowStepID = "step-B"
 	if err := repo.SetPendingMove(ctx, "s1", move); err != nil {
 		t.Fatalf("upsert pending: %v", err)
@@ -831,6 +861,9 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 	}
 	if got == nil || got.WorkflowStepID != "step-B" {
 		t.Errorf("expected step-B after upsert, got %+v", got)
+	}
+	if got == nil || got.MoveID != "move-b" {
+		t.Errorf("expected move-b move ID after upsert, got %+v", got)
 	}
 	if got == nil || got.Actor != "agent" {
 		t.Errorf("expected agent actor after upsert, got %+v", got)
@@ -875,7 +908,7 @@ func TestSQLiteRepository_PendingMoveSenderSessionMigration(t *testing.T) {
 	}
 	ctx := context.Background()
 	if err := repo.SetPendingMove(ctx, "s1", &PendingMove{
-		TaskID: "t1", WorkflowStepID: "step-a", SenderSessionID: "sender-s1",
+		MoveID: "move-migrated", TaskID: "t1", WorkflowStepID: "step-a", SenderSessionID: "sender-s1",
 	}); err != nil {
 		t.Fatalf("set migrated pending move: %v", err)
 	}
@@ -885,6 +918,9 @@ func TestSQLiteRepository_PendingMoveSenderSessionMigration(t *testing.T) {
 	}
 	if move == nil || move.SenderSessionID != "sender-s1" {
 		t.Fatalf("migrated pending move = %#v, want sender-s1", move)
+	}
+	if move.MoveID != "move-migrated" {
+		t.Fatalf("migrated pending move move_id = %q, want move-migrated", move.MoveID)
 	}
 }
 

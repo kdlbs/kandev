@@ -1,10 +1,23 @@
-import { describe, expect, it } from "vitest";
-import { toSheetItem } from "./session-task-switcher-sheet-hooks";
+import { describe, expect, it, vi } from "vitest";
+import { toSheetItem } from "./session-task-switcher-sheet-item";
+import {
+  createTaskSheetSelectionController,
+  handleTaskSheetOpenChange,
+  selectPendingTaskFromSheet,
+  selectTaskFromSheet,
+} from "./session-task-switcher-sheet-selection";
+import type { TaskPendingAction, TaskSession } from "@/lib/types/http";
 
 type SheetTask = Parameters<typeof toSheetItem>[0];
 type SheetCtx = Parameters<typeof toSheetItem>[1];
 const UPDATED_AT = "2026-07-22T00:00:00Z";
 const ERROR_PREVIEW = "Agent failed";
+
+async function flushSelection(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 function emptyCtx(): SheetCtx {
   return {
@@ -165,5 +178,405 @@ describe("toSheetItem queued prompt count", () => {
 
     expect(item.wipQueue).toEqual(wipQueue);
     expect(item.queuedCount).toBeUndefined();
+  });
+});
+
+describe("selectPendingTaskFromSheet", () => {
+  it("waits for the owner session before navigating and closing", async () => {
+    const order: string[] = [];
+    const loadTaskSessionsForTask = vi.fn(
+      async () =>
+        [
+          {
+            id: "secondary",
+            task_id: "task-1",
+            state: "WAITING_FOR_INPUT",
+            pending_action: "clarification",
+            started_at: UPDATED_AT,
+            updated_at: UPDATED_AT,
+          },
+          {
+            id: "primary",
+            task_id: "task-1",
+            state: "WAITING_FOR_INPUT",
+            is_primary: true,
+            started_at: UPDATED_AT,
+            updated_at: UPDATED_AT,
+          },
+        ] as TaskSession[],
+    );
+    const setActiveSession = vi.fn((_taskId: string, sessionId: string) => {
+      order.push(`session:${sessionId}`);
+    });
+    await selectPendingTaskFromSheet({
+      taskId: "task-1",
+      preferredSessionId: "primary",
+      taskPendingAction: "clarification",
+      loadTaskSessionsForTask,
+      setActiveSession,
+      setActiveTask: vi.fn(),
+      navigate: () => order.push("navigate"),
+      onOpenChange: () => order.push("close"),
+    });
+
+    expect(setActiveSession).toHaveBeenCalledWith("task-1", "secondary");
+    expect(loadTaskSessionsForTask).toHaveBeenCalledWith("task-1", { force: true });
+    expect(order).toEqual(["session:secondary", "navigate", "close"]);
+  });
+
+  it("falls back safely when session loading fails", async () => {
+    const order: string[] = [];
+    await selectPendingTaskFromSheet({
+      taskId: "task-1",
+      preferredSessionId: "primary",
+      taskPendingAction: "permission",
+      loadTaskSessionsForTask: vi.fn(async () => {
+        throw new Error("offline");
+      }),
+      setActiveSession: (_taskId, sessionId) => order.push(`session:${sessionId}`),
+      setActiveTask: () => order.push("task"),
+      navigate: () => order.push("navigate"),
+      onOpenChange: () => order.push("close"),
+    });
+    expect(order).toEqual(["task", "navigate", "close"]);
+  });
+
+  it("opens the task when the same action has a newer summary revision", async () => {
+    const taskId = "task-revision";
+    const setActiveSession = vi.fn();
+    const setActiveTask = vi.fn();
+    const navigate = vi.fn();
+    const onOpenChange = vi.fn();
+    await selectPendingTaskFromSheet({
+      taskId,
+      preferredSessionId: "primary",
+      taskPendingAction: "clarification",
+      pendingSnapshot: { revision: 1, pendingAction: "clarification" },
+      getTaskPendingSnapshot: () => ({ revision: 2, pendingAction: "clarification" }),
+      loadTaskSessionsForTask: vi.fn(async () => [
+        {
+          id: "owner",
+          task_id: taskId,
+          state: "WAITING_FOR_INPUT",
+          pending_action: "clarification",
+        } as TaskSession,
+      ]),
+      setActiveSession,
+      setActiveTask,
+      navigate,
+      onOpenChange,
+    });
+
+    expect(setActiveSession).not.toHaveBeenCalled();
+    expect(setActiveTask).toHaveBeenCalledWith(taskId);
+    expect(navigate).toHaveBeenCalledWith(taskId);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("selectPendingTaskFromSheet aborts", () => {
+  it("leaves selection inert when a forced session load is superseded", async () => {
+    const order: string[] = [];
+    const abortError = new Error("superseded");
+    abortError.name = "AbortError";
+
+    await selectPendingTaskFromSheet({
+      taskId: "task-1",
+      preferredSessionId: "primary",
+      taskPendingAction: "permission",
+      loadTaskSessionsForTask: vi.fn(async () => {
+        throw abortError;
+      }),
+      setActiveSession: (_taskId, sessionId) => order.push(`session:${sessionId}`),
+      setActiveTask: () => order.push("task"),
+      navigate: () => order.push("navigate"),
+      onOpenChange: () => order.push("close"),
+    });
+
+    expect(order).toEqual([]);
+  });
+});
+
+describe("selectTaskFromSheet races", () => {
+  it("keeps simultaneous sheet selection controllers independent", () => {
+    const first = createTaskSheetSelectionController();
+    const second = createTaskSheetSelectionController();
+    const firstToken = first.beginSelection();
+    const secondToken = second.beginSelection();
+
+    second.invalidate();
+
+    expect(first.isCurrent(firstToken)).toBe(true);
+    expect(second.isCurrent(secondToken)).toBe(false);
+  });
+
+  it("ignores an older pending selection that resolves after a newer tap", async () => {
+    let resolveTaskA: (sessions: TaskSession[]) => void = () => undefined;
+    let resolveTaskB: (sessions: TaskSession[]) => void = () => undefined;
+    const loadTaskSessionsForTask = vi.fn(
+      (taskId: string) =>
+        new Promise<TaskSession[]>((resolve) => {
+          if (taskId === "task-a") resolveTaskA = resolve;
+          else resolveTaskB = resolve;
+        }),
+    );
+    const setActiveSession = vi.fn();
+    const navigate = vi.fn();
+    const onOpenChange = vi.fn();
+    const shared = {
+      selectionController: createTaskSheetSelectionController(),
+      state: {
+        lastSessionByTaskId: {},
+        environmentIdBySessionId: {},
+        taskSessionsById: {},
+      },
+      loadTaskSessionsForTask,
+      setActiveSession,
+      setActiveTask: vi.fn(),
+      navigate,
+      onOpenChange,
+    };
+
+    selectTaskFromSheet({
+      ...shared,
+      taskId: "task-a",
+      task: { primarySessionId: "primary-a", taskPendingAction: "clarification" },
+    });
+    selectTaskFromSheet({
+      ...shared,
+      taskId: "task-b",
+      task: { primarySessionId: "primary-b", taskPendingAction: "clarification" },
+    });
+
+    resolveTaskB([
+      {
+        id: "owner-b",
+        task_id: "task-b",
+        state: "WAITING_FOR_INPUT",
+        pending_action: "clarification",
+        started_at: UPDATED_AT,
+        updated_at: UPDATED_AT,
+      } as TaskSession,
+    ]);
+    await flushSelection();
+    resolveTaskA([
+      {
+        id: "owner-a",
+        task_id: "task-a",
+        state: "WAITING_FOR_INPUT",
+        pending_action: "clarification",
+        started_at: UPDATED_AT,
+        updated_at: UPDATED_AT,
+      } as TaskSession,
+    ]);
+    await flushSelection();
+
+    expect(setActiveSession).toHaveBeenCalledTimes(1);
+    expect(setActiveSession).toHaveBeenCalledWith("task-b", "owner-b");
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith("task-b");
+    expect(onOpenChange).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("selectTaskFromSheet aborted loads", () => {
+  it("leaves a sessionless selection inert when its session load is aborted", async () => {
+    const abortError = new Error("task removed");
+    abortError.name = "AbortError";
+    const setActiveSession = vi.fn();
+    const setActiveTask = vi.fn();
+    const navigate = vi.fn();
+    const onOpenChange = vi.fn();
+
+    selectTaskFromSheet({
+      selectionController: createTaskSheetSelectionController(),
+      taskId: "task-aborted",
+      task: { primarySessionId: null },
+      state: {
+        lastSessionByTaskId: {},
+        environmentIdBySessionId: {},
+        taskSessionsById: {},
+      },
+      loadTaskSessionsForTask: vi.fn(async () => {
+        throw abortError;
+      }),
+      setActiveSession,
+      setActiveTask,
+      navigate,
+      onOpenChange,
+    });
+    await flushSelection();
+
+    expect(setActiveSession).not.toHaveBeenCalled();
+    expect(setActiveTask).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("selectTaskFromSheet summary races", () => {
+  it("opens the task and closes the sheet when the pending action changes", async () => {
+    const taskId = "task-summary-race";
+    let resolveLoad: (sessions: TaskSession[]) => void = () => undefined;
+    const loadTaskSessionsForTask = vi.fn(
+      () =>
+        new Promise<TaskSession[]>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    let currentSnapshot: {
+      revision: number;
+      pendingAction: TaskPendingAction;
+    } = { revision: 1, pendingAction: "clarification" };
+    const setActiveSession = vi.fn();
+    const setActiveTask = vi.fn();
+    const navigate = vi.fn();
+    const onOpenChange = vi.fn();
+
+    selectTaskFromSheet({
+      selectionController: createTaskSheetSelectionController(),
+      taskId,
+      task: {
+        primarySessionId: "primary",
+        statusSummary: {
+          revision: 1,
+          updated_at: UPDATED_AT,
+          pending_action: "clarification",
+        },
+      },
+      state: {
+        lastSessionByTaskId: {},
+        environmentIdBySessionId: {},
+        taskSessionsById: {},
+      },
+      loadTaskSessionsForTask,
+      setActiveSession,
+      setActiveTask,
+      navigate,
+      onOpenChange,
+      getTaskPendingSnapshot: () => currentSnapshot,
+    });
+    currentSnapshot = { revision: 2, pendingAction: "permission" };
+    resolveLoad([
+      {
+        id: "old-owner",
+        task_id: taskId,
+        state: "WAITING_FOR_INPUT",
+        pending_action: "clarification",
+      } as TaskSession,
+    ]);
+    await flushSelection();
+
+    expect(loadTaskSessionsForTask).toHaveBeenCalledWith(taskId, { force: true });
+    expect(setActiveSession).not.toHaveBeenCalled();
+    expect(setActiveTask).toHaveBeenCalledWith(taskId);
+    expect(navigate).toHaveBeenCalledWith(taskId);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("selectTaskFromSheet deleted-task race", () => {
+  it("leaves the sheet open when the pending task projection disappears", async () => {
+    const taskId = "task-deleted-race";
+    let resolveLoad: (sessions: TaskSession[]) => void = () => undefined;
+    const loadTaskSessionsForTask = vi.fn(
+      () =>
+        new Promise<TaskSession[]>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    const setActiveSession = vi.fn();
+    const setActiveTask = vi.fn();
+    const navigate = vi.fn();
+    const onOpenChange = vi.fn();
+
+    selectTaskFromSheet({
+      selectionController: createTaskSheetSelectionController(),
+      taskId,
+      task: {
+        primarySessionId: "primary",
+        statusSummary: {
+          revision: 1,
+          updated_at: UPDATED_AT,
+          pending_action: "clarification",
+        },
+      },
+      state: {
+        lastSessionByTaskId: {},
+        environmentIdBySessionId: {},
+        taskSessionsById: {},
+      },
+      loadTaskSessionsForTask,
+      setActiveSession,
+      setActiveTask,
+      navigate,
+      onOpenChange,
+      getTaskPendingSnapshot: () => undefined,
+    });
+    resolveLoad([
+      {
+        id: "deleted-owner",
+        task_id: taskId,
+        state: "WAITING_FOR_INPUT",
+        pending_action: "clarification",
+      } as TaskSession,
+    ]);
+    await flushSelection();
+
+    expect(setActiveSession).not.toHaveBeenCalled();
+    expect(setActiveTask).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("selectTaskFromSheet sheet lifecycle", () => {
+  it("invalidates a pending selection when the sheet closes and reopens", async () => {
+    let resolveLoad: (sessions: TaskSession[]) => void = () => undefined;
+    const loadTaskSessionsForTask = vi.fn(
+      () =>
+        new Promise<TaskSession[]>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    const setActiveSession = vi.fn();
+    const navigate = vi.fn();
+    const onOpenChange = vi.fn();
+    const selectionController = createTaskSheetSelectionController();
+
+    selectTaskFromSheet({
+      selectionController,
+      taskId: "task-stale",
+      task: { primarySessionId: "primary", taskPendingAction: "clarification" },
+      state: {
+        lastSessionByTaskId: {},
+        environmentIdBySessionId: {},
+        taskSessionsById: {},
+      },
+      loadTaskSessionsForTask,
+      setActiveSession,
+      setActiveTask: vi.fn(),
+      navigate,
+      onOpenChange,
+    });
+    handleTaskSheetOpenChange(selectionController, false, onOpenChange);
+    handleTaskSheetOpenChange(selectionController, true, onOpenChange);
+
+    resolveLoad([
+      {
+        id: "owner-stale",
+        task_id: "task-stale",
+        state: "WAITING_FOR_INPUT",
+        pending_action: "clarification",
+        started_at: UPDATED_AT,
+        updated_at: UPDATED_AT,
+      } as TaskSession,
+    ]);
+    await flushSelection();
+
+    expect(setActiveSession).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(onOpenChange.mock.calls).toEqual([[false], [true]]);
   });
 });

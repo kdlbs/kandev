@@ -73,9 +73,10 @@ func (c *Client) Initialize(ctx context.Context, clientName, clientVersion strin
 
 // NewSessionResponse from agentctl
 type NewSessionResponse struct {
-	Success   bool   `json:"success"`
-	SessionID string `json:"session_id,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Success    bool                       `json:"success"`
+	SessionID  string                     `json:"session_id,omitempty"`
+	ModelState *streams.SessionModelState `json:"model_state,omitempty"`
+	Error      string                     `json:"error,omitempty"`
 }
 
 // createSessionRequest sends a session creation request and parses the response.
@@ -86,6 +87,7 @@ func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, m
 		McpServers []types.McpServer `json:"mcp_servers,omitempty"`
 	}{Cwd: cwd, McpServers: mcpServers}
 
+	c.setLastSessionModelState(nil)
 	resp, err := c.sendStreamRequest(ctx, action, payload)
 	if err != nil {
 		return "", fmt.Errorf("%s request failed: %w", action, err)
@@ -106,6 +108,7 @@ func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, m
 	if !result.Success {
 		return "", fmt.Errorf("%s failed: %s", action, result.Error)
 	}
+	c.setLastSessionModelState(result.ModelState)
 	return result.SessionID, nil
 }
 
@@ -129,6 +132,7 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string, mcpServers [
 		McpServers []types.McpServer `json:"mcp_servers,omitempty"`
 	}{SessionID: sessionID, McpServers: mcpServers}
 
+	c.setLastSessionModelState(nil)
 	resp, err := c.sendStreamRequest(ctx, "agent.session.load", payload)
 	if err != nil {
 		return fmt.Errorf("load session request failed: %w", err)
@@ -143,8 +147,9 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string, mcpServers [
 	}
 
 	var result struct {
-		Success bool   `json:"success"`
-		Error   string `json:"error,omitempty"`
+		Success    bool                       `json:"success"`
+		ModelState *streams.SessionModelState `json:"model_state,omitempty"`
+		Error      string                     `json:"error,omitempty"`
 	}
 	if err := resp.ParsePayload(&result); err != nil {
 		return fmt.Errorf("failed to parse load session response: %w", err)
@@ -152,6 +157,7 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string, mcpServers [
 	if !result.Success {
 		return fmt.Errorf("load session failed: %s", result.Error)
 	}
+	c.setLastSessionModelState(result.ModelState)
 	return nil
 }
 
@@ -398,7 +404,7 @@ func (c *Client) readUpdatesStream(
 
 	var lastErr error
 	defer func() {
-		// Clean up pending requests BEFORE draining the worker. On a
+		// Clean up this connection's pending requests BEFORE draining the worker. On a
 		// connection drop mid-cancel, a worker handler
 		// (orchestrator.handleAgentReady) can block acquiring the per-session
 		// cancelInFlight guard that an in-flight Service.CancelAgent holds
@@ -408,8 +414,8 @@ func (c *Client) readUpdatesStream(
 		// the blocked handler finish and the worker exit. Draining first
 		// (<-workerDone) would wait on that handler forever, so cleanup could
 		// never run — the exact deadlock class this stream rework fixes, but on
-		// the disconnect path.
-		c.cleanupPendingRequests()
+		// the disconnect path. A replacement stream's requests remain pending.
+		c.cleanupPendingRequests(conn)
 
 		// Stop the worker and wait for the in-flight handler to unwind before
 		// signaling disconnect, so the drain barrier semantics callers rely on
@@ -418,7 +424,12 @@ func (c *Client) readUpdatesStream(
 		<-workerDone
 
 		c.mu.Lock()
-		c.agentStreamConn = nil
+		// A startup retry can install a replacement connection before the
+		// first reader's deferred cleanup runs. Only the reader that owns the
+		// current connection may clear the shared handle.
+		if c.agentStreamConn == conn {
+			c.agentStreamConn = nil
+		}
 		c.mu.Unlock()
 		if err := conn.Close(); err != nil {
 			c.logger.Debug("failed to close updates websocket", zap.Error(err))

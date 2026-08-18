@@ -35,6 +35,8 @@ function preview(value: unknown): unknown {
   }
 }
 
+// i18n-exempt: builds the telemetry payload posted to the error-log endpoint;
+// the fallback names an Error, it is never rendered.
 function errorPreview(value: object): { name: string; message: string; stack?: string } | null {
   try {
     if (!(value instanceof Error)) return null;
@@ -99,6 +101,8 @@ export function installConsoleInterceptor(): void {
     for (const [level, original] of originals) console[level] = original;
   };
 
+  // i18n-exempt: stages a telemetry log entry for the error-log endpoint; the
+  // fallback message is developer output, never shown to the user.
   const onError = (event: ErrorEvent) => {
     try {
       const error =

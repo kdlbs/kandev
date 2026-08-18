@@ -7,6 +7,7 @@ import type { FileTreeNode, FileContentResponse, OpenFileTab } from "@/lib/types
 import { getFilesPanelScrollPosition, setFilesPanelScrollPosition } from "@/lib/local-storage";
 import type { useToast } from "@/components/toast-provider";
 import type { useFileBrowserTree } from "./file-browser-hooks";
+import { t } from "@/lib/i18n";
 
 export type FetchAndOpenFileOptions = {
   repo?: string;
@@ -157,7 +158,7 @@ export async function fetchAndOpenFile(
     });
   } catch (error) {
     if (signal?.aborted) return;
-    const reason = error instanceof Error ? error.message : "Unknown error";
-    toast({ title: "Failed to open file", description: reason, variant: "error" });
+    const reason = error instanceof Error ? error.message : t("common:unknownError");
+    toast({ title: t("task:failedToOpenFile"), description: reason, variant: "error" });
   }
 }

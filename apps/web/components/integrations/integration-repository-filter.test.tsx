@@ -25,7 +25,10 @@ describe("IntegrationRepositoryFilter", () => {
     );
 
     fireEvent.click(screen.getByText("All repositories"));
-    fireEvent.change(await screen.findByPlaceholderText("Filter repositories..."), {
+    // The unset props fall back to the `integrations:*` catalog, which spells the
+    // placeholder with a real ellipsis. Both app consumers pass all three props,
+    // so this default is only ever rendered here.
+    fireEvent.change(await screen.findByPlaceholderText("Filter repositories…"), {
       target: { value: "web" },
     });
     fireEvent.click(await screen.findByRole("option", { name: "acme/web" }));

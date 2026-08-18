@@ -348,18 +348,26 @@ func TestGitHubBrokerScopeAuthorizerAllowsOnlyTheBoundContributionDestination(t 
 }
 
 func TestIsCanonicalKandevRepositoryInputRequiresPublicGitHubHost(t *testing.T) {
-	for _, host := range []string{"", "https://github.enterprise.example"} {
-		input := &taskservice.TaskRepositoryInput{
-			Provider: "github", ProviderHost: host, ProviderOwner: "kdlbs", ProviderName: "kandev",
-		}
-		if isCanonicalKandevRepositoryInput(input, nil) {
-			t.Fatalf("host %q was accepted as the public canonical GitHub repository", host)
-		}
+	tests := []struct {
+		name  string
+		input *taskservice.TaskRepositoryInput
+		repo  *taskmodels.Repository
+		valid bool
+	}{
+		{name: "input canonical", input: &taskservice.TaskRepositoryInput{Provider: "github", ProviderHost: "https://github.com", ProviderOwner: "kdlbs", ProviderName: "kandev"}, valid: true},
+		{name: "repository canonical", repo: &taskmodels.Repository{Provider: "github", ProviderHost: "github.com", ProviderOwner: "kdlbs", ProviderName: "kandev"}, valid: true},
+		{name: "input empty host", input: &taskservice.TaskRepositoryInput{Provider: "github", ProviderOwner: "kdlbs", ProviderName: "kandev"}},
+		{name: "input enterprise host", input: &taskservice.TaskRepositoryInput{Provider: "github", ProviderHost: "https://github.enterprise.example", ProviderOwner: "kdlbs", ProviderName: "kandev"}},
+		{name: "input provider mismatch", input: &taskservice.TaskRepositoryInput{Provider: "gitlab", ProviderHost: "https://github.com", ProviderOwner: "kdlbs", ProviderName: "kandev"}},
+		{name: "input owner mismatch", input: &taskservice.TaskRepositoryInput{Provider: "github", ProviderHost: "https://github.com", ProviderOwner: "other", ProviderName: "kandev"}},
+		{name: "repository name mismatch", repo: &taskmodels.Repository{Provider: "github", ProviderHost: "github.com", ProviderOwner: "kdlbs", ProviderName: "other"}},
 	}
-	if !isCanonicalKandevRepositoryInput(&taskservice.TaskRepositoryInput{
-		Provider: "github", ProviderHost: "https://github.com", ProviderOwner: "kdlbs", ProviderName: "kandev",
-	}, nil) {
-		t.Fatal("public GitHub canonical repository was rejected")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isCanonicalKandevRepositoryInput(tt.input, tt.repo); got != tt.valid {
+				t.Fatalf("isCanonicalKandevRepositoryInput() = %v, want %v", got, tt.valid)
+			}
+		})
 	}
 }
 

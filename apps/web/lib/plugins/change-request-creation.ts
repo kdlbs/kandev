@@ -1,5 +1,6 @@
 import type { PluginRepositoryProviderRegistration } from "./registry";
 import type { PluginHostRepository } from "./types";
+import { t } from "@/lib/i18n";
 
 type TaskRepositoryLink = { repository_id: string; position?: number };
 type CreationTask = {
@@ -144,7 +145,7 @@ export async function createChangeRequestWithProvider({
       success: false,
       branch_pushed: true,
       output: pushOutput,
-      error: error instanceof Error ? error.message : "Change-request creation failed",
+      error: error instanceof Error ? error.message : t("integrations:changeRequestCreationFailed"),
     };
   }
 }

@@ -69,7 +69,6 @@
   "deleteSavedQueryNamed": "Delete {{label}} saved query",
   "describeYourChanges": "Describe your changes...",
   "description": "Description",
-  "disabled": "Disabled",
   "dismissed": "Dismissed",
   "draftCreated": "Draft {{shortName}} created",
   "enableIntegrationNamed": "Enable {{name}}",
@@ -188,5 +187,7 @@
   "saveQuery": "Save query",
   "waitingForTheNextBackendHealth": "Waiting for the next backend health check…",
   "cursorPaginationSummary_one": "Page {{page}} · {{count}} result",
-  "cursorPaginationSummary_other": "Page {{page}} · {{count}} results"
+  "cursorPaginationSummary_other": "Page {{page}} · {{count}} results",
+  "allRepositories": "All repositories",
+  "changeRequestCreationFailed": "Change-request creation failed"
 }

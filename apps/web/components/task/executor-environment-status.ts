@@ -1,4 +1,5 @@
 import type { ContainerLiveStatus, TaskEnvironment } from "@/lib/api/domains/task-environment-api";
+import { t } from "@/lib/i18n";
 
 export type StatusTone = "running" | "stopped" | "warn" | "error" | "neutral";
 
@@ -16,7 +17,7 @@ export function getEnvironmentStatusSnapshot(
   container: ContainerLiveStatus | null,
 ): EnvironmentStatusSnapshot {
   if (!env) {
-    return { key: "none", label: "not created", tone: "neutral" };
+    return { key: "none", label: t("task:environmentNotCreated"), tone: "neutral" };
   }
   const status = resolveExecutorEnvironmentStatus(env, container);
   return { ...status, key: `${status.tone}:${status.label}` };

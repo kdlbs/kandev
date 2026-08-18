@@ -2,7 +2,7 @@
 
 import type { ReactNode, MouseEvent } from "react";
 import type { Layout } from "react-resizable-panels";
-import { memo, useEffect, useCallback, useState, useMemo } from "react";
+import { memo, useEffect, useCallback, useState, useMemo, useRef } from "react";
 import { SessionPanel } from "@kandev/ui/pannel-session";
 import { Group, Panel } from "react-resizable-panels";
 import {
@@ -17,9 +17,8 @@ import { useDefaultLayout } from "@/lib/layout/use-default-layout";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
 import { useTerminals } from "@/hooks/domains/session/use-terminals";
-import { shouldConfirmTerminalClose } from "@/lib/terminal/terminal-busy-registry";
 import { ParkedTerminalsMenu } from "@/components/task/parked-terminals-menu";
-import { CloseTerminalConfirmDialog } from "@/components/task/close-terminal-confirm-dialog";
+import { CloseTerminalConfirmPopover } from "@/components/task/close-terminal-confirm-popover";
 import {
   CommandsTabContent,
   TerminalTabContents,
@@ -143,7 +142,7 @@ function useRightPanelTabs({
   handleCloseDevTab: (event: MouseEvent) => void;
   handleCloseTab: (event: MouseEvent, terminalId: string) => void;
   renameTerminal: (id: string, name: string | null) => Promise<void> | void;
-  destroyTerminal: (id: string) => Promise<void> | void;
+  destroyTerminal: (id: string) => Promise<boolean> | void;
   sessionId: string | null;
   setRightPanelActiveTab: (sessionId: string, tabId: string) => void;
 }) {
@@ -184,7 +183,7 @@ function useRightPanelTabs({
         onDoubleClick: onContextMenu,
       }),
     ];
-  }, [hasScripts, terminals, handleCloseDevTab, handleCloseTab, onContextMenu]);
+  }, [hasScripts, terminals, handleCloseDevTab, handleCloseTab, onContextMenu, t]);
 
   const handleTabChange = useCallback(
     (value: string) => {
@@ -196,12 +195,7 @@ function useRightPanelTabs({
   return { tabs, handleTabChange };
 }
 
-/**
- * Gate the X-button close behind a confirm when the terminal looks busy or is
- * a script terminal — mirrors the dockview tab and mobile picker so every
- * close path warns before it destroys a running shell. Idle shells still close
- * immediately via the underlying `handleCloseTab`.
- */
+/** Gate every destructive terminal close behind a control-anchored confirmation. */
 function useConfirmableTerminalClose({
   terminals,
   handleCloseTab,
@@ -209,22 +203,18 @@ function useConfirmableTerminalClose({
 }: {
   terminals: Terminal[];
   handleCloseTab: (event: MouseEvent, terminalId: string) => void;
-  destroyTerminal: (id: string) => Promise<void>;
+  destroyTerminal: (id: string) => Promise<boolean>;
 }) {
   const [pendingClose, setPendingClose] = useState<Terminal | null>(null);
+  const closeAnchorRef = useRef<HTMLElement>(null);
 
   const handleAskCloseTab = useCallback(
     (event: MouseEvent, terminalId: string) => {
       const terminal = terminals.find((t) => t.id === terminalId);
-      const needsConfirm =
-        !!terminal &&
-        shouldConfirmTerminalClose(terminalId, {
-          type: terminal.type,
-          kind: terminal.kind,
-        });
-      if (needsConfirm) {
+      if (terminal) {
         event.preventDefault();
         event.stopPropagation();
+        closeAnchorRef.current = event.currentTarget as HTMLElement;
         setPendingClose(terminal);
         return;
       }
@@ -236,10 +226,15 @@ function useConfirmableTerminalClose({
   const handleConfirmClose = useCallback(async () => {
     if (!pendingClose) return;
     await destroyTerminal(pendingClose.id);
-    setPendingClose(null);
   }, [pendingClose, destroyTerminal]);
 
-  return { pendingClose, setPendingClose, handleAskCloseTab, handleConfirmClose };
+  return {
+    pendingClose,
+    setPendingClose,
+    closeAnchorRef,
+    handleAskCloseTab,
+    handleConfirmClose,
+  };
 }
 
 type CollapsedRightPanelProps = {
@@ -298,7 +293,7 @@ type RightPanelContentProps = {
   terminals: Terminal[];
   parkedTerminals: Terminal[];
   resumeTerminal: (id: string) => Promise<void> | void;
-  destroyTerminal: (id: string) => Promise<void> | void;
+  destroyTerminal: (id: string) => Promise<boolean> | void;
   environmentId: string | null;
   devProcessId: string | null | undefined;
   devOutput: string | undefined;
@@ -368,7 +363,9 @@ function RightPanelContent({
                 <ParkedTerminalsMenu
                   parkedTerminals={parkedTerminals}
                   onResume={resumeTerminal}
-                  onDestroy={destroyTerminal}
+                  onDestroy={(terminalId) => {
+                    void destroyTerminal(terminalId);
+                  }}
                 />
               ) : undefined
             }
@@ -500,7 +497,7 @@ const TaskRightPanel = memo(function TaskRightPanel({
     handleTabChange,
     closeConfirm,
   } = useTaskRightPanel({ sessionId, repositoryId, initialScripts, initialTerminals });
-  const { pendingClose, setPendingClose, handleConfirmClose } = closeConfirm;
+  const { pendingClose, setPendingClose, closeAnchorRef, handleConfirmClose } = closeConfirm;
   return (
     <>
       <RightPanelContent
@@ -525,9 +522,10 @@ const TaskRightPanel = memo(function TaskRightPanel({
         devOutput={devOutput}
         isStoppingDev={isStoppingDev}
       />
-      <CloseTerminalConfirmDialog
+      <CloseTerminalConfirmPopover
         open={pendingClose !== null}
         terminalName={pendingClose?.label || t("task:terminal")}
+        anchorRef={closeAnchorRef}
         onOpenChange={(open) => {
           if (!open) setPendingClose(null);
         }}

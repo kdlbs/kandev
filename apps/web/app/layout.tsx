@@ -19,6 +19,9 @@ import { SidebarViewsSyncBridge } from "@/components/sidebar-views-sync-bridge";
 import { LogBufferBridge } from "@/components/log-buffer-bridge";
 import { getFeatureFlagsAction, getRuntimeDebugModeAction } from "@/app/actions/features";
 
+// i18n-exempt: Next.js metadata convention object, left from the pre-Vite
+// shell and consumed by nothing. The SPA's real <title> and meta description
+// are static markup in index.html.
 export const metadata = {
   title: "Kandev - AI Kanban",
   description: "AI-powered workflow management for developers",

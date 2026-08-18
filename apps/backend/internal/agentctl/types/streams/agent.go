@@ -70,6 +70,10 @@ const (
 	// unavailable. Data carries {"fallback_model": <model id>}.
 	EventTypeSessionModelFallback = "session_model_fallback"
 
+	// EventTypeSessionModelSelectionWarning explains an executor-authoritative
+	// default or explicit fallback decision.
+	EventTypeSessionModelSelectionWarning = "session_model_selection_warning"
+
 	// EventTypeSessionInfo indicates ACP session metadata such as title changed.
 	EventTypeSessionInfo = "session_info"
 
@@ -303,6 +307,10 @@ type AgentEvent struct {
 	// events).
 	FallbackModel string `json:"fallback_model,omitempty"`
 
+	// ModelSelectionWarning carries the provider-neutral model decision made
+	// before the session's first prompt.
+	ModelSelectionWarning *ModelSelectionWarning `json:"model_selection_warning,omitempty"`
+
 	// SessionModels lists models available in the ACP session.
 	SessionModels []SessionModelInfo `json:"session_models,omitempty"`
 
@@ -333,6 +341,20 @@ type AgentEvent struct {
 
 	// Usage contains token usage stats from the prompt response.
 	Usage *PromptUsage `json:"usage,omitempty"`
+}
+
+// ModelSelectionWarning is the structured, provider-neutral explanation for
+// continuing with an executor model other than the saved profile request.
+type ModelSelectionWarning struct {
+	Kind              string `json:"kind"`
+	DecisionID        string `json:"decision_id,omitempty"`
+	Reason            string `json:"reason"`
+	RequestedModel    string `json:"requested_model,omitempty"`
+	EffectiveModel    string `json:"effective_model,omitempty"`
+	FallbackModel     string `json:"fallback_model,omitempty"`
+	AgentID           string `json:"agent_id,omitempty"`
+	ExecutorType      string `json:"executor_type,omitempty"`
+	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
 }
 
 // PlanEntry represents an entry in the agent's execution plan.
@@ -418,6 +440,15 @@ type SessionModelInfo struct {
 
 	// Meta contains raw _meta from the agent for agent-specific rendering.
 	Meta map[string]any `json:"meta,omitempty"`
+}
+
+// SessionModelState is the synchronous model snapshot returned with a newly
+// created or loaded session. It lets lifecycle callers apply a saved model
+// before the asynchronous session_models stream event is dispatched.
+type SessionModelState struct {
+	CurrentModelID string             `json:"current_model_id,omitempty"`
+	Models         []SessionModelInfo `json:"models,omitempty"`
+	ConfigOptions  []ConfigOption     `json:"config_options,omitempty"`
 }
 
 // AuthMethodInfo represents an authentication method from ACP initialize.

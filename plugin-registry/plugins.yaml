@@ -50,6 +50,9 @@ plugins:
   - id: kandev-plugin-voice
     repo: kdlbs/kandev-plugin-voice
     categories: [tools]
+  - id: kandev-plugin-youtrack
+    repo: ahmedbally/kandev-plugin-youtrack
+    categories: [integrations]
 # Example entry (copy, uncomment, and fill in when adding a plugin):
 #
 # plugins:

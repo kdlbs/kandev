@@ -70,7 +70,9 @@
   "projects": "專案",
   "queuedPromptCount_one": "{{count}} 條排隊提示",
   "queuedPromptCount_other": "{{count}} 條排隊提示",
+  "wipQueuePosition": "{{step}} 佇列中的第 {{position}} 項，共 {{total}} 項",
   "quickChat": "快速聊天",
+  "quickChatUnseen": "快速聊天，有新回覆",
   "quickTerminal": "快速終端",
   "quickChatTerminals": "終端",
   "quickChatNewAgent": "新建代理程式",
@@ -106,5 +108,13 @@
   "viewLabel": "檢視：{{name}}",
   "whatsNew": "新功能",
   "work": "工作",
-  "workspaceFallback": "工作區"
+  "workspaceFallback": "工作區",
+  "taskPreferences": "側邊欄任務偏好設定",
+  "views": "側邊欄檢視",
+  "failedToLoadArchivedTasks": "載入已歸檔任務失敗",
+  "failedToSyncSidebarTaskPrefs": "同步側邊欄任務偏好失敗",
+  "failedToSyncSidebarViews": "同步側邊欄檢視失敗",
+  "morePluginItems": "更多外掛項",
+  "newViewNumbered": "新檢視 {{suffix}}",
+  "untitledView": "未命名檢視"
 }

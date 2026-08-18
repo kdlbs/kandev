@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useEntityReferenceSearch } from "@/hooks/use-entity-reference-search";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import {
+  createEntityReferenceInputGate,
   createEntityReferenceSuggestion,
   handleEntityReferenceMenuKeyDown,
 } from "./tiptap-entity-reference-suggestion";
@@ -29,6 +30,7 @@ export function useEntityReferenceComposer({
   workspaceId,
   sessionId,
 }: UseEntityReferenceComposerOptions) {
+  const inputGate = useMemo(() => createEntityReferenceInputGate(), []);
   const [menu, setMenu] = useState<MenuState<EntityReference>>(EMPTY_REFERENCE_MENU);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const searchEnabled =
@@ -56,8 +58,9 @@ export function useEntityReferenceComposer({
   }, [items]);
 
   useEffect(() => {
+    inputGate.reset();
     void Promise.resolve().then(() => setMenu(EMPTY_REFERENCE_MENU));
-  }, [enabled, sessionId, workspaceId]);
+  }, [enabled, inputGate, sessionId, workspaceId]);
 
   const selectReference = useCallback((reference: EntityReference) => {
     commandRef.current?.(reference);
@@ -75,8 +78,8 @@ export function useEntityReferenceComposer({
     [selectReference],
   );
   const suggestion = useMemo(
-    () => createEntityReferenceSuggestion(setMenu, onKeyDown),
-    [onKeyDown],
+    () => createEntityReferenceSuggestion(setMenu, onKeyDown, inputGate),
+    [inputGate, onKeyDown],
   );
   const close = useCallback(() => setMenu(EMPTY_REFERENCE_MENU), []);
   const hasWorkspace = Boolean(workspaceId);
@@ -94,5 +97,9 @@ export function useEntityReferenceComposer({
     setSelectedIndex,
     selectReference,
     close,
+    onTextInput: inputGate.recordTextInput,
+    onBeforeInput: (inputType: string) => {
+      if (inputType.startsWith("delete")) inputGate.recordDeletion();
+    },
   };
 }

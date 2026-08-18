@@ -69,6 +69,7 @@ function useTerminalInit({
       disableStdin: isReadOnlyMode,
       convertEol: isReadOnlyMode,
       fontSize: fontSize ?? (isReadOnlyMode ? 12 : 13),
+      // i18n-exempt: CSS font stack.
       fontFamily: fontFamily || 'Menlo, Monaco, "Courier New", monospace',
       macOptionIsMeta: true,
       theme: getTerminalTheme(terminalRef.current),

@@ -104,8 +104,9 @@ test.describe("Mobile clarification multiline answer", () => {
     const context = session.clarificationContext();
     await expect(context).toHaveCount(1);
     await expect(context).toHaveText(
-      "Picking the foundational stack: answer all three so we can move forward.",
+      "Picking the foundational stack.\n\nAnswer all three so we can move forward.",
     );
+    await expect(context).not.toContainText(String.raw`\n`);
     await expect(context).toHaveCSS("font-size", "13px");
     await expect(context).toHaveCSS("margin-top", "12px");
     await expect(context).toHaveCSS("padding", "0px");

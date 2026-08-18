@@ -22,6 +22,22 @@ function session(overrides: Partial<TaskSession>): TaskSession {
 }
 
 describe("buildRunErrorsFromSessions", () => {
+  it("preserves structured managed runtime failure metadata", () => {
+    const errors = buildRunErrorsFromSessions([
+      session({
+        metadata: {
+          last_agent_error: {
+            message: "managed npm runtime failed to prepare",
+            failure_code: "managed_runtime_npm_resolution",
+            failure_details: "npm error code ETARGET",
+          },
+        },
+      }),
+    ]);
+    expect(errors[0].failureCode).toBe("managed_runtime_npm_resolution");
+    expect(errors[0].failureDetails).toBe("npm error code ETARGET");
+  });
+
   it("preserves the remediation URL from last_agent_error metadata", () => {
     const errors = buildRunErrorsFromSessions([
       session({

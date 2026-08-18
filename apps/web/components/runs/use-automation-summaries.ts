@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listAutomationSummaries } from "@/lib/api/domains/automation-api";
 import type { AutomationSummary } from "@/lib/types/automation";
+import { t } from "@/lib/i18n";
 
 const EMPTY_SUMMARIES: AutomationSummary[] = [];
 
@@ -42,7 +43,9 @@ export function useAutomationSummaries(workspaceId: string | undefined) {
       .catch((err: unknown) => {
         if (requestRef.current !== requestId) return;
         setLoaded({ workspaceId, summaries: EMPTY_SUMMARIES });
-        setError(err instanceof Error ? err.message : "Failed to load automation activity");
+        setError(
+          err instanceof Error ? err.message : t("automations:failedToLoadAutomationActivity"),
+        );
       })
       .finally(() => {
         if (requestRef.current !== requestId) return;

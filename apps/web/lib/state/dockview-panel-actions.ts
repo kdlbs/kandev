@@ -3,8 +3,8 @@ import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
 import { t } from "@/lib/i18n";
 import { focusOrAddPanel } from "./dockview-layout-builders";
 import { reviewPanelId, type ReviewPanelTarget } from "./dockview-review-panel-id";
-import { TERMINAL_DEFAULT_ID } from "./layout-manager/constants";
 import { panelTitle } from "./layout-manager/panel-title";
+import { buildTerminalPanelActions } from "./dockview-terminal-panel-actions";
 import {
   parsePluginPanelId,
   pluginPanelId,
@@ -37,10 +37,16 @@ function addSimplePanel(api: DockviewApi, groupId: string, opts: SimplePanelOpts
 
 export { reviewPanelId };
 
-function openBrowserPanel(api: DockviewApi, centerGroupId: string, url: string): void {
-  const browserPanel =
+/** The browser panel a preview should reuse: the active one, else the first. */
+function findBrowserPanel(api: DockviewApi) {
+  return (
     (api.activePanel?.api.component === "browser" ? api.activePanel : undefined) ??
-    api.panels.find((panel) => panel.api.component === "browser");
+    api.panels.find((panel) => panel.api.component === "browser")
+  );
+}
+
+function openBrowserPanel(api: DockviewApi, centerGroupId: string, url: string): void {
+  const browserPanel = findBrowserPanel(api);
 
   if (browserPanel) {
     browserPanel.api.updateParameters({ url });
@@ -58,6 +64,7 @@ function openBrowserPanel(api: DockviewApi, centerGroupId: string, url: string):
 }
 
 type SidePanelOpts = { groupId?: string; quiet?: boolean; inCenter?: boolean };
+export type ReviewPanelOptions = { groupId?: string };
 
 /**
  * Shared placement logic for a single-instance "side" panel (Plan, a plugin
@@ -492,6 +499,30 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
         params: { url: url ?? "" },
       });
     },
+    /**
+     * Open the preview browser without stacking a tab per call.
+     *
+     * `addBrowserPanel()` mints `browser:<timestamp>` when it has no URL, so an
+     * automatic open (start dev server, then stop, then start again) left a new
+     * empty tab behind on every cycle, and a URL detected later updated only the
+     * first of them. Explicit "+ > Browser" still uses `addBrowserPanel`, where
+     * a second tab is what the user asked for.
+     */
+    focusOrAddBrowserPanel: (groupId?: string) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      const existing = findBrowserPanel(api);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      addSimplePanel(api, groupId ?? centerGroupId, {
+        id: `browser:${Date.now()}`,
+        component: "browser",
+        title: panelTitle("browser"),
+        params: { url: "" },
+      });
+    },
     openBrowserPanel: (url: string) => {
       const { api, centerGroupId } = get();
       if (!api) return;
@@ -531,11 +562,11 @@ export function removeSessionPanel(api: DockviewApi, sessionId: string): void {
 function buildReviewPanelActions(get: StoreGet) {
   return {
     /**
-     * Focus an existing PR tab in place, or add a keyed tab beside the
-     * layout-owned canonical PR Details panel. Fall back to the center group
-     * when the current layout intentionally omits PR Details.
+     * Focus an existing PR tab in place, or add a keyed tab in the explicitly
+     * requested group. Callers without a group use the layout-owned canonical
+     * PR Details panel, then the center fallback.
      */
-    addPRPanel: (prKey?: string) => {
+    addPRPanel: (prKey?: string, opts?: ReviewPanelOptions) => {
       const { api, centerGroupId } = get();
       if (!api) return;
       // Multi-repo: each TaskPR opens in its own panel keyed by
@@ -550,7 +581,7 @@ function buildReviewPanelActions(get: StoreGet) {
         return;
       }
       if (prKey && focusMatchingLegacyPanel(api, id, "pr-detail", "prKey", prKey)) return;
-      const targetGroupId = api.getPanel("pr-detail")?.group.id ?? centerGroupId;
+      const targetGroupId = opts?.groupId ?? api.getPanel("pr-detail")?.group.id ?? centerGroupId;
       focusOrAddPanel(api, {
         id,
         component: "pr-detail",
@@ -559,7 +590,7 @@ function buildReviewPanelActions(get: StoreGet) {
         params: prKey ? { prKey } : undefined,
       });
     },
-    addMRPanel: (mrKey: string) => {
+    addMRPanel: (mrKey: string, opts?: ReviewPanelOptions) => {
       const { api, centerGroupId } = get();
       if (!api) return;
       const id = `mr-detail|${mrKey}`;
@@ -578,11 +609,11 @@ function buildReviewPanelActions(get: StoreGet) {
         id,
         component: "mr-detail",
         title: panelTitle("mr-detail"),
-        position: { referenceGroup: canonical?.group.id ?? centerGroupId },
+        position: { referenceGroup: opts?.groupId ?? canonical?.group.id ?? centerGroupId },
         params: { mrKey },
       });
     },
-    addReviewPanel: (review: ReviewPanelTarget) => {
+    addReviewPanel: (review: ReviewPanelTarget, opts?: ReviewPanelOptions) => {
       const { api, centerGroupId } = get();
       if (!api) return;
       const canonical = api.getPanel("pr-detail");
@@ -605,7 +636,7 @@ function buildReviewPanelActions(get: StoreGet) {
         id,
         component: "review-detail",
         title: review.title,
-        position: { referenceGroup: canonical?.group.id ?? centerGroupId },
+        position: { referenceGroup: opts?.groupId ?? canonical?.group.id ?? centerGroupId },
         params: {
           providerId: review.providerId,
           reviewKey: review.reviewKey,
@@ -689,31 +720,6 @@ export function buildExtraPanelActions(get: StoreGet) {
       );
     },
     ...buildReviewPanelActions(get),
-    addTerminalPanel: (
-      terminalId?: string,
-      groupId?: string,
-      environmentId?: string,
-      taskID?: string,
-      title?: string,
-    ) => {
-      const { api, rightBottomGroupId } = get();
-      if (!api) return;
-      const id = terminalId ?? `terminal-${Date.now()}`;
-      // Stamp env id + task id into the panel's params so cleanup
-      // (dockview-layout-setup.onDidRemovePanel) can call destroyUserShell
-      // with the correct task scope even after the user switches tasks.
-      // task_id is what the backend uses to verify ownership now — without
-      // it `requireOwnership` rejects with ErrTaskMismatch.
-      addSimplePanel(api, groupId ?? rightBottomGroupId, {
-        id,
-        component: "terminal",
-        // terminalTab is a custom dockview tab that adds the `#N` badge
-        // when there's more than one ordinary terminal in the task and
-        // exposes a context menu for rename / park / destroy.
-        tabComponent: "terminalTab",
-        title: title ?? panelTitle(TERMINAL_DEFAULT_ID),
-        params: { terminalId: id, environmentId, taskID },
-      });
-    },
+    ...buildTerminalPanelActions(get),
   };
 }

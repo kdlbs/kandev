@@ -48,6 +48,7 @@ import {
   buildExtraPanelActions,
   type OpenPanelOpts,
   type PreviewType,
+  type ReviewPanelOptions,
 } from "./dockview-panel-actions";
 import { preserveChatScrollDuringLayout } from "./dockview-scroll-preserve";
 import { measureDockviewContainer } from "./dockview-measure";
@@ -157,6 +158,8 @@ type DockviewStore = {
   addFileEditorPanel: (path: string, name: string, opts?: OpenPanelOpts) => void;
   promotePreviewToPinned: (type: PreviewType) => void;
   addBrowserPanel: (url?: string, groupId?: string) => void;
+  /** Focus the existing preview browser, or open one when there is none. */
+  focusOrAddBrowserPanel: (groupId?: string) => void;
   openBrowserPanel: (url: string) => void;
   addVscodePanel: () => void;
   openInternalVscode: (goto_: { file: string; line: number; col: number } | null) => void;
@@ -172,9 +175,9 @@ type DockviewStore = {
   closePluginPanels: (pluginId: string) => void;
   addTodosPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
   /** Open a PR detail panel. prKey (owner/repo/pr_number) gives multi-repo tasks one tab per PR. */
-  addPRPanel: (prKey?: string) => void;
+  addPRPanel: (prKey?: string, opts?: ReviewPanelOptions) => void;
   /** Open a GitLab merge request detail panel keyed by host/project/iid. */
-  addMRPanel: (mrKey: string) => void;
+  addMRPanel: (mrKey: string, opts?: ReviewPanelOptions) => void;
   /** Open a provider-neutral review detail panel. */
   addReviewPanel: (
     review: Pick<
@@ -186,6 +189,7 @@ type DockviewStore = {
       | "changeRequestNumber"
       | "title"
     >,
+    opts?: ReviewPanelOptions,
   ) => void;
   addTerminalPanel: (
     terminalId?: string,
@@ -194,6 +198,8 @@ type DockviewStore = {
     taskID?: string,
     title?: string,
   ) => void;
+  /** Read-only output panel for the repository dev script. */
+  addDevServerPanel: (groupId?: string) => void;
   selectedDiff: { path: string; content?: string } | null;
   setSelectedDiff: (diff: { path: string; content?: string } | null) => void;
   activeGroupId: string | null;

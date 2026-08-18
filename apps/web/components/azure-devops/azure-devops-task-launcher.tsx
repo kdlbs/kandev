@@ -66,6 +66,7 @@ function launchText(payload: AzureDevOpsLaunchPayload) {
     "",
     plainText(pullRequest.description),
   ].join("\n");
+  // i18n-exempt: persisted as the created task's title.
   return {
     title: truncateRemoteTaskTitle(
       payload.action

@@ -26,7 +26,10 @@ import { useSleepInhibitionSettings } from "@/hooks/domains/settings/use-sleep-i
 import type { SleepInhibitionResponse } from "@/lib/types/system";
 
 const MACOS_COMMAND = "/usr/bin/caffeinate -i -w <kandev-pid>";
+// i18n-exempt: Win32 API signature shown verbatim as code.
 const WINDOWS_API = "SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)";
+// i18n-exempt: D-Bus method call shown verbatim as code; its arguments are
+// wire values the systemd API matches, not display copy.
 const LINUX_METHOD =
   'org.freedesktop.login1.Manager.Inhibit("sleep", "Kandev", "A Kandev task is running", "block")';
 const CODE_CLASS = "break-all rounded bg-muted px-1 py-0.5 font-mono text-[0.7rem]";

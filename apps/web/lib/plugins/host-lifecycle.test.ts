@@ -37,6 +37,8 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     context: {
       getActiveWorkspaceId: () => undefined,
       subscribeActiveWorkspace: () => () => {},
+      getWorkspaceIds: () => [],
+      subscribeWorkspaces: () => () => {},
       getTaskCreationContext: () => null,
       subscribeTaskCreationContext: () => () => {},
       resolveRepositoryId: () => undefined,
@@ -60,7 +62,14 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     openTaskLinkDialog: () => ({ close: () => {} }),
     openTaskReview: () => {},
     toast: NOOP_TOAST,
-    utils: { cn: () => "", generateUUID: () => "uuid", formatRelativeTime: () => "" },
+    useSettingsSaveContributor: () => {},
+    setIntegrationEnabled: () => {},
+    utils: {
+      cn: () => "",
+      generateUUID: () => "uuid",
+      formatRelativeTime: () => "",
+      integrationStatusRefreshMs: 90000,
+    },
     storage: {
       get: async () => undefined,
       set: async () => ({ updatedAt: "" }),

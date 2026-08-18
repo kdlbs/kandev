@@ -23,9 +23,12 @@ import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { snapshotToState, taskToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
+import { latestIncompleteTurnId } from "@/lib/state/slices/session/turn-actions";
 import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
 import type { AppState } from "@/lib/state/store";
 import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
+// Aliased: `t` is the Terminal parameter name throughout this module.
+import { t as translate } from "@/lib/i18n";
 
 export const OPTIONAL_HYDRATION_TIMEOUT_MS = 5_000;
 
@@ -161,6 +164,7 @@ function buildSessionPageState(p: BuildSessionPageStateParams) {
   };
 }
 
+/** Builds the session-page hydration slice for repositories, agents, and workflow resources. */
 function buildResourceState(p: BuildSessionPageStateParams) {
   const { task, agents, repositories, workspaces, workflows } = p;
   const repositoryId = task.repositories?.[0]?.repository_id;
@@ -212,6 +216,7 @@ function buildResourceState(p: BuildSessionPageStateParams) {
   };
 }
 
+/** Builds the session-page hydration slice (task sessions, turns, models) for the page's task. */
 function buildSessionState(p: BuildSessionPageStateParams) {
   const { task, sessionId, allSessions, activeSession, turns } = p;
   // Prefer the full active session payload (with agent_profile_snapshot) over
@@ -235,10 +240,27 @@ function buildSessionState(p: BuildSessionPageStateParams) {
             ? {
                 bySession: { [sessionId]: turns },
                 activeBySession: {
-                  [sessionId]: turns.filter((t) => !t.completed_at).pop()?.id ?? null,
+                  // Same timestamp-aware selection as the store's
+                  // reconciliation (latestIncompleteTurnId compares
+                  // started_at with nanosecond precision) — not array
+                  // position, which a non-chronological API response
+                  // would misorder.
+                  [sessionId]: latestIncompleteTurnId(turns) ?? null,
                 },
+                // The SSR turn list is the session's complete persisted
+                // history — mark it loaded so turn-derived UI never
+                // re-fetches or mistakes WS-seeded live turns for it.
+                loadedBySession: { [sessionId]: true },
+                reconcileEpochBySession: {},
+                settledBoundaryBySession: {},
               }
-            : { bySession: {}, activeBySession: {} },
+            : {
+                bySession: {},
+                activeBySession: {},
+                loadedBySession: {},
+                reconcileEpochBySession: {},
+                settledBoundaryBySession: {},
+              },
         }
       : {}),
     environmentIdBySessionId: Object.fromEntries(
@@ -501,8 +523,8 @@ function deriveHydratedLabel(
   if (t.display_name) return t.display_name;
   if (t.custom_name && t.custom_name !== "") return t.custom_name;
   if (t.label) return t.label;
-  if (isOrdinary && t.seq) return `Terminal ${t.seq}`;
-  return isScript ? "Script" : "Terminal";
+  if (isOrdinary && t.seq) return translate("common:terminalNumbered", { seq: t.seq });
+  return isScript ? translate("common:script") : translate("common:terminal");
 }
 
 function pickTerminalKind(

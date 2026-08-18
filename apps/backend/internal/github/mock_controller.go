@@ -51,6 +51,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.POST("/files", c.addPRFiles)
 	api.POST("/commits", c.addPRCommits)
 	api.PUT("/pr-commits-failures", c.setPRCommitsFailures)
+	api.PUT("/merge-outcomes", c.setMergeOutcome)
 	api.POST("/commit-details", c.addPRCommitDetail)
 	api.POST("/branches", c.addBranches)
 	api.POST("/repo-files", c.addRepoFiles)
@@ -516,6 +517,23 @@ func (c *MockController) setPRCommitsFailures(ctx *gin.Context) {
 	}
 	c.mock.SetPRCommitsFailures(req.Owner, req.Repo, req.Number, req.Failures)
 	ctx.JSON(http.StatusOK, gin.H{"failures": req.Failures})
+}
+
+func (c *MockController) setMergeOutcome(ctx *gin.Context) {
+	var req struct {
+		Owner   string       `json:"owner"`
+		Repo    string       `json:"repo"`
+		Number  int          `json:"number"`
+		Outcome MergeOutcome `json:"outcome"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Owner) == "" ||
+		strings.TrimSpace(req.Repo) == "" || req.Number <= 0 ||
+		(req.Outcome != MergeOutcomeMerged && req.Outcome != MergeOutcomeQueued) {
+		respondInvalidPayload(ctx)
+		return
+	}
+	c.mock.SetMergeOutcome(req.Owner, req.Repo, req.Number, req.Outcome)
+	ctx.JSON(http.StatusOK, gin.H{"outcome": req.Outcome})
 }
 
 func (c *MockController) addPRCommitDetail(ctx *gin.Context) {

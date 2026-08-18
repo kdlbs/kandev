@@ -56,6 +56,9 @@
   "reorderQueuedMessage": "重新排序队列消息",
   "sortable": "可排序",
   "technicalDetails": "技术详情",
+  "managedRuntimeNpmTitle": "npm 无法准备运行时",
+  "managedRuntimeNpmBody": "Kandev 已刷新软件包数据，并重试了同一运行时一次。",
+  "managedRuntimeRetry": "重试运行时",
   "providerQuotaTitle": "{{provider}} 使用额度已达上限",
   "newChatTab": "新建聊天",
   "newQuickChat": "新建快速聊天",
@@ -137,5 +140,9 @@
   "transientRetryProviderModel": "{{provider}} · {{model}}",
   "transientRetryProvider": "服务商：{{provider}}",
   "transientRetryModel": "模型：{{model}}",
-  "unpinQueuedMessages": "取消固定消息队列"
+  "unpinQueuedMessages": "取消固定消息队列",
+  "emptyTurnKnownCommand": "`/{{command}}` 已运行，但没有产生任何输出。{{hint}}",
+  "emptyTurnNoOutput": "智能体已结束，但没有产生任何输出。",
+  "emptyTurnResendHint": "请尝试作为普通消息重新发送你的请求，不要带开头的斜杠。",
+  "emptyTurnUnknownCommand": "`/{{command}}` 不是该智能体识别的命令，因此没有返回任何内容。{{hint}}"
 }

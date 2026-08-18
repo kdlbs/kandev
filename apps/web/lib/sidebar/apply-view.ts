@@ -117,6 +117,10 @@ export function applyFilters(
 
 type SortComparator = (a: TaskSwitcherItem, b: TaskSwitcherItem) => number;
 
+function lastActivitySortValue(task: TaskSwitcherItem): string {
+  return task.lastActivityAt ?? task.updatedAt ?? task.createdAt ?? "";
+}
+
 const SORT_COMPARATORS: Record<Exclude<SortKey, "custom">, SortComparator> = {
   state: (a, b) => {
     const bucket = STATE_BUCKET_ORDER[getStateBucket(a)] - STATE_BUCKET_ORDER[getStateBucket(b)];
@@ -125,6 +129,7 @@ const SORT_COMPARATORS: Record<Exclude<SortKey, "custom">, SortComparator> = {
     return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
   },
   updatedAt: (a, b) => (a.updatedAt ?? "").localeCompare(b.updatedAt ?? ""),
+  lastActivityAt: (a, b) => lastActivitySortValue(a).localeCompare(lastActivitySortValue(b)),
   createdAt: (a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""),
   title: (a, b) => (a.title ?? "").localeCompare(b.title ?? ""),
 };

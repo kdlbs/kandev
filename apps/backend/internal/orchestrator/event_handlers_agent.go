@@ -22,6 +22,30 @@ import (
 
 const queueStatusMaxField = "max"
 
+type reservedPromptCallbackContextKey struct{}
+
+// agentReadyDetachedContext ignores transient event-delivery cancellation but
+// preserves shutdown cancellation for service-owned deferred callbacks.
+func agentReadyDetachedContext(ctx context.Context) context.Context {
+	if owned, _ := ctx.Value(reservedPromptCallbackContextKey{}).(bool); owned {
+		return ctx
+	}
+	return context.WithoutCancel(ctx)
+}
+
+func reservedPromptCallbackContext(
+	ownerCtx context.Context,
+	retryCtx context.Context,
+) (context.Context, context.CancelFunc) {
+	callbackCtx, cancel := context.WithCancel(retryCtx)
+	stopOwnerCancellation := context.AfterFunc(ownerCtx, cancel)
+	callbackCtx = context.WithValue(callbackCtx, reservedPromptCallbackContextKey{}, true)
+	return callbackCtx, func() {
+		stopOwnerCancellation()
+		cancel()
+	}
+}
+
 // handleAgentRunning handles agent running events (user sent input in passthrough mode)
 // This is called when the user sends input to the agent, indicating a new turn started.
 func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEventData) {
@@ -456,27 +480,90 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			lock.Unlock()
 		}
 	}()
-	for s.isCancelInFlight(data.SessionID) {
-		// The cancellation owner temporarily releases this mutex while the
-		// lifecycle manager waits for terminal stream frames. Do not complete
-		// the still-running turn in that window, but also do not discard this
-		// ready event: if cancellation fails, it is the event that must finish
-		// the unchanged turn and drain its queue.
+	waitedForReservation := false
+	for {
+		for s.isCancelInFlight(data.SessionID) {
+			// The cancellation owner temporarily releases this mutex while the
+			// lifecycle manager waits for terminal stream frames. Do not complete
+			// the still-running turn in that window, but also do not discard this
+			// ready event: if cancellation fails, it is the event that must finish
+			// the unchanged turn and drain its queue.
+			lock.Unlock()
+			guardLocked = false
+			if err := s.waitForCancelInFlight(agentReadyDetachedContext(ctx), data.SessionID); err != nil {
+				// A cancellation error does not make this ready event stale. The
+				// owner may have failed before mutating session/turn state; once the
+				// operation is gone, re-read both below and let this event settle its
+				// captured turn. Returning here would strand the turn and any queued
+				// peer message with no future ready event to drain it.
+				s.logger.Warn("cancellation failed while agent.ready was waiting; re-evaluating the captured turn",
+					zap.String("task_id", data.TaskID),
+					zap.String("session_id", data.SessionID),
+					zap.Error(err))
+			}
+			lock.Lock()
+			guardLocked = true
+		}
+
+		reservation := s.reservedPromptTurn(data.SessionID)
+		if reservation == nil {
+			break
+		}
+		waitedForReservation = true
 		lock.Unlock()
 		guardLocked = false
-		if err := s.waitForCancelInFlight(context.WithoutCancel(ctx), data.SessionID); err != nil {
-			// A cancellation error does not make this ready event stale. The
-			// owner may have failed before mutating session/turn state; once the
-			// operation is gone, re-read both below and let this event settle its
-			// captured turn. Returning here would strand the turn and any queued
-			// peer message with no future ready event to drain it.
-			s.logger.Warn("cancellation failed while agent.ready was waiting; re-evaluating the captured turn",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.SessionID),
-				zap.Error(err))
+		waitTimeout := s.agentReadyReservationWaitTimeout
+		if waitTimeout <= 0 {
+			waitTimeout = detachedClarificationDispatchTimeout + promptFailureCleanupTimeout
 		}
+		waitCtx, cancel := context.WithTimeout(agentReadyDetachedContext(ctx), waitTimeout)
+		accepted, waitErr := reservation.wait(waitCtx)
+		cancel()
 		lock.Lock()
 		guardLocked = true
+		if waitErr != nil {
+			if data.PromptGeneration == 0 {
+				s.logger.Warn("dropping generationless agent.ready after reserved prompt wait timed out",
+					zap.String("task_id", data.TaskID),
+					zap.String("session_id", data.SessionID),
+					zap.String("turn_id", reservation.id),
+					zap.Error(waitErr))
+				return
+			}
+			// A later reservation may outlive this callback invocation. Preserve
+			// request values, then attach the lifecycle owner again when it runs.
+			retryCtx := context.WithoutCancel(ctx)
+			deferred := s.deferReservedPromptCallback(reservation, func(ownerCtx context.Context) {
+				callbackCtx, cancelCallback := reservedPromptCallbackContext(ownerCtx, retryCtx)
+				defer cancelCallback()
+				s.handleAgentReady(callbackCtx, data)
+			})
+			if !deferred {
+				continue
+			}
+			s.logger.Warn("agent.ready timed out waiting for reserved prompt dispatch; deferred reconciliation until resolution",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.String("turn_id", reservation.id),
+				zap.Error(waitErr))
+			return
+		}
+		if !accepted {
+			s.logger.Debug("revalidating agent.ready after overlapping prompt reservation rolled back",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.String("turn_id", reservation.id))
+		}
+	}
+	if waitedForReservation {
+		ctx = agentReadyDetachedContext(ctx)
+		if data.PromptGeneration == 0 {
+			s.logger.Debug("ignoring generationless agent.ready that overlapped a prompt reservation",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID))
+			return
+		}
+		turnAtEventFire, turnSnapshotErr = s.peekActiveTurnID(ctx, data.SessionID)
 	}
 
 	// Re-validate now that the guard is held: a concurrent interrupt (or
@@ -760,7 +847,11 @@ func (s *Service) executeQueuedMessageWithReservation(
 	afterClaim := s.queuedLifecycleAfterClaim(promptCtx, queuedMsg, attachments, lifecyclePrompt)
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
-		claimEntryID, lifecyclePrompt, afterClaim)
+		promptTaskOptions{
+			claimEntryID:    claimEntryID,
+			lifecyclePrompt: lifecyclePrompt,
+			afterClaim:      afterClaim,
+		})
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg,
 		lifecyclePrompt, userMessageRecorded, err,
@@ -1562,6 +1653,7 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 	if errMsg == "" {
 		errMsg = "agent failed"
 	}
+	details := routingerr.Sanitize(data.FailureDetails)
 	// Keep this metadata until the user dismisses the UI notice locally or a
 	// later recoverable failure replaces it. A successful turn should not erase
 	// the investigation breadcrumb that explains why the task was marked REVIEW.
@@ -1570,6 +1662,8 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 		OccurredAt:       time.Now().UTC(),
 		AgentExecutionID: data.AgentExecutionID,
 		RemediationURL:   providerRemediationURL(data),
+		Code:             data.FailureCode,
+		Details:          details,
 	}
 	if err := s.repo.SetSessionMetadataKey(ctx, data.SessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
 		s.logger.Warn("failed to persist last agent error",
@@ -1590,6 +1684,12 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 		}
 		if lastErr.RemediationURL != "" {
 			eventData["remediation_url"] = lastErr.RemediationURL
+		}
+		if lastErr.Code != "" {
+			eventData["code"] = lastErr.Code
+		}
+		if lastErr.Details != "" {
+			eventData["details"] = lastErr.Details
 		}
 		if err := s.eventBus.Publish(ctx, events.TaskSessionErrorChanged, bus.NewEvent(
 			events.TaskSessionErrorChanged,
@@ -1702,6 +1802,13 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		"is_auth_error":    authErr,
 		"resume_corrupted": resumeCorrupted,
 	}
+	managedRuntimeNpmFailure := data.FailureCode == string(routingerr.CodeManagedRuntimeNpmResolution)
+	if managedRuntimeNpmFailure {
+		meta["failure_kind"] = string(routingerr.CodeManagedRuntimeNpmResolution)
+		if details := routingerr.Sanitize(data.FailureDetails); details != "" {
+			meta["error_output"] = details
+		}
+	}
 	// The validated remediation URL is carried independently of quota
 	// classification so the generic recoverable card can still show the link.
 	if remediationURL := providerRemediationURL(data); remediationURL != "" {
@@ -1716,7 +1823,21 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		}
 	}
 
-	meta["actions"] = buildRecoveryActions(data.TaskID, data.SessionID, hasResumeToken, authErr, resumeCorrupted)
+	if managedRuntimeNpmFailure {
+		meta["actions"] = []map[string]interface{}{
+			wsRecoveryAction(
+				data.TaskID,
+				data.SessionID,
+				"runtime_retry",
+				"Retry runtime",
+				"refresh",
+				"",
+				"managed-runtime-npm-retry-button",
+			),
+		}
+	} else {
+		meta["actions"] = buildRecoveryActions(data.TaskID, data.SessionID, hasResumeToken, authErr, resumeCorrupted)
+	}
 
 	if err := s.messageCreator.CreateSessionMessage(
 		ctx,
@@ -1789,6 +1910,17 @@ func (s *Service) isOfficeSession(ctx context.Context, sessionID string) bool {
 // error on focus / auto-resume.
 // Returns true if the failure was handled (caller should skip default FAILED logic).
 func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID, agentExecutionID string, err error, fromResume bool) bool {
+	failureData := watcher.AgentEventData{
+		TaskID:           taskID,
+		SessionID:        sessionID,
+		AgentExecutionID: agentExecutionID,
+		ErrorMessage:     err.Error(),
+	}
+	if classified := classifyManagedRuntimeNpmStartFailure(err); classified != nil {
+		failureData.ErrorMessage = "managed npm runtime failed to prepare"
+		failureData.FailureCode = string(routingerr.CodeManagedRuntimeNpmResolution)
+		failureData.FailureDetails = classified.RawExcerpt
+	}
 	if sessionID != "" {
 		lock, release := s.acquireCancelInFlightGuard(sessionID)
 		defer release()
@@ -1802,12 +1934,7 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 			return true
 		}
 
-		if drop, terminalState := s.shouldDropSessionFailure(ctx, watcher.AgentEventData{
-			TaskID:           taskID,
-			SessionID:        sessionID,
-			AgentExecutionID: agentExecutionID,
-			ErrorMessage:     err.Error(),
-		}, "agent process start", false); drop {
+		if drop, terminalState := s.shouldDropSessionFailure(ctx, failureData, "agent process start", false); drop {
 			// A cancellation that landed after the executor's first terminal-state
 			// read still needs its exact-execution cleanup path. Returning false lets
 			// the executor observe the final CANCELLED state and arbitrate teardown.
@@ -1816,6 +1943,14 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 			}
 			return true
 		}
+	}
+	if failureData.FailureCode == string(routingerr.CodeManagedRuntimeNpmResolution) {
+		s.logger.Info("managed npm runtime startup failure is recoverable",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", agentExecutionID))
+		s.handleRecoverableFailureLocked(ctx, failureData)
+		return true
 	}
 
 	if !isAuthError(err.Error()) {
@@ -1831,13 +1966,27 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 	s.logger.Info("agent start failure is auth error, treating as recoverable",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
-	s.handleRecoverableFailureLocked(ctx, watcher.AgentEventData{
-		TaskID:           taskID,
-		SessionID:        sessionID,
-		AgentExecutionID: agentExecutionID,
-		ErrorMessage:     err.Error(),
-	})
+	s.handleRecoverableFailureLocked(ctx, failureData)
 	return true
+}
+
+func classifyManagedRuntimeNpmStartFailure(err error) *routingerr.Error {
+	if err == nil {
+		return nil
+	}
+	var structured *routingerr.ManagedRuntimeStartupError
+	if errors.As(err, &structured) {
+		if structured.Code != routingerr.CodeManagedRuntimeNpmResolution {
+			return nil
+		}
+		return &routingerr.Error{
+			Code:       structured.Code,
+			Confidence: routingerr.ConfHigh,
+			Phase:      routingerr.PhaseSessionInit,
+			RawExcerpt: structured.Details,
+		}
+	}
+	return nil
 }
 
 // actionMetaKey* are the shared keys of the frontend ActionMessage button
@@ -1861,17 +2010,20 @@ const (
 // the map keys in one place avoids drift between the buttons and keeps the
 // metadata shape consistent.
 func wsRecoveryAction(taskID, sessionID, recoverAction, label, icon, tooltip, testID string) map[string]interface{} {
-	return map[string]interface{}{
-		actionMetaKeyType:    "ws_request",
-		actionMetaKeyLabel:   label,
-		actionMetaKeyIcon:    icon,
-		actionMetaKeyTooltip: tooltip,
-		actionMetaKeyTestID:  testID,
+	action := map[string]interface{}{
+		actionMetaKeyType:   "ws_request",
+		actionMetaKeyLabel:  label,
+		actionMetaKeyIcon:   icon,
+		actionMetaKeyTestID: testID,
 		"params": map[string]interface{}{
 			"method":  "session.recover",
 			"payload": map[string]interface{}{"task_id": taskID, "session_id": sessionID, "action": recoverAction},
 		},
 	}
+	if tooltip != "" {
+		action[actionMetaKeyTooltip] = tooltip
+	}
+	return action
 }
 
 // buildRecoveryActions creates the generic actions array for agent error

@@ -1,9 +1,10 @@
 "use client";
 
-import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import { SettingsFieldLabel } from "@/components/settings/settings-typography";
 import { useTranslation } from "react-i18next";
 
 type ProfileDetailsCardProps = {
@@ -23,12 +24,10 @@ export function ProfileDetailsCard({
   const isDirty = baselineName !== undefined && name.trim() !== baselineName.trim();
   return (
     <SettingsCard isDirty={isDirty} discoveryTargetId={discoveryTargetId}>
-      <CardHeader>
-        <CardTitle>{t("executors:profileDetails")}</CardTitle>
-      </CardHeader>
+      <SettingsCardHeader title={t("executors:profileDetails")} />
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="profile-name">{t("executors:name")}</Label>
+          <SettingsFieldLabel htmlFor="profile-name">{t("executors:name")}</SettingsFieldLabel>
           <Input
             id="profile-name"
             value={name}

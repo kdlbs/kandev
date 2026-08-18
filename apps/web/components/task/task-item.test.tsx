@@ -7,6 +7,7 @@ import type { TaskPR } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
 import { TaskItem } from "./task-item";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { formatRelativeTime } from "@/lib/utils";
 
 const TURN_FINISHED_ICON_TEST_ID = "task-state-turn-finished";
 const WORKFLOW_COMPLETE_ICON_TEST_ID = "task-state-workflow-complete";
@@ -574,6 +575,37 @@ describe("TaskItem queued prompt count badge", () => {
     expect(screen.getByTestId(QUEUED_BADGE_TEST_ID).getAttribute("aria-label")).toContain(
       "queued prompt",
     );
+  });
+});
+
+describe("TaskItem activity timestamp", () => {
+  it("shows activity time only when the active view sorts by activity", () => {
+    const activityAt = "2026-07-20T00:00:00Z";
+    const updatedAt = "2026-07-24T00:00:00Z";
+    const { rerender } = renderTaskItem({
+      updatedAt,
+      lastActivityAt: activityAt,
+      showActivityTime: true,
+    });
+
+    expect(screen.getByTestId("sidebar-task-time").textContent).toBe(
+      formatRelativeTime(activityAt),
+    );
+
+    rerender(
+      <StateProvider>
+        <TooltipProvider>
+          <TaskItem
+            title="Needs answer"
+            state="REVIEW"
+            updatedAt={updatedAt}
+            lastActivityAt={activityAt}
+            showActivityTime={false}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+    expect(screen.getByTestId("sidebar-task-time").textContent).toBe(formatRelativeTime(updatedAt));
   });
 });
 

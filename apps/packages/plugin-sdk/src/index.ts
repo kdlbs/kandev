@@ -101,6 +101,10 @@ export interface RepositoryIdentityInput {
 export interface PluginContextApi {
   getActiveWorkspaceId(): string | undefined;
   subscribeActiveWorkspace(listener: (workspaceId: string | undefined) => void): () => void;
+  /** Returns the ids of all workspaces currently available to the user. */
+  getWorkspaceIds(): readonly string[];
+  /** Notifies the plugin when the available workspace ids change. */
+  subscribeWorkspaces(listener: (workspaceIds: readonly string[]) => void): () => void;
   getTaskCreationContext(workspaceId: string): TaskCreationContext | null;
   subscribeTaskCreationContext(
     workspaceId: string,
@@ -465,7 +469,25 @@ interface PluginUIShape {
   TooltipProvider: unknown;
   TooltipTrigger: unknown;
   Combobox: unknown;
+  IntegrationAuthStatusBanner: unknown;
+  IntegrationEnabledControl: unknown;
+  SettingsSection: unknown;
+  SettingsCard: unknown;
+  WorkspaceScopedSection: unknown;
 }
+
+export type SettingsSaveRevision = string | number;
+
+export type SettingsSaveContributor = {
+  id: string;
+  order?: number;
+  revision: SettingsSaveRevision;
+  isDirty: boolean;
+  canSave?: boolean;
+  invalidReason?: string;
+  save: (revision: SettingsSaveRevision) => Promise<void> | void;
+  discard: (revision?: SettingsSaveRevision) => Promise<void> | void;
+};
 
 export type PluginUIApi = {
   readonly [Name in keyof PluginUIShape]: HostComponent;
@@ -568,7 +590,16 @@ export interface PluginHostApi {
     cn(...inputs: unknown[]): string;
     generateUUID(): string;
     formatRelativeTime(value: string | number | Date): string;
+    integrationStatusRefreshMs: number;
   };
+  useSettingsSaveContributor(contributor: SettingsSaveContributor): void;
+  /**
+   * Publishes this plugin integration's enabled state for one workspace.
+   * Drives the host sidebar's "Enabled" badge (per workspace) reactively;
+   * persist the durable value yourself (e.g. `host.storage`) — this call
+   * only updates live UI state.
+   */
+  setIntegrationEnabled(integrationId: string, workspaceId: string, enabled: boolean): void;
   storage: PluginStorageApi;
 }
 
@@ -592,6 +623,10 @@ export interface PluginRegistry {
     description: string;
     icon?: PluginIcon;
     Component: Component<{ workspaceId?: string }>;
+    /** Optional header action (e.g. an enable toggle) rendered in the host
+     * section header's action slot, mirroring built-in integrations.
+     * Receives `{ workspaceId?: string }` so it can operate per-workspace. */
+    action?: Component<{ workspaceId?: string }>;
   }): void;
   registerRepositoryProvider(provider: RepositoryProviderRegistration): void;
   registerTaskAction(action: {

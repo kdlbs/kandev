@@ -143,6 +143,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "session_model_fallback":
 		s.handleSessionModelFallbackEvent(ctx, payload)
 
+	case streams.EventTypeSessionModelSelectionWarning:
+		s.handleSessionModelSelectionWarningEvent(ctx, payload)
+
 	case streams.EventTypeMCPAttachment:
 		s.handleSessionMCPAttachmentEvent(ctx, payload)
 
@@ -1006,6 +1009,14 @@ func (s *Service) updateTaskSessionStateWithHook(
 	if onChanged != nil {
 		onChanged()
 	}
+	if isTerminalSessionState(nextState) {
+		if err := s.expireTerminalClarificationWaiters(ctx, sessionID); err != nil {
+			s.logger.Error("failed to expire clarification on terminal session; response claims remain quarantined",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
 	// Work has resumed: a session entering STARTING/RUNNING clears the
 	// startup interruption marker and republishes the task so open clients
 	// drop the red interruption icon. No-op when the marker is absent.
@@ -1146,6 +1157,14 @@ func (s *Service) transitionTaskSessionState(
 	}
 	if onChanged != nil {
 		onChanged()
+	}
+	if isTerminalSessionState(nextState) {
+		if err := s.expireTerminalClarificationWaiters(ctx, sessionID); err != nil {
+			s.logger.Error("failed to expire clarification on strict terminal transition; response claims remain quarantined",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 	}
 	s.publishTaskSessionStateChanged(
 		ctx,
@@ -2324,11 +2343,39 @@ func (s *Service) detachClarificationWaiters(ctx context.Context, sessionID stri
 	if s.clarificationCanceller == nil || sessionID == "" {
 		return
 	}
-	if n := s.clarificationCanceller.DetachSessionAndNotify(ctx, sessionID); n > 0 {
+	n, err := s.clarificationCanceller.DetachSessionAndNotify(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to detach pending clarifications on turn complete",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if n > 0 {
 		s.logger.Info("detached pending clarifications on turn complete",
 			zap.String("session_id", sessionID),
 			zap.Int("count", n))
 	}
+}
+
+func (s *Service) expireClarificationWaiters(ctx context.Context, sessionID string) error {
+	if s.clarificationCanceller == nil || sessionID == "" {
+		return nil
+	}
+	n, err := s.clarificationCanceller.ExpireSessionAndNotify(ctx, sessionID)
+	if n > 0 {
+		s.logger.Info("expired pending clarifications on terminal session",
+			zap.String("session_id", sessionID),
+			zap.Int("count", n))
+	}
+	return err
+}
+
+const terminalClarificationExpiryTimeout = 10 * time.Second
+
+func (s *Service) expireTerminalClarificationWaiters(ctx context.Context, sessionID string) error {
+	expireCtx, cancel := context.WithTimeout(ctx, terminalClarificationExpiryTimeout)
+	defer cancel()
+	return s.expireClarificationWaiters(expireCtx, sessionID)
 }
 
 // sessionStateString renders a session's state for logging, returning "" when
@@ -2630,22 +2677,19 @@ func (s *Service) persistPromptMetadataOnTurn(
 	turn *models.Turn,
 ) {
 	model, agentType := resolvePromptUsageLabels(payload, session)
-	metadata := turn.Metadata
-	if metadata == nil {
-		metadata = make(map[string]interface{})
+	updates := map[string]interface{}{
+		"prompt_usage": promptUsageMetadata(payload.Data.Usage),
 	}
-	metadata["prompt_usage"] = promptUsageMetadata(payload.Data.Usage)
 	if model != "" {
-		metadata[sessionModelConfigKey] = model
+		updates[sessionModelConfigKey] = model
 	}
 	if agentType != "" {
-		metadata["agent_type"] = agentType
+		updates["agent_type"] = agentType
 	}
 	if payload.AgentID != "" {
-		metadata["agent_id"] = payload.AgentID
+		updates["agent_id"] = payload.AgentID
 	}
-	turn.Metadata = metadata
-	if err := s.turnService.UpdateTurn(ctx, turn); err != nil {
+	if err := s.turnService.PatchTurnMetadata(ctx, turn.TaskSessionID, turn.ID, updates); err != nil {
 		s.logger.Warn("failed to persist prompt usage metadata on turn",
 			zap.String("turn_id", turn.ID),
 			zap.String("session_id", payload.SessionID),
@@ -2934,6 +2978,177 @@ func (s *Service) handleSessionModelFallbackEvent(ctx context.Context, payload *
 		zap.String("fallback_model", eventPayload.FallbackModel))
 	subject := events.BuildSessionModelFallbackSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelFallbackUpdated, "orchestrator", eventPayload))
+}
+
+// handleSessionModelSelectionWarningEvent persists one structured status
+// message for an executor-authoritative model decision and publishes the same
+// data to live WebSocket subscribers. Persistence is best-effort and never
+// blocks the task launch.
+func (s *Service) handleSessionModelSelectionWarningEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	warning, sessionID, ok := s.modelSelectionWarningEvent(ctx, payload)
+	if !ok {
+		return
+	}
+	var releaseClaim func()
+	if s.messageCreator != nil {
+		var claimed bool
+		releaseClaim, claimed = s.claimModelSelectionWarning(ctx, sessionID, warning.DecisionID)
+		if !claimed {
+			return
+		}
+	}
+	if err := s.persistModelSelectionWarningMessage(ctx, payload.TaskID, sessionID, warning); err != nil {
+		releaseClaim()
+	}
+	s.publishModelSelectionWarning(ctx, payload.TaskID, sessionID, warning)
+}
+
+func (s *Service) modelSelectionWarningEvent(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) (streams.ModelSelectionWarning, string, bool) {
+	if payload == nil || payload.Data == nil || payload.Data.ModelSelectionWarning == nil {
+		return streams.ModelSelectionWarning{}, "", false
+	}
+	sessionID := payload.SessionID
+	if sessionID == "" && payload.TaskID != "" && s.repo != nil {
+		if sess, err := s.repo.GetActiveTaskSessionByTaskID(ctx, payload.TaskID); err == nil && sess != nil {
+			sessionID = sess.ID
+		}
+	}
+	if sessionID == "" {
+		return streams.ModelSelectionWarning{}, "", false
+	}
+	return *payload.Data.ModelSelectionWarning, sessionID, true
+}
+
+func (s *Service) claimModelSelectionWarning(ctx context.Context, sessionID, decisionID string) (func(), bool) {
+	if s.repo == nil || decisionID == "" {
+		return func() {}, true
+	}
+	// A decision ID is created by lifecycle and is stable across event replay.
+	// Use the structured metadata key as an atomic claim so two deliveries cannot
+	// create duplicate status messages after a reconnect or restart.
+	claimCtx := context.WithoutCancel(ctx)
+	key := "model_selection_warning:" + decisionID
+	if claimer, ok := s.repo.(failedSessionMetadataClaimer); ok {
+		return s.claimModelSelectionWarningWithState(claimCtx, sessionID, key, claimer)
+	}
+	claimed, err := s.repo.SetSessionMetadataKeyIfAbsent(claimCtx, sessionID, key, true)
+	if err != nil {
+		s.logger.Warn("failed to claim model selection warning persistence",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return func() {}, false
+	}
+	return func() {}, claimed
+}
+
+func (s *Service) claimModelSelectionWarningWithState(
+	ctx context.Context,
+	sessionID, key string,
+	claimer failedSessionMetadataClaimer,
+) (func(), bool) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		s.logger.Warn("failed to load session for model selection warning claim",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return func() {}, false
+	}
+	claimed, err := claimer.SetSessionMetadataKeyIfAbsentIfState(ctx, sessionID, key, true, session.State)
+	if err != nil {
+		s.logger.Warn("failed to claim model selection warning persistence",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return func() {}, false
+	}
+	if !claimed {
+		return func() {}, false
+	}
+	return func() {
+		s.releaseModelSelectionWarningClaim(ctx, sessionID, key, session.State)
+	}, true
+}
+
+func (s *Service) releaseModelSelectionWarningClaim(
+	ctx context.Context,
+	sessionID, key string,
+	expectedState models.TaskSessionState,
+) {
+	releaser, ok := s.repo.(failedSessionMetadataClaimReleaser)
+	if !ok {
+		s.logger.Warn("session repository cannot release model selection warning claim",
+			zap.String("session_id", sessionID))
+		return
+	}
+	if _, err := releaser.RemoveSessionMetadataKeyIfState(ctx, sessionID, key, expectedState); err != nil {
+		s.logger.Warn("failed to release model selection warning claim",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
+func modelSelectionWarningMetadata(warning streams.ModelSelectionWarning) map[string]interface{} {
+	metadata := map[string]interface{}{
+		"variant":             "warning",
+		"kind":                warning.Kind,
+		"reason":              warning.Reason,
+		"requested_model":     warning.RequestedModel,
+		"effective_model":     warning.EffectiveModel,
+		"agent_id":            warning.AgentID,
+		"executor_type":       warning.ExecutorType,
+		"executor_profile_id": warning.ExecutorProfileID,
+		"decision_id":         warning.DecisionID,
+		"remediation":         []string{"executor_credentials", "copied_agent_configuration", "agent_version"},
+	}
+	if warning.FallbackModel != "" {
+		metadata["fallback_model"] = warning.FallbackModel
+	}
+	return metadata
+}
+
+func (s *Service) persistModelSelectionWarningMessage(
+	ctx context.Context,
+	taskID, sessionID string,
+	warning streams.ModelSelectionWarning,
+) error {
+	if s.messageCreator == nil {
+		return nil
+	}
+	if err := s.messageCreator.CreateSessionMessage(
+		ctx,
+		taskID,
+		"The executor could not use the saved model selection.",
+		sessionID,
+		string(v1.MessageTypeStatus),
+		s.getActiveTurnID(sessionID),
+		modelSelectionWarningMetadata(warning),
+		false,
+	); err != nil {
+		s.logger.Warn("failed to persist model selection warning",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (s *Service) publishModelSelectionWarning(
+	ctx context.Context,
+	taskID, sessionID string,
+	warning streams.ModelSelectionWarning,
+) {
+	if s.eventBus == nil {
+		return
+	}
+	eventPayload := lifecycle.SessionModelSelectionWarningEventPayload{
+		TaskID:    taskID,
+		SessionID: sessionID,
+		AgentID:   warning.AgentID,
+		Warning:   warning,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	subject := events.BuildSessionModelSelectionWarningSubject(sessionID)
+	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(
+		events.SessionModelSelectionWarningUpdated, "orchestrator", eventPayload,
+	))
 }
 
 func workflowSessionConfigFailures(raw any) []string {

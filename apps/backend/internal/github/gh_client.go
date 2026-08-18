@@ -901,23 +901,55 @@ func (c *GHClient) RequestReviewers(ctx context.Context, owner, repo string, num
 	return nil
 }
 
-func (c *GHClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
-	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/merge", owner, repo, number)
-	args := []string{"api", endpoint, "-X", "PUT"}
+func (c *GHClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error) {
+	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/merge-async", owner, repo, number)
+	args := []string{"api", endpoint, "-X", "PUT", "-f", "merge_action=default"}
 	if mergeMethod != "" {
 		args = append(args, "-f", "merge_method="+mergeMethod)
 	}
-	_, err := c.run(ctx, args...)
+	out, err := c.run(ctx, args...)
+	conflictBody := false
 	if err != nil {
 		// Surface status-based errors as GitHubAPIError so httpMergePR can
-		// translate 405 (not mergeable) / 409 (conflict) to HTTP 409 for
-		// gh CLI users too, matching the PAT path.
+		// translate merge rejections for gh CLI users, matching the PAT path.
 		if code, ok := ghMergeStatusCode(err); ok {
-			return &GitHubAPIError{StatusCode: code, Endpoint: endpoint, Body: err.Error()}
+			if code != http.StatusConflict {
+				return "", &GitHubAPIError{StatusCode: code, Endpoint: endpoint, Body: err.Error()}
+			}
+			out = err.Error()
+			conflictBody = true
+		} else {
+			return "", fmt.Errorf("merge PR #%d: %w", number, err)
 		}
-		return fmt.Errorf("merge PR #%d: %w", number, err)
 	}
-	return nil
+	var response mergeAsyncResponse
+	jsonBody := out
+	if start := strings.Index(jsonBody, "{"); start >= 0 {
+		if end := strings.LastIndex(jsonBody, "}"); end >= start {
+			jsonBody = jsonBody[start : end+1]
+		}
+	} else if conflictBody {
+		return "", &GitHubAPIError{StatusCode: http.StatusConflict, Endpoint: endpoint, Body: out}
+	}
+	if unmarshalErr := json.Unmarshal([]byte(jsonBody), &response); unmarshalErr != nil {
+		return "", fmt.Errorf("decode GitHub merge response: %w", unmarshalErr)
+	}
+	for response.Status == "pending" {
+		if response.UUID == "" {
+			return "", fmt.Errorf("GitHub merge response is pending without a UUID")
+		}
+		result, runErr := c.run(ctx, "api", endpoint+"/"+response.UUID)
+		if runErr != nil {
+			return "", fmt.Errorf("poll merge PR #%d: %w", number, runErr)
+		}
+		if unmarshalErr := json.Unmarshal([]byte(result), &response); unmarshalErr != nil {
+			return "", fmt.Errorf("decode GitHub merge response: %w", unmarshalErr)
+		}
+	}
+	if response.Status == mergeStatusFailed {
+		return "", fmt.Errorf("GitHub rejected merge: %s", response.Message)
+	}
+	return normalizeMergeOutcome(response.Status)
 }
 
 // ghMergeStatusCode extracts the HTTP status code from a gh CLI merge error.
@@ -935,6 +967,10 @@ func ghMergeStatusCode(err error) (int, bool) {
 		return http.StatusForbidden, true
 	}
 	s := err.Error()
+	if strings.Contains(s, "HTTP 400") || strings.Contains(s, "status: 400") ||
+		strings.Contains(s, "400 Bad Request") {
+		return http.StatusBadRequest, true
+	}
 	if strings.Contains(s, "HTTP 405") || strings.Contains(s, "status: 405") ||
 		strings.Contains(s, "405 Method Not Allowed") {
 		return http.StatusMethodNotAllowed, true

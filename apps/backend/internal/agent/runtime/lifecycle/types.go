@@ -55,7 +55,12 @@ type AgentExecution struct {
 	FinishedAt           *time.Time
 	ExitCode             *int
 	ErrorMessage         string
-	ProviderError        *streams.ProviderError
+	// FailureCode and FailureDetails carry a bounded, structured startup
+	// diagnostic to the orchestrator. They remain separate from the generic
+	// error message so user-facing recovery can choose a stable presentation.
+	FailureCode    string
+	FailureDetails string
+	ProviderError  *streams.ProviderError
 	// metadata is unexported on purpose: it is touched from the launch, prompt
 	// and stop paths concurrently, so all access must go through the metadataMu
 	// helpers in execution_metadata.go.
@@ -169,7 +174,8 @@ type AgentExecution struct {
 
 	// sessionInitialized is set to true after InitializeAndPrompt completes successfully.
 	// Used to distinguish launch-phase failures from normal prompt failures.
-	sessionInitialized bool
+	sessionInitialized   bool
+	sessionInitializedMu sync.RWMutex
 
 	// Available commands from the agent (for slash command menu)
 	availableCommands   []streams.AvailableCommand
@@ -216,6 +222,26 @@ type AgentExecution struct {
 	// Session-level trace span for grouping all operations under one trace
 	sessionSpan   trace.Span
 	sessionSpanMu sync.RWMutex
+
+	// Startup attempts are generation-bearing so callbacks from the first
+	// process cannot fail a replacement process after npm recovery starts.
+	// This state has its own mutex because stream setup can run while
+	// promptLifecycleMu is held by workspace rebind waiting for readiness.
+	startupAttemptGeneration uint64
+	startupRecoveryStarted   bool
+	startupLifecycleMu       sync.Mutex
+}
+
+func (e *AgentExecution) isSessionInitialized() bool {
+	e.sessionInitializedMu.RLock()
+	defer e.sessionInitializedMu.RUnlock()
+	return e.sessionInitialized
+}
+
+func (e *AgentExecution) setSessionInitialized(value bool) {
+	e.sessionInitializedMu.Lock()
+	e.sessionInitialized = value
+	e.sessionInitializedMu.Unlock()
 }
 
 type activeTopLevelTool struct {
@@ -300,16 +326,83 @@ func (e *AgentExecution) officeProfileID() string {
 
 // PromptCompletionSignal carries the result from a complete event or disconnect.
 type PromptCompletionSignal struct {
-	StopReason       string
-	IsError          bool
-	Error            string
-	PromptGeneration uint64
+	StopReason        string
+	IsError           bool
+	Error             string
+	PromptGeneration  uint64
+	StartupGeneration uint64
 }
 
 func (e *AgentExecution) promptGenerationSnapshot() uint64 {
 	e.promptLifecycleMu.Lock()
 	defer e.promptLifecycleMu.Unlock()
 	return e.promptGeneration
+}
+
+// beginStartupAttempt starts a generation for a new ACP process. Generation
+// zero is reserved for executions that predate startup tracking.
+func (e *AgentExecution) beginStartupAttempt() uint64 {
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	e.startupAttemptGeneration++
+	e.startupRecoveryStarted = false
+	return e.startupAttemptGeneration
+}
+
+// beginStartupRecovery advances the startup generation exactly once. The
+// caller uses the returned generation when wiring the replacement streams.
+func (e *AgentExecution) beginStartupRecovery() (uint64, bool) {
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	if e.startupRecoveryStarted {
+		return e.startupAttemptGeneration, false
+	}
+	e.startupRecoveryStarted = true
+	e.startupAttemptGeneration++
+	return e.startupAttemptGeneration, true
+}
+
+func (e *AgentExecution) finishStartupRecovery() {
+	e.startupLifecycleMu.Lock()
+	e.startupRecoveryStarted = false
+	e.startupLifecycleMu.Unlock()
+}
+
+func (e *AgentExecution) startupAttemptSnapshot() uint64 {
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	return e.startupAttemptGeneration
+}
+
+func (e *AgentExecution) acceptsStartupAttempt(generation uint64) bool {
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	return e.startupAttemptGeneration == generation
+}
+
+// signalPromptCompletionForStartupGeneration claims the current startup
+// generation and enqueues its completion signal as one ownership operation.
+// A stream can finish its generation check just before recovery advances the
+// execution, so checking and sending under the same mutex prevents an old
+// stream from publishing into the replacement prompt's channel.
+func (e *AgentExecution) signalPromptCompletionForStartupGeneration(
+	startupGeneration uint64,
+	signal PromptCompletionSignal,
+) bool {
+	if e == nil {
+		return false
+	}
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	if e.startupAttemptGeneration != startupGeneration {
+		return false
+	}
+	signal.StartupGeneration = startupGeneration
+	select {
+	case e.promptDoneCh <- signal:
+	default:
+	}
+	return true
 }
 
 func (e *AgentExecution) promptTurnIDSnapshot() string {

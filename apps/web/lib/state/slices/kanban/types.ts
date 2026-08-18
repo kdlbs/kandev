@@ -1,6 +1,7 @@
 import type {
   ForegroundActivity,
   TaskPendingAction,
+  TaskPriority,
   TaskState as TaskStatus,
 } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
@@ -70,7 +71,7 @@ export type KanbanState = {
     title: string;
     description?: string;
     autopilot?: boolean;
-    priority?: string | number;
+    priority?: TaskPriority;
     position: number;
     state?: TaskStatus;
     /** Primary repository id (lowest position). Kept for backwards compat. */

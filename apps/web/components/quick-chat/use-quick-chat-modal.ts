@@ -35,6 +35,7 @@ function useQuickChatStore(workspaceId: string) {
       terminalTabs: s.quickChat.terminalTabs,
       closeQuickChat: s.closeQuickChat,
       closeQuickChatSession: s.closeQuickChatSession,
+      removeQuickChatSession: s.removeQuickChatSession,
       setActiveQuickChatSession: s.setActiveQuickChatSession,
       createQuickTerminal: s.createQuickTerminal,
       updateQuickTerminal: s.updateQuickTerminal,
@@ -168,6 +169,7 @@ async function startQuickChatForAgent(
         (session.kind ?? "chat") === "chat" &&
         !isQuickChatSetupSessionId(session.sessionId),
     ).length + 1;
+  // i18n-exempt: persisted as the quick-chat task title, same contract as use-config-chat.ts.
   const initialName = `${agent?.label || "Agent"} - Chat ${sessionCount}`;
   const response = await startQuickChat(workspaceId, {
     agent_profile_id: agentId,
@@ -260,12 +262,12 @@ function useQuickChatSessionClose(store: QuickChatStore, resetPendingStarts: () 
     setSessionToClose(null);
     const taskId = resolveTaskId(store, sessionId);
     if (!taskId) {
-      store.closeQuickChatSession(sessionId);
+      store.removeQuickChatSession(sessionId);
       return;
     }
     try {
       await deleteQuickChatTask(taskId);
-      store.closeQuickChatSession(sessionId);
+      store.removeQuickChatSession(sessionId);
     } catch (error) {
       console.error("Failed to delete quick chat task:", error);
       toast({
