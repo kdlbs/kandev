@@ -3,13 +3,43 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
+
+// operatorOnlyConfigKeys are executor profile Config keys that the
+// agent-exposed MCP tools (create_executor_profile, update_executor_profile)
+// must reject. These keys can only be set through the operator HTTP/WS API.
+// This is a narrow security guard: it prevents self-enablement of container
+// security relaxations from within a task, without widening the surface onto
+// the operator path (which already exposes prepare_script — strictly more
+// powerful).
+var operatorOnlyConfigKeys = []string{
+	lifecycle.MetadataKeyAllowUserNamespaces,
+}
+
+// rejectOperatorConfigKeys returns an error if the config map contains any
+// key that is reserved for the operator path. The error names the offending
+// key and returns ws.ErrorCodeValidation.
+func rejectOperatorConfigKeys(config map[string]string) error {
+	var offending []string
+	for _, key := range operatorOnlyConfigKeys {
+		if _, ok := config[key]; ok {
+			offending = append(offending, key)
+		}
+	}
+	if len(offending) > 0 {
+		return fmt.Errorf("config key(s) reserved for operator: %s", strings.Join(offending, ", "))
+	}
+	return nil
+}
 
 func (h *Handlers) handleListExecutors(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	executors, err := h.taskSvc.ListExecutors(ctx)
@@ -73,6 +103,10 @@ func (h *Handlers) handleCreateExecutorProfile(ctx context.Context, msg *ws.Mess
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "name is required", nil)
 	}
 
+	if err := rejectOperatorConfigKeys(req.Config); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+
 	profile, err := h.taskSvc.CreateExecutorProfile(ctx, &service.CreateExecutorProfileRequest{
 		ExecutorID:    req.ExecutorID,
 		Name:          req.Name,
@@ -104,6 +138,10 @@ func (h *Handlers) handleUpdateExecutorProfile(ctx context.Context, msg *ws.Mess
 	}
 	if req.ProfileID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "profile_id is required", nil)
+	}
+
+	if err := rejectOperatorConfigKeys(req.Config); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 
 	profile, err := h.taskSvc.UpdateExecutorProfile(ctx, req.ProfileID, &service.UpdateExecutorProfileRequest{
