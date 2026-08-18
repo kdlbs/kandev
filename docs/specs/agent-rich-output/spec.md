@@ -49,9 +49,11 @@ agent-designed dashboards.
   compact localized unavailable state and does not break nearby messages.
 - Small textual comparisons continue to use Markdown tables. Version 1 does
   not provide a native data-table block.
-- Agent guidance includes one exact inline-chart recipe and one CSV recipe.
-  Kandev, rather than the agent, owns axes, legends, colors, and layout; agents
-  provide only `labels` plus labeled `series[].values`, or CSV column mappings.
+- Always-injected Task and Office guidance includes one exact inline-chart
+  recipe and one CSV recipe. The MCP description stays a focused routing
+  summary, while its schema retains complete examples. Kandev, rather than the
+  agent, owns axes, legends, colors, and layout; agents provide only `labels`
+  plus labeled `series[].values`, or CSV column mappings.
 
 ## API surface
 

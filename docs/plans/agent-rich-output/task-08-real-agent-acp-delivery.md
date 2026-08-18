@@ -97,9 +97,9 @@ Completed on 2026-08-16.
   canonical arguments or retaining the outer `{error, result}` wrapper.
 - Historic Codex wrappers remain readable in the frontend while new messages
   persist the provider-neutral tool name, arguments, and `CallToolResult`.
-- Task, Office, and MCP tool descriptions now include complete inline and CSV
-  chart recipes. Both include the required block summary and explain that axes
-  and legends are host-owned.
+- Task and Office guidance plus MCP schema examples include complete inline and
+  CSV chart recipes. The focused tool description routes explicit requests;
+  the prompts include the required block summary and host-owned axes/legends.
 - The isolated profile `Luna Worker (full access)` used model
   `gpt-5.6-luna`, mode `agent-full-access`, and `auto_approve: true`.
 - Real Luna trials produced: one valid inline bar chart on its only rich-output

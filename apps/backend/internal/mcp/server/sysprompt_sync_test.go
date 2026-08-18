@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	promptcfg "github.com/kandev/kandev/config/prompts"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -173,28 +174,38 @@ func TestTaskControlDocs_OmittedFromRestrictedModes(t *testing.T) {
 }
 
 func TestRichOutputDocs_MakeExplicitAndCSVUseDiscoverable(t *testing.T) {
+	inlineRecipe := `{"type":"chart","chart_type":"bar","title":"...","summary":"...","labels":["A","B"],"series":[{"label":"Count","values":[42,27]}]}`
+	csvRecipe := `{"type":"chart","chart_type":"line","title":"...","summary":"...","csv":{"path":"reports/latency.csv","x_column":"recorded_at","series":[{"column":"p95_ms","label":"p95 (ms)"}]}}`
+
 	for name, prompt := range map[string]string{
 		"task":   sysprompt.KandevContext(),
 		"office": sysprompt.OfficeContext(),
 	} {
 		t.Run(name, func(t *testing.T) {
+			var richOutputLine string
+			for _, line := range strings.Split(prompt, "\n") {
+				if strings.HasPrefix(line, "- show_rich_output_kandev:") {
+					richOutputLine = line
+					break
+				}
+			}
+			require.NotEmpty(t, richOutputLine)
+			assert.LessOrEqual(t, utf8.RuneCountInString(richOutputLine), 750)
 			for _, phrase := range []string{
 				"explicitly asks for a chart, graph, plot, or file preview",
-				"workspace CSV",
+				"version=1, title, and 1-4 blocks",
 				"x_column",
-				"include its unit",
-				"local multi-series legend",
-				"Markdown table",
-				"Inline chart recipe",
-				`"labels":["A","B"]`,
-				`"series":[{"label":"Count","values":[42,27]}]`,
-				"Kandev owns axes and legends",
-				"do not send data, categories, x_axis, or y_axis",
-				"CSV chart recipe",
-				`"csv":{"path":"reports/latency.csv","x_column":"recorded_at","series":[{"column":"p95_ms","label":"p95 (ms)"}]}`,
+				"task-workspace-relative",
+				"including its unit when useful",
+				"Markdown for a small table",
+				"Inline chart block",
+				"CSV chart block",
+				"Kandev owns axes, legends, tooltips, and layout",
 			} {
-				assert.Contains(t, prompt, phrase)
+				assert.Contains(t, richOutputLine, phrase)
 			}
+			assert.Equal(t, 1, strings.Count(richOutputLine, inlineRecipe))
+			assert.Equal(t, 1, strings.Count(richOutputLine, csvRecipe))
 		})
 	}
 }

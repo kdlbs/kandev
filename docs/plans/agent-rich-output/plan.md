@@ -142,6 +142,7 @@ replay from normalized tool-call input. CSV charts reuse the existing
 6. [x] [CSV-backed chart sources](task-06-csv-chart-sources.md)
 7. [x] [Chart axes and legends](task-07-chart-axes-legends.md)
 8. [x] [Real-agent ACP delivery](task-08-real-agent-acp-delivery.md)
+9. [x] [Compact MCP guidance](task-09-compact-mcp-guidance.md)
 
 Execution is sequential in the primary conversation. No subagents are
 authorized.
@@ -207,8 +208,8 @@ Status: complete on 2026-08-16.
   arguments plus the unwrapped MCP result.
 - Keep the frontend compatible with historic nested Codex payloads while new
   messages use the provider-neutral shape.
-- Give agents compact, exact inline and CSV chart recipes in Task, Office, and
-  MCP tool descriptions.
+- Give agents compact, exact inline and CSV chart recipes in Task and Office
+  guidance plus schema examples; keep the MCP description focused on routing.
 - Validate selection, restraint, CSV authoring, automatic approval, canonical
   replay, axes, and legends with fresh real Luna sessions in an isolated
   Tailscale-accessible instance.
@@ -218,3 +219,17 @@ Markdown for a small textual comparison, and completed the final CSV case on
 its first tool attempt. The isolated profile was full-access and auto-approved;
 no permission or clarification request occurred. The rendered line chart
 survived reload with five x-axis ticks, five y-axis ticks, and one legend.
+
+## Instruction budget hardening
+
+Status: complete on 2026-08-17.
+
+- Cap the rich-output MCP description at 650 runes and each always-injected
+  Task/Office guidance line at 750 runes.
+- Keep the exact inline and CSV recipes once in each prompt and in schema
+  examples, but remove those payloads from the routing description.
+- Protect both budgets and the content split with focused backend tests.
+
+Result: the tool description fell from 845 to 439 runes. Task and Office lines
+fell from 1,205 and 1,198 runes to 740 each without weakening mandatory
+explicit-request routing or removing either proven Luna recipe.

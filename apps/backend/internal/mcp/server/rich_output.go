@@ -165,7 +165,7 @@ var richOutputInputSchema = json.RawMessage(`{
 func (s *Server) registerRichOutputTool() {
 	tool := mcplib.NewToolWithRawSchema(
 		richOutputToolName,
-		`Render a Kandev-native file preview, metric group, line chart, bar chart, or CSV-backed time series/comparison. Use this when the user asks for a graph, chart, plot, or preview and suitable data is available. Inline chart recipe: {"type":"chart","chart_type":"bar","title":"...","summary":"...","labels":["A","B"],"series":[{"label":"Count","values":[42,27]}]}; switch chart_type to line for trends. CSV chart recipe: {"type":"chart","chart_type":"line","title":"...","summary":"...","csv":{"path":"reports/latency.csv","x_column":"recorded_at","series":[{"column":"p95_ms","label":"p95 (ms)"}]}}. Kandev owns axes and legends; do not send data, categories, x_axis, or y_axis. Give each series a clear label with its unit when useful. CSV paths must be task-workspace-relative. Use Markdown for small tables and plain prose for ordinary answers.`,
+		`Render one bounded Kandev-native file preview, metric group, line chart, bar chart, or CSV-backed time series or comparison chart. Use it for explicit graph, chart, plot, or preview requests when suitable data exists; use Markdown for small tables and prose otherwise. Inputs are semantic only: Kandev owns axes, legends, tooltips, layout, and styling. CSV paths must be task-workspace-relative. Label series and include units when useful.`,
 		richOutputInputSchema,
 	)
 	tool.Annotations.ReadOnlyHint = mcplib.ToBoolPtr(true)

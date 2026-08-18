@@ -153,13 +153,25 @@ func TestRichOutputToolReportsCSVReadFailure(t *testing.T) {
 	assert.Contains(t, content.Text, "could not read CSV source reports/latency.csv")
 }
 
-func TestRichOutputToolDescriptionMakesCSVChartsDiscoverable(t *testing.T) {
+func TestRichOutputToolDescriptionStaysFocusedAndDiscoverable(t *testing.T) {
 	s := New(&testBackend{}, "session-1", "task-1", 10005, newTestLogger(t), "", false, ModeTask)
 	tool := s.mcpServer.ListTools()[richOutputToolName].Tool
 
 	for _, phrase := range []string{"file preview", "line chart", "bar chart", "CSV-backed time series", "graph", "plot"} {
 		assert.Contains(t, tool.Description, phrase)
 	}
+	for _, phrase := range []string{
+		"Kandev owns axes, legends, tooltips, layout, and styling",
+		"task-workspace-relative",
+		"Markdown for small tables",
+		"include units when useful",
+	} {
+		assert.Contains(t, tool.Description, phrase)
+	}
+	assert.NotContains(t, tool.Description, "Inline chart recipe")
+	assert.NotContains(t, tool.Description, "CSV chart recipe")
+	assert.NotContains(t, tool.Description, `"labels":["A","B"]`)
+	assert.NotContains(t, tool.Description, `"x_column":"recorded_at"`)
 
 	encoded := tool.RawInputSchema
 	require.NotEmpty(t, encoded)
@@ -171,17 +183,6 @@ func TestRichOutputToolDescriptionMakesCSVChartsDiscoverable(t *testing.T) {
 	assert.Contains(t, string(encoded), `"chart_type":"line"`)
 	assert.Contains(t, string(encoded), `"labels":["A","B"]`)
 	assert.Contains(t, string(encoded), `"series":[{"label":"Count","values":[42,27]}]`)
-	for _, phrase := range []string{
-		"Inline chart recipe",
-		`"labels":["A","B"]`,
-		`"series":[{"label":"Count","values":[42,27]}]`,
-		"Kandev owns axes and legends",
-		"do not send data, categories, x_axis, or y_axis",
-		"CSV chart recipe",
-		`"csv":{"path":"reports/latency.csv","x_column":"recorded_at","series":[{"column":"p95_ms","label":"p95 (ms)"}]}`,
-	} {
-		assert.Contains(t, tool.Description, phrase)
-	}
 	require.NotNil(t, tool.Annotations.ReadOnlyHint)
 	assert.True(t, *tool.Annotations.ReadOnlyHint)
 	require.NotNil(t, tool.Annotations.DestructiveHint)
