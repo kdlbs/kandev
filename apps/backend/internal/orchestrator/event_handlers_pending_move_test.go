@@ -665,7 +665,7 @@ func (sc *pendingMoveScenario) assertOneTransitionToInProgress(t *testing.T, ste
 	if !freshImpl.IsPrimary {
 		t.Error("fresh impl session must be primary after the deferred move applies")
 	}
-	if freshImpl.State == models.TaskSessionStateCompleted {
+	if isTerminalSessionState(freshImpl.State) {
 		t.Errorf("fresh impl session state = %q, expected non-terminal", freshImpl.State)
 	}
 
