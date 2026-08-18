@@ -294,15 +294,19 @@ var ValidProjectStatuses = map[ProjectStatus]bool{
 // cumulative-delta inference for codex-acp) rather than reported directly
 // by the agent; the row still counts toward budget totals at face value.
 //
-// TokensCachedRead / TokensCachedWrite / TurnID / UsageEventID / CostSource /
-// the Rate*PerMillion columns / PricingCatalogVersion / CostContractVersion
-// are all nullable (pointer fields): NULL means "not recorded" — a legacy
-// row written before the column existed, or (for the cache split
-// specifically) an adapter with no per-turn usage frame, such as codex-acp's
-// occupancy-growth synthesis (Estimated=true). NULL is never backfilled to
-// 0; TokensCachedIn keeps its original read+write sum semantics on every
-// row so existing consumers of that column are unaffected. See
-// docs/specs/office/costs.md.
+// TokensCachedRead / TokensCachedWrite / TokensOut / TurnID / UsageEventID /
+// CostSource / the Rate*PerMillion columns / PricingCatalogVersion /
+// CostContractVersion are all nullable (pointer fields): NULL means "not
+// recorded" — a legacy row written before the column existed, or (for the
+// cache split specifically) an adapter with no per-turn usage frame, such as
+// codex-acp's occupancy-growth synthesis (Estimated=true). TokensOut is NULL
+// specifically when Estimated is true and no output count was observed
+// (OutputTokens == 0 on that synthesis path): a 0 there would assert a
+// measurement that was never taken, and a downstream per-output-token
+// measure must see "unknown" rather than a fake zero-output turn. NULL is
+// never backfilled to 0; TokensCachedIn keeps its original read+write sum
+// semantics on every row so existing consumers of that column are
+// unaffected. See docs/specs/office/costs.md.
 type CostEvent struct {
 	ID                        string      `json:"id" db:"id"`
 	SessionID                 string      `json:"session_id" db:"session_id"`
@@ -315,7 +319,7 @@ type CostEvent struct {
 	TokensCachedIn            int64       `json:"tokens_cached_in" db:"tokens_cached_in"`
 	TokensCachedRead          *int64      `json:"tokens_cached_read,omitempty" db:"tokens_cached_read"`
 	TokensCachedWrite         *int64      `json:"tokens_cached_write,omitempty" db:"tokens_cached_write"`
-	TokensOut                 int64       `json:"tokens_out" db:"tokens_out"`
+	TokensOut                 *int64      `json:"tokens_out,omitempty" db:"tokens_out"`
 	CostSubcents              int64       `json:"cost_subcents" db:"cost_subcents"`
 	Estimated                 bool        `json:"estimated" db:"estimated"`
 	TurnID                    *string     `json:"turn_id,omitempty" db:"turn_id"`

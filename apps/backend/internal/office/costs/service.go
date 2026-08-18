@@ -62,7 +62,10 @@ func NewCostService(
 // RecordCostEvent stores a cost event with caller-provided cost subcents.
 // Cost computation now lives in the subscriber (Layer A / B lookup); this
 // helper is the manual-entry / test-harness path that records a row
-// verbatim. Token counts are stored as int64.
+// verbatim. Token counts are stored as int64. Callers of this path always
+// have a directly-observed output count, so TokensOut is never NULL here —
+// only the prompt-usage subscriber's synthesis path (buildCostEvent) can
+// produce an unmeasured NULL.
 func (s *CostService) RecordCostEvent(
 	ctx context.Context,
 	sessionID, taskID, agentInstanceID, projectID string,
@@ -79,7 +82,7 @@ func (s *CostService) RecordCostEvent(
 		Provider:       provider,
 		TokensIn:       tokensIn,
 		TokensCachedIn: tokensCachedIn,
-		TokensOut:      tokensOut,
+		TokensOut:      &tokensOut,
 		CostSubcents:   costSubcents,
 		Estimated:      estimated,
 		OccurredAt:     time.Now().UTC(),

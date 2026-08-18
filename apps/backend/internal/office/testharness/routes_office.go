@@ -619,13 +619,15 @@ func seedRunSkillSnapshotHandler(repo *officesqlite.Repository, log *logger.Logg
 
 // seedCostEventRequest seeds an office_cost_events row directly.
 // Used by the agent dashboard E2E spec to drive the costs section
-// (aggregate + per-run rollup) without launching an agent.
+// (aggregate + per-run rollup) without launching an agent. TokensOut is a
+// pointer so a test can omit it to seed the "never measured" NULL shape
+// (docs/specs/office/costs.md) instead of always writing a measured 0.
 type seedCostEventRequest struct {
 	AgentProfileID string  `json:"agent_profile_id"`
 	TaskID         string  `json:"task_id"`
 	SessionID      string  `json:"session_id,omitempty"`
 	TokensIn       int64   `json:"tokens_in"`
-	TokensOut      int64   `json:"tokens_out"`
+	TokensOut      *int64  `json:"tokens_out,omitempty"`
 	TokensCachedIn int64   `json:"tokens_cached_in"`
 	CostSubcents   int64   `json:"cost_subcents"`
 	Estimated      bool    `json:"estimated,omitempty"`

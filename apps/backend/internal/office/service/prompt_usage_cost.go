@@ -24,7 +24,15 @@ import (
 // to keep separate. v2 preserves data.Usage.Estimated verbatim on every
 // path (see resolveCostForUsage); cost_source=unpriced alone now carries
 // the pricing-failure signal.
-const costContractVersion int64 = 2
+//
+// v2 → v3: v2 wrote TokensOut = data.Usage.OutputTokens unconditionally,
+// so a synthesised-usage turn (Estimated=true) with no observed output
+// token count stored a plain 0 — indistinguishable from a genuine
+// zero-output turn, and a row with real dollars attached to it. v3 makes
+// TokensOut nullable and leaves it NULL when Estimated is true and
+// OutputTokens == 0 (see buildCostEvent), so "never measured" is
+// unrepresentable as a number.
+const costContractVersion int64 = 3
 
 // costResolution is resolveCostForUsage's output: the priced cost plus
 // everything needed to record provenance on the row. Kept separate from
@@ -124,6 +132,17 @@ func (s *Service) lookupPricingWithVersion(
 // original read+write sum on every row regardless, so existing consumers
 // (the tree-holds rollup, card 2faa29da's task_sessions fix) are
 // unaffected.
+//
+// TokensOut follows the same honesty rule, gated on the narrower condition
+// data.Usage.Estimated && data.Usage.OutputTokens == 0 rather than
+// Estimated alone: an adapter is free to set Estimated=true while still
+// reporting a real output count (e.g. a future fallback path that recovers
+// OutputTokens some other way), and that measured value must not be
+// discarded just because the turn is otherwise synthesised. Only the
+// conjunction — estimated AND no output observed — means "never measured",
+// matching the one production call site that produces it today
+// (adapter_prompt.go's context-occupancy synthesis, which never sets
+// OutputTokens).
 func buildCostEvent(
 	data PromptUsageData, fields *sqlite.TaskExecutionFields, projectID, provider string,
 	resolution costResolution,
@@ -137,7 +156,6 @@ func buildCostEvent(
 		Provider:       provider,
 		TokensIn:       data.Usage.InputTokens,
 		TokensCachedIn: data.Usage.CachedReadTokens + data.Usage.CachedWriteTokens,
-		TokensOut:      data.Usage.OutputTokens,
 		CostSubcents:   resolution.costSubcents,
 		Estimated:      resolution.estimated,
 		CostSource:     &resolution.source,
@@ -145,6 +163,11 @@ func buildCostEvent(
 	}
 	contractVersion := costContractVersion
 	event.CostContractVersion = &contractVersion
+
+	if !data.Usage.Estimated || data.Usage.OutputTokens != 0 {
+		outputTokens := data.Usage.OutputTokens
+		event.TokensOut = &outputTokens
+	}
 
 	if !data.Usage.Estimated {
 		cachedRead := data.Usage.CachedReadTokens

@@ -254,8 +254,8 @@ func TestPromptUsage_CostSourceModelsDevList(t *testing.T) {
 	if row.PricingCatalogVersion == nil || *row.PricingCatalogVersion != "2026-08-12T00:00:00Z" {
 		t.Errorf("PricingCatalogVersion = %v, want the fake's version", row.PricingCatalogVersion)
 	}
-	if row.CostContractVersion == nil || *row.CostContractVersion != 2 {
-		t.Errorf("CostContractVersion = %v, want 2 (in-band activation point)", row.CostContractVersion)
+	if row.CostContractVersion == nil || *row.CostContractVersion != 3 {
+		t.Errorf("CostContractVersion = %v, want 3 (in-band activation point)", row.CostContractVersion)
 	}
 }
 
@@ -300,6 +300,98 @@ func TestPromptUsage_CostSourceUnpriced(t *testing.T) {
 	}
 	if row.Estimated {
 		t.Error("Estimated = true, want false: unpriced must not overwrite the adapter's own token-synthesis flag")
+	}
+}
+
+// TestPromptUsage_TokensOutNullWhenUnmeasured confirms a synthesised-usage
+// turn (Estimated=true, no output count observed) never writes tokens_out
+// as a plain 0 — that would assert a measurement that was never taken, and
+// a downstream per-output-token measure would divide by a fake zero-output
+// turn instead of seeing "unknown". This is the shape reproduced against
+// the live store: real dollars (a provider-reported cost sample) attached
+// to a row with no observed output tokens. See costContractVersion's
+// v2→v3 doc comment in prompt_usage_cost.go.
+func TestPromptUsage_TokensOutNullWhenUnmeasured(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "worker-unmeasured-out")
+	insertTestTask(t, svc, "task-unmeasured-out", "ws-1")
+	setTestTaskAssignee(t, svc, "task-unmeasured-out", "worker-unmeasured-out")
+
+	event := bus.NewEvent(events.SessionPromptUsageUpdated, "test", map[string]interface{}{
+		"task_id":    "task-unmeasured-out",
+		"session_id": "session-unmeasured-out",
+		"agent_id":   "claude-acp",
+		"model":      "opus",
+		"usage": map[string]interface{}{
+			"input_tokens":                    767,
+			"estimated":                       true,
+			"provider_reported_cost_subcents": 76700,
+			"provider_reported_cost_present":  true,
+		},
+	})
+	if err := eb.Publish(ctx, events.BuildSessionPromptUsageSubject("session-unmeasured-out"), event); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	costs, err := svc.ListCostEvents(ctx, "ws-1")
+	if err != nil || len(costs) != 1 {
+		t.Fatalf("list costs: %v (len=%d)", err, len(costs))
+	}
+	row := costs[0]
+	if row.TokensOut != nil {
+		t.Errorf("TokensOut = %v, want nil (NULL, never a fake 0)", *row.TokensOut)
+	}
+	if row.CostSubcents != 76700 {
+		t.Fatalf("cost_subcents = %d, want 76700 (real money on an unmeasured-output row)", row.CostSubcents)
+	}
+	if row.CostContractVersion == nil || *row.CostContractVersion != 3 {
+		t.Errorf("CostContractVersion = %v, want 3 (v2→v3: tokens_out nullability)", row.CostContractVersion)
+	}
+	// Asserting the negative directly, per the card's regression bullet: no
+	// row may present real money against an unmeasured zero.
+	if row.CostSubcents > 0 && row.TokensOut != nil && *row.TokensOut == 0 {
+		t.Error("row has cost_subcents > 0 and tokens_out = 0: an unmeasured output is masquerading as a measured zero")
+	}
+}
+
+// TestPromptUsage_TokensOutKeptWhenMeasuredEvenIfEstimated confirms the
+// gate is the conjunction Estimated && OutputTokens == 0, not Estimated
+// alone: a turn that is synthesised but still reports a real output count
+// (forward-compatible with the sibling adapter card populating
+// OutputTokens on the fallback path while leaving Estimated=true) must keep
+// that measured value, not NULL it out.
+func TestPromptUsage_TokensOutKeptWhenMeasuredEvenIfEstimated(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "worker-estimated-measured-out")
+	insertTestTask(t, svc, "task-estimated-measured-out", "ws-1")
+	setTestTaskAssignee(t, svc, "task-estimated-measured-out", "worker-estimated-measured-out")
+
+	event := bus.NewEvent(events.SessionPromptUsageUpdated, "test", map[string]interface{}{
+		"task_id":    "task-estimated-measured-out",
+		"session_id": "session-estimated-measured-out",
+		"agent_id":   "codex-acp",
+		"model":      "gpt-5.4-mini",
+		"usage": map[string]interface{}{
+			"input_tokens":  350,
+			"output_tokens": 42,
+			"estimated":     true,
+		},
+	})
+	if err := eb.Publish(ctx, events.BuildSessionPromptUsageSubject("session-estimated-measured-out"), event); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	costs, err := svc.ListCostEvents(ctx, "ws-1")
+	if err != nil || len(costs) != 1 {
+		t.Fatalf("list costs: %v (len=%d)", err, len(costs))
+	}
+	row := costs[0]
+	if row.TokensOut == nil || *row.TokensOut != 42 {
+		t.Errorf("TokensOut = %v, want 42 (a measured value must survive even on an estimated turn)", row.TokensOut)
 	}
 }
 
