@@ -506,36 +506,66 @@ func (s *AgentConversationService) Delete(ctx context.Context, pluginID, workspa
 	return count, nil
 }
 
+// managedConversationPageSize is the page size used when scanning a
+// workspace's ephemeral tasks for managed conversations. The repository has
+// no metadata predicate for the provenance keys, so the scan pages through
+// the whole ephemeral set rather than sampling the first page: quick chats
+// and other ephemeral tasks share this list, and a workspace that
+// accumulates more than one page of them would otherwise hide an existing
+// conversation, making Ensure create a duplicate and Dispatch report
+// NotFound.
+const managedConversationPageSize = 100
+
 // findManagedConversation returns the first managed conversation matching
 // the given (pluginID, workspaceID, conversationKey), or nil when none
 // exists.
 func (s *AgentConversationService) findManagedConversation(ctx context.Context, pluginID, workspaceID, conversationKey string) (*models.Task, error) {
-	tasks, _, err := s.tasks.ListTasksByWorkspace(ctx, workspaceID, "", "", "", 1, 100, "", false, true, true, false)
+	var found *models.Task
+	err := s.eachManagedConversation(ctx, pluginID, workspaceID, conversationKey, func(task *models.Task) bool {
+		found = task
+		return false
+	})
 	if err != nil {
 		return nil, err
 	}
-	for _, task := range tasks {
-		if isManagedConversation(task, pluginID, workspaceID, conversationKey) {
-			return task, nil
-		}
-	}
-	return nil, nil
+	return found, nil
 }
 
 // listManagedConversations returns all managed conversations matching the
 // given (pluginID, workspaceID, conversationKey).
 func (s *AgentConversationService) listManagedConversations(ctx context.Context, pluginID, workspaceID, conversationKey string) ([]*models.Task, error) {
-	tasks, _, err := s.tasks.ListTasksByWorkspace(ctx, workspaceID, "", "", "", 1, 100, "", false, true, true, false)
+	var out []*models.Task
+	err := s.eachManagedConversation(ctx, pluginID, workspaceID, conversationKey, func(task *models.Task) bool {
+		out = append(out, task)
+		return true
+	})
 	if err != nil {
 		return nil, err
 	}
-	var out []*models.Task
-	for _, task := range tasks {
-		if isManagedConversation(task, pluginID, workspaceID, conversationKey) {
-			out = append(out, task)
+	return out, nil
+}
+
+// eachManagedConversation pages through the workspace's ephemeral tasks and
+// invokes visit for every managed conversation matching the given
+// coordinates. visit returns false to stop early.
+func (s *AgentConversationService) eachManagedConversation(ctx context.Context, pluginID, workspaceID, conversationKey string, visit func(*models.Task) bool) error {
+	for page := 1; ; page++ {
+		tasks, total, err := s.tasks.ListTasksByWorkspace(ctx, workspaceID, "", "", "", page, managedConversationPageSize, "", false, true, true, false)
+		if err != nil {
+			return err
+		}
+		for _, task := range tasks {
+			if isManagedConversation(task, pluginID, workspaceID, conversationKey) {
+				if !visit(task) {
+					return nil
+				}
+			}
+		}
+		scanned := page * managedConversationPageSize
+		if len(tasks) < managedConversationPageSize || scanned >= total {
+			return nil
 		}
 	}
-	return out, nil
 }
 
 // isManagedConversation checks whether task's metadata identifies it as a
