@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
 
 	"go.uber.org/zap"
@@ -67,7 +68,9 @@ func NewCostService(
 // observed) — the same conjunction gate buildCostEvent applies for the
 // prompt-usage subscriber's synthesis path, so a caller that separately
 // observed a real (possibly zero) output count under estimation still gets
-// it recorded.
+// it recorded. CostContractVersion is stamped with the same
+// models.CostContractVersion the prompt-usage subscriber uses, so a
+// manually-recorded row is never mistaken for a legacy pre-contract one.
 func (s *CostService) RecordCostEvent(
 	ctx context.Context,
 	sessionID, taskID, agentInstanceID, projectID string,
@@ -75,18 +78,20 @@ func (s *CostService) RecordCostEvent(
 	tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
 	estimated bool,
 ) (*CostEvent, error) {
+	contractVersion := models.CostContractVersion
 	event := &CostEvent{
-		SessionID:      sessionID,
-		TaskID:         taskID,
-		AgentProfileID: agentInstanceID,
-		ProjectID:      projectID,
-		Model:          model,
-		Provider:       provider,
-		TokensIn:       tokensIn,
-		TokensCachedIn: tokensCachedIn,
-		CostSubcents:   costSubcents,
-		Estimated:      estimated,
-		OccurredAt:     time.Now().UTC(),
+		SessionID:           sessionID,
+		TaskID:              taskID,
+		AgentProfileID:      agentInstanceID,
+		ProjectID:           projectID,
+		Model:               model,
+		Provider:            provider,
+		TokensIn:            tokensIn,
+		TokensCachedIn:      tokensCachedIn,
+		CostSubcents:        costSubcents,
+		Estimated:           estimated,
+		CostContractVersion: &contractVersion,
+		OccurredAt:          time.Now().UTC(),
 	}
 	if !estimated || tokensOut != 0 {
 		event.TokensOut = &tokensOut

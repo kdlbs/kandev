@@ -286,6 +286,33 @@ var ValidProjectStatuses = map[ProjectStatus]bool{
 	ProjectStatusArchived:  true,
 }
 
+// CostContractVersion is the in-band activation point for the cache-split /
+// cost-provenance / turn-attribution columns (docs/specs/office/costs.md).
+// The Rill cost extract has no schema versioning of its own, so a row
+// written under a prior contract is distinguished by comparing
+// cost_contract_version, not by a date an analyst has to be told out of
+// band. Every writer of CostEvent.CostContractVersion (the prompt-usage
+// subscriber's buildCostEvent and the manual-entry RecordCostEvent) stamps
+// this same value so the two producers can never disagree about which
+// contract a row was written under. Bump only if the contract's meaning
+// changes again.
+//
+// v1 → v2: on the CostSourceUnpriced path, v1 forced Estimated=true
+// regardless of the caller's own Estimated flag, conflating "we could not
+// resolve a price" with "the token counts themselves were synthesised" —
+// two different signals this same contract introduced CostSource
+// specifically to keep separate. v2 preserves the caller's Estimated value
+// verbatim on every path; cost_source=unpriced alone now carries the
+// pricing-failure signal.
+//
+// v2 → v3: v2 wrote TokensOut = OutputTokens unconditionally, so a
+// synthesised-usage turn (Estimated=true) with no observed output token
+// count stored a plain 0 — indistinguishable from a genuine zero-output
+// turn, and a row with real dollars attached to it. v3 makes TokensOut
+// nullable and leaves it NULL when Estimated is true and OutputTokens == 0,
+// so "never measured" is unrepresentable as a number.
+const CostContractVersion int64 = 3
+
 // CostEvent represents a cost tracking event.
 //
 // CostSubcents is stored as hundredths of a cent (int64) to keep token-rate

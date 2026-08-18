@@ -127,6 +127,9 @@ func TestRecordCostEvent_StoresCallerValues(t *testing.T) {
 	if event.TokensOut == nil || *event.TokensOut != 100_000 {
 		t.Errorf("tokens_out = %v, want 100000", event.TokensOut)
 	}
+	if event.CostContractVersion == nil || *event.CostContractVersion != models.CostContractVersion {
+		t.Errorf("cost_contract_version = %v, want %d", event.CostContractVersion, models.CostContractVersion)
+	}
 }
 
 func TestRecordCostEvent_FlagsEstimated(t *testing.T) {
@@ -149,6 +152,10 @@ func TestRecordCostEvent_FlagsEstimated(t *testing.T) {
 	}
 	if event.TokensOut != nil {
 		t.Errorf("tokens_out = %v, want nil (estimated with unobserved output)", *event.TokensOut)
+	}
+	if event.CostContractVersion == nil || *event.CostContractVersion != models.CostContractVersion {
+		t.Errorf("cost_contract_version = %v, want %d (a manually-recorded row must never read as legacy)",
+			event.CostContractVersion, models.CostContractVersion)
 	}
 }
 

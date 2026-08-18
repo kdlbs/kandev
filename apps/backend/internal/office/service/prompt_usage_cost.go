@@ -10,30 +10,6 @@ import (
 	"github.com/kandev/kandev/internal/office/shared"
 )
 
-// costContractVersion is the in-band activation point for the cache-split /
-// cost-provenance / turn-attribution columns (docs/specs/office/costs.md).
-// The Rill cost extract has no schema versioning of its own, so a row
-// written under a prior contract is distinguished by comparing
-// cost_contract_version, not by a date an analyst has to be told out of
-// band. Bump only if the contract's meaning changes again.
-//
-// v1 → v2: on the CostSourceUnpriced path, v1 forced Estimated=true
-// regardless of data.Usage.Estimated, conflating "we could not resolve a
-// price" with "the token counts themselves were synthesised" — two
-// different signals this same contract introduced CostSource specifically
-// to keep separate. v2 preserves data.Usage.Estimated verbatim on every
-// path (see resolveCostForUsage); cost_source=unpriced alone now carries
-// the pricing-failure signal.
-//
-// v2 → v3: v2 wrote TokensOut = data.Usage.OutputTokens unconditionally,
-// so a synthesised-usage turn (Estimated=true) with no observed output
-// token count stored a plain 0 — indistinguishable from a genuine
-// zero-output turn, and a row with real dollars attached to it. v3 makes
-// TokensOut nullable and leaves it NULL when Estimated is true and
-// OutputTokens == 0 (see buildCostEvent), so "never measured" is
-// unrepresentable as a number.
-const costContractVersion int64 = 3
-
 // costResolution is resolveCostForUsage's output: the priced cost plus
 // everything needed to record provenance on the row. Kept separate from
 // models.CostEvent so this package's cost-resolution logic doesn't need to
@@ -57,7 +33,7 @@ type costResolution struct {
 // verbatim on every branch, including unpriced: whether the tokens were
 // synthesised and whether a price could be resolved are independent facts,
 // and cost_source=unpriced already carries the second one — see
-// costContractVersion's v1→v2 doc comment.
+// models.CostContractVersion's v1→v2 doc comment.
 func (s *Service) resolveCostForUsage(ctx context.Context, data PromptUsageData) costResolution {
 	if data.Usage.ProviderReportedCostPresent || data.Usage.ProviderReportedCostSubcents > 0 {
 		return costResolution{
@@ -161,7 +137,7 @@ func buildCostEvent(
 		CostSource:     &resolution.source,
 		OccurredAt:     time.Now().UTC(),
 	}
-	contractVersion := costContractVersion
+	contractVersion := models.CostContractVersion
 	event.CostContractVersion = &contractVersion
 
 	if !data.Usage.Estimated || data.Usage.OutputTokens != 0 {
