@@ -54,7 +54,7 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		_ = os.RemoveAll(result.InstallPath)
 		return nil, err
 	}
-	s.warnUndeclaredLegacyWebhookAccess(*result.Manifest)
+	s.warnWebhookAccessIssues(*result.Manifest)
 	s.agentToolInstallMu.Lock()
 	catalogLocked := true
 	defer func() {

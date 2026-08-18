@@ -77,11 +77,29 @@ bearer, a signature header), never the caller's Kandev credential. A
 non-Kandev cookie or non-PAT bearer still relays unchanged, so a `public`
 webhook can still verify a provider's own token.
 
-This is a hard cutover, not an `api_version`-gated grandfather clause: every
-existing webhook declaration with no `public` flag now requires auth
-immediately. Blast radius is bounded — authentication is off by default, and
-an auth-enabled install always has a setup-wizard local admin, so SSO is
-additive rather than the only way in.
+A cookie-authenticated webhook request must include an accepted `Origin`.
+Kandev uses the shared `internal/common/httpmw.AllowedOrigin` policy. PAT calls
+and the synthetic identity used when authentication is off do not need an
+Origin header.
+
+Header forwarding depends on access:
+
+- An authenticated webhook receives no `Authorization` or `Cookie` header.
+  This prevents ambient reverse-proxy and browser credentials from reaching the
+  plugin process.
+- A public webhook can receive provider credentials. Kandev still removes its
+  own session cookie and every `kandev_pat_*` credential.
+
+Webhook dispatch uses the existing plugin generation read lease. The lease
+covers the plugin RPC and response handling. Disable, uninstall, configuration
+restart, and upgrade wait for the response to finish. Thus, an access decision
+and an SSO login directive cannot cross into a replacement plugin generation.
+
+`SSOProviders()` only returns a provider when its initiate webhook is effectively
+public. API v1 omission remains public. API v2 requires `access: public` for the
+initiate webhook and its callback.
+The host logs one load-time warning when a declared initiate webhook is not
+public. This gives the operator a diagnostic without logging on each boot read.
 
 ## Consequences
 

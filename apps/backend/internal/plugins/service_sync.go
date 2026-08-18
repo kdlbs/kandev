@@ -208,7 +208,7 @@ func (s *Service) registerSideload(id, version string) error {
 		return fmt.Errorf("persist sideloaded record: %w", err)
 	}
 	s.registry.Add(rec)
-	s.warnUndeclaredLegacyWebhookAccess(rec.Manifest)
+	s.warnWebhookAccessIssues(rec.Manifest)
 	return nil
 }
 
