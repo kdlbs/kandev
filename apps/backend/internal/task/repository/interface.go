@@ -283,6 +283,15 @@ type TurnRepository interface {
 	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
 }
 
+type TaskSessionWakeRepository interface {
+	ListTaskSessionWakes(ctx context.Context, taskID, sessionID string) ([]*models.TaskSessionWake, error)
+	UpsertTaskSessionWake(ctx context.Context, wake *models.TaskSessionWake) (bool, error)
+	DeleteTaskSessionWake(ctx context.Context, taskID, sessionID, marker string) (bool, error)
+	ListDueTaskSessionWakes(ctx context.Context, now time.Time, limit int) ([]*models.TaskSessionWake, error)
+	ClaimTaskSessionWake(ctx context.Context, id string, expectedNextRunAt, nextRunAt, attemptedAt time.Time) (bool, error)
+	RecordTaskSessionWakeDelivery(ctx context.Context, id, status, lastError string, firedAt *time.Time) error
+}
+
 // SessionRepository handles task session lifecycle and workflow-session relationships.
 type SessionRepository interface {
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error

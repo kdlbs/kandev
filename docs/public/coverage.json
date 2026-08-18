@@ -157,6 +157,9 @@
         "list_task_documents_kandev",
         "list_task_sessions_kandev",
         "message_task_kandev",
+        "list_session_wakes_kandev",
+        "upsert_session_wake_kandev",
+        "delete_session_wake_kandev",
         "spawn_session_kandev",
         "write_task_document_kandev"
       ]

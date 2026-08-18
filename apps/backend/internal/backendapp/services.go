@@ -101,6 +101,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			Attachments:       repos.Task,
 			Turns:             repos.Task,
 			Sessions:          repos.Task,
+			SessionWakes:      repos.Task,
 			GitSnapshots:      repos.Task,
 			RepoEntities:      repos.Task,
 			RepositoryCleanup: repos.Task,

@@ -283,6 +283,12 @@ When Office is enabled, it prototypes **Blocked by** and **Blocking** properties
 
 </details>
 
+## Recurring session wakes
+
+Task-session MCP agents can use `upsert_session_wake_kandev` to schedule a future prompt in their current session. Schedules use five-field cron, descriptors, or `@every`, default to UTC, accept an IANA timezone, and require a future RFC3339 expiry. Reusing a marker updates the same schedule; reusing an expired marker reactivates it.
+
+A running session is never interrupted. Kandev retains one coalesced wake until the current turn ends. For a current-task note, write it in the current response; for restart state, update the task plan. Use `message_task_kandev` only for another task or sibling session.
+
 ## Troubleshooting
 
 - **New Agent has no usable profile:** configure credentials under **Settings → Agents** and a compatible executor under **Settings → Executors**.

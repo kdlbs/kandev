@@ -23,6 +23,7 @@ func (r *Repository) initSchema() error {
 		r.initStepTransitionsSchema,
 		r.initAttachmentsSchema,
 		r.initTaskResourceCleanupSchema,
+		r.initTaskSessionWakeSchema,
 		r.initGitSchema,
 		r.initReviewSchema,
 		r.initTaskReviewSchema,

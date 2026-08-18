@@ -497,6 +497,10 @@ which runs inside the agentctl session boundary.
 - Ensure the proxy protects both Streamable HTTP and SSE/message paths and permits long-lived requests.
 - Scope integration, Git, and agent credentials for the damage an unattended client could cause.
 
+## Session-bound recurring wakes
+
+`list_session_wakes_kandev`, `upsert_session_wake_kandev`, and `delete_session_wake_kandev` schedule prompts for the current MCP task session. Unlike Automations, each firing resumes that same session and never creates a task or automation run. Expired schedules remain visible until deleted and may be recreated with the same marker.
+
 ## Troubleshooting
 
 - **No scheduled run:** confirm the cron expression is valid five-field or `@`-shorthand text and the automation/trigger is enabled; a schedule fires at its next occurrence after creation, not immediately.

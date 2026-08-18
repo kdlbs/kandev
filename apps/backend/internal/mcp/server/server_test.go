@@ -385,6 +385,11 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "get_task_mr_automation_kandev")
 	assert.Contains(t, tools, "update_task_mr_automation_kandev")
 
+	// Task mode should have session wake tools scoped to the current MCP session.
+	assert.Contains(t, tools, "list_session_wakes_kandev")
+	assert.Contains(t, tools, "upsert_session_wake_kandev")
+	assert.Contains(t, tools, "delete_session_wake_kandev")
+
 	// Task mode should have plan tools
 	assert.Contains(t, tools, "create_task_plan_kandev")
 	assert.Contains(t, tools, "get_task_plan_kandev")
@@ -432,6 +437,35 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "update_task_state_kandev")
 	assert.NotContains(t, tools, "delete_workflow_step_kandev")
 	assert.NotContains(t, tools, "reorder_workflow_steps_kandev")
+}
+
+func TestSessionWakeToolsExposeNoTargetFields(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	for _, toolName := range []string{"list_session_wakes_kandev", "upsert_session_wake_kandev", "delete_session_wake_kandev"} {
+		tool, ok := s.mcpServer.ListTools()[toolName]
+		require.True(t, ok, "tool %s should be registered", toolName)
+		schema, err := json.Marshal(tool.Tool.InputSchema)
+		require.NoError(t, err)
+		assert.NotContains(t, string(schema), "task_id", toolName)
+		assert.NotContains(t, string(schema), "session_id", toolName)
+	}
+}
+
+func TestOfficeProfileDoesNotExposeSessionWakeTools(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	profile := mcpprofile.New(mcpprofile.SurfaceOfficeTask, nil, nil)
+	s := NewWithProfile(backend, "office-session", "office-task", 10005, log, "", false, profile)
+	tools := getRegisteredToolNames(s)
+	assert.NotContains(t, tools, "list_session_wakes_kandev")
+	assert.NotContains(t, tools, "upsert_session_wake_kandev")
+	assert.NotContains(t, tools, "delete_session_wake_kandev")
 }
 
 func TestServerProfile_AutopilotChildHasOnlyParentQuestion(t *testing.T) {
@@ -644,7 +678,7 @@ drained:
 	// as in TestServerModeTask_ToolCount and
 	// TestRegisterTools_LoggedCountMatchesRegisteredTools (list_task_sessions_test.go),
 	// which pin the per-mode registration rather than this SetProviders rebuild.
-	require.Len(t, tools, 35, "final registry should contain the complete GitLab-only task tool set")
+	require.Len(t, tools, 38, "final registry should contain the complete GitLab-only task tool set")
 	assert.Contains(t, tools, "get_task_mr_automation_kandev")
 	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
 }
@@ -823,7 +857,7 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Contains(t, tools, "list_task_sessions_kandev", "session discovery must be registered in task mode")
 	assert.Contains(t, tools, "add_task_dependency_kandev", "dependency edges must be manageable in task mode")
 	assert.Contains(t, tools, "remove_task_dependency_kandev")
-	assert.Equal(t, 37, len(tools))
+	assert.Equal(t, 40, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskOnlyAndDiscoverable(t *testing.T) {
