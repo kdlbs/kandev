@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -415,25 +417,33 @@ func (m *Manager) AuthenticateBySessionID(ctx context.Context, sessionID, method
 // before its agent mode event updated modeState. A nil/empty resolved mode is a
 // no-op. Addresses issue #1183.
 func (m *Manager) reapplySessionModeAfterReset(ctx context.Context, execution *AgentExecution, newSessionID string, prev *CachedModeState) {
-	if execution.agentctl == nil {
-		return
-	}
 	fallback := ""
-	var availableModes []streams.SessionModeInfo
 	if prev != nil {
 		fallback = prev.CurrentModeID
-		availableModes = prev.AvailableModes
 	}
 	mode := m.effectiveSessionMode(ctx, execution, fallback)
-	if mode == "" {
-		return
-	}
-	if err := execution.agentctl.SetMode(ctx, newSessionID, mode); err != nil {
+	if err := m.applySessionModeAfterReset(ctx, execution, newSessionID, mode); err != nil {
 		m.logger.Warn("failed to re-apply session mode after context reset",
 			zap.String("execution_id", execution.ID),
 			zap.String("mode", mode),
 			zap.Error(err))
-		return
+	}
+}
+
+func (m *Manager) applySessionModeAfterReset(
+	ctx context.Context,
+	execution *AgentExecution,
+	newSessionID, mode string,
+) error {
+	if execution.agentctl == nil || mode == "" {
+		return nil
+	}
+	if err := execution.agentctl.SetMode(ctx, newSessionID, mode); err != nil {
+		return fmt.Errorf("failed to restore session mode %q: %w", mode, err)
+	}
+	availableModes := []streams.SessionModeInfo(nil)
+	if current := execution.GetModeState(); current != nil {
+		availableModes = current.AvailableModes
 	}
 	// Restore the cache too: the fresh session would otherwise report the agent's
 	// default mode, leaving modeState stale relative to what we just re-applied.
@@ -445,6 +455,7 @@ func (m *Manager) reapplySessionModeAfterReset(ctx context.Context, execution *A
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID),
 		zap.String("mode", mode))
+	return nil
 }
 
 // reapplySessionModelAfterReset applies the executor-authoritative model
@@ -543,16 +554,107 @@ func freshSessionModelCatalogReady(state *CachedModelState) bool {
 }
 
 func (m *Manager) effectiveSessionModelForReset(ctx context.Context, execution *AgentExecution) string {
-	modelFallback := ""
-	if previous := execution.GetModelState(); previous != nil {
-		modelFallback = previous.CurrentModelID
+	return m.captureSessionRuntimeConfigForReset(ctx, execution).Model
+}
+
+func (m *Manager) captureSessionRuntimeConfigForReset(
+	ctx context.Context,
+	execution *AgentExecution,
+) models.SessionRuntimeConfig {
+	profileModel, profileMode, profileOptions := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
+	model, mode, options, optionsSet := m.effectiveSessionRuntimeConfigWithPresence(
+		ctx, execution, profileModel, profileMode, profileOptions,
+	)
+	modelState := execution.GetModelState()
+	if model == "" && modelState != nil {
+		model = modelState.CurrentModelID
 	}
-	if modelFallback == "" {
-		profileModel, _, _ := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
-		modelFallback = profileModel
+	if mode == "" {
+		if modeState := execution.GetModeState(); modeState != nil {
+			mode = modeState.CurrentModeID
+		}
 	}
-	model, _, _ := m.effectiveSessionRuntimeConfig(ctx, execution, modelFallback, "", nil)
-	return model
+	if !optionsSet {
+		options = selectedRuntimeConfigOptions(modelState)
+	}
+	return models.SessionRuntimeConfig{
+		Model:         model,
+		Mode:          mode,
+		ConfigOptions: sanitizeRuntimeConfigOptions(options),
+	}
+}
+
+func selectedRuntimeConfigOptions(state *CachedModelState) map[string]string {
+	if state == nil {
+		return nil
+	}
+	options := make(map[string]string, len(state.ConfigOptions))
+	for _, option := range state.ConfigOptions {
+		id := strings.TrimSpace(option.ID)
+		value := strings.TrimSpace(option.CurrentValue)
+		if isRestorableRuntimeConfigOption(id, option.Category, value) {
+			options[id] = value
+		}
+	}
+	if len(options) == 0 {
+		return nil
+	}
+	return options
+}
+
+func sanitizeRuntimeConfigOptions(options map[string]string) map[string]string {
+	if options == nil {
+		return nil
+	}
+	cleaned := make(map[string]string, len(options))
+	for id, value := range options {
+		if isRestorableRuntimeConfigOption(id, "", value) {
+			cleaned[strings.TrimSpace(id)] = strings.TrimSpace(value)
+		}
+	}
+	return cleaned
+}
+
+func isRestorableRuntimeConfigOption(id, category, value string) bool {
+	id = strings.TrimSpace(id)
+	value = strings.TrimSpace(value)
+	if id == "" || value == "" {
+		return false
+	}
+	if strings.EqualFold(id, "model") || strings.EqualFold(id, "mode") {
+		return false
+	}
+	return !strings.EqualFold(category, "model") && !strings.EqualFold(category, "mode")
+}
+
+func (m *Manager) restoreSessionRuntimeConfig(
+	ctx context.Context,
+	execution *AgentExecution,
+	sessionID string,
+	config models.SessionRuntimeConfig,
+) error {
+	if execution == nil || execution.agentctl == nil {
+		return fmt.Errorf("cannot restore session runtime configuration without an agentctl client")
+	}
+	if err := m.reapplySessionModelAfterReset(ctx, execution, sessionID, config.Model); err != nil {
+		return fmt.Errorf("restore session runtime model: %w", err)
+	}
+	if err := m.applySessionModeAfterReset(ctx, execution, sessionID, config.Mode); err != nil {
+		return fmt.Errorf("restore session runtime mode: %w", err)
+	}
+	options := sanitizeRuntimeConfigOptions(config.ConfigOptions)
+	optionIDs := make([]string, 0, len(options))
+	for id := range options {
+		optionIDs = append(optionIDs, id)
+	}
+	sort.Strings(optionIDs)
+	for _, id := range optionIDs {
+		value := options[id]
+		if err := execution.agentctl.SetConfigOption(ctx, id, value); err != nil {
+			return fmt.Errorf("restore session runtime option %q: %w", id, err)
+		}
+	}
+	return nil
 }
 
 // ResetAgentContext resets the agent's conversation context. For ACP agents that support
@@ -573,11 +675,10 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
 
-	// Capture active session state before the reset. The fresh ACP session starts
-	// at provider defaults, so asynchronous model/mode events from it must not
-	// replace the task's effective pre-reset configuration.
-	prevMode := execution.GetModeState()
-	effectiveModel := m.effectiveSessionModelForReset(ctx, execution)
+	// Capture the complete effective session configuration before the reset. The
+	// fresh ACP session starts at provider defaults, so asynchronous events from
+	// it must not replace the task's pre-reset restoration intent.
+	runtimeConfig := m.captureSessionRuntimeConfigForReset(ctx, execution)
 
 	// Clear the old catalog before creating the fresh session. The new
 	// session_models event is delivered asynchronously and must be the only
@@ -612,7 +713,6 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	// Success — update execution state without restarting process
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 		exec.ACPSessionID = newSessionID
-		exec.Status = v1.AgentStatusReady
 		exec.needsResumeContext = false
 		exec.resumeContextInjected = false
 
@@ -625,24 +725,23 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		}
 	})
 
-	// Restore the task's effective model and the user's session permission mode
-	// onto the fresh ACP session. A strict-mode model that is gone in the new
-	// session fails the reset explicitly instead of silently dropping to the
-	// provider default.
-	if !cacheFreshSessionModelState(execution) && effectiveModel != "" {
+	// Restore the complete captured configuration. A strict-mode model that is
+	// rejected by the fresh session fails the reset explicitly instead of
+	// silently dropping to the provider default.
+	if !cacheFreshSessionModelState(execution) &&
+		(runtimeConfig.Model != "" || len(runtimeConfig.ConfigOptions) > 0) {
 		waitForFreshSessionModelState(ctx, m.logger, execution)
 	}
-	if err := m.reapplySessionModelAfterReset(ctx, execution, newSessionID, effectiveModel); err != nil {
-		// The reset already committed the execution as Ready; a model
-		// re-application failure must not leave it there, or later prompts
-		// would run on the fresh session with provider-default model state.
+	if err := m.restoreSessionRuntimeConfig(ctx, execution, newSessionID, runtimeConfig); err != nil {
 		_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 			exec.Status = v1.AgentStatusFailed
 			exec.ErrorMessage = err.Error()
 		})
 		return err
 	}
-	m.reapplySessionModeAfterReset(ctx, execution, newSessionID, prevMode)
+	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
+		exec.Status = v1.AgentStatusReady
+	})
 
 	m.logger.Info("agent context reset via session (no process restart)",
 		zap.String("execution_id", executionID),
@@ -855,16 +954,19 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		return fmt.Errorf("failed to initialize ACP session after restart: %w", err)
 	}
 
-	if !cacheFreshSessionModelState(execution) && preparation.previousModel != "" {
+	if !cacheFreshSessionModelState(execution) &&
+		(preparation.runtimeConfig.Model != "" || len(preparation.runtimeConfig.ConfigOptions) > 0) {
 		waitForFreshSessionModelState(ctx, m.logger, execution)
-		if err := m.reapplySessionModelAfterReset(ctx, execution, execution.ACPSessionID, preparation.previousModel); err != nil {
-			m.updateExecutionError(executionID, "failed to restore session model after restart: "+err.Error())
-			return fmt.Errorf("failed to restore session model after restart: %w", err)
-		}
 	}
-
-	// Restore the user's session permission mode onto the fresh ACP session.
-	m.reapplySessionModeAfterReset(ctx, execution, execution.ACPSessionID, preparation.previousMode)
+	if err := m.restoreSessionRuntimeConfig(ctx, execution, execution.ACPSessionID, preparation.runtimeConfig); err != nil {
+		m.updateExecutionError(executionID, "failed to restore session runtime configuration after restart: "+err.Error())
+		return fmt.Errorf("failed to restore session runtime configuration after restart: %w", err)
+	}
+	if err := m.updateStatusAndPersist(ctx, execution.ID, v1.AgentStatusReady); err != nil {
+		m.updateExecutionError(executionID, "failed to mark restarted agent ready: "+err.Error())
+		return fmt.Errorf("failed to mark restarted agent ready: %w", err)
+	}
+	m.eventPublisher.PublishAgentEvent(ctx, events.AgentBootReady, execution)
 
 	m.logger.Info("agent process restarted with fresh context",
 		zap.String("execution_id", executionID),
@@ -878,8 +980,7 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 type agentRestartPreparation struct {
 	agentConfig   agents.Agent
 	commands      agentCommands
-	previousModel string
-	previousMode  *CachedModeState
+	runtimeConfig models.SessionRuntimeConfig
 }
 
 // prepareAgentRestart builds and validates the replacement before touching the current process.
@@ -900,8 +1001,7 @@ func (m *Manager) prepareAgentRestart(ctx context.Context, execution *AgentExecu
 	return agentRestartPreparation{
 		agentConfig:   agentConfig,
 		commands:      commands,
-		previousModel: m.effectiveSessionModelForReset(ctx, execution),
-		previousMode:  execution.GetModeState(),
+		runtimeConfig: m.captureSessionRuntimeConfigForReset(ctx, execution),
 	}, nil
 }
 
@@ -965,14 +1065,6 @@ func (m *Manager) initializeACPSessionForRestart(
 	if m.sessionManager.eventPublisher != nil {
 		m.sessionManager.eventPublisher.PublishACPSessionCreated(execution, result.SessionID)
 	}
-
-	// Mark execution as ready. This is a *boot* signal — initializeACPSessionForRestart
-	// is the post-restart init path and no turn has run yet, so AgentBootReady (not
-	// AgentReady) is what subscribers want to route on.
-	if err := m.updateStatusAndPersist(ctx, execution.ID, v1.AgentStatusReady); err != nil {
-		return err
-	}
-	m.eventPublisher.PublishAgentEvent(ctx, events.AgentBootReady, execution)
 
 	return nil
 }

@@ -344,6 +344,12 @@ New steps allow manual moves by default. **Show in command panel** also defaults
 | **WIP limit**             | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited. Overflow remains visible as queued cards; manual moves into a full step succeed and queue there. |
 | **Pull from**             | Optional one-hop feeder step. When capacity opens or eligible work arrives in the feeder, Kandev promotes queued work from the destination first, then the feeder. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
 
+When **Reset agent context** creates a fresh ACP session, Kandev preserves the
+selected ACP model, permission mode, and provider options. It restores these
+settings before the next automatic prompt. If the provider rejects a setting,
+the restoration fails and Kandev does not send the destination step's automatic
+prompt.
+
 The WIP check also applies when a task is created. It runs for an explicit
 `workflow_step_id` and for the workflow's resolved start step, and the
 admission check is atomic. When a limited step is full, the task is still

@@ -43,10 +43,22 @@ type restartMockAgentctlServer struct {
 	httpActions []string
 	wsActions   []string
 	setModelIDs []string
+	setModeIDs  []string
+	setOptions  []restartConfigOption
 
-	failStop       bool
-	failSessionNew bool
-	modelState     *streams.SessionModelState
+	failStop           bool
+	failSessionNew     bool
+	failMode           bool
+	failConfigOptionID string
+	modelState         *streams.SessionModelState
+	newModelState      *streams.SessionModelState
+	onReset            func()
+	onSessionNew       func()
+}
+
+type restartConfigOption struct {
+	ID    string `json:"config_id"`
+	Value string `json:"value"`
 }
 
 func TestStopAgentWithReason_MissingExecutionIsClassified(t *testing.T) {
@@ -139,18 +151,28 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 					},
 				})
 			case "agent.session.new":
+				if m.onSessionNew != nil {
+					m.onSessionNew()
+				}
 				if m.failSessionNew {
 					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 						"success": false,
 						"error":   "session new failed",
 					})
 				} else {
-					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+					payload := map[string]interface{}{
 						"success":    true,
 						"session_id": "new-session-123",
-					})
+					}
+					if m.newModelState != nil {
+						payload["model_state"] = m.newModelState
+					}
+					resp, _ = ws.NewResponse(msg.ID, msg.Action, payload)
 				}
 			case "agent.session.reset":
+				if m.onReset != nil {
+					m.onReset()
+				}
 				payload := map[string]interface{}{
 					"success":    true,
 					"session_id": "reset-session-456",
@@ -160,17 +182,30 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 				}
 				resp, _ = ws.NewResponse(msg.ID, msg.Action, payload)
 			case "agent.session.set_mode":
-				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-					"success": true,
-				})
+				if m.failMode {
+					resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "mode rejected", nil)
+				} else {
+					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+						"success": true,
+					})
+				}
 			case "agent.session.set_model":
 				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 					"success": true,
 				})
 			case "agent.session.set_config_option":
-				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-					"success": true,
-				})
+				var payload struct {
+					ConfigID string `json:"config_id"`
+					Value    string `json:"value"`
+				}
+				_ = json.Unmarshal(msg.Payload, &payload)
+				if payload.ConfigID == m.failConfigOptionID {
+					resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "config option rejected", nil)
+				} else {
+					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+						"success": true,
+					})
+				}
 			case "agent.stderr":
 				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 					"lines": []string{
@@ -221,14 +256,26 @@ func (m *restartMockAgentctlServer) recordWS(message ws.Message) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.wsActions = append(m.wsActions, message.Action)
-	if message.Action != "agent.session.set_model" {
-		return
-	}
-	var payload struct {
-		ModelID string `json:"model_id"`
-	}
-	if err := json.Unmarshal(message.Payload, &payload); err == nil {
-		m.setModelIDs = append(m.setModelIDs, payload.ModelID)
+	switch message.Action {
+	case "agent.session.set_model":
+		var payload struct {
+			ModelID string `json:"model_id"`
+		}
+		if err := json.Unmarshal(message.Payload, &payload); err == nil {
+			m.setModelIDs = append(m.setModelIDs, payload.ModelID)
+		}
+	case "agent.session.set_mode":
+		var payload struct {
+			ModeID string `json:"mode_id"`
+		}
+		if err := json.Unmarshal(message.Payload, &payload); err == nil {
+			m.setModeIDs = append(m.setModeIDs, payload.ModeID)
+		}
+	case "agent.session.set_config_option":
+		var payload restartConfigOption
+		if err := json.Unmarshal(message.Payload, &payload); err == nil {
+			m.setOptions = append(m.setOptions, payload)
+		}
 	}
 }
 
@@ -253,6 +300,22 @@ func (m *restartMockAgentctlServer) getSetModelIDs() []string {
 	defer m.mu.Unlock()
 	out := make([]string, len(m.setModelIDs))
 	copy(out, m.setModelIDs)
+	return out
+}
+
+func (m *restartMockAgentctlServer) getSetModeIDs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, len(m.setModeIDs))
+	copy(out, m.setModeIDs)
+	return out
+}
+
+func (m *restartMockAgentctlServer) getSetOptions() []restartConfigOption {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]restartConfigOption, len(m.setOptions))
+	copy(out, m.setOptions)
 	return out
 }
 
