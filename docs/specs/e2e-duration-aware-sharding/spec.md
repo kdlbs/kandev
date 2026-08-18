@@ -1,5 +1,5 @@
 ---
-status: building
+status: shipped
 created: 2026-08-10
 updated: 2026-08-18
 ---
@@ -210,5 +210,6 @@ The duration-aware sharding work is implemented in the CI workflow, E2E
 tooling, scoped Docker fixtures, and focused reliability tests. The generated
 manifests, rolling profile, retry diagnostics, and fail-closed runner have
 unit, type, and targeted E2E coverage. The prebuilt desktop image amendment is
-planned in `docs/plans/desktop-e2e-prebuilt-image/plan.md`. The balance target
-and the desktop-image rollout remain operational checks after merge.
+implemented and was proven by the branch image publish and pull-request smoke
+run recorded in `docs/plans/desktop-e2e-prebuilt-image/plan.md`. The balance
+target remains an operational check after merge.

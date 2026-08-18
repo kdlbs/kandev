@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/e2e-duration-aware-sharding/spec.md
 created: 2026-08-18
-status: building
+status: complete
 ---
 
 # Implementation Plan: Prebuilt Desktop E2E Image
@@ -98,8 +98,12 @@ or Rust toolchain download step.
 ## Verification Results
 
 Local contract, action-pinning, Dockerfile, and desktop smoke checks pass. The
-branch image publish and pull-request desktop smoke run will be recorded here
-after the branch is pushed.
+branch image publisher run `32191451396` completed successfully, including the
+`Build and push desktop` job `95886471809`. PR E2E run `32188852911` attempt 2
+completed successfully; `Desktop E2E Smoke` job `95887857830` entered the
+published container, built DEB/RPM bundles, and reported a successful WebView
+smoke. Its log contains source dependency installation but no live apt or Rust
+toolchain setup.
 
 ## Implementation Waves And Parallel Candidates
 
@@ -111,7 +115,7 @@ Execute sequentially in the primary session:
 
 ### Wave 2
 
-- [ ] [task-02-consume-and-prove-image](task-02-consume-and-prove-image.md)
+- [x] [task-02-consume-and-prove-image](task-02-consume-and-prove-image.md)
 
 ## Risks
 

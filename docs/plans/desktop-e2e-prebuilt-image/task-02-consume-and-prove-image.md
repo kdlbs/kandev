@@ -1,7 +1,7 @@
 ---
 id: "02-consume-and-prove-image"
 title: "Consume and prove desktop image"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-prebuild-desktop-image"]
 plan: "plan.md"
@@ -30,9 +30,10 @@ python3 .github/scripts/lint-action-pinning.py
 docker run --rm --ipc=host --volume "$PWD:/work" --workdir /work/apps kandev-ci:desktop-local bash -lc 'pnpm install --frozen-lockfile && pnpm --filter @kandev/desktop e2e'
 ```
 
-After the branch is pushed, start `.github/workflows/ci-base-image.yml` with
-`workflow_dispatch`. Record that run and the next `Desktop E2E Smoke` run in
-the task results and plan verification results.
+The branch image publisher run `32191451396` succeeded. The PR E2E run
+`32188852911` attempt 2 succeeded after rerunning its failed jobs; its
+`Desktop E2E Smoke` job `95887857830` passed container initialization,
+dependency installation, DEB/RPM bundling, and the WebView smoke.
 
 ## Files likely touched
 
@@ -72,5 +73,9 @@ the synchronized task and plan status.
   --frozen-lockfile` completed, the Tauri application built both DEB and RPM
   bundles, and `node e2e/desktop-launch-smoke.mjs` reported a successful
   WebView request after backend health.
-- Branch image publication and pull-request verification remain the remote
-  rollout records for this task.
+- Remote image publication and pull-request verification are complete. The
+  smoke log records `pnpm install --frozen-lockfile`, successful DEB/RPM
+  bundles, and `Desktop smoke passed: WebView requested / after backend health`;
+  it contains no live apt or Rust toolchain setup.
+- Changed files, blockers, risks, and synchronized plan status are recorded in
+  this task and the parent plan.

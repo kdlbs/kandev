@@ -67,3 +67,10 @@ files, blockers, risks, and the synchronized task and plan status.
 - `docker build --target desktop --tag kandev-ci:desktop-local --file
   .github/docker/ci-base/Dockerfile .` passed. The image smoke checks reported
   Rust 1.97.1, WebKitGTK, patchelf, and Xvfb.
+- Changed files: the desktop Dockerfile, CI image publisher, E2E workflow,
+  action-pinning workflow, contract test, and the associated plan/spec/task
+  records.
+- Blockers: none after the authorized branch image dispatch.
+- Risks: cold pnpm/Cargo project dependency downloads still depend on external
+  registries; the unbounded OS and Rust bootstrap path is prebuilt.
+- Synchronized status: Task 01 is done and Wave 1 is complete in the plan.
