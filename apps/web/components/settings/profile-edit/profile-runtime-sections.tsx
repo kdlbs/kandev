@@ -11,6 +11,7 @@ import {
 import {
   DockerfileBuildCard,
   DockerContainersCard,
+  UserNamespacesCard,
 } from "@/components/settings/profile-edit/docker-sections";
 import { NetworkPoliciesCard } from "@/components/settings/profile-edit/sprites-sections";
 import { SpritesInstancesCard } from "@/components/settings/sprites-settings";
@@ -21,6 +22,8 @@ type DockerSectionsProps = {
   onDockerfileChange: (v: string) => void;
   imageTag: string;
   onImageTagChange: (v: string) => void;
+  allowUserNamespaces: boolean;
+  onAllowUserNamespacesChange: (v: boolean) => void;
 };
 
 export function DockerSections({
@@ -29,6 +32,8 @@ export function DockerSections({
   onDockerfileChange,
   imageTag,
   onImageTagChange,
+  allowUserNamespaces,
+  onAllowUserNamespacesChange,
 }: DockerSectionsProps) {
   return (
     <>
@@ -39,6 +44,10 @@ export function DockerSections({
         imageTag={imageTag}
         baselineImageTag={profile.config?.image_tag ?? ""}
         onImageTagChange={onImageTagChange}
+      />
+      <UserNamespacesCard
+        enabled={allowUserNamespaces}
+        onChange={onAllowUserNamespacesChange}
       />
       <DockerContainersCard profileId={profile.id} />
     </>

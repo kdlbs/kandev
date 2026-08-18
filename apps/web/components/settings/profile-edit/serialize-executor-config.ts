@@ -14,6 +14,7 @@ export type ExecutorProfileConfigForm = {
   isDocker: boolean;
   dockerfile: string;
   imageTag: string;
+  allowUserNamespaces: boolean;
   isSSH: boolean;
   sshShell: string;
   sshReclaimTaskDir: boolean;
@@ -40,6 +41,7 @@ export function buildSaveConfig(
   setTextConfig(config, "git_user_email", form.isRemote ? gitEmail.trim() : "");
   setTextConfig(config, "dockerfile", form.isDocker ? form.dockerfile : "");
   setTextConfig(config, "image_tag", form.isDocker ? form.imageTag.trim() : "");
+  setTextConfig(config, "allow_user_namespaces", form.isDocker && form.allowUserNamespaces ? "true" : "");
   setTextConfig(config, "ssh_shell", form.isSSH ? form.sshShell.trim() : "");
   setBoolConfig(config, "ssh_reclaim_task_dir", form.isSSH, form.sshReclaimTaskDir);
   return config;

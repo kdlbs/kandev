@@ -279,5 +279,8 @@
   "portableConfigInfoTitle": "Configuração portátil do agente",
   "portableConfigNotFound": "Não encontrado",
   "portableConfigNotFoundHint": "Isto é uma sugestão de edição. Pode guardar o perfil e adicionar o ficheiro mais tarde.",
-  "portableConfigTitle": "Configuração do agente"
+  "portableConfigTitle": "Configuração do agente",
+  "allowUserNamespacesTitle": "Suporte para namespaces de utilizador",
+  "allowUserNamespacesDescription": "Permitir a criação de namespaces de utilizador sem privilégios e operações de montagem dentro de contentores. Ativa ferramentas de sandbox como bwrap.",
+  "allowUserNamespacesNote": "Esta definição só afeta contentores recém-criados. Os ambientes de tarefas existentes devem ser reiniciados para a alteração ter efeito."
 }

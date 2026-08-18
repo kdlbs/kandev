@@ -283,6 +283,9 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
   const [cleanupScript, setCleanupScript] = useState(profile.cleanup_script ?? "");
   const [dockerfile, setDockerfile] = useState(profile.config?.dockerfile ?? "");
   const [imageTag, setImageTag] = useState(profile.config?.image_tag ?? "");
+  const [allowUserNamespaces, setAllowUserNamespaces] = useState(
+    profile.config?.allow_user_namespaces === "true",
+  );
   const [sshShell, setSshShell] = useState(profile.config?.ssh_shell ?? "");
   const [sshReclaimTaskDir, setSshReclaimTaskDir] = useState(() =>
     isSSHReclaimEnabled(profile.config),
@@ -328,6 +331,8 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     setDockerfile,
     imageTag,
     setImageTag,
+    allowUserNamespaces,
+    setAllowUserNamespaces,
     sshShell,
     setSshShell,
     sshReclaimTaskDir,
@@ -407,6 +412,8 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
           onDockerfileChange={form.setDockerfile}
           imageTag={form.imageTag}
           onImageTagChange={form.setImageTag}
+          allowUserNamespaces={form.allowUserNamespaces}
+          onAllowUserNamespacesChange={form.setAllowUserNamespaces}
         />
       )}
       {form.isRemote && (

@@ -279,5 +279,8 @@
   "usesTheLocalDockerDaemonOn": "Uses the local Docker daemon on this machine.",
   "value": "Value",
   "verifyingConnection": "Verifying connection...",
-  "profileNameExample": "Production, Development"
+  "profileNameExample": "Production, Development",
+  "allowUserNamespacesTitle": "User namespace support",
+  "allowUserNamespacesDescription": "Allow unprivileged user namespace creation and mount operations inside containers. Enables sandboxing tools like bwrap.",
+  "allowUserNamespacesNote": "This setting only affects newly created containers. Existing task environments must be reset for the change to take effect."
 }

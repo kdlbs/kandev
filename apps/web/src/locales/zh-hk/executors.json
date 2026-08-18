@@ -279,5 +279,8 @@
   "portableConfigInfoTitle": "可遷移的代理程式設定檔",
   "portableConfigNotFound": "未找到",
   "portableConfigNotFoundHint": "這只是編輯提示。你可以先儲存設定，稍後再新增該檔案。",
-  "portableConfigTitle": "代理程式設定檔"
+  "portableConfigTitle": "代理程式設定檔",
+  "allowUserNamespacesTitle": "使用者命名空間支援",
+  "allowUserNamespacesDescription": "允許在容器內建立無特權的使用者命名空間和執行掛載操作。啟用如 bwrap 的沙盒工具。",
+  "allowUserNamespacesNote": "此設定僅影響新建立的容器。現有任務環境必須重設才能使變更生效。"
 }
