@@ -2949,8 +2949,19 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 
 	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	if err != nil || executionID == "" {
-		s.logger.Debug("no agent execution for context reset, skipping",
-			zap.String("session_id", sessionID))
+		// No in-memory execution exists yet — most commonly a lazily-resumed
+		// session whose process has not been relaunched since the last run.
+		// The resume path (applyRunningRecordToResumeRequest) reads the ACP
+		// resume token straight from the executors_running row, bypassing any
+		// in-memory execution lookup entirely, so leaving that token in place
+		// here would let the next lazy launch reconnect to the pre-reset
+		// conversation and silently skip the reset. Clear the same persisted
+		// state the live-execution path clears below so the reset survives
+		// until the agent's first turn regardless of when the process starts.
+		s.logger.Debug("no live agent execution for context reset, clearing persisted resume state",
+			zap.String("session_id", sessionID),
+			zap.String("step_name", stepName))
+		s.clearPersistedResetState(ctx, sessionID, session)
 		return true
 	}
 
@@ -2972,12 +2983,25 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		return false
 	}
 
+	s.clearPersistedResetState(ctx, sessionID, session)
+	return true
+}
+
+// clearPersistedResetState clears the durable, DB-backed session state that a
+// later lazy resume would otherwise pick back up: the stored ACP session ID
+// in session metadata, the resume token on the executors_running row, and the
+// persisted context window. Runs for both the live-execution reset (after the
+// provider session is actually reset) and the no-in-memory-execution path
+// above (where there is nothing live to reset but the persisted state must
+// still be cleared before the next agent turn).
+func (s *Service) clearPersistedResetState(ctx context.Context, sessionID string, session *models.TaskSession) {
 	// Clear the stored ACP session ID using json_set to avoid clobbering other keys.
 	if updateErr := s.repo.SetSessionMetadataKey(ctx, sessionID, "acp_session_id", ""); updateErr != nil {
 		s.logger.Warn("failed to clear ACP session ID from session metadata",
 			zap.String("session_id", sessionID),
 			zap.Error(updateErr))
 	}
+	s.clearResumeToken(ctx, sessionID)
 	if updateErr := s.clearContextWindowForReset(ctx, sessionID); updateErr != nil {
 		s.logger.Warn("failed to clear context window from session metadata",
 			zap.String("session_id", sessionID),
@@ -2988,7 +3012,6 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 	// its cache after the provider reset succeeds and must not receive stale data
 	// back through the final processOnEnter state event.
 	clearInMemoryContextWindow(session)
-	return true
 }
 
 // resolveSessionMCPSupport checks if the agent for a session supports MCP.
