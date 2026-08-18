@@ -322,24 +322,15 @@ func (h *pluginHost) EmitEvent(ctx context.Context, name string, payload map[str
 	return h.bus.Publish(ctx, subject, event)
 }
 
-// AgentConversations returns the agent conversation manager, gated on the
-// agent_conversation capability. Returns nil when the capability is not
-// declared, so the grpcHostServer casting check fails gracefully.
+// AgentConversations returns the agent conversation manager. It always
+// returns a non-nil manager: the agent_conversation capability check and the
+// late-wiring check happen inside each method, mirroring
+// PluginOwnedTaskTrees. Returning nil here would not make grpcHostServer's
+// AgentConversationHost type assertion fail (pluginHost always implements the
+// method), so the server would call a method on a nil interface and panic
+// instead of denying the call.
 func (h *pluginHost) AgentConversations() pluginsdk.AgentConversationManager {
-	if !h.capabilities.AgentConversation {
-		return nil
-	}
-	if h.agentConversations == nil {
-		return nil
-	}
-	svc := h.agentConversations()
-	if svc == nil {
-		return nil
-	}
-	return &pluginHostAgentConversationManager{
-		pluginID: h.pluginID,
-		svc:      svc,
-	}
+	return &pluginHostAgentConversationManager{host: h}
 }
 
 // unmarshalStateValue decodes a plugin_state row's JSON value into a
