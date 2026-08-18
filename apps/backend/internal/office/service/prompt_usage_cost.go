@@ -115,6 +115,12 @@ func (s *Service) lookupPricingWithVersion(
 // buildCostEvent assembles the office_cost_events row for a prompt-usage
 // update.
 //
+// AgentProfileID prefers RunnerProjection's workflow-configured runner
+// (fields.AssigneeAgentProfileID) and falls back to sessionAgentProfileID —
+// the session's own task_sessions.agent_profile_id — only when that
+// projection is empty (e.g. a Kanban step with no pinned runner). This
+// strictly fills blanks and never overrides an existing attribution.
+//
 // The cache split (TokensCachedRead / TokensCachedWrite) is recorded only
 // when data.Usage.Estimated is false. codex-acp's ACP bridge (and any
 // future adapter with no per-turn usage frame) synthesises InputTokens from
@@ -126,12 +132,16 @@ func (s *Service) lookupPricingWithVersion(
 // unaffected.
 func buildCostEvent(
 	data PromptUsageData, fields *sqlite.TaskExecutionFields, projectID, provider string,
-	resolution costResolution,
+	resolution costResolution, sessionAgentProfileID string,
 ) *models.CostEvent {
+	agentProfileID := fields.AssigneeAgentProfileID
+	if agentProfileID == "" {
+		agentProfileID = sessionAgentProfileID
+	}
 	event := &models.CostEvent{
 		SessionID:      data.SessionID,
 		TaskID:         data.TaskID,
-		AgentProfileID: fields.AssigneeAgentProfileID,
+		AgentProfileID: agentProfileID,
 		ProjectID:      projectID,
 		Model:          data.Model,
 		Provider:       provider,

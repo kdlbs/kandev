@@ -569,9 +569,18 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 		return nil
 	}
 
+	sessionAgentProfileID := ""
+	if fields.AssigneeAgentProfileID == "" {
+		if id, err := s.repo.GetSessionAgentProfileID(ctx, data.SessionID); err == nil {
+			sessionAgentProfileID = id
+		}
+	}
+
 	resolution := s.resolveCostForUsage(ctx, *data)
 	provider := resolveProvider(*data)
-	costEvent := buildCostEvent(*data, fields, s.projectIDForTask(ctx, data.TaskID), provider, resolution)
+	costEvent := buildCostEvent(
+		*data, fields, s.projectIDForTask(ctx, data.TaskID), provider, resolution, sessionAgentProfileID,
+	)
 
 	if err := s.recordCostEventAndRollup(
 		ctx, costEvent, data.SessionID,

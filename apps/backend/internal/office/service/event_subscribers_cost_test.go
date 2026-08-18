@@ -259,6 +259,63 @@ func TestPromptUsage_CostSourceModelsDevList(t *testing.T) {
 	}
 }
 
+// TestPromptUsage_ThoughtTokensDoNotAffectCost is a regression test for the
+// triage correction on the card: reasoning_output_tokens is a SUBSET of
+// output_tokens (OpenAI's own accounting: last_total = last_in + last_out
+// held across all 22 Tetris-benchmark rows even though reasoning was
+// nonzero), not an addend. Folding ThoughtTokens into billable output would
+// have double-counted and inflated that turn's cost by ~22%. Pins the cost
+// for an identical usage sample with and without ThoughtTokens set.
+func TestPromptUsage_ThoughtTokensDoNotAffectCost(t *testing.T) {
+	pricing := &fakePricingLookup{
+		hit: true,
+		pricing: shared.ModelPricing{
+			InputPerMillion:  300000,
+			OutputPerMillion: 1500000,
+		},
+	}
+
+	costFor := func(taskID, sessionID string, thoughtTokens int) int64 {
+		svc, eb := newTestServiceWithBus(t)
+		svc.SetPricingLookup(pricing)
+		ctx := context.Background()
+		createTestAgent(t, svc, "ws-1", "worker-thought")
+		insertTestTask(t, svc, taskID, "ws-1")
+		setTestTaskAssignee(t, svc, taskID, "worker-thought")
+
+		usage := map[string]interface{}{
+			"input_tokens":  37616,
+			"output_tokens": 410,
+		}
+		if thoughtTokens > 0 {
+			usage["thought_tokens"] = thoughtTokens
+		}
+		event := bus.NewEvent(events.SessionPromptUsageUpdated, "test", map[string]interface{}{
+			"task_id":    taskID,
+			"session_id": sessionID,
+			"model":      "gpt-5.6-terra",
+			"usage":      usage,
+		})
+		if err := eb.Publish(ctx, events.BuildSessionPromptUsageSubject(sessionID), event); err != nil {
+			t.Fatalf("publish: %v", err)
+		}
+		costs, err := svc.ListCostEvents(ctx, "ws-1")
+		if err != nil || len(costs) != 1 {
+			t.Fatalf("list costs: %v (len=%d)", err, len(costs))
+		}
+		return costs[0].CostSubcents
+	}
+
+	withoutReasoning := costFor("task-thought-a", "session-thought-a", 0)
+	withReasoning := costFor("task-thought-b", "session-thought-b", 238)
+	if withoutReasoning != withReasoning {
+		t.Fatalf(
+			"cost changed with ThoughtTokens present: without=%d with=%d, want equal (reasoning tokens are a subset of output, not billable separately)",
+			withoutReasoning, withReasoning,
+		)
+	}
+}
+
 // TestPromptUsage_CostSourceUnpriced confirms the "both layers miss" case
 // (no provider-reported cost, no pricing lookup wired) is tagged unpriced,
 // not silently left as a bare estimated=true with no source at all. It also
@@ -300,6 +357,82 @@ func TestPromptUsage_CostSourceUnpriced(t *testing.T) {
 	}
 	if row.Estimated {
 		t.Error("Estimated = true, want false: unpriced must not overwrite the adapter's own token-synthesis flag")
+	}
+}
+
+// TestPromptUsage_FallsBackToSessionAgentProfileWhenUnassigned is a
+// regression test for the codex cost-attribution gap: a task on a Kanban
+// step with no pinned runner (or, in general, no workflow_step_participants
+// 'runner' row) resolves RunnerProjection to "", so every cost event for it
+// attributed to no agent profile at all — measured at 421/639 opus and
+// 186/640 sonnet cost events store-wide. The session that actually ran the
+// turn still knows: task_sessions.agent_profile_id is populated. buildCostEvent
+// should fall back to it only when the workflow projection is blank.
+func TestPromptUsage_FallsBackToSessionAgentProfileWhenUnassigned(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "codex-runner")
+	insertTestTask(t, svc, "task-no-runner", "ws-1")
+	// Deliberately no setTestTaskAssignee call: the workflow step has no
+	// pinned runner, so RunnerProjection resolves to "".
+	insertTestTaskSession(t, svc, "session-no-runner", "task-no-runner", "codex-runner")
+
+	event := bus.NewEvent(events.SessionPromptUsageUpdated, "test", map[string]interface{}{
+		"task_id":    "task-no-runner",
+		"session_id": "session-no-runner",
+		"model":      "gpt-5.6-terra",
+		"usage": map[string]interface{}{
+			"input_tokens":  100,
+			"output_tokens": 10,
+		},
+	})
+	if err := eb.Publish(ctx, events.BuildSessionPromptUsageSubject("session-no-runner"), event); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	costs, err := svc.ListCostEvents(ctx, "ws-1")
+	if err != nil || len(costs) != 1 {
+		t.Fatalf("list costs: %v (len=%d)", err, len(costs))
+	}
+	if got := costs[0].AgentProfileID; got != "codex-runner" {
+		t.Errorf("AgentProfileID = %q, want %q (session fallback)", got, "codex-runner")
+	}
+}
+
+// TestPromptUsage_WorkflowRunnerWinsOverSessionAgentProfile confirms the
+// session fallback strictly fills blanks: when RunnerProjection already
+// resolves an assignee, the session's own agent_profile_id (which could
+// differ, e.g. after a mid-task agent swap) must never override it.
+func TestPromptUsage_WorkflowRunnerWinsOverSessionAgentProfile(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "workflow-runner")
+	createTestAgent(t, svc, "ws-1", "session-runner")
+	insertTestTask(t, svc, "task-both-runners", "ws-1")
+	setTestTaskAssignee(t, svc, "task-both-runners", "workflow-runner")
+	insertTestTaskSession(t, svc, "session-both-runners", "task-both-runners", "session-runner")
+
+	event := bus.NewEvent(events.SessionPromptUsageUpdated, "test", map[string]interface{}{
+		"task_id":    "task-both-runners",
+		"session_id": "session-both-runners",
+		"model":      "sonnet",
+		"usage": map[string]interface{}{
+			"input_tokens":  100,
+			"output_tokens": 10,
+		},
+	})
+	if err := eb.Publish(ctx, events.BuildSessionPromptUsageSubject("session-both-runners"), event); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	costs, err := svc.ListCostEvents(ctx, "ws-1")
+	if err != nil || len(costs) != 1 {
+		t.Fatalf("list costs: %v (len=%d)", err, len(costs))
+	}
+	if got := costs[0].AgentProfileID; got != "workflow-runner" {
+		t.Errorf("AgentProfileID = %q, want %q (workflow projection must win)", got, "workflow-runner")
 	}
 }
 
