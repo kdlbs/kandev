@@ -124,6 +124,9 @@ func TestRecordCostEvent_StoresCallerValues(t *testing.T) {
 	if event.Estimated {
 		t.Error("estimated should be false")
 	}
+	if event.TokensOut == nil || *event.TokensOut != 100_000 {
+		t.Errorf("tokens_out = %v, want 100000", event.TokensOut)
+	}
 }
 
 func TestRecordCostEvent_FlagsEstimated(t *testing.T) {
@@ -143,6 +146,9 @@ func TestRecordCostEvent_FlagsEstimated(t *testing.T) {
 	}
 	if !event.Estimated {
 		t.Error("estimated should be true for synthesised codex-acp delta")
+	}
+	if event.TokensOut != nil {
+		t.Errorf("tokens_out = %v, want nil (estimated with unobserved output)", *event.TokensOut)
 	}
 }
 
