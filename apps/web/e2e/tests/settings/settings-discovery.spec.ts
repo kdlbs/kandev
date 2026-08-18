@@ -80,7 +80,9 @@ test.describe("Settings discovery", () => {
 
     await testPage.goBack();
     await expect(testPage).toHaveURL(new RegExp(`${APPEARANCE_PATH}$`));
-    await expect(testPage.getByRole("heading", { name: "Appearance", exact: true })).toBeVisible();
+    await expect(
+      testPage.getByRole("heading", { level: 2, name: "Appearance", exact: true }),
+    ).toBeVisible();
   });
 
   test("targets the current dirty page without opening the leave guard", async ({

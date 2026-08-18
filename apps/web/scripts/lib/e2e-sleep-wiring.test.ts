@@ -19,12 +19,44 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { ESLint } from "eslint";
 import { describe, expect, it } from "vitest";
+
+import {
+  e2eSleepSeededGuardDirs,
+  SLEEP_EXEMPT_FILES,
+  SLEEP_RULE_ID,
+} from "../../eslint-rules/no-unsanctioned-sleep.mjs";
 
 const WEB_DIR = path.resolve(import.meta.dirname, "../..");
 const REPO_ROOT = path.resolve(WEB_DIR, "../..");
 
 const RATCHET_SCRIPT = "check-new-e2e-sleeps.mjs";
+
+/** ESLint reports a resolved severity numerically; 2 is `"error"`. */
+const RULE_ERROR = 2;
+
+/**
+ * One ESLint instance for every config-resolution test below.
+ *
+ * Resolving the first file loads the whole flat config and its plugins, which
+ * costs several seconds; later calls hit the instance's cache. Building one
+ * instance per test pushed the first past vitest's 5s default and failed it on
+ * timeout — a red that says nothing about the guard. Hence a shared instance and
+ * an explicit timeout on the tests that use it.
+ */
+const configFor = (() => {
+  let eslint: ESLint | null = null;
+  return (file: string) => (eslint ??= new ESLint({ cwd: WEB_DIR })).calculateConfigForFile(file);
+})();
+
+const SLEEP_GUARD_TIMEOUT = 60_000;
+
+/** The resolved severity of the sleep rule for `file`, or `undefined` if unset. */
+async function sleepSeverity(file: string) {
+  const config = await configFor(file);
+  return config.rules?.[SLEEP_RULE_ID];
+}
 
 const read = (rel: string) => fs.readFileSync(path.join(REPO_ROOT, rel), "utf8");
 
@@ -58,9 +90,16 @@ describe("sleep ratchet wiring", () => {
     // would move the slice boundary and quietly shrink what is asserted
     // (review finding). This is strictly tighter than the slice was — it pins
     // the invocation, its bare form, and the early exit, in order.
+    //
+    // How the event name is read is deliberately NOT pinned. It was
+    // `"${{ github.event_name }}"` inline until the merge-queue work moved it
+    // to an `EVENT_NAME` env var, which changed nothing about the guarantee
+    // here and broke this assertion anyway. What matters is that the
+    // pull_request branch runs the ratchet bare and returns: the trailing
+    // newline after the script name is what rejects a smuggled `--base`.
     expect(step).toMatch(
       new RegExp(
-        `if \\[\\[ "\\$\\{\\{ github.event_name \\}\\}" == "pull_request" \\]\\];? then\\n` +
+        `== "pull_request" \\]\\];? then\\n` +
           `\\s+node scripts/${RATCHET_SCRIPT}\\n` +
           `\\s+exit 0\\n`,
       ),
@@ -113,22 +152,67 @@ describe("sleep ratchet wiring", () => {
   });
 
   /**
-   * The guard list may only grow. A directory listed here was measured at zero,
-   * so removing an entry means somebody added a sleep to a clean directory and
-   * deleted the guard rather than the sleep.
+   * The guard may only grow.
+   *
+   * This asked ESLint's own config resolution rather than grepping the config
+   * text for glob literals. The string form only held while the guard was a
+   * list of directory globs: the graduation to a single `e2e/**` entry STRICTLY
+   * WIDENED coverage, yet a containment assertion reads that as seven deletions
+   * and fails. A test that fails on a tightening is one somebody edits to make
+   * the build pass, which is precisely the pressure this is meant to resist.
+   *
+   * `calculateConfigForFile` answers the question the guard actually exists to
+   * answer — "is a sleep in this file an error?" — so it survives any rewrite of
+   * the globs and still fails on a real narrowing.
    */
-  it("keeps every seeded guard directory", () => {
-    const config = read("apps/web/eslint-rules/no-unsanctioned-sleep.mjs");
-    for (const dir of [
-      "e2e/scripts/**/*.{ts,tsx}",
-      "e2e/tests/cli-mode/**/*.{ts,tsx}",
-      "e2e/tests/docker/**/*.{ts,tsx}",
-      "e2e/tests/github/**/*.{ts,tsx}",
-      "e2e/tests/i18n/**/*.{ts,tsx}",
-      "e2e/tests/kanban/**/*.{ts,tsx}",
-      "e2e/tests/preview/**/*.{ts,tsx}",
-    ]) {
-      expect(config).toContain(`"${dir}"`);
-    }
-  });
+  it(
+    "makes a sleep an error in every seeded guard directory",
+    async () => {
+      for (const dir of e2eSleepSeededGuardDirs) {
+        expect(await sleepSeverity(`${dir}/probe.spec.ts`), `${dir} lost its sleep guard`).toEqual([
+          RULE_ERROR,
+        ]);
+      }
+    },
+    SLEEP_GUARD_TIMEOUT,
+  );
+
+  /**
+   * The graduation itself: the directories that were NOT on the original seed
+   * list are covered now. Without this, narrowing the guard back to the old
+   * seven-entry allowlist would pass every other test in this file.
+   */
+  it(
+    "covers the directories the conversion added after the seed",
+    async () => {
+      for (const dir of [
+        "e2e/tests/task",
+        "e2e/tests/session",
+        "e2e/tests/settings",
+        "e2e/helpers",
+        "e2e/fixtures",
+        "e2e/pages",
+      ]) {
+        expect(await sleepSeverity(`${dir}/probe.spec.ts`), `${dir} is not guarded`).toEqual([
+          RULE_ERROR,
+        ]);
+      }
+    },
+    SLEEP_GUARD_TIMEOUT,
+  );
+
+  /**
+   * The exemption still applies. `causal-waits.ts` implements both banned forms,
+   * so a guard that covered it would make the sanctioned helper the one file
+   * that can never satisfy the rule it exists to serve.
+   */
+  it(
+    "still exempts the causal-waits helper and its own test",
+    async () => {
+      for (const file of SLEEP_EXEMPT_FILES) {
+        expect(await sleepSeverity(file), `${file} should be exempt`).toBeUndefined();
+      }
+    },
+    SLEEP_GUARD_TIMEOUT,
+  );
 });

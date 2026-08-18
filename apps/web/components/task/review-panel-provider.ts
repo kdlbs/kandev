@@ -6,6 +6,7 @@ import { usePluginRegistry, type PluginReviewProviderRegistration } from "@/lib/
 import type { ReviewItemSummary } from "@/lib/plugins/types";
 import type { TaskMR } from "@/lib/types/gitlab";
 import type { TaskPR } from "@/lib/types/github";
+import { t } from "@/lib/i18n";
 
 /** Provider IDs are registry-owned strings; GitHub and GitLab are built-in adapters. */
 export type ReviewProvider = string;
@@ -17,7 +18,7 @@ function githubReviewItem(pr: TaskPR): ReviewItemSummary {
   return {
     providerId: "github",
     reviewKey: prTaskKey(pr),
-    title: pr.pr_title || `Pull Request #${pr.pr_number}`,
+    title: pr.pr_title || t("github:pullRequestNumbered", { number: pr.pr_number }),
     url: pr.pr_url,
     connectionScope: reviewConnectionScope(pr.pr_url, "github"),
     repositoryId: pr.repository_id || `${pr.owner}/${pr.repo}`,

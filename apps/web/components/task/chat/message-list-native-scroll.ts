@@ -38,6 +38,8 @@ function useScrollPositionOnPrepend(
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    /** Captures the container's current scrollHeight/scrollTop so a later
+     * prepend can restore the visual position. */
     const onScroll = () => {
       scrollState.current.scrollHeight = el.scrollHeight;
       scrollState.current.scrollTop = el.scrollTop;
@@ -188,6 +190,8 @@ export function useAutoScroll(params: {
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    /** Persists the container's current scrollTop for the session (used when
+     * auto-scroll is disabled). */
     const captureScrollTop = () => {
       if (sessionId) storeApi.getState().setTranscriptScrollTop(sessionId, el.scrollTop);
     };
@@ -195,6 +199,8 @@ export function useAutoScroll(params: {
     // scroll events can fire far more often than that, and each write is a
     // synchronous sessionStorage.setItem plus a store update.
     const coalescer = createFrameCoalescer(captureScrollTop);
+    /** Scroll listener: resyncs the near-bottom flag and schedules a
+     * coalesced persistence of the scroll position. */
     const onScroll = () => {
       resyncIsNearBottom();
       coalescer.schedule();
@@ -277,6 +283,8 @@ function useCatchUpOnReEnable(
   useEffect(() => {
     const wasEnabled = prevEnabledRef.current;
     prevEnabledRef.current = enabled;
+    /** Snapshots the current transcript tail (count, last id, last updated
+     * timestamp) as the disable-time baseline for detecting progression. */
     const captureBaseline = () => {
       const last = messages[messages.length - 1];
       baselineRef.current = {
@@ -385,19 +393,93 @@ function useProgrammaticScrollGuard(
   return runGuardedScroll;
 }
 
-function useScrollToMessage(runGuardedScroll: (performScroll: () => void) => void) {
+/**
+ * Returns a `scrollToMessage(messageId, options?)` callback that scrolls the
+ * message's row into view (start- or center-aligned) under the programmatic
+ * scroll guard, then watches the animation and force-lands the alignment if
+ * the browser settles misaligned. Returns false when the row isn't rendered
+ * yet; a superseding request invalidates in-flight verification. When the
+ * requested alignment exceeds the scroll range, the nearest reachable
+ * position is accepted.
+ */
+export function useScrollToMessage(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  runGuardedScroll: (performScroll: () => void) => void,
+) {
+  // Bumped on every scrollToMessage call; in-flight verifiers of a superseded
+  // request bail on the next frame so stale work can never land the
+  // transcript on an older prompt after a newer one consumed.
+  const generationRef = useRef(0);
   return useCallback(
-    (messageId: string, options?: { align?: "start" | "center" }) => {
-      const el = document.getElementById(`msg-${messageId}`);
-      if (!el) return;
+    (messageId: string, options?: { align?: "start" | "center"; behavior?: "smooth" | "auto" }) => {
+      // Advance the generation BEFORE the lookup: a superseding request whose
+      // row is not rendered yet still returns false, but must invalidate any
+      // in-flight verifier so it can never force-land on a stale prompt.
+      const generation = ++generationRef.current;
+      const selector = `[id="msg-${CSS.escape(messageId)}"]`;
+      const el = scrollRef.current?.querySelector<HTMLElement>(selector);
+      if (!el) return false;
+      const alignStart = options?.align === "start";
       runGuardedScroll(() => {
         el.scrollIntoView({
-          block: options?.align === "start" ? "start" : "center",
-          behavior: "smooth",
+          block: alignStart ? "start" : "center",
+          behavior: options?.behavior ?? "smooth",
         });
+        const container = scrollRef.current;
+        if (!container) return;
+        const margin = parseFloat(getComputedStyle(el).scrollMarginTop) || 0;
+        // A dockview panel re-show (the prompt-history jump activates the
+        // chat) makes SessionPanelContent restore its saved scrollTop in a
+        // rAF that can cancel the scroll, and some runtimes no-op a smooth
+        // scrollIntoView entirely. Watch a bounded frame window: follow an
+        // in-progress animation toward the target, and force-land the
+        // alignment whenever the container settles misaligned (movement
+        // stopped short or never started). Bail immediately if a newer
+        // scroll request superseded this one.
+        let frames = 0;
+        let lastAbsDelta = Infinity;
+        /** Frame-watch verifier: follows an in-progress animation toward the
+         * target and force-lands the alignment once the container settles
+         * misaligned; bails when superseded or the nodes disconnect. */
+        const verify = () => {
+          frames += 1;
+          if (frames > 30 || !container.isConnected || !el.isConnected) return;
+          if (generationRef.current !== generation) return; // superseded
+          const elementRect = el.getBoundingClientRect();
+          const containerRect = container.getBoundingClientRect();
+          const delta = alignStart
+            ? elementRect.top - containerRect.top - margin
+            : elementRect.top +
+              elementRect.height / 2 -
+              (containerRect.top + containerRect.height / 2) -
+              margin / 2;
+          const absDelta = Math.abs(delta);
+          if (absDelta <= 2) return; // aligned
+          if (absDelta < lastAbsDelta) {
+            // Animation still moving toward the target — keep watching.
+            lastAbsDelta = absDelta;
+            requestAnimationFrame(verify);
+            return;
+          }
+          // Settled (or never moved): land the requested alignment. Browsers
+          // clamp scrollTop at the scroll range, so accept that boundary as
+          // the nearest reachable position instead of retrying forever.
+          const hasScrollMetrics = container.scrollHeight > 0 || container.clientHeight > 0;
+          const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+          const desiredScrollTop = container.scrollTop + delta;
+          const nextScrollTop = hasScrollMetrics
+            ? Math.min(maxScrollTop, Math.max(0, desiredScrollTop))
+            : desiredScrollTop;
+          if (hasScrollMetrics && nextScrollTop === container.scrollTop) return;
+          container.scrollTop = nextScrollTop;
+          lastAbsDelta = Infinity;
+          requestAnimationFrame(verify);
+        };
+        requestAnimationFrame(verify);
       });
+      return true;
     },
-    [runGuardedScroll],
+    [runGuardedScroll, scrollRef],
   );
 }
 
@@ -449,6 +531,8 @@ function useInitialScrollPosition(
     didInitialScroll.current = true;
     if (scrollTop === null) return;
 
+    /** Derives and stores the near-bottom flag from the applied scrollTop
+     * against the container's current dimensions. */
     const syncNearBottom = () => {
       isNearBottomRef.current = !hasTranscriptProgressedPastView({
         scrollTop,
@@ -522,7 +606,7 @@ export function useNativeScrollManagement(params: {
     programmaticScrollLockRef,
     resyncIsNearBottom,
   );
-  const handleScrollToMessage = useScrollToMessage(runGuardedScroll);
+  const handleScrollToMessage = useScrollToMessage(scrollRef, runGuardedScroll);
   useScrollPositionOnPrepend(scrollRef, items, isProgrammaticScrollLocked);
   const sentinelRef = useLazyLoadSentinel(scrollRef, hasMore, isLoadingMore, loadMore);
   useInitialScrollPosition(scrollRef, items.length, sessionId, enabled, isNearBottomRef);

@@ -4,6 +4,18 @@ import type { Repository } from "@/lib/types/http";
 import { listRepositories } from "@/lib/api";
 
 const EMPTY_REPOSITORIES: Repository[] = [];
+const REPOSITORY_LIST_RETRY_DELAYS_MS = [100, 250, 500, 1_000] as const;
+
+async function listRepositoriesUntilSettled(workspaceId: string) {
+  for (const retryDelayMs of REPOSITORY_LIST_RETRY_DELAYS_MS) {
+    try {
+      return await listRepositories(workspaceId, undefined, { cache: "no-store" });
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
+  }
+  return listRepositories(workspaceId, undefined, { cache: "no-store" });
+}
 
 /**
  * Loads a workspace's repositories from the store, fetching once when not yet
@@ -37,7 +49,7 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
     if (!enabled || !workspaceId) return;
     setRepositoriesLoading(workspaceId, true);
     try {
-      const response = await listRepositories(workspaceId, undefined, { cache: "no-store" });
+      const response = await listRepositoriesUntilSettled(workspaceId);
       setRepositories(workspaceId, response.repositories);
     } catch {
       // Keep the existing cached repositories when a manual refresh fails.
@@ -60,7 +72,7 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
     if (forcedRef.current === workspaceId) return;
     let cancelled = false;
     setRepositoriesLoading(workspaceId, true);
-    listRepositories(workspaceId, undefined, { cache: "no-store" })
+    listRepositoriesUntilSettled(workspaceId)
       .then((response) => {
         if (cancelled) return;
         forcedRef.current = workspaceId;
@@ -83,14 +95,14 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
     if (isLoaded) return;
     let cancelled = false;
     setRepositoriesLoading(workspaceId, true);
-    listRepositories(workspaceId, undefined, { cache: "no-store" })
+    listRepositoriesUntilSettled(workspaceId)
       .then((response) => {
         if (cancelled) return;
         setRepositories(workspaceId, response.repositories);
       })
       .catch(() => {
-        if (cancelled) return;
-        setRepositories(workspaceId, []);
+        // Keep the cache unloaded after a failed request. The next dialog
+        // mount can retry instead of treating an empty fallback as real.
       })
       .finally(() => {
         if (cancelled) return;

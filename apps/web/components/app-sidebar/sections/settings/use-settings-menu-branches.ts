@@ -23,6 +23,7 @@ import {
   buildBranchRoot,
   buildExecutorsBranch,
   buildWorkspacesBranch,
+  type BranchIntegrationContribution,
   type IntegrationSlug,
   type SettingsMenuNode,
 } from "./settings-menu-branches";
@@ -63,11 +64,23 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
   const agentDiscovery = useAppStore((s) => s.agentDiscovery.items);
   const discoveryLoaded = useAppStore((s) => s.agentDiscovery.loaded);
   const visibleIntegrationsFor = useVisibleIntegrationSlugsFor();
-  const integrationContributions = pluginRegistry.getIntegrationSettings().map((integration) => ({
-    id: integration.id,
-    label: integration.label,
-    icon: resolvePluginIcon(integration.icon),
-  }));
+  const { hideDisabled: hideDisabledIntegrations } = useHideDisabledIntegrationsInNav();
+  const integrationContributions: BranchIntegrationContribution[] = pluginRegistry
+    .getIntegrationSettings()
+    .map((integration) => ({
+      id: integration.id,
+      pluginId: integration.pluginId,
+      label: integration.label,
+      icon: resolvePluginIcon(integration.icon),
+    }));
+  const pluginIntegrationEnabled = useMemo(
+    () =>
+      hideDisabledIntegrations
+        ? (integrationId: string, workspaceId: string) =>
+            pluginRegistry.getIntegrationEnabled(integrationId, workspaceId)
+        : undefined,
+    [hideDisabledIntegrations, pluginRegistry],
+  );
   const { hideDisabled: hideDisabledAgentProfiles } = useHideDisabledAgentProfilesInNav();
 
   return useMemo(() => {
@@ -86,6 +99,7 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
           activeWorkspaceId,
           visibleIntegrationsFor,
           integrationContributions,
+          pluginIntegrationEnabled,
         ),
       ),
       ...branchEntry(
@@ -104,6 +118,8 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
     discoveryLoaded,
     visibleIntegrationsFor,
     integrationContributions,
+    pluginIntegrationEnabled,
+    hideDisabledIntegrations,
     hideDisabledAgentProfiles,
   ]);
 }

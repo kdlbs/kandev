@@ -250,7 +250,7 @@ func TestHostData_TaskWritesAndMessage(t *testing.T) {
 func TestHostData_SessionsListAndCodeStats(t *testing.T) {
 	impl := &dataRecordingHost{
 		sessions:  []Session{{ID: "session-1", TaskID: "task-1", State: "running"}},
-		codeStats: []SessionCodeStats{{SessionID: "session-1", LinesAddedCommitted: 10}},
+		codeStats: []SessionCodeStats{{SessionID: "session-1", LinesAddedCommitted: 10, CommittedLinesAvailable: true}},
 	}
 	host := dialHostOverBufconn(t, impl)
 

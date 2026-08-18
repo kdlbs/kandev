@@ -1,6 +1,7 @@
 ---
 status: approved
 created: 2026-08-01
+updated: 2026-08-18
 owner: Kandev
 decision: ADR-2026-08-01-repository-task-executor-defaults
 ---
@@ -9,9 +10,9 @@ decision: ADR-2026-08-01-repository-task-executor-defaults
 
 ## Why
 
-Repository-backed tasks should start in isolated workspaces unless the user or workspace has made
-an explicit contrary choice. A portable last-used Local executor profile must not silently turn a
-later ordinary task into an in-place run, including after a Kandev update or in another browser.
+Repository-backed tasks must start in isolated workspaces unless the user or workspace makes an
+explicit contrary choice. A portable last-used Local executor profile must not change a later
+ordinary task to an in-place run. This rule also applies after an update and in another browser.
 
 ## Broken behavior
 
@@ -20,16 +21,23 @@ it resolves the task source and workspace default. After any Local task, that po
 can therefore select Local for the next ordinary repository-backed task even when the workspace
 has no Local default.
 
+The same stale selection can occur within one open dialog. Repository-less mode requires Local and
+clears the previous executor when entered. Repo mode can then retain Local instead of resolving the
+repository-backed default again.
+
 ## What
 
 - The task-create dialog resolves the default executor before it considers the last-used executor
   profile.
-- An ordinary repository-backed task uses the workspace's valid configured default executor; when
-  the workspace has no valid default, it uses Worktree when Worktree is available.
+- An ordinary repository-backed task uses the workspace's valid configured default executor.
+  When the workspace has no valid default, it uses Worktree when Worktree is available.
 - A task with no repository, or a task created from an explicit unmanaged local path, continues to
   prefer a direct Local executor.
 - The backend-owned last-used executor profile may refine the profile choice only when that profile
   belongs to the already-resolved default executor. It cannot switch the executor.
+- Changing between repository-backed and repository-less source modes resolves the executor policy
+  for the destination mode. Returning to Repo does not retain Local only because repository-less
+  mode required it.
 - A valid explicit workspace default, including Local, remains authoritative.
 - A user may manually select a different executor profile for the task being created. Successful
   task creation continues to record that profile in backend user settings, but the recorded value
@@ -64,6 +72,8 @@ within the executor selected by policy, not a portable override of that policy.
 - **GIVEN** Local was selected manually for one ordinary task and the workspace still has no
   executor default, **WHEN** the next ordinary repository-backed task dialog opens, **THEN** it
   returns to Worktree.
+- **GIVEN** Repo with no executor default, **WHEN** the user selects None and Repo, **THEN** the
+  executor changes from Worktree to Local to Worktree.
 - **GIVEN** the preferred executor has no usable profile, **WHEN** the dialog resolves defaults,
   **THEN** it selects the first existing eligible fallback rather than leaving an invalid profile.
 

@@ -1,5 +1,54 @@
 import { expect, type Locator } from "@playwright/test";
 
+export type ElementBox = { x: number; y: number; width: number; height: number };
+
+export async function requireBox(locator: Locator, label: string): Promise<ElementBox> {
+  const box = await locator.boundingBox();
+  expect(box, `${label}: locator has no bounding box`).not.toBeNull();
+  if (!box) throw new Error(`${label}: locator has no bounding box`);
+  return box;
+}
+
+/**
+ * Returns descendant text in the order Chromium paints its glyphs from left to
+ * right. DOM text remains in logical order when bidi layout moves punctuation,
+ * so each character needs its own rendered range for visual-order assertions.
+ */
+export async function getSingleLineTextInVisualOrder(locator: Locator): Promise<string> {
+  return locator.evaluate((node) => {
+    const characters: { character: string; left: number; top: number; sourceIndex: number }[] = [];
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    let sourceIndex = 0;
+
+    for (let textNode = walker.nextNode(); textNode; textNode = walker.nextNode()) {
+      const text = textNode.textContent ?? "";
+      let offset = 0;
+      for (const character of Array.from(text)) {
+        const range = document.createRange();
+        const nextOffset = offset + character.length;
+        range.setStart(textNode, offset);
+        range.setEnd(textNode, nextOffset);
+        const rect = range.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          characters.push({ character, left: rect.left, top: rect.top, sourceIndex });
+        }
+        offset = nextOffset;
+        sourceIndex += 1;
+      }
+    }
+
+    const firstTop = characters[0]?.top;
+    if (firstTop !== undefined && characters.some(({ top }) => Math.abs(top - firstTop) > 1)) {
+      throw new Error("Expected text to render on one line");
+    }
+
+    return characters
+      .sort((left, right) => left.left - right.left || left.sourceIndex - right.sourceIndex)
+      .map(({ character }) => character)
+      .join("");
+  });
+}
+
 // Shared layout assertions for mobile / responsive specs. Extracted because
 // both onboarding mobile specs need the same overflow + padding checks and
 // duplicating the DOM walk caused review churn.
@@ -133,6 +182,48 @@ export async function assertNoElementHorizontalOverflow(
     widths.scroll,
     `${label}: scrollWidth (${widths.scroll}) exceeds clientWidth (${widths.client})`,
   ).toBeLessThanOrEqual(widths.client + 1);
+}
+
+/**
+ * Asserts that text occupies multiple rendered lines without overflowing its
+ * own horizontal content box. Useful for titles whose complete text must stay
+ * readable instead of being clipped with an ellipsis.
+ */
+export async function assertTextWrapsNaturallyWithoutHorizontalOverflow(
+  locator: Locator,
+  label = "text",
+): Promise<void> {
+  const metrics = await locator.evaluate((node) => {
+    const style = getComputedStyle(node);
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const lineWidths = Array.from(range.getClientRects(), (rect) => rect.width).filter(
+      (width) => width > 0,
+    );
+    return {
+      height: node.getBoundingClientRect().height,
+      lineHeight: Number.parseFloat(style.lineHeight),
+      scrollWidth: node.scrollWidth,
+      clientWidth: node.clientWidth,
+      lineWidths,
+    };
+  });
+  expect(
+    metrics.height,
+    `${label}: height (${metrics.height}) does not span multiple ${metrics.lineHeight}px lines`,
+  ).toBeGreaterThan(metrics.lineHeight * 1.5);
+  expect(
+    metrics.scrollWidth,
+    `${label}: scrollWidth (${metrics.scrollWidth}) exceeds clientWidth (${metrics.clientWidth})`,
+  ).toBeLessThanOrEqual(metrics.clientWidth + 1);
+  const [firstLineWidth] = metrics.lineWidths;
+  if (firstLineWidth === undefined) {
+    throw new Error(`${label}: text has no rendered line rectangles`);
+  }
+  expect(
+    firstLineWidth,
+    `${label}: first line should consume available width before wrapping`,
+  ).toBeGreaterThan(metrics.clientWidth * 0.8);
 }
 
 /**

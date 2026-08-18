@@ -58,9 +58,11 @@ func (f *fakeRepository) ListSessionCodeStats(
 	return f.stats, nil
 }
 
+func int64Ptr(v int64) *int64 { return &v }
+
 func TestService_ListSessionCodeStats_DelegatesToRepositoryAndReturnsResults(t *testing.T) {
 	want := []*models.SessionCodeStats{
-		{SessionID: "sess-1", LinesAddedCommitted: 10, LinesDeletedCommitted: 2, LinesAddedPeakPending: 5, LinesDeletedPeakPending: 1},
+		{SessionID: "sess-1", LinesAddedCommitted: int64Ptr(10), LinesDeletedCommitted: int64Ptr(2), LinesAddedPeakPending: 5, LinesDeletedPeakPending: 1},
 	}
 	repo := &fakeRepository{stats: want}
 	svc := New(repo)

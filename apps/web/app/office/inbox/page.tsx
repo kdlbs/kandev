@@ -19,5 +19,7 @@ export default async function InboxPage() {
     count = res.total_count ?? items.length;
   }
 
-  return <InboxPageClient initialItems={items} initialCount={count} />;
+  return (
+    <InboxPageClient initialItems={items} initialCount={count} initialWorkspaceId={workspaceId} />
+  );
 }

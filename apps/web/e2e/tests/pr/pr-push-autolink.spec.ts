@@ -35,6 +35,7 @@ test.describe("GitHub PR push-detection auto-link", () => {
     );
     await apiClient.updateRepository(seedData.repositoryId, {
       provider: "github",
+      provider_host: "https://github.com",
       provider_owner: "testorg",
       provider_name: "testrepo",
     });

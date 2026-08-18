@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kandev/kandev/internal/githubauth"
 )
 
 const (
@@ -30,27 +32,35 @@ var (
 )
 
 // Scope is the host-verified identity a lease may redeem for. Path is the
-// exact HTTPS remote path supplied to a provider resolver.
+// exact HTTPS remote path supplied to a provider resolver: plugin providers
+// compare it verbatim, so it is never rewritten. Redemption matching instead
+// compares githubauth.CanonicalCredentialPath of both sides, so a ".git"
+// suffix does not decide whether a lease matches.
 type Scope struct {
-	ProviderID   string
-	WorkspaceID  string
-	TaskID       string
-	SessionID    string
-	RepositoryID string
-	Host         string
-	Path         string
-	TTL          time.Duration
+	ProviderID         string
+	WorkspaceID        string
+	TaskID             string
+	SessionID          string
+	RepositoryID       string
+	Host               string
+	Path               string
+	IdentityProviderID string
+	ParentProviderID   string
+	CredentialBinding  string
+	TTL                time.Duration
 }
 
 // Redemption is helper-supplied, non-secret lease context. ProviderID and
 // WorkspaceID are deliberately absent: the opaque lease selects those fields.
 type Redemption struct {
-	Lease        string
-	TaskID       string
-	SessionID    string
-	RepositoryID string
-	Host         string
-	Path         string
+	Lease              string
+	TaskID             string
+	SessionID          string
+	RepositoryID       string
+	Host               string
+	Path               string
+	IdentityProviderID string
+	ParentProviderID   string
 }
 
 // Lease is safe to pass only to the credential helper. Its token is never
@@ -362,6 +372,9 @@ func normalizeScope(scope Scope) (Scope, error) {
 	scope.SessionID = strings.TrimSpace(scope.SessionID)
 	scope.RepositoryID = strings.TrimSpace(scope.RepositoryID)
 	scope.Host = strings.ToLower(strings.TrimSpace(scope.Host))
+	scope.IdentityProviderID = strings.TrimSpace(scope.IdentityProviderID)
+	scope.ParentProviderID = strings.TrimSpace(scope.ParentProviderID)
+	scope.CredentialBinding = strings.TrimSpace(scope.CredentialBinding)
 	path, err := normalizePath(scope.Path)
 	if err != nil {
 		return Scope{}, err
@@ -398,7 +411,9 @@ func matchesRedemption(scope Scope, request Redemption) bool {
 		scope.SessionID == strings.TrimSpace(request.SessionID) &&
 		scope.RepositoryID == strings.TrimSpace(request.RepositoryID) &&
 		strings.EqualFold(scope.Host, strings.TrimSpace(request.Host)) &&
-		scope.Path == path
+		githubauth.CanonicalCredentialPath(scope.Path) == githubauth.CanonicalCredentialPath(path) &&
+		scope.IdentityProviderID == strings.TrimSpace(request.IdentityProviderID) &&
+		scope.ParentProviderID == strings.TrimSpace(request.ParentProviderID)
 }
 
 func boundedTTL(requested time.Duration) time.Duration {

@@ -32,6 +32,7 @@ type worktreeCutover struct {
 	authoritativeWorktreeIDs  map[string]bool
 	envRepos                  []legacyEnvRepo
 	sessionWts                []legacySessionWorktree
+	orphanedSessionWts        []legacySessionWorktree
 	tasks                     map[string]*taskWorktreeTargets
 	taskEnvIDs                map[string]string
 	loserEnvIDs               map[string]bool
@@ -249,8 +250,7 @@ func (c *worktreeCutover) loadLegacySessionWorktrees(tx *sqlx.Tx) error {
 			row.deletedAt = &t
 		}
 		if _, ok := c.sessions[row.sessionID]; !ok {
-			c.conflicts = append(c.conflicts, fmt.Sprintf(
-				"task_session_worktrees row %s references missing session %s", row.worktreeID, row.sessionID))
+			c.orphanedSessionWts = append(c.orphanedSessionWts, row)
 			continue
 		}
 		c.sessionWts = append(c.sessionWts, row)
@@ -289,6 +289,7 @@ func (c *worktreeCutover) normalize(tx *sqlx.Tx) error {
 	c.pickSurvivingEnvironments()
 	c.mergeLegacyEnvRepoRows()
 	c.mergeFlatEnvironmentFields()
+	c.classifyOrphanedSessionWorktrees()
 	if err := c.backfillMissingEnvironments(tx); err != nil {
 		return err
 	}
@@ -306,6 +307,40 @@ func (c *worktreeCutover) normalize(tx *sqlx.Tx) error {
 			len(c.conflicts), strings.Join(c.conflicts, "\n- "))
 	}
 	return nil
+}
+
+// classifyOrphanedSessionWorktrees rejects a legacy row whose missing session
+// leaves no task or environment owner to recover. Deleted rows and rows whose
+// physical identity already has a higher-precedence task-owned source are
+// historical evidence and contribute no ownership or metadata.
+func (c *worktreeCutover) classifyOrphanedSessionWorktrees() {
+	for _, wt := range c.orphanedSessionWts {
+		if isLegacyDeletedWorktree(wt) || c.hasTaskOwnedSourceForWorktree(wt.worktreeID) {
+			continue
+		}
+		c.conflicts = append(c.conflicts, fmt.Sprintf(
+			"task_session_worktrees row %s references missing session %s", wt.worktreeID, wt.sessionID))
+	}
+}
+
+// hasTaskOwnedSourceForWorktree reports whether an exact physical identity is
+// represented by a non-deleted normalized target built from a canonical row
+// or surviving flat environment. Path, branch, and repository metadata cannot
+// recover the task relationship lost with the session.
+func (c *worktreeCutover) hasTaskOwnedSourceForWorktree(worktreeID string) bool {
+	if worktreeID == "" {
+		return false
+	}
+	for _, targets := range c.tasks {
+		for _, key := range targets.ordering {
+			target := targets.byKey[key]
+			if target.worktreeID == worktreeID && target.status != worktreeRepoStatusDeleted &&
+				target.deletedAt == nil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // pickSurvivingEnvironments keeps the most recently updated environment per

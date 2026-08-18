@@ -10,7 +10,7 @@ import { SettingsTree } from "@/components/app-sidebar/sections/settings/setting
  */
 export function SettingsPageNav({ pathname }: { pathname: string }) {
   return (
-    <div className="flex flex-col gap-0.5 [&_a]:min-h-10 [&_a]:text-sm [&_button]:min-h-10 [&_button]:text-sm [&_svg]:h-4 [&_svg]:w-4">
+    <div className="flex flex-col gap-0.5 [&_a]:min-h-11 [&_a]:text-sm [&_button]:min-h-11 [&_button]:text-sm [&_svg]:h-4 [&_svg]:w-4">
       <SettingsTree pathname={pathname} searchLayout="floating" />
     </div>
   );

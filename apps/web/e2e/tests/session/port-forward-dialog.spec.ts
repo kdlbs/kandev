@@ -2,6 +2,7 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 
 /**
@@ -43,6 +44,7 @@ async function seedRemoteSession(
   // registers, leaving isAgentBusy=true and the idle input never rendering. The
   // helper reloads once to re-derive state from SSR. The plain wait flaked here.
   await session.waitForChatIdle({ timeout: 30_000 });
+  await waitForSessionAgentctlReady(testPage, task.session_id);
 
   // Reset workspace default executor so other tests aren't affected
   await apiClient.updateWorkspace(seedData.workspaceId, {
@@ -82,6 +84,7 @@ async function seedLocalSession(
   // See seedRemoteSession: waitForChatIdle handles the WS-subscribe race that
   // makes a raw idleInput wait flake when the auto-started agent finishes early.
   await session.waitForChatIdle({ timeout: 30_000 });
+  await waitForSessionAgentctlReady(testPage, task.session_id);
 
   return { session, sessionId: task.session_id };
 }

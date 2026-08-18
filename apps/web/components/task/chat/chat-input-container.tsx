@@ -1,19 +1,14 @@
 "use client";
 
-import { forwardRef, useCallback, useState } from "react";
-import { IconAlertTriangle, IconPlayerPlay, IconRefresh } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { NewSessionDialog } from "@/components/task/new-session-dialog";
-import { useAppStore } from "@/components/state-provider";
+import { forwardRef, useCallback } from "react";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { ClarificationRequestMetadata, Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import { useChatInputContainer } from "./use-chat-input-container";
+import { SessionStoppedBanner } from "./session-stopped-banner";
 import {
   ChatInputBody,
   type ChatInputContextAreaProps,
@@ -24,7 +19,6 @@ import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
-import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 
 // Re-export ImageAttachment type for consumers
@@ -98,6 +92,7 @@ type ChatInputContainerProps = {
   submitKey?: "enter" | "cmd_enter";
   hasAgentCommands?: boolean;
   isFailed?: boolean;
+  isCompleted?: boolean;
   needsRecovery?: boolean;
   executorUnavailable?: boolean;
   executorUnavailableReason?: string;
@@ -114,143 +109,10 @@ type ChatInputContainerProps = {
   hidePlanMode?: boolean;
 };
 
-async function requestSessionRecover(
-  taskId: string,
-  sessionId: string,
-  action: "resume" | "fresh_start",
-): Promise<boolean> {
-  const client = getWebSocketClient();
-  if (!client) return false;
-  try {
-    await client.request(
-      "session.recover",
-      { task_id: taskId, session_id: sessionId, action },
-      30000,
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// The recovery banner keeps resume/fresh-start controls together for desktop
-// and mobile layouts; its line count is intentionally bounded by that UI.
-// eslint-disable-next-line max-lines-per-function
-function FailedSessionBanner({
-  showDialog,
-  onShowDialog,
-  taskId,
-  sessionId,
-  workspaceId,
-  message = "This agent has stopped.",
-  detail,
-  resumeLabel = "Resume",
-  resumingLabel = "Resuming...",
-}: {
-  showDialog: boolean;
-  onShowDialog: (open: boolean) => void;
-  taskId: string | null;
-  sessionId: string | null;
-  workspaceId?: string | null;
-  message?: string;
-  detail?: string;
-  resumeLabel?: string;
-  resumingLabel?: string;
-}) {
-  const { t } = useTranslation();
-  const [isResuming, setIsResuming] = useState(false);
-  const [isStartingFresh, setIsStartingFresh] = useState(false);
-
-  const agentProfileId = useAppStore((s) =>
-    sessionId ? (s.taskSessions.items[sessionId]?.agent_profile_id ?? "") : "",
-  );
-  const profileExists = useAppStore(
-    (s) =>
-      agentProfileId !== "" &&
-      s.agentProfiles.items.some((p: { id: string }) => p.id === agentProfileId),
-  );
-
-  const handleRecover = useCallback(
-    async (action: "resume" | "fresh_start") => {
-      if (!sessionId || !taskId) return;
-      const setBusy = action === "resume" ? setIsResuming : setIsStartingFresh;
-      setBusy(true);
-      const ok = await requestSessionRecover(taskId, sessionId, action);
-      if (!ok) setBusy(false);
-    },
-    [sessionId, taskId],
-  );
-
-  const handleResume = useCallback(() => handleRecover("resume"), [handleRecover]);
-  const handleFreshStart = useCallback(() => {
-    if (!profileExists) {
-      onShowDialog(true);
-      return;
-    }
-    void handleRecover("fresh_start");
-  }, [profileExists, onShowDialog, handleRecover]);
-
-  return (
-    <>
-      <div className="rounded border border-border overflow-hidden">
-        <div className="flex items-center justify-between gap-3 px-4 py-3">
-          <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
-            <IconAlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
-            <span className="truncate">{message}</span>
-            {detail && <span className="shrink-0 text-xs text-muted-foreground">({detail})</span>}
-          </div>
-          <div className="flex items-center gap-2">
-            {sessionId && taskId && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex" data-testid="failed-session-resume-wrapper">
-                    <Button
-                      variant="default"
-                      size="sm"
-                      data-testid="recovery-resume-button"
-                      className="shrink-0 gap-1.5 cursor-pointer"
-                      onClick={handleResume}
-                      disabled={isResuming || !profileExists}
-                    >
-                      <IconPlayerPlay className="h-3.5 w-3.5" />
-                      {isResuming ? resumingLabel : resumeLabel}
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                {!profileExists && (
-                  <TooltipContent>{t("task:agentProfileNoLongerExists")}</TooltipContent>
-                )}
-              </Tooltip>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="shrink-0 gap-1.5 cursor-pointer"
-              onClick={handleFreshStart}
-              disabled={isStartingFresh}
-              data-testid="recovery-fresh-button"
-            >
-              <IconRefresh className="h-3.5 w-3.5" />
-              {isStartingFresh ? t("task:starting") : t("task:startFreshSession")}
-            </Button>
-          </div>
-        </div>
-      </div>
-      {taskId && (
-        <NewSessionDialog
-          open={showDialog}
-          onOpenChange={onShowDialog}
-          taskId={taskId}
-          workspaceId={workspaceId}
-        />
-      )}
-    </>
-  );
-}
-
 type ContainerState = ReturnType<typeof useChatInputContainer>;
 type NormalizedChatInputProps = ChatInputContainerProps & {
   isFailed: boolean;
+  isCompleted: boolean;
   hasAgentCommands: boolean;
   submitKey: "enter" | "cmd_enter";
   planContextEnabled: boolean;
@@ -264,6 +126,7 @@ function normalizeChatInputProps(p: ChatInputContainerProps): NormalizedChatInpu
   return {
     ...p,
     isFailed: p.isFailed ?? false,
+    isCompleted: p.isCompleted ?? false,
     hasAgentCommands: p.hasAgentCommands ?? false,
     submitKey: p.submitKey ?? "cmd_enter",
     planContextEnabled: p.planContextEnabled ?? false,
@@ -457,9 +320,10 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       taskDescription,
     });
 
-    if (p.isFailed || executorUnavailable) {
+    if (p.isFailed || p.isCompleted || executorUnavailable) {
       return (
-        <FailedSessionBanner
+        <SessionStoppedBanner
+          mode={p.isCompleted ? "completed" : "recoverable"}
           showDialog={s.showNewSessionDialog}
           onShowDialog={s.setShowNewSessionDialog}
           taskId={taskId}

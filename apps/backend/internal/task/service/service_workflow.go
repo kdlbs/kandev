@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -509,26 +510,50 @@ func (s *Service) MoveTaskWithOptions(
 		}
 		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
 		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
+		delete(task.Metadata, models.MetaKeyManualMoveLifecycleCompleted)
 		if !opts.PreserveDeferredLaunch {
 			models.DropWIPDeferredLaunch(task)
 		}
 	}
 	task.UpdatedAt = time.Now().UTC()
 
+	// Keep an admitted manual move's lifecycle barrier in the same task write as
+	// the move whenever an active session exists. The admission repository removes
+	// the queued-exit marker for admitted tasks, so this separate marker carries
+	// the barrier across the task.moved event without changing WIP admission.
+	sessionID := ""
+	if stepChanged {
+		if activeSession := s.resolvePrimaryOrActiveSession(ctx, id); activeSession != nil {
+			sessionID = activeSession.ID
+			task.Metadata[models.MetaKeyManualMoveLifecyclePending] = map[string]interface{}{
+				"from_step_id": oldStepID,
+			}
+		}
+	}
+
 	var admittedState *v1.TaskState
 	if stepChanged {
 		admittedState = &stateAfterAdmission.State
 	}
-	_, err = s.updateMovedTask(ctx, task, oldStepID, targetStep, admittedState)
+
+	// manual_move only applies when no outer caller already declared a
+	// trigger — an mcp_move set by the MCP handler must survive this inner
+	// board-move default, since the agent (not a board click) is what caused
+	// the move.
+	moveCtx := ctx
+	if !steptelemetry.HasTrigger(moveCtx) {
+		actorKind, actorID := steptelemetry.HumanOrSystemActor(moveCtx)
+		moveCtx = steptelemetry.WithAttribution(moveCtx, steptelemetry.Attribution{
+			Trigger:   steptelemetry.TriggerManualMove,
+			ActorKind: actorKind,
+			ActorID:   actorID,
+		})
+	}
+
+	_, err = s.updateMovedTask(moveCtx, task, oldStepID, targetStep, admittedState)
 	if err != nil {
 		s.logger.Error("failed to move task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
-	}
-
-	// Resolve active session for the task.moved event (needed for on_exit/on_enter).
-	sessionID := ""
-	if activeSession := s.resolvePrimaryOrActiveSession(ctx, id); activeSession != nil {
-		sessionID = activeSession.ID
 	}
 
 	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowID)
@@ -539,12 +564,22 @@ func (s *Service) MoveTaskWithOptions(
 	// Publish task.moved event so the orchestrator can process on_exit/on_enter actions
 	if stepChanged {
 		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, oldStepID, workflowStepID, sessionID)
-		s.pullNextTaskOnVacate(ctx, oldStepID, task.ID)
 		historySessionID := opts.StepHistorySessionID
 		if historySessionID == "" {
 			historySessionID = sessionID
 		}
 		s.recordManualStepTransition(ctx, historySessionID, oldStepID, workflowStepID, opts.StepHistoryTrigger, opts.StepHistoryActor)
+		s.pullNextTaskOnVacate(ctx, oldStepID, task.ID)
+		s.pullTasksFromNewFeederWork(ctx, workflowID, workflowStepID)
+		refreshed, err := s.tasks.GetTask(ctx, task.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to refresh task after feeder pull: %w", err)
+		}
+		if refreshed == nil {
+			return nil, errors.New("failed to refresh task after feeder pull: repository returned nil task")
+		}
+		refreshed.Repositories = task.Repositories
+		task = refreshed
 	}
 
 	s.logger.Info("task moved",
@@ -557,10 +592,10 @@ func (s *Service) MoveTaskWithOptions(
 
 	// Fetch the workflow step info if getter is available
 	if s.workflowStepGetter != nil {
-		step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+		step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
 		if err != nil {
 			s.logger.Warn("failed to get workflow step for MoveTask response",
-				zap.String("workflow_step_id", workflowStepID),
+				zap.String("workflow_step_id", task.WorkflowStepID),
 				zap.Error(err))
 			// Don't fail the operation, just log and continue
 		} else {
@@ -614,6 +649,15 @@ func (s *Service) syncTaskStateForWorkflowMove(ctx context.Context, task *models
 }
 
 func (s *Service) pullNextTaskOnVacate(ctx context.Context, vacatedStepID, excludeTaskID string) {
+	// A queue/WIP reconciliation is always wip_pull, unconditionally
+	// overriding whatever trigger the caller that vacated the step declared
+	// — the vacating move and the resulting pull are two distinct ledger
+	// rows with two distinct causes. No single session initiates a pull, so
+	// actor kind is always system with no session.
+	ctx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+		Trigger:   steptelemetry.TriggerWIPPull,
+		ActorKind: steptelemetry.ActorSystem,
+	})
 	vacatedStep := s.reconcilableStep(ctx, vacatedStepID)
 	if vacatedStep == nil {
 		return
@@ -678,7 +722,7 @@ func (s *Service) promoteNextQueuedTask(ctx context.Context, targetStep *wfmodel
 		skipped[candidate.ID] = struct{}{}
 		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 	}
-	if queuedMoveExitPending(candidate) {
+	if moveLifecyclePending(candidate) {
 		skipped[candidate.ID] = struct{}{}
 		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 	}
@@ -698,6 +742,21 @@ func queuedMoveExitPending(task *models.Task) bool {
 	}
 	_, completed := task.Metadata[models.MetaKeyQueuedMoveExitCompleted]
 	return !completed
+}
+
+func manualMoveLifecyclePending(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	if _, pending := task.Metadata[models.MetaKeyManualMoveLifecyclePending]; !pending {
+		return false
+	}
+	_, completed := task.Metadata[models.MetaKeyManualMoveLifecycleCompleted]
+	return !completed
+}
+
+func moveLifecyclePending(task *models.Task) bool {
+	return queuedMoveExitPending(task) || manualMoveLifecyclePending(task)
 }
 
 func (s *Service) promoteSameStepQueuedTask(ctx context.Context, candidate *models.Task, fromStepID string, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}) bool {
@@ -1175,6 +1234,10 @@ func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, t
 	if len(ids) == 0 {
 		return &BulkMoveTasksResult{MovedCount: 0}, nil
 	}
+	bulkActorKind, bulkActorID := steptelemetry.HumanOrSystemActor(ctx)
+	ctx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+		Trigger: steptelemetry.TriggerBulkMove, ActorKind: bulkActorKind, ActorID: bulkActorID,
+	})
 
 	tasks, err := s.validateSelectedMoveBatch(ctx, ids, targetWorkflowID, targetStepID)
 	if err != nil {
@@ -1235,6 +1298,11 @@ func (s *Service) validateSelectedMoveBatch(ctx context.Context, taskIDs []strin
 // BulkMoveTasks moves all tasks from a source workflow/step to a target workflow/step.
 // If sourceStepID is empty, all tasks in the source workflow are moved.
 func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceStepID, targetWorkflowID, targetStepID string) (*BulkMoveTasksResult, error) {
+	bulkActorKind, bulkActorID := steptelemetry.HumanOrSystemActor(ctx)
+	ctx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+		Trigger: steptelemetry.TriggerBulkMove, ActorKind: bulkActorKind, ActorID: bulkActorID,
+	})
+
 	// Get the tasks to move
 	var tasks []*models.Task
 	var err error

@@ -1,70 +1,30 @@
 name: Lint Harness Files
 
+# No trigger-level `paths:` filter, deliberately. A workflow skipped by one
+# reports no conclusion at all, and a required check that never reports leaves
+# a pull request unable to enter a merge queue and a merge group unable to
+# leave it. `merge_group` cannot carry a `paths:` filter in the first place.
+#
+# The heavier gates push their filtering down into a `changes` job (see
+# `.github/scripts/changed-paths.py`). This job is a checkout plus four short
+# linters, so the whole list is replaced by simply always running: cheaper than
+# the job that would decide whether to run it, and it closes the gap where a
+# harness file outside the old list changed and nothing checked it.
+# See docs/ci-merge-queue.md.
 on:
   push:
     branches: [main]
-    paths:
-      - ".github/workflows/lint-harness-files.yml"
-      - ".github/scripts/lint-harness-files.py"
-      - "scripts/lint-harness-files.test.py"
-      - ".pre-commit-config.yaml"
-      - "AGENTS.md"
-      - "CLAUDE.md"
-      - "**/AGENTS.md"
-      - "**/CLAUDE.md"
-      - "**/.cursorrules"
-      - ".agents/skills/**/*.md"
-      - ".augment/skills/**/*.md"
-      - ".claude/skills/**/*.md"
-      - ".cursor/skills/**/*.md"
-      - ".opencode/skills/**/*.md"
-      - "apps/backend/internal/office/configloader/skills/**/*.md"
-      - ".agents/agents/**/*.md"
-      - ".opencode/agents/**/*.md"
-      - ".claude/agents/**/*.md"
-      - ".codex/agents/**/*.toml"
-      - ".codex/config.toml"
-      - ".claude/settings.json"
-      - ".claude/rules/**/*.md"
-      - ".cursor/rules/**/*.mdc"
-      - ".claude/commands/**/*.md"
-      - "apps/web/lib/plugins/types.ts"
-      - "scripts/validate-plugin-api-claims.mjs"
-      - "scripts/validate-plugin-api-claims.test.mjs"
   pull_request:
     branches: [main]
-    paths:
-      - ".github/workflows/lint-harness-files.yml"
-      - ".github/scripts/lint-harness-files.py"
-      - "scripts/lint-harness-files.test.py"
-      - ".pre-commit-config.yaml"
-      - "AGENTS.md"
-      - "CLAUDE.md"
-      - "**/AGENTS.md"
-      - "**/CLAUDE.md"
-      - "**/.cursorrules"
-      - ".agents/skills/**/*.md"
-      - ".augment/skills/**/*.md"
-      - ".claude/skills/**/*.md"
-      - ".cursor/skills/**/*.md"
-      - ".opencode/skills/**/*.md"
-      - "apps/backend/internal/office/configloader/skills/**/*.md"
-      - ".agents/agents/**/*.md"
-      - ".opencode/agents/**/*.md"
-      - ".claude/agents/**/*.md"
-      - ".codex/agents/**/*.toml"
-      - ".codex/config.toml"
-      - ".claude/settings.json"
-      - ".claude/rules/**/*.md"
-      - ".cursor/rules/**/*.mdc"
-      - ".claude/commands/**/*.md"
-      - "apps/web/lib/plugins/types.ts"
-      - "scripts/validate-plugin-api-claims.mjs"
-      - "scripts/validate-plugin-api-claims.test.mjs"
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a merge-queue run. Its ref is unique per queue entry, so a
+  # cancellation here could only come from a mis-keyed group, and the queue
+  # would read the cancelled check as a failure and eject the pull request.
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 permissions:
   contents: read

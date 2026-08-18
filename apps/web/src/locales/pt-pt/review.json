@@ -88,5 +88,10 @@
   "findingQueuedForAgent": "Constatação adicionada à fila do agente",
   "findingSentToAgent": "Constatação enviada ao agente",
   "walkthroughRequestQueued": "Pedido de passo a passo em fila",
-  "walkthroughRequestSent": "Pedido de passo a passo enviado"
+  "walkthroughRequestSent": "Pedido de passo a passo enviado",
+  "couldNotStartReview": "Não foi possível iniciar a revisão",
+  "severityBlocker": "Bloqueador",
+  "severityMajor": "Grave",
+  "severityMinor": "Menor",
+  "severityNit": "Detalhe"
 }

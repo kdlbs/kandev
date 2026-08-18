@@ -22,6 +22,16 @@ vi.mock("@/components/task-create-dialog-repo-chips", () => ({
   ),
 }));
 
+// The subtask form reads the workspace's repository sets, which needs the store.
+// This suite renders the body without a StateProvider, so both are stubbed.
+vi.mock("@/hooks/domains/workspace/use-repository-sets", () => ({
+  useRepositorySets: () => ({ sets: [], isLoading: false, refresh: vi.fn() }),
+}));
+
+vi.mock("@/components/task-create-dialog-repository-sets-apply", () => ({
+  useApplyRepositorySet: () => vi.fn(),
+}));
+
 vi.mock("@/components/task-create-dialog-selectors", () => ({
   AgentSelector: () => <div data-testid="agent-profile-selector" />,
   ExecutorProfileSelector: () => <div data-testid="executor-profile-selector" />,

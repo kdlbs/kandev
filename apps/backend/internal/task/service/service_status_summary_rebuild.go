@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/statussummary"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -31,11 +35,12 @@ func (s *Service) SetTaskStatusSummaryPRReader(reader TaskStatusSummaryPRReader)
 	}
 }
 
-// HydrateMissingTaskStatusSummaries repairs only absent rows. All durable
-// inputs are batch-loaded by the caller or by optional batch readers; this is
-// intentionally a lazy repair so startup does not scan every historical task.
-// The returned map includes both existing and newly repaired summaries.
-func (s *Service) HydrateMissingTaskStatusSummaries(
+// ReconcileTaskStatusSummaries repairs stale pending state in existing rows and
+// builds absent rows. All durable inputs are batch-loaded by the caller or by
+// optional batch readers, so startup does not scan every historical task. A
+// present nil result is an explicit cache invalidation; an absent key remains
+// an ordinary partial-response omission.
+func (s *Service) ReconcileTaskStatusSummaries(
 	ctx context.Context,
 	tasks []*models.Task,
 	sessionsByTask map[string][]*models.TaskSession,
@@ -48,26 +53,100 @@ func (s *Service) HydrateMissingTaskStatusSummaries(
 	if s == nil || s.statusSummaries == nil || len(tasks) == 0 {
 		return summaries, nil
 	}
+	activityByTask, activityObserved := s.loadSummaryActivity(ctx, taskIDs(tasks))
+	failedTaskIDs, reconcileErr := s.reconcileExistingSummaries(
+		ctx, tasks, sessionsByTask, pendingBySession, summaries, activityByTask, activityObserved,
+	)
+	rebuildTasks := tasks
+	if len(failedTaskIDs) > 0 {
+		rebuildTasks = make([]*models.Task, 0, len(tasks)-len(failedTaskIDs))
+		for _, task := range tasks {
+			if task == nil {
+				continue
+			}
+			if _, failed := failedTaskIDs[task.ID]; !failed {
+				rebuildTasks = append(rebuildTasks, task)
+			}
+		}
+	}
+	summaries = s.rebuildMissingSummaries(
+		ctx, rebuildTasks, sessionsByTask, pendingBySession, summaries, activityByTask, activityObserved,
+	)
+	return summaries, reconcileErr
+}
 
+func (s *Service) reconcileExistingSummaries(
+	ctx context.Context,
+	tasks []*models.Task,
+	sessionsByTask map[string][]*models.TaskSession,
+	pendingBySession map[string]models.TaskPendingAction,
+	summaries map[string]*statussummary.TaskStatusSummary,
+	activityByTask map[string]time.Time,
+	activityObserved bool,
+) (map[string]struct{}, error) {
+	var reconcileErr error
+	failedTaskIDs := make(map[string]struct{})
+	for _, task := range tasks {
+		if task == nil || task.ID == "" || summaries[task.ID] == nil {
+			continue
+		}
+		sessions := sessionsByTask[task.ID]
+		action := pendingActionForTask(sessions, pendingBySession)
+		reconciled, err := s.reconcileExistingSummary(
+			ctx,
+			task,
+			summaries[task.ID],
+			action,
+			activityByTask[task.ID],
+			activityObserved,
+		)
+		if err != nil {
+			if reconciled != nil {
+				summaries[task.ID] = reconciled
+			} else {
+				// A present nil entry is an explicit invalidation. DTO assembly
+				// distinguishes it from an ordinarily absent partial projection so
+				// clients can clear a known-stale cached summary.
+				summaries[task.ID] = nil
+			}
+			failedTaskIDs[task.ID] = struct{}{}
+			s.logSummaryRepairFailure(task.ID, "reconcile", err)
+			reconcileErr = errors.Join(
+				reconcileErr,
+				fmt.Errorf("reconcile task %s status summary: %w", task.ID, err),
+			)
+			continue
+		}
+		if reconciled == nil {
+			delete(summaries, task.ID)
+			continue
+		}
+		summaries[task.ID] = reconciled
+	}
+	return failedTaskIDs, reconcileErr
+}
+
+func (s *Service) rebuildMissingSummaries(
+	ctx context.Context,
+	tasks []*models.Task,
+	sessionsByTask map[string][]*models.TaskSession,
+	pendingBySession map[string]models.TaskPendingAction,
+	summaries map[string]*statussummary.TaskStatusSummary,
+	activityByTask map[string]time.Time,
+	activityObserved bool,
+) map[string]*statussummary.TaskStatusSummary {
 	missing := missingSummaryTasks(tasks, summaries)
 	if len(missing) == 0 {
-		return summaries, nil
+		return summaries
 	}
 	prByTask, prObserved := s.loadSummaryPRs(ctx, taskIDs(missing))
 	gitBySession, gitObserved := s.loadSummaryGit(ctx, sessionIDsForTasks(missing, sessionsByTask))
-	queuedByTask, queuedErr := s.CountPendingQueuedByTaskIDs(ctx, taskIDs(missing))
-	if queuedErr != nil {
-		if s.logger != nil {
-			s.logger.Warn("failed to load queued prompt counts for status summary repair", zap.Error(queuedErr))
-		}
-		queuedByTask = map[string]int{}
-	}
+	queuedByTask := s.loadQueuedSummaryCounts(ctx, taskIDs(missing))
+	activityAtByTask := activityByTask
 	now := time.Now().UTC()
 	for _, task := range missing {
-		if task == nil || task.ID == "" {
-			continue
-		}
-		input := s.rebuildInput(
+		activityAt := activityAtByTask[task.ID]
+		s.rebuildMissingSummary(ctx, task, summaries, s.rebuildInput(
 			sessionsByTask[task.ID],
 			pendingBySession,
 			gitBySession,
@@ -75,14 +154,110 @@ func (s *Service) HydrateMissingTaskStatusSummaries(
 			prByTask[task.ID],
 			prObserved,
 			queuedByTask[task.ID],
+			activityAt,
+			activityObserved,
 			now,
-		)
-		next := statussummary.BuildFromAuthoritative(input)
-		next.Revision = 1
-		next.UpdatedAt = now
+		))
+	}
+	return summaries
+}
+
+func (s *Service) loadQueuedSummaryCounts(ctx context.Context, taskIDs []string) map[string]int {
+	queuedByTask, err := s.CountPendingQueuedByTaskIDs(ctx, taskIDs)
+	if err == nil {
+		return queuedByTask
+	}
+	if s.logger != nil {
+		s.logger.Warn("failed to load queued prompt counts for status summary repair", zap.Error(err))
+	}
+	return map[string]int{}
+}
+
+func (s *Service) loadSummaryActivity(ctx context.Context, taskIDs []string) (map[string]time.Time, bool) {
+	if s.taskActivity == nil || len(taskIDs) == 0 {
+		return nil, false
+	}
+	activityByTask, err := s.taskActivity.LoadTaskLastActivity(ctx, taskIDs)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to load task activity for status summary repair", zap.Error(err))
+		}
+		return nil, false
+	}
+	return activityByTask, true
+}
+
+func (s *Service) rebuildMissingSummary(
+	ctx context.Context,
+	task *models.Task,
+	summaries map[string]*statussummary.TaskStatusSummary,
+	input statussummary.RebuildInput,
+) {
+	if task == nil || task.ID == "" {
+		return
+	}
+	next := statussummary.BuildFromAuthoritative(input)
+	next.Revision = 1
+	next.UpdatedAt = input.Now
+	if err := next.Validate(); err != nil {
+		s.logSummaryRepairFailure(task.ID, "validate", err)
+		return
+	}
+	accepted, err := s.statusSummaries.CompareAndUpdateTaskStatusSummary(ctx, &statussummary.StoredTaskStatusSummary{
+		TaskID:      task.ID,
+		WorkspaceID: task.WorkspaceID,
+		Summary:     next,
+	})
+	if err != nil {
+		s.logSummaryRepairFailure(task.ID, "persist", err)
+		return
+	}
+	if accepted {
+		summaries[task.ID] = &next
+		s.publishReconciledSummary(ctx, task, next)
+		return
+	}
+	// A projector event may have won the race while this repair was running.
+	// Return that authoritative row instead of exposing a stale repair.
+	rows, err := s.statusSummaries.LoadTaskStatusSummaries(ctx, []string{task.ID})
+	if err != nil {
+		s.logSummaryRepairFailure(task.ID, "reload", err)
+		return
+	}
+	if stored := rows[task.ID]; stored != nil {
+		summaries[task.ID] = stored
+	}
+}
+
+const maxSummaryReconcileAttempts = 3
+
+func (s *Service) reconcileExistingSummary(
+	ctx context.Context,
+	task *models.Task,
+	current *statussummary.TaskStatusSummary,
+	pendingAction string,
+	authoritativeActivity time.Time,
+	activityObserved bool,
+) (*statussummary.TaskStatusSummary, error) {
+	for attempt := 0; attempt < maxSummaryReconcileAttempts && current != nil; attempt++ {
+		activityNeedsRepair := activityObserved &&
+			(authoritativeActivity.After(time.Time{}) &&
+				(current.LastActivityAt == nil || authoritativeActivity.After(*current.LastActivityAt)))
+		if current.PendingAction == pendingAction && !activityNeedsRepair {
+			return current, nil
+		}
+		if err := prepareSummaryReconcileAttempt(ctx, attempt, current.Revision); err != nil {
+			return nil, err
+		}
+		next := *current
+		next.PendingAction = pendingAction
+		if activityObserved && authoritativeActivity.After(time.Time{}) {
+			next.LastActivityAt = maxSummaryActivity(current.LastActivityAt, authoritativeActivity)
+		}
+		next.Revision = current.Revision + 1
+		next.UpdatedAt = advancedSummaryTime(current.UpdatedAt, time.Now().UTC())
 		if err := next.Validate(); err != nil {
-			s.logSummaryRepairFailure(task.ID, "validate", err)
-			continue
+			return nil, fmt.Errorf("validate repair: %w", err)
 		}
 		accepted, err := s.statusSummaries.CompareAndUpdateTaskStatusSummary(ctx, &statussummary.StoredTaskStatusSummary{
 			TaskID:      task.ID,
@@ -90,25 +265,148 @@ func (s *Service) HydrateMissingTaskStatusSummaries(
 			Summary:     next,
 		})
 		if err != nil {
-			s.logSummaryRepairFailure(task.ID, "persist", err)
-			continue
+			return nil, fmt.Errorf("persist repair: %w", err)
 		}
 		if accepted {
-			summaries[task.ID] = &next
-			continue
+			s.publishReconciledSummary(ctx, task, next)
+			return &next, nil
 		}
-		// A projector event may have won the race while this repair was running.
-		// Return that authoritative row instead of exposing a stale repair.
 		rows, err := s.statusSummaries.LoadTaskStatusSummaries(ctx, []string{task.ID})
 		if err != nil {
-			s.logSummaryRepairFailure(task.ID, "reload", err)
+			return nil, fmt.Errorf("reload after compare-and-set rejection: %w", err)
+		}
+		current = rows[task.ID]
+		if current == nil {
+			return nil, nil
+		}
+		if s.sessions == nil {
+			return nil, errors.New("reload sessions: session repository unavailable")
+		}
+		refreshedSessions, err := s.sessions.ListTaskSessions(ctx, task.ID)
+		if err != nil {
+			return nil, fmt.Errorf("reload sessions: %w", err)
+		}
+		pendingBySession, err := s.GetPendingActionsForSessions(ctx, taskSessionIDs(refreshedSessions))
+		if err != nil {
+			return nil, fmt.Errorf("reload pending actions: %w", err)
+		}
+		pendingAction = pendingActionForTask(refreshedSessions, pendingBySession)
+	}
+	activityNeedsRepair := activityObserved &&
+		(authoritativeActivity.After(time.Time{}) &&
+			(current != nil && (current.LastActivityAt == nil || authoritativeActivity.After(*current.LastActivityAt))))
+	if current != nil && current.PendingAction == pendingAction && !activityNeedsRepair {
+		return current, nil
+	}
+	s.logSummaryReconcileExhaustion(task.ID, current)
+	return nil, errors.New("exhausted compare-and-set retries")
+}
+
+func maxSummaryActivity(current *time.Time, candidate time.Time) *time.Time {
+	if candidate.IsZero() {
+		if current == nil {
+			return nil
+		}
+		copy := current.UTC()
+		return &copy
+	}
+	if current != nil && !candidate.After(*current) {
+		copy := current.UTC()
+		return &copy
+	}
+	copy := candidate.UTC()
+	return &copy
+}
+
+func (s *Service) logSummaryReconcileExhaustion(
+	taskID string,
+	current *statussummary.TaskStatusSummary,
+) {
+	if s.logger != nil {
+		lastRevision := uint64(0)
+		if current != nil {
+			lastRevision = current.Revision
+		}
+		s.logger.Warn("task status summary compare-and-set retries exhausted",
+			zap.String("task_id", taskID),
+			zap.Int("attempts", maxSummaryReconcileAttempts),
+			zap.Uint64("last_revision", lastRevision))
+	}
+}
+
+const summaryReconcileInitialRetryDelay = time.Millisecond
+
+func prepareSummaryReconcileAttempt(ctx context.Context, attempt int, revision uint64) error {
+	if revision == ^uint64(0) {
+		return errors.New("revision overflow")
+	}
+	if err := waitForSummaryReconcileRetry(ctx, attempt); err != nil {
+		return fmt.Errorf("wait before compare-and-set retry: %w", err)
+	}
+	return nil
+}
+
+func waitForSummaryReconcileRetry(ctx context.Context, attempt int) error {
+	if attempt <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(summaryReconcileInitialRetryDelay << (attempt - 1))
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func advancedSummaryTime(previous, now time.Time) time.Time {
+	if !now.After(previous) {
+		return previous.Add(time.Nanosecond)
+	}
+	return now
+}
+
+func (s *Service) publishReconciledSummary(
+	ctx context.Context,
+	task *models.Task,
+	summary statussummary.TaskStatusSummary,
+) {
+	if s.eventBus == nil {
+		return
+	}
+	payload := statussummary.SummaryUpdated{
+		TaskID:      task.ID,
+		WorkspaceID: task.WorkspaceID,
+		Summary:     summary,
+	}
+	if err := s.eventBus.Publish(ctx, events.TaskStatusSummaryUpdated,
+		bus.NewEvent(events.TaskStatusSummaryUpdated, "task-status-summary-reconciler", payload)); err != nil {
+		s.logSummaryRepairFailure(task.ID, "publish", err)
+	}
+}
+
+func pendingActionForTask(
+	sessions []*models.TaskSession,
+	actions map[string]models.TaskPendingAction,
+) string {
+	hasClarification := false
+	for _, session := range sessions {
+		if session == nil || (session.State != models.TaskSessionStateRunning &&
+			session.State != models.TaskSessionStateWaitingForInput) {
 			continue
 		}
-		if stored := rows[task.ID]; stored != nil {
-			summaries[task.ID] = stored
+		switch actions[session.ID] {
+		case models.TaskPendingActionPermission:
+			return string(models.TaskPendingActionPermission)
+		case models.TaskPendingActionClarification:
+			hasClarification = true
 		}
 	}
-	return summaries, nil
+	if hasClarification {
+		return string(models.TaskPendingActionClarification)
+	}
+	return ""
 }
 
 func (s *Service) logSummaryRepairFailure(taskID, stage string, err error) {
@@ -201,17 +499,24 @@ func (s *Service) rebuildInput(
 	prs []statussummary.PullRequestInput,
 	prObserved bool,
 	queuedPromptCount int,
+	lastActivityAt time.Time,
+	activityObserved bool,
 	now time.Time,
 ) statussummary.RebuildInput {
 	input := statussummary.RebuildInput{
 		Sessions:          make([]statussummary.RebuildSession, 0, len(sessions)),
 		PendingActions:    make(map[string]string),
 		ActivityObserved:  s.foregroundActivity != nil,
+		LastActivityAt:    nil,
 		PullRequests:      prs,
 		PRObserved:        prObserved,
 		GitObserved:       gitObserved,
 		QueuedPromptCount: maxInt(queuedPromptCount, 0),
 		Now:               now,
+	}
+	if activityObserved && !lastActivityAt.IsZero() {
+		activityCopy := lastActivityAt.UTC()
+		input.LastActivityAt = &activityCopy
 	}
 	countProvider, hasCountProvider := s.foregroundActivity.(activeSubagentCountProvider)
 	for _, session := range sessions {

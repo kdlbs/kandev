@@ -8,6 +8,7 @@ import type { SessionRuntimeSlice } from "../session-runtime/types";
 
 type CombinedSlice = SessionSlice & SessionRuntimeSlice;
 
+/** Creates a zustand store combining the session and session-runtime slices. */
 function makeStore() {
   return create<CombinedSlice>()(
     immer((set) => ({
@@ -44,15 +45,28 @@ describe("removeTaskSession cleanup cascade", () => {
     s.addMessage({ id: "m1", session_id: SESSION_ID, role: "user", content: "hi" } as any);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     s.addTurn({ id: "t1", session_id: SESSION_ID } as any);
+    s.markTurnsLoaded(SESSION_ID);
+    // Seed the other two per-session reconciliation maps so removal must
+    // clear all three: a leaked settled boundary would block every future
+    // turn of a recreated session with the same id.
+    s.reconcileWorkspaceSourcesAdopted([SESSION_ID], "2026-07-23T10:00:00Z");
 
     expect(store.getState().messages.bySession[SESSION_ID]).toHaveLength(1);
     expect(store.getState().turns.bySession[SESSION_ID]).toHaveLength(1);
+    expect(store.getState().turns.loadedBySession[SESSION_ID]).toBe(true);
+    expect(store.getState().turns.settledBoundaryBySession[SESSION_ID]).toBe(
+      "2026-07-23T10:00:00Z",
+    );
+    expect(store.getState().turns.reconcileEpochBySession[SESSION_ID]).toBe(1);
 
     store.getState().removeTaskSession(TASK_ID, SESSION_ID);
 
     const after = store.getState();
     expect(after.messages.bySession[SESSION_ID]).toBeUndefined();
     expect(after.turns.bySession[SESSION_ID]).toBeUndefined();
+    expect(after.turns.loadedBySession[SESSION_ID]).toBeUndefined();
+    expect(after.turns.settledBoundaryBySession[SESSION_ID]).toBeUndefined();
+    expect(after.turns.reconcileEpochBySession[SESSION_ID]).toBeUndefined();
     expect(after.contextWindow.bySessionId[SESSION_ID]).toBeUndefined();
     expect(after.shell.outputs["env-1"]).toBeUndefined();
     expect(after.environmentIdBySessionId[SESSION_ID]).toBeUndefined();

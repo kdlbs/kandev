@@ -132,6 +132,7 @@ export function providerLabel(id: string): string {
   return PROVIDER_LABELS[id] ?? id;
 }
 
+// i18n-exempt: agent product names.
 const PROVIDER_LABELS: Record<string, string> = {
   "claude-acp": "Claude (ACP)",
   "codex-acp": "Codex (ACP)",

@@ -123,18 +123,18 @@ async function touchDragTo(
   // announce a droppable for it. Dispatching DragMove before that resolves no
   // target and the drop silently becomes a no-op.
   await expect.poll(announcedTarget, { timeout: 5_000 }).toContain(MOVED_OVER);
+  const initialAnnouncement = await announcedTarget();
 
-  // The second move is a 2px nudge that re-dispatches DragMove against the
-  // same droppable, so it produces no NEW announcement to wait on: a second
-  // `toContain(MOVED_OVER)` here would be satisfied by the first move's
-  // announcement and assert nothing, and a `.not.toBe(previous)` would never
-  // become true. The wait above already proves the drag is live and measured,
-  // which is the precondition pointerup actually needs.
+  // The first move can announce the dragged row itself because it also crosses
+  // the sensor's activation distance. The next move must resolve the intended
+  // row before pointerup; otherwise dnd-kit accepts a self-drop and the test
+  // passes through the gesture without exercising reorder at all.
   await page.dispatchEvent("body", "pointermove", {
     ...down,
     clientX: end.x,
     clientY: end.y + 2,
   });
+  await expect.poll(announcedTarget, { timeout: 5_000 }).not.toBe(initialAnnouncement);
 
   await page.dispatchEvent("body", "pointerup", {
     ...down,

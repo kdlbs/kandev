@@ -1,5 +1,7 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { useCallback, useState } from "react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 
 const setQuickChatInitialPrompt = vi.fn();
 const handleActivateTerminal = vi.fn();
@@ -7,9 +9,12 @@ const handleNewTerminal = vi.fn();
 const handleCloseTerminal = vi.fn();
 const handleOpenChange = vi.fn();
 const handleNewChat = vi.fn();
+const escapePreventDefault = vi.fn();
 const CHAT_NAME = "Chat one";
 const WORKSPACE_ID = "ws-1";
 const TERMINAL_TAB_ID = "terminal-1";
+const FIRE_ESCAPE_TESTID = "fire-escape";
+const TOGGLE_ESCAPE_GUARD_TESTID = "toggle-escape-guard";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (
@@ -27,7 +32,24 @@ vi.mock("@/lib/routing/client-dynamic", () => ({
 vi.mock("@kandev/ui/dialog", () => ({
   Dialog: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
     open ? <div data-testid="quick-chat-dialog">{children}</div> : null,
-  DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogContent: ({
+    children,
+    onEscapeKeyDown,
+  }: {
+    children: React.ReactNode;
+    onEscapeKeyDown?: (event: { preventDefault: () => void }) => void;
+  }) => (
+    <div>
+      {children}
+      {/* Stands in for Radix's DismissableLayer consulting onEscapeKeyDown
+          before deciding whether to close the dialog on a real Escape press. */}
+      <button
+        type="button"
+        data-testid={FIRE_ESCAPE_TESTID}
+        onClick={() => onEscapeKeyDown?.({ preventDefault: escapePreventDefault })}
+      />
+    </div>
+  ),
   DialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
@@ -73,8 +95,30 @@ vi.mock("@/components/config-chat/use-config-chat", () => ({
 vi.mock("./quick-chat-delete-dialog", () => ({
   QuickChatDeleteDialog: () => null,
 }));
+
+function EscapeGuardProbe() {
+  const [guarded, setGuarded] = useState(false);
+  // A stand-in for a real handled/in-scope/unmodified Escape: the toggle
+  // simulates whichever widget-side condition (enabled, target-in-scope, no
+  // modifier) is currently true, and the dialog must consult the predicate
+  // itself rather than a value it derived some other way. Memoized like a
+  // real caller (e.g. clarification-input-overlay.tsx's useEscapeGuardRegistration)
+  // must -- an inline closure would be a fresh reference every render, and the
+  // hook's effect re-running every render would re-register in a loop.
+  const predicate = useCallback(() => guarded, [guarded]);
+  useClarificationEscapeGuard(predicate);
+  return (
+    <div data-testid="quick-chat-session-view">
+      <button
+        type="button"
+        data-testid={TOGGLE_ESCAPE_GUARD_TESTID}
+        onClick={() => setGuarded((current) => !current)}
+      />
+    </div>
+  );
+}
 vi.mock("./quick-chat-session-view", () => ({
-  QuickChatSessionView: () => <div data-testid="quick-chat-session-view" />,
+  QuickChatSessionView: () => <EscapeGuardProbe />,
 }));
 vi.mock("./quick-chat-setup", () => ({
   QuickChatSetup: () => <div data-testid="quick-chat-setup" />,
@@ -82,54 +126,57 @@ vi.mock("./quick-chat-setup", () => ({
 vi.mock("@/components/config-chat/config-chat-setup", () => ({
   ConfigChatSetup: () => <div data-testid="config-chat-setup" />,
 }));
+const useQuickChatModalMock = vi.fn(() => defaultQuickChatModalState);
 vi.mock("./use-quick-chat-modal", () => ({
-  useQuickChatModal: () => ({
-    isOpen: true,
-    sessions: [{ sessionId: "chat-1", workspaceId: WORKSPACE_ID, kind: "chat", name: CHAT_NAME }],
-    terminalTabs: [
-      {
-        tabId: TERMINAL_TAB_ID,
-        workspaceId: WORKSPACE_ID,
-        sessionId: "pty-1",
-        sequence: 1,
-        status: "running",
-      },
-    ],
-    activeKind: "terminal",
-    activeSessionId: "chat-1",
-    activeTerminalTabId: TERMINAL_TAB_ID,
-    activeTerminalTab: {
+  useQuickChatModal: () => useQuickChatModalMock(),
+}));
+
+const defaultQuickChatModalState = {
+  isOpen: true,
+  sessions: [{ sessionId: "chat-1", workspaceId: WORKSPACE_ID, kind: "chat", name: CHAT_NAME }],
+  terminalTabs: [
+    {
       tabId: TERMINAL_TAB_ID,
       workspaceId: WORKSPACE_ID,
       sessionId: "pty-1",
       sequence: 1,
       status: "running",
     },
-    activeSession: {
-      sessionId: "chat-1",
-      workspaceId: WORKSPACE_ID,
-      kind: "chat",
-      name: CHAT_NAME,
-    },
-    sessionToClose: null,
-    setupKey: 0,
-    activeSessionNeedsAgent: true,
-    pendingAgentId: null,
-    setActiveQuickChatSession: vi.fn(),
-    setSessionToClose: vi.fn(),
-    handleOpenChange,
-    handleNewChat,
-    handleNewTerminal,
-    handleActivateTerminal,
-    handleTerminalStateChange: vi.fn(),
-    handleSetupKindChange: vi.fn(),
-    handleSelectAgent: vi.fn(),
-    handleCloseTab: vi.fn(),
-    handleCloseTerminal,
-    handleConfirmClose: vi.fn(),
-    handleRename: vi.fn(),
-  }),
-}));
+  ],
+  activeKind: "terminal",
+  activeSessionId: "chat-1",
+  activeTerminalTabId: TERMINAL_TAB_ID,
+  activeTerminalTab: {
+    tabId: TERMINAL_TAB_ID,
+    workspaceId: WORKSPACE_ID,
+    sessionId: "pty-1",
+    sequence: 1,
+    status: "running",
+  },
+  activeSession: {
+    sessionId: "chat-1",
+    workspaceId: WORKSPACE_ID,
+    kind: "chat",
+    name: CHAT_NAME,
+  },
+  sessionToClose: null,
+  setupKey: 0,
+  activeSessionNeedsAgent: true,
+  pendingAgentId: null,
+  setActiveQuickChatSession: vi.fn(),
+  setSessionToClose: vi.fn(),
+  handleOpenChange,
+  handleNewChat,
+  handleNewTerminal,
+  handleActivateTerminal,
+  handleTerminalStateChange: vi.fn(),
+  handleSetupKindChange: vi.fn(),
+  handleSelectAgent: vi.fn(),
+  handleCloseTab: vi.fn(),
+  handleCloseTerminal,
+  handleConfirmClose: vi.fn(),
+  handleRename: vi.fn(),
+};
 
 import { QuickChatModal } from "./quick-chat-modal";
 
@@ -154,5 +201,49 @@ describe("QuickChatModal mixed tabs", () => {
     expect(screen.getByText("Terminals")).toBeTruthy();
     expect(screen.queryByTestId("quick-chat-menu-session-chat-1")).toBeNull();
     expect(screen.queryByTestId("quick-chat-menu-terminal-terminal-1")).toBeNull();
+  });
+});
+
+describe("QuickChatModal — Escape with a pending clarification", () => {
+  function renderWithConversationTab() {
+    // mockReturnValue (not -Once): QuickChatModal's own escape-guard state
+    // lives in this component and re-renders it on every guard toggle, which
+    // re-invokes useQuickChatModal() more than the one time a *Once value
+    // would cover.
+    useQuickChatModalMock.mockReturnValue({
+      ...defaultQuickChatModalState,
+      activeKind: "conversation",
+      activeSessionNeedsAgent: false,
+    });
+    render(<QuickChatModal workspaceId={WORKSPACE_ID} />);
+  }
+
+  it("lets Escape close the modal when no clarification is guarding it", () => {
+    renderWithConversationTab();
+
+    fireEvent.click(screen.getByTestId(FIRE_ESCAPE_TESTID));
+
+    expect(escapePreventDefault).not.toHaveBeenCalled();
+  });
+
+  it("swallows the first Escape while a clarification is pending and expanded, keeping the modal open", () => {
+    renderWithConversationTab();
+
+    fireEvent.click(screen.getByTestId(TOGGLE_ESCAPE_GUARD_TESTID));
+    fireEvent.click(screen.getByTestId(FIRE_ESCAPE_TESTID));
+
+    expect(escapePreventDefault).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("quick-chat-dialog")).toBeTruthy();
+  });
+
+  it("lets the second Escape close the modal once the clarification has collapsed", () => {
+    renderWithConversationTab();
+
+    fireEvent.click(screen.getByTestId(TOGGLE_ESCAPE_GUARD_TESTID)); // guard on: pending + expanded
+    fireEvent.click(screen.getByTestId(FIRE_ESCAPE_TESTID)); // 1st Escape: collapses, swallowed
+    fireEvent.click(screen.getByTestId(TOGGLE_ESCAPE_GUARD_TESTID)); // simulates the resulting collapse
+    fireEvent.click(screen.getByTestId(FIRE_ESCAPE_TESTID)); // 2nd Escape: unguarded, would close
+
+    expect(escapePreventDefault).toHaveBeenCalledTimes(1);
   });
 });

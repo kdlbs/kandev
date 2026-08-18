@@ -239,14 +239,10 @@ func createTestClient(t *testing.T, serverURL string) *agentctl.Client {
 
 // --- Tests ---
 
-// TestInitializeAndPromptWithLayers_StrictPolicyFailsGoneModel verifies the
-// start-model policy is applied to the EFFECTIVE model (profile start model or
-// persisted runtime override) and a strict profile fails the launch explicitly
-// when that model is unavailable. This is the regression guard for the
-// no-silent model-fallback gate: an unavailable model must never silently
-// continue on the provider default, and a failed launch must not look
-// initialized.
-func TestInitializeAndPromptWithLayers_StrictPolicyFailsGoneModel(t *testing.T) {
+// TestInitializeAndPromptWithLayers_UnadvertisedModelUsesProviderDefault
+// verifies the executor-authoritative policy for both the profile model and a
+// persisted runtime override.
+func TestInitializeAndPromptWithLayers_UnadvertisedModelUsesProviderDefault(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		profileModel string
@@ -266,7 +262,8 @@ func TestInitializeAndPromptWithLayers_StrictPolicyFailsGoneModel(t *testing.T) 
 				OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
 			}, nil, stopCh)
 			cleanupStreamManager(t, stopCh, streamMgr)
-			sm.SetDependencies(NewEventPublisher(&MockEventBusWithTracking{}, log), streamMgr, nil, nil)
+			eventBus := &MockEventBusWithTracking{}
+			sm.SetDependencies(NewEventPublisher(eventBus, log), streamMgr, nil, nil)
 
 			client := createTestClient(t, mock.server.URL)
 			defer client.Close()
@@ -300,14 +297,29 @@ func TestInitializeAndPromptWithLayers_StrictPolicyFailsGoneModel(t *testing.T) 
 				tc.runtimeModel, "", nil,
 				StartModelPolicy{},
 			)
-			if err == nil {
-				t.Fatal("expected InitializeAndPromptWithLayers to fail for an unavailable model")
+			if err != nil {
+				t.Fatalf("unadvertised model should not fail launch: %v", err)
 			}
-			if !strings.Contains(err.Error(), "claude-gone") {
-				t.Errorf("error should name the unavailable model, got %q", err.Error())
+			if !execution.sessionInitialized {
+				t.Error("provider-default continuation must be marked initialized")
 			}
-			if execution.sessionInitialized {
-				t.Error("a failed launch must not be marked initialized")
+			for _, action := range mock.getActionLog() {
+				if action == "agent.session.set_model" {
+					t.Error("unadvertised model must not send a SetModel request")
+				}
+			}
+			var warning *AgentStreamEventPayload
+			for _, event := range eventBus.getStreamEvents() {
+				if event.Data != nil && event.Data.ModelSelectionWarning != nil {
+					warning = &event
+					break
+				}
+			}
+			if warning == nil {
+				t.Fatal("expected a model-selection warning event")
+			}
+			if warning.Data.ModelSelectionWarning.RequestedModel != "claude-gone" {
+				t.Errorf("warning requested model = %q, want claude-gone", warning.Data.ModelSelectionWarning.RequestedModel)
 			}
 		})
 	}
@@ -594,7 +606,6 @@ func TestInitializeAndPrompt_AppliesProfileConfigOptions(t *testing.T) {
 
 	actions := mock.getActionLog()
 	for _, want := range []string{
-		"agent.session.set_model",
 		"agent.session.set_mode",
 		"agent.session.set_config_option",
 	} {
@@ -691,6 +702,32 @@ func TestPublishSettledConfigOptionsAppliesToDelayedModelState(t *testing.T) {
 	}
 	if got := configValueByID(settled.ConfigOptions, "effort"); got != "high" {
 		t.Errorf("settled effort = %q, want high", got)
+	}
+}
+
+func TestPublishSettledConfigOptionsAllowsEmptyProviderSnapshot(t *testing.T) {
+	log := newSessionTestLogger()
+	eventBus := &MockEventBusWithTracking{}
+	publisher := NewEventPublisher(eventBus, log)
+	sm := NewSessionManager(log, nil)
+	sm.SetDependencies(publisher, nil, nil, nil)
+	execution := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "session-1"}
+	execution.SetModelState(&CachedModelState{
+		CurrentModelID: "claude-opus-4-8",
+		Models:         []streams.SessionModelInfo{{ModelID: "claude-opus-4-8", Name: "Claude Opus 4.8"}},
+	})
+
+	sm.publishSettledConfigOptions(execution, "acp-session-1", "", nil)
+
+	settled := eventBus.getStreamEvents()
+	if len(settled) != 1 {
+		t.Fatalf("settled event count = %d, want one empty-config snapshot", len(settled))
+	}
+	if !settledConfigEventData(settled[0].Data.Data) {
+		t.Fatal("empty-config snapshot must carry the settlement marker")
+	}
+	if len(settled[0].Data.ConfigOptions) != 0 {
+		t.Fatalf("settled config options = %#v, want empty", settled[0].Data.ConfigOptions)
 	}
 }
 
@@ -2092,6 +2129,138 @@ func TestWaitForPromptDone_PublishesSingleStall(t *testing.T) {
 			t.Fatalf("waitForPromptDone error = %v, want context canceled", err)
 		}
 	})
+}
+
+func TestMarkPromptDispatchedArmsActivityAfterDispatch(t *testing.T) {
+	store := NewExecutionStore()
+	execution := &AgentExecution{
+		ID:                         "test-exec",
+		SessionID:                  "test-session",
+		promptGeneration:           3,
+		agentEventSincePrompt:      true,
+		promptActivityEpoch:        2,
+		promptCompletionGeneration: 0,
+	}
+	if err := store.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+	sm.executionStore = store
+
+	sm.markPromptDispatched(execution, 3)
+
+	_, agentEventSeen, epoch := execution.promptActivitySnapshot()
+	if agentEventSeen {
+		t.Fatal("prompt dispatch left the previous activity marker armed")
+	}
+	if epoch != 3 {
+		t.Fatalf("activity epoch = %d, want 3 after dispatch", epoch)
+	}
+}
+
+// TestWaitForPromptDone_StallPayloadDiscriminatesNeverStarted verifies that
+// agentEventSincePrompt (armed false on dispatch, set true only by a genuine
+// agent event) is threaded into the published stall payload's NeverStarted
+// field: dispatch-only silence reports NeverStarted true, and the same
+// execution reports NeverStarted false once a real agent event has recorded
+// activity for the current prompt.
+func TestWaitForPromptDone_StallPayloadDiscriminatesNeverStarted(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		eventBus := &MockEventBusWithTracking{}
+		sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+		sm.eventPublisher = NewEventPublisher(eventBus, newSessionTestLogger())
+		execution := &AgentExecution{
+			ID:           "test-exec",
+			TaskID:       "test-task",
+			SessionID:    "test-session",
+			promptDoneCh: make(chan PromptCompletionSignal, 1),
+		}
+		// Mirrors sendPrompt's dispatch bump: activity timestamp moves, but the
+		// discriminator is armed false because no agent event has arrived yet.
+		execution.lastActivityAt = time.Now()
+		execution.agentEventSincePrompt = false
+
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		waitResult := make(chan error, 1)
+		go func() {
+			_, err := sm.waitForPromptDone(ctx, execution, 7)
+			waitResult <- err
+		}()
+
+		time.Sleep(5 * time.Minute)
+		synctest.Wait()
+
+		payload := lastStalledPayload(t, eventBus)
+		if !payload.NeverStarted {
+			t.Fatalf("NeverStarted = false, want true for dispatch-only silence")
+		}
+
+		cancel()
+		if err := <-waitResult; !errors.Is(err, context.Canceled) {
+			t.Fatalf("waitForPromptDone error = %v, want context canceled", err)
+		}
+	})
+}
+
+func TestWaitForPromptDone_StallPayloadReportsRunningAfterAgentEvent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		eventBus := &MockEventBusWithTracking{}
+		sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+		sm.eventPublisher = NewEventPublisher(eventBus, newSessionTestLogger())
+		execution := &AgentExecution{
+			ID:           "test-exec",
+			TaskID:       "test-task",
+			SessionID:    "test-session",
+			promptDoneCh: make(chan PromptCompletionSignal, 1),
+			Status:       v1.AgentStatusRunning,
+		}
+		execution.lastActivityAt = time.Now()
+		execution.agentEventSincePrompt = false
+
+		mgr := &Manager{eventPublisher: sm.eventPublisher}
+		mgr.recordActivity(execution, agentctl.AgentEvent{Type: "message_chunk"})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		waitResult := make(chan error, 1)
+		go func() {
+			_, err := sm.waitForPromptDone(ctx, execution, 7)
+			waitResult <- err
+		}()
+
+		time.Sleep(5 * time.Minute)
+		synctest.Wait()
+
+		payload := lastStalledPayload(t, eventBus)
+		if payload.NeverStarted {
+			t.Fatalf("NeverStarted = true, want false once a genuine agent event recorded activity")
+		}
+
+		cancel()
+		if err := <-waitResult; !errors.Is(err, context.Canceled) {
+			t.Fatalf("waitForPromptDone error = %v, want context canceled", err)
+		}
+	})
+}
+
+func lastStalledPayload(t *testing.T, eventBus *MockEventBusWithTracking) AgentStalledPayload {
+	t.Helper()
+	eventBus.mu.Lock()
+	defer eventBus.mu.Unlock()
+	for i := len(eventBus.PublishedEvents) - 1; i >= 0; i-- {
+		te := eventBus.PublishedEvents[i]
+		if te.Subject != "agent.stalled" {
+			continue
+		}
+		payload, ok := te.Event.Data.(AgentStalledPayload)
+		if !ok {
+			t.Fatalf("agent.stalled event data = %#v, want AgentStalledPayload", te.Event.Data)
+		}
+		return payload
+	}
+	t.Fatalf("no agent.stalled event published")
+	return AgentStalledPayload{}
 }
 
 func countPublishedEvents(eventBus *MockEventBusWithTracking, subject string) int {

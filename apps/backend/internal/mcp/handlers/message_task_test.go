@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -289,6 +290,15 @@ func seedTaskWithSession(t *testing.T, svc *service.Service, repo seedRepo, stat
 	})
 	sender := senderResult.Task
 	require.NoError(t, err)
+	// senderPayload's hardcoded "sender_session_id": "sender-sess-1" must be
+	// a real row — session_id has a foreign key to task_sessions, and in
+	// production sender_session_id always names the genuine calling
+	// session (senderPayload's own doc comment: "agentctl injects
+	// sender_task_id and sender_session_id").
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "sender-sess-1", TaskID: sender.ID, AgentProfileID: "agent-profile-sender",
+		State: models.TaskSessionStateRunning,
+	}))
 
 	sess := &models.TaskSession{
 		ID:             "sess-1",
@@ -1688,6 +1698,17 @@ func TestHandleMessageTask_DispatchErrorRollsBackTurnStartOutsideReview(t *testi
 	require.NoError(t, err)
 	assert.Equal(t, v1.TaskStateInProgress, updatedTask.State)
 	assert.Equal(t, "step-in-progress", updatedTask.WorkflowStepID)
+
+	// Review round 3 must-fix #2: the rollback's ledger row (from
+	// "step-next" back to "step-in-progress") must attribute the causal
+	// MCP sender session, not the session-less system default.
+	ledgerRows := ledgerRowsForTask(t, repo, target.ID)
+	lastLedgerRow := ledgerRows[len(ledgerRows)-1]
+	assert.Equal(t, string(steptelemetry.TriggerUnarchiveRestore), lastLedgerRow.trigger)
+	assert.Equal(t, string(steptelemetry.ActorAgent), lastLedgerRow.actorKind, "rollback must attribute the causal sender session, not system")
+	if assert.NotNil(t, lastLedgerRow.actorID) {
+		assert.Equal(t, "sender-sess-1", *lastLedgerRow.actorID)
+	}
 
 	primary, err := svc.GetPrimarySession(ctx, target.ID)
 	require.NoError(t, err)

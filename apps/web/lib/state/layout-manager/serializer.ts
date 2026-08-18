@@ -3,6 +3,7 @@ import type { LayoutState, LayoutColumn, LayoutGroup, LayoutPanel, LayoutNode } 
 import { computeColumnWidths, computeGroupHeights } from "./sizing";
 import {
   SIDEBAR_LOCK,
+  DEV_SERVER_PANEL_ID,
   KNOWN_PANEL_IDS,
   STRUCTURAL_COMPONENTS,
   TERMINAL_DEFAULT_ID,
@@ -11,6 +12,7 @@ import {
 import { panelTitle } from "./panel-title";
 
 /** Canonical English, because `normalizePanel` produces a stored LayoutState. */
+// i18n-exempt: canonical English persisted in saved layouts, compared when restoring.
 const TERMINAL_CANONICAL_TITLE = canonicalPanelTitle(TERMINAL_DEFAULT_ID) ?? "Terminal";
 
 // Dockview serialized grid node types (internal format)
@@ -343,6 +345,16 @@ function normalizePanel(
   counters: { terminal: number; browser: number },
 ): LayoutPanel {
   if (p.component === "terminal") {
+    // The dev-server panel shares the terminal component but is a read-only
+    // view of the dev process output — it owns no PTY, so it must keep its
+    // own id, params and title instead of being coerced into a shell tab.
+    if (p.id === DEV_SERVER_PANEL_ID) {
+      return {
+        ...p,
+        params: { type: DEV_SERVER_PANEL_ID },
+        title: canonicalPanelTitle(p.id, p.component) ?? p.title,
+      };
+    }
     if (KNOWN_PANEL_IDS.has(p.id) || isDbBackedTerminalId(p.id)) {
       // Default panel (terminal-default) and user-created DB-backed
       // terminals (shell-<uuid>) — preserve id + params so the live PTY

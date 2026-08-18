@@ -36,19 +36,23 @@ const (
 
 // LaunchSessionRequest is the unified request for session.launch.
 type LaunchSessionRequest struct {
-	TaskID            string        `json:"task_id"`
-	Intent            SessionIntent `json:"intent,omitempty"`
-	SessionID         string        `json:"session_id,omitempty"`
-	AgentProfileID    string        `json:"agent_profile_id,omitempty"`
-	ExecutorID        string        `json:"executor_id,omitempty"`
-	ExecutorProfileID string        `json:"executor_profile_id,omitempty"`
-	Prompt            string        `json:"prompt,omitempty"`
-	PlanMode          bool          `json:"plan_mode,omitempty"`
-	WorkflowStepID    string        `json:"workflow_step_id,omitempty"`
-	Priority          string        `json:"priority,omitempty"`
-	LaunchWorkspace   bool          `json:"launch_workspace,omitempty"`
-	SkipMessageRecord bool          `json:"skip_message_record,omitempty"`
-	AutoStart         bool          `json:"auto_start,omitempty"`
+	TaskID         string        `json:"task_id"`
+	Intent         SessionIntent `json:"intent,omitempty"`
+	SessionID      string        `json:"session_id,omitempty"`
+	AgentProfileID string        `json:"agent_profile_id,omitempty"`
+	// ProfileExplicit marks a non-empty profile selected by the manual New Agent
+	// picker. It bypasses workflow-step profile resolution for IntentStart only;
+	// IntentStartCreated keeps its existing profile resolution behavior.
+	ProfileExplicit   bool   `json:"profile_explicit,omitempty"`
+	ExecutorID        string `json:"executor_id,omitempty"`
+	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
+	Prompt            string `json:"prompt,omitempty"`
+	PlanMode          bool   `json:"plan_mode,omitempty"`
+	WorkflowStepID    string `json:"workflow_step_id,omitempty"`
+	Priority          string `json:"priority,omitempty"`
+	LaunchWorkspace   bool   `json:"launch_workspace,omitempty"`
+	SkipMessageRecord bool   `json:"skip_message_record,omitempty"`
+	AutoStart         bool   `json:"auto_start,omitempty"`
 	// NoAgentLaunch marks a prepare request that must NEVER be upgraded into an
 	// agent launch, even for passthrough profiles (whose prepare would normally
 	// be eagerly upgraded so the PTY exists). It backs the session.ensure
@@ -248,7 +252,7 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, req.AutoStart, req.Attachments,
-		startTaskOptions{SpawnOrigin: req.SpawnOrigin},
+		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin},
 	)
 	if err != nil {
 		return nil, err
@@ -369,9 +373,18 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	if err := s.authorizeTask(ctx, taskID); err != nil {
 		return nil, err
 	}
+	if action == "runtime_retry" {
+		if s.wasResumeAttempt(ctx, sessionID) {
+			action = "resume"
+		} else {
+			action = "fresh_start"
+		}
+	}
 	switch action {
 	case "fresh_start":
-		s.clearResumeToken(ctx, sessionID)
+		if err := s.clearResumeToken(ctx, sessionID); err != nil {
+			return nil, fmt.Errorf("failed to clear resume token for fresh start: %w", err)
+		}
 	case "resume":
 		// no-op — relaunch with existing resume token
 	default:

@@ -143,7 +143,8 @@
   "promptSourceStepPromptWithTaskDescription": "重新進入「{{stepName}}」會傳送已渲染的步驟提示詞（含任務描述）。",
   "promptSourceTaskDescription": "「{{stepName}}」沒有步驟提示詞，因此重新進入時會傳送任務描述。",
   "pullFrom": "拉取自",
-  "pullFromHelp": "當此步驟有容量時，可選的饋送步驟用於拉取排隊中的工作。",
+  "pullFromGuidanceWithFeeder": "可選的自動饋送入口。目標佇列中的任務優先獲得准入；有容量時，Kandev 再從 {{feeder}} 拉取符合條件的工作。直接移動和自動轉換會在目標步驟排隊，不需要饋送步驟。新任務在目標步驟已滿時使用此饋送步驟。",
+  "pullFromGuidanceWithoutFeeder": "未選擇饋送步驟。目標步驟已滿時，直接移動和自動轉換會在此目標佇列中排隊。新任務也會留在此佇列中，直到有可用容量。",
   "readOnlyManagedBySync": "只讀；由工作流程同步管理",
   "readOnlyManagedByImproveKandev": "只讀；由 Improve Kandev 管理",
   "remove": "移除",
@@ -260,5 +261,8 @@
   "workflows": "工作流程",
   "workflowsSectionDescription": "建立帶自動流轉的自主流水線，或由你手動移動任務的手動工作流程",
   "workflowSteps": "工作流程步驟",
-  "workflowSyncCompleted": "工作流程同步完成"
+  "workflowSyncCompleted": "工作流程同步完成",
+  "loadingSteps": "正在載入步驟…",
+  "noStepsInThisWorkflow": "該工作流程沒有步驟",
+  "selectAWorkflowFirst": "請先選擇一個工作流程"
 }

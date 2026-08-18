@@ -219,9 +219,12 @@ describe("applyFilters — titleMatch + combos", () => {
 });
 
 describe("applySort", () => {
-  const a = task({ id: "a", state: "REVIEW", updatedAt: "2026-04-01", title: "Zeta" });
-  const b = task({ id: "b", sessionState: "RUNNING", updatedAt: "2026-04-05", title: "Alpha" });
-  const c = task({ id: "c", updatedAt: "2026-04-03", title: "Mu" });
+  const early = "2026-04-01";
+  const middle = "2026-04-03";
+  const late = "2026-04-05";
+  const a = task({ id: "a", state: "REVIEW", updatedAt: early, title: "Zeta" });
+  const b = task({ id: "b", sessionState: "RUNNING", updatedAt: late, title: "Alpha" });
+  const c = task({ id: "c", updatedAt: middle, title: "Mu" });
 
   it("sorts by state bucket asc (review, in_progress, backlog)", () => {
     const out = applySort([c, b, a], { key: "state", direction: "asc" });
@@ -236,6 +239,31 @@ describe("applySort", () => {
   it("sorts by updatedAt desc", () => {
     const out = applySort([a, b, c], { key: "updatedAt", direction: "desc" });
     expect(out.map((t) => t.id)).toEqual(["b", "c", "a"]);
+  });
+
+  it("sorts by lastActivityAt with update and creation fallbacks", () => {
+    const out = applySort(
+      [
+        task({ id: "created-fallback", createdAt: early }),
+        task({ id: "updated-fallback", updatedAt: middle, createdAt: early }),
+        task({
+          id: "activity",
+          lastActivityAt: late,
+          updatedAt: "2026-04-02",
+          createdAt: early,
+        }),
+      ],
+      { key: "lastActivityAt", direction: "desc" },
+    );
+    expect(out.map((t) => t.id)).toEqual(["activity", "updated-fallback", "created-fallback"]);
+  });
+
+  it("keeps lastActivityAt stable for equal timestamps", () => {
+    const out = applySort(
+      [task({ id: "first", lastActivityAt: late }), task({ id: "second", lastActivityAt: late })],
+      { key: "lastActivityAt", direction: "asc" },
+    );
+    expect(out.map((t) => t.id)).toEqual(["first", "second"]);
   });
 
   it("sorts by title asc", () => {

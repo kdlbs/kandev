@@ -1,6 +1,7 @@
 ---
 status: shipped
 created: 2026-04-28
+updated: 2026-08-14
 owner: cfl
 ---
 
@@ -97,21 +98,26 @@ view) remains unchanged.
 
 **API:** `GET /tasks/:id/tree/cost-summary`
 
-### 5. Interaction cancellation
+### 5. Clarification dismissal
 
-Pending clarification questions can be explicitly cancelled by the operator.
+Pending clarification bundles can be skipped from task chat.
 
-- Only clarification requests in `pending` status (stored in the in-memory
-  `clarification.Store`) can be cancelled. Requests that have already been answered,
-  rejected, or expired are not eligible.
-- On cancel: the `CancelCh` on the `PendingClarification` is closed, which unblocks any
-  `WaitForResponse` caller in the agent turn. A continuation wakeup is queued for the
-  agent so it can proceed with the information that the question was cancelled.
-- The clarification message in the task session is updated to `status = "cancelled"`.
-- Activity is logged: `task.clarification_cancelled`.
+- The chat X control is labelled "Skip all questions" and posts the exact visible bundle to
+  `POST /clarification/:id/respond` with `rejected=true`.
+- When the in-memory waiter still owns the bundle, rejection unblocks `WaitForResponse` in the same
+  turn and every still-pending question row becomes `status = "rejected"`; terminal siblings remain
+  unchanged.
+- When the current-turn bundle is detached, rejection still persists every still-pending question row
+  as rejected, preserves terminal siblings, closes the overlay, and completes clarification cleanup
+  without resuming the agent.
+- A pending row from an older turn is superseded history. It cannot reappear as the active overlay,
+  re-arm a task icon, block workflow completion, or resume the agent from a stale response.
+- `POST /clarification/:id/cancel` remains a low-level cancellation operation for a request still in
+  the in-memory `clarification.Store`. It closes `CancelCh`, persists `status = "cancelled"`, and
+  publishes the existing cancellation event. It is not the chat Skip path.
 
-**UI:** A "Cancel" button (X icon) next to pending clarification questions in the task
-chat thread. The button is not shown for already-answered or expired questions.
+The current-turn ownership and restart behavior are defined by
+[Active Clarification Lifecycle](../clarification-active-lifecycle/spec.md).
 
 ---
 
@@ -125,6 +131,7 @@ POST /tasks/:id/tree/cancel         → create cancel hold, cancel wakeups, inte
 POST /tasks/:id/tree/restore        → release cancel hold, restore task statuses
 GET  /tasks/:id/tree/cost-summary   → aggregated cost across subtree
 POST /clarification/:id/cancel      → cancel a pending clarification question
+POST /clarification/:id/respond     → answer or reject the visible clarification bundle
 ```
 
 ### Preview response
@@ -201,7 +208,9 @@ Index: `idx_tree_hold_members_task` on `(task_id)` — supports "is this task ga
 
 **GIVEN** a task tree has spent across 5 tasks, **WHEN** the operator opens the root task detail, **THEN** the tree cost card shows the aggregated total from `GET /tasks/:rootId/tree/cost-summary`, including token breakdown.
 
-**GIVEN** an agent has posted a clarification question and the question is still pending, **WHEN** the operator clicks the Cancel (X) button on that question, **THEN** `POST /clarification/:id/cancel` is called, the `PendingClarification.CancelCh` is closed, a continuation wakeup is queued for the agent, and the message updates to `status="cancelled"` in the UI.
+**GIVEN** an agent has posted a current-turn clarification bundle, **WHEN** the operator clicks the Skip (X) control, **THEN** `POST /clarification/:id/respond` rejects that exact bundle, every still-pending question updates to `status="rejected"` while terminal siblings remain unchanged, and an already-detached agent is not resumed.
+
+**GIVEN** a detached clarification remains pending in an older turn, **WHEN** the session accepts newer work, **THEN** the old row remains in history but no active overlay, task icon, workflow barrier, or stale response derives from it.
 
 ---
 

@@ -57,6 +57,7 @@
   "noPluginsMatchSearch": "沒有與搜尋匹配的外掛。請嘗試清除篩選條件。",
   "noPluginsYet": "還沒有外掛。從「瀏覽」標籤安裝，或上傳一個包。",
   "notSet": "未設定",
+  "openSettingsFor": "開啟 {{name}} 的設定",
   "override": "覆蓋",
   "packageUrl": "包 URL",
   "pluginInstalled": "{{name}} 已安裝",
@@ -78,6 +79,7 @@
   "settingsDescription": "瀏覽市場，然後安裝、啟用、停用和解除安裝 Kandev 外掛。",
   "settingsSaved": "外掛設定已儲存",
   "settingsSavedReloadFailed": "設定已儲存，但重新載入失敗；請重新整理以確認。",
+  "setupRequired": "需要設定",
   "sortMostStars": "星標最多",
   "sortName": "名稱",
   "sortRecentlyUpdated": "最近更新",
@@ -113,5 +115,6 @@
   "uploadFile": "上傳檔案",
   "utilityAgentsUnavailable": "輔助代理程式不可用",
   "viewRaw": "檢視原始內容",
-  "yes": "是"
+  "yes": "是",
+  "pluginDialog": "外掛對話方塊"
 }

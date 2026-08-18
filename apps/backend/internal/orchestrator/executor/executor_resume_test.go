@@ -1152,6 +1152,43 @@ func TestApplyResumeRepoConfig_BaseBranchByExecutorType(t *testing.T) {
 	}
 }
 
+func TestApplyResumeWorktreeConfigPreservesSelectedRepositoryDestination(t *testing.T) {
+	primaryDestination := resumeTestContributionDestination("200")
+	selectedDestination := resumeTestContributionDestination("201")
+	primaryMetadata := map[string]interface{}{}
+	if err := models.PutContributionDestination(primaryMetadata, &primaryDestination); err != nil {
+		t.Fatalf("PutContributionDestination() = %v", err)
+	}
+
+	repo := newMockRepository()
+	repo.taskRepositories["primary-link"] = &models.TaskRepository{
+		ID: "primary-link", TaskID: "task-1", RepositoryID: "repo-primary", Metadata: primaryMetadata,
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{ContributionDestination: &selectedDestination}
+	exec.applyResumeWorktreeConfig(
+		context.Background(), &v1.Task{ID: "task-1"}, req,
+		&models.Repository{ID: "repo-selected"}, "repo-selected", "/tmp/repo", "main", nil,
+	)
+
+	if req.ContributionDestination == nil || req.ContributionDestination.TargetRepository.ProviderID != "201" {
+		t.Fatalf("resume destination = %#v, want selected repository destination", req.ContributionDestination)
+	}
+}
+
+func resumeTestContributionDestination(providerID string) models.ContributionDestination {
+	return models.ContributionDestination{
+		Version:  models.ContributionDestinationVersion,
+		Provider: models.ContributionDestinationProviderGitHub,
+		SourceRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "alice/kandev", ProviderID: providerID, RemoteURL: "https://github.com/alice/kandev.git",
+		},
+	}
+}
+
 // TestApplyResumeRepoConfig_WorktreeStampsTaskDir locks in the fix for
 // resumes of single-repo worktree tasks: the lifecycle preparer hands the
 // request to worktree.Manager.Create, which rejects requests missing

@@ -20,6 +20,11 @@ type SessionContextChangeOpts = {
   setHasPrompt: (v: boolean) => void;
 };
 
+function launchErrorDescription(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return t("common:unknownError");
+}
+
 export function useSessionContextChange(opts: SessionContextChangeOpts) {
   const { promptRef, initialPrompt, summarize, toast, setContextValue, setHasPrompt } = opts;
   return useCallback(
@@ -46,6 +51,7 @@ export function useSessionLaunchSubmit({
   promptRef,
   taskId,
   selectedProfileId,
+  profileExplicit,
   executorId,
   contextValue,
   initialPrompt,
@@ -60,6 +66,7 @@ export function useSessionLaunchSubmit({
   promptRef: RefObject<TaskFormInputsHandle | null>;
   taskId: string;
   selectedProfileId: string;
+  profileExplicit: boolean;
   executorId: string;
   contextValue: string;
   initialPrompt: string | null;
@@ -91,17 +98,19 @@ export function useSessionLaunchSubmit({
         const { request } = buildStartRequest(taskId, selectedProfileId, {
           executorId,
           prompt,
+          profileExplicit,
           attachments: toMessageAttachments(selectedAttachments),
         });
         const response = await launchSession(request);
         if (!response.session_id) {
           throw new Error("Session created but no session ID returned");
         }
-        const profile = agentProfiles.find((p) => p.id === selectedProfileId);
+        const effectiveProfileId = response.agent_profile_id ?? selectedProfileId;
+        const profile = agentProfiles.find((p) => p.id === effectiveProfileId);
         activateSession(
           response.session_id,
           taskId,
-          profile?.label ?? "Agent",
+          profile?.label ?? t("common:agent"),
           groupId,
           setActiveSession,
         );
@@ -109,7 +118,7 @@ export function useSessionLaunchSubmit({
       } catch (error) {
         toast({
           title: t("task:failedToCreateSession"),
-          description: error instanceof Error ? error.message : t("common:unknownError"),
+          description: launchErrorDescription(error),
           variant: "error",
         });
       } finally {
@@ -120,6 +129,7 @@ export function useSessionLaunchSubmit({
       promptRef,
       taskId,
       selectedProfileId,
+      profileExplicit,
       executorId,
       contextValue,
       initialPrompt,

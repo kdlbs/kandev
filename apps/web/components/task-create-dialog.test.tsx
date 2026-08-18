@@ -96,8 +96,19 @@ vi.mock("@/components/task-create-dialog-handlers", () => ({
 }));
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: { userSettings: { taskCreateLastUsed: null } }) => unknown) =>
-    selector({ userSettings: { taskCreateLastUsed: null } }),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  useAppStore: (selector: (state: any) => unknown) =>
+    selector({
+      userSettings: { taskCreateLastUsed: null },
+      repositorySets: {
+        itemsByWorkspaceId: {},
+        loadingByWorkspaceId: {},
+        loadedByWorkspaceId: {},
+        revisionByWorkspaceId: {},
+      },
+      setRepositorySets: () => undefined,
+      setRepositorySetsLoading: () => undefined,
+    }),
 }));
 
 vi.mock("@/components/task-create-dialog-submit", () => ({

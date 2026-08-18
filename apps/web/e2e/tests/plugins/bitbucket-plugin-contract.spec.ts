@@ -146,7 +146,7 @@ test.describe("Bitbucket plugin contract", () => {
     // error must not disclose the fixture's credential value. Exercise this
     // first because entity-source menus dispose their selected source after a
     // successful submission.
-    await testPage.getByText("Mock Fast", { exact: true }).click();
+    await session.clickSessionChatTab();
     await session.waitForChatIdle({ timeout: 30_000 });
     const editor = visibleEditor(session.activeChat());
     await editor.fill("");

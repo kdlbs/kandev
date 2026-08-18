@@ -38,6 +38,7 @@ import type { ImagePasteIssue } from "./clipboard-attachments";
 import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment-api";
 import { ApiError } from "@/lib/api/client";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type UseChatInputStateProps = {
   sessionId: string | null;
@@ -278,7 +279,7 @@ function useAttachments(sessionId: string | null, workspaceId?: string | null) {
       } catch (error) {
         updateAttachment(attachment.id, {
           uploadStatus: "failed",
-          uploadError: error instanceof ApiError ? error.message : "Upload failed",
+          uploadError: error instanceof ApiError ? error.message : t("task:attachmentUploadFailed"),
         });
       }
     },

@@ -7,6 +7,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeProjects } from "@/lib/state/slices/office/selectors";
 import { useInOffice } from "@/hooks/use-in-office";
 import { cn } from "@/lib/utils";
 import { APP_SIDEBAR_SECTION_IDS } from "../app-sidebar-constants";
@@ -20,7 +21,7 @@ export function ProjectsSection({ collapsed }: ProjectsSectionProps) {
   const { t } = useTranslation();
   const router = useRouter();
   const inOffice = useInOffice();
-  const projects = useAppStore((s) => s.office.projects);
+  const projects = useAppStore(selectOfficeProjects);
   const activeProjects = projects.filter((p) => p.status !== "archived");
 
   if (!inOffice) return null;

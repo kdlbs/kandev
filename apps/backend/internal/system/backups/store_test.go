@@ -51,7 +51,7 @@ func newTestService(t *testing.T) (*Service, string) {
 	t.Helper()
 	pool, dataDir := newTestPool(t)
 	tracker := jobs.NewTracker(nil, newTestLogger(t))
-	svc := NewService(dataDir, pool, tracker, newTestLogger(t))
+	svc := NewService(filepath.Join(dataDir, "kandev.db"), pool, tracker, newTestLogger(t))
 	return svc, dataDir
 }
 

@@ -68,6 +68,20 @@ describe("useRepositories", () => {
     expect(mockListRepositories).toHaveBeenCalledWith("ws-1", undefined, { cache: "no-store" });
   });
 
+  it("retries a transient initial fetch failure", async () => {
+    setup(/* loaded */ false);
+    mockListRepositories
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce({ repositories: [{ id: "r2", name: "Retry Repo" }] });
+
+    renderHook(() => useRepositories("ws-1", true, false));
+
+    await waitFor(() =>
+      expect(mockSetRepositories).toHaveBeenCalledWith("ws-1", [{ id: "r2", name: "Retry Repo" }]),
+    );
+    expect(mockListRepositories).toHaveBeenCalledTimes(2);
+  });
+
   it("does nothing when disabled or workspace is null", async () => {
     setup(/* loaded */ false);
     renderHook(() => useRepositories(null, true, true));
@@ -88,7 +102,7 @@ describe("useRepositories", () => {
 
   it("keeps cached repositories when a manual refresh fails", async () => {
     setup(/* loaded */ true);
-    mockListRepositories.mockRejectedValueOnce(new Error("Network unavailable"));
+    mockListRepositories.mockRejectedValue(new Error("Network unavailable"));
     const { result } = renderHook(() => useRepositories("ws-1"));
 
     await expect(result.current.refresh()).resolves.toBeUndefined();

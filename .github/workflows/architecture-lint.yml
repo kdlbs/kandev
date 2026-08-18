@@ -5,11 +5,15 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   # Pull requests can supersede one another safely. Pushes compare each commit
   # with its own before-SHA, so never cancel a push run before that comparison
-  # completes.
+  # completes. Merge-queue runs are keyed by their own merge-group SHA for the
+  # same reason, and are likewise never cancelled: the queue reads a cancelled
+  # check as a failure and ejects the pull request.
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -31,19 +35,42 @@ jobs:
       - name: Run linter tests
         run: python3 scripts/lint-architecture.test.py
 
-      - name: Lint pull request architecture
-        if: github.event_name == 'pull_request'
+      # One step rather than one per event. Each event names the baseline
+      # commit differently, and a `merge_group` run has neither of the two the
+      # split steps used to read: no `event.pull_request`, no `event.before`.
+      # Under the old shape it would have run the linter tests and silently
+      # linted nothing, which is the worst possible outcome for a required
+      # check — green, and having compared the branch against nothing.
+      - name: Resolve the architecture baseline
+        id: baseline
         env:
-          ARCHITECTURE_BASE_REF: ${{ github.event.pull_request.base.sha }}
-        run: >-
-          python3 scripts/lint-architecture.py --all
-          --baseline-base-ref "$ARCHITECTURE_BASE_REF"
-          --allow-missing-base-baseline
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
 
-      - name: Lint pushed architecture
-        if: github.event_name == 'push'
+          case "${EVENT_NAME}" in
+            pull_request) BASE_REF="${PR_BASE_SHA}" ;;
+            # The queue branch is cut from this commit, so it is the merge
+            # group's equivalent of the pull request's base.
+            merge_group) BASE_REF="${MERGE_GROUP_BASE_SHA}" ;;
+            push) BASE_REF="${PUSH_BEFORE}" ;;
+            *) BASE_REF="" ;;
+          esac
+
+          if [[ -z "${BASE_REF}" ]]; then
+            echo "No baseline commit for event '${EVENT_NAME}'." >&2
+            exit 1
+          fi
+
+          echo "base-ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
+          echo "Architecture baseline: ${BASE_REF}"
+
+      - name: Lint architecture
         env:
-          ARCHITECTURE_BASE_REF: ${{ github.event.before }}
+          ARCHITECTURE_BASE_REF: ${{ steps.baseline.outputs.base-ref }}
         run: >-
           python3 scripts/lint-architecture.py --all
           --baseline-base-ref "$ARCHITECTURE_BASE_REF"

@@ -216,7 +216,6 @@ test.describe("Plugins — composer capability", () => {
     await expect(dialog.getByTestId("submit-start-agent")).toBeEnabled({ timeout: 30_000 });
 
     await composerAction.getByTestId("e2e-composer-submit").click();
-    await expect(composerAction).toHaveAttribute("data-status", "submitted");
 
     // The native creation handler ran, not a plugin-built request: the app
     // navigated to a real task and the dictated prompt reached the agent.

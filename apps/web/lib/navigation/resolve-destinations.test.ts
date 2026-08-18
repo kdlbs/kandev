@@ -3,6 +3,7 @@ import { APP_DESTINATIONS } from "./core-destinations";
 import { resolveDestinations } from "./resolve-destinations";
 import { MOBILE_MENU_UTILITY_SECTIONS } from "./surface-policy";
 import type { AvailabilityMap, NavContext } from "./types";
+import type { PluginNavRegistration } from "@/lib/plugins/registry";
 
 const ALL_INTEGRATIONS: AvailabilityMap = {
   "azure-devops": true,
@@ -76,7 +77,10 @@ describe("resolveDestinations", () => {
     const href = home?.href;
 
     expect(typeof href).toBe("function");
-    expect(typeof href === "function" ? href(OFFICE) : null).toBe("/office");
+    // Carries the workspace id so this is byte-identical to `workspaceHomeHref`,
+    // which the sidebar's brand link uses. Both render in the same header, and
+    // two "home" affordances pointing at different URLs was the original defect.
+    expect(typeof href === "function" ? href(OFFICE) : null).toBe("/office?workspaceId=ws-office");
     expect(typeof href === "function" ? href(KANBAN) : null).toBe(
       "/?home=overview&workspaceId=ws-1",
     );
@@ -131,5 +135,43 @@ describe("resolveDestinations", () => {
 
     expect(ids(palette)).toContain("github");
     expect(ids(sidebar)).not.toContain("github");
+  });
+});
+
+describe("resolveDestinations with plugin items", () => {
+  const pluginItems: PluginNavRegistration[] = [
+    {
+      pluginId: "acme",
+      id: "board",
+      label: "Acme Board",
+      path: "/plugins/acme",
+      section: "sidebar-footer",
+    },
+  ];
+
+  it("orders the first-party stats destination before a plugin sidebar-footer item on the sidebar", () => {
+    const resolved = resolveDestinations({
+      surface: "sidebar",
+      section: "insights",
+      ctx: KANBAN,
+      pluginItems,
+    });
+
+    expect(ids(resolved)).toEqual(["stats", "plugin:acme:board"]);
+  });
+
+  it("orders the mobile utility group's manifest rows as stats, settings, then a plugin sidebar-footer item", () => {
+    const resolved = resolveDestinations({
+      surface: "mobileMenu",
+      section: MOBILE_MENU_UTILITY_SECTIONS,
+      ctx: KANBAN,
+      pluginItems,
+    });
+
+    // Plugin insights items are appended after the last catalog entry that
+    // matches this multi-section query (here: settings, a utilities entry),
+    // so the order is stats, settings, plugin, not interleaved with
+    // insights-section entries.
+    expect(ids(resolved)).toEqual(["stats", "settings", "plugin:acme:board"]);
   });
 });

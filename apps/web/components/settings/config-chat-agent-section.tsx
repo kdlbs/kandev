@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
-import { Label } from "@kandev/ui/label";
+import { CardContent } from "@kandev/ui/card";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { SettingsCard } from "./settings-card";
 import { UtilityAgentProfilePicker } from "./utility-agent-profile-picker";
+import { SettingsCardHeader } from "./settings-card-header";
+import { SettingsFieldLabel } from "./settings-typography";
 
 export function ConfigChatAgentSection() {
   const { t } = useTranslation();
@@ -63,17 +64,11 @@ export function ConfigChatAgentSection() {
 
   return (
     <SettingsCard isDirty={isDirty} data-testid="config-chat-agent-card">
-      <CardHeader>
-        <CardTitle className="text-base font-semibold leading-5">
-          <h3>{t("settings:configChatAgentTitle")}</h3>
-        </CardTitle>
-      </CardHeader>
+      <SettingsCardHeader title={t("settings:configChatAgentTitle")} />
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">{t("settings:configChatAgentDescription")}</p>
         <div className="space-y-2" data-settings-dirty={isDirty}>
-          <Label className="text-xs font-medium text-muted-foreground">
-            {t("settings:utilityAgentProfile")}
-          </Label>
+          <SettingsFieldLabel>{t("settings:utilityAgentProfile")}</SettingsFieldLabel>
           <UtilityAgentProfilePicker
             profiles={profiles}
             value={draftProfileId || "none"}

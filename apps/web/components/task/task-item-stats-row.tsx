@@ -64,7 +64,13 @@ export function TaskItemStatsRow({
   return (
     <span className="flex items-center gap-1.5 text-[11px]">
       {updatedAt && (
-        <span className="text-muted-foreground/50">{formatRelativeTime(updatedAt)}</span>
+        <span
+          data-testid="sidebar-task-time"
+          data-time-value={updatedAt}
+          className="text-muted-foreground/50"
+        >
+          {formatRelativeTime(updatedAt)}
+        </span>
       )}
       {prInfo && <span className="text-muted-foreground/50">#{prInfo.number}</span>}
       {queuedCount ? (

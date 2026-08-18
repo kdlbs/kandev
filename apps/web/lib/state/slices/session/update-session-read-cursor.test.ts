@@ -23,6 +23,11 @@ function makeStore() {
 const TASK_ID = toTaskId("task-1");
 const SESSION_ID = toSessionId("session-1");
 const TS = "2026-04-20T00:00:00Z";
+const REVISION_EPOCH = "7";
+
+function pendingRevision(sequence: number) {
+  return { epoch: REVISION_EPOCH, sequence };
+}
 
 function makeSession(overrides: Partial<TaskSession> = {}): TaskSession {
   return {
@@ -92,5 +97,117 @@ describe("updateSessionReadCursor", () => {
 
     const listed = store.getState().taskSessionsByTask.itemsByTaskId[TASK_ID]?.[0];
     expect(listed?.last_read_message_id).toBe("m2");
+  });
+});
+
+describe("setTaskSessionPendingAction", () => {
+  it("updates the by-id and per-task projections without replacing session state", () => {
+    const store = makeStore();
+    const session = makeSession({
+      pending_action: null,
+      pending_action_revision: pendingRevision(1),
+    });
+    store.setState((draft) => {
+      draft.taskSessions.items[SESSION_ID] = session;
+      draft.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session];
+    });
+
+    store.getState().setTaskSessionPendingAction(SESSION_ID, "clarification", pendingRevision(2));
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      state: "RUNNING",
+      pending_action: "clarification",
+      pending_action_revision: pendingRevision(2),
+    });
+    expect(store.getState().taskSessionsByTask.itemsByTaskId[TASK_ID]?.[0].pending_action).toBe(
+      "clarification",
+    );
+  });
+
+  it("does not create a bare session when the projection is not loaded", () => {
+    const store = makeStore();
+
+    store.getState().setTaskSessionPendingAction(SESSION_ID, "clarification");
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toBeUndefined();
+  });
+
+  it("preserves a newer WebSocket projection when a deferred list response resolves", () => {
+    const store = makeStore();
+    const staleListSession = makeSession({
+      pending_action: null,
+      pending_action_revision: pendingRevision(1),
+    });
+    store.getState().setTaskSessionsForTask(TASK_ID, [staleListSession]);
+
+    store.getState().setTaskSessionPendingAction(SESSION_ID, "clarification", pendingRevision(2));
+    store.getState().setTaskSessionsForTask(TASK_ID, [{ ...staleListSession, state: "COMPLETED" }]);
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      state: "COMPLETED",
+      pending_action: "clarification",
+      pending_action_revision: pendingRevision(2),
+    });
+  });
+
+  it("rejects a delayed WebSocket projection older than the HTTP snapshot", () => {
+    const store = makeStore();
+    store.getState().setTaskSessionsForTask(TASK_ID, [
+      makeSession({
+        pending_action: "clarification",
+        pending_action_revision: pendingRevision(2),
+      }),
+    ]);
+
+    store.getState().setTaskSessionPendingAction(SESSION_ID, null, pendingRevision(1));
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      pending_action: "clarification",
+      pending_action_revision: pendingRevision(2),
+    });
+  });
+
+  it("accepts a newer backend epoch and rejects delayed frames from the old epoch", () => {
+    const store = makeStore();
+    // Epochs are parsed as bigint, so decimal width changes at restart 10 do
+    // not turn this into lexicographic ordering.
+    const oldRevision = { epoch: "9", sequence: 99 };
+    const newRevision = { epoch: "10", sequence: 1 };
+    store
+      .getState()
+      .setTaskSessionsForTask(TASK_ID, [
+        makeSession({ pending_action: "clarification", pending_action_revision: oldRevision }),
+      ]);
+
+    store.getState().setTaskSessionPendingAction(SESSION_ID, null, newRevision);
+    store.getState().setTaskSessionPendingAction(SESSION_ID, "permission", {
+      ...oldRevision,
+      sequence: 100,
+    });
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      pending_action: null,
+      pending_action_revision: newRevision,
+    });
+  });
+
+  it("rejects an unseen older backend epoch after client state is rebuilt", () => {
+    const store = makeStore();
+    const currentRevision = { epoch: "3", sequence: 1 };
+    store
+      .getState()
+      .setTaskSessionsForTask(TASK_ID, [
+        makeSession({ pending_action: null, pending_action_revision: currentRevision }),
+      ]);
+
+    store.getState().setTaskSessionPendingAction(SESSION_ID, "clarification", {
+      epoch: "1",
+      sequence: 99,
+    });
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      pending_action: null,
+      pending_action_revision: currentRevision,
+    });
   });
 });

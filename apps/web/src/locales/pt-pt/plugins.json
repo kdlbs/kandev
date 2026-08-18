@@ -62,6 +62,7 @@
   "noPluginsYet": "Ainda não há plugins. Instale um a partir do separador Explorar ou carregue um pacote.",
   "notInMarketplace": "Não está no marketplace",
   "notSet": "Não definido",
+  "openSettingsFor": "Abrir as definições de {{name}}",
   "override": "substituição",
   "packageUrl": "URL do pacote",
   "pluginInstalled": "{{name}} instalado",
@@ -83,6 +84,7 @@
   "settingsDescription": "Explore o marketplace e instale, ative, desative e desinstale plugins do Kandev.",
   "settingsSaved": "Definições do plugin guardadas",
   "settingsSavedReloadFailed": "As definições foram guardadas, mas não foi possível recarregá-las; atualize para confirmar.",
+  "setupRequired": "Configuração necessária",
   "sortMostStars": "Mais estrelas",
   "sortName": "Nome",
   "sortRecentlyUpdated": "Atualizados recentemente",
@@ -122,5 +124,6 @@
   "uploadFile": "Carregar ficheiro",
   "utilityAgentsUnavailable": "Agentes utilitários indisponíveis",
   "viewRaw": "Ver o original",
-  "yes": "sim"
+  "yes": "sim",
+  "pluginDialog": "Janela do plugin"
 }

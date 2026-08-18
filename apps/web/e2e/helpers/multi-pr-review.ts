@@ -1,4 +1,5 @@
 import type { SeedData } from "../fixtures/test-base";
+import { expect } from "@playwright/test";
 import type { ApiClient } from "./api-client";
 
 export const REVIEW_OWNER = "testorg";
@@ -96,6 +97,22 @@ export async function seedMultiPRReviewTask(
       deletions: 0,
     });
   }
+
+  // Association requests are synchronous, but this read barrier makes the
+  // seed contract explicit before the browser's first task-PR sync. Without
+  // it, a cold worker could open the changes panel after only the first row
+  // was visible to the frontend.
+  const expectedNumbers = REVIEW_PRS.map((pr) => pr.number).sort((a, b) => a - b);
+  await expect
+    .poll(
+      async () =>
+        (await apiClient.listTaskPRs(task.id)).map((pr) => pr.pr_number).sort((a, b) => a - b),
+      {
+        timeout: 15_000,
+        message: "waiting for both seeded review PR associations",
+      },
+    )
+    .toEqual(expectedNumbers);
 
   return task;
 }

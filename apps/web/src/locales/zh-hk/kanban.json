@@ -63,7 +63,10 @@
   "pipeline": "流水線",
   "previewPanel": "預覽面板",
   "previousStep": "上一步",
+  "queuedCount_one": "{{count}} 個排隊任務",
+  "queuedCount_other": "{{count}} 個排隊任務",
   "queuedForStep": "已排隊等待 {{step}}",
+  "queuedSection": "排隊中",
   "repository": "儲存庫",
   "searchPlaceholder": "搜尋…",
   "searchSection": "搜尋",
@@ -91,5 +94,16 @@
   "workflow": "工作流程",
   "workflowStepFallback": "工作流程步驟 {{stepId}}",
   "columns": "列",
-  "columnsForWorkflow": "{{name}} 的列"
+  "columnsForWorkflow": "{{name}} 的列",
+  "needsReassignment": "需要重新分配",
+  "blockedByCount_one": "被 {{count}} 項阻塞",
+  "blockedByCount_other": "被 {{count}} 項阻塞",
+  "blockedByTasksTitle": "正在等待：{{tasks}}",
+  "blockedFailed": "阻塞項失敗",
+  "blockedPredecessorFailed": "該任務依賴的一個任務失敗了：{{tasks}}",
+  "noTasksYet": "暫無任務",
+  "noWorkflowsAvailableYet": "暫無可用的工作流程。",
+  "pullToRefreshPull": "下拉刷新",
+  "pullToRefreshRefreshing": "正在刷新任務",
+  "pullToRefreshRelease": "鬆開即可刷新"
 }

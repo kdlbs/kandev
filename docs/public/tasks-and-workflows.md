@@ -34,7 +34,7 @@ with the built-in Kanban steps, so it can accept tasks immediately.
 
 1. Open **Settings → Workspaces** and select **Add Workspace**.
 2. Enter the required workspace name.
-3. Open the workspace's **Repositories** page and add existing local repositories the workspace needs. You can also initialize a new empty repository while creating a task. Remote URLs are not registered on this page; enter them through **New Task → Remote**.
+3. Open the workspace's **Repositories** page and add existing local repositories the workspace needs. You can also initialize a new empty repository while creating a task. Remote URLs are not registered on this page; enter them through **New Task → Remote**. The same page's **Repository sets** section groups repositories you routinely use together, so one action fills the task form with all of them; see [Repository sets](#repository-sets).
 4. Open its **Workflows** page to review the default **Kanban** workflow. Create, import, or synchronize another workflow when the workspace needs a different process.
 5. On **Workspace Settings**, optionally choose a **Default Executor** and **Default Agent Profile**. Both default to **No default** unless configured.
 
@@ -148,6 +148,63 @@ A task can include several local or remote repository rows. Multi-repository cre
 If Kandev cannot resolve a pasted remote URL or its branch, the repository row keeps the URL and shows the provider error. Use **Retry** after correcting the URL or when a transient provider failure has cleared.
 
 Changes and review are scoped by repository. State the expected deliverable, base branch, and pull-request target for every attachment. See [Coordinate work](coordination.md) for adding branches after creation and splitting multi-repository work.
+
+</details>
+
+### Repository sets
+
+<details>
+<summary>Repository set details</summary>
+
+A **repository set** is a named, reusable group of a workspace's repositories: define **full-stack**
+once, then fill the repository picker with all of its repositories in a single action every time that
+combination of repositories is the one you need.
+
+A set holds repositories only. Branches stay a per-task decision, so applying a set leaves each row's
+branch to the picker's normal defaulting, and you review and adjust branches exactly as when adding
+rows by hand.
+
+Define a set in either place:
+
+- **Settings → Workspaces → _workspace_ → Repositories**, in the **Repository sets** section: create,
+  rename, edit which repositories belong, reorder them, and delete.
+- **New Task → Sets → Save as set**, which captures the repositories currently selected in the form
+  without disturbing the task you are creating.
+
+Apply one from the **Sets** control beside **add repository** in **New Task** and **New subtask**.
+Applying a set adds one row per repository, in the set's order. It is additive and repeatable:
+
+- a repository already in the form is skipped, so applying the same set twice changes nothing and two
+  overlapping sets give you the union;
+- rows you already configured are never discarded or reordered;
+- a repository that has since been removed from the workspace is skipped, and the dialog says how
+  many were skipped.
+
+Applying a set only fills the form. Nothing is saved until you create the task, so the repositories
+the task ends up with are whatever the form holds when you submit.
+
+Sets are also available over the API for scripted setup:
+
+```text
+GET    /api/v1/workspaces/:id/repository-sets
+POST   /api/v1/workspaces/:id/repository-sets   {"name","description","repository_ids"}
+GET    /api/v1/repository-sets/:id
+PATCH  /api/v1/repository-sets/:id              any of name, description, repository_ids
+DELETE /api/v1/repository-sets/:id
+```
+
+`repository_ids` is ordered and is the order a set fills the picker. A supplied `repository_ids`
+replaces the whole membership list, which is also how you reorder one; omit the field to leave
+membership untouched. The same five operations exist as `repository_set.list|create|get|update|delete`
+WebSocket actions, and `repository_set.created|updated|deleted` notifications keep every open client
+current. See [WebSocket API](websocket-api.md).
+
+Sets are workspace-scoped and shared: everyone who can see the workspace sees and can apply its sets.
+A set name is unique within its workspace, compared case-insensitively. Deleting a set removes the
+grouping only, never a repository; deleting a repository removes it from every set and leaves the sets
+themselves in place. Sets are not offered in **Remote** or **None** source mode. On an executor that
+cannot run a multi-repository task the control still works; the executor picker marks that profile
+unavailable once several repositories are selected, exactly as when you add the rows by hand.
 
 </details>
 

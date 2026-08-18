@@ -3,6 +3,7 @@
  */
 
 // Modifier keys
+// i18n-exempt: DOM KeyboardEvent.key values, compared against real events.
 export const MODIFIER_KEYS = {
   CTRL: "Control",
   CMD: "Meta",

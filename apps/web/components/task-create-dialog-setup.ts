@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback } from "react";
+import { FormEvent, useCallback, useState } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import type { Repository } from "@/lib/types/http";
@@ -11,6 +11,9 @@ import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useTaskSubmitHandlers } from "@/components/task-create-dialog-submit";
 import { useToast } from "@/components/toast-provider";
+import { useRepositorySets } from "@/hooks/domains/workspace/use-repository-sets";
+import { useApplyRepositorySet } from "@/components/task-create-dialog-repository-sets-apply";
+import { selectedRepositoryIdsForSet } from "@/components/task-create-dialog-repository-sets";
 import { useAppStore } from "@/components/state-provider";
 import {
   useDialogFormState,
@@ -25,8 +28,10 @@ import {
 import type { TaskCreateDialogProps } from "@/components/task-create-dialog";
 import { useResolvedTaskCreateWorkflowContext } from "@/components/task-create-dialog-workflow-context";
 import { truncateRemoteTaskTitle } from "@/lib/task-title";
+import { t } from "@/lib/i18n";
 
-const PROMPT_INSERTED_MESSAGE = "Enhanced prompt inserted.";
+// Catalog key: module scope, so it is resolved at the call site.
+const PROMPT_INSERTED_MESSAGE_KEY = "task:enhancedPromptInserted";
 
 function useEnhanceForDialog(
   fs: DialogFormState,
@@ -61,7 +66,7 @@ function useEnhanceForDialog(
     const generation = promptDelivery.captureScope();
     void enhancePrompt(current, (result) => {
       const inserted = promptDelivery.deliver(current, result, generation);
-      if (inserted) toast({ description: PROMPT_INSERTED_MESSAGE, variant: "success" });
+      if (inserted) toast({ description: t(PROMPT_INSERTED_MESSAGE_KEY), variant: "success" });
       return inserted;
     });
   }, [enhancePrompt, fs.descriptionInputRef, promptDelivery, toast]);
@@ -318,6 +323,14 @@ export function useTaskCreateDialogSetup(
   const handleLinearImport = useLinearImportHandler(fs, data.handlers.handleTaskNameChange);
   const freshBranchAvailable =
     !fs.useRemote && computed.isLocalExecutor && fs.repositories.length === 1;
+  const repositorySets = useRepositorySetsForDialog({
+    workspaceId: resolvedProps.workspaceId ?? null,
+    open: resolvedProps.open,
+    rows: fs.repositories,
+    repositories,
+    setRepositories: fs.setRepositories,
+    userSettingsLoaded,
+  });
   return {
     fs,
     isSessionMode,
@@ -337,12 +350,53 @@ export function useTaskCreateDialogSetup(
     submitHandlers,
     handleKeyDown,
     freshBranchAvailable,
+    repositorySets,
     taskCreateLastUsed,
     userSettingsLoaded,
     guardedHandleSubmit,
     enhance,
     handleJiraImport,
     handleLinearImport,
+  };
+}
+
+type RepositorySetsForDialogArgs = {
+  workspaceId: string | null;
+  open: boolean;
+  rows: DialogFormState["repositories"];
+  repositories: Repository[];
+  setRepositories: DialogFormState["setRepositories"];
+  userSettingsLoaded: boolean;
+};
+
+/**
+ * Assembles the repository-set props the picker needs: the workspace's sets, why
+ * applying one is unavailable, and the apply handler.
+ *
+ * Gated on `userSettingsLoaded` because the repository auto-select effect writes
+ * rows again once user settings arrive; offering the control before then lets a
+ * user apply a set that autopick immediately overwrites.
+ */
+function useRepositorySetsForDialog({
+  workspaceId,
+  open,
+  rows,
+  repositories,
+  setRepositories,
+  userSettingsLoaded,
+}: RepositorySetsForDialogArgs) {
+  const { sets } = useRepositorySets(workspaceId, open);
+  const onApply = useApplyRepositorySet({ rows, repositories, setRepositories });
+  const [saveOpen, setSaveOpen] = useState(false);
+  // Offer "Save as set" only when there is a workspace-repository selection worth
+  // saving, so the action is never a dead end.
+  const canSave = Boolean(workspaceId) && selectedRepositoryIdsForSet(rows).length > 0;
+  if (!userSettingsLoaded) return undefined;
+  return {
+    sets,
+    onApply,
+    save:
+      canSave && workspaceId ? { workspaceId, rows, open: saveOpen, setOpen: setSaveOpen } : null,
   };
 }
 

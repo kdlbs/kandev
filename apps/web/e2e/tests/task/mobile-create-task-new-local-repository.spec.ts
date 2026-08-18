@@ -42,6 +42,28 @@ async function openCreationDrawer(page: Page): Promise<Locator> {
   await expect(refresh).toBeVisible();
   await expect(action).toBeVisible();
   const searchControl = search.locator("..");
+  await expect
+    .poll(
+      async () => {
+        const [searchControlBox, refreshBox, actionBox] = await Promise.all([
+          searchControl.boundingBox(),
+          refresh.boundingBox(),
+          action.boundingBox(),
+        ]);
+        if (!searchControlBox || !refreshBox || !actionBox) return false;
+        const refreshGap = refreshBox.x - (searchControlBox.x + searchControlBox.width);
+        return (
+          searchControlBox.width > refreshBox.width + actionBox.width &&
+          refreshGap >= 0 &&
+          refreshGap <= 8
+        );
+      },
+      {
+        timeout: 15_000,
+        message: "repository picker toolbar did not settle into its mobile layout",
+      },
+    )
+    .toBe(true);
   const [searchControlBox, refreshBox, actionBox] = await Promise.all([
     searchControl.boundingBox(),
     refresh.boundingBox(),

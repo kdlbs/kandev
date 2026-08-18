@@ -258,4 +258,62 @@ test.describe("Subtask re-parenting by drag and drop", () => {
       })
       .toBe(true);
   });
+
+  test("starting a drag inside the row context menu does not drag the row", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const placement = {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    };
+    const parent = await apiClient.createTask(seedData.workspaceId, "Menu drag parent", placement);
+    const child = await apiClient.createTask(seedData.workspaceId, "Menu drag child", placement);
+
+    await testPage.goto(`/t/${parent.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const taskBlock = (taskId: string) =>
+      session.sidebar.locator(`[data-testid="sortable-task-block"][data-task-id="${taskId}"]`);
+    const before = {
+      parentY: (await taskBlock(parent.id).boundingBox())?.y ?? 0,
+      childY: (await taskBlock(child.id).boundingBox())?.y ?? 0,
+    };
+
+    // Right-click opens the context menu; the MouseSensor ignores right
+    // buttons, so opening the menu alone must not start a drag.
+    await taskBlock(child.id).getByTestId("sortable-task-handle").click({ button: "right" });
+    const colorItem = testPage.getByRole("menuitem", { name: /color/i });
+    await expect(colorItem).toBeVisible();
+
+    // Press and move inside the menu. The menu's pointer events must not
+    // reach the drag handle's sensor: a live drag would dim the source row
+    // and render nest drop zones on candidate rows.
+    const colorBox = await colorItem.boundingBox();
+    if (!colorBox) throw new Error("context menu color item has no bounding box");
+    await testPage.mouse.move(colorBox.x + colorBox.width / 2, colorBox.y + colorBox.height / 2);
+    await testPage.mouse.down();
+    await testPage.mouse.move(
+      colorBox.x + colorBox.width / 2 + 24,
+      colorBox.y + colorBox.height / 2,
+      {
+        steps: 3,
+      },
+    );
+    await expect(session.sidebar.getByTestId("nest-drop-zone")).toHaveCount(0);
+    await expect(taskBlock(child.id)).not.toHaveCSS("opacity", "0.5");
+    await testPage.mouse.up();
+
+    // The row never moved: both rows keep their vertical order.
+    await expect
+      .poll(async () => {
+        return {
+          parentY: (await taskBlock(parent.id).boundingBox())?.y ?? 0,
+          childY: (await taskBlock(child.id).boundingBox())?.y ?? 0,
+        };
+      })
+      .toEqual(before);
+  });
 });

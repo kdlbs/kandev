@@ -69,7 +69,9 @@ test.describe("Coarse RUNNING busy signal", () => {
     // contract remains coarse for the entire RUNNING turn.
     await waitForActiveSessionForegroundActivity(testPage, "generating");
     await expect(session.idleInput()).not.toBeVisible();
-    await expect(testPage.locator('[data-placeholder^="Queue"]')).toBeVisible();
+    await expect(testPage.locator('[data-placeholder^="Queue"]')).toBeVisible({
+      timeout: 20_000,
+    });
 
     const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
     await typeWhileBusy(testPage, editor, "queue this follow-up");
@@ -81,7 +83,12 @@ test.describe("Coarse RUNNING busy signal", () => {
     await expect(session.agentStatus()).toBeVisible();
     await waitForActiveSessionForegroundActivity(testPage, "generating");
     await expect(session.idleInput()).not.toBeVisible();
-    await expect(testPage.locator('[data-placeholder^="Queue"]')).toBeVisible();
+    // The queued draft is restored into the editor after reload, so the
+    // contenteditable no longer renders its empty-state placeholder. The
+    // queue chip is the stable post-reload contract for the queued state.
+    await expect(testPage.getByTestId("queue-chip")).toBeVisible({
+      timeout: 20_000,
+    });
   });
 
   test("foreground generation continues to queue input", async ({

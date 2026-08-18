@@ -1,4 +1,20 @@
-import type { ClarificationRequestMetadata, Message } from "@/lib/types/http";
+import type {
+  ClarificationRequestMetadata,
+  Message,
+  TaskPendingAction,
+  Turn,
+} from "@/lib/types/http";
+import { isInputCapableSessionState } from "./task-pending-input";
+
+export type PendingClarificationScope = {
+  /**
+   * Undefined means turn history is not loaded, so pendingAction gates the fallback.
+   * Null means history is loaded but has no durable turns, so all messages are hidden.
+   * A string scopes detection to that exact turn. An empty object disables detection.
+   */
+  currentTurnId?: string | null;
+  pendingAction?: TaskPendingAction | null;
+};
 
 export function isPendingClarificationMessage(message: Message): boolean {
   if (message.type !== "clarification_request") return false;
@@ -6,53 +22,144 @@ export function isPendingClarificationMessage(message: Message): boolean {
   return !metadata?.status || metadata.status === "pending";
 }
 
-export function findPendingClarification(messages?: readonly Message[] | null): Message | null {
-  if (!messages) return null;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (isPendingClarificationMessage(messages[i])) return messages[i];
+// TurnDTO timestamps are normalized by the backend to UTC with a Z suffix.
+// Non-Z input falls through to raw comparison and is outside this contract.
+function durableTurnTimestampKey(value: string): string {
+  const match = /^(.*T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/.exec(value);
+  if (!match) return value;
+  return `${match[1]}.${(match[2] ?? "").padEnd(9, "0")}Z`;
+}
+
+export function newestDurableTurnId(turns?: readonly Turn[]): string | null | undefined {
+  if (turns === undefined) return undefined;
+  if (turns.length === 0) return null;
+  let newest = turns[0];
+  for (let index = 1; index < turns.length; index++) {
+    const candidate = turns[index];
+    const newestKey = [
+      durableTurnTimestampKey(newest.started_at),
+      durableTurnTimestampKey(newest.created_at),
+      newest.id,
+    ];
+    const candidateKey = [
+      durableTurnTimestampKey(candidate.started_at),
+      durableTurnTimestampKey(candidate.created_at),
+      // Mirrors the backend's final deterministic tie-break. Turn IDs do not
+      // encode creation time; exact timestamp ties have no finer ordering.
+      candidate.id,
+    ];
+    for (let part = 0; part < candidateKey.length; part++) {
+      if (candidateKey[part] === newestKey[part]) continue;
+      if (candidateKey[part] > newestKey[part]) newest = candidate;
+      break;
+    }
+  }
+  return newest.id;
+}
+
+export function clarificationTurnIdForSession(
+  sessionState: string | null | undefined,
+  turns?: readonly Turn[],
+): string | null | undefined {
+  if (sessionState && !isInputCapableSessionState(sessionState)) return null;
+  return newestDurableTurnId(turns);
+}
+
+function clarificationMessagesInScope(
+  messages: readonly Message[],
+  scope?: PendingClarificationScope,
+): readonly Message[] {
+  if (!scope) return messages;
+  if (scope.pendingAction !== undefined && scope.pendingAction !== "clarification") return [];
+  if (scope.currentTurnId === null) return [];
+  if (scope.currentTurnId === undefined) {
+    return scope.pendingAction === "clarification" ? messages : [];
+  }
+  return messages.filter((message) => message.turn_id === scope.currentTurnId);
+}
+
+function newestMessageTurnId(messages: readonly Message[]): string | undefined {
+  let newest: Message | undefined;
+  for (const message of messages) {
+    if (!message.turn_id) continue;
+    if (!newest) {
+      newest = message;
+      continue;
+    }
+    const createdAt = durableTurnTimestampKey(message.created_at);
+    const newestCreatedAt = durableTurnTimestampKey(newest.created_at);
+    if (createdAt > newestCreatedAt || (createdAt === newestCreatedAt && message.id > newest.id)) {
+      newest = message;
+    }
+  }
+  return newest?.turn_id;
+}
+
+export function findPendingClarification(
+  messages?: readonly Message[] | null,
+  scope?: PendingClarificationScope,
+): Message | null {
+  if (!messages?.length) return null;
+  const scoped = clarificationMessagesInScope(messages, scope);
+  // Sidebar callers do not have durable turn history. Use persisted message
+  // order instead of WebSocket arrival order so a delayed predecessor event
+  // cannot hide the current request or re-arm an older one.
+  const latestTurnId = newestMessageTurnId(scoped);
+  for (let i = scoped.length - 1; i >= 0; i--) {
+    if (latestTurnId && scoped[i].turn_id !== latestTurnId) continue;
+    if (scoped[i].type !== "clarification_request") continue;
+    if (isPendingClarificationMessage(scoped[i])) return scoped[i];
   }
   return null;
 }
 
-// findPendingClarificationGroup returns every clarification_request message
-// that shares the latest pending message's pending_id, ordered by chat position.
-// Multi-question bundles emit one message per question; the chat panel uses this
-// list to render every pending question card together.
+// findPendingClarificationGroup returns pending clarification_request messages
+// that share the latest pending message's pending_id, ordered by chat position.
+// Multi-question bundles emit one message per question; terminal siblings count
+// toward arrival completeness but are not rendered for a replacement answer.
 //
 // Gates on `question_total` from metadata: returns an empty array until the
 // number of messages received equals the expected bundle size. This prevents
 // a user from acting on a partially-arrived bundle (clicking an option before
 // the rest of the N messages have been streamed in via the WS), which would
 // otherwise trigger a 400 from the backend's all-required gate.
-export function findPendingClarificationGroup(messages?: readonly Message[] | null): Message[] {
+export function findPendingClarificationGroup(
+  messages?: readonly Message[] | null,
+  scope?: PendingClarificationScope,
+): Message[] {
   if (!messages) return [];
-  const last = findPendingClarification(messages);
+  const scoped = clarificationMessagesInScope(messages, scope);
+  const last = findPendingClarification(scoped);
   if (!last) return [];
   const meta = last.metadata as ClarificationRequestMetadata | undefined;
   const pendingID = meta?.pending_id;
   if (!pendingID) return [last];
-  const group = messages.filter((m) => {
+  const bundle = scoped.filter((m) => {
     if (m.type !== "clarification_request") return false;
     const mMeta = m.metadata as ClarificationRequestMetadata | undefined;
     return mMeta?.pending_id === pendingID;
   });
   const expectedTotal = meta?.question_total;
-  if (typeof expectedTotal === "number" && expectedTotal > 0 && group.length < expectedTotal) {
+  if (typeof expectedTotal === "number" && expectedTotal > 0 && bundle.length < expectedTotal) {
     return [];
   }
-  return group;
+  return bundle.filter(isPendingClarificationMessage);
 }
 
-export function hasPendingClarification(messages?: readonly Message[] | null): boolean {
-  return findPendingClarification(messages) !== null;
+export function hasPendingClarification(
+  messages?: readonly Message[] | null,
+  scope?: PendingClarificationScope,
+): boolean {
+  return findPendingClarification(messages, scope) !== null;
 }
 
 export function hasPendingClarificationForSession(
   messagesBySession: Record<string, readonly Message[] | undefined>,
   sessionId?: string | null,
+  scope?: PendingClarificationScope,
 ): boolean {
   if (!sessionId) return false;
-  return hasPendingClarification(messagesBySession[sessionId]);
+  return hasPendingClarification(messagesBySession[sessionId], scope);
 }
 
 // --- Permission request helpers ---

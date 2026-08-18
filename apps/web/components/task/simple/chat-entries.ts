@@ -57,12 +57,15 @@ export function buildRunErrorsFromSessions(sessions: TaskSession[]): RunError[] 
   for (const s of sessions) {
     if (s.state !== "FAILED") continue;
     const failedAt = s.completedAt ?? s.updatedAt ?? s.startedAt ?? "";
+    const lastError = lastAgentErrorFromSessionMetadata(s.metadata);
     errors.push({
       id: `re-${s.id}`,
       sessionId: s.id,
       agentProfileId: s.agentProfileId,
       rawPayload: s.errorMessage ?? "",
       failedAt,
+      failureCode: lastError?.code,
+      failureDetails: lastError?.details,
       remediationUrl:
         normalizeRemediationUrl(remediationUrlFromSessionMetadata(s.metadata)) ?? undefined,
     });
@@ -104,6 +107,21 @@ function remediationUrlFromSessionMetadata(metadata: Record<string, unknown> | n
   const record = lastError as Record<string, unknown>;
   const raw = record.remediation_url ?? record.remediationUrl;
   return typeof raw === "string" && raw !== "" ? raw : undefined;
+}
+
+function lastAgentErrorFromSessionMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+): { code?: string; details?: string } | undefined {
+  const lastError = metadata?.last_agent_error;
+  if (!lastError || typeof lastError !== "object") return undefined;
+  const record = lastError as Record<string, unknown>;
+  const code = record.code ?? record.failure_code ?? record.failureCode;
+  const details =
+    record.details ?? record.failure_details ?? record.failureDetails ?? record.error_output;
+  return {
+    code: typeof code === "string" && code !== "" ? code : undefined,
+    details: typeof details === "string" && details !== "" ? details : undefined,
+  };
 }
 
 export type MergeChatEntriesArgs = {

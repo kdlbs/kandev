@@ -23,6 +23,7 @@ import { generateUUID } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
 import type { DiffComment } from "@/lib/diff/types";
 import type { FileInfo, GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+import { t } from "@/lib/i18n";
 
 type ReviewGitStatusFiles = {
   files: Record<string, FileInfo> | null;
@@ -172,7 +173,7 @@ export function useReviewDialog(effectiveSessionId: string | null) {
           10000,
         )
         .catch(() => {
-          toast({ title: "Failed to send comments", variant: "error" });
+          toast({ title: t("task:failedToSendComments"), variant: "error" });
         });
       setReviewDialogOpen(false);
     },

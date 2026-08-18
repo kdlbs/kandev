@@ -1,6 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ComponentType } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
+import { createAppStore } from "@/lib/state/store";
+import { buildHostApi } from "@/lib/plugins/host-api";
 import { DraftedIntegrationEnabledControl } from "./drafted-integration-enabled-control";
 
 afterEach(cleanup);
@@ -58,5 +61,25 @@ describe("DraftedIntegrationEnabledControl", () => {
 
     await waitFor(() => expect(persist).toHaveBeenCalledWith(false));
     await waitFor(() => expect(toggle.getAttribute("data-settings-dirty")).toBe("false"));
+  });
+
+  it("scopes the host-provided control id to its plugin", () => {
+    const host = buildHostApi("plugin-control", createAppStore());
+    const Control = host.ui.IntegrationEnabledControl as ComponentType<{
+      id: string;
+      enabled: boolean;
+      persist: (enabled: boolean) => Promise<void> | void;
+      name: string;
+    }>;
+
+    render(
+      <SettingsSaveProvider>
+        <Control id="source-control" name="Source control" enabled persist={vi.fn()} />
+      </SettingsSaveProvider>,
+    );
+
+    expect(screen.getByRole("switch", { name: "Enable Source control" }).getAttribute("id")).toBe(
+      "plugin:plugin-control:source-control-enabled",
+    );
   });
 });

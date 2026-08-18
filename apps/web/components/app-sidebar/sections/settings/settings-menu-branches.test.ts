@@ -15,6 +15,11 @@ import {
 const WORKSPACE_ID = "ws-1";
 const WORKSPACES_HREF = "/settings/workspaces";
 const WORKSPACES = [{ id: WORKSPACE_ID, name: "Main Workspace" }];
+const ORDERED_WORKSPACES = [
+  { id: "ws-first", name: "First" },
+  { id: "ws-active", name: "Active" },
+  { id: "ws-last", name: "Last" },
+];
 // Hoisted so the filter tests can build fixtures without re-spelling the
 // display name (sonar duplicate-literal rule).
 const AGENT_DISPLAY_NAME = "Claude Code";
@@ -45,7 +50,22 @@ function integrationsTabOf(tabs: readonly SettingsMenuNode[]): SettingsMenuNode 
   return tabs.find((node) => node.href?.endsWith("/integrations"));
 }
 
+function integrationSlugsOf(tabs: readonly SettingsMenuNode[]): Array<string | undefined> {
+  return (integrationsTabOf(tabs)?.children ?? []).map((node) => node.integrationSlug);
+}
+
 describe("buildWorkspacesBranch", () => {
+  it("places the active workspace first without disturbing the remaining order", () => {
+    const branch = buildWorkspacesBranch(ORDERED_WORKSPACES, "ws-active");
+
+    expect(branch.map((workspace) => workspace.key)).toEqual([
+      "workspace:ws-active",
+      "workspace:ws-first",
+      "workspace:ws-last",
+    ]);
+    expect(branch[0].badge).toBe("active");
+  });
+
   it("hangs each workspace's tabs under it, minus its own overview page", () => {
     const [workspace] = buildWorkspacesBranch(WORKSPACES);
 
@@ -71,7 +91,7 @@ describe("buildWorkspacesBranch", () => {
   it("appends registered provider integrations using the native workspace route", () => {
     const IntegrationIcon = () => null;
     const [workspace] = buildWorkspacesBranch(WORKSPACES, null, undefined, [
-      { id: "bitbucket", label: "Bitbucket", icon: IntegrationIcon },
+      { id: "bitbucket", pluginId: "plugin-bitbucket", label: "Bitbucket", icon: IntegrationIcon },
     ]);
     const integration = integrationsTabOf(workspace.children ?? [])?.children?.find(
       (node) => node.key === `workspace:${WORKSPACE_ID}:integrations:bitbucket`,
@@ -82,6 +102,37 @@ describe("buildWorkspacesBranch", () => {
       label: { text: "Bitbucket" },
       icon: IntegrationIcon,
     });
+  });
+
+  it("filters plugin integrations per workspace and keeps unknown state visible", () => {
+    const IntegrationIcon = () => null;
+    const workspaces = [
+      { id: "workspace-disabled", name: "Disabled" },
+      { id: "workspace-enabled", name: "Enabled" },
+      { id: "workspace-unknown", name: "Unknown" },
+    ];
+    const enabledByWorkspace: Record<string, boolean | undefined> = {
+      "workspace-disabled": false,
+      "workspace-enabled": true,
+    };
+    const [disabled, enabled, unknown] = buildWorkspacesBranch(
+      workspaces,
+      null,
+      undefined,
+      [
+        {
+          id: "bitbucket",
+          pluginId: "plugin-bitbucket",
+          label: "Bitbucket",
+          icon: IntegrationIcon,
+        },
+      ],
+      (_integrationId, workspaceId) => enabledByWorkspace[workspaceId],
+    );
+
+    expect(integrationSlugsOf(disabled.children ?? [])).not.toContain("bitbucket");
+    expect(integrationSlugsOf(enabled.children ?? [])).toContain("bitbucket");
+    expect(integrationSlugsOf(unknown.children ?? [])).toContain("bitbucket");
   });
 
   it("gives every tab and every integration its own mark", () => {

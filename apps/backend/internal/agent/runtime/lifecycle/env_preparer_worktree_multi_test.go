@@ -277,6 +277,9 @@ func TestWorktreePreparer_MultiRepo_RollbackOnPartialFailure(t *testing.T) {
 	if res.ErrorMessage == "" {
 		t.Error("expected non-empty error message")
 	}
+	if res.Error == nil {
+		t.Error("expected failed multi-repo result to retain its error cause")
+	}
 
 	// Rollback: no worktrees should remain in the store after partial failure.
 	all, err := mgr.GetAllByTaskID(context.Background(), "task-multi-fail")

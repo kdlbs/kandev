@@ -143,7 +143,6 @@
   "promptSourceStepPromptWithTaskDescription": "重新进入“{{stepName}}”会发送已渲染的步骤提示词（含任务描述）。",
   "promptSourceTaskDescription": "“{{stepName}}”没有步骤提示词，因此重新进入时会发送任务描述。",
   "pullFrom": "拉取自",
-  "pullFromHelp": "当此步骤有容量时，可选的馈送步骤用于拉取排队中的工作。",
   "pullFromGuidanceWithFeeder": "可选的自动馈送入口。目标队列中的任务优先获得准入；有容量时，Kandev 再从 {{feeder}} 拉取符合条件的工作。直接移动和自动转换会在目标步骤排队，不需要馈送步骤。新任务在目标步骤已满时使用此馈送步骤。",
   "pullFromGuidanceWithoutFeeder": "未选择馈送步骤。目标步骤已满时，直接移动和自动转换会在此目标队列中排队。新任务也会留在此队列中，直到有可用容量。",
   "readOnlyManagedBySync": "只读；由工作流同步管理",
@@ -262,5 +261,8 @@
   "workflows": "工作流",
   "workflowsSectionDescription": "创建带自动流转的自主流水线，或由你手动移动任务的手动工作流",
   "workflowSteps": "工作流步骤",
-  "workflowSyncCompleted": "工作流同步完成"
+  "workflowSyncCompleted": "工作流同步完成",
+  "loadingSteps": "正在加载步骤…",
+  "noStepsInThisWorkflow": "该工作流没有步骤",
+  "selectAWorkflowFirst": "请先选择一个工作流"
 }

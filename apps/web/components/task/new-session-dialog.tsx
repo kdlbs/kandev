@@ -132,6 +132,7 @@ function activateNewSession(
 }
 
 function useSessionOptions(taskId: string) {
+  const { t } = useTranslation();
   const { sessions, loadSessions } = useTaskSessions(taskId);
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
   useEffect(() => {
@@ -144,10 +145,10 @@ function useSessionOptions(taskId: string) {
     );
     return sorted.map((s, idx) => {
       const profile = agentProfiles.find((p: { id: string }) => p.id === s.agent_profile_id);
-      const name = profile ? agentProfileDisplayLabel(profile) : "Agent";
+      const name = profile ? agentProfileDisplayLabel(profile) : t("task:panelAgent");
       return { id: s.id, label: name, index: idx + 1, agentName: profile?.agent_name };
     });
-  }, [sessions, agentProfiles]);
+  }, [sessions, agentProfiles, t]);
 }
 
 function isMissingCompatibleProfile(
@@ -375,6 +376,7 @@ function NewSessionForm({
   const [selectedProfileId, setSelectedProfileId] = useState(
     handoffInitial?.selectedProfileId ?? initialProfileId ?? defaultProfileId,
   );
+  const [profileExplicit, setProfileExplicit] = useState(Boolean(handoff));
   const [hasPrompt, setHasPrompt] = useState(false);
   const [hasPendingAttachmentUploads, setHasPendingAttachmentUploads] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -406,6 +408,7 @@ function NewSessionForm({
     promptRef,
     taskId,
     selectedProfileId,
+    profileExplicit,
     executorId,
     contextValue,
     initialPrompt,
@@ -433,7 +436,10 @@ function NewSessionForm({
         profileOptions={profileSelection.profileOptions}
         selectedProfileId={selectedProfileId}
         isCreating={isCreating}
-        onProfileChange={setSelectedProfileId}
+        onProfileChange={(value) => {
+          setProfileExplicit(true);
+          setSelectedProfileId(value);
+        }}
       />
       <ContextSelect
         value={contextValue}

@@ -43,7 +43,7 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
 
       if (Object.keys(patch).length > 0) {
         await updateProject(project.id, patch);
-        updateProjectStore(project.id, patch);
+        updateProjectStore(project.workspaceId, project.id, patch);
       }
       setDirty(false);
       toast.success(t("office:projectSaved"));

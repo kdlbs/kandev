@@ -140,8 +140,8 @@ func (a *CodexACP) RemoteAuth() *RemoteAuth {
 				Type:  "files",
 				Label: "Copy auth files",
 				SourceFiles: map[string][]string{
-					"darwin": {".codex/auth.json", ".codex/config.toml"},
-					"linux":  {".codex/auth.json", ".codex/config.toml"},
+					"darwin": {".codex/auth.json"},
+					"linux":  {".codex/auth.json"},
 				},
 				TargetRelDir: ".codex",
 			},
@@ -151,6 +151,22 @@ func (a *CodexACP) RemoteAuth() *RemoteAuth {
 			},
 		},
 	}
+}
+
+func (a *CodexACP) PortableConfig() *PortableConfig {
+	return &PortableConfig{Bundles: []PortableConfigBundle{
+		{
+			ID:    "codex.config",
+			Label: "Copy Codex configuration",
+			Files: []PortableConfigFile{
+				{SourcePaths: map[string]string{
+					"darwin":  ".codex/config.toml",
+					"linux":   ".codex/config.toml",
+					"windows": ".codex/config.toml",
+				}, TargetPath: ".codex/config.toml"},
+			},
+		},
+	}}
 }
 
 // Verified against `codex --help`: `codex login --device-auth` is the

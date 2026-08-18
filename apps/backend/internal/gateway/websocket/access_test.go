@@ -210,6 +210,229 @@ func assertAuthRequiredBody(t *testing.T, rec *httptest.ResponseRecorder) {
 	}
 }
 
+// TestRequireConnectionAuthAcceptsPortProxyCapability covers the subtree
+// capability credential minted after the preview document authenticates: it is
+// accepted as a query parameter (appended to rewritten asset URLs, used by
+// credential-less fetches like the manifest) and as a path-scoped cookie
+// (cookie-sending subresource fetches), and only for the exact session:port
+// subtree it was minted for.
+func TestRequireConnectionAuthAcceptsPortProxyCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	gateway := newGatewayForTest(t)
+	gateway.SetPortProxy(nil) // constructs the handler; capability logic needs no manager
+	gateway.SetAuthPolicy(AuthPolicy{
+		Enforced:     func() bool { return true },
+		ResolveToken: func(context.Context, string) (authn.Identity, bool) { return authn.Identity{}, false },
+	})
+	identity := authn.Identity{UserID: "owner-1", Role: authn.RoleAdmin}
+	capability := gateway.PortProxyHandler.issueCapability("sess-cap", 5173, identity)
+
+	type outcome struct {
+		status   int
+		identity authn.Identity
+		hasID    bool
+	}
+	run := func(path string, cookie *http.Cookie) outcome {
+		t.Helper()
+		router := gin.New()
+		var got outcome
+		router.Any("/port-proxy/:sessionId/:port/*path", gateway.requireConnectionAuth(), func(c *gin.Context) {
+			got.identity, got.hasID = authn.FromGin(c)
+			c.Status(http.StatusOK)
+		})
+		router.Any("/vscode/:sessionId/*path", gateway.requireConnectionAuth(), func(c *gin.Context) {
+			got.identity, got.hasID = authn.FromGin(c)
+			c.Status(http.StatusOK)
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
+		router.ServeHTTP(rec, req)
+		got.status = rec.Code
+		return got
+	}
+
+	// Query parameter form: accepted, identity restored.
+	if got := run("/port-proxy/sess-cap/5173/manifest.webmanifest?"+proxyCapabilityQueryParam+"="+capability, nil); got.status != http.StatusOK {
+		t.Fatalf("capability query status = %d, want %d", got.status, http.StatusOK)
+	} else if !got.hasID || got.identity.UserID != "owner-1" {
+		t.Fatalf("capability query identity = %+v (has=%v), want owner-1", got.identity, got.hasID)
+	}
+
+	// Cookie form: accepted.
+	cookie := &http.Cookie{Name: proxyCapabilityCookieName, Value: capability, Path: "/port-proxy/sess-cap/5173"}
+	if got := run("/port-proxy/sess-cap/5173/src/main.tsx", cookie); got.status != http.StatusOK {
+		t.Fatalf("capability cookie status = %d, want %d", got.status, http.StatusOK)
+	}
+
+	// The same capability on a different subtree is rejected.
+	if got := run("/port-proxy/other-session/5173/x?"+proxyCapabilityQueryParam+"="+capability, nil); got.status != http.StatusUnauthorized {
+		t.Fatalf("capability on wrong session status = %d, want %d", got.status, http.StatusUnauthorized)
+	}
+	if got := run("/port-proxy/sess-cap/5174/x?"+proxyCapabilityQueryParam+"="+capability, nil); got.status != http.StatusUnauthorized {
+		t.Fatalf("capability on wrong port status = %d, want %d", got.status, http.StatusUnauthorized)
+	}
+
+	// A capability on a non-port-proxy route is never consulted.
+	if got := run("/vscode/sess-cap/x?"+proxyCapabilityQueryParam+"="+capability, nil); got.status != http.StatusUnauthorized {
+		t.Fatalf("capability on vscode route status = %d, want %d", got.status, http.StatusUnauthorized)
+	}
+
+	// No credential at all is still rejected.
+	if got := run("/port-proxy/sess-cap/5173/x", nil); got.status != http.StatusUnauthorized {
+		t.Fatalf("no credential status = %d, want %d", got.status, http.StatusUnauthorized)
+	}
+}
+
+// A request may carry multiple kandev_cap values (the app's own or encoded
+// duplicates); a valid one must win even when an invalid value comes first.
+func TestRequireConnectionAuthAcceptsAnyValidCapabilityAmongDuplicates(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	gateway := newGatewayForTest(t)
+	gateway.SetPortProxy(nil)
+	gateway.SetAuthPolicy(AuthPolicy{
+		Enforced:     func() bool { return true },
+		ResolveToken: func(context.Context, string) (authn.Identity, bool) { return authn.Identity{}, false },
+	})
+	capability := gateway.PortProxyHandler.issueCapability("sess-cap", 5173,
+		authn.Identity{UserID: "owner-1", Role: authn.RoleAdmin})
+
+	router := gin.New()
+	var got struct {
+		identity authn.Identity
+		hasID    bool
+	}
+	router.Any("/port-proxy/:sessionId/:port/*path", gateway.requireConnectionAuth(), func(c *gin.Context) {
+		got.identity, got.hasID = authn.FromGin(c)
+		c.Status(http.StatusOK)
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		"/port-proxy/sess-cap/5173/x?"+proxyCapabilityQueryParam+"=garbage&"+proxyCapabilityQueryParam+"="+capability, nil)
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (valid duplicate must win)", rec.Code, http.StatusOK)
+	}
+	if !got.hasID || got.identity.UserID != "owner-1" {
+		t.Fatalf("identity = %+v (has=%v), want owner-1", got.identity, got.hasID)
+	}
+}
+
+// A restored capability identity must pass the same live-account gate as
+// cookie/PAT auth: a user disabled mid-preview cannot keep the sliding-mint
+// capability alive.
+func TestRequireConnectionAuthCapabilityRequiresActiveUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	gateway := newGatewayForTest(t)
+	gateway.SetPortProxy(nil)
+	identity := authn.Identity{UserID: "owner-1", Role: authn.RoleAdmin}
+	capability := gateway.PortProxyHandler.issueCapability("sess-cap", 5173, identity)
+
+	run := func(active func(context.Context, string) bool) int {
+		gateway.SetAuthPolicy(AuthPolicy{
+			Enforced:     func() bool { return true },
+			ResolveToken: func(context.Context, string) (authn.Identity, bool) { return authn.Identity{}, false },
+			ActiveUser:   active,
+		})
+		router := gin.New()
+		router.Any("/port-proxy/:sessionId/:port/*path", gateway.requireConnectionAuth(), func(c *gin.Context) {
+			c.Status(http.StatusOK)
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/port-proxy/sess-cap/5173/x?"+proxyCapabilityQueryParam+"="+capability, nil)
+		router.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	if got := run(func(context.Context, string) bool { return true }); got != http.StatusOK {
+		t.Fatalf("active user status = %d, want %d", got, http.StatusOK)
+	}
+	if got := run(func(context.Context, string) bool { return false }); got != http.StatusUnauthorized {
+		t.Fatalf("disabled user status = %d, want %d (capability must not outlive the account)", got, http.StatusUnauthorized)
+	}
+	// Nil ActiveUser preserves zero-policy behavior.
+	if got := run(nil); got != http.StatusOK {
+		t.Fatalf("nil ActiveUser status = %d, want %d", got, http.StatusOK)
+	}
+}
+
+// Duplicate kandev_port_proxy cookies: a stale value sent first (more
+// specific path) must not shadow a valid subtree cookie — any cookie value
+// that validates authorizes the request.
+func TestRequireConnectionAuthAcceptsAnyValidCapabilityCookie(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	gateway := newGatewayForTest(t)
+	gateway.SetPortProxy(nil)
+	gateway.SetAuthPolicy(AuthPolicy{
+		Enforced:     func() bool { return true },
+		ResolveToken: func(context.Context, string) (authn.Identity, bool) { return authn.Identity{}, false },
+	})
+	capability := gateway.PortProxyHandler.issueCapability("sess-cap", 5173,
+		authn.Identity{UserID: "owner-1", Role: authn.RoleAdmin})
+
+	router := gin.New()
+	var got struct {
+		identity authn.Identity
+		hasID    bool
+	}
+	router.Any("/port-proxy/:sessionId/:port/*path", gateway.requireConnectionAuth(), func(c *gin.Context) {
+		got.identity, got.hasID = authn.FromGin(c)
+		c.Status(http.StatusOK)
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/port-proxy/sess-cap/5173/x", nil)
+	req.AddCookie(&http.Cookie{Name: proxyCapabilityCookieName, Value: "stale-not-valid", Path: "/port-proxy/sess-cap/5173"})
+	req.AddCookie(&http.Cookie{Name: proxyCapabilityCookieName, Value: capability, Path: "/port-proxy/sess-cap/5173"})
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (stale cookie must not shadow the valid one)", rec.Code, http.StatusOK)
+	}
+	if !got.hasID || got.identity.UserID != "owner-1" {
+		t.Fatalf("identity = %+v (has=%v), want owner-1", got.identity, got.hasID)
+	}
+}
+
+// TestRequireConnectionAuthIgnoresCapabilityWhenHandlerUnwired pins that the
+// capability gate is inert when the port proxy is not wired (SetupRoutes
+// registers no port-proxy routes then, and requireConnectionAuth must not
+// reach into a nil handler).
+func TestRequireConnectionAuthIgnoresCapabilityWhenHandlerUnwired(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	gateway := NewGateway(newNopTestLogger(t))
+	gateway.SetAuthPolicy(AuthPolicy{
+		Enforced:     func() bool { return true },
+		ResolveToken: func(context.Context, string) (authn.Identity, bool) { return authn.Identity{}, false },
+	})
+
+	router := gin.New()
+	var called bool
+	router.GET("/ws", gateway.requireConnectionAuth(), func(c *gin.Context) {
+		called = true
+		c.Status(http.StatusOK)
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/ws?token=anything", nil)
+	req.AddCookie(&http.Cookie{Name: proxyCapabilityCookieName, Value: "whatever"})
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if called {
+		t.Fatal("downstream handler ran without a valid credential")
+	}
+}
+
+func newNopTestLogger(t *testing.T) *logger.Logger {
+	t.Helper()
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	return log
+}
+
 func newAccessTestHub(t *testing.T) *Hub {
 	t.Helper()
 	log, err := logger.NewFromZap(zap.NewNop())

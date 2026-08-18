@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/user/models"
 )
 
+// TestFromUserSettingsIncludesAtomicRevision verifies the DTO carries the settings revision.
 func TestFromUserSettingsIncludesAtomicRevision(t *testing.T) {
 	got := FromUserSettings(&models.UserSettings{Revision: 42}).Revision
 	if got != 42 {
@@ -15,6 +16,7 @@ func TestFromUserSettingsIncludesAtomicRevision(t *testing.T) {
 	}
 }
 
+// TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences verifies the patch request exposes the Azure DevOps browse preferences field.
 func TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences(t *testing.T) {
 	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("AzureDevOpsBrowsePreferences")
 	if !ok || field.Tag.Get("json") != "azure_devops_browse_preferences,omitempty" {
@@ -22,6 +24,7 @@ func TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences(t *testing
 	}
 }
 
+// TestFromUserSettingsMapsAzureDevOpsBrowsePreferences verifies the DTO passes the Azure DevOps browse preferences through unchanged.
 func TestFromUserSettingsMapsAzureDevOpsBrowsePreferences(t *testing.T) {
 	preferences := json.RawMessage(`{"project-1":{"teamId":"team-1"}}`)
 	settings := FromUserSettings(&models.UserSettings{AzureDevOpsBrowsePreferences: preferences})
@@ -30,6 +33,7 @@ func TestFromUserSettingsMapsAzureDevOpsBrowsePreferences(t *testing.T) {
 	}
 }
 
+// TestUpdateUserSettingsRequestExposesKanbanHiddenStepIDs verifies the patch request exposes the kanban hidden step IDs field.
 func TestUpdateUserSettingsRequestExposesKanbanHiddenStepIDs(t *testing.T) {
 	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("KanbanHiddenStepIDs")
 	if !ok || field.Tag.Get("json") != "kanban_hidden_step_ids,omitempty" {
@@ -37,6 +41,7 @@ func TestUpdateUserSettingsRequestExposesKanbanHiddenStepIDs(t *testing.T) {
 	}
 }
 
+// TestFromUserSettingsMapsKanbanHiddenStepIDs verifies the DTO carries the per-workflow hidden step ID map.
 func TestFromUserSettingsMapsKanbanHiddenStepIDs(t *testing.T) {
 	hidden := map[string][]string{"wf-1": {"step-a", "step-b"}}
 	settings := FromUserSettings(&models.UserSettings{KanbanHiddenStepIDs: hidden})
@@ -45,6 +50,7 @@ func TestFromUserSettingsMapsKanbanHiddenStepIDs(t *testing.T) {
 	}
 }
 
+// TestUserSettingsDTOKanbanHiddenStepIDsAlwaysSerializesEvenWhenEmpty verifies an empty hidden step ID map serializes as {} instead of being omitted.
 func TestUserSettingsDTOKanbanHiddenStepIDsAlwaysSerializesEvenWhenEmpty(t *testing.T) {
 	// Regression test: the response field must never use `omitempty`. A
 	// client that clears its hidden set to {} needs that {} to actually
@@ -72,6 +78,7 @@ func TestUserSettingsDTOKanbanHiddenStepIDsAlwaysSerializesEvenWhenEmpty(t *test
 	}
 }
 
+// TestKanbanHiddenStepIDsRequestDecode verifies decoding distinguishes an omitted field from an explicit empty map.
 func TestKanbanHiddenStepIDsRequestDecode(t *testing.T) {
 	t.Run("omitted value stays nil", func(t *testing.T) {
 		var req UpdateUserSettingsRequest
@@ -94,6 +101,7 @@ func TestKanbanHiddenStepIDsRequestDecode(t *testing.T) {
 	})
 }
 
+// TestTasksListShowDetailsDTO verifies the DTO mapping and the nil-versus-explicit-false patch semantics.
 func TestTasksListShowDetailsDTO(t *testing.T) {
 	if !FromUserSettings(&models.UserSettings{TasksListShowDetails: true}).TasksListShowDetails {
 		t.Fatal("TasksListShowDetails = false, want true")
@@ -120,6 +128,7 @@ func TestTasksListShowDetailsDTO(t *testing.T) {
 	})
 }
 
+// TestAppStatusBarOrderDTOAndPatchSemantics verifies the status bar order DTO mapping and its patch semantics.
 func TestAppStatusBarOrderDTOAndPatchSemantics(t *testing.T) {
 	want := models.AppStatusBarOrder{
 		LeftItemIDs:  []string{"builtin:connection", "plugin:left"},
@@ -151,6 +160,7 @@ func TestAppStatusBarOrderDTOAndPatchSemantics(t *testing.T) {
 	})
 }
 
+// TestLspStatusLocationDTOAndPatchSemantics verifies the LSP status location DTO normalization and its patch semantics.
 func TestLspStatusLocationDTOAndPatchSemantics(t *testing.T) {
 	t.Run("response normalizes missing and unknown values to toolbar", func(t *testing.T) {
 		for _, value := range []string{"", "future_location"} {
@@ -191,6 +201,7 @@ func TestLspStatusLocationDTOAndPatchSemantics(t *testing.T) {
 	})
 }
 
+// TestUpdateUserSettingsRequestSystemMetricsDisplayPreservesOmittedFields verifies omitted system metrics display fields stay absent when re-marshaled.
 func TestUpdateUserSettingsRequestSystemMetricsDisplayPreservesOmittedFields(t *testing.T) {
 	var req UpdateUserSettingsRequest
 	if err := json.Unmarshal([]byte(`{"system_metrics_display":{"show_in_topbar":true}}`), &req); err != nil {
@@ -210,6 +221,7 @@ func TestUpdateUserSettingsRequestSystemMetricsDisplayPreservesOmittedFields(t *
 	}
 }
 
+// TestFromUserSettingsIncludesArchiveConfirmation verifies the DTO carries the task archive confirmation flag.
 func TestFromUserSettingsIncludesArchiveConfirmation(t *testing.T) {
 	for _, want := range []bool{true, false} {
 		dto := FromUserSettings(&models.UserSettings{ConfirmTaskArchive: want})
@@ -219,6 +231,7 @@ func TestFromUserSettingsIncludesArchiveConfirmation(t *testing.T) {
 	}
 }
 
+// TestAgentGeneratedTaskTitlesDTOAndPatchSemantics verifies the agent-generated task titles DTO mapping and its patch semantics.
 func TestAgentGeneratedTaskTitlesDTOAndPatchSemantics(t *testing.T) {
 	if !FromUserSettings(&models.UserSettings{AgentGeneratedTaskTitles: true}).AgentGeneratedTaskTitles {
 		t.Fatal("AgentGeneratedTaskTitles = false, want true")
@@ -249,6 +262,7 @@ func TestAgentGeneratedTaskTitlesDTOAndPatchSemantics(t *testing.T) {
 	}
 }
 
+// TestFromUserSettingsIncludesNormalizedMCPTaskAgentProfileDefault verifies the DTO normalizes the MCP task agent profile default.
 func TestFromUserSettingsIncludesNormalizedMCPTaskAgentProfileDefault(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -276,6 +290,7 @@ func TestFromUserSettingsIncludesNormalizedMCPTaskAgentProfileDefault(t *testing
 	}
 }
 
+// TestFromUserSettingsIncludesNormalizedStartupPage verifies the DTO normalizes the startup page.
 func TestFromUserSettingsIncludesNormalizedStartupPage(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -303,6 +318,35 @@ func TestFromUserSettingsIncludesNormalizedStartupPage(t *testing.T) {
 	}
 }
 
+// TestFromUserSettingsIncludesNormalizedLastSeenDisplay verifies the DTO normalizes the last-seen display mode.
+func TestFromUserSettingsIncludesNormalizedLastSeenDisplay(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "relative", value: models.LastSeenDisplayRelative, want: models.LastSeenDisplayRelative},
+		{name: "unknown defaults to absolute", value: "future_value", want: models.LastSeenDisplayAbsolute},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(FromUserSettings(&models.UserSettings{LastSeenDisplay: tt.value}))
+			if err != nil {
+				t.Fatalf("marshal DTO: %v", err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				t.Fatalf("decode DTO: %v", err)
+			}
+			if got := payload["last_seen_display"]; got != tt.want {
+				t.Fatalf("last_seen_display = %#v, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestUpdateUserSettingsRequestStartupPagePatchSemantics verifies startup page patch decoding distinguishes omitted and explicit values.
 func TestUpdateUserSettingsRequestStartupPagePatchSemantics(t *testing.T) {
 	t.Run("omitted value stays nil", func(t *testing.T) {
 		var req UpdateUserSettingsRequest
@@ -325,6 +369,7 @@ func TestUpdateUserSettingsRequestStartupPagePatchSemantics(t *testing.T) {
 	})
 }
 
+// TestUpdateUserSettingsRequestMCPTaskAgentProfileDefaultPatchSemantics verifies MCP task agent profile default patch decoding distinguishes omitted and explicit values.
 func TestUpdateUserSettingsRequestMCPTaskAgentProfileDefaultPatchSemantics(t *testing.T) {
 	t.Run("omitted value stays nil", func(t *testing.T) {
 		var req UpdateUserSettingsRequest
@@ -347,6 +392,7 @@ func TestUpdateUserSettingsRequestMCPTaskAgentProfileDefaultPatchSemantics(t *te
 	})
 }
 
+// TestNullableSidebarDraft verifies sidebar draft decoding distinguishes omitted, null, and object values.
 func TestNullableSidebarDraft(t *testing.T) {
 	t.Run("omitted field is not set", func(t *testing.T) {
 		var req UpdateUserSettingsRequest
@@ -385,6 +431,7 @@ func TestNullableSidebarDraft(t *testing.T) {
 	})
 }
 
+// TestNullableRawMessage verifies raw-message decoding distinguishes omitted, null, and JSON values.
 func TestNullableRawMessage(t *testing.T) {
 	t.Run("omitted field is not set", func(t *testing.T) {
 		var req UpdateUserSettingsRequest

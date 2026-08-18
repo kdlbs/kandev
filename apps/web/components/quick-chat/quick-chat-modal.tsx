@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, type CSSProperties } from "react";
+import { memo, useMemo, useRef, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
@@ -15,6 +15,11 @@ import { QuickTabAddMenu } from "./quick-tab-add-menu";
 import { QuickChatSetup } from "./quick-chat-setup";
 import { useQuickChatModal } from "./use-quick-chat-modal";
 import { useQuickChatWidth } from "@/hooks/use-quick-chat-width";
+import {
+  ClarificationEscapeGuardProvider,
+  type ClarificationEscapePredicate,
+  type ClarificationEscapeGuardRegistry,
+} from "@/hooks/use-clarification-escape-guard";
 import { ConfigChatSetup } from "@/components/config-chat/config-chat-setup";
 import { useConfigChat } from "@/components/config-chat/use-config-chat";
 import type { QuickChatSession, QuickTerminalTab } from "@/lib/state/slices/ui/types";
@@ -240,14 +245,44 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
   const quickChat = useQuickChatModal(workspaceId, configChat.reset);
   const setQuickChatInitialPrompt = useAppStore((state) => state.setQuickChatInitialPrompt);
   const { width, leftResizeHandleProps, rightResizeHandleProps } = useQuickChatWidth();
+  // A ref, not state: several widgets (a pending clarification, an open
+  // suggestion popup, the reverse-search overlay) can be registered at once
+  // and none of their register/unregister calls should trigger a re-render of
+  // the modal itself -- onEscapeKeyDown reads the live map only when Escape
+  // actually fires.
+  const escapeGuardsRef = useRef(new Map<string, ClarificationEscapePredicate>());
+  const escapeGuardRegistry = useMemo<ClarificationEscapeGuardRegistry>(
+    () => ({
+      register: (id, predicate) => escapeGuardsRef.current.set(id, predicate),
+      unregister: (id) => escapeGuardsRef.current.delete(id),
+    }),
+    [],
+  );
   return (
-    <>
+    <ClarificationEscapeGuardProvider value={escapeGuardRegistry}>
       <Dialog open={quickChat.isOpen} onOpenChange={quickChat.handleOpenChange}>
         <DialogContent
           className="!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 flex flex-col gap-0 p-0 pt-safe pb-safe shadow-2xl sm:!left-1/2 sm:!top-1/2 sm:!h-[85vh] sm:!max-h-[85vh] sm:!w-[var(--quick-chat-width)] sm:!max-w-[calc(100vw-2rem)] sm:!-translate-x-1/2 sm:!-translate-y-1/2"
           style={{ "--quick-chat-width": `${width}px` } as CSSProperties}
           showCloseButton={false}
           overlayClassName="bg-black/20"
+          onEscapeKeyDown={(event) => {
+            // A pending, expanded clarification (or an open suggestion popup,
+            // or the reverse-search overlay) handles this Escape itself and
+            // the modal stays open -- but only when that widget's own guard
+            // predicate reports it will actually act on this exact keydown
+            // (matching its enabled/scope/modifier state), so Escape never
+            // goes silently swallowed with nothing left to handle it. Once no
+            // guard claims it (e.g. a second, now-unguarded Escape), the modal
+            // closes, matching the main task chat panel's two-stage Escape
+            // after #2729.
+            for (const test of escapeGuardsRef.current.values()) {
+              if (test(event)) {
+                event.preventDefault();
+                break;
+              }
+            }
+          }}
         >
           <DialogTitle className="sr-only">{t("common:commandQuickChat")}</DialogTitle>
           <QuickChatResizeHandle edge="left" {...leftResizeHandleProps} />
@@ -266,6 +301,6 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
         onOpenChange={(open) => !open && quickChat.setSessionToClose(null)}
         onConfirm={quickChat.handleConfirmClose}
       />
-    </>
+    </ClarificationEscapeGuardProvider>
   );
 });

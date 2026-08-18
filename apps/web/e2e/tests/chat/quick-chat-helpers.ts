@@ -71,16 +71,19 @@ export async function openQuickChatWithAgent(page: Page, navigateHome = true): P
 
 export async function sendQuickChatMessage(dialog: Locator, page: Page, text: string) {
   const editor = dialog.locator(".tiptap.ProseMirror");
-  const modifier = process.platform === "darwin" ? "Meta" : "Control";
   // With eager init, the agent boots during picker -> tab transition and the
-  // input can briefly toggle disabled while the FE store catches up. Retry the
-  // full edit action so fill() cannot race a contenteditable=false flip.
+  // input can briefly toggle disabled while the FE store catches up. The whole
+  // fill + submit must retry as one unit: after a reopen the conversation can
+  // still be loading, so a fill can land on an editor that remounts (wiping
+  // the text) before the submit click. A successful send clears the editor
+  // synchronously, so each iteration either sends once and exits or sends
+  // nothing and retries.
   await expect(async () => {
     await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 1_000 });
     await editor.click({ timeout: 1_000 });
     await editor.fill(text, { timeout: 1_000 });
     await expect(editor).toHaveText(text, { timeout: 1_000 });
-    await editor.press(`${modifier}+Enter`, { timeout: 1_000 });
+    await dialog.getByTestId("submit-message-button").click({ timeout: 1_000 });
     await expect(editor).toHaveText("", { timeout: 2_000 });
   }).toPass({ timeout: 30_000, intervals: [250, 500, 1_000] });
 }

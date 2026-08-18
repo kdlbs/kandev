@@ -424,7 +424,7 @@ test.describe("Utility Agents settings page", () => {
     expect(defaultPickerBox!.width).toBeCloseTo(configPickerBox!.width, 0);
 
     const cardTypography = await testPage
-      .locator('[data-slot="card-title"] h3')
+      .locator('[data-slot="card-header"] h3')
       .evaluateAll((elements) =>
         elements.map((element) => {
           const style = getComputedStyle(element);

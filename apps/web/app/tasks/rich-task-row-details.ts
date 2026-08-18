@@ -1,4 +1,5 @@
 import type { Repository, Task } from "@/lib/types/http";
+import { t } from "@/lib/i18n";
 
 export type RichTaskRowDetails = {
   repositoryLabels: string[];
@@ -41,7 +42,8 @@ export function resolveRichTaskRowDetails({
     repositoryLabels.push(label);
   }
   const parentTitle = task.parent_id
-    ? (parentTasks.find((parentTask) => parentTask.id === task.parent_id)?.title ?? "Subtask")
+    ? (parentTasks.find((parentTask) => parentTask.id === task.parent_id)?.title ??
+      t("task:subtask"))
     : null;
   const reviewAttention = reviewAttentionFor(task);
 

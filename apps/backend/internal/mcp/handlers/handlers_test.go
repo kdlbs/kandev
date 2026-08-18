@@ -2975,7 +2975,7 @@ func TestHandleCreateTask_BlockedBy_Accepted(t *testing.T) {
 }
 
 func TestHandleClarificationTimeout_DetachesMessages(t *testing.T) {
-	svc, repo := newTestTaskService(t)
+	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
 	ctx := context.Background()
 
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
@@ -2999,9 +2999,7 @@ func TestHandleClarificationTimeout_DetachesMessages(t *testing.T) {
 	require.NoError(t, repo.CreateTurn(ctx, turn))
 
 	store := clarification.NewStore(time.Minute)
-	eventBus := bus.NewMemoryEventBus(testLogger(t))
-	t.Cleanup(func() { eventBus.Close() })
-	canceller := clarification.NewCanceller(store, repo, eventBus, testLogger(t))
+	canceller := clarification.NewCanceller(store, repo, svc, testLogger(t))
 
 	pendingID := "test-pending-id"
 	require.NoError(t, repo.CreateMessage(ctx, &models.Message{
@@ -3017,6 +3015,13 @@ func TestHandleClarificationTimeout_DetachesMessages(t *testing.T) {
 			"status":      "pending",
 		},
 	}))
+	var messageUpdated *bus.Event
+	subscription, err := eventBus.Subscribe(events.MessageUpdated, func(_ context.Context, event *bus.Event) error {
+		messageUpdated = event
+		return nil
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = subscription.Unsubscribe() })
 
 	// Drain the in-memory store so the handler must fall back to DB-driven cleanup
 	store.CancelSession(sess.ID)
@@ -3027,10 +3032,26 @@ func TestHandleClarificationTimeout_DetachesMessages(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 
-	msgs, err := repo.FindPendingClarificationMessagesBySessionID(ctx, sess.ID)
+	msgs, err := repo.FindActiveClarificationMessagesBySessionID(ctx, sess.ID)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1, "clarification should stay pending for deferred answer")
 	require.Equal(t, true, msgs[0].Metadata["agent_disconnected"])
+	require.NotNil(t, messageUpdated)
+	eventData, ok := messageUpdated.Data.(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, string(models.TaskPendingActionClarification), eventData["pending_action"])
+	require.IsType(t, models.PendingActionRevision{}, eventData["pending_action_revision"])
+
+	messageUpdated = nil
+	expired, err := canceller.ExpireSessionAndNotify(ctx, sess.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, expired)
+	require.NotNil(t, messageUpdated)
+	eventData, ok = messageUpdated.Data.(map[string]interface{})
+	require.True(t, ok)
+	require.Contains(t, eventData, "pending_action")
+	require.Nil(t, eventData["pending_action"])
+	require.IsType(t, models.PendingActionRevision{}, eventData["pending_action_revision"])
 }
 
 func TestHandleClarificationTimeout_WithoutCanceller_ReturnsError(t *testing.T) {

@@ -44,6 +44,7 @@ import {
   useEnsureUserSettings,
 } from "./use-ensure-user-settings";
 
+/** Builds a full default user-settings state marked as not loaded. */
 function makeUnloadedSettings(): UserSettingsState {
   return {
     revision: null,
@@ -98,6 +99,7 @@ function makeUnloadedSettings(): UserSettingsState {
     terminalFontFamily: null,
     terminalFontSize: null,
     changesPanelLayout: "tree",
+    lastSeenDisplay: "absolute",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
@@ -110,6 +112,7 @@ function makeUnloadedSettings(): UserSettingsState {
   };
 }
 
+/** Builds a mock settings API response wrapping the given task-create last-used payload. */
 function userSettingsResponse(taskCreateLastUsed = {}) {
   return {
     shell_options: [],

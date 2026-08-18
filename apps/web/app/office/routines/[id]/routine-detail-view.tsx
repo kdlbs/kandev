@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import {
   updateRoutine,
   runRoutine,
@@ -72,7 +73,7 @@ type RoutineDetailViewProps = {
 export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDetailViewProps) {
   const { t } = useTranslation();
   const router = useRouter();
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useAppStore(selectOfficeAgentProfiles);
   const [routine] = useState(initialRoutine);
   const [triggers, setTriggers] = useState(initialTriggers);
   const [draft, setDraft] = useState<DraftState>(buildDraft(initialRoutine, initialTriggers));

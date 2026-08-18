@@ -201,7 +201,6 @@
   "pollGitlabIssuesAndCreateOne": "轮询 GitLab 议题，并为每个新的匹配项创建一个任务。",
   "pollIntervalSeconds": "轮询间隔（秒）",
   "pollingAndCleanup": "轮询与清理",
-  "pressEnter": "按 Enter",
   "project": "项目",
   "projectPaths": "项目路径",
   "projects": "项目",
@@ -275,7 +274,6 @@
   "unsubscribeFromNotifications": "取消订阅 GitLab 通知",
   "unsubscribedFromGitlabNotifications": "已取消订阅 GitLab 通知",
   "updateWatch": "更新监控",
-  "updated": "已更新 ",
   "verifyingGitlabConnection": "正在验证 GitLab 连接",
   "watchDeletionFailed": "删除监控失败",
   "workflow": "工作流",
@@ -350,5 +348,14 @@
   "mrChipDrawerClose": "关闭合并请求状态面板",
   "gitlabRejectedAssociation": "GitLab 拒绝了关联。",
   "taskCreatedMrNotLinked": "任务已创建，但未关联合并请求",
-  "taskCreatedMrNotLinkedDescription": "打开任务并使用“关联 GitLab 合并请求”重试。{{error}}"
+  "taskCreatedMrNotLinkedDescription": "打开任务并使用“关联 GitLab 合并请求”重试。{{error}}",
+  "addedMrFeedbackToTaskContext": "已将 merge request 反馈加入任务上下文",
+  "failedToLoadMergeRequest": "加载 merge request 失败",
+  "failedToLoadMrAutomationOptions": "加载 MR 自动化选项失败。",
+  "failedToSearchGitLab": "在 GitLab 上搜索失败",
+  "memberSearchFailed": "成员搜索失败",
+  "presetAssigned": "指派给我",
+  "presetAuthored": "我创建的",
+  "presetCreated": "我创建的",
+  "presetReviewRequested": "请求我评审"
 }

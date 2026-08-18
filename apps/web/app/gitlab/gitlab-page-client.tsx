@@ -16,7 +16,7 @@ import {
   type SidebarSelection,
 } from "@/components/gitlab/my-gitlab/presets-sidebar";
 import { PresetsScopeBar } from "@/components/gitlab/my-gitlab/presets-scope-bar";
-import { MR_PRESETS, ISSUE_PRESETS } from "@/components/gitlab/my-gitlab/presets";
+import { MR_PRESETS, ISSUE_PRESETS, presetLabel } from "@/components/gitlab/my-gitlab/presets";
 import { useGitLabSearch } from "@/components/gitlab/my-gitlab/use-gitlab-search";
 import { useSavedPresets, type SavedPreset } from "@/components/gitlab/my-gitlab/use-saved-presets";
 import {
@@ -77,8 +77,10 @@ function resolveTitle(
   }
   const presets = selection.kind === "mr" ? MR_PRESETS : ISSUE_PRESETS;
   return (
-    presets.find((p) => p.value === selection.id)?.label ??
-    (selection.kind === "mr" ? t("gitlab:titleMergeRequests") : t("gitlab:titleIssues"))
+    presetLabel(
+      t,
+      presets.find((p) => p.value === selection.id),
+    ) ?? (selection.kind === "mr" ? t("gitlab:titleMergeRequests") : t("gitlab:titleIssues"))
   );
 }
 
@@ -213,6 +215,7 @@ function useGitLabPageState(searchEnabled: boolean, workspaceId?: string) {
   // Use committedQuery (not the unflushed draft) so the saved preset always
   // matches what is currently displayed in the list.
   const canSaveCurrent = committedQuery.trim().length > 0 || projectFilter.length > 0;
+  // i18n-exempt: persisted as the saved query's name, so it must not depend on the creating locale.
   const suggestedLabel =
     committedQuery.trim() || (projectFilter ? `In ${projectFilter}` : "Saved query");
   const onOpenSaveDialog = () => {

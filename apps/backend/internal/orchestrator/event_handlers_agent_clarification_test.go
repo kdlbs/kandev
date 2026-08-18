@@ -16,12 +16,26 @@ type repoBackedTurnService struct {
 	repo testRepo
 }
 
+type failingReservedTurnAttemptMarker struct {
+	TurnService
+	err error
+}
+
+func (s failingReservedTurnAttemptMarker) MarkReservedTurnDispatchAttempted(context.Context, *models.Turn) error {
+	return s.err
+}
+
 type testRepo interface {
 	CreateTurn(ctx context.Context, turn *models.Turn) error
 	CompleteTurn(ctx context.Context, id string) error
 	GetTurn(ctx context.Context, id string) (*models.Turn, error)
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 	UpdateTurn(ctx context.Context, turn *models.Turn) error
+	PatchTurnMetadata(
+		ctx context.Context,
+		sessionID, turnID string,
+		updates map[string]interface{},
+	) (bool, time.Time, error)
 }
 
 func (s *repoBackedTurnService) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
@@ -36,6 +50,37 @@ func (s *repoBackedTurnService) StartTurn(ctx context.Context, sessionID string)
 	return turn, nil
 }
 
+func (s *repoBackedTurnService) ReserveTurn(
+	ctx context.Context,
+	sessionID string,
+	_ *models.PromptDispatchRecovery,
+) (*models.Turn, error) {
+	return s.StartTurn(ctx, sessionID)
+}
+
+func (s *repoBackedTurnService) PublishReservedTurn(context.Context, *models.Turn) error { return nil }
+
+func (s *repoBackedTurnService) MarkReservedTurnDispatchAttempted(context.Context, *models.Turn) error {
+	return nil
+}
+
+func (s *repoBackedTurnService) RollbackReservedTurn(
+	ctx context.Context,
+	sessionID, turnID string,
+) (bool, error) {
+	deleter, ok := s.repo.(interface {
+		DeleteTurnIfUnreferenced(context.Context, string, string) (bool, error)
+	})
+	if !ok {
+		return false, errors.New("test turn repository cannot roll back reserved turns")
+	}
+	return deleter.DeleteTurnIfUnreferenced(ctx, sessionID, turnID)
+}
+
+func (s *repoBackedTurnService) ReconcileUnpublishedPromptTurns(context.Context) (int, error) {
+	return 0, nil
+}
+
 func (s *repoBackedTurnService) CompleteTurn(ctx context.Context, turnID string) error {
 	return s.repo.CompleteTurn(ctx, turnID)
 }
@@ -45,11 +90,27 @@ func (s *repoBackedTurnService) GetTurn(ctx context.Context, turnID string) (*mo
 }
 
 func (s *repoBackedTurnService) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
-	return s.repo.GetActiveTurnBySessionID(ctx, sessionID)
+	turn, err := s.repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return turn, err
 }
 
 func (s *repoBackedTurnService) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 	return s.repo.UpdateTurn(ctx, turn)
+}
+
+func (s *repoBackedTurnService) PatchTurnMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+	updates map[string]interface{},
+) error {
+	updated, _, err := s.repo.PatchTurnMetadata(ctx, sessionID, turnID, updates)
+	if err == nil && !updated {
+		return sql.ErrNoRows
+	}
+	return err
 }
 
 func (s *repoBackedTurnService) AbandonOpenTurns(ctx context.Context, sessionID string) error {

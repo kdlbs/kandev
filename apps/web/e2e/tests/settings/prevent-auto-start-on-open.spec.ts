@@ -152,22 +152,30 @@ test.describe("Prevent auto-start on open", () => {
       await session.waitForChatIdle({ timeout: 15_000 });
 
       // Restart the backend and reload — the resume-skipped gate must keep
-      // the agent stopped and render the Start agent button instead.
+      // the agent stopped. The composer hint replaces the footer Start agent
+      // button: it says a message will auto-start the agent, and it is
+      // always visible (the composer sits outside the transcript scroll
+      // container, so the clipped-button failure cannot occur).
       await backend.restart();
       await testPage.reload();
       await session.waitForLoad();
 
-      const startButton = testPage.getByTestId("session-resume-start-button");
-      await expect(startButton).toBeVisible({ timeout: 60_000 });
+      await expect(testPage.getByTestId("composer-agent-start-hint")).toBeVisible({
+        timeout: 60_000,
+      });
+      await expect(testPage.getByTestId("session-resume-start-button")).toHaveCount(0);
       await expect(testPage.getByText("Resumed agent", { exact: false })).toHaveCount(0);
 
-      // Manual start resumes the agent and it keeps working.
-      await startButton.click();
+      // Sending a message is the explicit start: the agent resumes and
+      // keeps working. Index 1: the first "simple mock response" from the
+      // pre-restart turn is still in the transcript, so the post-send reply
+      // must be the SECOND match — asserting index 0 would pass even if the
+      // resumed launch dropped the prompt.
+      await session.sendMessage("/e2e:simple-message");
       await expect(testPage.getByText("Resumed agent", { exact: false })).toBeVisible({
         timeout: 30_000,
       });
-      await session.sendMessage("/e2e:simple-message");
-      await session.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });
+      await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
     } finally {
       await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false });
     }

@@ -181,7 +181,7 @@ export async function resumeWithSilentFallback(
     return true;
   }
   setters.setResumptionState("error");
-  setters.setError("Failed to resume session - workspace restore also unavailable");
+  setters.setError(t("task:failedToResumeAndRestore"));
   return false;
 }
 
@@ -424,7 +424,7 @@ async function checkAndResume({
     }
   } catch (err) {
     setters.setResumptionState("error");
-    setters.setError(err instanceof Error ? err.message : "Unknown error");
+    setters.setError(err instanceof Error ? err.message : t("common:unknownError"));
   }
 }
 
@@ -643,11 +643,11 @@ export function useSessionResumption(
         return true;
       }
       setResumptionState("error");
-      setError("Failed to resume session");
+      setError(t("task:failedToResumeSession"));
       return false;
     } catch (err) {
       setResumptionState("error");
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setError(err instanceof Error ? err.message : t("common:unknownError"));
       return false;
     }
   }, [

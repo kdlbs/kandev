@@ -10,11 +10,13 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { formatRelativeTime } from "@/lib/utils";
 import { AgentAvatar } from "@/app/office/components/agent-avatar";
 import { RemediationLink } from "@/components/task/remediation-link";
 import type { RunError } from "@/app/office/tasks/[id]/types";
+import { ManagedRuntimeNpmRunError } from "./managed-runtime-npm-run-error";
 import { useTranslation } from "react-i18next";
 
 type RunErrorEntryProps = {
@@ -34,12 +36,13 @@ export function RunErrorEntry({ taskId, error }: RunErrorEntryProps) {
   const { t } = useTranslation();
   const agentName = useAppStore((s) =>
     error.agentProfileId
-      ? (s.office.agentProfiles.find((a) => a.id === error.agentProfileId)?.name ?? t("task:agent"))
+      ? (selectOfficeAgentProfiles(s).find((a) => a.id === error.agentProfileId)?.name ??
+        t("task:agent"))
       : t("task:agent"),
   );
   const [showDetails, setShowDetails] = useState(false);
 
-  const handleRecover = async (action: "resume" | "fresh_start") => {
+  const handleRecover = async (action: "resume" | "fresh_start" | "runtime_retry") => {
     const client = getWebSocketClient();
     if (!client) return;
     try {
@@ -52,6 +55,16 @@ export function RunErrorEntry({ taskId, error }: RunErrorEntryProps) {
       // No-op — the chat will reflect any subsequent state via WS.
     }
   };
+
+  if (error.failureCode === "managed_runtime_npm_resolution") {
+    return (
+      <ManagedRuntimeNpmRunError
+        error={error}
+        agentName={agentName}
+        onRetry={() => handleRecover("runtime_retry")}
+      />
+    );
+  }
 
   return (
     <div className="flex gap-3 py-3 border-b border-border/50">

@@ -6,8 +6,10 @@
  * translating either would change stored data and the instructions the model
  * receives, which is a bug rather than a missing translation.
  */
+// i18n-exempt: persisted as the task's own title. See the file header.
 export const DEFAULT_ONBOARDING_TASK_TITLE = "Setup Workspace";
 
+// i18n-exempt: sent verbatim to the coordinator agent as its prompt. See the file header.
 export const DEFAULT_ONBOARDING_TASK_DESCRIPTION = `Investigate the project in https://github.com/org/repo. Replace this URL with each repository that should be managed in this workspace.
 
 As the CEO agent:

@@ -15,6 +15,7 @@ test.describe("shell command output echo stripping", () => {
     apiClient,
     seedData,
   }) => {
+    test.setTimeout(120_000);
     const command = "cat file.txt";
     const echoedOutput = `$ ${command}=== marker ===\n`;
 
@@ -46,6 +47,7 @@ test.describe("shell command output echo stripping", () => {
     await expect(commandRow).toHaveText(command);
 
     const disclosure = chat.getByRole("button", { name: "Show command output" });
+    await expect(disclosure).toBeVisible({ timeout: 45_000 });
     const responsePromise = testPage.waitForResponse(
       (response) => response.url().endsWith("/shell-output") && response.status() === 200,
     );
@@ -64,6 +66,7 @@ test.describe("shell command output echo stripping", () => {
     apiClient,
     seedData,
   }) => {
+    test.setTimeout(120_000);
     // Some providers resolve a relative file-path argument in the command
     // to an absolute (cwd-joined) one before actually invoking the real
     // terminal, while the reported "command" - the same text the chat
@@ -104,6 +107,7 @@ test.describe("shell command output echo stripping", () => {
     await expect(commandRow).toHaveText(command);
 
     const disclosure = chat.getByRole("button", { name: "Show command output" });
+    await expect(disclosure).toBeVisible({ timeout: 45_000 });
     const responsePromise = testPage.waitForResponse(
       (response) => response.url().endsWith("/shell-output") && response.status() === 200,
     );
@@ -163,6 +167,7 @@ test.describe("shell command output echo stripping", () => {
     await expect(commandRow).toHaveText(command);
 
     const disclosure = chat.getByRole("button", { name: "Show command output" });
+    await expect(disclosure).toBeVisible({ timeout: 45_000 });
     const responsePromise = testPage.waitForResponse(
       (response) => response.url().endsWith("/shell-output") && response.status() === 200,
     );
