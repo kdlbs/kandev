@@ -117,10 +117,15 @@ test.describe("Task-create executor safety defaults", () => {
     seedData,
   }) => {
     const { localProfile, worktreeProfile } = await executorProfiles(apiClient);
-    await apiClient.updateWorkspace(seedData.workspaceId, { default_executor_id: "" });
-    await saveTaskCreatePreference(apiClient, seedData, localProfile.id);
+    const { workspaces } = await apiClient.listWorkspaces();
+    const workspace = workspaces.find((item) => item.id === seedData.workspaceId);
+    expect(workspace, "the seeded workspace is required by the fixture").toBeDefined();
+    const originalDefaultExecutorId = workspace?.default_executor_id ?? "";
 
     try {
+      await apiClient.updateWorkspace(seedData.workspaceId, { default_executor_id: "" });
+      await saveTaskCreatePreference(apiClient, seedData, localProfile.id);
+
       await openCreateTask(testPage);
       const executorSelector = testPage.getByTestId("executor-profile-selector");
       await expect(executorSelector).toContainText(worktreeProfile.name);
@@ -131,7 +136,9 @@ test.describe("Task-create executor safety defaults", () => {
       await testPage.getByTestId("source-mode-workspace").click();
       await expect(executorSelector).toContainText(worktreeProfile.name);
     } finally {
-      await apiClient.updateWorkspace(seedData.workspaceId, { default_executor_id: "" });
+      await apiClient.updateWorkspace(seedData.workspaceId, {
+        default_executor_id: originalDefaultExecutorId,
+      });
       await saveTaskCreatePreference(apiClient, seedData, worktreeProfile.id);
     }
   });
