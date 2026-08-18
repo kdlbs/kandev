@@ -13,14 +13,15 @@ func TestExtractUsage(t *testing.T) {
 	intp := func(v int) *int { return &v }
 
 	tests := []struct {
-		name    string
-		resp    *acp.PromptResponse
-		wantIn  int64
-		wantOut int64
-		wantCR  int64
-		wantCW  int64
-		wantTh  int64
-		wantNil bool
+		name           string
+		resp           *acp.PromptResponse
+		wantIn         int64
+		wantOut        int64
+		wantCR         int64
+		wantCW         int64
+		wantTh         int64
+		wantOutPresent bool
+		wantNil        bool
 	}{
 		{
 			name: "claude-acp result.usage (typed Usage)",
@@ -33,7 +34,7 @@ func TestExtractUsage(t *testing.T) {
 					TotalTokens:       25068,
 				},
 			},
-			wantIn: 6, wantOut: 7, wantCR: 16634, wantCW: 8421,
+			wantIn: 6, wantOut: 7, wantCR: 16634, wantCW: 8421, wantOutPresent: true,
 		},
 		{
 			name: "opencode-acp result.usage with thoughtTokens",
@@ -45,7 +46,18 @@ func TestExtractUsage(t *testing.T) {
 					TotalTokens:   10652,
 				},
 			},
-			wantIn: 10639, wantOut: 2, wantTh: 11,
+			wantIn: 10639, wantOut: 2, wantTh: 11, wantOutPresent: true,
+		},
+		{
+			name: "typed Usage preserves an observed zero output count",
+			resp: &acp.PromptResponse{
+				Usage: &acp.Usage{
+					InputTokens:  10,
+					OutputTokens: 0,
+					TotalTokens:  10,
+				},
+			},
+			wantIn: 10, wantOutPresent: true,
 		},
 		{
 			name: "gemini _meta.quota.model_usage[].token_count",
@@ -64,7 +76,7 @@ func TestExtractUsage(t *testing.T) {
 					},
 				},
 			},
-			wantIn: 9796, wantOut: 2,
+			wantIn: 9796, wantOut: 2, wantOutPresent: true,
 		},
 		{
 			name: "gemini _meta.quota.token_count flat",
@@ -78,7 +90,20 @@ func TestExtractUsage(t *testing.T) {
 					},
 				},
 			},
-			wantIn: 100, wantOut: 50,
+			wantIn: 100, wantOut: 50, wantOutPresent: true,
+		},
+		{
+			name: "gemini input-only metadata marks output missing",
+			resp: &acp.PromptResponse{
+				Meta: map[string]any{
+					"quota": map[string]any{
+						"token_count": map[string]any{
+							"input_tokens": float64(100),
+						},
+					},
+				},
+			},
+			wantIn: 100,
 		},
 		{
 			name: "_meta.usage legacy snake_case fallback",
@@ -91,7 +116,7 @@ func TestExtractUsage(t *testing.T) {
 					},
 				},
 			},
-			wantIn: 42, wantOut: 7,
+			wantIn: 42, wantOut: 7, wantOutPresent: true,
 		},
 		{
 			name: "_meta.usage legacy camelCase fallback",
@@ -104,7 +129,7 @@ func TestExtractUsage(t *testing.T) {
 					},
 				},
 			},
-			wantIn: 5, wantOut: 3,
+			wantIn: 5, wantOut: 3, wantOutPresent: true,
 		},
 		{
 			name:    "empty response yields nil",
@@ -142,6 +167,9 @@ func TestExtractUsage(t *testing.T) {
 			}
 			if got.OutputTokens != tc.wantOut {
 				t.Errorf("OutputTokens = %d, want %d", got.OutputTokens, tc.wantOut)
+			}
+			if got.OutputTokensPresent != tc.wantOutPresent {
+				t.Errorf("OutputTokensPresent = %t, want %t", got.OutputTokensPresent, tc.wantOutPresent)
 			}
 			if got.CachedReadTokens != tc.wantCR {
 				t.Errorf("CachedReadTokens = %d, want %d", got.CachedReadTokens, tc.wantCR)

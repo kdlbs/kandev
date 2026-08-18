@@ -2704,6 +2704,7 @@ func promptUsageMetadata(usage *streams.PromptUsage) map[string]interface{} {
 	return map[string]interface{}{
 		"input_tokens":                    usage.InputTokens,
 		"output_tokens":                   usage.OutputTokens,
+		"output_tokens_present":           usage.OutputTokensPresent,
 		"cached_read_tokens":              usage.CachedReadTokens,
 		"cached_write_tokens":             usage.CachedWriteTokens,
 		"thought_tokens":                  usage.ThoughtTokens,

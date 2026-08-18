@@ -109,16 +109,11 @@ func (s *Service) lookupPricingWithVersion(
 // (the tree-holds rollup, card 2faa29da's task_sessions fix) are
 // unaffected.
 //
-// TokensOut follows the same honesty rule, gated on the narrower condition
-// data.Usage.Estimated && data.Usage.OutputTokens == 0 rather than
-// Estimated alone: an adapter is free to set Estimated=true while still
-// reporting a real output count (e.g. a future fallback path that recovers
-// OutputTokens some other way), and that measured value must not be
-// discarded just because the turn is otherwise synthesised. Only the
-// conjunction — estimated AND no output observed — means "never measured",
-// matching the one production call site that produces it today
-// (adapter_prompt.go's context-occupancy synthesis, which never sets
-// OutputTokens).
+// TokensOut uses OutputTokensPresent to keep an observed zero distinct from
+// an absent sample. For events written before the presence flag existed, a
+// non-estimated count or a nonzero count remains observed. The only production
+// shape with no output sample is adapter_prompt.go's estimated
+// context-occupancy fallback.
 func buildCostEvent(
 	data PromptUsageData, fields *sqlite.TaskExecutionFields, projectID, provider string,
 	resolution costResolution,
@@ -140,7 +135,7 @@ func buildCostEvent(
 	contractVersion := models.CostContractVersion
 	event.CostContractVersion = &contractVersion
 
-	if !data.Usage.Estimated || data.Usage.OutputTokens != 0 {
+	if outputTokensObserved(data.Usage) {
 		outputTokens := data.Usage.OutputTokens
 		event.TokensOut = &outputTokens
 	}
@@ -170,4 +165,11 @@ func buildCostEvent(
 		event.UsageEventID = &usageEventID
 	}
 	return event
+}
+
+func outputTokensObserved(usage UsageTokens) bool {
+	if usage.OutputTokensPresent != nil {
+		return *usage.OutputTokensPresent
+	}
+	return !usage.Estimated || usage.OutputTokens != 0
 }

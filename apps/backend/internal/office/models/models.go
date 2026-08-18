@@ -291,11 +291,10 @@ var ValidProjectStatuses = map[ProjectStatus]bool{
 // The Rill cost extract has no schema versioning of its own, so a row
 // written under a prior contract is distinguished by comparing
 // cost_contract_version, not by a date an analyst has to be told out of
-// band. Every writer of CostEvent.CostContractVersion (the prompt-usage
-// subscriber's buildCostEvent and the manual-entry RecordCostEvent) stamps
-// this same value so the two producers can never disagree about which
-// contract a row was written under. Bump only if the contract's meaning
-// changes again.
+// band. Both production writers (the prompt-usage subscriber's buildCostEvent
+// and the manual-entry RecordCostEvent) use this value. The test harness uses
+// it too. Thus, the writers cannot disagree about which contract applies to a
+// row. Bump only if the contract's meaning changes again.
 //
 // v1 → v2: on the CostSourceUnpriced path, v1 forced Estimated=true
 // regardless of the caller's own Estimated flag, conflating "we could not
@@ -309,8 +308,9 @@ var ValidProjectStatuses = map[ProjectStatus]bool{
 // synthesised-usage turn (Estimated=true) with no observed output token
 // count stored a plain 0 — indistinguishable from a genuine zero-output
 // turn, and a row with real dollars attached to it. v3 makes TokensOut
-// nullable and leaves it NULL when Estimated is true and OutputTokens == 0,
-// so "never measured" is unrepresentable as a number.
+// nullable and uses the normalized output-token presence signal to leave it
+// NULL when no output count was observed, so "never measured" is
+// unrepresentable as a number.
 const CostContractVersion int64 = 3
 
 // CostEvent represents a cost tracking event.
@@ -327,13 +327,13 @@ const CostContractVersion int64 = 3
 // recorded" — a legacy row written before the column existed, or (for the
 // cache split specifically) an adapter with no per-turn usage frame, such as
 // codex-acp's occupancy-growth synthesis (Estimated=true). TokensOut is NULL
-// specifically when Estimated is true and no output count was observed
-// (OutputTokens == 0 on that synthesis path): a 0 there would assert a
-// measurement that was never taken, and a downstream per-output-token
-// measure must see "unknown" rather than a fake zero-output turn. NULL is
-// never backfilled to 0; TokensCachedIn keeps its original read+write sum
-// semantics on every row so existing consumers of that column are
-// unaffected. See docs/specs/office/costs.md.
+// specifically when no output count was observed: a 0 there would assert a
+// measurement that was never taken, and a downstream per-output-token measure
+// must see "unknown" rather than a fake zero-output turn. The JSON cost-list
+// representation includes this field as null so API consumers can make the
+// same distinction. NULL is never backfilled to 0; TokensCachedIn keeps its
+// original read+write sum semantics on every row so existing consumers of
+// that column are unaffected. See docs/specs/office/costs.md.
 type CostEvent struct {
 	ID                        string      `json:"id" db:"id"`
 	SessionID                 string      `json:"session_id" db:"session_id"`
@@ -346,7 +346,7 @@ type CostEvent struct {
 	TokensCachedIn            int64       `json:"tokens_cached_in" db:"tokens_cached_in"`
 	TokensCachedRead          *int64      `json:"tokens_cached_read,omitempty" db:"tokens_cached_read"`
 	TokensCachedWrite         *int64      `json:"tokens_cached_write,omitempty" db:"tokens_cached_write"`
-	TokensOut                 *int64      `json:"tokens_out,omitempty" db:"tokens_out"`
+	TokensOut                 *int64      `json:"tokens_out" db:"tokens_out"`
 	CostSubcents              int64       `json:"cost_subcents" db:"cost_subcents"`
 	Estimated                 bool        `json:"estimated" db:"estimated"`
 	TurnID                    *string     `json:"turn_id,omitempty" db:"turn_id"`

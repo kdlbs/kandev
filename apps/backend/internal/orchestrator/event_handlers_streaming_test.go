@@ -762,6 +762,7 @@ func TestPersistTurnPromptMetadata(t *testing.T) {
 			Usage: &streams.PromptUsage{
 				InputTokens:                  10,
 				OutputTokens:                 20,
+				OutputTokensPresent:          true,
 				CachedReadTokens:             3,
 				CachedWriteTokens:            4,
 				ThoughtTokens:                5,
@@ -787,6 +788,7 @@ func TestPersistTurnPromptMetadata(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, float64(42), usage["total_tokens"])
 	require.Equal(t, float64(123), usage["provider_reported_cost_subcents"])
+	require.Equal(t, true, usage["output_tokens_present"])
 	require.Equal(t, true, usage["estimated"])
 }
 

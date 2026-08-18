@@ -356,12 +356,9 @@ func TestPromptUsage_TokensOutNullWhenUnmeasured(t *testing.T) {
 	}
 }
 
-// TestPromptUsage_TokensOutKeptWhenMeasuredEvenIfEstimated confirms the
-// gate is the conjunction Estimated && OutputTokens == 0, not Estimated
-// alone: a turn that is synthesised but still reports a real output count
-// (forward-compatible with the sibling adapter card populating
-// OutputTokens on the fallback path while leaving Estimated=true) must keep
-// that measured value, not NULL it out.
+// TestPromptUsage_TokensOutKeptWhenMeasuredEvenIfEstimated confirms legacy
+// compatibility for events that predate OutputTokensPresent. A nonzero output
+// count remains observed even when Estimated is true.
 func TestPromptUsage_TokensOutKeptWhenMeasuredEvenIfEstimated(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	ctx := context.Background()
@@ -392,6 +389,79 @@ func TestPromptUsage_TokensOutKeptWhenMeasuredEvenIfEstimated(t *testing.T) {
 	row := costs[0]
 	if row.TokensOut == nil || *row.TokensOut != 42 {
 		t.Errorf("TokensOut = %v, want 42 (a measured value must survive even on an estimated turn)", row.TokensOut)
+	}
+}
+
+// TestPromptUsage_TokensOutKeepsObservedZero confirms that output-token
+// presence is independent from its numeric value. An estimated turn can have
+// an observed zero, which must remain a non-nil zero in the ledger.
+func TestPromptUsage_TokensOutKeepsObservedZero(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "worker-estimated-zero-out")
+	insertTestTask(t, svc, "task-estimated-zero-out", "ws-1")
+	setTestTaskAssignee(t, svc, "task-estimated-zero-out", "worker-estimated-zero-out")
+
+	event := bus.NewEvent(events.SessionPromptUsageUpdated, "test", map[string]interface{}{
+		"task_id":    "task-estimated-zero-out",
+		"session_id": "session-estimated-zero-out",
+		"agent_id":   "codex-acp",
+		"model":      "gpt-5.4-mini",
+		"usage": map[string]interface{}{
+			"input_tokens":          350,
+			"output_tokens":         0,
+			"output_tokens_present": true,
+			"estimated":             true,
+		},
+	})
+	if err := eb.Publish(ctx, events.BuildSessionPromptUsageSubject("session-estimated-zero-out"), event); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	costs, err := svc.ListCostEvents(ctx, "ws-1")
+	if err != nil || len(costs) != 1 {
+		t.Fatalf("list costs: %v (len=%d)", err, len(costs))
+	}
+	row := costs[0]
+	if row.TokensOut == nil || *row.TokensOut != 0 {
+		t.Errorf("TokensOut = %v, want non-nil 0 (the zero was observed)", row.TokensOut)
+	}
+}
+
+// TestPromptUsage_TokensOutTrustsExplicitMissingState confirms that output
+// presence is independent from the broader estimated flag. New normalized
+// events must use their explicit presence state instead of value inference.
+func TestPromptUsage_TokensOutTrustsExplicitMissingState(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "worker-missing-out")
+	insertTestTask(t, svc, "task-missing-out", "ws-1")
+	setTestTaskAssignee(t, svc, "task-missing-out", "worker-missing-out")
+
+	event := bus.NewEvent(events.SessionPromptUsageUpdated, "test", map[string]interface{}{
+		"task_id":    "task-missing-out",
+		"session_id": "session-missing-out",
+		"agent_id":   "future-acp",
+		"model":      "future-model",
+		"usage": map[string]interface{}{
+			"input_tokens":          350,
+			"output_tokens":         0,
+			"output_tokens_present": false,
+			"estimated":             false,
+		},
+	})
+	if err := eb.Publish(ctx, events.BuildSessionPromptUsageSubject("session-missing-out"), event); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	costs, err := svc.ListCostEvents(ctx, "ws-1")
+	if err != nil || len(costs) != 1 {
+		t.Fatalf("list costs: %v (len=%d)", err, len(costs))
+	}
+	if costs[0].TokensOut != nil {
+		t.Errorf("TokensOut = %v, want nil for explicitly unobserved output", *costs[0].TokensOut)
 	}
 }
 

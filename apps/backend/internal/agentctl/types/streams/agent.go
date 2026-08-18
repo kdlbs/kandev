@@ -531,11 +531,17 @@ type ConfigOptionValue struct {
 // Estimated is true when the adapter synthesised token counts (e.g.
 // codex-acp's cumulative-delta inference) rather than receiving an
 // authoritative per-turn usage frame. Rows flagged estimated still count
-// toward budget totals at face value per
-// docs/specs/office-costs/spec.md.
+// toward budget totals at face value per docs/specs/office/costs.md.
 type PromptUsage struct {
-	InputTokens                  int64 `json:"input_tokens"`
-	OutputTokens                 int64 `json:"output_tokens"`
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+
+	// OutputTokensPresent distinguishes an observed zero from a missing
+	// output-token sample. Adapters set it false when they cannot observe output
+	// tokens, such as the context-occupancy fallback. It is always serialized so
+	// downstream consumers can distinguish false from a legacy missing field.
+	OutputTokensPresent bool `json:"output_tokens_present"`
+
 	CachedReadTokens             int64 `json:"cached_read_tokens,omitempty"`
 	CachedWriteTokens            int64 `json:"cached_write_tokens,omitempty"`
 	ThoughtTokens                int64 `json:"thought_tokens,omitempty"`

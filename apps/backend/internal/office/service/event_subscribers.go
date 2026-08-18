@@ -135,10 +135,14 @@ type PromptUsageData struct {
 // subscriber uses it directly and skips the models.dev lookup. The legacy
 // positive-value check remains in the resolver for older events. Estimated is
 // true when the adapter synthesised tokens (codex-acp cumulative-delta
-// inference).
+// inference). OutputTokensPresent distinguishes an observed zero from a
+// missing output-token sample. The pointer is nil only for legacy events that
+// predate this field, so the subscriber can apply the old inference rule to
+// those events without overriding an explicit false from a new event.
 type UsageTokens struct {
 	InputTokens                  int64 `json:"input_tokens"`
 	OutputTokens                 int64 `json:"output_tokens"`
+	OutputTokensPresent          *bool `json:"output_tokens_present,omitempty"`
 	CachedReadTokens             int64 `json:"cached_read_tokens"`
 	CachedWriteTokens            int64 `json:"cached_write_tokens"`
 	ThoughtTokens                int64 `json:"thought_tokens,omitempty"`

@@ -659,19 +659,21 @@ func seedCostEventHandler(repo *officesqlite.Repository, log *logger.Logger) gin
 			occurred = t.UTC()
 		}
 		ctx := c.Request.Context()
+		contractVersion := officemodels.CostContractVersion
 		event := &officemodels.CostEvent{
-			ID:             uuid.New().String(),
-			SessionID:      req.SessionID,
-			TaskID:         req.TaskID,
-			AgentProfileID: req.AgentProfileID,
-			Model:          "test-model",
-			Provider:       "test",
-			TokensIn:       req.TokensIn,
-			TokensCachedIn: req.TokensCachedIn,
-			TokensOut:      req.TokensOut,
-			CostSubcents:   req.CostSubcents,
-			Estimated:      req.Estimated,
-			OccurredAt:     occurred,
+			ID:                  uuid.New().String(),
+			SessionID:           req.SessionID,
+			TaskID:              req.TaskID,
+			AgentProfileID:      req.AgentProfileID,
+			Model:               "test-model",
+			Provider:            "test",
+			TokensIn:            req.TokensIn,
+			TokensCachedIn:      req.TokensCachedIn,
+			TokensOut:           req.TokensOut,
+			CostSubcents:        req.CostSubcents,
+			Estimated:           req.Estimated,
+			CostContractVersion: &contractVersion,
+			OccurredAt:          occurred,
 		}
 		if err := repo.CreateCostEvent(ctx, event); err != nil {
 			log.Error("test harness: create cost event failed", zap.Error(err))
