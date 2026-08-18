@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+// i18n-exempt: IntersectionObserver geometry, not user-facing copy.
 const CHART_PREWARM_MARGIN = "200px 0px";
 
 export function useChartPlotVisibility() {

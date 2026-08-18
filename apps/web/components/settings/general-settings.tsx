@@ -3,12 +3,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "@/components/theme/app-theme";
 import {
-  IconActivity,
   IconBinaryTree,
   IconCommand,
   IconPalette,
   IconKeyboard,
-  IconGitBranch,
   IconArchive,
   IconArrowBackUp,
   IconListCheck,
@@ -24,7 +22,6 @@ import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { settingsControlClassName } from "@/components/settings/settings-control";
 import { SettingsPageHeader } from "@/components/settings/settings-typography";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
-import { SystemMetricsSettingsCard } from "@/components/settings/system-metrics-settings-card";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import type { Theme } from "@/lib/settings/types";
@@ -44,9 +41,9 @@ import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { StartupPageSettingsCard } from "@/components/settings/startup-page-settings-card";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { SleepInhibitionSettings } from "@/components/settings/sleep-inhibition-settings";
-import { AppStatusBarSettingsCard } from "@/components/settings/app-status-bar-settings-card";
 import { SettingsMenuModeCard } from "@/components/settings/settings-menu-mode-card";
 import { RichOutputMotionSettingsCard } from "@/components/settings/rich-output-motion-settings-card";
+import { AppearanceAccountSections } from "@/components/settings/appearance-account-sections";
 import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
@@ -139,51 +136,6 @@ function ChatSubmitKeyCard({
   );
 }
 
-function ChangesPanelLayoutCard({
-  value,
-  isDirty,
-  onChange,
-}: {
-  value: "flat" | "tree";
-  isDirty: boolean;
-  onChange: (value: "flat" | "tree") => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <SettingsCard
-      isDirty={isDirty}
-      discoveryTargetId={GENERAL_SETTINGS_TARGETS.changesPanelLayout}
-      data-testid="changes-panel-layout-card"
-    >
-      <CardHeader>
-        <CardTitle className="text-base">{t("settings:changesPanelLayout")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <Label htmlFor="changes-panel-layout">{t("settings:fileListView")}</Label>
-          <Select value={value} onValueChange={(next) => onChange(next as "flat" | "tree")}>
-            <SelectTrigger
-              id="changes-panel-layout"
-              data-testid="changes-panel-layout-select"
-              data-settings-dirty={isDirty}
-              className="cursor-pointer"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="flat">{t("settings:flatList")}</SelectItem>
-              <SelectItem value="tree">{t("settings:tree")}</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            {t("settings:displayChangedFilesAsAFlat")}
-          </p>
-        </div>
-      </CardContent>
-    </SettingsCard>
-  );
-}
-
 function StartupPageSettingsSection({
   value,
   isDirty,
@@ -267,29 +219,6 @@ function AppearanceThemeSection({
         />
       </div>
     </SettingsSection>
-  );
-}
-function AppStatusBarSettingsSection({
-  enabled,
-  isDirty,
-  onChange,
-}: {
-  enabled: boolean;
-  isDirty: boolean;
-  onChange: (enabled: boolean) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <>
-      <Separator />
-      <SettingsSection
-        icon={<IconActivity className="h-5 w-5" />}
-        title={t("settings:statusBar")}
-        description={t("settings:configureStatusBarVisibility")}
-      >
-        <AppStatusBarSettingsCard enabled={enabled} isDirty={isDirty} onChange={onChange} />
-      </SettingsSection>
-    </>
   );
 }
 
@@ -472,7 +401,6 @@ function AppearanceSettingsSections({
   previewMenuMode: (mode: SettingsMenuMode) => void;
   previewRichOutputAnimations: (enabled: boolean) => void;
 }) {
-  const { t } = useTranslation();
   return (
     <>
       <AppearanceThemeSection
@@ -510,43 +438,7 @@ function AppearanceSettingsSections({
       />
 
       <LanguageSettings />
-
-      <AppStatusBarSettingsSection
-        enabled={draft.appStatusBarEnabled}
-        isDirty={draft.appStatusBarEnabled !== saved.appStatusBarEnabled}
-        onChange={(appStatusBarEnabled) => updateDraft({ appStatusBarEnabled })}
-      />
-
-      <Separator />
-
-      <SettingsSection
-        icon={<IconGitBranch className="h-5 w-5" />}
-        title={t("settings:changesPanel")}
-        description={t("settings:customizeHowChangedFilesAreDisplayed")}
-      >
-        <ChangesPanelLayoutCard
-          value={draft.changesPanelLayout}
-          isDirty={draft.changesPanelLayout !== saved.changesPanelLayout}
-          onChange={(changesPanelLayout) => updateDraft({ changesPanelLayout })}
-        />
-      </SettingsSection>
-
-      <Separator />
-
-      <SettingsSection
-        icon={<IconActivity className="h-5 w-5" />}
-        title={t("settings:resourceMetrics")}
-        description={t("settings:configureBackendAndExecutionResourceSampling")}
-      >
-        <SystemMetricsSettingsCard
-          showInTopbar={draft.showMetrics}
-          isShowInTopbarDirty={draft.showMetrics !== saved.showMetrics}
-          onShowInTopbarChange={(showMetrics) => updateDraft({ showMetrics })}
-          simplified={draft.simplifiedMetrics}
-          isSimplifiedDirty={draft.simplifiedMetrics !== saved.simplifiedMetrics}
-          onSimplifiedChange={(simplifiedMetrics) => updateDraft({ simplifiedMetrics })}
-        />
-      </SettingsSection>
+      <AppearanceAccountSections draft={draft} saved={saved} updateDraft={updateDraft} />
     </>
   );
 }
