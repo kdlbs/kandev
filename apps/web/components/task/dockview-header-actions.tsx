@@ -4,7 +4,6 @@ import { useCallback, useState } from "react";
 import { type IDockviewHeaderActionsProps } from "dockview-react";
 import {
   IconPlus,
-  IconDeviceDesktop,
   IconTerminal2,
   IconPlayerPlay,
   IconLayoutSidebarRightCollapse,
@@ -22,19 +21,18 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
-import { startProcess } from "@/lib/api";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
 import { replaceTaskUrl } from "@/lib/links";
-import type { Task, ProcessInfo } from "@/lib/types/http";
+import type { Task } from "@/lib/types/http";
 import { sessionId as toSessionId } from "@/lib/types/ids";
-import type { ProcessStatusEntry } from "@/lib/state/slices";
 import { AddPanelMenuItems, MENU_ITEM_CLASS } from "./dockview-add-panel-items";
 import { useUserShells } from "@/hooks/domains/session/use-user-shells";
 import { useEnsureDefaultTerminalOrdinary } from "@/hooks/domains/session/use-ensure-default-terminal-ordinary";
 import { NewSessionDialog } from "./new-session-dialog";
 import { NewTaskDropdown } from "./new-task-dropdown";
 import { useActiveSessionDevScript } from "./repository-scripts-menu";
+import { DevServerPreviewButton } from "./dev-server-preview-button";
 import { GroupSplitCloseActionsView, useDockviewGroupWidth } from "./dockview-group-actions";
 import { useTranslation } from "react-i18next";
 import { useOptionalPortForwardingVisibility } from "./port-forwarding-visibility-provider";
@@ -44,22 +42,6 @@ const HEADER_ACTION_BUTTON_CLASS =
 const RAW_HEADER_ACTION_BUTTON_CLASS =
   "inline-flex h-6 w-6 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer";
 const HEADER_ICON_CLASS = "h-3.5 w-3.5";
-
-/** Map a ProcessInfo response to a ProcessStatusEntry for the store. */
-function mapProcessToStatus(process: ProcessInfo): ProcessStatusEntry {
-  return {
-    processId: process.id,
-    sessionId: process.session_id,
-    kind: process.kind,
-    scriptName: process.script_name,
-    status: process.status,
-    command: process.command,
-    workingDir: process.working_dir,
-    exitCode: process.exit_code ?? null,
-    startedAt: process.started_at,
-    updatedAt: process.updated_at,
-  };
-}
 
 function useLeftHeaderState(
   groupId: string,
@@ -387,52 +369,17 @@ function RightTopGroupActions() {
 }
 
 function CenterRightActions() {
-  const { t } = useTranslation();
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const repository = useAppStore((state) => {
-    if (!activeSessionId) return null;
-    const session = state.taskSessions.items[activeSessionId];
-    if (!session) return null;
-    const repoId = session.repository_id;
-    if (!repoId) return null;
-    const allRepos = Object.values(state.repositories.itemsByWorkspaceId).flat();
-    return allRepos.find((r) => r.id === repoId) ?? null;
-  });
-  const hasDevScript = Boolean(repository?.dev_script?.trim());
-
-  const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
-  const upsertProcessStatus = useAppStore((state) => state.upsertProcessStatus);
-  const setActiveProcess = useAppStore((state) => state.setActiveProcess);
-
-  const handleStartBrowser = useCallback(async () => {
-    addBrowserPanel();
-    if (hasDevScript && activeSessionId) {
-      try {
-        const resp = await startProcess(activeSessionId, { kind: "dev" });
-        if (resp?.process) {
-          upsertProcessStatus(mapProcessToStatus(resp.process));
-          setActiveProcess(resp.process.session_id, resp.process.id);
-        }
-      } catch {
-        // Process may already be running
-      }
-    }
-  }, [addBrowserPanel, hasDevScript, activeSessionId, upsertProcessStatus, setActiveProcess]);
+  const hasDevScript = Boolean(useActiveSessionDevScript());
 
   return (
     <div className="flex items-center gap-1">
       {/* Mode is shown in the chat input ModeSelector instead */}
       {hasDevScript && (
-        <Button
-          size="sm"
-          variant="ghost"
+        <DevServerPreviewButton
           className={HEADER_ACTION_BUTTON_CLASS}
-          onClick={handleStartBrowser}
-          aria-label={t("task:openBrowserPreview")}
-          title={t("task:openBrowserPreview")}
-        >
-          <IconDeviceDesktop className={HEADER_ICON_CLASS} />
-        </Button>
+          iconClassName={HEADER_ICON_CLASS}
+          testId="dev-server-preview-toggle-center"
+        />
       )}
     </div>
   );
@@ -458,11 +405,7 @@ function TerminalGroupRightActions() {
         environmentId={environmentId}
         rightBottomGroupId={rightBottomGroupId}
       />
-      <TerminalDevPreviewButton
-        environmentId={environmentId}
-        rightBottomGroupId={rightBottomGroupId}
-        visible={hasDevScript}
-      />
+      <TerminalDevPreviewButton rightBottomGroupId={rightBottomGroupId} visible={hasDevScript} />
     </>
   );
 }
@@ -542,72 +485,18 @@ function TerminalScriptsDropdown({
 }
 
 type TerminalDevPreviewButtonProps = {
-  environmentId: string | null;
   rightBottomGroupId: string | null;
   visible: boolean;
 };
 
-function TerminalDevPreviewButton({
-  environmentId,
-  rightBottomGroupId,
-  visible,
-}: TerminalDevPreviewButtonProps) {
-  const { t } = useTranslation();
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const taskID = useAppStore((state) => state.tasks?.activeTaskId ?? null);
-  const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
-  const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
-  const upsertProcessStatus = useAppStore((state) => state.upsertProcessStatus);
-  const setActiveProcess = useAppStore((state) => state.setActiveProcess);
-
-  const handleStartPreview = useCallback(async () => {
-    if (!activeSessionId || !environmentId) return;
-    addBrowserPanel();
-    try {
-      const resp = await startProcess(activeSessionId, { kind: "dev" });
-      if (resp?.process) {
-        upsertProcessStatus(mapProcessToStatus(resp.process));
-        setActiveProcess(resp.process.session_id, resp.process.id);
-      }
-    } catch {
-      // Process may already be running
-    }
-    try {
-      const shell = await createUserShell(environmentId, { taskId: taskID ?? undefined });
-      const title = shell.displayName ?? shell.label ?? t("common:terminal");
-      addTerminalPanel(
-        shell.terminalId,
-        rightBottomGroupId ?? undefined,
-        environmentId,
-        taskID ?? undefined,
-        title,
-      );
-    } catch {
-      // Terminal creation is best-effort
-    }
-  }, [
-    activeSessionId,
-    environmentId,
-    taskID,
-    addBrowserPanel,
-    upsertProcessStatus,
-    setActiveProcess,
-    addTerminalPanel,
-    rightBottomGroupId,
-  ]);
-
+function TerminalDevPreviewButton({ rightBottomGroupId, visible }: TerminalDevPreviewButtonProps) {
   if (!visible) return null;
 
   return (
-    <Button
-      size="sm"
-      variant="ghost"
+    <DevServerPreviewButton
+      outputGroupId={rightBottomGroupId}
       className={HEADER_ACTION_BUTTON_CLASS}
-      onClick={handleStartPreview}
-      aria-label={t("task:startDevServerPreview")}
-      title={t("task:startDevServerPreview")}
-    >
-      <IconDeviceDesktop className={HEADER_ICON_CLASS} />
-    </Button>
+      iconClassName={HEADER_ICON_CLASS}
+    />
   );
 }

@@ -1,9 +1,12 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { pluginRegistry } from "./registry";
 
 const PRIMARY_PLUGIN_ID = "plugin-a";
 const SECONDARY_PLUGIN_ID = "plugin-b";
 const SOURCE_CONTROL_PROVIDER_ID = "source-control";
+const SECOND_SOURCE_CONTROL_PROVIDER_ID = "source-control-secondary";
+const WORKSPACE_ID = "workspace-1";
+const OTHER_WORKSPACE_ID = "workspace-2";
 
 const registration = {
   id: SOURCE_CONTROL_PROVIDER_ID,
@@ -11,6 +14,31 @@ const registration = {
   description: "Configure source control.",
   Component: () => null,
 };
+
+function setIntegrationEnabled(
+  pluginId: string,
+  integrationId: string,
+  workspaceId: string,
+  enabled: boolean,
+): void {
+  (
+    pluginRegistry.setIntegrationEnabled.bind(pluginRegistry) as unknown as (
+      pluginId: string,
+      integrationId: string,
+      workspaceId: string,
+      enabled: boolean,
+    ) => void
+  )(pluginId, integrationId, workspaceId, enabled);
+}
+
+function isIntegrationEnabled(integrationId: string, workspaceId: string): boolean {
+  return (
+    pluginRegistry.isIntegrationEnabled.bind(pluginRegistry) as unknown as (
+      integrationId: string,
+      workspaceId: string,
+    ) => boolean
+  )(integrationId, workspaceId);
+}
 
 describe("pluginRegistry — integration settings", () => {
   afterEach(() => {
@@ -76,5 +104,61 @@ describe("pluginRegistry — integration settings", () => {
     expect(pluginRegistry.getIntegrationSetting(SOURCE_CONTROL_PROVIDER_ID)?.pluginId).toBe(
       SECONDARY_PLUGIN_ID,
     );
+  });
+
+  it("keeps enabled state independent for each registration and workspace", () => {
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerIntegrationSettings(registration);
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerIntegrationSettings({
+      ...registration,
+      id: SECOND_SOURCE_CONTROL_PROVIDER_ID,
+    });
+
+    setIntegrationEnabled(PRIMARY_PLUGIN_ID, SOURCE_CONTROL_PROVIDER_ID, WORKSPACE_ID, true);
+    setIntegrationEnabled(
+      PRIMARY_PLUGIN_ID,
+      SECOND_SOURCE_CONTROL_PROVIDER_ID,
+      OTHER_WORKSPACE_ID,
+      true,
+    );
+
+    expect(isIntegrationEnabled(SOURCE_CONTROL_PROVIDER_ID, WORKSPACE_ID)).toBe(true);
+    expect(isIntegrationEnabled(SOURCE_CONTROL_PROVIDER_ID, OTHER_WORKSPACE_ID)).toBe(false);
+    expect(isIntegrationEnabled(SECOND_SOURCE_CONTROL_PROVIDER_ID, WORKSPACE_ID)).toBe(false);
+    expect(isIntegrationEnabled(SECOND_SOURCE_CONTROL_PROVIDER_ID, OTHER_WORKSPACE_ID)).toBe(true);
+  });
+
+  it("rejects state updates for an integration owned by another plugin", () => {
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerIntegrationSettings(registration);
+    pluginRegistry.forPlugin(SECONDARY_PLUGIN_ID).registerIntegrationSettings({
+      ...registration,
+      id: SECOND_SOURCE_CONTROL_PROVIDER_ID,
+    });
+
+    const listener = vi.fn();
+    const unsubscribe = pluginRegistry.subscribe(listener);
+
+    setIntegrationEnabled(PRIMARY_PLUGIN_ID, SECOND_SOURCE_CONTROL_PROVIDER_ID, WORKSPACE_ID, true);
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(isIntegrationEnabled(SECOND_SOURCE_CONTROL_PROVIDER_ID, WORKSPACE_ID)).toBe(false);
+    unsubscribe();
+  });
+
+  it("suppresses unchanged notifications and clears state on unload", () => {
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerIntegrationSettings(registration);
+    const listener = vi.fn();
+    const unsubscribe = pluginRegistry.subscribe(listener);
+
+    setIntegrationEnabled(PRIMARY_PLUGIN_ID, SOURCE_CONTROL_PROVIDER_ID, WORKSPACE_ID, true);
+    setIntegrationEnabled(PRIMARY_PLUGIN_ID, SOURCE_CONTROL_PROVIDER_ID, WORKSPACE_ID, true);
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(isIntegrationEnabled(SOURCE_CONTROL_PROVIDER_ID, WORKSPACE_ID)).toBe(true);
+
+    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
+
+    expect(isIntegrationEnabled(SOURCE_CONTROL_PROVIDER_ID, WORKSPACE_ID)).toBe(false);
+    expect(listener).toHaveBeenCalledTimes(2);
+    unsubscribe();
   });
 });

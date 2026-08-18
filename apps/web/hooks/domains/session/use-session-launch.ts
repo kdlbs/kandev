@@ -4,6 +4,7 @@ import {
   type LaunchSessionRequest,
   type LaunchSessionResponse,
 } from "@/lib/services/session-launch-service";
+import { t } from "@/lib/i18n";
 
 export function useSessionLaunch(options?: {
   onSuccess?: (resp: LaunchSessionResponse) => void;
@@ -25,7 +26,7 @@ export function useSessionLaunch(options?: {
         options?.onSuccess?.(resp);
         return resp;
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Unknown error";
+        const message = err instanceof Error ? err.message : t("common:unknownError");
         setError(message);
         options?.onError?.(err instanceof Error ? err : new Error(message));
         return null;

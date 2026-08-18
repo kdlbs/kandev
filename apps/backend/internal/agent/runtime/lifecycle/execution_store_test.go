@@ -189,3 +189,24 @@ func TestExecutionStore_BeginPromptClearsActiveTopLevelTool(t *testing.T) {
 		t.Fatalf("active tool after BeginPrompt = %#v, want nil", got)
 	}
 }
+
+func TestExecutionStore_OwnsPromptActivityRejectsChangedEpoch(t *testing.T) {
+	store := NewExecutionStore()
+	exec := &AgentExecution{
+		ID:               "exec-1",
+		SessionID:        "session-1",
+		promptGeneration: 4,
+	}
+	if err := store.Add(exec); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	exec.armPromptActivity()
+
+	if !store.OwnsPromptActivity(exec.SessionID, exec.ID, 4, 1) {
+		t.Fatal("current activity epoch should own the prompt")
+	}
+	exec.markAgentActivity()
+	if store.OwnsPromptActivity(exec.SessionID, exec.ID, 4, 1) {
+		t.Fatal("changed activity epoch should invalidate the snapshot")
+	}
+}

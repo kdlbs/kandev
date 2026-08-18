@@ -507,5 +507,10 @@
   "versionCurrent": "Atual",
   "versionLatest": "Mais recente",
   "versionTitle": "Versão",
-  "versionViewUpdates": "Ver as atualizações"
+  "versionViewUpdates": "Ver as atualizações",
+  "dataStoragePageDescription": "Estatísticas da base de dados, cópias de segurança, limpeza de disco e registos do servidor.",
+  "messageQueueAutoMergeDescription": "Junta mensagens consecutivas compatíveis em fila da mesma origem num único turno antes da entrega.",
+  "messageQueueAutoMergeNotice": "Se uma mensagem tiver outra origem ou tarefa, modelo, modo, metadados ou limites partilhados incompatíveis, permanece como mensagem em fila separada. Isto aplica-se apenas a novas admissões e não altera o controlo de junção manual.",
+  "messageQueueAutoMergeToggleLabel": "Juntar automaticamente mensagens consecutivas",
+  "navDataStorage": "Dados e registos"
 }

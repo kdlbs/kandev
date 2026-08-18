@@ -114,7 +114,11 @@ func (a *OpenCodeACP) Runtime() *RuntimeConfig {
 			NativeSessionResume:         true,
 			NewSessionOnWorkspaceRebind: true,
 			CanRecover:                  &canRecover,
-			SessionDirTemplate:          "{home}/.opencode",
+			// Auth lives under .local/share/opencode and configuration under
+			// .config/opencode. Mount the isolated executor home so both trees
+			// remain visible without mounting the host home.
+			SessionDirTemplate: "{home}",
+			SessionDirTarget:   "/root",
 		},
 	}
 }
@@ -133,6 +137,27 @@ func (a *OpenCodeACP) RemoteAuth() *RemoteAuth {
 			},
 		},
 	}
+}
+
+func (a *OpenCodeACP) PortableConfig() *PortableConfig {
+	return &PortableConfig{Bundles: []PortableConfigBundle{
+		{
+			ID:    "opencode.config",
+			Label: "Copy OpenCode configuration",
+			Files: []PortableConfigFile{
+				{SourcePaths: map[string]string{
+					"darwin":  ".config/opencode/opencode.json",
+					"linux":   ".config/opencode/opencode.json",
+					"windows": ".config/opencode/opencode.json",
+				}, TargetPath: ".config/opencode/opencode.json"},
+				{SourcePaths: map[string]string{
+					"darwin":  ".config/opencode/opencode.jsonc",
+					"linux":   ".config/opencode/opencode.jsonc",
+					"windows": ".config/opencode/opencode.jsonc",
+				}, TargetPath: ".config/opencode/opencode.jsonc"},
+			},
+		},
+	}}
 }
 
 func (a *OpenCodeACP) InstallScript() string {

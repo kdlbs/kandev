@@ -16,7 +16,7 @@ import {
   type SidebarSelection,
 } from "@/components/gitlab/my-gitlab/presets-sidebar";
 import { PresetsScopeBar } from "@/components/gitlab/my-gitlab/presets-scope-bar";
-import { MR_PRESETS, ISSUE_PRESETS } from "@/components/gitlab/my-gitlab/presets";
+import { MR_PRESETS, ISSUE_PRESETS, presetLabel } from "@/components/gitlab/my-gitlab/presets";
 import { useGitLabSearch } from "@/components/gitlab/my-gitlab/use-gitlab-search";
 import { useSavedPresets, type SavedPreset } from "@/components/gitlab/my-gitlab/use-saved-presets";
 import {
@@ -77,8 +77,10 @@ function resolveTitle(
   }
   const presets = selection.kind === "mr" ? MR_PRESETS : ISSUE_PRESETS;
   return (
-    presets.find((p) => p.value === selection.id)?.label ??
-    (selection.kind === "mr" ? t("gitlab:titleMergeRequests") : t("gitlab:titleIssues"))
+    presetLabel(
+      t,
+      presets.find((p) => p.value === selection.id),
+    ) ?? (selection.kind === "mr" ? t("gitlab:titleMergeRequests") : t("gitlab:titleIssues"))
   );
 }
 

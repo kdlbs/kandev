@@ -42,12 +42,28 @@ vi.mock("@/hooks/use-file-editors", () => ({
   useFileEditors: () => ({ openFile: vi.fn() }),
 }));
 
+const { mockScrollTranscriptToMessage } = vi.hoisted(() => ({
+  mockScrollTranscriptToMessage: vi.fn(),
+}));
+
+const promptHistoryProps = vi.hoisted(() => ({
+  current: null as null | { onNavigateToPrompt?: (messageId: string) => void },
+}));
+
+vi.mock("./prompt-history-panel-content", () => ({
+  PromptHistoryPanelContent: (props: { onNavigateToPrompt?: (messageId: string) => void }) => {
+    promptHistoryProps.current = props;
+    return <div data-testid="prompt-history-mock" />;
+  },
+}));
+
 vi.mock("@/lib/state/dockview-store", () => ({
   useDockviewStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
       selectedDiff: null,
       setSelectedDiff: vi.fn(),
       api: { getPanel: vi.fn(), removePanel: vi.fn() },
+      scrollTranscriptToMessage: mockScrollTranscriptToMessage,
     }),
 }));
 
@@ -59,13 +75,61 @@ vi.mock("@/components/state-provider", () => ({
 import { renderPanel } from "./dockview-panel-content";
 import { TodosContent } from "./todos-panel-content";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  promptHistoryProps.current = null;
+  mockScrollTranscriptToMessage.mockClear();
+});
 
 const WRITE_TESTS = "Write tests";
 const IMPLEMENT_FEATURE = "Implement feature";
+const SESSION_ID = "session-1";
 // The dockview panel id equals the root testid; sharing one constant keeps
 // the string under the lint duplicate-literal threshold.
 const TODOS_PANEL_ID = "todos-panel";
+const PROMPT_HISTORY_COMPONENT = "prompt-history";
+const PROMPT_HISTORY_PANEL_TEST_ID = "prompt-history-panel";
+
+describe("dockview-panel-content prompt history renderer (desktop task workbench)", () => {
+  it("renders the prompt-history panel content for the registered component", () => {
+    mockAppState.taskSessions.items = { [SESSION_ID]: { name: "Custom Agent" } };
+
+    render(<>{renderPanel(PROMPT_HISTORY_PANEL_TEST_ID, PROMPT_HISTORY_COMPONENT, {})}</>);
+
+    expect(screen.getByTestId("prompt-history-mock")).toBeTruthy();
+  });
+
+  it("binds the arrow to scrollTranscriptToMessage with a custom session name", () => {
+    mockAppState.taskSessions.items = { [SESSION_ID]: { name: "Custom Agent" } };
+
+    render(<>{renderPanel(PROMPT_HISTORY_PANEL_TEST_ID, PROMPT_HISTORY_COMPONENT, {})}</>);
+    promptHistoryProps.current?.onNavigateToPrompt?.("message-1");
+
+    expect(mockScrollTranscriptToMessage).toHaveBeenCalledWith(
+      SESSION_ID,
+      "message-1",
+      "Custom Agent",
+    );
+  });
+
+  it("falls back to the chat panel title for an EMPTY-string session name", () => {
+    mockAppState.taskSessions.items = { [SESSION_ID]: { name: "" } };
+
+    render(<>{renderPanel(PROMPT_HISTORY_PANEL_TEST_ID, PROMPT_HISTORY_COMPONENT, {})}</>);
+    promptHistoryProps.current?.onNavigateToPrompt?.("message-1");
+
+    expect(mockScrollTranscriptToMessage).toHaveBeenCalledWith(SESSION_ID, "message-1", "Agent");
+  });
+
+  it("falls back to the chat panel title when the session name is absent", () => {
+    mockAppState.taskSessions.items = { [SESSION_ID]: {} };
+
+    render(<>{renderPanel(PROMPT_HISTORY_PANEL_TEST_ID, PROMPT_HISTORY_COMPONENT, {})}</>);
+    promptHistoryProps.current?.onNavigateToPrompt?.("message-1");
+
+    expect(mockScrollTranscriptToMessage).toHaveBeenCalledWith(SESSION_ID, "message-1", "Agent");
+  });
+});
 
 describe("dockview-panel-content todos panel (desktop task workbench)", () => {
   it("renders the same checklist rows, order, and status semantics the todo indicator shows", () => {

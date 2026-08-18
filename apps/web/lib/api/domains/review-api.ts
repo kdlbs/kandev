@@ -6,6 +6,8 @@ import type {
   TaskReviewSnapshot,
 } from "@/lib/types/review";
 
+// i18n-exempt: precondition diagnostic for a programmer error; callers branch
+// on the error type, never render this message.
 const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
 
 /**

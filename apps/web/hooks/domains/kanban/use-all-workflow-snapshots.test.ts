@@ -306,7 +306,11 @@ describe("useAllWorkflowSnapshots — snapshot mapping", () => {
  */
 type SummaryFixture = Record<string, unknown> | undefined;
 
-function seedSummaryRace(cached: SummaryFixture, response: SummaryFixture) {
+function seedSummaryRace(
+  cached: SummaryFixture,
+  response: SummaryFixture,
+  statusSummaryInvalidated = false,
+) {
   mockState.kanbanMulti.snapshots = {
     "wf-A": {
       workflowId: "wf-A",
@@ -326,6 +330,7 @@ function seedSummaryRace(cached: SummaryFixture, response: SummaryFixture) {
         workflow_step_id: "step-1",
         title: "Task",
         ...(response ? { status_summary: response } : {}),
+        ...(statusSummaryInvalidated ? { status_summary_invalidated: true } : {}),
       },
     ],
   });
@@ -382,5 +387,11 @@ describe("useAllWorkflowSnapshots — status summary revision race", () => {
     seedSummaryRace({ revision: 4, primary_session: { state: "WAITING_FOR_INPUT" } }, undefined);
 
     expect((await writtenSummary()).revision).toBe(4);
+  });
+
+  it("clears an unchanged cached summary when the response explicitly invalidates it", async () => {
+    seedSummaryRace({ revision: 4, pending_action: "clarification" }, undefined, true);
+
+    expect(await writtenSummary()).toBeUndefined();
   });
 });

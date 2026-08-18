@@ -42,7 +42,7 @@ export function ClarificationStepper({
   const { t } = useTranslation();
   return (
     <div
-      className="flex items-center gap-1.5 select-none"
+      className="flex shrink-0 select-none items-center gap-1.5"
       role="tablist"
       data-testid="clarification-stepper"
     >

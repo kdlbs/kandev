@@ -34,6 +34,24 @@ type MockEventBus struct {
 	closed          bool
 }
 
+type recordingTaskClarificationCanceller struct {
+	sessions    []string
+	hasDeadline []bool
+	contextErrs []error
+	err         error
+}
+
+func (c *recordingTaskClarificationCanceller) ExpireSessionAndNotify(
+	ctx context.Context,
+	sessionID string,
+) (int, error) {
+	c.sessions = append(c.sessions, sessionID)
+	_, hasDeadline := ctx.Deadline()
+	c.hasDeadline = append(c.hasDeadline, hasDeadline)
+	c.contextErrs = append(c.contextErrs, ctx.Err())
+	return 1, c.err
+}
+
 func NewMockEventBus() *MockEventBus {
 	return &MockEventBus{
 		publishedEvents: make([]*bus.Event, 0),
@@ -180,6 +198,7 @@ func createTestServiceWithSessionsRepo(
 		Sessions:          wrapSessions(repo),
 		GitSnapshots:      repo,
 		RepoEntities:      repo,
+		RepositorySets:    repo,
 		RepositoryCleanup: repo,
 		Executors:         repo,
 		Environments:      repo,
@@ -1969,6 +1988,8 @@ func TestService_ArchiveTaskPublishesSessionStateChangedForActiveSessions(t *tes
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
 
+	clarifications := &recordingTaskClarificationCanceller{}
+	svc.SetClarificationCanceller(clarifications)
 	if err := svc.ArchiveTask(ctx, "task-1"); err != nil {
 		t.Fatalf("ArchiveTask: %v", err)
 	}
@@ -2011,6 +2032,15 @@ func TestService_ArchiveTaskPublishesSessionStateChangedForActiveSessions(t *tes
 	}
 	if session.State != models.TaskSessionStateCancelled {
 		t.Errorf("session state = %q, want CANCELLED", session.State)
+	}
+	if len(clarifications.sessions) != 1 || clarifications.sessions[0] != "session-running" {
+		t.Fatalf("expired clarification sessions = %v, want [session-running]", clarifications.sessions)
+	}
+	if len(clarifications.hasDeadline) != 1 || !clarifications.hasDeadline[0] {
+		t.Fatalf("clarification expiry deadlines = %v, want one bounded context", clarifications.hasDeadline)
+	}
+	if len(clarifications.contextErrs) != 1 || clarifications.contextErrs[0] != nil {
+		t.Fatalf("clarification expiry context errors = %v, want active context", clarifications.contextErrs)
 	}
 }
 
@@ -3189,6 +3219,116 @@ func TestService_CreateMessage(t *testing.T) {
 	}
 	if events[0].Type != "message.added" {
 		t.Errorf("expected event type 'message.added', got %s", events[0].Type)
+	}
+}
+
+func TestService_ClarificationMessageEventsCarryPendingActionProjection(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-clarification")
+	if err := repo.UpdateTaskSessionState(
+		ctx,
+		sessionID,
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	message, err := svc.CreateMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		TurnID:        turnID,
+		Content:       "Choose",
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeClarificationRequest),
+		Metadata:      map[string]interface{}{"pending_id": "pending-1", "status": "pending"},
+	})
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	addedData := singlePublishedEventData(t, eventBus)
+	if got := addedData["pending_action"]; got != "clarification" {
+		t.Fatalf("message.added pending_action = %#v, want clarification", got)
+	}
+	addedRevision, ok := addedData["pending_action_revision"].(models.PendingActionRevision)
+	if !ok || addedRevision.Epoch == "" || addedRevision.Sequence == 0 {
+		t.Fatalf("message.added pending_action_revision = %#v", addedData["pending_action_revision"])
+	}
+
+	eventBus.ClearEvents()
+	message.Metadata["status"] = "answered"
+	if err := svc.UpdateMessage(ctx, message); err != nil {
+		t.Fatalf("UpdateMessage: %v", err)
+	}
+	data := singlePublishedEventData(t, eventBus)
+	if got, ok := data["pending_action"]; !ok || got != nil {
+		t.Fatalf("message.updated pending_action = %#v, want explicit nil", got)
+	}
+	updatedRevision, ok := data["pending_action_revision"].(models.PendingActionRevision)
+	if !ok || updatedRevision.Epoch != addedRevision.Epoch || updatedRevision.Sequence <= addedRevision.Sequence {
+		t.Fatalf("message.updated pending_action_revision = %#v, want after %#v", updatedRevision, addedRevision)
+	}
+}
+
+func TestService_OrdinaryMessageAuthorityEventsRefreshPendingAction(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	sourceTurnID := "turn-pending-source"
+	sourceTime := time.Now().UTC().Add(-time.Minute)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            sourceTurnID,
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		StartedAt:     sourceTime,
+		CreatedAt:     sourceTime,
+	}); err != nil {
+		t.Fatalf("create source turn: %v", err)
+	}
+	if _, err := svc.CreateMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		TurnID:        sourceTurnID,
+		Content:       "Choose",
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeClarificationRequest),
+		Metadata:      map[string]interface{}{"pending_id": "pending-source", "status": "pending"},
+	}); err != nil {
+		t.Fatalf("create source clarification: %v", err)
+	}
+
+	successor, err := svc.ReserveTurn(ctx, sessionID, &models.PromptDispatchRecovery{})
+	if err != nil {
+		t.Fatalf("ReserveTurn: %v", err)
+	}
+	eventBus.ClearEvents()
+	ordinary, err := svc.CreateMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		TurnID:        successor.ID,
+		Content:       "Successor output",
+		AuthorType:    "agent",
+	})
+	if err != nil {
+		t.Fatalf("create successor message: %v", err)
+	}
+	added := singlePublishedEventData(t, eventBus)
+	if got, exists := added["pending_action"]; !exists || got != nil {
+		t.Fatalf("ordinary message.added pending_action = %#v, want explicit nil", got)
+	}
+
+	eventBus.ClearEvents()
+	if err := svc.DeleteMessage(ctx, ordinary.ID); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+	deleted := singlePublishedEventData(t, eventBus)
+	if got := deleted["pending_action"]; got != "clarification" {
+		t.Fatalf("ordinary message.deleted pending_action = %#v, want clarification", got)
 	}
 }
 

@@ -474,6 +474,22 @@ export class SessionPage {
     return this.activeChat().getByTestId("clarification-overlay");
   }
 
+  /**
+   * The persistent bar wrapping the clarification overlay. Stays mounted
+   * (collapsed to a header row) while the bundle is pending, even after the
+   * user dismisses it with Escape or the collapse toggle.
+   */
+  clarificationBar(): Locator {
+    return this.activeChat().getByTestId("clarification-overlay-container");
+  }
+
+  /** Expand/collapse toggle in the clarification bar's header row. */
+  clarificationCollapseToggle(): Locator {
+    // The expanded overlay stays mounted but is hidden when the compact bar
+    // is shown, so scope this locator to the one visible toggle.
+    return this.activeChat().locator('[data-testid="clarification-collapse-toggle"]:visible');
+  }
+
   /** Shared context shown once above the active clarification question. */
   clarificationContext(): Locator {
     return this.clarificationOverlay().getByTestId("clarification-context");
@@ -626,6 +642,16 @@ export class SessionPage {
   /** "Start fresh session" button shown after agent crash. */
   recoveryFreshButton(): Locator {
     return this.page.getByTestId("recovery-fresh-button");
+  }
+
+  /** Terminal-state banner shown when the active session has completed. */
+  completedSessionBanner(): Locator {
+    return this.activeChat().getByTestId("completed-session-banner");
+  }
+
+  /** "New Agent" action shown for a completed session. */
+  completedSessionNewAgentButton(): Locator {
+    return this.completedSessionBanner().getByTestId("completed-session-new-agent-button");
   }
 
   /** "Cancel" button shown on the yellow transient-retry (529 Overloaded) card. */

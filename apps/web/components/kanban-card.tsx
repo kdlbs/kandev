@@ -32,6 +32,7 @@ import {
   type ForegroundActivity,
   type Repository,
   type TaskPendingAction,
+  type TaskPriority,
   type TaskState,
 } from "@/lib/types/http";
 import type { PluginTaskMenuContext } from "@/lib/plugins/types";
@@ -44,7 +45,7 @@ export interface Task {
   title: string;
   workflowStepId: string;
   state?: TaskState;
-  priority?: string | number;
+  priority?: TaskPriority;
   description?: string;
   position?: number;
   repositoryId?: string;

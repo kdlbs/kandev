@@ -55,6 +55,14 @@ function contextFingerprint(context: TaskCreationContext | null): string {
   return JSON.stringify(context);
 }
 
+function workspaceIds(state: AppState): string[] {
+  return state.workspaces.items.map((workspace) => workspace.id);
+}
+
+function workspaceIdsFingerprint(ids: readonly string[]): string {
+  return JSON.stringify(ids);
+}
+
 export function buildPluginContextApi(store: StoreApi<AppState>): PluginContextApi {
   return {
     getActiveWorkspaceId: () => store.getState().workspaces.activeId ?? undefined,
@@ -65,6 +73,9 @@ export function buildPluginContextApi(store: StoreApi<AppState>): PluginContextA
         (value) => value ?? "",
         listener,
       ),
+    getWorkspaceIds: () => workspaceIds(store.getState()),
+    subscribeWorkspaces: (listener) =>
+      subscribeDerived(store, workspaceIds, workspaceIdsFingerprint, listener),
     getTaskCreationContext: (workspaceId) => taskCreationContext(store.getState(), workspaceId),
     subscribeTaskCreationContext: (workspaceId, listener) =>
       subscribeDerived(

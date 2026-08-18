@@ -39,6 +39,40 @@ func TestProjectorQueueEventUpdatesQueuedPromptCount(t *testing.T) {
 	}
 }
 
+func TestProjectorQueueEventTracksUserPromptActivity(t *testing.T) {
+	projector, store, eventBus, updates, _ := newProjectorTest(t)
+	const taskID = "task-queued-activity"
+	queuedAt := time.Date(2026, 8, 1, 19, 0, 0, 0, time.UTC)
+
+	projector.countQueuedPrompts = func(context.Context, string) (int, error) {
+		return 1, nil
+	}
+	publishProjectorEvent(t, eventBus, events.MessageQueueStatusChanged, events.MessageQueueStatusChanged, map[string]interface{}{
+		"task_id":   taskID,
+		"queued_by": "user-1",
+		"queued_at": queuedAt,
+	})
+
+	summary := store.summary(taskID)
+	if summary == nil || summary.LastActivityAt == nil || !summary.LastActivityAt.Equal(queuedAt) {
+		t.Fatalf("queued user activity = %+v, want %s", summary, queuedAt)
+	}
+	if got := updates.Load(); got != 1 {
+		t.Fatalf("queued user admission published %d summary updates, want 1", got)
+	}
+
+	// Queue status events without a user-owned admission must remain count-only
+	// bookkeeping, even when they carry a newer timestamp-shaped value.
+	publishProjectorEvent(t, eventBus, events.MessageQueueStatusChanged, events.MessageQueueStatusChanged, map[string]interface{}{
+		"task_id":   taskID,
+		"queued_by": "agent",
+		"queued_at": queuedAt.Add(time.Hour),
+	})
+	if got := store.summary(taskID).LastActivityAt; got == nil || !got.Equal(queuedAt) {
+		t.Fatalf("agent queue activity changed last activity to %v, want %s", got, queuedAt)
+	}
+}
+
 func TestProjectorQueueEventWithUnchangedCountDoesNotRepublish(t *testing.T) {
 	projector, store, eventBus, updates, _ := newProjectorTest(t)
 	const taskID = "task-queued-unchanged"
@@ -125,8 +159,9 @@ func TestProjectorQueueEventWithoutTaskIDIsIgnored(t *testing.T) {
 // another writer persisting between the projector's count query and its
 // write), then accepts subsequent writes.
 type competingWriterStore struct {
-	base     *projectorTestStore
-	rejected bool
+	base         *projectorTestStore
+	competingGit *GitSummary
+	rejected     bool
 }
 
 func (s *competingWriterStore) LoadTaskStatusSummaries(
@@ -146,6 +181,7 @@ func (s *competingWriterStore) CompareAndUpdateTaskStatusSummary(
 		if row := rows[stored.TaskID]; row != nil {
 			competing := *row
 			competing.Revision = stored.Summary.Revision + 1 // beat the projector's attempt
+			competing.Git = s.competingGit
 			_, _ = s.base.CompareAndUpdateTaskStatusSummary(ctx, &StoredTaskStatusSummary{
 				TaskID:      stored.TaskID,
 				WorkspaceID: stored.WorkspaceID,
@@ -158,7 +194,10 @@ func (s *competingWriterStore) CompareAndUpdateTaskStatusSummary(
 
 func TestProjectorQueueEventRetriesAfterRejectedWrite(t *testing.T) {
 	const taskID = "task-queued-retry"
-	store := &competingWriterStore{base: newProjectorTestStore()}
+	store := &competingWriterStore{
+		base:         newProjectorTestStore(),
+		competingGit: &GitSummary{ChangedFiles: 9},
+	}
 	store.base.rows[taskID] = &StoredTaskStatusSummary{
 		TaskID:      taskID,
 		WorkspaceID: "workspace-1",
@@ -209,6 +248,9 @@ func TestProjectorQueueEventRetriesAfterRejectedWrite(t *testing.T) {
 	}
 	if got := updates.Load(); got != 1 {
 		t.Fatalf("publishes = %d, want exactly 1 (the retried write)", got)
+	}
+	if summary.Git == nil || summary.Git.ChangedFiles != 9 {
+		t.Fatalf("Git summary = %+v, want competing writer's observation preserved", summary.Git)
 	}
 }
 

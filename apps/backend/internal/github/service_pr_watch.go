@@ -884,6 +884,58 @@ func (s *Service) prepareTaskPRSyncState(ctx context.Context, tp *TaskPR, status
 	}
 }
 
+func taskPRChangedFields(tp *TaskPR, status *PRStatus, next taskPRSyncState) []string {
+	if tp == nil || status == nil || status.PR == nil {
+		return nil
+	}
+	changed := make([]string, 0, 16)
+	changed = appendChangedField(changed, "state", tp.State != next.state)
+	changed = appendChangedField(changed, "pr_title", tp.PRTitle != status.PR.Title)
+	changed = appendChangedField(changed, "additions", tp.Additions != status.PR.Additions)
+	changed = appendChangedField(changed, "deletions", tp.Deletions != status.PR.Deletions)
+	changed = appendChangedField(changed, "review_state", tp.ReviewState != status.ReviewState)
+	changed = appendChangedField(changed, "checks_state", tp.ChecksState != status.ChecksState)
+	changed = appendChangedField(changed, "mergeable_state", tp.MergeableState != next.mergeableState)
+	changed = appendChangedField(changed, "review_count", tp.ReviewCount != next.reviewCount)
+	changed = appendChangedField(
+		changed,
+		"pending_review_count",
+		tp.PendingReviewCount != next.pendingReviewCount,
+	)
+	changed = appendChangedField(
+		changed,
+		"required_reviews",
+		!intPtrEqual(tp.RequiredReviews, next.requiredReviews),
+	)
+	changed = appendChangedField(changed, "checks_total", tp.ChecksTotal != next.checksTotal)
+	changed = appendChangedField(changed, "checks_passing", tp.ChecksPassing != next.checksPassing)
+	changed = appendChangedField(
+		changed,
+		"unresolved_review_threads",
+		tp.UnresolvedReviewThreads != next.unresolved,
+	)
+	changed = appendChangedField(changed, "base_branch", tp.BaseBranch != next.baseBranch)
+	changed = appendChangedField(changed, "merged_at", !timeEqual(tp.MergedAt, next.mergedAt))
+	changed = appendChangedField(changed, "closed_at", !timeEqual(tp.ClosedAt, next.closedAt))
+	changed = appendChangedField(changed, "is_draft", !boolPtrEqual(tp.IsDraft, next.isDraft))
+	changed = appendChangedField(changed, "changed_files", !intPtrEqual(tp.ChangedFiles, next.changedFiles))
+	changed = appendChangedField(changed, "merged_by_login", !stringPtrEqual(tp.MergedByLogin, next.mergedByLogin))
+	changed = appendChangedField(changed, "closed_by_login", !stringPtrEqual(tp.ClosedByLogin, next.closedByLogin))
+	changed = appendChangedField(
+		changed,
+		"auto_merge_observed_at",
+		!timeEqual(tp.AutoMergeObservedAt, next.autoMergeObservedAt),
+	)
+	return changed
+}
+
+func appendChangedField(changed []string, field string, isChanged bool) []string {
+	if !isChanged {
+		return changed
+	}
+	return append(changed, field)
+}
+
 // SyncTaskPR updates a TaskPR record with the latest PR status. Multi-repo:
 // the row is found by (task_id, owner, repo, pr_number) since the same
 // task can have several PRs; the legacy GetTaskPR(taskID) "first match"
@@ -902,23 +954,8 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	}
 	next := s.prepareTaskPRSyncState(ctx, tp, status)
 
-	changed := tp.State != next.state ||
-		tp.PRTitle != status.PR.Title ||
-		tp.Additions != status.PR.Additions ||
-		tp.Deletions != status.PR.Deletions ||
-		tp.ReviewState != status.ReviewState ||
-		tp.ChecksState != status.ChecksState ||
-		tp.MergeableState != next.mergeableState ||
-		tp.ReviewCount != next.reviewCount ||
-		tp.PendingReviewCount != next.pendingReviewCount ||
-		!intPtrEqual(tp.RequiredReviews, next.requiredReviews) ||
-		tp.ChecksTotal != next.checksTotal ||
-		tp.ChecksPassing != next.checksPassing ||
-		tp.UnresolvedReviewThreads != next.unresolved ||
-		tp.BaseBranch != next.baseBranch ||
-		!timeEqual(tp.MergedAt, next.mergedAt) ||
-		!timeEqual(tp.ClosedAt, next.closedAt) ||
-		taskPROutcomeFieldsChanged(tp, next)
+	changedFields := taskPRChangedFields(tp, status, next)
+	changed := len(changedFields) > 0
 
 	tp.State = next.state
 	tp.PRTitle = status.PR.Title
@@ -944,6 +981,15 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	// CommentCount is no longer updated from polling -- only refreshed on-demand
 	now := time.Now().UTC()
 	tp.LastSyncedAt = &now
+	if len(changedFields) > 0 && s.logger != nil {
+		s.logger.Debug("task PR semantic state changed",
+			zap.String("task_id", taskID),
+			zap.String("pr_owner", tp.Owner),
+			zap.String("pr_repo", tp.Repo),
+			zap.Int("pr_number", tp.PRNumber),
+			zap.Strings("changed_fields", changedFields),
+		)
+	}
 
 	return s.persistAndPublishTaskPRSync(ctx, tp, changed, status.OutcomeFieldsPopulated)
 }
@@ -982,18 +1028,6 @@ func (s *Service) persistAndPublishTaskPRSync(ctx context.Context, tp *TaskPR, c
 		}
 	}
 	return nil
-}
-
-// taskPROutcomeFieldsChanged reports whether any of the five outcome fields
-// SyncTaskPR is about to write differs from the stored value. Split out of
-// SyncTaskPR's changed expression to keep that function within the repo's
-// complexity limits (see its cyclomatic-complexity suppression).
-func taskPROutcomeFieldsChanged(tp *TaskPR, next taskPRSyncState) bool {
-	return !boolPtrEqual(tp.IsDraft, next.isDraft) ||
-		!intPtrEqual(tp.ChangedFiles, next.changedFiles) ||
-		!stringPtrEqual(tp.MergedByLogin, next.mergedByLogin) ||
-		!stringPtrEqual(tp.ClosedByLogin, next.closedByLogin) ||
-		!timeEqual(tp.AutoMergeObservedAt, next.autoMergeObservedAt)
 }
 
 func (s *Service) fetchRequiredReviewsForTaskPR(ctx context.Context, tp *TaskPR, branch string) *int {
@@ -1239,7 +1273,9 @@ func (s *Service) detectPRForWatchOnce(
 	// fires WHILE FindPRByBranch is running wins over our post-fetch
 	// classification — see Service.markRepoAsMissing for the rationale.
 	repoErrGen := s.repoErrorGenSnapshot()
-	pr, err := findPRByBranchInForkNetwork(ctx, resolved.Client, watch.Owner, watch.Repo, watch.Branch)
+	pr, err := s.findPRByBranchInForkNetwork(
+		ctx, resolved.Client, resolved.CacheScope, watch.Owner, watch.Repo, watch.Branch,
+	)
 	if err != nil && isRepoNotResolvableErr(err) {
 		s.markRepoAsMissingForScope(resolved.CacheScope, watch.Owner, watch.Repo, repoErrGen)
 		// Wrap so wsSyncTaskPR can errors.Is(err, ErrRepoNotResolvable)

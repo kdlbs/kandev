@@ -19,16 +19,20 @@ import (
 	"go.uber.org/zap"
 )
 
+// ptr returns a pointer to a copy of v.
 func ptr[T any](v T) *T { return &v }
 
+// rawPatch wraps v in a double pointer for use as a raw JSON patch value.
 func rawPatch(v json.RawMessage) **json.RawMessage {
 	return ptr(ptr(v))
 }
 
+// rawClear returns a double pointer to a nil RawMessage for clearing a blob preference.
 func rawClear() **json.RawMessage {
 	return ptr((*json.RawMessage)(nil))
 }
 
+// TestApplyBasicSettingsTasksListShowDetails verifies applyBasicSettings preserves TasksListShowDetails when omitted and applies explicit values.
 func TestApplyBasicSettingsTasksListShowDetails(t *testing.T) {
 	t.Run("omission preserves saved value", func(t *testing.T) {
 		settings := &models.UserSettings{TasksListShowDetails: true}
@@ -53,6 +57,7 @@ func TestApplyBasicSettingsTasksListShowDetails(t *testing.T) {
 	}
 }
 
+// TestApplyBasicSettingsSystemMetricsDisplayPreservesOmittedFields verifies omitted SystemMetricsDisplay subfields are preserved by applyBasicSettings.
 func TestApplyBasicSettingsSystemMetricsDisplayPreservesOmittedFields(t *testing.T) {
 	settings := &models.UserSettings{
 		SystemMetricsDisplay: models.SystemMetricsDisplaySettings{
@@ -72,6 +77,7 @@ func TestApplyBasicSettingsSystemMetricsDisplayPreservesOmittedFields(t *testing
 	}
 }
 
+// makeLayouts builds n SavedLayout fixtures with distinct IDs and names.
 func makeLayouts(n int) []models.SavedLayout {
 	layouts := make([]models.SavedLayout, n)
 	for i := range layouts {
@@ -86,6 +92,7 @@ func makeLayouts(n int) []models.SavedLayout {
 	return layouts
 }
 
+// TestApplyBasicSettings_ReleaseNotes verifies release-note fields are preserved when nil and set or cleared when provided.
 func TestApplyBasicSettings_ReleaseNotes(t *testing.T) {
 	t.Run("nil fields leave settings unchanged", func(t *testing.T) {
 		settings := &models.UserSettings{
@@ -149,6 +156,7 @@ func TestApplyBasicSettings_ReleaseNotes(t *testing.T) {
 	})
 }
 
+// TestApplyBasicSettings_ConfirmTaskArchive verifies archive confirmation stays enabled when omitted and is toggled by explicit values.
 func TestApplyBasicSettings_ConfirmTaskArchive(t *testing.T) {
 	t.Run("omitted value leaves confirmation enabled", func(t *testing.T) {
 		settings := &models.UserSettings{ConfirmTaskArchive: true}
@@ -185,6 +193,7 @@ func TestApplyBasicSettings_ConfirmTaskArchive(t *testing.T) {
 	})
 }
 
+// TestApplyBasicSettings_PreventAutoStartAgentOnOpen verifies the auto-start setting is preserved when omitted and toggled by explicit values.
 func TestApplyBasicSettings_PreventAutoStartAgentOnOpen(t *testing.T) {
 	t.Run("omitted value leaves the setting unchanged", func(t *testing.T) {
 		settings := &models.UserSettings{PreventAutoStartAgentOnOpen: true}
@@ -221,6 +230,7 @@ func TestApplyBasicSettings_PreventAutoStartAgentOnOpen(t *testing.T) {
 	})
 }
 
+// TestApplyBasicSettingsAgentGeneratedTaskTitles verifies AgentGeneratedTaskTitles is preserved when omitted and applied when provided.
 func TestApplyBasicSettingsAgentGeneratedTaskTitles(t *testing.T) {
 	settings := &models.UserSettings{AgentGeneratedTaskTitles: false}
 	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
@@ -245,6 +255,7 @@ func TestApplyBasicSettingsAgentGeneratedTaskTitles(t *testing.T) {
 	}
 }
 
+// TestApplyBasicSettingsAppStatusBarOrder verifies the status bar order is preserved when omitted and replaced when provided.
 func TestApplyBasicSettingsAppStatusBarOrder(t *testing.T) {
 	saved := models.AppStatusBarOrder{
 		LeftItemIDs:  []string{"builtin:connection"},
@@ -275,6 +286,7 @@ func TestApplyBasicSettingsAppStatusBarOrder(t *testing.T) {
 	})
 }
 
+// TestApplyLSPSettingsRejectsManualOnlyAutoInstallLanguage verifies manual-install-only languages are rejected without mutating settings.
 func TestApplyLSPSettingsRejectsManualOnlyAutoInstallLanguage(t *testing.T) {
 	settings := &models.UserSettings{}
 	req := &UpdateUserSettingsRequest{
@@ -290,6 +302,7 @@ func TestApplyLSPSettingsRejectsManualOnlyAutoInstallLanguage(t *testing.T) {
 	}
 }
 
+// TestApplyLSPSettingsAcceptsTaskHostAutoInstallPreference verifies a task-host language auto-install preference is accepted and stored.
 func TestApplyLSPSettingsAcceptsTaskHostAutoInstallPreference(t *testing.T) {
 	settings := &models.UserSettings{}
 	req := &UpdateUserSettingsRequest{
@@ -304,6 +317,7 @@ func TestApplyLSPSettingsAcceptsTaskHostAutoInstallPreference(t *testing.T) {
 	}
 }
 
+// TestApplyLspStatusLocation verifies LspStatusLocation is preserved when omitted, applied when valid, and rejected when invalid.
 func TestApplyLspStatusLocation(t *testing.T) {
 	t.Run("omission preserves saved value", func(t *testing.T) {
 		settings := &models.UserSettings{LspStatusLocation: models.LspStatusLocationStatusBar}
@@ -347,6 +361,7 @@ func TestApplyLspStatusLocation(t *testing.T) {
 	})
 }
 
+// TestApplyBasicSettingsMCPTaskAgentProfileDefault verifies the MCP task-agent profile default is preserved, applied, and validated.
 func TestApplyBasicSettingsMCPTaskAgentProfileDefault(t *testing.T) {
 	t.Run("omission preserves saved value", func(t *testing.T) {
 		settings := &models.UserSettings{MCPTaskAgentProfileDefault: models.MCPTaskAgentProfileDefaultWorkspaceDefault}
@@ -386,6 +401,7 @@ func TestApplyBasicSettingsMCPTaskAgentProfileDefault(t *testing.T) {
 	})
 }
 
+// TestApplyBasicSettingsShowAnchoredPromptBar verifies ShowAnchoredPromptBar is preserved when omitted and toggled by explicit values.
 func TestApplyBasicSettingsShowAnchoredPromptBar(t *testing.T) {
 	t.Run("omission preserves saved value", func(t *testing.T) {
 		settings := &models.UserSettings{ShowAnchoredPromptBar: true}
@@ -418,6 +434,7 @@ func TestApplyBasicSettingsShowAnchoredPromptBar(t *testing.T) {
 	})
 }
 
+// TestApplyBasicSettingsTodoListPanel verifies ShowTodoListPanel is preserved when omitted and toggled by explicit values.
 func TestApplyBasicSettingsTodoListPanel(t *testing.T) {
 	t.Run("omission preserves saved value", func(t *testing.T) {
 		settings := &models.UserSettings{ShowTodoListPanel: true}
@@ -450,6 +467,7 @@ func TestApplyBasicSettingsTodoListPanel(t *testing.T) {
 	})
 }
 
+// TestApplyBasicSettingsTodoListPanelOnlyWhenNotEmpty verifies ShowTodoListPanelOnlyWhenNotEmpty is preserved when omitted and toggled by explicit values.
 func TestApplyBasicSettingsTodoListPanelOnlyWhenNotEmpty(t *testing.T) {
 	t.Run("omission preserves saved value", func(t *testing.T) {
 		settings := &models.UserSettings{ShowTodoListPanelOnlyWhenNotEmpty: true}
@@ -482,6 +500,7 @@ func TestApplyBasicSettingsTodoListPanelOnlyWhenNotEmpty(t *testing.T) {
 	})
 }
 
+// TestApplyBasicSettingsTranscriptNavigation verifies transcript navigation flags are applied while omitted flags are preserved.
 func TestApplyBasicSettingsTranscriptNavigation(t *testing.T) {
 	settings := &models.UserSettings{
 		ShowScrollToLastPrompt:          true,
@@ -507,6 +526,7 @@ func TestApplyBasicSettingsTranscriptNavigation(t *testing.T) {
 	}
 }
 
+// TestApplyBasicSettings_TasksListPreferences verifies tasks list sort and group are applied and invalid values rejected.
 func TestApplyBasicSettings_TasksListPreferences(t *testing.T) {
 	t.Run("sets valid sort and group", func(t *testing.T) {
 		settings := &models.UserSettings{}
@@ -542,6 +562,7 @@ func TestApplyBasicSettings_TasksListPreferences(t *testing.T) {
 	})
 }
 
+// TestApplyBasicSettings_TerminalFontFamily verifies the terminal font family is preserved, set, trimmed, and cleared.
 func TestApplyBasicSettings_TerminalFontFamily(t *testing.T) {
 	t.Run("nil leaves settings unchanged", func(t *testing.T) {
 		settings := &models.UserSettings{TerminalFontFamily: "Fira Code"}
@@ -588,6 +609,7 @@ func TestApplyBasicSettings_TerminalFontFamily(t *testing.T) {
 	})
 }
 
+// TestApplyChangesPanelLayout verifies the changes panel layout is preserved, set, trimmed, and validated.
 func TestApplyChangesPanelLayout(t *testing.T) {
 	t.Run("nil leaves settings unchanged", func(t *testing.T) {
 		settings := &models.UserSettings{ChangesPanelLayout: "tree"}
@@ -642,6 +664,7 @@ func TestApplyChangesPanelLayout(t *testing.T) {
 	})
 }
 
+// TestApplyStartupPage verifies the startup page is preserved when omitted, applied when valid, and rejected when invalid.
 func TestApplyStartupPage(t *testing.T) {
 	t.Run("omission preserves saved value", func(t *testing.T) {
 		settings := &models.UserSettings{StartupPage: models.StartupPageLastTask}
@@ -677,6 +700,7 @@ func TestApplyStartupPage(t *testing.T) {
 	})
 }
 
+// TestApplyBasicSettings_TerminalFontSize verifies font size application, reset to zero, and bounds validation.
 func TestApplyBasicSettings_TerminalFontSize(t *testing.T) {
 	t.Run("nil leaves settings unchanged", func(t *testing.T) {
 		settings := &models.UserSettings{TerminalFontSize: 14}
@@ -728,6 +752,7 @@ func TestApplyBasicSettings_TerminalFontSize(t *testing.T) {
 	})
 }
 
+// TestApplySavedLayouts table-tests saved layout count limits and validation errors.
 func TestApplySavedLayouts(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -907,6 +932,7 @@ func TestApplySavedLayouts(t *testing.T) {
 	}
 }
 
+// TestApplyWorkspaceAndTaskListPreferencesKanbanHiddenStepIDs table-tests kanban hidden step ID count and byte-budget limits.
 func TestApplyWorkspaceAndTaskListPreferencesKanbanHiddenStepIDs(t *testing.T) {
 	makeIDs := func(n int) []string {
 		ids := make([]string, n)
@@ -1034,6 +1060,7 @@ func TestApplyWorkspaceAndTaskListPreferencesKanbanHiddenStepIDs(t *testing.T) {
 	}
 }
 
+// makeSidebarViews builds n SidebarView fixtures with distinct IDs and names.
 func makeSidebarViews(n int) []models.SidebarView {
 	views := make([]models.SidebarView, n)
 	for i := range views {
@@ -1049,6 +1076,7 @@ func makeSidebarViews(n int) []models.SidebarView {
 	return views
 }
 
+// TestApplySidebarViews table-tests sidebar view count limits and validation errors.
 func TestApplySidebarViews(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1139,6 +1167,7 @@ func TestApplySidebarViews(t *testing.T) {
 	}
 }
 
+// TestApplySidebarViewState verifies active view and draft application, clearing, and validation.
 func TestApplySidebarViewState(t *testing.T) {
 	t.Run("nil fields leave active view and draft unchanged", func(t *testing.T) {
 		settings := &models.UserSettings{
@@ -1221,6 +1250,7 @@ func TestApplySidebarViewState(t *testing.T) {
 	})
 }
 
+// TestApplyUserPreferenceBlobs verifies blob preferences are patched while task-create last-used is preserved.
 func TestApplyUserPreferenceBlobs(t *testing.T) {
 	settings := &models.UserSettings{
 		TaskCreateLastUsed: models.TaskCreateLastUsed{
@@ -1250,6 +1280,7 @@ func TestApplyUserPreferenceBlobs(t *testing.T) {
 	}
 }
 
+// TestUpdateUserSettingsCombinesSettingsAndTaskCreatePatch verifies UpdateUserSettings folds the task-create patch into a single preserving write.
 func TestUpdateUserSettingsCombinesSettingsAndTaskCreatePatch(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
@@ -1302,6 +1333,7 @@ func TestUpdateUserSettingsCombinesSettingsAndTaskCreatePatch(t *testing.T) {
 	}
 }
 
+// TestPublishUserSettingsEventIncludesArchiveConfirmation verifies the settings event carries confirm_task_archive.
 func TestPublishUserSettingsEventIncludesArchiveConfirmation(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
@@ -1323,6 +1355,7 @@ func TestPublishUserSettingsEventIncludesArchiveConfirmation(t *testing.T) {
 	}
 }
 
+// TestPublishUserSettingsEventIncludesTasksListShowDetails verifies the settings event carries tasks_list_show_details.
 func TestPublishUserSettingsEventIncludesTasksListShowDetails(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
@@ -1344,6 +1377,7 @@ func TestPublishUserSettingsEventIncludesTasksListShowDetails(t *testing.T) {
 	}
 }
 
+// TestPublishUserSettingsEventIncludesNormalizedMCPTaskAgentProfileDefault verifies the event normalizes unknown profile defaults to current_task.
 func TestPublishUserSettingsEventIncludesNormalizedMCPTaskAgentProfileDefault(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
@@ -1367,6 +1401,7 @@ func TestPublishUserSettingsEventIncludesNormalizedMCPTaskAgentProfileDefault(t 
 	}
 }
 
+// TestPublishUserSettingsEventIncludesNormalizedStartupPage verifies the event normalizes unknown startup pages to task_overview.
 func TestPublishUserSettingsEventIncludesNormalizedStartupPage(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
@@ -1385,6 +1420,7 @@ func TestPublishUserSettingsEventIncludesNormalizedStartupPage(t *testing.T) {
 	}
 }
 
+// TestPublishUserSettingsEventIncludesAppStatusBarOrder verifies the settings event carries the app status bar order.
 func TestPublishUserSettingsEventIncludesAppStatusBarOrder(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
@@ -1407,6 +1443,7 @@ func TestPublishUserSettingsEventIncludesAppStatusBarOrder(t *testing.T) {
 	}
 }
 
+// TestPublishUserSettingsEventIncludesLspStatusLocation verifies the settings event carries lsp_status_location.
 func TestPublishUserSettingsEventIncludesLspStatusLocation(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
@@ -1427,6 +1464,7 @@ func TestPublishUserSettingsEventIncludesLspStatusLocation(t *testing.T) {
 	}
 }
 
+// TestUpdateUserSettingsRejectsInvalidMCPTaskAgentProfileDefaultWithoutPersisting verifies an invalid profile default is rejected without persisting or publishing.
 func TestUpdateUserSettingsRejectsInvalidMCPTaskAgentProfileDefaultWithoutPersisting(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
@@ -1455,6 +1493,7 @@ func TestUpdateUserSettingsRejectsInvalidMCPTaskAgentProfileDefaultWithoutPersis
 	}
 }
 
+// TestClearDefaultEditorIDPreservesTaskCreateLastUsed verifies clearing the default editor preserves task-create last-used in the write and event.
 func TestClearDefaultEditorIDPreservesTaskCreateLastUsed(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
@@ -1501,6 +1540,7 @@ func TestClearDefaultEditorIDPreservesTaskCreateLastUsed(t *testing.T) {
 	}
 }
 
+// TestRecordTaskCreateLastUsed verifies RecordTaskCreateLastUsed skips empty patches and updates and publishes non-empty ones.
 func TestRecordTaskCreateLastUsed(t *testing.T) {
 	newTestService := func(repo *recordingUserRepository, eventBus *recordingEventBus) *Service {
 		log, err := logger.NewFromZap(zap.NewNop())
@@ -1624,6 +1664,7 @@ func TestRecordTaskCreateLastUsed(t *testing.T) {
 	})
 }
 
+// TestApplyUserPreferenceBlobsValidation verifies blob preferences accept arrays, objects, and null and reject scalars and oversized blobs.
 func TestApplyUserPreferenceBlobsValidation(t *testing.T) {
 	t.Run("accepts arrays objects and null", func(t *testing.T) {
 		settings := &models.UserSettings{}
@@ -1669,6 +1710,7 @@ func TestApplyUserPreferenceBlobsValidation(t *testing.T) {
 
 }
 
+// TestAzureDevOpsBrowsePreferencesArePatched verifies Azure DevOps browse preferences are patched, persisted, and published.
 func TestAzureDevOpsBrowsePreferencesArePatched(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
@@ -1728,16 +1770,19 @@ type recordingUserRepository struct {
 	closeCalls                                int
 }
 
+// GetUser records the call and returns an unexpected-call error.
 func (r *recordingUserRepository) GetUser(context.Context, string) (*models.User, error) {
 	r.getUserCalls++
 	return nil, errors.New("unexpected GetUser call")
 }
 
+// GetDefaultUser records the call and returns an unexpected-call error.
 func (r *recordingUserRepository) GetDefaultUser(context.Context) (*models.User, error) {
 	r.getDefaultUserCalls++
 	return nil, errors.New("unexpected GetDefaultUser call")
 }
 
+// GetUserSettings records the call and returns the configured settings or error.
 func (r *recordingUserRepository) GetUserSettings(_ context.Context, userID string) (*models.UserSettings, error) {
 	r.getUserSettingsCalls++
 	r.getSettingsUserID = userID
@@ -1750,10 +1795,12 @@ func (r *recordingUserRepository) GetUserSettings(_ context.Context, userID stri
 	return nil, errors.New("unexpected GetUserSettings call")
 }
 
+// UpsertUserSettingsPreservingTaskCreateLastUsed records the preserving-write inputs and returns the configured result or error.
 func (r *recordingUserRepository) UpsertUserSettingsPreservingTaskCreateLastUsed(
 	_ context.Context,
 	settings *models.UserSettings,
 	patch *models.TaskCreateLastUsed,
+	_ int64,
 ) (*models.UserSettings, error) {
 	r.upsertUserSettingsPreservingLastUsedCalls++
 	settingsCopy := *settings
@@ -1771,6 +1818,7 @@ func (r *recordingUserRepository) UpsertUserSettingsPreservingTaskCreateLastUsed
 	return nil, errors.New("unexpected UpsertUserSettingsPreservingTaskCreateLastUsed call")
 }
 
+// UpdateTaskCreateLastUsed records the update inputs and returns the configured result or error.
 func (r *recordingUserRepository) UpdateTaskCreateLastUsed(
 	_ context.Context,
 	userID string,
@@ -1785,6 +1833,7 @@ func (r *recordingUserRepository) UpdateTaskCreateLastUsed(
 	return r.updateSettings, nil
 }
 
+// Close records the close call.
 func (r *recordingUserRepository) Close() error {
 	r.closeCalls++
 	return nil
@@ -1795,26 +1844,32 @@ type recordingEventBus struct {
 	publishedEvents   []*bus.Event
 }
 
+// Publish records the published subject and event.
 func (b *recordingEventBus) Publish(_ context.Context, subject string, event *bus.Event) error {
 	b.publishedSubjects = append(b.publishedSubjects, subject)
 	b.publishedEvents = append(b.publishedEvents, event)
 	return nil
 }
 
+// Subscribe returns an unexpected-call error.
 func (b *recordingEventBus) Subscribe(string, bus.EventHandler) (bus.Subscription, error) {
 	return nil, errors.New("unexpected Subscribe call")
 }
 
+// QueueSubscribe returns an unexpected-call error.
 func (b *recordingEventBus) QueueSubscribe(string, string, bus.EventHandler) (bus.Subscription, error) {
 	return nil, errors.New("unexpected QueueSubscribe call")
 }
 
+// Request returns an unexpected-call error.
 func (b *recordingEventBus) Request(context.Context, string, *bus.Event, time.Duration) (*bus.Event, error) {
 	return nil, errors.New("unexpected Request call")
 }
 
+// Close is a no-op.
 func (b *recordingEventBus) Close() {}
 
+// IsConnected reports the fake bus as connected.
 func (b *recordingEventBus) IsConnected() bool {
 	return true
 }

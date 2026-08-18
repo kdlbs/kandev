@@ -24,6 +24,7 @@ import { PluginPanelPicker } from "./plugin-panel-picker";
 type SessionMobileBottomNavProps = {
   activePanel: MobileSessionPanel;
   onPanelChange: (panel: MobileSessionPanel) => void;
+  showPromptHistory?: boolean;
   planBadge?: boolean;
   changesBadge?: number;
   hasReview?: boolean;
@@ -52,6 +53,7 @@ function buildMobileNavItems({
   showStatus,
   onOpenStatus,
   onOpenPluginPicker,
+  showPromptHistory,
   connectionIssueSeverity,
   t,
 }: {
@@ -62,6 +64,7 @@ function buildMobileNavItems({
   showStatus: boolean;
   onOpenStatus: () => void;
   onOpenPluginPicker: () => void;
+  showPromptHistory: boolean;
   connectionIssueSeverity: ConnectionIssueSeverity;
   t: (key: string) => string;
 }): NavItem[] {
@@ -112,12 +115,13 @@ function buildMobileNavItems({
       label: t("task:terminal"),
       icon: <IconTerminal2 className="h-5 w-5" />,
     },
-    ...(hasMobilePluginPanels()
+    ...(showPromptHistory || hasMobilePluginPanels()
       ? [
           {
             label: t("common:panels"),
             icon: <IconLayoutGrid className="h-5 w-5" />,
-            active: parsePluginPanelId(activePanel) !== undefined,
+            active:
+              parsePluginPanelId(activePanel) !== undefined || activePanel === "prompt-history",
             onClick: onOpenPluginPicker,
           },
         ]
@@ -138,6 +142,7 @@ function buildMobileNavItems({
 export function SessionMobileBottomNav({
   activePanel,
   onPanelChange,
+  showPromptHistory = false,
   planBadge = false,
   changesBadge = 0,
   hasReview = false,
@@ -159,6 +164,7 @@ export function SessionMobileBottomNav({
         showStatus,
         onOpenStatus,
         onOpenPluginPicker: () => setPluginPickerOpen(true),
+        showPromptHistory,
         connectionIssueSeverity,
         t,
       }),
@@ -171,6 +177,7 @@ export function SessionMobileBottomNav({
       connectionIssueSeverity,
       registryVersion,
       activePanel,
+      showPromptHistory,
       t,
     ],
   );
@@ -192,6 +199,7 @@ export function SessionMobileBottomNav({
         open={pluginPickerOpen}
         onOpenChange={setPluginPickerOpen}
         onSelect={onPanelChange}
+        showPromptHistory={showPromptHistory}
       />
     </nav>
   );

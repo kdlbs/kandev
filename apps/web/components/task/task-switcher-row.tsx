@@ -21,6 +21,7 @@ export type TaskRowProps = {
   stepsByWorkflowId?: Record<string, StepDef[]>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
+  showActivityTime?: boolean;
   onSelectTask: (taskId: string) => void;
   onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
@@ -91,6 +92,7 @@ type TaskRowItemProps = Pick<
   | "subtaskToggle"
   | "activeTaskId"
   | "selectedTaskId"
+  | "showActivityTime"
   | "onSelectTask"
   | "selectedTaskIds"
   | "onToggleSelectTask"
@@ -107,6 +109,7 @@ function TaskRowItem({
   subtaskToggle,
   activeTaskId,
   selectedTaskId,
+  showActivityTime,
   onSelectTask,
   selectedTaskIds,
   onToggleSelectTask,
@@ -154,6 +157,8 @@ function TaskRowItem({
       hasPendingClarification={task.hasPendingClarification}
       hasPendingPermission={task.hasPendingPermission}
       updatedAt={task.updatedAt}
+      lastActivityAt={task.lastActivityAt}
+      showActivityTime={showActivityTime}
       repositories={task.repositories}
       prInfo={task.prInfo}
       queuedCount={task.queuedCount}

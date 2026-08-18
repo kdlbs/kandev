@@ -62,7 +62,11 @@ function TerminalSlot({
   }, [isActive, terminal.id, ws]);
 
   return (
-    <div className={`absolute inset-0 ${isActive ? "block" : "hidden"}`}>
+    <div
+      data-testid={`mobile-terminal-slot-${terminal.id}`}
+      data-state={isActive ? "active" : "inactive"}
+      className={`absolute inset-0 ${isActive ? "block" : "hidden"}`}
+    >
       <PassthroughTerminal
         mode="shell"
         environmentId={environmentId}

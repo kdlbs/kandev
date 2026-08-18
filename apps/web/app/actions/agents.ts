@@ -215,6 +215,8 @@ export async function deleteAgentProfileAction(
         utilityAgents: body.utility_agents ?? [],
       };
     }
+    // i18n-exempt: server-provided error text, or an HTTP status diagnostic when
+    // the server sent none. The toast title around it is translated.
     return {
       status: "error",
       message: body?.error || `Request failed: ${response.status} ${response.statusText}`,

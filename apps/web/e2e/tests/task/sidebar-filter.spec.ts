@@ -75,6 +75,25 @@ async function saveTitleView(
   await filters.close();
 }
 
+async function taskRowOrder(surface: import("@playwright/test").Locator, taskIds: string[]) {
+  const rows = await surface.locator("[data-task-row-id]").all();
+  const order: string[] = [];
+  for (const row of rows) {
+    const id = await row.getAttribute("data-task-row-id");
+    if (id && taskIds.includes(id)) order.push(id);
+  }
+  return order;
+}
+
+async function taskActivityAt(
+  apiClient: import("../../helpers/api-client").ApiClient,
+  workspaceId: string,
+  taskId: string,
+): Promise<string | null> {
+  const result = await apiClient.listTasks(workspaceId);
+  return result.tasks.find((task) => task.id === taskId)?.status_summary?.last_activity_at ?? null;
+}
+
 test.describe("Sidebar filter bar — popover basics", () => {
   test("gear opens popover; ESC closes it", async ({ testPage, apiClient, seedData }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Basics Task"]);
@@ -305,6 +324,106 @@ test.describe("Sidebar filter — group + sort", () => {
     await toggle.click();
     const flipped = await toggle.getAttribute("data-direction");
     expect(flipped).not.toBe(initial);
+  });
+
+  test("sorts by last activity, persists, and ignores provider-only refresh", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const oldTask = await apiClient.createTask(seedData.workspaceId, "Activity old", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const newTask = await apiClient.createTask(seedData.workspaceId, "Activity new", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.updateTaskTitle(oldTask.id, "Activity old touched");
+    const navTask = await apiClient.createTask(seedData.workspaceId, "Activity sort nav", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    await testPage.goto(`/t/${navTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const filters = new SidebarFilterPopoverPage(testPage);
+    await filters.open();
+    await filters.setGroup("None");
+    await filters.setSort("Last activity", "desc");
+    await filters.saveAs("Last activity view");
+    await filters.close();
+
+    await expect
+      .poll(() => taskRowOrder(session.sidebar, [oldTask.id, newTask.id]))
+      .toEqual([oldTask.id, newTask.id]);
+    let activityAt: string | null = null;
+    await expect
+      .poll(async () => {
+        activityAt = await taskActivityAt(apiClient, seedData.workspaceId, oldTask.id);
+        return activityAt;
+      })
+      .toBeTruthy();
+    const oldRow = session.sidebar.locator(`[data-task-row-id="${oldTask.id}"]`);
+    await expect(oldRow.getByTestId("sidebar-task-time")).toHaveAttribute(
+      "data-time-value",
+      activityAt!,
+    );
+
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+    const reloadedFilters = new SidebarFilterPopoverPage(testPage);
+    await reloadedFilters.expectActiveViewChip("Last activity view");
+    await expect
+      .poll(() => taskRowOrder(session.sidebar, [oldTask.id, newTask.id]))
+      .toEqual([oldTask.id, newTask.id]);
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: newTask.id,
+      workspace_id: seedData.workspaceId,
+      repository_id: seedData.repositoryId,
+      owner: "activity-owner",
+      repo: "activity-repo",
+      pr_number: 7,
+      pr_url: "https://github.com/activity-owner/activity-repo/pull/7",
+      pr_title: "Activity PR",
+      head_branch: "activity",
+      base_branch: "main",
+      author_login: "activity-owner",
+      checks_state: "failure",
+    });
+    await expect
+      .poll(async () => {
+        const tasks = await apiClient.listTasks(seedData.workspaceId);
+        return tasks.tasks.find((task) => task.id === newTask.id)?.status_summary?.pull_request
+          ?.aggregate_state;
+      })
+      .toBe("failure");
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: newTask.id,
+      workspace_id: seedData.workspaceId,
+      repository_id: seedData.repositoryId,
+      owner: "activity-owner",
+      repo: "activity-repo",
+      pr_number: 7,
+      pr_url: "https://github.com/activity-owner/activity-repo/pull/7",
+      pr_title: "Activity PR refreshed",
+      head_branch: "activity",
+      base_branch: "main",
+      author_login: "activity-owner",
+      checks_state: "success",
+    });
+    await expect
+      .poll(async () => {
+        const tasks = await apiClient.listTasks(seedData.workspaceId);
+        return tasks.tasks.find((task) => task.id === newTask.id)?.status_summary?.pull_request
+          ?.aggregate_state;
+      })
+      .toBe("passing");
+    await expect
+      .poll(() => taskRowOrder(session.sidebar, [oldTask.id, newTask.id]))
+      .toEqual([oldTask.id, newTask.id]);
   });
 });
 

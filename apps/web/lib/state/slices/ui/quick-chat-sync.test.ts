@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   reconcileQuickTerminalTabs,
   reconcileQuickChatSessions,
+  mergeHydratedQuickChatSessions,
+  removeQuickChatSession,
   removeQuickChatSessionsForTask,
   upsertQuickChatSession,
 } from "./quick-chat-sync";
@@ -38,6 +40,11 @@ function state(sessions: QuickChatSession[], overrides: Partial<QuickChatState> 
     activeKind: "conversation" as const,
     activeTerminalTabId: null,
     lastTerminalTabIdByWorkspace: {},
+    unseenIdleByWorkspace: {},
+    lastSettledAtBySession: {},
+    sessionOwnership: {},
+    syncRevisionByWorkspace: {},
+    tombstonedSessions: {},
     ...overrides,
   };
 }
@@ -353,6 +360,32 @@ describe("upsertQuickChatSession", () => {
 
     expect(after.sessions[0].name).toBe("Mine");
   });
+
+  it("accepts a session once its tombstone has expired", () => {
+    const expiredAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const before = state([], {
+      tombstonedSessions: { a: { workspaceId: WS, tombstonedAt: expiredAt } },
+    });
+
+    const after = upsertQuickChatSession(before, chat("a"));
+
+    expect(after.sessions.map((s) => s.sessionId)).toEqual(["a"]);
+    expect(after.tombstonedSessions).toEqual({});
+  });
+});
+
+describe("mergeHydratedQuickChatSessions", () => {
+  it("accepts a session when its tombstone has expired", () => {
+    const expiredAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const before = state([], {
+      tombstonedSessions: { a: { workspaceId: WS, tombstonedAt: expiredAt } },
+    });
+
+    const after = mergeHydratedQuickChatSessions(before, [chat("a")]);
+
+    expect(after.sessions.map((session) => session.sessionId)).toEqual(["a"]);
+    expect(after.tombstonedSessions).toEqual({});
+  });
 });
 
 describe("removeQuickChatSessionsForTask", () => {
@@ -372,6 +405,31 @@ describe("removeQuickChatSessionsForTask", () => {
 
     expect(after.sessions.map((s) => s.sessionId)).toEqual(["a"]);
     expect(after.activeSessionId).toBeNull();
+  });
+
+  it("removes lifecycle state using ownership after its tab has disappeared", () => {
+    const before = state([], {
+      sessionOwnership: { removed: { workspaceId: WS, taskId: "task-removed" } },
+      unseenIdleByWorkspace: { [WS]: { removed: true } },
+      lastSettledAtBySession: { removed: "2026-08-17T07:00:00Z" },
+    });
+
+    const after = removeQuickChatSessionsForTask(before, "task-removed");
+
+    expect(after.sessionOwnership).toEqual({});
+    expect(after.unseenIdleByWorkspace).toEqual({});
+    expect(after.lastSettledAtBySession).toEqual({});
+  });
+
+  it("clears a pre-existing unseen marker when the session is removed directly", () => {
+    const before = state([chat("a")], {
+      unseenIdleByWorkspace: { [WS]: { a: true } },
+    });
+
+    const after = removeQuickChatSession(before, "a");
+
+    expect(after.unseenIdleByWorkspace).toEqual({});
+    expect(after.sessions.map((s) => s.sessionId)).toEqual([]);
   });
 
   it("returns the same state when no tab is affected", () => {

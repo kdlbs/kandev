@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "release.yml"
 DIAGNOSTICS_PATH = REPO_ROOT / ".github" / "scripts" / "collect-macos-desktop-diagnostics.sh"
 PUBLISH_NPM_PATH = REPO_ROOT / "scripts" / "release" / "publish-npm.sh"
+UPDATE_SCOOP_BUCKET_PATH = REPO_ROOT / "scripts" / "release" / "update-scoop-bucket.sh"
 NPM_PACKAGES_PATH = REPO_ROOT / "scripts" / "release" / "npm-packages.sh"
 PUBLIC_KEY_PATH = REPO_ROOT / ".github" / "release-signing-key.asc"
 RELEASE_PROCESS_PATH = REPO_ROOT / "docs" / "public" / "release-process.md"
@@ -19,6 +20,7 @@ LINT_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.
 WORKFLOW = WORKFLOW_PATH.read_text()
 DIAGNOSTICS = DIAGNOSTICS_PATH.read_text()
 PUBLISH_NPM = PUBLISH_NPM_PATH.read_text()
+UPDATE_SCOOP_BUCKET = UPDATE_SCOOP_BUCKET_PATH.read_text()
 NPM_PACKAGES = NPM_PACKAGES_PATH.read_text()
 RELEASE_PROCESS = RELEASE_PROCESS_PATH.read_text()
 LINT_WORKFLOW = LINT_WORKFLOW_PATH.read_text()
@@ -152,6 +154,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "publish-release",
             "publish-npm",
             "update-homebrew-tap",
+            "update-scoop-bucket",
         ):
             block = job_block(name)
             self.assertIn("github.event_name == 'workflow_dispatch'", block)
@@ -196,6 +199,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             ),
             "publish-npm": ("prepare", "publish-release"),
             "update-homebrew-tap": ("prepare", "publish-release"),
+            "update-scoop-bucket": ("prepare", "publish-release"),
         }
 
         for name, dependencies in direct_dependencies.items():
@@ -255,6 +259,30 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn('CLI_PACKAGE_BACKUP="$WORK_DIR/cli-package.json"', PUBLISH_NPM)
         self.assertIn('cp "$CLI_PACKAGE_BACKUP" "$CLI_PACKAGE_JSON"', PUBLISH_NPM)
 
+    def test_scoop_publication_uses_current_control_revision_and_deploy_key(self) -> None:
+        scoop = job_block("update-scoop-bucket")
+        self.assertIn("needs: [prepare, publish-release]", scoop)
+        self.assertIn("ref: ${{ github.workflow_sha }}", scoop)
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", scoop)
+        self.assertIn(
+            "SCOOP_BUCKET_DEPLOY_KEY: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}",
+            scoop,
+        )
+        self.assertIn("bash scripts/release/update-scoop-bucket.sh", scoop)
+        self.assertIn('"${{ needs.prepare.outputs.version }}"', scoop)
+        self.assertIn('"${{ needs.prepare.outputs.tag }}"', scoop)
+        self.assertIn("!inputs.dry_run", scoop)
+        self.assertIn("!inputs.desktop_validation_only", scoop)
+        self.assertNotIn("inputs.backfill_tag == ''", scoop)
+
+        preflight = step_block("Require Scoop bucket deploy key")
+        self.assertIn('if [ -z "$SCOOP_BUCKET_DEPLOY_KEY" ]', preflight)
+        self.assertIn("SCOOP_BUCKET_DEPLOY_KEY is required", preflight)
+
+        self.assertIn("SCOOP_BUCKET_DEPLOY_KEY", UPDATE_SCOOP_BUCKET)
+        self.assertIn("git push origin HEAD:main", UPDATE_SCOOP_BUCKET)
+        self.assertIn('CHECKSUM_NAME="${ARCHIVE_NAME}.sha256"', UPDATE_SCOOP_BUCKET)
+
     def test_publish_npm_rejects_version_dist_tag_mismatches(self) -> None:
         cases = (
             (
@@ -300,12 +328,54 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("CURRENT_REF: ${{ github.ref }}", guard)
         self.assertIn('if [ "$CURRENT_REF" != "refs/heads/main" ]', guard)
 
+    def test_normal_release_uses_admin_token_only_for_exact_head_merge(self) -> None:
+        create = step_block("Create release PR")
+        merge = step_block("Merge release PR with administrator token")
+        select = step_block("Select merged release commit")
+
+        for step in (create, merge, select):
+            self.assertIn(NORMAL_RELEASE_IF, step)
+
+        self.assertIn("id: release_pr", create)
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", create)
+        self.assertIn('MSG="release: publish $NEXT"', create)
+        self.assertIn('HEAD_SHA="$(git rev-parse HEAD)"', create)
+        self.assertIn('echo "url=$PR_URL" >> "$GITHUB_OUTPUT"', create)
+        self.assertIn('echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"', create)
+        self.assertNotIn("RELEASE_PR_BYPASS_TOKEN", create)
+
+        self.assertIn(
+            "GH_TOKEN: ${{ secrets.RELEASE_PR_BYPASS_TOKEN }}",
+            merge,
+        )
+        self.assertIn("PR_URL: ${{ steps.release_pr.outputs.url }}", merge)
+        self.assertIn("EXPECTED_HEAD: ${{ steps.release_pr.outputs.head }}", merge)
+        self.assertIn('if [ -z "$GH_TOKEN" ]', merge)
+        self.assertIn("RELEASE_PR_BYPASS_TOKEN is required", merge)
+        self.assertIn('gh pr merge "$PR_URL"', merge)
+        self.assertIn("--admin", merge)
+        self.assertIn("--squash", merge)
+        self.assertIn('--match-head-commit "$EXPECTED_HEAD"', merge)
+        self.assertNotIn("--delete-branch", merge)
+        self.assertNotIn("--auto", merge)
+
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", select)
+        self.assertNotIn("RELEASE_PR_BYPASS_TOKEN", select)
+        self.assertIn("--json state,mergedAt,mergeCommit,headRefOid", select)
+        self.assertIn('if [ "$PR_STATE" != "MERGED" ]', select)
+        self.assertIn('if [ "$PR_HEAD" != "$EXPECTED_HEAD" ]', select)
+        self.assertIn('[[ "$MERGE_COMMIT" =~ ^[0-9a-f]{40}$ ]]', select)
+        self.assertIn('git merge-base --is-ancestor "$MERGE_COMMIT" origin/main', select)
+        self.assertIn('git checkout --detach "$MERGE_COMMIT"', select)
+
     def test_normal_release_preflights_and_revalidates_signing_key_around_merge(
         self,
     ) -> None:
         prepare = job_block("prepare")
         bump = step_block("Bump version + generate CHANGELOG (in working tree)")
-        merge = step_block("Create release PR + squash-merge")
+        create_pr = step_block("Create release PR")
+        merge = step_block("Merge release PR with administrator token")
+        select = step_block("Select merged release commit")
         preflight_public_key = step_block("Validate committed release signing public key")
         preflight = step_block("Preflight release tag signing fingerprint")
         merged_public_key = step_block("Validate merged release signing public key")
@@ -391,8 +461,10 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
         self.assertLess(prepare.index(preflight_public_key), prepare.index(preflight))
         self.assertLess(prepare.index(preflight), prepare.index(bump))
-        self.assertLess(prepare.index(bump), prepare.index(merge))
-        self.assertLess(prepare.index(merge), prepare.index(merged_public_key))
+        self.assertLess(prepare.index(bump), prepare.index(create_pr))
+        self.assertLess(prepare.index(create_pr), prepare.index(merge))
+        self.assertLess(prepare.index(merge), prepare.index(select))
+        self.assertLess(prepare.index(select), prepare.index(merged_public_key))
         self.assertLess(prepare.index(merged_public_key), prepare.index(signing))
         self.assertLess(prepare.index(merge), prepare.index(signing))
         self.assertLess(prepare.index(signing), prepare.index(validate))
@@ -440,6 +512,17 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
         self.assertIsNotNone(documented_fingerprint)
         self.assertEqual(primary_fingerprints[0], documented_fingerprint.group(1))
+
+    def test_release_documentation_declares_the_pr_bypass_token_contract(self) -> None:
+        for requirement in (
+            "RELEASE_PR_BYPASS_TOKEN",
+            "fine-grained personal access token",
+            "Contents: Read and write",
+            "organization administrator",
+            "Only select repositories",
+            "expiration date",
+        ):
+            self.assertIn(requirement, RELEASE_PROCESS)
 
     def test_release_contract_ci_runs_when_key_or_release_documentation_changes(self) -> None:
         """This contract must run on every change, not a listed subset.
@@ -492,7 +575,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "node --test scripts/release/nightly-version.test.mjs "
             "scripts/release/nightly-release.test.mjs "
             "scripts/release/npm-view-version.test.mjs "
-            "scripts/release/publish-npm.test.mjs",
+            "scripts/release/publish-npm.test.mjs "
+            "scripts/release/update-scoop-bucket.test.mjs",
             LINT_WORKFLOW,
         )
 
@@ -545,7 +629,9 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
         for name in (
             "Bump version + generate CHANGELOG (in working tree)",
-            "Create release PR + squash-merge",
+            "Create release PR",
+            "Merge release PR with administrator token",
+            "Select merged release commit",
             "Import release tag signing key",
             "Validate release tag signing identity",
             "Create and push signed release tag",
@@ -566,6 +652,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "publish-release",
             "publish-npm",
             "update-homebrew-tap",
+            "update-scoop-bucket",
         ):
             block = job_block(name)
             self.assertRegex(

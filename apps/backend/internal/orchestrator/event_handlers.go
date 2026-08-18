@@ -61,6 +61,22 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 // session/load vs session/new in session.go — agents without native resume (e.g.,
 // Claude Code) use the token for their own --resume CLI flag instead.
 func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expectedExecID, acpSessionID, lastMessageUUID string) {
+	// The lifecycle manager updates its in-memory ACP session ID before it
+	// publishes reset/start events. Events from the previous ACP session can
+	// still be queued after that point, so reject those events before the
+	// execution-level CAS. The execution ID alone does not identify an ACP
+	// session generation because context resets keep the same execution.
+	if currentACPSessionID := s.currentACPSessionID(sessionID); currentACPSessionID != "" &&
+		acpSessionID != "" && acpSessionID != currentACPSessionID {
+		s.logger.Info("dropping resume token from stale ACP session generation",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("expected_exec_id", expectedExecID),
+			zap.String("resume_token", acpSessionID),
+			zap.String("current_resume_token", currentACPSessionID))
+		return
+	}
+
 	err := s.repo.UpdateResumeToken(ctx, sessionID, expectedExecID, acpSessionID, lastMessageUUID)
 	switch {
 	case err == nil:
@@ -102,6 +118,23 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expec
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+}
+
+// currentACPSessionID returns the lifecycle manager's current ACP session ID
+// when the concrete manager exposes it. The optional seam keeps the generic
+// AgentManagerClient contract unchanged for remote clients and test doubles.
+func (s *Service) currentACPSessionID(sessionID string) string {
+	provider, ok := s.agentManager.(interface {
+		GetACPSessionIDForSession(string) (string, bool)
+	})
+	if !ok {
+		return ""
+	}
+	acpSessionID, ok := provider.GetACPSessionIDForSession(sessionID)
+	if !ok {
+		return ""
+	}
+	return acpSessionID
 }
 
 // persistACPSessionID mirrors the agent's ACP session id into the session's

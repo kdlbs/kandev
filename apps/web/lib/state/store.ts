@@ -5,7 +5,10 @@ import type {
   Repository,
   Branch,
   RepositoryScript,
+  RepositorySet,
   Message,
+  TaskPendingAction,
+  TaskPendingActionRevision,
   Turn,
   TaskSession,
   TaskWalkthrough,
@@ -110,6 +113,7 @@ export type AppState = KanbanSlice & {
   // Workspace slice
   workspaces: (typeof defaultWorkspaceState)["workspaces"];
   repositories: (typeof defaultWorkspaceState)["repositories"];
+  repositorySets: (typeof defaultWorkspaceState)["repositorySets"];
   repositoryBranches: (typeof defaultWorkspaceState)["repositoryBranches"];
   repositoryScripts: (typeof defaultWorkspaceState)["repositoryScripts"];
 
@@ -283,6 +287,15 @@ export type AppState = KanbanSlice & {
   setRepositoryScriptsLoading: (repositoryId: string, loading: boolean) => void;
   clearRepositoryScripts: (repositoryId: string) => void;
   invalidateRepositories: (workspaceId: string) => void;
+  setRepositorySets: (
+    workspaceId: string,
+    sets: RepositorySet[],
+    expectedRevision?: number,
+  ) => void;
+  setRepositorySetsLoading: (workspaceId: string, loading: boolean) => void;
+  upsertRepositorySet: (workspaceId: string, set: RepositorySet) => void;
+  removeRepositorySet: (workspaceId: string, setId: string) => void;
+  invalidateRepositorySets: (workspaceId: string) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
   setEditors: (editors: EditorsState["items"]) => void;
   setEditorsLoading: (loading: boolean) => void;
@@ -358,6 +371,10 @@ export type AppState = KanbanSlice & {
   syncQuickTerminalTabs: UIA["syncQuickTerminalTabs"];
   upsertQuickChatSessionFromEvent: UIA["upsertQuickChatSessionFromEvent"];
   removeQuickChatSessionsForTask: UIA["removeQuickChatSessionsForTask"];
+  markQuickChatUnseenIdle: UIA["markQuickChatUnseenIdle"];
+  clearQuickChatUnseenIdle: UIA["clearQuickChatUnseenIdle"];
+  recordQuickChatSettled: UIA["recordQuickChatSettled"];
+  removeQuickChatSession: UIA["removeQuickChatSession"];
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string, workspaceId: string) => void;
@@ -374,20 +391,30 @@ export type AppState = KanbanSlice & {
     messages: Message[],
     meta?: { hasMore?: boolean; oldestCursor?: string | null },
   ) => void;
+  /** Adds a message to a session, merging fields when the message already exists. */
   addMessage: (message: Message) => void;
   mergeMessages: (
     sessionId: string,
     messages: Message[],
     meta?: { hasMore?: boolean; oldestCursor?: string | null },
   ) => void;
+  /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
+  /** Merges a complete REST snapshot and reconciles its marker atomically. */
+  mergeTurnsSnapshot: (sessionId: string, turns: Turn[], hydrationEpoch: number) => void;
   completeTurn: (
     sessionId: string,
     turnId: string,
     completedAt: string,
     metadata?: Record<string, unknown>,
+    updatedAt?: string,
   ) => void;
+  /** Marks a turn as the session's active turn (or null to clear it). */
   setActiveTurn: (sessionId: string, turnId: string | null) => void;
+  /** Reconciles the active-turn marker after REST hydration, epoch-guarded. */
+  reconcileActiveTurnAfterHydration: (sessionId: string, hydrationEpoch: number) => void;
+  /** Records that the session's full persisted turn history is in the store. */
+  markTurnsLoaded: (sessionId: string) => void;
   updateMessage: (message: Message) => void;
   removeMessage: (sessionId: string, messageId: string) => void;
   prependMessages: (
@@ -402,6 +429,11 @@ export type AppState = KanbanSlice & {
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
   setTaskSession: (session: TaskSession) => void;
   updateSessionReadCursor: (sessionId: string, lastReadMessageId: string) => void;
+  setTaskSessionPendingAction: (
+    sessionId: string,
+    pendingAction: TaskPendingAction | null,
+    revision?: TaskPendingActionRevision,
+  ) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;

@@ -16,6 +16,7 @@ import (
 func (r *Repository) initSchema() error {
 	steps := []func() error{
 		r.initCoreSchema,
+		r.initRepositorySetsSchema,
 		r.initPlansSchema,
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
@@ -390,6 +391,56 @@ func (r *Repository) initTaskSchema() error {
 		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
 	);
 	`)
+	return err
+}
+
+// repositorySetsSchemaDDL declares the repository-set tables. It runs after
+// initCoreSchema so `workspaces` and `repositories` exist for the foreign keys.
+//
+// Membership positions are contiguous from zero and carry no branch: branch
+// choice belongs to a task (task_repositories), which is exactly what the user
+// still decides after applying a set.
+const repositorySetsSchemaDDL = `
+	CREATE TABLE IF NOT EXISTS repository_sets (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		description TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+		UNIQUE(workspace_id, name)
+	);
+
+	CREATE TABLE IF NOT EXISTS repository_set_items (
+		id TEXT PRIMARY KEY,
+		repository_set_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		position INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (repository_set_id) REFERENCES repository_sets(id) ON DELETE CASCADE,
+		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+		UNIQUE(repository_set_id, repository_id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_repository_sets_workspace_id
+		ON repository_sets(workspace_id);
+	-- Names are compared case-insensitively, so the plain UNIQUE(workspace_id,
+	-- name) above is not the concurrency backstop the service assumes: two
+	-- concurrent creates of "Full-stack" and "full-stack" would both pass the
+	-- service's lookup and both insert. An expression index closes that, and
+	-- LOWER() is available on both SQLite and Postgres.
+	CREATE UNIQUE INDEX IF NOT EXISTS uniq_repository_sets_workspace_lower_name
+		ON repository_sets(workspace_id, LOWER(name));
+	CREATE INDEX IF NOT EXISTS idx_repository_set_items_set_position
+		ON repository_set_items(repository_set_id, position);
+	CREATE INDEX IF NOT EXISTS idx_repository_set_items_repository_id
+		ON repository_set_items(repository_id);
+	`
+
+func (r *Repository) initRepositorySetsSchema() error {
+	_, err := r.db.Exec(repositorySetsSchemaDDL)
 	return err
 }
 

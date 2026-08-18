@@ -2,6 +2,8 @@ import { fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client
 import type {
   ListWorkspacesResponse,
   ListRepositoriesResponse,
+  ListRepositorySetsResponse,
+  RepositorySet,
   RepositoryBranchesResponse,
   ListRepositoryScriptsResponse,
   Workspace,
@@ -37,6 +39,67 @@ export async function listRepositories(
   const queryString = searchParams.toString();
   const url = `/api/v1/workspaces/${workspaceId}/repositories${queryString ? `?${queryString}` : ""}`;
   return fetchJson<ListRepositoriesResponse>(url, options);
+}
+
+// Repository set operations
+//
+// Collection routes are workspace-scoped and item routes are flat, mirroring the
+// repository routes above.
+
+export async function listRepositorySets(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<ListRepositorySetsResponse>(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/repository-sets`,
+    options,
+  );
+}
+
+export async function createRepositorySet(
+  workspaceId: string,
+  payload: { name: string; description?: string; repositoryIds: string[] },
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<RepositorySet>(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/repository-sets`,
+    {
+      ...options,
+      init: {
+        method: "POST",
+        body: JSON.stringify({
+          name: payload.name,
+          description: payload.description ?? "",
+          repository_ids: payload.repositoryIds,
+        }),
+        ...(options?.init ?? {}),
+      },
+    },
+  );
+}
+
+/**
+ * Patches a set. Only the fields present in `payload` are sent: the backend
+ * reads a present-but-empty `repository_ids` as a rejected request rather than
+ * "leave membership alone", so an omitted field has to stay omitted.
+ */
+export async function updateRepositorySet(
+  setId: string,
+  payload: { name?: string; description?: string; repositoryIds?: string[] },
+  options?: ApiRequestOptions,
+) {
+  const body: Record<string, unknown> = {};
+  if (payload.name !== undefined) body.name = payload.name;
+  if (payload.description !== undefined) body.description = payload.description;
+  if (payload.repositoryIds !== undefined) body.repository_ids = payload.repositoryIds;
+  return fetchJson<RepositorySet>(`/api/v1/repository-sets/${encodeURIComponent(setId)}`, {
+    ...options,
+    init: { method: "PATCH", body: JSON.stringify(body), ...(options?.init ?? {}) },
+  });
+}
+
+export async function deleteRepositorySet(setId: string, options?: ApiRequestOptions) {
+  return fetchJson<void>(`/api/v1/repository-sets/${encodeURIComponent(setId)}`, {
+    ...options,
+    init: { method: "DELETE", ...(options?.init ?? {}) },
+  });
 }
 
 export async function initializeLocalRepository(

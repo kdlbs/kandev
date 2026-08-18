@@ -94,7 +94,18 @@ test.describe("Mobile plugin task panel", () => {
     await testPage.goto(`/t/${seedTask.id}`);
     await session.waitForLoad();
     await expect(notesEditor).toHaveCount(0);
-    await expect(testPage.getByRole("button", { name: "Panels" })).toHaveCount(0);
+    // Prompt history now shares the grouped Panels action for session
+    // tasks, so the button remains after the plugin is disabled; the
+    // disabled plugin's option must be gone from the picker and Chat must
+    // stay the active panel (no dead panel selection behind).
+    await expect(panelsNavButton).toBeVisible();
+    await panelsNavButton.tap();
+    await expect(
+      testPage.getByTestId("mobile-plugin-panel-option-kandev-plugin-e2e-notes"),
+    ).toHaveCount(0);
+    await expect(testPage.getByTestId("mobile-prompt-history-option")).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await expect(testPage.getByRole("dialog", { name: "Panels" })).toHaveCount(0);
     await expect(testPage.getByRole("button", { name: "Chat" })).toHaveClass(/text-primary/);
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

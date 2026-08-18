@@ -112,29 +112,7 @@ export function generationFencedHost(
     React: host.React,
     jsx: host.jsx,
     store: { ...host.store, setState, subscribe },
-    context: {
-      getActiveWorkspaceId: () => (isCurrent() ? host.context.getActiveWorkspaceId() : undefined),
-      subscribeActiveWorkspace: (listener) => {
-        if (!isCurrent()) return () => {};
-        return resources.track(
-          host.context.subscribeActiveWorkspace((workspaceId) => {
-            if (isCurrent()) listener(workspaceId);
-          }),
-        );
-      },
-      getTaskCreationContext: (workspaceId) =>
-        isCurrent() ? host.context.getTaskCreationContext(workspaceId) : null,
-      subscribeTaskCreationContext: (workspaceId, listener) => {
-        if (!isCurrent()) return () => {};
-        return resources.track(
-          host.context.subscribeTaskCreationContext(workspaceId, (context) => {
-            if (isCurrent()) listener(context);
-          }),
-        );
-      },
-      resolveRepositoryId: (identity) =>
-        isCurrent() ? host.context.resolveRepositoryId(identity) : undefined,
-    },
+    context: generationFencedContext(host, isCurrent, resources),
     api: {
       fetch,
       invokeAction,
@@ -169,7 +147,65 @@ export function generationFencedHost(
     toast: generationFencedToast(host.toast, isCurrent, resources),
     utils: host.utils,
     storage: generationFencedStorage(host.storage, isCurrent, resources),
+    useSettingsSaveContributor: host.useSettingsSaveContributor,
+    setIntegrationEnabled: (integrationId, workspaceId, enabled) => {
+      if (isCurrent()) host.setIntegrationEnabled(integrationId, workspaceId, enabled);
+    },
   };
+}
+
+function generationFencedContext(
+  host: PluginHostApi,
+  isCurrent: () => boolean,
+  resources: PluginLoadResources,
+): PluginHostApi["context"] {
+  return {
+    getActiveWorkspaceId: () => (isCurrent() ? host.context.getActiveWorkspaceId() : undefined),
+    subscribeActiveWorkspace: (listener) =>
+      generationFencedSubscription(
+        host.context.subscribeActiveWorkspace,
+        host.context,
+        isCurrent,
+        resources,
+        listener,
+      ),
+    getWorkspaceIds: () => (isCurrent() ? host.context.getWorkspaceIds() : []),
+    subscribeWorkspaces: (listener) =>
+      generationFencedSubscription(
+        host.context.subscribeWorkspaces,
+        host.context,
+        isCurrent,
+        resources,
+        listener,
+      ),
+    getTaskCreationContext: (workspaceId) =>
+      isCurrent() ? host.context.getTaskCreationContext(workspaceId) : null,
+    subscribeTaskCreationContext: (workspaceId, listener) => {
+      if (!isCurrent()) return () => {};
+      return resources.track(
+        host.context.subscribeTaskCreationContext(workspaceId, (context) => {
+          if (isCurrent()) listener(context);
+        }),
+      );
+    },
+    resolveRepositoryId: (identity) =>
+      isCurrent() ? host.context.resolveRepositoryId(identity) : undefined,
+  };
+}
+
+function generationFencedSubscription<Value>(
+  subscribe: (listener: (value: Value) => void) => () => void,
+  context: unknown,
+  isCurrent: () => boolean,
+  resources: PluginLoadResources,
+  listener: (value: Value) => void,
+): () => void {
+  if (!isCurrent()) return () => {};
+  return resources.track(
+    subscribe.call(context, (value) => {
+      if (isCurrent()) listener(value);
+    }),
+  );
 }
 
 function trackModalHandle(

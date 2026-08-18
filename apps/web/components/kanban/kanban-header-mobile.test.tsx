@@ -98,10 +98,12 @@ describe("KanbanHeaderMobile", () => {
   it("renders page title and workspace label for non-Home pages", () => {
     renderHeader("Tasks", undefined, undefined, "tasks");
 
-    const leftActions = screen.getByTestId(LEFT_ACTIONS_TEST_ID);
-    expect(leftActions.textContent).toContain("Tasks");
-    expect(leftActions.textContent).toContain("/root/kandev");
-    expect(leftActions.firstElementChild?.className).toContain("max-w-[38vw]");
+    const actionStrip = screen.getByTestId("mobile-topbar-action-strip");
+    expect(actionStrip.textContent).toContain("Tasks");
+    expect(actionStrip.textContent).toContain("/root/kandev");
+    expect(
+      actionStrip.querySelector("[data-testid='mobile-topbar-page-context']")?.className,
+    ).toContain("max-w-[38vw]");
   });
 
   it("opens quick chat from the header action when a workspace is active", () => {
@@ -114,11 +116,11 @@ describe("KanbanHeaderMobile", () => {
   it("opens quick terminal immediately before quick chat", () => {
     renderHeader("Home", ACTIVE_WORKSPACE_ID);
 
-    const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
-    const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
-    expect(terminal.nextElementSibling).toBe(quickChat);
+    const terminalTarget = screen.getByTestId("mobile-quick-terminal-hit-target");
+    const quickChatTarget = screen.getByTestId("mobile-quick-chat-hit-target");
+    expect(terminalTarget.nextElementSibling).toBe(quickChatTarget);
 
-    fireEvent.click(terminal);
+    fireEvent.click(screen.getByTestId(QUICK_TERMINAL_TEST_ID));
     expect(quickChatMocks.openQuickTerminal).toHaveBeenCalledTimes(1);
   });
 
@@ -132,9 +134,34 @@ describe("KanbanHeaderMobile", () => {
   it("places quick chat immediately before search", () => {
     renderHeader("Home", "workspace-1", vi.fn());
 
-    const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
+    const quickChat = screen.getByTestId("mobile-quick-chat-hit-target");
     const search = screen.getByTestId("mobile-search-toggle");
     expect(quickChat.nextElementSibling).toBe(search);
+  });
+
+  it("keeps the brand and menu outside the middle action strip", () => {
+    renderHeader("Home", ACTIVE_WORKSPACE_ID, vi.fn());
+
+    const strip = screen.getByTestId("mobile-topbar-action-strip");
+    const menu = screen.getByTestId("mobile-topbar-menu");
+    expect(strip.parentElement).toBe(menu.parentElement);
+    expect(strip.previousElementSibling).not.toBe(menu);
+    expect(menu.previousElementSibling).toBe(strip);
+  });
+
+  it("uses the shared compact icon geometry for native mobile actions", () => {
+    renderHeader("Home", ACTIVE_WORKSPACE_ID, vi.fn());
+
+    for (const id of [
+      QUICK_TERMINAL_TEST_ID,
+      QUICK_CHAT_TEST_ID,
+      "mobile-search-toggle",
+      "mobile-topbar-menu",
+    ]) {
+      expect(screen.getByTestId(id).className).not.toContain("!size-11");
+    }
+    expect(screen.getByTestId("mobile-quick-terminal-hit-target").className).toContain("h-11");
+    expect(screen.getByTestId("mobile-quick-chat-hit-target").className).toContain("h-11");
   });
 
   it("describes a connectivity warning on the persistent Home menu trigger", () => {

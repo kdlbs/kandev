@@ -5,7 +5,7 @@ import sonarjs from "eslint-plugin-sonarjs";
 import unusedImports from "eslint-plugin-unused-imports";
 import i18next from "eslint-plugin-i18next";
 import tseslint from "typescript-eslint";
-import { i18nGuardFiles, noLiteralStringOptions } from "./eslint.i18n.options.mjs";
+import { noLiteralStringOptions } from "./eslint.i18n.options.mjs";
 import {
   e2eSleepGuardFiles,
   e2eSleepPlugin,
@@ -56,17 +56,33 @@ const eslintConfig = defineConfig([
       ],
     },
   },
-  // Hardcoded user-facing strings. An ERROR, but only on the allowlist in
-  // eslint.i18n.options.mjs — the paths that render user-facing copy, which is
-  // where a regression is real. A repo-wide error would break every unrelated PR
-  // that lands a literal; a warning would let listed paths drift back. A PR
-  // appends to `i18nGuardFiles` when it adds such a path or externalizes one
-  // still off the list — `lib/sidebar` is one the screen sweep did not cover.
+  // Hardcoded user-facing strings. An ERROR, REPO-WIDE.
+  //
+  // This was scoped to `i18nGuardFiles` while the migration was in flight: a
+  // repo-wide error would have broken every unrelated PR that landed a literal
+  // in un-migrated code, which is what made the first attempt unmergeable. That
+  // reason has expired. Measured across all 2560 source files the rule reports
+  // ZERO violations, so widening it costs nothing today and permanently removes
+  // "the file was not on the list" as a way for copy to ship untranslated.
+  //
+  // `i18nGuardFiles` is kept: it is the migration's record, the scope
+  // `pnpm run lint:i18n` previews, and a ratchet `check-guard-allowlist.mjs`
+  // still enforces. It is no longer what bounds this rule.
   {
-    files: i18nGuardFiles,
+    files: ["**/*.ts", "**/*.tsx"],
     // Test files build fixtures out of literal strings on purpose; guarding them
-    // would force every `label="Tasks"` in a test through the catalog.
-    ignores: ["**/*.test.ts", "**/*.test.tsx", "e2e/**"],
+    // would force every `label="Tasks"` in a test through the catalog. The
+    // `*.test-helpers` / `*.test-utils` pair are imported only by tests and are
+    // the same class.
+    ignores: [
+      "**/*.test.ts",
+      "**/*.test.tsx",
+      "**/*.test-helpers.ts",
+      "**/*.test-helpers.tsx",
+      "**/*.test-utils.ts",
+      "**/*.test-utils.tsx",
+      "e2e/**",
+    ],
     plugins: { i18next },
     rules: { "i18next/no-literal-string": ["error", noLiteralStringOptions] },
   },
@@ -82,14 +98,16 @@ const eslintConfig = defineConfig([
       "sonarjs/no-duplicate-string": "off",
     },
   },
-  // Unconditional wall-clock sleeps in E2E specs. An ERROR, but only on
-  // `e2eSleepGuardFiles` — the directories the causal-waits conversion has
-  // already driven to zero. `pnpm lint` is `eslint --max-warnings 0`, so a
-  // repo-wide registration at ANY severity (warning included) would fail the
-  // build on the ~126 sleeps that predate the rule. Everything not listed is
-  // covered by `scripts/check-new-e2e-sleeps.mjs`, which judges only the lines a
-  // change added, so new sleeps are caught everywhere without a treadmill.
-  // Append a directory here when it reaches zero; see the list's own comment.
+  // Unconditional wall-clock sleeps in E2E specs. An ERROR across all of `e2e/`.
+  // This was a narrow allowlist while the causal-waits conversion was running —
+  // `pnpm lint` is `eslint --max-warnings 0`, so a repo-wide registration at ANY
+  // severity (warning included) would have failed the build on the sleeps that
+  // predated the rule and blocked every unrelated PR. The conversion reached
+  // zero, so `e2eSleepGuardFiles` has graduated to the whole tree and this now
+  // fails only a PR that ADDS a sleep.
+  // `scripts/check-new-e2e-sleeps.mjs` remains as the second line of defence: it
+  // judges only the lines a change added, and covers anything `ignores` carves
+  // out. Never narrow the guard to make a build pass; see the list's own comment.
   {
     files: e2eSleepGuardFiles,
     // `causal-waits.ts` implements both banned forms — see SLEEP_EXEMPT_FILES.

@@ -253,7 +253,7 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue message", nil)
 	}
 
-	h.publishStatus(ctx, req.SessionID)
+	h.publishStatus(ctx, req.SessionID, queued)
 	return ws.NewResponse(msg.ID, msg.Action, queued)
 }
 
@@ -954,7 +954,7 @@ func queueAccessDeniedResponse(msg *ws.Message) *ws.Message {
 
 // publishStatus emits the latest QueueStatus on the event bus so the frontend
 // updates its store after every mutation.
-func (h *QueueHandlers) publishStatus(ctx context.Context, sessionID string) {
+func (h *QueueHandlers) publishStatus(ctx context.Context, sessionID string, admitted ...*messagequeue.QueuedMessage) {
 	if h.eventBus == nil {
 		return
 	}
@@ -965,6 +965,10 @@ func (h *QueueHandlers) publishStatus(ctx context.Context, sessionID string) {
 		"count":         status.Count,
 		fieldMax:        status.Max,
 		"merge_enabled": status.MergeEnabled,
+	}
+	if len(admitted) > 0 && admitted[0] != nil && admitted[0].QueuedBy != "" && !messagequeue.IsReservedQueuedBy(admitted[0].QueuedBy) {
+		eventData["queued_by"] = admitted[0].QueuedBy
+		eventData["queued_at"] = admitted[0].QueuedAt
 	}
 	if h.sessionTaskResolver != nil {
 		if taskID, err := h.sessionTaskResolver(ctx, sessionID); err != nil {

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -23,10 +24,20 @@ type Repository struct {
 	queuePurgeMu     sync.RWMutex
 	queuePurger      func(context.Context, string)
 	queuePurgeNotify func(context.Context, string)
+	// clockNow is a test-only clock seam. Set it before any concurrent
+	// repository call; it carries no synchronization.
+	clockNow func() time.Time
 	// failCutoverAfter is a test-only failpoint for the worktree ownership
 	// cutover: when set to a cutover step name, the migration aborts at that
 	// step so tests can prove rollback restores the pre-upgrade state.
 	failCutoverAfter string
+}
+
+func (r *Repository) nowUTC() time.Time {
+	if r.clockNow != nil {
+		return r.clockNow().UTC()
+	}
+	return time.Now().UTC()
 }
 
 // SetTaskQueuePurger registers the orchestrator-owned queue cleanup for
