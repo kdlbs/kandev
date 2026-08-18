@@ -92,3 +92,25 @@ export async function waitForDockerContainerRemoved(
     })
     .toBe(false);
 }
+
+export type DockerExecResult = { status: number | null; stdout: string; stderr: string };
+
+export function dockerExec(containerID: string, ...command: string[]): DockerExecResult {
+  const result = spawnSync("docker", ["exec", containerID, ...command], { encoding: "utf8" });
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+
+export function dockerSecurityOpt(containerID: string): string[] | null {
+  const result = spawnSync(
+    "docker",
+    ["inspect", "--format", "{{json .HostConfig.SecurityOpt}}", containerID],
+    {
+      encoding: "utf8",
+    },
+  );
+  if (result.status !== 0)
+    throw new Error(
+      `failed to inspect Docker SecurityOpt for ${containerID}: ${result.stderr.trim()}`,
+    );
+  return JSON.parse(result.stdout) as string[] | null;
+}
