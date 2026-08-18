@@ -12,8 +12,9 @@ spec: "../../specs/kanban-auto-hide-empty-columns/spec.md"
 
 ## Acceptance
 
-- User settings persist a sorted, deduplicated `kanban_auto_hide_empty_workflow_ids` list and hydrate
-  it as `autoHideEmptyWorkflowIds`, defaulting legacy or missing state to `[]`.
+- User settings persist a sorted, deduplicated `workflow_ids_with_auto_hide_empty_steps` list and
+  hydrate it as `workflowIdsWithAutoHideEmptySteps`, defaulting missing state to `[]` and reading
+  the pre-rename `kanban_auto_hide_empty_workflow_ids` key for compatibility.
 - The existing Columns menu exposes an accessible, translated per-workflow toggle on desktop and
   phone without modifying `hiddenWorkflowStepIds`.
 - Two workflows can hold different values, and toggling one never changes the other.

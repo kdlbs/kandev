@@ -108,7 +108,7 @@ function makeUnloadedSettings(): UserSettingsState {
     lspServerConfigs: {},
     lspStatusLocation: "toolbar",
     hiddenWorkflowStepIds: {},
-    autoHideEmptyWorkflowIds: [],
+    workflowIdsWithAutoHideEmptySteps: [],
     loaded: false,
   };
 }

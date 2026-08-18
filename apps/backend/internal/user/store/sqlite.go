@@ -619,7 +619,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 		"app_status_bar_order":                     normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
-		"kanban_auto_hide_empty_workflow_ids":      settings.KanbanAutoHideEmptyWorkflowIDs,
+		"workflow_ids_with_auto_hide_empty_steps":  settings.WorkflowIDsWithAutoHideEmptySteps,
 	})
 }
 
@@ -699,7 +699,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		AppStatusBarEnabled:               false,
 		AppStatusBarOrder:                 normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
 		KanbanHiddenStepIDs:               map[string][]string{},
-		KanbanAutoHideEmptyWorkflowIDs:    []string{},
+		WorkflowIDsWithAutoHideEmptySteps: []string{},
 	}
 }
 
@@ -783,7 +783,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		AppStatusBarEnabled               *bool                               `json:"app_status_bar_enabled"`
 		AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
 		KanbanHiddenStepIDs               json.RawMessage                     `json:"kanban_hidden_step_ids"`
-		KanbanAutoHideEmptyWorkflowIDs    json.RawMessage                     `json:"kanban_auto_hide_empty_workflow_ids"`
+		WorkflowIDsWithAutoHideEmptySteps json.RawMessage                     `json:"workflow_ids_with_auto_hide_empty_steps"`
+		LegacyKanbanAutoHideWorkflowIDs   json.RawMessage                     `json:"kanban_auto_hide_empty_workflow_ids"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -915,7 +916,11 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	settings.LastSeenDisplay = normalizeLastSeenDisplayStored(payload.LastSeenDisplay)
 	settings.KanbanHiddenStepIDs = decodeKanbanHiddenStepIDs(payload.KanbanHiddenStepIDs)
-	settings.KanbanAutoHideEmptyWorkflowIDs = decodeStringIDs(payload.KanbanAutoHideEmptyWorkflowIDs)
+	workflowIDsWithAutoHideEmptySteps := payload.WorkflowIDsWithAutoHideEmptySteps
+	if len(workflowIDsWithAutoHideEmptySteps) == 0 {
+		workflowIDsWithAutoHideEmptySteps = payload.LegacyKanbanAutoHideWorkflowIDs
+	}
+	settings.WorkflowIDsWithAutoHideEmptySteps = decodeStringIDs(workflowIDsWithAutoHideEmptySteps)
 	return settings, nil
 }
 

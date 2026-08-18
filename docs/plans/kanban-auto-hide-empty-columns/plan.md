@@ -4,7 +4,7 @@ created: 2026-08-18
 status: building
 ---
 
-# Implementation Plan: Auto-hide empty Kanban columns
+# Implementation Plan: Auto-hide empty workflow steps
 
 ## Overview
 
@@ -28,10 +28,10 @@ contract and drag behavior touches shared Kanban and Pipeline composition.
 
 ## Data model and API
 
-- Add `KanbanAutoHideEmptyWorkflowIDs []string` to the existing Go user-settings model and DTO.
-- Add optional update field `kanban_auto_hide_empty_workflow_ids` and propagate it through controller,
+- Add `WorkflowIDsWithAutoHideEmptySteps []string` to the existing Go user-settings model and DTO.
+- Add optional update field `workflow_ids_with_auto_hide_empty_steps` and propagate it through controller,
   service, storage JSON, boot payload, and user-settings events.
-- Add `autoHideEmptyWorkflowIds: string[]` to frontend settings state and hydrate/persist it through
+- Add `workflowIdsWithAutoHideEmptySteps: string[]` to frontend settings state and hydrate/persist it through
   existing settings helpers.
 - Normalize as a sorted, deduplicated list. Default legacy state to `[]`.
 - No new endpoint, SQL column, or migration.

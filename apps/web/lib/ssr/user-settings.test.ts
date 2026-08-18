@@ -575,6 +575,38 @@ describe("last seen display hydration", () => {
   });
 });
 
+describe("auto-hide empty steps preference hydration", () => {
+  it("hydrates the canonical workflow-scoped key", () => {
+    const mapped = mapUserSettingsData(
+      { workflow_ids_with_auto_hide_empty_steps: ["wf-a"] },
+      createDefaultUserSettings(),
+    );
+
+    expect(mapped.workflowIdsWithAutoHideEmptySteps).toEqual(["wf-a"]);
+  });
+
+  it("hydrates the legacy kanban-prefixed key", () => {
+    const mapped = mapUserSettingsData(
+      { kanban_auto_hide_empty_workflow_ids: ["wf-legacy"] },
+      createDefaultUserSettings(),
+    );
+
+    expect(mapped.workflowIdsWithAutoHideEmptySteps).toEqual(["wf-legacy"]);
+  });
+
+  it("prefers the canonical key when both are present", () => {
+    const mapped = mapUserSettingsData(
+      {
+        workflow_ids_with_auto_hide_empty_steps: ["wf-new"],
+        kanban_auto_hide_empty_workflow_ids: ["wf-old"],
+      },
+      createDefaultUserSettings(),
+    );
+
+    expect(mapped.workflowIdsWithAutoHideEmptySteps).toEqual(["wf-new"]);
+  });
+});
+
 describe("prevent auto-start on open preference", () => {
   it("defaults the missing preference to false", () => {
     expect(buildCoreFields({}).preventAutoStartAgentOnOpen).toBe(false);

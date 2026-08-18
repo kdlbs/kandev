@@ -5,7 +5,7 @@ updated: 2026-08-18
 owner: gsimard-nordai
 ---
 
-# Auto-hide empty Kanban columns per workflow
+# Auto-hide empty workflow steps
 
 ## Why
 
@@ -87,13 +87,13 @@ different drag-and-drop contract.
 The user settings store gains a set of workflow ids whose empty columns are auto-hidden:
 
 ```text
-autoHideEmptyWorkflowIds: string[]
+workflowIdsWithAutoHideEmptySteps: string[]
 ```
 
 The REST/WebSocket wire field is:
 
 ```text
-kanban_auto_hide_empty_workflow_ids: string[]
+workflow_ids_with_auto_hide_empty_steps: string[]
 ```
 
 - Values SHALL be deduplicated and sorted before comparison and persistence.
@@ -122,7 +122,7 @@ live steps - manually hidden steps
 ## API surface
 
 - Extend the existing user settings GET/update/boot/WS contracts with
-  `kanban_auto_hide_empty_workflow_ids`.
+  `workflow_ids_with_auto_hide_empty_steps`.
 - Do not add a dedicated endpoint.
 - Do not change task, workflow-step, move, WIP-limit, or drag payloads.
 

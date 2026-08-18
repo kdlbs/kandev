@@ -97,7 +97,7 @@ type UpdateUserSettingsRequest struct {
 	AppStatusBarEnabled               *bool
 	AppStatusBarOrder                 *models.AppStatusBarOrder
 	KanbanHiddenStepIDs               *map[string][]string
-	KanbanAutoHideEmptyWorkflowIDs    *[]string
+	WorkflowIDsWithAutoHideEmptySteps *[]string
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -361,8 +361,8 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 		}
 		settings.KanbanHiddenStepIDs = *req.KanbanHiddenStepIDs
 	}
-	if req.KanbanAutoHideEmptyWorkflowIDs != nil {
-		settings.KanbanAutoHideEmptyWorkflowIDs = *req.KanbanAutoHideEmptyWorkflowIDs
+	if req.WorkflowIDsWithAutoHideEmptySteps != nil {
+		settings.WorkflowIDsWithAutoHideEmptySteps = *req.WorkflowIDsWithAutoHideEmptySteps
 	}
 	return nil
 }
@@ -887,7 +887,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 		"app_status_bar_order":                     settings.AppStatusBarOrder,
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
-		"kanban_auto_hide_empty_workflow_ids":      settings.KanbanAutoHideEmptyWorkflowIDs,
+		"workflow_ids_with_auto_hide_empty_steps":  settings.WorkflowIDsWithAutoHideEmptySteps,
 		"revision":                                 settings.Revision,
 		"updated_at":                               settings.UpdatedAt.Format(time.RFC3339),
 	}

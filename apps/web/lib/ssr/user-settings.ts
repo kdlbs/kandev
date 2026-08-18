@@ -84,7 +84,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     appStatusBarEnabled: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
     hiddenWorkflowStepIds: {},
-    autoHideEmptyWorkflowIds: [],
+    workflowIdsWithAutoHideEmptySteps: [],
     loaded: false,
   };
 }
@@ -335,8 +335,10 @@ export function buildCoreFields(
     ),
     appStatusBarEnabled: s.app_status_bar_enabled ?? current.appStatusBarEnabled,
     hiddenWorkflowStepIds: s.kanban_hidden_step_ids ?? current.hiddenWorkflowStepIds,
-    autoHideEmptyWorkflowIds:
-      s.kanban_auto_hide_empty_workflow_ids ?? current.autoHideEmptyWorkflowIds,
+    workflowIdsWithAutoHideEmptySteps:
+      s.workflow_ids_with_auto_hide_empty_steps ??
+      s.kanban_auto_hide_empty_workflow_ids ??
+      current.workflowIdsWithAutoHideEmptySteps,
     ...buildTerminalFields(s, current),
     ...buildSystemMetricsDisplayFields(s, current),
   };

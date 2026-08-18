@@ -14,7 +14,7 @@ type UserSettingsFields = {
   workflowId: string | null;
   repositoryIds: string[];
   hiddenWorkflowStepIds?: Record<string, string[]>;
-  autoHideEmptyWorkflowIds?: string[];
+  workflowIdsWithAutoHideEmptySteps?: string[];
 };
 
 type CommitSettingsFn = (
@@ -31,7 +31,7 @@ function baseSettingsPayload(settings: UserSettingsFields): UserSettingsFields {
     workflowId: settings.workflowId,
     repositoryIds: settings.repositoryIds,
     hiddenWorkflowStepIds: settings.hiddenWorkflowStepIds,
-    autoHideEmptyWorkflowIds: settings.autoHideEmptyWorkflowIds,
+    workflowIdsWithAutoHideEmptySteps: settings.workflowIdsWithAutoHideEmptySteps,
   };
 }
 
@@ -136,13 +136,13 @@ function useStepVisibilityHandlers(
   );
   const onToggleAutoHideEmpty = useCallback(
     (workflowId: string) => {
-      const current = userSettings.autoHideEmptyWorkflowIds ?? [];
+      const current = userSettings.workflowIdsWithAutoHideEmptySteps ?? [];
       const next = current.includes(workflowId)
         ? current.filter((id) => id !== workflowId)
         : [...current, workflowId];
       commitSettings({
         ...baseSettingsPayload(userSettings),
-        autoHideEmptyWorkflowIds: next,
+        workflowIdsWithAutoHideEmptySteps: next,
       });
     },
     [commitSettings, userSettings],
@@ -224,7 +224,7 @@ export function useKanbanDisplaySettings() {
     eligibleWorkflows,
     snapshots,
     hiddenWorkflowStepIds: userSettings.hiddenWorkflowStepIds ?? {},
-    autoHideEmptyWorkflowIds: userSettings.autoHideEmptyWorkflowIds ?? [],
+    workflowIdsWithAutoHideEmptySteps: userSettings.workflowIdsWithAutoHideEmptySteps ?? [],
     onWorkspaceChange,
     onWorkflowChange,
     onRepositoryChange,

@@ -219,8 +219,8 @@ function WorkflowItemContent({
   ...viewProps
 }: Omit<WorkflowItemProps, "isSortable"> & { dragHandleProps?: HTMLAttributes<HTMLDivElement> }) {
   const hiddenWorkflowStepIds = useAppStore((state) => state.userSettings.hiddenWorkflowStepIds);
-  const autoHideEmptyWorkflowIds = useAppStore(
-    (state) => state.userSettings.autoHideEmptyWorkflowIds,
+  const workflowIdsWithAutoHideEmptySteps = useAppStore(
+    (state) => state.userSettings.workflowIdsWithAutoHideEmptySteps,
   );
   const hiddenSet = useMemo(() => {
     const ids = hiddenWorkflowStepIds[wf.id];
@@ -233,10 +233,16 @@ function WorkflowItemContent({
       deriveAutoHiddenStepIds(
         snapshot.steps,
         occupancyTasks,
-        autoHideEmptyWorkflowIds.includes(wf.id),
+        workflowIdsWithAutoHideEmptySteps.includes(wf.id),
         hiddenWorkflowStepIds[wf.id] ?? EMPTY_HIDDEN_IDS,
       ),
-    [snapshot.steps, occupancyTasks, autoHideEmptyWorkflowIds, wf.id, hiddenWorkflowStepIds],
+    [
+      snapshot.steps,
+      occupancyTasks,
+      workflowIdsWithAutoHideEmptySteps,
+      wf.id,
+      hiddenWorkflowStepIds,
+    ],
   );
   const moveTargetSteps = useMemo(
     () => [...snapshot.steps].filter((step) => !hiddenSet.has(step.id)),
@@ -281,7 +287,7 @@ function WorkflowItemContent({
           steps={snapshot.steps}
           hiddenStepIds={hiddenWorkflowStepIds[wf.id] ?? EMPTY_HIDDEN_IDS}
           onToggle={onToggleStepVisibility}
-          autoHideEmpty={autoHideEmptyWorkflowIds.includes(wf.id)}
+          autoHideEmpty={workflowIdsWithAutoHideEmptySteps.includes(wf.id)}
           onToggleAutoHide={onToggleAutoHideEmpty}
         />
       }
@@ -334,8 +340,8 @@ function useSwimlaneData(
   const workflows = useAppStore((state) => state.workflows.items);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const hiddenWorkflowStepIds = useAppStore((state) => state.userSettings.hiddenWorkflowStepIds);
-  const autoHideEmptyWorkflowIds = useAppStore(
-    (state) => state.userSettings.autoHideEmptyWorkflowIds,
+  const workflowIdsWithAutoHideEmptySteps = useAppStore(
+    (state) => state.userSettings.workflowIdsWithAutoHideEmptySteps,
   );
 
   const repositories = useMemo(
@@ -378,12 +384,12 @@ function useSwimlaneData(
   const hasLiveHiddenSteps = useCallback(
     (workflowId: string) => {
       const hidden = hiddenWorkflowStepIds[workflowId];
-      if (autoHideEmptyWorkflowIds.includes(workflowId)) return true;
+      if (workflowIdsWithAutoHideEmptySteps.includes(workflowId)) return true;
       if (!hidden || hidden.length === 0) return false;
       const liveStepIds = new Set((snapshots[workflowId]?.steps ?? []).map((step) => step.id));
       return hidden.some((id) => liveStepIds.has(id));
     },
-    [hiddenWorkflowStepIds, autoHideEmptyWorkflowIds, snapshots],
+    [hiddenWorkflowStepIds, workflowIdsWithAutoHideEmptySteps, snapshots],
   );
 
   // The mobile board navigator is the only workflow switcher on the mobile
