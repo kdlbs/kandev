@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import type { Repository, RepositorySet } from "@/lib/types/http";
 import { repositoryId, workspaceId } from "@/lib/types/ids";
@@ -11,6 +11,11 @@ const NAME_INPUT = "repository-set-editor-name";
 const SAVE = "repository-set-editor-save";
 const SET_ROW = "repository-set-row";
 const CREATE = "repository-set-create";
+const DELETE = "repository-set-delete-set-1";
+const DELETE_CONFIRM_POPOVER = "repository-set-delete-confirm-popover";
+const DELETE_CONFIRM = "repository-set-delete-confirm";
+const DELETE_INLINE = "repository-set-delete-inline-confirmation";
+const DELETE_ERROR = "repository-set-delete-error";
 
 const mockCreate = vi.fn();
 const mockUpdate = vi.fn();
@@ -18,6 +23,7 @@ const mockDelete = vi.fn();
 const mockUpsert = vi.fn();
 const mockRemove = vi.fn();
 let mockSets: RepositorySet[] = [];
+let finePointer = true;
 
 vi.mock("@/lib/api", () => ({
   createRepositorySet: (...args: unknown[]) => mockCreate(...args),
@@ -27,6 +33,10 @@ vi.mock("@/lib/api", () => ({
 
 vi.mock("@/hooks/domains/workspace/use-repository-sets", () => ({
   useRepositorySets: () => ({ sets: mockSets, isLoading: false, refresh: vi.fn() }),
+}));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({ isFinePointer: finePointer }),
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -70,6 +80,7 @@ function renderSection(options: { readOnly?: boolean } = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  finePointer = true;
   mockSets = [repositorySet("set-1", FULL_STACK, [REPO_WEB, REPO_GATEWAY])];
   mockCreate.mockResolvedValue(repositorySet("set-2", "Backend", [REPO_GATEWAY]));
   mockUpdate.mockResolvedValue(repositorySet("set-1", "Renamed", [REPO_WEB]));
@@ -163,13 +174,18 @@ describe("WorkspaceRepositorySetsSection", () => {
     expect(screen.queryByTestId(NAME_INPUT)).not.toBeNull();
     expect(mockUpsert).not.toHaveBeenCalled();
   });
+});
 
+describe("WorkspaceRepositorySetsSection deletion confirmation", () => {
   it("deletes a set after confirmation and drops it from the store", async () => {
     renderSection();
 
-    fireEvent.click(screen.getByTestId("repository-set-delete-set-1"));
-    fireEvent.click(screen.getByTestId("repository-set-delete-confirm"));
+    fireEvent.click(screen.getByTestId(DELETE));
+    const popover = screen.getByTestId(DELETE_CONFIRM_POPOVER);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    fireEvent.click(within(popover).getByTestId(DELETE_CONFIRM));
 
+    expect(screen.queryByTestId(DELETE_CONFIRM_POPOVER)).toBeNull();
     await waitFor(() => expect(mockDelete).toHaveBeenCalledWith("set-1"));
     expect(mockRemove).toHaveBeenCalledWith("ws-1", "set-1");
   });
@@ -177,18 +193,66 @@ describe("WorkspaceRepositorySetsSection", () => {
   it("states that deleting a set leaves its repositories alone", () => {
     renderSection();
 
-    fireEvent.click(screen.getByTestId("repository-set-delete-set-1"));
+    fireEvent.click(screen.getByTestId(DELETE));
 
-    const dialog = screen.getByTestId("repository-set-delete-dialog");
-    expect(dialog.textContent).toContain("repositories");
+    const popover = screen.getByTestId(DELETE_CONFIRM_POPOVER);
+    expect(popover.textContent).toContain("repositories");
+    expect(screen.queryByTestId("repository-set-delete-dialog")).toBeNull();
   });
 
+  it("cancels locally and returns focus to the delete control", () => {
+    renderSection();
+
+    const trigger = screen.getByTestId(DELETE);
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(mockDelete).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("keeps the row and shows local failure feedback when deletion fails", async () => {
+    const { ApiError } = await import("@/lib/api/client");
+    mockDelete.mockRejectedValue(new ApiError("server error", 500, null));
+    renderSection();
+
+    fireEvent.click(screen.getByTestId(DELETE));
+    fireEvent.click(within(screen.getByTestId(DELETE_CONFIRM_POPOVER)).getByTestId(DELETE_CONFIRM));
+
+    await waitFor(() => expect(screen.queryByTestId(DELETE_ERROR)).not.toBeNull());
+    expect(
+      screen.getByTestId(SET_ROW).querySelector(`[data-testid="${DELETE_ERROR}"]`),
+    ).not.toBeNull();
+    expect(mockRemove).not.toHaveBeenCalled();
+  });
+
+  it("morphs the delete action into touch-sized inline confirmation on coarse pointers", async () => {
+    finePointer = false;
+    renderSection();
+
+    fireEvent.click(screen.getByTestId(DELETE));
+
+    const inline = screen.getByTestId(DELETE_INLINE);
+    expect(screen.queryByTestId(DELETE_CONFIRM_POPOVER)).toBeNull();
+    expect(within(inline).getByTestId(DELETE_CONFIRM).className).toContain("h-11");
+    expect(within(inline).getByTestId(DELETE_CONFIRM).className).toContain("min-w-11");
+
+    fireEvent.click(within(inline).getByRole("button", { name: "Cancel" }));
+    expect(mockDelete).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId(DELETE));
+    fireEvent.click(within(screen.getByTestId(DELETE_INLINE)).getByTestId(DELETE_CONFIRM));
+    await waitFor(() => expect(mockRemove).toHaveBeenCalledWith("ws-1", "set-1"));
+  });
+});
+
+describe("WorkspaceRepositorySetsSection read-only behavior", () => {
   it("offers no create, edit, or delete control when read-only", () => {
     renderSection({ readOnly: true });
 
     expect(screen.queryByTestId(CREATE)).toBeNull();
     expect(screen.queryByTestId("repository-set-edit-set-1")).toBeNull();
-    expect(screen.queryByTestId("repository-set-delete-set-1")).toBeNull();
+    expect(screen.queryByTestId(DELETE)).toBeNull();
     // The list itself still renders, so the sets remain visible.
     expect(screen.queryAllByTestId(SET_ROW)).toHaveLength(1);
   });

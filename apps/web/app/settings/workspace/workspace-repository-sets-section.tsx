@@ -1,16 +1,19 @@
 "use client";
 
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { IconPencil, IconStack2, IconTrash } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 
+import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { Repository, RepositorySet } from "@/lib/types/http";
 import { useRepositorySets } from "@/hooks/domains/workspace/use-repository-sets";
-import { RepositorySetEditorDialog } from "./workspace-repository-set-editor";
-import { RepositorySetDeleteDialog } from "./workspace-repository-set-delete";
 import { useWorkspaceRepositorySets } from "./use-workspace-repository-sets";
+import { RepositorySetEditorDialog } from "./workspace-repository-set-editor";
+import { RepositorySetDeleteConfirmation } from "./workspace-repository-set-delete";
 
 type WorkspaceRepositorySetsSectionProps = {
   workspaceId: string;
@@ -32,8 +35,35 @@ export function WorkspaceRepositorySetsSection({
   readOnly,
 }: WorkspaceRepositorySetsSectionProps) {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
   const { sets } = useRepositorySets(workspaceId);
   const manager = useWorkspaceRepositorySets({ workspaceId });
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!confirmingDeleteId || sets.some((set) => set.id === confirmingDeleteId)) return;
+    setConfirmingDeleteId(null);
+    manager.cancelDelete();
+  }, [confirmingDeleteId, manager, sets]);
+
+  const startDelete = (set: RepositorySet) => {
+    manager.startDelete(set);
+    setConfirmingDeleteId(set.id);
+  };
+
+  const cancelDelete = () => {
+    setConfirmingDeleteId(null);
+    manager.cancelDelete();
+  };
+
+  const closeDeleteConfirmation = () => {
+    setConfirmingDeleteId(null);
+  };
+
+  const confirmDelete = () => {
+    setConfirmingDeleteId(null);
+    void manager.confirmDelete();
+  };
 
   return (
     <SettingsSection
@@ -66,8 +96,14 @@ export function WorkspaceRepositorySetsSection({
               set={set}
               repositories={repositories}
               readOnly={readOnly}
+              isFinePointer={isFinePointer}
+              confirmingDelete={confirmingDeleteId === set.id}
+              deleteError={manager.deleting?.id === set.id ? manager.error : null}
               onEdit={() => manager.startEdit(set)}
-              onDelete={() => manager.startDelete(set)}
+              onDelete={() => startDelete(set)}
+              onDeleteCancel={cancelDelete}
+              onDeleteOpenChange={closeDeleteConfirmation}
+              onDeleteConfirm={confirmDelete}
             />
           ))}
         </div>
@@ -81,12 +117,6 @@ export function WorkspaceRepositorySetsSection({
         onChange={manager.updateDraft}
         onSubmit={manager.submitDraft}
       />
-      <RepositorySetDeleteDialog
-        set={manager.deleting}
-        error={manager.deleting ? manager.error : null}
-        onClose={manager.cancelDelete}
-        onConfirm={manager.confirmDelete}
-      />
     </SettingsSection>
   );
 }
@@ -95,8 +125,14 @@ type RepositorySetRowProps = {
   set: RepositorySet;
   repositories: Repository[];
   readOnly: boolean;
+  isFinePointer: boolean;
+  confirmingDelete: boolean;
+  deleteError: string | null;
   onEdit: () => void;
   onDelete: () => void;
+  onDeleteCancel: () => void;
+  onDeleteOpenChange: (open: boolean) => void;
+  onDeleteConfirm: () => void;
 };
 
 /**
@@ -108,10 +144,17 @@ function RepositorySetRow({
   set,
   repositories,
   readOnly,
+  isFinePointer,
+  confirmingDelete,
+  deleteError,
   onEdit,
   onDelete,
+  onDeleteCancel,
+  onDeleteOpenChange,
+  onDeleteConfirm,
 }: RepositorySetRowProps) {
   const { t } = useTranslation();
+  const deleteAnchorRef = useRef<HTMLButtonElement>(null);
   const namesById = new Map(
     repositories.map((repository) => [repository.id as string, repository]),
   );
@@ -129,31 +172,23 @@ function RepositorySetRow({
             <p className="text-xs text-muted-foreground">{set.description}</p>
           ) : null}
         </div>
-        {readOnly ? null : (
-          <div className="flex shrink-0 gap-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="cursor-pointer"
-              aria-label={t("workspaces:repositorySetsEdit")}
-              onClick={onEdit}
-              data-testid={`repository-set-edit-${set.id}`}
-            >
-              <IconPencil className="h-4 w-4" />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="cursor-pointer"
-              aria-label={t("workspaces:repositorySetsDelete")}
-              onClick={onDelete}
-              data-testid={`repository-set-delete-${set.id}`}
-            >
-              <IconTrash className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
+        <RepositorySetRowActions
+          set={set}
+          readOnly={readOnly}
+          isFinePointer={isFinePointer}
+          confirmingDelete={confirmingDelete}
+          deleteAnchorRef={deleteAnchorRef}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onDeleteCancel={onDeleteCancel}
+          onDeleteConfirm={onDeleteConfirm}
+        />
       </div>
+      {deleteError ? (
+        <p className="mt-2 text-xs text-destructive" data-testid="repository-set-delete-error">
+          {deleteError}
+        </p>
+      ) : null}
       <div className="mt-2 flex flex-wrap gap-1.5">
         {set.repositories.length === 0 ? (
           <span className="text-xs text-muted-foreground">
@@ -167,6 +202,83 @@ function RepositorySetRow({
           ))
         )}
       </div>
+      {isFinePointer ? (
+        <RepositorySetDeleteConfirmation
+          set={set}
+          open={confirmingDelete}
+          anchorRef={deleteAnchorRef}
+          onOpenChange={onDeleteOpenChange}
+          onCancel={onDeleteCancel}
+          onConfirm={onDeleteConfirm}
+        />
+      ) : null}
     </div>
+  );
+}
+
+type RepositorySetRowActionsProps = {
+  set: RepositorySet;
+  readOnly: boolean;
+  isFinePointer: boolean;
+  confirmingDelete: boolean;
+  deleteAnchorRef: RefObject<HTMLButtonElement | null>;
+  onEdit: () => void;
+  onDelete: () => void;
+  onDeleteCancel: () => void;
+  onDeleteConfirm: () => void;
+};
+
+function RepositorySetRowActions({
+  set,
+  readOnly,
+  isFinePointer,
+  confirmingDelete,
+  deleteAnchorRef,
+  onEdit,
+  onDelete,
+  onDeleteCancel,
+  onDeleteConfirm,
+}: RepositorySetRowActionsProps) {
+  const { t } = useTranslation();
+  if (readOnly) return null;
+  if (isFinePointer || !confirmingDelete) {
+    return (
+      <div className="flex shrink-0 gap-1">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="cursor-pointer"
+          aria-label={t("workspaces:repositorySetsEdit")}
+          onClick={onEdit}
+          data-testid={`repository-set-edit-${set.id}`}
+        >
+          <IconPencil className="h-4 w-4" />
+        </Button>
+        <Button
+          ref={deleteAnchorRef}
+          size="sm"
+          variant="ghost"
+          className="cursor-pointer"
+          aria-label={t("workspaces:repositorySetsDelete")}
+          onClick={onDelete}
+          data-testid={`repository-set-delete-${set.id}`}
+        >
+          <IconTrash className="h-4 w-4" />
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <InlineConfirmActions
+      density="touch"
+      testId="repository-set-delete-inline-confirmation"
+      ariaLabel={t("workspaces:repositorySetsDeleteTitle", { name: set.name })}
+      cancelLabel={t("common:cancel")}
+      confirmLabel={t("workspaces:repositorySetsDelete")}
+      confirmAriaLabel={t("workspaces:repositorySetsDeleteTitle", { name: set.name })}
+      confirmTestId="repository-set-delete-confirm"
+      onCancel={onDeleteCancel}
+      onConfirm={onDeleteConfirm}
+    />
   );
 }

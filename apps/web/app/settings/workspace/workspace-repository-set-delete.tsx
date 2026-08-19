@@ -1,68 +1,49 @@
 "use client";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@kandev/ui/alert-dialog";
+import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
+import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import type { RepositorySet } from "@/lib/types/http";
 
-type RepositorySetDeleteDialogProps = {
-  set: RepositorySet | null;
-  /** Non-null when the last delete attempt failed; keeps the dialog open. */
-  error: string | null;
-  onClose: () => void;
-  onConfirm: () => void;
+type RepositorySetDeleteConfirmationProps = {
+  set: RepositorySet;
+  open: boolean;
+  anchorRef: RefObject<HTMLElement | null>;
+  onOpenChange: (open: boolean) => void;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
 };
 
 /**
- * Confirms deleting a set. The copy states plainly that no repository is
- * affected, because "delete set" next to a list of repository names reads as
- * though it might remove them.
+ * Fine-pointer confirmation for deleting one repository set. The copy states
+ * plainly that no repository is affected, because "delete set" next to a list
+ * of repository names reads as though it might remove them.
  */
-export function RepositorySetDeleteDialog({
+export function RepositorySetDeleteConfirmation({
   set,
-  error,
-  onClose,
+  open,
+  anchorRef,
+  onOpenChange,
+  onCancel,
   onConfirm,
-}: RepositorySetDeleteDialogProps) {
+}: RepositorySetDeleteConfirmationProps) {
   const { t } = useTranslation();
-  if (!set) return null;
 
   return (
-    <AlertDialog open onOpenChange={(next) => (next ? undefined : onClose())}>
-      <AlertDialogContent data-testid="repository-set-delete-dialog">
-        <AlertDialogHeader>
-          <AlertDialogTitle>
-            {t("workspaces:repositorySetsDeleteTitle", { name: set.name })}
-          </AlertDialogTitle>
-          <AlertDialogDescription>
-            {t("workspaces:repositorySetsDeleteDescription")}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        {error ? (
-          <p className="text-xs text-destructive" data-testid="repository-set-delete-error">
-            {error}
-          </p>
-        ) : null}
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
-          <AlertDialogAction
-            className="cursor-pointer"
-            onClick={onConfirm}
-            data-testid="repository-set-delete-confirm"
-          >
-            {t("workspaces:repositorySetsDelete")}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <ActionConfirmPopover
+      open={open}
+      anchorRef={anchorRef}
+      title={t("workspaces:repositorySetsDeleteTitle", { name: set.name })}
+      description={t("workspaces:repositorySetsDeleteDescription")}
+      cancelLabel={t("common:cancel")}
+      confirmLabel={t("workspaces:repositorySetsDelete")}
+      confirmAriaLabel={t("workspaces:repositorySetsDeleteTitle", { name: set.name })}
+      confirmTestId="repository-set-delete-confirm"
+      testId="repository-set-delete-confirm-popover"
+      onOpenChange={onOpenChange}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
