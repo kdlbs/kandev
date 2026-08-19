@@ -771,6 +771,13 @@ func TestResolveBundle_LosingCancel_AfterPartialApplication_ReleasesWaiterWithou
 	if res.Resume != winnerRow.Resume {
 		t.Fatalf("expected the loser's response to carry the winner's resume %q (not a cancelled one), got %q", winnerRow.Resume, res.Resume)
 	}
+	gotResponse, err := SerializeResponse(res.Response)
+	if err != nil {
+		t.Fatalf("SerializeResponse(res.Response): %v", err)
+	}
+	if gotResponse != winnerRow.Response {
+		t.Fatalf("expected the loser's response payload to be byte-identical to the winner's stored row:\ngot=%s\nwant=%s", gotResponse, winnerRow.Response)
+	}
 	if len(f.messages.calls) != callsBefore {
 		t.Fatalf("expected the losing cancel to modify no messages, got %d new calls", len(f.messages.calls)-callsBefore)
 	}

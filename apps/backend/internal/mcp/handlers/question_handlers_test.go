@@ -628,6 +628,12 @@ func TestHandleAnswerQuestion_M8a_SessionDeletedBetweenIdentityAndClaim_NotFound
 	}))
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeNotFound)
+
+	// M8a: the failed claim must leave no clarification_resolutions row
+	// behind, so a subsequent retry (once the session exists again) can
+	// still win rather than finding a phantom claim.
+	_, err = repo.GetClarificationResolution(ctx, "pending-m8a-1")
+	require.ErrorIs(t, err, sqliterepo.ErrClarificationResolutionNotFound)
 }
 
 func TestHandleAnswerQuestion_MissingPendingID_ValidationError(t *testing.T) {
