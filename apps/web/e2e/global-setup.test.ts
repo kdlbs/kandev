@@ -248,7 +248,7 @@ describe("globalSetup", () => {
     vi.stubEnv("KANDEV_E2E_SKIP_FRESHNESS", "1");
     const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
 
-    (globalSetup as (config: unknown) => void)({ projects: [] });
+    (globalSetup as () => void)();
 
     expect(existsSync).toHaveBeenCalledWith(customBackend);
     expect(existsSync).not.toHaveBeenCalledWith(path.join(backendDirForTest(), "bin", "kandev"));
@@ -261,22 +261,41 @@ describe("globalSetup", () => {
       .spyOn(fs, "existsSync")
       .mockImplementation((artifactPath) => artifactPath !== customBackend);
 
-    expect(() => (globalSetup as (config: unknown) => void)({ projects: [] })).toThrow(
-      /KANDEV_E2E_BIN file does not exist/,
-    );
+    expect(() => (globalSetup as () => void)()).toThrow(/KANDEV_E2E_BIN file does not exist/);
     expect(existsSync).toHaveBeenCalledWith(customBackend);
   });
 
-  it("checks Linux helper binaries when the containers project is selected", () => {
+  // Regression: `globalSetup` used to derive "is this a container run" from
+  // Playwright's `FullConfig.projects`, which always lists every project
+  // declared in playwright.config.ts regardless of `--project=` selection —
+  // so an ordinary `--project=chromium` run was indistinguishable from
+  // `--project=containers` and wrongly demanded Linux-only helper binaries
+  // that `make build` does not produce. See global-setup.ts's isContainerRun.
+  it("checks Linux helper binaries only when a container run is requested via env", () => {
     vi.stubEnv("KANDEV_E2E_SKIP_FRESHNESS", "1");
+    vi.stubEnv("KANDEV_E2E_CONTAINERS", "1");
     const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
 
-    (globalSetup as (config: unknown) => void)({ projects: [{ name: "containers" }] });
+    (globalSetup as () => void)();
 
     expect(existsSync).toHaveBeenCalledWith(
       path.join(backendDirForTest(), "bin", "mock-agent-linux-amd64"),
     );
     expect(existsSync).toHaveBeenCalledWith(
+      path.join(backendDirForTest(), "bin", "agentctl-linux-amd64"),
+    );
+  });
+
+  it("does not require Linux helper binaries for an ordinary run", () => {
+    vi.stubEnv("KANDEV_E2E_SKIP_FRESHNESS", "1");
+    const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
+
+    (globalSetup as () => void)();
+
+    expect(existsSync).not.toHaveBeenCalledWith(
+      path.join(backendDirForTest(), "bin", "mock-agent-linux-amd64"),
+    );
+    expect(existsSync).not.toHaveBeenCalledWith(
       path.join(backendDirForTest(), "bin", "agentctl-linux-amd64"),
     );
   });
