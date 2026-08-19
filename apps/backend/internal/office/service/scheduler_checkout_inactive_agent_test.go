@@ -85,3 +85,72 @@ func TestSchedulerTick_InactiveAgentRunDoesNotStealCheckout(t *testing.T) {
 		t.Fatal("LOCK STOLEN: a third agent acquired the checkout while agent-inactive-holder still held it")
 	}
 }
+
+// TestSchedulerTick_SameAgentPreCheckoutRunDoesNotStealOwnLiveCheckout is
+// the same-agent variant of the regression above (Review round 3, BLOCKING
+// FINDING 1): releaseTaskCheckoutForRun is scoped by run.AgentProfileID,
+// which guards the cross-agent case but not this one. Agent X already
+// holds the checkout via a live, executing run (run B). A second run (run
+// A) for that SAME agent + task is queued (e.g. a comment or status
+// change) and then terminates via the "agent not active" branch before it
+// ever reaches checkoutTask, because the agent went paused between queue
+// and tick. Run A's release matches X's own checkout_agent_id and, before
+// this fix, cleared run B's still-live lock out from under it.
+func TestSchedulerTick_SameAgentPreCheckoutRunDoesNotStealOwnLiveCheckout(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	holder := &models.AgentInstance{
+		ID:          "agent-same-holder",
+		WorkspaceID: "ws-1",
+		Name:        "checkout-same-holder",
+		Role:        models.AgentRoleWorker,
+		Status:      models.AgentStatusIdle,
+	}
+	if err := svc.CreateAgentInstance(ctx, holder); err != nil {
+		t.Fatalf("create holder agent: %v", err)
+	}
+
+	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES ('task-same-1', 'ws-1', 'Same Agent Task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+
+	// Run B: the holder's own live, executing run already owns the
+	// checkout (simulates a launched run mid-turn, checked out earlier).
+	ok, err := svc.CheckoutTask(ctx, "task-same-1", holder.ID)
+	if err != nil || !ok {
+		t.Fatalf("seed checkout: ok=%v err=%v", ok, err)
+	}
+
+	// Run A: a second run for the SAME agent + task (e.g. a comment wake),
+	// queued while idle, then the agent goes paused before the tick picks
+	// it up - reproducing the race where the holder is deactivated after
+	// a second run was already queued behind its own live run.
+	if err := svc.QueueRun(ctx, holder.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"task-same-1"}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	svc.ExecSQL(t, `UPDATE agent_profiles SET status = 'paused' WHERE id = 'agent-same-holder'`)
+
+	service.RunSchedulerTick(svc, ctx)
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("run count = %d, want 1", len(runs))
+	}
+	if runs[0].Status != service.RunStatusFinished {
+		t.Fatalf("run status = %q, want finished (skipped for inactivity)", runs[0].Status)
+	}
+
+	// Run B's checkout must still be held: run A never held it, so
+	// finishing run A must not release the holder's own live lock.
+	stillHeld, err := svc.CheckoutTask(ctx, "task-same-1", "agent-third")
+	if err != nil {
+		t.Fatalf("holder-checkout probe: %v", err)
+	}
+	if stillHeld {
+		t.Fatal("LOCK STOLEN: a third agent acquired the checkout that agent-same-holder's live run still held")
+	}
+}

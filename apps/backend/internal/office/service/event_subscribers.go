@@ -321,6 +321,11 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		"session_id": data.SessionID,
 	})
 	s.markRoutingSuccess(ctx, run)
+	// run came from GetClaimedRunByTaskID: it is the run that actually
+	// launched and holds the checkout, so releasing here (rather than
+	// unconditionally inside transitionRunTerminal) is safe — see
+	// transitionRunTerminal's doc comment.
+	s.releaseTaskCheckoutForRun(ctx, run)
 	return s.FinishRun(ctx, run.ID)
 }
 
@@ -369,6 +374,11 @@ func (s *Service) handleTasklessAgentCompleted(
 		"session_id": data.SessionID,
 	})
 	s.refreshContinuationSummary(ctx, run, data.AgentID)
+	// run came from GetClaimedTasklessRunForAgent: it is the run that
+	// actually launched. Taskless runs typically carry no task_id, so this
+	// is a no-op in the common case, but call it for the same reason as
+	// handleAgentCompleted — see transitionRunTerminal's doc comment.
+	s.releaseTaskCheckoutForRun(ctx, run)
 	return s.FinishRun(ctx, run.ID)
 }
 
