@@ -116,5 +116,6 @@
   "utilityAgentsUnavailable": "Agentes utilitários indisponíveis",
   "viewRaw": "Ver o original",
   "yes": "sim",
-  "pluginDialog": "Janela do plugin"
+  "pluginDialog": "Janela do plugin",
+  "loadingWorkspaceAgentChat": "A carregar conversa"
 }
