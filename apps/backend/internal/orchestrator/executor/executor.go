@@ -102,6 +102,15 @@ type initialRuntimeSeedTaskSessionCreator interface {
 	CreateTaskSessionWithInitialRuntimeSeed(context.Context, *models.TaskSession) error
 }
 
+// workspaceBindingTaskSessionCreator elects the single materializing session
+// and inserts its creating environment in the same transaction as the session.
+// It is optional for lightweight test/legacy stores; production repositories
+// must implement it so a concurrent sibling cannot enter lifecycle setup
+// without a durable canonical workspace binding.
+type workspaceBindingTaskSessionCreator interface {
+	CreateTaskSessionWithWorkspaceBinding(context.Context, *models.TaskSession, *models.TaskEnvironment) error
+}
+
 type primarySessionTaskStateStore interface {
 	UpdateTaskStateIfPrimarySessionState(
 		context.Context,

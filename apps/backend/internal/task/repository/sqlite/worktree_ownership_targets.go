@@ -221,11 +221,11 @@ func (r *Repository) insertNormalized(c *worktreeCutover, tx *sqlx.Tx) error {
 		if _, err := tx.Exec(tx.Rebind(`
 			INSERT INTO task_environments_shadow (
 				id, task_id, executor_type, executor_id, executor_profile_id,
-				control_port, status, workspace_path, container_id, sandbox_id,
+				control_port, status, materialization_session_id, workspace_path, container_id, sandbox_id,
 				task_dir_name, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 			env.id, taskID, env.executorType, env.executorID, env.executorProfileID,
-			env.controlPort, env.status, env.workspacePath, env.containerID,
+			env.controlPort, env.status, "", env.workspacePath, env.containerID,
 			env.sandboxID, env.taskDirName, env.createdAt, env.updatedAt); err != nil {
 			return fmt.Errorf("cutover: insert shadow environment %s: %w", env.id, err)
 		}

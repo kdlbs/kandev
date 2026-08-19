@@ -1809,6 +1809,10 @@ type TaskEnvironment struct {
 	// needed (the orchestrator does this in service_turns.go for WorkspaceInfo).
 	ControlPort int                   `json:"control_port"` // agentctl control port
 	Status      TaskEnvironmentStatus `json:"status"`
+	// MaterializationSessionID durably identifies the one session allowed to
+	// turn a creating environment into a physical workspace. It is empty once
+	// the environment is ready; sibling sessions must attach only.
+	MaterializationSessionID string `json:"-"`
 
 	// WorkspacePath points at the agent workspace root (the task root when
 	// TaskDirName is set, otherwise the single repo's worktree path).

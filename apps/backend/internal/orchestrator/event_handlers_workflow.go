@@ -2008,7 +2008,7 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 
 	// Create a new session with the new agent profile.
 	// Reuse the same executor profile from the current session.
-	sessionID, err := s.executor.PrepareSession(ctx, task, newAgentProfileID, currentSession.ExecutorID, currentSession.ExecutorProfileID, dbTask.WorkflowStepID)
+	sessionID, err := s.executor.PrepareSessionForExistingEnvironment(ctx, task, newAgentProfileID, currentSession.ExecutorID, currentSession.ExecutorProfileID, dbTask.WorkflowStepID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare new session: %w", err)
 	}

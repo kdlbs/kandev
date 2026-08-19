@@ -859,6 +859,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		TaskTitle:                      reqWithWorktree.TaskTitle,
 		SessionID:                      reqWithWorktree.SessionID,
 		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
+		WorkspaceReuseRequired:         reqWithWorktree.WorkspaceReuseRequired,
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		PromptTurnID:                   reqWithWorktree.TurnID,

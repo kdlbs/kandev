@@ -20,6 +20,7 @@ import (
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -232,18 +233,32 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	}
 
 	workdir := r.workdirRoot(req.Metadata)
-	taskDir, err := r.prepareRemoteTaskDir(baseCtx, client, workdir, req)
-	if err != nil {
-		return nil, err
-	}
-	r.maybeUploadCredentials(baseCtx, client, req, platform)
-	if err := r.runPrepareScript(baseCtx, client, taskDir, req, platform, agentctlBin); err != nil {
-		return nil, err
+	taskDir := ""
+	if req.WorkspaceReuseRequired {
+		// A sibling SSH execution gets its own agentctl/session directory, but
+		// must use the already materialized task directory verbatim. In
+		// particular it must not run the remote prepare script or checkout
+		// verification, either of which can mutate an active shared checkout.
+		taskDir = strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeySSHRemoteTaskDir))
+		if taskDir == "" {
+			return nil, fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+		}
+	} else {
+		taskDir, err = r.prepareRemoteTaskDir(baseCtx, client, workdir, req)
+		if err != nil {
+			return nil, err
+		}
+		r.maybeUploadCredentials(baseCtx, client, req, platform)
+		if err := r.runPrepareScript(baseCtx, client, taskDir, req, platform, agentctlBin); err != nil {
+			return nil, err
+		}
 	}
 	launchCtx, launchCancel := withLaunchPhaseTimeout(baseCtx)
 	defer launchCancel()
-	if err := r.verifyPrimaryCheckout(launchCtx, client, taskDir, req, platform); err != nil {
-		return nil, err
+	if !req.WorkspaceReuseRequired {
+		if err := r.verifyPrimaryCheckout(launchCtx, client, taskDir, req, platform); err != nil {
+			return nil, err
+		}
 	}
 	sessionDir, err := r.prepareRemoteSessionDir(launchCtx, client, taskDir, req)
 	if err != nil {

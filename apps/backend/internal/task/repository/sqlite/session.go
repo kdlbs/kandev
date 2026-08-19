@@ -560,6 +560,119 @@ func (r *Repository) CreateTaskSessionWithInitialRuntimeSeed(ctx context.Context
 	return tx.Commit()
 }
 
+// CreateTaskSessionWithWorkspaceBinding atomically elects the first session
+// allowed to materialize a task workspace, or attaches a later session to its
+// ready canonical environment. The transaction deliberately happens before a
+// session row is committed: a preparing or unsafe workspace therefore leaves
+// no orphan session for a caller to clean up.
+//
+// The candidate is persisted only when this call wins the election. It may be
+// a worktree environment without a workspace path because that path is not
+// known until the elected launch has completed preparation.
+//
+//nolint:cyclop // The state cases are the durable workspace binding state machine.
+func (r *Repository) CreateTaskSessionWithWorkspaceBinding(
+	ctx context.Context,
+	session *models.TaskSession,
+	candidate *models.TaskEnvironment,
+) error {
+	if candidate == nil {
+		return fmt.Errorf("workspace binding candidate is required")
+	}
+	if candidate.TaskID != session.TaskID {
+		return fmt.Errorf("workspace binding task mismatch")
+	}
+	if session.ID == "" {
+		session.ID = uuid.New().String()
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
+		return err
+	}
+
+	var envID, status string
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT id, status FROM task_environments WHERE task_id = ?
+	`), session.TaskID).Scan(&envID, &status)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if candidate.ID == "" {
+			candidate.ID = uuid.New().String()
+		}
+		candidate.Status = models.TaskEnvironmentStatusCreating
+		candidate.MaterializationSessionID = session.ID
+		candidate.CreatedAt = r.nowUTC()
+		candidate.UpdatedAt = candidate.CreatedAt
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO task_environments (
+				id, task_id, executor_type, executor_id, executor_profile_id,
+				control_port, status, materialization_session_id, workspace_path,
+				container_id, sandbox_id, task_dir_name, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`), candidate.ID, candidate.TaskID, candidate.ExecutorType, candidate.ExecutorID,
+			candidate.ExecutorProfileID, candidate.ControlPort, string(candidate.Status),
+			candidate.MaterializationSessionID, candidate.WorkspacePath, candidate.ContainerID,
+			candidate.SandboxID, candidate.TaskDirName, candidate.CreatedAt, candidate.UpdatedAt); err != nil {
+			return fmt.Errorf("create workspace binding: %w", err)
+		}
+		session.TaskEnvironmentID = candidate.ID
+	case err != nil:
+		return fmt.Errorf("load workspace binding: %w", err)
+	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusCreating:
+		return fmt.Errorf("%w: retry after the initial workspace launch completes", models.ErrWorkspacePreparing)
+	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusReady || models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusStopped:
+		session.TaskEnvironmentID = envID
+	default:
+		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+
+	if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
+		return err
+	}
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// applyInitialRuntimeSeedTx preserves CreateTaskSessionWithInitialRuntimeSeed's
+// one-time seed semantics for the workspace-binding creation path.
+func (r *Repository) applyInitialRuntimeSeedTx(ctx context.Context, tx *sqlx.Tx, session *models.TaskSession) error {
+	initialRuntimeConfig, hasInitialRuntimeConfig, initialRuntimeConfigProfileID, hasInitialRuntimeSeedKey, err := r.loadInitialSessionRuntimeSeedTx(ctx, tx, session.TaskID)
+	if err != nil {
+		return err
+	}
+	var sessionCount int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(*) FROM task_sessions WHERE task_id = ?`), session.TaskID).Scan(&sessionCount); err != nil {
+		return fmt.Errorf("check task sessions before workspace binding: %w", err)
+	}
+	if sessionCount == 0 {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
+		if hasInitialRuntimeConfig && initialRuntimeConfigProfileID == session.AgentProfileID {
+			session.Metadata[models.SessionMetaKeyRuntimeConfigOverrides] = initialRuntimeConfig
+		}
+	} else if models.IsOriginalTaskSession(session.Metadata) {
+		delete(session.Metadata, models.SessionMetaKeyOrigin)
+	}
+	if hasInitialRuntimeSeedKey {
+		if _, err := r.removeTaskMetadataKeyWithExecutor(ctx, tx, session.TaskID, models.MetaKeyInitialSessionRuntimeConfig); err != nil {
+			return fmt.Errorf("consume initial runtime seed: %w", err)
+		}
+		if _, err := r.removeTaskMetadataKeyWithExecutor(ctx, tx, session.TaskID, models.MetaKeyInitialSessionRuntimeConfigProfileID); err != nil {
+			return fmt.Errorf("consume initial runtime seed profile: %w", err)
+		}
+	}
+	return nil
+}
+
 func (r *Repository) loadInitialSessionRuntimeSeedTx(
 	ctx context.Context,
 	tx *sqlx.Tx,

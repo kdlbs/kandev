@@ -101,6 +101,54 @@ func TestGetTaskEnvironmentMissingReturnsSentinel(t *testing.T) {
 	}
 }
 
+func TestCreateTaskSessionWithWorkspaceBindingElectsAndAttaches(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-binding")
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-binding", WorkspaceID: "workspace-binding", Title: "binding"}); err != nil {
+		t.Fatal(err)
+	}
+
+	first := &models.TaskSession{ID: "session-owner", TaskID: "task-binding"}
+	candidate := &models.TaskEnvironment{TaskID: "task-binding", ExecutorType: string(models.ExecutorTypeLocal)}
+	if err := repo.CreateTaskSessionWithWorkspaceBinding(ctx, first, candidate); err != nil {
+		t.Fatalf("bind first session: %v", err)
+	}
+	if first.TaskEnvironmentID == "" || first.TaskEnvironmentID != candidate.ID {
+		t.Fatalf("first binding = %q, candidate = %q", first.TaskEnvironmentID, candidate.ID)
+	}
+	env, err := repo.GetTaskEnvironment(ctx, first.TaskEnvironmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Status != models.TaskEnvironmentStatusCreating || env.MaterializationSessionID != first.ID {
+		t.Fatalf("creating environment = %+v", env)
+	}
+
+	blocked := &models.TaskSession{ID: "session-blocked", TaskID: "task-binding"}
+	err = repo.CreateTaskSessionWithWorkspaceBinding(ctx, blocked, &models.TaskEnvironment{TaskID: "task-binding"})
+	if !errors.Is(err, models.ErrWorkspacePreparing) {
+		t.Fatalf("second bind error = %v, want preparing", err)
+	}
+	sessions, err := repo.ListTaskSessions(ctx, "task-binding")
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("sessions after blocked bind = %+v, %v", sessions, err)
+	}
+
+	env.Status = models.TaskEnvironmentStatusReady
+	env.MaterializationSessionID = ""
+	if err := repo.UpdateTaskEnvironment(ctx, env); err != nil {
+		t.Fatal(err)
+	}
+	attached := &models.TaskSession{ID: "session-attached", TaskID: "task-binding"}
+	if err := repo.CreateTaskSessionWithWorkspaceBinding(ctx, attached, &models.TaskEnvironment{TaskID: "task-binding"}); err != nil {
+		t.Fatalf("attach ready environment: %v", err)
+	}
+	if attached.TaskEnvironmentID != env.ID {
+		t.Fatalf("attached environment = %q, want %q", attached.TaskEnvironmentID, env.ID)
+	}
+}
+
 func TestUpdateTaskEnvironmentMissingReturnsSentinel(t *testing.T) {
 	repo := newRepoForHealTests(t)
 
