@@ -187,10 +187,12 @@ function triggerDetails(
 function ModelRow({
   model,
   selected,
+  loading,
   onSelect,
 }: {
   model: ModelSelectorOption;
   selected: boolean;
+  loading: boolean;
   onSelect: (value: string) => void;
 }) {
   const item = (
@@ -199,6 +201,7 @@ function ModelRow({
       keywords={[model.name, model.description ?? "", model.id]}
       onSelect={() => !model.disabled && onSelect(model.id)}
       disabled={model.disabled}
+      data-testid={selected ? "model-config-selected-row" : undefined}
       className={cn("relative pr-7", model.disabled && "opacity-40 cursor-not-allowed")}
     >
       <div className="flex min-w-0 flex-1 items-center">
@@ -214,16 +217,17 @@ function ModelRow({
           <span className="shrink-0 text-xs text-muted-foreground">{model.usageMultiplier}</span>
         )}
       </div>
-      <IconCheck
-        className={cn("absolute right-2 h-4 w-4", selected ? "opacity-100" : "opacity-0")}
-      />
+      {selected && loading ? (
+        <Spinner aria-hidden="true" className="absolute right-2" />
+      ) : (
+        <IconCheck
+          className={cn("absolute right-2 h-4 w-4", selected ? "opacity-100" : "opacity-0")}
+        />
+      )}
     </CommandItem>
   );
   // cmdk's CommandItem swallows pointer events with no native tooltip slot;
-  // wrap disabled items in a Tooltip trigger so the gone-reason shows. The
-  // CommandItem is disabled (unfocusable), so the wrapper itself must be
-  // focusable and carry an accessible name for keyboard users to reach the
-  // reason.
+  // keep disabled items in a focusable wrapper so their gone reason is reachable.
   if (model.disabled && model.disabledReason) {
     return (
       <Tooltip>
@@ -415,6 +419,7 @@ function ModelConfigSelectorContent({
                 key={model.id}
                 model={model}
                 selected={model.id === currentModelValue}
+                loading={configOptionsLoading}
                 onSelect={onModelSelect}
               />
             ))}

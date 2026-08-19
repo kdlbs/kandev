@@ -14,10 +14,11 @@ spec: "../../specs/agents/dynamic-provider-options.md"
 ## Acceptance conditions
 
 1. Desktop Playwright coverage shows the loading row inside the open selector
-   while the model-option response is pending.
+   and the selected-row spinner while the model-option response is pending.
 2. Mobile Playwright coverage proves the same touch flow without horizontal
    overflow.
-3. Both tests prove that resolved option controls replace the spinner after the
+3. Both tests prove that resolved option controls replace the status spinner
+   and the selected-row spinner is replaced by the check icon after the
    response.
 
 ## Verification
@@ -62,8 +63,9 @@ results.
 ## Results
 
 Added resolver latency to the existing desktop and mobile profile flows. Both
-flows assert that the selector remains open, stale option controls are absent,
-the loading row is removed after resolution, and resolved controls return. The
+flows assert that the selector remains open, both loading indicators are
+visible, stale option controls are absent, the indicators are removed after
+resolution, the selected-row check returns, and resolved controls return. The
 mobile flow also asserts that the document has no horizontal overflow and uses
 touch actions.
 

@@ -39,6 +39,10 @@ It will use `data-testid="model-config-options-loading"` and an accessible
 status name. Existing callers will keep their current close behavior unless
 they enable asynchronous option resolution.
 
+While the request is pending, the selected model row replaces its trailing
+check icon with the same spinner. The check icon returns when the request
+resolves or fails.
+
 ### Agent profile wiring
 
 Update `apps/web/components/settings/profile-model-fields.tsx` so `ModelPicker`
@@ -63,7 +67,8 @@ and mobile.
 ## Tests
 
 - **What:** The shared selector stays open after a model change and shows the
-  loading row below the model list.
+  loading row below the model list. The selected row shows a spinner while the
+  request is pending and restores its check icon afterward.
 - **File:** `apps/web/components/model-config-selector.test.tsx`.
 - **How:** Use a stateful component test. Start resolution from
   `onModelChange`, make sure that stale option triggers are absent, and finish
@@ -80,20 +85,23 @@ No locale change is required. The selector reuses
 ## E2E Tests
 
 - **Scenario:** Given an open desktop profile selector, when a model resolution
-  is pending, then the spinner is visible below the model list. Resolved
-  controls replace it after the response.
+  is pending, then the selected row and the status row show spinners. Resolved
+  controls replace the status row and the selected row restores its check after
+  the response.
 - **File:** `apps/web/e2e/tests/settings/agent-profile-acp.spec.ts`.
-- **What to verify:** The popover stays open. The loading row is visible. Stale
-  option controls are absent. The loading row is removed and the new model
-  option appears after the response.
+- **What to verify:** The popover stays open. Both loading indicators are
+  visible. Stale option controls are absent. The loading indicators are
+  removed, the selected row shows its check, and the new model option appears
+  after the response.
 
 - **Scenario:** Given the same flow on a phone, when a model resolution is
-  pending, then the spinner is visible and contained in the selector.
+  pending, then both spinners are visible and contained in the selector.
 - **File:**
   `apps/web/e2e/tests/settings/mobile-agent-profile-config-selector.spec.ts`.
-- **What to verify:** Touch selection keeps the popover open. The loading row
-  is visible and is removed after resolution. The page has no horizontal
-  overflow. The resolved control remains reachable by touch.
+- **What to verify:** Touch selection keeps the popover open. Both loading
+  indicators are visible and are removed after resolution, with the selected
+  row's check restored. The page has no horizontal overflow. The resolved
+  control remains reachable by touch.
 
 Both tests will use `injectLatency` for the resolver route. This delay is the
 test stimulus that makes the transient state observable.

@@ -169,6 +169,9 @@ describe("ModelConfigSelector loading behavior", () => {
     expect(loadingRow.getAttribute("role")).toBe("status");
     expect(screen.getByRole("status", { name: "Loading model options…" })).toBe(loadingRow);
     expect(screen.queryByTestId(effortTriggerTestId)).toBeNull();
+    const selectedModelRow = screen.getByTestId("model-config-selected-row");
+    expect(selectedModelRow.querySelector("svg.tabler-icon-loader")).toBeTruthy();
+    expect(selectedModelRow.querySelector("svg.tabler-icon-check.absolute")).toBeNull();
 
     rerender(
       <ModelConfigSelector
@@ -189,6 +192,8 @@ describe("ModelConfigSelector loading behavior", () => {
     );
 
     expect(screen.queryByTestId("model-config-options-loading")).toBeNull();
+    expect(selectedModelRow.querySelector("svg.tabler-icon-loader")).toBeNull();
+    expect(selectedModelRow.querySelector("svg.tabler-icon-check.absolute")).toBeTruthy();
     expect(screen.getByTestId(effortTriggerTestId).textContent).toContain("Max");
   });
 });

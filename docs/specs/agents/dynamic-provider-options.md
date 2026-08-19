@@ -1,5 +1,5 @@
 ---
-status: building
+status: implemented
 created: 2026-08-07
 updated: 2026-08-19
 owner: kandev
@@ -68,12 +68,14 @@ selected and saved.
 
 Given an open agent profile model selector, when the author selects a model,
 then option resolution starts. The selector stays open and shows a loading
-spinner below the model list. The selector hides stale dependent controls until
-the new option snapshot arrives.
+spinner in the selected model row and below the model list. The selected row
+does not show its check icon while it is resolving. The selector hides stale
+dependent controls until the new option snapshot arrives.
 
 Given that the option request is complete, when Kandev shows the resolved
-snapshot or an error, then the loading spinner is not visible. The existing
-resolved controls or retryable error state are available.
+snapshot or an error, then the selected row restores its check icon and the
+loading spinners are not visible. The existing resolved controls or retryable
+error state are available.
 
 ### Model removes an option
 
@@ -120,7 +122,7 @@ touch-friendly layout, use the existing settings scroll owner, and do not
 create document-level horizontal overflow.
 
 Given an open agent profile model selector on a phone, when model options load,
-then the same loading spinner is visible and remains inside the selector.
+then the same loading indicators are visible and remain inside the selector.
 
 ## Data model
 
@@ -205,14 +207,14 @@ conventions and never expose provider secrets or raw process output.
 Each settings surface follows this state machine for the selected resolution
 context:
 
-| State | Event | Result |
-| --- | --- | --- |
-| baseline | model selected | Show baseline options and start one resolver request. |
-| resolving | matching response | Replace options with the complete snapshot and reconcile the draft. |
-| resolving | stale response | Ignore it and keep the newer model's state. |
-| resolving | timeout/error | Keep existing values, show retryable error, and do not add controls. |
-| resolved | same context requested | Reuse the runtime cache. |
-| resolved | refresh or baseline invalidation | Request a fresh snapshot. |
+| State     | Event                            | Result                                                               |
+| --------- | -------------------------------- | -------------------------------------------------------------------- |
+| baseline  | model selected                   | Show baseline options and start one resolver request.                |
+| resolving | matching response                | Replace options with the complete snapshot and reconcile the draft.  |
+| resolving | stale response                   | Ignore it and keep the newer model's state.                          |
+| resolving | timeout/error                    | Keep existing values, show retryable error, and do not add controls. |
+| resolved  | same context requested           | Reuse the runtime cache.                                             |
+| resolved  | refresh or baseline invalidation | Request a fresh snapshot.                                            |
 
 An option snapshot is replaced atomically. The frontend must not merge an old
 model's choices with a new model's choices.

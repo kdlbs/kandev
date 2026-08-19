@@ -55,6 +55,9 @@ test.describe("Mobile agent profile config selector", () => {
       await selector.tap();
       await testPage.getByRole("option", { name: /Mock Smart/ }).tap();
       await expect(testPage.getByTestId("model-config-options-loading")).toBeVisible();
+      const selectedModelRow = testPage.getByTestId("model-config-selected-row");
+      await expect(selectedModelRow.locator("svg.tabler-icon-loader")).toBeVisible();
+      await expect(selectedModelRow.locator("svg.tabler-icon-check.absolute")).toHaveCount(0);
       await expect(testPage.getByTestId("config-option-trigger-effort")).toHaveCount(0);
       await expect(selector).toHaveAttribute("aria-expanded", "true");
       expect(
@@ -66,6 +69,8 @@ test.describe("Mobile agent profile config selector", () => {
         timeout: 15_000,
       });
       await expect(testPage.getByTestId("model-config-options-loading")).toHaveCount(0);
+      await expect(selectedModelRow.locator("svg.tabler-icon-loader")).toHaveCount(0);
+      await expect(selectedModelRow.locator("svg.tabler-icon-check.absolute")).toBeVisible();
       await expect(selector).toContainText("Mock Smart", { timeout: 10_000 });
       const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
       await expect(effortTrigger).toBeVisible();
