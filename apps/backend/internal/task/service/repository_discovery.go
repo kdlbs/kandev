@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 type RepositoryDiscoveryConfig struct {
@@ -186,6 +187,9 @@ func resolveExplicitLocalRepositoryPath(repoPath string) (string, string, error)
 // checks, a crafted folder could borrow another repository's .git directory
 // and turn an exact-path grant into permission to mutate unrelated Git refs.
 func validateExplicitGitMetadata(repoPath string) error {
+	if _, err := worktree.ResolveGitMetadata(repoPath); err != nil {
+		return err
+	}
 	gitPath := filepath.Join(repoPath, ".git")
 	// codeql[go/path-injection] The canonical repository path is validated before inspecting its exact .git child.
 	info, err := os.Lstat(gitPath)
@@ -262,6 +266,10 @@ func validateStandaloneGitMetadata(gitPath string) error {
 	return nil
 }
 
+// validateLinkedWorktreeMetadata remains a narrow compatibility wrapper for
+// existing repository-admission callers. The shared worktree resolver owns all
+// linked-worktree validation so admission and runtime authorization cannot
+// drift.
 func validateLinkedWorktreeMetadata(repoPath, gitPath string) error {
 	gitDir, err := resolveGitDir(repoPath)
 	if err != nil {

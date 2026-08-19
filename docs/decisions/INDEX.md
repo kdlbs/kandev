@@ -227,3 +227,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-31-revoke-merge-approval-after-untrusted-push | [Revoke merge approval after an untrusted pull-request push](2026-08-31-revoke-merge-approval-after-untrusted-push.md) | accepted | workflow, security | 2026-08-31 |
 | 2026-08-31-passthrough-running-publication | [Defer Passthrough Running Publication Until Guard Release](2026-08-31-passthrough-running-publication.md) | accepted | backend | 2026-08-31 |
 | 2026-08-31-agent-aware-mcp-tool-names | [Preserve Canonical MCP Tool Names Through Agent Namespacing](2026-08-31-agent-aware-mcp-tool-names.md) | accepted | backend, agentctl, protocol | 2026-08-31 |
+| 2026-08-19-task-scoped-git-metadata-projection | [Task-Scoped Git Metadata Projection](2026-08-19-task-scoped-git-metadata-projection.md) | accepted | backend, security, workflow | 2026-08-19 |

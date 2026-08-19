@@ -38,5 +38,6 @@ The following specifications were added after this migration and remain in the l
 - [Startup listener before recovery](startup-listener-before-recovery/spec.md) (draft)
 - [Workflow on_enter action dispatch](workflow-on-enter-action-dispatch/spec.md) (draft)
 - [Task Delivery Ledger](task-delivery-ledger/spec.md) (draft)
+- [Task Git Metadata Permissions](platform/task-git-metadata-permissions.md) (building)
 
 ## Authoring rule
