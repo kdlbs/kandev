@@ -512,10 +512,11 @@ These are functions, so they sit beside `navigate`/`openModal` rather than in
 
 ### Native integration settings state
 
-`registerIntegrationSettings` may provide an `action` component. The host passes
-the routed `workspaceId` to both the page component and the action. Use that
-value for workspace-scoped reads and writes. Do not use
-`getActiveWorkspaceId()` for a routed settings page.
+`registerIntegrationSettings` may provide an `action` component. The host mounts
+the action in the detail `SettingsSection` header and in the native integrations
+index card. The host passes the routed `workspaceId` and a `surface` value of
+`"detail"` or `"index"`. Use the workspace value for workspace-scoped reads and
+writes. Do not use `getActiveWorkspaceId()` for a routed settings page.
 
 `host.setIntegrationEnabled(integrationId, workspaceId, enabled)` publishes a
 live value for one registration and workspace. The host checks that the
@@ -808,9 +809,17 @@ interface IntegrationSettingsRegistration {
   description: string;
   icon?: PluginIcon;
   Component: React.ComponentType<{ workspaceId?: string }>;
-  // Optional native header action. It receives the same routed workspace id
-  // as Component, so it never needs to infer the target from the active one.
-  action?: React.ComponentType<{ workspaceId?: string }>;
+  // Optional action for the detail section header and integrations index card.
+  // The surface identifies the host location and the workspace id identifies
+  // the settings target.
+  action?: React.ComponentType<IntegrationSettingsActionProps>;
+}
+
+type IntegrationSettingsActionSurface = "detail" | "index";
+
+interface IntegrationSettingsActionProps {
+  workspaceId?: string;
+  surface: IntegrationSettingsActionSurface;
 }
 
 // Integration settings render at /settings/integrations/{id} and

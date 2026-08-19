@@ -28,6 +28,7 @@ import { LinearEnabledControl } from "@/components/linear/linear-enabled-control
 import { SentryEnabledControl } from "@/components/sentry/sentry-enabled-control";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
 import { usePluginRegistry } from "@/lib/plugins/registry";
+import { PluginErrorBoundary } from "@/components/plugins/plugin-error-boundary";
 
 type IntegrationSlug = "azure-devops" | "github" | "gitlab" | "jira" | "linear" | "sentry";
 
@@ -196,7 +197,11 @@ export function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProp
                     <span className="truncate">{label}</span>
                   </Link>
                   <div className="shrink-0">
-                    {Action ? <Action workspaceId={workspaceId} /> : null}
+                    {Action ? (
+                      <PluginErrorBoundary context={`integration card action "${pluginId}:${id}"`}>
+                        <Action workspaceId={workspaceId} surface="index" />
+                      </PluginErrorBoundary>
+                    ) : null}
                   </div>
                 </div>
                 <Link href={href} className="text-sm text-muted-foreground cursor-pointer">

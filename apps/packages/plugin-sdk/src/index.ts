@@ -603,6 +603,14 @@ export interface PluginHostApi {
   storage: PluginStorageApi;
 }
 
+export type IntegrationSettingsActionSurface = "detail" | "index";
+
+export interface IntegrationSettingsActionProps {
+  workspaceId?: string;
+  /** Identifies the native integration surface that mounted the action. */
+  surface: IntegrationSettingsActionSurface;
+}
+
 export interface PluginRegistry {
   registerTranslations(catalogs: PluginTranslationCatalogs): void;
   registerRoute(path: string, component: Component, options?: PluginRouteOptions): void;
@@ -623,10 +631,9 @@ export interface PluginRegistry {
     description: string;
     icon?: PluginIcon;
     Component: Component<{ workspaceId?: string }>;
-    /** Optional header action (e.g. an enable toggle) rendered in the host
-     * section header's action slot, mirroring built-in integrations.
-     * Receives `{ workspaceId?: string }` so it can operate per-workspace. */
-    action?: Component<{ workspaceId?: string }>;
+    /** Optional action rendered in the detail section header and index card.
+     * Receives the routed workspace and the native surface that mounted it. */
+    action?: Component<IntegrationSettingsActionProps>;
   }): void;
   registerRepositoryProvider(provider: RepositoryProviderRegistration): void;
   registerTaskAction(action: {
