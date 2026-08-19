@@ -76,6 +76,8 @@ manually moving files into the task workspace.
 Decisions: [ADR-2026-07-22-runtime-mutable-task-workspace-sources](../../decisions/2026-07-22-runtime-mutable-task-workspace-sources.md)
 [ADR-2026-07-23-workspace-source-root-move-boundary](../../decisions/2026-07-23-workspace-source-root-move-boundary.md),
 and [ADR-2026-07-27-legacy-add-branch-live-rescan](../../decisions/2026-07-27-legacy-add-branch-live-rescan.md).
+Repository attachments also refresh the complete task-scoped Git metadata permission projection at
+the same idle rebind boundary; see [task Git metadata permissions](../platform/task-git-metadata-permissions.md).
 
 ## Data model
 
