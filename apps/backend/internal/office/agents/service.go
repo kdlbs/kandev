@@ -41,6 +41,7 @@ var (
 	ErrAgentCEOAlreadyExists = errors.New("workspace already has a CEO agent")
 	ErrAgentReportsToInvalid = errors.New("reports_to agent does not exist in this workspace")
 	ErrAgentReportsToSelf    = errors.New("agent cannot report to itself")
+	ErrAgentReportsToCycle   = errors.New("reports_to agent would create a cycle in the reporting hierarchy")
 	ErrAgentStatusTransition = errors.New("invalid status transition")
 )
 
@@ -812,16 +813,50 @@ func (s *AgentService) validateAgentNameUnique(ctx context.Context, name, worksp
 	return nil
 }
 
-// validateReportsTo ensures the target agent exists.
+// validateReportsTo ensures the target agent exists and that assigning it
+// would not create a cycle in the reporting hierarchy.
 func (s *AgentService) validateReportsTo(ctx context.Context, reportsTo, selfID string) error {
 	if selfID != "" && reportsTo == selfID {
 		return ErrAgentReportsToSelf
 	}
-	_, err := s.GetAgentFromConfig(ctx, reportsTo)
+	manager, err := s.GetAgentFromConfig(ctx, reportsTo)
 	if err != nil {
 		return ErrAgentReportsToInvalid
 	}
+	if selfID != "" && s.reportsToCycleExists(ctx, selfID, manager) {
+		return ErrAgentReportsToCycle
+	}
 	return nil
+}
+
+// reportsToCycleExists walks the persisted manager chain upward from start,
+// looking for target (the agent whose reports_to is being assigned). Each
+// hop is resolved via GetAgentFromConfig, which accepts either an ID or a
+// name, so the walk tolerates whichever form a hop's stored reports_to
+// happens to be in. The walk is bounded by a visited set of resolved IDs, so
+// a pre-existing cyclic row already in the database cannot hang resolution
+// of an unrelated update.
+func (s *AgentService) reportsToCycleExists(ctx context.Context, target string, start *models.AgentInstance) bool {
+	visited := make(map[string]bool)
+	node := start
+	for node != nil {
+		if node.ID == target {
+			return true
+		}
+		if visited[node.ID] {
+			return false
+		}
+		visited[node.ID] = true
+		if node.ReportsTo == "" {
+			return false
+		}
+		next, err := s.GetAgentFromConfig(ctx, node.ReportsTo)
+		if err != nil {
+			return false
+		}
+		node = next
+	}
+	return false
 }
 
 // validateStatusTransition checks if a status transition is allowed.
