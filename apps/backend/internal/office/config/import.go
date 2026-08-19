@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
 // PreviewImport diffs a bundle against the current workspace state.
@@ -170,13 +171,15 @@ func (s *ConfigService) applyAgents(
 	}
 	for _, cfg := range incoming {
 		if agent, ok := byName[cfg.Name]; ok {
-			agent.Role = models.AgentRole(cfg.Role)
-			agent.Icon = cfg.Icon
-			agent.BudgetMonthlyCents = cfg.BudgetMonthlyCents
-			agent.MaxConcurrentSessions = cfg.MaxConcurrentSessions
-			agent.DesiredSkills = cfg.DesiredSkills
-			agent.ExecutorPreference = cfg.ExecutorPreference
-			if err := s.repo.UpdateAgentInstance(ctx, agent); err != nil {
+			fields := sqlite.AgentInstanceConfigFields{
+				Role:                  cfg.Role,
+				Icon:                  cfg.Icon,
+				BudgetMonthlyCents:    cfg.BudgetMonthlyCents,
+				MaxConcurrentSessions: cfg.MaxConcurrentSessions,
+				DesiredSkills:         cfg.DesiredSkills,
+				ExecutorPreference:    cfg.ExecutorPreference,
+			}
+			if err := s.repo.UpdateAgentInstanceConfigFields(ctx, agent.ID, fields); err != nil {
 				return err
 			}
 			result.UpdatedCount++
@@ -353,11 +356,13 @@ func (s *ConfigService) applySkills(
 	}
 	for _, cfg := range incoming {
 		if skill, ok := bySlug[cfg.Slug]; ok {
-			skill.Name = cfg.Name
-			skill.Description = cfg.Description
-			skill.SourceType = models.SkillSourceType(cfg.SourceType)
-			skill.Content = cfg.Content
-			if err := s.repo.UpdateSkill(ctx, skill); err != nil {
+			fields := sqlite.SkillConfigFields{
+				Name:        cfg.Name,
+				Description: cfg.Description,
+				SourceType:  models.SkillSourceType(cfg.SourceType),
+				Content:     cfg.Content,
+			}
+			if err := s.repo.UpdateSkillConfigFields(ctx, skill.ID, fields); err != nil {
 				return err
 			}
 			result.UpdatedCount++
@@ -392,10 +397,12 @@ func (s *ConfigService) applyRoutines(
 	}
 	for _, cfg := range incoming {
 		if routine, ok := byName[cfg.Name]; ok {
-			routine.Description = cfg.Description
-			routine.TaskTemplate = cfg.TaskTemplate
-			routine.ConcurrencyPolicy = models.RoutineConcurrencyPolicy(cfg.ConcurrencyPolicy)
-			if err := s.repo.UpdateRoutine(ctx, routine); err != nil {
+			fields := sqlite.RoutineConfigFields{
+				Description:       cfg.Description,
+				TaskTemplate:      cfg.TaskTemplate,
+				ConcurrencyPolicy: models.RoutineConcurrencyPolicy(cfg.ConcurrencyPolicy),
+			}
+			if err := s.repo.UpdateRoutineConfigFields(ctx, routine.ID, fields); err != nil {
 				return err
 			}
 			result.UpdatedCount++
@@ -430,12 +437,14 @@ func (s *ConfigService) applyProjects(
 	}
 	for _, cfg := range incoming {
 		if project, ok := byName[cfg.Name]; ok {
-			project.Description = cfg.Description
-			project.Color = cfg.Color
-			project.BudgetCents = cfg.BudgetCents
-			project.Repositories = cfg.Repositories
-			project.ExecutorConfig = cfg.ExecutorConfig
-			if err := s.repo.UpdateProject(ctx, project); err != nil {
+			fields := sqlite.ProjectConfigFields{
+				Description:    cfg.Description,
+				Color:          cfg.Color,
+				BudgetCents:    cfg.BudgetCents,
+				Repositories:   cfg.Repositories,
+				ExecutorConfig: cfg.ExecutorConfig,
+			}
+			if err := s.repo.UpdateProjectConfigFields(ctx, project.ID, fields); err != nil {
 				return err
 			}
 			result.UpdatedCount++

@@ -141,6 +141,32 @@ func (r *Repository) UpdateSkill(ctx context.Context, skill *models.Skill) error
 	return err
 }
 
+// SkillConfigFields is the subset of office_skills columns a config import
+// owns (see UpdateSkillConfigFields).
+type SkillConfigFields struct {
+	Name        string
+	Description string
+	SourceType  models.SkillSourceType
+	Content     string
+}
+
+// UpdateSkillConfigFields updates only the columns a config import owns
+// (name, description, source type, content), leaving source_locator,
+// file_inventory, version, content_hash, approval_state, and the other
+// columns untouched instead of reverting them to a stale read-then-write
+// snapshot.
+func (r *Repository) UpdateSkillConfigFields(
+	ctx context.Context, id string, fields SkillConfigFields,
+) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE office_skills SET
+			name = ?, description = ?, source_type = ?, content = ?, updated_at = ?
+		WHERE id = ?
+	`), fields.Name, fields.Description, fields.SourceType, fields.Content, now, id)
+	return err
+}
+
 // DeleteSkill deletes a skill by ID.
 func (r *Repository) DeleteSkill(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(
