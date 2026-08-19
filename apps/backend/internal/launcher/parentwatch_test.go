@@ -75,6 +75,7 @@ func TestParentWatchdogStopIsIdempotent(t *testing.T) {
 	}, func(int) {
 		t.Fatal("unexpected exit")
 	})
+	watchdog.probe = func(int64) (bool, bool) { return true, true }
 	watchdog.start()
 	watchdog.stop()
 	watchdog.stop()

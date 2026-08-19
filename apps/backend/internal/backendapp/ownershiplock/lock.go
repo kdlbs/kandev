@@ -74,7 +74,7 @@ func openLockFile(path string) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	return os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	return openLockFilePlatform(path)
 }
 
 // Close releases every held OS lock in reverse acquisition order. The first

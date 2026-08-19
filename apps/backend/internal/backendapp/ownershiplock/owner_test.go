@@ -1,7 +1,6 @@
 package ownershiplock
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,6 +32,32 @@ func TestWriteOwnerRoundTrips(t *testing.T) {
 	}
 }
 
+func TestReadOwnerWhileLockIsHeld(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lock")
+	file, err := openLockFile(path)
+	if err != nil {
+		t.Fatalf("open lock file: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = unlockFile(file)
+		_ = file.Close()
+	})
+	if err := lockFile(file); err != nil {
+		t.Fatalf("lockFile: %v", err)
+	}
+	if err := writeOwner(file); err != nil {
+		t.Fatalf("writeOwner: %v", err)
+	}
+
+	owner := readOwner(path)
+	if owner == nil {
+		t.Fatal("readOwner returned nil while lock was held")
+	}
+	if owner.PID != int64(os.Getpid()) {
+		t.Fatalf("owner PID = %d, want %d", owner.PID, os.Getpid())
+	}
+}
+
 func TestWriteOwnerTruncatesPreviousRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "lock")
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
@@ -47,13 +72,9 @@ func TestWriteOwnerTruncatesPreviousRecord(t *testing.T) {
 	if err := writeOwner(file); err != nil {
 		t.Fatalf("writeOwner: %v", err)
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read lock file: %v", err)
-	}
-	var owner OwnerRecord
-	if err := json.Unmarshal(data, &owner); err != nil {
-		t.Fatalf("owner metadata has trailing or invalid data: %v", err)
+	owner := readOwner(path)
+	if owner == nil {
+		t.Fatal("readOwner returned nil after truncating previous metadata")
 	}
 	if owner.PID != int64(os.Getpid()) {
 		t.Fatalf("owner PID = %d, want %d", owner.PID, os.Getpid())
@@ -74,7 +95,7 @@ func TestReadOwnerRejectsInvalidMetadata(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "lock")
 			if test.name != "missing" {
-				if err := os.WriteFile(path, []byte(test.data), 0o600); err != nil {
+				if err := os.WriteFile(path, ownerMetadataFixture(test.data), 0o600); err != nil {
 					t.Fatalf("write metadata: %v", err)
 				}
 			}
@@ -83,4 +104,12 @@ func TestReadOwnerRejectsInvalidMetadata(t *testing.T) {
 			}
 		})
 	}
+}
+
+func ownerMetadataFixture(data string) []byte {
+	return ownerMetadataBytes([]byte(data))
+}
+
+func ownerMetadataBytes(data []byte) []byte {
+	return append([]byte{0}, data...)
 }

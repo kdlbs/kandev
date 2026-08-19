@@ -23,6 +23,13 @@ var (
 	ownerLivenessFn = proclive.Alive
 )
 
+const (
+	// Windows locks the first byte of the file. Keep metadata after that byte
+	// so a conflicting process can read it through a separate file handle.
+	ownerMetadataOffset    int64 = 1
+	maxOwnerMetadataLength int64 = 4096
+)
+
 func writeOwner(file *os.File) error {
 	executable, _ := os.Executable()
 	record := OwnerRecord{
@@ -37,7 +44,7 @@ func writeOwner(file *os.File) error {
 	if err := file.Truncate(0); err != nil {
 		return err
 	}
-	n, err := file.WriteAt(data, 0)
+	n, err := file.WriteAt(data, ownerMetadataOffset)
 	if err != nil {
 		return err
 	}
@@ -48,8 +55,21 @@ func writeOwner(file *os.File) error {
 }
 
 func readOwner(path string) *OwnerRecord {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
+		return nil
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		return nil
+	}
+	metadataLength := info.Size() - ownerMetadataOffset
+	if metadataLength <= 0 || metadataLength > maxOwnerMetadataLength {
+		return nil
+	}
+	data := make([]byte, int(metadataLength))
+	if _, err := file.ReadAt(data, ownerMetadataOffset); err != nil {
 		return nil
 	}
 	var record OwnerRecord

@@ -61,16 +61,22 @@ plus `writeOwner(file *os.File) error` and `readOwner(path string) *OwnerRecord`
 `writeOwner` builds the record from `os.Getpid()`, `os.Executable()` (empty
 string on error, not a failure), and `time.Now().UTC().Format(time.RFC3339Nano)`,
 then marshals to a single line. Write it with `file.Truncate(0)` followed by
-`file.WriteAt(data, 0)` on the handle already held. Truncating first is what
-guarantees a concurrent reader sees either nothing or a valid prefix, never a
-stale tail from a longer previous record.
+`file.WriteAt(data, ownerMetadataOffset)` on the handle already held. The first
+byte is reserved for the Windows lock range, so a conflicting process can read
+the metadata through a separate handle while the lock is held. Truncating first
+is what guarantees a concurrent reader sees either nothing or a valid prefix,
+never a stale tail from a longer previous record.
 
-`readOwner` opens the path separately for reading, unmarshals, and returns `nil`
-on any error, on an empty file, or on a non-positive PID. It must never block and
-never take a lock.
+`readOwner` opens the path separately for reading, reads after the reserved
+byte, unmarshals, and returns `nil` on any error, on an empty file, or on a
+non-positive PID. It must never block and never take a lock.
 
 In `lock.go`:
 
+- Open each sidecar with platform no-follow semantics and reject a symlink,
+  reparse point, or non-regular file before returning the handle. The opened
+  handle, rather than a second path lookup, is the regular-file proof used for
+  the later metadata write.
 - After `lockFile(file)` succeeds in `Acquire`, call `writeOwner(file)` and
   discard the error. A metadata write failure must not fail acquisition; the
   process owns the lock either way.
@@ -101,6 +107,8 @@ string.
   them.
 - Empty, unparseable, or known-dead metadata produces exactly today's message.
 - A failed metadata write still yields a successful `Acquire`.
+- A symlinked lock path is rejected without modifying its target.
+- Owner metadata remains readable while the lock is held on Windows.
 - No code path reads `OwnerRecord` to decide whether a lock may be acquired.
 
 ## Verification
@@ -137,12 +145,15 @@ In `lock_test.go`, extending the existing conflict coverage:
   wording in every case.
 - Unknown liveness, `(false, false)`, keeps the owner detail.
 - Metadata write failure still returns a usable owner from `Acquire`.
+- Create a symlinked sidecar and assert opening it fails without changing the
+  target bytes.
 
 In `owner_test.go`:
 
 - Round-trip `writeOwner` then `readOwner`.
 - Truncation: pre-fill the file with a longer valid record, write a shorter one,
   read back and assert no trailing bytes survive.
+- Hold the OS lock and read owner metadata through a second handle.
 - `readOwner` on a missing file, a directory, and a non-positive PID returns
   `nil` without error.
 
@@ -179,3 +190,6 @@ acquisition decision reads owner metadata. Update this file's `status` and
 - Security/trust and external side-effect boundaries: owner metadata never
   participates in acquisition, staleness, or takeover decisions; the OS lock
   remains authoritative.
+- Fixup hardening: platform no-follow sidecar opens reject symlinks/reparse
+  points before metadata writes, and the reserved lock byte keeps Windows
+  conflict diagnostics readable while the lock is held.

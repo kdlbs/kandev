@@ -144,6 +144,12 @@ crashed owner leaves its last-written metadata in place, a reader that can posit
 recorded process is no longer running omits the owner detail rather than naming a dead process; a
 platform that cannot determine liveness reports the recorded values as-is.
 
+The lock sidecar is opened with platform no-follow semantics and must resolve to a regular file before
+the backend can write metadata. A symlink or platform reparse point at the lock path is rejected
+without modifying its target. The first byte of the sidecar is reserved for the Windows lock range,
+so a conflicting process can read the advisory metadata through a separate handle while the lock is
+held.
+
 The backend fails closed when it cannot create, open, or acquire a required lock. Launcher port
 preflight and health-token ownership remain useful readiness checks, but they are not persistent
 state ownership checks.
@@ -223,6 +229,8 @@ not part of this contract.
    cannot confirm and still names the conflicting home path.
 8. Given a backend cannot write its owner metadata, when it has already acquired the lock, then it
    starts normally and a later conflicting process falls back to the path-only message.
+9. Given a lock sidecar path is a symlink or platform reparse point, when the backend starts, then
+   it rejects the lock before writing and leaves the link target unchanged.
 
 ## Out of scope
 

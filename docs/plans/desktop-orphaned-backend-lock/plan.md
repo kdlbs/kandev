@@ -97,10 +97,14 @@ already holds:
 {"pid":51229,"executable":"/Applications/Kandev.app/.../bin/kandev","started_at":"2026-08-19T09:14:35.123456789Z"}
 ```
 
-Written with `Truncate(0)` then `WriteAt(0)`, so a concurrent reader sees either
-empty or a valid prefix, never a stale tail from a longer previous record. It is
+Written with `Truncate(0)` then `WriteAt(1)`, leaving the first byte reserved for
+the Windows lock range so a conflicting process can read the metadata through a
+separate handle while the lock is held. A concurrent reader sees either empty
+or a valid prefix, never a stale tail from a longer previous record. It is
 advisory only: never read to decide ownership, staleness, or takeover, and a
-write failure never fails acquisition.
+write failure never fails acquisition. The lock sidecar is opened with
+platform no-follow semantics and must be a regular file; symlink or reparse
+point paths are rejected before any write.
 
 ---
 

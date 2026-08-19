@@ -2,6 +2,7 @@ package ownershiplock
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -84,6 +85,32 @@ func TestOwnershipLockReleasesAfterForcedProcessExit(t *testing.T) {
 	}
 	if err := owner.Close(); err != nil {
 		t.Fatalf("release after forced exit: %v", err)
+	}
+}
+
+func TestOwnershipLockRejectsSymlinkedLockPath(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	link := filepath.Join(dir, "lock")
+	want := []byte("must remain unchanged")
+	if err := os.WriteFile(target, want, 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	file, err := openLockFile(link)
+	if err == nil {
+		_ = file.Close()
+		t.Fatal("openLockFile succeeded for symlinked lock path")
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("symlink target changed to %q, want %q", got, want)
 	}
 }
 
@@ -244,9 +271,9 @@ func TestOwnershipLockConflictFallsBackWithoutUsableOwner(t *testing.T) {
 		name string
 		data []byte
 	}{
-		{name: "empty", data: nil},
-		{name: "invalid", data: []byte("not json")},
-		{name: "dead", data: mustOwnerJSON(t, OwnerRecord{PID: 987654321, Executable: "dead-kandev", StartedAt: "2026-08-19T09:14:35Z"})},
+		{name: "empty", data: ownerMetadataFixture("")},
+		{name: "invalid", data: ownerMetadataFixture("not json")},
+		{name: "dead", data: ownerMetadataBytes(mustOwnerJSON(t, OwnerRecord{PID: 987654321, Executable: "dead-kandev", StartedAt: "2026-08-19T09:14:35Z"}))},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
