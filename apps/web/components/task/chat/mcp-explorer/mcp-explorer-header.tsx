@@ -28,15 +28,19 @@ function HeaderCopy({ mobile }: { mobile: boolean }) {
   if (mobile) {
     return (
       <div className="min-w-0">
-        <DrawerTitle>{t("task:mcpExplorerTitle")}</DrawerTitle>
-        <DrawerDescription>{t("task:mcpExplorerDescription")}</DrawerDescription>
+        <DrawerTitle className="text-[13px] leading-5">{t("task:mcpExplorerTitle")}</DrawerTitle>
+        <DrawerDescription className="text-[13px] leading-5">
+          {t("task:mcpExplorerDescription")}
+        </DrawerDescription>
       </div>
     );
   }
   return (
     <div className="min-w-0">
-      <DialogTitle>{t("task:mcpExplorerTitle")}</DialogTitle>
-      <DialogDescription>{t("task:mcpExplorerDescription")}</DialogDescription>
+      <DialogTitle className="text-[13px] leading-5">{t("task:mcpExplorerTitle")}</DialogTitle>
+      <DialogDescription className="text-[13px] leading-5">
+        {t("task:mcpExplorerDescription")}
+      </DialogDescription>
     </div>
   );
 }

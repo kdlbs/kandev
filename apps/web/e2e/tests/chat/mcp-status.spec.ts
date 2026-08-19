@@ -52,6 +52,13 @@ async function expectRichStatusTooltip(testPage: Page, trigger: Locator) {
   await expect(kandev.locator("span").first()).toHaveClass(/bg-emerald-500/);
 }
 
+async function expectExplorerTypography(elements: Locator[]) {
+  const fontSizes = await Promise.all(
+    elements.map((element) => element.evaluate((node) => getComputedStyle(node).fontSize)),
+  );
+  expect(new Set(fontSizes)).toEqual(new Set(["13px"]));
+}
+
 async function expectScrollAndFocusReturn(explorer: Locator) {
   const scroll = explorer.getByTestId("mcp-tool-list-scroll");
   const header = explorer.getByTestId("mcp-server-detail");
@@ -101,6 +108,12 @@ test("desktop MCP explorer drills into tools and preserves list context", async 
     await expect(createTask).toBeVisible({ timeout: 30_000 });
     await expect(createTask.getByText(/^~\d+ tokens?$/)).toBeVisible();
     await expect(createTask.locator("p")).toHaveCount(0);
+    await expectExplorerTypography([
+      explorer.locator('[data-slot="dialog-description"]'),
+      explorer.getByTestId("mcp-server-detail").locator("h3"),
+      createTask,
+      createTask.getByText(/^~\d+ tokens?$/),
+    ]);
     await prCapture.screenshot("desktop-mcp-explorer-tools", {
       caption: "Desktop MCP explorer with compact tool rows and token estimates",
     });
@@ -111,6 +124,12 @@ test("desktop MCP explorer drills into tools and preserves list context", async 
     await expect(detail.getByText(/^~\d+ tokens?$/)).toBeVisible();
     await expect(detail.locator("section").first().locator("p")).toHaveText(/\S+/);
     await expect(detail.getByText("title", { exact: true })).toBeVisible();
+    await expectExplorerTypography([
+      explorer.locator('[data-slot="dialog-description"]'),
+      detail.locator("h3"),
+      detail.locator("section").first().locator("p"),
+      detail.getByText("title", { exact: true }),
+    ]);
     await prCapture.screenshot("desktop-mcp-explorer-tool-detail", {
       caption: "Desktop MCP tool detail with description and arguments",
     });

@@ -33,7 +33,7 @@ export function McpStatusDot({
 export function McpStatusTooltip({ servers }: { servers: MCPAttachmentServer[] }) {
   const { t } = useTranslation();
   return (
-    <div data-testid="mcp-status-popover" className="max-w-96 space-y-2 text-sm">
+    <div data-testid="mcp-status-popover" className="max-w-96 space-y-2 text-[13px] leading-5">
       <div className="font-medium">{t("task:mcpServers")}</div>
       {servers.length === 0 ? (
         <div className="text-muted-foreground">{t("task:mcpNoServers")}</div>

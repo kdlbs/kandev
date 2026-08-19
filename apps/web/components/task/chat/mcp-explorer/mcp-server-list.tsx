@@ -42,12 +42,15 @@ export function McpServerList({
   const { t } = useTranslation();
 
   return (
-    <div data-testid="mcp-server-list" className="h-full min-h-0 overflow-y-auto">
-      <div className="mb-2 px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+    <div
+      data-testid="mcp-server-list"
+      className="h-full min-h-0 overflow-y-auto text-[13px] leading-5"
+    >
+      <div className="mb-2 px-1 text-[13px] font-medium uppercase tracking-wide text-muted-foreground">
         {t("task:mcpServerList")}
       </div>
       {servers.length === 0 ? (
-        <p className="px-1 py-4 text-sm text-muted-foreground">{t("task:mcpNoServers")}</p>
+        <p className="px-1 py-4 text-[13px] text-muted-foreground">{t("task:mcpNoServers")}</p>
       ) : (
         <div className="space-y-1">
           {servers.map((server) => {
@@ -62,7 +65,7 @@ export function McpServerList({
                 aria-current={selected ? "true" : undefined}
                 onClick={() => onSelect(server.name)}
                 className={cn(
-                  "min-h-11 w-full justify-start gap-2 px-2 text-left",
+                  "min-h-11 w-full justify-start gap-2 px-2 text-left text-[13px]",
                   selected && "bg-muted/60",
                 )}
               >

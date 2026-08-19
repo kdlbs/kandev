@@ -26,17 +26,22 @@ export function McpServerSummary({ server }: { server: MCPAttachmentServer }) {
   const counts = getMcpToolCounts(server);
   const observedAt = formatObservedAt(server.tools_listed_at);
   return (
-    <div data-testid="mcp-server-detail" className="space-y-2 border-b border-border/70 pb-3">
+    <div
+      data-testid="mcp-server-detail"
+      className="space-y-2 border-b border-border/70 pb-3 text-[13px] leading-5"
+    >
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <McpStatusDot status={server.status} className="h-2.5 w-2.5" />
-        <h3 className="min-w-0 break-words text-base font-semibold">{server.name}</h3>
-        <span className="text-sm text-muted-foreground">{t(mcpStatusLabelKey(server.status))}</span>
-        <span className="ml-auto text-xs text-muted-foreground">
+        <h3 className="min-w-0 break-words text-[13px] font-semibold">{server.name}</h3>
+        <span className="text-[13px] text-muted-foreground">
+          {t(mcpStatusLabelKey(server.status))}
+        </span>
+        <span className="ml-auto text-[13px] text-muted-foreground">
           {t("task:mcpToolCount", { count: counts.total })}
         </span>
       </div>
-      {server.summary && <p className="text-sm text-muted-foreground">{server.summary}</p>}
-      <details className="text-sm">
+      {server.summary && <p className="text-[13px] text-muted-foreground">{server.summary}</p>}
+      <details className="text-[13px]">
         <summary className="min-h-11 cursor-pointer content-center text-muted-foreground">
           {t("task:mcpConnectionDetails")}
         </summary>

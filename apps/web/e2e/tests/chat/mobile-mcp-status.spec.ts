@@ -7,6 +7,13 @@ async function expectMinTouchHeight(control: Locator) {
   expect(box?.height).toBeGreaterThanOrEqual(44);
 }
 
+async function expectExplorerTypography(elements: Locator[]) {
+  const fontSizes = await Promise.all(
+    elements.map((element) => element.evaluate((node) => getComputedStyle(node).fontSize)),
+  );
+  expect(new Set(fontSizes)).toEqual(new Set(["13px"]));
+}
+
 test("mobile MCP explorer uses servers, tools, and tool detail pages", async ({
   testPage,
   apiClient,
@@ -68,11 +75,23 @@ test("mobile MCP explorer uses servers, tools, and tool detail pages", async ({
   const createTask = toolList.getByTestId("mcp-tool-row-create_task_kandev");
   await createTask.scrollIntoViewIfNeeded();
   await expectMinTouchHeight(createTask);
+  await expectExplorerTypography([
+    drawer.locator('[data-slot="drawer-description"]'),
+    toolList.getByTestId("mcp-server-detail").locator("h3"),
+    createTask,
+    createTask.getByText(/^~\d+ tokens?$/),
+  ]);
   await createTask.tap();
   const detail = drawer.getByTestId("mcp-tool-detail");
   await expect(detail).toBeVisible();
   await expect(detail.getByText(/^~\d+ tokens?$/)).toBeVisible();
   await expect(detail.getByText("title", { exact: true })).toBeVisible();
+  await expectExplorerTypography([
+    drawer.locator('[data-slot="drawer-description"]'),
+    detail.locator("h3"),
+    detail.locator("section").first().locator("p"),
+    detail.getByText("title", { exact: true }),
+  ]);
   const backToTools = detail.getByRole("button", { name: "Back to tools" });
   await expectMinTouchHeight(backToTools);
   await prCapture.screenshot("mobile-mcp-explorer-tool-detail", {

@@ -21,7 +21,7 @@ function ToolPages({ navigation, touch }: { navigation: Navigation; touch: boole
   const { t } = useTranslation();
   if (!navigation.server) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+      <div className="flex h-full items-center justify-center text-[13px] text-muted-foreground">
         {t("task:mcpNoServers")}
       </div>
     );
@@ -106,7 +106,7 @@ function DesktopExplorer({
         className="grid max-h-[85dvh] min-h-[min(34rem,85dvh)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-4xl"
       >
         <McpExplorerHeader onClose={() => setOpen(false)} mobile={false} />
-        <div className="min-h-0 overflow-hidden text-sm">
+        <div className="min-h-0 overflow-hidden text-[13px] leading-5">
           <ExplorerBody servers={servers} navigation={navigation} touch={false} />
         </div>
       </DialogContent>
@@ -147,7 +147,7 @@ export function McpServerExplorer({
         )}
       >
         <McpExplorerHeader onClose={() => setOpen(false)} mobile />
-        <div className="min-h-0 flex-1 overflow-hidden px-4 pb-4 text-sm">
+        <div className="min-h-0 flex-1 overflow-hidden px-4 pb-4 text-[13px] leading-5">
           <ExplorerBody servers={servers} navigation={navigation} touch />
         </div>
       </DrawerContent>
