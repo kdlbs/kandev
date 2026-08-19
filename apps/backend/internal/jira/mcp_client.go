@@ -18,40 +18,59 @@ import (
 // over the MCP Streamable HTTP transport. The OAuth token from the MCP
 // OAuth 2.1 flow authenticates the session — it does NOT work for direct
 // Jira REST API calls, so we route through the MCP server.
-//
-// Each MCPClient holds one MCP session (initialize → tools/call). Sessions
-// are per-workspace and cached in the service's client map, so the session
-// is reused across requests until the client is invalidated (config change,
-// token refresh).
 type MCPClient struct {
-	http       *http.Client
+	http        *http.Client
 	accessToken string
+	tokenMu     sync.RWMutex // guards accessToken
 	workspaceID string
-	sessionMu  sync.Mutex // guards session init only
-	mu         sync.Mutex // guards session reset on 401
-	sessionID  string
+	siteURL     string
+	sessionMu   sync.Mutex // guards session init
+	sessionID   string
 	initialized bool
-	cloudID    string
+	cloudID     string
+	refresher   TokenRefresher
 }
 
 const (
-	mcpEndpoint   = "https://mcp.atlassian.com/v1/mcp/authv2"
-	mcpProtocol   = "2025-06-18"
+	mcpEndpoint = "https://mcp.atlassian.com/v1/mcp/authv2"
+	mcpProtocol = "2025-06-18"
 )
 
 // NewMCPClient builds an MCP-backed Jira client.
-func NewMCPClient(accessToken, cloudID, workspaceID string) *MCPClient {
+func NewMCPClient(accessToken, cloudID, workspaceID, siteURL string) *MCPClient {
+	site := strings.TrimRight(siteURL, "/")
 	return &MCPClient{
 		http: &http.Client{
 			Timeout: 30 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		},
 		accessToken: accessToken,
 		workspaceID: workspaceID,
+		siteURL:     site,
 		cloudID:     cloudID,
 	}
 }
 
-// mcpRequest is a JSON-RPC 2.0 request.
+func (c *MCPClient) getToken() string {
+	c.tokenMu.RLock()
+	defer c.tokenMu.RUnlock()
+	return c.accessToken
+}
+
+func (c *MCPClient) setToken(t string) {
+	c.tokenMu.Lock()
+	defer c.tokenMu.Unlock()
+	c.accessToken = t
+}
+
+// SetRefresher wires the OAuth token refresher for 401 auto-refresh.
+func (c *MCPClient) SetRefresher(workspaceID string, r TokenRefresher) {
+	c.workspaceID = workspaceID
+	c.refresher = r
+}
+
 type mcpRequest struct {
 	JSONRPC string      `json:"jsonrpc"`
 	Method  string      `json:"method"`
@@ -59,7 +78,6 @@ type mcpRequest struct {
 	ID      int         `json:"id"`
 }
 
-// mcpResponse is the parsed SSE event data.
 type mcpResponse struct {
 	Result struct {
 		Content []struct {
@@ -76,12 +94,37 @@ type mcpResponse struct {
 	ID      int    `json:"id"`
 }
 
-// call sends a JSON-RPC request to the MCP server and parses the SSE response.
+// call sends a JSON-RPC request. On 401, refreshes token and retries once.
 func (c *MCPClient) call(ctx context.Context, method string, params interface{}) (string, error) {
+	result, err := c.callOnce(ctx, method, params)
+	if err == nil {
+		return result, nil
+	}
+	if c.refresher != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == 401 {
+			if refreshErr := c.refresher.RefreshOAuthToken(ctx, c.workspaceID); refreshErr != nil {
+				return "", fmt.Errorf("oauth token refresh failed: %w; original: %v", refreshErr, err)
+			}
+			newToken, revealErr := c.refresher.RevealAccessToken(ctx, c.workspaceID)
+			if revealErr != nil {
+				return "", fmt.Errorf("reveal refreshed token: %w; original: %v", revealErr, err)
+			}
+			c.setToken(newToken)
+			c.sessionMu.Lock()
+			c.sessionID = ""
+			c.initialized = false
+			c.sessionMu.Unlock()
+			return c.callOnce(ctx, method, params)
+		}
+	}
+	return "", err
+}
+
+func (c *MCPClient) callOnce(ctx context.Context, method string, params interface{}) (string, error) {
 	if err := c.ensureSession(ctx); err != nil {
 		return "", err
 	}
-
 	reqBody, _ := json.Marshal(mcpRequest{
 		JSONRPC: "2.0",
 		Method:  method,
@@ -92,7 +135,7 @@ func (c *MCPClient) call(ctx context.Context, method string, params interface{})
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+	req.Header.Set("Authorization", "Bearer "+c.getToken())
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("MCP-Protocol-Version", mcpProtocol)
@@ -108,17 +151,15 @@ func (c *MCPClient) call(ctx context.Context, method string, params interface{})
 		return "", err
 	}
 	if resp.StatusCode == 401 {
-		// Session expired — reset so next call re-initializes.
-		c.mu.Lock()
+		c.sessionMu.Lock()
 		c.sessionID = ""
 		c.initialized = false
-		c.mu.Unlock()
+		c.sessionMu.Unlock()
 		return "", &APIError{StatusCode: 401, Message: "MCP session expired"}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", &APIError{StatusCode: resp.StatusCode, Message: string(raw)}
 	}
-	// Parse SSE response: lines starting with "data: "
 	data := parseSSE(raw)
 	if data == "" {
 		return "", fmt.Errorf("MCP server returned empty response")
@@ -142,8 +183,6 @@ func (c *MCPClient) call(ctx context.Context, method string, params interface{})
 	return mcpr.Result.Content[0].Text, nil
 }
 
-// ensureSession initializes the MCP session if not already done. Uses a
-// separate lock so concurrent API calls don't serialize on session init.
 func (c *MCPClient) ensureSession(ctx context.Context) error {
 	c.sessionMu.Lock()
 	defer c.sessionMu.Unlock()
@@ -164,7 +203,7 @@ func (c *MCPClient) ensureSession(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+	req.Header.Set("Authorization", "Bearer "+c.getToken())
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("MCP-Protocol-Version", mcpProtocol)
@@ -186,38 +225,43 @@ func (c *MCPClient) ensureSession(ctx context.Context) error {
 	return nil
 }
 
-// parseSSE extracts the data from an SSE response body.
 func parseSSE(raw []byte) string {
+	var sb strings.Builder
 	for _, line := range strings.Split(string(raw), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "data: ") {
-			return strings.TrimPrefix(line, "data: ")
+			sb.WriteString(strings.TrimPrefix(line, "data: "))
 		}
 	}
-	return ""
+	return sb.String()
 }
 
-var mcpIDCounter int
+var mcpIDCounter struct {
+	sync.Mutex
+	n int
+}
 
 func nextMCPID() int {
-	mcpIDCounter++
-	return mcpIDCounter
+	mcpIDCounter.Lock()
+	defer mcpIDCounter.Unlock()
+	mcpIDCounter.n++
+	return mcpIDCounter.n
 }
 
-// --- Client interface implementation ---
+// --- Client interface ---
 
 func (c *MCPClient) TestAuth(ctx context.Context) (*TestConnectionResult, error) {
 	result, err := c.call(ctx, "tools/call", map[string]interface{}{
-		"name": "atlassianUserInfo",
+		"name":      "atlassianUserInfo",
 		"arguments": map[string]interface{}{},
 	})
 	if err != nil {
 		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
 	}
 	var user struct {
-		Name  string `json:"name"`
-		Email string `json:"email"`
-		AccountID string `json:"account_id"`
+		Name      string `json:"name"`
+		Email     string `json:"email"`
+		AccountID string `json:"accountId"`
 	}
 	if err := json.Unmarshal([]byte(result), &user); err != nil {
 		return &TestConnectionResult{OK: true}, nil
@@ -226,20 +270,47 @@ func (c *MCPClient) TestAuth(ctx context.Context) (*TestConnectionResult, error)
 }
 
 func (c *MCPClient) GetTicket(ctx context.Context, ticketKey string) (*JiraTicket, error) {
-	result, err := c.call(ctx, "tools/call", map[string]interface{}{
-		"name": "getJiraIssue",
-		"arguments": map[string]interface{}{
-			"cloudId":      c.cloudID,
-			"issueIdOrKey": ticketKey,
-		},
-	})
-	if err != nil {
-		return nil, err
+	type issueResult struct {
+		ticket *JiraTicket
+		err    error
 	}
-	return parseMCPIssue(result, ticketKey)
+	type transResult struct {
+		transitions []JiraTransition
+		err         error
+	}
+	issueCh := make(chan issueResult, 1)
+	transCh := make(chan transResult, 1)
+	go func() {
+		result, err := c.call(ctx, "tools/call", map[string]interface{}{
+			"name": "getJiraIssue",
+			"arguments": map[string]interface{}{
+				"cloudId":      c.cloudID,
+				"issueIdOrKey": ticketKey,
+			},
+		})
+		if err != nil {
+			issueCh <- issueResult{nil, err}
+			return
+		}
+		t, err := parseMCPIssue(result, c.siteURL)
+		issueCh <- issueResult{t, err}
+	}()
+	go func() {
+		trans, err := c.listTransitions(ctx, ticketKey)
+		transCh <- transResult{trans, err}
+	}()
+	ir := <-issueCh
+	if ir.err != nil {
+		return nil, ir.err
+	}
+	tr := <-transCh
+	if tr.err == nil {
+		ir.ticket.Transitions = tr.transitions
+	}
+	return ir.ticket, nil
 }
 
-func (c *MCPClient) ListTransitions(ctx context.Context, ticketKey string) ([]JiraTransition, error) {
+func (c *MCPClient) listTransitions(ctx context.Context, ticketKey string) ([]JiraTransition, error) {
 	result, err := c.call(ctx, "tools/call", map[string]interface{}{
 		"name": "getTransitionsForJiraIssue",
 		"arguments": map[string]interface{}{
@@ -252,25 +323,31 @@ func (c *MCPClient) ListTransitions(ctx context.Context, ticketKey string) ([]Ji
 	}
 	var resp struct {
 		Transitions []struct {
-			ID           string `json:"id"`
-			Name         string `json:"name"`
-			ToStatusID   string `json:"toStatusId"`
-			ToStatusName string `json:"toStatusName"`
+			ID   string `json:"id"`
+			Name string `json:"name"`
+			To   struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"to"`
 		} `json:"transitions"`
 	}
 	if err := json.Unmarshal([]byte(result), &resp); err != nil {
 		return nil, fmt.Errorf("decode transitions: %w", err)
 	}
-	transitions := make([]JiraTransition, len(resp.Transitions))
-	for i, t := range resp.Transitions {
-		transitions[i] = JiraTransition{
+	out := make([]JiraTransition, 0, len(resp.Transitions))
+	for _, t := range resp.Transitions {
+		out = append(out, JiraTransition{
 			ID:           t.ID,
 			Name:         t.Name,
-			ToStatusID:   t.ToStatusID,
-			ToStatusName: t.ToStatusName,
-		}
+			ToStatusID:   t.To.ID,
+			ToStatusName: t.To.Name,
+		})
 	}
-	return transitions, nil
+	return out, nil
+}
+
+func (c *MCPClient) ListTransitions(ctx context.Context, ticketKey string) ([]JiraTransition, error) {
+	return c.listTransitions(ctx, ticketKey)
 }
 
 func (c *MCPClient) DoTransition(ctx context.Context, ticketKey, transitionID string) error {
@@ -279,7 +356,7 @@ func (c *MCPClient) DoTransition(ctx context.Context, ticketKey, transitionID st
 		"arguments": map[string]interface{}{
 			"cloudId":      c.cloudID,
 			"issueIdOrKey": ticketKey,
-			"transitionId": transitionID,
+			"transition":   map[string]string{"id": transitionID},
 		},
 	})
 	return err
@@ -305,43 +382,57 @@ func (c *MCPClient) ListProjects(ctx context.Context) ([]JiraProject, error) {
 	if err := json.Unmarshal([]byte(result), &resp); err != nil {
 		return nil, fmt.Errorf("decode projects: %w", err)
 	}
-	projects := make([]JiraProject, len(resp.Values))
-	for i, p := range resp.Values {
-		projects[i] = JiraProject{Key: p.Key, Name: p.Name, ID: p.ID}
+	out := make([]JiraProject, 0, len(resp.Values))
+	for _, p := range resp.Values {
+		out = append(out, JiraProject{Key: p.Key, Name: p.Name, ID: p.ID})
 	}
-	return projects, nil
+	return out, nil
 }
 
+// ListProjectStatuses fetches project workflow statuses. The MCP server
+// doesn't expose a direct /project/{key}/statuses endpoint, so we use
+// getJiraProjectIssueTypesMetadata which returns issue types with their
+// available statuses. We flatten and dedupe like CloudClient does.
 func (c *MCPClient) ListProjectStatuses(ctx context.Context, projectKey string) ([]JiraStatus, error) {
 	result, err := c.call(ctx, "tools/call", map[string]interface{}{
 		"name": "getJiraProjectIssueTypesMetadata",
 		"arguments": map[string]interface{}{
-			"cloudId":     c.cloudID,
+			"cloudId":        c.cloudID,
 			"projectIdOrKey": projectKey,
 		},
 	})
 	if err != nil {
 		return nil, err
 	}
-	var resp struct {
+	// The response is an array of issue types, each with a "statuses" array.
+	var body []struct {
 		Statuses []struct {
 			ID             string `json:"id"`
 			Name           string `json:"name"`
-			StatusCategory string `json:"statusCategory"`
+			StatusCategory struct {
+				Key string `json:"key"`
+			} `json:"statusCategory"`
 		} `json:"statuses"`
 	}
-	if err := json.Unmarshal([]byte(result), &resp); err != nil {
+	if err := json.Unmarshal([]byte(result), &body); err != nil {
 		return nil, fmt.Errorf("decode project statuses: %w", err)
 	}
-	statuses := make([]JiraStatus, len(resp.Statuses))
-	for i, s := range resp.Statuses {
-		statuses[i] = JiraStatus{
-			ID:             s.ID,
-			Name:           s.Name,
-			StatusCategory: s.StatusCategory,
+	out := make([]JiraStatus, 0)
+	seen := make(map[string]struct{})
+	for _, it := range body {
+		for _, s := range it.Statuses {
+			if _, dup := seen[s.ID]; dup {
+				continue
+			}
+			seen[s.ID] = struct{}{}
+			out = append(out, JiraStatus{
+				ID:             s.ID,
+				Name:           s.Name,
+				StatusCategory: s.StatusCategory.Key,
+			})
 		}
 	}
-	return statuses, nil
+	return out, nil
 }
 
 func (c *MCPClient) SearchTickets(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
@@ -360,106 +451,106 @@ func (c *MCPClient) SearchTickets(ctx context.Context, jql, pageToken string, ma
 	if err != nil {
 		return nil, err
 	}
-	return parseMCPSearchResult(result)
+	return parseMCPSearchResult(result, c.siteURL)
 }
 
-// parseMCPIssue parses a Jira issue from the MCP tool response text.
-func parseMCPIssue(raw, ticketKey string) (*JiraTicket, error) {
-	var issue struct {
-		Key    string `json:"key"`
-		Fields struct {
-			Summary     string `json:"summary"`
-			Status      struct {
-				ID           string `json:"id"`
-				Name         string `json:"name"`
-				StatusCategory struct {
-					Name string `json:"name"`
-				} `json:"statusCategory"`
-			} `json:"status"`
-			Project struct {
+// mcpIssue mirrors the subset of the Jira issue payload from the MCP tool.
+type mcpIssue struct {
+	ID     string `json:"id"`
+	Key    string `json:"key"`
+	Fields struct {
+		Summary     string      `json:"summary"`
+		Description interface{} `json:"description"` // ADF or string
+		Updated     string      `json:"updated"`
+		Status      struct {
+			ID             string `json:"id"`
+			Name           string `json:"name"`
+			StatusCategory struct {
 				Key string `json:"key"`
-			} `json:"project"`
-			Issuetype struct {
-				Name string `json:"name"`
-				IconURL string `json:"iconUrl"`
-			} `json:"issuetype"`
-			Priority struct {
-				Name    string `json:"name"`
-				IconURL string `json:"iconUrl"`
-			} `json:"priority"`
-			Assignee struct {
-				DisplayName string `json:"displayName"`
-				AvatarUrls  map[string]string `json:"avatarUrls"`
-			} `json:"assignee"`
-			Reporter struct {
-				DisplayName string `json:"displayName"`
-				AvatarUrls  map[string]string `json:"avatarUrls"`
-			} `json:"reporter"`
-			Updated string `json:"updated"`
-		} `json:"fields"`
+			} `json:"statusCategory"`
+		} `json:"status"`
+		Project struct {
+			Key string `json:"key"`
+		} `json:"project"`
+		Issuetype struct {
+			Name    string `json:"name"`
+			IconURL string `json:"iconUrl"`
+		} `json:"issuetype"`
+		Priority struct {
+			Name    string `json:"name"`
+			IconURL string `json:"iconUrl"`
+		} `json:"priority"`
+		Assignee *mcpUser `json:"assignee"`
+		Reporter *mcpUser `json:"reporter"`
+	} `json:"fields"`
+}
+
+type mcpUser struct {
+	DisplayName string `json:"displayName"`
+	AvatarURLs  struct {
+		Size24 string `json:"24x24"`
+		Size32 string `json:"32x32"`
+	} `json:"avatarUrls"`
+}
+
+func (u *mcpUser) avatar() string {
+	if u == nil {
+		return ""
 	}
+	if u.AvatarURLs.Size24 != "" {
+		return u.AvatarURLs.Size24
+	}
+	return u.AvatarURLs.Size32
+}
+
+func (u *mcpUser) name() string {
+	if u == nil {
+		return ""
+	}
+	return u.DisplayName
+}
+
+// parseMCPIssue converts the MCP tool response into a JiraTicket.
+func parseMCPIssue(raw, siteURL string) (*JiraTicket, error) {
+	var issue mcpIssue
 	if err := json.Unmarshal([]byte(raw), &issue); err != nil {
 		return nil, fmt.Errorf("decode issue: %w", err)
 	}
-	category := ""
-	if issue.Fields.Status.StatusCategory.Name != "" {
-		cat := strings.ToLower(issue.Fields.Status.StatusCategory.Name)
-		switch {
-		case strings.Contains(cat, "new"):
-			category = "new"
-		case strings.Contains(cat, "done"):
-			category = "done"
-		case strings.Contains(cat, "indeterminate"):
-			category = "indeterminate"
-		}
-	}
-	var assigneeAvatar, reporterAvatar string
-	if len(issue.Fields.Assignee.AvatarUrls) > 0 {
-		for _, v := range issue.Fields.Assignee.AvatarUrls {
-			assigneeAvatar = v
-			break
-		}
-	}
-	if len(issue.Fields.Reporter.AvatarUrls) > 0 {
-		for _, v := range issue.Fields.Reporter.AvatarUrls {
-			reporterAvatar = v
-			break
-		}
-	}
 	return &JiraTicket{
+		ID:             issue.ID,
 		Key:            issue.Key,
 		Summary:        issue.Fields.Summary,
+		Description:    extractDescription(issue.Fields.Description),
 		StatusID:       issue.Fields.Status.ID,
 		StatusName:     issue.Fields.Status.Name,
-		StatusCategory: category,
+		StatusCategory: issue.Fields.Status.StatusCategory.Key,
 		ProjectKey:     issue.Fields.Project.Key,
 		IssueType:      issue.Fields.Issuetype.Name,
 		IssueTypeIcon:  issue.Fields.Issuetype.IconURL,
 		Priority:       issue.Fields.Priority.Name,
 		PriorityIcon:   issue.Fields.Priority.IconURL,
-		AssigneeName:   issue.Fields.Assignee.DisplayName,
-		AssigneeAvatar: assigneeAvatar,
-		ReporterName:   issue.Fields.Reporter.DisplayName,
-		ReporterAvatar: reporterAvatar,
+		AssigneeName:   issue.Fields.Assignee.name(),
+		AssigneeAvatar: issue.Fields.Assignee.avatar(),
+		ReporterName:   issue.Fields.Reporter.name(),
+		ReporterAvatar: issue.Fields.Reporter.avatar(),
 		Updated:        issue.Fields.Updated,
-		URL:            fmt.Sprintf("https://salla-dev.atlassian.net/browse/%s", issue.Key),
+		URL:            siteURL + "/browse/" + issue.Key,
 	}, nil
 }
 
-// parseMCPSearchResult parses the search response from the MCP tool.
-func parseMCPSearchResult(raw string) (*SearchResult, error) {
+func parseMCPSearchResult(raw, siteURL string) (*SearchResult, error) {
 	var resp struct {
-		Issues []json.RawMessage `json:"issues"`
-		IsLast bool              `json:"isLast"`
-		NextPageToken string    `json:"nextPageToken"`
-		MaxResults int          `json:"maxResults"`
+		Issues       []json.RawMessage `json:"issues"`
+		IsLast       bool              `json:"isLast"`
+		NextPageToken string           `json:"nextPageToken"`
+		MaxResults    int              `json:"maxResults"`
 	}
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
 		return nil, fmt.Errorf("decode search result: %w", err)
 	}
 	tickets := make([]JiraTicket, 0, len(resp.Issues))
 	for _, raw := range resp.Issues {
-		ticket, err := parseMCPIssue(string(raw), "")
+		ticket, err := parseMCPIssue(string(raw), siteURL)
 		if err != nil {
 			continue
 		}

@@ -160,7 +160,7 @@ type ClientFactory func(cfg *JiraConfig, secret string) Client
 // MCPClient for OAuth auth (which routes through the MCP server).
 func DefaultClientFactory(cfg *JiraConfig, secret string) Client {
 	if cfg.AuthMethod == AuthMethodOAuth {
-		return NewMCPClient(secret, cfg.CloudID, cfg.WorkspaceID)
+		return NewMCPClient(secret, cfg.CloudID, cfg.WorkspaceID, cfg.SiteURL)
 	}
 	return NewCloudClient(cfg, secret)
 }
@@ -358,7 +358,16 @@ func (s *Service) TestConnectionForWorkspace(ctx context.Context, workspaceID st
 	if err != nil {
 		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
 	}
+	// Set WorkspaceID on the config so MCPClient/SetRefresher get the right ID.
+	cfg.WorkspaceID = workspaceID
 	client := s.clientFn(cfg, secret)
+	// Wire the OAuth token refresher for test-connection clients too,
+	// so an expired access token is auto-refreshed during testing.
+	if cfg.AuthMethod == AuthMethodOAuth {
+		if mc, ok := client.(*MCPClient); ok {
+			mc.SetRefresher(workspaceID, s)
+		}
+	}
 	return client.TestAuth(ctx)
 }
 
@@ -606,10 +615,16 @@ func (s *Service) clientFor(ctx context.Context, workspaceID string) (Client, er
 		}
 	}
 	client := s.clientFn(cfg, secret)
-	// Wire the OAuth token refresher so CloudClient can auto-refresh on 401.
+	// Wire the OAuth token refresher so clients can auto-refresh on 401.
+	// This covers both the cached path (clientFor) and the test-connection
+	// path (resolveCredentials → clientFn) — both create a fresh client that
+	// needs the refresher wired.
 	if cfg.AuthMethod == AuthMethodOAuth {
 		if cc, ok := client.(*CloudClient); ok {
 			cc.SetRefresher(workspaceID, s)
+		}
+		if mc, ok := client.(*MCPClient); ok {
+			mc.SetRefresher(workspaceID, s)
 		}
 	}
 	s.mu.Lock()
