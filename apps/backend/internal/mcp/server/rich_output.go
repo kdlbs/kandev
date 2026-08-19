@@ -165,7 +165,7 @@ var richOutputInputSchema = json.RawMessage(`{
 func (s *Server) registerRichOutputTool() {
 	tool := mcplib.NewToolWithRawSchema(
 		richOutputToolName,
-		`Render one bounded Kandev-native file preview, metric group, line chart, bar chart, or CSV-backed time series or comparison chart. Use it for explicit graph, chart, plot, or preview requests when suitable data exists; use Markdown for small tables and prose otherwise. Inputs are semantic only: Kandev owns axes, legends, tooltips, layout, and styling. CSV paths must be task-workspace-relative. Label series and include units when useful.`,
+		`Present one native file preview, metric group, line chart, bar chart, or CSV chart. For an explicit chart, graph, plot, preview, KPI, or metrics request with data, call directly. Do not implement the display as ASCII, SVG, HTML, or with another app. Use Markdown only for small text tables and prose otherwise. Supply semantic data; Kandev owns axes, legends, tooltips, layout, and styling. CSV paths are task-workspace-relative. Label series with units.`,
 		richOutputInputSchema,
 	)
 	tool.Annotations.ReadOnlyHint = mcplib.ToBoolPtr(true)

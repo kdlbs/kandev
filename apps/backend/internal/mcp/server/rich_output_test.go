@@ -157,14 +157,16 @@ func TestRichOutputToolDescriptionStaysFocusedAndDiscoverable(t *testing.T) {
 	s := New(&testBackend{}, "session-1", "task-1", 10005, newTestLogger(t), "", false, ModeTask)
 	tool := s.mcpServer.ListTools()[richOutputToolName].Tool
 
-	for _, phrase := range []string{"file preview", "line chart", "bar chart", "CSV-backed time series", "graph", "plot"} {
+	for _, phrase := range []string{"file preview", "line chart", "bar chart", "CSV chart", "graph", "plot", "KPI", "metrics"} {
 		assert.Contains(t, tool.Description, phrase)
 	}
 	for _, phrase := range []string{
+		"explicit chart, graph, plot, preview, KPI, or metrics request with data, call directly",
+		"Do not implement the display as ASCII, SVG, HTML, or with another app",
 		"Kandev owns axes, legends, tooltips, layout, and styling",
 		"task-workspace-relative",
-		"Markdown for small tables",
-		"include units when useful",
+		"Markdown only for small text tables",
+		"Label series with units",
 	} {
 		assert.Contains(t, tool.Description, phrase)
 	}

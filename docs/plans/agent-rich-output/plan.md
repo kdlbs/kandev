@@ -144,6 +144,7 @@ replay from normalized tool-call input. CSV charts reuse the existing
 7. [x] [Chart axes and legends](task-07-chart-axes-legends.md)
 8. [x] [Real-agent ACP delivery](task-08-real-agent-acp-delivery.md)
 9. [x] [Compact MCP guidance](task-09-compact-mcp-guidance.md)
+10. [x] [Agent routing regression](task-10-agent-routing-regression.md)
 
 Execution is sequential in the primary conversation. No subagents are
 authorized.
@@ -234,3 +235,22 @@ Status: complete on 2026-08-17.
 Result: the tool description fell from 845 to 439 runes. Task and Office lines
 fell from 1,205 and 1,198 runes to 740 each without weakening mandatory
 explicit-request routing or removing either proven Luna recipe.
+
+## Agent routing regression
+
+Status: complete on 2026-08-19.
+
+- Route explicit chart, preview, KPI, and metric-summary requests directly to
+  `show_rich_output_kandev`; reject ASCII, SVG, HTML, and alternate-app
+  presentation substitutes in the agent guidance.
+- Add one exact metric-group recipe while retaining the inline-chart, CSV-chart,
+  Markdown-restraint, and host-ownership guidance under the existing budgets.
+- Re-run inline bar, CSV time series, file preview, metric summary, and small
+  Markdown comparison prompts as fresh Luna Worker subtasks in separate
+  worktree executor environments.
+
+Result: the prompt lines are 737 of 750 runes and the MCP description is 454 of
+650 runes. All four native requests produced exactly one valid rich-output call;
+the textual comparison produced only Markdown. The CSV task created only its
+requested CSV source, and all five tasks completed without permission or input
+requests.

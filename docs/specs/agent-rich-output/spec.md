@@ -49,11 +49,13 @@ agent-designed dashboards.
   compact localized unavailable state and does not break nearby messages.
 - Small textual comparisons continue to use Markdown tables. Version 1 does
   not provide a native data-table block.
-- Always-injected Task and Office guidance includes one exact inline-chart
-  recipe and one CSV recipe. The MCP description stays a focused routing
-  summary, while its schema retains complete examples. Kandev, rather than the
-  agent, owns axes, legends, colors, and layout; agents provide only `labels`
-  plus labeled `series[].values`, or CSV column mappings.
+- Always-injected Task and Office guidance includes one exact inline-chart,
+  CSV-chart, and metric-group recipe. It tells agents to call the native tool
+  directly for explicit presentation requests instead of building ASCII, SVG,
+  HTML, or another app. The MCP description stays a focused routing summary,
+  while its schema retains complete chart examples. Kandev, rather than the
+  agent, owns axes, legends, colors, and layout; agents provide only semantic
+  blocks, inline chart values, or CSV column mappings.
 
 ## API surface
 
@@ -211,6 +213,13 @@ for this feature.
   Kandev's tool guidance, **THEN** it can copy the canonical `chart_type`,
   `title`, `summary`, `labels`, and labeled `series[].values` shape without
   inventing axis, category, or data fields.
+- **GIVEN** an agent is explicitly asked for a chart, file preview, KPI cards,
+  or a native metric summary and suitable data exists, **WHEN** it chooses a
+  response mechanism, **THEN** it calls `show_rich_output_kandev` directly
+  instead of creating an ASCII, SVG, HTML, or app-based substitute.
+- **GIVEN** an agent is asked for KPI cards or a native metric summary, **WHEN**
+  it reads Kandev's tool guidance, **THEN** it can copy the canonical metric
+  `items[].label` and `items[].value` shape without editing a workspace file.
 - **GIVEN** a configuration or external MCP client, **WHEN** it lists tools,
   **THEN** `show_rich_output_kandev` is absent.
 - **GIVEN** a valid completed presentation, **WHEN** the transcript receives
