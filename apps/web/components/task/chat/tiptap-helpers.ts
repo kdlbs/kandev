@@ -319,6 +319,20 @@ function insertCodeFenceNodes(
   }
 }
 
+/**
+ * Rich content pasted from outside the editor should paste as plain text, the
+ * way Ctrl+Shift+V does. The chat composer has no link or styling marks, so the
+ * default HTML parse keeps a browser hyperlink's visible title and silently
+ * drops its URL. Copies made inside the editor (mentions, code blocks) carry
+ * ProseMirror's `data-pm-slice` marker; those are left to the default handler
+ * so their nodes round-trip.
+ */
+function shouldStripPastedFormatting(clipboardData: DataTransfer): boolean {
+  const html = clipboardData.getData("text/html");
+  if (!html) return false;
+  return !html.includes("data-pm-slice");
+}
+
 export function handleEditorPaste(
   view: import("@tiptap/pm/view").EditorView,
   event: ClipboardEvent,
@@ -349,6 +363,17 @@ export function handleEditorPaste(
       insertCodeFenceNodes(view, segments);
       return true;
     }
+  }
+
+  // 3. Strip formatting from externally pasted rich content. Re-running the
+  // paste with just the plain text keeps a hyperlink's URL instead of the
+  // default parse's visible title. `pasteText` fires a synthetic empty-clipboard
+  // paste, so this handler re-enters once, no-ops, and ProseMirror inserts the
+  // text with its own inline/block handling.
+  if (text && clipboardData && shouldStripPastedFormatting(clipboardData)) {
+    event.preventDefault();
+    view.pasteText(text);
+    return true;
   }
 
   return false;
