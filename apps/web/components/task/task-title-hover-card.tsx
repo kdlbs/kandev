@@ -83,7 +83,15 @@ function DesktopTaskTitlePreview({
           aria-expanded={hover.open}
           onPointerEnter={hover.onTriggerEnter}
           onPointerLeave={hover.onTriggerLeave}
-          onKeyDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            // Only swallow keys while the preview is open (protects it from
+            // the card/row's own keyboard shortcuts, e.g. drag pickup).
+            // Escape must always fall through to close the surface it sits
+            // on (kanban preview panel, dialog, ...) even when the trigger
+            // merely has focus from a plain click and the preview isn't open.
+            if (!hover.open && event.key === "Escape") return;
+            event.stopPropagation();
+          }}
           onClick={handleTriggerClick}
           className="min-w-0 max-w-full cursor-pointer text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
         >

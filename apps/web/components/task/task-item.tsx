@@ -316,7 +316,12 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
 }
 
 function TaskItemTitle({ taskId, title }: { taskId?: string; title: string }) {
-  const content = <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>;
+  // w-full: ScrollOnOverflow's root is inline-block, so once it sits inside
+  // the title-preview trigger's <button> (task-title-hover-card.tsx) rather
+  // than being the flex row's direct child, shrink-to-fit sizing lets it grow
+  // past the button's flex-shrunk width instead of clipping to it — losing
+  // the overflow the hover-scroll marquee depends on.
+  const content = <ScrollOnOverflow className="min-w-0 w-full">{title}</ScrollOnOverflow>;
   if (!taskId) return content;
   return (
     <TaskTitleHoverCard taskId={taskId} title={title} side="right" align="start">

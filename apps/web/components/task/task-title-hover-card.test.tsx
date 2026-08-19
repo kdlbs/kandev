@@ -10,6 +10,7 @@ afterEach(() => cleanup());
 
 const LONG_TITLE = "A very long parent task title that should render in full";
 const FIRST_SUBTASK_TITLE = "First subtask";
+const HOVER_CARD_TEST_ID = "task-title-hover-card";
 
 function makeTask(overrides: Partial<KanbanState["tasks"][number]>): KanbanState["tasks"][number] {
   return {
@@ -97,7 +98,7 @@ async function openCard() {
   const trigger = screen.getByTestId("task-title-preview-trigger");
   trigger.focus();
   fireEvent.click(trigger, { detail: 0 });
-  await screen.findAllByTestId("task-title-hover-card");
+  await screen.findAllByTestId(HOVER_CARD_TEST_ID);
 }
 
 /** First (portal) match for a subtask row; Radix also force-mounts a copy. */
@@ -110,7 +111,7 @@ describe("TaskTitleHoverCard", () => {
     renderCard([makeTask({ id: "parent-1" })]);
     await openCard();
 
-    const card = screen.getAllByTestId("task-title-hover-card")[0];
+    const card = screen.getAllByTestId(HOVER_CARD_TEST_ID)[0];
     expect(card.textContent).toContain(LONG_TITLE);
     const titleEl = card.querySelector(".font-semibold");
     expect(titleEl?.textContent).toBe(LONG_TITLE);
@@ -304,12 +305,42 @@ describe("TaskTitleHoverCard — subtask cap and dismissal", () => {
     );
     await openCard();
 
-    const card = screen.getAllByTestId("task-title-hover-card")[0];
+    const card = screen.getAllByTestId(HOVER_CARD_TEST_ID)[0];
     const titleEl = card.querySelector(".font-semibold");
     expect(titleEl).not.toBeNull();
     fireEvent.click(titleEl!);
 
     expect(onParentClick).not.toHaveBeenCalled();
+  });
+});
+
+describe("TaskTitleHoverCard — keyboard propagation", () => {
+  it("lets Escape bubble from the trigger to a closed surface (e.g. a preview panel) when the preview itself is not open", () => {
+    // Regression: a plain click focuses the trigger button without opening
+    // the preview (handleTriggerClick early-returns for real clicks). If
+    // Escape were unconditionally swallowed here, closing an ancestor
+    // surface (like the kanban preview panel) via Escape would silently stop
+    // working the moment its title happened to be under focus.
+    const onParentKeyDown = vi.fn();
+    render(
+      <StateProvider
+        initialState={{
+          kanban: { workflowId: "wf-1", steps: [], tasks: [makeTask({ id: "parent-1" })] },
+        }}
+      >
+        <div onKeyDown={onParentKeyDown}>
+          <TaskTitleHoverCard taskId="parent-1" title={LONG_TITLE}>
+            <span data-testid="trigger">{LONG_TITLE}</span>
+          </TaskTitleHoverCard>
+        </div>
+      </StateProvider>,
+    );
+    const trigger = screen.getByTestId("task-title-preview-trigger");
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Escape" });
+
+    expect(onParentKeyDown).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId(HOVER_CARD_TEST_ID)).toBeNull();
   });
 
   it("does not bubble keyboard activation from a subtask link to the parent row", async () => {

@@ -174,6 +174,6 @@ describe("KanbanCardBody — title hover card gating", () => {
   it("mounts the hover card trigger around the title when enableTitleHover is set", () => {
     render(<KanbanCardBody task={TASK} repositoryChips={[]} enableTitleHover />);
     const title = screen.getByTestId(TITLE_TEST_ID);
-    expect(title.closest('[data-slot="hover-card-trigger"]')).not.toBeNull();
+    expect(title.closest('[data-testid="task-title-preview-trigger"]')).not.toBeNull();
   });
 });
