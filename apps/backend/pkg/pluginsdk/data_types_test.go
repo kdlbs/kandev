@@ -129,14 +129,29 @@ func TestWorkflowProtoRoundTrip(t *testing.T) {
 
 func TestWorkflowStepProtoRoundTrip(t *testing.T) {
 	step := WorkflowStep{
-		ID:         "step-1",
-		WorkflowID: "wf-1",
-		Name:       "Review",
-		Position:   1,
-		StageType:  "review",
+		ID:                   "step-1",
+		WorkflowID:           "wf-1",
+		Name:                 "Review",
+		Position:             1,
+		StageType:            "review",
+		CoordinatorMonitored: true,
+		CoordinatorPrompt:    "Verify the spec covers rollback.",
 	}
 	proto := step.toProto()
 	require.Equal(t, step, workflowStepFromProto(proto))
+}
+
+// TestWorkflowStepProtoRoundTrip_UnmonitoredStep pins the zero-value case: a
+// step that was never checked in Settings > Workspace > Workflow
+// configuration round-trips with CoordinatorMonitored false and an empty
+// CoordinatorPrompt, distinguishable from a checked step with an empty
+// prompt only by the boolean.
+func TestWorkflowStepProtoRoundTrip_UnmonitoredStep(t *testing.T) {
+	step := WorkflowStep{ID: "step-1", WorkflowID: "wf-1", Name: "Spec"}
+	proto := step.toProto()
+	require.Equal(t, step, workflowStepFromProto(proto))
+	require.False(t, proto.GetCoordinatorMonitored())
+	require.Empty(t, proto.GetCoordinatorPrompt())
 }
 
 func TestAgentProfileProtoRoundTrip(t *testing.T) {
