@@ -8,9 +8,10 @@ import { toast } from "@/lib/toast/sonner";
 import { Input } from "@kandev/ui/input";
 import { Switch } from "@kandev/ui/switch";
 import { Button } from "@kandev/ui/button";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateWorkspaceSettings, getWorkspaceSettings } from "@/lib/api/domains/office-api";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
+import type { AppState } from "@/lib/state/store";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
 import { ConfigSection } from "./config-section";
 import { DangerZoneSection } from "./danger-zone-section";
@@ -251,12 +252,15 @@ function RecoverySection({
 
 type Workspace = WorkspaceState["items"][number];
 
+type WorkspaceStoreApi = {
+  getState: () => Pick<AppState, "workspaces" | "setWorkspaces">;
+};
+
 type SaveAppearanceOptions = {
   activeWorkspace: Workspace | undefined;
   name: string;
   description: string;
-  workspaces: Workspace[];
-  setWorkspaces: (items: Workspace[]) => void;
+  storeApi: WorkspaceStoreApi;
   setName: (v: string) => void;
   setDescription: (v: string) => void;
   setSaving: (v: boolean) => void;
@@ -267,8 +271,7 @@ function buildSaveAppearanceHandler({
   activeWorkspace,
   name,
   description,
-  workspaces,
-  setWorkspaces,
+  storeApi,
   setName,
   setDescription,
   setSaving,
@@ -289,8 +292,14 @@ function buildSaveAppearanceHandler({
       });
       setName(updated.name);
       setDescription(updated.description ?? "");
+      // Read the store's current list at save time, not the array captured at
+      // render/handler-build time: an in-flight workspace.created/updated/deleted
+      // WS event can land during the PATCH round trip, and a stale snapshot here
+      // would clobber it with a whole-array replace (setWorkspaces has no merge
+      // semantics). Same idiom as config-chat-agent-section.tsx.
+      const { workspaces: current, setWorkspaces } = storeApi.getState();
       setWorkspaces(
-        workspaces.map((ws) =>
+        current.items.map((ws) =>
           ws.id === updated.id
             ? { ...ws, name: updated.name, description: updated.description }
             : ws,
@@ -420,8 +429,7 @@ function useRecoveryState(activeWorkspace: Workspace | undefined) {
 
 export function useSettingsState(
   activeWorkspace: Workspace | undefined,
-  workspaces: Workspace[],
-  setWorkspaces: (items: Workspace[]) => void,
+  storeApi: WorkspaceStoreApi,
 ) {
   const { t } = useTranslation();
   const [name, setName] = useState(activeWorkspace?.name ?? "");
@@ -441,8 +449,7 @@ export function useSettingsState(
     activeWorkspace,
     name,
     description,
-    workspaces,
-    setWorkspaces,
+    storeApi,
     setName,
     setDescription,
     setSaving: setSavingAppearance,
@@ -470,11 +477,12 @@ export function useSettingsState(
 
 export function SettingsContent() {
   const { t } = useTranslation();
+  const storeApi = useAppStoreApi();
   const workspaces = useAppStore((s) => s.workspaces);
   const setWorkspaces = useAppStore((s) => s.setWorkspaces);
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
-  const s = useSettingsState(activeWorkspace, workspaces.items, setWorkspaces);
+  const s = useSettingsState(activeWorkspace, storeApi);
   const initial = (s.name || "W").charAt(0).toUpperCase();
 
   return (
