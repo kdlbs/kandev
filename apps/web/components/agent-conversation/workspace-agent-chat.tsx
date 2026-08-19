@@ -106,6 +106,7 @@ function ClarificationSection({
           <ClarificationInputOverlay
             messages={messages}
             onResolved={onResolved}
+            onDismiss={noop}
             shortcutScopeRef={shortcutScopeRef}
             keyboardShortcutsEnabled={!collapsed}
           />
@@ -138,6 +139,8 @@ function useAgentConversationState(sessionId: string) {
  * The component is a hydration/error boundary around the same shared chat
  * primitives used by Quick Chat and task panels.
  */
+const noop = () => {};
+
 export const WorkspaceAgentChat = memo(function WorkspaceAgentChat({
   sessionId,
   placeholderOverride,
