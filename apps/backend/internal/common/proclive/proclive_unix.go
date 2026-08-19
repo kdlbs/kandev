@@ -1,10 +1,12 @@
 //go:build !windows
 
-package tempartifacts
+package proclive
 
 import "syscall"
 
-func processAlive(pid int64) (alive, known bool) {
+// Alive reports whether pid is alive. Unix signal-zero checks distinguish a
+// dead process from a process that exists but cannot be signaled by the caller.
+func Alive(pid int64) (alive, known bool) {
 	if pid <= 0 {
 		return false, true
 	}
