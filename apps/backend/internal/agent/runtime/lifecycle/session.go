@@ -635,7 +635,7 @@ func (sm *SessionManager) applyRuntimeSessionLayers(
 				zap.String("execution_id", execution.ID), zap.String("mode", runtimeMode), zap.Error(err))
 		}
 	}
-	sanitizedOptions := profileconfig.SanitizeConfigOptions(runtimeConfigOptions)
+	sanitizedOptions := sanitizeRuntimeConfigOptionsWithCatalog(runtimeConfigOptions, execution.GetModelState())
 	for _, configID := range sortedConfigOptionKeys(sanitizedOptions) {
 		value := sanitizedOptions[configID]
 		if err := execution.agentctl.SetConfigOption(ctx, configID, value); err != nil {
