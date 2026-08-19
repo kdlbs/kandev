@@ -23,6 +23,28 @@ func newTestLocalLogger() *logger.Logger {
 	return log
 }
 
+func TestLocalPreparer_ReuseRequiredSkipsCheckoutAndSetup(t *testing.T) {
+	workspacePath := t.TempDir()
+	marker := filepath.Join(workspacePath, "setup-ran")
+	preparer := NewLocalPreparer(newTestLocalLogger())
+
+	result, err := preparer.Prepare(context.Background(), &EnvPrepareRequest{
+		WorkspacePath:          workspacePath,
+		CheckoutBranch:         "must-not-be-checked-out",
+		SetupScript:            "touch " + marker,
+		WorkspaceReuseRequired: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Prepare() result = %#v, want success", result)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("reuse-required preparation ran setup script: stat error = %v", err)
+	}
+}
+
 // initGitRepo creates a minimal git repo with an initial commit and returns the path.
 func initGitRepo(t *testing.T) string {
 	t.Helper()
