@@ -816,7 +816,7 @@ func (s *Server) runGitLogForRepo(
 		return nil, comparisonErr
 	}
 	if comparison.Explicit {
-		if comparison.Status != "ready" || comparison.Ref == "" {
+		if comparison.Status != lspStatusReady || comparison.Ref == "" {
 			return comparisonUnavailableLogResult(comparison.ErrorCode), nil
 		}
 		mergeBase, err := gitOp.GetMergeBase(ctx, "HEAD", comparison.Ref)
@@ -1094,8 +1094,17 @@ func (s *Server) runGitCumulativeDiffForRepo(
 	if comparisonErr != nil {
 		return nil, http.StatusBadRequest, comparisonErr
 	}
+	return s.runGitCumulativeDiffForRepoResolved(ctx, gitOp, base, targetBranch, repo, comparison)
+}
+
+func (s *Server) runGitCumulativeDiffForRepoResolved(
+	ctx context.Context,
+	gitOp *process.GitOperator,
+	base, targetBranch, repo string,
+	comparison process.ComparisonResolution,
+) (*process.CumulativeDiffResult, int, error) {
 	if comparison.Explicit {
-		if comparison.Status != "ready" || comparison.Ref == "" {
+		if comparison.Status != lspStatusReady || comparison.Ref == "" {
 			return comparisonUnavailableDiffResult(comparison.ErrorCode), http.StatusOK, nil
 		}
 		mergeBase, err := gitOp.GetMergeBase(ctx, "HEAD", comparison.Ref)
@@ -1231,7 +1240,11 @@ func (s *Server) collectCumulativeDiffForRepo(ctx context.Context, sub string) p
 		return perRepoDiffOutcome{subpath: sub, status: http.StatusBadRequest, err: comparisonErr}
 	}
 	if comparison.Explicit {
-		result, status, err := s.runGitCumulativeDiffForRepo(ctx, "", "", sub)
+		gitOp, gitOpErr := s.procMgr.GitOperatorFor(sub)
+		if gitOpErr != nil {
+			return perRepoDiffOutcome{subpath: sub, status: http.StatusBadRequest, err: gitOpErr}
+		}
+		result, status, err := s.runGitCumulativeDiffForRepoResolved(ctx, gitOp, "", "", sub, comparison)
 		return perRepoDiffOutcome{subpath: sub, result: result, status: status, err: err}
 	}
 	base, isSubmodule := s.resolvePerRepoBaseAndScope(ctx, sub)
@@ -1242,7 +1255,11 @@ func (s *Server) collectCumulativeDiffForRepo(ctx context.Context, sub string) p
 	}
 	// Multi-repo: base is already resolved per-repo via resolvePerRepoBase,
 	// so we pass empty target_branch to skip the second merge-base attempt.
-	result, status, err := s.runGitCumulativeDiffForRepo(ctx, base, "", sub)
+	gitOp, gitOpErr := s.procMgr.GitOperatorFor(sub)
+	if gitOpErr != nil {
+		return perRepoDiffOutcome{subpath: sub, status: http.StatusBadRequest, err: gitOpErr, isSubmodule: isSubmodule}
+	}
+	result, status, err := s.runGitCumulativeDiffForRepoResolved(ctx, gitOp, base, "", sub, comparison)
 	return perRepoDiffOutcome{
 		subpath:     sub,
 		result:      result,
@@ -1370,6 +1387,7 @@ func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string,
 // GitStatusResult represents the result of a git status query.
 type GitStatusResult struct {
 	Success             bool                   `json:"success"`
+	RepositoryName      string                 `json:"repository_name,omitempty"`
 	IsSubmodule         bool                   `json:"is_submodule,omitempty"`
 	Branch              string                 `json:"branch"`
 	RemoteBranch        string                 `json:"remote_branch"`
@@ -1487,6 +1505,7 @@ func (s *Server) collectStatusForRepo(ctx context.Context, sub string, fresh boo
 		RepositoryName: sub,
 		Status: GitStatusResult{
 			Success:             true,
+			RepositoryName:      sub,
 			IsSubmodule:         status.IsSubmodule,
 			Branch:              status.Branch,
 			RemoteBranch:        status.RemoteBranch,
@@ -1552,6 +1571,7 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 
 	c.JSON(http.StatusOK, GitStatusResult{
 		Success:             true,
+		RepositoryName:      c.Query("repo"),
 		IsSubmodule:         status.IsSubmodule,
 		Branch:              status.Branch,
 		RemoteBranch:        status.RemoteBranch,

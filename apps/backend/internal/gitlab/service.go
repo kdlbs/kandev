@@ -718,7 +718,7 @@ func (s *Service) syncTaskMRWithClient(
 	if err := store.UpsertTaskMR(ctx, row); err != nil {
 		return nil, fmt.Errorf("upsert task MR: %w", err)
 	}
-	s.reconcileComparisonTarget(ctx, taskID, host, mr)
+	s.reconcileComparisonTargetFromSync(ctx, taskID, host, mr)
 	return &taskMRSyncResult{
 		taskMR:         row,
 		reviewers:      append([]MRReviewer(nil), mr.Reviewers...),

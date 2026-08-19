@@ -45,4 +45,25 @@ test.describe("Fork pull-request comparison target", () => {
     );
     await expect(testPage.getByTestId("comparison-target-notice")).toHaveCount(0);
   });
+
+  test("shows an unavailable state when the upstream target cannot be fetched", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const { task } = await seedForkPRComparisonTask(apiClient, seedData, backend, {
+      comparisonTargetAvailable: false,
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("comparison-target-notice")).toContainText(
+      "upstream/widget:main",
+    );
+  });
 });

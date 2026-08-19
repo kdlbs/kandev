@@ -480,8 +480,19 @@ func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *ty
 		carryAheadBehind(update, prior)
 		return
 	}
-	update.Ahead, _ = strconv.Atoi(parts[0])
-	update.Behind, _ = strconv.Atoi(parts[1])
+	ahead, aheadErr := strconv.Atoi(parts[0])
+	behind, behindErr := strconv.Atoi(parts[1])
+	if aheadErr != nil || behindErr != nil || ahead < 0 || behind < 0 {
+		if comparison.Explicit {
+			update.ComparisonStatus = comparisonTargetStatusUnavailable
+			update.ComparisonErrorCode = comparisonTargetErrorRefUnavailable
+			return
+		}
+		carryAheadBehind(update, prior)
+		return
+	}
+	update.Ahead = ahead
+	update.Behind = behind
 }
 
 // getRemoteAheadBehindCounts populates RemoteAhead/RemoteBehind relative to

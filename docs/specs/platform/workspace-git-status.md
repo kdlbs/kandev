@@ -48,7 +48,7 @@ A branch name alone is not a complete comparison identity. A task may be attache
 - Explicitly choosing a branch in **Compare against** returns the attachment to repository-local comparison: the write updates `base_branch` and removes any provider-derived `comparison_target` atomically.
 - A detached pull-request association removes the target only when that target names the detached change. Closing or merging the associated change does not remove the target because its base remains the relevant integration line for the task history.
 - Kandev does not broaden task Git credentials to materialize a target. Public targets and targets already readable through the execution's effective Git credentials are supported. An unreadable private target fails visibly.
-- Target setup is fail-closed. If identity validation, remote collision checks, or fetch fails, file status remains usable, but comparison-derived totals, ahead/behind, commits, and cumulative diff are unavailable. The Changes panel names the intended `<owner>/<repository>:<branch>` target and shows an actionable comparison error; task-list summaries suppress numeric Git totals and expose the unavailable state instead of publishing a same-named `origin` fallback.
+- Target setup is fail-closed. If identity validation, remote collision checks, fetch, or merge-base resolution fails, file status remains usable, but comparison-derived totals, ahead/behind, commits, and cumulative diff are unavailable. The Changes panel names the intended `<owner>/<repository>:<branch>` target and shows an actionable comparison error; task-list summaries suppress numeric Git totals and expose the unavailable state instead of publishing a same-named `origin` fallback.
 
 ## API surface
 

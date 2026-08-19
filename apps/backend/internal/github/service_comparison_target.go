@@ -15,7 +15,8 @@ import (
 // service owns attachment matching and durable metadata.
 type ComparisonTargetObserver interface {
 	ReconcileComparisonTarget(ctx context.Context, taskID string, candidate taskmodels.ComparisonTargetCandidate) (*taskmodels.ComparisonTargetReconciliation, error)
-	RemoveComparisonTargetForChange(ctx context.Context, taskID, taskRepositoryID, provider, kind string, number int) error
+	ReconcileComparisonTargetFromSync(ctx context.Context, taskID string, candidate taskmodels.ComparisonTargetCandidate) (*taskmodels.ComparisonTargetReconciliation, error)
+	RemoveComparisonTargetForChange(ctx context.Context, taskID, repositoryID, provider, kind string, number int) error
 }
 
 // SetComparisonTargetObserver wires the task-service reconciler after both
@@ -25,6 +26,14 @@ func (s *Service) SetComparisonTargetObserver(observer ComparisonTargetObserver)
 }
 
 func (s *Service) reconcileComparisonTarget(ctx context.Context, taskID string, pr *PR) {
+	s.reconcileComparisonTargetMode(ctx, taskID, pr, true)
+}
+
+func (s *Service) reconcileComparisonTargetFromSync(ctx context.Context, taskID string, pr *PR) {
+	s.reconcileComparisonTargetMode(ctx, taskID, pr, false)
+}
+
+func (s *Service) reconcileComparisonTargetMode(ctx context.Context, taskID string, pr *PR, allowReplacement bool) {
 	if s.comparisonTargetObserver == nil || strings.TrimSpace(taskID) == "" {
 		return
 	}
@@ -37,7 +46,13 @@ func (s *Service) reconcileComparisonTarget(ctx context.Context, taskID string, 
 		}
 		return
 	}
-	result, err := s.comparisonTargetObserver.ReconcileComparisonTarget(ctx, taskID, candidate)
+	var result *taskmodels.ComparisonTargetReconciliation
+	var err error
+	if allowReplacement {
+		result, err = s.comparisonTargetObserver.ReconcileComparisonTarget(ctx, taskID, candidate)
+	} else {
+		result, err = s.comparisonTargetObserver.ReconcileComparisonTargetFromSync(ctx, taskID, candidate)
+	}
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("comparison target reconciliation failed",

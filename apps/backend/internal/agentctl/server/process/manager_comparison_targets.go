@@ -2,7 +2,9 @@ package process
 
 import (
 	"context"
-	"strings"
+	"errors"
+	"sync"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
@@ -87,12 +89,19 @@ func (m *Manager) prepareTrackerComparisonTarget(ctx context.Context, tracker *W
 	if tracker == nil {
 		return
 	}
-	target := m.comparisonTargetFor(tracker.RepositoryName())
+	repositoryName := tracker.RepositoryName()
+	target := m.comparisonTargetFor(repositoryName)
+	if !m.comparisonTargetIsCurrent(repositoryName, target) {
+		return
+	}
 	tracker.SetComparisonTarget(target)
 	if target == nil {
 		return
 	}
 	if tracker.gitIndexPath == "" {
+		if !m.comparisonTargetIsCurrent(repositoryName, target) {
+			return
+		}
 		tracker.SetComparisonTargetUnavailable(target, comparisonTargetErrorInvalid)
 		return
 	}
@@ -102,38 +111,52 @@ func (m *Manager) prepareTrackerComparisonTarget(ctx context.Context, tracker *W
 	}
 	materialized, err := materializeComparisonTarget(ctx, runner, *target)
 	if err != nil {
+		if !m.comparisonTargetIsCurrent(repositoryName, target) {
+			return
+		}
 		code := comparisonTargetErrorCode(err)
 		tracker.SetComparisonTargetUnavailable(target, code)
 		m.logger.Warn("comparison target unavailable",
-			zap.String("repository", tracker.RepositoryName()),
+			zap.String("repository", repositoryName),
 			zap.String("error_code", code),
 			zap.Error(err))
+		return
+	}
+	if !m.comparisonTargetIsCurrent(repositoryName, target) {
 		return
 	}
 	tracker.SetComparisonTargetReady(target, materialized.Ref)
 }
 
-func comparisonTargetErrorCode(err error) string {
-	message := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(message, "collision"):
-		return comparisonTargetErrorRemoteCollision
-	case strings.Contains(message, "invalid"):
-		return comparisonTargetErrorInvalid
-	case strings.Contains(message, "ref unavailable"):
-		return comparisonTargetErrorRefUnavailable
-	case strings.Contains(message, "fetch"):
-		return comparisonTargetErrorFetch
-	default:
-		return comparisonTargetErrorRemoteSetup
+func (m *Manager) comparisonTargetIsCurrent(repositoryName string, target *models.ComparisonTarget) bool {
+	current := m.comparisonTargetFor(repositoryName)
+	if current == nil || target == nil {
+		return current == nil && target == nil
 	}
+	return current.Equal(*target)
+}
+
+func comparisonTargetErrorCode(err error) string {
+	var targetErr *comparisonTargetMaterializationError
+	if errors.As(err, &targetErr) && targetErr.code != "" {
+		return targetErr.code
+	}
+	return comparisonTargetErrorRemoteSetup
 }
 
 func (m *Manager) refreshComparisonTrackersDetached(trackers []*WorkspaceTracker) {
-	ctx := context.Background()
+	var group sync.WaitGroup
 	for _, tracker := range trackers {
-		if tracker != nil {
-			tracker.RefreshGitStatus(ctx)
+		if tracker == nil {
+			continue
 		}
+		group.Add(1)
+		go func(tracker *WorkspaceTracker) {
+			defer group.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			tracker.RefreshGitStatus(ctx)
+		}(tracker)
 	}
+	group.Wait()
 }

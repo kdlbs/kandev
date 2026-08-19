@@ -291,9 +291,6 @@ func (s *Service) UnlinkTaskMR(ctx context.Context, workspaceID, associationID s
 	if lookupErr != nil {
 		return lookupErr
 	}
-	if err := store.DeleteTaskMRForWorkspace(ctx, workspaceID, associationID); err != nil {
-		return err
-	}
 	if association != nil && s.comparisonTargetObserver != nil && association.RepositoryID != "" {
 		if err := s.comparisonTargetObserver.RemoveComparisonTargetForChange(
 			ctx,
@@ -302,10 +299,16 @@ func (s *Service) UnlinkTaskMR(ctx context.Context, workspaceID, associationID s
 			taskmodels.ComparisonTargetProviderGitLab,
 			taskmodels.ComparisonTargetKindMergeRequest,
 			association.MRIID,
-		); err != nil && s.logger != nil {
-			s.logger.Warn("GitLab comparison target detach cleanup failed",
-				zap.String("task_id", association.TaskID), zap.Int("mr_iid", association.MRIID), zap.Error(err))
+		); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("GitLab comparison target detach cleanup failed",
+					zap.String("task_id", association.TaskID), zap.Int("mr_iid", association.MRIID), zap.Error(err))
+			}
+			return err
 		}
+	}
+	if err := store.DeleteTaskMRForWorkspace(ctx, workspaceID, associationID); err != nil {
+		return err
 	}
 	return nil
 }

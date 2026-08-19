@@ -3372,6 +3372,7 @@ func (s *Service) saveGitStatusSnapshot(ctx context.Context, sessionID string, f
 	}
 
 	metadata := map[string]interface{}{
+		"repository_name":       status.RepositoryName,
 		"timestamp":             status.Timestamp,
 		"modified":              status.Modified,
 		"added":                 status.Added,

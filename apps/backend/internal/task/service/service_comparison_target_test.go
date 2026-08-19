@@ -146,6 +146,75 @@ func TestReconcileComparisonTargetClearsSameRepositoryBinding(t *testing.T) {
 	}
 }
 
+func TestReconcileComparisonTargetFromSyncDoesNotReplaceNewerChange(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedComparisonServiceWorkspace(t, repo, "contributor/widget", "head-42")
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-comparison", WorkflowID: "wf-comparison", WorkflowStepID: "step-comparison", Title: "Historical sync",
+		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-comparison", BaseBranch: "main", CheckoutBranch: "feature/cursor-cost"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	newer := comparisonCandidate("contributor/widget", "head-42", "upstream/widget", "base-99")
+	newer.Number = 2002
+	if _, err := svc.ReconcileComparisonTarget(ctx, taskResult.Task.ID, newer); err != nil {
+		t.Fatalf("seed newer target: %v", err)
+	}
+	older := comparisonCandidate("contributor/widget", "head-42", "upstream/widget", "base-99")
+	older.Number = 2001
+	result, err := svc.ReconcileComparisonTargetFromSync(ctx, taskResult.Task.ID, older)
+	if err != nil {
+		t.Fatalf("historical sync: %v", err)
+	}
+	if result.Status != models.ComparisonTargetNoMatch {
+		t.Fatalf("historical sync status = %q, want no_match", result.Status)
+	}
+	rows, err := repo.ListTaskRepositories(ctx, taskResult.Task.ID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("ListTaskRepositories: %v rows=%d", err, len(rows))
+	}
+	stored, ok, err := models.LoadComparisonTarget(rows[0].Metadata)
+	if err != nil || !ok || stored.Number != newer.Number {
+		t.Fatalf("stored target = %#v present=%v err=%v, want newer change", stored, ok, err)
+	}
+}
+
+func TestRemoveComparisonTargetForChangeResolvesRepositoryAttachment(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedComparisonServiceWorkspace(t, repo, "contributor/widget", "head-42")
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-comparison", WorkflowID: "wf-comparison", WorkflowStepID: "step-comparison", Title: "Detach target",
+		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-comparison", BaseBranch: "main", CheckoutBranch: "feature/cursor-cost"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	rows, err := repo.ListTaskRepositories(ctx, taskResult.Task.ID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("ListTaskRepositories: %v rows=%d", err, len(rows))
+	}
+	target, err := comparisonCandidate("contributor/widget", "head-42", "upstream/widget", "base-99").Build()
+	if err != nil {
+		t.Fatalf("Build target: %v", err)
+	}
+	if _, _, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, rows[0].ID, &target, nil); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	if err := svc.RemoveComparisonTargetForChange(ctx, taskResult.Task.ID, "repo-comparison", models.ComparisonTargetProviderGitHub, models.ComparisonTargetKindPullRequest, target.Number); err != nil {
+		t.Fatalf("RemoveComparisonTargetForChange: %v", err)
+	}
+	updated, err := repo.GetTaskRepository(ctx, rows[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := models.LoadComparisonTarget(updated.Metadata); err != nil || ok {
+		t.Fatalf("target remains after repository-scoped detach: present=%v err=%v", ok, err)
+	}
+}
+
 func seedComparisonServiceWorkspace(t *testing.T, repo interface {
 	CreateWorkspace(context.Context, *models.Workspace) error
 	CreateWorkflow(context.Context, *models.Workflow) error

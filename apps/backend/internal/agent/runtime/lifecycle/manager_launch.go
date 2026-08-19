@@ -237,6 +237,9 @@ func comparisonTargetsFromWorkspaceRepositories(specs []WorkspaceRepositorySpec)
 				BranchSlug: spec.BranchSlug,
 			})
 		}
+		if existing, ok := targets[key]; ok && !existing.Equal(*spec.ComparisonTarget) {
+			return nil, fmt.Errorf("comparison target collision for workspace repository %q", key)
+		}
 		targets[key] = *spec.ComparisonTarget
 	}
 	if len(targets) == 0 {

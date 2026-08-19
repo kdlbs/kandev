@@ -45,18 +45,25 @@ func (s *Service) pushTaskComparisonTargets(ctx context.Context, taskID string) 
 // created by a retarget or a different PR association.
 func (s *Service) RemoveComparisonTargetForChange(
 	ctx context.Context,
-	taskID, taskRepositoryID, provider, kind string,
+	taskID, repositoryID, provider, kind string,
 	number int,
 ) error {
-	if taskID == "" || taskRepositoryID == "" || provider == "" || kind == "" || number <= 0 {
+	if !validComparisonTargetDetachRequest(taskID, repositoryID, provider, kind, number) {
 		return nil
 	}
 	if err := s.authorizeTaskID(ctx, taskID); err != nil {
 		return err
 	}
-	taskRepo, err := s.loadTaskRepositoryForUpdate(ctx, taskID, taskRepositoryID)
+	taskRepos, err := s.taskRepos.ListTaskRepositories(ctx, taskID)
 	if err != nil {
 		return err
+	}
+	taskRepo, err := comparisonTargetAttachmentForChange(taskRepos, repositoryID, provider, kind, number)
+	if err != nil {
+		return err
+	}
+	if taskRepo == nil {
+		return nil
 	}
 	current, ok, err := models.LoadComparisonTarget(taskRepo.Metadata)
 	if err != nil {
@@ -72,6 +79,38 @@ func (s *Service) RemoveComparisonTargetForChange(
 	}
 	s.applyComparisonTargetSideEffects(context.WithoutCancel(ctx), taskID, taskRepo.RepositoryID, taskRepo.BaseBranch)
 	return nil
+}
+
+func validComparisonTargetDetachRequest(taskID, repositoryID, provider, kind string, number int) bool {
+	return taskID != "" && repositoryID != "" && provider != "" && kind != "" && number > 0
+}
+
+func comparisonTargetAttachmentForChange(
+	taskRepos []*models.TaskRepository,
+	repositoryID, provider, kind string,
+	number int,
+) (*models.TaskRepository, error) {
+	var matched *models.TaskRepository
+	for _, candidate := range taskRepos {
+		if candidate == nil || candidate.RepositoryID != repositoryID {
+			continue
+		}
+		current, ok, err := models.LoadComparisonTarget(candidate.Metadata)
+		if err != nil {
+			return nil, fmt.Errorf("load comparison target for detach: %w", err)
+		}
+		if !ok || current.Provider != provider || current.Kind != kind || current.Number != number {
+			continue
+		}
+		if matched != nil {
+			// Two attachments can point at the same repository. Do not clear
+			// either one when the provider change does not identify one exact
+			// attachment.
+			return nil, nil
+		}
+		matched = candidate
+	}
+	return matched, nil
 }
 
 func (s *Service) applyComparisonTargetSideEffects(ctx context.Context, taskID, repositoryID, baseBranch string) {

@@ -41,6 +41,24 @@ func (s *Service) DetachTaskPR(ctx context.Context, workspaceID, associationID s
 	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
 		return nil, err
 	}
+	if s.comparisonTargetObserver != nil && tp.RepositoryID != "" {
+		if err := s.comparisonTargetObserver.RemoveComparisonTargetForChange(
+			ctx,
+			tp.TaskID,
+			tp.RepositoryID,
+			taskmodels.ComparisonTargetProviderGitHub,
+			taskmodels.ComparisonTargetKindPullRequest,
+			tp.PRNumber,
+		); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("comparison target detach cleanup failed",
+					zap.String("task_id", tp.TaskID),
+					zap.Int("pr_number", tp.PRNumber),
+					zap.Error(err))
+			}
+			return nil, err
+		}
+	}
 	if tp.DetachedAt != nil {
 		return tp, nil
 	}
@@ -53,21 +71,6 @@ func (s *Service) DetachTaskPR(ctx context.Context, workspaceID, associationID s
 	}
 	if !transitioned {
 		return detached, nil
-	}
-	if s.comparisonTargetObserver != nil && detached.RepositoryID != "" {
-		if err := s.comparisonTargetObserver.RemoveComparisonTargetForChange(
-			ctx,
-			detached.TaskID,
-			detached.RepositoryID,
-			taskmodels.ComparisonTargetProviderGitHub,
-			taskmodels.ComparisonTargetKindPullRequest,
-			detached.PRNumber,
-		); err != nil && s.logger != nil {
-			s.logger.Warn("comparison target detach cleanup failed",
-				zap.String("task_id", detached.TaskID),
-				zap.Int("pr_number", detached.PRNumber),
-				zap.Error(err))
-		}
 	}
 	if s.eventBus != nil {
 		event := bus.NewEvent(events.GitHubTaskPRDeleted, "github", &TaskPRDeletedEvent{

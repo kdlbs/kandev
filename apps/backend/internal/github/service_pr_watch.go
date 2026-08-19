@@ -889,7 +889,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	// Provider payloads carry the authoritative head/base repository identity
 	// and branch. Reconcile after the TaskPR write so a malformed or
 	// unmatchable payload never prevents the review association from persisting.
-	s.reconcileComparisonTarget(ctx, taskID, status.PR)
+	s.reconcileComparisonTargetFromSync(ctx, taskID, status.PR)
 
 	if len(changedFields) > 0 {
 		if s.logger != nil {

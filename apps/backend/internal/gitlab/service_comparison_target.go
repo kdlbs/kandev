@@ -15,7 +15,8 @@ import (
 // identities; it never infers a fork from the target project URL alone.
 type ComparisonTargetObserver interface {
 	ReconcileComparisonTarget(ctx context.Context, taskID string, candidate taskmodels.ComparisonTargetCandidate) (*taskmodels.ComparisonTargetReconciliation, error)
-	RemoveComparisonTargetForChange(ctx context.Context, taskID, taskRepositoryID, provider, kind string, number int) error
+	ReconcileComparisonTargetFromSync(ctx context.Context, taskID string, candidate taskmodels.ComparisonTargetCandidate) (*taskmodels.ComparisonTargetReconciliation, error)
+	RemoveComparisonTargetForChange(ctx context.Context, taskID, repositoryID, provider, kind string, number int) error
 }
 
 func (s *Service) SetComparisonTargetObserver(observer ComparisonTargetObserver) {
@@ -23,6 +24,14 @@ func (s *Service) SetComparisonTargetObserver(observer ComparisonTargetObserver)
 }
 
 func (s *Service) reconcileComparisonTarget(ctx context.Context, taskID, host string, mr *MR) {
+	s.reconcileComparisonTargetMode(ctx, taskID, host, mr, true)
+}
+
+func (s *Service) reconcileComparisonTargetFromSync(ctx context.Context, taskID, host string, mr *MR) {
+	s.reconcileComparisonTargetMode(ctx, taskID, host, mr, false)
+}
+
+func (s *Service) reconcileComparisonTargetMode(ctx context.Context, taskID, host string, mr *MR, allowReplacement bool) {
 	if s.comparisonTargetObserver == nil || strings.TrimSpace(taskID) == "" {
 		return
 	}
@@ -30,7 +39,13 @@ func (s *Service) reconcileComparisonTarget(ctx context.Context, taskID, host st
 	if !ok {
 		return
 	}
-	result, err := s.comparisonTargetObserver.ReconcileComparisonTarget(ctx, taskID, candidate)
+	var result *taskmodels.ComparisonTargetReconciliation
+	var err error
+	if allowReplacement {
+		result, err = s.comparisonTargetObserver.ReconcileComparisonTarget(ctx, taskID, candidate)
+	} else {
+		result, err = s.comparisonTargetObserver.ReconcileComparisonTargetFromSync(ctx, taskID, candidate)
+	}
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("GitLab comparison target reconciliation failed",

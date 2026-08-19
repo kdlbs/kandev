@@ -530,6 +530,7 @@ func (c *Client) GetCumulativeDiff(ctx context.Context, baseCommit, targetBranch
 // GitStatusResult represents the result of a git status query.
 type GitStatusResult struct {
 	Success             bool                   `json:"success"`
+	RepositoryName      string                 `json:"repository_name,omitempty"`
 	IsSubmodule         bool                   `json:"is_submodule,omitempty"`
 	Branch              string                 `json:"branch"`
 	RemoteBranch        string                 `json:"remote_branch"`

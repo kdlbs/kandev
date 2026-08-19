@@ -18,6 +18,26 @@ func (s *Service) ReconcileComparisonTarget(
 	taskID string,
 	candidate models.ComparisonTargetCandidate,
 ) (*models.ComparisonTargetReconciliation, error) {
+	return s.reconcileComparisonTarget(ctx, taskID, candidate, true)
+}
+
+// ReconcileComparisonTargetFromSync refreshes an existing provider change
+// without allowing an older historical payload to replace a newer target.
+// Explicit association and retarget events use ReconcileComparisonTarget.
+func (s *Service) ReconcileComparisonTargetFromSync(
+	ctx context.Context,
+	taskID string,
+	candidate models.ComparisonTargetCandidate,
+) (*models.ComparisonTargetReconciliation, error) {
+	return s.reconcileComparisonTarget(ctx, taskID, candidate, false)
+}
+
+func (s *Service) reconcileComparisonTarget(
+	ctx context.Context,
+	taskID string,
+	candidate models.ComparisonTargetCandidate,
+	allowReplacement bool,
+) (*models.ComparisonTargetReconciliation, error) {
 	target, err := candidate.Build()
 	if err != nil {
 		return nil, err
@@ -43,6 +63,23 @@ func (s *Service) ReconcileComparisonTarget(
 	if !ok {
 		return &models.ComparisonTargetReconciliation{Status: models.ComparisonTargetNoMatch}, nil
 	}
+	current, hasCurrent, err := models.LoadComparisonTarget(matched.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("load current comparison target: %w", err)
+	}
+	if hasCurrent && !allowReplacement && !current.ChangeIdentityEqual(target) {
+		return &models.ComparisonTargetReconciliation{Status: models.ComparisonTargetNoMatch}, nil
+	}
+	return s.persistMatchedComparisonTarget(ctx, taskID, matched, attachedIdentity, target)
+}
+
+func (s *Service) persistMatchedComparisonTarget(
+	ctx context.Context,
+	taskID string,
+	matched *models.TaskRepository,
+	attachedIdentity models.ComparisonTargetRepository,
+	target models.ComparisonTarget,
+) (*models.ComparisonTargetReconciliation, error) {
 	if target.IsSameRepository(attachedIdentity) {
 		_, changed, err := s.taskRepos.UpdateTaskRepositoryComparisonTarget(ctx, matched.ID, nil, nil)
 		if err != nil {

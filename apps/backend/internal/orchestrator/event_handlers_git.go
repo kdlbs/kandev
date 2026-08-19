@@ -104,8 +104,8 @@ func (c *gitSnapshotCache) forget(sessionID string) {
 
 func gitStatusHash(s *lifecycle.GitStatusData) string {
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%s|%s|%s|%d|%d|%d|%d",
-		s.Branch, s.RemoteBranch, s.HeadCommit, s.BaseCommit,
+	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%d|%d",
+		s.RepositoryName, s.Branch, s.RemoteBranch, s.HeadCommit, s.BaseCommit,
 		s.ComparisonTarget, s.ComparisonStatus, s.ComparisonErrorCode,
 		s.Ahead, s.Behind, s.BranchAdditions, s.BranchDeletions)
 	return hex.EncodeToString(h.Sum(nil))
@@ -199,6 +199,7 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 		Behind:       st.Behind,
 		Files:        nil, // intentional: badge only needs totals
 		Metadata: map[string]interface{}{
+			"repository_name":       st.RepositoryName,
 			"branch_additions":      st.BranchAdditions,
 			"branch_deletions":      st.BranchDeletions,
 			"comparison_target":     st.ComparisonTarget,

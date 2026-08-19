@@ -15,7 +15,7 @@ import {
 } from "./changes-panel-helpers";
 import type { ChangesPanelBodyProps } from "./changes-panel-data";
 import { useTranslation } from "react-i18next";
-import { IconAlertTriangle, IconGitBranch } from "@tabler/icons-react";
+import { IconAlertTriangle } from "@tabler/icons-react";
 
 function ComparisonTargetNotice({
   comparisonTargets,
@@ -27,30 +27,16 @@ function ComparisonTargetNotice({
   const targetLabel = comparisonTargets.join(", ") || t("task:comparisonTargetUnknown");
   return (
     <div
-      className={
-        comparisonUnavailable
-          ? "mx-3 mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs"
-          : "mx-3 mt-2 rounded-md border border-border bg-muted/30 px-2.5 py-2 text-xs"
-      }
+      className="mx-3 mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs"
       data-testid="comparison-target-notice"
-      role={comparisonUnavailable ? "alert" : "status"}
+      role="alert"
     >
       <div className="flex min-w-0 items-start gap-2">
-        {comparisonUnavailable ? (
-          <IconAlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
-        ) : (
-          <IconGitBranch className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        )}
+        <IconAlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
         <div className="min-w-0">
-          <p className="font-medium text-foreground">
-            {comparisonUnavailable
-              ? t("task:comparisonTargetUnavailable")
-              : t("task:comparisonTargetLabel")}
-          </p>
+          <p className="font-medium text-foreground">{t("task:comparisonTargetUnavailable")}</p>
           <p className="break-words text-muted-foreground">
-            {comparisonUnavailable
-              ? t("task:comparisonTargetUnavailableDescription", { target: targetLabel })
-              : targetLabel}
+            {t("task:comparisonTargetUnavailableDescription", { target: targetLabel })}
           </p>
         </div>
       </div>

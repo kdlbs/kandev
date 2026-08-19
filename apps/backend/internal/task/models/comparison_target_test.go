@@ -116,6 +116,23 @@ func TestComparisonTargetRemoveIsSourceAware(t *testing.T) {
 	}
 }
 
+func TestComparisonTargetChangeIdentityIncludesTargetRepository(t *testing.T) {
+	left := testComparisonTarget()
+	right := left
+	if !left.ChangeIdentityEqual(right) {
+		t.Fatal("identical provider changes should have equal identities")
+	}
+	right.TargetRepository = ComparisonTargetRepository{
+		Host:       "github.com",
+		Path:       "another/widget",
+		ProviderID: "base-100",
+		RemoteURL:  "https://github.com/another/widget.git",
+	}
+	if left.ChangeIdentityEqual(right) {
+		t.Fatal("same-number changes in different target repositories must differ")
+	}
+}
+
 func TestComparisonTargetRejectsMalformedRehydratedMetadata(t *testing.T) {
 	metadata := map[string]interface{}{ComparisonTargetMetadataKey: json.RawMessage(`{"version":1}`)}
 	if _, ok, err := LoadComparisonTarget(metadata); err == nil || ok {

@@ -349,7 +349,7 @@ func (s *Service) refreshTaskMRFromWatch(ctx context.Context, store *Store, clie
 			zap.String("watch_id", watch.ID), zap.String("task_id", watch.TaskID), zap.Error(err))
 		return
 	}
-	s.reconcileComparisonTarget(ctx, watch.TaskID, client.Host(), status.MR)
+	s.reconcileComparisonTargetFromSync(ctx, watch.TaskID, client.Host(), status.MR)
 	if prevErr != nil || taskMRVisibleFieldsChanged(previous, association) {
 		s.publishTaskMRUpdated(ctx, workspaceID, association)
 	}

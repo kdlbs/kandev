@@ -167,7 +167,10 @@ func (c ComparisonTarget) Equal(other ComparisonTarget) bool {
 // ChangeIdentityEqual reports whether two targets belong to the same provider
 // change, independent of a retargeted branch or repository.
 func (c ComparisonTarget) ChangeIdentityEqual(other ComparisonTarget) bool {
-	return c.Provider == other.Provider && c.Kind == other.Kind && c.Number == other.Number
+	return c.Provider == other.Provider &&
+		c.Kind == other.Kind &&
+		c.Number == other.Number &&
+		ComparisonTargetRepositoriesEqual(c.TargetRepository, other.TargetRepository)
 }
 
 // IsSameRepository compares provider repository identity, not display names.

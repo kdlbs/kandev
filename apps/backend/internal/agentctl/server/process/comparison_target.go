@@ -25,6 +25,29 @@ type comparisonTargetMaterialization struct {
 	Ref        string
 }
 
+type comparisonTargetMaterializationError struct {
+	code string
+	err  error
+}
+
+func (e *comparisonTargetMaterializationError) Error() string {
+	if e == nil || e.err == nil {
+		return e.code
+	}
+	return e.err.Error()
+}
+
+func (e *comparisonTargetMaterializationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+func comparisonTargetFailure(code string, err error) error {
+	return &comparisonTargetMaterializationError{code: code, err: err}
+}
+
 // ComparisonResolution is the bounded state consumed by every comparison
 // surface. Explicit=true means callers must use Ref when Status is ready and
 // must return unavailable when it is not.
@@ -139,28 +162,46 @@ func materializeComparisonTarget(
 	target models.ComparisonTarget,
 ) (comparisonTargetMaterialization, error) {
 	if err := target.Validate(); err != nil {
-		return comparisonTargetMaterialization{}, fmt.Errorf("comparison target invalid: %w", err)
+		return comparisonTargetMaterialization{}, comparisonTargetFailure(
+			comparisonTargetErrorInvalid,
+			fmt.Errorf("comparison target invalid: %w", err),
+		)
 	}
 	remoteName := target.ComparisonRemoteName()
 	configuredURL, remoteErr := run(ctx, "remote", "get-url", remoteName)
 	if remoteErr == nil {
 		if strings.TrimSpace(configuredURL) != target.TargetRepository.RemoteURL {
-			return comparisonTargetMaterialization{}, fmt.Errorf("comparison remote collision for %s", remoteName)
+			return comparisonTargetMaterialization{}, comparisonTargetFailure(
+				comparisonTargetErrorRemoteCollision,
+				fmt.Errorf("comparison remote collision for %s", remoteName),
+			)
 		}
 	} else {
 		if _, err := run(ctx, "remote", "add", "--no-tags", remoteName, target.TargetRepository.RemoteURL); err != nil {
-			return comparisonTargetMaterialization{}, fmt.Errorf("comparison remote setup failed: %w", err)
+			return comparisonTargetMaterialization{}, comparisonTargetFailure(
+				comparisonTargetErrorRemoteSetup,
+				fmt.Errorf("comparison remote setup failed: %w", err),
+			)
 		}
 	}
 	if _, err := run(ctx, "config", "remote."+remoteName+".pushurl", "DISABLED"); err != nil {
-		return comparisonTargetMaterialization{}, fmt.Errorf("comparison remote push protection failed: %w", err)
+		return comparisonTargetMaterialization{}, comparisonTargetFailure(
+			comparisonTargetErrorRemoteSetup,
+			fmt.Errorf("comparison remote push protection failed: %w", err),
+		)
 	}
 	refspec := "refs/heads/" + target.TargetBranch + ":" + target.ComparisonRef()
 	if _, err := run(ctx, "fetch", "--no-tags", remoteName, refspec); err != nil {
-		return comparisonTargetMaterialization{}, fmt.Errorf("comparison target fetch failed: %w", err)
+		return comparisonTargetMaterialization{}, comparisonTargetFailure(
+			comparisonTargetErrorFetch,
+			fmt.Errorf("comparison target fetch failed: %w", err),
+		)
 	}
 	if _, err := run(ctx, "rev-parse", "--verify", target.ComparisonRef()+"^{commit}"); err != nil {
-		return comparisonTargetMaterialization{}, fmt.Errorf("comparison target ref unavailable: %w", err)
+		return comparisonTargetMaterialization{}, comparisonTargetFailure(
+			comparisonTargetErrorRefUnavailable,
+			fmt.Errorf("comparison target ref unavailable: %w", err),
+		)
 	}
 	return comparisonTargetMaterialization{RemoteName: remoteName, Ref: target.ComparisonRef()}, nil
 }

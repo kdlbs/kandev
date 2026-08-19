@@ -59,4 +59,30 @@ test.describe("Mobile fork pull-request comparison target", () => {
     );
     await expect(testPage.getByTestId("comparison-target-notice")).toHaveCount(0);
   });
+
+  test("shows the unavailable target in the touch changes panel", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const { task } = await seedForkPRComparisonTask(apiClient, seedData, backend, {
+      comparisonTargetAvailable: false,
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+    await expect(testPage.getByRole("button", { name: "Changes" })).toBeVisible({
+      timeout: 15_000,
+    });
+    await testPage.getByRole("button", { name: "Changes" }).tap();
+
+    const changes = testPage.getByTestId("mobile-changes-panel");
+    await expect(changes).toBeVisible({ timeout: 15_000 });
+    await expect(changes.getByTestId("comparison-target-notice")).toContainText(
+      "upstream/widget:main",
+    );
+  });
 });

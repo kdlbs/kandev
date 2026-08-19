@@ -7,10 +7,15 @@ import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 
 const targetURL = "https://github.com/upstream/widget.git";
 
+type ForkPRComparisonOptions = {
+  comparisonTargetAvailable?: boolean;
+};
+
 export async function seedForkPRComparisonTask(
   apiClient: ApiClient,
   seedData: SeedData,
   backend: BackendContext,
+  options: ForkPRComparisonOptions = {},
 ) {
   const gitEnv = makeGitEnv(backend.tmpDir);
   const suffix = `${process.pid}-${Date.now()}`;
@@ -44,13 +49,18 @@ export async function seedForkPRComparisonTask(
   const headSHA = localGit.commit("Add three fork contribution files");
 
   // agentctl fetches the credential-free provider URL. The test maps that URL
-  // to its disposable upstream bare repository without changing origin.
+  // to its disposable upstream bare repository without changing origin. The
+  // unavailable mode maps to a missing local path so it exercises the same
+  // fail-closed path without depending on external network state.
+  const comparisonTargetPath =
+    options.comparisonTargetAvailable === false
+      ? path.join(backend.tmpDir, "repos", `missing-upstream-${suffix}.git`)
+      : targetRemoteDir;
   execFileSync(
     "git",
-    ["config", "--global", `url.file://${targetRemoteDir}.insteadOf`, targetURL],
+    ["config", "--global", `url.file://${comparisonTargetPath}.insteadOf`, targetURL],
     { env: gitEnv },
   );
-  localGit.exec(`git config url."file://${targetRemoteDir}".insteadOf "${targetURL}"`);
 
   await apiClient.updateRepository(seedData.repositoryId, {
     provider: "github",

@@ -52,8 +52,6 @@ func (m *Manager) PushComparisonTargetsForTask(ctx context.Context, taskID strin
 	if taskID == "" {
 		return
 	}
-	pushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
 	for _, exec := range m.executionStore.List() {
 		if exec.TaskID != taskID {
 			continue
@@ -62,7 +60,10 @@ func (m *Manager) PushComparisonTargetsForTask(ctx context.Context, taskID strin
 		if client == nil {
 			continue
 		}
-		if err := client.SetComparisonTargets(pushCtx, targets); err != nil {
+		pushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		err := client.SetComparisonTargets(pushCtx, targets)
+		cancel()
+		if err != nil {
 			m.logger.Warn("failed to push comparison targets to agentctl",
 				zap.String("task_id", taskID),
 				zap.String("execution_id", exec.ID),
