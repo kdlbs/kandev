@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"sync"
 	"testing"
@@ -113,8 +114,36 @@ func TestApplyRuntimeSessionLayersFiltersUnadvertisedOptions(t *testing.T) {
 		}
 		got := sentKeys(seen)
 		want := []string{"fast", "reasoning"}
-		if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		if !slices.Equal(got, want) {
 			t.Fatalf("sent config options = %v, want %v (effort/thinking must be dropped)", got, want)
+		}
+	})
+
+	t.Run("unknown catalog (nil model state) sends no options and reports no failures", func(t *testing.T) {
+		mock := newMockAgentServer(t)
+		defer mock.Close()
+		seen := configOptionRecorder(mock, "")
+
+		sm := NewSessionManager(newSessionTestLogger(), newTestStopCh(t))
+		client := createTestClient(t, mock.server.URL)
+		defer client.Close()
+		connectAgentStream(t, mock, client)
+		// Leave model state nil: the current agent's option catalog is unknown,
+		// so replay must fail safe and send nothing (spec failure mode).
+		execution := &AgentExecution{ID: "e3", SessionID: "s3", agentctl: client}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, failed := sm.applyRuntimeSessionLayers(
+			ctx, execution, "acp-3", "cfg", "", "", "", "",
+			map[string]string{"reasoning": "high", "effort": "x", "thinking": "y"},
+		)
+
+		if len(failed) != 0 {
+			t.Fatalf("expected no failed options for unknown catalog, got %v", failed)
+		}
+		if got := sentKeys(seen); len(got) != 0 {
+			t.Fatalf("expected no options sent for unknown catalog, got %v", got)
 		}
 	})
 
