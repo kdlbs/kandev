@@ -172,7 +172,7 @@ so the message keeps naming the path and the existing
 `use a separate KANDEV_HOME_DIR` guidance appended in `main.go` still reads
 correctly:
 
-```
+```text
 home target "/Users/cfl12/.kandev" is already owned by another backend (pid 51229, /Applications/Kandev.app/.../bin/kandev, started 2026-08-19T09:14:35Z)
 ```
 
@@ -218,7 +218,8 @@ is backend stderr, which stays English per the backend i18n scope in
 
 | What | File | How |
 |---|---|---|
-| `Alive` reports self alive, reports a reaped PID gone, treats non-positive PIDs as gone-and-known | `internal/common/proclive/proclive_test.go` | Table-driven; reap a real short-lived `os/exec` child for the dead case |
+| `Alive` reports self alive, reports a reaped PID gone, treats non-positive PIDs as gone-and-known | `internal/common/proclive/proclive_unix_test.go` | Separate Unix tests; reap a real short-lived `os/exec` child for the dead case |
+| `Alive` reports unknown on Windows | `internal/common/proclive/proclive_windows_test.go` | Windows-only test asserts `(false, false)` for the current process |
 | `tempartifacts` keeps its current reconciliation behavior after migrating | `internal/system/storage/tempartifacts/registry_test.go` | Existing tests must pass unchanged |
 | Watchdog shuts the tree down when the watched PID dies | `internal/launcher/parentwatch_test.go` | `testing/synctest` with an injected liveness probe flipping to `(false, true)`; assert `supervisor.shutdown` and `launcherExit(0)` via the package's existing `launcherExit` seam |
 | Watchdog stays quiet while the parent lives, and while liveness is unknown | `internal/launcher/parentwatch_test.go` | Same harness with probes returning `(true, true)` and `(false, false)`; assert no shutdown after several ticks |
@@ -282,7 +283,7 @@ the wiring that activates it.
 
 ## Implementation Waves And Parallel Candidates
 
-```
+```text
 Wave 1:
 - [x] [task-01-proclive-shared-helper](task-01-proclive-shared-helper.md)
 

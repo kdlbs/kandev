@@ -91,7 +91,7 @@ Extend `ConflictError.Error()` rather than replacing it, so the existing sentenc
 and the `use a separate KANDEV_HOME_DIR` guidance appended by `main.go` still
 read correctly:
 
-```
+```text
 home target "/Users/cfl12/.kandev" is already owned by another backend (pid 51229, /path/to/kandev, started 2026-08-19T09:14:35Z)
 ```
 

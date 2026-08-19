@@ -20,6 +20,12 @@ func TestAliveReportsReapedProcessAsDead(t *testing.T) {
 	if err := child.Start(); err != nil {
 		t.Fatalf("start child: %v", err)
 	}
+	t.Cleanup(func() {
+		if child.ProcessState == nil {
+			_ = child.Process.Kill()
+			_ = child.Wait()
+		}
+	})
 	if err := child.Wait(); err != nil {
 		t.Fatalf("wait child: %v", err)
 	}

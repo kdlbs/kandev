@@ -9,7 +9,7 @@ import (
 )
 
 func TestParentWatchdogDetectsReapedProcess(t *testing.T) {
-	child := exec.Command("sh", "-c", "sleep 10")
+	child := exec.Command("sleep", "10")
 	if err := child.Start(); err != nil {
 		t.Fatalf("start child: %v", err)
 	}
