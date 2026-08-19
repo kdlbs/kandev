@@ -84,15 +84,16 @@ No locale change is required. The selector reuses
   controls replace it after the response.
 - **File:** `apps/web/e2e/tests/settings/agent-profile-acp.spec.ts`.
 - **What to verify:** The popover stays open. The loading row is visible. Stale
-  option controls are absent. The new model option appears after the response.
+  option controls are absent. The loading row is removed and the new model
+  option appears after the response.
 
 - **Scenario:** Given the same flow on a phone, when a model resolution is
   pending, then the spinner is visible and contained in the selector.
 - **File:**
   `apps/web/e2e/tests/settings/mobile-agent-profile-config-selector.spec.ts`.
 - **What to verify:** Touch selection keeps the popover open. The loading row
-  is visible. The page has no horizontal overflow. The resolved control remains
-  reachable by touch.
+  is visible and is removed after resolution. The page has no horizontal
+  overflow. The resolved control remains reachable by touch.
 
 Both tests will use `injectLatency` for the resolver route. This delay is the
 test stimulus that makes the transient state observable.
@@ -111,6 +112,11 @@ Implementation is complete. The task-defined checks passed:
   project. The screenshots were inspected, mapped in `manifest.json`, and
   compressed for publication.
 - `git diff --check` and Prettier checks for all changed source and test files.
+
+Review fixup coverage also verifies that the selector stays open whenever
+options are loading, the loading row has one accessible status announcement,
+and both rejected and `status: failed` resolution responses clear stale
+dependent options. The targeted regression suite now passes 46 tests.
 
 ## Implementation Waves And Parallel Candidates
 

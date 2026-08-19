@@ -76,3 +76,8 @@ The exact verification command passed:
 - `pnpm run i18n:check` passed. The command reported only existing orphan
   catalog entries.
 - `pnpm run i18n:ratchet` passed with no new violations.
+
+Review fixup added regression coverage for the self-contained loading close
+guard, the single accessible status announcement, and stale-option clearing
+after rejected or failed resolution responses. The targeted suite now passes
+46 tests.

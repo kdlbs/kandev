@@ -65,6 +65,7 @@ test.describe("Mobile agent profile config selector", () => {
       await expect(testPage.getByTestId("model-config-resolution-loading")).toBeHidden({
         timeout: 15_000,
       });
+      await expect(testPage.getByTestId("model-config-options-loading")).toHaveCount(0);
       await expect(selector).toContainText("Mock Smart", { timeout: 10_000 });
       const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
       await expect(effortTrigger).toBeVisible();

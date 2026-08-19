@@ -167,6 +167,7 @@ describe("ModelConfigSelector loading behavior", () => {
 
     const loadingRow = screen.getByTestId("model-config-options-loading");
     expect(loadingRow.getAttribute("role")).toBe("status");
+    expect(screen.getByRole("status", { name: "Loading model options…" })).toBe(loadingRow);
     expect(screen.queryByTestId(effortTriggerTestId)).toBeNull();
 
     rerender(
@@ -189,6 +190,30 @@ describe("ModelConfigSelector loading behavior", () => {
 
     expect(screen.queryByTestId("model-config-options-loading")).toBeNull();
     expect(screen.getByTestId(effortTriggerTestId).textContent).toContain("Max");
+  });
+});
+
+describe("ModelConfigSelector loading guard", () => {
+  it("keeps the picker open when options are loading without the explicit open flag", () => {
+    const onModelChange = vi.fn();
+
+    render(
+      <ModelConfigSelector
+        modelOptions={[
+          { id: "model-a", name: "Model A" },
+          { id: "model-b", name: "Model B" },
+        ]}
+        currentModel="model-a"
+        onModelChange={onModelChange}
+        configOptionsLoading
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+    fireEvent.click(screen.getByRole("option", { name: /Model B/ }));
+
+    expect(onModelChange).toHaveBeenCalledWith("model-b");
+    expect(screen.getByTestId("model-config-options-loading")).toBeTruthy();
   });
 });
 

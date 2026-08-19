@@ -430,7 +430,7 @@ function ModelConfigSelectorContent({
             role="status"
             aria-label={t("agents:resolvingModelOptions")}
           >
-            <Spinner className="h-3.5 w-3.5" />
+            <Spinner aria-hidden="true" className="h-3.5 w-3.5" />
             <span>{t("agents:resolvingModelOptions")}</span>
           </div>
         </>
@@ -596,7 +596,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   const onModelSelect = (value: string) => {
     if (!value) return;
     onModelChange(value);
-    if (!keepOpenOnModelChange && !hasExtraConfigOptions) {
+    if (!keepOpenOnModelChange && !hasExtraConfigOptions && !configOptionsLoading) {
       setOpen(false);
     }
   };

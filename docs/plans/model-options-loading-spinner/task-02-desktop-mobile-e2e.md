@@ -63,8 +63,9 @@ results.
 
 Added resolver latency to the existing desktop and mobile profile flows. Both
 flows assert that the selector remains open, stale option controls are absent,
-and resolved controls return after the request completes. The mobile flow also
-asserts that the document has no horizontal overflow and uses touch actions.
+the loading row is removed after resolution, and resolved controls return. The
+mobile flow also asserts that the document has no horizontal overflow and uses
+touch actions.
 
 Verification passed:
 

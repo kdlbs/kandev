@@ -175,6 +175,7 @@ test.describe("Agent profile — ACP-first", () => {
       await expect(testPage.getByTestId("model-config-resolution-loading")).toBeHidden({
         timeout: 15_000,
       });
+      await expect(testPage.getByTestId("model-config-options-loading")).toHaveCount(0);
       await expect(selector).toContainText("Mock Smart", { timeout: 10_000 });
       await expect(testPage.getByTestId("config-option-trigger-effort")).toBeVisible();
       await testPage.getByTestId("config-option-trigger-effort").click();

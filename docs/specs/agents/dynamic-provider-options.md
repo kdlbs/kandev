@@ -95,8 +95,9 @@ change is required for the new identifier.
 Given a model selection whose capability probe times out, is unavailable, or
 returns no complete post-model option snapshot, when the settings page receives
 the failure, then it keeps already persisted and currently selected values,
-does not offer unverified new options, shows a retryable discovery error, and
-allows a model-only save when the rest of the form is valid.
+does not show stale dependent controls or offer unverified new options, shows a
+retryable discovery error, and allows a model-only save when the rest of the
+form is valid.
 
 ### Responses arrive out of order
 
