@@ -42,7 +42,8 @@ test.describe("Org chart", () => {
     await expect(testPage.getByRole("heading", { name: /Org/i }).first()).toBeVisible({
       timeout: 10_000,
     });
-    await expect(testPage.getByRole("link", { name: "Org Chart Reparent Target" })).toHaveAttribute(
+    const orgChart = testPage.getByTestId("org-chart-edges").locator("..");
+    await expect(orgChart.getByRole("link", { name: /Org Chart Reparent Target/ })).toHaveAttribute(
       "data-reports-to",
       officeSeed.agentId,
     );

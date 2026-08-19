@@ -162,7 +162,12 @@ describe("AgentConfigurationTab reports-to selection", () => {
   });
 
   it("does not offer the agent itself as a reports-to option", async () => {
-    const manager = { ...baseAgent, id: MANAGER_ID, name: "Manager" } as AgentProfile;
+    const manager = {
+      ...baseAgent,
+      id: MANAGER_ID,
+      name: "Manager",
+      role: "worker",
+    } as AgentProfile;
     renderConfigTab([manager], manager);
 
     fireEvent.click(screen.getByRole("combobox", { name: REPORTS_TO_COMBOBOX }));
@@ -173,7 +178,12 @@ describe("AgentConfigurationTab reports-to selection", () => {
   });
 
   it("does not offer a descendant as a reports-to option", async () => {
-    const manager = { ...baseAgent, id: MANAGER_ID, name: "Manager" } as AgentProfile;
+    const manager = {
+      ...baseAgent,
+      id: MANAGER_ID,
+      name: "Manager",
+      role: "worker",
+    } as AgentProfile;
     const worker = {
       ...baseAgent,
       id: WORKER_ID,
