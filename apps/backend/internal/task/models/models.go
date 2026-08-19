@@ -605,6 +605,61 @@ type PendingStepCompletionSignal struct {
 	SignaledAt time.Time `json:"signaled_at"`
 }
 
+// CompletionIntentState is the durable lifecycle of an exact-turn completion
+// request. Terminal states intentionally cannot be reopened or settled again:
+// a later user message owns a successor intent rather than mutating history.
+type CompletionIntentState string
+
+const (
+	CompletionIntentStatePending    CompletionIntentState = "pending"
+	CompletionIntentStateSettling   CompletionIntentState = "settling"
+	CompletionIntentStateSettled    CompletionIntentState = "settled"
+	CompletionIntentStateReopened   CompletionIntentState = "reopened"
+	CompletionIntentStateSuperseded CompletionIntentState = "superseded"
+	CompletionIntentStateRejected   CompletionIntentState = "rejected"
+)
+
+// CanTransitionTo permits only the forward, compare-and-set transitions used
+// by completion admission and exact-turn settlement. It deliberately rejects
+// same-state writes so duplicate callbacks must observe an existing outcome.
+func (state CompletionIntentState) CanTransitionTo(next CompletionIntentState) bool {
+	switch state {
+	case CompletionIntentStatePending:
+		return next == CompletionIntentStateSettling ||
+			next == CompletionIntentStateReopened ||
+			next == CompletionIntentStateSuperseded ||
+			next == CompletionIntentStateRejected
+	case CompletionIntentStateSettling:
+		return next == CompletionIntentStateSettled ||
+			next == CompletionIntentStateSuperseded ||
+			next == CompletionIntentStateRejected
+	default:
+		return false
+	}
+}
+
+// CompletionIntent binds an accepted completion signal to the only turn it is
+// allowed to settle. AgentExecutionID and PromptGeneration are captured when
+// the provider exposes them, so late frames cannot close a successor turn.
+type CompletionIntent struct {
+	ID                       string                `json:"id"`
+	TaskID                   string                `json:"task_id"`
+	SessionID                string                `json:"session_id"`
+	TurnID                   string                `json:"turn_id"`
+	WorkflowStepID           string                `json:"workflow_step_id"`
+	AgentExecutionID         string                `json:"agent_execution_id,omitempty"`
+	PromptGeneration         int64                 `json:"prompt_generation,omitempty"`
+	State                    CompletionIntentState `json:"state"`
+	Summary                  string                `json:"summary"`
+	Handoff                  string                `json:"handoff,omitempty"`
+	Blockers                 string                `json:"blockers,omitempty"`
+	RequestedAt              time.Time             `json:"requested_at"`
+	LastPostSignalActivityAt time.Time             `json:"last_post_signal_activity_at"`
+	EligibleAt               time.Time             `json:"eligible_at"`
+	SettledAt                *time.Time            `json:"settled_at,omitempty"`
+	Outcome                  string                `json:"outcome,omitempty"`
+}
+
 // LoadSessionRuntimeConfig decodes the runtime-config bag entry from session
 // metadata. It tolerates both typed values and JSON-rehydrated maps.
 func LoadSessionRuntimeConfig(metadata map[string]interface{}) (SessionRuntimeConfig, bool) {

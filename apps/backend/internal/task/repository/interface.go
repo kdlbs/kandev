@@ -289,6 +289,15 @@ type TurnRepository interface {
 	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
 }
 
+// CompletionIntentRepository persists exact-turn completion ownership. Its
+// compare-and-set transition prevents duplicate provider and reconciler events
+// from settling the same intent twice.
+type CompletionIntentRepository interface {
+	CreateOrGetCompletionIntent(ctx context.Context, intent *models.CompletionIntent) (created bool, stored *models.CompletionIntent, err error)
+	GetCompletionIntent(ctx context.Context, id string) (*models.CompletionIntent, error)
+	TransitionCompletionIntent(ctx context.Context, id string, from, to models.CompletionIntentState, settledAt time.Time) (bool, error)
+}
+
 // SessionRepository handles task session lifecycle and workflow-session relationships.
 type SessionRepository interface {
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
