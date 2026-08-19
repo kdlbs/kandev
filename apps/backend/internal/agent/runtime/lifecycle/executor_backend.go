@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -388,8 +389,11 @@ type ExecutorCreateRequest struct {
 	PromptTurnID         string
 	WorkspacePath        string
 	WorkspaceSourceRoots []string
-	Protocol             string
-	Env                  map[string]string
+	// GitMetadataProjections are fresh, task-owned grants compiled by the
+	// executor; they replace legacy source-repository gitdir metadata.
+	GitMetadataProjections []*worktree.GitMetadataProjection
+	Protocol               string
+	Env                    map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
 	ApprovedSecretEnvKeys  []string
