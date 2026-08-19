@@ -13,6 +13,7 @@ import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentProfile, AgentRole } from "@/lib/state/slices/office/types";
 import { AgentRoutingCard } from "./agent-routing-card";
+import { reportsToOptions } from "./reports-to-options";
 import { useTranslation } from "react-i18next";
 
 type AgentConfigurationTabProps = {
@@ -54,6 +55,7 @@ const CAPABILITY_LABEL_KEYS: Record<string, string> = {
 type FormState = {
   name: string;
   role: AgentRole;
+  reportsTo: string;
   budgetMonthlyCents: number;
   maxConcurrentSessions: number;
   executorType: string;
@@ -63,6 +65,7 @@ function initialForm(agent: AgentProfile): FormState {
   return {
     name: agent.name,
     role: agent.role,
+    reportsTo: agent.reportsTo ?? "",
     budgetMonthlyCents: agent.budgetMonthlyCents,
     maxConcurrentSessions: agent.maxConcurrentSessions,
     executorType: agent.executorPreference?.type ?? "",
@@ -91,9 +94,9 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
     setDirty(true);
   }, []);
 
-  const reportsToAgent = useMemo(
-    () => allOfficeAgents.find((a) => a.id === agent.reportsTo),
-    [allOfficeAgents, agent.reportsTo],
+  const reportsToChoices = useMemo(
+    () => reportsToOptions(allOfficeAgents, agent.id),
+    [allOfficeAgents, agent.id],
   );
 
   const handleSave = useCallback(async () => {
@@ -102,6 +105,7 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
       const update: Partial<AgentProfile> = {
         name: form.name,
         role: form.role,
+        reportsTo: form.reportsTo,
         budgetMonthlyCents: form.budgetMonthlyCents,
         maxConcurrentSessions: form.maxConcurrentSessions,
         executorPreference: form.executorType ? { type: form.executorType } : undefined,
@@ -124,9 +128,11 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
         name={form.name}
         role={form.role}
         roles={roles}
-        reportsToName={reportsToAgent?.name ?? t("office:none")}
+        reportsTo={form.reportsTo}
+        reportsToChoices={reportsToChoices}
         onNameChange={(v) => patch({ name: v })}
         onRoleChange={(v) => patch({ role: v })}
+        onReportsToChange={(v) => patch({ reportsTo: v })}
       />
       <CapabilityPreviewCard agent={agent} role={form.role} />
       <OrchestrationCard
@@ -193,20 +199,60 @@ function effectiveCapabilities(agent: AgentProfile, role: AgentRole): string[] {
   return Object.keys(CAPABILITY_LABEL_KEYS).filter((key) => allowed.has(key));
 }
 
+function ReportsToField({
+  reportsTo,
+  choices,
+  onChange,
+}: {
+  reportsTo: string;
+  choices: Array<{ id: string; name: string }>;
+  onChange: (v: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex-1">
+      <Label htmlFor="cfg-reports-to">{t("office:reportsTo")}</Label>
+      <Select
+        value={reportsTo || "__none__"}
+        onValueChange={(v) => onChange(v === "__none__" ? "" : v)}
+      >
+        <SelectTrigger id="cfg-reports-to" className="mt-1 cursor-pointer">
+          <SelectValue placeholder={t("office:noneTopLevel")} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__" className="cursor-pointer">
+            {t("office:none")}
+          </SelectItem>
+          {choices.map((c) => (
+            <SelectItem key={c.id} value={c.id} className="cursor-pointer">
+              {c.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground mt-1">{t("office:whichAgentManagesThisOne")}</p>
+    </div>
+  );
+}
+
 function IdentityCard({
   name,
   role,
   roles,
-  reportsToName,
+  reportsTo,
+  reportsToChoices,
   onNameChange,
   onRoleChange,
+  onReportsToChange,
 }: {
   name: string;
   role: AgentRole;
   roles: Array<{ id: string; label: string }>;
-  reportsToName: string;
+  reportsTo: string;
+  reportsToChoices: Array<{ id: string; name: string }>;
   onNameChange: (v: string) => void;
   onRoleChange: (v: AgentRole) => void;
+  onReportsToChange: (v: string) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -243,13 +289,11 @@ function IdentityCard({
               </SelectContent>
             </Select>
           </div>
-          <div className="flex-1">
-            <Label>{t("office:reportsTo")}</Label>
-            <Input value={reportsToName} disabled className="mt-1" />
-            <p className="text-xs text-muted-foreground mt-1">
-              {t("office:editOrgChartFromTheAgents")}
-            </p>
-          </div>
+          <ReportsToField
+            reportsTo={reportsTo}
+            choices={reportsToChoices}
+            onChange={onReportsToChange}
+          />
         </div>
       </CardContent>
     </Card>
