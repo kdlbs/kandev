@@ -288,6 +288,19 @@ func fullBundle() *ConfigBundle {
 	}
 }
 
+// hierarchyAgent returns a minimal AgentConfig for reports_to resolution
+// tests. Role and counts are irrelevant to hierarchy resolution but keep the
+// fixture realistic.
+func hierarchyAgent(name, reportsTo string) AgentConfig {
+	return AgentConfig{
+		Name:                  name,
+		Role:                  "engineer",
+		ReportsTo:             reportsTo,
+		BudgetMonthlyCents:    100,
+		MaxConcurrentSessions: 1,
+	}
+}
+
 // seedAgent inserts an office agent row and returns it.
 func seedAgent(t *testing.T, e *testEnv, wsID, name string) *models.AgentInstance {
 	t.Helper()

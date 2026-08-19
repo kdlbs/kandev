@@ -57,16 +57,18 @@ func TestApplyImport_CreatesEveryFieldFromBundle(t *testing.T) {
 	assertEqual(t, "project executor config", project.ExecutorConfig, `{"type":"local_docker"}`)
 }
 
-// TestApplyImport_NameReferencesAreNotResolved pins the deliberate gap in the
-// importer: the three cross-entity references in the DTO (agent reports_to,
-// routine assignee_name, project lead_agent_name) name an entity but the
-// import never resolves them to an ID. They are export-only fields today.
-// Wiring resolution in must update this test.
+// TestApplyImport_NameReferencesAreNotResolved documents the current state of
+// the three cross-entity references in the DTO (agent reports_to, routine
+// assignee_name, project lead_agent_name): agent reports_to IS resolved to
+// the target agent's ID (see the reports_to-specific tests in
+// import_reports_to_test.go for the full behavior), but routine assignee_name
+// and project lead_agent_name remain export-only fields that import never
+// resolves. Wiring resolution in for those must update this test.
 func TestApplyImport_NameReferencesAreNotResolved(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 
-	// Seed the referenced agent so a resolver would have something to find.
+	// Seed the referenced agent so the resolver has something to find.
 	lead := seedAgent(t, env, testWorkspaceID, "grace")
 
 	if _, err := env.svc.ApplyImport(ctx, testWorkspaceID, fullBundle()); err != nil {
@@ -74,10 +76,7 @@ func TestApplyImport_NameReferencesAreNotResolved(t *testing.T) {
 	}
 
 	agent := agentByName(t, env, testWorkspaceID, "ada")
-	assertEqual(t, "agent reports_to", agent.ReportsTo, "")
-	if agent.ReportsTo == lead.ID {
-		t.Error("reports_to resolution appears implemented; update this test")
-	}
+	assertEqual(t, "agent reports_to", agent.ReportsTo, lead.ID)
 	assertEqual(t, "routine assignee",
 		routineByName(t, env, testWorkspaceID, "standup").AssigneeAgentProfileID, "")
 	assertEqual(t, "project lead",

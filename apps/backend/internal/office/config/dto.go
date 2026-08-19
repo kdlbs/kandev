@@ -75,8 +75,9 @@ type ImportPreview struct {
 
 // ImportResult reports what was actually changed.
 type ImportResult struct {
-	CreatedCount int `json:"created_count"`
-	UpdatedCount int `json:"updated_count"`
+	CreatedCount int      `json:"created_count"`
+	UpdatedCount int      `json:"updated_count"`
+	Warnings     []string `json:"warnings,omitempty"`
 }
 
 // ParseError describes a single file that failed to parse during a FS scan.

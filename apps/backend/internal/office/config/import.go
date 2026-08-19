@@ -178,7 +178,64 @@ func (s *ConfigService) applyAgents(
 			result.CreatedCount++
 		}
 	}
+	return s.applyAgentReportsTo(ctx, wsID, incoming, result)
+}
+
+// applyAgentReportsTo resolves each incoming agent's reports_to name to the
+// target agent's ID and persists it. It runs after every agent in the bundle
+// has been created or updated above, so it re-lists the workspace to pick up
+// IDs assigned to newly-created rows — this makes resolution independent of
+// bundle order and lets a reports_to name an agent that is only in the
+// workspace, not the bundle. A name that resolves to nothing (dangling
+// reference) or to the agent itself is recorded as a warning and left empty
+// rather than failing the import.
+func (s *ConfigService) applyAgentReportsTo(
+	ctx context.Context, wsID string, incoming []AgentConfig, result *ImportResult,
+) error {
+	current, err := s.repo.ListAgentInstances(ctx, wsID)
+	if err != nil {
+		return err
+	}
+	byName := make(map[string]*models.AgentInstance, len(current))
+	for _, a := range current {
+		byName[a.Name] = a
+	}
+	for _, cfg := range incoming {
+		agent, ok := byName[cfg.Name]
+		if !ok {
+			continue
+		}
+		reportsTo, warning := resolveReportsTo(cfg, byName)
+		if warning != "" {
+			result.Warnings = append(result.Warnings, warning)
+		}
+		if agent.ReportsTo == reportsTo {
+			continue
+		}
+		agent.ReportsTo = reportsTo
+		if err := s.repo.UpdateAgentInstance(ctx, agent); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// resolveReportsTo resolves cfg.ReportsTo (a name) against byName (a name ->
+// agent index built from the target workspace after apply). It returns the
+// resolved manager ID, or an empty string plus a warning when the name is a
+// self-reference or does not match any known agent.
+func resolveReportsTo(cfg AgentConfig, byName map[string]*models.AgentInstance) (string, string) {
+	if cfg.ReportsTo == "" {
+		return "", ""
+	}
+	if cfg.ReportsTo == cfg.Name {
+		return "", fmt.Sprintf("agent %q cannot report to itself", cfg.Name)
+	}
+	manager, ok := byName[cfg.ReportsTo]
+	if !ok {
+		return "", fmt.Sprintf("agent %q reports_to %q, which was not found", cfg.Name, cfg.ReportsTo)
+	}
+	return manager.ID, ""
 }
 
 func (s *ConfigService) applySkills(
