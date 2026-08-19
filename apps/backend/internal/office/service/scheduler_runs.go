@@ -74,7 +74,15 @@ func (s *Service) transitionRunTerminal(ctx context.Context, id, status string) 
 // already call releaseCheckoutIfNeeded — without this, checkout_agent_id
 // leaked forever and every other agent was permanently blocked from
 // acquiring the task. Safe to call redundantly alongside those existing
-// call sites: ReleaseTaskCheckout is an idempotent SET NULL.
+// call sites: ReleaseTaskCheckoutForAgent is an idempotent, owner-scoped
+// SET NULL.
+//
+// Owner-scoped by run.AgentProfileID, not just task ID: a run that never
+// held the checkout (the loser of a checkout-contention race escalating via
+// escalateFailure, or a run for an agent that turned out to be
+// inactive/idle and never reached the checkout attempt in processRun) must
+// not clear a different, currently-active agent's lock out from under it —
+// that inverted the invariant this whole release path exists to protect.
 func (s *Service) releaseTaskCheckoutForRun(ctx context.Context, run *models.Run) {
 	if run == nil {
 		return
@@ -83,7 +91,7 @@ func (s *Service) releaseTaskCheckoutForRun(ctx context.Context, run *models.Run
 	if taskID == "" {
 		return
 	}
-	if err := s.repo.ReleaseTaskCheckout(ctx, taskID); err != nil {
+	if err := s.repo.ReleaseTaskCheckoutForAgent(ctx, taskID, run.AgentProfileID); err != nil {
 		s.logger.Error("failed to release task checkout on terminal transition",
 			zap.String("run_id", run.ID),
 			zap.String("task_id", taskID),

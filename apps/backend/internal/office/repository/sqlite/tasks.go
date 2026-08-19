@@ -749,6 +749,19 @@ func (r *Repository) ReleaseTaskCheckout(ctx context.Context, taskID string) err
 	return err
 }
 
+// ReleaseTaskCheckoutForAgent releases the exclusive lock on a task only if
+// agentID is the current holder. Unlike ReleaseTaskCheckout, a caller that
+// never held the lock (e.g. the loser of a checkout race, or a run for an
+// agent that was never checked out) cannot clear someone else's active
+// checkout out from under them.
+func (r *Repository) ReleaseTaskCheckoutForAgent(ctx context.Context, taskID, agentID string) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL
+		WHERE id = ? AND checkout_agent_id = ?
+	`), taskID, agentID)
+	return err
+}
+
 // ReapStaleCheckouts clears checkout_agent_id/checkout_at on tasks whose
 // checkout is older than olderThan and that have no queued or claimed run
 // in flight. This is a backstop for callers that fail to release the

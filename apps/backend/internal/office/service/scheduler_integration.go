@@ -604,7 +604,16 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 // HandleRunFailure's exponential schedule (2m-2h): losing a checkout race
 // isn't a failure, the task is just busy, so a short delay is enough for
 // the current holder to finish and release it.
-const checkoutContendedRetryDelay = 30 * time.Second
+//
+// Set to 60s (not the original 30s) so the full MaxRetryCount(4) budget
+// covers 4 minutes of contention before escalating to a permanent failure.
+// The defect this fix accompanies was itself observed with a ~3-minute
+// holder-release delay; the previous 30s x 4 = 2-minute budget would have
+// escalated (and permanently failed the reviewer's run) before the holder
+// ever released the lock. Retried at a flat delay rather than exponential
+// backoff, on purpose: unlike a real failure, a wait here is bounded by how
+// long the current holder takes, not by how many times we've already tried.
+const checkoutContendedRetryDelay = 60 * time.Second
 
 // tryCheckout attempts to acquire an exclusive lock on the task. Returns true
 // if the checkout succeeded or was not needed, false if blocked.

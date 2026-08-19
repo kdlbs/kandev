@@ -80,12 +80,29 @@ func TestSchedulerTick_ContendedCheckoutRequeuesRun(t *testing.T) {
 	if !found {
 		t.Fatal("expected a checkout.contended run event, found none")
 	}
+
+	// The holder must still own the checkout: requeuing the loser must not
+	// touch a lock it never acquired.
+	stillHeld, err := svc.CheckoutTask(ctx, "task-contended-1", "agent-third")
+	if err != nil {
+		t.Fatalf("holder-checkout probe: %v", err)
+	}
+	if stillHeld {
+		t.Fatal("LOCK STOLEN: a third agent acquired the checkout while agent-checkout-holder still held it")
+	}
 }
 
 // TestSchedulerTick_ContendedCheckoutEscalatesPastMaxRetries pins the
 // bound on the re-queue loop: a run that keeps losing the checkout past
 // MaxRetryCount must eventually be marked failed rather than retried
-// forever.
+// forever. It also pins the fix for a Review round-1 regression: escalation
+// routes through escalateFailure -> FailRun -> transitionRunTerminal ->
+// releaseTaskCheckoutForRun, and the escalating run is by construction the
+// LOSER of the checkout race. Before the release was scoped to the run's
+// own agent, this call cleared checkout_agent_id unconditionally by task
+// ID, so the escalation of a run that never held the lock stole it out
+// from under the real holder — the exact inverse of the leak this defect
+// board exists to fix.
 func TestSchedulerTick_ContendedCheckoutEscalatesPastMaxRetries(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -130,5 +147,16 @@ func TestSchedulerTick_ContendedCheckoutEscalatesPastMaxRetries(t *testing.T) {
 	}
 	if runs[0].Status != service.RunStatusFailed {
 		t.Fatalf("run status = %q, want failed after exhausting retries", runs[0].Status)
+	}
+
+	// The real holder must still own the checkout: the escalated run
+	// (agent-checkout-exhausted) never held it, so failing it must not
+	// release agent-checkout-holder-2's lock.
+	stillHeld, err := svc.CheckoutTask(ctx, "task-contended-2", "agent-third")
+	if err != nil {
+		t.Fatalf("holder-checkout probe: %v", err)
+	}
+	if stillHeld {
+		t.Fatal("LOCK STOLEN: a third agent acquired the checkout while agent-checkout-holder-2 still held it")
 	}
 }
