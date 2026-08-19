@@ -342,7 +342,7 @@ function TerminalTabBody({
   );
 }
 
-function TerminalTabMenu({
+export function TerminalTabMenu({
   canMutate,
   onStartRename,
   onClosePanel,

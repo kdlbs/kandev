@@ -58,6 +58,35 @@ async function openTask(page: Page, title: string): Promise<SessionPage> {
   return session;
 }
 
+async function openTabletTask(page: Page, taskId: string): Promise<SessionPage> {
+  await page.goto("/");
+  await page.evaluate(() => {
+    window.localStorage.setItem("task-right-panel-collapsed", "false");
+  });
+  await page.goto(`/t/${taskId}`);
+  const session = new SessionPage(page);
+  await session.waitForLoad();
+  await expect(page.getByTestId("tablet-task-layout")).toBeVisible({ timeout: 15_000 });
+  return session;
+}
+
+async function listTerminalIds(
+  apiClient: ApiClient,
+  taskId: string,
+  environmentId: string,
+): Promise<string[]> {
+  const response = await apiClient.wsRequest<{
+    shells?: Array<{ id?: string; terminal_id?: string }>;
+  }>("user_shell.list", {
+    task_id: taskId,
+    task_environment_id: environmentId,
+    include_parked: true,
+  });
+  return (response.shells ?? [])
+    .map((shell) => shell.id ?? shell.terminal_id)
+    .filter((id): id is string => Boolean(id));
+}
+
 async function clickNewTerminalInPlusMenu(page: Page, session: SessionPage) {
   await session.addPanelButton().click();
   const menu = page
@@ -73,6 +102,84 @@ async function clickNewTerminalInPlusMenu(page: Page, session: SessionPage) {
 }
 
 test.describe("Terminals — dockview UI", () => {
+  test("right-panel terminal context menu supports inline rename and confirmed terminate", async ({
+    tabletTestPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const task = await createTaskAndWait(apiClient, seedData, "Right Panel Context Menu");
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    const environmentId = sessions[0]?.task_environment_id;
+    expect(environmentId).toBeTruthy();
+
+    const first = await apiClient.wsRequest<{ terminal_id: string }>("user_shell.create", {
+      task_id: task.id,
+      task_environment_id: environmentId,
+    });
+    const second = await apiClient.wsRequest<{ terminal_id: string }>("user_shell.create", {
+      task_id: task.id,
+      task_environment_id: environmentId,
+    });
+    await openTabletTask(tabletTestPage, task.id);
+    const firstTab = tabletTestPage.getByTestId(`terminal-tab-${first.terminal_id}`);
+    const secondTab = tabletTestPage.getByTestId(`terminal-tab-${second.terminal_id}`);
+    await expect(firstTab).toBeVisible({ timeout: 15_000 });
+    await expect(secondTab).toBeVisible({ timeout: 15_000 });
+
+    // Double-click keeps the existing inline rename entry point functional.
+    await firstTab.dblclick();
+    const renameInput = tabletTestPage.getByTestId("terminal-tab-rename-input");
+    await expect(renameInput).toBeVisible();
+    await renameInput.fill("double click rename");
+    await tabletTestPage.keyboard.press("Enter");
+    await expect(firstTab).toContainText("double click rename", { timeout: 10_000 });
+
+    // The close button still opens the same local confirmation and returns
+    // focus to that control when cancelled.
+    await firstTab.hover();
+    const firstClose = tabletTestPage.getByTestId(`terminal-tab-close-${first.terminal_id}`);
+    await firstClose.click();
+    const closeConfirmation = tabletTestPage.getByTestId("terminal-close-confirm-popover");
+    await expect(closeConfirmation).toBeVisible();
+    await closeConfirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(firstClose).toBeFocused();
+    await expect(firstTab).toBeVisible();
+
+    // Context-menu actions are separate and do not invoke browser-native
+    // prompt() or destroy the shell before the anchored confirmation.
+    let nativeDialogSeen = false;
+    tabletTestPage.once("dialog", (dialog) => {
+      nativeDialogSeen = true;
+      void dialog.dismiss();
+    });
+    await secondTab.click({ button: "right" });
+    await tabletTestPage.getByRole("menuitem", { name: /^Rename/ }).click();
+    await expect(renameInput).toBeVisible();
+    await renameInput.fill("context menu rename");
+    await tabletTestPage.keyboard.press("Enter");
+    await expect(secondTab).toContainText("context menu rename", { timeout: 10_000 });
+
+    await secondTab.click({ button: "right" });
+    await tabletTestPage.getByRole("menuitem", { name: /^Terminate/ }).click();
+    await expect(closeConfirmation).toBeVisible();
+    expect(nativeDialogSeen).toBe(false);
+    await expect
+      .poll(() => listTerminalIds(apiClient, task.id, environmentId), {
+        message: "context-menu terminate must wait for confirmation",
+      })
+      .toContain(second.terminal_id);
+    await expect(secondTab).toBeVisible();
+
+    await closeConfirmation.getByRole("button", { name: "Close terminal", exact: true }).click();
+    await expect(secondTab).toHaveCount(0, { timeout: 10_000 });
+    await expect
+      .poll(() => listTerminalIds(apiClient, task.id, environmentId), {
+        message: "confirmed context-menu terminate should destroy the shell",
+      })
+      .not.toContain(second.terminal_id);
+  });
+
   /**
    * Regression: the tab title for ordinary terminals should be the
    * literal "Terminal" (no " N" suffix) with the sequence number in a

@@ -1,8 +1,9 @@
 "use client";
 
-import type { ReactNode, MouseEvent } from "react";
+import { useRef, type ReactNode, type MouseEvent, type RefObject } from "react";
 import { Fragment } from "react";
 import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
+import { ContextMenu, ContextMenuTrigger } from "@kandev/ui/context-menu";
 
 export type SessionTab = {
   id: string;
@@ -15,6 +16,8 @@ export type SessionTab = {
   onClose?: (event: MouseEvent) => void;
   onContextMenu?: (event: MouseEvent) => void;
   onDoubleClick?: (event: MouseEvent) => void;
+  renderContextMenu?: (closeAnchorRef: RefObject<HTMLElement | null>) => ReactNode;
+  content?: ReactNode;
   className?: string;
   testId?: string;
   closeTestId?: string;
@@ -78,46 +81,63 @@ function SessionTabItem({
   index: number;
   separatorAfterIndex?: number;
 }) {
+  const closeAnchorRef = useRef<HTMLElement>(null);
+  const trigger = (
+    <TabsTrigger
+      value={tab.id}
+      data-testid={tab.testId}
+      onContextMenu={tab.onContextMenu}
+      onDoubleClick={tab.onDoubleClick}
+      className={
+        (tab.className ?? "") +
+        " group relative py-1 cursor-pointer rounded-sm " +
+        (tab.truncate === false ? "max-w-[200px]" : "max-w-[120px]")
+      }
+    >
+      {tab.content ?? (
+        <>
+          {tab.icon}
+          {tab.badge && (
+            <span
+              data-testid={`${tab.testId ?? tab.id}-seq-badge`}
+              className="mr-1 inline-flex items-center justify-center rounded-sm bg-muted text-muted-foreground text-[10px] font-mono leading-none px-1 py-0.5"
+            >
+              {tab.badge}
+            </span>
+          )}
+          <span className={`truncate ${tab.icon ? "ml-1.5" : ""}`} style={{ textOverflow: "clip" }}>
+            {tab.label}
+          </span>
+        </>
+      )}
+      {tab.closable && tab.onClose && (
+        <span
+          ref={closeAnchorRef}
+          role="button"
+          tabIndex={-1}
+          data-testid={tab.closeTestId}
+          className={`absolute right-1 rounded bg-background hover:bg-muted hover:text-foreground text-muted-foreground transition-opacity ${tab.alwaysShowClose ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+          onClick={tab.onClose}
+        >
+          <CloseIcon />
+        </span>
+      )}
+    </TabsTrigger>
+  );
+
   return (
     <Fragment key={tab.id}>
       {separatorAfterIndex !== undefined && index === separatorAfterIndex + 1 && (
         <div className="h-4 w-px bg-border mx-1" />
       )}
-      <TabsTrigger
-        value={tab.id}
-        data-testid={tab.testId}
-        onContextMenu={tab.onContextMenu}
-        onDoubleClick={tab.onDoubleClick}
-        className={
-          (tab.className ?? "") +
-          " group relative py-1 cursor-pointer rounded-sm " +
-          (tab.truncate === false ? "max-w-[200px]" : "max-w-[120px]")
-        }
-      >
-        {tab.icon}
-        {tab.badge && (
-          <span
-            data-testid={`${tab.testId ?? tab.id}-seq-badge`}
-            className="mr-1 inline-flex items-center justify-center rounded-sm bg-muted text-muted-foreground text-[10px] font-mono leading-none px-1 py-0.5"
-          >
-            {tab.badge}
-          </span>
-        )}
-        <span className={`truncate ${tab.icon ? "ml-1.5" : ""}`} style={{ textOverflow: "clip" }}>
-          {tab.label}
-        </span>
-        {tab.closable && tab.onClose && (
-          <span
-            role="button"
-            tabIndex={-1}
-            data-testid={tab.closeTestId}
-            className={`absolute right-1 rounded bg-background hover:bg-muted hover:text-foreground text-muted-foreground transition-opacity ${tab.alwaysShowClose ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
-            onClick={tab.onClose}
-          >
-            <CloseIcon />
-          </span>
-        )}
-      </TabsTrigger>
+      {tab.renderContextMenu ? (
+        <ContextMenu>
+          <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
+          {tab.renderContextMenu(closeAnchorRef)}
+        </ContextMenu>
+      ) : (
+        trigger
+      )}
     </Fragment>
   );
 }
