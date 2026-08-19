@@ -286,6 +286,7 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		SessionID:                      req.SessionID,
 		ExecutorProfileID:              getMetadataString(req.Metadata, "executor_profile_id"),
 		InstanceID:                     req.InstanceID,
+		GitMetadataProjections:         req.GitMetadataProjections,
 		Credentials:                    req.Env,
 		AutoApprovePermissions:         req.AutoApprovePermissions,
 		AutoApprovePermissionsOverride: req.AutoApprovePermissionsOverride,
