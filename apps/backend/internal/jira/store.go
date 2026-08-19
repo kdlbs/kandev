@@ -124,6 +124,9 @@ func (s *Store) initSchema() error {
 	if err := s.addIssueWatchRepositoryColumns(); err != nil {
 		return err
 	}
+	if err := s.addOAuthColumns(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -237,6 +240,32 @@ func (s *Store) addInstanceTypeColumn() error {
 	}
 	if _, err := s.db.Exec(`ALTER TABLE jira_configs ADD COLUMN instance_type TEXT NOT NULL DEFAULT 'cloud'`); err != nil {
 		return fmt.Errorf("add instance_type column: %w", err)
+	}
+	return nil
+}
+
+// addOAuthColumns brings older databases up to the current schema by adding
+// client_id, cloud_id, and token_expires_at to jira_configs when missing.
+// All three backfill to empty/NULL and are only populated for OAuth configs.
+func (s *Store) addOAuthColumns() error {
+	cols, err := s.tableColumns("jira_configs")
+	if err != nil {
+		return err
+	}
+	if _, ok := cols["client_id"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE jira_configs ADD COLUMN client_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add client_id column: %w", err)
+		}
+	}
+	if _, ok := cols["cloud_id"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE jira_configs ADD COLUMN cloud_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add cloud_id column: %w", err)
+		}
+	}
+	if _, ok := cols["token_expires_at"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE jira_configs ADD COLUMN token_expires_at DATETIME`); err != nil {
+			return fmt.Errorf("add token_expires_at column: %w", err)
+		}
 	}
 	return nil
 }
@@ -372,7 +401,8 @@ func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
 }
 
 const selectConfigColumns = `workspace_id, site_url, email, auth_method, instance_type, default_project_key,
-		last_checked_at, last_ok, last_error, created_at, updated_at`
+		last_checked_at, last_ok, last_error, created_at, updated_at,
+		client_id, cloud_id, token_expires_at`
 
 // GetConfig returns the default workspace Jira config, or nil when no row
 // exists. New code should call GetConfigForWorkspace.
@@ -433,16 +463,21 @@ func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string
 		cfg.InstanceType = InstanceTypeCloud
 	}
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO jira_configs (workspace_id, site_url, email, auth_method, instance_type, default_project_key, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO jira_configs (workspace_id, site_url, email, auth_method, instance_type, default_project_key,
+			client_id, cloud_id, token_expires_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			site_url = excluded.site_url,
 			email = excluded.email,
 			auth_method = excluded.auth_method,
 			instance_type = excluded.instance_type,
 			default_project_key = excluded.default_project_key,
+			client_id = excluded.client_id,
+			cloud_id = excluded.cloud_id,
+			token_expires_at = excluded.token_expires_at,
 			updated_at = excluded.updated_at`,
-		workspaceID, cfg.SiteURL, cfg.Email, cfg.AuthMethod, cfg.InstanceType, cfg.DefaultProjectKey, cfg.CreatedAt, cfg.UpdatedAt)
+		workspaceID, cfg.SiteURL, cfg.Email, cfg.AuthMethod, cfg.InstanceType, cfg.DefaultProjectKey,
+		cfg.ClientID, cfg.CloudID, cfg.TokenExpiresAt, cfg.CreatedAt, cfg.UpdatedAt)
 	return err
 }
 
@@ -511,6 +546,19 @@ func (s *Store) UpdateAuthHealthForWorkspace(ctx context.Context, workspaceID st
 		SET last_checked_at = ?, last_ok = ?, last_error = ?
 		WHERE workspace_id = ?`,
 		checkedAt, ok, errMsg, workspaceID)
+	return err
+}
+
+// UpdateTokenExpiryForWorkspace updates the OAuth access token expiry for a
+// workspace config row. Called after a successful token refresh.
+func (s *Store) UpdateTokenExpiryForWorkspace(ctx context.Context, workspaceID string, expiresAt time.Time) error {
+	workspaceID, err := s.resolveWorkspaceID(workspaceID)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+		UPDATE jira_configs SET token_expires_at = ?, updated_at = ? WHERE workspace_id = ?`,
+		expiresAt, time.Now().UTC(), workspaceID)
 	return err
 }
 

@@ -47,6 +47,25 @@ type CloudClient struct {
 	instanceType string
 	apiBase      string // "/rest/api/3" for cloud, "/rest/api/2" for server.
 	maxBodySize  int64
+	// refresher enables on-demand token refresh for OAuth. When non-nil and a
+	// request gets 401, the client refreshes the access token and retries once.
+	refresher TokenRefresher
+	// workspaceID identifies the workspace for token refresh.
+	workspaceID string
+}
+
+// TokenRefresher is implemented by the Service to allow CloudClient to refresh
+// OAuth access tokens on-demand when a request hits a 401.
+type TokenRefresher interface {
+	RefreshOAuthToken(ctx context.Context, workspaceID string) error
+	RevealAccessToken(ctx context.Context, workspaceID string) (string, error)
+}
+
+// SetRefresher wires the OAuth token refresher. Called by the service after
+// constructing the client so the client can trigger a refresh on 401.
+func (c *CloudClient) SetRefresher(workspaceID string, r TokenRefresher) {
+	c.workspaceID = workspaceID
+	c.refresher = r
 }
 
 // NewCloudClient builds a client from a JiraConfig + secret. siteURL is
@@ -105,6 +124,8 @@ func (c *CloudClient) authorize(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer "+c.secret)
 	case AuthMethodSessionCookie:
 		req.Header.Set("Cookie", buildSessionCookieHeader(c.secret))
+	case AuthMethodOAuth:
+		req.Header.Set("Authorization", "Bearer "+c.secret)
 	}
 }
 
@@ -118,7 +139,32 @@ func buildSessionCookieHeader(secret string) string {
 
 // do executes a request and decodes a 2xx JSON body into out (may be nil).
 // Non-2xx responses are returned as *APIError so callers can switch on status.
+// For OAuth auth, a 401 triggers an automatic token refresh and single retry.
 func (c *CloudClient) do(ctx context.Context, method, path string, body interface{}, out interface{}) error {
+	err := c.doOnce(ctx, method, path, body, out)
+	if err == nil {
+		return nil
+	}
+	// Auto-refresh on 401 for OAuth: refresh the token and retry once.
+	if c.authMethod == AuthMethodOAuth && c.refresher != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusUnauthorized {
+			if refreshErr := c.refresher.RefreshOAuthToken(ctx, c.workspaceID); refreshErr != nil {
+				return fmt.Errorf("oauth token refresh failed: %w; original error: %v", refreshErr, err)
+			}
+			newToken, revealErr := c.refresher.RevealAccessToken(ctx, c.workspaceID)
+			if revealErr != nil {
+				return fmt.Errorf("reveal refreshed token: %w; original error: %v", revealErr, err)
+			}
+			c.secret = newToken
+			return c.doOnce(ctx, method, path, body, out)
+		}
+	}
+	return err
+}
+
+// doOnce executes a single request attempt without retry logic.
+func (c *CloudClient) doOnce(ctx context.Context, method, path string, body interface{}, out interface{}) error {
 	var reqBody io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)

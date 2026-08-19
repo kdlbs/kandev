@@ -64,6 +64,13 @@ type Service struct {
 	// post-construction via SetWorkspaceAuthorizer. Nil (unit tests, auth
 	// disabled) means unscoped — every workspace is visible, as before auth.
 	workspaceAuthorizer func(context.Context, string) error
+	// oauthStates holds pending OAuth CSRF states in memory.
+	oauthStates *mcpStateManager
+	// oauthMu provides per-workspace locks for token refresh to prevent
+	// concurrent refreshes from racing on the rotating refresh token.
+	oauthMu *perWorkspaceMutex
+	// oauthRedirectURI is the fully-qualified callback URL. Set at Provide time.
+	oauthRedirectURI string
 }
 
 // SetWorkspaceAuthorizer installs the per-user workspace access boundary applied
@@ -73,6 +80,22 @@ type Service struct {
 func (s *Service) SetWorkspaceAuthorizer(authorizer func(context.Context, string) error) {
 	if s != nil {
 		s.workspaceAuthorizer = authorizer
+	}
+}
+
+// RevealAccessToken reads the current OAuth access token from the secret store.
+// Implements the TokenRefresher interface for CloudClient auto-refresh.
+func (s *Service) RevealAccessToken(ctx context.Context, workspaceID string) (string, error) {
+	if s.secrets == nil {
+		return "", nil
+	}
+	return s.secrets.Reveal(ctx, OAuthAccessTokenKeyForWorkspace(workspaceID))
+}
+
+// SetOAuthRedirectURI sets the OAuth callback URL. Called at Provide time.
+func (s *Service) SetOAuthRedirectURI(uri string) {
+	if s != nil {
+		s.oauthRedirectURI = uri
 	}
 }
 
@@ -133,8 +156,12 @@ func (s *Service) MockClient() *MockClient {
 // tests can inject fakes without touching HTTP.
 type ClientFactory func(cfg *JiraConfig, secret string) Client
 
-// DefaultClientFactory returns a real CloudClient.
+// DefaultClientFactory returns a real CloudClient for token-based auth, or
+// MCPClient for OAuth auth (which routes through the MCP server).
 func DefaultClientFactory(cfg *JiraConfig, secret string) Client {
+	if cfg.AuthMethod == AuthMethodOAuth {
+		return NewMCPClient(secret, cfg.CloudID, cfg.WorkspaceID)
+	}
 	return NewCloudClient(cfg, secret)
 }
 
@@ -145,11 +172,13 @@ func NewService(store *Store, secrets SecretStore, clientFn ClientFactory, log *
 		clientFn = DefaultClientFactory
 	}
 	return &Service{
-		store:    store,
-		secrets:  secrets,
-		log:      log,
-		clientFn: clientFn,
-		clients:  make(map[string]Client),
+		store:       store,
+		secrets:     secrets,
+		log:         log,
+		clientFn:    clientFn,
+		clients:     make(map[string]Client),
+		oauthStates: newMCPStateManager(),
+		oauthMu:     newPerWorkspaceMutex(),
 	}
 }
 
@@ -193,6 +222,13 @@ func (s *Service) GetConfigForWorkspace(ctx context.Context, workspaceID string)
 			cfg.SecretExpiresAt = parseSessionCookieExpiry(secret)
 		}
 	}
+	// For OAuth, HasSecret should reflect whether the OAuth access token exists.
+	if cfg.AuthMethod == AuthMethodOAuth && s.secrets != nil {
+		oauthExists, oauthErr := s.secrets.Exists(ctx, OAuthAccessTokenKeyForWorkspace(workspaceID))
+		if oauthErr == nil {
+			cfg.HasSecret = oauthExists
+		}
+	}
 	return cfg, nil
 }
 
@@ -227,6 +263,15 @@ func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string,
 		AuthMethod:        req.AuthMethod,
 		InstanceType:      req.InstanceType,
 		DefaultProjectKey: req.DefaultProjectKey,
+		ClientID:           req.ClientID,
+	}
+	// Preserve cloudId for OAuth — it's resolved during the OAuth flow and
+	// shouldn't be overwritten by a regular config save.
+	if req.AuthMethod == AuthMethodOAuth {
+		if existing, _ := s.store.GetConfigForWorkspace(ctx, workspaceID); existing != nil {
+			cfg.CloudID = existing.CloudID
+			cfg.TokenExpiresAt = existing.TokenExpiresAt
+		}
 	}
 	if err := s.store.UpsertConfigForWorkspace(ctx, workspaceID, cfg); err != nil {
 		return nil, fmt.Errorf("upsert jira config: %w", err)
@@ -236,6 +281,9 @@ func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string,
 			return nil, fmt.Errorf("store jira secret: %w", err)
 		}
 	}
+	// OAuth: client_id is stored in the config row (UpsertConfigForWorkspace
+	// above). No client_secret — the flow uses PKCE with
+	// token_endpoint_auth_method="none".
 	s.invalidateClient(workspaceID)
 	// Probe asynchronously so a slow Atlassian doesn't stall the save response.
 	// RecordAuthHealth manages its own probe timeout, so a fresh
@@ -272,6 +320,9 @@ func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID stri
 		if err := s.secrets.Delete(ctx, SecretKeyForWorkspace(workspaceID)); err != nil {
 			s.log.Warn("jira: secret delete failed", zap.Error(err))
 		}
+		// Clean up OAuth secrets if they exist.
+		_ = s.secrets.Delete(ctx, OAuthAccessTokenKeyForWorkspace(workspaceID))
+		_ = s.secrets.Delete(ctx, OAuthRefreshTokenKeyForWorkspace(workspaceID))
 	}
 	s.invalidateClient(workspaceID)
 	return nil
@@ -538,7 +589,11 @@ func (s *Service) clientFor(ctx context.Context, workspaceID string) (Client, er
 	}
 	secret := ""
 	if s.secrets != nil {
-		secret, err = s.revealSecret(ctx, workspaceID)
+		if cfg.AuthMethod == AuthMethodOAuth {
+			secret, err = s.secrets.Reveal(ctx, OAuthAccessTokenKeyForWorkspace(workspaceID))
+		} else {
+			secret, err = s.revealSecret(ctx, workspaceID)
+		}
 		if err != nil {
 			// Don't conflate a transient secret-store failure with "user never
 			// configured Jira". The UI gates on ErrNotConfigured to render a
@@ -551,6 +606,12 @@ func (s *Service) clientFor(ctx context.Context, workspaceID string) (Client, er
 		}
 	}
 	client := s.clientFn(cfg, secret)
+	// Wire the OAuth token refresher so CloudClient can auto-refresh on 401.
+	if cfg.AuthMethod == AuthMethodOAuth {
+		if cc, ok := client.(*CloudClient); ok {
+			cc.SetRefresher(workspaceID, s)
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Re-check: another caller may have populated the cache while we were
@@ -594,11 +655,12 @@ func (s *Service) resolveCredentials(ctx context.Context, workspaceID string, re
 			return nil, "", errors.New("no secret store configured")
 		}
 		var err error
-		secret, err = s.revealSecret(ctx, workspaceID)
+		if cfg.AuthMethod == AuthMethodOAuth {
+			secret, err = s.secrets.Reveal(ctx, OAuthAccessTokenKeyForWorkspace(workspaceID))
+		} else {
+			secret, err = s.revealSecret(ctx, workspaceID)
+		}
 		if err != nil {
-			// Don't conflate a transient secret-store failure with "no token
-			// stored". Surfacing the real error gives the user a path to retry
-			// instead of telling them to paste a token they already have.
 			s.log.Warn("jira: secret reveal failed", zap.Error(err))
 			return nil, "", fmt.Errorf("read jira secret: %w", err)
 		}
@@ -615,6 +677,7 @@ func (s *Service) resolveCredentials(ctx context.Context, workspaceID string, re
 	needsStoredConfig := cfg.SiteURL == "" ||
 		cfg.AuthMethod == "" ||
 		cfg.InstanceType == "" ||
+		cfg.AuthMethod == AuthMethodOAuth ||
 		(cfg.AuthMethod == AuthMethodAPIToken && cfg.Email == "")
 	if needsStoredConfig {
 		if err := s.fillConfigFromStored(ctx, workspaceID, cfg); err != nil {
@@ -657,6 +720,12 @@ func (s *Service) fillConfigFromStored(ctx context.Context, workspaceID string, 
 	}
 	if cfg.InstanceType == "" {
 		cfg.InstanceType = stored.InstanceType
+	}
+	if cfg.ClientID == "" {
+		cfg.ClientID = stored.ClientID
+	}
+	if cfg.CloudID == "" {
+		cfg.CloudID = stored.CloudID
 	}
 	return nil
 }
@@ -726,7 +795,17 @@ func validateConfigRequest(req *SetConfigRequest) error {
 	default:
 		return fmt.Errorf("unknown instance type: %q", req.InstanceType)
 	}
-	return validateAuthInstance(req.AuthMethod, req.InstanceType, req.Email)
+	if err := validateAuthInstance(req.AuthMethod, req.InstanceType, req.Email); err != nil {
+		return err
+	}
+	// OAuth requires a client_id at config-save time. The client_secret is
+	// stored during the OAuth connect flow, not here.
+	if req.AuthMethod == AuthMethodOAuth && req.ClientID == "" {
+		return errors.New("clientId required for oauth auth")
+	}
+	// OAuth client_id is populated by the dynamic registration flow, not
+	// by the user — so we don't validate it here for non-oauth methods.
+	return nil
 }
 
 // validateAuthInstance enforces the supported (auth method, instance type)
@@ -758,6 +837,12 @@ func validateAuthInstance(authMethod, instanceType, email string) error {
 		// reject the combo until we add a Server-aware session-cookie path.
 		if instanceType != InstanceTypeCloud {
 			return errors.New("session_cookie auth is supported only on Atlassian Cloud — use pat for Server/DC")
+		}
+	case AuthMethodOAuth:
+		// OAuth 2.0 (3LO) is an Atlassian Cloud feature. The authorization,
+		// token, and accessible-resources endpoints are Cloud-only.
+		if instanceType != InstanceTypeCloud {
+			return errors.New("oauth auth is supported only on Atlassian Cloud — use pat for Server/DC")
 		}
 	default:
 		return fmt.Errorf("unknown auth method: %q", authMethod)
