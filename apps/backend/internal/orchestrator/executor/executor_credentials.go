@@ -16,7 +16,6 @@ import (
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/githubauth"
-	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -236,12 +235,104 @@ func (e *Executor) resolveManagedGitHubCredentials(
 	return false, nil
 }
 
+// PreflightManagedGitCredentials validates every task repository binding that
+// would use a managed Git credential lease, without cloning or issuing one.
+// It is a read-only check meant to run before a new session row is persisted
+// (PrepareSession) or before a workflow profile switch tears down the
+// current session (see switchSessionForStep), so an irreparable repository
+// identity - a foreign/ambiguous provider host, a malformed clone URL -
+// rejects the operation before anything is mutated, rather than surfacing as
+// a doomed session created later at launch time.
+func (e *Executor) PreflightManagedGitCredentials(
+	ctx context.Context,
+	workspaceID, taskID, executorID, executorProfileID string,
+) error {
+	metadata := make(map[string]interface{})
+	if executorProfileID != "" {
+		metadata["executor_profile_id"] = executorProfileID
+	}
+	execConfig := e.resolveExecutorConfig(ctx, executorID, workspaceID, metadata)
+	return e.preflightManagedGitCredentials(ctx, workspaceID, taskID, execConfig)
+}
+
+func (e *Executor) preflightManagedGitCredentials(
+	ctx context.Context,
+	workspaceID, taskID string,
+	execConfig executorConfig,
+) error {
+	if e.gitCredentialIssuer == nil {
+		// No broker configured: the managed-credential feature is inactive, so
+		// nothing here will ever attempt to resolve a repository's identity.
+		return nil
+	}
+	policy := TaskGitCredentialPolicy{Mode: taskGitCredentialsModeManaged}
+	if e.githubCredentialPolicyResolver != nil {
+		resolved, err := e.githubCredentialPolicyResolver.ResolveTaskGitCredentialPolicy(ctx, workspaceID)
+		if err != nil {
+			return fmt.Errorf("resolve task Git credential policy: %w", err)
+		}
+		policy = resolved
+	}
+	if policy.Mode == taskGitCredentialsModeExecutor {
+		return nil
+	}
+	if executorProfileHasGitHubToken(execConfig) {
+		return nil
+	}
+	taskRepos, err := e.repo.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("list task repositories: %w", err)
+	}
+	for _, taskRepo := range taskRepos {
+		if taskRepo == nil || taskRepo.RepositoryID == "" {
+			continue
+		}
+		repository, err := e.repo.GetRepository(ctx, taskRepo.RepositoryID)
+		if err != nil {
+			return fmt.Errorf("load repository %q: %w", taskRepo.RepositoryID, err)
+		}
+		if repository == nil || managedGitCredentialProvider(repository, true, nil) == "" {
+			continue
+		}
+		if _, _, _, _, err := gitCredentialCloneIdentity(repository, repository.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func executorProfileHasGitHubToken(execConfig executorConfig) bool {
+	if !executorNeedsResolvedCredentials(execConfig.ExecutorType) {
+		return false
+	}
+	authSecretsJSON, _ := execConfig.Metadata[profileKeyRemoteAuthSecrets].(string)
+	if authSecretsJSON == "" {
+		return false
+	}
+	var authSecrets map[string]string
+	if err := json.Unmarshal([]byte(authSecretsJSON), &authSecrets); err != nil {
+		return false
+	}
+	return strings.TrimSpace(authSecrets["gh_cli_env"]) != ""
+}
+
 func (e *Executor) issueGitCredentialScopes(
 	ctx context.Context,
 	req *LaunchAgentRequest,
 	infos []*repoInfo,
 	githubManaged bool,
 ) ([]githubCredentialScope, map[string]struct{}, error) {
+	// Validate every managed repository before issuing the first lease. This avoids
+	// leaving a partial lease set when a later task binding is invalid.
+	for _, info := range infos {
+		if info == nil || info.Repository == nil || managedGitCredentialProvider(info.Repository, githubManaged, req.Env) == "" {
+			continue
+		}
+		if _, _, _, _, err := gitCredentialCloneIdentity(info.Repository, info.RepositoryID); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	scopes := make([]githubCredentialScope, 0, len(infos)*2)
 	helpers := make(map[string]struct{}, len(infos))
 	for _, info := range infos {
@@ -572,58 +663,18 @@ func managedGitCredentialProvider(repository *models.Repository, githubManaged b
 	return providerID
 }
 
-// credentialIdentityCloneURL returns the HTTPS clone URL a managed credential
-// scope is derived from. A repository cloned over SSH stores an SSH remote URL;
-// that is a transport choice, not a different repository, so it does not fail
-// the launch. The persisted provider identity wins, because its host carries
-// the real HTTPS origin including any non-default port that an SSH URL cannot
-// express; rewriting the remote in place is the fallback when there is none.
-func credentialIdentityCloneURL(repository *models.Repository) string {
-	cloneURL := repositoryCloneURL(repository)
-	if strings.HasPrefix(strings.ToLower(cloneURL), httpsScheme+"://") {
-		return cloneURL
-	}
-	if derived := providerHTTPSCloneURL(repository); derived != "" {
-		return derived
-	}
-	if converted := repoclone.CanonicalHTTPSCloneURL(cloneURL); converted != "" {
-		return converted
-	}
-	return cloneURL
-}
-
 func gitCredentialCloneIdentity(repository *models.Repository, repositoryID string) (string, string, string, string, error) {
-	cloneURL := credentialIdentityCloneURL(repository)
-	if cloneURL == "" {
-		return "", "", "", "", fmt.Errorf("repository %q has no HTTPS clone URL for managed credentials", repositoryID)
+	if repository == nil {
+		return "", "", "", "", fmt.Errorf("repository %q is required", repositoryID)
 	}
-	parsed, err := url.Parse(cloneURL)
-	if err != nil || parsed.Scheme != httpsScheme || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" ||
-		parsed.Fragment != "" || parsed.Path == "" {
-		return "", "", "", "", fmt.Errorf("repository %q must use an HTTPS clone URL for managed credentials", repositoryID)
+	identity, err := gitcredentials.ResolveRepositoryIdentity(gitcredentials.RepositoryIdentityInput{
+		RepositoryID: repositoryID, Provider: repository.Provider, ProviderHost: repository.ProviderHost,
+		ProviderOwner: repository.ProviderOwner, ProviderName: repository.ProviderName, RemoteURL: repository.RemoteURL,
+	})
+	if err != nil {
+		return "", "", "", "", err
 	}
-	providerHost := strings.TrimSpace(repository.ProviderHost)
-	providerID := strings.ToLower(strings.TrimSpace(repository.Provider))
-	if providerHost == "" && (providerID == "" || providerID == gitHubProviderID) {
-		providerHost = "https://" + defaultGitHubHost
-	}
-	if err := repoclone.ValidateHTTPSCloneOrigin(cloneURL, providerHost); err != nil {
-		return "", "", "", "", fmt.Errorf("repository %q provider origin: %w", repositoryID, err)
-	}
-	owner, repo, err := credentialHelperPath(parsed.Path)
-	if err != nil || repositoryID == "" {
-		return "", "", "", "", fmt.Errorf("repository %q has an invalid HTTPS clone path", repositoryID)
-	}
-	return parsed.Host, parsed.Path, owner, repo, nil
-}
-
-func credentialHelperPath(path string) (string, string, error) {
-	trimmed := strings.TrimSuffix(strings.Trim(path, "/"), ".git")
-	owner, repo, found := strings.Cut(trimmed, "/")
-	if !found || owner == "" || repo == "" {
-		return "", "", errors.New("repository path needs owner and name")
-	}
-	return owner, repo, nil
+	return identity.Host, identity.Path, identity.Owner, identity.Repository, nil
 }
 
 func validateGitHubCredentialBrokerURL(raw, executorType string) error {

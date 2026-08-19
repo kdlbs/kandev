@@ -394,6 +394,11 @@ repository.script.get
 repository.script.list
 repository.script.update
 repository.update
+repository_set.create
+repository_set.delete
+repository_set.get
+repository_set.list
+repository_set.update
 
 executor.create
 executor.delete
@@ -699,6 +704,9 @@ task.walkthrough.deleted
 repository.created
 repository.updated
 repository.deleted
+repository_set.created
+repository_set.updated
+repository_set.deleted
 repository.script.created
 repository.script.updated
 repository.script.deleted

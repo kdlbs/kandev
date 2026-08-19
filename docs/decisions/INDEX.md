@@ -94,6 +94,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-15-subagent-context-schema-boundary | [Start with the execution-aware subagent schema](2026-08-15-subagent-context-schema-boundary.md) | accepted | backend | 2026-08-15 |
 | 2026-08-15-portable-agent-configuration-bundles | [Use Explicit Portable Agent Configuration Bundles](2026-08-15-portable-agent-configuration-bundles.md) | accepted | backend, frontend, protocol, security | 2026-08-15 |
 | 2026-08-15-executor-authoritative-model-selection | [Let the Executor Own Model Selection](2026-08-15-executor-authoritative-model-selection.md) | accepted | backend, frontend, protocol, persistence | 2026-08-15 |
+| 2026-08-18-context-reset-preserves-runtime-configuration | [Preserve ACP Runtime Configuration Across Context Reset](2026-08-18-context-reset-preserves-runtime-configuration.md) | accepted | backend, protocol, workflow | 2026-08-18 |
 | 2026-07-28-coarse-running-busy-signal | [Restore Coarse Running Prompt Admission](2026-07-28-coarse-running-busy-signal.md) | accepted | backend, frontend, protocol | 2026-07-28 |
 | 2026-07-29-agent-stall-user-controlled-recovery | [Keep Agent Stall Recovery User Controlled](2026-07-29-agent-stall-user-controlled-recovery.md) | accepted | backend, frontend, protocol | 2026-07-29 |
 | 2026-07-29-quarantine-retention-override | [Make Quarantine Retention Overridable but Visible](2026-07-29-quarantine-retention-override.md) | accepted | backend, frontend | 2026-07-29 |
@@ -173,5 +174,8 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-12-task-bound-fork-destinations | [Bind Fork Push Destinations to Tasks](2026-08-12-task-bound-fork-destinations.md) | accepted (amended 2026-08-13) | backend, frontend, workflow, security, GitHub | 2026-08-12 |
 | 2026-08-13-hard-delete-task-contribution-links | [Hard delete owns task contribution links](2026-08-13-hard-delete-task-contribution-links.md) | accepted | backend | 2026-08-13 |
 | 2026-08-15-office-mode-follows-active-workspace | [Office Mode Follows the Active Workspace](2026-08-15-office-mode-follows-active-workspace.md) | accepted | frontend, backend | 2026-08-15 |
+| 2026-08-16-session-mcp-tool-catalog | [Keep MCP Tool Catalogs Session Owned](2026-08-16-session-mcp-tool-catalog.md) | superseded by 2026-08-18-session-mcp-tool-definition-details | backend, agentctl, frontend, protocol, security | 2026-08-16 |
+| 2026-08-18-session-mcp-tool-definition-details | [Bound MCP Tool Definition Details to Current Sessions](2026-08-18-session-mcp-tool-definition-details.md) | accepted | backend, agentctl, frontend, protocol, security | 2026-08-18 |
 | 2026-08-17-separate-task-activity-from-summary-freshness | [Separate Task Activity From Summary Freshness](2026-08-17-separate-task-activity-from-summary-freshness.md) | accepted | backend, frontend, protocol | 2026-08-17 |
 | 2026-08-17-release-pr-ruleset-bypass | [Give Stable Release PRs an Administrator Token Bypass](2026-08-17-release-pr-ruleset-bypass.md) | accepted | infra, workflow, security | 2026-08-17 |
+| 2026-08-18-never-started-agent-stall-terminal | [Treat Never-Started Agent Stalls as Terminal](2026-08-18-never-started-agent-stall-terminal.md) | accepted | backend, frontend, protocol | 2026-08-18 |

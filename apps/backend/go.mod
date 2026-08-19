@@ -3,11 +3,11 @@ module github.com/kandev/kandev
 go 1.26.0
 
 require (
+	github.com/Masterminds/semver/v3 v3.2.1
 	github.com/UserExistsError/conpty v0.1.4
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/coder/acp-go-sdk v0.13.5
 	github.com/creack/pty v1.1.24
-	github.com/Masterminds/semver/v3 v3.2.1
 	github.com/gin-gonic/gin v1.9.1
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/google/uuid v1.6.0
@@ -28,6 +28,7 @@ require (
 	github.com/spf13/viper v1.16.0
 	github.com/stretchr/testify v1.11.1
 	github.com/superfly/sprites-go v0.0.0-20260206213632-8176adff485b
+	github.com/tiktoken-go/tokenizer v0.8.1
 	github.com/tuzig/vt10x v0.0.0-20231206072048-370e51642bf7
 	github.com/yuin/goldmark v1.7.13
 	go.opentelemetry.io/otel v1.43.0
@@ -58,6 +59,7 @@ require (
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
+	github.com/dlclark/regexp2/v2 v2.5.1 // indirect
 	github.com/docker/go-connections v0.7.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/fatih/color v1.13.0 // indirect

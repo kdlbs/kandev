@@ -1696,13 +1696,6 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 		zap.String("current_session", currentSession.ID),
 		zap.String("current_profile", currentSession.AgentProfileID),
 		zap.String("new_profile", newAgentProfileID))
-
-	// Signal to the frontend that the task is preparing a new agent.
-	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
-		s.logger.Warn("failed to set task SCHEDULING during agent switch",
-			zap.String("task_id", taskID), zap.Error(err))
-	}
-
 	existing, lookupErr := s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID)
 	if lookupErr != nil {
 		s.logger.Warn("failed to look up reusable session, falling through to create new",
@@ -1710,6 +1703,35 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 			zap.String("agent_profile_id", newAgentProfileID),
 			zap.Error(lookupErr))
 	}
+	targetSession := currentSession
+	if existing != nil {
+		targetSession = existing
+	}
+
+	// Validate managed-credential repository bindings before mutating either
+	// session's ownership. Reusing or replacing the current session only to
+	// discover at launch that a repository binding is irreparable would leave
+	// the task stuck on a doomed session with no recovery path back to the one
+	// that was still working.
+	dbTask, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task for session switch preflight: %w", err)
+	}
+	if dbTask == nil {
+		return nil, fmt.Errorf("task %s not found for session switch preflight", taskID)
+	}
+	if err := s.executor.PreflightManagedGitCredentials(
+		ctx, dbTask.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
+	); err != nil {
+		return nil, err
+	}
+
+	// Signal to the frontend that the task is preparing a new agent.
+	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
+		s.logger.Warn("failed to set task SCHEDULING during agent switch",
+			zap.String("task_id", taskID), zap.Error(err))
+	}
+
 	if existing != nil {
 		return s.reuseSessionForStep(ctx, taskID, currentSession, existing)
 	}
@@ -1971,6 +1993,39 @@ func (s *Service) prepareWorkflowStepSession(
 		return nil, false, err
 	}
 	return newSession, true, nil
+}
+
+func (s *Service) preflightWorkflowStepCredentials(
+	ctx context.Context,
+	taskID string,
+	currentSession *models.TaskSession,
+	targetStep *wfmodels.WorkflowStep,
+) error {
+	if currentSession == nil || targetStep == nil || s.agentManager.IsPassthroughSession(ctx, currentSession.ID) {
+		return nil
+	}
+	effectiveProfile := s.resolveStepAgentProfile(ctx, targetStep)
+	if effectiveProfile == "" || effectiveProfile == currentSession.AgentProfileID {
+		return nil
+	}
+	targetSession := currentSession
+	existing, err := s.findReusableSessionForProfile(ctx, taskID, effectiveProfile, currentSession.ID)
+	if err != nil {
+		return fmt.Errorf("find reusable session for credential preflight: %w", err)
+	}
+	if existing != nil {
+		targetSession = existing
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get task for credential preflight: %w", err)
+	}
+	if task == nil {
+		return fmt.Errorf("task %s not found for credential preflight", taskID)
+	}
+	return s.executor.PreflightManagedGitCredentials(
+		ctx, task.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
+	)
 }
 
 // maybySwitchSessionForProfile preserves the legacy processOnEnter failure
@@ -3240,10 +3295,34 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		return true
 	}
 
+	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
+	defer releaseLifecycleLock()
+	s.setSessionResetInProgress(sessionID, true)
+	defer s.setSessionResetInProgress(sessionID, false)
+
 	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	if err != nil || executionID == "" {
-		s.logger.Debug("no agent execution for context reset, skipping",
-			zap.String("session_id", sessionID))
+		// No in-memory execution exists yet — most commonly a lazily-resumed
+		// session whose process has not been relaunched since the last run.
+		// The resume path (applyRunningRecordToResumeRequest) reads the ACP
+		// resume token straight from the executors_running row, bypassing any
+		// in-memory execution lookup entirely, so leaving that token in place
+		// here would let the next lazy launch reconnect to the pre-reset
+		// conversation and silently skip the reset. Clear the same persisted
+		// state the live-execution path clears below so the reset survives
+		// until the agent's first turn regardless of when the process starts.
+		s.logger.Debug("no live agent execution for context reset, clearing persisted resume state",
+			zap.String("session_id", sessionID),
+			zap.String("step_name", stepName))
+		if err := s.clearResumeToken(ctx, sessionID); err != nil {
+			s.logger.Error("failed to clear lazy resume token before context reset",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("step_name", stepName),
+				zap.Error(err))
+			return false
+		}
+		s.clearPersistedResetState(ctx, sessionID, session)
 		return true
 	}
 
@@ -3253,18 +3332,76 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		zap.String("step_name", stepName),
 		zap.String("agent_execution_id", executionID))
 
-	s.setSessionResetInProgress(sessionID, true)
-	defer s.setSessionResetInProgress(sessionID, false)
-
+	previousACPSessionID := s.currentACPSessionID(sessionID)
 	if err := s.agentManager.ResetAgentContext(ctx, executionID); err != nil {
 		s.logger.Error("failed to reset agent context",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName),
 			zap.Error(err))
+		s.reconcileFailedContextReset(ctx, taskID, session, executionID, previousACPSessionID)
 		return false
 	}
 
+	// Clear the old resume token only after the provider reset succeeds. This
+	// keeps a valid recovery token when the runtime reset fails. A fresh ACP
+	// session event can race this clear, so persist the lifecycle manager's
+	// current session ID again below after the clear.
+	if err := s.clearResumeToken(ctx, sessionID); err != nil {
+		s.logger.Error("failed to clear resume token after context reset",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("step_name", stepName),
+			zap.Error(err))
+		return false
+	}
+	if acpSessionID := s.currentACPSessionID(sessionID); acpSessionID != "" {
+		s.storeResumeToken(ctx, taskID, sessionID, executionID, acpSessionID, "")
+	}
+
+	// Clear the remaining persisted state (ACP session metadata, context window)
+	// after the provider reset succeeds. The token is handled explicitly above.
+	s.clearPersistedResetState(ctx, sessionID, session)
+	return true
+}
+
+// reconcileFailedContextReset handles a reset that moved the live ACP session
+// before a later reset step failed. The old cursor and context metadata belong
+// to the previous ACP session and must not survive that partial transition.
+func (s *Service) reconcileFailedContextReset(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	executionID string,
+	previousACPSessionID string,
+) {
+	liveACPSessionID := s.currentACPSessionID(session.ID)
+	if liveACPSessionID == "" || liveACPSessionID == previousACPSessionID {
+		return
+	}
+
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	if err != nil {
+		s.logger.Warn("failed to inspect execution after partial context reset",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("agent_execution_id", executionID),
+			zap.Error(err))
+		return
+	}
+	if running.AgentExecutionID != executionID {
+		return
+	}
+
+	s.storeResumeToken(ctx, taskID, session.ID, executionID, liveACPSessionID, "")
+	s.clearPersistedResetState(ctx, session.ID, session)
+}
+
+// clearPersistedResetState clears the durable, DB-backed session state that a
+// later lazy resume would otherwise pick back up: the stored ACP session ID
+// in session metadata and the persisted context window. The resume token is
+// cleared explicitly by resetAgentContext so a reset failure can retain it.
+func (s *Service) clearPersistedResetState(ctx context.Context, sessionID string, session *models.TaskSession) {
 	// Clear the stored ACP session ID using json_set to avoid clobbering other keys.
 	if updateErr := s.repo.SetSessionMetadataKey(ctx, sessionID, "acp_session_id", ""); updateErr != nil {
 		s.logger.Warn("failed to clear ACP session ID from session metadata",
@@ -3281,7 +3418,6 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 	// its cache after the provider reset succeeds and must not receive stale data
 	// back through the final processOnEnter state event.
 	clearInMemoryContextWindow(session)
-	return true
 }
 
 // resolveSessionMCPSupport checks if the agent for a session supports MCP.
@@ -3759,6 +3895,13 @@ func (s *Service) applyEngineTransition(
 			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 			return false
 		}
+	}
+	if err := s.preflightWorkflowStepCredentials(ctx, taskID, session, targetStep); err != nil {
+		s.logger.Warn("target profile credential preflight failed, skipping transition",
+			zap.String("task_id", taskID),
+			zap.String("step_id", result.ToStepID),
+			zap.Error(err))
+		return false
 	}
 
 	terminalTarget := s.workflowStepIsTerminal(ctx, targetStep.ID)

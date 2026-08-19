@@ -284,6 +284,29 @@ export type RepositorySecretBinding = {
   secret_id: string;
 };
 
+/**
+ * A named, reusable group of workspace repositories. Applying one fills the
+ * task-creation repository picker in a single action.
+ *
+ * A set deliberately carries no branch: branch choice belongs to the task, and
+ * the picker's existing per-row defaulting fills it after a set is applied.
+ */
+export type RepositorySet = {
+  id: string;
+  workspace_id: WorkspaceId;
+  name: string;
+  description: string;
+  /** Membership in apply order. Always an array, never null. */
+  repositories: RepositorySetItem[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type RepositorySetItem = {
+  repository_id: RepositoryId;
+  position: number;
+};
+
 export type RepositoryScript = {
   id: string;
   repository_id: RepositoryId;
@@ -580,6 +603,11 @@ export type ListWorkflowsResponse = {
 
 export type ListTasksResponse = {
   tasks: Task[];
+  total: number;
+};
+
+export type ListRepositorySetsResponse = {
+  repository_sets: RepositorySet[];
   total: number;
 };
 

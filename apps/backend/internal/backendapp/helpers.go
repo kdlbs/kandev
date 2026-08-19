@@ -500,13 +500,15 @@ func appendSessionModelsMessage(sessionID string, session *models.TaskSession, l
 	if modelState == nil || (modelState.CurrentModelID == "" && len(modelState.Models) == 0) {
 		return result
 	}
+	snapshot, _ := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
 	notification, err := ws.NewNotification(ws.ActionSessionModelsUpdated, lifecycle.SessionModelsEventPayload{
-		TaskID:         session.TaskID,
-		SessionID:      sessionID,
-		CurrentModelID: modelState.CurrentModelID,
-		Models:         modelState.Models,
-		ConfigOptions:  modelState.ConfigOptions,
-		ConfigBaseline: sessionACPConfigBaseline(session),
+		TaskID:               session.TaskID,
+		SessionID:            sessionID,
+		CurrentModelID:       modelState.CurrentModelID,
+		Models:               modelState.Models,
+		ConfigOptions:        modelState.ConfigOptions,
+		ConfigOptionsSettled: modelState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled,
+		ConfigBaseline:       sessionACPConfigBaseline(session),
 	})
 	if err == nil {
 		result = append(result, notification)
@@ -1062,6 +1064,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		})
 	}
 	taskhandlers.RegisterRepositoryRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	taskhandlers.RegisterRepositorySetRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorProfileRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.agentList, p.log)
 	taskhandlers.RegisterEnvironmentRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)

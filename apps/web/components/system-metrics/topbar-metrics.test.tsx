@@ -13,7 +13,7 @@ vi.mock("@/hooks/use-system-metrics-subscription", () => ({
   useSystemMetricsSubscription: subscribeMock,
 }));
 
-function renderMetrics(appStatusBarEnabled: boolean) {
+function renderMetrics(appStatusBarEnabled: boolean, mobile = false) {
   const initialState = {
     userSettings: {
       ...defaultSettingsState.userSettings,
@@ -40,7 +40,7 @@ function renderMetrics(appStatusBarEnabled: boolean) {
   return render(
     <StateProvider initialState={initialState}>
       <TooltipProvider>
-        <TopbarMetrics />
+        <TopbarMetrics mobile={mobile} />
       </TooltipProvider>
     </StateProvider>,
   );
@@ -57,6 +57,7 @@ describe("TopbarMetrics preference fallback", () => {
     renderMetrics(false);
 
     expect(screen.getByTestId("topbar-metrics")).toBeTruthy();
+    expect(screen.getByTestId("topbar-metrics").className).toContain("h-8");
     expect(screen.getByLabelText("CPU 42%")).toBeTruthy();
     expect(subscribeMock).toHaveBeenCalledWith(true);
   });
@@ -66,5 +67,13 @@ describe("TopbarMetrics preference fallback", () => {
 
     expect(screen.queryByTestId("topbar-metrics")).toBeNull();
     expect(subscribeMock).not.toHaveBeenCalled();
+  });
+
+  it("uses 16px metric icons in the mobile topbar", () => {
+    renderMetrics(false, true);
+
+    expect(screen.getByLabelText("CPU 42%").querySelector("svg")?.getAttribute("class")).toContain(
+      "size-4",
+    );
   });
 });

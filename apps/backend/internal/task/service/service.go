@@ -271,6 +271,7 @@ type Repos struct {
 	Sessions          repository.SessionRepository
 	GitSnapshots      repository.GitSnapshotRepository
 	RepoEntities      repository.RepositoryEntityRepository
+	RepositorySets    repository.RepositorySetRepository
 	RepositoryCleanup repository.RepositoryCleanupRepository
 	Executors         repository.ExecutorRepository
 	Environments      repository.EnvironmentRepository
@@ -295,6 +296,7 @@ type Service struct {
 	sessions                        repository.SessionRepository
 	gitSnapshots                    repository.GitSnapshotRepository
 	repoEntities                    repository.RepositoryEntityRepository
+	repositorySets                  repository.RepositorySetRepository
 	repositoryCleanup               repository.RepositoryCleanupRepository
 	executors                       repository.ExecutorRepository
 	environments                    repository.EnvironmentRepository
@@ -435,6 +437,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		sessions:              repos.Sessions,
 		gitSnapshots:          repos.GitSnapshots,
 		repoEntities:          repos.RepoEntities,
+		repositorySets:        repos.RepositorySets,
 		repositoryCleanup:     repos.RepositoryCleanup,
 		executors:             repos.Executors,
 		environments:          repos.Environments,

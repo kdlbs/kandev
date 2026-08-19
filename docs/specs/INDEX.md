@@ -104,6 +104,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [agent-generated-titles](tasks/agent-generated-titles.md) | approved |
 | [task-create-executor-default](tasks/task-create-executor-default.md) | approved |
 | [task-create-workflow-memory](tasks/task-create-workflow-memory.md) | approved |
+| [repository-sets](repository-sets/spec.md) | building |
 | [external-id-idempotency](tasks/external-id-idempotency/spec.md) | draft |
 | [prompt-attachments](tasks/prompt-attachments.md) | draft |
 | [sidebar-task-edit](tasks/sidebar-task-edit.md) | approved |
@@ -245,6 +246,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [context-window reset freshness](context-window-reset-freshness/spec.md) | shipped |
 | [cancel-turn-progress](ui/cancel-turn-progress.md) | approved |
 | [agent-todo-list-panel](ui/agent-todo-list-panel.md) | shipped |
+| [prompt-history-panel](ui/prompt-history-panel.md) | draft |
 
 ## system-page/ — operational diagnostics & maintenance UI
 
@@ -295,7 +297,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [automation-runs-delete-all-by-status](automation-runs-delete-all-by-status/spec.md) | draft |
 | [no-silent-model-fallback](no-silent-model-fallback/spec.md) | approved |
 | [portable-agent-configuration](portable-agent-configuration/spec.md) | draft |
-| [e2e-duration-aware-sharding](e2e-duration-aware-sharding/spec.md) | implemented |
+| [e2e-duration-aware-sharding](e2e-duration-aware-sharding/spec.md) | shipped |
 | [board-step-visibility-filter](board-step-visibility-filter/spec.md) | draft |
 | [shutdown-turn-failure-suppression](shutdown-turn-failure-suppression/spec.md) | draft |
 | [executor-profile-env-precedence](executor-profile-env-precedence/spec.md) | building |

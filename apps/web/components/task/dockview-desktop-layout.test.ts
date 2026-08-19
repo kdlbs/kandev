@@ -1,6 +1,19 @@
 import { describe, it, expect } from "vitest";
 import { t } from "@/lib/i18n";
 import { resolveChatPanelTitle } from "./dockview-panel-content";
+import { DESKTOP_VALID_COMPONENTS } from "./dockview-desktop-layout";
+
+describe("dockview desktop layout registry", () => {
+  it("accepts the prompt-history component", () => {
+    expect(DESKTOP_VALID_COMPONENTS.has("prompt-history")).toBe(true);
+  });
+
+  it("accepts every component the desktop renderer knows", () => {
+    for (const component of ["chat", "plan", "todos", "files", "changes", "prompt-history"]) {
+      expect(DESKTOP_VALID_COMPONENTS.has(component)).toBe(true);
+    }
+  });
+});
 
 /**
  * Regression: the generic "chat" placeholder dockview panel used to fall back

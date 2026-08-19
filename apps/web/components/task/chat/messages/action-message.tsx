@@ -51,12 +51,20 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   const message = comment.content || t("task:anErrorOccurred");
 
   if (metadata?.action_visibility === "running") {
-    if (sessionState !== "RUNNING" || !comment.turn_id || activeTurnId !== comment.turn_id) {
+    if (sessionState === "RUNNING" && comment.turn_id && activeTurnId === comment.turn_id) {
+      return (
+        <RunningActionNotice
+          actions={metadata.actions}
+          message={message}
+          taskId={comment.task_id}
+        />
+      );
+    }
+    // A terminal error may have been persisted with the old running metadata
+    // shape. Let it use the settled renderer instead of hiding the diagnostic.
+    if (comment.type !== "error") {
       return null;
     }
-    return (
-      <RunningActionNotice actions={metadata.actions} message={message} taskId={comment.task_id} />
-    );
   }
 
   return (

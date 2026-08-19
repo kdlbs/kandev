@@ -36,6 +36,7 @@ const TEST_SESSION_ID = "sess-1";
 const TEST_TASK_ID = "task-1";
 const SESSION_RECOVER_METHOD = "session.recover";
 
+/** Builds a system status Message describing a transient provider retry, with an optional Cancel action. */
 function retryMessage(overrides: Partial<Message> = {}): Message {
   return {
     id: "msg-1",
@@ -70,6 +71,7 @@ function retryMessage(overrides: Partial<Message> = {}): Message {
   } as Message;
 }
 
+/** Builds the "warning" retrying metadata object for a given attempt and retry delay. */
 function transientRetryMetadata(attempt: number, retryInSeconds: number) {
   return {
     variant: "warning",
@@ -83,6 +85,7 @@ function transientRetryMetadata(attempt: number, retryInSeconds: number) {
   };
 }
 
+/** Builds an error-variant recovery Message with an optional Resume action carrying request params. */
 function recoveryMessage(withParams = false): Message {
   return retryMessage({
     content: RECOVERY_MESSAGE,
@@ -108,6 +111,7 @@ function recoveryMessage(withParams = false): Message {
   } as Partial<Message>);
 }
 
+/** Builds a running-stall notice Message for the given turn with a Cancel turn action. */
 function stalledMessage(turnId = "turn-1"): Message {
   return retryMessage({
     turn_id: turnId,
@@ -307,6 +311,15 @@ describe("ActionMessage — running stall notice", () => {
   it("hides the running-only notice after the session settles", () => {
     const { container } = renderAction(stalledMessage(), "WAITING_FOR_INPUT");
     expect(container.firstChild).toBeNull();
+  });
+
+  it("keeps a terminal stall diagnostic visible after the session fails", () => {
+    const message = stalledMessage();
+    message.type = "error";
+
+    renderAction(message, "FAILED");
+
+    expect(screen.getByText("Still waiting on Start dev server.")).toBeTruthy();
   });
 
   it("sends agent.cancel when Cancel turn is activated", async () => {
@@ -522,6 +535,7 @@ describe("ActionMessage — remediation link", () => {
   const REMEDIATION_URL = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go";
   const QUOTA_OUTPUT = "5-hour usage limit reached";
 
+  /** Builds a recovery Message carrying the given remediation URL in its metadata. */
   function recoveryMeta(remediationUrl?: string): Message {
     return retryMessage({
       content: RECOVERY_MESSAGE,

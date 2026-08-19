@@ -895,6 +895,7 @@ func (m *Manager) runEnvironmentPreparerWithProgress(
 		return &EnvPrepareResult{
 			Success:      false,
 			ErrorMessage: err.Error(),
+			Error:        err,
 		}
 	}
 
@@ -985,6 +986,20 @@ func (m *Manager) launchApplyPrepareResult(
 			ErrorMessage: result.ErrorMessage,
 			Steps:        result.Steps,
 		})
+		// Prefer the typed chain on result.Error so errors.Is/errors.As reach
+		// the underlying sentinel (worktree.ErrBranchCheckedOut, etc.). Fall
+		// back to the textual ErrorMessage when the preparer did not supply a
+		// typed error. The formatted message is identical in both cases.
+		if result.Error != nil {
+			displayMessage := result.ErrorMessage
+			if displayMessage == "" {
+				displayMessage = result.Error.Error()
+			}
+			return fmt.Errorf("environment preparation failed: %w", &prepareResultError{
+				message: displayMessage,
+				cause:   result.Error,
+			})
+		}
 		return fmt.Errorf("environment preparation failed: %s", result.ErrorMessage)
 	}
 	if result.WorkspacePath != "" {

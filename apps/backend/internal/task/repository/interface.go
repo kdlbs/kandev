@@ -400,6 +400,27 @@ type RepositoryEntityRepository interface {
 	GetRepositoryByLocalPath(ctx context.Context, workspaceID, localPath string) (*models.Repository, error)
 }
 
+// RepositorySetRepository stores named, reusable groups of workspace
+// repositories. Membership order is authoritative: writes assign contiguous
+// positions from the supplied order, and reads return items in that order with
+// soft-deleted and out-of-workspace repositories excluded.
+type RepositorySetRepository interface {
+	CreateRepositorySet(ctx context.Context, set *models.RepositorySet) error
+	GetRepositorySet(ctx context.Context, id string) (*models.RepositorySet, error)
+	// GetRepositorySetByName compares the name case-insensitively and returns
+	// nil, nil when it is unused, leaving the conflict decision to the caller.
+	GetRepositorySetByName(ctx context.Context, workspaceID, name string) (*models.RepositorySet, error)
+	ListRepositorySets(ctx context.Context, workspaceID string) ([]*models.RepositorySet, error)
+	// ListRepositorySetIDsByRepository reports which sets hold a repository, so a
+	// caller can publish their new shape after a deletion prunes membership.
+	ListRepositorySetIDsByRepository(ctx context.Context, repositoryID string) ([]string, error)
+	// UpdateRepositorySet writes the set's fields and, when repositoryIDs is
+	// non-nil, replaces its whole membership in the same transaction so the two
+	// cannot land apart. A nil repositoryIDs leaves membership untouched.
+	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryIDs *[]string) error
+	DeleteRepositorySet(ctx context.Context, id string) (bool, error)
+}
+
 // RepositorySecretBindingRepository stores normalized repository environment
 // references. It is optional on RepositoryEntityRepository to keep legacy
 // adapters source-compatible while the SQLite implementation rolls out.

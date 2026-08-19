@@ -77,6 +77,25 @@ type RepositorySecretBindingDTO struct {
 	SecretID string `json:"secret_id"`
 }
 
+// RepositorySetDTO is a named group of workspace repositories on the wire.
+// Repositories is always an array, never null: the web store indexes it without
+// a nil check, and a set whose members were all deleted is legitimately empty.
+type RepositorySetDTO struct {
+	ID           string                 `json:"id"`
+	WorkspaceID  string                 `json:"workspace_id"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description"`
+	Repositories []RepositorySetItemDTO `json:"repositories"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+}
+
+// RepositorySetItemDTO is one repository's membership, in apply order.
+type RepositorySetItemDTO struct {
+	RepositoryID string `json:"repository_id"`
+	Position     int    `json:"position"`
+}
+
 type RepositoryScriptDTO struct {
 	ID           string    `json:"id"`
 	RepositoryID string    `json:"repository_id"`
@@ -480,6 +499,11 @@ type ListRepositoriesResponse struct {
 	Total        int             `json:"total"`
 }
 
+type ListRepositorySetsResponse struct {
+	RepositorySets []RepositorySetDTO `json:"repository_sets"`
+	Total          int                `json:"total"`
+}
+
 type ListRepositoryScriptsResponse struct {
 	Scripts []RepositoryScriptDTO `json:"scripts"`
 	Total   int                   `json:"total"`
@@ -631,6 +655,25 @@ func FromRepository(repository *models.Repository) RepositoryDTO {
 		SecretBindings:         bindings,
 		CreatedAt:              repository.CreatedAt,
 		UpdatedAt:              repository.UpdatedAt,
+	}
+}
+
+func FromRepositorySet(set *models.RepositorySet) RepositorySetDTO {
+	items := make([]RepositorySetItemDTO, 0, len(set.Items))
+	for _, item := range set.Items {
+		items = append(items, RepositorySetItemDTO{
+			RepositoryID: item.RepositoryID,
+			Position:     item.Position,
+		})
+	}
+	return RepositorySetDTO{
+		ID:           set.ID,
+		WorkspaceID:  set.WorkspaceID,
+		Name:         set.Name,
+		Description:  set.Description,
+		Repositories: items,
+		CreatedAt:    set.CreatedAt,
+		UpdatedAt:    set.UpdatedAt,
 	}
 }
 

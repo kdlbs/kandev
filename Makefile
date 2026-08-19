@@ -554,7 +554,7 @@ test-scripts:
 	@node --test scripts/validate-public-docs.test.mjs
 
 .PHONY: test-e2e
-test-e2e: build-backend build-web-e2e build-e2e-plugin-package
+test-e2e: build-backend build-backend-linux-helpers build-web-e2e build-e2e-plugin-package
 	@printf "$(CYAN)Running E2E tests (headless, parallel, managed runner)...$(RESET)\n"
 	@cd $(WEB_DIR) && status=0; for project in routing auth chromium mobile-chrome containers; do \
 		printf "$(CYAN)-- project: $$project --$(RESET)\n"; \

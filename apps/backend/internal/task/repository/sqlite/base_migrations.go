@@ -128,6 +128,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.ensureTaskWorkspaceFoldersSchema(); err != nil {
 		return err
 	}
+	if err := r.ensureRepositorySetsSchema(); err != nil {
+		return err
+	}
 	r.migrate.Apply("task_sessions.execution_profile_id", `ALTER TABLE task_sessions ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("executors_running.execution_profile_id", `ALTER TABLE executors_running ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("executors_running.last_message_uuid", `ALTER TABLE executors_running ADD COLUMN last_message_uuid TEXT DEFAULT ''`)
@@ -578,6 +581,16 @@ func (r *Repository) ensureTaskWorkspaceFoldersSchema() error {
 			ON task_workspace_folders(task_id, position);
 	`); err != nil {
 		return fmt.Errorf("create task workspace folders schema: %w", err)
+	}
+	return nil
+}
+
+// ensureRepositorySetsSchema upgrades databases created before repository sets
+// existed. It replays the same DDL as the schema-init step; CREATE TABLE/INDEX
+// IF NOT EXISTS is replay-safe on SQLite and Postgres.
+func (r *Repository) ensureRepositorySetsSchema() error {
+	if _, err := r.db.Exec(repositorySetsSchemaDDL); err != nil {
+		return fmt.Errorf("create repository sets schema: %w", err)
 	}
 	return nil
 }

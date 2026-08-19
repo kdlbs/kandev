@@ -133,6 +133,13 @@ const (
 	AzureDevOpsPullRequestWatchMatch = "azure_devops.pull_request_watch.match"
 )
 
+// Event types for repository sets
+const (
+	RepositorySetCreated = "repository_set.created"
+	RepositorySetUpdated = "repository_set.updated"
+	RepositorySetDeleted = "repository_set.deleted"
+)
+
 // Event types for repository scripts
 const (
 	RepositoryScriptCreated = "repository.script.created"

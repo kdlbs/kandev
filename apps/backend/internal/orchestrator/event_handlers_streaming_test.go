@@ -762,6 +762,7 @@ func TestPersistTurnPromptMetadata(t *testing.T) {
 			Usage: &streams.PromptUsage{
 				InputTokens:                  10,
 				OutputTokens:                 20,
+				OutputTokensPresent:          true,
 				CachedReadTokens:             3,
 				CachedWriteTokens:            4,
 				ThoughtTokens:                5,
@@ -787,6 +788,7 @@ func TestPersistTurnPromptMetadata(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, float64(42), usage["total_tokens"])
 	require.Equal(t, float64(123), usage["provider_reported_cost_subcents"])
+	require.Equal(t, true, usage["output_tokens_present"])
 	require.Equal(t, true, usage["estimated"])
 }
 
@@ -1365,6 +1367,10 @@ func TestPublishPromptUsage_NonTerminalCompletionUsesReadyTurnSnapshot(t *testin
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.AgentProfileID = "session-agent"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
 
 	stepGetter := newMockStepGetter()
 	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
@@ -1408,6 +1414,8 @@ func TestPublishPromptUsage_NonTerminalCompletionUsesReadyTurnSnapshot(t *testin
 	require.NotNil(t, usageEvent, "expected a session_prompt_usage.updated event to be published")
 	require.Equal(t, turn.ID, usageEvent.TurnID,
 		"non-terminal completion must carry the turn id the ready event just closed, not NULL")
+	require.Equal(t, "session-agent", usageEvent.AgentProfileID,
+		"prompt usage must carry the stable profile recorded on the task session")
 }
 
 // TestPublishPromptUsage_CompletionPayloadTurnIDOwnsTurn verifies that a

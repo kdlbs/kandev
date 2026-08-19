@@ -512,10 +512,11 @@ These are functions, so they sit beside `navigate`/`openModal` rather than in
 
 ### Native integration settings state
 
-`registerIntegrationSettings` may provide an `action` component. The host passes
-the routed `workspaceId` to both the page component and the action. Use that
-value for workspace-scoped reads and writes. Do not use
-`getActiveWorkspaceId()` for a routed settings page.
+`registerIntegrationSettings` may provide an `action` component. The host mounts
+the action in the detail `SettingsSection` header and in the native integrations
+index card. The host passes the routed `workspaceId` and a `surface` value of
+`"detail"` or `"index"`. Use the workspace value for workspace-scoped reads and
+writes. Do not use `getActiveWorkspaceId()` for a routed settings page.
 
 `host.setIntegrationEnabled(integrationId, workspaceId, enabled)` publishes a
 live value for one registration and workspace. The host checks that the
@@ -719,9 +720,14 @@ interface PluginRegistry {
   // carry the active session plus every kandev session id on the task.
   // "main-top-bar" renders status/actions in the default app top bar on the
   // Home / Kanban / Tasks views (beside the CPU/DB metrics and the view/display
-  // controls) and forwards `{ workspaceId, workspaceLabel, currentPage }`. It is
-  // the app-wide, task-agnostic counterpart to "chat-top-bar", so it carries no
-  // task/session ids.
+  // controls) and forwards `{ workspaceId, workspaceLabel, currentPage,
+  // presentation }`, where presentation is "desktop" or "mobile". On a phone,
+  // contributions join the horizontally scrollable middle action strip between
+  // the fixed Kandev link and menu button. Documented host ui.Button icon
+  // contributions are normalized to a 32px box with a 16px SVG icon on phones;
+  // desktop contribution sizing is unchanged. It is the app-wide,
+  // task-agnostic counterpart to "chat-top-bar", so it carries no task/session
+  // ids.
   // "sidebar-workspace-actions" renders icon buttons after the built-in Quick
   // Terminal and Quick Chat actions in the desktop sidebar's New Task row and
   // in the shared phone navigation sheet. It forwards
@@ -808,9 +814,17 @@ interface IntegrationSettingsRegistration {
   description: string;
   icon?: PluginIcon;
   Component: React.ComponentType<{ workspaceId?: string }>;
-  // Optional native header action. It receives the same routed workspace id
-  // as Component, so it never needs to infer the target from the active one.
-  action?: React.ComponentType<{ workspaceId?: string }>;
+  // Optional action for the detail section header and integrations index card.
+  // The surface identifies the host location and the workspace id identifies
+  // the settings target.
+  action?: React.ComponentType<IntegrationSettingsActionProps>;
+}
+
+type IntegrationSettingsActionSurface = "detail" | "index";
+
+interface IntegrationSettingsActionProps {
+  workspaceId?: string;
+  surface: IntegrationSettingsActionSurface;
 }
 
 // Integration settings render at /settings/integrations/{id} and

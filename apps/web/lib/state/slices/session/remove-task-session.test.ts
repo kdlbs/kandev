@@ -8,6 +8,7 @@ import type { SessionRuntimeSlice } from "../session-runtime/types";
 
 type CombinedSlice = SessionSlice & SessionRuntimeSlice;
 
+/** Creates a zustand store combining the session and session-runtime slices. */
 function makeStore() {
   return create<CombinedSlice>()(
     immer((set) => ({

@@ -24,6 +24,7 @@ func TestConfigContext_ContainsAllTools(t *testing.T) {
 		"create_workflow_kandev",
 		"update_workflow_kandev",
 		"delete_workflow_kandev",
+		"export_workflow_kandev",
 		"list_workflow_steps_kandev",
 		"create_workflow_step_kandev",
 		"update_workflow_step_kandev",

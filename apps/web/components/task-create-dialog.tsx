@@ -85,6 +85,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         localRepositoryCreation={localRepositoryCreation}
         onRefreshRepositories={onRefreshRepositories}
         repositoriesRefreshing={repositoriesRefreshing}
+        repositorySets={props.repositorySets}
       />
       {showTaskName && (
         <InlineTaskName

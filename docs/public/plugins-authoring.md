@@ -256,7 +256,7 @@ slice shapes in a released plugin.
 | registerComponent           | registerComponent(slot, Component); component receives { slotProps?: unknown }                                                                                                                                                                                                                         | Active ui.bundle                                                       | Every registration is owner-tracked, error-isolated, and bulk-revoked                                                                                                                                           | registry.registerComponent("task-sidebar", Panel)                                                                   |
 | registerWsHandler           | registerWsHandler(action, handler(payload)); receives actions bridged from lib/ws                                                                                                                                                                                                                      | Active ui.bundle                                                       | Handler is removed on disable/uninstall; tolerate duplicate/replayed actions                                                                                                                                    | registry.registerWsHandler("acme.updated", renderUpdate)                                                            |
 | registerKeybinding          | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo                                                                                                                                                                                  | ui.bundle and ui.keybindings[]                                         | Handler is removed on disable/uninstall; core shortcuts win, and editable targets are skipped unless that entry set ui.keybindings[].allow_in_editor                                                            | registry.registerKeybinding("open-panel", () => host.openModal(...))                                                |
-| registerIntegrationSettings | One provider-owned settings component with an optional header action mounted inside Settings > Integrations                                                                                                                                                                                       | Active ui.bundle                                                       | Registration is exclusive by id and revoked on unload; host owns workspace selection and settings navigation; both component and action receive the routed `workspaceId`                                                               | registry.registerIntegrationSettings({ id: "acme", Component, action: Toggle }) |
+| registerIntegrationSettings | One provider-owned settings component with an optional action mounted in the detail header and the integrations index card                                                                                                                                    | Active ui.bundle                                                       | Registration is exclusive by id and revoked on unload; host owns workspace selection and settings navigation; component and action receive the routed `workspaceId`, and action receives its `surface`                                                               | registry.registerIntegrationSettings({ id: "acme", Component, action: Toggle }) |
 | registerTranslations        | Flat English fallback plus optional Kandev locale catalogs, isolated to this plugin's namespace                                                                                                                                                                                                        | Active ui.bundle                                                       | Catalogs are replaced atomically, removed on unload, and registry consumers invalidate when the host locale changes                                                                                             | registry.registerTranslations({ en: { settings: "Settings" }, "pt-pt": { settings: "Definições" } })                |
 | registerRepositoryProvider  | Provider-owned paged/searchable repository list, URL match/inspect, branches, and optional native `createChangeRequest` transport                                                                                                                                                                      | ui.bundle and matching `repository_providers[]` id                     | Registration and in-flight callbacks are result-fenced on unload; host owns native task and Create PR UI                                                                                                        | registry.registerRepositoryProvider({ id: "acme", ...provider })                                                    |
 | registerTaskAction          | Child action inside the task menu's native Link section                                                                                                                                                                                                                                                | Active ui.bundle                                                       | Action is revoked on unload; host supplies current task/workspace and desktop/mobile presentation                                                                                                               | registry.registerTaskAction({ id: "link-pr", placement: "link", ... })                                              |
@@ -1063,9 +1063,16 @@ interface IntegrationSettingsRegistration {
   description: string;
   icon?: PluginIcon;
   Component: React.ComponentType<{ workspaceId?: string }>;
-  // Optional native header action. It receives the same routed workspace id
-  // as Component.
-  action?: React.ComponentType<{ workspaceId?: string }>;
+  // Optional action in the detail section header and integrations index card.
+  // The surface identifies the host location.
+  action?: React.ComponentType<IntegrationSettingsActionProps>;
+}
+
+type IntegrationSettingsActionSurface = "detail" | "index";
+
+interface IntegrationSettingsActionProps {
+  workspaceId?: string;
+  surface: IntegrationSettingsActionSurface;
 }
 
 interface PluginRouteOptions {
@@ -1398,8 +1405,10 @@ owned until unload.
 ### Workspace integration state and native save bar
 
 The optional `action` component and the main integration component both receive
-the `workspaceId` from the URL. Use this value for the workspace that the user
-is editing. Do not replace it with `host.context.getActiveWorkspaceId()`.
+the `workspaceId` from the URL. The action also receives `surface`, with the
+value `"detail"` for the settings header or `"index"` for the integrations card.
+Use the workspace value for the workspace that the user is editing. Do not
+replace it with `host.context.getActiveWorkspaceId()`.
 
 `host.setIntegrationEnabled(integrationId, workspaceId, enabled)` updates the
 live **Enabled** badge for one registration. The host checks the registration
@@ -1524,12 +1533,18 @@ type MainTopBarSlotProps = {
   workspaceId: string | null; // workspace the top bar is showing, null on global home
   workspaceLabel?: string; // human-readable workspace name, when known
   currentPage: "kanban" | "tasks";
+  presentation: "desktop" | "mobile";
 };
 ```
 
 Because the bar is not scoped to a task, no task/session ids are provided. Like
 `chat-top-bar` it is a compact horizontal strip, so keep contributions to small
-badges or `h-7` buttons that match the native metric chips.
+badges or icon buttons. On a phone, `presentation` is `"mobile"`; the
+contribution joins the horizontally scrollable middle strip between the fixed
+Kandev link and menu button. Use `host.ui.Button` for documented icon actions.
+The host normalizes those buttons to a 32px box and their SVG icons to 16px.
+Do not add a second horizontal scroll container. Desktop contributions keep
+their existing sizing.
 
 ```js
 // inside initialize(registry, host):

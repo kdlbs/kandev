@@ -1464,6 +1464,43 @@ type Repository struct {
 	DeletedAt              *time.Time                `json:"deleted_at,omitempty"`
 }
 
+// RepositorySet is a named, reusable group of workspace repositories that fills
+// the task-creation repository picker in one action.
+//
+// A set deliberately stores no branch. Branch choice belongs to a task and is
+// already modelled on TaskRepository; a branch cached here would go stale
+// against the repository's real refs.
+type RepositorySet struct {
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Items is the ordered membership. Slice order is authoritative on write:
+	// positions are assigned from it, and reads return items sorted by position.
+	Items     []RepositorySetItem `json:"repositories"`
+	CreatedAt time.Time           `json:"created_at"`
+	UpdatedAt time.Time           `json:"updated_at"`
+}
+
+// RepositorySetItem is one repository's membership in a set.
+type RepositorySetItem struct {
+	ID              string    `json:"id"`
+	RepositorySetID string    `json:"repository_set_id"`
+	RepositoryID    string    `json:"repository_id"`
+	Position        int       `json:"position"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// RepositoryIDs returns the set's membership in position order.
+func (s *RepositorySet) RepositoryIDs() []string {
+	ids := make([]string, 0, len(s.Items))
+	for _, item := range s.Items {
+		ids = append(ids, item.RepositoryID)
+	}
+	return ids
+}
+
 // ProviderRepositoryIdentity is the durable provider lookup key. New plugin
 // providers supply Scope + RepositoryID; legacy built-ins use Host/Owner/Name.
 type ProviderRepositoryIdentity struct {

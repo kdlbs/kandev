@@ -17,6 +17,8 @@ Reviewers can see changed filenames in Review's file tree, but cannot tell wheth
 - The marker does not rely on color alone. Its accessible name and native title describe the status; a moved file may include its previous path when available.
 - The desktop marker occupies a fixed trailing column. At narrow sidebar widths, the filename truncates before the marker, stale warning, or comment count overlap.
 - Below the desktop breakpoint, where the file tree is hidden, the same status marker appears in each sticky diff header. No required cue depends on hover.
+- Desktop and phone sticky diff headers render ordinary left-to-right repository paths without relocating punctuation. A dot-prefixed directory segment keeps its dot attached to that segment instead of moving beside a separator or filename.
+- When a sticky diff header cannot show all directory context, it elides the leading directory text while keeping the nearest directory suffix and filename visible. Truncation does not change the full path exposed by the header title or accessible collapse/expand label.
 - Review includes changed files even when they have no textual patch, including pure renames. Their diff body shows status-specific explanatory text instead of an indefinite loading message.
 - Existing explicit skip reasons for binary, oversized, truncated, or budget-exceeded diffs take precedence over generic status-specific text.
 - Existing file icons, tree hierarchy, filtering, review checkboxes, stale indicators, comment counts, source precedence, and multi-repository identity remain unchanged.
@@ -30,6 +32,8 @@ Reviewers can see changed filenames in Review's file tree, but cannot tell wheth
 - **GIVEN** a file with an explicit diff skip reason, **WHEN** its body renders, **THEN** the skip-reason message is shown instead of the generic status empty state.
 - **GIVEN** a 160 px Review sidebar and a long filename, **WHEN** the row renders, **THEN** the filename truncates while the status marker, stale warning, and comment count remain visible without overlap.
 - **GIVEN** a mobile viewport, **WHEN** the user reviews a changed file, **THEN** its sticky diff header exposes the status marker without horizontal page overflow.
+- **GIVEN** the changed path `.agents/skills/pr-fixup/SKILL.md`, **WHEN** its desktop sticky diff header renders, **THEN** `.agents` remains the first directory segment, `SKILL.md` remains the filename, and no dot is rendered beside another segment or separator.
+- **GIVEN** a long changed path with a dot-prefixed directory in a phone viewport, **WHEN** its sticky diff header truncates the directory, **THEN** the visible directory suffix and filename retain their original punctuation order without horizontal page overflow.
 
 ## Out of scope
 
@@ -38,3 +42,5 @@ Reviewers can see changed filenames in Review's file tree, but cannot tell wheth
 - A new mobile file navigator.
 - Status animations.
 - Backend or API changes; Review consumes existing git and pull-request status metadata.
+- Changing file-path data, sorting, copying, or Git operations.
+- Defining a new visual-order policy for paths containing strong right-to-left Unicode characters.

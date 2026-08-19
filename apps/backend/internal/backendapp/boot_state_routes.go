@@ -61,7 +61,7 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 		state["userSettings"] = mapUserSettingsState(settings, activeWorkspaceID)
 	}
 	if activeWorkspaceID == "" {
-		return state, map[string]any{"activeWorkspaceId": nil, "workflows": []any{}, "steps": []any{}, "repositories": []any{}, "tasks": []any{}, "total": 0, "tasksListSort": tasksListSort, "tasksListGroup": tasksListGroup}
+		return state, map[string]any{"activeWorkspaceId": nil, "workflows": []any{}, "steps": []any{}, "repositories": []any{}, "repositorySets": []any{}, "tasks": []any{}, "total": 0, "tasksListSort": tasksListSort, "tasksListGroup": tasksListGroup}
 	}
 	workflows, err := b.p.taskSvc.ListWorkflows(ctx, activeWorkspaceID, false)
 	if err != nil {
@@ -75,6 +75,7 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 		state["userSettings"] = mapUserSettingsStateWithWorkflow(settings, activeWorkspaceID, activeWorkflowID)
 	}
 	repositories := b.repositoriesForState(ctx, activeWorkspaceID, state)
+	repositorySets := b.repositorySetsForState(ctx, activeWorkspaceID, state)
 	steps := b.workflowStepsForWorkspace(ctx, activeWorkspaceID)
 	tasks, total := b.tasksForWorkspace(ctx, activeWorkspaceID, activeWorkflowID, settingsRepositoryID, tasksListSort)
 	routeData := map[string]any{
@@ -82,6 +83,7 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 		"workflows":         workflowsToDTOs(workflows),
 		"steps":             steps,
 		"repositories":      repositories,
+		"repositorySets":    repositorySets,
 		"tasks":             tasks,
 		"total":             total,
 		"tasksListSort":     tasksListSort,
@@ -125,7 +127,7 @@ func (b bootStateBuilder) routeContextBootData(ctx context.Context, req *http.Re
 		state["userSettings"] = mapUserSettingsState(settings, activeWorkspaceID)
 	}
 	if activeWorkspaceID == "" {
-		return state, map[string]any{"activeWorkspaceId": nil, "workflows": []any{}, "steps": []any{}, "repositories": []any{}}
+		return state, map[string]any{"activeWorkspaceId": nil, "workflows": []any{}, "steps": []any{}, "repositories": []any{}, "repositorySets": []any{}}
 	}
 	workflows, err := b.p.taskSvc.ListWorkflows(ctx, activeWorkspaceID, false)
 	if err != nil {
@@ -141,12 +143,14 @@ func (b bootStateBuilder) routeContextBootData(ctx context.Context, req *http.Re
 		state["userSettings"] = mapUserSettingsStateWithWorkflow(settings, activeWorkspaceID, activeWorkflowID)
 	}
 	repositories := b.repositoriesForState(ctx, activeWorkspaceID, state)
+	repositorySets := b.repositorySetsForState(ctx, activeWorkspaceID, state)
 	steps := b.workflowStepsForWorkspace(ctx, activeWorkspaceID)
 	return state, map[string]any{
 		"activeWorkspaceId": activeWorkspaceID,
 		"workflows":         workflowsToDTOs(workflows),
 		"steps":             steps,
 		"repositories":      repositories,
+		"repositorySets":    repositorySets,
 	}
 }
 
@@ -210,6 +214,57 @@ func (b bootStateBuilder) repositoriesForState(ctx context.Context, workspaceID 
 		"itemsByWorkspaceId":   map[string]any{workspaceID: items},
 		"loadingByWorkspaceId": map[string]any{workspaceID: false},
 		"loadedByWorkspaceId":  map[string]any{workspaceID: true},
+	}
+	return items
+}
+
+// repositorySetsForState loads the workspace's repository sets for the boot
+// payload, logging and returning empty on failure. The task-create picker offers
+// sets on first paint from this, so the hook does not have to fetch.
+func (b bootStateBuilder) repositorySetsForState(
+	ctx context.Context,
+	workspaceID string,
+	state map[string]any,
+) []taskdto.RepositorySetDTO {
+	items := repositorySetsToDTOs(nil)
+	loaded := false
+	sets, err := b.p.taskSvc.ListRepositorySets(ctx, workspaceID)
+	if err != nil {
+		// Non-fatal, like every neighbour here: boot succeeds with an empty list
+		// and the client fetches instead. Leaving `loaded` false is what makes
+		// that fetch happen; marking a failed load as loaded would hide the
+		// workspace's real sets until an explicit refresh.
+		b.logBootError("list repository sets", err)
+	} else {
+		items = repositorySetsToDTOs(sets)
+		loaded = true
+	}
+	state["repositorySets"] = repositorySetsState(workspaceID, items, loaded)
+	return items
+}
+
+// repositorySetsState is the workspace-keyed slice shape the web store expects.
+// An empty workspace still keys an entry: an absent key reads as "not loaded" to
+// the client hook, which then refetches on every dialog open.
+func repositorySetsState(
+	workspaceID string,
+	items []taskdto.RepositorySetDTO,
+	loaded bool,
+) map[string]any {
+	return map[string]any{
+		"itemsByWorkspaceId":   map[string]any{workspaceID: items},
+		"loadingByWorkspaceId": map[string]any{workspaceID: false},
+		"loadedByWorkspaceId":  map[string]any{workspaceID: loaded},
+	}
+}
+
+// repositorySetsToDTOs maps repository set models to DTOs, always as an array.
+func repositorySetsToDTOs(sets []*taskmodels.RepositorySet) []taskdto.RepositorySetDTO {
+	items := make([]taskdto.RepositorySetDTO, 0, len(sets))
+	for _, set := range sets {
+		if set != nil {
+			items = append(items, taskdto.FromRepositorySet(set))
+		}
 	}
 	return items
 }

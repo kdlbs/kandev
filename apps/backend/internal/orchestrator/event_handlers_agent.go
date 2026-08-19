@@ -1563,20 +1563,24 @@ func (s *Service) wasResumeAttempt(ctx context.Context, sessionID string) bool {
 }
 
 // clearResumeToken removes the resume token from the executor running record so
-// the next agent start won't use --resume. It is reserved for explicit
-// user-initiated fresh-start recovery; ordinary ACP startup failures retain the
-// token so the session can be retried.
+// the next agent start won't use --resume. Callers use this for explicit fresh
+// starts and after a successful context reset; ordinary ACP startup failures
+// retain the token so the session can be retried.
 //
 // Unconditional clear: passes expectedExecID="" so the narrow update is not
 // CAS-guarded — clearing a token is always intentional regardless of which
 // execution is currently registered.
-func (s *Service) clearResumeToken(ctx context.Context, sessionID string) {
+func (s *Service) clearResumeToken(ctx context.Context, sessionID string) error {
 	err := s.repo.UpdateResumeToken(ctx, sessionID, "", "", "")
-	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
+	if errors.Is(err, models.ErrExecutorRunningNotFound) {
+		return nil
+	}
+	if err != nil {
 		s.logger.Error("failed to clear resume token",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+	return err
 }
 
 // handleRecoverableFailure handles agent failures by keeping the session recoverable.

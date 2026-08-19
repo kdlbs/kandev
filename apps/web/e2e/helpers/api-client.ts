@@ -783,6 +783,46 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Creates a repository set. `repositoryIds` is ordered and is the order the set
+   * fills the task-creation picker.
+   */
+  async createRepositorySet(
+    workspaceId: string,
+    name: string,
+    repositoryIds: string[],
+    description = "",
+  ): Promise<{ id: string; name: string }> {
+    return this.request("POST", `/api/v1/workspaces/${workspaceId}/repository-sets`, {
+      name,
+      description,
+      repository_ids: repositoryIds,
+    });
+  }
+
+  async listRepositories(workspaceId: string): Promise<{
+    repositories: Array<{ id: string; name: string }>;
+    total: number;
+  }> {
+    return this.request("GET", `/api/v1/workspaces/${workspaceId}/repositories`);
+  }
+
+  async listRepositorySets(workspaceId: string): Promise<{
+    repository_sets: Array<{
+      id: string;
+      name: string;
+      description: string;
+      repositories: Array<{ repository_id: string; position: number }>;
+    }>;
+    total: number;
+  }> {
+    return this.request("GET", `/api/v1/workspaces/${workspaceId}/repository-sets`);
+  }
+
+  async deleteRepositorySet(setId: string): Promise<void> {
+    await this.rawRequest("DELETE", `/api/v1/repository-sets/${setId}`);
+  }
+
   async createSecret(
     name: string,
     value: string,
@@ -1125,6 +1165,13 @@ export class ApiClient {
     profileId: string,
   ): Promise<{ profile_id: string; enabled: boolean; servers: Record<string, unknown> }> {
     return this.request("GET", `/api/v1/agent-profiles/${profileId}/mcp-config`);
+  }
+
+  async updateAgentProfileMcpConfig(
+    profileId: string,
+    config: { enabled: boolean; servers: Record<string, unknown> },
+  ): Promise<{ profile_id: string; enabled: boolean; servers: Record<string, unknown> }> {
+    return this.request("POST", `/api/v1/agent-profiles/${profileId}/mcp-config`, config);
   }
 
   // --- E2E Test Reset ---
