@@ -471,6 +471,7 @@ func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "update_workflow_kandev")
 	assert.Contains(t, tools, "delete_workflow_kandev")
 	assert.Contains(t, tools, "import_workflow_kandev")
+	assert.Contains(t, tools, "export_workflow_kandev")
 	assert.Contains(t, tools, "list_workflow_steps_kandev")
 	assert.Contains(t, tools, "create_workflow_step_kandev")
 	assert.Contains(t, tools, "update_workflow_step_kandev")
@@ -856,9 +857,9 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
-	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 interaction = 33
+	// 13 workflow (incl. list_repositories + import_workflow + export_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 interaction = 34
 	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev requires a live task session; must NOT register in config mode")
-	assert.Equal(t, 33, len(tools))
+	assert.Equal(t, 34, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
@@ -975,6 +976,7 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "list_workspaces_kandev")
 	assert.Contains(t, tools, "list_repositories_kandev")
 	assert.Contains(t, tools, "create_workflow_kandev")
+	assert.Contains(t, tools, "export_workflow_kandev")
 	assert.Contains(t, tools, "list_agents_kandev")
 	assert.Contains(t, tools, "get_mcp_config_kandev")
 	assert.Contains(t, tools, "list_executors_kandev")
@@ -1016,9 +1018,9 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 create_task + 2 task-dependency = 35.
+	// 13 workflow (incl. list_repositories + import_workflow + export_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 create_task + 2 task-dependency = 36.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 35, len(tools))
+	assert.Equal(t, 36, len(tools))
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 
