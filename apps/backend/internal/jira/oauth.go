@@ -22,12 +22,12 @@ import (
 // Dynamic Client Registration (RFC 7591) + PKCE (S256) replaces the need for
 // a pre-created app — no client_id/client_secret from the developer console.
 const (
-	mcpAuthorizeURL     = "https://mcp.atlassian.com/v1/authorize"
-	mcpTokenURL         = "https://mcp.atlassian.com/v1/token"
-	mcpRegisterURL      = "https://mcp.atlassian.com/v1/register"
-	mcpResourceURL      = "https://mcp.atlassian.com"
-	mcpScopes           = "offline_access read:jira-user read:jira-work write:jira-work"
-	mcpStateTTL         = 10 * time.Minute
+	mcpAuthorizeURL = "https://mcp.atlassian.com/v1/authorize"
+	mcpTokenURL     = "https://mcp.atlassian.com/v1/token"
+	mcpRegisterURL  = "https://mcp.atlassian.com/v1/register"
+	mcpResourceURL  = "https://mcp.atlassian.com"
+	mcpScopes       = "offline_access read:jira-user read:jira-work write:jira-work"
+	mcpStateTTL     = 10 * time.Minute
 )
 
 // mcpTokenResponse is the response from the token endpoint.
@@ -43,7 +43,7 @@ type mcpTokenResponse struct {
 type mcpRegisterResponse struct {
 	ClientID                string   `json:"client_id"`
 	ClientIDIssuedAt        int64    `json:"client_id_issued_at"`
-	RedirectURIs           []string `json:"redirect_uris"`
+	RedirectURIs            []string `json:"redirect_uris"`
 	GrantTypes              []string `json:"grant_types"`
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
 }
@@ -120,12 +120,12 @@ func generatePKCEPair() (verifier, challenge string, err error) {
 // token_endpoint_auth_method="none".
 func registerMCPClient(redirectURI string) (string, error) {
 	body, _ := json.Marshal(map[string]interface{}{
-		"client_name":                  "Kandev",
-		"redirect_uris":                []string{redirectURI},
-		"grant_types":                  []string{"authorization_code", "refresh_token"},
-		"response_types":               []string{"code"},
-		"token_endpoint_auth_method":   "none",
-		"scope":                        mcpScopes,
+		"client_name":                "Kandev",
+		"redirect_uris":              []string{redirectURI},
+		"grant_types":                []string{"authorization_code", "refresh_token"},
+		"response_types":             []string{"code"},
+		"token_endpoint_auth_method": "none",
+		"scope":                      mcpScopes,
 	})
 	req, err := http.NewRequest("POST", mcpRegisterURL, strings.NewReader(string(body)))
 	if err != nil {
@@ -284,10 +284,10 @@ func exchangeMCPCode(clientID, code, redirectURI, codeVerifier string) (*mcpToke
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
-		"redirect_uri":   {redirectURI},
-		"client_id":      {clientID},
-		"code_verifier":  {codeVerifier},
-		"resource":       {mcpResourceURL},
+		"redirect_uri":  {redirectURI},
+		"client_id":     {clientID},
+		"code_verifier": {codeVerifier},
+		"resource":      {mcpResourceURL},
 	}
 	return postMCPTokenRequest(form.Encode())
 }
@@ -296,10 +296,10 @@ func exchangeMCPCode(clientID, code, redirectURI, codeVerifier string) (*mcpToke
 // client_id is sent (no client_secret — PKCE public client).
 func refreshMCPToken(clientID, refreshToken string) (*mcpTokenResponse, error) {
 	form := url.Values{
-		"grant_type":     {"refresh_token"},
-		"refresh_token":  {refreshToken},
-		"client_id":      {clientID},
-		"resource":       {mcpResourceURL},
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {refreshToken},
+		"client_id":     {clientID},
+		"resource":      {mcpResourceURL},
 	}
 	return postMCPTokenRequest(form.Encode())
 }

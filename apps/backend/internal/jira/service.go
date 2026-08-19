@@ -263,7 +263,7 @@ func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string,
 		AuthMethod:        req.AuthMethod,
 		InstanceType:      req.InstanceType,
 		DefaultProjectKey: req.DefaultProjectKey,
-		ClientID:           req.ClientID,
+		ClientID:          req.ClientID,
 	}
 	// Preserve cloudId for OAuth — it's resolved during the OAuth flow and
 	// shouldn't be overwritten by a regular config save.

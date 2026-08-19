@@ -540,10 +540,10 @@ func parseMCPIssue(raw, siteURL string) (*JiraTicket, error) {
 
 func parseMCPSearchResult(raw, siteURL string) (*SearchResult, error) {
 	var resp struct {
-		Issues       []json.RawMessage `json:"issues"`
-		IsLast       bool              `json:"isLast"`
-		NextPageToken string           `json:"nextPageToken"`
-		MaxResults    int              `json:"maxResults"`
+		Issues        []json.RawMessage `json:"issues"`
+		IsLast        bool              `json:"isLast"`
+		NextPageToken string            `json:"nextPageToken"`
+		MaxResults    int               `json:"maxResults"`
 	}
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
 		return nil, fmt.Errorf("decode search result: %w", err)

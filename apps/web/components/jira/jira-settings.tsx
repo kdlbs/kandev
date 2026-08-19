@@ -284,7 +284,10 @@ function OAuthFields({
       const res = await fetch(`/api/v1/jira/oauth/start?${params}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Request failed" }));
-        toast({ description: t("jira:oauthStartFailed", { error: err.error || String(err) }), variant: "error" });
+        toast({
+          description: t("jira:oauthStartFailed", { error: err.error || String(err) }),
+          variant: "error",
+        });
         return;
       }
       const { authUrl } = await res.json();
@@ -297,30 +300,39 @@ function OAuthFields({
     }
   }, [workspaceId, form.siteUrl, t, toast]);
 
-  const completeOAuth = useCallback(async (code: string, state: string) => {
-    setCompleting(true);
-    try {
-      const res = await fetch(
-        `/api/v1/jira/oauth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}&api=1`,
-        { headers: { Accept: "application/json" } },
-      );
-      if (res.ok) {
-        toast({ description: t("jira:oauthConnected"), variant: "success" });
-        setShowPasteDialog(false);
-        setPasteUrl("");
-        onConnected();
-      } else {
-        const err = await res.json().catch(() => ({ error: "Failed" }));
-        toast({ description: t("jira:oauthStartFailed", { error: err.error || "Unknown error" }), variant: "error" });
+  const completeOAuth = useCallback(
+    async (code: string, state: string) => {
+      setCompleting(true);
+      try {
+        const res = await fetch(
+          `/api/v1/jira/oauth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}&api=1`,
+          { headers: { Accept: "application/json" } },
+        );
+        if (res.ok) {
+          toast({ description: t("jira:oauthConnected"), variant: "success" });
+          setShowPasteDialog(false);
+          setPasteUrl("");
+          onConnected();
+        } else {
+          const err = await res.json().catch(() => ({ error: "Failed" }));
+          toast({
+            description: t("jira:oauthStartFailed", { error: err.error || "Unknown error" }),
+            variant: "error",
+          });
+          setShowPasteDialog(true);
+        }
+      } catch (err) {
+        toast({
+          description: t("jira:oauthStartFailed", { error: String(err) }),
+          variant: "error",
+        });
         setShowPasteDialog(true);
+      } finally {
+        setCompleting(false);
       }
-    } catch (err) {
-      toast({ description: t("jira:oauthStartFailed", { error: String(err) }), variant: "error" });
-      setShowPasteDialog(true);
-    } finally {
-      setCompleting(false);
-    }
-  }, [t, toast, onConnected]);
+    },
+    [t, toast, onConnected],
+  );
 
   const handlePasteComplete = useCallback(async () => {
     try {
@@ -389,7 +401,10 @@ function OAuthFields({
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => { setShowPasteDialog(false); setPasteUrl(""); }}
+                onClick={() => {
+                  setShowPasteDialog(false);
+                  setPasteUrl("");
+                }}
                 className="cursor-pointer"
               >
                 {t("jira:oauthCancel")}
@@ -707,7 +722,8 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
   const missingSecret = !isOAuth && !savedSecretMatchesMode && !s.form.secret;
   const oauthNeedsConnect = isOAuth && !s.config?.hasSecret;
   const emailRequired = s.form.instanceType === "cloud" && s.form.authMethod === "api_token";
-  const disableSave = s.saving || !s.form.siteUrl || (emailRequired && !s.form.email) || (missingSecret && !isOAuth);
+  const disableSave =
+    s.saving || !s.form.siteUrl || (emailRequired && !s.form.email) || (missingSecret && !isOAuth);
   const disableTest = missingSecret || (isOAuth && oauthNeedsConnect);
   const revision = JSON.stringify(s.form);
   const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
