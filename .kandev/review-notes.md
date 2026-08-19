@@ -42,6 +42,19 @@
   its own profiles, and `host.ui.WorkspaceAgentChat` staying off plugin boot while still resolving
   to the real chat surface. (commit 504c4d961)
 
+## Fixed during review (second pass)
+
+- `apps/backend/internal/task/service/agent_conversations.go:507` — `Delete`, the plugin-facing
+  path behind the `DeleteAgentConversation` RPC, had the same already-deleted race `04e9766f3`
+  fixed one function below in `DeleteAllForPlugin`: it lists managed conversations and then
+  deletes them without holding a lock across the two, so an overlapping uninstall cleanup or a
+  retried delete can remove the row in between. The plugin received an error for a delete that
+  had reached its goal state, and the early return abandoned any remaining matches. Already-gone
+  is now success on this path too, which also makes it agree with the service's existing
+  treatment of "no conversation matched" as success. Only the not-found case is absorbed; every
+  other error still returns. Proven red/green by disabling the guard against four concurrent
+  `Delete` calls over the real SQLite repository. (commit fd6c7584c)
+
 ## Follow-up tasks created (out of scope for this PR)
 
 - Make internal/github tests hermetic against GH_TOKEN (task
