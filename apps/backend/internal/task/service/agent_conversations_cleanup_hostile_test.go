@@ -103,3 +103,44 @@ func TestDeleteAllForPluginIgnoresMalformedProvenance(t *testing.T) {
 		}
 	}
 }
+
+// A plugin's own Delete races the same way uninstall cleanup does: the listing
+// is not held under a lock, so an overlapping uninstall or a retried delete can
+// remove the row in between. A caller that asked for a conversation to be gone
+// and finds it gone has not failed.
+func TestDeleteConcurrentCallsOverRealRepository(t *testing.T) {
+	svc, repo := newAgentConversationServiceOverRealRepo(t)
+	ctx := context.Background()
+	seedConversationWorkspace(t, repo, "ws-one")
+	victim := ensureConversation(t, svc, "plugin-coordinator", "ws-one", "coordinator")
+	survivor := ensureConversation(t, svc, "plugin-coordinator", "ws-one", "other-key")
+
+	var wg sync.WaitGroup
+	counts := make([]int32, 4)
+	errs := make([]error, 4)
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			counts[i], errs[i] = svc.Delete(ctx, "plugin-coordinator", "ws-one", "coordinator")
+		}(i)
+	}
+	wg.Wait()
+
+	var total int32
+	for i, c := range counts {
+		if errs[i] != nil {
+			t.Errorf("concurrent Delete call %d reported an error for work another caller completed: %v", i, errs[i])
+		}
+		total += c
+	}
+	if total != 1 {
+		t.Errorf("concurrent Delete reported %d deletions across all callers, want exactly 1", total)
+	}
+	if taskExists(t, repo, victim.TaskID) {
+		t.Error("the targeted conversation survived concurrent Delete")
+	}
+	if !taskExists(t, repo, survivor.TaskID) {
+		t.Error("a conversation under a different key was deleted by Delete")
+	}
+}
