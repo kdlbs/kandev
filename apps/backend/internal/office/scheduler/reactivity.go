@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/office/models"
 )
 
 // Canonical lowercase status values used inside the pipeline. Backend
@@ -317,6 +319,9 @@ func (ss *SchedulerService) cascadeReviewRequested(
 	}
 	for _, p := range parts {
 		if p.AgentProfileID == "" {
+			continue
+		}
+		if p.Role != models.ParticipantRoleReviewer && p.Role != models.ParticipantRoleApprover {
 			continue
 		}
 		queue(p.AgentProfileID, RunContext{

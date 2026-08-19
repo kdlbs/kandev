@@ -60,8 +60,35 @@ func (s *Service) transitionRunTerminal(ctx context.Context, id, status string) 
 	if err := s.repo.FinishRun(ctx, id, status); err != nil {
 		return err
 	}
+	s.releaseTaskCheckoutForRun(ctx, run)
 	s.publishRunProcessed(ctx, id, status, run)
 	return nil
+}
+
+// releaseTaskCheckoutForRun releases the run's task checkout now that the
+// run has reached a terminal state. This is the choke point for the
+// AgentCompleted/AgentFailed event-subscriber path (handleAgentCompleted,
+// handleTasklessAgentCompleted): a real launch leaves prepareAndLaunch
+// returning early, so the run never passes back through
+// SchedulerIntegration's own synchronous finishRun/checkBudget paths that
+// already call releaseCheckoutIfNeeded — without this, checkout_agent_id
+// leaked forever and every other agent was permanently blocked from
+// acquiring the task. Safe to call redundantly alongside those existing
+// call sites: ReleaseTaskCheckout is an idempotent SET NULL.
+func (s *Service) releaseTaskCheckoutForRun(ctx context.Context, run *models.Run) {
+	if run == nil {
+		return
+	}
+	taskID := taskIDFromRunPayload(run.Payload)
+	if taskID == "" {
+		return
+	}
+	if err := s.repo.ReleaseTaskCheckout(ctx, taskID); err != nil {
+		s.logger.Error("failed to release task checkout on terminal transition",
+			zap.String("run_id", run.ID),
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
 }
 
 // publishRunProcessed emits an OfficeRunProcessed bus event with the

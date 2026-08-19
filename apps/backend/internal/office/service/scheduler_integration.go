@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -127,6 +128,7 @@ func (si *SchedulerIntegration) tick(ctx context.Context) {
 		si.processRun(ctx, run)
 	}
 	si.recoverStaleClaimedRuns(ctx)
+	si.reapStaleCheckouts(ctx)
 }
 
 // liftParkedRoutingRuns clears routing-block status on runs whose
@@ -164,6 +166,26 @@ func (si *SchedulerIntegration) recoverStaleClaimedRuns(ctx context.Context) {
 	}
 	if count > 0 {
 		si.logger.Info("recovered stale claimed runs", zap.Int64("count", count))
+	}
+}
+
+// reapStaleCheckouts is the backstop for task checkouts that never got
+// released on a run's terminal transition (see releaseTaskCheckoutForRun
+// in scheduler_runs.go for the primary release path). Reuses
+// staleClaimedRunAge as the staleness threshold — the same age already
+// used to decide a claimed run has gone unanswered, so a checkout held
+// past that point with no in-flight run behind it is equally stuck.
+func (si *SchedulerIntegration) reapStaleCheckouts(ctx context.Context) {
+	count, err := si.svc.repo.ReapStaleCheckouts(ctx, time.Now().UTC().Add(-staleClaimedRunAge))
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		si.logger.Error("failed to reap stale task checkouts", zap.Error(err))
+		return
+	}
+	if count > 0 {
+		si.logger.Info("reaped stale task checkouts", zap.Int64("count", count))
 	}
 }
 
@@ -221,7 +243,7 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 
 	// Atomic task checkout.
 	taskID := si.extractTaskID(run.Payload)
-	if !si.checkoutTask(ctx, runID, taskID, agentInstanceID) {
+	if !si.checkoutTask(ctx, run, taskID, agentInstanceID) {
 		return
 	}
 
@@ -450,14 +472,14 @@ func (si *SchedulerIntegration) mintRuntimeToken(
 
 // checkoutTask performs the atomic task checkout guard. Returns false if the
 // caller should abort processing (tree-gated or checkout failed).
-func (si *SchedulerIntegration) checkoutTask(ctx context.Context, runID, taskID, agentInstanceID string) bool {
+func (si *SchedulerIntegration) checkoutTask(ctx context.Context, run *models.Run, taskID, agentInstanceID string) bool {
 	if taskID == "" {
 		return true
 	}
-	if si.isTaskTreeGated(ctx, runID, taskID) {
+	if si.isTaskTreeGated(ctx, run.ID, taskID) {
 		return false
 	}
-	return si.tryCheckout(ctx, runID, taskID, agentInstanceID)
+	return si.tryCheckout(ctx, run, taskID, agentInstanceID)
 }
 
 func (si *SchedulerIntegration) isTaskTreeGated(ctx context.Context, runID, taskID string) bool {
@@ -577,26 +599,60 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 	return false
 }
 
+// checkoutContendedRetryDelay is the backoff before a run that lost the
+// atomic task checkout is retried. Deliberately much shorter than
+// HandleRunFailure's exponential schedule (2m-2h): losing a checkout race
+// isn't a failure, the task is just busy, so a short delay is enough for
+// the current holder to finish and release it.
+const checkoutContendedRetryDelay = 30 * time.Second
+
 // tryCheckout attempts to acquire an exclusive lock on the task. Returns true
 // if the checkout succeeded or was not needed, false if blocked.
 func (si *SchedulerIntegration) tryCheckout(
-	ctx context.Context, runID, taskID, agentID string,
+	ctx context.Context, run *models.Run, taskID, agentID string,
 ) bool {
 	acquired, err := si.svc.repo.CheckoutTask(ctx, taskID, agentID)
 	if err != nil {
 		si.logger.Error("task checkout error",
-			zap.String("run_id", runID), zap.Error(err))
-		_ = si.svc.FinishRun(ctx, runID)
+			zap.String("run_id", run.ID), zap.Error(err))
+		_ = si.svc.FinishRun(ctx, run.ID)
 		return false
 	}
 	if !acquired {
 		si.logger.Info("run skipped (task checked out by another agent)",
-			zap.String("run_id", runID),
+			zap.String("run_id", run.ID),
 			zap.String("task_id", taskID))
-		_ = si.svc.FinishRun(ctx, runID)
+		si.requeueContendedCheckout(ctx, run, taskID)
 		return false
 	}
 	return true
+}
+
+// requeueContendedCheckout re-queues a run that lost the atomic task
+// checkout instead of finishing it as though it had completed
+// successfully. RunStatus has no dedicated "skipped" state, so finishing
+// it here was indistinguishable from a real completion, and nothing else
+// re-queued the loser once the holder released the task — the run was
+// silently dropped. Bounded by MaxRetryCount so a stuck holder can't
+// spin this forever; past that it escalates exactly like any other
+// exhausted retry.
+func (si *SchedulerIntegration) requeueContendedCheckout(ctx context.Context, run *models.Run, taskID string) {
+	si.svc.AppendRunEvent(ctx, run.ID, "checkout.contended", "info", map[string]interface{}{
+		"task_id":     taskID,
+		"retry_count": run.RetryCount,
+	})
+	if run.RetryCount >= MaxRetryCount {
+		if err := si.svc.escalateFailure(ctx, run, fmt.Errorf("task checkout contended past max retries")); err != nil {
+			si.logger.Error("failed to escalate contended checkout",
+				zap.String("run_id", run.ID), zap.Error(err))
+		}
+		return
+	}
+	retryAt := time.Now().UTC().Add(checkoutContendedRetryDelay)
+	if err := si.svc.repo.ScheduleRetry(ctx, run.ID, retryAt, run.RetryCount+1); err != nil {
+		si.logger.Error("failed to requeue contended checkout",
+			zap.String("run_id", run.ID), zap.Error(err))
+	}
 }
 
 // checkBudget runs pre-execution budget checks. Returns true if allowed.

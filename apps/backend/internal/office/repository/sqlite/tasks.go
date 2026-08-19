@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -746,6 +747,34 @@ func (r *Repository) ReleaseTaskCheckout(ctx context.Context, taskID string) err
 		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL WHERE id = ?
 	`), taskID)
 	return err
+}
+
+// ReapStaleCheckouts clears checkout_agent_id/checkout_at on tasks whose
+// checkout is older than olderThan and that have no queued or claimed run
+// in flight. This is a backstop for callers that fail to release the
+// checkout on a terminal run transition (an event-subscriber path that
+// crashes before publishing, a run that never reaches a terminal event at
+// all) — releaseTaskCheckoutForRun (internal/office/service) is the
+// primary release path; this only cleans up what that missed. Returns the
+// number of tasks reaped. json_extract is SQLite-flavoured — see
+// CancelRunsForTasks in tree_holds.go for why that's acceptable here.
+func (r *Repository) ReapStaleCheckouts(ctx context.Context, olderThan time.Time) (int64, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL
+		WHERE checkout_agent_id IS NOT NULL
+		  AND checkout_agent_id != ''
+		  AND checkout_at IS NOT NULL
+		  AND checkout_at < ?
+		  AND NOT EXISTS (
+		      SELECT 1 FROM runs w
+		      WHERE json_extract(w.payload, '$.task_id') = tasks.id
+		        AND w.status IN ('queued', 'claimed')
+		  )
+	`), olderThan)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 // UpdateTaskPriority sets the priority TEXT column on a task. Caller is
