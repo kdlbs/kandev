@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { TFunction } from "i18next";
 import Image from "@/components/routing/app-image";
 import { IconUpload, IconDeviceFloppy } from "@tabler/icons-react";
 import { toast } from "@/lib/toast/sonner";
@@ -9,6 +10,7 @@ import { Switch } from "@kandev/ui/switch";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { updateWorkspaceSettings, getWorkspaceSettings } from "@/lib/api/domains/office-api";
+import { updateWorkspaceAction } from "@/app/actions/workspaces";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
 import { ConfigSection } from "./config-section";
 import { DangerZoneSection } from "./danger-zone-section";
@@ -249,6 +251,128 @@ function RecoverySection({
 
 type Workspace = WorkspaceState["items"][number];
 
+type SaveAppearanceOptions = {
+  activeWorkspace: Workspace | undefined;
+  name: string;
+  description: string;
+  workspaces: Workspace[];
+  setWorkspaces: (items: Workspace[]) => void;
+  setName: (v: string) => void;
+  setDescription: (v: string) => void;
+  setSaving: (v: boolean) => void;
+  t: TFunction;
+};
+
+function buildSaveAppearanceHandler({
+  activeWorkspace,
+  name,
+  description,
+  workspaces,
+  setWorkspaces,
+  setName,
+  setDescription,
+  setSaving,
+  t,
+}: SaveAppearanceOptions) {
+  return async () => {
+    if (!activeWorkspace) return;
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      toast.error(t("workspaces:workspaceNameIsRequired"));
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await updateWorkspaceAction(activeWorkspace.id, {
+        name: trimmedName,
+        description,
+      });
+      setName(updated.name);
+      setDescription(updated.description ?? "");
+      setWorkspaces(
+        workspaces.map((ws) =>
+          ws.id === updated.id
+            ? { ...ws, name: updated.name, description: updated.description }
+            : ws,
+        ),
+      );
+      toast.success(t("office:appearanceSettingsSaved"));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("office:failedToSaveSettings"));
+    } finally {
+      setSaving(false);
+    }
+  };
+}
+
+function usePermissionsState(activeWorkspace: Workspace | undefined) {
+  const { t } = useTranslation();
+  const [approvalNewAgents, setApprovalNewAgents] = useState(true);
+  const [approvalTaskCompletion, setApprovalTaskCompletion] = useState(false);
+  const [approvalSkillChanges, setApprovalSkillChanges] = useState(true);
+  const [origApprovalNewAgents, setOrigApprovalNewAgents] = useState(true);
+  const [origApprovalTaskCompletion, setOrigApprovalTaskCompletion] = useState(false);
+  const [origApprovalSkillChanges, setOrigApprovalSkillChanges] = useState(true);
+  const [savingPermissions, setSavingPermissions] = useState(false);
+  const activeWorkspaceId = activeWorkspace?.id;
+
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    void getWorkspaceSettings(activeWorkspaceId)
+      .then((res) => {
+        const s = res.settings;
+        if (s.require_approval_for_new_agents !== undefined) {
+          setApprovalNewAgents(s.require_approval_for_new_agents);
+          setOrigApprovalNewAgents(s.require_approval_for_new_agents);
+        }
+        if (s.require_approval_for_task_completion !== undefined) {
+          setApprovalTaskCompletion(s.require_approval_for_task_completion);
+          setOrigApprovalTaskCompletion(s.require_approval_for_task_completion);
+        }
+        if (s.require_approval_for_skill_changes !== undefined) {
+          setApprovalSkillChanges(s.require_approval_for_skill_changes);
+          setOrigApprovalSkillChanges(s.require_approval_for_skill_changes);
+        }
+      })
+      .catch(() => {});
+  }, [activeWorkspaceId]);
+
+  const handleSavePermissions = useCallback(async () => {
+    if (!activeWorkspace) return;
+    setSavingPermissions(true);
+    try {
+      await updateWorkspaceSettings(activeWorkspace.id, {
+        require_approval_for_new_agents: approvalNewAgents,
+        require_approval_for_task_completion: approvalTaskCompletion,
+        require_approval_for_skill_changes: approvalSkillChanges,
+      });
+      setOrigApprovalNewAgents(approvalNewAgents);
+      setOrigApprovalTaskCompletion(approvalTaskCompletion);
+      setOrigApprovalSkillChanges(approvalSkillChanges);
+      toast.success(t("office:permissionSettingsSaved"));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("office:failedToSaveSettings"));
+    } finally {
+      setSavingPermissions(false);
+    }
+  }, [activeWorkspace, approvalNewAgents, approvalTaskCompletion, approvalSkillChanges]);
+
+  return {
+    approvalNewAgents,
+    setApprovalNewAgents,
+    approvalTaskCompletion,
+    setApprovalTaskCompletion,
+    approvalSkillChanges,
+    setApprovalSkillChanges,
+    savingPermissions,
+    permissionsDirty:
+      approvalNewAgents !== origApprovalNewAgents ||
+      approvalTaskCompletion !== origApprovalTaskCompletion ||
+      approvalSkillChanges !== origApprovalSkillChanges,
+    handleSavePermissions,
+  };
+}
+
 function useRecoveryState(activeWorkspace: Workspace | undefined) {
   const { t } = useTranslation();
   const [lookbackHours, setLookbackHours] = useState(24);
@@ -294,82 +418,36 @@ function useRecoveryState(activeWorkspace: Workspace | undefined) {
   };
 }
 
-function useSettingsState(activeWorkspace: Workspace | undefined) {
+export function useSettingsState(
+  activeWorkspace: Workspace | undefined,
+  workspaces: Workspace[],
+  setWorkspaces: (items: Workspace[]) => void,
+) {
   const { t } = useTranslation();
   const [name, setName] = useState(activeWorkspace?.name ?? "");
   const [description, setDescription] = useState(activeWorkspace?.description ?? "");
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [approvalNewAgents, setApprovalNewAgents] = useState(true);
-  const [approvalTaskCompletion, setApprovalTaskCompletion] = useState(false);
-  const [approvalSkillChanges, setApprovalSkillChanges] = useState(true);
-  const [origApprovalNewAgents, setOrigApprovalNewAgents] = useState(true);
-  const [origApprovalTaskCompletion, setOrigApprovalTaskCompletion] = useState(false);
-  const [origApprovalSkillChanges, setOrigApprovalSkillChanges] = useState(true);
   const [savingAppearance, setSavingAppearance] = useState(false);
-  const [savingPermissions, setSavingPermissions] = useState(false);
   const recovery = useRecoveryState(activeWorkspace);
-
-  const activeWorkspaceId = activeWorkspace?.id;
-
-  useEffect(() => {
-    if (!activeWorkspaceId) return;
-    void getWorkspaceSettings(activeWorkspaceId)
-      .then((res) => {
-        const s = res.settings;
-        if (s.require_approval_for_new_agents !== undefined) {
-          setApprovalNewAgents(s.require_approval_for_new_agents);
-          setOrigApprovalNewAgents(s.require_approval_for_new_agents);
-        }
-        if (s.require_approval_for_task_completion !== undefined) {
-          setApprovalTaskCompletion(s.require_approval_for_task_completion);
-          setOrigApprovalTaskCompletion(s.require_approval_for_task_completion);
-        }
-        if (s.require_approval_for_skill_changes !== undefined) {
-          setApprovalSkillChanges(s.require_approval_for_skill_changes);
-          setOrigApprovalSkillChanges(s.require_approval_for_skill_changes);
-        }
-      })
-      .catch(() => {});
-  }, [activeWorkspaceId]);
+  const permissions = usePermissionsState(activeWorkspace);
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) setLogoPreview(URL.createObjectURL(file));
   };
 
-  const handleSaveAppearance = useCallback(async () => {
-    if (!activeWorkspace) return;
-    setSavingAppearance(true);
-    try {
-      await updateWorkspaceSettings(activeWorkspace.id, { name, description });
-      toast.success(t("office:appearanceSettingsSaved"));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("office:failedToSaveSettings"));
-    } finally {
-      setSavingAppearance(false);
-    }
-  }, [activeWorkspace, name, description]);
-
-  const handleSavePermissions = useCallback(async () => {
-    if (!activeWorkspace) return;
-    setSavingPermissions(true);
-    try {
-      await updateWorkspaceSettings(activeWorkspace.id, {
-        require_approval_for_new_agents: approvalNewAgents,
-        require_approval_for_task_completion: approvalTaskCompletion,
-        require_approval_for_skill_changes: approvalSkillChanges,
-      });
-      setOrigApprovalNewAgents(approvalNewAgents);
-      setOrigApprovalTaskCompletion(approvalTaskCompletion);
-      setOrigApprovalSkillChanges(approvalSkillChanges);
-      toast.success(t("office:permissionSettingsSaved"));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("office:failedToSaveSettings"));
-    } finally {
-      setSavingPermissions(false);
-    }
-  }, [activeWorkspace, approvalNewAgents, approvalTaskCompletion, approvalSkillChanges]);
+  const handleSaveAppearance = buildSaveAppearanceHandler({
+    activeWorkspace,
+    name,
+    description,
+    workspaces,
+    setWorkspaces,
+    setName,
+    setDescription,
+    setSaving: setSavingAppearance,
+    t,
+  });
 
   const origName = activeWorkspace?.name ?? "";
   const origDescription = activeWorkspace?.description ?? "";
@@ -381,23 +459,12 @@ function useSettingsState(activeWorkspace: Workspace | undefined) {
     setDescription,
     logoPreview,
     fileInputRef,
-    approvalNewAgents,
-    setApprovalNewAgents,
-    approvalTaskCompletion,
-    setApprovalTaskCompletion,
-    approvalSkillChanges,
-    setApprovalSkillChanges,
+    ...permissions,
     ...recovery,
     appearanceDirty: name !== origName || description !== origDescription,
-    permissionsDirty:
-      approvalNewAgents !== origApprovalNewAgents ||
-      approvalTaskCompletion !== origApprovalTaskCompletion ||
-      approvalSkillChanges !== origApprovalSkillChanges,
     savingAppearance,
-    savingPermissions,
     handleLogoChange,
     handleSaveAppearance,
-    handleSavePermissions,
   };
 }
 
@@ -407,7 +474,7 @@ export function SettingsContent() {
   const setWorkspaces = useAppStore((s) => s.setWorkspaces);
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
-  const s = useSettingsState(activeWorkspace);
+  const s = useSettingsState(activeWorkspace, workspaces.items, setWorkspaces);
   const initial = (s.name || "W").charAt(0).toUpperCase();
 
   return (

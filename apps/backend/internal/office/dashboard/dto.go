@@ -449,8 +449,6 @@ type CreateCommentRequest struct {
 
 // UpdateWorkspaceSettingsRequest is the request body for updating workspace settings.
 type UpdateWorkspaceSettingsRequest struct {
-	Name                             *string `json:"name"`
-	Description                      *string `json:"description"`
 	PermissionHandlingMode           *string `json:"permission_handling_mode"`
 	RecoveryLookbackHours            *int    `json:"recovery_lookback_hours"`
 	RequireApprovalForNewAgents      *bool   `json:"require_approval_for_new_agents"`

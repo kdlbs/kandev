@@ -66,11 +66,11 @@ test.describe("Dashboard", () => {
 
   test("update workspace settings", async ({ officeApi, officeSeed }) => {
     const updated = await officeApi.updateWorkspaceSettings(officeSeed.workspaceId, {
-      name: "E2E Workspace Updated",
+      recovery_lookback_hours: 42,
     });
-    expect(updated).toBeDefined();
+    expect(updated).toEqual({ ok: true });
 
-    const settings = await officeApi.getWorkspaceSettings(officeSeed.workspaceId);
-    expect(settings).toBeDefined();
+    const { settings } = await officeApi.getWorkspaceSettings(officeSeed.workspaceId);
+    expect((settings as { recovery_lookback_hours: number }).recovery_lookback_hours).toBe(42);
   });
 });
