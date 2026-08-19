@@ -1,6 +1,7 @@
 ---
-status: shipped
+status: building
 created: 2026-08-07
+updated: 2026-08-19
 owner: kandev
 ---
 
@@ -30,6 +31,9 @@ settings surfaces that do not have a live task session:
 - After a user selects a model in the workflow session override editor or an
   agent profile editor, Kandev requests a model-aware capability snapshot from
   the provider through a sessionless ACP probe.
+- In an agent profile editor, the open model selector stays open while Kandev
+  resolves the selected model. The area below the model list shows a localized
+  loading spinner instead of stale dependent options.
 - The probe applies the requested model using generic ACP session-model logic,
   captures the complete post-model `config_options` response or update, and
   applies the existing ACP compatibility normalization.
@@ -59,6 +63,17 @@ Given the OpenCode agent profile settings page, when the profile model changes
 to a model with additional selectable options, then the profile editor uses
 the same resolved snapshot as workflow settings and allows those options to be
 selected and saved.
+
+### Agent profile shows model-option progress
+
+Given an open agent profile model selector, when the author selects a model,
+then option resolution starts. The selector stays open and shows a loading
+spinner below the model list. The selector hides stale dependent controls until
+the new option snapshot arrives.
+
+Given that the option request is complete, when Kandev shows the resolved
+snapshot or an error, then the loading spinner is not visible. The existing
+resolved controls or retryable error state are available.
 
 ### Model removes an option
 
@@ -102,6 +117,9 @@ Given a phone viewport, when the author selects a model and configures the
 resolved options in either settings flow, then controls remain in a one-column
 touch-friendly layout, use the existing settings scroll owner, and do not
 create document-level horizontal overflow.
+
+Given an open agent profile model selector on a phone, when model options load,
+then the same loading spinner is visible and remains inside the selector.
 
 ## Data model
 
@@ -254,5 +272,7 @@ task session, change an agent profile, or mutate provider configuration.
   out-of-order response.
 - Resolver failures preserve saved data and provide a retryable, localized
   status.
+- The agent profile model selector shows localized progress below the model
+  list while model-dependent options load.
 - Desktop and mobile E2E coverage verifies workflow and profile behavior, with
   touch sizing and overflow assertions for the mobile workflow editor.

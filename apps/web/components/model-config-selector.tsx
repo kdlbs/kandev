@@ -19,6 +19,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import { Separator } from "@kandev/ui/separator";
+import { Spinner } from "@kandev/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 
 export type ModelSelectorOption = {
@@ -358,6 +359,7 @@ type ModelConfigSelectorContentProps = {
   onConfigSelect: (configId: string) => void;
   onConfigBack: () => void;
   onConfigChange?: (configId: string, value: string) => void;
+  configOptionsLoading: boolean;
 };
 
 function ModelConfigSelectorContent({
@@ -369,6 +371,7 @@ function ModelConfigSelectorContent({
   onConfigSelect,
   onConfigBack,
   onConfigChange,
+  configOptionsLoading,
 }: ModelConfigSelectorContentProps) {
   const { t } = useTranslation();
   const pendingFocusConfigId = useRef<string | null>(null);
@@ -418,24 +421,39 @@ function ModelConfigSelectorContent({
           </CommandGroup>
         </CommandList>
       </Command>
-      {extraConfigOptions.length > 0 && (
+      {configOptionsLoading ? (
         <>
           <Separator />
-          <ScrollArea className="max-h-40 pr-2">
-            <div className="space-y-1">
-              {extraConfigOptions.map((option) => (
-                <ConfigOptionTrigger
-                  key={option.id}
-                  option={option}
-                  onSelect={() => onConfigSelect(option.id)}
-                  triggerRef={(element) => {
-                    triggerRefs.current[option.id] = element;
-                  }}
-                />
-              ))}
-            </div>
-          </ScrollArea>
+          <div
+            className="flex min-h-9 items-center gap-2 px-2 text-xs text-muted-foreground"
+            data-testid="model-config-options-loading"
+            role="status"
+            aria-label={t("agents:resolvingModelOptions")}
+          >
+            <Spinner className="h-3.5 w-3.5" />
+            <span>{t("agents:resolvingModelOptions")}</span>
+          </div>
         </>
+      ) : (
+        extraConfigOptions.length > 0 && (
+          <>
+            <Separator />
+            <ScrollArea className="max-h-40 pr-2">
+              <div className="space-y-1">
+                {extraConfigOptions.map((option) => (
+                  <ConfigOptionTrigger
+                    key={option.id}
+                    option={option}
+                    onSelect={() => onConfigSelect(option.id)}
+                    triggerRef={(element) => {
+                      triggerRefs.current[option.id] = element;
+                    }}
+                  />
+                ))}
+              </div>
+            </ScrollArea>
+          </>
+        )
       )}
     </>
   );
@@ -457,6 +475,11 @@ export type ModelConfigSelectorProps = {
   configBaseline?: Record<string, string>;
   /** Optional suffix appended to the trigger's model label (e.g. "(fallback)"). */
   currentModelSuffix?: string;
+
+  /** Keeps the picker open while a caller resolves model-dependent options. */
+  configOptionsLoading?: boolean;
+  /** Keeps the picker open after model selection, even without existing options. */
+  keepOpenOnModelChange?: boolean;
 
   /** Optional title tooltip on the trigger (e.g. explains a live-only note). */
   triggerTitle?: string;
@@ -542,6 +565,8 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   triggerSummary = "all",
   configBaseline,
   currentModelSuffix,
+  configOptionsLoading = false,
+  keepOpenOnModelChange = false,
 }: ModelConfigSelectorProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -571,7 +596,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   const onModelSelect = (value: string) => {
     if (!value) return;
     onModelChange(value);
-    if (!hasExtraConfigOptions) {
+    if (!keepOpenOnModelChange && !hasExtraConfigOptions) {
       setOpen(false);
     }
   };
@@ -609,6 +634,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
           onConfigSelect={setActiveConfigId}
           onConfigBack={() => setActiveConfigId(null)}
           onConfigChange={onConfigChange}
+          configOptionsLoading={configOptionsLoading}
         />
       </PopoverContent>
     </Popover>
