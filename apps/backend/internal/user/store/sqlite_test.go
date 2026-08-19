@@ -916,6 +916,25 @@ func TestSQLiteRepositoryWorkflowIDsWithAutoHideEmptyStepsDefaultAndRoundTrip(t 
 	}
 }
 
+func TestDecodeWorkflowIDsWithAutoHideEmptyStepsFallsBackToEmpty(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  json.RawMessage
+	}{
+		{name: "missing", raw: nil},
+		{name: "null", raw: json.RawMessage(`null`)},
+		{name: "non-array", raw: json.RawMessage(`{"workflow":"wf-a"}`)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := decodeStringIDs(tt.raw)
+			if got == nil || len(got) != 0 {
+				t.Fatalf("decodeStringIDs(%s) = %#v, want non-nil empty", tt.raw, got)
+			}
+		})
+	}
+}
+
 // TestScanUserSettingsKanbanHiddenStepIDsCorruptFallsBackToEmpty verifies corrupt kanban_hidden_step_ids values fall back to empty while sibling fields still load.
 func TestScanUserSettingsKanbanHiddenStepIDsCorruptFallsBackToEmpty(t *testing.T) {
 	tests := []struct {

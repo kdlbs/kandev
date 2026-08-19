@@ -40,11 +40,12 @@ import {
   getTemporaryStepIds,
   useKanbanDragScrollAnchor,
 } from "@/hooks/domains/kanban/use-kanban-drag-scroll-anchor";
-import { cn } from "@kandev/ui/lib/utils";
 import {
-  type KanbanExternalLinkAvailability,
-  useKanbanExternalLinkAvailability,
-} from "@/components/kanban-external-link-availability";
+  type SharedKanbanLayoutProps,
+  useSharedKanbanLayoutProps,
+} from "@/hooks/domains/kanban/use-shared-kanban-layout-props";
+import { cn } from "@kandev/ui/lib/utils";
+import { useKanbanExternalLinkAvailability } from "@/components/kanban-external-link-availability";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 
@@ -336,31 +337,6 @@ function MobileKanbanLayout({
   );
 }
 
-type SharedKanbanLayoutProps = {
-  steps: WorkflowStep[];
-  // Real workflow steps only (excludes the synthetic "Needs Reassignment"
-  // sentinel) — used wherever a step is offered as a move destination
-  // (move menus, drop targets), since that sentinel is display-only.
-  moveTargetSteps: WorkflowStep[];
-  tasks: Task[];
-  onPreviewTask: (task: Task) => void;
-  onOpenTask: (task: Task) => void;
-  onEditTask: (task: Task) => void;
-  onDeleteTask: (task: Task) => void;
-  onArchiveTask?: (task: Task) => void;
-  moveTaskToStep: (task: Task, targetStepId: string) => Promise<void>;
-  showMaximizeButton?: boolean;
-  deletingTaskId?: string | null;
-  archivingTaskId?: string | null;
-  selectedIds?: Set<string>;
-  onToggleSelect?: (taskId: string) => void;
-  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
-  isMultiSelectMode?: boolean;
-  externalLinkAvailability: KanbanExternalLinkAvailability;
-  temporaryStepIds: Set<string>;
-  isDragging: boolean;
-};
-
 function TabletKanbanLayout({
   steps,
   moveTargetSteps,
@@ -516,7 +492,6 @@ function renderKanbanLayout({
   return <DesktopKanbanLayout {...sharedProps} />;
 }
 
-// eslint-disable-next-line max-lines-per-function -- responsive Kanban composition stays centralized while DnD, empty-state, and layout concerns are extracted.
 export function SwimlaneKanbanContent({
   workflowId,
   steps,
@@ -556,50 +531,24 @@ export function SwimlaneKanbanContent({
     moveTargetSteps,
     isMobile,
   });
-  const sharedProps = useMemo(
-    () => ({
-      steps: drag.renderedSteps,
-      moveTargetSteps,
-      tasks: displayTasks,
-      onPreviewTask,
-      onOpenTask,
-      onEditTask,
-      onDeleteTask,
-      onArchiveTask,
-      moveTaskToStep: drag.moveTaskToStep,
-      showMaximizeButton,
-      deletingTaskId,
-      archivingTaskId,
-      selectedIds,
-      onToggleSelect,
-      onSelectRange,
-      isMultiSelectMode,
-      externalLinkAvailability,
-      temporaryStepIds: drag.temporaryStepIds,
-      isDragging: !!drag.activeTask,
-    }),
-    [
-      drag.renderedSteps,
-      moveTargetSteps,
-      displayTasks,
-      onPreviewTask,
-      onOpenTask,
-      onEditTask,
-      onDeleteTask,
-      onArchiveTask,
-      drag.moveTaskToStep,
-      showMaximizeButton,
-      deletingTaskId,
-      archivingTaskId,
-      selectedIds,
-      onToggleSelect,
-      onSelectRange,
-      isMultiSelectMode,
-      externalLinkAvailability,
-      drag.temporaryStepIds,
-      drag.activeTask,
-    ],
-  );
+  const sharedProps = useSharedKanbanLayoutProps({
+    drag,
+    moveTargetSteps,
+    displayTasks,
+    onPreviewTask,
+    onOpenTask,
+    onEditTask,
+    onDeleteTask,
+    onArchiveTask,
+    showMaximizeButton,
+    deletingTaskId,
+    archivingTaskId,
+    selectedIds,
+    onToggleSelect,
+    onSelectRange,
+    isMultiSelectMode,
+    externalLinkAvailability,
+  });
 
   const desktopEmptyState = getDesktopEmptyState(isMobile, displaySteps, moveTargetSteps);
   if (desktopEmptyState !== undefined) return desktopEmptyState;

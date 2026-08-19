@@ -32,8 +32,8 @@ spec: "../../specs/kanban-auto-hide-empty-columns/spec.md"
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run components/kanban-board.test.ts components/kanban/mobile-drop-targets.test.tsx components/kanban/swimlane-kanban-content.test.tsx components/kanban/swimlane-graph-content.test.tsx
-cd apps/web && pnpm run typecheck && pnpm run i18n:ratchet
+(cd apps && pnpm --filter @kandev/web test -- --run components/kanban-board.test.ts components/kanban/mobile-drop-targets.test.tsx components/kanban/swimlane-kanban-content.test.tsx components/kanban/swimlane-graph-content.test.tsx components/kanban/swimlane-graph2-orphan-display.test.ts)
+(cd apps/web && pnpm run typecheck && pnpm run i18n:ratchet)
 ```
 
 ## Risks

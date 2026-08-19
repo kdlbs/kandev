@@ -1,7 +1,8 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { StateProvider } from "@/components/state-provider";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { ORPHAN_STEP_ID } from "./swimlane-kanban-content";
 import { getGraph2DisplayState, SwimlaneGraph2Content } from "./swimlane-graph2-content";
 import type { Task } from "@/components/kanban-card";
@@ -58,15 +59,18 @@ describe("SwimlaneGraph2Content auto-hidden steps", () => {
       createElement(
         StateProvider,
         null,
-        createElement(SwimlaneGraph2Content, {
-          workflowId: "wf-1",
-          steps: visibleSteps,
-          moveTargetSteps,
-          tasks,
-          onPreviewTask: () => undefined,
-          onOpenTask: () => undefined,
-          onEditTask: () => undefined,
-          onDeleteTask: () => undefined,
+        createElement(TooltipProvider, {
+          delayDuration: 0,
+          children: createElement(SwimlaneGraph2Content, {
+            workflowId: "wf-1",
+            steps: visibleSteps,
+            moveTargetSteps,
+            tasks,
+            onPreviewTask: () => undefined,
+            onOpenTask: () => undefined,
+            onEditTask: () => undefined,
+            onDeleteTask: () => undefined,
+          }),
         }),
       ),
     );
@@ -87,6 +91,10 @@ describe("SwimlaneGraph2Content auto-hidden steps", () => {
     expect(screen.getByText("Doing")).toBeTruthy();
     expect(screen.queryByText("Todo")).toBeNull();
     expect(screen.queryByText("Done")).toBeNull();
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "Doing" }).parentElement!);
+    expect(screen.getByRole("button", { name: "Move to Todo" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Move to Done" })).toBeTruthy();
   });
 
   it("explains when every empty pipeline stage is auto-hidden", () => {

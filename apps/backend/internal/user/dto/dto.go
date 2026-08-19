@@ -300,7 +300,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		AppStatusBarEnabled:               settings.AppStatusBarEnabled,
 		AppStatusBarOrder:                 settings.AppStatusBarOrder,
 		KanbanHiddenStepIDs:               settings.KanbanHiddenStepIDs,
-		WorkflowIDsWithAutoHideEmptySteps: settings.WorkflowIDsWithAutoHideEmptySteps,
+		WorkflowIDsWithAutoHideEmptySteps: append([]string{}, settings.WorkflowIDsWithAutoHideEmptySteps...),
 		Revision:                          settings.Revision,
 		UpdatedAt:                         settings.UpdatedAt.Format(time.RFC3339),
 	}

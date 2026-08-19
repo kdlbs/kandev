@@ -8,7 +8,6 @@ import type { WorkflowStep } from "@/components/kanban-column";
 type DragScrollAnchor = {
   stepId: string;
   viewportLeft: number;
-  originalScrollLeft: number;
 };
 
 function findStepElement(board: HTMLDivElement, stepId: string): HTMLElement | undefined {
@@ -27,10 +26,13 @@ export function getPreservedScrollLeft(
   currentScrollLeft: number,
   anchorViewportLeft: number,
   currentAnchorLeft: number | undefined,
-  originalScrollLeft: number,
 ): number {
-  if (currentAnchorLeft == null) return originalScrollLeft;
+  if (currentAnchorLeft == null) return currentScrollLeft;
   return currentScrollLeft + currentAnchorLeft - anchorViewportLeft;
+}
+
+export function getRenderedStepKey(steps: WorkflowStep[]): string {
+  return steps.map((step) => step.id).join("\0");
 }
 
 export function getDragDisplaySteps(
@@ -84,13 +86,14 @@ export function useKanbanDragScrollAnchor({
         anchorRef.current = {
           stepId: task.workflowStepId,
           viewportLeft: stepElement.getBoundingClientRect().left,
-          originalScrollLeft: scrollWindow.scrollLeft,
         };
       }
       onDragStart(event);
     },
     [tasks, onDragStart],
   );
+
+  const renderedStepKey = getRenderedStepKey(renderedSteps);
 
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
@@ -103,7 +106,6 @@ export function useKanbanDragScrollAnchor({
       scrollWindow.scrollLeft,
       anchor.viewportLeft,
       stepElement?.getBoundingClientRect().left,
-      anchor.originalScrollLeft,
     );
     scrollWindow.scrollLeft = desiredScrollLeft;
 
@@ -121,7 +123,7 @@ export function useKanbanDragScrollAnchor({
     return () => {
       if (restoreFrameRef.current != null) cancelAnimationFrame(restoreFrameRef.current);
     };
-  }, [activeTask, renderedSteps]);
+  }, [activeTask, renderedStepKey]);
 
   return { boardRef, handleAnchoredDragStart };
 }

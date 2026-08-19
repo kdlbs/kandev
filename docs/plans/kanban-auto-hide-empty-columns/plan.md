@@ -119,9 +119,9 @@ make fmt
 make typecheck
 make test
 make lint
-cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet
-cd apps/web && pnpm e2e:run --host --project chromium tests/kanban/auto-hide-empty-columns.spec.ts
-cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/kanban/mobile-auto-hide-empty-columns.spec.ts
+(cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet)
+(cd apps/web && pnpm e2e:run --host --project chromium tests/kanban/auto-hide-empty-columns.spec.ts)
+(cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/kanban/mobile-auto-hide-empty-columns.spec.ts)
 ```
 
 ## Verification results

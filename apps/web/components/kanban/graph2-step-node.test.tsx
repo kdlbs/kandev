@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
@@ -182,12 +182,14 @@ describe("Graph2StepNode — hidden destination disclosure", () => {
     return screen.getByRole("button", { name: "Move to Done" });
   }
 
-  it("wraps the move button in a tooltip only when its destination is hidden", () => {
+  it("shows the destination tooltip only when the destination is hidden", async () => {
     const hiddenTargetButton = renderNextMove(true);
-    expect(hiddenTargetButton.getAttribute("data-slot")).toBe("tooltip-trigger");
+    fireEvent.focus(hiddenTargetButton);
+    await waitFor(() => expect(screen.getByRole("tooltip").textContent).toBe("Move to Done"));
 
     cleanup();
     const visibleTargetButton = renderNextMove(false);
-    expect(visibleTargetButton.getAttribute("data-slot")).toBeNull();
+    fireEvent.focus(visibleTargetButton);
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 });

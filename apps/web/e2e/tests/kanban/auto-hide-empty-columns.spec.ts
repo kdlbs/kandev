@@ -113,5 +113,10 @@ test("auto-hides empty columns without changing drag destinations", async ({
     .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
     .toBe(autoHiddenStep.id);
   await expect(kanban.taskCardInColumn(TASK_TITLE, autoHiddenStep.id)).toBeVisible();
+  const settledDestinationBox = await destination.boundingBox();
+  if (!settledDestinationBox) throw new Error("occupied destination has no layout box");
+  const viewportWidth = await testPage.evaluate(() => window.innerWidth);
+  expect(settledDestinationBox.x).toBeLessThan(viewportWidth);
+  expect(settledDestinationBox.x + settledDestinationBox.width).toBeGreaterThan(0);
   await expect(kanban.columnByStepId(manuallyHiddenStep.id)).toHaveCount(0);
 });

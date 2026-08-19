@@ -38,8 +38,8 @@ spec: "../../specs/kanban-auto-hide-empty-columns/spec.md"
 
 ```bash
 make -C apps/backend test
-cd apps && pnpm --filter @kandev/web test -- --run hooks/use-user-display-settings.test.ts hooks/use-kanban-display-settings.test.ts components/kanban/columns-menu.test.tsx
-cd apps/web && pnpm run typecheck && pnpm run i18n:check && pnpm run i18n:ratchet
+(cd apps && pnpm --filter @kandev/web test -- --run hooks/use-user-display-settings.test.ts hooks/use-kanban-display-settings.test.ts components/kanban/columns-menu.test.tsx)
+(cd apps/web && pnpm run typecheck && pnpm run i18n:check && pnpm run i18n:ratchet)
 ```
 
 ## Risks

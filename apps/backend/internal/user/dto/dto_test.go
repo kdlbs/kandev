@@ -107,6 +107,21 @@ func TestWorkflowIDsWithAutoHideEmptyStepsContract(t *testing.T) {
 		t.Fatalf("WorkflowIDsWithAutoHideEmptySteps patch field = %+v, want JSON preference field", field)
 	}
 
+	defaultSettings := FromUserSettings(&models.UserSettings{})
+	encoded, err := json.Marshal(defaultSettings)
+	if err != nil {
+		t.Fatalf("encode default settings: %v", err)
+	}
+	var serialized struct {
+		WorkflowIDs []string `json:"workflow_ids_with_auto_hide_empty_steps"`
+	}
+	if err := json.Unmarshal(encoded, &serialized); err != nil {
+		t.Fatalf("decode default settings: %v", err)
+	}
+	if serialized.WorkflowIDs == nil || len(serialized.WorkflowIDs) != 0 {
+		t.Fatalf("serialized default WorkflowIDs = %#v, want non-nil empty", serialized.WorkflowIDs)
+	}
+
 	want := []string{"wf-a", "wf-b"}
 	source := &models.UserSettings{}
 	sourceField := reflect.ValueOf(source).Elem().FieldByName("WorkflowIDsWithAutoHideEmptySteps")

@@ -30,8 +30,8 @@ spec: "../../specs/kanban-auto-hide-empty-columns/spec.md"
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run components/kanban/swimlane-container.test.ts lib/kanban/workflow-swimlanes.test.ts
-cd apps/web && pnpm run typecheck && pnpm run i18n:ratchet
+(cd apps && pnpm --filter @kandev/web test -- --run components/kanban/swimlane-container.test.ts lib/kanban/workflow-swimlanes.test.ts)
+(cd apps/web && pnpm run typecheck && pnpm run i18n:ratchet)
 ```
 
 ## Risks

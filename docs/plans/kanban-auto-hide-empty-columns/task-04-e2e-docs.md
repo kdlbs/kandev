@@ -31,8 +31,8 @@ spec: "../../specs/kanban-auto-hide-empty-columns/spec.md"
 ## Verification
 
 ```bash
-cd apps/web && pnpm e2e:run --host --project chromium tests/kanban/auto-hide-empty-columns.spec.ts
-cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/kanban/mobile-auto-hide-empty-columns.spec.ts
+(cd apps/web && pnpm e2e:run --host --project chromium tests/kanban/auto-hide-empty-columns.spec.ts)
+(cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/kanban/mobile-auto-hide-empty-columns.spec.ts)
 make fmt
 make typecheck
 make test

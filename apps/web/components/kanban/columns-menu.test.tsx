@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ColumnsMenu } from "./columns-menu";
 
@@ -93,16 +93,20 @@ describe("ColumnsMenu — one workflow's steps", () => {
     render(<ColumnsMenu {...baseProps()} />);
     openMenu();
 
-    const label = screen.getByText("Auto-hide empty columns");
+    const toggle = screen.getByTestId(`columns-menu-auto-hide-empty-${WF.id}`);
+    const menu = toggle.closest<HTMLElement>('[role="menu"]');
+    expect(menu).not.toBeNull();
+    const menuQueries = within(menu!);
+    const label = menuQueries.getByText("Auto-hide empty columns");
     expect(label.classList.contains("whitespace-normal")).toBe(true);
     expect(label.classList.contains("truncate")).toBe(false);
-    expect(screen.queryByText("Show empty steps again while moving tasks.")).toBeNull();
+    expect(menuQueries.queryByText("Show empty steps again while moving tasks.")).toBeNull();
     expect(
-      Array.from(document.querySelectorAll('[data-slot="dropdown-menu-label"]')).map(
+      Array.from(menu!.querySelectorAll('[data-slot="dropdown-menu-label"]')).map(
         (element) => element.textContent,
       ),
     ).toEqual(["Display Options", "Columns"]);
-    expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(1);
+    expect(menu!.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(1);
   });
 
   it("ignores a hidden id that no longer matches a live step", () => {
