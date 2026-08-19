@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/kanban-auto-hide-empty-columns/spec.md
 created: 2026-08-18
-status: building
+status: complete
 ---
 
 # Implementation Plan: Auto-hide empty workflow steps
@@ -99,7 +99,7 @@ Update the feature-spec index with the new spec.
 - [x] [Task 01 - Persist the per-workflow preference](task-01-persist-preference.md)
 - [x] [Task 02 - Derive and render empty-column visibility](task-02-derived-visibility.md)
 - [x] [Task 03 - Restore auto-hidden move targets](task-03-drag-targets.md)
-- [ ] [Task 04 - Prove end-to-end behavior and document it](task-04-e2e-docs.md)
+- [x] [Task 04 - Prove end-to-end behavior and document it](task-04-e2e-docs.md)
 
 All tasks are sequential. Tasks 02-04 depend on the contracts established by the preceding task and
 touch overlapping Kanban composition or acceptance tests.
@@ -123,3 +123,13 @@ cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet
 cd apps/web && pnpm e2e:run --host --project chromium tests/kanban/auto-hide-empty-columns.spec.ts
 cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/kanban/mobile-auto-hide-empty-columns.spec.ts
 ```
+
+## Verification results
+
+- Targeted Prettier, ESLint, and the E2E sleep ratchet passed for the new coverage and selectors.
+- Chromium passed 1/1 test, covering default-off compatibility, persisted enablement, search-stable
+  occupancy, manual-hidden precedence, drag reveal, cancellation, and successful drop.
+- Mobile Chrome passed 1/1 test, covering focused-workflow persistence, the 44 CSS px toggle,
+  drag-time destination recovery, cancellation cleanup, and document overflow.
+- The E2E backend required a dedicated `KANDEV_AGENT_STANDALONE_PORT` locally because the live Kandev
+  runtime already owned the default port; both successful runs used isolated temporary databases.

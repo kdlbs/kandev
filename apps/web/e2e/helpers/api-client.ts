@@ -1103,6 +1103,7 @@ export class ApiClient {
     tasks_list_group?: string;
     task_create_last_used?: TaskCreateLastUsedApi;
     kanban_hidden_step_ids?: Record<string, string[]>;
+    workflow_ids_with_auto_hide_empty_steps?: string[];
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }
