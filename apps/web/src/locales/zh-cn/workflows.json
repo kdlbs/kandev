@@ -264,5 +264,11 @@
   "workflowSyncCompleted": "工作流同步完成",
   "loadingSteps": "正在加载步骤…",
   "noStepsInThisWorkflow": "该工作流没有步骤",
-  "selectAWorkflowFirst": "请先选择一个工作流"
+  "selectAWorkflowFirst": "请先选择一个工作流",
+  "coordinatorMonitoring": "协调器监控",
+  "coordinatorMonitoringHelp": "选择协调器应监控的步骤并设置每步骤提示词。",
+  "noStepsToMonitor": "没有可供监控的工作流步骤。",
+  "coordinatorStepPromptPlaceholder": "此步骤的可选提示词...",
+  "failedToLoadCoordinatorMonitoring": "加载协调器监控设置失败",
+  "failedToSaveCoordinatorMonitoring": "保存协调器监控设置失败"
 }

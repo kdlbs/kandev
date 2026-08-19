@@ -2215,7 +2215,7 @@ This pattern requires the manifest to declare:
 The backing task/session is hidden from every kanban and task list, expires
 only through explicit `DeleteAgentConversation`, and carries
 server-stamped `source = "plugin:<id>"` provenance. See the
-[Agent conversation contract](GRPC-CONTRACT.md#5a-agent-conversation-contract)
+[Agent conversation contract](../plans/plugins/GRPC-CONTRACT.md#5a-agent-conversation-contract)
 for the full gRPC contract and PLUGIN-API.md for `WorkspaceAgentChat`.
 ## Build, package, install, and test
 

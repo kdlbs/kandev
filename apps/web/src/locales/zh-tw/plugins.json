@@ -127,5 +127,6 @@
   "utilityAgentsUnavailable": "輔助代理程式不可用",
   "viewRaw": "檢視原始內容",
   "yes": "是",
-  "pluginDialog": "外掛對話方塊"
+  "pluginDialog": "外掛對話方塊",
+  "loadingWorkspaceAgentChat": "正在載入對話"
 }

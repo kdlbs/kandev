@@ -264,5 +264,11 @@
   "workflowSyncCompleted": "工作流程同步完成",
   "loadingSteps": "正在載入步驟…",
   "noStepsInThisWorkflow": "該工作流程沒有步驟",
-  "selectAWorkflowFirst": "請先選擇一個工作流程"
+  "selectAWorkflowFirst": "請先選擇一個工作流程",
+  "coordinatorMonitoring": "協調器監控",
+  "coordinatorMonitoringHelp": "選擇協調器應監控的步驟並設定每步驟提示詞。",
+  "noStepsToMonitor": "沒有可供監控的工作流程步驟。",
+  "coordinatorStepPromptPlaceholder": "此步驟的選擇性提示詞...",
+  "failedToLoadCoordinatorMonitoring": "載入協調器監控設定失敗",
+  "failedToSaveCoordinatorMonitoring": "儲存協調器監控設定失敗"
 }
