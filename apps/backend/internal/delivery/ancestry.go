@@ -28,26 +28,6 @@ func looksLikeCommitSHA(commit string) bool {
 	return commitSHAPattern.MatchString(commit)
 }
 
-// gitSymbolicRefs are git's well-known symbolic refs: pure alnum/underscore
-// with no leading dash and no "~"/"^", so validBranchNameRegex admits them
-// even though none is ever a real branch name.
-var gitSymbolicRefs = map[string]struct{}{
-	"HEAD":       {},
-	"ORIG_HEAD":  {},
-	"FETCH_HEAD": {},
-	"MERGE_HEAD": {},
-}
-
-// isGitSymbolicRef reports whether defaultBranch is one of the ref names
-// above, which refExists's local-fallback rev-parse would otherwise resolve
-// to whatever commit that symbolic ref currently points at in the checkout —
-// silently the wrong commit, not a resolution failure (Review round 3,
-// finding #2).
-func isGitSymbolicRef(defaultBranch string) bool {
-	_, ok := gitSymbolicRefs[defaultBranch]
-	return ok
-}
-
 // CheckoutResolver is the narrow, read-only, single-method port the
 // ancestry check depends on for the repository's local checkout path
 // (spec "Which checkout"). It is satisfied by
@@ -95,14 +75,15 @@ func (a *AncestryChecker) Check(ctx context.Context, repositoryID, defaultBranch
 	// as "does not exist" — defense-in-depth alongside the ingestion-time
 	// validation in task/service.applyRepositoryUpdates /
 	// CreateRepository, mirroring looksLikeCommitSHA's treatment of
-	// commit above. IsValidBranchName's allowlist regex admits bare commit
-	// SHAs and git's well-known symbolic refs (both pure alnum/underscore,
-	// no leading dash, no "~"/"^"): neither is a real branch name, and both
-	// resolve via refExists's local-fallback rev-parse to a commit that is
-	// not what the caller's default_branch value names — the same silent
-	// wrong-commit failure mode this guard exists to close (Review round 3,
-	// finding #2).
-	if !securityutil.IsValidBranchName(defaultBranch) || looksLikeCommitSHA(defaultBranch) || isGitSymbolicRef(defaultBranch) {
+	// commit above. IsValidDefaultBranchName's allowlist admits bare commit
+	// SHAs (both pure alnum/underscore, no leading dash, no "~"/"^"), which
+	// is not a real branch name and resolves via refExists's local-fallback
+	// rev-parse to a commit that is not what the caller's default_branch
+	// value names — the same silent wrong-commit failure mode this guard
+	// exists to close (Review round 3, finding #2). Git's well-known
+	// symbolic refs (HEAD and friends) are rejected by
+	// IsValidDefaultBranchName itself.
+	if !securityutil.IsValidDefaultBranchName(defaultBranch) || looksLikeCommitSHA(defaultBranch) {
 		out.Errored = true
 		return out
 	}

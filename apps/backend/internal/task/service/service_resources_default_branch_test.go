@@ -220,6 +220,108 @@ func TestService_FindOrCreateRepositoryRejectsInvalidDefaultBranchBackfill(t *te
 	}
 }
 
+// TestService_CreateRepositoryRejectsGitSymbolicRefDefaultBranch covers a
+// PR-review finding on this same field: "HEAD", "main/", and "a//b" all
+// pass the plain securityutil.IsValidBranchName allowlist this function
+// used before, but "HEAD" in particular is a git symbolic pseudo-ref, not a
+// real branch name. Persisting it as default_branch reaches the worktree
+// FallbackBaseBranch path (internal/worktree), which resolves it via a
+// local rev-parse fallback to whatever commit the checkout's HEAD currently
+// points at — silently the wrong revision, not a resolution failure. This
+// asserts the ingestion-time reject, mirroring the existing flag-like/
+// revision-syntax coverage above.
+func TestService_CreateRepositoryRejectsGitSymbolicRefDefaultBranch(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	invalidBranches := []string{"HEAD", "ORIG_HEAD", "FETCH_HEAD", "MERGE_HEAD", "main/", "a//b"}
+	for _, branch := range invalidBranches {
+		t.Run(branch, func(t *testing.T) {
+			_, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+				WorkspaceID:   "ws-1",
+				Name:          "Invalid Repo " + branch,
+				SourceType:    sourceTypeProvider,
+				Provider:      "github",
+				DefaultBranch: branch,
+			})
+			if !errors.Is(err, ErrInvalidRepositorySettings) {
+				t.Fatalf("CreateRepository error = %v, want ErrInvalidRepositorySettings", err)
+			}
+		})
+	}
+	repositories, err := repo.ListRepositories(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("ListRepositories: %v", err)
+	}
+	if len(repositories) != 0 {
+		t.Fatalf("invalid repository was persisted: %+v", repositories)
+	}
+}
+
+// TestApplyRepositoryUpdates_DefaultBranchRejectsGitSymbolicRef is
+// applyRepositoryUpdates' twin of the CreateRepository test above.
+func TestApplyRepositoryUpdates_DefaultBranchRejectsGitSymbolicRef(t *testing.T) {
+	repo := &models.Repository{DefaultBranch: "main"}
+	invalid := "HEAD"
+	err := applyRepositoryUpdates(repo, &UpdateRepositoryRequest{DefaultBranch: &invalid})
+	if !errors.Is(err, ErrInvalidRepositorySettings) {
+		t.Fatalf("applyRepositoryUpdates error = %v, want ErrInvalidRepositorySettings", err)
+	}
+	if repo.DefaultBranch != "main" {
+		t.Errorf("DefaultBranch = %q, want unmodified %q", repo.DefaultBranch, "main")
+	}
+}
+
+// TestService_FindOrCreateRepositoryBackfillRejectsGitSymbolicRef is the
+// FindOrCreateRepository backfill's twin of the same coverage, mirroring
+// TestService_FindOrCreateRepositoryRejectsInvalidDefaultBranchBackfill's
+// "best-effort backfill, call still succeeds" shape.
+func TestService_FindOrCreateRepositoryBackfillRejectsGitSymbolicRef(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID:   "ws-1",
+		Name:          "owner/repo",
+		SourceType:    sourceTypeProvider,
+		Provider:      "github",
+		ProviderOwner: "owner",
+		ProviderName:  "repo",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	resolved, wasCreated, err := svc.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
+		WorkspaceID:   "ws-1",
+		Provider:      "github",
+		ProviderOwner: "owner",
+		ProviderName:  "repo",
+		DefaultBranch: "HEAD",
+	})
+	if err != nil {
+		t.Fatalf("FindOrCreateRepository: %v", err)
+	}
+	if wasCreated || resolved.ID != created.ID {
+		t.Fatalf("resolved repository = %q (created=%t), want existing %q", resolved.ID, wasCreated, created.ID)
+	}
+	if resolved.DefaultBranch != "" {
+		t.Fatalf("resolved.DefaultBranch = %q, want empty (backfill skipped)", resolved.DefaultBranch)
+	}
+	stored, err := repo.GetRepository(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if stored.DefaultBranch != "" {
+		t.Fatalf("invalid DefaultBranch backfill persisted as %q", stored.DefaultBranch)
+	}
+}
+
 // TestService_FindOrCreateRepositoryBackfillsValidDefaultBranch is the
 // positive control for the test above: a legitimate default_branch value
 // still backfills onto a previously-empty row.
