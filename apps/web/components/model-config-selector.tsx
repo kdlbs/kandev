@@ -431,7 +431,7 @@ function ModelConfigSelectorContent({
             aria-label={t("agents:resolvingModelOptions")}
           >
             <Spinner aria-hidden="true" className="h-3.5 w-3.5" />
-            <span>{t("agents:resolvingModelOptions")}</span>
+            <span aria-hidden="true">{t("agents:resolvingModelOptions")}</span>
           </div>
         </>
       ) : (
