@@ -304,6 +304,20 @@ func (r *Repository) UpdateAgentInstanceConfigFields(
 	return err
 }
 
+// UpdateAgentReportsTo updates only an agent's reporting relationship. Config
+// import resolves this field in a second pass, after all agent IDs are known.
+// A narrow update prevents that pass from reverting runtime-owned fields from
+// the stale agent snapshot used for name resolution.
+func (r *Repository) UpdateAgentReportsTo(ctx context.Context, id, reportsTo string) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_profiles
+		SET reports_to = ?, updated_at = ?
+		WHERE id = ? AND `+agentInstanceFilter+`
+	`), reportsTo, now, id)
+	return err
+}
+
 // UpdateAgentSettings persists the agent_profiles.settings JSON blob for
 // an agent. Used by onboarding to seed routing.tier_source / .provider_
 // order_source markers on the freshly created CEO agent so the routing

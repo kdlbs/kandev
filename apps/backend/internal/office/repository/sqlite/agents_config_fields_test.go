@@ -92,3 +92,46 @@ func TestUpdateAgentInstanceConfigFields_UpdatesOnlyOwnedColumns(t *testing.T) {
 		t.Errorf("CooldownSec changed: got %d, want %d", got.CooldownSec, agent.CooldownSec)
 	}
 }
+
+// TestUpdateAgentReportsTo_UpdatesOnlyReportsTo proves that the second config
+// import pass cannot overwrite state that belongs to the agent runtime.
+func TestUpdateAgentReportsTo_UpdatesOnlyReportsTo(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	agent := fullAgentInstance("agent-1", "ws-1", "ada")
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("CreateAgentInstance: %v", err)
+	}
+	const wantSettings = `{"routing":{"tier_source":"explicit"}}`
+	if err := repo.UpdateAgentSettings(ctx, agent.ID, wantSettings); err != nil {
+		t.Fatalf("UpdateAgentSettings: %v", err)
+	}
+	if err := repo.UpdateAgentStatusFields(ctx, agent.ID, "paused", "manual pause"); err != nil {
+		t.Fatalf("UpdateAgentStatusFields: %v", err)
+	}
+
+	if err := repo.UpdateAgentReportsTo(ctx, agent.ID, "manager-1"); err != nil {
+		t.Fatalf("UpdateAgentReportsTo: %v", err)
+	}
+
+	got, err := repo.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentInstance: %v", err)
+	}
+	if got.ReportsTo != "manager-1" {
+		t.Errorf("ReportsTo = %q, want %q", got.ReportsTo, "manager-1")
+	}
+	if string(got.Status) != "paused" {
+		t.Errorf("Status changed: got %q, want %q", got.Status, "paused")
+	}
+	if got.PauseReason != "manual pause" {
+		t.Errorf("PauseReason changed: got %q, want %q", got.PauseReason, "manual pause")
+	}
+	if got.Settings != wantSettings {
+		t.Errorf("Settings changed: got %q, want %q", got.Settings, wantSettings)
+	}
+	if got.Role != agent.Role {
+		t.Errorf("Role changed: got %q, want %q", got.Role, agent.Role)
+	}
+}

@@ -260,8 +260,7 @@ func (s *ConfigService) applyAgentReportsTo(
 		if agent.ReportsTo == reportsTo {
 			continue
 		}
-		agent.ReportsTo = reportsTo
-		if err := s.repo.UpdateAgentInstance(ctx, agent); err != nil {
+		if err := s.repo.UpdateAgentReportsTo(ctx, agent.ID, reportsTo); err != nil {
 			return fmt.Errorf("resolve reports_to: update %q: %w", agent.Name, err)
 		}
 	}

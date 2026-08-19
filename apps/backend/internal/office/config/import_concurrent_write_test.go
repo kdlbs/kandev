@@ -61,6 +61,25 @@ func installRaceTrigger(t *testing.T, e *testEnv, table, triggerID, targetID, co
 	}
 }
 
+// installReportsToRaceTrigger lands a status update after the reports_to
+// resolver reads all agents but before it updates a later agent. The trigger
+// does not fire during the first config-field pass because that pass does not
+// include reports_to in its UPDATE statement.
+func installReportsToRaceTrigger(t *testing.T, e *testEnv, triggerID, targetID string) {
+	t.Helper()
+	stmt := fmt.Sprintf(`
+		CREATE TRIGGER race_agent_reports_to
+		AFTER UPDATE OF reports_to ON agent_profiles
+		WHEN NEW.id = %[1]s
+		BEGIN
+			UPDATE agent_profiles SET status = 'paused' WHERE id = %[2]s;
+		END;
+	`, sqlLit(triggerID), sqlLit(targetID))
+	if _, err := e.db.Exec(stmt); err != nil {
+		t.Fatalf("install reports_to race trigger: %v", err)
+	}
+}
+
 // sqlLit renders s as a single-quoted SQL string literal. Trigger bodies
 // cannot take bind parameters, so the id/value operands have to be spliced
 // into the statement text; every value here comes from uuid.New().String()
@@ -103,6 +122,31 @@ func TestApplyImport_Agents_PreservesConcurrentWriteBetweenListAndUpdate(t *test
 	assertEqual(t, "icon updated", got.Icon, "💰")
 	assertEqual(t, "budget updated", got.BudgetMonthlyCents, 200)
 	assertEqual(t, "max sessions updated", got.MaxConcurrentSessions, 2)
+}
+
+func TestApplyImport_Agents_PreservesConcurrentWriteDuringReportsToUpdate(t *testing.T) {
+	e := newTestEnv(t)
+	ctx := context.Background()
+	first := seedAgent(t, e, testWorkspaceID, "alpha")
+	second := seedAgent(t, e, testWorkspaceID, "beta")
+	manager := seedAgent(t, e, testWorkspaceID, "lead")
+
+	installReportsToRaceTrigger(t, e, first.ID, second.ID)
+
+	bundle := &ConfigBundle{Agents: []AgentConfig{
+		{Name: "alpha", Role: "engineer", ReportsTo: "lead", MaxConcurrentSessions: 1},
+		{Name: "beta", Role: "engineer", ReportsTo: "lead", MaxConcurrentSessions: 1},
+		{Name: "lead", Role: "cto", MaxConcurrentSessions: 1},
+	}}
+	if _, err := e.svc.ApplyImport(ctx, testWorkspaceID, bundle); err != nil {
+		t.Fatalf("ApplyImport: %v", err)
+	}
+
+	gotFirst := agentByName(t, e, testWorkspaceID, "alpha")
+	gotSecond := agentByName(t, e, testWorkspaceID, "beta")
+	assertEqual(t, "first reports_to updated", gotFirst.ReportsTo, manager.ID)
+	assertEqual(t, "second reports_to updated", gotSecond.ReportsTo, manager.ID)
+	assertEqual(t, "status survives concurrent write during reports_to update", string(gotSecond.Status), "paused")
 }
 
 // TestApplyImport_Skills_PreservesConcurrentWriteBetweenListAndUpdate mirrors

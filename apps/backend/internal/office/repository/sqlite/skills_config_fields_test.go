@@ -2,6 +2,8 @@ package sqlite_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -9,9 +11,9 @@ import (
 )
 
 // TestUpdateSkillConfigFields_UpdatesOnlyOwnedColumns proves the
-// column-scoped writer touches only name, description, source_type, and
-// content - leaving approval_state and every other column, which a config
-// import does not own, exactly as they were.
+// column-scoped writer touches only name, description, source_type, content,
+// and the hash derived from content. It leaves approval_state and package
+// metadata, which a config import does not own, exactly as they were.
 func TestUpdateSkillConfigFields_UpdatesOnlyOwnedColumns(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
@@ -80,8 +82,10 @@ func TestUpdateSkillConfigFields_UpdatesOnlyOwnedColumns(t *testing.T) {
 	if got.Version != skill.Version {
 		t.Errorf("Version changed: got %q, want %q", got.Version, skill.Version)
 	}
-	if got.ContentHash != skill.ContentHash {
-		t.Errorf("ContentHash changed: got %q, want %q", got.ContentHash, skill.ContentHash)
+	wantHashBytes := sha256.Sum256([]byte(fields.Content + "\x00" + skill.FileInventory + "\x00" + skill.SourceLocator))
+	wantHash := hex.EncodeToString(wantHashBytes[:])
+	if got.ContentHash != wantHash {
+		t.Errorf("ContentHash = %q, want %q for updated content", got.ContentHash, wantHash)
 	}
 	if got.ApprovalState != skill.ApprovalState {
 		t.Errorf("ApprovalState changed: got %q, want %q", got.ApprovalState, skill.ApprovalState)
