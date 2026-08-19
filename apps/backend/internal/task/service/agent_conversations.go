@@ -57,6 +57,11 @@ const (
 // managed conversation operations.
 type agentConversationTaskRepo interface {
 	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
+	// ListEphemeralTasksAllWorkspaces returns every ephemeral task across
+	// every workspace, unpaginated. Used only by DeleteAllForPlugin (plugin
+	// uninstall) — ListTasksByWorkspace cannot answer a cross-workspace query
+	// because it always scopes to one workspace_id.
+	ListEphemeralTasksAllWorkspaces(ctx context.Context) ([]*models.Task, error)
 	CreateTask(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, taskID string) error
 }
@@ -506,6 +511,44 @@ func (s *AgentConversationService) Delete(ctx context.Context, pluginID, workspa
 	return count, nil
 }
 
+// DeleteAllForPlugin removes every managed conversation owned by pluginID,
+// across every workspace and conversation key. Called by the plugin system's
+// Uninstall lifecycle (never by the plugin's own gRPC requests — see the
+// AgentConversationService interface doc in internal/plugins), so a plugin's
+// hidden conversations are never orphaned after uninstall. Provenance-safe:
+// isManagedConversationOwnedByPlugin only matches ephemeral tasks whose
+// stamped kandev.plugin_id metadata equals pluginID, so ordinary user tasks
+// and other plugins' managed conversations are never touched. Returns the
+// number of conversations removed and the first deletion error encountered
+// (deletion keeps going after an error so one bad row cannot block cleanup
+// of the rest; the caller reports the error rather than treating a partial
+// failure as success — see criterion 15's "failure is reported rather than
+// silently orphaning data").
+func (s *AgentConversationService) DeleteAllForPlugin(ctx context.Context, pluginID string) (int32, error) {
+	if pluginID == "" {
+		return 0, status.Error(codes.InvalidArgument, "plugin_id is required")
+	}
+	tasks, err := s.tasks.ListEphemeralTasksAllWorkspaces(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to list ephemeral tasks for plugin uninstall cleanup: %w", err)
+	}
+	var count int32
+	var firstErr error
+	for _, task := range tasks {
+		if !isManagedConversationOwnedByPlugin(task, pluginID) {
+			continue
+		}
+		if err := s.tasks.DeleteTask(ctx, task.ID); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("failed to delete managed conversation task %s: %w", task.ID, err)
+			}
+			continue
+		}
+		count++
+	}
+	return count, firstErr
+}
+
 // managedConversationPageSize is the page size used when scanning a
 // workspace's ephemeral tasks for managed conversations. The repository has
 // no metadata predicate for the provenance keys, so the scan pages through
@@ -579,6 +622,19 @@ func isManagedConversation(task *models.Task, pluginID, workspaceID, conversatio
 	cKey, _ := task.Metadata[metaKeyConversationKey].(string)
 	ephemeral, _ := task.Metadata[metaKeyEphemeral].(bool)
 	return pID == pluginID && wID == workspaceID && cKey == conversationKey && ephemeral
+}
+
+// isManagedConversationOwnedByPlugin is isManagedConversation without the
+// workspace/conversationKey narrowing — used by DeleteAllForPlugin, which
+// must find every managed conversation a plugin owns regardless of which
+// workspace or conversation key it was created under.
+func isManagedConversationOwnedByPlugin(task *models.Task, pluginID string) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	pID, _ := task.Metadata[metaKeyPluginID].(string)
+	ephemeral, _ := task.Metadata[metaKeyEphemeral].(bool)
+	return pID == pluginID && ephemeral
 }
 
 // claimOccurrenceKey atomically claims an occurrence key for

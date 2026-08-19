@@ -54,6 +54,18 @@ func (f *acPagingTaskRepo) ListTasksByWorkspace(_ context.Context, workspaceID, 
 	return filtered[offset:end], total, nil
 }
 
+func (f *acPagingTaskRepo) ListEphemeralTasksAllWorkspaces(_ context.Context) ([]*models.Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var filtered []*models.Task
+	for _, t := range f.tasks {
+		if t.IsEphemeral {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered, nil
+}
+
 func (f *acPagingTaskRepo) CreateTask(_ context.Context, task *models.Task) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

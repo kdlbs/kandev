@@ -21,6 +21,7 @@ import (
 type agentConversationTaskAdapter struct {
 	repo interface {
 		ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*taskmodels.Task, int, error)
+		ListEphemeralTasksAllWorkspaces(ctx context.Context) ([]*taskmodels.Task, error)
 		CreateTask(ctx context.Context, task *taskmodels.Task) error
 		DeleteTask(ctx context.Context, taskID string) error
 	}
@@ -28,6 +29,10 @@ type agentConversationTaskAdapter struct {
 
 func (a agentConversationTaskAdapter) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*taskmodels.Task, int, error) {
 	return a.repo.ListTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
+}
+
+func (a agentConversationTaskAdapter) ListEphemeralTasksAllWorkspaces(ctx context.Context) ([]*taskmodels.Task, error) {
+	return a.repo.ListEphemeralTasksAllWorkspaces(ctx)
 }
 
 func (a agentConversationTaskAdapter) CreateTask(ctx context.Context, task *taskmodels.Task) error {
@@ -118,6 +123,7 @@ func (a agentConversationDispatcherAdapter) Deliver(ctx context.Context, taskID 
 func NewAgentConversationService(
 	taskRepo interface {
 		ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*taskmodels.Task, int, error)
+		ListEphemeralTasksAllWorkspaces(ctx context.Context) ([]*taskmodels.Task, error)
 		CreateTask(ctx context.Context, task *taskmodels.Task) error
 		DeleteTask(ctx context.Context, taskID string) error
 		GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*taskmodels.TaskSession, error)

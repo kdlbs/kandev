@@ -29,6 +29,14 @@ type AgentConversationService interface {
 	// Delete removes all conversations owned by pluginID matching workspaceID
 	// and conversationKey.
 	Delete(ctx context.Context, pluginID, workspaceID, conversationKey string) (int32, error)
+
+	// DeleteAllForPlugin removes every managed conversation owned by pluginID
+	// across every workspace and conversation key. Unlike Delete/Ensure/
+	// Dispatch, this is not part of pluginsdk.AgentConversationManager — it is
+	// never callable by the plugin's own gRPC requests, only by the host's
+	// Uninstall lifecycle (Service.Uninstall), which calls it directly through
+	// this interface. Returns the number of managed conversations removed.
+	DeleteAllForPlugin(ctx context.Context, pluginID string) (int32, error)
 }
 
 // pluginHostAgentConversationManager implements pluginsdk.AgentConversationManager,
