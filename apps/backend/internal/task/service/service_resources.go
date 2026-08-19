@@ -761,7 +761,7 @@ func (s *Service) createRepository(
 	if sourceType == "" {
 		sourceType = sourceTypeLocal
 	}
-	if req.DefaultBranch != "" && !securityutil.IsValidBranchName(req.DefaultBranch) {
+	if req.DefaultBranch != "" && !securityutil.IsValidDefaultBranchName(req.DefaultBranch) {
 		return nil, fmt.Errorf("%w: invalid default branch", ErrInvalidRepositorySettings)
 	}
 	prefix := strings.TrimSpace(req.WorktreeBranchPrefix)
@@ -977,7 +977,7 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 		// skips only this field's backfill rather than failing the whole
 		// find-or-create call, since this is a best-effort backfill.
 		if existing.DefaultBranch == "" && req.DefaultBranch != "" {
-			if securityutil.IsValidBranchName(req.DefaultBranch) {
+			if securityutil.IsValidDefaultBranchName(req.DefaultBranch) {
 				existing.DefaultBranch = req.DefaultBranch
 				dirty = true
 			} else {
@@ -1195,7 +1195,7 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 		repository.ProviderName = *req.ProviderName
 	}
 	if req.DefaultBranch != nil {
-		if *req.DefaultBranch != "" && !securityutil.IsValidBranchName(*req.DefaultBranch) {
+		if *req.DefaultBranch != "" && !securityutil.IsValidDefaultBranchName(*req.DefaultBranch) {
 			return fmt.Errorf("%w: invalid default branch", ErrInvalidRepositorySettings)
 		}
 		repository.DefaultBranch = *req.DefaultBranch
