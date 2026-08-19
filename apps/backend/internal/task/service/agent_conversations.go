@@ -506,6 +506,15 @@ func (s *AgentConversationService) Delete(ctx context.Context, pluginID, workspa
 	var count int32
 	for _, t := range tasks {
 		if err := s.tasks.DeleteTask(ctx, t.ID); err != nil {
+			// Already gone is the goal state here for the same reason it is in
+			// DeleteAllForPlugin: the listing above is not held under a lock, so
+			// an uninstall cleanup or a retried delete can remove the row in
+			// between. A caller that asked for a conversation to be gone and
+			// finds it gone has not failed, and a plugin already treats "no
+			// conversation matched" as success.
+			if errors.Is(err, taskrepo.ErrTaskNotFound) {
+				continue
+			}
 			return count, fmt.Errorf("failed to delete managed conversation task %s: %w", t.ID, err)
 		}
 		count++
