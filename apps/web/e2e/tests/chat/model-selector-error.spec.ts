@@ -430,6 +430,7 @@ test.describe("Chat model selector — persistence", () => {
     // effort default to High, so wait for the complete runtime snapshot
     // instead of asserting the transient model-only label.
     await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+    await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
     await expect
       .poll(async () => {
         const { sessions } = await apiClient.listTaskSessions(task.id);

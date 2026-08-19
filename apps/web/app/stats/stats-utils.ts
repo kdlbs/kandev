@@ -1,5 +1,6 @@
 import type { StatsRange } from "@/lib/api/domains/stats-api";
 import type { StatsResponse } from "@/lib/types/http";
+import { t } from "@/lib/i18n";
 
 export type RangeKey = StatsRange;
 
@@ -13,11 +14,11 @@ export function isRangeKey(value: string | null | undefined): value is RangeKey 
 export function getRangeLabel(range: RangeKey): string {
   switch (range) {
     case "week":
-      return "Last Week";
+      return t("stats:rangeLastWeek");
     case "month":
-      return "Last Month";
+      return t("stats:rangeLastMonth");
     case "all":
-      return "All Time";
+      return t("stats:rangeAllTime");
   }
 }
 
@@ -33,9 +34,15 @@ export function formatDuration(ms: number): string {
 
 export function getSubtitle(global: StatsResponse["global"] | null, hasError: boolean): string {
   if (global) {
-    return `${global.total_tasks} tasks · ${global.total_sessions} sessions · ${formatDuration(global.total_duration_ms)}`;
+    // Composed from two count-bearing keys rather than one template, because
+    // i18next carries a single `count` per key and both nouns inflect.
+    return t("stats:subtitleReady", {
+      tasks: t("stats:subtitleTaskCount", { count: global.total_tasks }),
+      sessions: t("stats:subtitleSessionCount", { count: global.total_sessions }),
+      duration: formatDuration(global.total_duration_ms),
+    });
   }
-  return hasError ? "Failed to load stats" : "Loading stats…";
+  return hasError ? t("stats:failedToLoadStats") : t("stats:loadingStats");
 }
 
 export type StatsState = {
@@ -83,18 +90,37 @@ export function buildStatsSummary(
   const topRepo = repository_stats
     .filter((r) => r.total_tasks > 0)
     .sort((a, b) => b.total_tasks - a.total_tasks)[0];
-  const topRepoLabel = topRepo ? `${topRepo.repository_name} (${topRepo.total_tasks} tasks)` : "-";
+  const topRepoLabel = topRepo
+    ? t("stats:summaryTopRepo", {
+        repository: topRepo.repository_name,
+        count: topRepo.total_tasks,
+      })
+    : "-";
   const hasGitStats =
     git_stats && (git_stats.total_commits > 0 || git_stats.total_files_changed > 0);
   const gitLine = hasGitStats
-    ? `${git_stats.total_commits} commits, +${git_stats.total_insertions.toLocaleString()}/-${git_stats.total_deletions.toLocaleString()}`
-    : "no git activity";
+    ? t("stats:summaryGitActivity", {
+        count: git_stats.total_commits,
+        insertions: git_stats.total_insertions.toLocaleString(),
+        deletions: git_stats.total_deletions.toLocaleString(),
+      })
+    : t("stats:noGitActivity");
+  // The whole report, not only the range and the empty-git fragment. A summary
+  // the user pastes elsewhere must not be half English and half translated.
   return [
-    `*Kandev Stats - ${rangeLabel}*`,
-    `- Tasks: ${global.total_tasks} total (${global.completed_tasks} done, ${global.in_progress_tasks} in progress) · ${completion} completion`,
-    `- Completed (${rangeLabel}): ${completedInRange}`,
-    `- Time: ${formatDuration(global.total_duration_ms)} total · ${formatDuration(global.avg_duration_ms_per_task)} avg/task`,
-    `- Repos: ${repository_stats.length} tracked · Top repo: ${topRepoLabel}`,
-    `- Git: ${gitLine}`,
+    t("stats:summaryHeading", { range: rangeLabel }),
+    t("stats:summaryTasks", {
+      total: global.total_tasks,
+      done: global.completed_tasks,
+      inProgress: global.in_progress_tasks,
+      completion,
+    }),
+    t("stats:summaryCompletedInRange", { range: rangeLabel, completed: completedInRange }),
+    t("stats:summaryTime", {
+      total: formatDuration(global.total_duration_ms),
+      average: formatDuration(global.avg_duration_ms_per_task),
+    }),
+    t("stats:summaryRepos", { count: repository_stats.length, topRepo: topRepoLabel }),
+    t("stats:summaryGit", { git: gitLine }),
   ].join("\n");
 }

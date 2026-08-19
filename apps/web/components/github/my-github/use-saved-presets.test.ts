@@ -58,10 +58,11 @@ function workspaceSettings(
 async function expectRandomUuidPresetId() {
   const uuid = "123e4567-e89b-42d3-a456-426614174000";
   vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(uuid);
-  vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings());
+  const existing = { ...valid, id: "p_existing" };
+  vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings([existing]));
   vi.mocked(updateGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings());
   const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
-  await waitFor(() => expect(result.current.presets).toEqual([]));
+  await waitFor(() => expect(result.current.presets).toEqual([existing]));
 
   let created: SavedPreset | null = null;
   await act(async () => {

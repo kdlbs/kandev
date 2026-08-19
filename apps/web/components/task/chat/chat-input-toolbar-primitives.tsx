@@ -6,23 +6,19 @@ import {
   IconFileTextSpark,
   IconPaperclip,
   IconPlayerPauseFilled,
-  IconPlugConnected,
-  IconPlugConnectedX,
 } from "@tabler/icons-react";
 
 import { GridSpinner } from "@/components/grid-spinner";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { Button } from "@kandev/ui/button";
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from "@kandev/ui/drawer";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { formatShortcut } from "@/lib/keyboard/utils";
 import { cn } from "@/lib/utils";
-import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type SubmitButtonProps = {
   isAgentBusy: boolean;
@@ -51,8 +47,8 @@ function submitTooltipDescription(
   submitDisabledReason?: string,
 ) {
   if (submitDisabledReason) return submitDisabledReason;
-  if (isAgentBusy) return "Queue message";
-  if (planModeEnabled) return "Request plan changes";
+  if (isAgentBusy) return t("task:submitTooltipQueueMessage");
+  if (planModeEnabled) return t("task:submitTooltipRequestPlanChanges");
   return undefined;
 }
 
@@ -213,119 +209,6 @@ export function PlanToggleButton({
         </Button>
       </TooltipTrigger>
       <TooltipContent className="max-w-xs">{tooltip}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-const mcpStatusColor: Record<string, string> = {
-  active: "bg-emerald-500",
-  connected: "bg-amber-500",
-  delivered: "bg-amber-500",
-  failed: "bg-destructive",
-  filtered: "bg-muted-foreground/50",
-  unavailable: "bg-muted-foreground/50",
-  unknown: "bg-muted-foreground/50",
-};
-
-const mcpStatusLabel: Record<string, string> = {
-  active: "Active",
-  connected: "Connected",
-  delivered: "Delivered - connection unverified",
-  failed: "Failed",
-  filtered: "Filtered",
-  unavailable: "Unavailable",
-  unknown: "Unknown",
-};
-
-export function McpIndicator({
-  mcpServers,
-  attachmentHistory,
-}: {
-  mcpServers: string[];
-  attachmentHistory?: MCPAttachmentHistory;
-}) {
-  const { t } = useTranslation();
-  const usesTouchDrawer = useTouchDrawer();
-  const hasMcp = mcpServers.length > 0;
-  const Icon = hasMcp ? IconPlugConnected : IconPlugConnectedX;
-  const observedServers = attachmentHistory?.current.servers;
-  const servers =
-    observedServers && observedServers.length > 0
-      ? observedServers
-      : mcpServers.map((name) => ({ name, status: "unknown" as const, summary: undefined }));
-  const statusList = hasMcp ? (
-    <div className="space-y-1">
-      <div className="font-medium">{t("task:mcpServers")}</div>
-      {servers.map((server) => (
-        <div key={server.name} className="flex items-center gap-2">
-          <span
-            className={cn(
-              "h-2 w-2 shrink-0 rounded-full",
-              mcpStatusColor[server.status] ?? mcpStatusColor.unknown,
-            )}
-            aria-hidden="true"
-          />
-          <span className="truncate">{server.name}</span>
-          <span className="text-muted-foreground">
-            {mcpStatusLabel[server.status] ?? t("task:unknown")}
-          </span>
-          {server.summary && <span className="text-muted-foreground">{server.summary}</span>}
-        </div>
-      ))}
-    </div>
-  ) : (
-    "Agent does not support MCP"
-  );
-  const trigger = (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      aria-label={t("task:showMcpConnectionStatus")}
-      className={cn(
-        "h-7 w-7 cursor-pointer rounded-md hover:bg-muted/40",
-        hasMcp ? "text-foreground" : "text-muted-foreground/40",
-      )}
-      data-testid="mcp-status-trigger"
-    >
-      <Icon className="h-4 w-4" />
-    </Button>
-  );
-
-  if (usesTouchDrawer) {
-    return (
-      <Drawer>
-        <DrawerTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={t("task:showMcpConnectionStatus")}
-            className={cn(
-              "h-11 w-11 cursor-pointer rounded-md active:scale-95",
-              hasMcp ? "text-foreground" : "text-muted-foreground/40",
-            )}
-            data-testid="mcp-status-trigger"
-          >
-            <Icon className="h-4 w-4" />
-          </Button>
-        </DrawerTrigger>
-        <DrawerContent data-testid="mcp-status-drawer" className="max-h-[80dvh]">
-          <DrawerHeader>
-            <DrawerTitle>{t("task:mcpConnectionStatus")}</DrawerTitle>
-          </DrawerHeader>
-          <div className="min-h-0 overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] text-sm">
-            {statusList}
-          </div>
-        </DrawerContent>
-      </Drawer>
-    );
-  }
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-      <TooltipContent data-testid="mcp-status-popover">{statusList}</TooltipContent>
     </Tooltip>
   );
 }

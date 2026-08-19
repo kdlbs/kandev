@@ -1,7 +1,7 @@
 ---
 status: building
 created: 2026-07-19
-amended: 2026-08-07
+amended: 2026-08-12
 owner: Kandev
 ---
 
@@ -52,6 +52,12 @@ automation under different GitHub Apps without operating separate Kandev deploym
   workspace automation connection. **Inherit executor Git credentials** injects no GitHub broker
   helper or `gh` shim: Local and Worktree tasks use host-visible Git/SSH credentials, while remote
   tasks use credentials configured in that executor.
+- A task that is explicitly created for a pre-PR fork contribution under managed task credentials
+  may carry one server-authored, versioned `contribution_destination` on its canonical repository
+  attachment. Managed routing may issue one additional lease for that exact fork. The fork is a
+  push destination only: canonical repository identity, `origin`, issue lookup, and pull-request
+  targeting remain unchanged. Executor-owned identities are opaque and do not receive a
+  workspace-authored destination binding.
 - Every newly created workspace attempts to persist **Inherit executor Git credentials** as its
   initial task policy. After a successful settings write, if creation is performed by an internal
   trusted caller, an auth-disabled synthetic administrator, or a real administrator while host
@@ -83,6 +89,9 @@ automation under different GitHub Apps without operating separate Kandev deploym
   that result for primary-repository configuration, multi-repository configuration, and credential
   routing. Origin reconciliation is serialized per managed checkout, compares the current and
   desired canonical URLs, and performs no write when they already match.
+- Repository preparation validates any contribution destination before issuing credentials, adds a
+  collision-resistant dedicated fork remote, and reconstructs it on launch and resume. It never
+  accepts a fork inferred from the checkout's current remotes or a caller-provided repository name.
 - Git failures while inspecting or reconciling a managed checkout preserve a bounded,
   credential-redacted diagnostic. Git's dubious-ownership failure is classified as a service/data
   ownership mismatch with guidance to restore the intended Kandev service account or reconcile the
@@ -92,6 +101,10 @@ automation under different GitHub Apps without operating separate Kandev deploym
   only in memory. PAT/CLI tokens retain their provider-granted scope once delivered to a trusted
   agent subprocess. GitHub HTTPS and the broker-aware `gh` shim fail closed rather than consulting
   another ambient helper after a managed-helper failure.
+- A managed pre-PR fork destination must be writable by the same workspace automation source that
+  supplies the task leases. Human PAT and named CLI automation actors may own or create their fork.
+  An App installation without direct target write access is not silently paired with a user's
+  personal fork or personal token.
 - Managed Git helper execution does not depend on the post-startup `PATH`: Git resolves an
   absolute Kandev-owned `agentctl` executable published before the first managed Git operation.
   Local and Worktree preparation binds the helper to the standalone launcher's absolute executable
@@ -388,9 +401,19 @@ post-signature processing failures produce `failing`; a later valid successful d
 - `executor -> executor-visible credentials`, regardless of PAT/CLI/App automation method.
 - Initial launch and resume run the same resolution. A successful operation replaces the session
   snapshot; a failed operation leaves the previous snapshot unchanged.
+- Managed admission resolves the task policy and the selected executor profile before it validates
+  repository identity. An explicit profile `GITHUB_TOKEN` or `GH_TOKEN` bypasses managed broker
+  admission because the profile token is the effective source.
+- Managed admission completes before Kandev creates, rebinds, resumes, or changes a session, and
+  before a workflow transition changes the current step. A policy error or an invalid repository
+  identity leaves the task, workflow, and session state unchanged.
 - Each attached repository is resolved once for an individual launch or resume. The resolved
   repository set is shared by task configuration and credential-snapshot construction rather than
   triggering repeated materialization or origin mutation.
+- Broker issuance and redemption use the same persisted repository identity fields. A local Git
+  checkout and its `origin` are materialization data, not authorization data.
+- A public `github.com` remote can supply an in-memory origin when persisted provider-host metadata
+  is absent. Kandev does not rewrite repository provider identity from partial legacy metadata.
 - Changing the workspace policy affects new launches and the next resume, not an already-running
   process.
 
@@ -412,6 +435,9 @@ post-signature processing failures produce `failing`; a later valid successful d
 - Public base URL validation requires a canonical HTTPS origin with no credentials, query, or
   fragment and rejects loopback, private, link-local, or non-globally-routable DNS results. Kandev
   does not fetch the supplied URL as validation.
+- Repository identity accepts credential-free HTTPS and SSH remote forms. It rejects an SSH
+  password, query, or fragment before canonicalization, and an error never contains the rejected
+  secret-bearing remote.
 - App private keys, client secrets, webhook secrets, personal tokens, and live installation tokens
   never enter executor environments. Only brokered PAT/CLI tokens or repository-restricted
   installation tokens reach a managed trusted child operation; explicit executor-profile
@@ -429,6 +455,10 @@ post-signature processing failures produce `failing`; a later valid successful d
 - The effective task Git environment is runtime-only. It is copied only after the existing
   task/session or task-environment ownership check, is never persisted in task metadata or terminal
   records, and is never written to logs, errors, browser payloads, or process arguments.
+- The broker accepts a fork owner/repository only when it exactly matches a valid
+  `contribution_destination` or `remote_contribution` on the same authorized task-repository
+  attachment. Unknown binding versions, malformed URLs, cross-workspace rows, unrelated forks, and
+  target mismatches fail closed.
 - Indexed Git configuration is validated and composed as a single ordered block at environment
   merge boundaries. Kandev never replaces a complete inherited block merely by assigning its own
   `GIT_CONFIG_COUNT`; managed helper reset semantics are expressed as later Git config entries.
@@ -448,6 +478,9 @@ post-signature processing failures produce `failing`; a later valid successful d
   account; selecting another stored login fails with guidance to activate it or upgrade the CLI.
 - If the managed `agentctl` helper, broker, or `gh` shim is unavailable, the command fails with a
   managed-credential error and does not fall through to another HTTPS helper or interactive prompt.
+- If a contribution task cannot prove direct target write access or prepare an exact fork writable
+  by the workspace automation connection, task creation fails before launch. A same-name repository
+  that is not a fork of the canonical target is reported as a conflict and is never overwritten.
 - If an authorized task terminal, passthrough PTY, or task-scoped command cannot receive its
   effective managed Git environment, Kandev fails that process start before it runs the requested
   command. It does not silently fall back to an ambient credential helper or host `gh` login.
@@ -656,6 +689,20 @@ registration and never creates a global default.
   credential policy is selected, **THEN** Kandev leaves its configured `origin` unchanged.
 - **GIVEN** managed mode and an explicit executor-profile GitHub token, **WHEN** a task launches,
   **THEN** the profile token wins and the session disclosure labels its actor runtime-selected.
+- **GIVEN** managed mode and an explicit executor-profile `GITHUB_TOKEN` or `GH_TOKEN`, **WHEN** an
+  attached repository has incomplete managed identity, **THEN** the profile token remains the
+  effective source and managed broker admission does not reject the task.
+- **GIVEN** a managed repository remote with an SSH password, query, or fragment, **WHEN** Kandev
+  resolves its credential identity, **THEN** resolution fails without exposing the remote and no
+  task, workflow, or session state changes.
+- **GIVEN** a provider-backed repository whose only usable identity is a local checkout origin,
+  **WHEN** a managed task launches or the broker authorizes a request, **THEN** both paths reject
+  the incomplete persisted identity before session state changes.
+- **GIVEN** task Git credential policy resolution fails, **WHEN** a normal or Office task launches
+  or resumes, **THEN** Kandev returns the error and does not create, rebind, or resume a session.
+- **GIVEN** a workflow transition selects an agent profile that cannot use managed credentials,
+  **WHEN** the source step exits, **THEN** Kandev keeps the source step and current session and does
+  not route the destination step prompt.
 - **GIVEN** a managed helper cannot execute or redeem its lease, **WHEN** Git requests GitHub HTTPS
   credentials, **THEN** the command fails without falling through to a personal helper or prompt.
 - **GIVEN** a broker-enabled managed task whose login profile replaces its inherited `PATH`,
@@ -746,6 +793,8 @@ and the
 [system-service identity guardrails repair plan](../../plans/system-service-identity-guardrails/plan.md).
 The new-workspace default repair is tracked in
 [the new workspace GitHub access defaults plan](../../plans/new-workspace-github-access-defaults/plan.md).
+Managed credential admission and repository identity corrections are tracked in
+[the managed Git credential admission repair plan](../../plans/managed-git-credential-admission-repair/plan.md).
 
 ## Decision
 

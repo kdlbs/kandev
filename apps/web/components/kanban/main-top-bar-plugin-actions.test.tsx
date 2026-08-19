@@ -23,14 +23,14 @@ describe("MainTopBarPluginActions", () => {
       const ctx = slotProps as MainTopBarSlotProps;
       return (
         <div data-testid="plugin-app-bar">
-          {`${ctx.workspaceId}|${ctx.workspaceLabel}|${ctx.currentPage}`}
+          {`${ctx.workspaceId}|${ctx.workspaceLabel}|${ctx.currentPage}|${ctx.presentation}`}
         </div>
       );
     });
 
     render(<MainTopBarPluginActions workspaceId="w1" workspaceLabel="Acme" currentPage="tasks" />);
 
-    expect(screen.getByTestId("plugin-app-bar").textContent).toBe("w1|Acme|tasks");
+    expect(screen.getByTestId("plugin-app-bar").textContent).toBe("w1|Acme|tasks|desktop");
   });
 
   it("normalizes an absent workspace id to null", () => {
@@ -42,5 +42,24 @@ describe("MainTopBarPluginActions", () => {
     render(<MainTopBarPluginActions currentPage="kanban" />);
 
     expect(screen.getByTestId("plugin-app-bar").textContent).toBe("null");
+  });
+
+  it("passes mobile presentation and applies the native icon-button contract", () => {
+    pluginRegistry.forPlugin("plugin-a").registerComponent(SLOT, ({ slotProps }) => {
+      const ctx = slotProps as MainTopBarSlotProps;
+      return (
+        <button data-slot="button" data-testid="plugin-button">
+          <svg />
+          {ctx.presentation}
+        </button>
+      );
+    });
+
+    render(<MainTopBarPluginActions currentPage="kanban" presentation="mobile" />);
+
+    expect(screen.getByTestId("plugin-button").textContent).toBe("mobile");
+    expect(screen.getByTestId("mobile-main-top-bar-plugin-actions").className).toContain(
+      "[&_[data-slot=button]]:!size-8",
+    );
   });
 });

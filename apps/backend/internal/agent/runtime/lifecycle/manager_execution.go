@@ -348,6 +348,24 @@ func (m *Manager) GetExecutionIDForSession(_ context.Context, sessionID string) 
 	return "", fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 }
 
+// GetACPSessionIDForSession returns the ACP conversation currently owned by a
+// live execution. The orchestrator uses this optional accessor after a context
+// reset to persist the new conversation immediately, instead of depending on
+// an asynchronous session-created event arriving before a backend restart.
+func (m *Manager) GetACPSessionIDForSession(sessionID string) (string, bool) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists || execution == nil {
+		return "", false
+	}
+	var acpSessionID string
+	if err := m.executionStore.WithRLock(execution.ID, func(exec *AgentExecution) {
+		acpSessionID = exec.ACPSessionID
+	}); err != nil || acpSessionID == "" {
+		return "", false
+	}
+	return acpSessionID, true
+}
+
 // IsAgentCommandConfigured reports whether an execution has been promoted from
 // workspace-only infrastructure to an agent execution ready to start.
 func (m *Manager) IsAgentCommandConfigured(executionID string) bool {
@@ -685,6 +703,10 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if err != nil {
 		return nil, err
 	}
+	contributionDestinations, err := contributionDestinationsFromMetadata(metadata)
+	if err != nil {
+		return nil, err
+	}
 	autoApprove := false
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -713,6 +735,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
 			BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
 			RemoteContributions:            remoteContributions,
+			ContributionDestinations:       contributionDestinations,
 		},
 		profileInfo: profileInfo,
 	}, nil

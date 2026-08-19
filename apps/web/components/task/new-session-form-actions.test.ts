@@ -37,6 +37,13 @@ const AGENT_PROFILE_A: AgentProfileOption = {
   agent_id: "agent-id",
   cli_passthrough: false,
 };
+const AGENT_PROFILE_B: AgentProfileOption = {
+  id: "profile-b",
+  label: "Profile B",
+  agent_name: "agent-b",
+  agent_id: "agent-id-b",
+  cli_passthrough: false,
+};
 
 const ATTACHMENT: FileAttachment = {
   id: "attachment-1",
@@ -260,6 +267,7 @@ describe("useSessionLaunchSubmit", () => {
         promptRef,
         taskId: TASK_ID,
         selectedProfileId: PROFILE_ID,
+        profileExplicit: true,
         executorId: EXECUTOR_ID,
         contextValue: "blank",
         initialPrompt: null,
@@ -283,6 +291,7 @@ describe("useSessionLaunchSubmit", () => {
     expect(mockBuildStartRequest).toHaveBeenCalledWith(TASK_ID, PROFILE_ID, {
       executorId: EXECUTOR_ID,
       prompt: "hello",
+      profileExplicit: true,
       attachments: MESSAGE_ATTACHMENTS,
     });
     expect(mockLaunchSession).toHaveBeenCalledWith({
@@ -302,6 +311,53 @@ describe("useSessionLaunchSubmit", () => {
     expect(mockSetIsCreating).toHaveBeenLastCalledWith(false);
   });
 
+  it("marks the picker profile explicit and labels the tab from the effective response profile", async () => {
+    mockLaunchSession.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      agent_profile_id: AGENT_PROFILE_B.id,
+    });
+    const promptRef = createPromptRef("hello");
+    const mockSetActiveSession = vi.fn();
+    const mockActivateSession = vi.fn();
+    const mockSetIsCreating = vi.fn();
+    const mockOnClose = vi.fn();
+
+    const { result } = renderHook(() =>
+      useSessionLaunchSubmit({
+        promptRef,
+        taskId: TASK_ID,
+        selectedProfileId: AGENT_PROFILE_A.id,
+        profileExplicit: true,
+        executorId: EXECUTOR_ID,
+        contextValue: "blank",
+        initialPrompt: null,
+        agentProfiles: [AGENT_PROFILE_A, AGENT_PROFILE_B],
+        onClose: mockOnClose,
+        toast: mockToast,
+        setActiveSession: mockSetActiveSession,
+        activateSession: mockActivateSession,
+        setIsCreating: mockSetIsCreating,
+      }),
+    );
+
+    await act(async () => {
+      await result.current({ preventDefault: vi.fn() } as unknown as FormEvent);
+    });
+
+    expect(mockBuildStartRequest).toHaveBeenCalledWith(
+      TASK_ID,
+      AGENT_PROFILE_A.id,
+      expect.objectContaining({ profileExplicit: true }),
+    );
+    expect(mockActivateSession).toHaveBeenCalledWith(
+      SESSION_ID,
+      TASK_ID,
+      AGENT_PROFILE_B.label,
+      undefined,
+      mockSetActiveSession,
+    );
+  });
+
   it("uses initial prompt when context is copy_prompt and user did not type anything", async () => {
     const promptRef = createPromptRef("   ", [ATTACHMENT]);
     const mockSetActiveSession = vi.fn();
@@ -314,6 +370,7 @@ describe("useSessionLaunchSubmit", () => {
         promptRef,
         taskId: TASK_ID,
         selectedProfileId: PROFILE_ID,
+        profileExplicit: true,
         executorId: EXECUTOR_ID,
         contextValue: "copy_prompt",
         initialPrompt: SEED_PROMPT,
@@ -360,6 +417,7 @@ describe("useSessionLaunchSubmit", () => {
         promptRef,
         taskId: TASK_ID,
         selectedProfileId: PROFILE_ID,
+        profileExplicit: true,
         executorId: EXECUTOR_ID,
         contextValue: "blank",
         initialPrompt: null,
@@ -398,6 +456,7 @@ describe("useSessionLaunchSubmit", () => {
         promptRef,
         taskId: TASK_ID,
         selectedProfileId: PROFILE_ID,
+        profileExplicit: true,
         executorId: EXECUTOR_ID,
         contextValue: "blank",
         initialPrompt: null,
@@ -434,6 +493,7 @@ describe("useSessionLaunchSubmit", () => {
         promptRef,
         taskId: TASK_ID,
         selectedProfileId: PROFILE_ID,
+        profileExplicit: true,
         executorId: EXECUTOR_ID,
         contextValue: "blank",
         initialPrompt: null,

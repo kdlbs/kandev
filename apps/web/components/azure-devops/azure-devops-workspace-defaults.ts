@@ -26,6 +26,7 @@ import type { AzureDevOpsActionPreset, AzureDevOpsQueryPreset } from "@/lib/type
 
 type Translate = (key: string) => string;
 
+// i18n-exempt: WIQL is Azure DevOps' query language, not prose. See the file header.
 const WIQL_START = "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project";
 const WIQL_ORDER = " ORDER BY [System.ChangedDate] DESC";
 
@@ -33,6 +34,7 @@ function wiql(condition?: string): string {
   return `${WIQL_START}${condition ? ` AND ${condition}` : ""}${WIQL_ORDER}`;
 }
 
+// i18n-exempt: persisted preset seed, and must match the server-side defaults. See the file header.
 export const DEFAULT_AZURE_WORK_ITEM_QUERIES: AzureDevOpsQueryPreset[] = [
   {
     id: "recent",
@@ -63,6 +65,7 @@ export const DEFAULT_AZURE_WORK_ITEM_QUERIES: AzureDevOpsQueryPreset[] = [
   },
 ];
 
+// i18n-exempt: persisted preset seed, and must match the server-side defaults. See the file header.
 export const DEFAULT_AZURE_PULL_REQUEST_QUERIES: AzureDevOpsQueryPreset[] = [
   {
     id: "review-requested",
@@ -90,6 +93,7 @@ export const DEFAULT_AZURE_PULL_REQUEST_QUERIES: AzureDevOpsQueryPreset[] = [
   },
 ];
 
+// i18n-exempt: persisted preset seed, and must match the server-side defaults. See the file header.
 export const DEFAULT_AZURE_WORK_ITEM_ACTIONS: AzureDevOpsActionPreset[] = [
   {
     id: "implement",
@@ -117,6 +121,7 @@ export const DEFAULT_AZURE_WORK_ITEM_ACTIONS: AzureDevOpsActionPreset[] = [
   },
 ];
 
+// i18n-exempt: persisted preset seed, and must match the server-side defaults. See the file header.
 export const DEFAULT_AZURE_PULL_REQUEST_ACTIONS: AzureDevOpsActionPreset[] = [
   {
     id: "review",

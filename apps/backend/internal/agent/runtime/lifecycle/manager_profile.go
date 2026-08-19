@@ -234,12 +234,25 @@ func (m *Manager) sessionRuntimeOverrides(ctx context.Context, execution *AgentE
 }
 
 func (m *Manager) effectiveSessionRuntimeConfig(ctx context.Context, execution *AgentExecution, profileModel, profileMode string, profileConfigOptions map[string]string) (string, string, map[string]string) {
+	model, mode, configOptions, _ := m.effectiveSessionRuntimeConfigWithPresence(
+		ctx, execution, profileModel, profileMode, profileConfigOptions,
+	)
+	return model, mode, configOptions
+}
+
+func (m *Manager) effectiveSessionRuntimeConfigWithPresence(
+	ctx context.Context,
+	execution *AgentExecution,
+	profileModel, profileMode string,
+	profileConfigOptions map[string]string,
+) (string, string, map[string]string, bool) {
 	model := profileModel
 	mode := profileMode
 	configOptions := maps.Clone(profileConfigOptions)
+	configOptionsSet := profileConfigOptions != nil
 	info := m.sessionWorkspaceInfo(ctx, execution)
 	if info == nil {
-		return model, mode, configOptions
+		return model, mode, configOptions, configOptionsSet
 	}
 	if info.RuntimeModel != "" {
 		model = info.RuntimeModel
@@ -249,8 +262,12 @@ func (m *Manager) effectiveSessionRuntimeConfig(ctx context.Context, execution *
 	}
 	if info.RuntimeConfigOptionsSet {
 		configOptions = maps.Clone(info.RuntimeConfigOptions)
+		if configOptions == nil {
+			configOptions = make(map[string]string)
+		}
+		configOptionsSet = true
 	}
-	return model, mode, configOptions
+	return model, mode, configOptions, configOptionsSet
 }
 
 // effectiveSessionMode prefers a session-level permission mode persisted in the

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { IconChevronRight, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -23,6 +24,7 @@ import {
   ActiveWorkspaceBadge,
   workspaceSettingsHref,
 } from "@/components/settings/workspaces/workspace-settings-shell";
+import { orderWorkspacesForDisplay } from "@/lib/settings/workspace-display-order";
 import type { WorkspaceState } from "@/lib/state/slices";
 
 type Workspace = WorkspaceState["items"][number];
@@ -120,12 +122,14 @@ function WorkspaceListItem({ workspace }: { workspace: Workspace }) {
 
 export function WorkspacesPageClient() {
   const items = useAppStore((state) => state.workspaces.items);
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   const setWorkspaces = useAppStore((state) => state.setWorkspaces);
   const [isAdding, setIsAdding] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const createRequest = useRequest(createWorkspaceAction);
   const { toast } = useToast();
   const { t } = useTranslation();
+  const orderedItems = orderWorkspacesForDisplay(items, activeWorkspaceId);
 
   const handleAddWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -176,7 +180,7 @@ export function WorkspacesPageClient() {
             {t("workspaces:manageYourWorkspacesAndWorkflows")}
           </p>
         </div>
-        <Button size="sm" onClick={() => setIsAdding(true)}>
+        <Button size="sm" className={settingsActionClassName()} onClick={() => setIsAdding(true)}>
           <IconPlus className="h-4 w-4 mr-2" />
           {t("workspaces:addWorkspace")}
         </Button>
@@ -197,11 +201,11 @@ export function WorkspacesPageClient() {
             />
           )}
 
-          {items.map((workspace: Workspace) => (
+          {orderedItems.map((workspace: Workspace) => (
             <WorkspaceListItem key={workspace.id} workspace={workspace} />
           ))}
 
-          {items.length === 0 && (
+          {orderedItems.length === 0 && (
             <Card>
               <CardContent className="py-8 text-center">
                 <p className="text-sm text-muted-foreground">

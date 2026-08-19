@@ -8,6 +8,7 @@ import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeProjects } from "@/lib/state/slices/office/selectors";
 import { getProject, deleteProject } from "@/lib/api/domains/office-api";
 import type { Project } from "@/lib/state/slices/office/types";
 import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
@@ -26,16 +27,22 @@ export default function ProjectDetailPage({ params }: PageProps) {
   const { id } = use(params);
   const router = useRouter();
   const removeProject = useAppStore((s) => s.removeProject);
-  const storeProject = useAppStore((s) => s.office.projects.find((p) => p.id === id));
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const storeProject = useAppStore((s) => selectOfficeProjects(s).find((p) => p.id === id));
   const [fetchedProject, setFetchedProject] = useState<Project | null>(null);
-  const project = storeProject ?? fetchedProject;
+  const project =
+    storeProject ?? (fetchedProject?.workspaceId === activeWorkspaceId ? fetchedProject : null);
 
   useEffect(() => {
-    if (storeProject) return;
+    setFetchedProject(null);
+  }, [activeWorkspaceId, id]);
+
+  useEffect(() => {
+    if (!activeWorkspaceId || storeProject) return;
     let cancelled = false;
     getProject(id)
       .then((res) => {
-        if (!cancelled && res) setFetchedProject(res as unknown as Project);
+        if (!cancelled && res.workspaceId === activeWorkspaceId) setFetchedProject(res);
       })
       .catch((err) => {
         if (!cancelled) {
@@ -45,13 +52,13 @@ export default function ProjectDetailPage({ params }: PageProps) {
     return () => {
       cancelled = true;
     };
-  }, [id, storeProject]);
+  }, [activeWorkspaceId, id, storeProject, t]);
 
   const handleDelete = async () => {
     if (!project) return;
     try {
       await deleteProject(project.id);
-      removeProject(project.id);
+      removeProject(project.workspaceId, project.id);
       toast.success(t("office:projectDeleted"));
       router.push("/office/projects");
     } catch (err) {
@@ -93,7 +100,7 @@ export default function ProjectDetailPage({ params }: PageProps) {
 
         <Separator />
 
-        <ProjectTasksSection projectId={project.id} />
+        <ProjectTasksSection projectId={project.id} workspaceId={project.workspaceId} />
 
         <Separator />
 

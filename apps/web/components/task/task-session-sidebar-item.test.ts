@@ -4,6 +4,9 @@ import { buildSidebarItem } from "./task-session-sidebar-item";
 type SidebarTask = Parameters<typeof buildSidebarItem>[0];
 type SidebarContext = Parameters<typeof buildSidebarItem>[1];
 const UPDATED_AT = "2026-07-22T00:00:00Z";
+const ACTIVITY_AT = "2026-07-24T00:00:00Z";
+const CREATED_AT = "2026-07-20T00:00:00Z";
+const SUMMARY_UPDATED_AT = "2026-07-25T00:00:00Z";
 
 function emptyContext(): SidebarContext {
   return {
@@ -120,5 +123,43 @@ describe("buildSidebarItem", () => {
 
     expect(item.wipQueue).toEqual(wipQueue);
     expect(item.queuedCount).toBeUndefined();
+  });
+});
+
+describe("buildSidebarItem activity", () => {
+  it("maps summary activity and falls back through task update to creation", () => {
+    const projected = buildSidebarItem(
+      task({
+        updatedAt: UPDATED_AT,
+        createdAt: CREATED_AT,
+        statusSummary: {
+          revision: 6,
+          updated_at: SUMMARY_UPDATED_AT,
+          last_activity_at: ACTIVITY_AT,
+        },
+      }),
+      emptyContext(),
+    );
+    expect(projected.updatedAt).toBe(SUMMARY_UPDATED_AT);
+    expect(projected.lastActivityAt).toBe(ACTIVITY_AT);
+
+    const updatedFallback = buildSidebarItem(
+      task({
+        updatedAt: UPDATED_AT,
+        createdAt: CREATED_AT,
+        statusSummary: { revision: 7, updated_at: SUMMARY_UPDATED_AT },
+      }),
+      emptyContext(),
+    );
+    expect(updatedFallback.lastActivityAt).toBe(UPDATED_AT);
+
+    const createdFallback = buildSidebarItem(
+      task({
+        createdAt: CREATED_AT,
+        statusSummary: { revision: 8, updated_at: SUMMARY_UPDATED_AT },
+      }),
+      emptyContext(),
+    );
+    expect(createdFallback.lastActivityAt).toBe(CREATED_AT);
   });
 });

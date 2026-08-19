@@ -587,6 +587,9 @@ func (s *Store) initSchemaData(legacyUpgrade bool) error {
 	if err := s.backfillPRWatchesRepositoryID(); err != nil {
 		return fmt.Errorf("backfill github_pr_watches.repository_id: %w", err)
 	}
+	if err := s.healTaskOwnedOrphans(); err != nil {
+		return err
+	}
 	if err := s.migrateTaskCIOptionsToPRScope(); err != nil {
 		return fmt.Errorf("migrate task CI options to PR scope: %w", err)
 	}
@@ -1483,6 +1486,16 @@ func (s *Store) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber i
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE github_pr_watches SET pr_number = ?, updated_at = ? WHERE id = ?`,
 		prNumber, time.Now().UTC(), id)
+	return err
+}
+
+// UpdatePRWatchRepository repairs the provider repository identity after PR
+// discovery. A watch can start on a contributor fork while the PR targets the
+// canonical parent repository.
+func (s *Store) UpdatePRWatchRepository(ctx context.Context, id, owner, repo string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE github_pr_watches SET owner = ?, repo = ?, updated_at = ? WHERE id = ?`,
+		owner, repo, time.Now().UTC(), id)
 	return err
 }
 

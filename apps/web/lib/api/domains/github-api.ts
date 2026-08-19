@@ -311,6 +311,9 @@ type AccessibleReposResponse = {
 // configured (HTTP 503 with `code: "github_not_configured"`). Callers use the
 // instanceof check to render a "Connect GitHub" CTA instead of a generic
 // error toast.
+// i18n-exempt: transport/API diagnostic. Callers branch on the error code and
+// render translated copy; this text only ever appears in a console or as an
+// interpolated English diagnostic (see docs/i18n.md on interpolated values).
 export class GitHubUnavailableError extends Error {
   constructor(message = "GitHub is not configured") {
     super(message);

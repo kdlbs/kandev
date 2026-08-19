@@ -303,7 +303,7 @@ func TestConfigureGitHubCredentialBrokerPublishesLocalHelperBeforePreparation(t 
 }
 
 func TestConfigureGitHubCredentialBrokerIssuesOneLeasePerRepository(t *testing.T) {
-	issuer := &fakeGitHubCredentialLeaseIssuer{}
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: GitHubCredentialLease{Token: "opaque-lease"}}
 	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
 	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
 	req := &LaunchAgentRequest{
@@ -534,6 +534,50 @@ func TestIssueGitHubContributionCredentialScopeIgnoresGitLabBinding(t *testing.T
 	}
 }
 
+func TestConfigureGitHubCredentialBrokerIncludesExactContributionDestination(t *testing.T) {
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: GitHubCredentialLease{Token: "opaque-lease"}}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExecutorType: string(models.ExecutorTypeRemoteDocker), Env: map[string]string{},
+	}
+	info := &repoInfo{
+		RepositoryID: "repo-1",
+		Repository:   &models.Repository{Provider: "github", ProviderRepoID: "100", ProviderOwner: "kdlbs", ProviderName: "kandev"},
+		ContributionDestination: &models.ContributionDestination{
+			Version:  models.ContributionDestinationVersion,
+			Provider: models.ContributionDestinationProviderGitHub,
+			SourceRepository: models.ContributionDestinationRepository{
+				Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+			},
+			TargetRepository: models.ContributionDestinationRepository{
+				Host: "github.com", Path: "agent/kandev", ProviderID: "200", RemoteURL: "https://github.com/agent/kandev.git",
+			},
+			CredentialBinding: &models.ContributionDestinationCredentialBinding{
+				Source: string("pat"), Login: "automation", CredentialGeneration: 7,
+			},
+		},
+	}
+
+	if err := exec.configureGitHubCredentialBroker(context.Background(), req, info); err != nil {
+		t.Fatalf("configureGitHubCredentialBroker() error = %v", err)
+	}
+	if len(issuer.requests) != 2 {
+		t.Fatalf("lease requests = %d, want canonical and destination scopes: %+v", len(issuer.requests), issuer.requests)
+	}
+	if issuer.requests[1].Path != "/agent/kandev.git" {
+		t.Fatalf("destination lease scope = %+v", issuer.requests[1])
+	}
+	var destinationBinding models.ContributionDestinationCredentialBinding
+	if err := json.Unmarshal([]byte(issuer.requests[1].CredentialBinding), &destinationBinding); err != nil {
+		t.Fatalf("decode destination lease binding: %v", err)
+	}
+	if issuer.requests[1].IdentityProviderID != "200" || issuer.requests[1].ParentProviderID != "100" || destinationBinding.Source != "pat" {
+		t.Fatalf("destination lease identity = %+v", issuer.requests[1])
+	}
+}
+
 func TestConfigureGitHubCredentialBrokerPreservesExplicitProfileToken(t *testing.T) {
 	issuer := &fakeGitHubCredentialLeaseIssuer{lease: gitcredentials.Lease{Token: "opaque-lease"}}
 	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
@@ -558,6 +602,53 @@ func TestConfigureGitHubCredentialBrokerPreservesExplicitProfileToken(t *testing
 	}
 	if got := req.Env[envGitHubCredentialLease]; got != "" {
 		t.Fatalf("broker lease = %q, want none with explicit profile auth", got)
+	}
+}
+
+func TestConfigureGitHubCredentialBrokerDisablesDestinationForExplicitProfileToken(t *testing.T) {
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: GitHubCredentialLease{Token: "opaque-lease"}}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
+	destination := testCredentialDestination()
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExecutorType:            string(models.ExecutorTypeRemoteDocker),
+		Env:                     map[string]string{envGHToken: "profile-token"},
+		ContributionDestination: &destination,
+	}
+	info := &repoInfo{
+		RepositoryID:            "repo-1",
+		Repository:              &models.Repository{Provider: "github", ProviderOwner: "kdlbs", ProviderName: "kandev"},
+		ContributionDestination: &destination,
+	}
+
+	if err := exec.configureGitHubCredentialBroker(context.Background(), req, info); err != nil {
+		t.Fatalf("configureGitHubCredentialBroker() error = %v", err)
+	}
+	if issuer.calls != 0 {
+		t.Fatalf("IssueGitHubCredentialLease calls = %d, want 0", issuer.calls)
+	}
+	if req.ContributionDestination != nil || info.ContributionDestination != nil {
+		t.Fatalf("managed destination remained active: request=%#v info=%#v", req.ContributionDestination, info.ContributionDestination)
+	}
+}
+
+func TestConfigureGitHubCredentialBrokerRejectsUnboundDestination(t *testing.T) {
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: GitHubCredentialLease{Token: "opaque-lease"}}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
+	destination := testCredentialDestination()
+	info := &repoInfo{
+		RepositoryID:            "repo-1",
+		Repository:              &models.Repository{Provider: "github", ProviderRepoID: "100", ProviderOwner: "kdlbs", ProviderName: "kandev"},
+		ContributionDestination: &destination,
+	}
+	err := exec.configureGitHubCredentialBroker(context.Background(), &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExecutorType: string(models.ExecutorTypeRemoteDocker), Env: map[string]string{},
+	}, info)
+	if err == nil || !strings.Contains(err.Error(), "credential binding is missing") {
+		t.Fatalf("configureGitHubCredentialBroker() error = %v, want missing binding error", err)
 	}
 }
 
@@ -614,6 +705,46 @@ func TestConfigureGitHubCredentialBrokerSkipsExecutorInheritedPolicy(t *testing.
 	}
 	if got, want := req.Env["GIT_CONFIG_KEY_0"], "core.hooksPath"; got != want {
 		t.Fatalf("GIT_CONFIG_KEY_0 = %q, want %q", got, want)
+	}
+}
+
+func TestConfigureGitHubCredentialBrokerDisablesDestinationForExecutorPolicy(t *testing.T) {
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: GitHubCredentialLease{Token: "opaque-lease"}}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
+	exec.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
+		policy: TaskGitCredentialPolicy{Mode: "executor"},
+	})
+	destination := testCredentialDestination()
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ContributionDestination: &destination,
+		Env:                     map[string]string{},
+	}
+	info := &repoInfo{
+		RepositoryID:            "repo-1",
+		Repository:              &models.Repository{Provider: "github", ProviderOwner: "kdlbs", ProviderName: "kandev"},
+		ContributionDestination: &destination,
+	}
+
+	if err := exec.configureGitHubCredentialBroker(context.Background(), req, info); err != nil {
+		t.Fatalf("configureGitHubCredentialBroker() error = %v", err)
+	}
+	if req.ContributionDestination != nil || info.ContributionDestination != nil {
+		t.Fatalf("managed destination remained active: request=%#v info=%#v", req.ContributionDestination, info.ContributionDestination)
+	}
+}
+
+func testCredentialDestination() models.ContributionDestination {
+	return models.ContributionDestination{
+		Version:  models.ContributionDestinationVersion,
+		Provider: models.ContributionDestinationProviderGitHub,
+		SourceRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "agent/kandev", ProviderID: "200", RemoteURL: "https://github.com/agent/kandev.git",
+		},
 	}
 }
 

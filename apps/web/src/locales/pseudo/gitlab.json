@@ -201,7 +201,6 @@
   "pollGitlabIssuesAndCreateOne": "Ƥōĺĺ ĜĩţĹàƀ ĩśśũēś àńď ćŕēàţē ōńē ţàśķ ƥēŕ ńēŵ ḿàţćĥ.",
   "pollIntervalSeconds": "Ƥōĺĺ ĩńţēŕvàĺ (śēćōńďś)",
   "pollingAndCleanup": "Ƥōĺĺĩńĝ àńď ćĺēàńũƥ",
-  "pressEnter": "Ƥŕēśś Ēńţēŕ",
   "project": "Ƥŕōĵēćţ",
   "projectPaths": "Ƥŕōĵēćţ ƥàţĥś",
   "projects": "Ƥŕōĵēćţś",
@@ -275,7 +274,6 @@
   "unsubscribeFromNotifications": "Ũńśũƀśćŕĩƀē ƒŕōḿ ĜĩţĹàƀ ńōţĩƒĩćàţĩōńś",
   "unsubscribedFromGitlabNotifications": "Ũńśũƀśćŕĩƀēď ƒŕōḿ ĜĩţĹàƀ ńōţĩƒĩćàţĩōńś",
   "updateWatch": "Ũƥďàţē ŵàţćĥ",
-  "updated": "Ũƥďàţēď ",
   "verifyingGitlabConnection": "Vēŕĩƒŷĩńĝ ĜĩţĹàƀ ćōńńēćţĩōń",
   "watchDeletionFailed": "Ŵàţćĥ ďēĺēţĩōń ƒàĩĺēď",
   "workflow": "Ŵōŕķƒĺōŵ",
@@ -350,5 +348,14 @@
   "mrChipDrawerClose": "Ćĺōśē ḿēŕĝē ŕēqũēśţ śţàţũś",
   "gitlabRejectedAssociation": "ĜĩţĹàƀ ŕēĵēćţēď ţĥē àśśōćĩàţĩōń.",
   "taskCreatedMrNotLinked": "Ţàśķ ćŕēàţēď, ƀũţ ḿēŕĝē ŕēqũēśţ ŵàś ńōţ ĺĩńķēď",
-  "taskCreatedMrNotLinkedDescription": "Ōƥēń ţĥē ţàśķ àńď ũśē Ĺĩńķ ĜĩţĹàƀ ḿēŕĝē ŕēqũēśţ ţō ŕēţŕŷ. {{error}}"
+  "taskCreatedMrNotLinkedDescription": "Ōƥēń ţĥē ţàśķ àńď ũśē Ĺĩńķ ĜĩţĹàƀ ḿēŕĝē ŕēqũēśţ ţō ŕēţŕŷ. {{error}}",
+  "memberSearchFailed": "Ḿēḿƀēŕ śēàŕćĥ ƒàĩĺēď",
+  "addedMrFeedbackToTaskContext": "Àďďēď ḿēŕĝē ŕēqũēśţ ƒēēďƀàćķ ţō ţàśķ ćōńţēxţ",
+  "failedToLoadMergeRequest": "Ƒàĩĺēď ţō ĺōàď ḿēŕĝē ŕēqũēśţ",
+  "failedToLoadMrAutomationOptions": "Ƒàĩĺēď ţō ĺōàď ḾŔ àũţōḿàţĩōń ōƥţĩōńś.",
+  "failedToSearchGitLab": "Ƒàĩĺēď ţō śēàŕćĥ ĜĩţĹàƀ",
+  "presetAssigned": "Àśśĩĝńēď",
+  "presetAuthored": "Àũţĥōŕēď",
+  "presetCreated": "Ćŕēàţēď",
+  "presetReviewRequested": "Ŕēvĩēŵ ŕēqũēśţēď"
 }

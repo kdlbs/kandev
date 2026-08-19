@@ -11,7 +11,37 @@ Playwright-based end-to-end tests. Each Playwright worker spawns its own real Go
 | `helpers/`             | Reusable building blocks for specs (`api-client.ts`, `docker.ts`, `ssh.ts`, `git-helper.ts`, `ws-capture.ts`, …).                            |
 | `pages/`               | Page Objects (one class per top-level UI surface — `SessionPage`, `KanbanPage`, `JiraSettingsPage`, `SSHSettingsPage`, …).                   |
 | `playwright.config.ts` | Project definitions, timeouts, sharding config.                                                                                              |
-| `global-setup.ts`      | Pre-flight checks for required binaries (kandev, mock-agent) and the Vite web build.                                                         |
+| `global-setup.ts`      | Pre-flight checks for required backend artifacts, the Vite web build, and backend artifact freshness.                                        |
+
+## Prerequisites
+
+E2E runs the **prebuilt** backend, not a live rebuild — `fixtures/backend.ts` spawns
+`apps/backend/bin/kandev`, and `pnpm run build:e2e` only rebuilds the Vite bundle.
+Before running specs (or after touching anything under `apps/backend`), rebuild both:
+
+```sh
+make -C apps/backend build              # bin/kandev, bin/mock-agent
+make -C apps/backend e2e-plugin-package # .build/kandev-plugin-e2e-1.0.0.tar.gz, for tests/plugins/plugins.spec.ts
+cd apps/web && pnpm run build:e2e
+```
+
+These are prerequisites, not optional steps — `global-setup.ts` fails fast with the
+exact remedy command if a required backend artifact is older than any file under
+`apps/backend` or is missing. This includes the fixture plugin package. The
+`containers` project also checks the Linux mock-agent and agentctl binaries.
+
+"Any file", not just `*.go`: the binary `//go:embed`s a large asset surface, so
+editing `internal/profiles/profiles.yaml` (runtime feature-flag defaults), a
+`config/workflows/*.yml`, a `config/prompts/*.md`, or an `internal/i18n/locales/*.json`
+changes backend behaviour without touching a single `.go` file. Excluded are `bin/`,
+`.build/`, `testdata/`, the synced web bundle at `internal/webapp/embedded/generated/`,
+and the gitignored Go outputs that land in the source tree (`coverage.out`, `*.test`,
+`coverage.html`) so that `make -C apps/backend test-coverage` does not ask for a rebuild.
+
+Skip all freshness checks with `KANDEV_E2E_SKIP_FRESHNESS=1` (both E2E CI jobs set
+this because they stage artifacts after their own checkout). `KANDEV_E2E_BIN`
+selects a custom backend binary. The setup still checks the local mock agent and
+other required artifacts.
 
 ## Playwright projects
 
@@ -455,11 +485,25 @@ silently fails to apply leaves a call site that lints clean and throws
 `dwell is not defined` at runtime, inside whichever retry path only executes on
 a loaded shard. That has already happened once.
 
-Two checks, deliberately scoped differently, because ~126 raw sleeps predate
-them and `pnpm lint` is `eslint --max-warnings 0` — a repo-wide rule at _any_
-severity would break every unrelated PR until the conversion finishes.
+Two checks, scoped differently. They were scoped differently out of necessity —
+~153 raw sleeps predated them, and `pnpm lint` is `eslint --max-warnings 0`, so a
+repo-wide rule at _any_ severity would have broken every unrelated PR until the
+conversion finished. The conversion has finished, so both now cover the tree.
 
-**1. The new-code ratchet** (`scripts/check-new-e2e-sleeps.mjs`) runs in CI and
+**1. The eslint rule** (`eslint-rules/no-unsanctioned-sleep.mjs`) is an **error**
+across all of `e2e/` via `e2eSleepGuardFiles`, so `pnpm lint` fails on a new
+sleep. It began as an allowlist of seven directories measured at zero and
+**graduated** once `pnpm run lint:e2e-sleeps e2e` reported zero across the tree.
+
+The guard **only ever widens**. **Never narrow it to make a build pass**: a
+narrowing means a sleep was added and the guard deleted instead of the sleep.
+`scripts/lib/e2e-sleep-wiring.test.ts` asserts coverage through ESLint's own
+config resolution rather than by grepping the config text, so it fails on a
+narrowing however the globs are rewritten — and it fails if the CI step or the
+pre-commit hook disappears, because a gate nobody calls reports a clean tree
+forever.
+
+**2. The new-code ratchet** (`scripts/check-new-e2e-sleeps.mjs`) runs in CI and
 pre-commit and judges the **change**, not the file:
 
 - a file the change **added** must be clean outright;
@@ -467,17 +511,11 @@ pre-commit and judges the **change**, not the file:
 
 So editing a line next to somebody else's `waitForTimeout` never becomes your
 problem, and there is no migration treadmill. Same model as
-`golangci-lint --new-from-rev` and the i18n ratchet.
-
-**2. The eslint rule** (`eslint-rules/no-unsanctioned-sleep.mjs`) is an
-**error**, but only on `e2eSleepGuardFiles` — directories the conversion has
-already driven to zero. Append a directory there in the same PR that clears it.
-**Never remove an entry to make a build pass**: a removal means a sleep was added
-to a clean directory.
-
-When the list would cover all of `e2e/`, replace it with `e2e/**/*.ts`. That is
-the graduation, and from then on the ratchet is a second line of defence rather
-than the only one.
+`golangci-lint --new-from-rev` and the i18n ratchet. Now that the rule covers the
+tree this is the second line of defence rather than the only one, and it is still
+worth keeping: it catches a sleep added under any path a future `ignores` entry
+carves out, and it attributes a finding to the line the change added rather than
+to the file it happens to live in.
 
 Two commands:
 

@@ -96,9 +96,17 @@ type lifecycleAdapter struct {
 	logger   *logger.Logger
 }
 
+// orchestrator.Service.currentACPSessionID selects the generation-safety seam
+// for resetAgentContext by asserting the agent manager to this unexported
+// interface; that assertion fails silently at runtime if this method is
+// missing or its signature drifts, leaving storeResumeToken's stale-event
+// guard and the reset-failure reconcile permanently inert against a defunct
+// or dead-wrong ACP session id. Pin the exact shape here so drift is a build
+// error, not a silently-dead production guard.
 var _ interface {
 	OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
 	GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error)
+	GetACPSessionIDForSession(sessionID string) (string, bool)
 } = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
@@ -192,6 +200,7 @@ func buildLifecycleLaunchRequest(
 		AgentProfileID:                officeProfileID,
 		ExecutionProfileID:            req.AgentProfileID,
 		StartAgent:                    req.StartAgent,
+		TurnID:                        req.TurnID,
 		WorkspacePath:                 workspacePath,
 		TaskDescription:               req.TaskDescription,
 		Attachments:                   convertToLifecycleAttachments(req.Attachments),
@@ -221,6 +230,7 @@ func buildLifecycleLaunchRequest(
 		CheckoutBranch:                req.CheckoutBranch,
 		PRNumber:                      req.PRNumber,
 		RemoteContribution:            req.RemoteContribution,
+		ContributionDestination:       req.ContributionDestination,
 		WorktreeBranchPrefix:          req.WorktreeBranchPrefix,
 		WorktreeBranchTemplate:        req.WorktreeBranchTemplate,
 		WorktreeBranchTicket:          req.WorktreeBranchTicket,
@@ -270,26 +280,27 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 	specs := make([]lifecycle.RepoLaunchSpec, 0, len(repos))
 	for _, r := range repos {
 		specs = append(specs, lifecycle.RepoLaunchSpec{
-			RepositoryID:           r.RepositoryID,
-			RepositoryPath:         r.RepositoryPath,
-			RepositoryURL:          r.RepositoryURL,
-			RepoName:               r.RepoName,
-			BaseBranch:             r.BaseBranch,
-			DefaultBranch:          r.DefaultBranch,
-			CheckoutBranch:         r.CheckoutBranch,
-			PRNumber:               r.PRNumber,
-			RemoteContribution:     r.RemoteContribution,
-			WorktreeID:             r.WorktreeID,
-			WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
-			WorktreeBranchTemplate: r.WorktreeBranchTemplate,
-			WorktreeBranchTicket:   r.WorktreeBranchTicket,
-			PullBeforeWorktree:     r.PullBeforeWorktree,
-			RemoteSyncHandled:      r.RemoteSyncHandled,
-			RepoSetupScript:        r.RepoSetupScript,
-			RepoCleanupScript:      r.RepoCleanupScript,
-			CopyFiles:              r.CopyFiles,
-			BranchSlug:             r.BranchSlug,
-			BranchIdentitySlug:     r.BranchIdentitySlug,
+			RepositoryID:            r.RepositoryID,
+			RepositoryPath:          r.RepositoryPath,
+			RepositoryURL:           r.RepositoryURL,
+			RepoName:                r.RepoName,
+			BaseBranch:              r.BaseBranch,
+			DefaultBranch:           r.DefaultBranch,
+			CheckoutBranch:          r.CheckoutBranch,
+			PRNumber:                r.PRNumber,
+			RemoteContribution:      r.RemoteContribution,
+			ContributionDestination: r.ContributionDestination,
+			WorktreeID:              r.WorktreeID,
+			WorktreeBranchPrefix:    r.WorktreeBranchPrefix,
+			WorktreeBranchTemplate:  r.WorktreeBranchTemplate,
+			WorktreeBranchTicket:    r.WorktreeBranchTicket,
+			PullBeforeWorktree:      r.PullBeforeWorktree,
+			RemoteSyncHandled:       r.RemoteSyncHandled,
+			RepoSetupScript:         r.RepoSetupScript,
+			RepoCleanupScript:       r.RepoCleanupScript,
+			CopyFiles:               r.CopyFiles,
+			BranchSlug:              r.BranchSlug,
+			BranchIdentitySlug:      r.BranchIdentitySlug,
 		})
 	}
 	return specs
@@ -318,6 +329,10 @@ func convertToLifecycleAttachments(attachments []v1.MessageAttachment) []lifecyc
 // SetExecutionDescription updates the task description in an existing execution's metadata.
 func (a *lifecycleAdapter) SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error {
 	return a.mgr.SetExecutionDescription(ctx, agentExecutionID, description)
+}
+
+func (a *lifecycleAdapter) SetPromptTurnID(ctx context.Context, agentExecutionID, turnID string) error {
+	return a.mgr.SetPromptTurnID(ctx, agentExecutionID, turnID)
 }
 
 // RequiresCloneURL implements executor.ExecutorTypeCapabilities by delegating to
@@ -440,6 +455,14 @@ func (a *lifecycleAdapter) OwnsPromptGeneration(sessionID, executionID string, g
 
 func (a *lifecycleAdapter) GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error) {
 	return a.mgr.GetPromptGenerationForSession(ctx, sessionID)
+}
+
+// GetACPSessionIDForSession forwards to the lifecycle manager so
+// orchestrator.Service.currentACPSessionID observes the live execution's
+// actual ACP session identity in production, not just in tests against
+// mockAgentManager (see the compile-time assertion above this type).
+func (a *lifecycleAdapter) GetACPSessionIDForSession(sessionID string) (string, bool) {
+	return a.mgr.GetACPSessionIDForSession(sessionID)
 }
 
 func (a *lifecycleAdapter) GetSessionAuthMethods(sessionID string) []streams.AuthMethodInfo {
@@ -782,6 +805,16 @@ func (w *orchestratorWrapper) SteerTask(ctx context.Context, taskID, sessionID, 
 	return w.svc.SteerTask(ctx, taskID, sessionID, prompt, model, planMode, attachments)
 }
 
+// subagentContextAdapter adapts the task service to the
+// orchestrator.SubagentContextRecorder interface.
+type subagentContextAdapter struct {
+	svc *taskservice.Service
+}
+
+func (a *subagentContextAdapter) RecordSubagentContext(ctx context.Context, req taskservice.RecordSubagentContextRequest) {
+	a.svc.RecordSubagentContext(ctx, req)
+}
+
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface
 type messageCreatorAdapter struct {
 	svc    *taskservice.Service
@@ -1025,6 +1058,47 @@ func (a *messageCreatorAdapter) rollbackPartialBundle(ctx context.Context, ids [
 // for a specific (pending_id, question_id) pair within the session.
 func (a *messageCreatorAdapter) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, questionID, status string, answer *clarification.Answer) error {
 	return a.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, answer)
+}
+
+func (a *messageCreatorAdapter) CompleteActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, status string,
+	responses map[string]interface{},
+) ([]*models.Message, bool, error) {
+	return a.svc.CompleteActiveClarificationBundle(ctx, pendingID, status, responses)
+}
+
+func (a *messageCreatorAdapter) FinalizeClarificationResponseDelivery(
+	ctx context.Context,
+	pendingID, terminalStatus string,
+	claimedMessages []*models.Message,
+) ([]*models.Message, bool, error) {
+	return a.svc.FinalizeClarificationResponseDelivery(
+		ctx,
+		pendingID,
+		terminalStatus,
+		claimedMessages,
+	)
+}
+
+func (a *messageCreatorAdapter) RestoreActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, terminalStatus string,
+	claimedMessages []*models.Message,
+) ([]*models.Message, bool, error) {
+	return a.svc.RestoreActiveClarificationBundle(
+		ctx,
+		pendingID,
+		terminalStatus,
+		claimedMessages,
+	)
+}
+
+func (a *messageCreatorAdapter) PublishClarificationBundleUpdates(
+	ctx context.Context,
+	messages []*models.Message,
+) error {
+	return a.svc.PublishClarificationBundleUpdates(ctx, messages)
 }
 
 // CreateAgentMessageStreaming creates a new agent message with a pre-generated ID.

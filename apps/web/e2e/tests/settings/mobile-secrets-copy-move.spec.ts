@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { test, expect } from "../../fixtures/test-base";
 import {
   assertNoDescendantOverflowsRight,
@@ -8,7 +10,7 @@ const WORKSPACE_VALUE = "e2e-mobile-copy-move-value";
 const GLOBAL_VALUE = "e2e-mobile-copy-move-global";
 
 /** Unique per run so retries never collide with leftovers from a failed attempt. */
-const runToken = () => `${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+const runToken = () => `${Date.now()}${randomUUID().slice(0, 8)}`;
 
 test.describe("mobile-secrets-copy-move", () => {
   test("moves a workspace secret to General and copies one back at phone width", async ({

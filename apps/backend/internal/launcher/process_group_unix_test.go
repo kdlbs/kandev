@@ -4,10 +4,13 @@ package launcher
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -16,6 +19,9 @@ import (
 )
 
 const launcherSignalHelperEnv = "KANDEV_LAUNCHER_SIGNAL_HELPER"
+const launcherProcessTreeHelperEnv = "KANDEV_LAUNCHER_PROCESS_TREE_HELPER"
+const launcherProcessTreeDescendantEnv = "KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT"
+const launcherProcessTreeExitDescendantEnv = "KANDEV_LAUNCHER_PROCESS_TREE_EXIT_DESCENDANT"
 
 func TestConfigureManagedProcessCreatesProcessGroup(t *testing.T) {
 	cmd := exec.Command("kandev")
@@ -73,6 +79,117 @@ func TestManagedProcessKillSendsGracefulSignalBeforeForceKill(t *testing.T) {
 	}
 	if string(raw) != "term" {
 		t.Fatalf("SIGTERM marker = %q, want term", string(raw))
+	}
+}
+
+func TestManagedProcessKillSignalsOnlyRootBeforeForceKill(t *testing.T) {
+	tempDir := t.TempDir()
+	rootReadyFile := filepath.Join(tempDir, "root-ready")
+	rootTermFile := filepath.Join(tempDir, "root-term")
+	descendantReadyFile := filepath.Join(tempDir, "descendant-ready")
+	descendantTermFile := filepath.Join(tempDir, "descendant-term")
+	descendantPIDFile := filepath.Join(tempDir, "descendant-pid")
+	releaseFile := filepath.Join(tempDir, "release")
+	cmd := exec.Command(os.Args[0], "-test.run=TestLauncherProcessTreeHelper")
+	cmd.Env = append(os.Environ(),
+		launcherProcessTreeHelperEnv+"=1",
+		"KANDEV_LAUNCHER_PROCESS_TREE_ROOT_READY_FILE="+rootReadyFile,
+		"KANDEV_LAUNCHER_PROCESS_TREE_ROOT_TERM_FILE="+rootTermFile,
+		"KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_READY_FILE="+descendantReadyFile,
+		"KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_TERM_FILE="+descendantTermFile,
+		"KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_PID_FILE="+descendantPIDFile,
+		"KANDEV_LAUNCHER_PROCESS_TREE_RELEASE_FILE="+releaseFile,
+	)
+	configureManagedProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start process-tree fixture: %v", err)
+	}
+	proc := &managedProcess{label: "process-tree-fixture", cmd: cmd, done: make(chan struct{})}
+	go waitForManagedProcess(t, proc)
+	t.Cleanup(func() {
+		_ = killManagedProcessGroup(cmd.Process.Pid)
+		if exited, _ := proc.Exited(); !exited {
+			waitForManagedProcessDone(t, proc, 5*time.Second)
+		}
+	})
+
+	waitForFile(t, rootReadyFile)
+	killDone := make(chan managedProcessShutdownResult, 1)
+	go func() {
+		killDone <- proc.kill()
+	}()
+	waitForFile(t, rootTermFile)
+	if fileAppears(t, descendantTermFile, 500*time.Millisecond) {
+		t.Fatalf("descendant received the launcher's initial graceful signal")
+	}
+	if err := cmd.Process.Signal(syscall.SIGUSR1); err != nil {
+		t.Fatalf("release root fixture: %v", err)
+	}
+	result := <-killDone
+	if !result.graceful || !result.forceKilled {
+		t.Fatalf("kill result graceful=%v forceKilled=%v err=%v, want true/true/nil",
+			result.graceful, result.forceKilled, result.err)
+	}
+	if exited, exitCode := proc.Exited(); !exited || exitCode != 0 {
+		t.Fatalf("process-tree fixture exit status = exited:%v code:%d, want true/0", exited, exitCode)
+	}
+	descendantPID := readProcessPID(t, descendantPIDFile)
+	waitForProcessGone(t, descendantPID, 5*time.Second)
+}
+
+func TestManagedProcessKillTargetsBackendPIDFile(t *testing.T) {
+	tempDir := t.TempDir()
+	rootReadyFile := filepath.Join(tempDir, "root-ready")
+	rootTermFile := filepath.Join(tempDir, "root-term")
+	descendantReadyFile := filepath.Join(tempDir, "descendant-ready")
+	descendantTermFile := filepath.Join(tempDir, "descendant-term")
+	descendantPIDFile := filepath.Join(tempDir, "descendant-pid")
+	releaseFile := filepath.Join(tempDir, "release")
+	cmd := exec.Command(os.Args[0], "-test.run=TestLauncherProcessTreeHelper")
+	cmd.Env = append(os.Environ(),
+		launcherProcessTreeHelperEnv+"=1",
+		launcherProcessTreeExitDescendantEnv+"=1",
+		"KANDEV_LAUNCHER_PROCESS_TREE_ROOT_READY_FILE="+rootReadyFile,
+		"KANDEV_LAUNCHER_PROCESS_TREE_ROOT_TERM_FILE="+rootTermFile,
+		"KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_READY_FILE="+descendantReadyFile,
+		"KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_TERM_FILE="+descendantTermFile,
+		"KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_PID_FILE="+descendantPIDFile,
+		"KANDEV_LAUNCHER_PROCESS_TREE_RELEASE_FILE="+releaseFile,
+	)
+	configureManagedProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start process-tree fixture: %v", err)
+	}
+	proc := &managedProcess{
+		label:           "process-tree-pid-file-fixture",
+		cmd:             cmd,
+		gracefulPIDFile: descendantPIDFile,
+		done:            make(chan struct{}),
+	}
+	go waitForManagedProcess(t, proc)
+	t.Cleanup(func() {
+		_ = killManagedProcessGroup(cmd.Process.Pid)
+		if exited, _ := proc.Exited(); !exited {
+			waitForManagedProcessDone(t, proc, 5*time.Second)
+		}
+	})
+
+	waitForFile(t, rootReadyFile)
+	killDone := make(chan managedProcessShutdownResult, 1)
+	go func() {
+		killDone <- proc.kill()
+	}()
+	waitForFile(t, descendantTermFile)
+	if fileAppears(t, rootTermFile, 500*time.Millisecond) {
+		t.Fatalf("launcher signalled the wrapper instead of the backend PID from the file")
+	}
+	if err := cmd.Process.Signal(syscall.SIGUSR1); err != nil {
+		t.Fatalf("release root fixture: %v", err)
+	}
+	result := <-killDone
+	if !result.graceful || result.err != nil {
+		t.Fatalf("kill result graceful=%v forceKilled=%v err=%v, want graceful without error",
+			result.graceful, result.forceKilled, result.err)
 	}
 }
 
@@ -146,6 +263,86 @@ func TestLauncherSignalHelper(t *testing.T) {
 		}
 	}
 	os.Exit(0)
+}
+
+func TestLauncherProcessTreeHelper(t *testing.T) {
+	if os.Getenv(launcherProcessTreeHelperEnv) != "1" {
+		return
+	}
+	descendantReadyFile := os.Getenv("KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_READY_FILE")
+	descendantTermFile := os.Getenv("KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_TERM_FILE")
+	descendantPIDFile := os.Getenv("KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_PID_FILE")
+	rootReadyFile := os.Getenv("KANDEV_LAUNCHER_PROCESS_TREE_ROOT_READY_FILE")
+	rootTermFile := os.Getenv("KANDEV_LAUNCHER_PROCESS_TREE_ROOT_TERM_FILE")
+	releaseFile := os.Getenv("KANDEV_LAUNCHER_PROCESS_TREE_RELEASE_FILE")
+	descendant := exec.Command(os.Args[0], "-test.run=TestLauncherProcessTreeDescendantHelper")
+	descendant.Env = append(os.Environ(),
+		launcherProcessTreeDescendantEnv+"=1",
+		"KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_READY_FILE="+descendantReadyFile,
+		"KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_TERM_FILE="+descendantTermFile,
+	)
+	if err := descendant.Start(); err != nil {
+		t.Fatalf("start descendant fixture: %v", err)
+	}
+	descendantReleased := false
+	t.Cleanup(func() {
+		if descendantReleased {
+			return
+		}
+		_ = descendant.Process.Kill()
+		_ = descendant.Wait()
+	})
+	if err := os.WriteFile(descendantPIDFile, []byte(strconv.Itoa(descendant.Process.Pid)), 0o600); err != nil {
+		t.Fatalf("write descendant pid file: %v", err)
+	}
+	waitForFile(t, descendantReadyFile)
+	if err := os.WriteFile(rootReadyFile, []byte("ready"), 0o600); err != nil {
+		t.Fatalf("write root ready file: %v", err)
+	}
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGTERM, syscall.SIGUSR1)
+	defer signal.Stop(signals)
+	if got := <-signals; got != syscall.SIGTERM {
+		t.Fatalf("root received signal %v, want SIGTERM", got)
+	}
+	if err := os.WriteFile(rootTermFile, []byte("term"), 0o600); err != nil {
+		t.Fatalf("write root term file: %v", err)
+	}
+	for {
+		if _, err := os.Stat(releaseFile); err == nil {
+			break
+		}
+		if got := <-signals; got == syscall.SIGUSR1 {
+			if err := os.WriteFile(releaseFile, []byte("release"), 0o600); err != nil {
+				t.Fatalf("write release file: %v", err)
+			}
+		}
+	}
+	descendantReleased = true
+}
+
+func TestLauncherProcessTreeDescendantHelper(t *testing.T) {
+	if os.Getenv(launcherProcessTreeDescendantEnv) != "1" {
+		return
+	}
+	readyFile := os.Getenv("KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_READY_FILE")
+	termFile := os.Getenv("KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_TERM_FILE")
+	if err := os.WriteFile(readyFile, []byte("ready"), 0o600); err != nil {
+		t.Fatalf("write descendant ready file: %v", err)
+	}
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	for got := range signals {
+		if got == syscall.SIGTERM {
+			if err := os.WriteFile(termFile, []byte("term"), 0o600); err != nil {
+				t.Fatalf("write descendant term file: %v", err)
+			}
+			if os.Getenv(launcherProcessTreeExitDescendantEnv) == "1" {
+				return
+			}
+		}
+	}
 }
 
 func startManagedSignalHelper(t *testing.T, termFile string, mode string) *managedProcess {
@@ -267,11 +464,72 @@ func (o *safeOutput) String() string {
 
 func waitForFile(t *testing.T, path string) {
 	t.Helper()
-	for range 100 {
+	for range 500 {
 		if _, err := os.Stat(path); err == nil {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", path)
+}
+
+func fileAppears(t *testing.T, path string, timeout time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
+}
+
+func waitForManagedProcess(t *testing.T, proc *managedProcess) {
+	t.Helper()
+	err := proc.cmd.Wait()
+	code := 0
+	if err != nil {
+		code = 1
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			code = exitErr.ExitCode()
+		}
+	}
+	proc.mu.Lock()
+	proc.exitCode = code
+	proc.exited = true
+	proc.mu.Unlock()
+	close(proc.done)
+}
+
+func readProcessPID(t *testing.T, path string) int {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read process pid file: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("parse process pid %q: %v", string(raw), err)
+	}
+	return pid
+}
+
+func waitForProcessGone(t *testing.T, pid int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if runtime.GOOS == "linux" {
+			status, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "status"))
+			if errors.Is(err, os.ErrNotExist) || strings.Contains(string(status), "State:\tZ") {
+				return
+			}
+		}
+		process, err := os.FindProcess(pid)
+		if err != nil || process.Signal(syscall.Signal(0)) != nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("process pid=%d remained alive", pid)
 }

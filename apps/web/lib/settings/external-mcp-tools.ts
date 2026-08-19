@@ -26,6 +26,7 @@ export type ExternalMcpToolGroup = {
 };
 
 /** Task-state enum accepted by `update_task_state_kandev`, verbatim wire values. */
+// i18n-exempt: task state enum values, matched by the backend.
 const TASK_STATES = "open, in_progress, complete, blocked, cancelled";
 
 /** Request field on `create_task_kandev`, verbatim wire value. */

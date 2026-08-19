@@ -7,18 +7,13 @@ import (
 	"sort"
 	"strings"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/agent/agents"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
+	"github.com/kandev/kandev/internal/agent/runtime/envmetrics"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
-)
-
-const (
-	managedRuntimeOrigin       = "managed runtime"
-	managedCredentialOrigin    = "managed credentials"
-	managedAgentDefaultsOrigin = "managed agent defaults"
-	agentProfileOrigin         = "agent profile"
-	executorProfileOrigin      = "executor profile"
 )
 
 // TaskEnvironmentRepositoryReader supplies durable repository bindings when a
@@ -36,7 +31,7 @@ func (m *Manager) resolveStrictEnvironment(
 	profileInfo *AgentProfileInfo,
 ) (map[string]string, error) {
 	definitions := append([]runtimeenv.Definition(nil), req.EnvironmentDefinitions...)
-	appendMapDefinitions(&definitions, req.Env, managedRuntimeOrigin)
+	appendMapDefinitions(&definitions, req.Env, runtimeenv.OriginManagedRuntime)
 	appendAgentProfileDefinitions(&definitions, profileInfo)
 
 	appendStandardDefinitions(&definitions, executionID, req)
@@ -44,30 +39,60 @@ func (m *Manager) resolveStrictEnvironment(
 	appendRequiredCredentialDefinitions(ctx, &definitions, m.credsMgr, agentConfig)
 	if req.managedGoCachePath != "" {
 		definitions = append(definitions, runtimeenv.Definition{
-			Key: "GOCACHE", Literal: req.managedGoCachePath, Origin: managedRuntimeOrigin,
+			Key: "GOCACHE", Literal: req.managedGoCachePath, Origin: runtimeenv.OriginManagedRuntime,
 		})
 	}
 
-	resolved, err := runtimeenv.Resolve(ctx, definitions, m.resolveEnvironmentDefinition)
+	resolved, records, err := runtimeenv.Resolve(ctx, definitions, m.resolveEnvironmentDefinition)
 	if err != nil {
 		return nil, fmt.Errorf("resolve task environment: %w", err)
 	}
+	m.logEnvironmentOverrides(req, records)
 	return resolved, nil
+}
+
+// logEnvironmentOverrides emits the AC-23 structured log and the AC-24
+// envmetrics counter for every OverrideRecord a successful Resolve produced.
+// It runs only on Resolve's success path: all-or-nothing governs Resolve's
+// own error paths, not a later launch failure, so a failure downstream of a
+// successful resolve must not roll these back (F32).
+func (m *Manager) logEnvironmentOverrides(req *LaunchRequest, records []runtimeenv.OverrideRecord) {
+	for _, record := range records {
+		losingOrigins := make([]string, 0, len(record.LosingOrigins))
+		losingTiers := make([]int, 0, len(record.LosingOrigins))
+		for _, losing := range record.LosingOrigins {
+			losingOrigins = append(losingOrigins, losing.Origin)
+			losingTiers = append(losingTiers, int(losing.Tier))
+			envmetrics.RecordOverrideApplied(
+				runtimeenv.JoinOriginLabels(record.WinningOrigins),
+				runtimeenv.NormalizeOriginLabel(losing.Origin),
+			)
+		}
+		m.logger.Info("environment override applied",
+			zap.String("env_key", record.Key),
+			zap.Strings("winning_origins", record.WinningOrigins),
+			zap.Int("winning_tier", int(record.WinningTier)),
+			zap.Strings("losing_origins", losingOrigins),
+			zap.Ints("losing_tiers", losingTiers),
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.SessionID),
+		)
+	}
 }
 
 func appendAgentProfileDefinitions(definitions *[]runtimeenv.Definition, profileInfo *AgentProfileInfo) {
 	if profileInfo == nil {
 		return
 	}
-	appendProfileDefinitions(definitions, profileInfo.EnvVars, agentProfileOrigin)
+	appendProfileDefinitions(definitions, profileInfo.EnvVars, runtimeenv.OriginAgentProfile)
 	if profileInfo.Model != "" {
 		*definitions = append(*definitions, runtimeenv.Definition{
-			Key: "AGENT_MODEL", Literal: profileInfo.Model, Origin: managedRuntimeOrigin,
+			Key: "AGENT_MODEL", Literal: profileInfo.Model, Origin: runtimeenv.OriginManagedRuntime,
 		})
 	}
 	if profileInfo.AutoApprove {
 		*definitions = append(*definitions, runtimeenv.Definition{
-			Key: "AGENTCTL_AUTO_APPROVE_PERMISSIONS", Literal: "true", Origin: managedRuntimeOrigin,
+			Key: "AGENTCTL_AUTO_APPROVE_PERMISSIONS", Literal: "true", Origin: runtimeenv.OriginManagedRuntime,
 		})
 	}
 }
@@ -85,7 +110,7 @@ func appendAgentRuntimeDefaults(definitions *[]runtimeenv.Definition, agentConfi
 			continue
 		}
 		*definitions = append(*definitions, runtimeenv.Definition{
-			Key: key, Literal: value, Origin: managedAgentDefaultsOrigin,
+			Key: key, Literal: value, Origin: runtimeenv.OriginManagedAgentDefaults,
 		})
 	}
 }
@@ -109,7 +134,7 @@ func appendRequiredCredentialDefinitions(
 			continue
 		}
 		*definitions = append(*definitions, runtimeenv.Definition{
-			Key: key, Literal: value, Origin: managedCredentialOrigin,
+			Key: key, Literal: value, Origin: runtimeenv.OriginManagedCredentials,
 		})
 	}
 }
@@ -150,7 +175,7 @@ func appendStandardDefinitions(definitions *[]runtimeenv.Definition, executionID
 		if value == "" {
 			continue
 		}
-		*definitions = append(*definitions, runtimeenv.Definition{Key: key, Literal: value, Origin: managedRuntimeOrigin})
+		*definitions = append(*definitions, runtimeenv.Definition{Key: key, Literal: value, Origin: runtimeenv.OriginManagedRuntime})
 	}
 }
 
@@ -222,10 +247,7 @@ func (m *Manager) repositoryEnvironmentDefinitions(ctx context.Context, taskID, 
 		if repository.WorkspaceID != workspaceID {
 			return nil, errors.New("repository environment belongs to a different workspace")
 		}
-		origin := "repository"
-		if name := strings.TrimSpace(repository.Name); name != "" {
-			origin = "repository " + name
-		}
+		origin := runtimeenv.RepositoryOrigin(repository.Name)
 		for _, binding := range repository.SecretBindings {
 			if strings.TrimSpace(binding.Key) == "" || strings.TrimSpace(binding.SecretID) == "" {
 				return nil, fmt.Errorf("repository %s has an invalid secret binding", repository.ID)
@@ -258,7 +280,7 @@ func (m *Manager) executorProfileEnvironmentDefinitions(ctx context.Context, pro
 			continue
 		}
 		definitions = append(definitions, runtimeenv.Definition{
-			Key: value.Key, Literal: value.Value, SecretID: value.SecretID, Origin: executorProfileOrigin,
+			Key: value.Key, Literal: value.Value, SecretID: value.SecretID, Origin: runtimeenv.OriginExecutorProfile,
 		})
 	}
 	return definitions, nil

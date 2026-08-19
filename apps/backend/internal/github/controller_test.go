@@ -52,7 +52,7 @@ func TestValidGitHubCallbackState(t *testing.T) {
 type stubClient struct {
 	getPRFunc             func(ctx context.Context, owner, repo string, number int) (*PR, error)
 	getIssueFunc          func(ctx context.Context, owner, repo string, number int) (*Issue, error)
-	mergePRFn             func(ctx context.Context, owner, repo string, number int, mergeMethod string) error
+	mergePRFn             func(ctx context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error)
 	getRepoMergeMethodsFn func() (RepoMergeMethods, error)
 	requestReviewersFn    func(ctx context.Context, owner, repo string, number int, reviewers []string) error
 }
@@ -132,11 +132,11 @@ func (s *stubClient) RequestReviewers(ctx context.Context, owner, repo string, n
 	}
 	return nil
 }
-func (s *stubClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
+func (s *stubClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error) {
 	if s.mergePRFn != nil {
 		return s.mergePRFn(ctx, owner, repo, number, mergeMethod)
 	}
-	return nil
+	return MergeOutcomeMerged, nil
 }
 func (s *stubClient) ListRepoBranches(context.Context, string, string) ([]RepoBranch, error) {
 	return nil, nil
@@ -1780,12 +1780,12 @@ func TestHttpMergePR_Success(t *testing.T) {
 		mergeMethod string
 	}
 	sc := &stubClient{
-		mergePRFn: func(_ context.Context, owner, repo string, number int, mergeMethod string) error {
+		mergePRFn: func(_ context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error) {
 			called.owner = owner
 			called.repo = repo
 			called.number = number
 			called.mergeMethod = mergeMethod
-			return nil
+			return MergeOutcomeMerged, nil
 		},
 	}
 	router, _ := setupControllerTest(sc)
@@ -1799,8 +1799,36 @@ func TestHttpMergePR_Success(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
+	var response struct {
+		Status MergeOutcome `json:"status"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Status != MergeOutcomeMerged {
+		t.Errorf("status = %q, want merged", response.Status)
+	}
 	if called.owner != "acme" || called.repo != "widget" || called.number != 42 || called.mergeMethod != "squash" {
 		t.Errorf("unexpected MergePR args: %+v", called)
+	}
+}
+
+func TestHttpMergePR_Queued(t *testing.T) {
+	router, _ := setupControllerTest(&stubClient{
+		mergePRFn: func(context.Context, string, string, int, string) (MergeOutcome, error) {
+			return MergeOutcomeQueued, nil
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/github/prs/acme/widget/42/merge", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"status":"queued"`) {
+		t.Errorf("body = %s, want queued outcome", w.Body.String())
 	}
 }
 
@@ -1824,9 +1852,9 @@ func TestHttpMergePR_EmptyBody_ResolvesToAllowedMethod(t *testing.T) {
 	// should resolve to the first allowed method instead.
 	var gotMethod string
 	sc := &stubClient{
-		mergePRFn: func(_ context.Context, _, _ string, _ int, mergeMethod string) error {
+		mergePRFn: func(_ context.Context, _, _ string, _ int, mergeMethod string) (MergeOutcome, error) {
 			gotMethod = mergeMethod
-			return nil
+			return MergeOutcomeMerged, nil
 		},
 		getRepoMergeMethodsFn: func() (RepoMergeMethods, error) {
 			// Squash-only repo (the case that surfaced this bug).
@@ -1853,9 +1881,9 @@ func TestHttpMergePR_ExplicitMethod_Passthrough(t *testing.T) {
 	var gotMethod string
 	var lookupCalls int
 	sc := &stubClient{
-		mergePRFn: func(_ context.Context, _, _ string, _ int, mergeMethod string) error {
+		mergePRFn: func(_ context.Context, _, _ string, _ int, mergeMethod string) (MergeOutcome, error) {
 			gotMethod = mergeMethod
-			return nil
+			return MergeOutcomeMerged, nil
 		},
 		getRepoMergeMethodsFn: func() (RepoMergeMethods, error) {
 			lookupCalls++
@@ -1887,9 +1915,9 @@ func TestHttpMergePR_EmptyBody_LookupFails_FallsBackToGitHubDefault(t *testing.T
 	// than refusing to merge because of an unrelated lookup failure.
 	var gotMethod string
 	sc := &stubClient{
-		mergePRFn: func(_ context.Context, _, _ string, _ int, mergeMethod string) error {
+		mergePRFn: func(_ context.Context, _, _ string, _ int, mergeMethod string) (MergeOutcome, error) {
 			gotMethod = mergeMethod
-			return nil
+			return MergeOutcomeMerged, nil
 		},
 		getRepoMergeMethodsFn: func() (RepoMergeMethods, error) {
 			return RepoMergeMethods{}, fmt.Errorf("rate limited")
@@ -2402,8 +2430,8 @@ func TestHandleListAccessibleRepos_PreservesAPIErrorStatus(t *testing.T) {
 
 func TestHttpMergePR_Conflict(t *testing.T) {
 	sc := &stubClient{
-		mergePRFn: func(context.Context, string, string, int, string) error {
-			return &GitHubAPIError{StatusCode: http.StatusMethodNotAllowed, Endpoint: "/merge", Body: "not mergeable"}
+		mergePRFn: func(context.Context, string, string, int, string) (MergeOutcome, error) {
+			return "", &GitHubAPIError{StatusCode: http.StatusMethodNotAllowed, Endpoint: "/merge", Body: "not mergeable"}
 		},
 	}
 	router, _ := setupControllerTest(sc)

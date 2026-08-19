@@ -24,7 +24,7 @@ type PageShellProps = {
   /** `data-testid` on the topbar header (e2e anchors like `office-topbar`). */
   topbarTestId?: string;
   /** In-section nav for the phone sheet: settings tree, office sections. */
-  pageNav?: ReactNode;
+  pageNav?: ReactNode | ((close: () => void) => ReactNode);
   /** Manifest destination ids `pageNav` already covers. See `AppNavSections`. */
   navOmitDestinations?: string[];
   /**

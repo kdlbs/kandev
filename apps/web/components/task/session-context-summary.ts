@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import type { SummarizeSessionResult } from "@/hooks/use-summarize-session";
+import { t } from "@/lib/i18n";
 
 type PromptValueTarget = { value: string } | { setValue: (value: string) => void };
 type PromptValueRef = RefObject<PromptValueTarget | null>;
@@ -43,10 +44,8 @@ export function applySummarizeSessionResult({
     setPromptValue("");
     setHasPrompt(false);
     toast({
-      title: "Summarize failed",
-      description:
-        result.error ??
-        "Could not generate a summary. Check that the summarize utility agent is configured and enabled in settings.",
+      title: t("task:summarizeFailed"),
+      description: result.error ?? t("task:summarizeCouldNotGenerate"),
       variant: "error",
     });
     return;

@@ -352,6 +352,14 @@ func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
 		return
 	}
 
+	if rebindErr := p.service.rebindPRWatchRepository(ctx, watch, pr); rebindErr != nil {
+		p.logger.Error("failed to rebind PR watch to detected repository",
+			zap.String("watch_id", watch.ID),
+			zap.Int("pr_number", pr.Number),
+			zap.Error(rebindErr))
+		return
+	}
+
 	// Found a PR — update the watch and create association
 	if updateErr := p.service.store.UpdatePRWatchPRNumber(ctx, watch.ID, pr.Number); updateErr != nil {
 		p.logger.Error("failed to update PR watch with detected PR",

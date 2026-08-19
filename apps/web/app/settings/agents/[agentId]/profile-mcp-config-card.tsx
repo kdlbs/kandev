@@ -45,6 +45,7 @@ type ProfileMcpConfigCardProps = {
   onToastError: (error: unknown) => void;
 };
 
+// i18n-exempt: MCP server config the user copies verbatim, including the example header value.
 const POPULAR_SERVERS: Record<string, Record<string, unknown>> = {
   playwright: {
     type: "stdio",
@@ -76,11 +77,14 @@ const POPULAR_SERVERS: Record<string, Record<string, unknown>> = {
 // Tool names and MCP-server product names are identifiers, not copy: they are
 // interpolated as values so the pseudo-locale cannot turn them into something
 // the user cannot type or look up.
+// i18n-exempt: server name and tool ids are config values the user copies verbatim into an agent.
 const KANDEV_MCP_NAME = "Kandev MCP";
 
+// i18n-exempt: server name and tool ids are config values the user copies verbatim into an agent.
 const KANDEV_TOOL_NAMES =
   "list_workspaces, list_boards, list_workflow_steps, list_tasks, create_task, update_task";
 
+// i18n-exempt: MCP server product names.
 const POPULAR_SERVER_NAMES: Record<string, string> = {
   playwright: "Playwright MCP",
   "chrome-devtools": "Chrome DevTools MCP",

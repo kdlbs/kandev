@@ -20,6 +20,7 @@ import {
   shouldPreserveActivePanel,
 } from "./dockview-session-tab-activation";
 import { anchorIncomingSessionPanel, ensureSessionPanel } from "./dockview-session-handoff";
+import { t } from "@/lib/i18n";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -128,7 +129,7 @@ export function setupChatPanelSafetyNet(
           id: `session:${activeSessionId}`,
           component: "chat",
           tabComponent: "sessionTab",
-          title: "Agent",
+          title: t("common:agent"),
           params: { sessionId: activeSessionId },
           position,
         });

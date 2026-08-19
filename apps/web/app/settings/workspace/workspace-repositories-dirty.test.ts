@@ -6,6 +6,7 @@ import {
   cloneRepository,
   isRepositoryDirty,
   mergeSavedRepositoryDraft,
+  persistedRepositoryItems,
   type RepositoryWithScripts,
 } from "./workspace-repositories-dirty";
 
@@ -98,5 +99,12 @@ describe("repository secret binding draft state", () => {
     cloned.scripts[0]!.command = "changed";
 
     expect(source.scripts[0]!.command).toBe("echo setup");
+  });
+
+  it("keeps temporary repository drafts out of persisted repository lists", () => {
+    const persisted = repository();
+    const draft = repository({ id: repositoryId("temp-repo-1") });
+
+    expect(persistedRepositoryItems([persisted, draft])).toEqual([persisted]);
   });
 });

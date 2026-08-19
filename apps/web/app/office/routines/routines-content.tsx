@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { IconPlus } from "@tabler/icons-react";
 import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import {
   listRoutines,
   createRoutine,
@@ -186,7 +187,7 @@ function useRoutinesData(workspaceId: string | null) {
 export function RoutinesContent() {
   const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useAppStore(selectOfficeAgentProfiles);
   const [showCreate, setShowCreate] = useState(false);
   const { routines, runs, setRuns, triggersByRoutine, fetchRoutines, fetchRuns } =
     useRoutinesData(workspaceId);

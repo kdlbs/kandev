@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -18,14 +19,18 @@ import (
 	"go.uber.org/zap"
 )
 
+// ErrUserSettingsConflict marks an exhausted conditional settings update.
 var (
-	ErrUserNotFound = errors.New("user not found")
-	ErrValidation   = errors.New("validation error")
+	ErrUserNotFound         = errors.New("user not found")
+	ErrValidation           = errors.New("validation error")
+	ErrUserSettingsConflict = store.ErrUserSettingsRevisionConflict
 )
 
 const (
 	changesPanelLayoutFlat = "flat"
 	changesPanelLayoutTree = "tree"
+
+	maxUserSettingsCASAttempts = 3
 )
 
 type Service struct {
@@ -87,6 +92,7 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontFamily                *string
 	TerminalFontSize                  *int
 	ChangesPanelLayout                *string
+	LastSeenDisplay                   *string
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
 	AppStatusBarEnabled               *bool
 	AppStatusBarOrder                 *models.AppStatusBarOrder
@@ -166,45 +172,87 @@ func (s *Service) GetDefaultUtilityAgentProfileID(ctx context.Context) (string, 
 }
 
 // UpdateUserSettings applies a partial settings patch field by field,
-// validates each group, persists the result, and publishes the settings
-// update event.
+// validates each group, persists the result under expected-revision CAS, and
+// publishes the settings update event.
 func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSettingsRequest) (*models.UserSettings, error) {
-	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
-	if err != nil {
-		return nil, err
-	}
-	if err := applyBasicSettings(settings, req); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
-	}
-	if err := s.applyChatSubmitKey(settings, req); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
-	}
-	if err := applyLSPSettings(settings, req); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
-	}
-	if err := applySavedLayouts(settings, req); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
-	}
-	if err := applySidebarViews(settings, req); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
-	}
-	if err := applySidebarViewState(settings, req); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
-	}
-	if err := applyUserPreferenceBlobs(settings, req); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
-	}
-	settings.UpdatedAt = time.Now().UTC()
 	var taskCreatePatch *models.TaskCreateLastUsed
 	if req.TaskCreateLastUsed != nil && !taskCreateLastUsedPatchEmpty(*req.TaskCreateLastUsed) {
 		taskCreatePatch = req.TaskCreateLastUsed
 	}
-	settings, err = s.repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, taskCreatePatch)
-	if err != nil {
-		return nil, err
+	return s.updateUserSettingsCAS(ctx, func(settings *models.UserSettings) (bool, error) {
+		// The shallow copy is safe only while every apply* helper replaces
+		// reference fields (slices, maps, and json.RawMessage) instead of
+		// mutating them in place. In-place mutation would alias before and make
+		// DeepEqual miss the write.
+		before := *settings
+		if err := applyBasicSettings(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := s.applyChatSubmitKey(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applyLSPSettings(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applySavedLayouts(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applySidebarViews(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applySidebarViewState(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		if err := applyUserPreferenceBlobs(settings, req); err != nil {
+			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		}
+		return !reflect.DeepEqual(*settings, before), nil
+	}, taskCreatePatch)
+}
+
+// updateUserSettingsCAS applies a full-blob user-settings write under
+// expected-revision CAS with bounded retry. apply is evaluated against every
+// freshly read model and reports whether it mutated it; the immutable
+// taskCreatePatch is passed to every attempt so a retry re-applies the same
+// task-create merge against the fresh row. A no-op (apply returned false and
+// no patch) writes and publishes nothing and returns the freshly read
+// (current) settings. Exactly one event is published per successful write.
+func (s *Service) updateUserSettingsCAS(
+	ctx context.Context,
+	apply func(*models.UserSettings) (bool, error),
+	taskCreatePatch *models.TaskCreateLastUsed,
+) (*models.UserSettings, error) {
+	userID := s.settingsUserID(ctx)
+	var lastErr error
+	for attempt := 0; attempt < maxUserSettingsCASAttempts; attempt++ {
+		settings, err := s.repo.GetUserSettings(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		applied, err := apply(settings)
+		if err != nil {
+			return nil, err
+		}
+		if !applied && taskCreatePatch == nil {
+			// No-op: report the freshly read (current) settings, write nothing,
+			// publish nothing.
+			return settings, nil
+		}
+		updated, err := s.repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, taskCreatePatch, settings.Revision)
+		if err == nil {
+			s.publishUserSettingsEvent(ctx, updated)
+			return updated, nil
+		}
+		if !errors.Is(err, store.ErrUserSettingsRevisionConflict) {
+			return nil, err
+		}
+		lastErr = err
 	}
-	s.publishUserSettingsEvent(ctx, settings)
-	return settings, nil
+	s.logger.Warn("user settings update exhausted CAS retries",
+		zap.Int("attempts", maxUserSettingsCASAttempts),
+		zap.Error(lastErr),
+	)
+	return nil, fmt.Errorf("user settings update exhausted after %d attempts: %w", maxUserSettingsCASAttempts, lastErr)
 }
 
 // RecordTaskCreateLastUsed persists the last task-creation choices (a no-op
@@ -252,6 +300,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		return err
 	}
 	if err := applyChangesPanelLayout(settings, req.ChangesPanelLayout); err != nil {
+		return err
+	}
+	if err := applyLastSeenDisplay(settings, req.LastSeenDisplay); err != nil {
 		return err
 	}
 	applySystemMetricsDisplay(settings, req.SystemMetricsDisplay)
@@ -546,6 +597,20 @@ func applyChangesPanelLayout(settings *models.UserSettings, value *string) error
 	return nil
 }
 
+// applyLastSeenDisplay validates and applies the last-seen display enum
+// (absolute or relative).
+func applyLastSeenDisplay(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	if v != models.LastSeenDisplayAbsolute && v != models.LastSeenDisplayRelative {
+		return errors.New("last_seen_display must be 'absolute' or 'relative'")
+	}
+	settings.LastSeenDisplay = v
+	return nil
+}
+
 // applyChatSubmitKey validates and applies the chat_submit_key setting.
 func (s *Service) applyChatSubmitKey(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.ChatSubmitKey == nil {
@@ -813,6 +878,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"terminal_font_family":                     settings.TerminalFontFamily,
 		"terminal_font_size":                       settings.TerminalFontSize,
 		"changes_panel_layout":                     settings.ChangesPanelLayout,
+		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 		"app_status_bar_order":                     settings.AppStatusBarOrder,
@@ -884,19 +950,12 @@ func (s *Service) ClearDefaultEditorID(ctx context.Context, editorID string) err
 	if editorID == "" {
 		return nil
 	}
-	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
-	if err != nil {
-		return err
-	}
-	if settings.DefaultEditorID != editorID {
-		return nil
-	}
-	settings.DefaultEditorID = ""
-	settings.UpdatedAt = time.Now().UTC()
-	settings, err = s.repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, nil)
-	if err != nil {
-		return err
-	}
-	s.publishUserSettingsEvent(ctx, settings)
-	return nil
+	_, err := s.updateUserSettingsCAS(ctx, func(settings *models.UserSettings) (bool, error) {
+		if settings.DefaultEditorID != editorID {
+			return false, nil
+		}
+		settings.DefaultEditorID = ""
+		return true, nil
+	}, nil)
+	return err
 }

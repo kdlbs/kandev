@@ -132,6 +132,24 @@ jobs:
             ${{ env.IMAGE_NAME }}:build-sha-${{ steps.tag.outputs.image_tag }}
             ${{ env.IMAGE_NAME }}:build-latest
 
+      # Stage 3: desktop (runtime + Tauri Linux dependencies + Rust).
+      # Consumed by the host-independent desktop smoke job.
+      - name: Build and push desktop
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: .github/docker/ci-base/Dockerfile
+          target: desktop
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+          cache-from: |
+            type=gha,scope=desktop
+            type=gha,scope=runtime
+          cache-to: type=gha,scope=desktop,mode=max
+          tags: |
+            ${{ env.IMAGE_NAME }}:desktop-sha-${{ steps.tag.outputs.image_tag }}
+            ${{ env.IMAGE_NAME }}:desktop-latest
+
       - name: Summarize
         run: |
           {
@@ -139,6 +157,7 @@ jobs:
             echo ""
             echo "- runtime: \`${IMAGE_NAME}:runtime-sha-${IMAGE_TAG}\` / \`runtime-latest\`"
             echo "- build:   \`${IMAGE_NAME}:build-sha-${IMAGE_TAG}\` / \`build-latest\`"
+            echo "- desktop: \`${IMAGE_NAME}:desktop-sha-${IMAGE_TAG}\` / \`desktop-latest\`"
             echo "- postgres: \`${POSTGRES_TARGET}@${POSTGRES_DIGEST}\`"
             echo "- pushed:  \`${PUSHED}\`"
           } >> "$GITHUB_STEP_SUMMARY"

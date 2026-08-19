@@ -1,8 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useId, useRef, useState, type RefObject } from "react";
-import { IconChevronDown, IconChevronUp, IconMessageQuestion } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
 import { MessageList } from "@/components/task/chat/message-list";
@@ -12,13 +10,9 @@ import {
   useSubmitHandler,
   useChatPanelHandlers,
 } from "@/components/task/chat/chat-input-area";
-import { ClarificationInputOverlay } from "@/components/task/chat/clarification-input-overlay";
-import { ResizeHandle } from "@/components/task/chat/resize-handle";
-import { useResizableClarificationOverlay } from "@/hooks/use-resizable-clarification-overlay";
-import type { Message } from "@/lib/types/http";
+import { ClarificationPanelSection } from "@/components/task/chat/clarification-panel-section";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-down";
-import { useTranslation } from "react-i18next";
 
 type QuickChatContentProps = {
   sessionId: string;
@@ -27,92 +21,6 @@ type QuickChatContentProps = {
   initialPrompt?: string;
   onInitialPromptSent?: () => void;
 };
-
-type QuickChatClarificationSectionProps = {
-  pending: boolean;
-  messages: readonly Message[] | null | undefined;
-  onResolved: () => void;
-  shortcutScopeRef: RefObject<HTMLElement | null>;
-};
-
-function QuickChatClarificationSection({
-  pending,
-  messages,
-  onResolved,
-  shortcutScopeRef,
-}: QuickChatClarificationSectionProps) {
-  const { t } = useTranslation();
-  const [collapsed, setCollapsed] = useState(false);
-  const contentId = useId();
-  const { height, containerRef, resetHeight, resizeHandleProps } =
-    useResizableClarificationOverlay();
-
-  // A newly opened clarification starts expanded and auto-sized. Collapsing
-  // an active one leaves its form state and user-selected height intact.
-  useEffect(() => {
-    if (!pending) {
-      setCollapsed(false);
-      resetHeight();
-    }
-  }, [pending, resetHeight]);
-
-  if (!pending) return null;
-
-  const actionLabel = collapsed ? t("chat:expandClarification") : t("chat:collapseClarification");
-
-  return (
-    <div className="relative flex-shrink-0 border-t border-sky-400/30 bg-card">
-      {!collapsed && <ResizeHandle {...resizeHandleProps} />}
-      <div
-        ref={containerRef}
-        data-testid="clarification-overlay-container"
-        className={
-          collapsed
-            ? "h-11"
-            : "flex min-h-[7.5rem] max-h-[35vh] flex-col overflow-hidden overscroll-contain"
-        }
-        style={!collapsed && height !== null ? { height } : undefined}
-      >
-        <div className="flex h-11 flex-shrink-0 items-center justify-between gap-2 pl-4">
-          <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
-            <IconMessageQuestion className="h-4 w-4 flex-shrink-0 text-blue-500" />
-            <span className="truncate">{t("chat:clarificationNeeded")}</span>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-11 w-11 flex-shrink-0 cursor-pointer rounded-none"
-            aria-label={actionLabel}
-            aria-expanded={!collapsed}
-            aria-controls={contentId}
-            title={actionLabel}
-            data-testid="clarification-collapse-toggle"
-            onClick={() => setCollapsed((current) => !current)}
-          >
-            {collapsed ? (
-              <IconChevronUp className="h-4 w-4" />
-            ) : (
-              <IconChevronDown className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
-        <div
-          id={contentId}
-          data-testid="clarification-scroll-region"
-          className={collapsed ? "hidden" : "min-h-0 flex-1 overflow-y-auto px-1"}
-        >
-          <ClarificationInputOverlay
-            messages={messages}
-            onResolved={onResolved}
-            shortcutScopeRef={shortcutScopeRef}
-            keyboardShortcutsEnabled={!collapsed}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function useQuickChatState(sessionId: string) {
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
@@ -190,12 +98,13 @@ export const QuickChatContent = memo(function QuickChatContent({
           onOpenFile={undefined}
         />
       </div>
-      <QuickChatClarificationSection
+      <ClarificationPanelSection
         key={sessionId}
         pending={Boolean(pendingClarification)}
         messages={pendingClarificationGroup}
         onResolved={handleClarificationResolved}
         shortcutScopeRef={shortcutScopeRef}
+        maxHeightVh={35}
       />
       <ChatInputArea
         chatInputRef={chatInputRef}

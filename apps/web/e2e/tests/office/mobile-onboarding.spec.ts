@@ -52,7 +52,10 @@ test.describe("Office onboarding — mobile layout", () => {
 
     await testPage.getByRole("button", { name: "Cancel" }).click();
 
-    await expect(testPage).toHaveURL((url) => url.pathname === "/", { timeout: 10_000 });
+    // Cancelling lands on home, and home for an active Office workspace is the
+    // Office dashboard — `/` redirects there rather than rendering a kanban
+    // board for a workspace that has none.
+    await expect(testPage).toHaveURL((url) => url.pathname === "/office", { timeout: 10_000 });
   });
 
   test("tier profile step (Step 1) fits within the viewport horizontally", async ({

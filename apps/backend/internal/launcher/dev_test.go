@@ -115,6 +115,7 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 		"KANDEV_DEBUG_DEV_MODE=true",
 		"KANDEV_HOME_DIR=" + filepath.Join(repo, ".kandev-dev"),
 		"KANDEV_DATABASE_PATH=",
+		"KANDEV_BACKEND_PID_FILE=" + filepath.Join(repo, ".kandev-dev", "supervisor", "backend.pid"),
 	} {
 		if !strings.Contains(backendEnv, expected) {
 			t.Fatalf("backend environment missing %q:\n%s", expected, backendEnv)

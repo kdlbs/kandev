@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -249,6 +250,9 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	if err := s.validateTaskWorkflow(ctx, req); err != nil {
 		return nil, err
 	}
+	if err := s.prepareContributionDestination(ctx, req); err != nil {
+		return nil, err
+	}
 
 	workflowStepID := s.resolveWorkflowStep(ctx, req)
 	task := s.buildTask(req, workflowStepID)
@@ -261,6 +265,48 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 		}
 	}
 	return task, nil
+}
+
+func (s *Service) prepareContributionDestination(ctx context.Context, req *CreateTaskRequest) error {
+	if s.contributionDestinationPreparer == nil || req.WorkflowID == "" {
+		return nil
+	}
+	workflow, err := s.workflows.GetWorkflow(ctx, req.WorkflowID)
+	if err != nil {
+		return fmt.Errorf("load workflow for contribution destination: %w", err)
+	}
+	if workflow == nil || workflow.WorkflowTemplateID == nil || *workflow.WorkflowTemplateID == "" {
+		return nil
+	}
+	repositories, err := s.loadContributionDestinationRepositories(ctx, req)
+	if err != nil {
+		return err
+	}
+	return s.contributionDestinationPreparer.PrepareContributionDestination(ctx, req, workflow, repositories)
+}
+
+func (s *Service) loadContributionDestinationRepositories(
+	ctx context.Context,
+	req *CreateTaskRequest,
+) ([]*models.Repository, error) {
+	if len(req.Repositories) == 0 || s.repoEntities == nil {
+		return nil, nil
+	}
+	repositories := make([]*models.Repository, len(req.Repositories))
+	for index, input := range req.Repositories {
+		if input.RepositoryID == "" {
+			continue
+		}
+		repository, err := s.repoEntities.GetRepository(ctx, input.RepositoryID)
+		if err != nil {
+			return nil, fmt.Errorf("load repository %s for contribution destination: %w", input.RepositoryID, err)
+		}
+		if repository == nil || repository.WorkspaceID != req.WorkspaceID {
+			return nil, repoerrors.ErrRepositoryNotFound
+		}
+		repositories[index] = repository
+	}
+	return repositories, nil
 }
 
 // finalizeCreatedTask runs create-sequence step 6, the required synchronous
@@ -394,6 +440,13 @@ func (s *Service) pullTasksFromNewFeederWork(ctx context.Context, workflowID, fe
 			s.pullNextTaskOnVacate(ctx, step.ID, "")
 		}
 	}
+}
+
+// ReconcileFeederPulls wakes steps that pull from feederStepID. The
+// orchestrator calls this after an admitted manual move's lifecycle barrier
+// completes so selection and promotion rules stay owned by this service.
+func (s *Service) ReconcileFeederPulls(ctx context.Context, workflowID, feederStepID string) {
+	s.pullTasksFromNewFeederWork(ctx, workflowID, feederStepID)
 }
 
 func (s *Service) createTaskWithCapacity(ctx context.Context, task *models.Task) error {
@@ -705,6 +758,11 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 				return fmt.Errorf("remote contribution branches do not match the resolved binding")
 			}
 		}
+		if repoInput.ContributionDestination != nil {
+			if err := repoInput.ContributionDestination.Validate(); err != nil {
+				return fmt.Errorf("invalid contribution destination: %w", err)
+			}
+		}
 		repositoryID, baseBranch, _, err := s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
 		if err != nil {
 			return err
@@ -740,6 +798,11 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 		if repoInput.RemoteContribution != nil {
 			if err := models.PutRemoteContribution(metadata, repoInput.RemoteContribution); err != nil {
 				return fmt.Errorf("persist remote contribution: %w", err)
+			}
+		}
+		if repoInput.ContributionDestination != nil {
+			if err := models.PutContributionDestination(metadata, repoInput.ContributionDestination); err != nil {
+				return fmt.Errorf("persist contribution destination: %w", err)
 			}
 		}
 		taskRepo := &models.TaskRepository{
@@ -1490,7 +1553,14 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	}
 	task.UpdatedAt = time.Now().UTC()
 
-	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+	updateCtx := ctx
+	if req.WorkflowStepID != nil {
+		actorKind, actorID := steptelemetry.HumanOrSystemActor(ctx)
+		updateCtx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+			Trigger: steptelemetry.TriggerTaskUpdate, ActorKind: actorKind, ActorID: actorID,
+		})
+	}
+	if err := s.tasks.UpdateTask(updateCtx, task); err != nil {
 		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -1755,8 +1825,23 @@ func (s *Service) RestoreTaskMessageRollback(
 	restoredTask := *task
 	restoredTask.State = state
 	restoredTask.WorkflowStepID = workflowStepID
+	// The rollback's trigger is always unarchive_restore, but its actor
+	// prefers an attribution already on ctx over the ActorSystem default —
+	// the MCP message-dispatch rollback path (handlers.go's
+	// handleMessageTask) knows the causal sender session and sets one
+	// before calling here, mirroring the sqlite repository's
+	// hardcodedTriggerAttribution prefer-preset-else-fallback pattern.
+	rollbackAttribution := steptelemetry.Attribution{
+		Trigger: steptelemetry.TriggerUnarchiveRestore, ActorKind: steptelemetry.ActorSystem,
+	}
+	if preset := steptelemetry.FromContext(ctx); preset.ActorKind != steptelemetry.ActorUnknown {
+		rollbackAttribution.ActorKind = preset.ActorKind
+		rollbackAttribution.ActorID = preset.ActorID
+		rollbackAttribution.SessionID = preset.SessionID
+	}
+	rollbackCtx := steptelemetry.WithAttribution(ctx, rollbackAttribution)
 	updated, err := repo.RestoreTaskMessageRollbackIfSessionState(
-		ctx,
+		rollbackCtx,
 		&restoredTask,
 		ownerSessionID,
 		expectedSessionState,
@@ -1950,12 +2035,26 @@ func (s *Service) finalizeCancelledSessions(ctx context.Context, taskID string, 
 	// not also suppress the event publish below — event-driven clients
 	// need session.state_changed regardless of whether the archiving
 	// caller is still connected.
-	// Deliberately left unbounded (no timeout) here: publishSessionsCancelled
-	// gives each session in cancelledSessions its own independent 10s
-	// deadline around its Publish call, so one slow synchronous subscriber
-	// can no longer consume a shared batch-wide budget and starve the
-	// events for sessions later in the loop.
+	// Deliberately left unbounded at the batch level: clarification expiry and
+	// publishSessionsCancelled give each session their own independent timeout,
+	// so one slow write or synchronous subscriber cannot starve later sessions.
 	detachedCtx := context.WithoutCancel(ctx)
+	if s.clarificationCanceller != nil {
+		for _, session := range cancelledSessions {
+			if session == nil || session.ID == "" {
+				continue
+			}
+			expireCtx, cancelExpire := context.WithTimeout(detachedCtx, taskPublicationTimeout)
+			_, err := s.clarificationCanceller.ExpireSessionAndNotify(expireCtx, session.ID)
+			cancelExpire()
+			if err != nil {
+				s.logger.Error("failed to expire clarification after archive cancellation; response claims remain quarantined",
+					zap.String("task_id", taskID),
+					zap.String("session_id", session.ID),
+					zap.Error(err))
+			}
+		}
+	}
 	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledSessions, models.SessionArchiveCancelReason)
 }
 

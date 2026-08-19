@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { searchUserIssues, searchUserMRs } from "@/lib/api/domains/gitlab-api";
 import type { Issue, MR } from "@/lib/types/gitlab";
 import type { PresetOption } from "./presets";
+import { t } from "@/lib/i18n";
 
 type SearchKind = "mr" | "issue";
 type Item = MR | Issue;
@@ -134,7 +135,7 @@ export function useGitLabSearch({
         setState((s) => ({
           items: [],
           loading: false,
-          error: err instanceof Error ? err.message : "Failed to search GitLab",
+          error: err instanceof Error ? err.message : t("gitlab:failedToSearchGitLab"),
           lastFetchedAt: s.lastFetchedAt,
           total: 0,
           workspaceId: requestedWorkspaceId,

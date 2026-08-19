@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 
 import type { Agent, AgentProfile } from "@/lib/types/http";
 
@@ -9,16 +10,20 @@ const mocks = vi.hoisted(() => ({
   duplicateAgentProfileAction: vi.fn(),
   toast: vi.fn(),
   routerPush: vi.fn(),
+  responsive: { isFullDesktop: false },
 }));
 
 function profile(id: string, name: string): AgentProfile {
   return { id, name, agentDisplayName: "Claude Code" } as AgentProfile;
 }
 
+const ALPHA_PROFILE_NAME = "Alpha";
+const PROFILE_ROW_SELECTOR = '[data-testid="agent-profile-row"]';
+
 const AGENT = {
   id: "agent-1",
   name: "claude",
-  profiles: [profile("p-1", "Alpha"), profile("p-2", "Beta")],
+  profiles: [profile("p-1", ALPHA_PROFILE_NAME), profile("p-2", "Beta")],
 } as unknown as Agent;
 
 const EMPTY_AGENT = { ...AGENT, profiles: [] } as unknown as Agent;
@@ -59,6 +64,10 @@ vi.mock("@/components/toast-provider", () => ({
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mocks.routerPush }),
   usePathname: () => "/settings/agents",
+}));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => mocks.responsive,
 }));
 
 vi.mock("@/components/routing/app-link", () => ({
@@ -104,8 +113,12 @@ vi.mock("@/components/settings/agent-profile-delete-dialog", () => ({
 
 import { AgentProfilesSubList, ProfileRow } from "./agent-profiles-section";
 
+function renderWithTooltipProvider(ui: ReactNode) {
+  return render(<TooltipProvider>{ui}</TooltipProvider>);
+}
+
 function renderRows() {
-  return render(
+  return renderWithTooltipProvider(
     <>
       {AGENT.profiles.map((p) => (
         <ProfileRow key={p.id} agent={AGENT} profile={p} />
@@ -115,14 +128,17 @@ function renderRows() {
 }
 
 function confirmDeleteFor(name: string) {
-  const row = screen.getByLabelText(name).closest('[data-testid="agent-profile-row"]');
+  const row = screen.getByLabelText(name).closest(PROFILE_ROW_SELECTOR);
   if (!row) throw new Error(`no row for ${name}`);
-  fireEvent.click(row.querySelector('[data-testid="delete-item"]')!);
+  const profileId = AGENT.profiles.find((p) => p.name === name)?.id;
+  if (!profileId) throw new Error(`no profile id for ${name}`);
+  fireEvent.click(row.querySelector(`[data-testid="delete-profile-${profileId}"]`)!);
   fireEvent.click(row.querySelector('[data-testid="confirm-delete"]')!);
 }
 
 describe("ProfileRow deletion", () => {
   beforeEach(() => {
+    mocks.responsive.isFullDesktop = false;
     storeState = {
       settingsAgents: { items: [{ ...AGENT, profiles: [...AGENT.profiles] }] },
       agentProfiles: { items: [{ id: "p-1" }, { id: "p-2" }] },
@@ -173,11 +189,13 @@ describe("ProfileRow deletion", () => {
 
 describe("ProfileRow duplicate", () => {
   beforeEach(() => {
+    mocks.responsive.isFullDesktop = false;
     storeState = {
       settingsAgents: { items: [{ ...AGENT, profiles: [...AGENT.profiles] }] },
       agentProfiles: { items: [] },
     };
   });
+  afterEach(() => cleanup());
 
   it("calls the duplicate action with the profile id", async () => {
     mocks.duplicateAgentProfileAction.mockResolvedValue({
@@ -186,11 +204,80 @@ describe("ProfileRow duplicate", () => {
     } as unknown as AgentProfile);
     renderRows();
 
-    const row = screen.getByLabelText("Alpha").closest('[data-testid="agent-profile-row"]');
-    if (!row) throw new Error("no row for Alpha");
+    const row = screen.getByLabelText(ALPHA_PROFILE_NAME).closest(PROFILE_ROW_SELECTOR);
+    if (!row) throw new Error(`no row for ${ALPHA_PROFILE_NAME}`);
     fireEvent.click(row.querySelector('[data-testid="duplicate-profile-p-1"]')!);
 
     await waitFor(() => expect(mocks.duplicateAgentProfileAction).toHaveBeenCalledWith("p-1"));
+  });
+});
+
+describe("ProfileRow responsive actions", () => {
+  beforeEach(() => {
+    storeState = {
+      settingsAgents: { items: [{ ...AGENT, profiles: [...AGENT.profiles] }] },
+      agentProfiles: { items: [] },
+    };
+    mocks.responsive.isFullDesktop = false;
+    vi.clearAllMocks();
+  });
+  afterEach(() => cleanup());
+
+  it("renders compact icon-only duplicate and delete actions inline on full desktop", async () => {
+    mocks.responsive.isFullDesktop = true;
+    renderWithTooltipProvider(<ProfileRow agent={AGENT} profile={AGENT.profiles[0]} />);
+
+    const row = screen.getByLabelText(ALPHA_PROFILE_NAME).closest(PROFILE_ROW_SELECTOR);
+    if (!row) throw new Error(`no row for ${ALPHA_PROFILE_NAME}`);
+    expect(row.querySelector('[data-testid="profile-actions-inline-p-1"]')).not.toBeNull();
+    const duplicate = row.querySelector<HTMLButtonElement>(
+      '[data-testid="duplicate-profile-inline-p-1"]',
+    );
+    const deleteButton = row.querySelector<HTMLButtonElement>(
+      '[data-testid="delete-profile-inline-p-1"]',
+    );
+    expect(duplicate).not.toBeNull();
+    expect(deleteButton).not.toBeNull();
+    expect(duplicate?.textContent).toBe("");
+    expect(deleteButton?.textContent).toBe("");
+    expect(duplicate?.getAttribute("data-size")).toBe("icon");
+    expect(deleteButton?.getAttribute("data-size")).toBe("icon");
+    expect(row.querySelector('[data-testid="profile-actions-menu-p-1"]')).toBeNull();
+
+    fireEvent.focus(duplicate!);
+    await waitFor(() => expect(screen.getByRole("tooltip", { name: "Duplicate" })).toBeTruthy());
+    fireEvent.focus(deleteButton!);
+    await waitFor(() => expect(screen.getByRole("tooltip", { name: "Delete" })).toBeTruthy());
+  });
+
+  it("keeps duplicate and delete in the overflow menu below full desktop", () => {
+    renderWithTooltipProvider(<ProfileRow agent={AGENT} profile={AGENT.profiles[0]} />);
+
+    const row = screen.getByLabelText(ALPHA_PROFILE_NAME).closest(PROFILE_ROW_SELECTOR);
+    if (!row) throw new Error(`no row for ${ALPHA_PROFILE_NAME}`);
+    expect(row.querySelector('[data-testid="profile-actions-inline-p-1"]')).toBeNull();
+    expect(row.querySelector('[data-testid="profile-actions-menu-p-1"]')).not.toBeNull();
+    expect(row.querySelector('[data-testid="duplicate-profile-p-1"]')).not.toBeNull();
+    expect(row.querySelector('[data-testid="delete-profile-p-1"]')).not.toBeNull();
+  });
+
+  it("wires inline duplicate and delete to the shared row behavior", async () => {
+    mocks.responsive.isFullDesktop = true;
+    mocks.duplicateAgentProfileAction.mockResolvedValue({
+      id: "p-3",
+      name: "Alpha Copy",
+    } as unknown as AgentProfile);
+    mocks.deleteAgentProfileAction.mockResolvedValue({ status: "ok" });
+    renderWithTooltipProvider(<ProfileRow agent={AGENT} profile={AGENT.profiles[0]} />);
+
+    const row = screen.getByLabelText(ALPHA_PROFILE_NAME).closest(PROFILE_ROW_SELECTOR);
+    if (!row) throw new Error(`no row for ${ALPHA_PROFILE_NAME}`);
+    fireEvent.click(row.querySelector('[data-testid="duplicate-profile-inline-p-1"]')!);
+    fireEvent.click(row.querySelector('[data-testid="delete-profile-inline-p-1"]')!);
+    fireEvent.click(row.querySelector('[data-testid="confirm-delete"]')!);
+
+    await waitFor(() => expect(mocks.duplicateAgentProfileAction).toHaveBeenCalledWith("p-1"));
+    await waitFor(() => expect(mocks.deleteAgentProfileAction).toHaveBeenCalledWith("p-1"));
   });
 });
 
@@ -199,7 +286,7 @@ describe("AgentProfilesSubList layout", () => {
   afterEach(() => cleanup());
 
   it("renders profile rows without the count or create action", () => {
-    render(<AgentProfilesSubList savedAgent={AGENT} agentName="claude" />);
+    renderWithTooltipProvider(<AgentProfilesSubList savedAgent={AGENT} agentName="claude" />);
 
     expect(screen.queryByText("2 profiles", { exact: true })).toBeNull();
     expect(screen.getAllByTestId("agent-profile-row")).toHaveLength(2);
@@ -207,13 +294,13 @@ describe("AgentProfilesSubList layout", () => {
   });
 
   it("omits the profile body when no agent record exists", () => {
-    render(<AgentProfilesSubList savedAgent={undefined} agentName="claude" />);
+    renderWithTooltipProvider(<AgentProfilesSubList savedAgent={undefined} agentName="claude" />);
 
     expect(screen.queryByTestId("agent-profiles-claude")).toBeNull();
   });
 
   it("omits the profile body when the saved agent has no profiles", () => {
-    render(<AgentProfilesSubList savedAgent={EMPTY_AGENT} agentName="claude" />);
+    renderWithTooltipProvider(<AgentProfilesSubList savedAgent={EMPTY_AGENT} agentName="claude" />);
 
     expect(screen.queryByTestId("agent-profiles-claude")).toBeNull();
   });

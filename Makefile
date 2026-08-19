@@ -550,11 +550,11 @@ test-scripts:
 	@bash scripts/release/retry-ghcr-command.test.sh
 	@node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs
 	@python3 .github/scripts/release-workflow-contract_test.py
-	@node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs
+	@node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs scripts/release/update-scoop-bucket.test.mjs
 	@node --test scripts/validate-public-docs.test.mjs
 
 .PHONY: test-e2e
-test-e2e: build-backend build-web-e2e build-e2e-plugin-package
+test-e2e: build-backend build-backend-linux-helpers build-web-e2e build-e2e-plugin-package
 	@printf "$(CYAN)Running E2E tests (headless, parallel, managed runner)...$(RESET)\n"
 	@cd $(WEB_DIR) && status=0; for project in routing auth chromium mobile-chrome containers; do \
 		printf "$(CYAN)-- project: $$project --$(RESET)\n"; \

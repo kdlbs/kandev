@@ -89,6 +89,8 @@ func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
 		status := http.StatusInternalServerError
 		if errors.Is(err, service.ErrValidation) {
 			status = http.StatusBadRequest
+		} else if errors.Is(err, service.ErrUserSettingsConflict) {
+			status = http.StatusConflict
 		}
 		h.logger.Error("failed to update user settings", zap.Error(err))
 		c.JSON(status, gin.H{"error": "failed to update user settings"})
@@ -115,6 +117,8 @@ func (h *Handlers) wsUpdateUserSettings(ctx context.Context, msg *ws.Message) (*
 		code := ws.ErrorCodeInternalError
 		if errors.Is(err, service.ErrValidation) {
 			code = ws.ErrorCodeBadRequest
+		} else if errors.Is(err, service.ErrUserSettingsConflict) {
+			code = ws.ErrorCodeConflict
 		}
 		return ws.NewError(msg.ID, msg.Action, code, "Failed to update user settings", nil)
 	}

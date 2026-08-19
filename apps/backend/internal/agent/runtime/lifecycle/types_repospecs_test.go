@@ -29,18 +29,20 @@ func TestLaunchRequest_RepoSpecs_ReturnsExplicitListWhenSet(t *testing.T) {
 
 func TestLaunchRequest_RepoSpecs_SynthesizesFromLegacyFields(t *testing.T) {
 	binding := models.RemoteContribution{CanonicalURL: "https://github.com/acme/widget/pull/7"}
+	destination := models.ContributionDestination{Provider: "github"}
 	req := &LaunchRequest{
-		RepositoryID:         "repo-x",
-		RepositoryPath:       "/x",
-		BaseBranch:           "main",
-		CheckoutBranch:       "feature/y",
-		WorktreeID:           "wt-1",
-		WorktreeBranchPrefix: "feat/",
-		PullBeforeWorktree:   true,
-		RepoName:             "x",
-		BranchSlug:           "feature-y",
-		BranchIdentitySlug:   "feature-y",
-		RemoteContribution:   &binding,
+		RepositoryID:            "repo-x",
+		RepositoryPath:          "/x",
+		BaseBranch:              "main",
+		CheckoutBranch:          "feature/y",
+		WorktreeID:              "wt-1",
+		WorktreeBranchPrefix:    "feat/",
+		PullBeforeWorktree:      true,
+		RepoName:                "x",
+		BranchSlug:              "feature-y",
+		BranchIdentitySlug:      "feature-y",
+		RemoteContribution:      &binding,
+		ContributionDestination: &destination,
 	}
 	specs := req.RepoSpecs()
 	if len(specs) != 1 {
@@ -56,6 +58,9 @@ func TestLaunchRequest_RepoSpecs_SynthesizesFromLegacyFields(t *testing.T) {
 	}
 	if got.RemoteContribution != &binding {
 		t.Errorf("remote contribution = %#v, want %#v", got.RemoteContribution, &binding)
+	}
+	if got.ContributionDestination != &destination {
+		t.Errorf("contribution destination = %#v, want %#v", got.ContributionDestination, &destination)
 	}
 }
 

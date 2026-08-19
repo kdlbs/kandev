@@ -69,7 +69,6 @@
   "deleteSavedQueryNamed": "Ďēĺēţē {{label}} śàvēď qũēŕŷ",
   "describeYourChanges": "Ďēśćŕĩƀē ŷōũŕ ćĥàńĝēś...",
   "description": "Ďēśćŕĩƥţĩōń",
-  "disabled": "Ďĩśàƀĺēď",
   "dismissed": "Ďĩśḿĩśśēď",
   "draftCreated": "Ďŕàƒţ {{shortName}} ćŕēàţēď",
   "enableIntegrationNamed": "Ēńàƀĺē {{name}}",
@@ -188,5 +187,7 @@
   "saveQuery": "Śàvē qũēŕŷ",
   "waitingForTheNextBackendHealth": "Ŵàĩţĩńĝ ƒōŕ ţĥē ńēxţ ƀàćķēńď ĥēàĺţĥ ćĥēćķ…",
   "cursorPaginationSummary_one": "Ƥàĝē {{page}} · {{count}} ŕēśũĺţ",
-  "cursorPaginationSummary_other": "Ƥàĝē {{page}} · {{count}} ŕēśũĺţś"
+  "cursorPaginationSummary_other": "Ƥàĝē {{page}} · {{count}} ŕēśũĺţś",
+  "allRepositories": "Àĺĺ ŕēƥōśĩţōŕĩēś",
+  "changeRequestCreationFailed": "Ćĥàńĝē-ŕēqũēśţ ćŕēàţĩōń ƒàĩĺēď"
 }

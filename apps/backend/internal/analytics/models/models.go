@@ -102,10 +102,17 @@ type GitStats struct {
 // wants a single "effective lines" number (the larger of the two, to avoid
 // double-counting work that was later committed) computes that itself, the
 // same way the source plugin's effectiveLines helper does.
+//
+// LinesAddedCommitted / LinesDeletedCommitted are nil, not 0, for a session
+// that predates commit-capture activation (see commit_capture_activated_at in
+// kandev_meta) and has no observed commits: capture wasn't running yet for
+// that session, so "zero" cannot be distinguished from "unknown" and must not
+// be asserted as a real measurement. A session with at least one observed
+// commit, or one that started after activation, always gets a real int64.
 type SessionCodeStats struct {
 	SessionID               string `json:"session_id"`
-	LinesAddedCommitted     int64  `json:"lines_added_committed"`
-	LinesDeletedCommitted   int64  `json:"lines_deleted_committed"`
+	LinesAddedCommitted     *int64 `json:"lines_added_committed"`
+	LinesDeletedCommitted   *int64 `json:"lines_deleted_committed"`
 	LinesAddedPeakPending   int64  `json:"lines_added_peak_pending"`
 	LinesDeletedPeakPending int64  `json:"lines_deleted_peak_pending"`
 }

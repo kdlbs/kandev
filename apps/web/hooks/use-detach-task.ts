@@ -7,6 +7,7 @@ import { detachTask as requestDetachTask } from "@/lib/api";
 import type { Task } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { t } from "@/lib/i18n";
 
 type DetachTarget = {
   id: string;
@@ -21,7 +22,7 @@ function requestDetachOnce(taskId: string): Promise<Task> {
   if (existing) return existing;
 
   const request = requestDetachTask(taskId).catch((error) => {
-    toast.error(error instanceof Error ? error.message : "Failed to detach task");
+    toast.error(error instanceof Error ? error.message : t("task:failedToDetachTask"));
     throw error;
   });
   detachRequests.set(taskId, request);

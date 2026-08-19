@@ -46,6 +46,7 @@ export function reportMermaidRenderFailure(
   originalCode: string,
   normalizedCode: string,
 ): void {
+  // i18n-exempt: console diagnostics for the developer, never shown in the UI.
   const normalizedSection =
     normalizedCode === originalCode ? "" : `\n\nNormalized diagram:\n${normalizedCode}`;
 

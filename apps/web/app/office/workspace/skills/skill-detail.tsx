@@ -18,6 +18,7 @@ import { Separator } from "@kandev/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import type { Skill, SkillSourceType } from "@/lib/state/slices/office/types";
 import { FileTree, type FileTreeNode } from "@/components/shared/file-tree";
 import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
@@ -79,7 +80,7 @@ export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
   // local edits would just get overwritten. Lock both edit and delete
   // for them regardless of what the source meta says.
   const readOnly = sourceMeta.readOnly || !!skill.isSystem;
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useAppStore(selectOfficeAgentProfiles);
   const usedByCount = useMemo(
     () => agents.filter((a) => a.desiredSkills?.includes(skill.id)).length,
     [agents, skill.id],

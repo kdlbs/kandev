@@ -1,3 +1,6 @@
+import type { TaskPriority } from "@/lib/types/http";
+export type { TaskPriority } from "@/lib/types/http";
+
 /**
  * Local task types for office task detail.
  * These will be replaced by backend-generated types once Wave 3A lands.
@@ -11,8 +14,6 @@ export type TaskStatus =
   | "done"
   | "cancelled"
   | "blocked";
-
-export type TaskPriority = "critical" | "high" | "medium" | "low";
 
 export type TaskRunStatus = "queued" | "claimed" | "finished" | "failed" | "cancelled";
 
@@ -103,6 +104,8 @@ export type RunError = {
   failedAt: string;
   /** Adapter-validated provider remediation URL from last_agent_error metadata. */
   remediationUrl?: string;
+  failureCode?: string;
+  failureDetails?: string;
 };
 
 export type TaskLabelLocal = {

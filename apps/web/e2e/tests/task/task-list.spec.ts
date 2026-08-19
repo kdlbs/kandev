@@ -69,10 +69,12 @@ test.describe("Task List", () => {
       hasText: "Hierarchy Child Task",
     });
 
+    // Wait for the filtered list to settle before reading row attributes. SSR
+    // and the client list can briefly overlap while the search result mounts.
+    await expect(parentRow).toHaveCount(1, { timeout: 5000 });
+    await expect(childRow).toHaveCount(1, { timeout: 5000 });
     await expect(parentRow).toHaveAttribute("data-level", "0", { timeout: 5000 });
     await expect(childRow).toHaveAttribute("data-level", "1", { timeout: 5000 });
-    await expect(parentRow).toHaveCount(1);
-    await expect(childRow).toHaveCount(1);
     await expect(taskList.getByTestId("tasks-list-row-title")).toHaveText([
       "Hierarchy Parent Task",
       "Hierarchy Child Task",

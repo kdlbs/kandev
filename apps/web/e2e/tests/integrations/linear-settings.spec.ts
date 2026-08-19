@@ -182,6 +182,7 @@ test.describe("Linear settings", () => {
     });
 
     await apiClient.mockLinearSetAuthHealth({
+      workspaceId: seedData.workspaceId,
       ok: false,
       error: "rate limited",
     });

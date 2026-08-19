@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Switch } from "@kandev/ui/switch";
 import { useTranslation } from "react-i18next";
+import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 import { settingsWithDockerAcknowledgement } from "@/hooks/domains/system/use-storage-maintenance";
 import type { StorageCapabilities, StorageMaintenanceSettings } from "@/lib/types/system";
 import { DedicatedDockerDialog, ExternalGoCacheDialog } from "./storage-confirmation-dialogs";
@@ -504,8 +505,10 @@ export function StoragePolicyCard({
   return (
     <section className="min-w-0 space-y-4" data-testid="storage-policy-card">
       <div>
-        <h2 className="text-base font-medium">{t("system:storagePolicyTitle")}</h2>
-        <p className="text-xs text-muted-foreground">{t("system:storagePolicyDescription")}</p>
+        <h2 className={SETTINGS_TYPOGRAPHY.sectionTitle}>{t("system:storagePolicyTitle")}</h2>
+        <p className={SETTINGS_TYPOGRAPHY.sectionDescription}>
+          {t("system:storagePolicyDescription")}
+        </p>
       </div>
       <div className="space-y-3">
         <ScheduleSection

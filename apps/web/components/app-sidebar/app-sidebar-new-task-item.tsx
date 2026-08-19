@@ -16,6 +16,8 @@ import { IMPROVE_KANDEV_WORKSPACE_NAME } from "@/components/improve-kandev-dialo
 import { linkToTask } from "@/lib/links";
 import type { Task } from "@/lib/types/http";
 import { subscribeNewTaskCreationRequests } from "@/lib/desktop/new-task-request";
+import { selectQuickChatHasUnseenIdle } from "@/lib/state/slices/ui/quick-chat-unseen-selectors";
+import { AppSidebarWorkspaceActions } from "./app-sidebar-workspace-actions";
 
 // The Office "New issue" dialog only renders on `/office` routes, but this item
 // lives in the global sidebar (every page). Lazy-load it so its office-only
@@ -37,22 +39,24 @@ function useNewTaskCreationRequest(workspaceId: string | null, openDialog: () =>
   }, [workspaceId, openDialog]);
 }
 
-const ROW_ACTION_INSET_CLASS = "pr-16";
 type RowActionButtonProps = {
   icon: TablerIcon;
   label: string;
   testId: string;
+  dot?: boolean;
   onClick: () => void;
 };
 
-function RowActionButton({ icon: Icon, label, testId, onClick }: RowActionButtonProps) {
+function RowActionButton({
+  icon: Icon,
+  label,
+  testId,
+  onClick,
+  dot = false,
+}: RowActionButtonProps) {
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const hoveredRef = useRef(false);
-
   const handleTooltipOpenChange = (nextOpen: boolean) => {
-    // Focus is restored to this action after Quick Terminal closes. Keep the
-    // tooltip pointer-driven so that accessibility focus does not leave a
-    // stale popover behind the dialog.
     if (nextOpen && !hoveredRef.current) return;
     setTooltipOpen(nextOpen);
   };
@@ -79,7 +83,16 @@ function RowActionButton({ icon: Icon, label, testId, onClick }: RowActionButton
           data-testid={testId}
           className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted hover:text-foreground cursor-pointer"
         >
-          <Icon className="h-3.5 w-3.5" />
+          <span className="relative flex">
+            <Icon className="h-3.5 w-3.5" />
+            {dot && (
+              <span
+                aria-hidden="true"
+                className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-background"
+                data-testid="quick-chat-unseen-dot"
+              />
+            )}
+          </span>
         </button>
       </TooltipTrigger>
       <TooltipContent side="right">{label}</TooltipContent>
@@ -166,6 +179,12 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const inOffice = useInOffice();
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
+  const quickChatHasUnseenIdle = useAppStore((state) =>
+    selectQuickChatHasUnseenIdle(state, workspaceId),
+  );
+  const quickChatLabel = t(
+    quickChatHasUnseenIdle ? "sidebar:quickChatUnseen" : "sidebar:quickChat",
+  );
   const handleOpenQuickTerminal = useQuickTerminalLauncher(workspaceId);
   const [open, setOpen] = useState(false);
   const isImproveWorkspace = activeWorkspace?.name === IMPROVE_KANDEV_WORKSPACE_NAME;
@@ -180,7 +199,6 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   useNewTaskCreationRequest(workspaceId, handleOpenNewTask);
 
   const canOpenRowActions = !collapsed && !!workspaceId;
-  const actionInsetClass = canOpenRowActions ? ROW_ACTION_INSET_CLASS : undefined;
   const handleRegularTaskCreated = useCallback(
     (
       task: Task,
@@ -201,7 +219,7 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
 
   return (
     <>
-      <div className="relative">
+      <div className="flex min-w-0 items-center gap-1">
         <AppSidebarNavItem
           icon={IconSquarePlus}
           label={t("sidebar:newTask")}
@@ -209,10 +227,10 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
           collapsed={collapsed}
           disabled={!workspaceId}
           testId="create-task-button"
-          className={actionInsetClass}
+          className={!collapsed ? "min-w-0 flex-1" : undefined}
         />
         {canOpenRowActions && (
-          <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 sidebar-fade-in">
+          <div className="flex shrink-0 items-center gap-1 sidebar-fade-in">
             <RowActionButton
               icon={IconTerminal2}
               label={t("sidebar:quickTerminal")}
@@ -221,9 +239,15 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
             />
             <RowActionButton
               icon={IconMessageCircle}
-              label={t("sidebar:quickChat")}
+              label={quickChatLabel}
               testId="sidebar-quick-chat-shortcut"
               onClick={handleOpenQuickChat}
+              dot={quickChatHasUnseenIdle}
+            />
+            <AppSidebarWorkspaceActions
+              workspaceId={workspaceId}
+              workspaceLabel={activeWorkspace?.name}
+              presentation="desktop"
             />
           </div>
         )}

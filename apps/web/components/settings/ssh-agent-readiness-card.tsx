@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
@@ -14,6 +14,8 @@ import { probeSSHAgents, probeSSHShells } from "@/lib/api/domains/ssh-api";
 import type { SSHAgentReadinessRow } from "@/lib/types/http-ssh";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 export interface SSHAgentReadinessCardProps {
   executorId: string;
@@ -185,28 +187,24 @@ export function SSHAgentReadinessCard({
 
   return (
     <SettingsCard isDirty={shellDirty} data-testid="ssh-agent-readiness-card">
-      <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <CardTitle>{t("executors:sshAvailableAgents")}</CardTitle>
-            <CardDescription>
-              {/* $PATH is a shell variable name, interpolated so the
-                  pseudo-locale cannot transliterate it. */}
-              {t("executors:sshAvailableAgentsDescription", { pathVar: "$PATH" })}
-            </CardDescription>
-          </div>
+      <SettingsCardHeader
+        title={t("executors:sshAvailableAgents")}
+        description={t("executors:sshAvailableAgentsDescription", { pathVar: "$PATH" })}
+        actions={
           <Button
             variant="outline"
             size="sm"
             onClick={refresh}
             disabled={loading}
             data-testid="ssh-agent-readiness-probe"
-            className="cursor-pointer shrink-0"
+            className={settingsActionClassName("cursor-pointer")}
           >
             {loading ? <IconLoader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
             {hasProbed ? t("executors:sshReprobe") : t("executors:sshProbeAgents")}
           </Button>
-        </div>
+        }
+      />
+      <div className="px-4">
         <ShellSelector
           shell={displayShell}
           shells={shells}
@@ -215,7 +213,7 @@ export function SSHAgentReadinessCard({
           onChange={handleShellChange}
           isDirty={shellDirty}
         />
-      </CardHeader>
+      </div>
       <CardContent>
         <ReadinessContent error={error} hasProbed={hasProbed} rows={rows} />
       </CardContent>

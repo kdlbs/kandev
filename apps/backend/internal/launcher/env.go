@@ -10,6 +10,7 @@ import (
 
 const healthTokenBytes = 32
 const desktopNativeNotificationsEnabled = "true"
+const backendPIDFileEnv = "KANDEV_BACKEND_PID_FILE"
 
 func newHealthToken() (string, error) {
 	token := make([]byte, healthTokenBytes)
@@ -64,6 +65,16 @@ func upsertEnv(env []string, key, value string) []string {
 		}
 	}
 	return append(env, prefix+value)
+}
+
+func processEnvValue(env []string, key string) string {
+	prefix := key + "="
+	for _, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			return strings.TrimPrefix(item, prefix)
+		}
+	}
+	return ""
 }
 
 func setEnvIfUnset(env []string, key, value string) []string {

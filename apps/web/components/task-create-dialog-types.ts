@@ -2,6 +2,7 @@ import type React from "react";
 import type {
   LocalRepository,
   Repository,
+  RepositorySet,
   Executor,
   Task,
   CreateTaskResponse,
@@ -541,6 +542,22 @@ export type DialogFormBodyProps = {
   onToggleFreshBranch: (enabled: boolean) => void;
   onToggleNoRepository?: () => void;
   onWorkspacePathChange: (value: string) => void;
+  /** Repository sets available in this workspace, and how to apply or define one. */
+  repositorySets?: {
+    sets: RepositorySet[];
+    onApply: (set: RepositorySet) => void;
+    /**
+     * Present when the current selection can be saved as a new set. Null when
+     * there is no workspace-repository row to save, so the action is never a
+     * dead end.
+     */
+    save?: {
+      workspaceId: string;
+      rows: TaskRepoRow[];
+      open: boolean;
+      setOpen: (open: boolean) => void;
+    } | null;
+  };
   localRepositoryCreation?: {
     executorSelection:
       | import("@/components/task-create-dialog-handlers").DirectLocalExecutorSelection

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
@@ -65,11 +66,40 @@ func (a *WorkflowSwitcherAdapter) SwitchTaskWorkflow(
 		}
 		resolvedStepID = resolved
 	}
-	if err := a.Mover.AddTaskToWorkflow(ctx, taskID, newWorkflowID, resolvedStepID, 0); err != nil {
+	attachCtx := steptelemetry.WithAttribution(ctx, workflowAttachedAttribution(ctx))
+	if err := a.Mover.AddTaskToWorkflow(attachCtx, taskID, newWorkflowID, resolvedStepID, 0); err != nil {
 		return "", fmt.Errorf("update task %s to workflow %s/%s: %w",
 			taskID, newWorkflowID, resolvedStepID, err)
 	}
 	return resolvedStepID, nil
+}
+
+// workflowAttachedAttribution is this adapter's ledger row attribution: the
+// trigger is always workflow_attached (SwitchTaskWorkflow is that trigger's
+// sole production meaning), and the actor prefers an explicit attribution
+// already on ctx over recomputing one. The engine's SwitchWorkflowCallback
+// (this adapter's sole caller) sets one carrying the causal session's ID
+// before calling here, since a switch_workflow action is always genuinely
+// caused by a session's turn — the authn-seam fallback below would
+// otherwise silently record actor_kind=system for a session-caused
+// transition, because an engine-internal ctx carries no authenticated
+// identity. The fallback still exists for any future caller that doesn't
+// set attribution.
+func workflowAttachedAttribution(ctx context.Context) steptelemetry.Attribution {
+	if preset := steptelemetry.FromContext(ctx); preset.ActorKind != steptelemetry.ActorUnknown {
+		return steptelemetry.Attribution{
+			Trigger:   steptelemetry.TriggerWorkflowAttached,
+			ActorKind: preset.ActorKind,
+			ActorID:   preset.ActorID,
+			SessionID: preset.SessionID,
+		}
+	}
+	actorKind, actorID := steptelemetry.HumanOrSystemActor(ctx)
+	return steptelemetry.Attribution{
+		Trigger:   steptelemetry.TriggerWorkflowAttached,
+		ActorKind: actorKind,
+		ActorID:   actorID,
+	}
 }
 
 // Compile-time interface assertion.

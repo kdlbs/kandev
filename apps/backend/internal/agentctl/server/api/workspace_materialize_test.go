@@ -19,6 +19,16 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+func TestContributionDestinationPushURLsMatchAcceptsRepeatedTarget(t *testing.T) {
+	targetURL := "https://github.com/agent/kandev.git"
+	if !contributionDestinationPushURLsMatch(targetURL+"\n"+targetURL, targetURL) {
+		t.Fatal("repeated identical contribution push URLs were rejected")
+	}
+	if contributionDestinationPushURLsMatch(targetURL+"\nhttps://github.com/other/kandev.git", targetURL) {
+		t.Fatal("mixed contribution push URLs were accepted")
+	}
+}
+
 func TestMaterializeRepository_ClonesIntoWorkspaceDestination(t *testing.T) {
 	origin := createMaterializeOrigin(t)
 	workDir := t.TempDir()

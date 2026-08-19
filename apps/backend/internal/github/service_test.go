@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -949,6 +950,121 @@ func TestSyncTaskPR_SecondIdenticalSyncNoEvent(t *testing.T) {
 	}
 	if got := eb.publishedCount(); got != 1 {
 		t.Errorf("expected still 1 event after identical second sync, got %d", got)
+	}
+}
+
+func TestSyncTaskPR_EquivalentRESTAndGraphQLStatusNoSecondEvent(t *testing.T) {
+	svc, store, eb := setupSyncTest(t)
+	ctx := context.Background()
+	createdAt := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(time.Hour)
+	pr := &PR{
+		Number:         1,
+		Title:          "Same status",
+		URL:            "https://github.com/owner/repo/pull/1",
+		HTMLURL:        "https://github.com/owner/repo/pull/1",
+		State:          "open",
+		HeadBranch:     "feat",
+		HeadSHA:        "abc",
+		BaseBranch:     "main",
+		AuthorLogin:    "alice",
+		RepoOwner:      "owner",
+		RepoName:       "repo",
+		Mergeable:      true,
+		MergeableState: "clean",
+		Additions:      3,
+		Deletions:      1,
+		CreatedAt:      createdAt,
+		UpdatedAt:      updatedAt,
+	}
+	restStatus := newPRStatus(
+		pr,
+		[]PRReview{{Author: "alice", State: reviewStateApproved, CreatedAt: updatedAt}},
+		[]CheckRun{{Status: checkStatusCompleted, Conclusion: checkConclusionSuccess}},
+	)
+	raw := &batchedPRResult{
+		State:       "OPEN",
+		Title:       pr.Title,
+		URL:         pr.URL,
+		HeadRefName: pr.HeadBranch,
+		BaseRefName: pr.BaseBranch,
+		HeadRefOid:  pr.HeadSHA,
+		Additions:   pr.Additions,
+		Deletions:   pr.Deletions,
+		CreatedAt:   pr.CreatedAt,
+		UpdatedAt:   pr.UpdatedAt,
+	}
+	raw.Author.Login = pr.AuthorLogin
+	raw.Mergeable = "MERGEABLE"
+	raw.MergeStatus = "CLEAN"
+	raw.Reviews.Nodes = []reviewNode{{State: "APPROVED"}}
+	raw.Reviews.Nodes[0].Author.Login = "alice"
+	raw.Reviews.Nodes[0].SubmittedAt = updatedAt
+	raw.Commits.Nodes = []struct {
+		Commit struct {
+			StatusCheckRollup *struct {
+				State string `json:"state"`
+			} `json:"statusCheckRollup"`
+		} `json:"commit"`
+	}{{}}
+	raw.Commits.Nodes[0].Commit.StatusCheckRollup = &struct {
+		State string `json:"state"`
+	}{State: "SUCCESS"}
+	graphqlStatus := convertBatchedPRResult(raw, "owner", "repo", 1)
+	if graphqlStatus.ChecksState != restStatus.ChecksState {
+		t.Fatalf("GraphQL checks state = %q, REST = %q", graphqlStatus.ChecksState, restStatus.ChecksState)
+	}
+	if graphqlStatus.ReviewState != restStatus.ReviewState || graphqlStatus.ReviewCount != restStatus.ReviewCount {
+		t.Fatalf("GraphQL review summary = (%q, %d), REST = (%q, %d)", graphqlStatus.ReviewState, graphqlStatus.ReviewCount, restStatus.ReviewState, restStatus.ReviewCount)
+	}
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID:     "t1",
+		Owner:      "owner",
+		Repo:       "repo",
+		PRNumber:   1,
+		PRURL:      pr.URL,
+		PRTitle:    "Old title",
+		HeadBranch: pr.HeadBranch,
+		BaseBranch: pr.BaseBranch,
+		State:      "open",
+	}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+	if err := svc.SyncTaskPR(ctx, "t1", restStatus); err != nil {
+		t.Fatalf("REST sync: %v", err)
+	}
+	if err := svc.SyncTaskPR(ctx, "t1", graphqlStatus); err != nil {
+		t.Fatalf("GraphQL sync: %v", err)
+	}
+	if got := eb.publishedCount(); got != 1 {
+		t.Fatalf("equivalent REST and GraphQL snapshots published %d events, want 1", got)
+	}
+}
+
+func TestSyncTaskPR_ChangedFields(t *testing.T) {
+	taskPR := &TaskPR{
+		State:              "open",
+		PRTitle:            "before",
+		Additions:          1,
+		Deletions:          2,
+		ReviewState:        "pending",
+		ChecksState:        "pending",
+		MergeableState:     "blocked",
+		ReviewCount:        1,
+		PendingReviewCount: 2,
+		ChecksTotal:        3,
+		ChecksPassing:      1,
+		BaseBranch:         "main",
+	}
+	status := &PRStatus{PR: &PR{Title: "after", State: "merged", Additions: 4, Deletions: 5, BaseBranch: "release", MergeableState: "clean"}, ReviewState: "approved", ChecksState: "success", ReviewCount: 2, PendingReviewCount: 0, ChecksTotal: 4, ChecksPassing: 4}
+	next := taskPRSyncState{
+		state: "merged", mergeableState: "clean", reviewCount: 2, pendingReviewCount: 0,
+		checksTotal: 4, checksPassing: 4, baseBranch: "release",
+	}
+	want := []string{"state", "pr_title", "additions", "deletions", "review_state", "checks_state", "mergeable_state", "review_count", "pending_review_count", "checks_total", "checks_passing", "base_branch"}
+	got := taskPRChangedFields(taskPR, status, next)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("taskPRChangedFields() = %#v, want %#v", got, want)
 	}
 }
 

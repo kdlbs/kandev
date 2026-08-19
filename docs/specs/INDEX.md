@@ -51,12 +51,14 @@ Product-wide capabilities that are not tied to a single feature area.
 | [plugins — agent tools](plugins/agent-tools.md) | draft |
 | [plugins — Voice extraction host prerequisites](plugins/voice-extraction-host.md) | shipped |
 | [plugins — Voice Mode leaves core](plugins/voice-extraction.md) | shipped |
+| [plugin-nav-sidebar-footer](plugin-nav-sidebar-footer/spec.md) | draft |
 | [semantic-notifications](platform/notifications.md) | shipped |
 | [workspace-git-status](platform/workspace-git-status.md) | shipped |
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |
 | [provider-error-recovery](platform/provider-error-recovery.md) | draft |
+| [duplicated-tab-stale-data](fix-duplicated-tab-stale-data/spec.md) | building |
 | [health-endpoint-version](health-endpoint-version/spec.md) | building |
 | [go-dev-launcher](go-dev-launcher/spec.md) | draft |
 
@@ -71,6 +73,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [interrupted-task-indicator](tasks/interrupted-task-indicator.md) | complete |
 | [labels](tasks/labels.md) | shipped |
 | [title-length-limit](tasks/title-length-limit.md) | complete |
+| [active clarification lifecycle](clarification-active-lifecycle/spec.md) | approved |
 | [model-unification](tasks/model-unification.md) | draft |
 | [run-scheduling](tasks/run-scheduling.md) | building |
 | [without-repositories](tasks/without-repositories.md) | draft |
@@ -101,12 +104,14 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [agent-generated-titles](tasks/agent-generated-titles.md) | approved |
 | [task-create-executor-default](tasks/task-create-executor-default.md) | approved |
 | [task-create-workflow-memory](tasks/task-create-workflow-memory.md) | approved |
+| [repository-sets](repository-sets/spec.md) | building |
 | [external-id-idempotency](tasks/external-id-idempotency/spec.md) | draft |
 | [prompt-attachments](tasks/prompt-attachments.md) | draft |
 | [sidebar-task-edit](tasks/sidebar-task-edit.md) | approved |
 | [autopilot-mode](tasks/autopilot-mode.md) | draft |
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
 | [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | building |
+| [task-step-transition-ledger](workflow/task-step-transition-ledger/spec.md) | draft |
 | [conditional-session-settings](workflow-session-settings/spec.md) | approved |
 | [prevent-agent-autostart-on-open](prevent-agent-autostart-on-open/spec.md) | draft |
 | [workflow-duplication](workflow-duplication/spec.md) | draft |
@@ -154,6 +159,7 @@ Per-workspace credentials and triage triggers for external services.
 | [creation](workspaces/creation.md) | building |
 | [deletion](workspaces/deletion.md) | shipped |
 | [local-repositories](workspaces/local-repositories.md) | shipped |
+| [worktree-branch-templates](workspaces/worktree-branch-templates.md) | building |
 | [repository-secrets](workspaces/repository-secrets.md) | shipped |
 | [secret-scope-transfer](workspaces/secret-scope-transfer.md) | shipped |
 
@@ -170,13 +176,16 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 
 | Spec | Status |
 |---|---|
+| [workspace-active-first-order](ui/workspace-active-first-order.md) | shipped |
 | [ci-pr-automation](ui/ci-pr-automation.md) | building |
 | [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
 | [github-saved-query-defaults](ui/github-saved-query-defaults.md) | shipped |
+| [pr-detail-header-width](pr-detail-header-width/spec.md) | shipped |
 | [pr-task-status-summary](ui/pr-task-status-summary.md) | shipped |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [resizable-markdown-tables](ui/resizable-markdown-tables.md) | building |
 | [transcript-auto-scroll](ui/transcript-auto-scroll.md) | building |
+| [clarification-context](ui/clarification-context.md) | shipped |
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
 | [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |
 | [acp-model-configuration-summary](ui/acp-model-configuration-summary.md) | shipped |
@@ -190,7 +199,9 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [sidebar-task-completion-icons](ui/sidebar-task-completion-icons.md) | shipped |
 | [sidebar-queued-prompt-count](ui/sidebar-queued-prompt-count.md) | shipped |
 | [session-tab-delete-feedback](ui/session-tab-delete-feedback.md) | shipped |
+| [terminal-close-feedback](ui/terminal-close-feedback.md) | shipped |
 | [message-favorite-star-mobile-size](ui/message-favorite-star-mobile-size.md) | shipped |
+| [message-metadata-overflow](ui/message-metadata-overflow.md) | shipped |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
 | [subagent-observability](ui/subagent-observability.md) | building |
 | [entity-reference-composer](ui/entity-reference-composer.md) | draft |
@@ -203,6 +214,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [message-queue-send-now](ui/message-queue-send-now.md) | shipped |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
 | [settings-discovery](ui/settings-discovery.md) | shipped |
+| [settings-typography](settings-typography/spec.md) | draft |
 | [executor-settings-card-spacing](ui/executor-settings-card-spacing.md) | shipped |
 | [quick-chat-elevation](ui/quick-chat-elevation.md) | building |
 | [transcript-navigation-settings](ui/transcript-navigation-settings.md) | shipped |
@@ -222,6 +234,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [external-vcs-file-links](ui/external-vcs-file-links.md) | shipped |
 | [task-listing-display-preferences](ui/task-listing-display-preferences.md) | shipped |
 | [sidebar-archived-filter](ui/sidebar-archived-filter.md) | draft |
+| [sidebar-last-activity-sort](ui/sidebar-last-activity-sort.md) | draft |
 | [task-workspace-content-search](ui/task-workspace-content-search.md) | shipped |
 | [file-tree-chat-context](ui/file-tree-chat-context.md) | shipped |
 | [task-review-shortcut](ui/task-review-shortcut.md) | approved |
@@ -232,6 +245,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [context-window reset freshness](context-window-reset-freshness/spec.md) | shipped |
 | [cancel-turn-progress](ui/cancel-turn-progress.md) | approved |
 | [agent-todo-list-panel](ui/agent-todo-list-panel.md) | shipped |
+| [prompt-history-panel](ui/prompt-history-panel.md) | draft |
 
 ## system-page/ — operational diagnostics & maintenance UI
 
@@ -253,9 +267,12 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [mock-agent-slow-duration](mock-agent-slow-duration/spec.md) | shipped |
 | [session-subscription-recovery](session-subscription-recovery/spec.md) | draft |
 | [npm-nightly-channel](npm-nightly-channel/spec.md) | shipped |
+| [scoop-release-automation](scoop-release-automation/spec.md) | shipped |
+| [release-pr-queue-bypass](release-pr-queue-bypass/spec.md) | shipped |
 | [agent-resume-runtime-recovery](agent-resume-runtime-recovery/spec.md) | shipped |
 | [agent-stall-recovery](agent-stall-recovery/spec.md) | approved |
 | [mcp-session-observability](mcp-session-observability/spec.md) | approved |
+| [subagent-context-persistence](subagent-context-persistence/spec.md) | draft |
 | [auth](auth/spec.md) | building |
 | [create-local-repository](create-local-repository/spec.md) | shipped |
 | [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |
@@ -271,15 +288,18 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [claude-fork-review-allowlist](claude-fork-review-allowlist/spec.md) | building |
 | [workflow-settings-autosave](workflow-settings-autosave/spec.md) | archived; superseded by settings-manual-save |
 | [mobile-quick-chat-topbar](mobile-quick-chat-topbar/spec.md) | building |
+| [quick-chat-idle-dot](quick-chat-idle-dot/spec.md) | draft |
 | [native-code-review](native-code-review/spec.md) | building |
 | [missing-task-route-recovery](missing-task-route-recovery/spec.md) | draft |
 | [browser-inspect-annotations-save](browser-inspect-annotations-save/spec.md) | shipped |
 | [automations-pr-merged-trigger](automations-pr-merged-trigger/spec.md) | draft |
 | [automation-runs-delete-all-by-status](automation-runs-delete-all-by-status/spec.md) | draft |
 | [no-silent-model-fallback](no-silent-model-fallback/spec.md) | approved |
-| [e2e-duration-aware-sharding](e2e-duration-aware-sharding/spec.md) | implemented |
+| [portable-agent-configuration](portable-agent-configuration/spec.md) | draft |
+| [e2e-duration-aware-sharding](e2e-duration-aware-sharding/spec.md) | shipped |
 | [board-step-visibility-filter](board-step-visibility-filter/spec.md) | draft |
 | [shutdown-turn-failure-suppression](shutdown-turn-failure-suppression/spec.md) | draft |
+| [executor-profile-env-precedence](executor-profile-env-precedence/spec.md) | building |
 
 ---
 

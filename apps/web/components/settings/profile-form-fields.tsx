@@ -7,7 +7,6 @@ import type { SelectConfigOption } from "@/components/model-config-selector";
 import { NoAuthPanel, ProbingPanel } from "@/components/settings/profile-status-panels";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
 import { Skeleton } from "@kandev/ui/skeleton";
 import { Switch } from "@kandev/ui/switch";
 import { useProfileModelCapabilities } from "@/hooks/domains/settings/use-profile-model-capabilities";
@@ -36,6 +35,10 @@ import {
   ModelPicker,
   ModePicker,
 } from "@/components/settings/profile-model-fields";
+import {
+  SettingsFieldDescription,
+  SettingsFieldLabel,
+} from "@/components/settings/settings-typography";
 import type {
   CLIFlag,
   CommandEntry,
@@ -45,8 +48,6 @@ import type {
   PermissionSetting,
   PassthroughConfig,
 } from "@/lib/types/http";
-
-const MUTED_TEXT_CLASS = "text-xs text-muted-foreground";
 
 export type ProfileFormData = {
   name: string;
@@ -135,15 +136,14 @@ function PermissionToggleRow({
       data-testid={isDanger ? "permission-auto-approve-danger" : `permission-toggle-${settingKey}`}
     >
       <div className={`flex-1 min-w-0 ${compact && !isDanger ? "space-y-0.5" : "space-y-1"}`}>
-        <Label htmlFor={switchId} className={`flex items-center gap-1.5 ${labelCls ?? ""}`}>
+        <SettingsFieldLabel
+          htmlFor={switchId}
+          className={`flex items-center gap-1.5 ${labelCls ?? ""}`}
+        >
           {isDanger && <IconAlertTriangle className="size-4 shrink-0 text-destructive" />}
           {setting.label}
-        </Label>
-        <p
-          className={compact ? "text-[10px] text-muted-foreground leading-tight" : MUTED_TEXT_CLASS}
-        >
-          {setting.description}
-        </p>
+        </SettingsFieldLabel>
+        <SettingsFieldDescription>{setting.description}</SettingsFieldDescription>
       </div>
       <Switch id={switchId} size={switchSize} checked={checked} onCheckedChange={onCheckedChange} />
     </div>
@@ -188,10 +188,8 @@ function PermissionToggles({
         {passthroughConfig?.supported && (
           <div className="flex items-center justify-between gap-2">
             <div className="space-y-0.5">
-              <Label className="text-xs">{passthroughConfig.label}</Label>
-              <p className="text-[10px] text-muted-foreground leading-tight">
-                {passthroughConfig.description}
-              </p>
+              <SettingsFieldLabel className="text-xs">{passthroughConfig.label}</SettingsFieldLabel>
+              <SettingsFieldDescription>{passthroughConfig.description}</SettingsFieldDescription>
             </div>
             <Switch
               size={switchSize}
@@ -234,8 +232,8 @@ function PermissionToggles({
       {passthroughConfig?.supported && (
         <div className="flex items-center justify-between rounded-md border p-3">
           <div className="space-y-1">
-            <Label>{passthroughConfig.label}</Label>
-            <p className={MUTED_TEXT_CLASS}>{passthroughConfig.description}</p>
+            <SettingsFieldLabel>{passthroughConfig.label}</SettingsFieldLabel>
+            <SettingsFieldDescription>{passthroughConfig.description}</SettingsFieldDescription>
           </div>
           <Switch
             checked={profile.cli_passthrough}
@@ -282,9 +280,9 @@ function CapabilitiesRow(props: CapabilitiesRowProps) {
   if (props.isLoading && props.models.length === 0) {
     return (
       <div className={gapCls}>
-        <Label className={props.isCompact ? MUTED_TEXT_CLASS : undefined}>
+        <SettingsFieldLabel className={props.isCompact ? "text-xs" : undefined}>
           {t("agents:startModel")}
-        </Label>
+        </SettingsFieldLabel>
         <Skeleton className="h-7 w-full" />
       </div>
     );
@@ -332,7 +330,7 @@ function CapabilitiesRowContent({
   const { t } = useTranslation();
   const hasModes = modes.length > 0;
   const activeMode = findActiveMode(modes, profile.mode, currentModeId);
-  const labelCls = isCompact ? MUTED_TEXT_CLASS : undefined;
+  const labelCls = isCompact ? "text-xs" : undefined;
   const gapCls = isCompact ? "space-y-1.5" : "space-y-2";
 
   return (
@@ -343,7 +341,7 @@ function CapabilitiesRowContent({
           data-settings-dirty={profileModelIsDirty(profile, baselineProfile)}
           data-settings-dirty-level="container"
         >
-          <Label className={labelCls}>{t("agents:startModel")}</Label>
+          <SettingsFieldLabel className={labelCls}>{t("agents:startModel")}</SettingsFieldLabel>
           <ModelPicker
             profile={profile}
             models={models}
@@ -361,7 +359,7 @@ function CapabilitiesRowContent({
             data-settings-dirty={profileModeIsDirty(profile, baselineProfile)}
             data-settings-dirty-level="container"
           >
-            <Label className={labelCls}>{t("agents:startMode")}</Label>
+            <SettingsFieldLabel className={labelCls}>{t("agents:startMode")}</SettingsFieldLabel>
             <ModePicker
               profile={profile}
               modes={modes}
@@ -378,7 +376,9 @@ function CapabilitiesRowContent({
         isLoading={configIsLoading}
         onRetry={onRetryConfig}
       />
-      {activeMode?.description && <p className={MUTED_TEXT_CLASS}>{activeMode.description}</p>}
+      {activeMode?.description && (
+        <SettingsFieldDescription>{activeMode.description}</SettingsFieldDescription>
+      )}
       {commands.length > 0 && <CommandsButton commands={commands} />}
       <CapabilityStatusMessage status={status} />
     </div>
@@ -402,7 +402,7 @@ function NameField({
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="flex-1 space-y-2">
-        <Label>{t("agents:profileName")}</Label>
+        <SettingsFieldLabel>{t("agents:profileName")}</SettingsFieldLabel>
         <Input
           data-testid="profile-name-input"
           value={profile.name}
@@ -560,7 +560,7 @@ function ProfileFormFooter({
           models={models}
           configOptions={configOptions}
           baselineProfile={baselineProfile}
-          labelCls={isCompact ? MUTED_TEXT_CLASS : undefined}
+          labelCls={isCompact ? "text-xs" : undefined}
           gapCls={isCompact ? "space-y-1.5" : "space-y-2"}
           onChange={onChange}
         />

@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { IconRefresh } from "@tabler/icons-react";
 import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { updateAgentProfile, getAgentUtilization } from "@/lib/api/domains/office-api";
 import type { AgentProfile, AgentRole, ProviderUsage } from "@/lib/state/slices/office/types";
 import { UtilizationBars } from "@/app/office/components/utilization-bars";
@@ -224,7 +225,7 @@ const FALLBACK_EXECUTOR_TYPES = [
 
 export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
   const { t } = useTranslation();
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useAppStore(selectOfficeAgentProfiles);
   const meta = useAppStore((s) => s.office.meta);
   const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
 
@@ -255,7 +256,7 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
         maxConcurrentSessions: maxConcurrent,
         executorPreference: executorType ? { type: executorType } : undefined,
       } as Partial<AgentProfile>);
-      updateStore(agent.id, {
+      updateStore(agent.workspaceId, agent.id, {
         name,
         role,
         budgetMonthlyCents: Math.round(budget * 100),
@@ -269,7 +270,7 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
     } finally {
       setSaving(false);
     }
-  }, [agent.id, name, role, budget, maxConcurrent, executorType, updateStore]);
+  }, [agent.id, agent.workspaceId, name, role, budget, maxConcurrent, executorType, updateStore]);
 
   const reportsToAgent = agents.find((a) => a.id === agent.reportsTo);
 

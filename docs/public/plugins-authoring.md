@@ -240,7 +240,9 @@ import type { PluginHostApi, PluginRegistry } from "@kandev/plugin-sdk";
 ```
 
 Official code-host plugins use `host.context` for provider-neutral workspace,
-task-creation, and exact repository-identity reads. If a required read is
+task-creation, and exact repository-identity reads. `getWorkspaceIds()` and
+`subscribeWorkspaces()` let a plugin republish workspace-scoped integration
+state after load or when the workspace list changes. If a required read is
 missing, extend this typed context contract; do not reverse-engineer Zustand
 slice shapes in a released plugin.
 
@@ -249,12 +251,12 @@ slice shapes in a released plugin.
 | Surface                     | Location and input                                                                                                                                                                                                                                                                                     | Manifest requirement                                                   | Cleanup/lifecycle                                                                                                                                                                                               | Small example                                                                                                       |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | registerRoute               | registry.registerRoute(path, Component, options?); exact SPA path; options.topbar defaults to host chrome or false for full-bleed                                                                                                                                                                      | Active ui.bundle                                                       | Route is removed on disable/uninstall; use destroy for subscriptions                                                                                                                                            | registry.registerRoute("/acme", Page, { topbar: { title: "Acme" } })                                                |
-| registerNavItem             | { id, label, path, icon?, section? }; section is main, integrations, or accepted-but-not-rendered settings                                                                                                                                                                                             | Active ui.bundle                                                       | Nav item is revoked and removed from desktop/phone navigation                                                                                                                                                   | registry.registerNavItem({ id: "home", label: "Acme", path: "/acme", icon: "chart" })                               |
+| registerNavItem             | { id, label, path, icon?, section? }; section is main, integrations, sidebar-footer (sidebar footer icon row, subject to an inline budget past which the item moves to the footer's overflow menu; and phone menu Utilities group, uncapped), or accepted-but-not-rendered settings                                                                                                                          | Active ui.bundle                                                       | Nav item is revoked and removed from desktop/phone navigation                                                                                                                                                   | registry.registerNavItem({ id: "home", label: "Acme", path: "/acme", icon: "chart" })                               |
 | registerSettingsRoute       | registerSettingsRoute(fullPath, Component) with an exact path under /settings/plugins/<id>/...; settings shell supplies chrome                                                                                                                                                                         | Active ui.bundle                                                       | Route is removed on disable/uninstall                                                                                                                                                                           | registry.registerSettingsRoute("/settings/plugins/acme/health", HealthPage)                                         |
 | registerComponent           | registerComponent(slot, Component); component receives { slotProps?: unknown }                                                                                                                                                                                                                         | Active ui.bundle                                                       | Every registration is owner-tracked, error-isolated, and bulk-revoked                                                                                                                                           | registry.registerComponent("task-sidebar", Panel)                                                                   |
 | registerWsHandler           | registerWsHandler(action, handler(payload)); receives actions bridged from lib/ws                                                                                                                                                                                                                      | Active ui.bundle                                                       | Handler is removed on disable/uninstall; tolerate duplicate/replayed actions                                                                                                                                    | registry.registerWsHandler("acme.updated", renderUpdate)                                                            |
 | registerKeybinding          | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo                                                                                                                                                                                  | ui.bundle and ui.keybindings[]                                         | Handler is removed on disable/uninstall; core shortcuts win, and editable targets are skipped unless that entry set ui.keybindings[].allow_in_editor                                                            | registry.registerKeybinding("open-panel", () => host.openModal(...))                                                |
-| registerIntegrationSettings | One provider-owned settings component mounted inside Settings > Integrations                                                                                                                                                                                                                           | Active ui.bundle                                                       | Registration is exclusive by id and revoked on unload; host owns workspace selection and settings navigation                                                                                                    | registry.registerIntegrationSettings({ id: "acme", ... })                                                           |
+| registerIntegrationSettings | One provider-owned settings component with an optional action mounted in the detail header and the integrations index card                                                                                                                                    | Active ui.bundle                                                       | Registration is exclusive by id and revoked on unload; host owns workspace selection and settings navigation; component and action receive the routed `workspaceId`, and action receives its `surface`                                                               | registry.registerIntegrationSettings({ id: "acme", Component, action: Toggle }) |
 | registerTranslations        | Flat English fallback plus optional Kandev locale catalogs, isolated to this plugin's namespace                                                                                                                                                                                                        | Active ui.bundle                                                       | Catalogs are replaced atomically, removed on unload, and registry consumers invalidate when the host locale changes                                                                                             | registry.registerTranslations({ en: { settings: "Settings" }, "pt-pt": { settings: "Definições" } })                |
 | registerRepositoryProvider  | Provider-owned paged/searchable repository list, URL match/inspect, branches, and optional native `createChangeRequest` transport                                                                                                                                                                      | ui.bundle and matching `repository_providers[]` id                     | Registration and in-flight callbacks are result-fenced on unload; host owns native task and Create PR UI                                                                                                        | registry.registerRepositoryProvider({ id: "acme", ...provider })                                                    |
 | registerTaskAction          | Child action inside the task menu's native Link section                                                                                                                                                                                                                                                | Active ui.bundle                                                       | Action is revoked on unload; host supplies current task/workspace and desktop/mobile presentation                                                                                                               | registry.registerTaskAction({ id: "link-pr", placement: "link", ... })                                              |
@@ -263,7 +265,9 @@ slice shapes in a released plugin.
 | registerTaskMenuAction      | { id, label, icon?, group: "edit" \| "primary", visible?(context), run(context) }; "edit" nests inside the card's Edit submenu, "primary" renders as a flat top-level item between "Move to"/"Send to workflow" and "Link"                                                                             | Active ui.bundle                                                       | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged                                                                                                                           | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "edit", run: doEnhance })                 |
 | registerTaskFilter          | { id, label, getOptions(), matches(context, selected) }; adds a client-side, multi-select filter section to the kanban board's display dropdown, alongside Workflow/Repository                                                                                                                         | Active ui.bundle                                                       | Filter is revoked on disable/uninstall; selections are ephemeral (not persisted); matches is only called for a non-empty selection, and a throw is caught, logged, and treated as non-matching                  | registry.registerTaskFilter({ id: "tags", label: "Tags", getOptions: listTagOptions, matches: taskHasSelectedTag }) |
 | host.React / host.jsx       | Shared React instance and React.createElement alias                                                                                                                                                                                                                                                    | Active ui.bundle                                                       | No cleanup; never bundle a second React/Radix runtime                                                                                                                                                           | const h = host.jsx                                                                                                  |
-| host.context                | Versioned provider-neutral reads/subscriptions for active workspace, native task creation, and exact provider repository identity                                                                                                                                                                      | Active ui.bundle                                                       | Subscriptions are generation-owned and revoked on unload; records are stable SDK shapes, not private app state                                                                                                  | const context = host.context.getTaskCreationContext(workspaceId)                                                    |
+| host.context                | Versioned provider-neutral reads/subscriptions for active workspace, all workspace ids, native task creation, and exact provider repository identity                                                                                                                                                  | Active ui.bundle                                                       | Subscriptions are generation-owned and revoked on unload; records are stable SDK shapes, not private app state                                                                                                  | const ids = host.context.getWorkspaceIds()                                                                           |
+| host.useSettingsSaveContributor | Registers one plugin-owned contributor for the native save bar; the host prefixes ids with `plugin:<pluginId>:` before shared coordination                                                                                                                                            | Active ui.bundle                                                       | Contributor lifecycle follows the rendering component; save and discard remain plugin-owned                                                                                                                   | host.useSettingsSaveContributor({ id: "credentials", revision, isDirty, save, discard })                            |
+| host.setIntegrationEnabled | Publishes one registration's live enabled value for one workspace; the value is reactive but not durable                                                                                                                                                                                         | Active ui.bundle                                                       | The host validates that `integrationId` belongs to this plugin; republish after load using `host.context.getWorkspaceIds()` and `subscribeWorkspaces()`                                                                                  | host.setIntegrationEnabled("acme", workspaceId, enabled)                                                          |
 | host.i18n                   | Plugin-scoped `locale`, imperative `t(key, options?)`, and reactive `useTranslation()`                                                                                                                                                                                                                 | A registered English catalog                                           | Locale changes re-render reactive consumers; missing active-locale messages fall back to the plugin's English catalog                                                                                           | const { t } = host.i18n.useTranslation(); t("pullRequests")                                                         |
 | host.store (legacy)         | Compatibility-only access to Kandev's private Zustand store; intentionally absent from `@kandev/plugin-sdk`                                                                                                                                                                                            | Older ui.bundle                                                        | Do not use in new or official plugins; private slices may change without plugin-API compatibility                                                                                                               | Migrate reads to host.context                                                                                       |
 | host.api.fetch / baseUrl    | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments                                                                                                                                                                                      | Active ui.bundle; backend path must be a declared webhook when relayed | Declare `webhooks[].access: authenticated` for UI-only or billable operations; requests are generation-aborted on unload                                                                                        | host.api.fetch("webhooks/inbound", { method: "POST" })                                                              |
@@ -433,26 +437,33 @@ display-only until Kandev calls the plugin again to authorize it for submission.
 registerComponent currently has these mounted slots. The source type is open
 to strings, but an unmounted name renders nowhere.
 
-| Slot                      | Mounted location                                         | slotProps                                                        |
-| ------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------- |
-| task-sidebar              | Bottom of task-detail sidebar                            | none                                                             |
-| settings-nav              | Settings navigation tree                                 | none                                                             |
-| chat-input-actions        | Task or Quick Chat composer toolbar                      | PluginComposerSlotProps                                          |
-| task-create-input-actions | Task creation composer toolbar                           | PluginComposerSlotProps                                          |
-| new-session-input-actions | New-session composer toolbar                             | PluginComposerSlotProps                                          |
-| chat-top-bar              | Session top bar                                          | { taskId, taskTitle?, workspaceId, activeSessionId, sessionIds } |
-| main-top-bar              | Home/Kanban/Tasks top bar                                | { workspaceId, workspaceLabel?, currentPage }                    |
-| app-status-bar-left       | Left side of desktop status bar or mobile status drawer  | AppStatusBarSlotProps                                            |
-| app-status-bar-right      | Right side of desktop status bar or mobile status drawer | AppStatusBarSlotProps                                            |
-| plugin-settings           | Top of this plugin's Settings > Plugins page             | { pluginId, status }; owner-scoped to the plugin being viewed    |
-| task-card-indicators      | Kanban card, beside the PR status icon                   | { taskId, workspaceId, workflowStepId }                          |
-| task-card-tags            | Kanban card, its own row below the badges row            | { taskId, workspaceId, workflowStepId }                          |
+| Slot                      | Mounted location                                          | slotProps                                                        |
+| ------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
+| task-sidebar              | Bottom of task-detail sidebar                             | none                                                             |
+| settings-nav              | Settings navigation tree                                  | none                                                             |
+| chat-input-actions        | Task or Quick Chat composer toolbar                       | PluginComposerSlotProps                                          |
+| task-create-input-actions | Task creation composer toolbar                            | PluginComposerSlotProps                                          |
+| new-session-input-actions | New-session composer toolbar                              | PluginComposerSlotProps                                          |
+| chat-top-bar              | Session top bar                                           | { taskId, taskTitle?, workspaceId, activeSessionId, sessionIds } |
+| main-top-bar              | Home/Kanban/Tasks top bar                                 | { workspaceId, workspaceLabel?, currentPage }                    |
+| app-status-bar-left       | Left side of desktop status bar or mobile status drawer   | AppStatusBarSlotProps                                            |
+| app-status-bar-right      | Right side of desktop status bar or mobile status drawer  | AppStatusBarSlotProps                                            |
+| plugin-settings           | Top of this plugin's Settings > Plugins page              | { pluginId, status }; owner-scoped to the plugin being viewed    |
+| task-card-indicators      | Kanban card, beside the PR status icon                    | { taskId, workspaceId, workflowStepId }                          |
+| task-card-tags            | Kanban card, its own row below the badges row             | { taskId, workspaceId, workflowStepId }                          |
+| sidebar-workspace-actions | Desktop New Task row or phone navigation action group, after Quick Terminal and Quick Chat | SidebarWorkspaceActionsSlotProps |
 
 AppStatusBarSlotProps is { placement, presentation, density, pathname,
 activeWorkspaceId, activeTaskId, activeSessionId }. Desktop presentation is a
 compact 24px bar; mobile presentation is an in-flow drawer, so render a
 touch-usable row. Status items can be reordered by the host; plugins do not get
 an ordering API.
+
+`SidebarWorkspaceActionsSlotProps` is `{ workspaceId, workspaceLabel?,
+presentation }`. The host uses `presentation: "desktop"` for the compact
+sidebar cluster and `presentation: "mobile"` for the phone navigation sheet.
+Mobile actions must keep their own buttons or links at least 44px in the active
+dimension and provide an accessible name.
 
 `PluginComposerSlotProps` is `{ surface, presentation, taskId, taskTitle?,
 activeSessionId, sessionIds, disabled, submittable, disabledReason?, composer }`.
@@ -1052,6 +1063,16 @@ interface IntegrationSettingsRegistration {
   description: string;
   icon?: PluginIcon;
   Component: React.ComponentType<{ workspaceId?: string }>;
+  // Optional action in the detail section header and integrations index card.
+  // The surface identifies the host location.
+  action?: React.ComponentType<IntegrationSettingsActionProps>;
+}
+
+type IntegrationSettingsActionSurface = "detail" | "index";
+
+interface IntegrationSettingsActionProps {
+  workspaceId?: string;
+  surface: IntegrationSettingsActionSurface;
 }
 
 interface PluginRouteOptions {
@@ -1082,6 +1103,8 @@ interface PluginHostApi {
   context: {
     getActiveWorkspaceId(): string | undefined;
     subscribeActiveWorkspace(listener): () => void;
+    getWorkspaceIds(): readonly string[];
+    subscribeWorkspaces(listener: (workspaceIds: readonly string[]) => void): () => void;
     getTaskCreationContext(workspaceId: string): TaskCreationContext | null;
     subscribeTaskCreationContext(workspaceId: string, listener): () => void;
     resolveRepositoryId(identity: {
@@ -1134,6 +1157,24 @@ interface PluginHostApi {
   openModal(options: PluginModalOptions): PluginModalHandle;
   // Native task change-request link workflow. See "Task link dialogs" below.
   openTaskLinkDialog(options: PluginTaskLinkDialogOptions): PluginModalHandle;
+  // Registers one plugin-owned contributor with the native settings save bar.
+  // The host prefixes the id with `plugin:<pluginId>:` before coordination.
+  useSettingsSaveContributor(contributor: SettingsSaveContributor): void;
+  // Publishes one integration registration's live enabled state for one
+  // workspace. Persist the source of truth with host.storage and republish it
+  // after load.
+  setIntegrationEnabled(integrationId: string, workspaceId: string, enabled: boolean): void;
+}
+
+interface SettingsSaveContributor {
+  id: string;
+  order?: number;
+  revision: string | number;
+  isDirty: boolean;
+  canSave?: boolean;
+  invalidReason?: string;
+  save(revision: string | number): Promise<void> | void;
+  discard(revision?: string | number): Promise<void> | void;
 }
 
 interface PluginModalOptions {
@@ -1193,6 +1234,15 @@ semantic names (`pull-request`, `pull-request-closed`, `merged`, and `filter`) s
 code-host plugins use the host's exact glyphs instead of copying SVG paths. Runtime
 components remain host-owned; do not move or duplicate them in a plugin UI package. See
 `apps/web/lib/plugins/host-api.ts` for the exact current list.
+
+Native integration settings also expose `IntegrationAuthStatusBanner`,
+`IntegrationEnabledControl`, `SettingsSection`, `SettingsCard`, and
+`WorkspaceScopedSection`. The host supplies the shared settings layout and
+save coordination; the plugin supplies provider fields and persistence.
+
+`host.utils.integrationStatusRefreshMs` is the host polling interval used by
+native integration health controls. Use it when a plugin must match that
+refresh cadence.
 
 A repository provider may implement `createChangeRequest`. Kandev keeps the native
 Create PR dialog and Git eligibility rules, pushes the selected checkout through the
@@ -1352,6 +1402,40 @@ navigation, and global/workspace routes, then wraps the plugin component in the 
 settings section. IDs must be URL-safe, cannot shadow built-in integrations, and stay
 owned until unload.
 
+### Workspace integration state and native save bar
+
+The optional `action` component and the main integration component both receive
+the `workspaceId` from the URL. The action also receives `surface`, with the
+value `"detail"` for the settings header or `"index"` for the integrations card.
+Use the workspace value for the workspace that the user is editing. Do not
+replace it with `host.context.getActiveWorkspaceId()`.
+
+`host.setIntegrationEnabled(integrationId, workspaceId, enabled)` updates the
+live **Enabled** badge for one registration. The host checks the registration
+owner and keeps the value in memory only. Store the durable value with
+`host.storage`, then publish it for every workspace after plugin load:
+
+```js
+function publishEnabled(host, integrationId, enabledByWorkspace) {
+  for (const workspaceId of host.context.getWorkspaceIds()) {
+    host.setIntegrationEnabled(
+      integrationId,
+      workspaceId,
+      enabledByWorkspace.get(workspaceId) === true,
+    );
+  }
+}
+
+const unsubscribe = host.context.subscribeWorkspaces((workspaceIds) => {
+  // Refresh durable values for new or removed workspace ids.
+});
+```
+
+Use `host.useSettingsSaveContributor` for plugin drafts that must use the
+native Save changes bar. Contributor ids are local to the plugin. The host
+adds a `plugin:<pluginId>:` prefix before it stores the contributor, so a
+plugin cannot replace a host contributor with the same local id.
+
 ### Composer actions
 
 Register `chat-input-actions`, `task-create-input-actions`, or
@@ -1449,12 +1533,18 @@ type MainTopBarSlotProps = {
   workspaceId: string | null; // workspace the top bar is showing, null on global home
   workspaceLabel?: string; // human-readable workspace name, when known
   currentPage: "kanban" | "tasks";
+  presentation: "desktop" | "mobile";
 };
 ```
 
 Because the bar is not scoped to a task, no task/session ids are provided. Like
 `chat-top-bar` it is a compact horizontal strip, so keep contributions to small
-badges or `h-7` buttons that match the native metric chips.
+badges or icon buttons. On a phone, `presentation` is `"mobile"`; the
+contribution joins the horizontally scrollable middle strip between the fixed
+Kandev link and menu button. Use `host.ui.Button` for documented icon actions.
+The host normalizes those buttons to a 32px box and their SVG icons to 16px.
+Do not add a second horizontal scroll container. Desktop contributions keep
+their existing sizing.
 
 ```js
 // inside initialize(registry, host):

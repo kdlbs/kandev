@@ -81,6 +81,13 @@ func gatewayAuthPolicy(authSvc *auth.Service, taskSvc *taskservice.Service, task
 	return gateways.AuthPolicy{
 		Enforced:     func() bool { return authSvc.Mode() != auth.ModeDisabled },
 		ResolveToken: authSvc.ResolveBearer,
+		// A restored subtree-capability identity must pass the same live
+		// account gate as cookie/PAT auth: IdentityForUser fails when the
+		// account is missing or no longer active.
+		ActiveUser: func(ctx context.Context, userID string) bool {
+			_, ok := authSvc.IdentityForUser(ctx, userID)
+			return ok
+		},
 		Subscriptions: gateways.SubscriptionAccessPolicy{
 			Task:    taskSvc.AuthorizeTaskAccess,
 			Session: taskSvc.AuthorizeSessionAccess,

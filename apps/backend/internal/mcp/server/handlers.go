@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -24,20 +25,21 @@ var askQuestionKeepAliveInterval = 20 * time.Second
 // Argument-name constants used across the ask_user_question_kandev handler.
 // Pulled out so goconst stays happy and renames stay safe.
 const (
-	promptArg          = "prompt"
-	questionsArg       = "questions"
-	optionsArg         = "options"
-	idArg              = "id"
-	titleArg           = "title"
-	labelArg           = "label"
-	descriptionArg     = "description"
-	optionIDFieldName  = "option_id"
-	questionIDFieldKey = "question_id"
-	answeredFieldKey   = "answered"
-	rejectedFieldKey   = "rejected"
-	documentArg        = "document"
-	messageArg         = "message"
-	autopilotArg       = "autopilot"
+	promptArg            = "prompt"
+	questionsArg         = "questions"
+	optionsArg           = "options"
+	idArg                = "id"
+	titleArg             = "title"
+	labelArg             = "label"
+	descriptionArg       = "description"
+	optionIDFieldName    = "option_id"
+	questionIDFieldKey   = "question_id"
+	answeredFieldKey     = "answered"
+	rejectedFieldKey     = "rejected"
+	documentArg          = "document"
+	messageArg           = "message"
+	autopilotArg         = "autopilot"
+	contextParagraphsArg = "context_paragraphs"
 )
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
@@ -261,6 +263,9 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 		}
 		if state := req.GetString("state", ""); state != "" {
 			payload["state"] = state
+		}
+		if launchPrompt := req.GetString("deferred_launch_prompt", ""); launchPrompt != "" {
+			payload["deferred_launch_prompt"] = launchPrompt
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTask, payload, &result); err != nil {
@@ -562,7 +567,7 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 			return errResult, nil
 		}
 
-		questionCtx := req.GetString("context", "")
+		questionCtx := readQuestionContext(req)
 		payload := map[string]interface{}{
 			"session_id": s.sessionID,
 			questionsArg: questions,
@@ -605,7 +610,7 @@ func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
 			"task_id":    s.taskID,
 			"session_id": s.sessionID,
 			questionsArg: questions,
-			"context":    req.GetString("context", ""),
+			"context":    readQuestionContext(req),
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAskParentQuestion, payload, &result); err != nil {
@@ -614,6 +619,14 @@ func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+func readQuestionContext(req mcp.CallToolRequest) string {
+	paragraphs := req.GetStringSlice(contextParagraphsArg, nil)
+	if len(paragraphs) > 0 {
+		return strings.Join(paragraphs, "\n\n")
+	}
+	return req.GetString("context", "")
 }
 
 // emitKeepAlivePings invokes send on every interval tick until stop is closed or
@@ -827,11 +840,11 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 	if len(out) == 0 {
 		// Nothing matched by id — surface the raw payload so the agent can still inspect it.
 		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data))
+		return mcp.NewToolResultStructured(result, string(data))
 	}
 
 	data, _ := json.MarshalIndent(out, "", "  ")
-	return mcp.NewToolResultText(string(data))
+	return mcp.NewToolResultStructured(out, string(data))
 }
 
 // simplifyAnswer normalizes the answer map. Single-choice per question, but

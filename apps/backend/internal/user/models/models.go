@@ -46,6 +46,20 @@ func NormalizeStartupPage(value string) string {
 }
 
 const (
+	LastSeenDisplayAbsolute = "absolute"
+	LastSeenDisplayRelative = "relative"
+)
+
+// NormalizeLastSeenDisplay returns the canonical last-seen display mode:
+// relative is accepted as-is, anything else is coerced to absolute.
+func NormalizeLastSeenDisplay(value string) string {
+	if value == LastSeenDisplayRelative {
+		return value
+	}
+	return LastSeenDisplayAbsolute
+}
+
+const (
 	// RoleAdmin unlocks user management and system settings mutation when
 	// authentication is enabled. It does NOT grant visibility into other
 	// users' workspaces (hard privacy isolation).
@@ -123,6 +137,7 @@ type UserSettings struct {
 	TerminalFontFamily                string                            `json:"terminal_font_family"`
 	TerminalFontSize                  int                               `json:"terminal_font_size"`
 	ChangesPanelLayout                string                            `json:"changes_panel_layout"` // "flat" | "tree"
+	LastSeenDisplay                   string                            `json:"last_seen_display"`    // "absolute" | "relative"
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`
 	AppStatusBarOrder                 AppStatusBarOrder                 `json:"app_status_bar_order"`

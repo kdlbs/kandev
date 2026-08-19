@@ -220,6 +220,18 @@ Only success resolves a link. A predecessor that fails or is cancelled leaves
 its dependents blocked with a reason naming it, and Kandev does not retry it or
 drop the link on its own.
 
+Starting a chain step by any other means consumes its recorded start, so the
+gate cannot fire a second session on a task that is already running. A start
+that fails keeps the intent, and preparing a workspace without launching an
+agent does not consume it.
+
+While a step is still waiting, `update_task_kandev` accepts
+`deferred_launch_prompt` to replace the prompt it will launch with. Use it when
+the brief written at creation time has gone stale. The rest of the recorded
+launch (agent profile, executor) is preserved. Once the task has started the
+update is rejected, because nothing would read the new prompt; send the new
+context with `message_task_kandev` instead.
+
 ### Autopilot tasks and MCP profiles
 
 Task creation accepts one optional boolean:
@@ -342,6 +354,8 @@ payloads are unchanged.
 
 `spawn_session_kandev` creates a named sibling session on the current task by default and can target another task in the same workspace. `message_task_kandev` can address a task's primary session or an explicit session ID: a running agent receives queued input, an idle/created session can be started, and a failed or cancelled session rejects the message.
 
+Without `session_id` the message goes to the task's primary session. If that primary is cancelled or failed, Kandev falls back to the newest session on the task that can still take a message, so a task with a live session stays reachable after its primary was stopped. A session named explicitly by `session_id` is never redirected. When every session is terminal the call fails and names `spawn_session_kandev`, which is the way to give the task a new session.
+
 A same-task message requires the sibling's session ID. Normal messages can cross workspaces when the sender knows the full task ID. Delivery to a running session is queued by default. When a direct child must abandon its current approach and receive replacement work now, its parent should use `message_task_kandev` with `delivery_mode: "interrupt"`; another sender receives a hard error rather than a silent downgrade, and a request that cannot dispatch safely remains queued.
 
 Use `stop_task_kandev` only when the direct child should halt without a replacement prompt. It has no session selector: one call gracefully stops every execution Kandev still observes as live across the child's active sessions, including non-primary sessions. Accepted sessions become `CANCELLED` before runtime teardown is scheduled. `status: "stopped"` confirms logical cancellation and asynchronous teardown, not operating-system process exit; a child with no live execution returns the idempotent `status: "not_running"` without changing task or session state.
@@ -428,11 +442,45 @@ An agent profile can add `stdio`, `http`, `sse`, or `streamable_http` servers wh
 
 Stdio normally starts per session and cannot be shared. Network servers can be shared or per-session. The executor's MCP policy can deny transports/server names, rewrite URLs, or inject environment. See [Agents and profiles](agents-and-profiles.md) for configuration, secret handling, and failure behavior.
 
-### Diagnose one running session
+### Inspect one running session
 
-Use the neutral plug button beside the chat composer to inspect the current session's MCP attachment report. It distinguishes configuration delivered to the agent from a connection observed by Kandev: the built-in task server becomes **Connected** after MCP initialize and **Active** after it serves `tools/list`. A third-party profile server usually remains **Delivered · connection unverified** because it connects directly to the agent rather than through Kandev. Missing observation is not a failure; red appears only for an explicit sanitized error.
+Open the **MCP servers** explorer with the button beside the chat composer. The
+explorer shows attachment status for the current session and execution. On
+desktop, it opens a wide dialog. On touch devices, it opens a full-height
+drawer.
 
-On desktop, hover or focus the button for the compact status list. On touch devices, tap its 44px target to open the same list in a bottom drawer. The report is per Kandev session and execution, so simultaneous agents in one task never share a status row. It stores only bounded, sanitized attachment facts: no MCP headers, environment values, tool arguments/results, raw ACP frames, or agent output.
+The explorer has server, tool-list, and tool-detail levels. On desktop, the
+server list stays visible beside the active level. On touch devices, select a
+server to open its tool list. Select **Back to servers** to return.
+
+Select `kandev` after Kandev serves `tools/list`. The tool list is sorted and
+scrolls independently from the explorer header. Each row shows the tool name
+and an estimated token value. Select a tool to open its description and
+arguments. Select **Back to tools** to return to the same list position.
+
+The tool page shows common object properties as argument rows. It also shows
+plain JSON for nested or composed schemas. A tool without an input schema shows
+**No arguments**. A schema that exceeds a storage limit shows **Schema too
+large to display**.
+
+Kandev stores at most 64 KiB for one input schema and 512 KiB for all schemas
+in one catalog. It stores at most 128 tools and 1,024 UTF-8 bytes for each
+description. Notices identify truncated catalogs or schemas.
+
+The `~N tokens` value uses `o200k_base` on the complete compact MCP tool JSON.
+It is an estimate, not a provider context count or billing count. The agent can
+use a different tokenizer or tool-loading format.
+
+A profile server can show **Delivered, connection unverified**. That server
+connects directly to the agent, so Kandev cannot inspect its `tools/list`
+result, descriptions, schemas, or token estimates. The explorer still shows
+safe status metadata. The built-in Kandev server becomes **Connected** after
+MCP initialize. It becomes **Active** after it serves `tools/list`. Missing
+observation is not a failure. Red appears only for an explicit sanitized error.
+
+The report is per Kandev session and execution. It stores only bounded,
+sanitized attachment facts. It does not store MCP headers, environment values,
+tool arguments or results, raw ACP frames, or agent output.
 
 </details>
 
@@ -451,14 +499,16 @@ http://127.0.0.1:<backend-port>/mcp
 
 SSE compatibility uses `/mcp/sse` with messages sent to `/mcp/message`. A reverse proxy must support long-lived streaming connections.
 
-External MCP exposes 33 tools in these groups:
+External MCP exposes 36 tools in these groups:
 
-- workspace/workflow configuration: list workspaces, workflows, repositories, and workflow steps; create, update, delete, or import workflows; create, update, delete, or reorder steps;
+- workspace/workflow configuration: list workspaces, workflows, repositories, and workflow steps; create, update, delete, import, or export workflows; create, update, delete, or reorder steps;
 - agents and profiles: list/update agents; create/delete profiles; list/update profiles; get/update profile MCP configuration;
 - executors: list executors and profiles; create, update, or delete executor profiles;
 - tasks: list, create, move, delete, archive, or update task state; list a task's sessions; and read task conversation.
 
-The settings page's static **Available tools** preview currently counts 30 and omits `list_repositories_kandev`, `import_workflow_kandev`, and `get_task_conversation_kandev`. Treat the client's live `tools/list` response from the endpoint, not that preview, as authoritative.
+`export_workflow_kandev` takes `workflow_id` and returns one version 1 `kandev_workflow` JSON document. It omits instance IDs and timestamps. Pass its JSON text unchanged as `document` to `import_workflow_kandev` when it is within the existing 1 MiB import limit.
+
+The settings page's static **Available tools** preview currently counts 30 and omits `list_repositories_kandev`, `import_workflow_kandev`, `export_workflow_kandev`, and `get_task_conversation_kandev`. Treat the client's live `tools/list` response from the endpoint, not that preview, as authoritative.
 
 In external mode, `create_task_kandev` has no current task and does not accept the `parent_id: "self"` shorthand. Its registered top-level contract asks for a repository ID, repository URL (including a supported GitHub pull request or GitLab merge request URL), or local path; workspace and workflow resolve automatically only when unambiguous. The current handler can nevertheless accept an omitted repository and create repo-less work, which is a contract/implementation mismatch rather than a supported equivalent of the regular UI's **None** option. Supply an explicit repository locator for portable clients. A resolvable agent profile is required even with `start_agent: false`; otherwise `start_agent` defaults to true. To create a subtask, pass the full ID of an existing parent.
 

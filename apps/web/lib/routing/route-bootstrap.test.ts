@@ -64,80 +64,32 @@ describe("readCookie", () => {
 });
 
 describe("resolveSettingsActiveWorkspaceId", () => {
-  const officeWorkflow = "office-workflow";
-  const officeWorkflow1 = "office-workflow-1";
-  const officeWorkflow2 = "office-workflow-2";
-  const kanbanOne = "kanban-1";
-  const kanbanTwo = "kanban-2";
+  const OFFICE = { id: "office-1", office_workflow_id: "office-workflow" };
+  const OFFICE_TWO = { id: "office-2", office_workflow_id: "office-workflow-2" };
+  const KANBAN = { id: "kanban-1", office_workflow_id: null };
+  const KANBAN_TWO = { id: "kanban-2", office_workflow_id: null };
 
-  it("falls back to a kanban workspace before an office workspace", () => {
-    expect(
-      resolveSettingsActiveWorkspaceId(
-        [
-          { id: "office-1", office_workflow_id: officeWorkflow },
-          { id: kanbanOne, office_workflow_id: null },
-        ],
-        null,
-        null,
-      ),
-    ).toBe(kanbanOne);
+  it("prefers the active workspace cookie whatever type it names", () => {
+    // Previously this resolver filtered office workspaces out. That was
+    // invisible while chrome came from the pathname; now that chrome follows
+    // the active workspace, filtering here would switch an Office user's
+    // workspace as a side effect of opening Settings.
+    expect(resolveSettingsActiveWorkspaceId([KANBAN, OFFICE], OFFICE.id, null)).toBe(OFFICE.id);
+    expect(resolveSettingsActiveWorkspaceId([OFFICE, KANBAN], KANBAN.id, null)).toBe(KANBAN.id);
   });
 
-  it("uses active cookie when it matches a kanban workspace", () => {
-    expect(
-      resolveSettingsActiveWorkspaceId(
-        [
-          { id: "office-1", office_workflow_id: officeWorkflow },
-          { id: kanbanOne, office_workflow_id: null },
-          { id: kanbanTwo, office_workflow_id: null },
-        ],
-        kanbanTwo,
-        null,
-      ),
-    ).toBe(kanbanTwo);
+  it("falls back to the stored preference when no cookie matches", () => {
+    expect(resolveSettingsActiveWorkspaceId([OFFICE, KANBAN], "ws-missing", OFFICE.id)).toBe(
+      OFFICE.id,
+    );
   });
 
-  it("falls back to settings workspace when no cookie matches", () => {
-    expect(
-      resolveSettingsActiveWorkspaceId(
-        [
-          { id: "office-1", office_workflow_id: officeWorkflow },
-          { id: kanbanOne, office_workflow_id: null },
-          { id: kanbanTwo, office_workflow_id: null },
-        ],
-        "ws-missing",
-        kanbanOne,
-      ),
-    ).toBe(kanbanOne);
+  it("falls back to the first workspace when nothing is named", () => {
+    expect(resolveSettingsActiveWorkspaceId([OFFICE, KANBAN_TWO], null, null)).toBe(OFFICE.id);
+    expect(resolveSettingsActiveWorkspaceId([KANBAN, OFFICE_TWO], null, null)).toBe(KANBAN.id);
   });
 
   it("returns null when no workspaces exist", () => {
     expect(resolveSettingsActiveWorkspaceId([], "k-1", "k-2")).toBeNull();
-  });
-
-  it("falls back to office workspace only when no kanban workspaces exist", () => {
-    expect(
-      resolveSettingsActiveWorkspaceId(
-        [
-          { id: "office-1", office_workflow_id: officeWorkflow1 },
-          { id: "office-2", office_workflow_id: officeWorkflow2 },
-        ],
-        "missing",
-        null,
-      ),
-    ).toBe("office-1");
-  });
-
-  it("returns first kanban workspace when multiple kanban options exist", () => {
-    expect(
-      resolveSettingsActiveWorkspaceId(
-        [
-          { id: kanbanOne, office_workflow_id: null },
-          { id: kanbanTwo, office_workflow_id: null },
-        ],
-        null,
-        null,
-      ),
-    ).toBe(kanbanOne);
   });
 });

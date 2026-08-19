@@ -152,6 +152,48 @@ func (c *PATClient) HasRepositoryAccess(ctx context.Context, owner, repo string)
 	return metadata.FullName != "", nil
 }
 
+// GetRepository returns the provider-authoritative repository identity and
+// permissions used by managed contribution-destination preparation.
+func (c *PATClient) GetRepository(ctx context.Context, owner, repo string) (*GitHubRepository, error) {
+	var raw githubRepositoryResponse
+	endpoint := fmt.Sprintf("/repos/%s/%s", owner, repo)
+	if err := c.get(ctx, endpoint, &raw); err != nil {
+		return nil, fmt.Errorf("get repository %s/%s: %w", owner, repo, err)
+	}
+	return projectGitHubRepository(raw), nil
+}
+
+// ListRepositoryForks lists every fork in the canonical repository's fork
+// network, including forks whose names differ from the canonical name.
+func (c *PATClient) ListRepositoryForks(ctx context.Context, owner, repo string) ([]*GitHubRepository, error) {
+	endpoint := fmt.Sprintf("/repos/%s/%s/forks?per_page=100", owner, repo)
+	forks := make([]*GitHubRepository, 0)
+	for endpoint != "" {
+		var page []githubRepositoryResponse
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, fmt.Errorf("list repository forks for %s/%s: %w", owner, repo, err)
+		}
+		for _, raw := range page {
+			forks = append(forks, projectGitHubRepository(raw))
+		}
+		endpoint = next
+	}
+	return forks, nil
+}
+
+// CreateFork creates a fork for the authenticated human automation identity.
+// GitHub may return before the fork is fully readable; the service resolver
+// performs the bounded follow-up verification.
+func (c *PATClient) CreateFork(ctx context.Context, owner, repo string) (*GitHubRepository, error) {
+	var raw githubRepositoryResponse
+	endpoint := fmt.Sprintf("/repos/%s/%s/forks", owner, repo)
+	if err := c.postJSON(ctx, endpoint, []byte(`{}`), &raw); err != nil {
+		return nil, fmt.Errorf("create fork for %s/%s: %w", owner, repo, err)
+	}
+	return projectGitHubRepository(raw), nil
+}
+
 func (c *PATClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	var raw patPR
 	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, number)
@@ -179,11 +221,27 @@ func (c *PATClient) FindPRByBranch(ctx context.Context, owner, repo, branch stri
 	if err != nil {
 		return nil, fmt.Errorf("find PR by branch %q: %w", branch, err)
 	}
-	status := statuses[graphqlBranchKey(owner, repo, branch)]
+	status := statuses.Statuses[graphqlBranchKey(owner, repo, branch)]
 	if status == nil {
 		return nil, nil
 	}
 	return status.PR, nil
+}
+
+func (c *PATClient) FindPRByHead(ctx context.Context, owner, repo, headOwner, headRepo, branch string) (*PR, error) {
+	var raw []patPR
+	head := url.QueryEscape(headOwner + ":" + branch)
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls?state=open&head=%s&per_page=100", owner, repo, head)
+	if err := c.get(ctx, endpoint, &raw); err != nil {
+		return nil, fmt.Errorf("find PR by head %q:%q: %w", headOwner, branch, err)
+	}
+	for i := range raw {
+		pr := convertPatPR(&raw[i], owner, repo)
+		if sameRepositoryIdentity(pr.HeadRepoOwner, pr.HeadRepoName, headOwner, headRepo) {
+			return pr, nil
+		}
+	}
+	return nil, nil
 }
 
 func (c *PATClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*PR, error) {
@@ -670,17 +728,36 @@ func (c *PATClient) RequestReviewers(ctx context.Context, owner, repo string, nu
 	return c.post(ctx, endpoint, jsonBody)
 }
 
-func (c *PATClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
-	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, number)
-	payload := map[string]string{}
+func (c *PATClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error) {
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge-async", owner, repo, number)
+	payload := map[string]string{"merge_action": "default"}
 	if mergeMethod != "" {
 		payload["merge_method"] = mergeMethod
 	}
 	jsonBody, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("marshal merge payload: %w", err)
+		return "", fmt.Errorf("marshal merge payload: %w", err)
 	}
-	return c.put(ctx, endpoint, jsonBody)
+	var response mergeAsyncResponse
+	if err := c.putJSON(ctx, endpoint, jsonBody, &response); err != nil {
+		var apiErr *GitHubAPIError
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusConflict ||
+			json.Unmarshal([]byte(apiErr.Body), &response) != nil || response.UUID == "" {
+			return "", err
+		}
+	}
+	for response.Status == "pending" {
+		if response.UUID == "" {
+			return "", fmt.Errorf("GitHub merge response is pending without a UUID")
+		}
+		if err := c.get(ctx, endpoint+"/"+response.UUID, &response); err != nil {
+			return "", err
+		}
+	}
+	if response.Status == mergeStatusFailed {
+		return "", fmt.Errorf("GitHub rejected merge: %s", response.Message)
+	}
+	return normalizeMergeOutcome(response.Status)
 }
 
 func (c *PATClient) CreateGist(ctx context.Context, in CreateGistInput) (*GistResponse, error) {
@@ -790,8 +867,18 @@ func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) erro
 // postJSON sends a POST and decodes the response body into result.
 // 2xx with no body returns nil; 4xx/5xx returns a *GitHubAPIError.
 func (c *PATClient) postJSON(ctx context.Context, endpoint string, body []byte, result interface{}) error {
+	return c.requestJSON(ctx, http.MethodPost, endpoint, body, result)
+}
+
+func (c *PATClient) requestJSON(
+	ctx context.Context,
+	method string,
+	endpoint string,
+	body []byte,
+	result interface{},
+) error {
 	u := githubAPIBase + endpoint
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -800,7 +887,7 @@ func (c *PATClient) postJSON(ctx context.Context, endpoint string, body []byte, 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("request POST %s: %w", endpoint, err)
+		return fmt.Errorf("request %s %s: %w", method, endpoint, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	c.recordRateHeaders(resp, endpoint)
@@ -842,27 +929,11 @@ func (c *PATClient) delete(ctx context.Context, endpoint string) error {
 }
 
 func (c *PATClient) put(ctx context.Context, endpoint string, body []byte) error {
-	u := githubAPIBase + endpoint
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	c.setGitHubHeaders(req)
-	req.Header.Set("Content-Type", "application/json")
+	return c.putJSON(ctx, endpoint, body, nil)
+}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("request PUT %s: %w", endpoint, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	c.recordRateHeaders(resp, endpoint)
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
-		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
-	}
-	return nil
+func (c *PATClient) putJSON(ctx context.Context, endpoint string, body []byte, result interface{}) error {
+	return c.requestJSON(ctx, http.MethodPut, endpoint, body, result)
 }
 
 func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}) error {

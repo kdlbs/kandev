@@ -1,0 +1,10 @@
+{
+  "common:menu": "\"Menu\" is the ordinary Portuguese word; translating it would change nothing.",
+  "kanban:menu": "\"Menu\" is the ordinary Portuguese word; translating it would change nothing.",
+  "office:desc": "\"Desc\" is the same abbreviation for descending order in Portuguese.",
+  "office:total": "\"Total\" is the ordinary Portuguese word; translating it would change nothing.",
+  "stats:summaryGit": "The only word is the tool name Git; the rest of the line is the interpolated value.",
+  "system:diskTotal": "\"Total\" is the ordinary Portuguese word; translating it would change nothing.",
+  "system:featureToggleExperimental": "\"Experimental\" is spelled identically in Portuguese.",
+  "task:manual": "\"Manual\" is the ordinary Portuguese word for a non-automatic action."
+}
