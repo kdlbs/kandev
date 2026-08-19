@@ -436,6 +436,7 @@ export type UserSettingsState = {
   lastSeenDisplay: LastSeenDisplay;
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarEnabled: boolean;
+  resolveSessionHostnames: boolean;
   appStatusBarOrder: AppStatusBarOrderState;
   hiddenWorkflowStepIds: Record<string, string[]>;
   loaded: boolean;

@@ -594,10 +594,11 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 			"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar,
 			"simplified":   settings.SystemMetricsDisplay.Simplified,
 		},
-		"appStatusBarEnabled":   settings.AppStatusBarEnabled,
-		"appStatusBarOrder":     mapAppStatusBarOrder(settings.AppStatusBarOrder),
-		"hiddenWorkflowStepIds": stringSliceMap(settings.KanbanHiddenStepIDs),
-		"loaded":                true,
+		"appStatusBarEnabled":     settings.AppStatusBarEnabled,
+		"resolveSessionHostnames": settings.ResolveSessionHostnames,
+		"appStatusBarOrder":       mapAppStatusBarOrder(settings.AppStatusBarOrder),
+		"hiddenWorkflowStepIds":   stringSliceMap(settings.KanbanHiddenStepIDs),
+		"loaded":                  true,
 	}
 }
 

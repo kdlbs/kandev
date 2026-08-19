@@ -617,6 +617,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"resolve_session_hostnames":                settings.ResolveSessionHostnames,
 		"app_status_bar_order":                     normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
 	})
@@ -696,6 +697,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		SidebarActiveViewID:               DefaultSidebarViewID,
 		SidebarTaskPrefs:                  normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
 		AppStatusBarEnabled:               false,
+		ResolveSessionHostnames:           false,
 		AppStatusBarOrder:                 normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
 		KanbanHiddenStepIDs:               map[string][]string{},
 	}
@@ -779,6 +781,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LastSeenDisplay                   json.RawMessage                     `json:"last_seen_display"`
 		SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 		AppStatusBarEnabled               *bool                               `json:"app_status_bar_enabled"`
+		ResolveSessionHostnames           *bool                               `json:"resolve_session_hostnames"`
 		AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
 		KanbanHiddenStepIDs               json.RawMessage                     `json:"kanban_hidden_step_ids"`
 	}
@@ -903,6 +906,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.SystemMetricsDisplay = payload.SystemMetricsDisplay
 	if payload.AppStatusBarEnabled != nil {
 		settings.AppStatusBarEnabled = *payload.AppStatusBarEnabled
+	}
+	if payload.ResolveSessionHostnames != nil {
+		settings.ResolveSessionHostnames = *payload.ResolveSessionHostnames
 	}
 	settings.AppStatusBarOrder = normalizeAppStatusBarOrder(payload.AppStatusBarOrder)
 	if payload.ChangesPanelLayout == "flat" {

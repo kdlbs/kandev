@@ -140,6 +140,7 @@ type UserSettings struct {
 	LastSeenDisplay                   string                            `json:"last_seen_display"`    // "absolute" | "relative"
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`
+	ResolveSessionHostnames           bool                              `json:"resolve_session_hostnames"`
 	AppStatusBarOrder                 AppStatusBarOrder                 `json:"app_status_bar_order"`
 	KanbanHiddenStepIDs               map[string][]string               `json:"kanban_hidden_step_ids"`
 	Revision                          int64                             `json:"revision"`

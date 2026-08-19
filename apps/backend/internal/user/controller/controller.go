@@ -105,6 +105,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		LastSeenDisplay:                   req.LastSeenDisplay,
 		SystemMetricsDisplay:              systemMetricsDisplayPatch(req.SystemMetricsDisplay),
 		AppStatusBarEnabled:               req.AppStatusBarEnabled,
+		ResolveSessionHostnames:           req.ResolveSessionHostnames,
 		AppStatusBarOrder:                 req.AppStatusBarOrder,
 		KanbanHiddenStepIDs:               req.KanbanHiddenStepIDs,
 	})

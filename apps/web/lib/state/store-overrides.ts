@@ -75,6 +75,8 @@ export function buildStateOverrides(m: DefaultState) {
     office: m.office,
     features: m.features,
     auth: m.auth,
+    sessionHostnames: m.sessionHostnames,
+    sessionHostnamesEpoch: m.sessionHostnamesEpoch,
     automations: m.automations,
     automationRuns: m.automationRuns,
     system: m.system,

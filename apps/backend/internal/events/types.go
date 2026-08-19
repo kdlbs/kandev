@@ -169,7 +169,8 @@ const (
 
 // Event types for users
 const (
-	UserSettingsUpdated = "user.settings.updated"
+	UserSettingsUpdated         = "user.settings.updated"
+	AuthSessionHostnameResolved = "auth.session.hostname.resolved"
 )
 
 // PluginUserStateUpdated fires after a successful write/delete on a
