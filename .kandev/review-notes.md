@@ -74,6 +74,13 @@
   is consistent with the spec's "read by the plugin through a capability-scoped API", but proto
   field numbers are effectively permanent and the plan's own risk list asks for ADR/spec review
   before code generation, so this should be an explicit decision rather than an inherited one.
+- **Acceptance criterion 19 (desktop/mobile E2E) is not met on this branch.**
+  `apps/web/e2e/tests/plugins/coordinator-plugin.spec.ts` and
+  `mobile-coordinator-plugin.spec.ts` do not exist yet; they are plan step 13 work, gated on the
+  coordinator plugin repository. Everything verified on this branch is Go-level against the real
+  SQLite repository and the real plugin action dispatch, so no agent-conversation path has been
+  exercised against a running Kandev instance. The fixture's `conversations.probe` action is
+  retained as the groundwork those specs will drive.
 - **Correct the claim in `94e7efc36`'s message before reusing it in the PR description.** It states
   it "closes a same-process race in Ensure's check-then-create sequence", but the commit does not
   touch `Ensure` or `lockEnsureKey`; that serialization already existed on the branch. The rest of
