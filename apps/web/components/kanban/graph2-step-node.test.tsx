@@ -192,4 +192,29 @@ describe("Graph2StepNode — hidden destination disclosure", () => {
     fireEvent.focus(visibleTargetButton);
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
+
+  it("exposes move controls when the current node receives keyboard focus", () => {
+    render(
+      <StateProvider>
+        <TooltipProvider>
+          <Graph2StepNode
+            step={STEP}
+            phase="current"
+            task={makeTask()}
+            hasPrev={false}
+            hasNext
+            nextStepId="step-done"
+            nextStepTitle="Done"
+            nextStepHidden
+            onMoveTask={() => undefined}
+            onPreviewTask={() => undefined}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    fireEvent.focus(screen.getByRole("button", { name: "In Progress" }));
+
+    expect(screen.getByRole("button", { name: "Move to Done" })).not.toBeNull();
+  });
 });

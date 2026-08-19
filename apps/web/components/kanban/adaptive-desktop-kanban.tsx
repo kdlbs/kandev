@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import type { WorkflowStep } from "@/components/kanban-column";
-import { getKanbanColumnGridTemplate } from "./kanban-grid-template";
+import { getKanbanColumnGridTemplate, KANBAN_COLUMN_MIN_PX } from "./kanban-grid-template";
 
 type AdaptiveDesktopKanbanProps = {
   steps: WorkflowStep[];
@@ -10,7 +10,7 @@ type AdaptiveDesktopKanbanProps = {
   renderColumn: (step: WorkflowStep) => ReactNode;
 };
 
-export const KANBAN_DRAG_END_PADDING = "max(0px, calc(100% - 280px))";
+export const KANBAN_DRAG_END_PADDING = `max(0px, calc(100% - ${KANBAN_COLUMN_MIN_PX}px))`;
 
 export function AdaptiveDesktopKanban({
   steps,

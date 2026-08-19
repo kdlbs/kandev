@@ -124,6 +124,7 @@ export function Graph2StepNode({
   const { t } = useTranslation();
   const router = useRouter();
   const [isHovered, setIsHovered] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
   const pendingInput = useTaskPendingInput(task.primarySessionId, {
     taskId: task.id,
     taskPendingAction: task.taskPendingAction,
@@ -141,13 +142,21 @@ export function Graph2StepNode({
     router.push(linkToTask(task.id));
   };
 
+  const showMoveControls = isHovered || isFocused;
+
   return (
     <div
       className="relative shrink-0"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      onFocusCapture={() => setIsFocused(true)}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setIsFocused(false);
+        }
+      }}
     >
-      {isHovered && hasPrev && prevStepId && (
+      {showMoveControls && hasPrev && prevStepId && (
         <MoveButton
           direction="left"
           isMoving={isMoving}
@@ -183,7 +192,7 @@ export function Graph2StepNode({
         </div>
       </button>
 
-      {isHovered && hasNext && nextStepId && (
+      {showMoveControls && hasNext && nextStepId && (
         <MoveButton
           direction="right"
           isMoving={isMoving}

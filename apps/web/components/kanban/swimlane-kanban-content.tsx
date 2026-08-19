@@ -289,6 +289,7 @@ function MobileKanbanLayout({
           taskCounts={taskCounts}
           onColumnChange={onIndexChange}
           workflowNavigation={mobileWorkflowNavigation}
+          allStepsAutoHidden={areAllEmptyStepsAutoHidden(steps, moveTargetSteps)}
         />
       )}
       {steps.length === 0 ? (

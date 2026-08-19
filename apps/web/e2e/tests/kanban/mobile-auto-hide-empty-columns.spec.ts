@@ -1,5 +1,6 @@
-import { type Locator, type Page } from "@playwright/test";
+import { type CDPSession, type Locator, type Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
 const TASK_TITLE = "Mobile auto-hide drag source";
@@ -31,14 +32,46 @@ async function openColumnsMenu(
   return menu;
 }
 
-async function beginPointerDrag(page: Page, card: Locator) {
+async function touchDragToTarget(page: Page, card: Locator, target: Locator) {
   const box = await card.boundingBox();
   if (!box) throw new Error("mobile drag source has no layout box");
   const x = box.x + box.width / 2;
   const y = box.y + box.height / 2;
-  await page.mouse.move(x, y);
-  await page.mouse.down();
-  await page.mouse.move(x + 20, y, { steps: 4 });
+  const cdp: CDPSession = await page.context().newCDPSession(page);
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x, y, id: 1 }],
+  });
+  await dwell(
+    page,
+    350,
+    "library-timer",
+    "dnd-kit's TouchSensor needs its 250ms activation delay before the move target appears",
+  );
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [{ x: x + 14, y, id: 1 }],
+  });
+  await expect(target).toBeVisible();
+  await expectMinTouchTarget(target);
+  const targetBox = await target.boundingBox();
+  if (!targetBox) throw new Error("mobile drop target has no layout box");
+  const targetX = targetBox.x + targetBox.width / 2;
+  const targetY = targetBox.y + targetBox.height / 2;
+  for (let step = 1; step <= 10; step += 1) {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [
+        {
+          x: x + ((targetX - x) * step) / 10,
+          y: y + ((targetY - y) * step) / 10,
+          id: 1,
+        },
+      ],
+    });
+  }
+  await expect(target).toHaveClass(/border-primary/);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
 }
 
 async function expectMinTouchTarget(locator: Locator) {
@@ -93,19 +126,18 @@ test("keeps auto-hide scoped and restores mobile move targets during drag", asyn
   await closeMobileMenu(testPage, mobile);
 
   await expect(testPage.getByTestId(`kanban-column-${hiddenDestination.id}`)).toHaveCount(0);
-  await beginPointerDrag(testPage, mobile.taskCard(task.id));
-
   const recoveredTarget = testPage.getByTestId(`mobile-drop-target-${hiddenDestination.id}`);
-  await expect(recoveredTarget).toBeVisible();
-  await expectMinTouchTarget(recoveredTarget);
+  await touchDragToTarget(testPage, mobile.taskCard(task.id), recoveredTarget);
   const overflow = await testPage.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,
     clientWidth: document.documentElement.clientWidth,
   }));
   expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
-  await testPage.keyboard.press("Escape");
-  await testPage.mouse.up();
   await expect(recoveredTarget).toHaveCount(0);
+  await expect
+    .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
+    .toBe(hiddenDestination.id);
+  await expect(testPage.getByTestId(`kanban-column-${hiddenDestination.id}`)).toBeVisible();
 
   const persistedSettings = (await apiClient.getUserSettings()).settings;
   expect(persistedSettings.workflow_ids_with_auto_hide_empty_steps).toEqual([workflow.id]);

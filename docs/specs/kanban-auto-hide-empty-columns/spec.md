@@ -1,5 +1,5 @@
 ---
-status: implemented
+status: shipped
 created: 2026-08-18
 updated: 2026-08-18
 owner: gsimard-nordai

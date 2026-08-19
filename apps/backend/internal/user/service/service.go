@@ -391,15 +391,19 @@ const (
 )
 
 func normalizeWorkflowIDsWithAutoHideEmptySteps(workflowIDs []string) ([]string, error) {
-	if len(workflowIDs) > maxWorkflowIDsWithAutoHideEmptySteps {
+	unique := make(map[string]struct{}, len(workflowIDs))
+	for _, workflowID := range workflowIDs {
+		unique[workflowID] = struct{}{}
+	}
+	if len(unique) > maxWorkflowIDsWithAutoHideEmptySteps {
 		return nil, fmt.Errorf(
 			"workflow_ids_with_auto_hide_empty_steps: max %d workflow ids allowed",
 			maxWorkflowIDsWithAutoHideEmptySteps,
 		)
 	}
 	totalBytes := 0
-	unique := make(map[string]struct{}, len(workflowIDs))
-	for _, workflowID := range workflowIDs {
+	normalized := make([]string, 0, len(unique))
+	for workflowID := range unique {
 		totalBytes += len(workflowID)
 		if totalBytes > maxUserPreferenceBlobBytes {
 			return nil, fmt.Errorf(
@@ -407,10 +411,6 @@ func normalizeWorkflowIDsWithAutoHideEmptySteps(workflowIDs []string) ([]string,
 				maxUserPreferenceBlobBytes,
 			)
 		}
-		unique[workflowID] = struct{}{}
-	}
-	normalized := make([]string, 0, len(unique))
-	for workflowID := range unique {
 		normalized = append(normalized, workflowID)
 	}
 	sort.Strings(normalized)

@@ -1068,6 +1068,10 @@ func TestApplyWorkspaceAndTaskListPreferencesAutoHideWorkflowIDs(t *testing.T) {
 		}
 		return ids
 	}
+	duplicateWorkflowIDs := make([]string, maxWorkflowIDsWithAutoHideEmptySteps+1)
+	for i := range duplicateWorkflowIDs {
+		duplicateWorkflowIDs[i] = "wf-duplicate"
+	}
 
 	tests := []struct {
 		name    string
@@ -1080,6 +1084,11 @@ func TestApplyWorkspaceAndTaskListPreferencesAutoHideWorkflowIDs(t *testing.T) {
 			name:  "normalizes duplicate workflow ids",
 			value: []string{"wf-b", "wf-a", "wf-b"},
 			want:  []string{"wf-a", "wf-b"},
+		},
+		{
+			name:  "applies the count limit after deduplication",
+			value: duplicateWorkflowIDs,
+			want:  []string{"wf-duplicate"},
 		},
 		{
 			name:    "rejects too many workflow ids",
