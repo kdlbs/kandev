@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -43,6 +44,7 @@ type CloudClient struct {
 	siteURL      string
 	email        string
 	secret       string
+	secretMu     sync.RWMutex // guards secret for concurrent read/write
 	authMethod   string
 	instanceType string
 	apiBase      string // "/rest/api/3" for cloud, "/rest/api/2" for server.
@@ -116,16 +118,19 @@ const userAgent = "kandev/1.0 (+https://github.com/kdlbs/kandev)"
 func (c *CloudClient) authorize(req *http.Request) {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", userAgent)
+	c.secretMu.RLock()
+	secret := c.secret
+	c.secretMu.RUnlock()
 	switch c.authMethod {
 	case AuthMethodAPIToken:
-		basic := base64.StdEncoding.EncodeToString([]byte(c.email + ":" + c.secret))
+		basic := base64.StdEncoding.EncodeToString([]byte(c.email + ":" + secret))
 		req.Header.Set("Authorization", "Basic "+basic)
 	case AuthMethodPAT:
-		req.Header.Set("Authorization", "Bearer "+c.secret)
+		req.Header.Set("Authorization", "Bearer "+secret)
 	case AuthMethodSessionCookie:
-		req.Header.Set("Cookie", buildSessionCookieHeader(c.secret))
+		req.Header.Set("Cookie", buildSessionCookieHeader(secret))
 	case AuthMethodOAuth:
-		req.Header.Set("Authorization", "Bearer "+c.secret)
+		req.Header.Set("Authorization", "Bearer "+secret)
 	}
 }
 
@@ -156,7 +161,9 @@ func (c *CloudClient) do(ctx context.Context, method, path string, body interfac
 			if revealErr != nil {
 				return fmt.Errorf("reveal refreshed token: %w; original error: %v", revealErr, err)
 			}
+			c.secretMu.Lock()
 			c.secret = newToken
+			c.secretMu.Unlock()
 			return c.doOnce(ctx, method, path, body, out)
 		}
 	}

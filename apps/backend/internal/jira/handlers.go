@@ -597,25 +597,29 @@ func wsListProjects(svc *Service) func(ctx context.Context, msg *ws.Message) (*w
 // httpOAuthStart initiates the OAuth 2.0 (3LO) flow. Returns the Atlassian
 // authorization URL for the frontend to open in a popup/redirect.
 func (c *Controller) httpOAuthStart(ctx *gin.Context) {
-	var req struct {
-		WorkspaceID string `json:"workspaceId"  form:"workspaceId"`
-		SiteURL     string `json:"siteUrl"      form:"siteUrl"`
-	}
-	if err := ctx.ShouldBind(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	workspaceID := c.workspaceID(ctx)
+	if workspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
 		return
 	}
-	if req.WorkspaceID == "" || req.SiteURL == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspaceId and siteUrl are required"})
+	if err := c.service.authorizeWorkspaceAccess(ctx.Request.Context(), workspaceID); err != nil {
+		if workspaceDenied(err) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	siteURL := ctx.Query("siteUrl")
+	if siteURL == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "siteUrl required"})
 		return
 	}
 	redirectURI := c.service.oauthRedirectURI
 	if redirectURI == "" {
-		// Always use localhost — Atlassian allows loopback redirects without
-		// admin allowlisting, same pattern as Claude/MCP clients.
 		redirectURI = "http://localhost:38429/api/v1/jira/oauth/callback"
 	}
-	authURL, err := c.service.StartOAuthFlow(ctx.Request.Context(), req.WorkspaceID, req.SiteURL, redirectURI)
+	authURL, err := c.service.StartOAuthFlow(ctx.Request.Context(), workspaceID, siteURL, redirectURI)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -667,9 +671,17 @@ func (c *Controller) httpOAuthCallback(ctx *gin.Context) {
 
 // httpOAuthRefresh manually triggers a token refresh for testing/debugging.
 func (c *Controller) httpOAuthRefresh(ctx *gin.Context) {
-	workspaceID := ctx.Query("workspaceId")
+	workspaceID := c.workspaceID(ctx)
 	if workspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspaceId required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
+		return
+	}
+	if err := c.service.authorizeWorkspaceAccess(ctx.Request.Context(), workspaceID); err != nil {
+		if workspaceDenied(err) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
 		return
 	}
 	if err := c.service.RefreshOAuthToken(ctx.Request.Context(), workspaceID); err != nil {

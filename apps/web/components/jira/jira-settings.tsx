@@ -670,6 +670,7 @@ function useJiraSettings(workspaceId: string) {
     handleSave,
     handleDelete,
     discard,
+    load,
   };
 }
 
@@ -756,7 +757,7 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
               workspaceId={workspaceId}
               connected={!!s.config?.hasSecret}
               tokenExpiresAt={s.config?.tokenExpiresAt ?? null}
-              onConnected={() => void s.handleSave()}
+              onConnected={() => void load()}
             />
           ) : (
             <SecretField

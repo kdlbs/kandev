@@ -210,5 +210,17 @@
   "workflowStep": "工作流步骤",
   "yourJiraSessionExpiredOrNeeds": "你的 Jira 会话已过期或需要二次验证。请重新连接以查看此工单。",
   "builtinViewAssignedToMe": "指派给我",
-  "builtinViewUnassigned": "未指派"
+  "builtinViewUnassigned": "未指派",
+  "connectWithAtlassian": "Connect with Atlassian",
+  "connecting": "Connecting...",
+  "oauth2": "OAuth 2.0",
+  "oauthConnected": "Connected via OAuth. Tokens refresh automatically.",
+  "oauthDescription": "Authenticate via Atlassian OAuth 2.1 with PKCE. No app creation or credentials needed. Click to authorize through your browser. Tokens auto-refresh on expiry.",
+  "oauthStartFailed": "Failed to start OAuth: {{error}}",
+  "oauthTokenExpires": "Token expires at: {{date}}",
+  "oauthPasteInstructions": "Complete authorization in the new tab",
+  "oauthPasteHelp": "After approving on Atlassian, you'll be redirected to a localhost URL that won't load. Copy the full URL from your browser's address bar and paste it below.",
+  "oauthComplete": "Complete",
+  "oauthCancel": "Cancel",
+  "oauthPasteInvalid": "Invalid URL. Make sure you copied the full redirect URL including code and state parameters."
 }

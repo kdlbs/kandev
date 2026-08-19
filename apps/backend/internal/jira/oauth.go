@@ -431,10 +431,7 @@ func resolveCloudIDViaMCP(accessToken, siteURL string) (string, error) {
 			return r.ID, nil
 		}
 	}
-	if len(resources) > 0 {
-		return resources[0].ID, nil
-	}
-	return "", errors.New("no accessible resources found")
+	return "", fmt.Errorf("site URL %q not found in accessible resources", siteURL)
 }
 
 // resolveCloudID calls the accessible-resources endpoint directly. Only works
