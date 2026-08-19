@@ -202,8 +202,9 @@ func (s *ConfigService) applyAgents(
 // also reference an agent that is only in the workspace. Filesystem syncs pass
 // false because the snapshot is authoritative and rows absent from it are
 // pruned after this import. A name that resolves to nothing (dangling
-// reference) or to the agent itself is recorded as a warning and left empty
-// rather than failing the import.
+// reference), to the agent itself, or that would create a cycle in the
+// reporting hierarchy is recorded as a warning and left empty rather than
+// failing the import.
 func (s *ConfigService) applyAgentReportsTo(
 	ctx context.Context, wsID string, incoming []AgentConfig, result *ImportResult,
 	allowExternalManagers bool,
@@ -213,19 +214,25 @@ func (s *ConfigService) applyAgentReportsTo(
 		return fmt.Errorf("resolve reports_to: list agents: %w", err)
 	}
 	byName := make(map[string]*models.AgentInstance, len(current))
+	byID := make(map[string]*models.AgentInstance, len(current))
 	incomingNames := bundleAgentSet(incoming)
 	for _, a := range current {
 		if !allowExternalManagers && !incomingNames[a.Name] {
 			continue
 		}
 		byName[a.Name] = a
+		byID[a.ID] = a
+	}
+	incomingByName := make(map[string]AgentConfig, len(incoming))
+	for _, cfg := range incoming {
+		incomingByName[cfg.Name] = cfg
 	}
 	for _, cfg := range incoming {
 		agent, ok := byName[cfg.Name]
 		if !ok {
 			continue
 		}
-		reportsTo, warning := resolveReportsTo(cfg, byName)
+		reportsTo, warning := resolveReportsTo(cfg, byName, byID, incomingByName)
 		if warning != "" {
 			result.Warnings = append(result.Warnings, warning)
 		}
@@ -241,10 +248,17 @@ func (s *ConfigService) applyAgentReportsTo(
 }
 
 // resolveReportsTo resolves cfg.ReportsTo (a name) against byName (a name ->
-// agent index built from the target workspace after apply). It returns the
-// resolved manager ID, or an empty string plus a warning when the name is a
-// self-reference or does not match any known agent.
-func resolveReportsTo(cfg AgentConfig, byName map[string]*models.AgentInstance) (string, string) {
+// agent index built from the target workspace after apply, already filtered
+// to the callers' allowExternalManagers policy). It returns the resolved
+// manager ID, or an empty string plus a warning when the name is a
+// self-reference, does not match any known agent, or would create a cycle in
+// the reporting hierarchy.
+func resolveReportsTo(
+	cfg AgentConfig,
+	byName map[string]*models.AgentInstance,
+	byID map[string]*models.AgentInstance,
+	incomingByName map[string]AgentConfig,
+) (string, string) {
 	if cfg.ReportsTo == "" {
 		return "", ""
 	}
@@ -255,7 +269,55 @@ func resolveReportsTo(cfg AgentConfig, byName map[string]*models.AgentInstance) 
 	if !ok {
 		return "", fmt.Sprintf("agent %q reports_to %q, which was not found", cfg.Name, cfg.ReportsTo)
 	}
+	if reportsToCycleExists(cfg.Name, cfg.ReportsTo, byName, byID, incomingByName) {
+		return "", fmt.Sprintf("agent %q reports_to %q, which would create a cycle", cfg.Name, cfg.ReportsTo)
+	}
 	return manager.ID, ""
+}
+
+// reportsToCycleExists walks the proposed manager chain upward from start,
+// looking for target. Each hop is resolved against the proposed graph: when
+// the current node is itself part of the incoming bundle, its parent is the
+// bundle's declared reports_to name; otherwise its parent comes from
+// byName/byID, the same allowExternalManagers-filtered view used to resolve
+// the direct manager lookup above — an agent a sync would already reject as
+// a manager (because it fell outside the filter) is equally invisible as an
+// intermediate hop, since such an edge can never end up persisted anyway.
+// The walk is iterative and bounded by a visited set (plus a hard hop cap as
+// a second bound) so a pre-existing cyclic row already in the database
+// cannot hang resolution of an unrelated agent.
+func reportsToCycleExists(
+	target, start string,
+	byName map[string]*models.AgentInstance,
+	byID map[string]*models.AgentInstance,
+	incomingByName map[string]AgentConfig,
+) bool {
+	visited := make(map[string]bool, len(byName)+len(incomingByName))
+	node := start
+	maxHops := len(byName) + len(incomingByName) + 1
+	for i := 0; i < maxHops; i++ {
+		if node == target {
+			return true
+		}
+		if visited[node] {
+			return false
+		}
+		visited[node] = true
+
+		var parent string
+		if incCfg, ok := incomingByName[node]; ok {
+			parent = incCfg.ReportsTo
+		} else if agent, ok := byName[node]; ok && agent.ReportsTo != "" {
+			if parentAgent, ok := byID[agent.ReportsTo]; ok {
+				parent = parentAgent.Name
+			}
+		}
+		if parent == "" {
+			return false
+		}
+		node = parent
+	}
+	return false
 }
 
 func (s *ConfigService) applySkills(

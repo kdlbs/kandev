@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestApplyImport_ReportsToResolvesRegardlessOfBundleOrder imports a manager
@@ -207,4 +208,194 @@ func TestApplyIncoming_DoesNotKeepReportsToForPrunedManager(t *testing.T) {
 	if _, err := env.repo.GetAgentInstance(ctx, manager.ID); err == nil {
 		t.Fatalf("pruned manager %q is still visible in the repository", manager.ID)
 	}
+}
+
+// TestApplyImport_ReportsToTwoAgentCycleWarns asserts a 2-cycle formed
+// entirely within one bundle (bob reports_to carol, carol reports_to bob) is
+// detected, both edges are cleared, and each is reported with its own
+// warning rather than silently persisted.
+func TestApplyImport_ReportsToTwoAgentCycleWarns(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	bundle := &ConfigBundle{Agents: []AgentConfig{
+		hierarchyAgent("bob", "carol"),
+		hierarchyAgent("carol", "bob"),
+	}}
+
+	result, err := env.svc.ApplyImport(ctx, testWorkspaceID, bundle)
+	if err != nil {
+		t.Fatalf("ApplyImport: %v", err)
+	}
+	if len(result.Warnings) != 2 {
+		t.Fatalf("warnings: got %d, want 2: %v", len(result.Warnings), result.Warnings)
+	}
+	for _, w := range result.Warnings {
+		if !strings.Contains(w, "bob") || !strings.Contains(w, "carol") {
+			t.Errorf("warning %q does not name both agents in the cycle", w)
+		}
+	}
+	assertEqual(t, "bob reports_to cleared", agentByName(t, env, testWorkspaceID, "bob").ReportsTo, "")
+	assertEqual(t, "carol reports_to cleared", agentByName(t, env, testWorkspaceID, "carol").ReportsTo, "")
+}
+
+// TestApplyImport_ReportsToThreeAgentChainCycleWarns asserts a longer chain
+// cycle (a -> b -> c -> a), not just a direct 2-cycle, is detected. Every
+// edge in the cycle is cleared with its own warning.
+func TestApplyImport_ReportsToThreeAgentChainCycleWarns(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	bundle := &ConfigBundle{Agents: []AgentConfig{
+		hierarchyAgent("a", "b"),
+		hierarchyAgent("b", "c"),
+		hierarchyAgent("c", "a"),
+	}}
+
+	result, err := env.svc.ApplyImport(ctx, testWorkspaceID, bundle)
+	if err != nil {
+		t.Fatalf("ApplyImport: %v", err)
+	}
+	if len(result.Warnings) != 3 {
+		t.Fatalf("warnings: got %d, want 3: %v", len(result.Warnings), result.Warnings)
+	}
+	assertEqual(t, "a reports_to cleared", agentByName(t, env, testWorkspaceID, "a").ReportsTo, "")
+	assertEqual(t, "b reports_to cleared", agentByName(t, env, testWorkspaceID, "b").ReportsTo, "")
+	assertEqual(t, "c reports_to cleared", agentByName(t, env, testWorkspaceID, "c").ReportsTo, "")
+}
+
+// TestApplyImport_ReportsToCycleThroughPersistedNonBundleAgentWarns asserts
+// a cycle is still detected when only one side of it is in the incoming
+// bundle: frank already exists in the workspace, eve already persistently
+// reports_to frank (outside this bundle), and this bundle proposes frank
+// reports_to eve. Resolving only against the bundle's own contents would
+// miss this; the walk must also consult persisted state.
+func TestApplyImport_ReportsToCycleThroughPersistedNonBundleAgentWarns(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	seed := &ConfigBundle{Agents: []AgentConfig{hierarchyAgent("frank", "")}}
+	if _, err := env.svc.ApplyImport(ctx, testWorkspaceID, seed); err != nil {
+		t.Fatalf("seed frank: %v", err)
+	}
+	frank := agentByName(t, env, testWorkspaceID, "frank")
+
+	eve := seedAgent(t, env, testWorkspaceID, "eve")
+	eve.ReportsTo = frank.ID
+	if err := env.repo.UpdateAgentInstance(ctx, eve); err != nil {
+		t.Fatalf("seed eve reports_to frank: %v", err)
+	}
+
+	bundle := &ConfigBundle{Agents: []AgentConfig{hierarchyAgent("frank", "eve")}}
+	result, err := env.svc.ApplyImport(ctx, testWorkspaceID, bundle)
+	if err != nil {
+		t.Fatalf("ApplyImport: %v", err)
+	}
+	if len(result.Warnings) != 1 {
+		t.Fatalf("warnings: got %d, want 1: %v", len(result.Warnings), result.Warnings)
+	}
+	if !strings.Contains(result.Warnings[0], "frank") || !strings.Contains(result.Warnings[0], "eve") {
+		t.Errorf("warning %q does not name both agents in the cycle", result.Warnings[0])
+	}
+	assertEqual(t, "frank reports_to cleared", agentByName(t, env, testWorkspaceID, "frank").ReportsTo, "")
+	assertEqual(t, "eve reports_to unchanged", agentByName(t, env, testWorkspaceID, "eve").ReportsTo, frank.ID)
+}
+
+// TestApplyImport_ReportsToDeepChainNoCycleResolves guards against
+// over-rejection: a valid deep chain with no cycle (a -> b -> c) must still
+// resolve every edge with zero warnings.
+func TestApplyImport_ReportsToDeepChainNoCycleResolves(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	bundle := &ConfigBundle{Agents: []AgentConfig{
+		hierarchyAgent("a", "b"),
+		hierarchyAgent("b", "c"),
+		hierarchyAgent("c", ""),
+	}}
+
+	result, err := env.svc.ApplyImport(ctx, testWorkspaceID, bundle)
+	if err != nil {
+		t.Fatalf("ApplyImport: %v", err)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("warnings: got %d, want 0: %v", len(result.Warnings), result.Warnings)
+	}
+	a := agentByName(t, env, testWorkspaceID, "a")
+	b := agentByName(t, env, testWorkspaceID, "b")
+	c := agentByName(t, env, testWorkspaceID, "c")
+	assertEqual(t, "a reports_to b", a.ReportsTo, b.ID)
+	assertEqual(t, "b reports_to c", b.ReportsTo, c.ID)
+	assertEqual(t, "c reports_to", c.ReportsTo, "")
+}
+
+// TestApplyImport_PreExistingPersistedCycleDoesNotHang asserts that a
+// cyclic reports_to pair already sitting in the database (from before this
+// guard existed) cannot hang import resolution for an unrelated agent. The
+// walk must be bounded by a visited set, not rely on the graph being
+// acyclic.
+func TestApplyImport_PreExistingPersistedCycleDoesNotHang(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	x := seedAgent(t, env, testWorkspaceID, "x")
+	y := seedAgent(t, env, testWorkspaceID, "y")
+	x.ReportsTo = y.ID
+	if err := env.repo.UpdateAgentInstance(ctx, x); err != nil {
+		t.Fatalf("seed x reports_to y: %v", err)
+	}
+	y.ReportsTo = x.ID
+	if err := env.repo.UpdateAgentInstance(ctx, y); err != nil {
+		t.Fatalf("seed y reports_to x: %v", err)
+	}
+
+	bundle := &ConfigBundle{Agents: []AgentConfig{hierarchyAgent("zack", "x")}}
+	done := make(chan error, 1)
+	go func() {
+		_, err := env.svc.ApplyImport(ctx, testWorkspaceID, bundle)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ApplyImport: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ApplyImport did not terminate: pre-existing persisted cycle appears to hang resolution")
+	}
+
+	zack := agentByName(t, env, testWorkspaceID, "zack")
+	if zack.ReportsTo == "" {
+		t.Fatal("zack should resolve to x despite the pre-existing x/y cycle")
+	}
+}
+
+// TestApplyIncoming_CycleThroughPrunedExternalManagerDoesNotFalseFlag
+// asserts the filesystem-sync path (allowExternalManagers=false) does not
+// walk into a pruned, DB-only agent's persisted reports_to when checking a
+// bundle member for a cycle. grace is DB-only (absent from the filesystem)
+// and persistently reports_to bob; the filesystem snapshot proposes bob
+// reports_to carol, entirely within the snapshot. That must resolve cleanly
+// with no cycle warning — grace's pruning is a separate, unrelated concern
+// already covered by TestApplyIncoming_DoesNotKeepReportsToForPrunedManager.
+func TestApplyIncoming_CycleThroughPrunedExternalManagerDoesNotFalseFlag(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	grace := seedAgent(t, env, testWorkspaceID, "grace")
+	bob := seedAgent(t, env, testWorkspaceID, "bob")
+	bob.ReportsTo = grace.ID
+	if err := env.repo.UpdateAgentInstance(ctx, bob); err != nil {
+		t.Fatalf("seed bob reports_to grace: %v", err)
+	}
+
+	env.writeFSAgent(t, "bob", "name: bob\nrole: worker\nreports_to: carol\n")
+	env.writeFSAgent(t, "carol", "name: carol\nrole: manager\n")
+
+	result, err := env.svc.ApplyIncoming(ctx, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ApplyIncoming: %v", err)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("warnings: got %d, want 0: %v", len(result.Warnings), result.Warnings)
+	}
+	carol := agentByName(t, env, testWorkspaceID, "carol")
+	assertEqual(t, "bob reports_to carol after fs sync", agentByName(t, env, testWorkspaceID, "bob").ReportsTo, carol.ID)
 }
