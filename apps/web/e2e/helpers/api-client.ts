@@ -54,6 +54,18 @@ export type MockPR = {
   author_login: string;
   repo_owner: string;
   repo_name: string;
+  /** Explicit source repository identity for fork pull-request tests. */
+  head_repo_id?: number;
+  head_repo_node_id?: string;
+  head_repo_owner?: string;
+  head_repo_name?: string;
+  head_repo_clone_url?: string;
+  /** Explicit target repository identity for fork pull-request tests. */
+  base_repo_id?: number;
+  base_repo_owner?: string;
+  base_repo_name?: string;
+  base_default_branch?: string;
+  maintainer_can_modify?: boolean;
   html_url?: string;
   url?: string;
   body?: string;

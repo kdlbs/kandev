@@ -67,6 +67,7 @@ type ContainerConfig struct {
 	BaseBranches             map[string]string
 	RemoteContributions      map[string]models.RemoteContribution
 	ContributionDestinations map[string]models.ContributionDestination
+	ComparisonTargets        map[string]models.ComparisonTarget
 }
 
 func boolPtr(v bool) *bool {
@@ -114,6 +115,7 @@ func buildContainerCreateInstanceRequest(
 		BaseBranches:             config.BaseBranches,
 		RemoteContributions:      config.RemoteContributions,
 		ContributionDestinations: config.ContributionDestinations,
+		ComparisonTargets:        config.ComparisonTargets,
 	}
 }
 

@@ -161,6 +161,15 @@ Changes are grouped by repository and then by state:
 
 From this panel you can stage or unstage files, discard working-tree changes, commit, amend, reset or revert commits, pull, rebase, merge, push, force-push, rename the task branch, choose a base branch, and create or open a pull request or merge request. Operations apply to the selected repository. Discarding a file is permanent, and history-changing operations can lose work or invalidate review; read [Git operations](git-operations.md) before using them.
 
+For a linked fork pull request, the Changes header shows the exact comparison target, such as
+`upstream/widget:main`. Kandev keeps this target separate from `origin`, the checked-out branch,
+and the push remote. Desktop hover details and the mobile touch drawer show the same target.
+
+If Kandev cannot materialize that exact target, the Changes panel shows a comparison warning and
+hides numeric diff, commit, and ahead/behind totals. It does not use a same-named `origin` branch as
+a substitute. Check the executor's Git access and refresh the session after the target becomes
+available.
+
 ### Open a file in its external repository
 
 When Kandev has unambiguous repository context, file toolbars in Changes, Review, built-in viewers and editors, and their mobile layouts show **Open file in GitHub**, **Open file in GitLab**, or **Open file in Azure DevOps**. The action opens the provider page in a new browser tab. GitLab links support both `gitlab.com` and configured self-managed hosts.

@@ -707,6 +707,16 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if err != nil {
 		return nil, err
 	}
+	comparisonTargets, err := comparisonTargetsFromMetadata(metadata)
+	if err != nil {
+		return nil, err
+	}
+	if len(comparisonTargets) == 0 {
+		comparisonTargets, err = comparisonTargetsFromWorkspaceRepositories(info.WorkspaceRepositories)
+		if err != nil {
+			return nil, err
+		}
+	}
 	autoApprove := false
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -736,6 +746,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
 			RemoteContributions:            remoteContributions,
 			ContributionDestinations:       contributionDestinations,
+			ComparisonTargets:              comparisonTargets,
 		},
 		profileInfo: profileInfo,
 	}, nil

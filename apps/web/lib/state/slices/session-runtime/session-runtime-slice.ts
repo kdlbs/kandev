@@ -93,10 +93,8 @@ function sameFiles(
 
 function hasBranchSummaryChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
   return (
-    existing.branch !== incoming.branch ||
-    existing.remote_branch !== incoming.remote_branch ||
-    existing.head_commit !== incoming.head_commit ||
-    existing.base_commit !== incoming.base_commit ||
+    hasBranchReferencesChanged(existing, incoming) ||
+    hasComparisonSummaryChanged(existing, incoming) ||
     existing.ahead !== incoming.ahead ||
     existing.behind !== incoming.behind ||
     existing.remote_ahead !== incoming.remote_ahead ||
@@ -106,6 +104,23 @@ function hasBranchSummaryChanged(existing: GitStatusEntry, incoming: GitStatusEn
     existing.is_submodule !== incoming.is_submodule ||
     existing.branch_additions !== incoming.branch_additions ||
     existing.branch_deletions !== incoming.branch_deletions
+  );
+}
+
+function hasBranchReferencesChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
+  return (
+    existing.branch !== incoming.branch ||
+    existing.remote_branch !== incoming.remote_branch ||
+    existing.head_commit !== incoming.head_commit ||
+    existing.base_commit !== incoming.base_commit
+  );
+}
+
+function hasComparisonSummaryChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
+  return (
+    existing.comparison_target !== incoming.comparison_target ||
+    existing.comparison_status !== incoming.comparison_status ||
+    existing.comparison_error_code !== incoming.comparison_error_code
   );
 }
 

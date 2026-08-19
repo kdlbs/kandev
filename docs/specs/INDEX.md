@@ -53,7 +53,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [plugins — Voice Mode leaves core](plugins/voice-extraction.md) | shipped |
 | [plugin-nav-sidebar-footer](plugin-nav-sidebar-footer/spec.md) | draft |
 | [semantic-notifications](platform/notifications.md) | shipped |
-| [workspace-git-status](platform/workspace-git-status.md) | shipped |
+| [workspace-git-status](platform/workspace-git-status.md) | approved |
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |

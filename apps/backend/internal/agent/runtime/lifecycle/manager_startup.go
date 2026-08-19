@@ -443,6 +443,7 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	// after a restart, would otherwise have none — and their branch diff stat
 	// would silently fall back to an integration branch.
 	m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, execution.GetAgentCtlClient())
+	m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, execution.GetAgentCtlClient())
 	// Use the timeout context for event publishing instead of a fresh Background context
 	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
 }

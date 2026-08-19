@@ -259,6 +259,11 @@ type InstanceConfig struct {
 	// origin/main → master priority list inside workspace_git_status.go.
 	BaseBranches map[string]string
 
+	// ComparisonTargets maps repository subpaths to provider-qualified,
+	// credential-free comparison bindings. Targets are installed before
+	// tracker polling so an unavailable target cannot fall back to origin.
+	ComparisonTargets map[string]models.ComparisonTarget
+
 	// RemoteContributions maps workspace repository subpaths to the
 	// server-authored contribution binding used for source-routed writes.
 	RemoteContributions      map[string]models.RemoteContribution
@@ -457,6 +462,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if len(overrides.BaseBranches) > 0 {
 		cfg.BaseBranches = overrides.BaseBranches
 	}
+	if len(overrides.ComparisonTargets) > 0 {
+		cfg.ComparisonTargets = cloneComparisonTargets(overrides.ComparisonTargets)
+	}
 	if len(overrides.RemoteContributions) > 0 {
 		cfg.RemoteContributions = cloneRemoteContributions(overrides.RemoteContributions)
 	}
@@ -508,9 +516,21 @@ type InstanceOverrides struct {
 	RequiresProcessKill      bool
 	StripEnv                 []string
 	BaseBranches             map[string]string
+	ComparisonTargets        map[string]models.ComparisonTarget
 	RemoteContributions      map[string]models.RemoteContribution
 	ContributionDestinations map[string]models.ContributionDestination
 	WorkspaceSourceRoots     []string
+}
+
+func cloneComparisonTargets(values map[string]models.ComparisonTarget) map[string]models.ComparisonTarget {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]models.ComparisonTarget, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func cloneRemoteContributions(values map[string]models.RemoteContribution) map[string]models.RemoteContribution {

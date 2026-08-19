@@ -458,6 +458,7 @@ func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInst
 		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:      req.RemoteContributions,
 		ContributionDestinations: req.ContributionDestinations,
+		ComparisonTargets:        req.ComparisonTargets,
 		Env:                      cloneStringMap(req.Env),
 	}
 }

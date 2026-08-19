@@ -683,11 +683,12 @@ func (p *Projector) applyGitEventLocked(state *projectionState, data map[string]
 		state.gitObserved = true
 	}
 	observation := GitSummary{
-		Additions:    nonNegativeInt(status, "branch_additions", "additions"),
-		Deletions:    nonNegativeInt(status, "branch_deletions", "deletions"),
-		ChangedFiles: changedFileCount(status),
-		Ahead:        nonNegativeInt(status, "ahead"),
-		Behind:       nonNegativeInt(status, "behind"),
+		Additions:             nonNegativeInt(status, "branch_additions", "additions"),
+		Deletions:             nonNegativeInt(status, "branch_deletions", "deletions"),
+		ChangedFiles:          changedFileCount(status),
+		Ahead:                 nonNegativeInt(status, "ahead"),
+		Behind:                nonNegativeInt(status, "behind"),
+		ComparisonUnavailable: stringField(status, "comparison_status") == "unavailable",
 	}
 	if equalGitSummary(state.git[repository], observation) {
 		return false

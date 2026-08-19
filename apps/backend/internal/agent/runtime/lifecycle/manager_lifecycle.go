@@ -109,6 +109,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			// their diff stats stay pinned to an integration-branch fallback.
 			if client := execution.GetAgentCtlClient(); client != nil {
 				m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
+				m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
 			}
 
 			// Reconnect to workspace streams (shell, git, file changes) in background

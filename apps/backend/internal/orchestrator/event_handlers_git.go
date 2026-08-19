@@ -104,8 +104,9 @@ func (c *gitSnapshotCache) forget(sessionID string) {
 
 func gitStatusHash(s *lifecycle.GitStatusData) string {
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%d|%d|%d|%d",
+	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%s|%s|%s|%d|%d|%d|%d",
 		s.Branch, s.RemoteBranch, s.HeadCommit, s.BaseCommit,
+		s.ComparisonTarget, s.ComparisonStatus, s.ComparisonErrorCode,
 		s.Ahead, s.Behind, s.BranchAdditions, s.BranchDeletions)
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -198,14 +199,17 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 		Behind:       st.Behind,
 		Files:        nil, // intentional: badge only needs totals
 		Metadata: map[string]interface{}{
-			"branch_additions": st.BranchAdditions,
-			"branch_deletions": st.BranchDeletions,
-			"modified":         st.Modified,
-			"added":            st.Added,
-			"deleted":          st.Deleted,
-			"untracked":        st.Untracked,
-			"renamed":          st.Renamed,
-			"timestamp":        data.Timestamp,
+			"branch_additions":      st.BranchAdditions,
+			"branch_deletions":      st.BranchDeletions,
+			"comparison_target":     st.ComparisonTarget,
+			"comparison_status":     st.ComparisonStatus,
+			"comparison_error_code": st.ComparisonErrorCode,
+			"modified":              st.Modified,
+			"added":                 st.Added,
+			"deleted":               st.Deleted,
+			"untracked":             st.Untracked,
+			"renamed":               st.Renamed,
+			"timestamp":             data.Timestamp,
 		},
 	}
 	if err := s.repo.UpsertLatestLiveGitSnapshot(ctx, snapshot); err != nil {

@@ -743,6 +743,9 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		return nil, err
 	}
 	req.McpProviders = deriveMCPProviders(allRepos)
+	if len(allRepos) > 0 {
+		req.ComparisonTarget = allRepos[0].ComparisonTarget
+	}
 	profileContext.Providers = req.McpProviders
 	if err := e.resolveLaunchEnvironment(ctx, req, execConfig.ProfileEnvVars, allRepos); err != nil {
 		return nil, err

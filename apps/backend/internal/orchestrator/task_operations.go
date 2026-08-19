@@ -3372,14 +3372,17 @@ func (s *Service) saveGitStatusSnapshot(ctx context.Context, sessionID string, f
 	}
 
 	metadata := map[string]interface{}{
-		"timestamp":        status.Timestamp,
-		"modified":         status.Modified,
-		"added":            status.Added,
-		"deleted":          status.Deleted,
-		"untracked":        status.Untracked,
-		"renamed":          status.Renamed,
-		"branch_additions": status.BranchAdditions,
-		"branch_deletions": status.BranchDeletions,
+		"timestamp":             status.Timestamp,
+		"modified":              status.Modified,
+		"added":                 status.Added,
+		"deleted":               status.Deleted,
+		"untracked":             status.Untracked,
+		"renamed":               status.Renamed,
+		"branch_additions":      status.BranchAdditions,
+		"branch_deletions":      status.BranchDeletions,
+		"comparison_target":     status.ComparisonTarget,
+		"comparison_status":     status.ComparisonStatus,
+		"comparison_error_code": status.ComparisonErrorCode,
 	}
 
 	if err := s.repo.CreateGitSnapshot(ctx, &models.GitSnapshot{

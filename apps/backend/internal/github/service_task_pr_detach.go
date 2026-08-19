@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
 
@@ -52,6 +53,21 @@ func (s *Service) DetachTaskPR(ctx context.Context, workspaceID, associationID s
 	}
 	if !transitioned {
 		return detached, nil
+	}
+	if s.comparisonTargetObserver != nil && detached.RepositoryID != "" {
+		if err := s.comparisonTargetObserver.RemoveComparisonTargetForChange(
+			ctx,
+			detached.TaskID,
+			detached.RepositoryID,
+			taskmodels.ComparisonTargetProviderGitHub,
+			taskmodels.ComparisonTargetKindPullRequest,
+			detached.PRNumber,
+		); err != nil && s.logger != nil {
+			s.logger.Warn("comparison target detach cleanup failed",
+				zap.String("task_id", detached.TaskID),
+				zap.Int("pr_number", detached.PRNumber),
+				zap.Error(err))
+		}
 	}
 	if s.eventBus != nil {
 		event := bus.NewEvent(events.GitHubTaskPRDeleted, "github", &TaskPRDeletedEvent{

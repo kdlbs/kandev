@@ -115,6 +115,7 @@ func buildStandaloneCreateInstanceRequest(
 		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:      req.RemoteContributions,
 		ContributionDestinations: req.ContributionDestinations,
+		ComparisonTargets:        req.ComparisonTargets,
 		WorkspaceSourceRoots:     req.WorkspaceSourceRoots,
 	}
 }

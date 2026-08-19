@@ -357,6 +357,9 @@ func buildGitStatusNotification(sessionID, repositoryName string, status client.
 		"renamed":               status.Renamed,
 		branchAdditionsFieldKey: status.BranchAdditions,
 		branchDeletionsFieldKey: status.BranchDeletions,
+		"comparison_target":     status.ComparisonTarget,
+		"comparison_status":     status.ComparisonStatus,
+		"comparison_error_code": status.ComparisonErrorCode,
 		"is_submodule":          status.IsSubmodule,
 	}
 	if repositoryName != "" {
@@ -415,6 +418,9 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 			"renamed":               metadata["renamed"],
 			branchAdditionsFieldKey: metadata[branchAdditionsFieldKey],
 			branchDeletionsFieldKey: metadata[branchDeletionsFieldKey],
+			"comparison_target":     metadata["comparison_target"],
+			"comparison_status":     metadata["comparison_status"],
+			"comparison_error_code": metadata["comparison_error_code"],
 		},
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)

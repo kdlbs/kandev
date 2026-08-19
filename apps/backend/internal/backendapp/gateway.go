@@ -567,14 +567,16 @@ func taskGitObservation(
 	if name, ok := snapshot.Metadata["repository_name"].(string); ok && name != "" {
 		repository = name
 	}
+	comparisonStatus, _ := snapshot.Metadata["comparison_status"].(string)
 	return statussummary.GitObservation{
 		Repository: repository,
 		Summary: statussummary.GitSummary{
-			Additions:    nonNegativeMetadataInt(snapshot.Metadata, "branch_additions"),
-			Deletions:    nonNegativeMetadataInt(snapshot.Metadata, "branch_deletions"),
-			ChangedFiles: len(snapshot.Files),
-			Ahead:        maxNonNegative(snapshot.Ahead),
-			Behind:       maxNonNegative(snapshot.Behind),
+			Additions:             nonNegativeMetadataInt(snapshot.Metadata, "branch_additions"),
+			Deletions:             nonNegativeMetadataInt(snapshot.Metadata, "branch_deletions"),
+			ChangedFiles:          len(snapshot.Files),
+			Ahead:                 maxNonNegative(snapshot.Ahead),
+			Behind:                maxNonNegative(snapshot.Behind),
+			ComparisonUnavailable: comparisonStatus == "unavailable",
 		},
 	}, true
 }

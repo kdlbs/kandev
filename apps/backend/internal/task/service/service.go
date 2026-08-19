@@ -132,6 +132,14 @@ type AgentBaseBranchPusher interface {
 	PushBaseBranchesForTask(ctx context.Context, taskID string, branches map[string]string)
 }
 
+// AgentComparisonTargetPusher pushes the durable provider-qualified comparison
+// target map to every running agentctl execution for a task. Implementations
+// must replace the complete projection, including an empty map, so a cleared
+// target cannot remain cached in a live workspace.
+type AgentComparisonTargetPusher interface {
+	PushComparisonTargetsForTask(ctx context.Context, taskID string, targets map[string]models.ComparisonTarget)
+}
+
 type BranchMaterializer interface {
 	// MaterializeBranch creates the worktree for a freshly inserted
 	// task_repositories row. Best-effort: when no active session exists yet
@@ -347,6 +355,7 @@ type Service struct {
 	secretStore            secrets.SecretStore
 	workspaceSecretDeleter WorkspaceSecretDeleter
 	baseBranchPusher       AgentBaseBranchPusher
+	comparisonTargetPusher AgentComparisonTargetPusher
 	runtimeOverridesMu     sync.Mutex
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
@@ -491,6 +500,13 @@ func (s *Service) SetWorkspaceSourceProviderRefresher(r WorkspaceSourceProviderR
 // session launch.
 func (s *Service) SetAgentBaseBranchPusher(p AgentBaseBranchPusher) {
 	s.baseBranchPusher = p
+}
+
+// SetAgentComparisonTargetPusher wires the live-update push for provider PR
+// and MR reconciliation. Optional: when unset, the persisted attachment
+// metadata remains authoritative and is hydrated at the next launch.
+func (s *Service) SetAgentComparisonTargetPusher(p AgentComparisonTargetPusher) {
+	s.comparisonTargetPusher = p
 }
 
 // SetProviderDefaultBranchProber wires the synchronous default-branch probe

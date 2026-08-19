@@ -110,6 +110,9 @@ func deriveGitSummary(state *projectionState) *GitSummary {
 	}
 	var git GitSummary
 	for _, observation := range state.git {
+		if observation.ComparisonUnavailable {
+			return &GitSummary{ComparisonUnavailable: true}
+		}
 		git.Additions += observation.Additions
 		git.Deletions += observation.Deletions
 		git.ChangedFiles += observation.ChangedFiles

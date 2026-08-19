@@ -34,6 +34,7 @@ import { useTranslation } from "react-i18next";
 import { TaskAutopilotIcon } from "@/components/task/task-autopilot-icon";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
+import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
 
 type DiffStats = {
   additions: number;
@@ -64,6 +65,7 @@ type TaskItemProps = {
    */
   onSelect?: (e: React.MouseEvent | React.KeyboardEvent) => void;
   diffStats?: DiffStats;
+  comparisonUnavailable?: boolean;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string;
   remoteExecutorName?: string;
@@ -333,6 +335,7 @@ function TaskItemContent({
   wipQueue,
   issueInfo,
   agentErrorMessage,
+  comparisonUnavailable,
 }: {
   title: string;
   autopilot?: boolean;
@@ -352,6 +355,7 @@ function TaskItemContent({
   wipQueue?: WipQueueStatus;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
+  comparisonUnavailable?: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -369,6 +373,7 @@ function TaskItemContent({
         {taskId ? <RegisteredChangeRequestTaskIcon taskId={taskId} /> : null}
         {issueInfo && <IssueTaskIcon issueInfo={issueInfo} />}
         {agentErrorMessage && <TaskAgentErrorIcon message={agentErrorMessage} />}
+        <TaskItemComparisonUnavailable unavailable={comparisonUnavailable} />
         {isRemoteExecutor && (
           <RemoteCloudTooltip
             taskId={taskId ?? ""}
@@ -436,6 +441,7 @@ export const TaskItem = memo(function TaskItem({
   onClick,
   onSelect,
   diffStats,
+  comparisonUnavailable,
   isRemoteExecutor,
   remoteExecutorType,
   remoteExecutorName,
@@ -511,6 +517,7 @@ export const TaskItem = memo(function TaskItem({
         wipQueue={wipQueue}
         issueInfo={issueInfo}
         agentErrorMessage={agentErrorMessage}
+        comparisonUnavailable={comparisonUnavailable}
       />
       {hasDiffStats ? (
         <div className="mobile-task-actions-with-stats group/actions relative shrink-0 self-center flex items-center">

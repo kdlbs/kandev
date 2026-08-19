@@ -198,6 +198,19 @@ Before starting, document:
 - the merge order for dependent changes; and
 - the test command required in each repository.
 
+### Fork pull requests and comparison targets
+
+When a task branch is the head of a fork pull request, provider integration records both repository
+identities. Kandev applies the target only when the attached repository matches the PR head and the
+live checkout branch matches the PR source branch. This prevents an old fork PR from changing the
+comparison base of another attachment.
+
+The target repository and branch are stored on that task-repository attachment. A live session uses
+an exact comparison-only ref for the target. It keeps `origin`, checkout, and push routing unchanged.
+Retargeting the PR refreshes the target. Changing the task base branch or removing the owning PR
+association clears it. If the target is unavailable, Kandev fails closed and marks comparison
+unavailable instead of using a same-named local or `origin` branch.
+
 </details>
 
 ### Add sources after creation

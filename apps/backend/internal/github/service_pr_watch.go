@@ -337,8 +337,10 @@ func (s *Service) associatePRWithTask(
 					s.logger.Debug("failed to publish restored task PR event", zap.Error(err))
 				}
 			}
+			s.reconcileComparisonTarget(ctx, taskID, pr)
 			return restored, nil
 		}
+		s.reconcileComparisonTarget(ctx, taskID, pr)
 		return existing, nil
 	}
 	tp := &TaskPR{
@@ -378,6 +380,7 @@ func (s *Service) associatePRWithTask(
 			s.logger.Debug("failed to publish task PR updated event", zap.Error(err))
 		}
 	}
+	s.reconcileComparisonTarget(ctx, taskID, pr)
 
 	s.logger.Info("associated PR with task",
 		zap.String("task_id", taskID),
@@ -883,6 +886,10 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	if err := s.store.UpdateTaskPR(ctx, tp); err != nil {
 		return fmt.Errorf("update task PR: %w", err)
 	}
+	// Provider payloads carry the authoritative head/base repository identity
+	// and branch. Reconcile after the TaskPR write so a malformed or
+	// unmatchable payload never prevents the review association from persisting.
+	s.reconcileComparisonTarget(ctx, taskID, status.PR)
 
 	if len(changedFields) > 0 {
 		if s.logger != nil {

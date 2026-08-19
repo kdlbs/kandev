@@ -119,6 +119,10 @@ type Manager struct {
 	// launches. See manager_base_branches.go.
 	baseBranchProvider BaseBranchProvider
 
+	// comparisonTargetProvider hydrates task-repository comparison bindings so
+	// every workspace creation path can seed agentctl from durable state.
+	comparisonTargetProvider ComparisonTargetProvider
+
 	// secretStore encrypts/decrypts runtime auth tokens (e.g., agentctl handshake tokens).
 	// Used to persist tokens across backend restarts for remote executor recovery.
 	secretStore secrets.SecretStore

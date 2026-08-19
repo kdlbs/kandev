@@ -157,6 +157,11 @@ type Manager struct {
 	// same map under workspaceTrackersMu.
 	baseBranchesMu sync.RWMutex
 
+	// comparisonTargetsMu guards the provider-qualified target map separately
+	// from branch-only overrides. Updating one target must not race tracker
+	// creation or rewrite siblings' authoritative state.
+	comparisonTargetsMu sync.RWMutex
+
 	// streamSubscribers tracks every workspace-stream subscriber attached
 	// via SubscribeWorkspaceStream so RescanRepositories can wire new
 	// per-repo trackers into the same channels without re-subscription. The
@@ -642,7 +647,8 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 		return t, nil
 	}
 	t := NewWorkspaceTracker(full, m.logger)
-	t.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), cleaned))
+	m.configureTracker(t, cleaned, m.currentWorkspaceSourceRoots())
+	m.prepareTrackerComparisonTarget(context.Background(), t)
 	m.workspaceTrackersBySubpath[cleaned] = t
 	return t, nil
 }

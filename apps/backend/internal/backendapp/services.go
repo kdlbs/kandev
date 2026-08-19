@@ -162,6 +162,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	githubSvc := initGitHubService(cfg, dbPool, eventBus, repos.Secrets, log)
 	if githubSvc != nil {
 		taskSvc.SetTaskStatusSummaryPRReader(&githubTaskStatusSummaryPRReader{gh: githubSvc})
+		githubSvc.SetComparisonTargetObserver(taskSvc)
 		githubSvc.SetPromptResolver(promptSvc)
 		taskSvc.SetContributionDestinationPreparer(&githubContributionDestinationPreparer{service: githubSvc, taskSvc: taskSvc})
 		if brokerErr := githubSvc.ConfigureCredentialBroker(&githubBrokerScopeAuthorizer{repo: repos.Task, provider: githubSvc}); brokerErr != nil {
@@ -171,6 +172,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	gitlabSvc, gitlabCleanup := initGitLabService(dbPool, eventBus, repos.Secrets, log)
 	if gitlabSvc != nil {
 		gitlabSvc.SetPromptResolver(promptSvc)
+		gitlabSvc.SetComparisonTargetObserver(taskSvc)
 	}
 	azureDevOpsSvc := initAzureDevOpsService(dbPool, eventBus, repos.Secrets, log)
 	if azureDevOpsSvc != nil {

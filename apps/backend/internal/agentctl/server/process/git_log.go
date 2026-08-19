@@ -16,6 +16,10 @@ type GitLogResult struct {
 	Success bool             `json:"success"`
 	Commits []*GitCommitInfo `json:"commits"`
 	Error   string           `json:"error,omitempty"`
+	// ErrorCode is a bounded machine-readable failure reason. It is populated
+	// for explicit comparison-target failures; raw git/provider errors stay in
+	// server logs only.
+	ErrorCode string `json:"error_code,omitempty"`
 	// PerRepoErrors lists per-repo failures during a multi-repo log fan-out.
 	// Empty/nil for single-repo responses or when every repo succeeded. The
 	// merged response keeps Success=true as long as at least one repo
@@ -28,6 +32,7 @@ type GitLogResult struct {
 type GitLogRepoError struct {
 	RepositoryName string `json:"repository_name"`
 	Error          string `json:"error"`
+	ErrorCode      string `json:"error_code,omitempty"`
 }
 
 // GitCommitInfo represents a single commit in the log.
@@ -72,6 +77,7 @@ type CumulativeDiffResult struct {
 	// rather than hidden.
 	TruncatedFilesCount int    `json:"truncated_files_count,omitempty"`
 	Error               string `json:"error,omitempty"`
+	ErrorCode           string `json:"error_code,omitempty"`
 }
 
 // maxCumulativeDiffFiles bounds how many file entries GetCumulativeDiff returns.

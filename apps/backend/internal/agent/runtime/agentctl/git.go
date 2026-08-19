@@ -390,9 +390,10 @@ func (c *Client) GitShowCommit(ctx context.Context, commitSHA, repo string) (*Co
 
 // GitLogResult represents the result of a git log operation.
 type GitLogResult struct {
-	Success bool             `json:"success"`
-	Commits []*GitCommitInfo `json:"commits"`
-	Error   string           `json:"error,omitempty"`
+	Success   bool             `json:"success"`
+	Commits   []*GitCommitInfo `json:"commits"`
+	Error     string           `json:"error,omitempty"`
+	ErrorCode string           `json:"error_code,omitempty"`
 	// PerRepoErrors lists per-repo failures during a multi-repo log fan-out.
 	// Empty/nil for single-repo responses or when every repo succeeded. Mirrors
 	// the server's process.GitLogResult.PerRepoErrors field.
@@ -405,6 +406,7 @@ type GitLogResult struct {
 type GitLogRepoError struct {
 	RepositoryName string `json:"repository_name"`
 	Error          string `json:"error"`
+	ErrorCode      string `json:"error_code,omitempty"`
 }
 
 // GitCommitInfo represents a single commit in the log.
@@ -484,6 +486,7 @@ type CumulativeDiffResult struct {
 	// Surfaced to the UI as a "N more files hidden" banner.
 	TruncatedFilesCount int    `json:"truncated_files_count,omitempty"`
 	Error               string `json:"error,omitempty"`
+	ErrorCode           string `json:"error_code,omitempty"`
 }
 
 // GetCumulativeDiff gets the cumulative diff from baseCommit to HEAD.
@@ -526,27 +529,30 @@ func (c *Client) GetCumulativeDiff(ctx context.Context, baseCommit, targetBranch
 
 // GitStatusResult represents the result of a git status query.
 type GitStatusResult struct {
-	Success          bool                   `json:"success"`
-	IsSubmodule      bool                   `json:"is_submodule,omitempty"`
-	Branch           string                 `json:"branch"`
-	RemoteBranch     string                 `json:"remote_branch"`
-	HeadCommit       string                 `json:"head_commit"`
-	BaseCommit       string                 `json:"base_commit"` // Merge-base with origin branch
-	Ahead            int                    `json:"ahead"`
-	Behind           int                    `json:"behind"`
-	RemoteAhead      int                    `json:"remote_ahead"`
-	RemoteBehind     int                    `json:"remote_behind"`
-	RemoteHeadCommit string                 `json:"remote_head_commit,omitempty"`
-	Modified         []string               `json:"modified"`
-	Added            []string               `json:"added"`
-	Deleted          []string               `json:"deleted"`
-	Untracked        []string               `json:"untracked"`
-	Renamed          []string               `json:"renamed"`
-	Files            map[string]interface{} `json:"files"`
-	Timestamp        string                 `json:"timestamp"`
-	BranchAdditions  int                    `json:"branch_additions,omitempty"`
-	BranchDeletions  int                    `json:"branch_deletions,omitempty"`
-	Error            string                 `json:"error,omitempty"`
+	Success             bool                   `json:"success"`
+	IsSubmodule         bool                   `json:"is_submodule,omitempty"`
+	Branch              string                 `json:"branch"`
+	RemoteBranch        string                 `json:"remote_branch"`
+	HeadCommit          string                 `json:"head_commit"`
+	BaseCommit          string                 `json:"base_commit"` // Merge-base with origin branch
+	ComparisonTarget    string                 `json:"comparison_target,omitempty"`
+	ComparisonStatus    string                 `json:"comparison_status,omitempty"`
+	ComparisonErrorCode string                 `json:"comparison_error_code,omitempty"`
+	Ahead               int                    `json:"ahead"`
+	Behind              int                    `json:"behind"`
+	RemoteAhead         int                    `json:"remote_ahead"`
+	RemoteBehind        int                    `json:"remote_behind"`
+	RemoteHeadCommit    string                 `json:"remote_head_commit,omitempty"`
+	Modified            []string               `json:"modified"`
+	Added               []string               `json:"added"`
+	Deleted             []string               `json:"deleted"`
+	Untracked           []string               `json:"untracked"`
+	Renamed             []string               `json:"renamed"`
+	Files               map[string]interface{} `json:"files"`
+	Timestamp           string                 `json:"timestamp"`
+	BranchAdditions     int                    `json:"branch_additions,omitempty"`
+	BranchDeletions     int                    `json:"branch_deletions,omitempty"`
+	Error               string                 `json:"error,omitempty"`
 }
 
 // fetchJSONResult performs a GET against `path` and decodes the response into

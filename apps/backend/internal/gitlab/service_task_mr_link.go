@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 var (
@@ -193,6 +194,7 @@ func (s *Service) AssociateExistingMRByURL(
 	if err := store.UpsertTaskMR(ctx, association); err != nil {
 		return nil, fmt.Errorf("upsert task MR: %w", err)
 	}
+	s.reconcileComparisonTarget(ctx, taskID, client.Host(), status.MR)
 	s.publishTaskMRUpdated(ctx, workspaceID, association)
 	return association, nil
 }
@@ -285,7 +287,27 @@ func (s *Service) UnlinkTaskMR(ctx context.Context, workspaceID, associationID s
 	if store == nil {
 		return errors.New("gitlab store not configured")
 	}
-	return store.DeleteTaskMRForWorkspace(ctx, workspaceID, associationID)
+	association, lookupErr := store.GetTaskMRByID(ctx, associationID)
+	if lookupErr != nil {
+		return lookupErr
+	}
+	if err := store.DeleteTaskMRForWorkspace(ctx, workspaceID, associationID); err != nil {
+		return err
+	}
+	if association != nil && s.comparisonTargetObserver != nil && association.RepositoryID != "" {
+		if err := s.comparisonTargetObserver.RemoveComparisonTargetForChange(
+			ctx,
+			association.TaskID,
+			association.RepositoryID,
+			taskmodels.ComparisonTargetProviderGitLab,
+			taskmodels.ComparisonTargetKindMergeRequest,
+			association.MRIID,
+		); err != nil && s.logger != nil {
+			s.logger.Warn("GitLab comparison target detach cleanup failed",
+				zap.String("task_id", association.TaskID), zap.Int("mr_iid", association.MRIID), zap.Error(err))
+		}
+	}
+	return nil
 }
 
 func taskMRFromStatus(taskID, repositoryID, host, projectPath string, status *MRStatus) *TaskMR {

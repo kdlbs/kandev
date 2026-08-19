@@ -179,3 +179,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-17-separate-task-activity-from-summary-freshness | [Separate Task Activity From Summary Freshness](2026-08-17-separate-task-activity-from-summary-freshness.md) | accepted | backend, frontend, protocol | 2026-08-17 |
 | 2026-08-17-release-pr-ruleset-bypass | [Give Stable Release PRs an Administrator Token Bypass](2026-08-17-release-pr-ruleset-bypass.md) | accepted | infra, workflow, security | 2026-08-17 |
 | 2026-08-18-never-started-agent-stall-terminal | [Treat Never-Started Agent Stalls as Terminal](2026-08-18-never-started-agent-stall-terminal.md) | accepted | backend, frontend, protocol | 2026-08-18 |
+| 2026-08-19-repository-qualified-comparison-targets | [Qualify Git Comparison Targets by Repository](2026-08-19-repository-qualified-comparison-targets.md) | accepted | backend, agentctl, frontend, protocol, GitHub, GitLab | 2026-08-19 |
