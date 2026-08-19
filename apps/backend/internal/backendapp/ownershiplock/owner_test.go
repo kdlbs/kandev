@@ -20,6 +20,7 @@ func TestWriteOwnerRoundTrips(t *testing.T) {
 	owner := readOwner(path)
 	if owner == nil {
 		t.Fatal("readOwner returned nil")
+		return
 	}
 	if owner.PID != int64(os.Getpid()) {
 		t.Fatalf("owner PID = %d, want %d", owner.PID, os.Getpid())
@@ -52,6 +53,7 @@ func TestReadOwnerWhileLockIsHeld(t *testing.T) {
 	owner := readOwner(path)
 	if owner == nil {
 		t.Fatal("readOwner returned nil while lock was held")
+		return
 	}
 	if owner.PID != int64(os.Getpid()) {
 		t.Fatalf("owner PID = %d, want %d", owner.PID, os.Getpid())
@@ -75,6 +77,7 @@ func TestWriteOwnerTruncatesPreviousRecord(t *testing.T) {
 	owner := readOwner(path)
 	if owner == nil {
 		t.Fatal("readOwner returned nil after truncating previous metadata")
+		return
 	}
 	if owner.PID != int64(os.Getpid()) {
 		t.Fatalf("owner PID = %d, want %d", owner.PID, os.Getpid())
