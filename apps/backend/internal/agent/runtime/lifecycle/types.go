@@ -203,7 +203,7 @@ type AgentExecution struct {
 	// response buffers active for an execution. Agentctl accepts prompt requests
 	// asynchronously, so its transport-level gate alone cannot provide this.
 	promptMu                sync.Mutex
-	dispatchedPromptPending bool
+	dispatchedPromptPending atomic.Bool
 
 	// Closed when the current SendPrompt returns, so CancelAgent can wait
 	// for the in-flight prompt to finish before the caller retries.

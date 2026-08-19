@@ -263,6 +263,10 @@ func (m *Manager) escalateStuckCancel(ctx context.Context, execution *AgentExecu
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID))
 
+	// Clear the cancelled dispatch-only prompt before releasing its waiter. If
+	// the waiter immediately admits a successor, a later cleanup must not clear
+	// the successor's gate.
+	execution.dispatchedPromptPending.Store(false)
 	execution.signalPromptCompletionForStartupGeneration(
 		execution.startupAttemptSnapshot(),
 		PromptCompletionSignal{
