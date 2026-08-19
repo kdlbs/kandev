@@ -103,9 +103,6 @@ export function CoordinatorMonitorSection({
                   htmlFor={`monitor-${workflowId}-${step.id}`}
                   className="text-sm font-normal cursor-pointer"
                 />
-                <span aria-hidden="true" className="text-sm">
-                  {step.name}
-                </span>
               </div>
               {stepConfig.selected && (
                 <div className="ml-6">
