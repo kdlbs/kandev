@@ -27,15 +27,41 @@
   Narrowed to revive's `file-length-limit`; both files lint clean under everything else.
   (commit 1d5a57bdf)
 
+## Fixed during QA
+
+- `apps/backend/pkg/pluginsdk/host.go:1017` — `grpcHostServer` only type-asserted
+  `AgentConversationHost` and then called straight through `AgentConversations()`. That interface is
+  public and returning nil is how an implementation says "this caller may not use agent
+  conversations", so the three RPCs segfaulted the gRPC server. A bufconn test reproduces the
+  SIGSEGV without the fix. (commit ac48d8174)
+- `apps/backend/internal/workflow/service/coordinator_monitoring.go:27` — `workspace_id` arrived in
+  the PUT body and was stored verbatim; posting `TOTALLY-BOGUS-WORKSPACE` against a live instance
+  persisted exactly that on a workflow belonging to a different workspace. Now resolved from the
+  workflow itself. (commit 37b29d9f4)
+- Added the coverage both Review-phase UI fixes shipped without: the `agent_profile` field loading
+  its own profiles, and `host.ui.WorkspaceAgentChat` staying off plugin boot while still resolving
+  to the real chat surface. (commit 504c4d961)
+
+## Follow-up tasks created (out of scope for this PR)
+
+- Make internal/github tests hermetic against GH_TOKEN (task
+  `725d47ae-58f9-4903-88b4-2d9aa8dbe733`) — `apps/backend/internal/github/factory_test.go:38` and
+  `service_token_test.go:229` fail in any shell exporting `GH_TOKEN` and pass under `env -i`.
+  Introduced in `44811da70` by Carlos Florencio <carlosmflorencio@gmail.com>. `internal/github` has
+  zero files in this branch's diff.
+
 ## Action required by author
 
-- `apps/backend/internal/workflow/handlers/handlers.go:296` — `PUT
-  /api/v1/workflows/:id/coordinator-monitoring` takes `workspace_id` from the request body and
-  stores it unvalidated on every `workflow_coordinator_monitoring` row; nothing checks it against
-  the workflow's own workspace. No impact today because the column is never read back, but the
-  Coordinator plugin is specified to read this policy workspace-scoped, so the provenance should be
-  derived server-side from the workflow before that consumer lands. The obvious repository-level fix
-  (`SELECT workspace_id FROM workflows` inside the replace transaction) was tried and reverted: the
-  handler tests back workflows with a mock provider rather than a `workflows` row, so it cannot be
-  verified at that layer without changing the fixtures, and the right owning layer is an author
-  decision.
+- **Sign off on two permanent proto fields.** `828f949b1` adds
+  `WorkflowStep.coordinator_monitored = 6` / `coordinator_prompt = 7` and serves them from the
+  existing `api_read: ["workflows"]` capability rather than a new one, so **every** plugin holding
+  that capability can read operator-authored coordinator instructions for every step. Note the
+  deliberate asymmetry this creates: `wfmodels.WorkflowStep.Prompt` (the step's own agent
+  instructions) is still not exposed to plugins at all. The choice is documented in the commit and
+  is consistent with the spec's "read by the plugin through a capability-scoped API", but proto
+  field numbers are effectively permanent and the plan's own risk list asks for ADR/spec review
+  before code generation, so this should be an explicit decision rather than an inherited one.
+- **Correct the claim in `94e7efc36`'s message before reusing it in the PR description.** It states
+  it "closes a same-process race in Ensure's check-then-create sequence", but the commit does not
+  touch `Ensure` or `lockEnsureKey`; that serialization already existed on the branch. The rest of
+  the message is accurate.
