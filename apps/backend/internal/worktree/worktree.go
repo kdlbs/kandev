@@ -138,6 +138,13 @@ type CreateRequest struct {
 	// persistence is deferred to the executor's environment transaction.
 	TaskEnvironmentID string
 
+	// ReuseRequired makes this an attach-only request. The supplied WorktreeID
+	// must identify an active, valid worktree owned by this task/environment.
+	// It is deliberately distinct from ordinary resume/recovery: no lookup
+	// miss, invalid directory, or mismatched canonical record may create or
+	// recreate a worktree in this mode.
+	ReuseRequired bool
+
 	// TaskTitle is the human-readable task title (optional).
 	// If provided, it will be used to generate semantic worktree/branch names.
 	// The title is sanitized and truncated to 20 characters.

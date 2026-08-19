@@ -1050,6 +1050,10 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if execCfg.ExecutorID != "" {
 		session.ExecutorID = execCfg.ExecutorID
 	}
+	// A persisted environment belongs to the task, not to the session that
+	// first materialized it. Its next launch must attach rather than recover or
+	// materialize another workspace.
+	req.WorkspaceReuseRequired = existingEnv != nil
 	req.OfficeAgentProfileID = opts.OfficeAgentProfileID
 	req.TurnID = opts.TurnID
 	if req.OfficeAgentProfileID == "" && session.AgentProfileID != "" {

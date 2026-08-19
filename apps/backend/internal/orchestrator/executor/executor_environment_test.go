@@ -408,6 +408,20 @@ func TestReuseExistingEnvironment_WorktreeAndContainer(t *testing.T) {
 	}
 }
 
+func TestReuseExistingEnvironment_AttachOnlyDoesNotAdoptSiblingExecution(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-1"] = &models.TaskSession{ID: "session-1", TaskID: "task-1", TaskEnvironmentID: "environment-1"}
+	repo.executorsRunning["session-1"] = &models.ExecutorRunning{AgentExecutionID: "execution-1"}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{TaskID: "task-1", WorkspaceReuseRequired: true}
+
+	e.reuseExistingEnvironment(context.Background(), req, &models.TaskEnvironment{ID: "environment-1"})
+
+	if req.PreviousExecutionID != "" {
+		t.Fatalf("attach-only reuse adopted sibling execution %q", req.PreviousExecutionID)
+	}
+}
+
 func TestReuseExistingEnvironment_EmptyEnvFieldsDoNothing(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1"}

@@ -70,8 +70,10 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 	if env.ID == "" {
 		return
 	}
-	if running := e.latestExecutorRunningForEnvironment(ctx, req.TaskID, env); running != nil {
-		applyExecutorRunningMetadata(req, running)
+	if !req.WorkspaceReuseRequired {
+		if running := e.latestExecutorRunningForEnvironment(ctx, req.TaskID, env); running != nil {
+			applyExecutorRunningMetadata(req, running)
+		}
 	}
 }
 
@@ -100,7 +102,10 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 	}
 
 	envWorktreeIDs := e.environmentRepoWorktreeIDs(req, env)
-	sessionWorktreeIDs := e.latestSessionWorktreeIDsForEnvironment(ctx, req.TaskID, env.ID)
+	var sessionWorktreeIDs map[repositoryWorktreeKey]string
+	if !req.WorkspaceReuseRequired {
+		sessionWorktreeIDs = e.latestSessionWorktreeIDsForEnvironment(ctx, req.TaskID, env.ID)
+	}
 	if len(envWorktreeIDs) == 0 && len(sessionWorktreeIDs) == 0 {
 		return
 	}
@@ -248,7 +253,22 @@ func environmentWorktreeBranch(env *models.TaskEnvironment) string {
 
 func (e *Executor) environmentRepoWorktreeIDs(req *LaunchAgentRequest, env *models.TaskEnvironment) map[repositoryWorktreeKey]string {
 	result := make(map[repositoryWorktreeKey]string)
-	for _, repo := range env.Repos {
+	repos := env.Repos
+	// Some repository implementations hydrate the environment row without its
+	// inventory. Reuse-required launches must still consult the canonical
+	// task_environment_repos rows, never a sibling session projection.
+	if req.WorkspaceReuseRequired && env.ID != "" && e.repo != nil {
+		stored, err := e.repo.ListTaskEnvironmentRepos(context.Background(), env.ID)
+		if err != nil {
+			e.logger.Warn("failed to load task environment worktree inventory",
+				zap.String("task_environment_id", env.ID), zap.Error(err))
+			return result
+		}
+		if len(stored) > 0 {
+			repos = stored
+		}
+	}
+	for _, repo := range repos {
 		if repo.RepositoryID == "" || repo.WorktreeID == "" {
 			continue
 		}
