@@ -656,11 +656,13 @@ func TestAddWorkspaceSourcesDefaultsTaskAndForwardsMixedSources(t *testing.T) {
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "task-current", payload["task_id"])
+	assert.Equal(t, "task-current", payload["caller_task_id"])
+	assert.Equal(t, "test-session", payload["caller_session_id"])
 	assert.Len(t, payload["sources"], 2)
 }
 
-func TestAddWorkspaceSourcesRejectsAnotherTask(t *testing.T) {
-	backend := &testBackend{}
+func TestAddWorkspaceSourcesForwardsDirectChildTargetWithTrustedProvenance(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"task_id": "task-child"}}
 	s := newTaskModeServer(t, backend, "task-current")
 
 	result := callTool(t, s, "add_workspace_sources_kandev", map[string]interface{}{
@@ -668,8 +670,12 @@ func TestAddWorkspaceSourcesRejectsAnotherTask(t *testing.T) {
 		"sources": []interface{}{map[string]interface{}{"kind": "folder", "local_path": "/tmp/docs"}},
 	})
 
-	assert.True(t, result.IsError)
-	assert.Empty(t, backend.lastAction)
+	assert.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-other", payload["task_id"])
+	assert.Equal(t, "task-current", payload["caller_task_id"])
+	assert.Equal(t, "test-session", payload["caller_session_id"])
 }
 
 // TestAddBranchToTask_ForwardsLocalPath verifies local_path is plumbed through

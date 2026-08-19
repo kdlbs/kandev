@@ -855,7 +855,7 @@ func TestAttachWorkspaceSources_RejectsSameRepositoryDifferentBaseOnLocalRuntime
 	}
 }
 
-func TestAttachWorkspaceSourcesRejectsDuplicateRepositoryWithinBatch(t *testing.T) {
+func TestAttachWorkspaceSourcesCollapsesDuplicateRepositoryWithinBatch(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	svc.workspaceFolders = repo
 	ctx := context.Background()
@@ -874,8 +874,15 @@ func TestAttachWorkspaceSourcesRejectsDuplicateRepositoryWithinBatch(t *testing.
 		t.Fatal(err)
 	}
 	_, err = svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{{Kind: WorkspaceSourceRepository, RepositoryID: "repo-dup", BaseBranch: "release", CheckoutBranch: "feature/x"}, {Kind: WorkspaceSourceRepository, RepositoryID: "repo-dup", BaseBranch: "release", CheckoutBranch: "feature/x"}}})
-	if err == nil {
-		t.Fatal("AttachWorkspaceSources succeeded, want duplicate error")
+	if err != nil {
+		t.Fatalf("AttachWorkspaceSources: %v", err)
+	}
+	rows, err := repo.ListTaskRepositories(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("task repositories = %d, want primary plus one attachment", len(rows))
 	}
 }
 

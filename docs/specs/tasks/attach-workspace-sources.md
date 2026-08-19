@@ -147,7 +147,11 @@ outside the effective workspace remain non-actionable and are never rewritten in
 file request.
 
 `add_workspace_sources_kandev` accepts the same source union and defaults `task_id` to the current
-task.
+task. The caller may target only itself or a same-workspace direct child. The task MCP server injects
+the bound caller task/session provenance and the backend verifies it before mutation; provenance is
+not an agent-supplied tool argument. Exact normalized repository and folder retries are idempotent,
+while contradictory source identities remain conflicts. See ADR
+[`2026-08-19-parent-authorized-child-workspace-sources`](../../decisions/2026-08-19-parent-authorized-child-workspace-sources.md).
 
 `add_branch_to_task_kandev` preserves its existing request arguments and returns:
 
@@ -290,7 +294,8 @@ persisted; every relaunch and resume of that task reuses the persisted name.
   chooses repository kinds from the touch-sized **Add repository** menu, adds two sources, and
   submits, **THEN** a touch-usable full-height picker completes the same operation without
   horizontal document overflow and returns focus to the workspace-actions control.
-- **GIVEN** an agent calls `add_workspace_sources_kandev` for its current idle task, **WHEN** all
+- **GIVEN** an agent calls `add_workspace_sources_kandev` for its current idle task or an idle
+  same-workspace direct child, **WHEN** all
   inputs materialize, **THEN** the UI receives the same task and session updates as the human flow.
 - **GIVEN** two distinct tasks whose titles sanitize to the same task-root slug, **WHEN** each task
   materializes a Kandev-owned task root, **THEN** their collision-resistant suffixes normally produce

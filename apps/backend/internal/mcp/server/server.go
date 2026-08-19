@@ -1291,8 +1291,12 @@ func (s *Server) registerAddBranchToTaskTool() {
 func (s *Server) registerAddWorkspaceSourcesTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("add_workspace_sources_kandev",
-			mcp.WithDescription("Attach repository and folder workspace sources to an idle task. task_id defaults to the current task."),
+			mcp.WithDescription("Attach repository and folder workspace sources to an idle task. A task may update itself or its same-workspace direct child. Exact retries are idempotent."),
 			mcp.WithString(mcpKeyTaskID, mcp.Description("Task to update. Defaults to the current task.")),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(true),
 			mcp.WithArray("sources", mcp.Required(), mcp.MinItems(1),
 				mcp.Description("Ordered source objects. Each has kind repository or folder and the documented fields for that kind."),
 				mcp.Items(map[string]any{"type": "object"}),
@@ -1311,11 +1315,8 @@ func (s *Server) addWorkspaceSourcesHandler() server.ToolHandlerFunc {
 		if taskID == "" {
 			return mcp.NewToolResultError("task_id is required (no current task context to default to)"), nil
 		}
-		// A task-mode MCP server is bound to one live task. Never let an agent
-		// use this mutation tool as a cross-task capability: the backend tunnel
-		// has no authenticated user principal to authorize arbitrary task IDs.
-		if s.taskID == "" || taskID != s.taskID {
-			return mcp.NewToolResultError("task_id is not available in this session"), nil
+		if s.taskID == "" || s.sessionID == "" {
+			return mcp.NewToolResultError("task source provenance is unavailable in this session"), nil
 		}
 		arguments, ok := req.Params.Arguments.(map[string]interface{})
 		if !ok {
@@ -1325,7 +1326,8 @@ func (s *Server) addWorkspaceSourcesHandler() server.ToolHandlerFunc {
 		if !ok {
 			return mcp.NewToolResultError("sources is required"), nil
 		}
-		payload := map[string]interface{}{mcpKeyTaskID: taskID, "sources": sources}
+		// Provenance is server-authored and intentionally absent from the callable schema.
+		payload := map[string]interface{}{mcpKeyTaskID: taskID, "sources": sources, "caller_task_id": s.taskID, "caller_session_id": s.sessionID}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAddWorkspaceSources, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
