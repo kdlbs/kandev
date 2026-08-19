@@ -1022,6 +1022,7 @@ func (s *Service) updateTaskSessionStateWithHook(
 	// drop the red interruption icon. No-op when the marker is absent.
 	if nextState == models.TaskSessionStateStarting || nextState == models.TaskSessionStateRunning {
 		s.clearTaskInterruptedMarker(ctx, taskID)
+		s.clearTaskAutoStartFailedMarker(ctx, taskID)
 	}
 	if authoritativeUpdatedAt == nil {
 		s.logger.Warn("skipping session state_changed publish; could not read authoritative updated_at",
@@ -1769,6 +1770,7 @@ func (s *Service) setSessionStarting(
 	// updateTaskSessionStateWithHook, so clear the interruption marker here
 	// too (no-op when absent).
 	s.clearTaskInterruptedMarker(ctx, taskID)
+	s.clearTaskAutoStartFailedMarker(ctx, taskID)
 
 	if publishSession != nil {
 		s.publishTaskSessionStateChanged(ctx, taskID, session.ID, oldState, session.State, session.ErrorMessage, stateUpdatedAt, publishSession)
@@ -1798,6 +1800,36 @@ func (s *Service) clearTaskInterruptedMarker(ctx context.Context, taskID string)
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || task == nil {
 		s.logger.Warn("failed to load task for interrupted-clear publish",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	s.publishTaskUpdated(ctx, task)
+}
+
+// clearTaskAutoStartFailedMarker removes the auto-start-failure marker from a
+// task and republishes task.updated when it was actually present, so open
+// clients drop the failure badge. Called from the same session-start funnel
+// as clearTaskInterruptedMarker: a session entering STARTING/RUNNING means an
+// agent did launch, so any earlier auto-start failure no longer applies.
+// No-op when the marker is absent.
+func (s *Service) clearTaskAutoStartFailedMarker(ctx context.Context, taskID string) {
+	if taskID == "" {
+		return
+	}
+	removed, err := s.repo.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyAutoStartFailed)
+	if err != nil {
+		s.logger.Warn("failed to clear auto-start-failed marker",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	if !removed {
+		return
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		s.logger.Warn("failed to load task for auto-start-failed-clear publish",
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return

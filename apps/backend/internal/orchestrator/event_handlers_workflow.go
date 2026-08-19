@@ -1071,6 +1071,11 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		return
 	}
 
+	if s.isOfficeTask(ctx, task.ID) {
+		s.autoStartOfficeTaskForLoadedStep(ctx, task, step, eventName, restoreQueuePromotion)
+		return
+	}
+
 	workflowAgentProfileID := s.resolveStepAgentProfile(ctx, step)
 	agentProfileID := workflowAgentProfileID
 	if agentProfileID == "" {
@@ -1097,7 +1102,8 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		// can fire. Only the first atomic claim of MetaKeyAutoStartClaimed wins;
 		// the loser skips launch because the winner will handle it.
 		// Absent guard = ordinary (non-watcher) auto-start; proceed as before.
-		if _, hasGuard := task.Metadata[models.MetaKeyAutoStartGuard]; hasGuard {
+		_, hasGuard := task.Metadata[models.MetaKeyAutoStartGuard]
+		if hasGuard {
 			if !s.claimAutoStart(asyncCtx, task.ID, eventName) {
 				s.logger.Debug(eventName+": auto-start claim lost; watcher path will launch",
 					zap.String("task_id", task.ID))
@@ -1114,12 +1120,96 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 			s.logger.Error(eventName+": failed to auto-start task",
 				zap.String("task_id", task.ID),
 				zap.Error(err))
-			s.restoreAutoStartClaim(asyncCtx, task.ID, eventName)
-			if restoreQueuePromotion {
-				s.restoreTaskLifecycleToken(asyncCtx, task.ID, models.MetaKeyQueuePromotionPending, eventName)
-			}
+			s.handleAutoStartFailure(asyncCtx, task.ID, eventName, hasGuard, restoreQueuePromotion)
 		}
 	}()
+}
+
+// autoStartOfficeTaskForLoadedStep is the Office-aware counterpart of the
+// kanban launch path above. An Office task has no session-based launch route
+// (see validateOfficeRuntimeEnv) — StartTask can never succeed for it, it
+// just logs "office runtime context is incomplete" and starts nothing. Queue
+// a run through the engine's Office adapters instead, the same mechanism the
+// scheduler's recovery sweep and the "assign task" flow already use to start
+// Office work (internal/office/service/scheduler_recovery.go).
+func (s *Service) autoStartOfficeTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool) {
+	s.logger.Info(eventName+": queueing office run (no session, auto-start step)",
+		zap.String("task_id", task.ID),
+		zap.String("to_step_id", step.ID))
+
+	// Async for the same reason as the kanban path above: the event bus
+	// delivers synchronously and blocking here would stall the HTTP handler
+	// that published the move.
+	go func() {
+		asyncCtx := context.WithoutCancel(ctx)
+
+		_, hasGuard := task.Metadata[models.MetaKeyAutoStartGuard]
+		if hasGuard {
+			if !s.claimAutoStart(asyncCtx, task.ID, eventName) {
+				s.logger.Debug(eventName+": auto-start claim lost; watcher path will launch",
+					zap.String("task_id", task.ID))
+				return
+			}
+		}
+
+		if err := s.queueOfficeAutoStartRun(asyncCtx, task, step); err != nil {
+			s.logger.Error(eventName+": failed to queue office auto-start run",
+				zap.String("task_id", task.ID),
+				zap.Error(err))
+			s.handleAutoStartFailure(asyncCtx, task.ID, eventName, hasGuard, restoreQueuePromotion)
+		}
+	}()
+}
+
+// officeAutoStartRunReason mirrors office/service.RunReasonTaskAssigned
+// ("task_assigned"). Kept as a literal rather than importing
+// internal/office/service: the two packages intentionally avoid importing
+// each other (see runsServiceEngineAdapter in backendapp/main.go), so a
+// shared reason string is duplicated rather than pulled across the boundary.
+const officeAutoStartRunReason = "task_assigned"
+
+// queueOfficeAutoStartRun makes auto_start_agent Office-aware: instead of
+// StartTask (kanban-only), it resolves an agent the same way a "primary"
+// queue_run target would — preferring the task's current runner participant,
+// falling back to its assignee — and queues a run through engineRunQueue.
+func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep) error {
+	if s.engineRunQueue == nil {
+		return fmt.Errorf("office run queue is not wired")
+	}
+	agentProfileID := task.AssigneeAgentProfileID
+	if s.enginePrimary != nil {
+		if resolved, err := s.enginePrimary.PrimaryAgentProfileID(ctx, step.ID, task.ID); err == nil && resolved != "" {
+			agentProfileID = resolved
+		}
+	}
+	if agentProfileID == "" {
+		return fmt.Errorf("no agent profile resolved for office auto-start on task %s", task.ID)
+	}
+	return s.engineRunQueue.QueueRun(ctx, engine.QueueRunRequest{
+		AgentProfileID: agentProfileID,
+		TaskID:         task.ID,
+		WorkflowStepID: step.ID,
+		Reason:         officeAutoStartRunReason,
+		Payload:        map[string]any{"task_id": task.ID},
+	})
+}
+
+// handleAutoStartFailure records a failed auto-start attempt. It restores the
+// MetaKeyAutoStartClaimed token only when hasGuard is true: claimAutoStart is
+// only ever called (and the token only ever taken) when the task carries
+// MetaKeyAutoStartGuard, so restoring it unconditionally stamps
+// auto_start_claimed onto tasks that never carried the guard, corrupting the
+// invariant documented at MetaKeyAutoStartGuard. It also stamps
+// MetaKeyAutoStartFailed so the failure surfaces on the task card instead of
+// only in backend logs.
+func (s *Service) handleAutoStartFailure(ctx context.Context, taskID, eventName string, hasGuard, restoreQueuePromotion bool) {
+	if hasGuard {
+		s.restoreAutoStartClaim(ctx, taskID, eventName)
+	}
+	if restoreQueuePromotion {
+		s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, eventName)
+	}
+	s.setTaskAutoStartFailedMarker(ctx, taskID, eventName)
 }
 
 func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eventName string) bool {
@@ -1245,6 +1335,29 @@ func (s *Service) restoreAutoStartClaim(ctx context.Context, taskID, eventName s
 		s.logger.Warn(eventName+": failed to restore auto-start claim",
 			zap.String("task_id", taskID), zap.Error(err))
 	}
+}
+
+// setTaskAutoStartFailedMarker stamps MetaKeyAutoStartFailed on a task and
+// republishes task.updated so the failure surfaces on the card. Cleared by
+// clearTaskAutoStartFailedMarker when a session for the task next reaches
+// STARTING/RUNNING.
+func (s *Service) setTaskAutoStartFailedMarker(ctx context.Context, taskID, eventName string) {
+	setter, ok := s.repo.(taskMetadataKeySetter)
+	if !ok {
+		return
+	}
+	if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyAutoStartFailed, true); err != nil {
+		s.logger.Warn(eventName+": failed to set auto-start-failed marker",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		s.logger.Warn(eventName+": failed to load task for auto-start-failed publish",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	s.publishTaskUpdated(ctx, task)
 }
 
 // handleTaskMovedWithSession handles the case where a task with an existing session

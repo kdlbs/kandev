@@ -9,6 +9,7 @@ import {
 } from "@tabler/icons-react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { renderSubagentCountChip, renderTaskStatusIcon } from "./kanban-card-content";
+import { AutoStartFailedTaskIcon } from "@/lib/ui/state-icons";
 import type { Task } from "./kanban-card";
 
 function task(overrides: Partial<Task>): Task {
@@ -89,6 +90,32 @@ describe("renderTaskStatusIcon — waiting-for-input variants", () => {
       true,
     );
     expect(iconType(node)).toBe(IconShieldQuestion);
+  });
+});
+
+describe("renderTaskStatusIcon — auto-start failed", () => {
+  it("shows the auto-start-failed triangle for a task whose on_enter launch failed", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "IN_PROGRESS", autoStartFailed: true }),
+      false,
+      false,
+      false,
+    );
+    expect(iconType(node)).toBe(AutoStartFailedTaskIcon);
+  });
+
+  it("keeps the terminal done check over a lingering auto-start-failed marker", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "COMPLETED", autoStartFailed: true }),
+      false,
+      false,
+      false,
+    );
+    expect(iconType(node)).toBe(IconCheck);
+  });
+
+  it("renders nothing for a resting task with the marker absent", () => {
+    expect(renderTaskStatusIcon(task({ state: "IN_PROGRESS" }), false, false, false)).toBeNull();
   });
 });
 

@@ -316,9 +316,10 @@ export function renderTaskStatusIcon(
   const showPermissionIcon = shouldUsePermissionTaskIcon(hasPendingPermission);
   const needsMe = showQuestionIcon || showPermissionIcon;
   const showInterrupted = !!task.interrupted;
+  const showAutoStartFailed = !!task.autoStartFailed;
   const hasActivity =
     task.foregroundActivity === "generating" || task.foregroundActivity === "background";
-  if (!showRunningSpinner && !needsMe && !hasActivity && !showInterrupted) {
+  if (!showRunningSpinner && !needsMe && !hasActivity && !showInterrupted && !showAutoStartFailed) {
     return null;
   }
   // A "needs me" prompt (pending clarification / permission) must not be masked
@@ -333,6 +334,7 @@ export function renderTaskStatusIcon(
     foregroundActivity: task.foregroundActivity,
     hasPendingPermission,
     interrupted: showInterrupted,
+    autoStartFailed: showAutoStartFailed,
   });
 }
 
