@@ -1167,6 +1167,13 @@ export class ApiClient {
     return this.request("GET", `/api/v1/agent-profiles/${profileId}/mcp-config`);
   }
 
+  async updateAgentProfileMcpConfig(
+    profileId: string,
+    config: { enabled: boolean; servers: Record<string, unknown> },
+  ): Promise<{ profile_id: string; enabled: boolean; servers: Record<string, unknown> }> {
+    return this.request("POST", `/api/v1/agent-profiles/${profileId}/mcp-config`, config);
+  }
+
   // --- E2E Test Reset ---
 
   async e2eReset(workspaceId: string, keepWorkflowIds?: string[]): Promise<void> {
@@ -2432,7 +2439,7 @@ export class ApiClient {
     await this.wsRequest("message.queue.cancel", { session_id: sessionId });
   }
 
-  async getQueueStatus(sessionId: string): Promise<{ count: number }> {
+  async getQueueStatus(sessionId: string): Promise<{ count: number; auto_run: boolean }> {
     return this.wsRequest("message.queue.get", { session_id: sessionId });
   }
 

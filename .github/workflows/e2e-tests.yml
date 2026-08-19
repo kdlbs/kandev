@@ -67,6 +67,8 @@ jobs:
             apps/packages/**
             apps/pnpm-lock.yaml
             apps/pnpm-workspace.yaml
+            .github/docker/ci-base/**
+            .github/workflows/ci-base-image.yml
             .github/workflows/e2e-tests.yml
             .github/scripts/changed-paths.py
             !**/*.md
@@ -390,10 +392,19 @@ jobs:
       # executor and the SSH executor's sshd target). Without --project the
       # container-bound specs would run here too, fail seeding (Docker not
       # enabled for these shards), and spam every shard.
+      # global-setup.ts refuses to run a backend binary older than any
+      # apps/backend source. That guard exists for local runs, where nothing
+      # else notices `pnpm run build:e2e` rebuilding only the frontend. Here
+      # the binary is staged out of band: the `build` job compiled it from
+      # this same commit, and the shard's own checkout stamps every source
+      # file with a *later* mtime than the artifact it downloads. Freshness is
+      # already guaranteed by `needs: build`; the mtime comparison is not
+      # meaningful across jobs.
       - name: Run planned E2E tests (shard ${{ matrix.shard }}/14)
         working-directory: apps/web
         env:
           E2E_SHARD: ${{ matrix.shard }}
+          KANDEV_E2E_SKIP_FRESHNESS: "1"
         run: bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/normal/${{ matrix.shard }}.json"
 
       - name: Upload blob report
@@ -571,11 +582,14 @@ jobs:
           name: e2e-shard-manifests
           path: e2e-manifests
 
+      # Same out-of-band staging as the chromium shards above — see the comment
+      # on that step for why the backend-binary freshness guard is skipped.
       - name: Run planned container-backed E2E tests shard ${{ matrix.shard }}/6 (Docker executor + SSH executor)
         working-directory: apps/web
         env:
           KANDEV_E2E_CONTAINERS: "1"
           E2E_SHARD: ${{ matrix.shard }}
+          KANDEV_E2E_SKIP_FRESHNESS: "1"
         run: bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/containers/${{ matrix.shard }}.json"
 
       # Named with the same `blob-report-*` prefix the merge job globs for
@@ -602,8 +616,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
-    # Includes Ubuntu WebKit/Tauri system package installation; GitHub apt mirrors
-    # can spend more than 20 minutes there before tests start.
+    # The desktop image contains the Rust toolchain, Tauri dependencies, and
+    # Xvfb. This job does not depend on hosted-runner apt mirrors.
+    container:
+      image: ghcr.io/kdlbs/kandev-ci:desktop-latest
+      options: --ipc=host
     timeout-minutes: 45
     defaults:
       run:
@@ -615,39 +632,23 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
-        with:
-          version: "9.15.9"
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      # The desktop image uses /root as HOME, so this matches the store path
+      # used by the other container jobs.
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version: "24"
-          cache: pnpm
-          cache-dependency-path: apps/pnpm-lock.yaml
-
-      - name: Set up Rust
-        run: rustup toolchain install stable --profile minimal
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           workspaces: apps/desktop/src-tauri -> target
           key: desktop-e2e
-
-      - name: Install desktop system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            pkg-config \
-            libglib2.0-dev \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            xvfb
 
       - name: Install dependencies
         working-directory: apps

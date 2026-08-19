@@ -4,6 +4,11 @@
 **Date:** 2026-08-05
 **Area:** backend, frontend, protocol, workflow
 
+Related decision:
+[Keep Queue Auto-run Server Owned](2026-08-16-server-owned-queue-auto-run.md)
+defines an accepted Send Now claim as an explicit queue resume while retaining
+this decision's replacement-turn guarantees.
+
 ## Context
 
 The queue panel needs a **Send Now** action that interrupts a busy agent and

@@ -20,6 +20,8 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+const queueStatusMaxField = "max"
+
 type reservedPromptCallbackContextKey struct{}
 
 // agentReadyDetachedContext ignores transient event-delivery cancellation but
@@ -106,10 +108,12 @@ func (s *Service) publishQueueStatusEvent(ctx context.Context, sessionID string)
 
 	queueStatus := s.messageQueue.GetStatus(ctx, sessionID)
 	eventData := map[string]interface{}{
-		"session_id": sessionID,
-		"entries":    queueStatus.Entries,
-		"count":      queueStatus.Count,
-		"max":        queueStatus.Max,
+		metaKeySessionID:    sessionID,
+		"entries":           queueStatus.Entries,
+		"count":             queueStatus.Count,
+		queueStatusMaxField: queueStatus.Max,
+		"auto_run":          queueStatus.AutoRun,
+		"merge_enabled":     queueStatus.MergeEnabled,
 	}
 	if taskID, err := s.SessionTaskID(ctx, sessionID); err != nil {
 		s.logger.Warn("resolve session task for queue status event",
@@ -148,10 +152,12 @@ func (s *Service) publishTaskQueueStatusEvent(ctx context.Context, taskID, sessi
 	}
 	if sessionID != "" && s.messageQueue != nil {
 		queueStatus := s.messageQueue.GetStatus(ctx, sessionID)
-		eventData["session_id"] = sessionID
+		eventData[metaKeySessionID] = sessionID
 		eventData["entries"] = queueStatus.Entries
 		eventData["count"] = queueStatus.Count
-		eventData["max"] = queueStatus.Max
+		eventData[queueStatusMaxField] = queueStatus.Max
+		eventData["auto_run"] = queueStatus.AutoRun
+		eventData["merge_enabled"] = queueStatus.MergeEnabled
 	}
 	s.logger.Debug("publishing task queue status changed event",
 		zap.String("task_id", taskID),

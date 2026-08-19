@@ -1,7 +1,7 @@
 ---
 status: shipped
 created: 2026-06-23
-updated: 2026-08-11
+updated: 2026-08-19
 owner: tbd
 ---
 
@@ -219,6 +219,17 @@ display before being shown.
   rejected without stopping the running application.
 - A missing packaged launcher/helper, backend bind failure, failed authenticated health check, or
   startup timeout produces a visible startup error and terminates the owned process tree.
+- On platforms with a reliable process-liveness probe, if the shell process ends without running
+  its own shutdown path, because it crashed, was force quit, or was killed by the operating system,
+  the owned launcher and backend must still exit on their own. Shell-initiated cleanup covers quit,
+  startup failure, and update restart, but it cannot cover its own abnormal termination, so the
+  launcher is additionally bound to the lifetime of the shell that spawned it. The shell publishes
+  its process identity to the launcher at spawn time, and the launcher stops its supervised tree
+  once that process is positively known to be gone. This is a hard requirement rather than
+  best-effort cleanup on those platforms: a launcher that outlives its shell keeps the Kandev
+  home's exclusive runtime-state lock and blocks every later desktop and CLI start until the
+  operator finds and kills it by hand. Platforms without a reliable probe retain their existing
+  normal-shutdown guarantee and do not infer parent death from an unknown liveness result.
 - A GUI environment that cannot find an agent CLI surfaces the existing setup-health guidance.
 - If backend shutdown fails during update restart, installation does not force an unclean restart;
   the user sees an actionable error and can quit normally.
@@ -261,6 +272,11 @@ display before being shown.
   Settings page opens in the main window.
 - **GIVEN** the user clicks the macOS red close control, **WHEN** shutdown completes, **THEN** both
   the app and its owned backend exit.
+- **GIVEN** a desktop platform with a reliable process-liveness probe and a shell that ends without
+  running its shutdown path, **WHEN** the launcher observes that the shell process it was spawned
+  by is positively gone, **THEN** the launcher shuts down its backend, releases the Kandev home
+  runtime-state lock, and exits, so the next desktop or CLI start acquires ownership without the
+  operator killing a leftover process.
 - **GIVEN** a signed newer desktop version exists, **WHEN** an automatic check finds it, **THEN**
   Kandev prompts in the existing Updates page before any download, install, or restart.
 - **GIVEN** a Linux AppImage installation, **WHEN** the user confirms a valid update, **THEN** the

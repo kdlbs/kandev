@@ -401,9 +401,19 @@ post-signature processing failures produce `failing`; a later valid successful d
 - `executor -> executor-visible credentials`, regardless of PAT/CLI/App automation method.
 - Initial launch and resume run the same resolution. A successful operation replaces the session
   snapshot; a failed operation leaves the previous snapshot unchanged.
+- Managed admission resolves the task policy and the selected executor profile before it validates
+  repository identity. An explicit profile `GITHUB_TOKEN` or `GH_TOKEN` bypasses managed broker
+  admission because the profile token is the effective source.
+- Managed admission completes before Kandev creates, rebinds, resumes, or changes a session, and
+  before a workflow transition changes the current step. A policy error or an invalid repository
+  identity leaves the task, workflow, and session state unchanged.
 - Each attached repository is resolved once for an individual launch or resume. The resolved
   repository set is shared by task configuration and credential-snapshot construction rather than
   triggering repeated materialization or origin mutation.
+- Broker issuance and redemption use the same persisted repository identity fields. A local Git
+  checkout and its `origin` are materialization data, not authorization data.
+- A public `github.com` remote can supply an in-memory origin when persisted provider-host metadata
+  is absent. Kandev does not rewrite repository provider identity from partial legacy metadata.
 - Changing the workspace policy affects new launches and the next resume, not an already-running
   process.
 
@@ -425,6 +435,9 @@ post-signature processing failures produce `failing`; a later valid successful d
 - Public base URL validation requires a canonical HTTPS origin with no credentials, query, or
   fragment and rejects loopback, private, link-local, or non-globally-routable DNS results. Kandev
   does not fetch the supplied URL as validation.
+- Repository identity accepts credential-free HTTPS and SSH remote forms. It rejects an SSH
+  password, query, or fragment before canonicalization, and an error never contains the rejected
+  secret-bearing remote.
 - App private keys, client secrets, webhook secrets, personal tokens, and live installation tokens
   never enter executor environments. Only brokered PAT/CLI tokens or repository-restricted
   installation tokens reach a managed trusted child operation; explicit executor-profile
@@ -676,6 +689,20 @@ registration and never creates a global default.
   credential policy is selected, **THEN** Kandev leaves its configured `origin` unchanged.
 - **GIVEN** managed mode and an explicit executor-profile GitHub token, **WHEN** a task launches,
   **THEN** the profile token wins and the session disclosure labels its actor runtime-selected.
+- **GIVEN** managed mode and an explicit executor-profile `GITHUB_TOKEN` or `GH_TOKEN`, **WHEN** an
+  attached repository has incomplete managed identity, **THEN** the profile token remains the
+  effective source and managed broker admission does not reject the task.
+- **GIVEN** a managed repository remote with an SSH password, query, or fragment, **WHEN** Kandev
+  resolves its credential identity, **THEN** resolution fails without exposing the remote and no
+  task, workflow, or session state changes.
+- **GIVEN** a provider-backed repository whose only usable identity is a local checkout origin,
+  **WHEN** a managed task launches or the broker authorizes a request, **THEN** both paths reject
+  the incomplete persisted identity before session state changes.
+- **GIVEN** task Git credential policy resolution fails, **WHEN** a normal or Office task launches
+  or resumes, **THEN** Kandev returns the error and does not create, rebind, or resume a session.
+- **GIVEN** a workflow transition selects an agent profile that cannot use managed credentials,
+  **WHEN** the source step exits, **THEN** Kandev keeps the source step and current session and does
+  not route the destination step prompt.
 - **GIVEN** a managed helper cannot execute or redeem its lease, **WHEN** Git requests GitHub HTTPS
   credentials, **THEN** the command fails without falling through to a personal helper or prompt.
 - **GIVEN** a broker-enabled managed task whose login profile replaces its inherited `PATH`,
@@ -766,6 +793,8 @@ and the
 [system-service identity guardrails repair plan](../../plans/system-service-identity-guardrails/plan.md).
 The new-workspace default repair is tracked in
 [the new workspace GitHub access defaults plan](../../plans/new-workspace-github-access-defaults/plan.md).
+Managed credential admission and repository identity corrections are tracked in
+[the managed Git credential admission repair plan](../../plans/managed-git-credential-admission-repair/plan.md).
 
 ## Decision
 

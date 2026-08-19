@@ -8,7 +8,7 @@ import { SessionPage } from "../../pages/session-page";
 test.describe("mobile: pause queue recovery", () => {
   test.describe.configure({ retries: 1 });
 
-  test("force-stop parks the next message until Run next is tapped", async ({
+  test("Cancel persists Auto-run OFF across reload and the switch resumes", async ({
     testPage,
     apiClient,
     seedData,
@@ -48,11 +48,14 @@ test.describe("mobile: pause queue recovery", () => {
     await expect(chat.getByText("simple mock response", { exact: false }).nth(1)).not.toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage);
 
-    await queueChip.tap();
-    const runNext = chat.getByTestId("queue-drain-next");
-    await expect(runNext).toBeVisible();
-    await expect(runNext).toBeInViewport();
-    await runNext.tap();
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(chat.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
+    await chat.getByTestId("queue-chip").tap();
+    const autoRun = chat.getByTestId("queue-auto-run");
+    await expect(autoRun).toBeVisible();
+    await expect(autoRun).toHaveAttribute("data-state", "unchecked");
+    await autoRun.tap();
 
     await expect(chat.getByTestId("queue-chip")).not.toBeVisible({ timeout: 30_000 });
     await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });

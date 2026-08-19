@@ -165,6 +165,8 @@ export type QueuedMessage = {
 export type QueueMeta = {
   count: number;
   max: number;
+  /** Backend-owned queue motion policy. Missing server state defaults to on. */
+  autoRun: boolean;
   /** Mirrors the server's message queue merge_enabled setting; hides the
    * "Merge with above" affordance without a separate settings fetch. */
   mergeEnabled: boolean;
@@ -175,6 +177,7 @@ export type QueueStatus = {
   count: number;
   max: number;
   merge_enabled: boolean;
+  auto_run?: boolean;
 };
 
 export type QueueState = {

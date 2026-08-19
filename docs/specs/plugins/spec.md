@@ -683,8 +683,10 @@ Mattermost-webapp model), not iframes. The full contract lives in
   `registerComponent(slot, C)` (including `app-status-bar-left` and
   `app-status-bar-right`), and `registerWsHandler(action, fn)`. Integration-settings
   contributions appear in the native global integrations index, workspace settings
-  navigation, and global/workspace settings routes. IDs are URL-safe, unique among
-  active plugins, and cannot shadow host integrations; unload revokes the contribution.
+  navigation, and global/workspace settings routes. An optional integration action
+  receives the routed workspace and a `surface` value for the detail header or index
+  card. IDs are URL-safe, unique among active plugins, and cannot shadow host
+  integrations; unload revokes the contribution.
   Status-slot components receive the exact `AppStatusBarSlotProps` contract in
   `PLUGIN-API.md`: current path/context plus placement and presentation. The host
   renders one responsive presentation at once — 24 px bar on tablet/desktop or

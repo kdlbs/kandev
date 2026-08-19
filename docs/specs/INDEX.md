@@ -211,6 +211,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [message-queue-management](ui/message-queue-management.md) | shipped |
 | [message-queue-merge](ui/message-queue-merge.md) | shipped |
 | [message-queue-reorder](ui/message-queue-reorder.md) | building |
+| [message-queue-run](ui/message-queue-run.md) | shipped |
 | [message-queue-send-now](ui/message-queue-send-now.md) | shipped |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
 | [settings-discovery](ui/settings-discovery.md) | shipped |
@@ -296,7 +297,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [automation-runs-delete-all-by-status](automation-runs-delete-all-by-status/spec.md) | draft |
 | [no-silent-model-fallback](no-silent-model-fallback/spec.md) | approved |
 | [portable-agent-configuration](portable-agent-configuration/spec.md) | draft |
-| [e2e-duration-aware-sharding](e2e-duration-aware-sharding/spec.md) | implemented |
+| [e2e-duration-aware-sharding](e2e-duration-aware-sharding/spec.md) | shipped |
 | [board-step-visibility-filter](board-step-visibility-filter/spec.md) | draft |
 | [shutdown-turn-failure-suppression](shutdown-turn-failure-suppression/spec.md) | draft |
 | [executor-profile-env-precedence](executor-profile-env-precedence/spec.md) | building |

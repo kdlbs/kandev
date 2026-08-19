@@ -1696,13 +1696,6 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 		zap.String("current_session", currentSession.ID),
 		zap.String("current_profile", currentSession.AgentProfileID),
 		zap.String("new_profile", newAgentProfileID))
-
-	// Signal to the frontend that the task is preparing a new agent.
-	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
-		s.logger.Warn("failed to set task SCHEDULING during agent switch",
-			zap.String("task_id", taskID), zap.Error(err))
-	}
-
 	existing, lookupErr := s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID)
 	if lookupErr != nil {
 		s.logger.Warn("failed to look up reusable session, falling through to create new",
@@ -1710,6 +1703,35 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 			zap.String("agent_profile_id", newAgentProfileID),
 			zap.Error(lookupErr))
 	}
+	targetSession := currentSession
+	if existing != nil {
+		targetSession = existing
+	}
+
+	// Validate managed-credential repository bindings before mutating either
+	// session's ownership. Reusing or replacing the current session only to
+	// discover at launch that a repository binding is irreparable would leave
+	// the task stuck on a doomed session with no recovery path back to the one
+	// that was still working.
+	dbTask, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task for session switch preflight: %w", err)
+	}
+	if dbTask == nil {
+		return nil, fmt.Errorf("task %s not found for session switch preflight", taskID)
+	}
+	if err := s.executor.PreflightManagedGitCredentials(
+		ctx, dbTask.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
+	); err != nil {
+		return nil, err
+	}
+
+	// Signal to the frontend that the task is preparing a new agent.
+	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
+		s.logger.Warn("failed to set task SCHEDULING during agent switch",
+			zap.String("task_id", taskID), zap.Error(err))
+	}
+
 	if existing != nil {
 		return s.reuseSessionForStep(ctx, taskID, currentSession, existing)
 	}
@@ -1971,6 +1993,39 @@ func (s *Service) prepareWorkflowStepSession(
 		return nil, false, err
 	}
 	return newSession, true, nil
+}
+
+func (s *Service) preflightWorkflowStepCredentials(
+	ctx context.Context,
+	taskID string,
+	currentSession *models.TaskSession,
+	targetStep *wfmodels.WorkflowStep,
+) error {
+	if currentSession == nil || targetStep == nil || s.agentManager.IsPassthroughSession(ctx, currentSession.ID) {
+		return nil
+	}
+	effectiveProfile := s.resolveStepAgentProfile(ctx, targetStep)
+	if effectiveProfile == "" || effectiveProfile == currentSession.AgentProfileID {
+		return nil
+	}
+	targetSession := currentSession
+	existing, err := s.findReusableSessionForProfile(ctx, taskID, effectiveProfile, currentSession.ID)
+	if err != nil {
+		return fmt.Errorf("find reusable session for credential preflight: %w", err)
+	}
+	if existing != nil {
+		targetSession = existing
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get task for credential preflight: %w", err)
+	}
+	if task == nil {
+		return fmt.Errorf("task %s not found for credential preflight", taskID)
+	}
+	return s.executor.PreflightManagedGitCredentials(
+		ctx, task.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
+	)
 }
 
 // maybySwitchSessionForProfile preserves the legacy processOnEnter failure
@@ -2413,7 +2468,19 @@ func (s *Service) syncTaskStateForPendingMove(ctx context.Context, taskID, fromS
 // cancel/interrupt for the same session could land in between and this
 // call would otherwise blindly take a message for a session that turned
 // out to no longer be idle.
+type queueDrainOutcome uint8
+
+const (
+	queueDrainSkipped queueDrainOutcome = iota
+	queueDrainDispatched
+	queueDrainPaused
+)
+
 func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, sessionID string) bool {
+	return s.drainQueuedMessageForPromptableSessionOutcome(ctx, sessionID) == queueDrainDispatched
+}
+
+func (s *Service) drainQueuedMessageForPromptableSessionOutcome(ctx context.Context, sessionID string) queueDrainOutcome {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
@@ -2421,21 +2488,21 @@ func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, se
 	if s.isCancelInFlight(sessionID) {
 		s.logger.Debug("skipping drain while cancellation is in progress",
 			zap.String("session_id", sessionID))
-		return false
+		return queueDrainSkipped
 	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to reload session before drain",
 			zap.String("session_id", sessionID), zap.Error(err))
-		return false
+		return queueDrainSkipped
 	}
 	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
 		s.logger.Debug("skipping drain: session is not promptable once the guard is held",
 			zap.String("session_id", sessionID), zap.Error(err))
-		return false
+		return queueDrainSkipped
 	}
-	return s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID)
+	return s.drainQueuedMessageForPromptableSessionLockedOutcome(ctx, sessionID)
 }
 
 // drainQueuedMessageForPromptableSessionLocked takes the next queued
@@ -2450,12 +2517,22 @@ func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, se
 // or an admitted-but-not-yet-dispatched steer. Send Now uses the phase-specific
 // helpers to supersede only a pending automatic FIFO reservation.
 func (s *Service) drainQueuedMessageForPromptableSessionLocked(ctx context.Context, sessionID string) bool {
+	return s.drainQueuedMessageForPromptableSessionLockedOutcome(ctx, sessionID) == queueDrainDispatched
+}
+
+func (s *Service) drainQueuedMessageForPromptableSessionLockedOutcome(ctx context.Context, sessionID string) queueDrainOutcome {
 	if s.messageQueue == nil || s.isCancelInFlight(sessionID) ||
 		s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
-		return false
+		return queueDrainSkipped
 	}
-	queuedMsg, ok := s.messageQueue.ReserveQueued(ctx, sessionID)
-	return s.dispatchTakenQueuedMessage(ctx, sessionID, queuedMsg, ok)
+	queuedMsg, ok, autoRun := s.messageQueue.ReserveQueuedWithAutoRun(ctx, sessionID)
+	if !autoRun {
+		return queueDrainPaused
+	}
+	if s.dispatchTakenQueuedMessage(ctx, sessionID, queuedMsg, ok) {
+		return queueDrainDispatched
+	}
+	return queueDrainSkipped
 }
 
 // dispatchTakenQueuedMessage publishes the queue-status update and dispatches
@@ -2915,17 +2992,18 @@ func (s *Service) resetSessionForFreshFallback(
 	return &reset, nil
 }
 
-// takeAndMergeHandoffMessage drains any queued hand-off message for the session
-// (set by handleMoveTask via move_task_kandev or by drainQueuedMessageForPromptableSession)
-// and merges its content + attachments into the auto-start prompt. Returns the
-// original queued message (so terminal failure paths can re-queue it via
+// takeAndMergeHandoffMessage drains an Auto-run-enabled hand-off message for
+// the session (set by handleMoveTask via move_task_kandev or by
+// drainQueuedMessageForPromptableSession) and merges its content + attachments
+// into the auto-start prompt. Paused queues keep the hand-off parked. Returns
+// the original queued message (so terminal failure paths can re-queue it via
 // requeueMessage), merged prompt, converted attachments, and structurally
 // normalized references.
 func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, basePrompt string) (*messagequeue.QueuedMessage, string, []v1.MessageAttachment, []v1.EntityReference) {
 	if s.messageQueue == nil {
 		return nil, basePrompt, nil, nil
 	}
-	msg, ok := s.messageQueue.TakeQueued(ctx, sessionID)
+	msg, ok := s.messageQueue.TakeQueuedIfAutoRun(ctx, sessionID)
 	if !ok || msg == nil || (msg.Content == "" && len(msg.Attachments) == 0) {
 		return nil, basePrompt, nil, nil
 	}
@@ -3254,12 +3332,14 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		zap.String("step_name", stepName),
 		zap.String("agent_execution_id", executionID))
 
+	previousACPSessionID := s.currentACPSessionID(sessionID)
 	if err := s.agentManager.ResetAgentContext(ctx, executionID); err != nil {
 		s.logger.Error("failed to reset agent context",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName),
 			zap.Error(err))
+		s.reconcileFailedContextReset(ctx, taskID, session, executionID, previousACPSessionID)
 		return false
 	}
 
@@ -3283,6 +3363,38 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 	// after the provider reset succeeds. The token is handled explicitly above.
 	s.clearPersistedResetState(ctx, sessionID, session)
 	return true
+}
+
+// reconcileFailedContextReset handles a reset that moved the live ACP session
+// before a later reset step failed. The old cursor and context metadata belong
+// to the previous ACP session and must not survive that partial transition.
+func (s *Service) reconcileFailedContextReset(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	executionID string,
+	previousACPSessionID string,
+) {
+	liveACPSessionID := s.currentACPSessionID(session.ID)
+	if liveACPSessionID == "" || liveACPSessionID == previousACPSessionID {
+		return
+	}
+
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	if err != nil {
+		s.logger.Warn("failed to inspect execution after partial context reset",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("agent_execution_id", executionID),
+			zap.Error(err))
+		return
+	}
+	if running.AgentExecutionID != executionID {
+		return
+	}
+
+	s.storeResumeToken(ctx, taskID, session.ID, executionID, liveACPSessionID, "")
+	s.clearPersistedResetState(ctx, session.ID, session)
 }
 
 // clearPersistedResetState clears the durable, DB-backed session state that a
@@ -3783,6 +3895,13 @@ func (s *Service) applyEngineTransition(
 			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 			return false
 		}
+	}
+	if err := s.preflightWorkflowStepCredentials(ctx, taskID, session, targetStep); err != nil {
+		s.logger.Warn("target profile credential preflight failed, skipping transition",
+			zap.String("task_id", taskID),
+			zap.String("step_id", result.ToStepID),
+			zap.Error(err))
+		return false
 	}
 
 	terminalTarget := s.workflowStepIsTerminal(ctx, targetStep.ID)
