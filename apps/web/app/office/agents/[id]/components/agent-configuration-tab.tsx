@@ -144,7 +144,7 @@ function reconcileForm(
   const reconciled = { ...previousForm };
   for (const field of FORM_FIELDS) {
     if (!dirtyFields.has(field)) {
-      reconciled[field] = nextForm[field];
+      Object.assign(reconciled, { [field]: nextForm[field] });
     }
   }
   return reconciled;

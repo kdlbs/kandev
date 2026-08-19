@@ -200,7 +200,7 @@ describe("AgentConfigurationTab save errors", () => {
     fireEvent.click(screen.getByRole("button", { name: SAVE_BUTTON }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: SAVE_BUTTON })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: SAVE_BUTTON })).not.toBeNull();
     });
   });
 });
@@ -239,7 +239,7 @@ describe("AgentConfigurationTab draft navigation", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Name")).toHaveValue("Manager");
+      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Manager");
     });
     expect(screen.queryByRole("button", { name: SAVE_BUTTON })).toBeNull();
   });
@@ -301,6 +301,6 @@ describe("AgentConfigurationTab CEO hierarchy", () => {
     renderConfigTab([baseAgent, manager], baseAgent);
 
     const reportsTo = screen.getByRole("combobox", { name: REPORTS_TO_COMBOBOX });
-    expect(reportsTo).toBeDisabled();
+    expect((reportsTo as HTMLButtonElement).disabled).toBe(true);
   });
 });
