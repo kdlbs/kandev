@@ -251,7 +251,9 @@ type SecretFieldProps = FieldsRowProps & { hasSavedSecret: boolean };
 
 type SecretFieldPropsWithExpiry = SecretFieldProps & { secretExpiresAt?: string | null };
 
-type OAuthFieldsProps = FieldsRowProps & {
+type OAuthFieldsProps = {
+  form: FormState;
+  loading: boolean;
   workspaceId: string;
   connected: boolean;
   tokenExpiresAt?: string | null;
@@ -260,7 +262,6 @@ type OAuthFieldsProps = FieldsRowProps & {
 
 function OAuthFields({
   form,
-  baseline,
   loading,
   workspaceId,
   connected,
@@ -721,10 +722,10 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
   const isOAuth = s.form.authMethod === "oauth";
   const missingSecret = !isOAuth && !savedSecretMatchesMode && !s.form.secret;
   const oauthNeedsConnect = isOAuth && !s.config?.hasSecret;
-  const emailRequired = s.form.instanceType === "cloud" && s.form.authMethod === "api_token";
+
   const disableSave =
-    s.saving || !s.form.siteUrl || (emailRequired && !s.form.email) || (missingSecret && !isOAuth);
-  const disableTest = missingSecret || (isOAuth && oauthNeedsConnect);
+    s.saving || !s.form.siteUrl || (emailRequired && !s.form.email) || missingSecret;
+  const disableTest = missingSecret || oauthNeedsConnect;
   const revision = JSON.stringify(s.form);
   const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
   // Assigned rather than returned from a helper, but the guard would not see it
@@ -767,9 +768,7 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
           {isOAuth ? (
             <OAuthFields
               form={s.form}
-              baseline={baseline}
               loading={s.loading}
-              update={s.update}
               workspaceId={workspaceId}
               connected={!!s.config?.hasSecret}
               tokenExpiresAt={s.config?.tokenExpiresAt ?? null}

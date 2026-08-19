@@ -268,7 +268,11 @@ func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string,
 	// Preserve cloudId for OAuth — it's resolved during the OAuth flow and
 	// shouldn't be overwritten by a regular config save.
 	if req.AuthMethod == AuthMethodOAuth {
-		if existing, _ := s.store.GetConfigForWorkspace(ctx, workspaceID); existing != nil {
+		existing, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
+		if err != nil {
+			return nil, fmt.Errorf("read existing config: %w", err)
+		}
+		if existing != nil {
 			cfg.CloudID = existing.CloudID
 			cfg.TokenExpiresAt = existing.TokenExpiresAt
 		}
