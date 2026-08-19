@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
+import { AgentAvatar } from "@/app/office/components/agent-avatar";
 import { formatRelativeTime } from "@/lib/utils";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import type { Task, TaskDecision } from "@/app/office/tasks/[id]/types";
@@ -13,7 +14,7 @@ import { MultiSelectPopover, type MultiSelectItem } from "./multi-select-popover
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 
-type AgentItem = MultiSelectItem & { icon: string; name: string };
+type AgentItem = MultiSelectItem & { name: string };
 
 // AgentDecisionStatus is the per-chip badge state for an agent listed
 // as a reviewer or approver. Computed by buildDecisionLookup below.
@@ -87,7 +88,6 @@ function buildAgentItems(agents: AgentProfile[]): AgentItem[] {
   return agents.map<AgentItem>((a) => ({
     id: a.id,
     name: a.name,
-    icon: a.icon ?? "🤖",
     label: a.name,
     keywords: [a.name, a.role ?? ""],
   }));
@@ -147,7 +147,7 @@ export function AgentsMultiPicker({
       key={item.id}
       className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"
     >
-      <span className="text-sm leading-none">{item.icon}</span>
+      <AgentAvatar name={item.name} size="xs" />
       <span className="truncate max-w-[110px]">{item.name}</span>
       {decisionsByAgent && <DecisionIcon decision={decisionsByAgent.get(item.id)} />}
       <span
@@ -174,7 +174,7 @@ export function AgentsMultiPicker({
 
   const renderItem = (item: AgentItem) => (
     <span className="flex items-center gap-2 min-w-0">
-      <span className="text-base leading-none">{item.icon}</span>
+      <AgentAvatar name={item.name} size="sm" />
       <span className="truncate">{item.name}</span>
     </span>
   );

@@ -169,20 +169,35 @@ describe("buildDecisionLookup", () => {
   });
 });
 
+const approvalAgents = [
+  makeAgent("a-approved", "Alice"),
+  makeAgent("a-changes", "Bob"),
+  makeAgent("a-pending", "Carol"),
+];
+
 describe("ApproversPicker chip decoration", () => {
   it("renders a status icon per chip matching the most recent decision", () => {
-    const agents = [
-      makeAgent("a-approved", "Alice"),
-      makeAgent("a-changes", "Bob"),
-      makeAgent("a-pending", "Carol"),
-    ];
     render(
-      <Wrapper task={baseTask} agents={agents}>
+      <Wrapper task={baseTask} agents={approvalAgents}>
         <ApproversPicker task={baseTask} />
       </Wrapper>,
     );
     expect(screen.getAllByTestId("decision-icon-approved")).toHaveLength(1);
     expect(screen.getAllByTestId("decision-icon-changes_requested")).toHaveLength(1);
     expect(screen.getAllByTestId("decision-icon-pending")).toHaveLength(1);
+  });
+});
+
+describe("ApproversPicker chip avatars", () => {
+  it("renders per-agent initials instead of the generic robot glyph", () => {
+    render(
+      <Wrapper task={baseTask} agents={approvalAgents}>
+        <ApproversPicker task={baseTask} />
+      </Wrapper>,
+    );
+    expect(screen.getByText("AL")).toBeTruthy();
+    expect(screen.getByText("BO")).toBeTruthy();
+    expect(screen.getByText("CA")).toBeTruthy();
+    expect(screen.queryByText("🤖")).toBeNull();
   });
 });

@@ -17,10 +17,11 @@ type AgentAvatarProps = {
   role?: string | null;
   name?: string | null;
   className?: string;
-  size?: "sm" | "md" | "lg";
+  size?: "xs" | "sm" | "md" | "lg";
 };
 
 const SIZE: Record<NonNullable<AgentAvatarProps["size"]>, string> = {
+  xs: "h-4 w-4 text-[8px]",
   sm: "h-6 w-6 text-[10px]",
   md: "h-8 w-8 text-xs",
   lg: "h-10 w-10 text-sm",

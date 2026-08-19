@@ -256,6 +256,13 @@ test.describe("property pickers", () => {
     await trigger.click();
     await testPage.getByTestId(`multi-select-add-${reviewerId}`).click();
 
+    // The chip should render a per-agent initials avatar (AL/BO/CA-style),
+    // not the generic robot glyph every agent used to share.
+    if (created) {
+      await expect(trigger.getByText("PR")).toBeVisible({ timeout: 5_000 });
+    }
+    await expect(trigger.getByText("🤖")).not.toBeVisible();
+
     // Re-open if the popover auto-closed and remove the reviewer.
     const removeItem = testPage.getByTestId(`multi-select-remove-${reviewerId}`);
     if ((await removeItem.count()) === 0) {
