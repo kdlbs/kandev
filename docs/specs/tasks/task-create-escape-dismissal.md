@@ -15,7 +15,8 @@ The same key must not close the Create Task dialog and discard the active task-c
 
 - The standard Create Task dialog remains open when the user presses Escape.
 - This rule applies when an autocomplete menu is open and when no menu is open.
-- If an autocomplete menu is open, Escape closes that menu and keeps the dialog open.
+- If an autocomplete menu is open, Escape closes that menu, keeps the dialog open, and leaves
+  focus in the prompt textarea so typing can continue.
 - Escape does not clear the prompt, the autocomplete query, attachments, or other form values.
 - The footer Cancel action and other existing dismissal actions keep their current behavior.
 - The rule applies to all standard task-creation entry points and all viewport sizes.
@@ -23,7 +24,8 @@ The same key must not close the Create Task dialog and discard the active task-c
 ## Scenarios
 
 - **GIVEN** the Create Task dialog is open without an autocomplete menu, **WHEN** the user presses Escape, **THEN** the dialog stays open with its form values unchanged.
-- **GIVEN** the Create Task dialog has an open `@` autocomplete menu, **WHEN** the user presses Escape, **THEN** the menu closes and the dialog stays open.
+- **GIVEN** the Create Task dialog has an open `@` autocomplete menu, **WHEN** the user presses Escape, **THEN** the menu closes, the dialog stays open, and the prompt textarea keeps focus.
+- **GIVEN** a task-chat `@` or `#` autocomplete menu is open, **WHEN** the user presses Escape, **THEN** the menu closes and the chat editor keeps focus so typing can continue.
 - **GIVEN** the Create Task dialog is open on a phone with a hardware keyboard, **WHEN** the user presses Escape, **THEN** the full-height dialog stays open.
 - **GIVEN** the Create Task dialog is open, **WHEN** the user selects Cancel, **THEN** the dialog closes through the existing cancellation path.
 
@@ -32,7 +34,8 @@ The same key must not close the Create Task dialog and discard the active task-c
 - Changing Escape behavior in Edit Task, New Agent, Quick Chat, or other dialogs.
 - Changing autocomplete search, selection, or trigger characters.
 - Changing pointer, outside-click, browser-back, or Cancel dismissal behavior.
-- Changing the dialog layout, focus order, scroll owner, or mobile composition.
+- Changing the dialog layout, general focus order, scroll owner, or mobile composition beyond
+  retaining prompt focus after autocomplete dismissal.
 
 ## Implementation plan
 

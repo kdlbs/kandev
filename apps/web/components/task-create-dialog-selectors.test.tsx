@@ -26,6 +26,7 @@ vi.mock("@/components/task/chat/file-attachment", async () => {
 // Captures the slot props TaskFormInputs hands its plugin composer action,
 // which is the only way text now reaches the description programmatically.
 const pluginSlotCalls: PluginComposerSlotProps[] = [];
+const mentionMocks = vi.hoisted(() => ({ handleKeyDown: vi.fn() }));
 
 vi.mock("@/components/plugins/plugin-slot", () => ({
   PluginSlot: ({ slotProps }: { slotProps: PluginComposerSlotProps }) => {
@@ -45,7 +46,7 @@ vi.mock("@/hooks/use-task-create-prompt-mention", () => ({
     query: "",
     selectedIndex: 0,
     handleChange: (_: string) => {},
-    handleKeyDown: (_: React.KeyboardEvent) => {},
+    handleKeyDown: mentionMocks.handleKeyDown,
     handleSelect: () => {},
     closeMenu: () => {},
     setSelectedIndex: () => {},
@@ -55,6 +56,7 @@ vi.mock("@/hooks/use-task-create-prompt-mention", () => ({
 afterEach(() => {
   cleanup();
   pluginSlotCalls.length = 0;
+  mentionMocks.handleKeyDown.mockReset();
   vi.restoreAllMocks();
   vi.mocked(processFile).mockReset();
 });
@@ -89,6 +91,19 @@ function renderTaskFormInputs(initial: string, strict = false) {
   const textarea = screen.getByTestId("task-description-input") as HTMLTextAreaElement;
   return { ...utils, textarea, ref };
 }
+
+describe("TaskFormInputs mention keyboard routing", () => {
+  it("handles Escape in capture before a target listener stops the bubble phase", () => {
+    const { textarea } = renderTaskFormInputs("");
+    const stopAtTarget = (event: KeyboardEvent) => event.stopPropagation();
+    textarea.addEventListener("keydown", stopAtTarget);
+
+    fireEvent.keyDown(textarea, { key: "Escape", bubbles: true, cancelable: true });
+
+    textarea.removeEventListener("keydown", stopAtTarget);
+    expect(mentionMocks.handleKeyDown).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("TaskFormInputs plugin composer action — rendering", () => {
   it("renders the composer slot in task-create mode", () => {

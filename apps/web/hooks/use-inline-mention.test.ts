@@ -113,6 +113,53 @@ describe("useInlineMention scheduling", () => {
   });
 });
 
+describe("useInlineMention Escape", () => {
+  it("claims the key and restores input focus after closing the menu", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    const inputState = { value: "@qa", caretPos: 3 };
+    const input = makeMutableInput(inputState);
+    const inputRef = { current: input };
+    const { result } = renderHook(() =>
+      useInlineMention({
+        inputRef,
+        value: inputState.value,
+        onChange: (nextValue) => {
+          inputState.value = nextValue;
+        },
+        promptInsertMode: "inline",
+      }),
+    );
+
+    act(() => result.current.handleChange("@qa", 3));
+    act(() => frames.shift()?.(0));
+    expect(result.current.isOpen).toBe(true);
+
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Escape",
+        preventDefault,
+        stopPropagation,
+      } as unknown as React.KeyboardEvent);
+    });
+
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(stopPropagation).toHaveBeenCalledOnce();
+    expect(result.current.isOpen).toBe(false);
+    expect(frames).toHaveLength(1);
+
+    act(() => frames.shift()?.(0));
+    expect(input.focus).toHaveBeenCalledOnce();
+  });
+});
+
 describe("makePromptItem — context mode (default chat behavior)", () => {
   it("deletes the @query text and calls onPromptSelect", () => {
     const prompt = { id: "p1", name: "bug-template", content: "Reproduce, isolate, fix." };

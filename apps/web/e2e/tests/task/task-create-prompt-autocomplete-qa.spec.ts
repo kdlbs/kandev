@@ -79,6 +79,11 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     // The open state must persist after the close animation window.
     await expect(testPage.getByTestId("create-task-dialog")).toHaveAttribute("data-state", "open");
+    await expect(textarea).toBeFocused();
+
+    await textarea.pressSequentially(" continued");
+    await expect(textarea).toHaveValue("@qa-es continued");
+    await expect(testPage.getByText(MENU_TITLE)).toHaveCount(0);
   });
 
   test("Escape keeps Create Task open without an autocomplete menu", async ({
