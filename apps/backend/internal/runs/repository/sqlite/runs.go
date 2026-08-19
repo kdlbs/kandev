@@ -340,6 +340,33 @@ func (r *Repository) GetClaimedRunByTaskID(ctx context.Context, taskID string) (
 	return &req, nil
 }
 
+// GetClaimedRunByTaskAndAgent returns the claimed run for a task that
+// belongs to a specific agent. Unlike GetClaimedRunByTaskID, this is scoped
+// to the agent as well as the task: ClaimNextEligibleRun's busy-lock is
+// per-agent, not per-task, so two different agents can each have a claimed
+// run on the same task at once. Callers that already know which agent's
+// lifecycle event they are handling (AgentCompleted/AgentFailed) must use
+// this instead of the unscoped lookup, which prefers whichever row was
+// claimed most recently regardless of which agent actually sent the event
+// (Review round 4, BLOCKING FINDING 2).
+func (r *Repository) GetClaimedRunByTaskAndAgent(
+	ctx context.Context, taskID, agentProfileID string,
+) (*models.Run, error) {
+	var req models.Run
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT * FROM runs
+		WHERE status = 'claimed'
+		  AND agent_profile_id = ?
+		  AND json_extract(payload, '$.task_id') = ?
+		ORDER BY claimed_at DESC
+		LIMIT 1
+	`), agentProfileID, taskID).StructScan(&req)
+	if err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
 // CheckIdempotencyKey returns true if the key already exists within the window.
 func (r *Repository) CheckIdempotencyKey(ctx context.Context, key string, windowHours int) (bool, error) {
 	cutoff := time.Now().UTC().Add(-time.Duration(windowHours) * time.Hour)

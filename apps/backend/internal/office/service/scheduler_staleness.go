@@ -44,8 +44,7 @@ func (si *SchedulerIntegration) cancelStaleRun(
 		zap.String("reason", reason),
 		zap.Time("requested_at", run.RequestedAt))
 
-	taskID := si.extractTaskID(run.Payload)
-	si.releaseCheckoutIfNeeded(ctx, taskID)
+	si.releaseCheckoutIfNeeded(ctx, run)
 
 	if err := si.svc.repo.CancelRun(ctx, run.ID, reason); err != nil {
 		si.logger.Error("failed to cancel stale run",

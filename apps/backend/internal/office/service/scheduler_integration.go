@@ -257,7 +257,7 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 	if err != nil {
 		si.logger.Warn("executor resolution failed; retrying run",
 			zap.String("run_id", runID), zap.Error(err))
-		si.releaseCheckoutIfNeeded(ctx, taskID)
+		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return
 	}
@@ -287,7 +287,7 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 	if err != nil {
 		si.logger.Warn("runtime context build failed; retrying run",
 			zap.String("run_id", run.ID), zap.Error(err))
-		si.releaseCheckoutIfNeeded(ctx, taskID)
+		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return
 	}
@@ -304,7 +304,7 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 	if err != nil {
 		si.logger.Warn("runtime token mint failed; retrying run",
 			zap.String("run_id", run.ID), zap.Error(err))
-		si.releaseCheckoutIfNeeded(ctx, taskID)
+		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return
 	}
@@ -558,7 +558,7 @@ func (si *SchedulerIntegration) launchOrLog(
 			"phase":         "adapter.invoke",
 			"error_message": err.Error(),
 		})
-		si.releaseCheckoutIfNeeded(ctx, taskID)
+		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return false
 	}
@@ -585,7 +585,7 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 			"phase":         "routing.dispatch",
 			"error_message": err.Error(),
 		})
-		si.releaseCheckoutIfNeeded(ctx, taskID)
+		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return true
 	}
@@ -593,7 +593,7 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 		return true
 	}
 	if parked {
-		si.releaseCheckoutIfNeeded(ctx, taskID)
+		si.releaseCheckoutIfNeeded(ctx, run)
 		return true
 	}
 	return false
@@ -680,7 +680,7 @@ func (si *SchedulerIntegration) checkBudget(
 	if !allowed {
 		si.logger.Info("run skipped (budget exceeded)",
 			zap.String("run_id", run.ID), zap.String("reason", reason))
-		si.releaseCheckoutIfNeeded(ctx, taskID)
+		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.FinishRun(ctx, run.ID)
 		si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
 			"scheduler", "office-scheduler",
@@ -707,7 +707,7 @@ func (si *SchedulerIntegration) finishRun(
 		return
 	}
 
-	si.releaseCheckoutIfNeeded(ctx, taskID)
+	si.releaseCheckoutIfNeeded(ctx, run)
 
 	// Record cooldown timestamp in-memory and DB.
 	now := time.Now().UTC()
@@ -724,15 +724,15 @@ func (si *SchedulerIntegration) finishRun(
 		}), run.ID, "")
 }
 
-// releaseCheckoutIfNeeded releases the task checkout if a task ID is present.
-func (si *SchedulerIntegration) releaseCheckoutIfNeeded(ctx context.Context, taskID string) {
-	if taskID == "" {
-		return
-	}
-	if err := si.svc.repo.ReleaseTaskCheckout(ctx, taskID); err != nil {
-		si.logger.Error("failed to release task checkout",
-			zap.String("task_id", taskID), zap.Error(err))
-	}
+// releaseCheckoutIfNeeded releases the task checkout the given run may hold.
+// Delegates to the owner-scoped releaseTaskCheckoutForRun (Review round 3)
+// rather than the unscoped repo.ReleaseTaskCheckout: every call site here
+// runs before or in place of a run's own terminal transition, so a run that
+// never actually held the checkout (an escalated contention loser, a
+// stale/inactive-agent cancel) must not clear a different, currently-active
+// agent's live lock out from under it (Review round 4, BLOCKING FINDING 1).
+func (si *SchedulerIntegration) releaseCheckoutIfNeeded(ctx context.Context, run *models.Run) {
+	si.svc.releaseTaskCheckoutForRun(ctx, run)
 }
 
 // extractTaskID parses the task_id from a run payload.

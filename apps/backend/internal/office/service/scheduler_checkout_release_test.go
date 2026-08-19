@@ -72,8 +72,9 @@ func TestSchedulerTick_AgentCompletedReleasesTaskCheckout(t *testing.T) {
 	}
 
 	event := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
-		"task_id":    "task-checkout-release-1",
-		"session_id": "session-checkout-release",
+		"task_id":          "task-checkout-release-1",
+		"session_id":       "session-checkout-release",
+		"agent_profile_id": agent.ID,
 	})
 	if err := eb.Publish(ctx, events.AgentCompleted, event); err != nil {
 		t.Fatalf("publish agent completed: %v", err)
@@ -142,9 +143,10 @@ func TestSchedulerTick_AgentFailedReleasesTaskCheckout(t *testing.T) {
 	}
 
 	event := bus.NewEvent(events.AgentFailed, "test", map[string]string{
-		"task_id":       "task-checkout-fail-1",
-		"session_id":    "session-checkout-fail",
-		"error_message": "boom",
+		"task_id":          "task-checkout-fail-1",
+		"session_id":       "session-checkout-fail",
+		"error_message":    "boom",
+		"agent_profile_id": agent.ID,
 	})
 	if err := eb.Publish(ctx, events.AgentFailed, event); err != nil {
 		t.Fatalf("publish agent failed: %v", err)

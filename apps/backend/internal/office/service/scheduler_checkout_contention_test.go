@@ -160,3 +160,98 @@ func TestSchedulerTick_ContendedCheckoutEscalatesPastMaxRetries(t *testing.T) {
 		t.Fatal("LOCK STOLEN: a third agent acquired the checkout while agent-checkout-holder-2 still held it")
 	}
 }
+
+// TestSchedulerTick_StaleContendedRunDoesNotStealADifferentAgentsLiveCheckout
+// pins the Review round-4 BLOCKING FINDING 1 fix: requeueContendedCheckout
+// (the fix for the checkout-contention defect above) calls ScheduleRetry
+// with RetryCount+1, so a run that has lost the checkout race even once can
+// accumulate RetryCount >= 1. If that run's original RequestedAt is older
+// than staleRunThreshold, evaluateRunStaleness now routes it to
+// cancelStaleRun on a later tick - a path reachable BEFORE the run ever
+// calls checkoutTask, exactly like the "agent not active" branch in
+// scheduler_checkout_inactive_agent_test.go. Before this fix, cancelStaleRun
+// called the unscoped releaseCheckoutIfNeeded(ctx, taskID), which cleared
+// checkout_agent_id by task ID alone and stole a different, currently-active
+// agent's live lock out from under it - reopening the exact leak this
+// defect board exists to fix.
+func TestSchedulerTick_StaleContendedRunDoesNotStealADifferentAgentsLiveCheckout(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	holder := &models.AgentInstance{
+		ID:          "agent-stale-holder",
+		WorkspaceID: "ws-1",
+		Name:        "checkout-stale-holder",
+		Role:        models.AgentRoleWorker,
+		Status:      models.AgentStatusIdle,
+	}
+	if err := svc.CreateAgentInstance(ctx, holder); err != nil {
+		t.Fatalf("create holder agent: %v", err)
+	}
+
+	staleAgent := &models.AgentInstance{
+		ID:          "agent-stale-contended",
+		WorkspaceID: "ws-1",
+		Name:        "checkout-stale-contended",
+		Role:        models.AgentRoleWorker,
+		Status:      models.AgentStatusIdle,
+	}
+	if err := svc.CreateAgentInstance(ctx, staleAgent); err != nil {
+		t.Fatalf("create stale agent: %v", err)
+	}
+
+	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES ('task-stale-1', 'ws-1', 'Stale Contention Task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+
+	// The holder's own live, executing run already owns the checkout.
+	ok, err := svc.CheckoutTask(ctx, "task-stale-1", holder.ID)
+	if err != nil || !ok {
+		t.Fatalf("seed checkout: ok=%v err=%v", ok, err)
+	}
+
+	// A second run, for a DIFFERENT agent, already lost the checkout race
+	// once (retry_count=1, simulating requeueContendedCheckout having run)
+	// and was originally requested over 2 hours ago - old enough that
+	// evaluateRunStaleness now routes it to cancelStaleRun on this tick
+	// instead of another contended retry.
+	svc.ExecSQL(t, `
+		INSERT INTO runs (
+			id, agent_profile_id, reason, payload, status, coalesced_count,
+			context_snapshot, retry_count, requested_at
+		) VALUES (
+			'run-stale-contended', ?, 'task_assigned', '{"task_id":"task-stale-1"}',
+			'queued', 1, '{}', 1, datetime('now', '-3 hours')
+		)
+	`, staleAgent.ID)
+
+	service.RunSchedulerTick(svc, ctx)
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	var staleRun *models.Run
+	for _, r := range runs {
+		if r.ID == "run-stale-contended" {
+			staleRun = r
+		}
+	}
+	if staleRun == nil {
+		t.Fatalf("run-stale-contended not found among runs: %v", runs)
+	}
+	if staleRun.Status != service.RunStatusCancelled {
+		t.Fatalf("run status = %q, want cancelled (stale)", staleRun.Status)
+	}
+
+	// The real holder must still own the checkout: the stale run never held
+	// it (it is a different agent, and evaluateRunStaleness fires before
+	// checkoutTask on this tick), so cancelling it must not release
+	// agent-stale-holder's live lock.
+	stillHeld, err := svc.CheckoutTask(ctx, "task-stale-1", "agent-third")
+	if err != nil {
+		t.Fatalf("holder-checkout probe: %v", err)
+	}
+	if stillHeld {
+		t.Fatal("LOCK STOLEN: a third agent acquired the checkout while agent-stale-holder still held it")
+	}
+}
