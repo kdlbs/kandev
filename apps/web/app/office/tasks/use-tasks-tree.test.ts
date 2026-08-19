@@ -33,13 +33,18 @@ const PRIORITY_ORDER = {
   none: 4,
 };
 
-function task(id: string, title: string, parentId?: string): OfficeTask {
+function task(
+  id: string,
+  title: string,
+  parentId?: string,
+  status: OfficeTask["status"] = "todo",
+): OfficeTask {
   return {
     id,
     workspaceId: "workspace-1",
     identifier: id.toUpperCase(),
     title,
-    status: "todo",
+    status,
     priority: "none",
     parentId,
     createdAt: "2026-01-01T00:00:00.000Z",
@@ -52,10 +57,11 @@ function buildNodes(
   expandedIds: Set<string>,
   sortField: TaskSortField = "title",
   sortDir: TaskSortDir = "asc",
+  filters: TaskFilterState = FILTERS,
 ): FlatTaskNode[] {
   return buildTaskTreeNodes({
     tasks,
-    filters: FILTERS,
+    filters,
     sortField,
     sortDir,
     nestingEnabled: true,
@@ -124,5 +130,37 @@ describe("office task tree", () => {
       [child.id, 0, true],
       [grandchild.id, 1, false],
     ]);
+  });
+
+  it("includes a raw backend CREATED task when filtering by the todo status", () => {
+    const created = task("created", "Created task", undefined, "CREATED" as OfficeTask["status"]);
+    const done = task("done", "Done task", undefined, "COMPLETED" as OfficeTask["status"]);
+
+    const nodes = buildNodes([created, done], new Set(), "title", "asc", {
+      ...FILTERS,
+      statuses: ["todo"],
+    });
+
+    expect(nodes.map((node) => node.task.id)).toEqual([created.id]);
+  });
+
+  it("sorts a raw backend CREATED task into the todo band, not last", () => {
+    const created = task("created", "Created task", undefined, "CREATED" as OfficeTask["status"]);
+    const inProgress = task(
+      "in-progress",
+      "In progress task",
+      undefined,
+      "IN_PROGRESS" as OfficeTask["status"],
+    );
+    const cancelled = task(
+      "cancelled",
+      "Cancelled task",
+      undefined,
+      "CANCELLED" as OfficeTask["status"],
+    );
+
+    const nodes = buildNodes([cancelled, inProgress, created], new Set(), "status", "asc");
+
+    expect(nodes.map((node) => node.task.id)).toEqual([created.id, inProgress.id, cancelled.id]);
   });
 });

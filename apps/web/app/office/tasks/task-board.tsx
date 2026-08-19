@@ -6,6 +6,7 @@ import { useAppStore } from "@/components/state-provider";
 import type { OfficeTask, OfficeTaskStatus } from "@/lib/state/slices/office/types";
 import { StatusIcon } from "./status-icon";
 import { STATUS_LABEL_KEYS } from "../lib/label-keys";
+import { normalizeTaskStatus } from "./normalize-status";
 import { useTranslation } from "react-i18next";
 
 // `labelKey`, not `label` — see the note in `status-labels.ts`. The workspace's
@@ -71,6 +72,25 @@ function BoardColumn({
   );
 }
 
+// Board columns are keyed on the canonical lowercase OfficeTaskStatus
+// vocabulary, but `task.status` can carry a raw backend enum value (e.g.
+// "CREATED") — see normalize-status.ts. Normalize before bucketing so those
+// tasks land in their canonical column instead of being silently dropped.
+export function groupTasksByStatus(
+  tasks: OfficeTask[],
+  columnStatuses: OfficeTaskStatus[],
+): Map<OfficeTaskStatus, OfficeTask[]> {
+  const grouped = new Map<OfficeTaskStatus, OfficeTask[]>();
+  for (const status of columnStatuses) {
+    grouped.set(status, []);
+  }
+  for (const task of tasks) {
+    const list = grouped.get(normalizeTaskStatus(task.status));
+    if (list) list.push(task);
+  }
+  return grouped;
+}
+
 export function TaskBoard({ tasks }: TaskBoardProps) {
   const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
@@ -78,14 +98,10 @@ export function TaskBoard({ tasks }: TaskBoardProps) {
     ? meta.statuses.map((s) => ({ status: s.id as OfficeTaskStatus, label: s.label }))
     : FALLBACK_COLUMNS.map((c) => ({ status: c.status, label: t(c.labelKey) }));
 
-  const grouped = new Map<OfficeTaskStatus, OfficeTask[]>();
-  for (const col of columns) {
-    grouped.set(col.status, []);
-  }
-  for (const task of tasks) {
-    const list = grouped.get(task.status);
-    if (list) list.push(task);
-  }
+  const grouped = groupTasksByStatus(
+    tasks,
+    columns.map((c) => c.status),
+  );
 
   return (
     <div className="flex gap-3 overflow-x-auto pb-4">
