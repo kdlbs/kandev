@@ -228,8 +228,9 @@ func (p *fixturePlugin) createWatchTask(ctx context.Context, workspaceID string)
 // handleConversationProbe exercises the agent_conversation RPCs end to end:
 // Ensure, Dispatch with a unique occurrence key, and Delete.  Returns a JSON
 // body carrying the conversation descriptor fields plus the dispatch status.
-// E2E tests invoke this to prove the gRPC round trip works without depending
-// on a full coordinator plugin backend.
+// conversation_probe_test.go drives this action directly. The desktop/mobile
+// E2E specs that run it against a live instance are not written yet (spec
+// criterion 19); until they are, this action has no runtime caller.
 func (p *fixturePlugin) handleConversationProbe(ctx context.Context, workspaceID string) (*pluginsdk.PluginActionResponse, error) {
 	host := p.Host()
 	if host == nil {
