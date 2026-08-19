@@ -47,6 +47,7 @@
   "manifestInstalled": "Instalado",
   "manifestSigned": "Assinado",
   "manifestVersion": "Versão",
+  "manifestWebhookPublic": "{{key}} (público)",
   "manifestWebhooks": "Webhooks",
   "marketplaceSources": "Origens do marketplace",
   "marketplaceSourcesDescription": "Adicione um registo de equipa ou empresarial para explorar os seus plugins juntamente com o catálogo oficial. Cada origem disponibiliza um documento {{document}}.",
