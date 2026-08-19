@@ -115,6 +115,9 @@ func (s *ConfigService) previewProjects(
 func (s *ConfigService) ApplyImport(
 	ctx context.Context, workspaceID string, bundle *ConfigBundle,
 ) (*ImportResult, error) {
+	s.importMu.Lock()
+	defer s.importMu.Unlock()
+
 	return s.applyImport(ctx, workspaceID, bundle, true)
 }
 
@@ -153,6 +156,10 @@ func (s *ConfigService) applyAgents(
 	ctx context.Context, wsID string, incoming []AgentConfig, result *ImportResult,
 	allowExternalManagers bool,
 ) error {
+	if duplicateName, ok := duplicateAgentName(incoming); ok {
+		return fmt.Errorf("duplicate agent name %q in import bundle", duplicateName)
+	}
+
 	existing, err := s.repo.ListAgentInstances(ctx, wsID)
 	if err != nil {
 		return err
@@ -192,6 +199,17 @@ func (s *ConfigService) applyAgents(
 		}
 	}
 	return s.applyAgentReportsTo(ctx, wsID, incoming, result, allowExternalManagers)
+}
+
+func duplicateAgentName(incoming []AgentConfig) (string, bool) {
+	seen := make(map[string]struct{}, len(incoming))
+	for _, cfg := range incoming {
+		if _, ok := seen[cfg.Name]; ok {
+			return cfg.Name, true
+		}
+		seen[cfg.Name] = struct{}{}
+	}
+	return "", false
 }
 
 // applyAgentReportsTo resolves each incoming agent's reports_to name to the
@@ -294,7 +312,9 @@ func reportsToCycleExists(
 ) bool {
 	visited := make(map[string]bool, len(byName)+len(incomingByName))
 	node := start
-	maxHops := len(byName) + len(incomingByName) + 1
+	// The visited set is the primary bound. Keep a small secondary cap in case
+	// a future graph representation makes the set incomplete.
+	maxHops := len(byName) + 1
 	for i := 0; i < maxHops; i++ {
 		if node == target {
 			return true

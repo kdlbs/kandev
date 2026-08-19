@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestApplyImport_ReportsToResolvesRegardlessOfBundleOrder imports a manager
@@ -326,12 +325,12 @@ func TestApplyImport_ReportsToDeepChainNoCycleResolves(t *testing.T) {
 	assertEqual(t, "c reports_to", c.ReportsTo, "")
 }
 
-// TestApplyImport_PreExistingPersistedCycleDoesNotHang asserts that a
-// cyclic reports_to pair already sitting in the database (from before this
+// TestApplyImport_PreExistingPersistedCycleDoesNotPreventResolution asserts
+// that a cyclic reports_to pair already sitting in the database (from before this
 // guard existed) cannot hang import resolution for an unrelated agent. The
 // walk must be bounded by a visited set, not rely on the graph being
 // acyclic.
-func TestApplyImport_PreExistingPersistedCycleDoesNotHang(t *testing.T) {
+func TestApplyImport_PreExistingPersistedCycleDoesNotPreventResolution(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 
@@ -347,24 +346,12 @@ func TestApplyImport_PreExistingPersistedCycleDoesNotHang(t *testing.T) {
 	}
 
 	bundle := &ConfigBundle{Agents: []AgentConfig{hierarchyAgent("zack", "x")}}
-	done := make(chan error, 1)
-	go func() {
-		_, err := env.svc.ApplyImport(ctx, testWorkspaceID, bundle)
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("ApplyImport: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("ApplyImport did not terminate: pre-existing persisted cycle appears to hang resolution")
+	if _, err := env.svc.ApplyImport(ctx, testWorkspaceID, bundle); err != nil {
+		t.Fatalf("ApplyImport: %v", err)
 	}
 
 	zack := agentByName(t, env, testWorkspaceID, "zack")
-	if zack.ReportsTo == "" {
-		t.Fatal("zack should resolve to x despite the pre-existing x/y cycle")
-	}
+	assertEqual(t, "zack reports_to x", zack.ReportsTo, x.ID)
 }
 
 // TestApplyIncoming_CycleThroughPrunedExternalManagerDoesNotFalseFlag
@@ -372,30 +359,58 @@ func TestApplyImport_PreExistingPersistedCycleDoesNotHang(t *testing.T) {
 // walk into a pruned, DB-only agent's persisted reports_to when checking a
 // bundle member for a cycle. grace is DB-only (absent from the filesystem)
 // and persistently reports_to bob; the filesystem snapshot proposes bob
-// reports_to carol, entirely within the snapshot. That must resolve cleanly
-// with no cycle warning — grace's pruning is a separate, unrelated concern
-// already covered by TestApplyIncoming_DoesNotKeepReportsToForPrunedManager.
+// reports_to carol and carol reports_to grace. bob must resolve cleanly, while
+// carol must receive the expected dangling-reference warning.
 func TestApplyIncoming_CycleThroughPrunedExternalManagerDoesNotFalseFlag(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 
 	grace := seedAgent(t, env, testWorkspaceID, "grace")
 	bob := seedAgent(t, env, testWorkspaceID, "bob")
-	bob.ReportsTo = grace.ID
-	if err := env.repo.UpdateAgentInstance(ctx, bob); err != nil {
-		t.Fatalf("seed bob reports_to grace: %v", err)
+	grace.ReportsTo = bob.ID
+	if err := env.repo.UpdateAgentInstance(ctx, grace); err != nil {
+		t.Fatalf("seed grace reports_to bob: %v", err)
 	}
 
 	env.writeFSAgent(t, "bob", "name: bob\nrole: worker\nreports_to: carol\n")
-	env.writeFSAgent(t, "carol", "name: carol\nrole: manager\n")
+	env.writeFSAgent(t, "carol", "name: carol\nrole: manager\nreports_to: grace\n")
 
 	result, err := env.svc.ApplyIncoming(ctx, testWorkspaceID)
 	if err != nil {
 		t.Fatalf("ApplyIncoming: %v", err)
 	}
-	if len(result.Warnings) != 0 {
-		t.Fatalf("warnings: got %d, want 0: %v", len(result.Warnings), result.Warnings)
+	if len(result.Warnings) != 1 {
+		t.Fatalf("warnings: got %d, want 1: %v", len(result.Warnings), result.Warnings)
+	}
+	if !strings.Contains(result.Warnings[0], "carol") || !strings.Contains(result.Warnings[0], "grace") {
+		t.Errorf("warning %q does not name the pruned manager and report", result.Warnings[0])
 	}
 	carol := agentByName(t, env, testWorkspaceID, "carol")
 	assertEqual(t, "bob reports_to carol after fs sync", agentByName(t, env, testWorkspaceID, "bob").ReportsTo, carol.ID)
+	assertEqual(t, "carol reports_to cleared", carol.ReportsTo, "")
+	if _, err := env.repo.GetAgentInstance(ctx, grace.ID); err == nil {
+		t.Fatalf("pruned manager %q is still visible in the repository", grace.ID)
+	}
+}
+
+// TestApplyImport_DuplicateAgentNamesFailBeforeWrites rejects an ambiguous
+// bundle before it can create duplicate rows or build an incorrect graph.
+func TestApplyImport_DuplicateAgentNamesFailBeforeWrites(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	bundle := &ConfigBundle{Agents: []AgentConfig{
+		hierarchyAgent("bob", "carol"),
+		hierarchyAgent("bob", "dave"),
+	}}
+
+	if _, err := env.svc.ApplyImport(ctx, testWorkspaceID, bundle); err == nil {
+		t.Fatal("ApplyImport succeeded for a bundle with duplicate agent names")
+	}
+	agents, err := env.repo.ListAgentInstances(ctx, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	if len(agents) != 0 {
+		t.Fatalf("duplicate bundle partially wrote %d agent rows", len(agents))
+	}
 }

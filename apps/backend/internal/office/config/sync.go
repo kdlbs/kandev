@@ -93,6 +93,9 @@ func (s *ConfigService) OutgoingDiff(ctx context.Context, workspaceID string) (*
 // ApplyIncoming reads the on-disk config and writes it to the DB. Rows in the
 // DB but missing from disk are deleted.
 func (s *ConfigService) ApplyIncoming(ctx context.Context, workspaceID string) (*ImportResult, error) {
+	s.importMu.Lock()
+	defer s.importMu.Unlock()
+
 	bundle, _, err := s.ScanFilesystem(ctx, workspaceID)
 	if err != nil {
 		return nil, err
