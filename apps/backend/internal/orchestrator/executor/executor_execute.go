@@ -753,6 +753,18 @@ func (e *Executor) ExecuteWithFullProfile(ctx context.Context, task *v1.Task, ag
 // This allows the caller to get the session ID immediately and launch the agent later.
 // Returns the session ID.
 func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string) (string, error) {
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true)
+}
+
+// PrepareSessionForExistingEnvironment creates a workflow replacement session
+// that will be bound by its caller to an already selected canonical
+// environment. It must not claim a temporary task-local materialization.
+func (e *Executor) PrepareSessionForExistingEnvironment(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string) (string, error) {
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, false)
+}
+
+//nolint:cyclop,funlen // Session construction keeps its existing validation sequence in one transaction boundary.
+func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool) (string, error) {
 	if agentProfileID == "" {
 		e.logger.Error("task has no agent_profile_id configured", zap.String("task_id", task.ID))
 		return "", ErrNoAgentProfileID
@@ -861,7 +873,15 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 	}
 
 	var createErr error
-	if atomicCreator, ok := e.repo.(initialRuntimeSeedTaskSessionCreator); ok {
+	if binder, ok := e.repo.(workspaceBindingTaskSessionCreator); ok && bindWorkspace && !taskUsesDeferredEnvironmentInheritance(task.Metadata) {
+		createErr = binder.CreateTaskSessionWithWorkspaceBinding(ctx, session, &models.TaskEnvironment{
+			TaskID:            task.ID,
+			ExecutorType:      execConfig.ExecutorType,
+			ExecutorID:        execConfig.ExecutorID,
+			ExecutorProfileID: session.ExecutorProfileID,
+			Status:            models.TaskEnvironmentStatusCreating,
+		})
+	} else if atomicCreator, ok := e.repo.(initialRuntimeSeedTaskSessionCreator); ok {
 		createErr = atomicCreator.CreateTaskSessionWithInitialRuntimeSeed(ctx, session)
 	} else {
 		createErr = e.repo.CreateTaskSession(ctx, session)
@@ -892,6 +912,19 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		zap.String("session_id", sessionID))
 
 	return sessionID, nil
+}
+
+// taskUsesDeferredEnvironmentInheritance keeps the existing handoff resolver
+// authoritative for inherited/shared tasks. It supplies the parent/group
+// environment immediately after the session exists; claiming a task-local
+// creating environment first would transiently create a second owner.
+func taskUsesDeferredEnvironmentInheritance(metadata map[string]interface{}) bool {
+	workspace, ok := metadata["workspace"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	mode, _ := workspace["mode"].(string)
+	return mode == "inherit_parent" || mode == "shared_group"
 }
 
 // resolveAgentProfileSnapshot resolves an agent profile ID to a snapshot map and passthrough flag.
@@ -1050,10 +1083,17 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if execCfg.ExecutorID != "" {
 		session.ExecutorID = execCfg.ExecutorID
 	}
-	// A persisted environment belongs to the task, not to the session that
+	// A ready/stopped environment belongs to the task, not to the session that
 	// first materialized it. Its next launch must attach rather than recover or
-	// materialize another workspace.
-	req.WorkspaceReuseRequired = existingEnv != nil
+	// materialize another workspace. A creating environment is usable only by
+	// its durable elected owner; every sibling fails before lifecycle setup.
+	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusCreating && existingEnv.MaterializationSessionID != session.ID {
+		return nil, fmt.Errorf("%w: retry after the initial workspace launch completes", models.ErrWorkspacePreparing)
+	}
+	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusFailed {
+		return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+	req.WorkspaceReuseRequired = existingEnv != nil && existingEnv.MaterializationSessionID != session.ID
 	req.OfficeAgentProfileID = opts.OfficeAgentProfileID
 	req.TurnID = opts.TurnID
 	if req.OfficeAgentProfileID == "" && session.AgentProfileID != "" {
@@ -1124,6 +1164,14 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// Call the AgentManager to launch the container
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
 	if err != nil {
+		if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusCreating && existingEnv.MaterializationSessionID == session.ID {
+			existingEnv.Status = models.TaskEnvironmentStatusFailed
+			existingEnv.MaterializationSessionID = ""
+			if updateErr := e.repo.UpdateTaskEnvironment(ctx, existingEnv); updateErr != nil {
+				e.logger.Warn("failed to mark workspace materialization failed",
+					zap.String("task_id", task.ID), zap.String("task_environment_id", existingEnv.ID), zap.Error(updateErr))
+			}
+		}
 		repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
 		return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
 	}
@@ -1953,6 +2001,7 @@ func (e *Executor) persistTaskEnvironment(
 		// Status, workspace, and container fields are still env-row-owned; the
 		// physical worktree lives on task_environment_repos.
 		existingEnv.Status = models.TaskEnvironmentStatusReady
+		existingEnv.MaterializationSessionID = ""
 		// Refresh workspace + container/sandbox fields. The original update
 		// branch only touched AgentExecutionID/Status, so envs created with
 		// empty paths (e.g. before the worktree resolved) stayed permanently

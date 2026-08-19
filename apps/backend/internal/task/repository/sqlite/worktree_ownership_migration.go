@@ -43,6 +43,7 @@ func finalTaskEnvironmentsDDL(tableName string) string {
 			executor_profile_id TEXT DEFAULT '',
 			control_port INTEGER DEFAULT 0,
 			status TEXT NOT NULL DEFAULT 'creating',
+			materialization_session_id TEXT DEFAULT '',
 			workspace_path TEXT DEFAULT '',
 			container_id TEXT DEFAULT '',
 			sandbox_id TEXT DEFAULT '',

@@ -51,6 +51,24 @@ func (h *Handlers) handleSpawnSession(ctx context.Context, msg *ws.Message) (*ws
 		SpawnOrigin:    spawnOriginFromSession(spawner),
 	})
 	if err != nil {
+		if errors.Is(err, models.ErrWorkspacePreparing) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict,
+				"the task workspace is still being prepared; retry after its initial launch completes",
+				map[string]interface{}{
+					"reason":      "workspace_preparing",
+					"recoverable": true,
+					"retry":       "retry after the initial workspace launch completes",
+				})
+		}
+		if errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict,
+				"the task workspace cannot be safely reused; retry after restoring its existing workspace",
+				map[string]interface{}{
+					"reason":      "workspace_reuse_unsafe",
+					"recoverable": true,
+					"retry":       "restore the task workspace, then retry",
+				})
+		}
 		if errors.Is(err, worktree.ErrReuseWorktreeUnavailable) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict,
 				"the task workspace cannot be safely reused; retry after restoring its existing workspace",
