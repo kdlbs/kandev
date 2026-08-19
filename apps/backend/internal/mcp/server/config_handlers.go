@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -70,7 +71,11 @@ func (s *Server) registerConfigWorkflowTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("export_workflow_kandev",
-			mcp.WithDescription("Export one workflow as a portable version 1 kandev_workflow JSON document. The result contains one workflow and its steps without instance IDs or timestamps. Pass the JSON text unchanged as document to import_workflow_kandev."),
+			mcp.WithDescription("Export one workflow as a portable version 1 kandev_workflow JSON document. The result contains one workflow and its steps without instance IDs or timestamps. Pass the JSON text unchanged as document to import_workflow_kandev (the import document limit is 1 MiB)."),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID to export")),
 		),
 		s.wrapHandler("export_workflow_kandev", s.exportWorkflowHandler()),
@@ -406,6 +411,10 @@ func (s *Server) exportWorkflowHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		workflowID, err := req.RequireString("workflow_id")
 		if err != nil {
+			return mcp.NewToolResultError("workflow_id is required"), nil
+		}
+		workflowID = strings.TrimSpace(workflowID)
+		if workflowID == "" {
 			return mcp.NewToolResultError("workflow_id is required"), nil
 		}
 		return s.forwardToBackend(ctx, ws.ActionMCPExportWorkflow, map[string]string{"workflow_id": workflowID})

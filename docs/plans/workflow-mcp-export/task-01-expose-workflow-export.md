@@ -68,3 +68,6 @@ Report the files changed, the red and green test results, remaining risks, and t
 - Reused `workflow.Service.ExportWorkflow` and the existing JSON-text bridge.
 - Added coverage for registration, portable output, unchanged import round trips, missing IDs, and service errors.
 - Verification: `cd apps/backend && go test ./internal/mcp/handlers ./internal/mcp/server ./pkg/websocket` passed with 696 tests.
+- PR fixup added read-only, non-destructive, idempotent, closed-world tool annotations; documented the 1 MiB import limit in the tool description; and rejected empty or whitespace-only IDs before forwarding.
+- Fixup regression verification: the new annotation and whitespace-ID tests failed before the patch, then passed after it.
+- Fixup verification: `go test ./internal/mcp/handlers ./internal/mcp/server ./pkg/websocket` passed with 698 tests and `make -C apps/backend lint` reported 0 issues.

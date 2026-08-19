@@ -88,7 +88,10 @@ No browser E2E test is necessary. The feature changes an MCP contract and agent 
 ## Verification Results
 
 - `go test ./internal/mcp/handlers ./internal/mcp/server ./pkg/websocket`: passed, 696 tests across 3 packages.
+- PR fixup: the annotation and whitespace-ID regression tests failed before the fix and passed after it.
+- `go test ./internal/mcp/handlers ./internal/mcp/server ./pkg/websocket`: passed, 698 tests across 3 packages after fixup.
 - `go test ./internal/sysprompt`: passed.
+- `make -C apps/backend lint`: passed with 0 issues after fixup.
 - `node --test scripts/validate-public-docs.test.mjs`: passed 61 tests with 0 failures.
 - `node scripts/validate-public-docs.mjs`: validated 41 published docs pages.
 - `git diff --check`: passed.
