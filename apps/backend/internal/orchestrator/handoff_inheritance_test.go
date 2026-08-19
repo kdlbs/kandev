@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -107,6 +108,33 @@ func TestPrepareSessionForStart_PropagatesInheritedEnvironment(t *testing.T) {
 	}
 	if got.TaskEnvironmentID != "env-parent" {
 		t.Errorf("TaskEnvironmentID = %q, want env-parent (inherited via start path)", got.TaskEnvironmentID)
+	}
+}
+
+func TestPrepareSessionForStart_InheritedWorkspaceMissingCompensatesSession(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{repoForExecutionLookup: repo})
+	ctx := context.Background()
+	now := time.Now().UTC()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-missing", Name: "WS", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-missing", WorkspaceID: "ws-missing", Name: "WF", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "parent-missing", WorkspaceID: "ws-missing", WorkflowID: "wf-missing", Title: "P", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "child-missing", ParentID: "parent-missing", WorkspaceID: "ws-missing", WorkflowID: "wf-missing", Title: "C", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now})
+
+	_, created, err := svc.prepareSessionForStart(ctx, &v1.Task{
+		ID:       "child-missing",
+		ParentID: "parent-missing",
+		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+	}, "profile-1", "exec-1", "", "")
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("prepareSessionForStart error = %v, want workspace reuse unsafe", err)
+	}
+	if created {
+		t.Fatal("failed inherited launch must not report a created session")
+	}
+	sessions, listErr := repo.ListTaskSessions(ctx, "child-missing")
+	if listErr != nil || len(sessions) != 0 {
+		t.Fatalf("sessions after rejected inherited launch = %+v, %v", sessions, listErr)
 	}
 }
 
