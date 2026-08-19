@@ -262,7 +262,7 @@
   "workflowsSectionDescription": "Create autonomous pipelines with automated transitions or manual workflows where you move tasks yourself",
   "workflowSteps": "Workflow Steps",
   "workflowSyncCompleted": "Workflow sync completed",
-  "loadingSteps": "Loading steps...",
+  "loadingSteps": "Loading steps…",
   "noStepsInThisWorkflow": "No steps in this workflow",
   "selectAWorkflowFirst": "Select a workflow first",
   "coordinatorMonitoring": "Coordinator monitoring",
