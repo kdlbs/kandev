@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	"google.golang.org/grpc/codes"
@@ -539,6 +541,15 @@ func (s *AgentConversationService) DeleteAllForPlugin(ctx context.Context, plugi
 			continue
 		}
 		if err := s.tasks.DeleteTask(ctx, task.ID); err != nil {
+			// The conversation being gone already is the goal state, not a
+			// failure: the listing above is not held under a lock, so a
+			// concurrent cleanup (or a retried uninstall racing itself) can
+			// remove a row between the list and this delete. Reporting that
+			// as an error would abort an uninstall that actually succeeded,
+			// since Service.Uninstall is fail-visible on this path.
+			if errors.Is(err, taskrepo.ErrTaskNotFound) {
+				continue
+			}
 			if firstErr == nil {
 				firstErr = fmt.Errorf("failed to delete managed conversation task %s: %w", task.ID, err)
 			}
