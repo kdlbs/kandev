@@ -181,3 +181,30 @@ func TestApplyIncoming_PreservesReportsToFromFilesystem(t *testing.T) {
 	bob := agentByName(t, env, testWorkspaceID, "bob")
 	assertEqual(t, "bob reports_to grace after fs sync", bob.ReportsTo, grace.ID)
 }
+
+// TestApplyIncoming_DoesNotKeepReportsToForPrunedManager verifies that the
+// incoming sync does not resolve hierarchy names against DB-only agents.
+// A manager that is absent from the filesystem must not leave a dangling ID
+// on an agent that remains in the imported bundle.
+func TestApplyIncoming_DoesNotKeepReportsToForPrunedManager(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	manager := seedAgent(t, env, testWorkspaceID, "grace")
+	seedAgent(t, env, testWorkspaceID, "bob")
+	env.writeFSAgent(t, "bob", "name: bob\nrole: worker\nreports_to: grace\n")
+
+	result, err := env.svc.ApplyIncoming(ctx, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ApplyIncoming: %v", err)
+	}
+	if len(result.Warnings) != 1 {
+		t.Fatalf("warnings: got %d, want 1: %v", len(result.Warnings), result.Warnings)
+	}
+	if !strings.Contains(result.Warnings[0], "bob") || !strings.Contains(result.Warnings[0], "grace") {
+		t.Errorf("warning %q does not name both the agent and the pruned manager", result.Warnings[0])
+	}
+	assertEqual(t, "bob reports_to after manager prune", agentByName(t, env, testWorkspaceID, "bob").ReportsTo, "")
+	if _, err := env.repo.GetAgentInstance(ctx, manager.ID); err == nil {
+		t.Fatalf("pruned manager %q is still visible in the repository", manager.ID)
+	}
+}

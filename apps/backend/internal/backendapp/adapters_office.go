@@ -230,6 +230,7 @@ func (a *configSyncerAdapter) ApplyIncoming(ctx context.Context, workspaceID str
 	return &officeonboarding.ApplyResult{
 		CreatedCount: result.CreatedCount,
 		UpdatedCount: result.UpdatedCount,
+		Warnings:     result.Warnings,
 	}, nil
 }
 

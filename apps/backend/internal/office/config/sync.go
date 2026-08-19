@@ -97,7 +97,9 @@ func (s *ConfigService) ApplyIncoming(ctx context.Context, workspaceID string) (
 	if err != nil {
 		return nil, err
 	}
-	result, err := s.ApplyImport(ctx, workspaceID, bundle)
+	// The filesystem is an authoritative snapshot for this direction. Do not
+	// resolve reports_to against DB-only managers because they are pruned below.
+	result, err := s.applyImport(ctx, workspaceID, bundle, false)
 	if err != nil {
 		return nil, err
 	}
