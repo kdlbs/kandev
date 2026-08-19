@@ -194,7 +194,7 @@ func (s *ConfigService) applyAgentReportsTo(
 ) error {
 	current, err := s.repo.ListAgentInstances(ctx, wsID)
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve reports_to: list agents: %w", err)
 	}
 	byName := make(map[string]*models.AgentInstance, len(current))
 	for _, a := range current {
@@ -214,7 +214,7 @@ func (s *ConfigService) applyAgentReportsTo(
 		}
 		agent.ReportsTo = reportsTo
 		if err := s.repo.UpdateAgentInstance(ctx, agent); err != nil {
-			return err
+			return fmt.Errorf("resolve reports_to: update %q: %w", agent.Name, err)
 		}
 	}
 	return nil

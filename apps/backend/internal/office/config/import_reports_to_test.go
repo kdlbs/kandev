@@ -161,3 +161,23 @@ func TestApplyImport_ReportsToRoundTripsAcrossWorkspaces(t *testing.T) {
 	carol := agentByName(t, target, testWorkspaceID, "carol")
 	assertEqual(t, "bob reports_to carol in target workspace", bob.ReportsTo, carol.ID)
 }
+
+// TestApplyIncoming_PreservesReportsToFromFilesystem covers the
+// filesystem-config-sync path (ApplyIncoming -> ScanFilesystem ->
+// ApplyImport), not just the bundle-upload import endpoint. reports_to
+// written to an on-disk agent YAML file must survive the scan and resolve to
+// the manager's ID, the same as it does for a directly-uploaded bundle.
+func TestApplyIncoming_PreservesReportsToFromFilesystem(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	env.writeFSAgent(t, "grace", "name: grace\nrole: manager\n")
+	env.writeFSAgent(t, "bob", "name: bob\nrole: worker\nreports_to: grace\n")
+
+	if _, err := env.svc.ApplyIncoming(ctx, testWorkspaceID); err != nil {
+		t.Fatalf("ApplyIncoming: %v", err)
+	}
+
+	grace := agentByName(t, env, testWorkspaceID, "grace")
+	bob := agentByName(t, env, testWorkspaceID, "bob")
+	assertEqual(t, "bob reports_to grace after fs sync", bob.ReportsTo, grace.ID)
+}

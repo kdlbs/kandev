@@ -19,7 +19,7 @@ func (s *ConfigService) ScanFilesystem(_ context.Context, _ string) (*ConfigBund
 	bundle := &ConfigBundle{Settings: SettingsConfig{Name: defaultWorkspaceName}}
 	for _, a := range s.cfgLoader.GetAgents(defaultWorkspaceName) {
 		bundle.Agents = append(bundle.Agents, AgentConfig{
-			Name: a.Name, Role: string(a.Role), Icon: a.Icon,
+			Name: a.Name, Role: string(a.Role), Icon: a.Icon, ReportsTo: a.ReportsTo,
 			BudgetMonthlyCents: a.BudgetMonthlyCents, MaxConcurrentSessions: a.MaxConcurrentSessions,
 			DesiredSkills: a.DesiredSkills, ExecutorPreference: a.ExecutorPreference,
 		})
