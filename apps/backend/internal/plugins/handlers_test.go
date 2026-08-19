@@ -72,13 +72,7 @@ func newTestRouterWithIdentity(t *testing.T, identity authn.Identity) (*gin.Engi
 	// fails closed without one), so wire an in-memory one, matching prod
 	// where Provide always attaches the shared vault.
 	svc.SetSecrets(newFakeSecretRevealer())
-	router := gin.New()
-	router.Use(func(ctx *gin.Context) {
-		authn.SetOnGin(ctx, identity)
-		ctx.Next()
-	})
-	RegisterRoutes(router, svc, nil, testLogger(t))
-	return router, svc
+	return registerPluginRoutesWithIdentity(t, svc, identity), svc
 }
 
 func newAdminTestRouter(t *testing.T) (*gin.Engine, *Service) {
