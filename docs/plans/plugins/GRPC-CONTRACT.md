@@ -493,6 +493,18 @@ the strong identity is workspace + provider + scope + immutable provider reposit
 ID. Host/name/owner fields remain routing and display metadata; scoped descriptors do
 not adopt legacy unscoped rows.
 
+`WorkflowStep` additionally carries `coordinator_monitored` (bool) and
+`coordinator_prompt` (string): the host-owned Settings > Workspace > Workflow
+configuration policy an operator saves per step (checked or not, plus an
+optional multiline prompt). This is read-only through `ListSteps` — there is
+no write RPC, since the policy is edited only through Kandev's own Settings
+UI, never by a plugin. `coordinator_monitored` is `false` and
+`coordinator_prompt` is `""` for a step nobody has checked. A plugin
+composes its own base prompt with `coordinator_prompt` only when
+`coordinator_monitored` is `true`; an empty prompt on a checked step adds no
+step-specific instruction. See `docs/specs/coordinator-plugin/spec.md`'s
+"Workflow monitoring policy" for the full state model.
+
 **Authoring example** — a plugin declaring `api_read: ["sessions"]` and reading
 computed per-session code stats instead of opening the kandev database:
 

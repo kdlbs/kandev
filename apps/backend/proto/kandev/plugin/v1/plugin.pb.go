@@ -3275,14 +3275,23 @@ func (x *ListWorkflowsResponse) GetPageInfo() *PageInfo {
 }
 
 type WorkflowStep struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	WorkflowId    string                 `protobuf:"bytes,2,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	Position      int32                  `protobuf:"varint,4,opt,name=position,proto3" json:"position,omitempty"`
-	StageType     string                 `protobuf:"bytes,5,opt,name=stage_type,json=stageType,proto3" json:"stage_type,omitempty"` // work | review | approval | custom
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Id         string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkflowId string                 `protobuf:"bytes,2,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	Name       string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Position   int32                  `protobuf:"varint,4,opt,name=position,proto3" json:"position,omitempty"`
+	StageType  string                 `protobuf:"bytes,5,opt,name=stage_type,json=stageType,proto3" json:"stage_type,omitempty"` // work | review | approval | custom
+	// coordinator_monitored and coordinator_prompt carry the Settings >
+	// Workspace > Workflow configuration policy an operator saves for this
+	// step (host-owned storage, not plugin-owned — see
+	// docs/specs/coordinator-plugin/spec.md's "Workflow monitoring policy").
+	// coordinator_monitored is false and coordinator_prompt is "" for a step
+	// that was never checked. A plugin composes coordinator_prompt with its
+	// own base prompt only when coordinator_monitored is true.
+	CoordinatorMonitored bool   `protobuf:"varint,6,opt,name=coordinator_monitored,json=coordinatorMonitored,proto3" json:"coordinator_monitored,omitempty"`
+	CoordinatorPrompt    string `protobuf:"bytes,7,opt,name=coordinator_prompt,json=coordinatorPrompt,proto3" json:"coordinator_prompt,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *WorkflowStep) Reset() {
@@ -3346,6 +3355,20 @@ func (x *WorkflowStep) GetPosition() int32 {
 func (x *WorkflowStep) GetStageType() string {
 	if x != nil {
 		return x.StageType
+	}
+	return ""
+}
+
+func (x *WorkflowStep) GetCoordinatorMonitored() bool {
+	if x != nil {
+		return x.CoordinatorMonitored
+	}
+	return false
+}
+
+func (x *WorkflowStep) GetCoordinatorPrompt() string {
+	if x != nil {
+		return x.CoordinatorPrompt
 	}
 	return ""
 }
@@ -6978,7 +7001,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x04page\x18\x02 \x01(\v2\x16.kandev.plugin.v1.PageR\x04page\"\x8a\x01\n" +
 	"\x15ListWorkflowsResponse\x128\n" +
 	"\tworkflows\x18\x01 \x03(\v2\x1a.kandev.plugin.v1.WorkflowR\tworkflows\x127\n" +
-	"\tpage_info\x18\x02 \x01(\v2\x1a.kandev.plugin.v1.PageInfoR\bpageInfo\"\x8e\x01\n" +
+	"\tpage_info\x18\x02 \x01(\v2\x1a.kandev.plugin.v1.PageInfoR\bpageInfo\"\xf2\x01\n" +
 	"\fWorkflowStep\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
 	"\vworkflow_id\x18\x02 \x01(\tR\n" +
@@ -6986,7 +7009,9 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x1a\n" +
 	"\bposition\x18\x04 \x01(\x05R\bposition\x12\x1d\n" +
 	"\n" +
-	"stage_type\x18\x05 \x01(\tR\tstageType\";\n" +
+	"stage_type\x18\x05 \x01(\tR\tstageType\x123\n" +
+	"\x15coordinator_monitored\x18\x06 \x01(\bR\x14coordinatorMonitored\x12-\n" +
+	"\x12coordinator_prompt\x18\a \x01(\tR\x11coordinatorPrompt\";\n" +
 	"\x18ListWorkflowStepsRequest\x12\x1f\n" +
 	"\vworkflow_id\x18\x01 \x01(\tR\n" +
 	"workflowId\"Q\n" +

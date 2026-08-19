@@ -444,6 +444,15 @@ message WorkflowStep {
   string name = 3;
   int32 position = 4;
   string stage_type = 5; // work | review | approval | custom
+  // coordinator_monitored and coordinator_prompt carry the Settings >
+  // Workspace > Workflow configuration policy an operator saves for this
+  // step (host-owned storage, not plugin-owned — see
+  // docs/specs/coordinator-plugin/spec.md's "Workflow monitoring policy").
+  // coordinator_monitored is false and coordinator_prompt is "" for a step
+  // that was never checked. A plugin composes coordinator_prompt with its
+  // own base prompt only when coordinator_monitored is true.
+  bool coordinator_monitored = 6;
+  string coordinator_prompt = 7;
 }
 message ListWorkflowStepsRequest {
   string workflow_id = 1;

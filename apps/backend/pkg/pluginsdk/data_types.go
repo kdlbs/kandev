@@ -373,15 +373,27 @@ type WorkflowStep struct {
 	Name       string
 	Position   int32
 	StageType  string
+	// CoordinatorMonitored and CoordinatorPrompt carry the Settings >
+	// Workspace > Workflow configuration policy an operator saves for this
+	// step (host-owned storage — see docs/specs/coordinator-plugin/spec.md's
+	// "Workflow monitoring policy"). CoordinatorMonitored is false and
+	// CoordinatorPrompt is "" for a step that was never checked. A plugin
+	// composes CoordinatorPrompt with its own base prompt only when
+	// CoordinatorMonitored is true; an empty prompt on a monitored step adds
+	// no step-specific instruction.
+	CoordinatorMonitored bool
+	CoordinatorPrompt    string
 }
 
 func (s WorkflowStep) toProto() *pluginv1.WorkflowStep {
 	return &pluginv1.WorkflowStep{
-		Id:         s.ID,
-		WorkflowId: s.WorkflowID,
-		Name:       s.Name,
-		Position:   s.Position,
-		StageType:  s.StageType,
+		Id:                   s.ID,
+		WorkflowId:           s.WorkflowID,
+		Name:                 s.Name,
+		Position:             s.Position,
+		StageType:            s.StageType,
+		CoordinatorMonitored: s.CoordinatorMonitored,
+		CoordinatorPrompt:    s.CoordinatorPrompt,
 	}
 }
 
@@ -390,11 +402,13 @@ func workflowStepFromProto(p *pluginv1.WorkflowStep) WorkflowStep {
 		return WorkflowStep{}
 	}
 	return WorkflowStep{
-		ID:         p.GetId(),
-		WorkflowID: p.GetWorkflowId(),
-		Name:       p.GetName(),
-		Position:   p.GetPosition(),
-		StageType:  p.GetStageType(),
+		ID:                   p.GetId(),
+		WorkflowID:           p.GetWorkflowId(),
+		Name:                 p.GetName(),
+		Position:             p.GetPosition(),
+		StageType:            p.GetStageType(),
+		CoordinatorMonitored: p.GetCoordinatorMonitored(),
+		CoordinatorPrompt:    p.GetCoordinatorPrompt(),
 	}
 }
 

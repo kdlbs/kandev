@@ -122,11 +122,20 @@ func (f *fakeWorkflowLister) ListWorkflows(_ context.Context, workspaceID string
 }
 
 type fakeWorkflowStepLister struct {
-	steps map[string][]*wfmodels.WorkflowStep
+	steps      map[string][]*wfmodels.WorkflowStep
+	monitoring map[string][]wfmodels.CoordinatorStepMonitor
+	monErr     error
 }
 
 func (f *fakeWorkflowStepLister) ListStepsByWorkflow(_ context.Context, workflowID string) ([]*wfmodels.WorkflowStep, error) {
 	return f.steps[workflowID], nil
+}
+
+func (f *fakeWorkflowStepLister) GetCoordinatorMonitoring(_ context.Context, workflowID string) ([]wfmodels.CoordinatorStepMonitor, error) {
+	if f.monErr != nil {
+		return nil, f.monErr
+	}
+	return f.monitoring[workflowID], nil
 }
 
 type fakeAgentProfileDataSource struct {
@@ -530,6 +539,75 @@ func TestPluginHost_Workflows_SucceedsWithCapability(t *testing.T) {
 	}
 	if len(steps) != 1 || steps[0].StageType != "work" {
 		t.Fatalf("ListSteps() = %+v, want one step with StageType=work", steps)
+	}
+}
+
+// TestPluginHost_Workflows_ListStepsMergesCoordinatorMonitoring pins the
+// permanent Host read surface a coordinator-style plugin needs to compose
+// its per-step prompt on every check (criteria 22/23): ListSteps merges the
+// host-owned Settings > Workspace > Workflow configuration policy onto each
+// step by workflow_step_id, an unchecked step reports CoordinatorMonitored
+// false with an empty prompt, and merging never touches unrelated steps or
+// workflows.
+func TestPluginHost_Workflows_ListStepsMergesCoordinatorMonitoring(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"workflows"}})
+	d.steps.steps = map[string][]*wfmodels.WorkflowStep{
+		"wf-1": {
+			{ID: "step-checked", WorkflowID: "wf-1", Name: "Spec", Position: 0, StageType: wfmodels.StageType("work")},
+			{ID: "step-unchecked", WorkflowID: "wf-1", Name: "Review", Position: 1, StageType: wfmodels.StageType("review")},
+		},
+	}
+	d.steps.monitoring = map[string][]wfmodels.CoordinatorStepMonitor{
+		"wf-1": {
+			{WorkflowStepID: "step-checked", Selected: true, Prompt: "Verify the spec covers rollback."},
+		},
+	}
+
+	steps, err := d.host.Workflows().ListSteps(context.Background(), "wf-1")
+	if err != nil {
+		t.Fatalf("ListSteps() unexpected error: %v", err)
+	}
+	if len(steps) != 2 {
+		t.Fatalf("ListSteps() returned %d steps, want 2", len(steps))
+	}
+
+	byID := map[string]pluginsdk.WorkflowStep{}
+	for _, s := range steps {
+		byID[s.ID] = s
+	}
+
+	checked := byID["step-checked"]
+	if !checked.CoordinatorMonitored {
+		t.Fatal("step-checked: CoordinatorMonitored = false, want true")
+	}
+	if checked.CoordinatorPrompt != "Verify the spec covers rollback." {
+		t.Fatalf("step-checked: CoordinatorPrompt = %q", checked.CoordinatorPrompt)
+	}
+
+	unchecked := byID["step-unchecked"]
+	if unchecked.CoordinatorMonitored {
+		t.Fatal("step-unchecked: CoordinatorMonitored = true, want false (never checked)")
+	}
+	if unchecked.CoordinatorPrompt != "" {
+		t.Fatalf("step-unchecked: CoordinatorPrompt = %q, want empty", unchecked.CoordinatorPrompt)
+	}
+}
+
+// TestPluginHost_Workflows_ListStepsPropagatesMonitoringLoadFailure proves a
+// monitoring-store failure fails the whole read loudly (matching every other
+// Host data-read failure mode) rather than silently returning steps with
+// zeroed-out monitoring fields, which would look identical to "nothing is
+// checked" and mislead a plugin into skipping work it should do.
+func TestPluginHost_Workflows_ListStepsPropagatesMonitoringLoadFailure(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"workflows"}})
+	d.steps.steps = map[string][]*wfmodels.WorkflowStep{
+		"wf-1": {{ID: "step-1", WorkflowID: "wf-1", Name: "Todo"}},
+	}
+	d.steps.monErr = errors.New("coordinator monitoring store unavailable")
+
+	_, err := d.host.Workflows().ListSteps(context.Background(), "wf-1")
+	if err == nil {
+		t.Fatal("expected ListSteps() to propagate the monitoring load error")
 	}
 }
 
