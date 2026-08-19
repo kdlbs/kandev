@@ -2,10 +2,9 @@ package config
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
-
-	"github.com/kandev/kandev/internal/office/models"
-	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
 // These tests are the regression coverage for the full-row read-modify-write
@@ -16,180 +15,181 @@ import (
 // direct API edits) changed between the List read and the Update write was
 // silently reverted to its stale snapshot value.
 //
-// Each test reproduces the exact production sequence: capture the row the
-// way applyAgents' List call would, perform the concurrent write, then drive
-// the import side of the sequence through the repository. Before the fix
-// that last step was `Update<Entity>(ctx, stale)` — the mutated-in-place
-// stale struct — which silently reverted the concurrent write. After the
-// fix it is `Update<Entity>ConfigFields`, which never references the
-// unowned column at the SQL level, so staleness of the rest of the struct
-// cannot matter.
+// Each apply* function calls List* exactly once, then loops over the
+// incoming bundle entries and issues one Update* per matched row, in bundle
+// order. That gives a real window between the single List call and the
+// Update call for any row after the first: a write landing in that window is
+// exactly what production concurrency looks like (a budget-cap pause, a
+// direct API edit, another import) racing an in-flight import.
+//
+// Each test below drives that window through ConfigService.ApplyImport
+// itself (not the repository methods directly - those already have their
+// own coverage in internal/office/repository/sqlite). A bundle with two
+// entities puts the first entity's Update* first in the loop; a SQL trigger
+// fires when that first Update* statement runs and, in response, writes an
+// unowned column on the *second* entity - landing strictly between the
+// single List call (which read the second entity's pre-write state) and the
+// second entity's own Update* call later in the same loop. That is the
+// production race window, reproduced deterministically instead of with
+// goroutines and a timing hope.
+//
+// Before the fix, the second entity's Update* call used the row List*
+// captured before the trigger fired - the mutated-in-place stale struct -
+// and a full-row Update* silently reverted the trigger's write. After the
+// fix, Update*ConfigFields never references the unowned column at the SQL
+// level, so staleness of the rest of the struct cannot matter.
 
-// TestUpdateAgentInstanceConfigFields_PreservesConcurrentStatusWrite
+// installRaceTrigger creates a same-table trigger that fires when the row
+// identified by triggerID is updated, and in response writes value into
+// column on the row identified by targetID. Used to land a "concurrent"
+// write strictly inside an apply* function's List-once-then-loop window: the
+// trigger fires off the *first* entity's Update* statement and mutates the
+// *second* entity's unowned column before the loop reaches that row's own
+// Update* call.
+func installRaceTrigger(t *testing.T, e *testEnv, table, triggerID, targetID, column, value string) {
+	t.Helper()
+	stmt := fmt.Sprintf(`
+		CREATE TRIGGER race_%[1]s
+		AFTER UPDATE ON %[1]s
+		WHEN NEW.id = %[2]s
+		BEGIN
+			UPDATE %[1]s SET %[3]s = %[4]s WHERE id = %[5]s;
+		END;
+	`, table, sqlLit(triggerID), column, sqlLit(value), sqlLit(targetID))
+	if _, err := e.db.Exec(stmt); err != nil {
+		t.Fatalf("install race trigger on %s: %v", table, err)
+	}
+}
+
+// sqlLit renders s as a single-quoted SQL string literal. Trigger bodies
+// cannot take bind parameters, so the id/value operands have to be spliced
+// into the statement text; every value here comes from uuid.New().String()
+// or a test-chosen literal, but the escaping is done properly anyway rather
+// than assumed safe.
+func sqlLit(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+// TestApplyImport_Agents_PreservesConcurrentWriteBetweenListAndUpdate
 // reproduces the triage receipt: a budget-cap pause (UpdateAgentStatusFields,
 // the real concurrent writer used by internal/office/costs/budgets.go)
-// landing after the import's list read but before its write must survive,
-// instead of being reverted to the stale "idle" status the import read.
-func TestUpdateAgentInstanceConfigFields_PreservesConcurrentStatusWrite(t *testing.T) {
+// landing between applyAgents' single List call and its Update call for a
+// later row must survive, instead of being reverted to the stale "idle"
+// status that List captured before the write happened.
+func TestApplyImport_Agents_PreservesConcurrentWriteBetweenListAndUpdate(t *testing.T) {
 	e := newTestEnv(t)
 	ctx := context.Background()
-	seedAgent(t, e, testWorkspaceID, "ada")
+	first := seedAgent(t, e, testWorkspaceID, "alpha")
+	second := seedAgent(t, e, testWorkspaceID, "beta")
 
-	// What applyAgents' List call would have captured.
-	snapshot, err := e.repo.ListAgentInstances(ctx, testWorkspaceID)
-	if err != nil {
-		t.Fatalf("ListAgentInstances: %v", err)
-	}
-	stale := snapshot[0]
+	installRaceTrigger(t, e, "agent_profiles", first.ID, second.ID, "status", "paused")
 
-	// A concurrent writer pauses the agent for a budget cap between the
-	// import's read and its write.
-	if err := e.repo.UpdateAgentStatusFields(ctx, stale.ID, "paused", "budget cap exceeded"); err != nil {
-		t.Fatalf("UpdateAgentStatusFields: %v", err)
+	bundle := &ConfigBundle{
+		Agents: []AgentConfig{
+			{Name: "alpha", Role: "cto", BudgetMonthlyCents: 100, MaxConcurrentSessions: 1},
+			{Name: "beta", Role: "cfo", Icon: "💰", BudgetMonthlyCents: 200, MaxConcurrentSessions: 2},
+		},
 	}
-
-	// The import proceeds with only the fields it owns (import.go's
-	// applyAgents builds these from the incoming AgentConfig, not from the
-	// stale struct, and only stale.ID identifies the row).
-	fields := sqlite.AgentInstanceConfigFields{
-		Role:                  "cto",
-		Icon:                  "🤖",
-		BudgetMonthlyCents:    4200,
-		MaxConcurrentSessions: 3,
-		DesiredSkills:         `["go"]`,
-		ExecutorPreference:    "local_docker",
-	}
-	if err := e.repo.UpdateAgentInstanceConfigFields(ctx, stale.ID, fields); err != nil {
-		t.Fatalf("UpdateAgentInstanceConfigFields: %v", err)
+	if _, err := e.svc.ApplyImport(ctx, testWorkspaceID, bundle); err != nil {
+		t.Fatalf("ApplyImport: %v", err)
 	}
 
-	got := agentByName(t, e, testWorkspaceID, "ada")
-	assertEqual(t, "status survives import", string(got.Status), "paused")
-	assertEqual(t, "pause reason survives import", got.PauseReason, "budget cap exceeded")
+	got := agentByName(t, e, testWorkspaceID, "beta")
+	assertEqual(t, "status survives concurrent write during import", string(got.Status), "paused")
 
 	// The owned fields must still have landed - a scoped update that writes
-	// nothing would also make the clobber assertions above pass for the
-	// wrong reason.
-	assertEqual(t, "role updated", string(got.Role), "cto")
-	assertEqual(t, "icon updated", got.Icon, "🤖")
-	assertEqual(t, "budget updated", got.BudgetMonthlyCents, 4200)
-	assertEqual(t, "max sessions updated", got.MaxConcurrentSessions, 3)
-	assertEqual(t, "desired skills updated", got.DesiredSkills, `["go"]`)
-	assertEqual(t, "executor preference updated", got.ExecutorPreference, "local_docker")
+	// nothing would also make the assertion above pass for the wrong reason.
+	assertEqual(t, "role updated", string(got.Role), "cfo")
+	assertEqual(t, "icon updated", got.Icon, "💰")
+	assertEqual(t, "budget updated", got.BudgetMonthlyCents, 200)
+	assertEqual(t, "max sessions updated", got.MaxConcurrentSessions, 2)
 }
 
-// TestUpdateSkillConfigFields_PreservesConcurrentApprovalStateWrite mirrors
+// TestApplyImport_Skills_PreservesConcurrentWriteBetweenListAndUpdate mirrors
 // the agent case for skills: approval_state is not a column applySkills
-// owns, so a write landing between the import's read and its write must
-// survive.
-func TestUpdateSkillConfigFields_PreservesConcurrentApprovalStateWrite(t *testing.T) {
+// owns, so a write landing between applyImport's List call and a later
+// row's Update call must survive.
+func TestApplyImport_Skills_PreservesConcurrentWriteBetweenListAndUpdate(t *testing.T) {
 	e := newTestEnv(t)
 	ctx := context.Background()
-	seedSkill(t, e, testWorkspaceID, "code-review")
+	first := seedSkill(t, e, testWorkspaceID, "alpha")
+	second := seedSkill(t, e, testWorkspaceID, "beta")
 
-	snapshot, err := e.repo.ListSkills(ctx, testWorkspaceID)
-	if err != nil {
-		t.Fatalf("ListSkills: %v", err)
-	}
-	stale := snapshot[0]
+	installRaceTrigger(t, e, "office_skills", first.ID, second.ID, "approval_state", "approved")
 
-	if _, err := e.db.ExecContext(ctx,
-		`UPDATE office_skills SET approval_state = ? WHERE id = ?`, "approved", stale.ID,
-	); err != nil {
-		t.Fatalf("concurrent approval_state write: %v", err)
+	bundle := &ConfigBundle{
+		Skills: []SkillConfig{
+			{Name: "Alpha", Slug: "alpha", Description: "first", SourceType: "inline", Content: "# Alpha\n"},
+			{Name: "Beta", Slug: "beta", Description: "second", SourceType: "inline", Content: "# Beta\n"},
+		},
 	}
-
-	fields := sqlite.SkillConfigFields{
-		Name:        "Deep Review",
-		Description: "reads everything",
-		SourceType:  models.SkillSourceType("git"),
-		Content:     "# Deep Review\n",
-	}
-	if err := e.repo.UpdateSkillConfigFields(ctx, stale.ID, fields); err != nil {
-		t.Fatalf("UpdateSkillConfigFields: %v", err)
+	if _, err := e.svc.ApplyImport(ctx, testWorkspaceID, bundle); err != nil {
+		t.Fatalf("ApplyImport: %v", err)
 	}
 
-	got := skillBySlug(t, e, testWorkspaceID, "code-review")
-	assertEqual(t, "approval_state survives import", string(got.ApprovalState), "approved")
+	got := skillBySlug(t, e, testWorkspaceID, "beta")
+	assertEqual(t, "approval_state survives concurrent write during import", string(got.ApprovalState), "approved")
 
-	assertEqual(t, "name updated", got.Name, "Deep Review")
-	assertEqual(t, "description updated", got.Description, "reads everything")
-	assertEqual(t, "source type updated", string(got.SourceType), "git")
-	assertEqual(t, "content updated", got.Content, "# Deep Review\n")
+	assertEqual(t, "name updated", got.Name, "Beta")
+	assertEqual(t, "description updated", got.Description, "second")
+	assertEqual(t, "content updated", got.Content, "# Beta\n")
 }
 
-// TestUpdateRoutineConfigFields_PreservesConcurrentStatusWrite mirrors the
-// agent case for routines: status is not a column applyRoutines owns.
-func TestUpdateRoutineConfigFields_PreservesConcurrentStatusWrite(t *testing.T) {
+// TestApplyImport_Routines_PreservesConcurrentWriteBetweenListAndUpdate
+// mirrors the agent case for routines: status is not a column applyRoutines
+// owns.
+func TestApplyImport_Routines_PreservesConcurrentWriteBetweenListAndUpdate(t *testing.T) {
 	e := newTestEnv(t)
 	ctx := context.Background()
-	seedRoutine(t, e, testWorkspaceID, "standup")
+	first := seedRoutine(t, e, testWorkspaceID, "alpha")
+	second := seedRoutine(t, e, testWorkspaceID, "beta")
 
-	snapshot, err := e.repo.ListRoutines(ctx, testWorkspaceID)
-	if err != nil {
-		t.Fatalf("ListRoutines: %v", err)
-	}
-	stale := snapshot[0]
+	installRaceTrigger(t, e, "office_routines", first.ID, second.ID, "status", "paused")
 
-	if _, err := e.db.ExecContext(ctx,
-		`UPDATE office_routines SET status = ? WHERE id = ?`, "paused", stale.ID,
-	); err != nil {
-		t.Fatalf("concurrent status write: %v", err)
+	bundle := &ConfigBundle{
+		Routines: []RoutineConfig{
+			{Name: "alpha", Description: "first", TaskTemplate: "do the first thing", ConcurrencyPolicy: "skip"},
+			{Name: "beta", Description: "second", TaskTemplate: "do the second thing", ConcurrencyPolicy: "always_create"},
+		},
 	}
-
-	fields := sqlite.RoutineConfigFields{
-		Description:       "weekly",
-		TaskTemplate:      "summarise the week",
-		ConcurrencyPolicy: models.RoutineConcurrencyPolicy("always_create"),
-	}
-	if err := e.repo.UpdateRoutineConfigFields(ctx, stale.ID, fields); err != nil {
-		t.Fatalf("UpdateRoutineConfigFields: %v", err)
+	if _, err := e.svc.ApplyImport(ctx, testWorkspaceID, bundle); err != nil {
+		t.Fatalf("ApplyImport: %v", err)
 	}
 
-	got := routineByName(t, e, testWorkspaceID, "standup")
-	assertEqual(t, "status survives import", got.Status, "paused")
+	got := routineByName(t, e, testWorkspaceID, "beta")
+	assertEqual(t, "status survives concurrent write during import", got.Status, "paused")
 
-	assertEqual(t, "description updated", got.Description, "weekly")
-	assertEqual(t, "task template updated", got.TaskTemplate, "summarise the week")
+	assertEqual(t, "description updated", got.Description, "second")
+	assertEqual(t, "task template updated", got.TaskTemplate, "do the second thing")
 	assertEqual(t, "concurrency policy updated", string(got.ConcurrencyPolicy), "always_create")
 }
 
-// TestUpdateProjectConfigFields_PreservesConcurrentStatusWrite mirrors the
-// agent case for projects: status is not a column applyProjects owns.
-func TestUpdateProjectConfigFields_PreservesConcurrentStatusWrite(t *testing.T) {
+// TestApplyImport_Projects_PreservesConcurrentWriteBetweenListAndUpdate
+// mirrors the agent case for projects: status is not a column applyProjects
+// owns.
+func TestApplyImport_Projects_PreservesConcurrentWriteBetweenListAndUpdate(t *testing.T) {
 	e := newTestEnv(t)
 	ctx := context.Background()
-	seedProject(t, e, testWorkspaceID, "apollo")
+	first := seedProject(t, e, testWorkspaceID, "alpha")
+	second := seedProject(t, e, testWorkspaceID, "beta")
 
-	snapshot, err := e.repo.ListProjects(ctx, testWorkspaceID)
-	if err != nil {
-		t.Fatalf("ListProjects: %v", err)
-	}
-	stale := snapshot[0]
+	installRaceTrigger(t, e, "office_projects", first.ID, second.ID, "status", "on_hold")
 
-	if _, err := e.db.ExecContext(ctx,
-		`UPDATE office_projects SET status = ? WHERE id = ?`, "on_hold", stale.ID,
-	); err != nil {
-		t.Fatalf("concurrent status write: %v", err)
+	bundle := &ConfigBundle{
+		Projects: []ProjectConfig{
+			{Name: "alpha", Description: "first", Color: "#ff0000", BudgetCents: 100},
+			{Name: "beta", Description: "second", Color: "#00ff00", BudgetCents: 200, Repositories: `["kdlbs/other"]`},
+		},
 	}
-
-	fields := sqlite.ProjectConfigFields{
-		Description:    "mars shot",
-		Color:          "#00ff00",
-		BudgetCents:    1234,
-		Repositories:   `["kdlbs/other"]`,
-		ExecutorConfig: `{"type":"local_pc"}`,
-	}
-	if err := e.repo.UpdateProjectConfigFields(ctx, stale.ID, fields); err != nil {
-		t.Fatalf("UpdateProjectConfigFields: %v", err)
+	if _, err := e.svc.ApplyImport(ctx, testWorkspaceID, bundle); err != nil {
+		t.Fatalf("ApplyImport: %v", err)
 	}
 
-	got := projectByName(t, e, testWorkspaceID, "apollo")
-	assertEqual(t, "status survives import", string(got.Status), "on_hold")
+	got := projectByName(t, e, testWorkspaceID, "beta")
+	assertEqual(t, "status survives concurrent write during import", string(got.Status), "on_hold")
 
-	assertEqual(t, "description updated", got.Description, "mars shot")
+	assertEqual(t, "description updated", got.Description, "second")
 	assertEqual(t, "color updated", got.Color, "#00ff00")
-	assertEqual(t, "budget updated", got.BudgetCents, 1234)
+	assertEqual(t, "budget updated", got.BudgetCents, 200)
 	assertEqual(t, "repositories updated", got.Repositories, `["kdlbs/other"]`)
-	assertEqual(t, "executor config updated", got.ExecutorConfig, `{"type":"local_pc"}`)
 }
