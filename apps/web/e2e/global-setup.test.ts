@@ -6,6 +6,7 @@ import globalSetup, { assertBackendArtifactsFresh } from "./global-setup";
 
 let backendDir: string;
 let binPath: string;
+const originalArgv = [...process.argv];
 
 beforeEach(() => {
   backendDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-backend-fixture-"));
@@ -25,6 +26,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  process.argv = [...originalArgv];
   fs.rmSync(backendDir, { recursive: true, force: true });
 });
 
@@ -271,9 +273,29 @@ describe("globalSetup", () => {
   // so an ordinary `--project=chromium` run was indistinguishable from
   // `--project=containers` and wrongly demanded Linux-only helper binaries
   // that `make build` does not produce. See global-setup.ts's isContainerRun.
-  it("checks Linux helper binaries only when a container run is requested via env", () => {
+  it.each([
+    ["KANDEV_E2E_CONTAINERS", "1"],
+    ["KANDEV_E2E_DOCKER", "1"],
+  ])("checks Linux helper binaries for the %s marker", (marker, value) => {
     vi.stubEnv("KANDEV_E2E_SKIP_FRESHNESS", "1");
-    vi.stubEnv("KANDEV_E2E_CONTAINERS", "1");
+    vi.stubEnv(marker, value);
+    const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
+
+    (globalSetup as () => void)();
+
+    expect(existsSync).toHaveBeenCalledWith(
+      path.join(backendDirForTest(), "bin", "mock-agent-linux-amd64"),
+    );
+    expect(existsSync).toHaveBeenCalledWith(
+      path.join(backendDirForTest(), "bin", "agentctl-linux-amd64"),
+    );
+  });
+
+  it("checks Linux helper binaries for a direct containers project selection", () => {
+    vi.stubEnv("KANDEV_E2E_SKIP_FRESHNESS", "1");
+    vi.stubEnv("KANDEV_E2E_CONTAINERS", "");
+    vi.stubEnv("KANDEV_E2E_DOCKER", "");
+    process.argv = [...originalArgv, "--project=containers"];
     const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
 
     (globalSetup as () => void)();
@@ -288,6 +310,8 @@ describe("globalSetup", () => {
 
   it("does not require Linux helper binaries for an ordinary run", () => {
     vi.stubEnv("KANDEV_E2E_SKIP_FRESHNESS", "1");
+    vi.stubEnv("KANDEV_E2E_CONTAINERS", "");
+    vi.stubEnv("KANDEV_E2E_DOCKER", "");
     const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
 
     (globalSetup as () => void)();

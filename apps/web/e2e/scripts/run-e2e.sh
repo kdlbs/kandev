@@ -106,6 +106,7 @@ build_fe() {
 build_backend_host() {
   log "building backend (host)"
   local targets=(build)
+  # The Playwright project is `containers`; `KANDEV_E2E_DOCKER` remains only an env alias.
   [[ "$PROJECT" == containers ]] && targets+=(build-agentctl-linux build-mock-agent-linux)
   make -C "$BACKEND_DIR" "${targets[@]}" >/dev/null || die "backend build failed"
 }
@@ -194,7 +195,7 @@ log "mode=$MODE  shards=$SHARDS  project=$PROJECT  strict=$STRICT"
 STRICT_ENV=()
 [[ "$STRICT" == 1 ]] && STRICT_ENV=(KANDEV_E2E_WS_ASSERT=1)
 CONTAINER_ENV=()
-[[ "$PROJECT" == containers || "$PROJECT" == docker ]] && CONTAINER_ENV=(KANDEV_E2E_CONTAINERS=1)
+[[ "$PROJECT" == containers ]] && CONTAINER_ENV=(KANDEV_E2E_CONTAINERS=1)
 
 # ---------------------------------------------------------------------------
 # HOST mode
@@ -237,7 +238,7 @@ run_docker() {
   local strict_flag=()
   [[ "$STRICT" == 1 ]] && strict_flag=(-e KANDEV_E2E_WS_ASSERT=1)
   local container_flag=()
-  [[ "$PROJECT" == containers || "$PROJECT" == docker ]] && container_flag=(-e KANDEV_E2E_CONTAINERS=1)
+  [[ "$PROJECT" == containers ]] && container_flag=(-e KANDEV_E2E_CONTAINERS=1)
   local capture_flag=()
   [[ -n "${CAPTURE_PR_ASSETS:-}" ]] && capture_flag=(-e CAPTURE_PR_ASSETS)
   local pw="git config --global --add safe.directory /work 2>/dev/null; cd /work/apps/web && pnpm exec playwright test --config e2e/playwright.config.ts --project=\"$PROJECT\""

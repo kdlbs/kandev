@@ -61,15 +61,23 @@ export default function globalSetup() {
  * from a `--project=containers` one; verified empirically, not just by
  * reading the types.
  *
- * The env vars are the actual source of truth: CI's `e2e-containers` job sets
- * `KANDEV_E2E_CONTAINERS=1` (and nowhere else does), and the README's only
- * documented way to run `--project=containers` locally also sets it. Mirrors
- * `fixtures/backend.ts`'s `isContainerProjectActive`, whose own
- * `projectName === "containers"` branch is safe only because it reads
- * `testInfo.project.name` — the per-test resolved project — not `FullConfig`.
+ * Managed runs and CI pass an explicit environment marker. Direct Playwright
+ * runs keep the selected project in `process.argv`, so this function reads the
+ * CLI value as well. This mirrors `fixtures/backend.ts`'s
+ * `isContainerProjectActive`, whose project-name branch reads
+ * `testInfo.project.name` — the per-test resolved project — instead of
+ * `FullConfig`.
  */
-function isContainerRun(env: NodeJS.ProcessEnv): boolean {
-  return env.KANDEV_E2E_CONTAINERS === "1" || env.KANDEV_E2E_DOCKER === "1";
+export function isContainerRun(env: NodeJS.ProcessEnv, argv = process.argv): boolean {
+  if (env.KANDEV_E2E_CONTAINERS === "1" || env.KANDEV_E2E_DOCKER === "1") return true;
+
+  const selectedProjects = argv.flatMap((arg, index) => {
+    if (arg === "--project") return argv[index + 1] ? [argv[index + 1]!] : [];
+    if (arg.startsWith("--project=")) return [arg.slice("--project=".length)];
+    return [];
+  });
+
+  return selectedProjects.some((projects) => projects.split(",").includes("containers"));
 }
 
 function backendMakeCommand(backendDir: string, target: string): string {
