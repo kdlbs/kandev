@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,7 +11,55 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/worktree"
 )
+
+func TestGitMetadataMountsMasksSiblingWorktrees(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo")
+	runContainerGit(t, "", "init", "-b", "main", repo)
+	runContainerGit(t, repo, "config", "user.email", "test@example.com")
+	runContainerGit(t, repo, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repo, "file"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runContainerGit(t, repo, "add", "file")
+	runContainerGit(t, repo, "commit", "-m", "initial")
+	checkout := filepath.Join(t.TempDir(), "checkout")
+	runContainerGit(t, repo, "worktree", "add", "-b", "task", checkout)
+	projection, err := worktree.ResolveGitMetadata(checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mounts, err := gitMetadataMounts([]*worktree.GitMetadataProjection{projection})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertGitMount(t, mounts, projection.CommonDir, true, false)
+	assertGitMount(t, mounts, projection.WorktreesDir, false, true)
+	for _, path := range projection.WritablePaths {
+		assertGitMount(t, mounts, path, false, false)
+	}
+}
+
+func runContainerGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	if dir != "" {
+		args = append([]string{"-C", dir}, args...)
+	}
+	if output, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, output)
+	}
+}
+
+func assertGitMount(t *testing.T, mounts []docker.MountConfig, target string, readOnly, tmpfs bool) {
+	t.Helper()
+	for _, mount := range mounts {
+		if mount.Target == target && mount.ReadOnly == readOnly && mount.Tmpfs == tmpfs {
+			return
+		}
+	}
+	t.Fatalf("missing mount target=%q readOnly=%t tmpfs=%t: %#v", target, readOnly, tmpfs, mounts)
+}
 
 // configStubAgent wraps MockAgent and overrides Runtime() with a fixed
 // RuntimeConfig that mimics ACP agents (image+tag, {workspace} placeholder).

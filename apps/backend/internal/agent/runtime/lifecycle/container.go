@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 const (
@@ -52,7 +53,7 @@ type ContainerConfig struct {
 	AutoApprovePermissionsOverride *bool
 	ProfileInfo                    *AgentProfileInfo
 	InstanceID                     string
-	MainRepoGitDir                 string // Path to main repo's .git directory (for worktrees)
+	GitMetadataProjections         []*worktree.GitMetadataProjection
 	McpServers                     []McpServerConfig
 	McpMode                        string
 	McpProviders                   []string
@@ -434,16 +435,11 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	// sources resolve to a real on-disk location.
 	mounts := cm.expandMounts(rt.Mounts, config.WorkspacePath, ag, config.InstanceID)
 
-	// Add main repo .git directory mount for worktrees
-	if config.MainRepoGitDir != "" {
-		mounts = append(mounts, docker.MountConfig{
-			Source:   config.MainRepoGitDir,
-			Target:   config.MainRepoGitDir, // Same path inside container
-			ReadOnly: false,
-		})
-		cm.logger.Debug("added main repo .git directory mount for worktree",
-			zap.String("path", config.MainRepoGitDir))
+	gitMounts, err := gitMetadataMounts(config.GitMetadataProjections)
+	if err != nil {
+		return docker.ContainerConfig{}, err
 	}
+	mounts = append(mounts, gitMounts...)
 
 	if config.LocalClonePath != "" {
 		mounts = append(mounts, docker.MountConfig{
