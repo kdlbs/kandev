@@ -87,6 +87,57 @@ func TestReapStaleCheckouts_SkipsTaskWithInFlightRun(t *testing.T) {
 	}
 }
 
+// TestReapStaleCheckouts_ReapsWhenOnlyRunBelongsToAnotherAgent is the
+// regression test for the compound scenario this card was filed about: the
+// checkout holder's own run finished (leaking the checkout), and a
+// *different* agent's run is queued against the same task — precisely
+// because the leaked checkout is blocking it (see
+// requeueContendedCheckout in scheduler_integration.go). A queued/claimed
+// run belonging to a different agent than the checkout holder is not
+// evidence the checkout is still legitimately held, so it must not
+// suppress the reap. Without holder-scoping this run is exactly what
+// disarms the backstop the leak scenario depends on.
+func TestReapStaleCheckouts_ReapsWhenOnlyRunBelongsToAnotherAgent(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	insertTask(t, repo, ctx, "task-reap-4", "ws-1", "Leaked checkout, blocked waiter", "", "")
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks SET checkout_agent_id = 'agent-runner-leaked', checkout_at = datetime('now', '-1 hour')
+		WHERE id = 'task-reap-4'
+	`); err != nil {
+		t.Fatalf("seed stale checkout: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO runs (
+			id, agent_profile_id, reason, payload, status, coalesced_count,
+			context_snapshot, requested_at
+		) VALUES (
+			'run-reap-4', 'agent-reviewer-waiting', 'task_review_requested', '{"task_id":"task-reap-4"}',
+			'queued', 1, '{}', CURRENT_TIMESTAMP
+		)
+	`); err != nil {
+		t.Fatalf("seed queued run for a different agent: %v", err)
+	}
+
+	count, err := repo.ReapStaleCheckouts(ctx, time.Now().UTC().Add(-30*time.Minute))
+	if err != nil {
+		t.Fatalf("reap: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("reaped count = %d, want 1 (the only run belongs to a different agent than the holder)", count)
+	}
+
+	// Cleared checkout accepts a new agent.
+	acquired, err := repo.CheckoutTask(ctx, "task-reap-4", "agent-new")
+	if err != nil {
+		t.Fatalf("checkout after reap: %v", err)
+	}
+	if !acquired {
+		t.Fatal("expected checkout to be reaped, but a new agent still cannot acquire it")
+	}
+}
+
 // TestReapStaleCheckouts_SkipsRecentCheckout proves a checkout younger
 // than the threshold is left alone even with no in-flight run — it may
 // simply not have started its run row yet.

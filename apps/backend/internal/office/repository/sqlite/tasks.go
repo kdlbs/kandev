@@ -764,13 +764,25 @@ func (r *Repository) ReleaseTaskCheckoutForAgent(ctx context.Context, taskID, ag
 
 // ReapStaleCheckouts clears checkout_agent_id/checkout_at on tasks whose
 // checkout is older than olderThan and that have no queued or claimed run
-// in flight. This is a backstop for callers that fail to release the
-// checkout on a terminal run transition (an event-subscriber path that
-// crashes before publishing, a run that never reaches a terminal event at
-// all) — releaseTaskCheckoutForRun (internal/office/service) is the
-// primary release path; this only cleans up what that missed. Returns the
-// number of tasks reaped. json_extract is SQLite-flavoured — see
-// CancelRunsForTasks in tree_holds.go for why that's acceptable here.
+// *belonging to the checkout holder* in flight. This is a backstop for
+// callers that fail to release the checkout on a terminal run transition
+// (an event-subscriber path that crashes before publishing, a run that
+// never reaches a terminal event at all) — releaseTaskCheckoutForRun
+// (internal/office/service) is the primary release path; this only cleans
+// up what that missed. Returns the number of tasks reaped. json_extract is
+// SQLite-flavoured — see CancelRunsForTasks in tree_holds.go for why
+// that's acceptable here.
+//
+// The in-flight check is scoped to the checkout holder's own runs, not any
+// run on the task: a queued run can belong to a different agent that is
+// waiting precisely because this checkout is leaked (see
+// requeueContendedCheckout in scheduler_integration.go, which re-queues a
+// run that lost the checkout race) — task-scoping would let that waiting
+// run permanently suppress the reap it depends on. 'queued' stays in the
+// status list even holder-scoped: recoverStaleClaimedRuns runs immediately
+// before reapStaleCheckouts in the same tick and flips a live agent's own
+// claimed run to queued at 30 minutes, so dropping 'queued' would reap a
+// still-executing holder.
 func (r *Repository) ReapStaleCheckouts(ctx context.Context, olderThan time.Time) (int64, error) {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL
@@ -781,6 +793,7 @@ func (r *Repository) ReapStaleCheckouts(ctx context.Context, olderThan time.Time
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w
 		      WHERE json_extract(w.payload, '$.task_id') = tasks.id
+		        AND w.agent_profile_id = tasks.checkout_agent_id
 		        AND w.status IN ('queued', 'claimed')
 		  )
 	`), olderThan)
