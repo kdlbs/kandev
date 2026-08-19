@@ -94,6 +94,7 @@ export function CoordinatorMonitorSection({
               <div className="flex items-center gap-2">
                 <Checkbox
                   id={`monitor-${workflowId}-${step.id}`}
+                  aria-label={`${t("workflows:coordinatorMonitoring")} ${step.name}`}
                   checked={stepConfig.selected}
                   disabled={disabled}
                   onCheckedChange={(checked) => handleSelect(step.id, checked === true)}
@@ -101,9 +102,10 @@ export function CoordinatorMonitorSection({
                 <Label
                   htmlFor={`monitor-${workflowId}-${step.id}`}
                   className="text-sm font-normal cursor-pointer"
-                >
+                />
+                <span aria-hidden="true" className="text-sm">
                   {step.name}
-                </Label>
+                </span>
               </div>
               {stepConfig.selected && (
                 <div className="ml-6">
