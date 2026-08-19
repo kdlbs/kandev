@@ -39,8 +39,10 @@ var (
 	ErrAgentNameRequired     = errors.New("agent name is required")
 	ErrAgentRoleInvalid      = errors.New("invalid agent role")
 	ErrAgentCEOAlreadyExists = errors.New("workspace already has a CEO agent")
+	ErrAgentCEOReportsTo     = errors.New("CEO agent must be the workspace root")
 	ErrAgentReportsToInvalid = errors.New("reports_to agent does not exist in this workspace")
 	ErrAgentReportsToSelf    = errors.New("agent cannot report to itself")
+	ErrAgentReportsToCycle   = errors.New("agent reporting structure cannot contain a cycle")
 	ErrAgentStatusTransition = errors.New("invalid status transition")
 )
 
@@ -756,6 +758,9 @@ func (s *AgentService) validateAgentCreate(ctx context.Context, agent *models.Ag
 		return ErrAgentRoleInvalid
 	}
 	if agent.Role == models.AgentRoleCEO {
+		if agent.ReportsTo != "" {
+			return ErrAgentCEOReportsTo
+		}
 		if s.countAgentsByRoleInWorkspace(ctx, models.AgentRoleCEO, agent.WorkspaceID, "") > 0 {
 			return ErrAgentCEOAlreadyExists
 		}
@@ -764,7 +769,7 @@ func (s *AgentService) validateAgentCreate(ctx context.Context, agent *models.Ag
 		return err
 	}
 	if agent.ReportsTo != "" {
-		return s.validateReportsTo(ctx, agent.ReportsTo, "")
+		return s.validateReportsTo(ctx, agent.ReportsTo, "", agent.WorkspaceID)
 	}
 	return nil
 }
@@ -778,12 +783,15 @@ func (s *AgentService) validateAgentUpdate(ctx context.Context, agent *models.Ag
 		return ErrAgentRoleInvalid
 	}
 	if agent.Role == models.AgentRoleCEO {
+		if agent.ReportsTo != "" {
+			return ErrAgentCEOReportsTo
+		}
 		if s.countAgentsByRoleInWorkspace(ctx, models.AgentRoleCEO, agent.WorkspaceID, agent.ID) > 0 {
 			return ErrAgentCEOAlreadyExists
 		}
 	}
 	if agent.ReportsTo != "" {
-		return s.validateReportsTo(ctx, agent.ReportsTo, agent.ID)
+		return s.validateReportsTo(ctx, agent.ReportsTo, agent.ID, agent.WorkspaceID)
 	}
 	return nil
 }
@@ -812,14 +820,61 @@ func (s *AgentService) validateAgentNameUnique(ctx context.Context, name, worksp
 	return nil
 }
 
-// validateReportsTo ensures the target agent exists.
-func (s *AgentService) validateReportsTo(ctx context.Context, reportsTo, selfID string) error {
+// validateReportsTo ensures the target agent exists in the same workspace and
+// that changing the edge does not create a cycle in the reporting tree.
+func (s *AgentService) validateReportsTo(
+	ctx context.Context, reportsTo, selfID, workspaceID string,
+) error {
 	if selfID != "" && reportsTo == selfID {
 		return ErrAgentReportsToSelf
 	}
-	_, err := s.GetAgentFromConfig(ctx, reportsTo)
+	target, err := s.GetAgentFromConfig(ctx, reportsTo)
 	if err != nil {
 		return ErrAgentReportsToInvalid
+	}
+	if target.WorkspaceID != workspaceID {
+		return ErrAgentReportsToInvalid
+	}
+	if selfID == "" {
+		return nil
+	}
+
+	agents, err := s.ListAgentsFromConfig(ctx, workspaceID)
+	if err != nil {
+		return ErrAgentReportsToInvalid
+	}
+	parentByID := make(map[string]string, len(agents))
+	idByReference := make(map[string]string, len(agents)*2)
+	for _, agent := range agents {
+		parentByID[agent.ID] = agent.ReportsTo
+		idByReference[agent.ID] = agent.ID
+		if agent.Name != "" {
+			idByReference[agent.Name] = agent.ID
+		}
+	}
+	// Validate the proposed edge, not the stale value currently stored for the
+	// agent being updated.
+	parentByID[selfID] = reportsTo
+
+	currentID := target.ID
+	visited := make(map[string]struct{}, len(agents))
+	for currentID != "" {
+		if currentID == selfID {
+			return ErrAgentReportsToCycle
+		}
+		if _, seen := visited[currentID]; seen {
+			return ErrAgentReportsToCycle
+		}
+		visited[currentID] = struct{}{}
+		parentReference := parentByID[currentID]
+		if parentReference == "" {
+			return nil
+		}
+		nextID, ok := idByReference[parentReference]
+		if !ok {
+			return nil
+		}
+		currentID = nextID
 	}
 	return nil
 }

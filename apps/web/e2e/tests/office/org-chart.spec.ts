@@ -30,16 +30,22 @@ test.describe("Org chart", () => {
 
     await testPage.goto(`/office/agents/${workerId}/configuration`);
     await testPage.getByRole("combobox", { name: "Reports to" }).click();
-    await testPage.getByRole("option", { name: "CEO" }).click();
+    const listbox = testPage.getByRole("listbox");
+    await expect(listbox).toBeVisible();
+    await listbox.getByRole("option", { name: "CEO" }).click();
 
     const saved = waitForHttp(testPage, "PATCH", new RegExp(`/api/v1/office/agents/${workerId}$`));
     await testPage.getByRole("button", { name: "Save Configuration" }).click();
     await saved;
 
-    await testPage.goto("/office/workspace/org");
+    await testPage.getByRole("link", { name: /Agent topology/i }).click();
     await expect(testPage.getByRole("heading", { name: /Org/i }).first()).toBeVisible({
       timeout: 10_000,
     });
+    await expect(testPage.getByRole("link", { name: "Org Chart Reparent Target" })).toHaveAttribute(
+      "data-reports-to",
+      officeSeed.agentId,
+    );
     await expect(testPage.getByTestId("org-edge")).toHaveCount(edgesBefore + 1, {
       timeout: 15_000,
     });

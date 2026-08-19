@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
@@ -57,7 +57,7 @@ const PROFILE_OPTION = {
 };
 
 function renderConfigTab(agents: AgentProfile[], agent: AgentProfile) {
-  render(
+  return render(
     <StateProvider
       initialState={{
         workspaces: { activeId: WORKSPACE_ID, items: [] },
@@ -73,7 +73,7 @@ function renderConfigTab(agents: AgentProfile[], agent: AgentProfile) {
   );
 }
 
-describe("AgentConfigurationTab", () => {
+describe("AgentConfigurationTab save", () => {
   it("reconciles the form with the canonical profile returned by the backend", async () => {
     vi.mocked(updateAgentProfile).mockResolvedValueOnce({
       ...baseAgent,
@@ -89,7 +89,9 @@ describe("AgentConfigurationTab", () => {
       expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Canonical CEO");
     });
   });
+});
 
+describe("AgentConfigurationTab capabilities", () => {
   it("shows create-agent capability for CEO agents", () => {
     renderConfigTab([baseAgent], baseAgent);
 
@@ -109,7 +111,9 @@ describe("AgentConfigurationTab", () => {
       "Create agent",
     );
   });
+});
 
+describe("AgentConfigurationTab reports-to selection", () => {
   it("PATCHes reportsTo when a new manager is selected", async () => {
     const manager = { ...baseAgent, id: MANAGER_ID, name: "Manager" } as AgentProfile;
     const worker = {
@@ -122,7 +126,8 @@ describe("AgentConfigurationTab", () => {
     renderConfigTab([manager, worker], worker);
 
     fireEvent.click(screen.getByRole("combobox", { name: REPORTS_TO_COMBOBOX }));
-    fireEvent.click(await screen.findByRole("option", { name: "Manager" }));
+    const listbox = await screen.findByRole("listbox");
+    fireEvent.click(within(listbox).getByRole("option", { name: "Manager" }));
     fireEvent.click(screen.getByRole("button", { name: SAVE_BUTTON }));
 
     await waitFor(() => {
@@ -144,7 +149,8 @@ describe("AgentConfigurationTab", () => {
     renderConfigTab([baseAgent, worker], worker);
 
     fireEvent.click(screen.getByRole("combobox", { name: REPORTS_TO_COMBOBOX }));
-    fireEvent.click(await screen.findByRole("option", { name: "None" }));
+    const listbox = await screen.findByRole("listbox");
+    fireEvent.click(within(listbox).getByRole("option", { name: "None" }));
     fireEvent.click(screen.getByRole("button", { name: SAVE_BUTTON }));
 
     await waitFor(() => {
@@ -160,8 +166,9 @@ describe("AgentConfigurationTab", () => {
     renderConfigTab([manager], manager);
 
     fireEvent.click(screen.getByRole("combobox", { name: REPORTS_TO_COMBOBOX }));
+    const listbox = await screen.findByRole("listbox");
     await waitFor(() => {
-      expect(screen.queryByRole("option", { name: "Manager" })).toBeNull();
+      expect(within(listbox).queryByRole("option", { name: "Manager" })).toBeNull();
     });
   });
 
@@ -177,8 +184,123 @@ describe("AgentConfigurationTab", () => {
     renderConfigTab([manager, worker], manager);
 
     fireEvent.click(screen.getByRole("combobox", { name: REPORTS_TO_COMBOBOX }));
+    const listbox = await screen.findByRole("listbox");
     await waitFor(() => {
-      expect(screen.queryByRole("option", { name: "Worker" })).toBeNull();
+      expect(within(listbox).queryByRole("option", { name: "Worker" })).toBeNull();
     });
+  });
+});
+
+describe("AgentConfigurationTab save errors", () => {
+  it("keeps the form dirty when saving fails", async () => {
+    vi.mocked(updateAgentProfile).mockRejectedValueOnce(new Error("network error"));
+    renderConfigTab([baseAgent], baseAgent);
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Retry CEO" } });
+    fireEvent.click(screen.getByRole("button", { name: SAVE_BUTTON }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: SAVE_BUTTON })).toBeInTheDocument();
+    });
+  });
+});
+
+describe("AgentConfigurationTab draft navigation", () => {
+  it("resets a draft when navigation changes to another agent", async () => {
+    const manager = {
+      ...baseAgent,
+      id: MANAGER_ID,
+      name: "Manager",
+      role: "worker",
+    } as AgentProfile;
+    const worker = {
+      ...baseAgent,
+      id: WORKER_ID,
+      name: "Worker",
+      role: "worker" as const,
+      reportsTo: MANAGER_ID,
+    } as AgentProfile;
+    const view = renderConfigTab([manager, worker], worker);
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Draft worker" } });
+    view.rerender(
+      <StateProvider
+        initialState={{
+          workspaces: { activeId: WORKSPACE_ID, items: [] },
+          office: {
+            ...defaultOfficeState.office,
+            agentProfilesByWorkspaceId: { [WORKSPACE_ID]: [manager, worker] },
+          },
+          agentProfiles: { items: [PROFILE_OPTION], version: 0 },
+        }}
+      >
+        <AgentConfigurationTab agent={manager} />
+      </StateProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Name")).toHaveValue("Manager");
+    });
+    expect(screen.queryByRole("button", { name: SAVE_BUTTON })).toBeNull();
+  });
+});
+
+describe("AgentConfigurationTab concurrent save", () => {
+  it("uses a concurrent manager update when the manager field was untouched", async () => {
+    const manager = {
+      ...baseAgent,
+      id: MANAGER_ID,
+      name: "Manager",
+      role: "worker",
+    } as AgentProfile;
+    const worker = {
+      ...baseAgent,
+      id: WORKER_ID,
+      name: "Worker",
+      role: "worker" as const,
+      reportsTo: undefined,
+    } as AgentProfile;
+    const updatedWorker = { ...worker, reportsTo: MANAGER_ID };
+    vi.mocked(updateAgentProfile).mockResolvedValueOnce(updatedWorker);
+    const view = renderConfigTab([manager, worker], worker);
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Renamed worker" } });
+    view.rerender(
+      <StateProvider
+        initialState={{
+          workspaces: { activeId: WORKSPACE_ID, items: [] },
+          office: {
+            ...defaultOfficeState.office,
+            agentProfilesByWorkspaceId: { [WORKSPACE_ID]: [manager, updatedWorker] },
+          },
+          agentProfiles: { items: [PROFILE_OPTION], version: 0 },
+        }}
+      >
+        <AgentConfigurationTab agent={updatedWorker} />
+      </StateProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: SAVE_BUTTON }));
+    await waitFor(() => {
+      expect(updateAgentProfile).toHaveBeenCalledWith(
+        WORKER_ID,
+        expect.objectContaining({ name: "Renamed worker", reportsTo: MANAGER_ID }),
+      );
+    });
+  });
+});
+
+describe("AgentConfigurationTab CEO hierarchy", () => {
+  it("keeps the CEO at the top of the hierarchy", () => {
+    const manager = {
+      ...baseAgent,
+      id: MANAGER_ID,
+      name: "Manager",
+      role: "worker",
+    } as AgentProfile;
+    renderConfigTab([baseAgent, manager], baseAgent);
+
+    const reportsTo = screen.getByRole("combobox", { name: REPORTS_TO_COMBOBOX });
+    expect(reportsTo).toBeDisabled();
   });
 });
