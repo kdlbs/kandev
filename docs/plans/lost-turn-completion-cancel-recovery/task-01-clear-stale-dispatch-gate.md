@@ -59,8 +59,10 @@ None.
    agentctl.
 3. Change `dispatchedPromptPending` to `atomic.Bool`.
 4. Replace direct reads and writes with `Load` and `Store`.
-5. Clear the old gate before `escalateStuckCancel` sends its synthetic signal.
-6. Do not add an elapsed-time timeout to the gate.
+5. Route nil or stale closed prompt barriers through escalation when a dispatch
+   gate is still pending.
+6. Clear the old gate before `escalateStuckCancel` sends its synthetic signal.
+7. Do not add an elapsed-time timeout to the gate.
 
 ## Output Contract
 
@@ -79,5 +81,9 @@ risks. Update this task and `plan.md` in the same conversation.
 - GREEN: `git diff --check` passed.
 - Changed files: `types.go`, `session.go`, `manager_interaction.go`, and
   `manager_interaction_cancel_test.go`, plus this plan package.
-- The dispatch gate is now atomic and cancellation clears it before releasing
-  the synthetic completion signal. No known blockers remain.
+- Review remediation: the regression now uses the real dispatch-only state with
+  no fabricated prompt barrier, asserts the gate is cleared before the
+  follow-up, and bounds the initial prompt observation.
+- The dispatch gate is atomic. Cancellation handles nil and stale closed
+  barriers, clears the gate before releasing the synthetic completion signal,
+  and marks the execution ready. No known blockers remain.

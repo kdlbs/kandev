@@ -179,27 +179,19 @@ func TestManager_CancelAgent_ClearsPendingDispatchGate(t *testing.T) {
 
 	_, err := mgr.PromptAgent(context.Background(), exec.ID, "dispatch-only", nil, true)
 	require.NoError(t, err)
-	<-promptSeen
+	select {
+	case <-promptSeen:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("dispatch-only prompt did not reach agentctl")
+	}
 	require.True(t, exec.dispatchedPromptPending.Load(),
 		"dispatch-only prompt must leave its completion gate pending")
-
-	promptFinished := make(chan struct{})
-	exec.promptFinished = promptFinished
-	syntheticSignalReceived := make(chan struct{})
-	go func() {
-		<-exec.promptDoneCh
-		close(syntheticSignalReceived)
-		close(promptFinished)
-	}()
 
 	cancelCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	require.ErrorIs(t, mgr.CancelAgent(cancelCtx, exec.ID), ErrCancelEscalated)
-	select {
-	case <-syntheticSignalReceived:
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("cancel escalation did not release the simulated prompt")
-	}
+	require.False(t, exec.dispatchedPromptPending.Load(),
+		"escalation must clear dispatch gate before releasing the waiter")
 
 	followUpCtx, followUpCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer followUpCancel()

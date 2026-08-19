@@ -195,6 +195,9 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 	execution.promptFinishedMu.Unlock()
 
 	if ch == nil {
+		if execution.dispatchedPromptPending.Load() {
+			return m.escalateStuckCancel(ctx, execution, nil)
+		}
 		if streamDisconnected {
 			m.logger.Info("agent stream already disconnected; cancel is complete",
 				zap.String("execution_id", executionID))
@@ -230,6 +233,9 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 	// Without this, a follow-up PromptAgent races on promptDoneCh with two readers.
 	select {
 	case <-ch:
+		if execution.dispatchedPromptPending.Load() {
+			return m.escalateStuckCancel(ctx, execution, ch)
+		}
 		m.logger.Debug("in-flight prompt finished after cancel",
 			zap.String("execution_id", executionID))
 		return nil
@@ -276,18 +282,20 @@ func (m *Manager) escalateStuckCancel(ctx context.Context, execution *AgentExecu
 		},
 	)
 
-	select {
-	case <-ch:
-		m.logger.Info("in-flight prompt released after cancel escalation",
-			zap.String("execution_id", execution.ID))
-	case <-time.After(cancelEscalationTimeout):
-		m.logger.Warn("in-flight prompt did not release after cancel escalation",
-			zap.String("execution_id", execution.ID))
-	case <-ctx.Done():
-		// Fall through to MarkReady/drain below — once the synthetic signal is
-		// queued, the cleanup must survive the caller's context cancellation
-		// or the execution leaks in the Running state and the stale signal
-		// breaks the next PromptAgent call.
+	if ch != nil {
+		select {
+		case <-ch:
+			m.logger.Info("in-flight prompt released after cancel escalation",
+				zap.String("execution_id", execution.ID))
+		case <-time.After(cancelEscalationTimeout):
+			m.logger.Warn("in-flight prompt did not release after cancel escalation",
+				zap.String("execution_id", execution.ID))
+		case <-ctx.Done():
+			// Fall through to MarkReady/drain below — once the synthetic signal is
+			// queued, the cleanup must survive the caller's context cancellation
+			// or the execution leaks in the Running state and the stale signal
+			// breaks the next PromptAgent call.
+		}
 	}
 
 	if err := m.markReadyEventWithContext(context.Background(), execution.ID, events.AgentReady, true); err != nil {

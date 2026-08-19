@@ -26,8 +26,10 @@ state safe for access from prompt and cancellation goroutines.
   and store operations in `waitForPendingDispatchedPrompt` and
   `finishAcceptedPrompt`.
 - In `apps/backend/internal/agent/runtime/lifecycle/manager_interaction.go`,
-  clear the pending dispatch gate before `escalateStuckCancel` sends its
-  synthetic completion signal.
+  route cancellation through the same escalation cleanup when a pending
+  dispatch gate has no live prompt barrier, then clear the gate before
+  `escalateStuckCancel` sends its synthetic completion signal. Escalation skips
+  the waiter timeout when no prompt barrier exists.
 
 The cancellation path must clear the old gate before it releases a waiter.
 This order prevents a stale cleanup from clearing a successor dispatch.
@@ -53,6 +55,12 @@ This order prevents a stale cleanup from clearing a successor dispatch.
 - GREEN: `cd apps/backend && go test ./internal/agent/runtime/lifecycle -run
   'TestSendPrompt_DispatchOnly' -count=1` passed with 2 tests.
 - GREEN: `git diff --check` passed.
+- Review remediation: cancellation now escalates when the real dispatch-only
+  path has a nil or stale closed prompt barrier, and the regression asserts the
+  gate is clear before the follow-up prompt.
+- Review remediation checks: the cancel race pair passed with 2 tests, the
+  dispatch-only regression passed with 2 tests, `gofmt -l` reported no files,
+  and `git diff --check` passed.
 
 ## Implementation Waves And Parallel Candidates
 
