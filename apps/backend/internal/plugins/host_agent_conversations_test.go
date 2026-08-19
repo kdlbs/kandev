@@ -32,6 +32,11 @@ func (s *stubAgentConversationService) Delete(_ context.Context, pluginID, _, _ 
 	return 1, nil
 }
 
+func (s *stubAgentConversationService) DeleteAllForPlugin(_ context.Context, pluginID string) (int32, error) {
+	s.lastPluginID = pluginID
+	return 1, nil
+}
+
 func agentConversationHost(capability bool, svc AgentConversationService) *pluginHost {
 	return &pluginHost{
 		pluginID:           "p1",

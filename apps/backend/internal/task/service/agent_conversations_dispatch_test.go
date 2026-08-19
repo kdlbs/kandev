@@ -501,3 +501,130 @@ func TestDeleteIdempotent(t *testing.T) {
 		t.Fatalf("deleted = %d, want 0", count)
 	}
 }
+
+// ── DeleteAllForPlugin (uninstall cleanup) tests ───────────────────────────
+//
+// Uninstall must find and remove every managed conversation a plugin owns
+// regardless of workspace (Delete/Ensure/Dispatch are scoped to one
+// workspace+key), while never touching another plugin's managed
+// conversations or ordinary (non-ephemeral) user tasks. These pin exactly
+// that contract.
+
+func TestDeleteAllForPluginSpansWorkspaces(t *testing.T) {
+	svc, deps := newACTestService()
+
+	if _, _, err := svc.Ensure(context.Background(), "plugin-coordinator", pluginsdk.AgentConversationSpec{
+		WorkspaceID: "ws-1", ConversationKey: "coordinator",
+	}); err != nil {
+		t.Fatalf("Ensure ws-1: %v", err)
+	}
+	if _, _, err := svc.Ensure(context.Background(), "plugin-coordinator", pluginsdk.AgentConversationSpec{
+		WorkspaceID: "ws-2", ConversationKey: "coordinator",
+	}); err != nil {
+		t.Fatalf("Ensure ws-2: %v", err)
+	}
+
+	count, err := svc.DeleteAllForPlugin(context.Background(), "plugin-coordinator")
+	if err != nil {
+		t.Fatalf("DeleteAllForPlugin: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("deleted = %d, want 2 (one per workspace)", count)
+	}
+	if got := deps.tasks.count(); got != 0 {
+		t.Fatalf("remaining task rows = %d, want 0", got)
+	}
+}
+
+// TestDeleteAllForPluginLeavesOtherPluginsUntouched is the provenance-safety
+// regression: uninstalling one plugin must never delete another plugin's
+// managed conversation, even though both are ephemeral tasks that would
+// otherwise look alike.
+func TestDeleteAllForPluginLeavesOtherPluginsUntouched(t *testing.T) {
+	svc, deps := newACTestService()
+
+	if _, _, err := svc.Ensure(context.Background(), "plugin-coordinator", pluginsdk.AgentConversationSpec{
+		WorkspaceID: "ws-1", ConversationKey: "coordinator",
+	}); err != nil {
+		t.Fatalf("Ensure plugin-coordinator: %v", err)
+	}
+	otherDesc, _, err := svc.Ensure(context.Background(), "plugin-other", pluginsdk.AgentConversationSpec{
+		WorkspaceID: "ws-1", ConversationKey: "coordinator",
+	})
+	if err != nil {
+		t.Fatalf("Ensure plugin-other: %v", err)
+	}
+
+	count, err := svc.DeleteAllForPlugin(context.Background(), "plugin-coordinator")
+	if err != nil {
+		t.Fatalf("DeleteAllForPlugin: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("deleted = %d, want 1 (only plugin-coordinator's own conversation)", count)
+	}
+
+	remaining, _, _ := deps.tasks.ListTasksByWorkspace(context.Background(), "ws-1", "", "", "", 1, 100, "", false, true, true, false)
+	if len(remaining) != 1 || remaining[0].ID != otherDesc.TaskID {
+		t.Fatalf("expected only plugin-other's conversation (%s) to survive, got %+v", otherDesc.TaskID, remaining)
+	}
+}
+
+// TestDeleteAllForPluginLeavesOrdinaryUserTasksUntouched proves the other
+// half of provenance safety: an ordinary (non-ephemeral, no plugin
+// provenance) user task in the same workspace is never reachable by
+// DeleteAllForPlugin, even one created by the same plugin ID acting through
+// a normal (non-managed-conversation) path.
+func TestDeleteAllForPluginLeavesOrdinaryUserTasksUntouched(t *testing.T) {
+	svc, deps := newACTestService()
+
+	if _, _, err := svc.Ensure(context.Background(), "plugin-coordinator", pluginsdk.AgentConversationSpec{
+		WorkspaceID: "ws-1", ConversationKey: "coordinator",
+	}); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	userTask := &models.Task{
+		WorkspaceID: "ws-1",
+		Title:       "Fix the login bug",
+		IsEphemeral: false,
+		Metadata:    map[string]interface{}{"kandev.plugin_id": "plugin-coordinator"},
+	}
+	if err := deps.tasks.CreateTask(context.Background(), userTask); err != nil {
+		t.Fatalf("seed ordinary user task: %v", err)
+	}
+
+	count, err := svc.DeleteAllForPlugin(context.Background(), "plugin-coordinator")
+	if err != nil {
+		t.Fatalf("DeleteAllForPlugin: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("deleted = %d, want 1 (the managed conversation only)", count)
+	}
+
+	remaining, _, _ := deps.tasks.ListTasksByWorkspace(context.Background(), "ws-1", "", "", "", 1, 100, "", true, true, false, false)
+	if len(remaining) != 1 || remaining[0].ID != userTask.ID {
+		t.Fatalf("expected the ordinary user task to survive untouched, got %+v", remaining)
+	}
+}
+
+func TestDeleteAllForPluginRejectsEmptyPluginID(t *testing.T) {
+	svc, _ := newACTestService()
+	_, err := svc.DeleteAllForPlugin(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if code := status.Code(err); code != codes.InvalidArgument {
+		t.Fatalf("got %v, want InvalidArgument", code)
+	}
+}
+
+func TestDeleteAllForPluginNothingOwnedIsNoop(t *testing.T) {
+	svc, _ := newACTestService()
+	count, err := svc.DeleteAllForPlugin(context.Background(), "plugin-never-installed")
+	if err != nil {
+		t.Fatalf("DeleteAllForPlugin: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("deleted = %d, want 0", count)
+	}
+}
