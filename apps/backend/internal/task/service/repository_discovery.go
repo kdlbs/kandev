@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 type RepositoryDiscoveryConfig struct {
@@ -185,82 +186,17 @@ func resolveExplicitLocalRepositoryPath(repoPath string) (string, string, error)
 // checks, a crafted folder could borrow another repository's .git directory
 // and turn an exact-path grant into permission to mutate unrelated Git refs.
 func validateExplicitGitMetadata(repoPath string) error {
-	gitPath := filepath.Join(repoPath, ".git")
-	// codeql[go/path-injection] The canonical repository path is validated before inspecting its exact .git child.
-	info, err := os.Lstat(gitPath)
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return errors.New(".git metadata must not be a symbolic link")
-	}
-	if info.IsDir() {
-		return validateStandaloneGitMetadata(gitPath)
-	}
-	if !info.Mode().IsRegular() {
-		return errors.New(".git metadata must be a directory or linked-worktree pointer")
-	}
-	return validateLinkedWorktreeMetadata(repoPath, gitPath)
+	_, err := worktree.ResolveGitMetadata(repoPath)
+	return err
 }
 
-func validateStandaloneGitMetadata(gitPath string) error {
-	// codeql[go/path-injection] gitPath is the validated repository's real, non-symlink .git directory.
-	if _, err := os.Lstat(filepath.Join(gitPath, "commondir")); err == nil {
-		return errors.New("standalone .git metadata must not redirect its common directory")
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return nil
-}
-
+// validateLinkedWorktreeMetadata remains a narrow compatibility wrapper for
+// existing repository-admission callers. The shared worktree resolver owns all
+// linked-worktree validation so admission and runtime authorization cannot
+// drift.
 func validateLinkedWorktreeMetadata(repoPath, gitPath string) error {
-	gitDir, err := resolveGitDir(repoPath)
-	if err != nil {
-		return err
-	}
-	canonicalGitDir, err := filepath.EvalSymlinks(gitDir)
-	if err != nil {
-		return err
-	}
-	canonicalGitFile, err := filepath.EvalSymlinks(gitPath)
-	if err != nil {
-		return err
-	}
-
-	backPointer, err := readMetadataPath(filepath.Join(canonicalGitDir, "gitdir"), canonicalGitDir)
-	if err != nil {
-		return errors.New(".git pointer is not a linked worktree")
-	}
-	if !sameCanonicalPath(backPointer, canonicalGitFile) {
-		return errors.New("linked-worktree metadata does not point back to the selected repository")
-	}
-
-	commonDir, err := readMetadataPath(filepath.Join(canonicalGitDir, "commondir"), canonicalGitDir)
-	if err != nil {
-		return errors.New("linked-worktree metadata has no valid common directory")
-	}
-	worktreesDir := filepath.Join(commonDir, "worktrees")
-	rel, err := filepath.Rel(worktreesDir, canonicalGitDir)
-	if err != nil || rel == "." || rel == ".." || filepath.Dir(rel) != "." {
-		return errors.New("linked-worktree metadata is outside its common directory")
-	}
-	return nil
-}
-
-func readMetadataPath(path, relativeTo string) (string, error) {
-	// codeql[go/path-injection] Linked-worktree metadata is canonicalized and verified by reciprocal pointers.
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	metadataPath := strings.TrimSpace(string(content))
-	if metadataPath == "" {
-		return "", errors.New("metadata path is empty")
-	}
-	if !filepath.IsAbs(metadataPath) {
-		metadataPath = filepath.Join(relativeTo, metadataPath)
-	}
-	return filepath.EvalSymlinks(filepath.Clean(metadataPath))
+	_ = gitPath
+	return validateExplicitGitMetadata(repoPath)
 }
 
 func sameCanonicalPath(left, right string) bool {
