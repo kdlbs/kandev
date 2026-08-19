@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -287,7 +288,7 @@ func TestOwnershipLockConflictFallsBackWithoutUsableOwner(t *testing.T) {
 				t.Fatalf("Acquire primary owner: %v", err)
 			}
 			t.Cleanup(func() { _ = owner.Close() })
-			if err := os.WriteFile(targets[0].LockPath, test.data, 0o600); err != nil {
+			if err := writeOwnerMetadataFixture(owner.held[0].file, test.data); err != nil {
 				t.Fatalf("write conflict metadata: %v", err)
 			}
 
@@ -305,6 +306,20 @@ func TestOwnershipLockConflictFallsBackWithoutUsableOwner(t *testing.T) {
 			}
 		})
 	}
+}
+
+func writeOwnerMetadataFixture(file *os.File, data []byte) error {
+	if err := file.Truncate(0); err != nil {
+		return err
+	}
+	n, err := file.WriteAt(data, 0)
+	if err != nil {
+		return err
+	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 func TestOwnershipLockConflictKeepsUnknownOwner(t *testing.T) {
