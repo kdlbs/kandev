@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 
 	"go.uber.org/zap"
@@ -19,6 +21,7 @@ const (
 // production repository provides durable, indexed recovery.
 type completionIntentReconciliationStore interface {
 	ListDueCompletionIntents(ctx context.Context, now time.Time, limit int) ([]*models.CompletionIntent, error)
+	GetCompletionIntentForTurn(ctx context.Context, sessionID, turnID string) (*models.CompletionIntent, error)
 	TransitionCompletionIntent(ctx context.Context, id string, from, to models.CompletionIntentState, settledAt time.Time) (bool, error)
 }
 
@@ -176,4 +179,33 @@ func (s *Service) finishCompletionIntent(ctx context.Context, store completionIn
 	if _, err := store.TransitionCompletionIntent(ctx, intent.ID, models.CompletionIntentStateSettling, state, at); err != nil {
 		s.logger.Warn("failed to finish completion intent", zap.String("intent_id", intent.ID), zap.Error(err))
 	}
+}
+
+// settleCompletionIntentForProviderTurn records the normal provider-ready
+// settlement path. The periodic worker remains responsible for a missing
+// lifecycle event, but an observed event must not later make a successfully
+// completed intent look superseded merely because the task has advanced.
+func (s *Service) settleCompletionIntentForProviderTurn(ctx context.Context, sessionID, turnID string) {
+	if sessionID == "" || turnID == "" {
+		return
+	}
+	store, ok := s.repo.(completionIntentReconciliationStore)
+	if !ok {
+		return
+	}
+	intent, err := store.GetCompletionIntentForTurn(ctx, sessionID, turnID)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			s.logger.Warn("failed to load completion intent for provider settlement", zap.String("session_id", sessionID), zap.String("turn_id", turnID), zap.Error(err))
+		}
+		return
+	}
+	claimed, err := store.TransitionCompletionIntent(ctx, intent.ID, models.CompletionIntentStatePending, models.CompletionIntentStateSettling, time.Time{})
+	if err != nil || !claimed {
+		if err != nil {
+			s.logger.Warn("failed to claim provider completion intent", zap.String("intent_id", intent.ID), zap.Error(err))
+		}
+		return
+	}
+	s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSettled, time.Now().UTC())
 }

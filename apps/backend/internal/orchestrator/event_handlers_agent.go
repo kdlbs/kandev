@@ -639,6 +639,10 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	// Complete the current turn
 	s.completeTurnForSession(ctx, data.SessionID)
+	// Normal provider lifecycle completion is the authoritative successful
+	// settlement of a matching completion signal. Keep the worker only for the
+	// missing-ready path; it must not later relabel this intent as superseded.
+	defer s.settleCompletionIntentForProviderTurn(ctx, data.SessionID, turnAtEventFire)
 
 	// A move_task_kandev call during this turn deferred the actual move to
 	// avoid racing on_enter against the running turn. Apply it now: the move

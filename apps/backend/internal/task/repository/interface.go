@@ -295,6 +295,10 @@ type TurnRepository interface {
 type CompletionIntentRepository interface {
 	CreateOrGetCompletionIntent(ctx context.Context, intent *models.CompletionIntent) (created bool, stored *models.CompletionIntent, err error)
 	GetCompletionIntent(ctx context.Context, id string) (*models.CompletionIntent, error)
+	// GetCompletionIntentForTurn returns the completion intent bound to one
+	// exact session turn, when a normal provider ready/completed lifecycle
+	// event needs to settle it before the recovery worker runs.
+	GetCompletionIntentForTurn(ctx context.Context, sessionID, turnID string) (*models.CompletionIntent, error)
 	// ListDueCompletionIntents returns pending intents whose quiet grace has
 	// elapsed, in eligible-time order. The bounded reconciler uses this indexed
 	// query instead of scanning all running sessions after a restart.

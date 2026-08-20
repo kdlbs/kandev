@@ -34,6 +34,10 @@ func TestCompletionIntentCreateOrGetAndCompareAndSet(t *testing.T) {
 	if err != nil || created || got.ID != intent.ID {
 		t.Fatalf("duplicate CreateOrGetCompletionIntent = (%v, %+v, %v)", created, got, err)
 	}
+	byTurn, err := repo.GetCompletionIntentForTurn(ctx, intent.SessionID, intent.TurnID)
+	if err != nil || byTurn.ID != intent.ID {
+		t.Fatalf("GetCompletionIntentForTurn = (%+v, %v), want %q", byTurn, err, intent.ID)
+	}
 	settled, err := repo.TransitionCompletionIntent(ctx, intent.ID, models.CompletionIntentStatePending, models.CompletionIntentStateSettling, now)
 	if err != nil || !settled {
 		t.Fatalf("TransitionCompletionIntent pending->settling = (%v, %v)", settled, err)

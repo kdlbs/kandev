@@ -44,6 +44,14 @@ func (r *Repository) GetCompletionIntent(ctx context.Context, id string) (*model
 	return scanCompletionIntent(row)
 }
 
+func (r *Repository) GetCompletionIntentForTurn(ctx context.Context, sessionID, turnID string) (*models.CompletionIntent, error) {
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(completionIntentSelect+`
+		WHERE session_id = ? AND turn_id = ?
+		ORDER BY requested_at ASC, id ASC
+		LIMIT 1`), sessionID, turnID)
+	return scanCompletionIntent(row)
+}
+
 func (r *Repository) ListDueCompletionIntents(ctx context.Context, now time.Time, limit int) ([]*models.CompletionIntent, error) {
 	if limit <= 0 {
 		return nil, nil
