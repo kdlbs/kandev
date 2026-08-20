@@ -1,26 +1,46 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 
+// Any real counter the store can hold is >= 1, so 0 reliably "looks bumped"
+// on the very first observed value and "looks unbumped" otherwise — see
+// use-session-commits.ts for the same sentinel pattern.
+const REFETCH_TRIGGER_INIT = 0;
+
 /**
- * Calls `onRefetch` when the office refetch trigger matches `triggerType`.
+ * Calls `onRefetch` when a matching office refetch trigger fires.
  * Supports exact match ("dashboard") or prefix match ("comments:" matches "comments:task-123").
+ *
+ * Triggers are per-type counters (`office.refetchTriggers`), not a single
+ * "last trigger" value: a WS handler often bumps several distinct types in
+ * one synchronous call (e.g. `task:${id}` then `dashboard`), and React
+ * coalesces those into one render, so a shared last-value field would only
+ * ever be observable by the final type's subscribers.
  *
  * @param triggerType - The trigger type to watch for (e.g. "dashboard", "tasks", "comments")
  * @param onRefetch - Callback invoked when a matching trigger fires
  */
 export function useOfficeRefetch(triggerType: string, onRefetch: () => void) {
-  const trigger = useAppStore((s) => s.office.refetchTrigger);
+  const triggers = useAppStore((s) => s.office.refetchTriggers);
   const callbackRef = useRef(onRefetch);
   // Update ref in a layout effect to avoid mutating during render
   useLayoutEffect(() => {
     callbackRef.current = onRefetch;
   });
 
+  // Tracks the highest matching counter we've already acted on, so a bump
+  // triggers exactly one refetch rather than re-firing on every render.
+  const lastSeenRef = useRef(REFETCH_TRIGGER_INIT);
+
   useEffect(() => {
-    if (!trigger) return;
-    const matches = trigger.type === triggerType || trigger.type.startsWith(triggerType + ":");
-    if (matches) {
+    let maxSeen = REFETCH_TRIGGER_INIT;
+    for (const [type, seq] of Object.entries(triggers)) {
+      if (type === triggerType || type.startsWith(triggerType + ":")) {
+        if (seq > maxSeen) maxSeen = seq;
+      }
+    }
+    if (maxSeen > lastSeenRef.current) {
+      lastSeenRef.current = maxSeen;
       callbackRef.current();
     }
-  }, [trigger, triggerType]);
+  }, [triggers, triggerType]);
 }

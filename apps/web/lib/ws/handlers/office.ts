@@ -85,6 +85,7 @@ function buildTaskHandlers(
         return;
       }
       updateTaskStatus(taskId, { status: newStatus as OfficeTaskStatus });
+      triggerRefetch(`task:${taskId}`);
       triggerRefetch("dashboard");
       triggerRefetch("activity");
     },
@@ -99,6 +100,7 @@ function buildTaskHandlers(
         return;
       }
       updateTaskStatus(taskId, { status: newStatus as OfficeTaskStatus });
+      triggerRefetch(`task:${taskId}`);
       triggerRefetch("dashboard");
     },
 

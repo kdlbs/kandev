@@ -515,11 +515,13 @@ func buildStatusTimeline(changes []TimelineEvent) []TimelineEventDTO {
 // event's "to" value into the office in_progress/done status buckets. The
 // office activity log's task_status_changed entries are written by two
 // different producers with different value domains: DashboardService.
-// UpdateTaskStatus logs already-normalized lowercase status strings (see
-// normaliseStatus), while the generic workflow engine's TaskMoved handler
-// logs raw step names (categorizeStep's "In Progress" / "Done"). Both must
-// resolve to the same bucket so timestamp derivation doesn't depend on
-// which path wrote the entry.
+// UpdateTaskStatus publishes the raw request status (normaliseStatus's
+// output is assigned to a separate local and never reaches the published
+// event, but req.NewStatus is itself constrained to that same vocabulary,
+// so it lowercases to the same bucket), while the generic workflow engine's
+// TaskMoved handler logs raw step names (categorizeStep's "In Progress" /
+// "Done"). Both must resolve to the same bucket so timestamp derivation
+// doesn't depend on which path wrote the entry.
 func timelineStatusIsInProgress(raw string) bool {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case statusInProgressLowercase, "in progress":

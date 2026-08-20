@@ -498,11 +498,6 @@ import type {
 
 // --- Slice state & actions ---
 
-export type OfficeRefetchTrigger = {
-  type: string;
-  timestamp: number;
-};
-
 /**
  * Office collections that belong to one workspace, stored per workspace id
  * rather than as a single current value.
@@ -537,7 +532,12 @@ export type OfficeSliceState = {
     tasks: TasksState;
     meta: OfficeMeta | null;
     isLoading: boolean;
-    refetchTrigger: OfficeRefetchTrigger | null;
+    // Per-type counters rather than one "last trigger" value: a single WS
+    // handler often fires several distinct types in the same synchronous
+    // call (e.g. `task:${id}` then `dashboard`), and React/Zustand coalesce
+    // those into one render, so a shared last-value field would only ever
+    // let the final type's subscribers see a change. See useOfficeRefetch.
+    refetchTriggers: Record<string, number>;
     routing: RoutingState;
     providerHealth: ProviderHealthSliceState;
     runAttempts: RunAttemptsState;

@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/office-fixture";
 import type { Page } from "@playwright/test";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 /**
  * E2E coverage for office task property pickers (status, priority,
@@ -376,26 +377,30 @@ test.describe("property pickers", () => {
     await expect(startedRow).toHaveText("--");
     await expect(completedRow).toHaveText("--");
 
+    // startedAt/completedAt are derived server-side from the status-change
+    // timeline (see deriveTaskTimestamps in the backend) and delivered to
+    // the open page by the "office.task.status_changed" WS handler's
+    // per-task refetch (GET /api/v1/office/tasks/:id) — assert on that
+    // live-page refetch rather than a reload, so a regression of the
+    // refetch itself fails this test.
+    const taskDetailPath = new RegExp(`^/api/v1/office/tasks/${task.id}$`);
+
+    const startedRefetch = waitForHttp(testPage, "GET", taskDetailPath);
     await testPage.getByTestId("status-picker-trigger").click();
     await testPage.getByTestId("status-picker-option-in_progress").click();
     await expect(testPage.getByTestId("status-picker-trigger")).toContainText(/In Progress/i, {
       timeout: 15_000,
     });
+    await startedRefetch;
+    await expect(startedRow).not.toHaveText("--", { timeout: 5_000 });
 
+    const completedRefetch = waitForHttp(testPage, "GET", taskDetailPath);
     await testPage.getByTestId("status-picker-trigger").click();
     await testPage.getByTestId("status-picker-option-done").click();
     await expect(testPage.getByTestId("status-picker-trigger")).toContainText(/Done/i, {
       timeout: 15_000,
     });
-
-    // startedAt/completedAt are derived server-side from the status-change
-    // timeline (see deriveTaskTimestamps in the backend); the client only
-    // learns the derived values on the next full task-detail fetch, so
-    // reload rather than assert against the optimistic local patch.
-    await testPage.reload();
-    await gotoTaskPage(testPage, task.id, "Picker Timeline Task");
-
-    await expect(testPage.getByTestId("started-row")).not.toHaveText("--", { timeout: 10_000 });
-    await expect(testPage.getByTestId("completed-row")).not.toHaveText("--", { timeout: 10_000 });
+    await completedRefetch;
+    await expect(completedRow).not.toHaveText("--", { timeout: 5_000 });
   });
 });
