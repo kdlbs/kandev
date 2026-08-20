@@ -1687,6 +1687,13 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 	// Remote executors need a clone URL since the remote host has no access to the local filesystem.
 	if !req.WorkspaceReuseRequired && e.capabilities != nil && e.capabilities.RequiresCloneURL(execConfig.ExecutorType) && repoInfo.Repository != nil {
 		cloneURL := repositoryCloneURL(repoInfo.Repository)
+		// Local Docker can bind-mount a task's checked-out source directory and
+		// clone it there. RepositoryPath is authoritative for that launch even
+		// when the persisted generic repository has no provider identity or
+		// origin URL (as in workspace-source and E2E fixtures).
+		if cloneURL == "" && execConfig.ExecutorType == string(models.ExecutorTypeLocalDocker) {
+			cloneURL = strings.TrimSpace(repoInfo.RepositoryPath)
+		}
 		if cloneURL == "" {
 			return metadata, ErrNoCloneURL
 		}
