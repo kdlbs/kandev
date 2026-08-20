@@ -121,8 +121,11 @@ func TestSchedulerTick_AgentCompletedForNonLatestClaimReleasesTheCompletingAgent
 			runB = r
 		}
 	}
-	if runB == nil || runA == nil {
-		t.Fatalf("expected both runs to still exist, got: %v", runs)
+	if runA == nil {
+		t.Fatalf("expected run-claimed-a to still exist, got: %v", runs)
+	}
+	if runB == nil {
+		t.Fatalf("expected run-claimed-b to still exist, got: %v", runs)
 	}
 	if runB.Status != service.RunStatusFinished {
 		t.Fatalf("run-claimed-b status = %q, want finished (it is the run that actually completed)", runB.Status)
