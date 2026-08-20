@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -23,16 +24,17 @@ func installAttestedCloneGitMetadataPolicy(ctx context.Context, req *ExecutorCre
 	if instance == nil || instance.Client == nil || instance.WorkspacePath == "" {
 		return unsupportedGitMetadataProjection("clone checkout attestation is unavailable; start a new session with a supported executor")
 	}
-	if err := instance.Client.AttestWorkspaceGitMetadata(ctx); err != nil {
+	approved, err := instance.Client.AttestWorkspaceGitMetadata(ctx)
+	if err != nil {
 		return unsupportedGitMetadataProjection("clone checkout attestation failed; start a new session with a supported executor")
 	}
-	roots := instance.WorkspaceSourceRoots
-	if len(roots) == 0 {
-		roots = []string{instance.WorkspacePath}
+	expectedRoots := append([]string(nil), instance.WorkspaceSourceRoots...)
+	if len(expectedRoots) == 0 {
+		expectedRoots = []string{instance.WorkspacePath}
 	}
-	metadata := make([]remoteRegularGitMetadata, 0, len(roots))
-	for _, root := range roots {
-		metadata = append(metadata, remoteRegularGitMetadata{CheckoutPath: root, GitDir: root + "/.git"})
+	metadata, err := remoteRegularGitMetadataFromAttestations(approved, expectedRoots)
+	if err != nil {
+		return unsupportedGitMetadataProjection("clone checkout attestation failed; start a new session with a supported executor")
 	}
 	if err := prepareRemoteRegularGitMetadataPolicy(req, metadata...); err != nil {
 		return unsupportedGitMetadataProjection("clone Git metadata policy installation failed; start a new session with a supported executor")
@@ -46,6 +48,41 @@ func installAttestedCloneGitMetadataPolicy(ctx context.Context, req *ExecutorCre
 	}
 	instance.Metadata["runtime_env"] = policyEnv
 	return nil
+}
+
+// remoteRegularGitMetadataFromAttestations accepts only the exact checkout
+// set lifecycle configured for this executor. GitDir values are consumed from
+// agentctl's final proof rather than reconstructed from a checkout string.
+func remoteRegularGitMetadataFromAttestations(approved []agentctl.GitMetadataAttestation, expectedRoots []string) ([]remoteRegularGitMetadata, error) {
+	if len(approved) == 0 || len(approved) != len(expectedRoots) {
+		return nil, errors.New("clone Git metadata attestation set is incomplete")
+	}
+	expected := make(map[string]struct{}, len(expectedRoots))
+	for _, root := range expectedRoots {
+		if root == "" {
+			return nil, errors.New("clone Git metadata attestation set is invalid")
+		}
+		if _, duplicate := expected[root]; duplicate {
+			return nil, errors.New("clone Git metadata attestation set is invalid")
+		}
+		expected[root] = struct{}{}
+	}
+	metadata := make([]remoteRegularGitMetadata, 0, len(approved))
+	for _, checkout := range approved {
+		if _, ok := expected[checkout.CheckoutPath]; !ok {
+			return nil, errors.New("clone Git metadata attestation set is invalid")
+		}
+		item := remoteRegularGitMetadata{CheckoutPath: checkout.CheckoutPath, GitDir: checkout.GitDir}
+		if !validRemoteRegularGitMetadata(item) {
+			return nil, errors.New("clone Git metadata attestation set is invalid")
+		}
+		delete(expected, checkout.CheckoutPath)
+		metadata = append(metadata, item)
+	}
+	if len(expected) != 0 {
+		return nil, errors.New("clone Git metadata attestation set is incomplete")
+	}
+	return metadata, nil
 }
 
 // remoteRegularGitMetadata describes the only repository layout supported by

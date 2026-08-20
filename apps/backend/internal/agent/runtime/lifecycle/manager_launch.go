@@ -873,7 +873,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		PromptTurnID:                   reqWithWorktree.TurnID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
-		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
+		WorkspaceSourceRoots:           taskWorkspaceSourceRoots(reqWithWorktree.WorkspacePath, reqWithWorktree.WorkspaceFolders, gitMetadata),
 		GitMetadataRequirement:         cloneGitMetadataRequirement(rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) > 0),
 		GitMetadataProjections:         gitMetadata,
 		Protocol:                       string(agentConfig.Runtime().Protocol),

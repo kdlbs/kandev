@@ -752,7 +752,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			AgentProfileID:                 executionProfileID,
 			OfficeAgentProfileID:           info.AgentProfileID,
 			WorkspacePath:                  info.WorkspacePath,
-			WorkspaceSourceRoots:           workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
+			WorkspaceSourceRoots:           taskWorkspaceSourceRoots(info.WorkspacePath, info.WorkspaceFolders, nil),
 			Protocol:                       string(agentConfig.Runtime().Protocol),
 			Env:                            envPreparation.env,
 			AutoApprovePermissions:         autoApprove,
