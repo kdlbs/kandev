@@ -1,5 +1,6 @@
 import { fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client";
 import type { DashboardData } from "@/lib/state/slices/office/types";
+import type { QuorumResponseDTO } from "@/lib/state/slices/office/quorum-types";
 import { normalizeOfficeTask, type OfficeTaskWire } from "./office-task-normalize";
 
 const BASE = "/api/v1/office";
@@ -335,6 +336,12 @@ export function listTaskDecisions(taskId: string, options?: ApiRequestOptions) {
     `${BASE}/tasks/${taskId}/decisions`,
     options,
   ).then((res) => res.decisions ?? []);
+}
+
+// --- Task quorum (AC-24b diagnostic read) ---
+
+export function getTaskQuorum(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<QuorumResponseDTO>(`${BASE}/tasks/${taskId}/quorum`, options);
 }
 
 // --- Comments ---

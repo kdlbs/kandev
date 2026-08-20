@@ -19,6 +19,7 @@ export type {
 export type { OfficeAgentProfile as AgentProfile } from "@/lib/types/agent-profile";
 
 import type { OfficeAgentProfile as AgentProfile } from "@/lib/types/agent-profile";
+import type { QuorumResponseDTO, TaskQuorumSliceState } from "./quorum-types";
 
 export type SkillSourceType =
   | "inline"
@@ -542,6 +543,7 @@ export type OfficeSliceState = {
     providerHealth: ProviderHealthSliceState;
     runAttempts: RunAttemptsState;
     agentRouting: AgentRoutingSliceState;
+    taskQuorum: TaskQuorumSliceState;
   };
 };
 
@@ -588,6 +590,7 @@ export type OfficeSliceActions = {
   setRunAttempts: (runId: string, attempts: RouteAttempt[]) => void;
   appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
+  setTaskQuorum: (taskId: string, quorum: QuorumResponseDTO) => void;
 };
 
 export type OfficeSlice = OfficeSliceState & OfficeSliceActions;

@@ -280,6 +280,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [auth](auth/spec.md) | building |
 | [create-local-repository](create-local-repository/spec.md) | shipped |
 | [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |
+| [workflow-quorum-decision-recording](workflow-quorum-decision-recording/spec.md) | draft |
 | [improve-kandev](improve-kandev/spec.md) | building |
 | [homebrew-core](homebrew-core/spec.md) | building |
 | [native-kandev-cli](native-kandev-cli/spec.md) | draft |
