@@ -193,3 +193,83 @@ func (r *Repository) CompleteStepEntryMarker(ctx context.Context, entryID int64,
 	}
 	return nil
 }
+
+// GetStepEntryMarkerState reads back a marker's current state and stored
+// failure cause (if any). found is false when no marker row exists for
+// (entryID, position) — the marker was never claimed. Used by the CAS-loser
+// path in dispatchEngineOwnedOnEnterAction: losing the claim to an existing
+// row means "already claimed or handled," but that covers three different
+// outcomes (still in progress elsewhere, already done, or already failed
+// terminally), and only this read can tell them apart.
+func (r *Repository) GetStepEntryMarkerState(ctx context.Context, entryID int64, position int) (state StepEntryMarkerState, cause string, found bool, err error) {
+	var row struct {
+		State string         `db:"state"`
+		Error sql.NullString `db:"error"`
+	}
+	queryErr := r.db.GetContext(ctx, &row, r.db.Rebind(`
+		SELECT state, error FROM workflow_step_entry_markers WHERE entry_id = ? AND position = ?
+	`), entryID, position)
+	if errors.Is(queryErr, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if queryErr != nil {
+		return "", "", false, fmt.Errorf("get step entry marker state: %w", queryErr)
+	}
+	return StepEntryMarkerState(row.State), row.Error.String, true, nil
+}
+
+// ClearStepDecisionsAndCompleteMarker satisfies AC-B6: it deletes every
+// decision for (taskID, stepID) and marks the clear_decisions position
+// done, in one database transaction. A crash between the delete and the
+// marker update is therefore impossible to observe as "delete committed,
+// marker still in_progress" — the transaction either commits both or
+// neither, which is the invariant a future AC-B9 recovery scan needs to
+// safely decide whether re-running clear_decisions for a non-terminal
+// marker is necessary.
+//
+// This duplicates the DELETE FROM workflow_step_decisions statement in
+// workflow/repository.Repository.ClearStepDecisions rather than depending
+// on that package: AC-B6 and AC-B7 together require the decisions table
+// and the step-entry tables to be written through the same transaction,
+// and workflow/repository.Repository exposes no way to join a
+// caller-supplied *sql.Tx into its own writes. Both tables live in the same
+// database reached through the same writer *sqlx.DB (see
+// internal/backendapp/storage.go), so running both statements here, against
+// this repository's own r.db, is safe — see
+// orchestrator.dispatchClearDecisionsAtomic for the call site and the
+// capability check that keeps this path off whenever the DecisionStore
+// isn't actually backed by this database (e.g. every existing test double).
+func (r *Repository) ClearStepDecisionsAndCompleteMarker(
+	ctx context.Context, taskID, stepID string, entryID int64, position int, now time.Time,
+) (int64, error) {
+	if taskID == "" || stepID == "" {
+		return 0, errors.New("task_id and step_id are required")
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin clear decisions transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, r.db.Rebind(
+		`DELETE FROM workflow_step_decisions WHERE task_id = ? AND step_id = ?`,
+	), taskID, stepID)
+	if err != nil {
+		return 0, fmt.Errorf("clear step decisions: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE workflow_step_entry_markers
+		SET state = ?, error = NULL, completed_at = ?
+		WHERE entry_id = ? AND position = ? AND state = ?
+	`), string(StepEntryMarkerDone), now, entryID, position, string(StepEntryMarkerInProgress))
+	if err != nil {
+		return 0, fmt.Errorf("complete step entry marker: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit clear decisions transaction: %w", err)
+	}
+	return rows, nil
+}

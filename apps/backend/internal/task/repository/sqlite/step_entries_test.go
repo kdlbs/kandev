@@ -323,6 +323,178 @@ func TestCompleteStepEntryMarkerWithoutClaimIsNoop(t *testing.T) {
 	}
 }
 
+func TestGetStepEntryMarkerStateNoRowReturnsNotFound(t *testing.T) {
+	repo := newStepEntriesTestRepo(t)
+	entryID := allocateOneStepEntry(t, repo, "task-10", "step-review")
+	ctx := context.Background()
+
+	_, _, found, err := repo.GetStepEntryMarkerState(ctx, entryID, 0)
+	if err != nil {
+		t.Fatalf("GetStepEntryMarkerState: %v", err)
+	}
+	if found {
+		t.Fatalf("found = true, want false (no claim ever happened)")
+	}
+}
+
+func TestGetStepEntryMarkerStateReportsDone(t *testing.T) {
+	repo := newStepEntriesTestRepo(t)
+	entryID := allocateOneStepEntry(t, repo, "task-11", "step-review")
+	ctx := context.Background()
+
+	if _, err := repo.ClaimStepEntryMarker(ctx, entryID, 0, "clear_decisions", "op-1", time.Now().UTC()); err != nil {
+		t.Fatalf("ClaimStepEntryMarker: %v", err)
+	}
+	if err := repo.CompleteStepEntryMarker(ctx, entryID, 0, StepEntryMarkerDone, "", time.Now().UTC()); err != nil {
+		t.Fatalf("CompleteStepEntryMarker: %v", err)
+	}
+
+	state, cause, found, err := repo.GetStepEntryMarkerState(ctx, entryID, 0)
+	if err != nil {
+		t.Fatalf("GetStepEntryMarkerState: %v", err)
+	}
+	if !found {
+		t.Fatalf("found = false, want true")
+	}
+	if state != StepEntryMarkerDone {
+		t.Fatalf("state = %q, want %q", state, StepEntryMarkerDone)
+	}
+	if cause != "" {
+		t.Fatalf("cause = %q, want empty", cause)
+	}
+}
+
+func TestGetStepEntryMarkerStateReportsFailedWithCause(t *testing.T) {
+	repo := newStepEntriesTestRepo(t)
+	entryID := allocateOneStepEntry(t, repo, "task-12", "step-review")
+	ctx := context.Background()
+
+	if _, err := repo.ClaimStepEntryMarker(ctx, entryID, 0, "clear_decisions", "op-1", time.Now().UTC()); err != nil {
+		t.Fatalf("ClaimStepEntryMarker: %v", err)
+	}
+	if err := repo.CompleteStepEntryMarker(ctx, entryID, 0, StepEntryMarkerFailed, "boom", time.Now().UTC()); err != nil {
+		t.Fatalf("CompleteStepEntryMarker: %v", err)
+	}
+
+	state, cause, found, err := repo.GetStepEntryMarkerState(ctx, entryID, 0)
+	if err != nil {
+		t.Fatalf("GetStepEntryMarkerState: %v", err)
+	}
+	if !found {
+		t.Fatalf("found = false, want true")
+	}
+	if state != StepEntryMarkerFailed {
+		t.Fatalf("state = %q, want %q", state, StepEntryMarkerFailed)
+	}
+	if cause != "boom" {
+		t.Fatalf("cause = %q, want %q", cause, "boom")
+	}
+}
+
+// seedWorkflowStepDecisionsTable creates workflow_step_decisions directly
+// (rather than importing internal/workflow/repository, which owns it in
+// production) so ClearStepDecisionsAndCompleteMarker has something to
+// delete against — see phase2_sqlite.go's decisionsSchema for the DDL this
+// mirrors.
+func seedWorkflowStepDecisionsTable(t *testing.T, repo *Repository) {
+	t.Helper()
+	_, err := repo.db.Exec(`
+		CREATE TABLE IF NOT EXISTS workflow_step_decisions (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			step_id TEXT NOT NULL,
+			participant_id TEXT NOT NULL,
+			decision TEXT NOT NULL,
+			decided_at TIMESTAMP NOT NULL
+		)
+	`)
+	if err != nil {
+		t.Fatalf("create workflow_step_decisions: %v", err)
+	}
+}
+
+func insertStepDecision(t *testing.T, repo *Repository, id, taskID, stepID string) {
+	t.Helper()
+	_, err := repo.db.ExecContext(context.Background(), repo.db.Rebind(`
+		INSERT INTO workflow_step_decisions (id, task_id, step_id, participant_id, decision, decided_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`), id, taskID, stepID, "participant-1", "approve", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("insert workflow_step_decisions row: %v", err)
+	}
+}
+
+func countStepDecisions(t *testing.T, repo *Repository, taskID, stepID string) int {
+	t.Helper()
+	var n int
+	err := repo.db.QueryRowContext(context.Background(), repo.db.Rebind(
+		`SELECT COUNT(*) FROM workflow_step_decisions WHERE task_id = ? AND step_id = ?`,
+	), taskID, stepID).Scan(&n)
+	if err != nil {
+		t.Fatalf("count workflow_step_decisions: %v", err)
+	}
+	return n
+}
+
+func TestClearStepDecisionsAndCompleteMarkerDeletesDecisionsAndCompletesMarker(t *testing.T) {
+	repo := newStepEntriesTestRepo(t)
+	seedWorkflowStepDecisionsTable(t, repo)
+	entryID := allocateOneStepEntry(t, repo, "task-10", "step-review")
+	ctx := context.Background()
+
+	insertStepDecision(t, repo, "dec-1", "task-10", "step-review")
+	insertStepDecision(t, repo, "dec-2", "task-10", "step-review")
+
+	if _, err := repo.ClaimStepEntryMarker(ctx, entryID, 0, "clear_decisions", "op-1", time.Now().UTC()); err != nil {
+		t.Fatalf("ClaimStepEntryMarker: %v", err)
+	}
+
+	rows, err := repo.ClearStepDecisionsAndCompleteMarker(ctx, "task-10", "step-review", entryID, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("ClearStepDecisionsAndCompleteMarker: %v", err)
+	}
+	if rows != 2 {
+		t.Fatalf("rows = %d, want 2", rows)
+	}
+
+	if n := countStepDecisions(t, repo, "task-10", "step-review"); n != 0 {
+		t.Fatalf("remaining decisions = %d, want 0", n)
+	}
+
+	state, markerErr := stepEntryMarkerState(t, repo, entryID, 0)
+	if state != string(StepEntryMarkerDone) {
+		t.Fatalf("marker state = %q, want %q", state, StepEntryMarkerDone)
+	}
+	if markerErr != "" {
+		t.Fatalf("marker error = %q, want empty", markerErr)
+	}
+}
+
+func TestClearStepDecisionsAndCompleteMarkerRejectsMissingIDs(t *testing.T) {
+	repo := newStepEntriesTestRepo(t)
+	seedWorkflowStepDecisionsTable(t, repo)
+	entryID := allocateOneStepEntry(t, repo, "task-11", "step-review")
+	ctx := context.Background()
+
+	insertStepDecision(t, repo, "dec-1", "task-11", "step-review")
+	if _, err := repo.ClaimStepEntryMarker(ctx, entryID, 0, "clear_decisions", "op-1", time.Now().UTC()); err != nil {
+		t.Fatalf("ClaimStepEntryMarker: %v", err)
+	}
+
+	if _, err := repo.ClearStepDecisionsAndCompleteMarker(ctx, "", "step-review", entryID, 0, time.Now().UTC()); err == nil {
+		t.Fatalf("expected an error for an empty task_id")
+	}
+
+	// Nothing should have changed: the validation guard runs before BeginTx.
+	if n := countStepDecisions(t, repo, "task-11", "step-review"); n != 1 {
+		t.Fatalf("remaining decisions = %d, want 1 (untouched)", n)
+	}
+	state, _ := stepEntryMarkerState(t, repo, entryID, 0)
+	if state != string(StepEntryMarkerInProgress) {
+		t.Fatalf("marker state = %q, want %q (untouched)", state, StepEntryMarkerInProgress)
+	}
+}
+
 func stepEntryMarkerState(t *testing.T, repo *Repository, entryID int64, position int) (state, markerErr string) {
 	t.Helper()
 	var s, e *string
