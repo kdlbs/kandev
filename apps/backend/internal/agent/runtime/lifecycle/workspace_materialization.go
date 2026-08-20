@@ -97,13 +97,16 @@ func (m *Manager) MaterializeRepositoriesForEnvironment(ctx context.Context, tas
 	}
 	materialized := make([]materializedWorkspaceRepositoryClient, 0, len(clients))
 	for _, execution := range clients {
-		created, materializeErr := materializeWorkspaceRepositoriesWithoutRescan(ctx, execution.client, repositories, false)
+		attempt, materializeErr := materializeWorkspaceRepositoriesWithoutRescan(ctx, execution.client, repositories, false)
 		if materializeErr != nil {
+			if attempt.cleanupErr != nil {
+				materialized = append(materialized, materializedWorkspaceRepositoryClient{execution: execution, created: attempt.created})
+			}
 			failedCleanup, rollbackErr := rollbackMaterializedWorkspaceRepositoryClients(ctx, materialized)
 			m.failClosedMaterializedWorkspaceRepositoryClients(ctx, failedCleanup)
 			return nil, fmt.Errorf("materialize workspace repositories for session %s: %w", execution.sessionID, errors.Join(materializeErr, rollbackErr))
 		}
-		materialized = append(materialized, materializedWorkspaceRepositoryClient{execution: execution, created: created})
+		materialized = append(materialized, materializedWorkspaceRepositoryClient{execution: execution, created: attempt.created})
 	}
 	rescanned := make([]workspaceRepositoryExecution, 0, len(clients))
 	refreshed := make([]cloneWorkspacePolicyRefresh, 0, len(clients))
@@ -165,12 +168,12 @@ func (m *Manager) failClosedMaterializedWorkspaceRepositoryClients(ctx context.C
 }
 
 func materializeWorkspaceRepositories(ctx context.Context, client workspaceRepositoryClient, repositories []WorkspaceRepositoryMaterialization, sourceRoots ...[]string) error {
-	created, err := materializeWorkspaceRepositoriesWithoutRescan(ctx, client, repositories, true)
+	attempt, err := materializeWorkspaceRepositoriesWithoutRescan(ctx, client, repositories, true)
 	if err != nil {
 		return err
 	}
 	if err := client.RescanWorkspace(ctx, "", sourceRoots...); err != nil {
-		cleanupErr := rollbackMaterializedWorkspaceRepositories(ctx, client, created)
+		cleanupErr := rollbackMaterializedWorkspaceRepositories(ctx, client, attempt.created)
 		var reconcileErr error
 		if cleanupErr == nil {
 			reconcileErr = reconcileWorkspaceRepositoryClient(ctx, client, nil)
@@ -482,11 +485,19 @@ func workspaceRepositorySessionIDs(executions []*AgentExecution) []string {
 	return ids
 }
 
-func materializeWorkspaceRepositoriesWithoutRescan(ctx context.Context, client workspaceRepositoryClient, repositories []WorkspaceRepositoryMaterialization, requireGitMetadataAttestation bool) ([]WorkspaceRepositoryMaterialization, error) {
+// workspaceRepositoryMaterializationAttempt preserves the exact set created
+// before a per-client failure. The caller needs it to retry compensation and
+// fail the corresponding execution closed when cleanup cannot prove removal.
+type workspaceRepositoryMaterializationAttempt struct {
+	created    []WorkspaceRepositoryMaterialization
+	cleanupErr error
+}
+
+func materializeWorkspaceRepositoriesWithoutRescan(ctx context.Context, client workspaceRepositoryClient, repositories []WorkspaceRepositoryMaterialization, requireGitMetadataAttestation bool) (workspaceRepositoryMaterializationAttempt, error) {
 	if client == nil {
-		return nil, fmt.Errorf("agentctl client is required")
+		return workspaceRepositoryMaterializationAttempt{}, fmt.Errorf("agentctl client is required")
 	}
-	created := make([]WorkspaceRepositoryMaterialization, 0, len(repositories))
+	attempt := workspaceRepositoryMaterializationAttempt{created: make([]WorkspaceRepositoryMaterialization, 0, len(repositories))}
 	for _, repository := range repositories {
 		response, err := client.MaterializeRepository(ctx, agentctl.MaterializeRepositoryRequest{
 			RepositoryURL:           repository.RepositoryURL,
@@ -497,22 +508,22 @@ func materializeWorkspaceRepositoriesWithoutRescan(ctx context.Context, client w
 			ContributionDestination: repository.ContributionDestination,
 		})
 		if err != nil {
-			rollbackErr := rollbackMaterializedWorkspaceRepositories(ctx, client, created)
-			return nil, fmt.Errorf("materialize workspace repository %q: %w", repository.Destination, errors.Join(err, rollbackErr))
+			attempt.cleanupErr = rollbackMaterializedWorkspaceRepositories(ctx, client, attempt.created)
+			return attempt, fmt.Errorf("materialize workspace repository %q: %w", repository.Destination, errors.Join(err, attempt.cleanupErr))
 		}
 		if response == nil {
-			rollbackErr := rollbackMaterializedWorkspaceRepositories(ctx, client, created)
-			return nil, fmt.Errorf("materialize workspace repository %q: %w", repository.Destination, errors.Join(errors.New("empty response"), rollbackErr))
+			attempt.cleanupErr = rollbackMaterializedWorkspaceRepositories(ctx, client, attempt.created)
+			return attempt, fmt.Errorf("materialize workspace repository %q: %w", repository.Destination, errors.Join(errors.New("empty response"), attempt.cleanupErr))
 		}
 		if requireGitMetadataAttestation && !response.GitMetadataAttested {
-			rollbackErr := rollbackMaterializedWorkspaceRepositories(ctx, client, created)
-			return nil, fmt.Errorf("materialize workspace repository %q: %w", repository.Destination, errors.Join(errors.New("git metadata attestation missing"), rollbackErr))
+			attempt.cleanupErr = rollbackMaterializedWorkspaceRepositories(ctx, client, attempt.created)
+			return attempt, fmt.Errorf("materialize workspace repository %q: %w", repository.Destination, errors.Join(errors.New("git metadata attestation missing"), attempt.cleanupErr))
 		}
 		if !response.Reused {
-			created = append(created, repository)
+			attempt.created = append(attempt.created, repository)
 		}
 	}
-	return created, nil
+	return attempt, nil
 }
 
 func rollbackWorkspaceRepositoryRescans(ctx context.Context, executions []workspaceRepositoryExecution) error {
