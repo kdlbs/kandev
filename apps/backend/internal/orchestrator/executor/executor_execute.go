@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -1711,16 +1712,17 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 }
 
 // dockerLocalCloneSource returns a host directory suitable for Docker's
-// read-only bind mount. A repository path can also be a remote URL while a
-// workspace-source attachment is in progress; treating that as a local source
-// makes Docker reject the launch before the intended clone error can surface.
+// read-only bind mount. The Docker daemon can run in a different mount
+// namespace from the backend, so an absolute host path may be unavailable to
+// os.Stat here while remaining valid to Docker. Remote URLs and known files are
+// still rejected before they reach Docker's bind-mount API.
 func dockerLocalCloneSource(repositoryPath string) string {
 	source := strings.TrimSpace(repositoryPath)
-	if source == "" {
+	if source == "" || !filepath.IsAbs(source) {
 		return ""
 	}
 	info, err := os.Stat(source)
-	if err != nil || !info.IsDir() {
+	if err == nil && !info.IsDir() {
 		return ""
 	}
 	return source

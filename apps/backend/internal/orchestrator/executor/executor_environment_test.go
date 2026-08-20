@@ -729,13 +729,34 @@ func TestApplyRepositoryConfig_DockerUsesRepositoryPathWhenCloneURLIsUnavailable
 	}
 }
 
-func TestApplyRepositoryConfig_DockerRejectsMissingRepositoryPathFallback(t *testing.T) {
+func TestApplyRepositoryConfig_DockerUsesAbsoluteRepositoryPathFallbackWhenBackendCannotStatIt(t *testing.T) {
+	e := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	req := &LaunchAgentRequest{TaskID: "task-1"}
+	task := &v1.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "Some task"}
+	source := filepath.Join(t.TempDir(), "docker-host-only-source")
+	info := &repoInfo{
+		RepositoryID:   "repo-abc",
+		RepositoryPath: source,
+		Repository:     &models.Repository{ID: "repo-abc", Name: "myrepo"},
+	}
+	execCfg := executorConfig{ExecutorID: "docker", ExecutorType: string(models.ExecutorTypeLocalDocker)}
+
+	metadata, err := e.applyRepositoryConfig(req, task, info, execCfg, nil)
+	if err != nil {
+		t.Fatalf("applyRepositoryConfig: %v", err)
+	}
+	if req.RepositoryURL != source || metadata["repository_clone_url"] != source {
+		t.Fatalf("Docker clone source = %q / %#v, want Docker-host repository path", req.RepositoryURL, metadata)
+	}
+}
+
+func TestApplyRepositoryConfig_DockerRejectsRemoteRepositoryPathFallback(t *testing.T) {
 	e := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
 	req := &LaunchAgentRequest{TaskID: "task-1"}
 	task := &v1.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "Some task"}
 	info := &repoInfo{
 		RepositoryID:   "repo-abc",
-		RepositoryPath: filepath.Join(t.TempDir(), "missing-source"),
+		RepositoryPath: "https://example.invalid/owner/repository.git",
 		Repository:     &models.Repository{ID: "repo-abc", Name: "myrepo"},
 	}
 	execCfg := executorConfig{ExecutorID: "docker", ExecutorType: string(models.ExecutorTypeLocalDocker)}
