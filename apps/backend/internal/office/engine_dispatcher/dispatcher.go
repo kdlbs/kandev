@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/shared"
@@ -37,6 +38,43 @@ type SessionResolver interface {
 // minimal interface so tests can pass a fake.
 type EngineHandle interface {
 	HandleTrigger(ctx context.Context, in engine.HandleInput) (engine.HandleResult, error)
+	// RecordParticipantDecision and EvaluateStepQuorum are the AC-57a/57d
+	// engine decision entry points. Widening this dispatcher-local
+	// interface (rather than shared.WorkflowEngineDispatcher) is the
+	// documented AC-57d implementation note: callers reach the new
+	// capability through Dispatcher.RecordDecision /
+	// Dispatcher.EvaluateStepQuorum plus a type assertion against a
+	// narrow caller-side interface, mirroring handledWorkflowEngineDispatcher.
+	RecordParticipantDecision(ctx context.Context, sessionID string, in engine.DecisionInfo) (engine.RecordDecisionResult, error)
+	EvaluateStepQuorum(ctx context.Context, taskID, sessionID string) (engine.QuorumSnapshot, error)
+}
+
+// RecordDecisionInput is what a transport must resolve before calling
+// Dispatcher.RecordDecision: the task/step/participant identity and the
+// verdict itself. Session resolution (AC-16/16a) happens inside
+// RecordDecision, not here.
+type RecordDecisionInput struct {
+	TaskID        string
+	StepID        string
+	ParticipantID string
+	Decision      string
+	DeciderType   string
+	DeciderID     string
+	Role          string
+	Comment       string
+}
+
+// RecordDecisionResult mirrors engine.RecordDecisionResult plus the
+// validated StepID (AC-37) the decision was recorded against, which the
+// AC-64 tool contract and AC-57b-i both need.
+type RecordDecisionResult struct {
+	StepID              string
+	DecisionID          string
+	DecidedAt           time.Time
+	Transitioned        bool
+	TransitionAbandoned bool
+	FromStepID          string
+	ToStepID            string
 }
 
 // Dispatcher resolves a task's active session and invokes the workflow
@@ -145,4 +183,117 @@ func (d *Dispatcher) resolveSession(
 
 func isReusableCommentSession(state taskmodels.TaskSessionState) bool {
 	return state == taskmodels.TaskSessionStateCompleted || state == taskmodels.TaskSessionStateIdle
+}
+
+// RecordDecision is the AC-57a write-side engine decision entry point:
+// it resolves the task's active session per AC-16/16a, then delegates the
+// write-and-reevaluate to Engine.RecordParticipantDecision. AC-16a's
+// "no session resolvable" case is not an error here — an empty sessionID
+// tells the engine to record the decision and skip re-evaluation
+// (reported under AC-23/F39 by the engine itself), matching the existing
+// blank-session behavior RecordParticipantDecision already implements.
+func (d *Dispatcher) RecordDecision(ctx context.Context, in RecordDecisionInput) (RecordDecisionResult, error) {
+	if in.TaskID == "" {
+		return RecordDecisionResult{}, fmt.Errorf("task_id is required")
+	}
+	sessionID, err := d.resolveActiveSessionID(ctx, in.TaskID)
+	if err != nil {
+		return RecordDecisionResult{}, fmt.Errorf("resolve active session: %w", err)
+	}
+	result, err := d.engine.RecordParticipantDecision(ctx, sessionID, engine.DecisionInfo{
+		TaskID:        in.TaskID,
+		StepID:        in.StepID,
+		ParticipantID: in.ParticipantID,
+		Decision:      in.Decision,
+		DeciderType:   in.DeciderType,
+		DeciderID:     in.DeciderID,
+		Role:          in.Role,
+		Comment:       in.Comment,
+	})
+	if err != nil {
+		return RecordDecisionResult{}, fmt.Errorf("record participant decision: %w", err)
+	}
+	return RecordDecisionResult{
+		StepID:              in.StepID,
+		DecisionID:          result.DecisionID,
+		DecidedAt:           result.DecidedAt,
+		Transitioned:        result.Transitioned,
+		TransitionAbandoned: result.TransitionAbandoned,
+		FromStepID:          result.FromStepID,
+		ToStepID:            result.ToStepID,
+	}, nil
+}
+
+// EvaluateStepQuorum is the AC-57d read-only engine entry point. Per F38,
+// the state read that satisfies TransitionStore.LoadState's signature uses
+// ANY resolvable session for the task (GetTaskSessionByTaskID, latest,
+// any state) since MachineState.CurrentStepID is derived from the task
+// row, not the session; a task with no session at all yields a
+// successful empty snapshot rather than an error. ReevaluationBlocked's
+// second conjunct — "no active session" (AC-16's query, distinct from
+// F38's any-session read) — is not something the engine can compute
+// itself, so it is ANDed in here.
+func (d *Dispatcher) EvaluateStepQuorum(ctx context.Context, taskID string) (engine.QuorumSnapshot, error) {
+	sessionID, err := d.resolveLatestSessionID(ctx, taskID)
+	if err != nil {
+		return engine.QuorumSnapshot{}, fmt.Errorf("resolve latest session: %w", err)
+	}
+	snapshot, err := d.engine.EvaluateStepQuorum(ctx, taskID, sessionID)
+	if err != nil {
+		return engine.QuorumSnapshot{}, err
+	}
+	if snapshot.ReevaluationBlocked {
+		noActiveSession, err := d.hasNoActiveSession(ctx, taskID)
+		if err != nil {
+			return engine.QuorumSnapshot{}, fmt.Errorf("resolve active session: %w", err)
+		}
+		snapshot.ReevaluationBlocked = noActiveSession
+	}
+	return snapshot, nil
+}
+
+// resolveActiveSessionID returns AC-16's active-session id, or "" when no
+// such session is resolvable (AC-16a) — never an error for that case.
+func (d *Dispatcher) resolveActiveSessionID(ctx context.Context, taskID string) (string, error) {
+	session, err := d.sessions.GetActiveTaskSessionByTaskID(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	if session == nil {
+		return "", nil
+	}
+	return session.ID, nil
+}
+
+// resolveLatestSessionID returns the F38 "any session" id (the task's
+// most recent session regardless of state), or "" when the task has never
+// had one.
+func (d *Dispatcher) resolveLatestSessionID(ctx context.Context, taskID string) (string, error) {
+	session, err := d.sessions.GetTaskSessionByTaskID(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	if session == nil {
+		return "", nil
+	}
+	return session.ID, nil
+}
+
+// hasNoActiveSession reports whether AC-16's active-session query finds no
+// row, the second conjunct of QuorumSnapshot.ReevaluationBlocked (AC-62).
+func (d *Dispatcher) hasNoActiveSession(ctx context.Context, taskID string) (bool, error) {
+	session, err := d.sessions.GetActiveTaskSessionByTaskID(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
+			return true, nil
+		}
+		return false, err
+	}
+	return session == nil, nil
 }

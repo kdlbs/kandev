@@ -39,12 +39,42 @@ type fakeEngine struct {
 	called   bool
 	err      error
 	result   engine.HandleResult
+
+	decisionCalled  bool
+	decisionSession string
+	decisionIn      engine.DecisionInfo
+	decisionResult  engine.RecordDecisionResult
+	decisionErr     error
+
+	quorumCalled  bool
+	quorumTaskID  string
+	quorumSession string
+	quorumResult  engine.QuorumSnapshot
+	quorumErr     error
 }
 
 func (f *fakeEngine) HandleTrigger(_ context.Context, in engine.HandleInput) (engine.HandleResult, error) {
 	f.called = true
 	f.captured = in
 	return f.result, f.err
+}
+
+func (f *fakeEngine) RecordParticipantDecision(
+	_ context.Context, sessionID string, in engine.DecisionInfo,
+) (engine.RecordDecisionResult, error) {
+	f.decisionCalled = true
+	f.decisionSession = sessionID
+	f.decisionIn = in
+	return f.decisionResult, f.decisionErr
+}
+
+func (f *fakeEngine) EvaluateStepQuorum(
+	_ context.Context, taskID, sessionID string,
+) (engine.QuorumSnapshot, error) {
+	f.quorumCalled = true
+	f.quorumTaskID = taskID
+	f.quorumSession = sessionID
+	return f.quorumResult, f.quorumErr
 }
 
 type realRunsAdapter struct {

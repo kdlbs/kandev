@@ -228,6 +228,7 @@ func newTestDeps(t *testing.T) *testDeps {
 	costSvc := &stubCostChecker{}
 	svc := dashboard.NewDashboardService(repo, log, activity, agentSvc, costSvc)
 	svc.SetDecisionStore(wfRepo)
+	svc.SetWorkflowEngineDispatcher(newTestEngineDispatcher(wfRepo, log))
 
 	router := gin.New()
 	group := router.Group("/api/v1/office")
