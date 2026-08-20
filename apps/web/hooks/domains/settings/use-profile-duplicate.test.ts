@@ -172,6 +172,26 @@ describe("applyProfileDuplicated", () => {
     );
   });
 
+  it("carries the owning agent's capability_status onto the copy when the agent is absent from the store", () => {
+    // Mirrors the mid-request scenario above, but the duplicated profile's
+    // agent is unhealthy: the copy must not silently read as healthy just
+    // because it took the stub-agent branch (toAgentProfileOption dropped
+    // capability_status when only { id, name } was passed).
+    const copy = profile("p2", "a1", COPY_NAME);
+    const unhealthyAgent = {
+      ...agent("a1"),
+      capability_status: "not_installed",
+      capability_error: "agent CLI not found",
+    } as Agent;
+    const initial = stateWith([], []);
+
+    const next = applyProfileDuplicated(initial, unhealthyAgent, copy);
+
+    const created = next.agentProfiles.items.find((o) => o.id === "p2");
+    expect(created?.capability_status).toBe("not_installed");
+    expect(created?.capability_error).toBe("agent CLI not found");
+  });
+
   it("preserves WS-delivered orphan options for agents absent from the store", () => {
     // p-orphan was delivered by WS for an agent not present in settingsAgents;
     // duplicating a profile of a DIFFERENT agent must not wipe it.

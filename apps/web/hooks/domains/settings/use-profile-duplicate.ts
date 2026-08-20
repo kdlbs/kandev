@@ -60,7 +60,7 @@ export function applyProfileDuplicated(
   // The copy must appear exactly once with the known agent metadata: append
   // it when absent, replace an OLDER existing option (e.g. a WS stub) with
   // it, and keep a NEWER WS-delivered option untouched.
-  const copyOption = toAgentProfileOption({ id: agent.id, name: agent.name }, created);
+  const copyOption = toAgentProfileOption(agent, created);
   const existingCopy = merged.find((option) => option.id === created.id);
   let agentProfilesItems: AgentProfileOption[];
   if (!existingCopy) {
