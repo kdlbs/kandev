@@ -443,6 +443,31 @@ func (s *Server) stopTaskHandler() server.ToolHandlerFunc {
 	}
 }
 
+func (s *Server) settleStaleSessionHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		sessionID, err := req.RequireString("session_id")
+		if err != nil {
+			return mcp.NewToolResultError("session_id is required"), nil
+		}
+		turnID, err := req.RequireString("turn_id")
+		if err != nil {
+			return mcp.NewToolResultError("turn_id is required"), nil
+		}
+		// As with the halt tool, construct server-owned attribution rather than
+		// forwarding arbitrary arguments supplied by an agent model.
+		payload := map[string]interface{}{
+			"session_id": sessionID, "turn_id": turnID,
+			"sender_task_id": s.taskID, "sender_session_id": s.sessionID,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPSettleStaleSession, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
 // spawnSessionHandler spawns an additional agent session on an existing task.
 // task_id defaults to the server's own task; sender identity is injected so
 // the spawned session can identify and reply to its spawner.

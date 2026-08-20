@@ -709,6 +709,22 @@ type CompletionIntent struct {
 	Outcome                  string                `json:"outcome,omitempty"`
 }
 
+// SessionControlEvent is the immutable audit record for an authorized attempt
+// to settle one exact stale turn. It intentionally contains only identities and
+// normalized evidence codes, never prompt or report content.
+type SessionControlEvent struct {
+	ID              string    `json:"id"`
+	ActorTaskID     string    `json:"actor_task_id"`
+	ActorSessionID  string    `json:"actor_session_id"`
+	TargetTaskID    string    `json:"target_task_id"`
+	TargetSessionID string    `json:"target_session_id"`
+	TargetTurnID    string    `json:"target_turn_id"`
+	AuthorityBasis  string    `json:"authority_basis"`
+	EvidenceCode    string    `json:"evidence_code"`
+	Result          string    `json:"result"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
 // LoadSessionRuntimeConfig decodes the runtime-config bag entry from session
 // metadata. It tolerates both typed values and JSON-rehydrated maps.
 func LoadSessionRuntimeConfig(metadata map[string]interface{}) (SessionRuntimeConfig, bool) {

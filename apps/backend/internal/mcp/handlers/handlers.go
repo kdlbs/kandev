@@ -189,6 +189,12 @@ type TaskStopper interface {
 	StopTaskForCoordinator(ctx context.Context, taskID string) (orchestrator.CoordinatorTaskStopResult, error)
 }
 
+// StaleSessionSettler is the exact-turn recovery operation. Authorization is
+// intentionally kept in the MCP handler where trusted caller identity enters.
+type StaleSessionSettler interface {
+	SettleStaleSession(ctx context.Context, request orchestrator.StaleSessionSettlementRequest) (orchestrator.StaleSessionSettlementResult, error)
+}
+
 // TaskTitleBranchRenamer performs the best-effort branch side effect after an
 // owner session accepts a prompt-first task title.
 type TaskTitleBranchRenamer interface {
@@ -240,6 +246,7 @@ type Handlers struct {
 	walkthroughService   *service.WalkthroughService
 	sessionLauncher      SessionLauncher
 	taskStopper          TaskStopper
+	staleSessionSettler  StaleSessionSettler
 	titleBranchRenamer   TaskTitleBranchRenamer
 	stopTaskGetter       func(context.Context, string) (*models.Task, error)
 	messageQueue         MessageQueuer
@@ -313,6 +320,9 @@ func NewHandlers(
 	if stopper, ok := sessionLauncher.(TaskStopper); ok {
 		h.taskStopper = stopper
 	}
+	if settler, ok := sessionLauncher.(StaleSessionSettler); ok {
+		h.staleSessionSettler = settler
+	}
 	return h
 }
 
@@ -329,6 +339,11 @@ func (h *Handlers) SetPromptReferenceResolver(resolver PromptReferenceResolver) 
 // SetTaskStopper wires the orchestrator-owned halt operation.
 func (h *Handlers) SetTaskStopper(stopper TaskStopper) {
 	h.taskStopper = stopper
+}
+
+// SetStaleSessionSettler wires narrow, evidence-gated session recovery.
+func (h *Handlers) SetStaleSessionSettler(settler StaleSessionSettler) {
+	h.staleSessionSettler = settler
 }
 
 // SetTaskTitleBranchRenamer wires the best-effort branch rename performed
@@ -394,6 +409,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPStepComplete, h.handleStepComplete)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
 	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
+	d.RegisterFunc(ws.ActionMCPSettleStaleSession, h.handleSettleStaleSession)
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
 	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)

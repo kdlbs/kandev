@@ -1074,6 +1074,18 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("stop_task_kandev", s.stopTaskHandler()),
 	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("settle_stale_session_kandev",
+			mcp.WithDescription(`Settle one demonstrably stale administrative turn without cancelling the session. This is not a general stop tool: it requires the exact session and turn ID, and succeeds only for a same-workspace peer session, direct parent, or server-recorded spawn supervisor when an eligible completion intent proves the turn is quiet and stale. Active, ambiguous, or successor turns return active_turn/not_stale unchanged. Worktrees, commits, task data, history, and queued messages are preserved.`),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString("session_id", mcp.Required(), mcp.Description("The exact stale target session ID")),
+			mcp.WithString("turn_id", mcp.Required(), mcp.Description("The exact active turn ID captured by stale evidence")),
+		),
+		s.wrapHandler("settle_stale_session_kandev", s.settleStaleSessionHandler()),
+	)
 	s.registerSpawnSessionTool()
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_task_conversation_kandev",

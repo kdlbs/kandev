@@ -318,6 +318,13 @@ type CompletionIntentRepository interface {
 	TransitionCompletionIntent(ctx context.Context, id string, from, to models.CompletionIntentState, settledAt time.Time) (bool, error)
 }
 
+// SessionControlEventRepository stores authorized stale-turn control attempts.
+// Denied requests are deliberately not written: they are security-log only to
+// avoid creating a durable write-amplification primitive for untrusted callers.
+type SessionControlEventRepository interface {
+	CreateSessionControlEvent(ctx context.Context, event *models.SessionControlEvent) error
+}
+
 // SessionRepository handles task session lifecycle and workflow-session relationships.
 type SessionRepository interface {
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error

@@ -697,6 +697,23 @@ func (r *Repository) initCompletionIntentSchema() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_completion_intents_due
 		ON session_completion_intents(state, eligible_at);
+	CREATE TABLE IF NOT EXISTS session_control_events (
+		id TEXT PRIMARY KEY,
+		actor_task_id TEXT NOT NULL,
+		actor_session_id TEXT NOT NULL,
+		target_task_id TEXT NOT NULL,
+		target_session_id TEXT NOT NULL,
+		target_turn_id TEXT NOT NULL,
+		authority_basis TEXT NOT NULL,
+		evidence_code TEXT NOT NULL,
+		result TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (actor_task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (target_task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (target_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_session_control_events_target
+		ON session_control_events(target_session_id, created_at);
 	`)
 	return err
 }

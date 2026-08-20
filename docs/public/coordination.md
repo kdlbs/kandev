@@ -141,6 +141,8 @@ Use the queue controls according to the outcome you want:
 - **Clear all** removes every visible pending row without sending a prompt.
 - **Cancel** in the chat toolbar stops the active turn as a user cancellation. It may record the cancellation, complete an eligible workflow step, and move the task to review; it does not send queued content.
 
+If a provider fails to close a completed administrative turn, a related coordinator can use `settle_stale_session_kandev` with the exact session and turn IDs. It settles only a quiet turn with server-recorded completion evidence. It preserves the session, worktree, queued messages, and history; it never acts as a broad cancellation control.
+
 Choose the control by intent:
 
 | Intent                                                  | Operation                                                        | Result                                                                                                                                       |
