@@ -215,8 +215,22 @@ func (d *Dispatcher) RecordDecision(ctx context.Context, in RecordDecisionInput)
 		Role:          in.Role,
 		Comment:       in.Comment,
 	})
+	// AC-15: the engine returns a populated result alongside a non-nil err
+	// exactly when the write succeeded but the post-write re-evaluation
+	// failed. That case must be reported as success — with the recorded
+	// decision's identity kept — never collapsed into a write failure. An
+	// empty DecisionID means the write itself never happened, which is a
+	// genuine failure. This is the single funnel recordTaskDecision and
+	// RecordAgentDecision both call through, so fixing it here covers both.
 	if err != nil {
-		return RecordDecisionResult{}, fmt.Errorf("record participant decision: %w", err)
+		if result.DecisionID == "" {
+			return RecordDecisionResult{}, fmt.Errorf("record participant decision: %w", err)
+		}
+		d.logger.Warn("quorum re-evaluation failed after decision recorded",
+			zap.String("task_id", in.TaskID),
+			zap.String("step_id", in.StepID),
+			zap.String("decision_id", result.DecisionID),
+			zap.Error(err))
 	}
 	return RecordDecisionResult{
 		StepID:              in.StepID,

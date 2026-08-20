@@ -121,6 +121,42 @@ func TestDispatcher_RecordDecision_PropagatesEngineError(t *testing.T) {
 	}
 }
 
+// TestDispatcher_RecordDecision_KeepsResultWhenReevaluationFails is AC-15:
+// when the engine's write succeeded but its post-write re-evaluation
+// failed, RecordParticipantDecision returns a *populated* result alongside
+// a non-nil error (see quorum.go's RecordParticipantDecision, which does
+// `return result, err` rather than `return RecordDecisionResult{}, err`).
+// The dispatcher — the single funnel both recordTaskDecision and
+// RecordAgentDecision call through — must keep that result and report
+// success rather than collapsing a re-evaluation failure into a write
+// failure and losing decision_id/decided_at.
+func TestDispatcher_RecordDecision_KeepsResultWhenReevaluationFails(t *testing.T) {
+	decidedAt := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	reevalErr := errors.New("load step: db down")
+	eng := &fakeEngine{
+		decisionResult: engine.RecordDecisionResult{DecisionID: "decision-1", DecidedAt: decidedAt},
+		decisionErr:    reevalErr,
+	}
+	sessions := &fakeSessions{activeSession: &taskmodels.TaskSession{ID: "sess-1"}}
+	d := New(eng, sessions, logger.Default())
+
+	result, err := d.RecordDecision(context.Background(), RecordDecisionInput{
+		TaskID: "task-1", StepID: "review", ParticipantID: "participant-1", Decision: "approved",
+	})
+	if err != nil {
+		t.Fatalf("RecordDecision: %v, want success per AC-15 (write succeeded, re-eval failed)", err)
+	}
+	if result.DecisionID != "decision-1" || !result.DecidedAt.Equal(decidedAt) {
+		t.Errorf("result decision identity lost: %+v", result)
+	}
+	if result.StepID != "review" {
+		t.Errorf("result.StepID = %q, want review", result.StepID)
+	}
+	if result.Transitioned {
+		t.Error("Transitioned = true, want false: re-evaluation errored, no transition could have applied")
+	}
+}
+
 // TestDispatcher_RecordDecision_RejectsEmptyTaskID mirrors HandleTrigger's
 // existing input validation for the new write-side entry point.
 func TestDispatcher_RecordDecision_RejectsEmptyTaskID(t *testing.T) {
