@@ -34,11 +34,11 @@ func exportStatus(err error) int {
 	return http.StatusInternalServerError
 }
 
-// ExportDocument serves GET /api/v1/workspaces/:wsId/automations/export.
+// ExportDocument serves GET /api/v1/workspaces/:id/automations/export.
 // The body is built completely in memory by Service.ExportAutomationsDocument
 // before c.Data writes the status line and body (AC-48).
 func (h *ExportHandler) ExportDocument(c *gin.Context) {
-	body, err := h.svc.ExportAutomationsDocument(c.Request.Context(), c.Param("wsId"))
+	body, err := h.svc.ExportAutomationsDocument(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		h.respondExportError(c, err)
 		return
@@ -46,13 +46,13 @@ func (h *ExportHandler) ExportDocument(c *gin.Context) {
 	c.Data(http.StatusOK, "application/yaml", body)
 }
 
-// ExportZip serves GET /api/v1/workspaces/:wsId/automations/export/zip. The
+// ExportZip serves GET /api/v1/workspaces/:id/automations/export/zip. The
 // archive is built completely in memory by Service.ExportAutomationsZip
 // before c.Data writes the status line and body (AC-48) — deliberately not
 // Office's io.Copy streaming pattern, which cannot retract a 200 already
 // sent once a mid-copy failure occurs.
 func (h *ExportHandler) ExportZip(c *gin.Context) {
-	body, err := h.svc.ExportAutomationsZip(c.Request.Context(), c.Param("wsId"))
+	body, err := h.svc.ExportAutomationsZip(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		h.respondExportError(c, err)
 		return
