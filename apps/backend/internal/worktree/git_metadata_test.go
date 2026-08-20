@@ -82,6 +82,35 @@ func TestGitMetadataProjectionPreservesNativeIndexLockAndCommit(t *testing.T) {
 	runGitMetadata(t, checkout, "fsck", "--strict")
 }
 
+func TestGitMetadataProjectionSupportsMultipleTaskRepositories(t *testing.T) {
+	repoA := initGitMetadataRepository(t)
+	repoB := initGitMetadataRepository(t)
+	checkoutA := filepath.Join(t.TempDir(), "primary")
+	checkoutB := filepath.Join(t.TempDir(), "attached")
+	runGitMetadata(t, repoA, "worktree", "add", "-b", "task-a", checkoutA)
+	runGitMetadata(t, repoB, "worktree", "add", "-b", "task-b", checkoutB)
+
+	projectionA, err := ResolveGitMetadata(checkoutA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectionB, err := ResolveGitMetadata(checkoutB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projectionA.GitDir == projectionB.GitDir || projectionA.CommonDir == projectionB.CommonDir {
+		t.Fatalf("multi-repository projections overlap: %#v %#v", projectionA, projectionB)
+	}
+	for _, checkout := range []string{checkoutA, checkoutB} {
+		if err := os.WriteFile(filepath.Join(checkout, "tracked.txt"), []byte("changed\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runGitMetadata(t, checkout, "add", "tracked.txt")
+		runGitMetadata(t, checkout, "commit", "-m", "task change")
+		runGitMetadata(t, checkout, "fsck", "--strict")
+	}
+}
+
 func initGitMetadataRepository(t *testing.T) string {
 	t.Helper()
 	repo := filepath.Join(t.TempDir(), "repo")
