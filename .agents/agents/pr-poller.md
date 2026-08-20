@@ -16,9 +16,11 @@ Do not read source code, edit files, push, post or resolve GitHub comments,
 trigger workflows, fetch full CI logs, or spawn subagents.
 
 Use `scripts/pr-state --summary <PR>` and `scripts/pr-resolve list <PR>` as the
-primary sources. Poll at a 30-second cadence for at most 20 minutes. In the
-default mode, return early for a failed check, merge conflict, actionable
-review feedback, or a terminal clean state. If the caller says "wait N
+primary sources. Prefer `scripts/pr-await <PR>` when it is available: it blocks
+internally and returns one report, so the whole wait costs a single turn. Fall
+back to polling only if that script is missing, and then at a 60-second cadence
+for at most 20 minutes. In the default mode, return early for a failed check,
+merge conflict, actionable review feedback, or a terminal clean state. If the caller says "wait N
 minutes" or "then fix up", use strict-deadline mode: calculate and include the
 absolute deadline in the polling prompt, accumulate findings, and do not return
 early for findings, pending checks, or a clean snapshot. Stop early only if the

@@ -50,19 +50,30 @@ If the fresh mergeability query reports `mergeable=CONFLICTING` or
 result, push it, and restart this section with a new PR-state snapshot. Do not
 triage comments or checks against a conflicted head.
 
-For pending CI, do not run a rapid polling loop. Wait at a reasonable interval,
-then run the same summary again. Stop after about 20 minutes and report the
-exact pending checks as "CI in progress." Use two monitoring modes: default
-monitoring may return early for a failed check, merge conflict, actionable
-finding, or clean terminal state; strict-deadline monitoring applies when the
-user says "wait N minutes" or "then fix up." In strict mode, calculate and
-pass an absolute deadline, accumulate failures/comments, and do not return
-early for findings, pending checks, or a clean snapshot; stop early only when
-the PR is merged/closed or access is revoked. Do not use interactive `gh pr
-checks --watch` in the primary conversation: its TTY redraws make captured
-output unusable. Use saved `scripts/pr-state --summary` snapshots about 60–90
-seconds apart, or the read-only `pr-poller` only when the user explicitly asked
-to wait or monitor.
+For pending CI, wait with `scripts/pr-await <PR>`. It blocks below the
+conversation and prints one report when every check is terminal, so a wait of
+any length costs a single round-trip. Do not re-run `scripts/pr-state
+--summary` on a timer instead: each snapshot is a separate model turn that
+re-reads the whole context, and waiting is only about 6% of what such a turn
+actually does.
+
+Default `--mode all-terminal` is the cost-correct choice and returns only when
+no check is pending, so every failure arrives in one report and is fixed in one
+pass. It is also the correct choice for a reason unrelated to cost: a failed job
+can be visible while its parent workflow is still running, so an early return
+reports a partial failure set. Use `--mode first-failure` only when the user
+wants the first failure interactively; it costs an extra full CI cycle per
+failure. Pass `--deadline-min` for a user-stated limit; on exit 2 report the
+named pending checks as "CI in progress."
+
+Read its exit code rather than re-deriving state: 0 clean, 1 terminal with
+findings, 2 deadline with checks still pending, 3 blocked (merged/closed,
+workflow approval required, or access lost). A push during the wait restarts
+the gate against the new head and is reported.
+
+Do not use interactive `gh pr checks --watch` in the primary conversation: its
+TTY redraws make captured output unusable. Use the read-only `pr-poller` only
+when the user explicitly asked to wait or monitor and `pr-await` is unavailable.
 Treat a poller's unresolved/pending snapshot as provisional: it can predate a
 primary-session push or thread resolution. Re-run `scripts/pr-state --summary
 <PR>` at the current head before acting on it or declaring completion.
