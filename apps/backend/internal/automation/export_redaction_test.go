@@ -107,8 +107,12 @@ func TestExportRedaction_AC23_FullyPopulatedAutomationRoundTripsEveryExportedFie
 		ID:           "trig-scheduled",
 		AutomationID: a.ID,
 		Type:         TriggerTypeScheduled,
-		Config:       []byte(`{"cron":"0 9 * * 1-5"}`),
-		Enabled:      true,
+		// dry_run's value ("true") is a string whose bare text would resolve to
+		// !!bool if emitted without an explicit tag, and retries is a JSON
+		// number that must NOT carry !!str — both required by AC-23's Config
+		// clause so the tag half of the assertion below is not vacuous.
+		Config:  []byte(`{"cron":"0 9 * * 1-5","dry_run":"true","retries":3}`),
+		Enabled: true,
 	}); err != nil {
 		t.Fatalf("CreateTrigger scheduled: %v", err)
 	}
@@ -173,13 +177,44 @@ func TestExportRedaction_AC23_FullyPopulatedAutomationRoundTripsEveryExportedFie
 	assertScalarField(t, scheduled, "type", "scheduled")
 	assertScalarField(t, scheduled, "enabled", "true")
 	scheduledConfig := requireMapKey(t, scheduled, "config")
-	assertScalarField(t, scheduledConfig, "cron", "0 9 * * 1-5")
+	// AC-23's Config clause: every scalar checked on both lexeme and re-parsed
+	// Tag. "cron" and "dry_run" are JSON strings (dry_run's text is ambiguous
+	// and would resolve to !!bool if emitted bare) so both must carry !!str;
+	// "retries" is a JSON number and must NOT carry !!str.
+	assertConfigScalar(t, scheduledConfig, "cron", "0 9 * * 1-5", true)
+	assertConfigScalar(t, scheduledConfig, "dry_run", "true", true)
+	assertConfigScalar(t, scheduledConfig, "retries", "3", false)
 
 	webhook := triggers.Content[1]
 	assertScalarField(t, webhook, "type", "webhook")
 	assertScalarField(t, webhook, "enabled", "false")
 	webhookConfig := requireMapKey(t, webhook, "config")
-	assertScalarField(t, webhookConfig, "branch", "main")
+	assertConfigScalar(t, webhookConfig, "branch", "main", true)
+}
+
+// assertConfigScalar checks a trigger Config scalar's re-parsed lexeme
+// (Value) and type tag (Tag) together, per AC-23's Config clause: a
+// lexeme-only comparison passes even when a string has been silently
+// retyped (e.g. a JSON string "true" emitted bare re-parses with
+// Value == "true" but Tag == "!!bool"), so both must be asserted. Pass
+// wantStrTag=true for JSON strings/keys (expected Tag "!!str") and false for
+// JSON numbers (expected Tag anything but "!!str", i.e. AC-41's unquoted
+// number rule observed from the re-parsed side).
+func assertConfigScalar(t *testing.T, mapping *yaml.Node, key, wantValue string, wantStrTag bool) {
+	t.Helper()
+	v := requireMapKey(t, mapping, key)
+	if v.Kind != yaml.ScalarNode {
+		t.Fatalf("config field %q is not a scalar (kind %v)", key, v.Kind)
+	}
+	if v.Value != wantValue {
+		t.Errorf("config field %q value = %q, want %q", key, v.Value, wantValue)
+	}
+	if wantStrTag && v.Tag != "!!str" {
+		t.Errorf("config field %q tag = %q, want !!str", key, v.Tag)
+	}
+	if !wantStrTag && v.Tag == "!!str" {
+		t.Errorf("config field %q tag = !!str, want a non-string tag", key)
+	}
 }
 
 // AC-43: none of the excluded columns may leak into either export form,
