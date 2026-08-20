@@ -27,14 +27,30 @@ func seedBundleSession(t *testing.T, repo *Repository, sessionID, taskID string)
 
 func seedBundleTurn(t *testing.T, repo *Repository, turnID, sessionID, taskID string) {
 	t.Helper()
-	now := time.Now().UTC()
+	seedBundleTurnAt(t, repo, turnID, sessionID, taskID, time.Now().UTC())
+}
+
+// seedBundleTurnAt creates a turn with an explicit started_at/created_at, so
+// a test can control which of two turns on the same session is newest per
+// turnAuthorityPredicate's ORDER BY (started_at DESC, created_at DESC, id DESC).
+func seedBundleTurnAt(t *testing.T, repo *Repository, turnID, sessionID, taskID string, at time.Time) {
+	t.Helper()
 	_, err := repo.db.Exec(repo.db.Rebind(`
 		INSERT OR IGNORE INTO task_session_turns
 			(id, task_session_id, task_id, started_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
-	`), turnID, sessionID, taskID, now, now, now)
+	`), turnID, sessionID, taskID, at, at, at)
 	if err != nil {
 		t.Fatalf("seed turn %s: %v", turnID, err)
+	}
+}
+
+// seedBundleSessionWithState creates a session in an explicit state, for
+// covering D4's non-terminal-session conjunct.
+func seedBundleSessionWithState(t *testing.T, repo *Repository, sessionID, taskID string, state models.TaskSessionState) {
+	t.Helper()
+	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{ID: sessionID, TaskID: taskID, State: state}); err != nil {
+		t.Fatalf("create session %s: %v", sessionID, err)
 	}
 }
 
@@ -219,6 +235,45 @@ func TestListUnresolvedClarificationBundles_ExcludesParentQuestionBundle(t *test
 	}
 	if len(page.Bundles) != 0 {
 		t.Fatalf("bundles = %+v, want none (parent-question bundle excluded)", page.Bundles)
+	}
+}
+
+// TestListUnresolvedClarificationBundles_ExcludesSupersededTurnAndTerminalSession
+// covers D4/L2a's two conjuncts the status-only has_pending aggregate cannot
+// express on its own: the bundle's turn_id must be the session's current turn
+// per turnAuthorityPredicate, and the owning session must not be terminal.
+// Both bundles below have an otherwise-pending message (COALESCE(status,”)
+// IN (”,'pending')) and would incorrectly surface if the list query reused
+// only the status conjunct instead of the same helpers claimActiveClarificationBundle
+// uses (turnAuthorityPredicate, nonTerminalSessionPredicate).
+func TestListUnresolvedClarificationBundles_ExcludesSupersededTurnAndTerminalSession(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Now().UTC()
+
+	// Superseded-turn bundle: its message sits on an older turn, but a newer
+	// turn on the same session has since been started, so the older turn is
+	// no longer authoritative (D4's second conjunct).
+	seedBundleTask(t, repo, "task-B7", "")
+	seedBundleSession(t, repo, "sess-B7", "task-B7")
+	seedBundleTurnAt(t, repo, "turn-B7-old", "sess-B7", "task-B7", base)
+	insertClarificationMessage(t, repo, "msg-B7", "sess-B7", "task-B7", "turn-B7-old", "pending-B7", "q1", "pending", 0, base)
+	seedBundleTurnAt(t, repo, "turn-B7-new", "sess-B7", "task-B7", base.Add(time.Minute))
+
+	// Terminal-session bundle: the message is on the session's only (and
+	// therefore current) turn, but the session itself has already reached a
+	// terminal state (D4's third conjunct).
+	seedBundleTask(t, repo, "task-B8", "")
+	seedBundleSessionWithState(t, repo, "sess-B8", "task-B8", models.TaskSessionStateCompleted)
+	seedBundleTurn(t, repo, "turn-B8", "sess-B8", "task-B8")
+	insertClarificationMessage(t, repo, "msg-B8", "sess-B8", "task-B8", "turn-B8", "pending-B8", "q1", "pending", 0, base)
+
+	page, err := repo.ListUnresolvedClarificationBundles(ctx, unscopedOpts(50))
+	if err != nil {
+		t.Fatalf("ListUnresolvedClarificationBundles: %v", err)
+	}
+	if len(page.Bundles) != 0 {
+		t.Fatalf("bundles = %+v, want none (superseded-turn and terminal-session bundles both excluded)", page.Bundles)
 	}
 }
 

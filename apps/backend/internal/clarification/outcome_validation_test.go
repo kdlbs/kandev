@@ -150,6 +150,36 @@ func TestValidateOutcome_N8b_ReasonOverCap(t *testing.T) {
 	}
 }
 
+// TestValidateOutcome_N8b_CustomTextAtCapAccepted proves N8b's positive
+// boundary: exactly answerTextRuneCap runes, counted over code points with a
+// multi-byte fixture (not bytes), is accepted.
+func TestValidateOutcome_N8b_CustomTextAtCapAccepted(t *testing.T) {
+	exact := make([]rune, answerTextRuneCap)
+	for i := range exact {
+		exact[i] = '本' // multi-byte rune: proves the cap counts runes, not bytes
+	}
+	err := validateOutcome(twoQuestionBundle(), Outcome{
+		Answers: []Answer{{QuestionID: "q1", CustomText: string(exact)}, {QuestionID: "q2"}},
+	})
+	if err != nil {
+		t.Fatalf("expected no error at exactly %d runes, got %v", answerTextRuneCap, err)
+	}
+}
+
+// TestValidateOutcome_N8b_ReasonAtCapAccepted proves N8b's positive boundary
+// on a rejection's reason: exactly answerTextRuneCap runes, counted over
+// code points with a multi-byte fixture, is accepted.
+func TestValidateOutcome_N8b_ReasonAtCapAccepted(t *testing.T) {
+	exact := make([]rune, answerTextRuneCap)
+	for i := range exact {
+		exact[i] = '本' // multi-byte rune: proves the cap counts runes, not bytes
+	}
+	err := validateOutcome(twoQuestionBundle(), Outcome{Rejected: true, RejectReason: string(exact)})
+	if err != nil {
+		t.Fatalf("expected no error at exactly %d runes, got %v", answerTextRuneCap, err)
+	}
+}
+
 // TestValidateOutcome_N6a_L16BundleUnanswerableExceptByRejection proves L16:
 // a bundle whose sole question carries an empty question_id can never pass
 // answers validation, whatever the caller submits, and can only be

@@ -78,9 +78,15 @@ func clarificationBundleWhereClause(opts models.ListClarificationBundlesOptions)
 	return "AND " + strings.Join(conditions, " AND "), args
 }
 
-// clarificationBundleQuery assembles the bundle-grouping subquery (D4a's
-// surviving conjunct: has_pending, message-status based) joined to its
-// visibility-checked task row.
+// clarificationBundleQuery assembles the bundle-grouping subquery joined to
+// its visibility-checked task row. Per spec D4/L2a, a bundle is pending only
+// when all three conjuncts hold: at least one message has status in (”,
+// 'pending') (has_pending), the message's turn is the session's current turn,
+// and the owning session is not terminal. The latter two conjuncts are built
+// from the same helpers claimActiveClarificationBundle already uses
+// (turnAuthorityPredicate, nonTerminalSessionPredicate) rather than
+// hand-written, per L2a, so a future change to activeness cannot leave this
+// tool behind.
 //
 // It also excludes any message carrying the autopilot parent-question
 // marker (models.MetaKeyParentQuestion, "parent_question.go"). That
@@ -97,6 +103,15 @@ func clarificationBundleQuery(drv, whereExtra string) string {
 	pendingIDExpr := dialect.JSONExtract(drv, "m.metadata", "pending_id")
 	statusExpr := dialect.JSONExtract(drv, "m.metadata", "status")
 	notParentQuestion := dialect.ExcludeTruthyMetadataPredicate(drv, "m.metadata", "parent_question")
+	nonTerminalSession := nonTerminalSessionPredicate("m")
+	currentTurn := fmt.Sprintf(`m.turn_id = (
+			SELECT turn_row.id
+			FROM task_session_turns turn_row
+			WHERE turn_row.task_session_id = m.task_session_id
+			  AND %s
+			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+			LIMIT 1
+		  )`, turnAuthorityPredicate(drv, "turn_row"))
 	return fmt.Sprintf(`
 		SELECT b.pending_id, b.session_id, b.task_id, b.created_at
 		FROM (
@@ -110,6 +125,8 @@ func clarificationBundleQuery(drv, whereExtra string) string {
 			JOIN task_sessions ts ON ts.id = m.task_session_id
 			WHERE m.type = 'clarification_request'
 			  AND %[5]s
+			  AND %[6]s
+			  AND %[7]s
 			GROUP BY %[1]s, m.task_session_id
 		) b
 		JOIN tasks t ON t.id = b.task_id
@@ -117,7 +134,7 @@ func clarificationBundleQuery(drv, whereExtra string) string {
 		  %[4]s
 		ORDER BY b.created_at ASC, b.pending_id ASC
 		LIMIT ?
-	`, pendingIDExpr, statusExpr, clarificationTerminalStatusesSQL, whereExtra, notParentQuestion)
+	`, pendingIDExpr, statusExpr, clarificationTerminalStatusesSQL, whereExtra, notParentQuestion, nonTerminalSession, currentTurn)
 }
 
 // scanClarificationBundleRows scans the bundle rows. The created_at column

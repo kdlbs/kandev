@@ -380,27 +380,6 @@ func isInputCapableSession(session *models.TaskSession) bool {
 	return session != nil && (session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateWaitingForInput)
 }
 
-func taskPendingActionPtr(sessions []*models.TaskSession, actions map[string]models.TaskPendingAction) *string {
-	var clarification bool
-	for _, session := range sessions {
-		if !isInputCapableSession(session) {
-			continue
-		}
-		switch actions[session.ID] {
-		case models.TaskPendingActionPermission:
-			value := string(models.TaskPendingActionPermission)
-			return &value
-		case models.TaskPendingActionClarification:
-			clarification = true
-		}
-	}
-	if clarification {
-		value := string(models.TaskPendingActionClarification)
-		return &value
-	}
-	return nil
-}
-
 func pendingActionPtr(
 	sessionID *string,
 	pendingActionsBySession map[string]models.TaskPendingAction,

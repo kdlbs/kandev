@@ -482,6 +482,47 @@ func TestHandleAnswerQuestion_M6_StrayRejectReasonDiscardedOnAnsweredPath(t *tes
 	}
 }
 
+// TestHandleAnswerQuestion_N8b_CustomTextAtCapAccepted proves N8b's positive
+// boundary end-to-end through the MCP handler: an answer's custom_text of
+// exactly 2000 runes (clarification.answerTextRuneCap, unexported), counted
+// over code points with a multi-byte fixture, is accepted rather than
+// rejected as over the cap.
+func TestHandleAnswerQuestion_N8b_CustomTextAtCapAccepted(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	seedBundle(t, ctx, svc, repo, "pending-n8b-1")
+
+	store := clarification.NewStore(time.Minute)
+	resolver := newTestResolver(t, store, repo, svc)
+	h := &Handlers{taskSvc: svc, clarificationResolver: resolver, clarificationBundles: repo, logger: testLogger(t)}
+
+	exact := make([]rune, 2000)
+	for i := range exact {
+		exact[i] = '本' // multi-byte rune: proves the cap counts runes, not bytes
+	}
+
+	resp, err := h.handleAnswerQuestion(ctx, makeWSMessage(t, ws.ActionMCPAnswerQuestion, map[string]interface{}{
+		"pending_id": "pending-n8b-1",
+		"answers": []map[string]interface{}{
+			{"question_id": "q1", "selected_options": []string{"opt-a"}, "custom_text": string(exact)},
+			{"question_id": "q2", "selected_options": []string{"opt-c"}},
+		},
+	}))
+	require.NoError(t, err)
+
+	var body answerQuestionResponse
+	require.NoError(t, json.Unmarshal(resp.Payload, &body))
+	require.True(t, body.Claimed)
+	require.Equal(t, string(clarification.StatusAnswered), body.Status)
+
+	var respPayload map[string]interface{}
+	require.NoError(t, json.Unmarshal(body.Response, &respPayload))
+	answers, ok := respPayload["answers"].([]interface{})
+	require.True(t, ok)
+	first := answers[0].(map[string]interface{})
+	require.Equal(t, string(exact), first["custom_text"])
+}
+
 func TestHandleAnswerQuestion_SecondCaller_ClaimedFalseSameOutcome(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()

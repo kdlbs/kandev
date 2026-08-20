@@ -132,6 +132,37 @@ func TestHttpWaitForResponse_UnknownPendingID_404(t *testing.T) {
 	}
 }
 
+// TestHttpWaitForResponse_A5a_ForeignAndFabricatedPendingIDsReturnSameStatus
+// proves A5a directly: GET /:id/wait returns the SAME status for a foreign
+// bundle (exists durably, caller denied) and for a fabricated pending_id (no
+// durable messages at all). Asserting only "both are 404" via two independent
+// hardcoded literals — as TestHttpWaitForResponse_AuthorizationDenied_404 and
+// TestHttpWaitForResponse_UnknownPendingID_404 do above — would keep passing
+// even if a future change moved just one of the two cases to a different
+// status; it would not, on its own, prove the two remain indistinguishable to
+// an unauthorized caller. A3 exists precisely so a status-code oracle can't
+// tell a caller which pending_ids exist, so this test compares the two
+// responses to each other rather than each to a hardcoded literal.
+func TestHttpWaitForResponse_A5a_ForeignAndFabricatedPendingIDsReturnSameStatus(t *testing.T) {
+	msgs := map[string][]*taskmodels.Message{
+		"pending-a5a-foreign": {clarificationMessage("m1", "pending-a5a-foreign", "q1", 0, "First?", "opt1")},
+	}
+	h, _ := setupAuthzHandler(t, msgs, &stubAuthorizer{err: errAuthzDenied})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	foreignRec := runWait(t, h, "pending-a5a-foreign", ctx)
+	fabricatedRec := runWait(t, h, "pending-a5a-fabricated-does-not-exist", ctx)
+
+	if foreignRec.Code != fabricatedRec.Code {
+		t.Fatalf("foreign bundle status = %d, fabricated pending_id status = %d; A5a requires them to be identical so an unauthorized caller cannot distinguish the two",
+			foreignRec.Code, fabricatedRec.Code)
+	}
+	if foreignRec.Code != http.StatusNotFound {
+		t.Fatalf("both responses = %d, want 404", foreignRec.Code)
+	}
+}
+
 // TestHttpGetRequest_A8_AuthorizesDurableTaskID_NotInMemory proves A8: the
 // task_id used for authorization always comes from the bundle's durable
 // messages (M5), never the in-memory Request.TaskID — even when the two
