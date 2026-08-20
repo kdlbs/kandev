@@ -80,13 +80,12 @@ export function applyImport(
   bundle: Record<string, unknown>,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<{ result: { created_count: number; updated_count: number } }>(
-    `${BASE}/workspaces/${workspaceId}/config/import`,
-    {
-      ...options,
-      init: { method: "POST", body: JSON.stringify(bundle), ...options?.init },
-    },
-  );
+  return fetchJson<{
+    result: { created_count: number; updated_count: number; warnings?: string[] };
+  }>(`${BASE}/workspaces/${workspaceId}/config/import`, {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(bundle), ...options?.init },
+  });
 }
 
 // --- Config Sync (FS <-> DB) ---
@@ -131,10 +130,12 @@ export function getOutgoingDiff(workspaceId: string, options?: ApiRequestOptions
 }
 
 export function applyIncomingSync(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ result: { created_count: number; updated_count: number } }>(
-    `${BASE}/workspaces/${workspaceId}/config/sync/import-fs`,
-    { ...options, init: { method: "POST", ...options?.init } },
-  );
+  return fetchJson<{
+    result: { created_count: number; updated_count: number; warnings?: string[] };
+  }>(`${BASE}/workspaces/${workspaceId}/config/sync/import-fs`, {
+    ...options,
+    init: { method: "POST", ...options?.init },
+  });
 }
 
 export function applyOutgoingSync(workspaceId: string, options?: ApiRequestOptions) {
@@ -493,6 +494,7 @@ export function completeOnboarding(data: OnboardingCompletePayload, options?: Ap
 export type ImportFromFSResult = {
   workspaceIds: string[];
   importedCount: number;
+  warnings?: string[];
 };
 
 export function importFromFS(options?: ApiRequestOptions) {

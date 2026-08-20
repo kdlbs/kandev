@@ -1167,6 +1167,13 @@ export class ApiClient {
     return this.request("GET", `/api/v1/agent-profiles/${profileId}/mcp-config`);
   }
 
+  async updateAgentProfileMcpConfig(
+    profileId: string,
+    config: { enabled: boolean; servers: Record<string, unknown> },
+  ): Promise<{ profile_id: string; enabled: boolean; servers: Record<string, unknown> }> {
+    return this.request("POST", `/api/v1/agent-profiles/${profileId}/mcp-config`, config);
+  }
+
   // --- E2E Test Reset ---
 
   async e2eReset(workspaceId: string, keepWorkflowIds?: string[]): Promise<void> {
@@ -1222,9 +1229,11 @@ export class ApiClient {
   }
 
   /**
-   * Seeds an agent message via the e2e harness. `metadata` lands on the
-   * message row; `turnMetadata` is persisted on the ensured turn so specs can
-   * exercise the metadata dialog's `turn_metadata` field.
+   * Seeds a message via the e2e harness. `metadata` lands on the message row;
+   * `turnMetadata` is persisted on the ensured turn so specs can exercise the
+   * metadata dialog's `turn_metadata` field. `authorType` defaults to agent;
+   * "user" seeds a prompt row whose prompt_index is computed server-side.
+   * `createdAt` (RFC3339) pins the row's timestamp for deterministic ordering.
    */
   async seedSessionMessage(
     sessionId: string,
@@ -1233,12 +1242,16 @@ export class ApiClient {
       content?: string;
       metadata?: Record<string, unknown>;
       turnMetadata?: Record<string, unknown>;
+      authorType?: "user" | "agent";
+      createdAt?: string;
     },
   ): Promise<void> {
     const body: Record<string, unknown> = { session_id: sessionId, type: opts.type };
     if (opts.content !== undefined) body.content = opts.content;
     if (opts.metadata !== undefined) body.metadata = opts.metadata;
     if (opts.turnMetadata !== undefined) body.turn_metadata = opts.turnMetadata;
+    if (opts.authorType !== undefined) body.author_type = opts.authorType;
+    if (opts.createdAt !== undefined) body.created_at = opts.createdAt;
     await this.request("POST", "/api/v1/_test/messages", body);
   }
 
@@ -2432,7 +2445,7 @@ export class ApiClient {
     await this.wsRequest("message.queue.cancel", { session_id: sessionId });
   }
 
-  async getQueueStatus(sessionId: string): Promise<{ count: number }> {
+  async getQueueStatus(sessionId: string): Promise<{ count: number; auto_run: boolean }> {
     return this.wsRequest("message.queue.get", { session_id: sessionId });
   }
 

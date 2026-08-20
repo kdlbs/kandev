@@ -238,7 +238,6 @@
   "dockerImageWithExample": "Docker image (e.g. node:20-slim)",
   "duration": "Duration",
   "editable": "Editable",
-  "editOrgChartFromTheAgents": "Edit org chart from the agents list.",
   "editRoutine": "Edit routine",
   "effectiveActionsThisAgentCanRequest": "Effective actions this agent can request during Office runs.",
   "eGCodeReview": "e.g. code-review",

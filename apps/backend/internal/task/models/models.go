@@ -1141,6 +1141,12 @@ type Message struct {
 	RequestsInput bool                   `json:"requests_input"` // True if agent is requesting user input
 	CreatedAt     time.Time              `json:"created_at"`
 	UpdatedAt     time.Time              `json:"updated_at"` // Authoritative per-message change signal
+	// PromptIndex is the 1-based ordinal of the message among ALL user
+	// messages of its session, ordered by normalized-microsecond created_at
+	// ascending with ties broken by id ascending. Read-time derived: zero for
+	// non-user messages and for legacy 12-column reads, and serialized only
+	// when > 0 (json omitempty).
+	PromptIndex int `json:"prompt_index,omitempty"`
 }
 
 // ToAPI converts internal Message to API type.
@@ -1175,6 +1181,7 @@ func (m *Message) ToAPI() *v1.Message {
 		RequestsInput: m.RequestsInput,
 		CreatedAt:     m.CreatedAt,
 		UpdatedAt:     m.UpdatedAt,
+		PromptIndex:   m.PromptIndex,
 	}
 	if hasHidden {
 		result.RawContent = m.Content

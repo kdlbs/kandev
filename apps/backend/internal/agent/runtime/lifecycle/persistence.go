@@ -316,22 +316,18 @@ func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *A
 // so the in-memory and persistent state are gone in the same operation.
 //
 // Resume-safety invariant (#1597 resume-safety invariant): a row that still holds
-// a resume_token is REPAIRED in place (status=stopped, local_pid cleared) rather
-// than deleted, so a session stays resumable even if a subsequent relaunch fails.
-// On the happy path the relaunch UPSERTs a fresh row over the repaired one, so
-// repairing costs nothing; on the failure path it preserves the only handle to a
-// resumable conversation. Rows with no resume_token are deleted as before.
+// a resume_token, or still claims a running execution, is REPAIRED in place
+// (status=stopped, local_pid cleared) rather than deleted. This keeps a
+// non-terminal session visible while a stale runtime is being replaced and
+// preserves resumable conversations if a subsequent relaunch fails. On the
+// happy path the relaunch UPSERTs a fresh row over the repaired one, so
+// repairing costs nothing. Rows that are already stopped and have no token are
+// deleted as before.
 //
-// Deliberate deviation from models.RowMustBePreserved, which also preserves
-// tokenless rows backing a non-terminal session: this path gates on the token
-// alone because the token IS the resumable agent state. A row without one means
-// the agent never established (or never reported) an ACP session — there is no
-// agent-side context a preserved row could resume, and Kandev's own chat
-// history lives in the task tables, untouched by this delete. Preserving a
-// tokenless row here would keep only incidental metadata that the relaunch
-// upsert rebuilds anyway, at the cost of wiring session-state reads into the
-// lifecycle tier. Orchestrator-side reconciliation, which already knows session
-// state, applies the full invariant via pruneOrRepairExecutorRow.
+// This remains a narrower rule than models.RowMustBePreserved because the
+// lifecycle tier does not own task-session state. The running status is the
+// local signal that a non-terminal session may still need the row; the
+// orchestrator applies the full task-state invariant during reconciliation.
 //
 // Best-effort: a failure here is logged but doesn't propagate.
 func (m *Manager) deleteExecutorRunning(ctx context.Context, sessionID string) {
@@ -344,7 +340,8 @@ func (m *Manager) deleteExecutorRunning(ctx context.Context, sessionID string) {
 	if reader, ok := m.runningWriter.(executorRunningReader); ok {
 		existing, err := reader.GetExecutorRunningBySessionID(ctx, sessionID)
 		switch {
-		case err == nil && existing != nil && existing.ResumeToken != "":
+		case err == nil && existing != nil &&
+			(existing.ResumeToken != "" || existing.Status == models.ExecutorRunningStatusRunning):
 			if repairErr := m.runningWriter.RepairExecutorRunningDead(ctx, sessionID); repairErr != nil &&
 				!errors.Is(repairErr, models.ErrExecutorRunningNotFound) {
 				m.logger.Warn("failed to repair resumable executors_running row on cleanup; leaving row intact",

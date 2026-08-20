@@ -11,7 +11,37 @@ Playwright-based end-to-end tests. Each Playwright worker spawns its own real Go
 | `helpers/`             | Reusable building blocks for specs (`api-client.ts`, `docker.ts`, `ssh.ts`, `git-helper.ts`, `ws-capture.ts`, …).                            |
 | `pages/`               | Page Objects (one class per top-level UI surface — `SessionPage`, `KanbanPage`, `JiraSettingsPage`, `SSHSettingsPage`, …).                   |
 | `playwright.config.ts` | Project definitions, timeouts, sharding config.                                                                                              |
-| `global-setup.ts`      | Pre-flight checks for required binaries (kandev, mock-agent) and the Vite web build.                                                         |
+| `global-setup.ts`      | Pre-flight checks for required backend artifacts, the Vite web build, and backend artifact freshness.                                        |
+
+## Prerequisites
+
+E2E runs the **prebuilt** backend, not a live rebuild — `fixtures/backend.ts` spawns
+`apps/backend/bin/kandev`, and `pnpm run build:e2e` only rebuilds the Vite bundle.
+Before running specs (or after touching anything under `apps/backend`), rebuild both:
+
+```sh
+make -C apps/backend build              # bin/kandev, bin/mock-agent
+make -C apps/backend e2e-plugin-package # .build/kandev-plugin-e2e-1.0.0.tar.gz, for tests/plugins/plugins.spec.ts
+cd apps/web && pnpm run build:e2e
+```
+
+These are prerequisites, not optional steps — `global-setup.ts` fails fast with the
+exact remedy command if a required backend artifact is older than any file under
+`apps/backend` or is missing. This includes the fixture plugin package. The
+`containers` project also checks the Linux mock-agent and agentctl binaries.
+
+"Any file", not just `*.go`: the binary `//go:embed`s a large asset surface, so
+editing `internal/profiles/profiles.yaml` (runtime feature-flag defaults), a
+`config/workflows/*.yml`, a `config/prompts/*.md`, or an `internal/i18n/locales/*.json`
+changes backend behaviour without touching a single `.go` file. Excluded are `bin/`,
+`.build/`, `testdata/`, the synced web bundle at `internal/webapp/embedded/generated/`,
+and the gitignored Go outputs that land in the source tree (`coverage.out`, `*.test`,
+`coverage.html`) so that `make -C apps/backend test-coverage` does not ask for a rebuild.
+
+Skip all freshness checks with `KANDEV_E2E_SKIP_FRESHNESS=1` (both E2E CI jobs set
+this because they stage artifacts after their own checkout). `KANDEV_E2E_BIN`
+selects a custom backend binary. The setup still checks the local mock agent and
+other required artifacts.
 
 ## Playwright projects
 

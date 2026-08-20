@@ -34,11 +34,22 @@ the local single-user install with a login screen it never asked for.
   `admin` (user management, auth settings, destructive system operations,
   feature toggles) and `member`. Users can be disabled (revokes all sessions
   and tokens); the last active admin cannot be demoted or disabled.
-- **Sessions & tokens.** Browser sessions are opaque cookies
-  (`kandev_session`, HttpOnly, SameSite=Lax, sliding 30-day expiry,
-  DB-backed and revocable from `Settings > Account`). Programmatic clients
-  (external MCP, scripts, CI) use personal access tokens
-  (`kandev_pat_…`, shown once, revocable).
+- **Sessions & tokens.** Browser sessions are opaque cookies with the base
+  session-cookie name `kandev_session` (effective name is request-host
+  derived — see the port-scoping bullet below), HttpOnly, SameSite=Lax,
+  sliding 30-day expiry, DB-backed and revocable from `Settings > Account`.
+  Programmatic clients (external MCP, scripts, CI) use personal access
+  tokens (`kandev_pat_…`, shown once, revocable).
+- **Cookie name is port-scoped when the instance is served on a non-default
+  port.** Cookies ignore port when deciding scope, so two auth-enabled
+  instances on one host (same IP, different ports) would otherwise overwrite
+  each other's `kandev_session` and yank every instance to `/login` on the
+  next request. The backend derives the session cookie name from the request
+  host: `kandev_session_<port>` on a ported host, plain `kandev_session` on a
+  default-port host (see `fix-multi-instance-cookie-isolation`). An explicit
+  `auth.cookieName` config value is used verbatim. The legacy unprefixed
+  cookie is deliberately not read (one re-login after upgrade keeps the
+  cross-instance conflict dead).
 - **Invites.** Admins mint tokenized invite URLs (`/invite?token=…`,
   optional pinned email, member/admin role, 7-day default expiry, single
   use). No email server required. Admins can also create accounts directly.
@@ -124,6 +135,10 @@ the local single-user install with a login screen it never asked for.
 - **GIVEN** an authenticated Kandev browser session, **WHEN** a protected API
   request receives a Kandev session challenge, **THEN** the browser clears the
   stale Kandev identity and navigates to `/login`.
+- **GIVEN** two auth-enabled Kandev instances A (port 8080) and B (port
+  8081) on the same host, **WHEN** the user logs into B, **THEN** A's session
+  keeps working and A's next page load authenticates with A's own
+  `kandev_session_8080` cookie rather than showing the Sign in page.
 - **GIVEN** an authenticated Kandev browser session and an expired or invalid
   third-party integration credential, **WHEN** GitHub, GitLab, Jira, or Linear
   data loading returns 401 without a Kandev session challenge, **THEN** the

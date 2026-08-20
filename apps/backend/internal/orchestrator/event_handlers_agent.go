@@ -20,6 +20,8 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+const queueStatusMaxField = "max"
+
 type reservedPromptCallbackContextKey struct{}
 
 // agentReadyDetachedContext ignores transient event-delivery cancellation but
@@ -106,10 +108,12 @@ func (s *Service) publishQueueStatusEvent(ctx context.Context, sessionID string)
 
 	queueStatus := s.messageQueue.GetStatus(ctx, sessionID)
 	eventData := map[string]interface{}{
-		"session_id": sessionID,
-		"entries":    queueStatus.Entries,
-		"count":      queueStatus.Count,
-		"max":        queueStatus.Max,
+		metaKeySessionID:    sessionID,
+		"entries":           queueStatus.Entries,
+		"count":             queueStatus.Count,
+		queueStatusMaxField: queueStatus.Max,
+		"auto_run":          queueStatus.AutoRun,
+		"merge_enabled":     queueStatus.MergeEnabled,
 	}
 	if taskID, err := s.SessionTaskID(ctx, sessionID); err != nil {
 		s.logger.Warn("resolve session task for queue status event",
@@ -148,10 +152,12 @@ func (s *Service) publishTaskQueueStatusEvent(ctx context.Context, taskID, sessi
 	}
 	if sessionID != "" && s.messageQueue != nil {
 		queueStatus := s.messageQueue.GetStatus(ctx, sessionID)
-		eventData["session_id"] = sessionID
+		eventData[metaKeySessionID] = sessionID
 		eventData["entries"] = queueStatus.Entries
 		eventData["count"] = queueStatus.Count
-		eventData["max"] = queueStatus.Max
+		eventData[queueStatusMaxField] = queueStatus.Max
+		eventData["auto_run"] = queueStatus.AutoRun
+		eventData["merge_enabled"] = queueStatus.MergeEnabled
 	}
 	s.logger.Debug("publishing task queue status changed event",
 		zap.String("task_id", taskID),
@@ -1236,7 +1242,16 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 		zap.Bool("workflow_transitioned", transitioned))
 
 	if !transitioned && session.State != models.TaskSessionStateWaitingForInput {
-		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
+		// Terminal-receipt path. Only flip the session to WAITING_FOR_INPUT
+		// when the most recent agent-authored message actually asked the
+		// user for input. Sibling sessions (root task, ParentID empty)
+		// keep the original affordance so a finishing session on a
+		// multi-session task still flips to WAITING — only subtasks
+		// (ParentID non-empty) get the guard. setSessionWaitingForInputIfRequested
+		// itself inspects the task row to pick the path; for sibling
+		// sessions the call is a no-op pass-through to the unconditional
+		// helper, preserving the pre-fix behavior.
+		s.setSessionWaitingForInputIfRequested(ctx, data.TaskID, data.SessionID, session)
 	}
 
 	// Capture a git status snapshot before cleanup so it can be served
@@ -1249,6 +1264,22 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 	// Finalize the automation run: mark status=succeeded so the automation's
 	// concurrency slot is released. The worktree stays.
 	s.finalizeAutomationRun(ctx, data.TaskID, true, "")
+
+	// Settle point: turn has been completed and the session state has been
+	// reconciled. reclaimIdleSession is the synchronous equivalent of the
+	// (intentionally-not-built) runtime auto-convergence tick. It only
+	// proceeds when no live agent process and no active turn are observed,
+	// so the typical WAITING_FOR_INPUT case (live agent waiting for the
+	// user) is a no-op pass-through. Subtask terminals that already
+	// collapsed to COMPLETED inside setSessionWaitingForInputIfRequested
+	// reclaimed earlier; this call covers sibling/office flows whose
+	// settled shape has no live runtime.
+	if err := s.reclaimIdleSession(context.WithoutCancel(ctx), data.SessionID); err != nil {
+		s.logger.Warn("agent.completed settle: reclaim failed; row preserved",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+	}
 }
 
 // handleAgentFailed handles agent failure events

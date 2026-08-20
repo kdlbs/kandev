@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"testing"
@@ -212,12 +213,34 @@ func TestManager_CleanupStaleExecution_SkipsStopWhenNoRuntime(t *testing.T) {
 	}
 }
 
+func TestManager_CleanupStaleExecution_PreservesTrackingOnStopError(t *testing.T) {
+	log := newTestRegistryLogger()
+	reg := newTestRegistry()
+	execRegistry := NewExecutorRegistry(log)
+	mock := &mockStopTracker{name: "standalone", stopErr: errors.New("runtime unavailable")}
+	execRegistry.Register(mock)
+	mgr := NewManager(reg, &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil, ExecutorFallbackWarn, "", log)
+
+	execution := &AgentExecution{ID: "exec-error", SessionID: "session-error", RuntimeName: "standalone"}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("failed to seed execution: %v", err)
+	}
+
+	if err := mgr.CleanupStaleExecutionBySessionID(context.Background(), "session-error"); err == nil {
+		t.Fatal("cleanup must report a runtime stop failure")
+	}
+	if _, found := mgr.GetExecutionBySessionID("session-error"); !found {
+		t.Fatal("failed cleanup must retain execution tracking for a retry")
+	}
+}
+
 // mockStopTracker is a minimal ExecutorBackend that records StopInstance calls.
 type mockStopTracker struct {
 	name              executor.Name
 	stopCalled        bool
 	stoppedInstanceID string
 	stopReason        string
+	stopErr           error
 }
 
 func (m *mockStopTracker) Name() executor.Name { return m.name }
@@ -231,7 +254,7 @@ func (m *mockStopTracker) StopInstance(ctx context.Context, instance *ExecutorIn
 	m.stopCalled = true
 	m.stoppedInstanceID = instance.InstanceID
 	m.stopReason = instance.StopReason
-	return nil
+	return m.stopErr
 }
 
 func TestManagerStopAllAgentsPassesBackendShutdownReason(t *testing.T) {

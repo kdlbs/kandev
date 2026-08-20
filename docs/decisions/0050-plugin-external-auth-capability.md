@@ -22,12 +22,13 @@ RPCs the plugin *calls*, plus host→plugin events and a proxied inbound webhook
 (`/api/plugins/{id}/webhooks/{key}`, already on the auth public allowlist).
 None of these can establish an authenticated browser session.
 
-The architectural constraint that shaped this decision: the `kandev_session`
-cookie must be set on the **HTTP response to the browser**. A `Host` gRPC RPC
-runs on the go-plugin broker channel, not the browser's HTTP connection, so it
-*cannot* set that cookie. The only plugin→browser HTTP path is the webhook
-response. Therefore session establishment must happen on the webhook response
-path, regardless of whether a new RPC exists.
+The architectural constraint that shaped this decision: the session cookie
+(name derived from the request host — base name `kandev_session`) must be set
+on the **HTTP response to the browser**. A `Host` gRPC RPC runs on the
+go-plugin broker channel, not the browser's HTTP connection, so it *cannot*
+set that cookie. The only plugin→browser HTTP path is the webhook response.
+Therefore session establishment must happen on the webhook response path,
+regardless of whether a new RPC exists.
 
 ## Decision
 
@@ -44,7 +45,7 @@ a reserved header `X-Kandev-Auth-Login` whose value is a JSON assertion
    not silently ignored.
 3. Calls `auth.Service.AuthenticateExternal`, which maps the assertion to a
    user (existing identity → link-by-email → JIT-provision a **member**),
-   mints a session, and the host sets the `kandev_session` cookie itself. The
+   mints a session, and the host sets the session cookie itself. The
    email-linking step is trust-sensitive: the plugin **MUST** only assert an
    email the IdP verified as owned by the subject, otherwise a spoofed email
    claim is an account takeover. As defense-in-depth the host **refuses to

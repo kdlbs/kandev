@@ -18,6 +18,11 @@ var (
 	attachSignalsFn = func(supervisor *processSupervisor) {
 		supervisor.attachSignals()
 	}
+	startParentWatchFn = func(supervisor *processSupervisor) *parentWatchdog {
+		watchdog := newParentWatchdogFromEnv(supervisor.shutdown, launcherExit)
+		watchdog.start()
+		return watchdog
+	}
 )
 
 func runStart(ctx context.Context, opts Options) int {
@@ -92,6 +97,10 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	supervisor := newSupervisorFn()
 	attachSignalsFn(supervisor)
 	shutdownDebugf("runManagedApp signal handler attached")
+	parentWatchdog := startParentWatchFn(supervisor)
+	if parentWatchdog != nil {
+		defer parentWatchdog.stop()
+	}
 	healthToken, err := launchHealthToken()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())

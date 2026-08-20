@@ -799,6 +799,10 @@ export type Message = {
   created_at: string;
   /** Authoritative per-message change signal; advances on every content/metadata update. */
   updated_at?: string;
+  /** 1-based ordinal among ALL user messages of the session (ordered by
+   * created_at ascending, ties by id); present only on user messages from an
+   * indexed server payload, omitted on older payloads. */
+  prompt_index?: number;
 };
 
 export type Turn = {

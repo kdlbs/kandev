@@ -85,7 +85,6 @@ function useEscToClose(open: boolean, onClose: () => void): void {
 type QueueAffordanceProps = {
   sessionId: string | null;
   children: ReactNode;
-  canDrain?: boolean;
   /**
    * Optional render slot for placing the chip inside an external row (e.g. the
    * chat status bar). The callback receives the chip node (or `null` when no
@@ -97,7 +96,6 @@ type QueueAffordanceProps = {
 
 type QueuePanelHandlerArgs = {
   clearAll: () => Promise<void>;
-  drainNext: () => Promise<void>;
   editEntry: (
     entryId: string,
     content: string,
@@ -108,13 +106,10 @@ type QueuePanelHandlerArgs = {
   mergeEntry: (entryId: string) => Promise<void>;
   reorderEntries: (orderedIds: string[]) => Promise<void>;
   sendEntryNow: (entryId: string) => Promise<void>;
-  sendAllNow: () => Promise<void>;
+  setAutoRun: (enabled: boolean) => Promise<void>;
 };
 
-function useSendNowPanelHandlers(
-  sendEntryNow: (entryId: string) => Promise<void>,
-  sendAllNow: () => Promise<void>,
-) {
+function useSendNowPanelHandlers(sendEntryNow: (entryId: string) => Promise<void>) {
   const { t } = useTranslation();
   const sendNowErrorMessage = useCallback(
     (err: unknown) => {
@@ -144,24 +139,17 @@ function useSendNowPanelHandlers(
     },
     [sendEntryNow, sendNowErrorMessage],
   );
-  const handleSendAllNow = useCallback(() => {
-    sendAllNow().catch((err) => {
-      console.error("Failed to send queued messages now:", err);
-      toast.error(sendNowErrorMessage(err));
-    });
-  }, [sendAllNow, sendNowErrorMessage]);
-  return { handleSendEntryNow, handleSendAllNow };
+  return { handleSendEntryNow };
 }
 
 function useQueuePanelHandlers({
   clearAll,
-  drainNext,
   editEntry,
   removeEntry,
   mergeEntry,
   reorderEntries,
   sendEntryNow,
-  sendAllNow,
+  setAutoRun,
 }: QueuePanelHandlerArgs) {
   // Tracks merge requests still in flight so a rapid second click on the same
   // row cannot fire a second request for an entry that is already gone — the
@@ -169,10 +157,7 @@ function useQueuePanelHandlers({
   // a spurious "not found" error.
   const pendingMerges = useRef(new Set<string>());
   const { t } = useTranslation();
-  const { handleSendEntryNow, handleSendAllNow } = useSendNowPanelHandlers(
-    sendEntryNow,
-    sendAllNow,
-  );
+  const { handleSendEntryNow } = useSendNowPanelHandlers(sendEntryNow);
   const handleSave = useCallback(
     async (entryId: string, content: string, entityReferences: EntityReference[]) => {
       await editEntry(entryId, content, undefined, entityReferences);
@@ -219,12 +204,15 @@ function useQueuePanelHandlers({
       toast.error(t("chat:failedToClearQueuedMessages"));
     });
   }, [clearAll, t]);
-  const handleDrain = useCallback(() => {
-    drainNext().catch((err) => {
-      console.error("Failed to run queued message:", err);
-      toast.error(t("chat:failedToRunQueuedMessage"));
-    });
-  }, [drainNext, t]);
+  const handleAutoRunChange = useCallback(
+    (enabled: boolean) => {
+      setAutoRun(enabled).catch((err) => {
+        console.error("Failed to update queue Auto-run:", err);
+        toast.error(t("chat:failedToSetQueueAutoRun"));
+      });
+    },
+    [setAutoRun, t],
+  );
   const handleReorder = useCallback(
     async (orderedIds: string[]) => {
       try {
@@ -245,10 +233,9 @@ function useQueuePanelHandlers({
     handleRemove,
     handleMerge,
     handleClear,
-    handleDrain,
+    handleAutoRunChange,
     handleReorder,
     handleSendEntryNow,
-    handleSendAllNow,
   };
 }
 
@@ -259,15 +246,14 @@ type QueuePanelDisclosureProps = {
   count: number;
   max: number;
   isFull: boolean;
-  canDrain: boolean;
+  autoRun: boolean;
   isLoading: boolean;
   cancellationPending: boolean;
   mergeEnabled: boolean;
   pinned: boolean;
   onClose: () => void;
   onClear: () => void;
-  onDrain: () => void;
-  onSendNow: () => void;
+  onAutoRunChange: (enabled: boolean) => void;
   onTogglePin: () => void;
   onSave: (entryId: string, content: string, refs: EntityReference[]) => Promise<void>;
   onRemove: (entryId: string) => Promise<void>;
@@ -284,15 +270,14 @@ function QueuePanelDisclosure({
   count,
   max,
   isFull,
-  canDrain,
+  autoRun,
   isLoading,
   cancellationPending,
   mergeEnabled,
   pinned,
   onClose,
   onClear,
-  onDrain,
-  onSendNow,
+  onAutoRunChange,
   onTogglePin,
   onSave,
   onRemove,
@@ -313,15 +298,14 @@ function QueuePanelDisclosure({
           count={count}
           max={max}
           isFull={isFull}
-          canDrain={canDrain}
+          autoRun={autoRun}
           isLoading={isLoading}
           cancellationPending={cancellationPending}
           mergeEnabled={mergeEnabled}
           pinned={pinned}
           onClose={onClose}
           onClear={onClear}
-          onDrain={onDrain}
-          onSendNow={onSendNow}
+          onAutoRunChange={onAutoRunChange}
           onTogglePin={onTogglePin}
           onSave={onSave}
           onRemove={onRemove}
@@ -342,27 +326,22 @@ function QueuePanelDisclosure({
  *   it expands a panel above the input. Drained or session-switched queues
  *   auto-collapse.
  */
-export function QueueAffordance({
-  sessionId,
-  children,
-  canDrain = false,
-  renderStatusBar,
-}: QueueAffordanceProps) {
+export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueAffordanceProps) {
   const {
     entries,
     count,
     max,
     isFull,
     mergeEnabled,
+    autoRun,
     isLoading,
     clearAll,
-    drainNext,
+    setAutoRun,
     editEntry,
     removeEntry,
     mergeEntry,
     reorderEntries,
     sendEntryNow,
-    sendAllNow,
     cancellationPending,
   } = useQueue(sessionId);
   const { value: pinned, toggle: togglePin } = useQueuePinned(sessionId);
@@ -372,19 +351,17 @@ export function QueueAffordance({
     handleRemove,
     handleMerge,
     handleClear,
-    handleDrain,
+    handleAutoRunChange,
     handleReorder,
     handleSendEntryNow,
-    handleSendAllNow,
   } = useQueuePanelHandlers({
     clearAll,
-    drainNext,
     editEntry,
     removeEntry,
     mergeEntry,
     reorderEntries,
     sendEntryNow,
-    sendAllNow,
+    setAutoRun,
   });
 
   // Reset disclosure on session switch or full drain using render-phase state
@@ -424,15 +401,14 @@ export function QueueAffordance({
         count={count}
         max={max}
         isFull={isFull}
-        canDrain={canDrain}
+        autoRun={autoRun}
         isLoading={isLoading}
         cancellationPending={cancellationPending}
         mergeEnabled={mergeEnabled}
         pinned={pinned}
         onClose={close}
         onClear={handleClear}
-        onDrain={handleDrain}
-        onSendNow={handleSendAllNow}
+        onAutoRunChange={handleAutoRunChange}
         onTogglePin={togglePin}
         onSave={handleSave}
         onRemove={handleRemove}
@@ -506,15 +482,14 @@ type QueuePanelProps = {
   count: number;
   max: number;
   isFull: boolean;
-  canDrain: boolean;
+  autoRun: boolean;
   isLoading: boolean;
   cancellationPending: boolean;
   mergeEnabled: boolean;
   pinned: boolean;
   onClose: () => void;
   onClear: () => void;
-  onDrain: () => void;
-  onSendNow: () => void;
+  onAutoRunChange: (enabled: boolean) => void;
   onTogglePin: () => void;
   onSave: (entryId: string, content: string, entityReferences: EntityReference[]) => Promise<void>;
   onRemove: (entryId: string) => Promise<void>;
@@ -576,15 +551,14 @@ function QueuePanel({
   count,
   max,
   isFull,
-  canDrain,
+  autoRun,
   isLoading,
   cancellationPending,
   mergeEnabled,
   pinned,
   onClose,
   onClear,
-  onDrain,
-  onSendNow,
+  onAutoRunChange,
   onTogglePin,
   onSave,
   onRemove,
@@ -619,13 +593,12 @@ function QueuePanel({
         count={count}
         max={max}
         isFull={isFull}
-        canDrain={canDrain}
+        autoRun={autoRun}
         isLoading={isLoading}
         cancellationPending={cancellationPending}
         pinned={pinned}
         onClear={onClear}
-        onDrain={onDrain}
-        onSendNow={onSendNow}
+        onAutoRunChange={onAutoRunChange}
         onTogglePin={onTogglePin}
         onClose={onClose}
       />

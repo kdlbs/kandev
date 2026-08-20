@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -274,14 +275,17 @@ func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionI
 		zap.String("session_id", sessionID),
 		zap.String("execution_id", execution.ID))
 
-	// End session trace span
-	execution.EndSessionSpan()
-
 	// Stop the runtime instance (workspace tracker, shell, etc.) to prevent leaked
 	// goroutines. Without this, the old agentctl instance keeps running when a new
 	// execution is created for the same session, causing git polling on deleted worktrees.
 	// This is idempotent — returns success if the instance is already gone.
-	m.stopAgentViaBackend(ctx, execution.ID, execution, stopReasonStaleExecutionCleanup, false, false)
+	if err := m.stopAgentViaBackend(ctx, execution.ID, execution, stopReasonStaleExecutionCleanup, false, false); err != nil {
+		return fmt.Errorf("stop stale runtime %s: %w", execution.ID, err)
+	}
+
+	// End session trace span only after the runtime has stopped. A failed stop
+	// remains retryable and should keep the execution's lifecycle intact.
+	execution.EndSessionSpan()
 
 	// Close agentctl connection if it exists
 	if execution.agentctl != nil {

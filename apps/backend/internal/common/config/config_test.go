@@ -506,3 +506,71 @@ func TestFeaturesConfig_JSONShape(t *testing.T) {
 		t.Fatal("retired appStatusBar remains in FeaturesConfig JSON")
 	}
 }
+
+// TestAuthCookieNameDefaultsEmpty pins the config-default contract: the
+// seeded default is EMPTY so the auth service port-scopes its internal
+// "kandev_session" base from the request host; a seeded non-empty default
+// would suppress suffixing in production.
+func TestAuthCookieNameDefaultsEmpty(t *testing.T) {
+	t.Setenv("KANDEV_AUTH_COOKIE_NAME", "")
+	cfg, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if got := cfg.Auth.CookieName; got != "" {
+		t.Fatalf("default auth.cookieName = %q, want empty", got)
+	}
+}
+
+// TestAuthCookieNameFromConfigFile pins config.yaml precedence for
+// auth.cookieName.
+func TestAuthCookieNameFromConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	cfgYAML := "auth:\n  cookieName: my_session\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfgYAML), 0o600); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	t.Setenv("KANDEV_AUTH_COOKIE_NAME", "")
+
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if got := cfg.Auth.CookieName; got != "my_session" {
+		t.Fatalf("auth.cookieName from config = %q, want %q", got, "my_session")
+	}
+}
+
+// TestAuthCookieNameFromEnv pins the canonical environment override
+// KANDEV_AUTH_COOKIE_NAME (explicit BindEnv — the automatic camelCase
+// mapping would expose the undocumented KANDEV_AUTH_COOKIENAME instead).
+func TestAuthCookieNameFromEnv(t *testing.T) {
+	t.Setenv("KANDEV_AUTH_COOKIE_NAME", "env_session")
+
+	cfg, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if got := cfg.Auth.CookieName; got != "env_session" {
+		t.Fatalf("auth.cookieName from env = %q, want %q", got, "env_session")
+	}
+}
+
+// TestAuthCookieNameEnvOverridesFile pins precedence: environment wins over
+// config.yaml for auth.cookieName.
+func TestAuthCookieNameEnvOverridesFile(t *testing.T) {
+	dir := t.TempDir()
+	cfgYAML := "auth:\n  cookieName: file_session\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfgYAML), 0o600); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	t.Setenv("KANDEV_AUTH_COOKIE_NAME", "env_session")
+
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if got := cfg.Auth.CookieName; got != "env_session" {
+		t.Fatalf("auth.cookieName = %q, want env override %q", got, "env_session")
+	}
+}

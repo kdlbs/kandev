@@ -141,7 +141,9 @@ describe("useSubmitHandler", () => {
       variant: "error",
     });
   });
+});
 
+describe("useSubmitHandler routing", () => {
   it("queues through the shared handler instead of preview onSend while clarification is pending", async () => {
     const onSend = vi.fn();
     const { result } = renderHook(() =>
@@ -167,7 +169,26 @@ describe("useSubmitHandler", () => {
     expect(onSend).toHaveBeenCalledWith({ message: "direct preview message" });
     expect(handleSendMessageMock).not.toHaveBeenCalled();
   });
+});
 
+describe("useSubmitHandler plan mode", () => {
+  it("uses the normal send path in plan mode", async () => {
+    const onSend = vi.fn();
+    const { result } = renderHook(() =>
+      useSubmitHandler(panelState({ planModeEnabled: true }), onSend),
+    );
+
+    await act(async () => {
+      await result.current.handleSubmit({ message: "plan-mode instruction" });
+    });
+
+    expect(onSend).toHaveBeenCalledWith({ message: "plan-mode instruction" });
+    expect(handleSendMessageMock).not.toHaveBeenCalled();
+    expect(toastMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("useSubmitHandler deterministic failures", () => {
   it.each([
     ["connection-unavailable", "Connection unavailable. Reconnect and try again."],
     ["session-unavailable", "The selected session is not available for input."],
@@ -190,7 +211,9 @@ describe("useSubmitHandler", () => {
       variant: "error",
     });
   });
+});
 
+describe("useSubmitHandler message comments", () => {
   it("keeps agent message comments pending when sending fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const markCommentsSent = vi.fn();

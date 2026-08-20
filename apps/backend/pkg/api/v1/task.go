@@ -242,6 +242,11 @@ type Message struct {
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 	CreatedAt     time.Time              `json:"created_at"`
 	UpdatedAt     time.Time              `json:"updated_at,omitempty"` // Authoritative per-message change signal
+	// PromptIndex is the 1-based ordinal of the message among ALL user
+	// messages of its session (ordered by normalized-microsecond created_at
+	// ascending, ties by id ascending), present only on user messages
+	// produced by an indexed server payload; omitted when zero.
+	PromptIndex int `json:"prompt_index,omitempty"`
 }
 
 // CreateMessageRequest for adding a message to a task session

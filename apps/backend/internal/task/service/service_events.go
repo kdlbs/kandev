@@ -925,6 +925,7 @@ func messageEventChangesPendingAction(eventType string, message *models.Message)
 	}
 }
 
+// newMessageEvent builds a bus event for a message lifecycle change, embedding the message's prompt index when present.
 func newMessageEvent(eventType string, message *models.Message) *bus.Event {
 
 	messageType := string(message.Type)
@@ -948,6 +949,12 @@ func newMessageEvent(eventType string, message *models.Message) *bus.Event {
 		// fields with nanosecond precision too, so both delivery channels agree.
 		"created_at": message.CreatedAt.Format(time.RFC3339Nano),
 		"updated_at": message.UpdatedAt.Format(time.RFC3339Nano),
+	}
+
+	// User messages carry their stable prompt ordinal so WS consumers can
+	// render the panel label without an extra fetch; agent rows omit it.
+	if message.PromptIndex > 0 {
+		data["prompt_index"] = message.PromptIndex
 	}
 
 	if hasHidden {

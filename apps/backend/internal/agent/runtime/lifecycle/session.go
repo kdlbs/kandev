@@ -635,7 +635,17 @@ func (sm *SessionManager) applyRuntimeSessionLayers(
 				zap.String("execution_id", execution.ID), zap.String("mode", runtimeMode), zap.Error(err))
 		}
 	}
-	sanitizedOptions := profileconfig.SanitizeConfigOptions(runtimeConfigOptions)
+	// Fail safe: when the current agent's option catalog is not yet known, we
+	// cannot verify which persisted options it supports, so replay nothing
+	// rather than sending a prior agent's keys (spec failure mode: unknown
+	// catalog must not send unverified options). This covers flat-model-list
+	// agents whose startup wait exits on the model list before any config
+	// options settle.
+	modelState := execution.GetModelState()
+	var sanitizedOptions map[string]string
+	if _, catalogKnown := capturedRuntimeConfigOptionCatalog(modelState); catalogKnown {
+		sanitizedOptions = sanitizeRuntimeConfigOptionsWithCatalog(runtimeConfigOptions, modelState)
+	}
 	for _, configID := range sortedConfigOptionKeys(sanitizedOptions) {
 		value := sanitizedOptions[configID]
 		if err := execution.agentctl.SetConfigOption(ctx, configID, value); err != nil {
@@ -1517,12 +1527,12 @@ func (sm *SessionManager) triggerPrompt(
 }
 
 func waitForPendingDispatchedPrompt(ctx context.Context, execution *AgentExecution) error {
-	if !execution.dispatchedPromptPending {
+	if !execution.dispatchedPromptPending.Load() {
 		return nil
 	}
 	select {
 	case <-execution.promptDoneCh:
-		execution.dispatchedPromptPending = false
+		execution.dispatchedPromptPending.Store(false)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -1537,7 +1547,7 @@ func (sm *SessionManager) finishAcceptedPrompt(
 	promptGeneration uint64,
 ) (*PromptResult, error) {
 	if dispatchOnly {
-		execution.dispatchedPromptPending = true
+		execution.dispatchedPromptPending.Store(true)
 	}
 	if onDispatched != nil {
 		onDispatched()

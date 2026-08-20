@@ -174,7 +174,7 @@ test.describe("Enhance prompt button in task creation", () => {
     await textarea.fill(prompt);
     await enhanceBtn.click();
     await requestGate;
-    await testPage.keyboard.press("Escape");
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(dialog).not.toBeVisible();
 
     await openCreateTaskDialog(testPage, seedData.workspaceId);

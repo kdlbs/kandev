@@ -238,7 +238,6 @@
   "dockerImageWithExample": "Docker 鏡像（例如 node:20-slim）",
   "duration": "時長",
   "editable": "可編輯",
-  "editOrgChartFromTheAgents": "從代理程式列表編輯組織圖。",
   "editRoutine": "編輯例行程序",
   "effectiveActionsThisAgentCanRequest": "此代理程式在辦公室執行期間可請求的有效操作。",
   "eGCodeReview": "例如 code-review",

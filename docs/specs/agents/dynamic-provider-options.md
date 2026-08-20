@@ -1,6 +1,7 @@
 ---
-status: shipped
+status: implemented
 created: 2026-08-07
+updated: 2026-08-19
 owner: kandev
 ---
 
@@ -30,6 +31,9 @@ settings surfaces that do not have a live task session:
 - After a user selects a model in the workflow session override editor or an
   agent profile editor, Kandev requests a model-aware capability snapshot from
   the provider through a sessionless ACP probe.
+- In an agent profile editor, the open model selector stays open while Kandev
+  resolves the selected model. The area below the model list shows a localized
+  loading spinner instead of stale dependent options.
 - The probe applies the requested model using generic ACP session-model logic,
   captures the complete post-model `config_options` response or update, and
   applies the existing ACP compatibility normalization.
@@ -60,6 +64,19 @@ to a model with additional selectable options, then the profile editor uses
 the same resolved snapshot as workflow settings and allows those options to be
 selected and saved.
 
+### Agent profile shows model-option progress
+
+Given an open agent profile model selector, when the author selects a model,
+then option resolution starts. The selector stays open and shows a loading
+spinner in the selected model row and below the model list. The selected row
+does not show its check icon while it is resolving. The selector hides stale
+dependent controls until the new option snapshot arrives.
+
+Given that the option request is complete, when Kandev shows the resolved
+snapshot or an error, then the selected row restores its check icon and the
+loading spinners are not visible. The existing resolved controls or retryable
+error state are available.
+
 ### Model removes an option
 
 Given a draft with a selected option for the current model, when the author
@@ -80,8 +97,9 @@ change is required for the new identifier.
 Given a model selection whose capability probe times out, is unavailable, or
 returns no complete post-model option snapshot, when the settings page receives
 the failure, then it keeps already persisted and currently selected values,
-does not offer unverified new options, shows a retryable discovery error, and
-allows a model-only save when the rest of the form is valid.
+does not show stale dependent controls or offer unverified new options, shows a
+retryable discovery error, and allows a model-only save when the rest of the
+form is valid.
 
 ### Responses arrive out of order
 
@@ -102,6 +120,9 @@ Given a phone viewport, when the author selects a model and configures the
 resolved options in either settings flow, then controls remain in a one-column
 touch-friendly layout, use the existing settings scroll owner, and do not
 create document-level horizontal overflow.
+
+Given an open agent profile model selector on a phone, when model options load,
+then the same loading indicators are visible and remain inside the selector.
 
 ## Data model
 
@@ -186,14 +207,14 @@ conventions and never expose provider secrets or raw process output.
 Each settings surface follows this state machine for the selected resolution
 context:
 
-| State | Event | Result |
-| --- | --- | --- |
-| baseline | model selected | Show baseline options and start one resolver request. |
-| resolving | matching response | Replace options with the complete snapshot and reconcile the draft. |
-| resolving | stale response | Ignore it and keep the newer model's state. |
-| resolving | timeout/error | Keep existing values, show retryable error, and do not add controls. |
-| resolved | same context requested | Reuse the runtime cache. |
-| resolved | refresh or baseline invalidation | Request a fresh snapshot. |
+| State     | Event                            | Result                                                               |
+| --------- | -------------------------------- | -------------------------------------------------------------------- |
+| baseline  | model selected                   | Show baseline options and start one resolver request.                |
+| resolving | matching response                | Replace options with the complete snapshot and reconcile the draft.  |
+| resolving | stale response                   | Ignore it and keep the newer model's state.                          |
+| resolving | timeout/error                    | Keep existing values, show retryable error, and do not add controls. |
+| resolved  | same context requested           | Reuse the runtime cache.                                             |
+| resolved  | refresh or baseline invalidation | Request a fresh snapshot.                                            |
 
 An option snapshot is replaced atomically. The frontend must not merge an old
 model's choices with a new model's choices.
@@ -254,5 +275,7 @@ task session, change an agent profile, or mutate provider configuration.
   out-of-order response.
 - Resolver failures preserve saved data and provide a retryable, localized
   status.
+- The agent profile model selector shows localized progress below the model
+  list while model-dependent options load.
 - Desktop and mobile E2E coverage verifies workflow and profile behavior, with
   touch sizing and overflow assertions for the mobile workflow editor.

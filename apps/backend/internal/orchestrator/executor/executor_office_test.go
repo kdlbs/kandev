@@ -77,6 +77,57 @@ func TestEnsureSessionForAgent_CreatesWhenMissing(t *testing.T) {
 	}
 }
 
+func TestEnsureSessionForAgentRejectsManagedIdentityBeforeCreatingSession(t *testing.T) {
+	repo := newMockRepository()
+	seedPreflightTaskRepository(repo, "task-office", "repo-1", &models.Repository{
+		ID: "repo-1", Provider: "acme-forge", RemoteURL: "https://forge.example/acme/widgets.git",
+	})
+	exec := newPreflightTestExecutor(t, repo)
+
+	got, err := exec.EnsureSessionForAgent(
+		context.Background(), officeTestTask(), "agent-1", "profile-1", "", "",
+	)
+	if err == nil {
+		t.Fatal("EnsureSessionForAgent() error = nil, want managed identity rejection")
+	}
+	if got != nil {
+		t.Fatalf("session = %#v, want nil", got)
+	}
+	if len(repo.createTaskSessionCalls) != 0 {
+		t.Fatalf("CreateTaskSession calls = %d, want 0", len(repo.createTaskSessionCalls))
+	}
+}
+
+func TestEnsureSessionForAgentRejectsManagedIdentityBeforeRebindingIdleSession(t *testing.T) {
+	repo := newMockRepository()
+	seedPreflightTaskRepository(repo, "task-office", "repo-1", &models.Repository{
+		ID: "repo-1", Provider: "acme-forge", RemoteURL: "https://forge.example/acme/widgets.git",
+	})
+	existing := &models.TaskSession{
+		ID: "sess-existing", TaskID: "task-office", AgentProfileID: "agent-1",
+		ExecutionProfileID: "profile-old", State: models.TaskSessionStateIdle, StartedAt: time.Now().UTC(),
+	}
+	repo.sessions[existing.ID] = existing
+	exec := newPreflightTestExecutor(t, repo)
+
+	got, err := exec.EnsureSessionForAgent(
+		context.Background(), officeTestTask(), "agent-1", "profile-new", "", "",
+	)
+	if err == nil {
+		t.Fatal("EnsureSessionForAgent() error = nil, want managed identity rejection")
+	}
+	if got != nil {
+		t.Fatalf("session = %#v, want nil", got)
+	}
+	stored := repo.sessions[existing.ID]
+	if stored.State != models.TaskSessionStateIdle {
+		t.Fatalf("session state = %q, want IDLE", stored.State)
+	}
+	if stored.ExecutionProfileID != "profile-old" {
+		t.Fatalf("execution profile = %q, want profile-old", stored.ExecutionProfileID)
+	}
+}
+
 func TestEnsureSessionForAgent_DoesNotMarkExistingTaskSessionAsOrigin(t *testing.T) {
 	repo := newMockRepository()
 	repo.sessions["sess-existing"] = &models.TaskSession{

@@ -71,6 +71,7 @@
         "create_workflow_step_kandev",
         "delete_workflow_kandev",
         "delete_workflow_step_kandev",
+        "export_workflow_kandev",
         "import_workflow_kandev",
         "list_workflow_steps_kandev",
         "list_workflows_kandev",
