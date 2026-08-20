@@ -43,6 +43,7 @@ export function createPlaceholderCompletionProvider(
     ): languages.ProviderResult<languages.CompletionList> {
       const line = model.getLineContent(position.lineNumber);
       const textBefore = line.substring(0, position.column - 1);
+      const textAfter = line.substring(position.column - 1);
 
       // Only trigger after `{{`
       if (!textBefore.endsWith("{{") && !textBefore.match(/\{\{[\w.]*$/)) {
@@ -74,7 +75,7 @@ export function createPlaceholderCompletionProvider(
         kind: monaco.languages.CompletionItemKind.Variable,
         detail: p.description,
         documentation: p.example ? `Example: ${p.example}` : undefined,
-        insertText: `${p.key}}}`,
+        insertText: textAfter.startsWith("}}") ? p.key : `${p.key}}}`,
         range,
         sortText: String(i).padStart(3, "0"),
       }));
@@ -133,6 +134,7 @@ export function createPromptMentionCompletionProvider(
 
       const suggestions: languages.CompletionItem[] = prompts.map((prompt, i) => ({
         label: `@${prompt.name}`,
+        filterText: prompt.name,
         kind: monaco.languages.CompletionItemKind.Reference,
         detail: previewContent(prompt.content),
         documentation: previewContent(prompt.content),

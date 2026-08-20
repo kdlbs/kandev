@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { createPromptMentionCompletionProvider } from "./script-editor-completions";
+import {
+  createPlaceholderCompletionProvider,
+  createPromptMentionCompletionProvider,
+  type ScriptPlaceholder,
+} from "./script-editor-completions";
 import type { PromptReference } from "@/lib/prompts/expand-prompt-references";
 import type { editor, languages, Position } from "monaco-editor";
 
 const monacoStub = {
   languages: {
-    CompletionItemKind: { Reference: 17 },
+    CompletionItemKind: { Reference: 17, Variable: 18 },
   },
 } as unknown as typeof import("monaco-editor");
 
@@ -21,6 +25,21 @@ function complete(
   column: number,
 ): languages.CompletionList {
   const provider = createPromptMentionCompletionProvider(monacoStub, prompts);
+  const result = provider.provideCompletionItems(
+    modelForLine(line),
+    { lineNumber: 1, column } as unknown as Position,
+    {} as languages.CompletionContext,
+    {} as import("monaco-editor").CancellationToken,
+  );
+  return result as languages.CompletionList;
+}
+
+function completePlaceholder(
+  placeholders: ScriptPlaceholder[],
+  line: string,
+  column: number,
+): languages.CompletionList {
+  const provider = createPlaceholderCompletionProvider(monacoStub, placeholders);
   const result = provider.provideCompletionItems(
     modelForLine(line),
     { lineNumber: 1, column } as unknown as Position,
@@ -73,5 +92,34 @@ describe("createPromptMentionCompletionProvider", () => {
   it("includes a content preview in detail/documentation", () => {
     const { suggestions } = complete(prompts, "@", 2);
     expect(suggestions[0].detail).toBe("Review this code carefully for bugs.");
+  });
+
+  it("uses the prompt name for filtering while displaying the @-prefixed label", () => {
+    const { suggestions } = complete(
+      [{ id: "1", name: "changes-walkthrough", content: "Walk through changes." }],
+      "@c",
+      3,
+    );
+
+    expect(suggestions[0].label).toBe("@changes-walkthrough");
+    expect(suggestions[0].filterText).toBe("changes-walkthrough");
+  });
+});
+
+describe("createPlaceholderCompletionProvider", () => {
+  const placeholders: ScriptPlaceholder[] = [
+    { key: "task_prompt", description: "Task prompt", example: "Fix the bug", executor_types: [] },
+  ];
+
+  it("does not duplicate closing braces that already follow the cursor", () => {
+    const { suggestions } = completePlaceholder(placeholders, "{{}}", 3);
+
+    expect(suggestions[0].insertText).toBe("task_prompt");
+  });
+
+  it("adds one closing brace pair for an unfinished placeholder token", () => {
+    const { suggestions } = completePlaceholder(placeholders, "{{", 3);
+
+    expect(suggestions[0].insertText).toBe("task_prompt}}");
   });
 });

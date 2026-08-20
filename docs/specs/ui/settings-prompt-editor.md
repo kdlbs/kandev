@@ -15,7 +15,12 @@ Prompt fields in Settings use different editors and completion rules. Users cann
 - Kandev provides one shared prompt editor for prompt-authoring fields in Settings.
 - The editor stores plain text and preserves each existing settings and save contract.
 - Typing `{{` shows only the placeholders that the current prompt context supports.
+- Selecting a placeholder inside an existing `{{...}}` pair replaces only the
+  placeholder name and preserves the pair's closing braces. Selecting a
+  placeholder after an unfinished `{{` adds exactly one closing pair.
 - Typing `@` shows saved prompts when the runtime resolves saved-prompt references for that field.
+- Typing a name prefix after `@` keeps saved prompts whose names match that
+  prefix available for selection.
 - A selected saved prompt inserts its `@name` reference. The editor does not inline or copy the saved prompt content.
 - The saved-prompt list updates when a prompt is added, edited, or removed.
 - A custom prompt can reference other saved prompts. Its editor does not suggest the prompt that is currently open.
@@ -58,6 +63,14 @@ Selecting a completion item changes only the local draft. The existing settings 
 - **GIVEN** a saved prompt named `review-helper`, **WHEN** a user types `@rev` in a GitHub quick action, **THEN** the editor offers `@review-helper`.
 - **GIVEN** that suggestion, **WHEN** the user selects it, **THEN** the draft contains `@review-helper` and no save starts.
 - **GIVEN** a GitHub quick action editor, **WHEN** a user types `{{`, **THEN** the editor offers `{{url}}` and `{{title}}`.
+- **GIVEN** an editor contains `{{}}` with the cursor between the brace pairs,
+  **WHEN** the user selects `{{task_prompt}}`, **THEN** the draft contains
+  exactly `{{task_prompt}}` with no duplicated closing braces.
+- **GIVEN** an editor contains an unfinished `{{` token, **WHEN** the user
+  selects `{{task_prompt}}`, **THEN** the draft contains exactly
+  `{{task_prompt}}` with one closing brace pair.
+- **GIVEN** a saved prompt named `changes-walkthrough`, **WHEN** a user types
+  `@c`, **THEN** the completion list keeps `@changes-walkthrough` available.
 - **GIVEN** two open editors with different placeholder lists, **WHEN** a user types `{{` in either editor, **THEN** only that editor's placeholders appear.
 - **GIVEN** an open workflow prompt, **WHEN** another route adds a saved prompt, **THEN** the next `@` list includes it.
 - **GIVEN** a custom prompt named `release`, **WHEN** the user edits `release` and types `@`, **THEN** the list omits `@release` and includes other saved prompts.
@@ -77,3 +90,5 @@ Selecting a completion item changes only the local draft. The existing settings 
 ## Implementation plan
 
 See [`../../plans/settings-prompt-editor/plan.md`](../../plans/settings-prompt-editor/plan.md).
+The completion regression repair is tracked in
+[`../../plans/settings-prompt-completion-regressions/plan.md`](../../plans/settings-prompt-completion-regressions/plan.md).

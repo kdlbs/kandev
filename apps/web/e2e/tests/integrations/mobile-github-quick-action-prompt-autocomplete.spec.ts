@@ -15,7 +15,7 @@ test.describe("GitHub quick action prompt autocomplete on mobile", () => {
   }) => {
     test.setTimeout(90_000);
     const prompt = await apiClient.createPrompt(
-      "e2e-mobile-github-action-prompt",
+      `c-e2e-mobile-prompt-${Date.now()}`,
       "Reusable mobile review guidance",
     );
 
@@ -32,7 +32,7 @@ test.describe("GitHub quick action prompt autocomplete on mobile", () => {
       await waitForPromptInStore(testPage, prompt.name);
 
       const editor = quickActions.locator('[data-testid^="github-action-prompt-editor-"]').first();
-      await replacePromptEditor(testPage, editor, "Review @", { touch: true });
+      await replacePromptEditor(testPage, editor, "Review @c", { touch: true });
       await acceptPromptCompletion(testPage, prompt.name, { touch: true });
       await testPage.keyboard.type(" {{");
       await acceptPromptCompletion(testPage, "{{title}}", { touch: true });
