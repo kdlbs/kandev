@@ -573,3 +573,4 @@ func parseMCPSearchResult(raw, siteURL string) (*SearchResult, error) {
 		NextPageToken: resp.NextPageToken,
 	}, nil
 }
+

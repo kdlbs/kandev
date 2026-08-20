@@ -1311,3 +1311,4 @@ func applyIssueWatchPatch(w *IssueWatch, req *UpdateIssueWatchRequest) {
 		w.MaxInflightTasks = req.MaxInflightTasks.Value
 	}
 }
+

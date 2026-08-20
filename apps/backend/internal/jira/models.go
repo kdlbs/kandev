@@ -314,3 +314,4 @@ type UpdateIssueWatchRequest struct {
 	// "null"). Absent = unchanged, null = uncapped, positive int = cap.
 	MaxInflightTasks optional.Int `json:"maxInflightTasks"`
 }
+

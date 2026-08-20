@@ -183,3 +183,4 @@ export interface UpdateJiraIssueWatchInput {
   /** Per-watch throttle cap; null = uncapped, positive int = cap. */
   maxInflightTasks?: number | null;
 }
+
