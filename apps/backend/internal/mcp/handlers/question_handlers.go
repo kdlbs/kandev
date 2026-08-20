@@ -271,6 +271,12 @@ func (h *Handlers) handleAnswerQuestion(ctx context.Context, msg *ws.Message) (*
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "clarification request not found", nil)
 	case clarification.IsValidationError(err):
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	case clarification.IsNotActiveError(err):
+		// N4a: R2's no-winner branch is a distinct, expected outcome (the
+		// bundle was superseded/terminal/expired/malformed with no winner),
+		// not an unclassified failure. Mirrors the REST endpoint's
+		// IsNotActiveError -> http.StatusConflict mapping (handlers.go).
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
 	default:
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}

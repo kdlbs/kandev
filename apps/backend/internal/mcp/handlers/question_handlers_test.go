@@ -558,6 +558,43 @@ func TestHandleAnswerQuestion_SecondCaller_ClaimedFalseSameOutcome(t *testing.T)
 	require.JSONEq(t, string(firstBody.Response), string(secondBody.Response))
 }
 
+// TestHandleAnswerQuestion_NoWinner_ConflictError proves N4a: R2's second
+// branch (the claim was lost and no message was ever answered/rejected —
+// here because a later Turn on the same session supersedes the bundle's
+// turn, mirroring TestCompleteActiveClarificationBundleRejectsSupersededTurn
+// in the sqlite repository package) must be reported as a CONFLICT error,
+// distinct from both success and not-found — not the generic INTERNAL_ERROR
+// the default case falls through to for every other unclassified error.
+func TestHandleAnswerQuestion_NoWinner_ConflictError(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	taskID, sessionID := seedBundle(t, ctx, svc, repo, "pending-nowinner-1")
+
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-pending-nowinner-1-newer",
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+	}))
+
+	store := clarification.NewStore(time.Minute)
+	resolver := newTestResolver(t, store, repo, svc)
+	h := &Handlers{taskSvc: svc, clarificationResolver: resolver, clarificationBundles: repo, logger: testLogger(t)}
+
+	resp, err := h.handleAnswerQuestion(ctx, makeWSMessage(t, ws.ActionMCPAnswerQuestion, map[string]interface{}{
+		"pending_id": "pending-nowinner-1",
+		"answers": []map[string]interface{}{
+			{"question_id": "q1", "selected_options": []string{"opt-a"}},
+			{"question_id": "q2", "selected_options": []string{"opt-c"}},
+		},
+	}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeConflict)
+
+	var ep ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &ep))
+	require.Equal(t, "clarification request is no longer active", ep.Message)
+}
+
 func TestHandleAnswerQuestion_Rejected(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
