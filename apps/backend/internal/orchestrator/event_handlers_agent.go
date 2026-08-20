@@ -171,7 +171,7 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 	if queuedMsg.QueuedBy != "" && coalesceKey != "" {
 		queuedBy = queuedMsg.QueuedBy
 	}
-	if isLifecycleAutomationOrigin(queuedMsg.Metadata["origin"]) {
+	if isDurableLifecyclePrompt(queuedMsg) {
 		s.requeueLifecycleMessage(ctx, queuedMsg, queuedBy, coalesceKey)
 		return
 	}
@@ -729,6 +729,10 @@ func isLifecycleAutomationOrigin(origin interface{}) bool {
 	return origin == githubPRAutomationOrigin || origin == mrAutomationOrigin
 }
 
+func isDurableLifecyclePrompt(queuedMsg *messagequeue.QueuedMessage) bool {
+	return queuedMsg != nil && (isLifecycleAutomationOrigin(queuedMsg.Metadata["origin"]) || queuedMsg.IsWorkflowControl())
+}
+
 func (s *Service) recordQueuedUserMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, attachments []v1.MessageAttachment) error {
 	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
 	if s.messageCreator == nil || alreadyRecorded {
@@ -772,7 +776,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 		reservation = s.queuedDispatchReservationForEntry(reservedSessionID, queuedMsg.ID)
 	}
 	defer s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, reservation)
-	lifecyclePrompt := isLifecycleAutomationOrigin(queuedMsg.Metadata["origin"])
+	lifecyclePrompt := isDurableLifecyclePrompt(queuedMsg)
 
 	claimEntryID, handoffDone := s.claimQueuedMessageHandoff(
 		promptCtx, callerSessionID, queuedMsg, reservation,
@@ -794,6 +798,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 			zap.String("session_id", callerSessionID),
 			zap.String("task_id", queuedMsg.TaskID),
 			zap.String("queue_id", queuedMsg.ID))
+		s.acknowledgeLifecycleQueueEntry(promptCtx, reservedSessionID, queuedMsg)
 		return
 	}
 
@@ -836,6 +841,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 				zap.String("session_id", callerSessionID),
 				zap.String("task_id", queuedMsg.TaskID),
 				zap.String("queue_id", queuedMsg.ID))
+			s.acknowledgeLifecycleQueueEntry(promptCtx, reservedSessionID, queuedMsg)
 			return
 		}
 		s.processOnTurnStartViaEngine(promptCtx, queuedMsg.TaskID, session)
@@ -1029,6 +1035,9 @@ func (s *Service) lifecycleQueuedDispatchIsCurrent(
 ) bool {
 	task, err := s.repo.GetTask(ctx, queuedMsg.TaskID)
 	if err != nil || task == nil || task.ArchivedAt != nil {
+		return false
+	}
+	if queuedMsg.IsWorkflowControl() && !s.workflowControlDeliveryIsCurrent(ctx, queuedMsg, task) {
 		return false
 	}
 	dispatchTracked := s.isQueuedDispatchInFlight(queuedMsg.SessionID)

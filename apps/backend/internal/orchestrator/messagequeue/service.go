@@ -456,25 +456,43 @@ func (s *Service) RequeueMessage(ctx context.Context, msg *QueuedMessage, queued
 // QueueLifecycleMessageWithCoalesceKey accepts a lifecycle entry only while
 // its task remains active. accepted is false for a normal archive/delete win.
 func (s *Service) QueueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, bool, error) {
-	return s.queueLifecycleMessageWithCoalesceKey(ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, false)
+	return s.queueLifecycleMessageWithCoalesceKey(ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, false, s.MaxPerSession())
 }
 
 // RequeueLifecycleMessageWithCoalesceKey preserves the generation captured by
 // an existing durable row. This prevents a stale retry from becoming a new
 // prompt after the task was archived and then unarchived.
 func (s *Service) RequeueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, bool, error) {
-	return s.queueLifecycleMessageWithCoalesceKey(ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, true)
+	return s.queueLifecycleMessageWithCoalesceKey(ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, true, 0)
+}
+
+// QueueWorkflowControlMessage persists one transition-keyed workflow prompt
+// in the control lane. Control messages use the existing durable reserve/ack
+// mechanics but bypass ordinary FIFO capacity, so a saturated peer-message
+// queue cannot prevent a committed workflow transition from being handed off.
+func (s *Service) QueueWorkflowControlMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, transitionID int64) (*QueuedMessage, bool, bool, error) {
+	if transitionID <= 0 {
+		return nil, false, false, errors.New("workflow transition identity is required")
+	}
+	metadataCopy := copyMessageMetadata(metadata, 2)
+	metadataCopy[MetadataWorkflowTransitionID] = transitionID
+	metadataCopy[MetadataWorkflowControl] = true
+	coalesceKey := fmt.Sprintf("workflow-transition:%d", transitionID)
+	return s.queueLifecycleMessageWithCoalesceKey(
+		ctx, sessionID, taskID, content, model, userID, planMode, attachments,
+		metadataCopy, coalesceKey, true, false, 0,
+	)
 }
 
 // queueLifecycleMessageWithCoalesceKey is the lifecycle-guarded core of the lifecycle queue methods.
-func (s *Service) queueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert, isRetry bool) (*QueuedMessage, bool, bool, error) {
+func (s *Service) queueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert, isRetry bool, maxPerSession int) (*QueuedMessage, bool, bool, error) {
 	var queued *QueuedMessage
 	var replaced, accepted bool
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		var err error
 		queued, replaced, accepted, err = s.insertLifecycleMessageWithCoalesceKey(
 			admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments,
-			metadata, coalesceKey, allowInsert, isRetry,
+			metadata, coalesceKey, allowInsert, isRetry, maxPerSession,
 		)
 		return err
 	})
@@ -482,7 +500,7 @@ func (s *Service) queueLifecycleMessageWithCoalesceKey(ctx context.Context, sess
 }
 
 // insertLifecycleMessageWithCoalesceKey inserts or replaces a lifecycle entry under the admission lock.
-func (s *Service) insertLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert, isRetry bool) (*QueuedMessage, bool, bool, error) {
+func (s *Service) insertLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert, isRetry bool, maxPerSession int) (*QueuedMessage, bool, bool, error) {
 	metadataCopy := clearReservedMetadata(metadata)
 	generation, err := s.repo.LifecycleGeneration(ctx, taskID)
 	if err != nil {
@@ -504,7 +522,6 @@ func (s *Service) insertLifecycleMessageWithCoalesceKey(ctx context.Context, ses
 	metadataCopy[MetadataLifecycleDurable] = true
 	metadataCopy[MetadataLifecycleGeneration] = generation
 	msg := &QueuedMessage{SessionID: sessionID, TaskID: taskID, Content: content, Model: model, PlanMode: planMode, Attachments: attachments, Metadata: metadataCopy, QueuedBy: userID}
-	maxPerSession := s.MaxPerSession()
 	if isRetry {
 		maxPerSession = 0
 	}

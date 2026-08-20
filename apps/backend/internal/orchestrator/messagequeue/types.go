@@ -72,6 +72,15 @@ const MetadataLifecycleReserved = "lifecycle_reserved_in_flight"
 // delivery receipt. It is backend-owned and never originates from a client.
 const MetadataDeliveryID = "delivery_id"
 
+// MetadataWorkflowTransitionID binds a workflow control prompt to one
+// committed task_step_transitions row. It is used to suppress an older
+// on-entry prompt after the task moves again.
+const MetadataWorkflowTransitionID = "workflow_transition_id"
+
+// MetadataWorkflowControl marks a durable workflow-owned prompt that uses the
+// separate control lane rather than ordinary FIFO capacity.
+const MetadataWorkflowControl = "workflow_control"
+
 // MetadataSenderTaskID identifies the task that produced an agent message. Two
 // agent entries may only merge when their sender task ids match, so the merge
 // never mixes prompts issued by different agents.
@@ -151,6 +160,16 @@ func (m *QueuedMessage) IsDurableLifecycle() bool {
 	}
 	origin, _ := m.Metadata["origin"].(string)
 	return origin == "github_pr_automation"
+}
+
+// IsWorkflowControl reports whether this entry belongs to the capacity-free,
+// transition-keyed workflow control lane.
+func (m *QueuedMessage) IsWorkflowControl() bool {
+	if m == nil {
+		return false
+	}
+	control, _ := m.Metadata[MetadataWorkflowControl].(bool)
+	return control
 }
 
 // IsReservedInFlight reports whether this durable row was already reserved for

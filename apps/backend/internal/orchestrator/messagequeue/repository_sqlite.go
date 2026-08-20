@@ -240,14 +240,8 @@ func (r *sqliteRepository) Insert(ctx context.Context, msg *QueuedMessage, maxPe
 		return err
 	}
 
-	if maxPerSession > 0 {
-		var count int
-		if err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`), msg.SessionID); err != nil {
-			return fmt.Errorf("count: %w", err)
-		}
-		if count >= maxPerSession {
-			return ErrQueueFull
-		}
+	if err := r.ensureQueueCapacity(ctx, tx, msg.SessionID, maxPerSession); err != nil {
+		return err
 	}
 
 	var maxPos sql.NullInt64
@@ -298,14 +292,8 @@ func (r *sqliteRepository) Restore(ctx context.Context, msg *QueuedMessage, maxP
 		return err
 	}
 
-	if maxPerSession > 0 {
-		var count int
-		if err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`), msg.SessionID); err != nil {
-			return fmt.Errorf("count: %w", err)
-		}
-		if count >= maxPerSession {
-			return ErrQueueFull
-		}
+	if err := r.ensureQueueCapacity(ctx, tx, msg.SessionID, maxPerSession); err != nil {
+		return err
 	}
 	if msg.ID == "" {
 		msg.ID = uuid.New().String()
@@ -364,14 +352,8 @@ func (r *sqliteRepository) AppendOrInsertTail(ctx context.Context, sessionID, ta
 	}
 
 	// No matching tail — insert a fresh entry while still inside the same tx.
-	if maxPerSession > 0 {
-		var count int
-		if err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`), sessionID); err != nil {
-			return nil, false, fmt.Errorf("count: %w", err)
-		}
-		if count >= maxPerSession {
-			return nil, false, ErrQueueFull
-		}
+	if err := r.ensureQueueCapacity(ctx, tx, sessionID, maxPerSession); err != nil {
+		return nil, false, err
 	}
 	var maxPos sql.NullInt64
 	if err := tx.GetContext(ctx, &maxPos, r.db.Rebind(`SELECT MAX(position) FROM queued_messages WHERE session_id = ?`), sessionID); err != nil {
@@ -754,14 +736,44 @@ func (r *sqliteRepository) ensureQueueCapacity(ctx context.Context, tx *sqlx.Tx,
 	if maxPerSession <= 0 {
 		return nil
 	}
-	var count int
-	if err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`), sessionID); err != nil {
-		return fmt.Errorf("count: %w", err)
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`SELECT metadata_json FROM queued_messages WHERE session_id = ?`), sessionID)
+	if err != nil {
+		return fmt.Errorf("list queue metadata for capacity: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	count := 0
+	for rows.Next() {
+		var metadataJSON string
+		if err := rows.Scan(&metadataJSON); err != nil {
+			return fmt.Errorf("scan queue metadata for capacity: %w", err)
+		}
+		workflowControl, err := isWorkflowControlMetadataJSON(metadataJSON)
+		if err != nil {
+			return err
+		}
+		if !workflowControl {
+			count++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate queue metadata for capacity: %w", err)
 	}
 	if count >= maxPerSession {
 		return ErrQueueFull
 	}
 	return nil
+}
+
+func isWorkflowControlMetadataJSON(metadataJSON string) (bool, error) {
+	if metadataJSON == "" || metadataJSON == "{}" {
+		return false, nil
+	}
+	metadata := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		return false, fmt.Errorf("decode queue metadata for capacity: %w", err)
+	}
+	control, _ := metadata[MetadataWorkflowControl].(bool)
+	return control, nil
 }
 
 // ListBySession returns all entries for a session ordered by position ascending.
