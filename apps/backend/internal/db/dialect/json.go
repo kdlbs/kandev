@@ -1,6 +1,9 @@
 package dialect
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // JSONExtract returns the SQL fragment to extract a JSON value.
 //
@@ -11,6 +14,34 @@ func JSONExtract(driver, col, path string) string {
 		return fmt.Sprintf("%s::jsonb->>'%s'", col, path)
 	}
 	return fmt.Sprintf("json_extract(%s, '$.%s')", col, path)
+}
+
+// JSONExtractPath returns the SQL fragment to extract a JSON value nested
+// under one or more keys. It exists because JSONExtract's Postgres branch
+// does single-level extraction only: a dotted path like "question.id" passed
+// straight to JSONExtract would work on SQLite's native dotted json_extract
+// syntax but silently return NULL on Postgres, where col::jsonb->>'a.b'
+// treats the whole string as one literal top-level key rather than a nested
+// traversal. Postgres needs a chained -> for every segment but the last,
+// which gets ->> so the final result comes back as text like JSONExtract.
+//
+//	SQLite:   json_extract(col, '$.a.b')
+//	Postgres: col::jsonb->'a'->>'b'
+func JSONExtractPath(driver, col string, segments ...string) string {
+	if len(segments) == 1 {
+		return JSONExtract(driver, col, segments[0])
+	}
+	if IsPostgres(driver) {
+		var b strings.Builder
+		b.WriteString(col)
+		b.WriteString("::jsonb")
+		for _, seg := range segments[:len(segments)-1] {
+			fmt.Fprintf(&b, "->'%s'", seg)
+		}
+		fmt.Fprintf(&b, "->>'%s'", segments[len(segments)-1])
+		return b.String()
+	}
+	return fmt.Sprintf("json_extract(%s, '$.%s')", col, strings.Join(segments, "."))
 }
 
 // JSONExtractIsNotNull returns the SQL fragment to check that a JSON path is not null.

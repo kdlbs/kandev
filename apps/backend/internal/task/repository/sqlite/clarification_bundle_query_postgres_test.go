@@ -168,3 +168,70 @@ func TestPostgresListUnresolvedClarificationBundlesCursorPagination(t *testing.T
 		t.Fatalf("second page HasMore = true, want false")
 	}
 }
+
+// TestPostgresListUnresolvedClarificationBundlesExcludesEmptyQuestionID
+// mirrors TestListUnresolvedClarificationBundles_ExcludesEmptyQuestionID
+// (spec L16) on Postgres: the exclusion predicate uses
+// dialect.JSONExtractPath for the nested metadata.question.id fallback,
+// whose Postgres branch (chained -> / ->>) is a distinct code path from
+// JSONExtract's single-level col::jsonb->>'key' used elsewhere in this
+// query. The SQLite-only run never exercises that chained-operator SQL.
+func TestPostgresListUnresolvedClarificationBundlesExcludesEmptyQuestionID(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+
+	seedBundleTask(t, repo, "task-pg-l16", "")
+	seedBundleSession(t, repo, "sess-pg-l16", "task-pg-l16")
+	seedBundleTurn(t, repo, "turn-pg-l16", "sess-pg-l16", "task-pg-l16")
+	insertClarificationMessage(t, repo, "msg-pg-l16", "sess-pg-l16", "task-pg-l16", "turn-pg-l16", "pending-pg-l16", "", "pending", 0, time.Now().UTC())
+
+	page, err := repo.ListUnresolvedClarificationBundles(ctx, unscopedOpts(50))
+	if err != nil {
+		t.Fatalf("ListUnresolvedClarificationBundles: %v", err)
+	}
+	if len(page.Bundles) != 0 {
+		t.Fatalf("bundles = %+v, want none (message with empty question_id excludes the bundle per L16)", page.Bundles)
+	}
+}
+
+// TestPostgresListUnresolvedClarificationBundlesIncludesNestedOnlyQuestionID
+// mirrors TestListUnresolvedClarificationBundles_IncludesNestedOnlyQuestionID:
+// proves the Postgres branch of the fallback (chained -> then ->>) actually
+// resolves a nested-only question.id rather than always returning NULL, the
+// exact silent-wrong-answer failure mode a naive single-level JSONExtract
+// call would have on this dialect.
+func TestPostgresListUnresolvedClarificationBundlesIncludesNestedOnlyQuestionID(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+
+	seedBundleTask(t, repo, "task-pg-l16b", "")
+	seedBundleSession(t, repo, "sess-pg-l16b", "task-pg-l16b")
+	seedBundleTurn(t, repo, "turn-pg-l16b", "sess-pg-l16b", "task-pg-l16b")
+	meta := map[string]interface{}{
+		"pending_id":  "pending-pg-l16b",
+		"question_id": "",
+		"status":      "pending",
+		"question": map[string]interface{}{
+			"id":     "q-nested-only",
+			"title":  "title",
+			"prompt": "prompt",
+		},
+	}
+	insertClarificationMessageRawMetadata(t, repo, "msg-pg-l16b", "sess-pg-l16b", "task-pg-l16b", "turn-pg-l16b", meta, time.Now().UTC())
+
+	page, err := repo.ListUnresolvedClarificationBundles(ctx, unscopedOpts(50))
+	if err != nil {
+		t.Fatalf("ListUnresolvedClarificationBundles: %v", err)
+	}
+	if len(page.Bundles) != 1 || page.Bundles[0].PendingID != "pending-pg-l16b" {
+		t.Fatalf("bundles = %+v, want exactly pending-pg-l16b (nested question.id resolves the fallback)", page.Bundles)
+	}
+}

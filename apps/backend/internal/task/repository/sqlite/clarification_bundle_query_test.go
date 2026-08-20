@@ -546,3 +546,79 @@ func TestListUnresolvedClarificationBundles_ScopedVisibilityAcrossWorkspacesFill
 		}
 	}
 }
+
+// insertClarificationMessageRawMetadata inserts one clarification_request
+// message with caller-supplied metadata verbatim, for L16 cases the flat
+// insertClarificationMessage helper cannot express (its question_id and
+// question.id always agree).
+func insertClarificationMessageRawMetadata(t *testing.T, repo *Repository, id, sessionID, messageTaskID, turnID string, meta map[string]interface{}, ts time.Time) {
+	t.Helper()
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("marshal metadata: %v", err)
+	}
+	_, err = repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO task_session_messages
+			(id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at)
+		VALUES (?, ?, ?, ?, 'agent', '', 'q', 1, 'clarification_request', ?, ?)
+	`), id, sessionID, messageTaskID, turnID, string(metaJSON), ts)
+	if err != nil {
+		t.Fatalf("insert clarification message %s: %v", id, err)
+	}
+}
+
+// TestListUnresolvedClarificationBundles_ExcludesEmptyQuestionID covers spec
+// L16: a bundle in which any message carries an empty or absent question_id
+// (checked via questionIDFromMetadata's flat-then-nested fallback, not just
+// the flat metadata.question_id key) must be excluded from the list, the same
+// way answer_question_kandev already rejects it pre-claim. Without this, an
+// external caller could list a bundle whose question_id can never be
+// resolved and would always fail to answer.
+func TestListUnresolvedClarificationBundles_ExcludesEmptyQuestionID(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedBundleTask(t, repo, "task-L16", "")
+	seedBundleSession(t, repo, "sess-L16", "task-L16")
+	seedBundleTurn(t, repo, "turn-L16", "sess-L16", "task-L16")
+	insertClarificationMessage(t, repo, "msg-L16", "sess-L16", "task-L16", "turn-L16", "pending-L16", "", "pending", 0, time.Now().UTC())
+
+	page, err := repo.ListUnresolvedClarificationBundles(ctx, unscopedOpts(50))
+	if err != nil {
+		t.Fatalf("ListUnresolvedClarificationBundles: %v", err)
+	}
+	if len(page.Bundles) != 0 {
+		t.Fatalf("bundles = %+v, want none (message with empty question_id excludes the bundle per L16)", page.Bundles)
+	}
+}
+
+// TestListUnresolvedClarificationBundles_IncludesNestedOnlyQuestionID proves
+// the L16 exclusion predicate mirrors questionIDFromMetadata's fallback
+// order rather than checking only the flat metadata.question_id key: a
+// message whose flat key is empty but whose nested question.id is set has a
+// resolvable question_id and must still be listed.
+func TestListUnresolvedClarificationBundles_IncludesNestedOnlyQuestionID(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedBundleTask(t, repo, "task-L16b", "")
+	seedBundleSession(t, repo, "sess-L16b", "task-L16b")
+	seedBundleTurn(t, repo, "turn-L16b", "sess-L16b", "task-L16b")
+	meta := map[string]interface{}{
+		"pending_id":  "pending-L16b",
+		"question_id": "",
+		"status":      "pending",
+		"question": map[string]interface{}{
+			"id":     "q-nested-only",
+			"title":  "title",
+			"prompt": "prompt",
+		},
+	}
+	insertClarificationMessageRawMetadata(t, repo, "msg-L16b", "sess-L16b", "task-L16b", "turn-L16b", meta, time.Now().UTC())
+
+	page, err := repo.ListUnresolvedClarificationBundles(ctx, unscopedOpts(50))
+	if err != nil {
+		t.Fatalf("ListUnresolvedClarificationBundles: %v", err)
+	}
+	if len(page.Bundles) != 1 || page.Bundles[0].PendingID != "pending-L16b" {
+		t.Fatalf("bundles = %+v, want exactly pending-L16b (nested question.id resolves the fallback)", page.Bundles)
+	}
+}

@@ -47,6 +47,26 @@ func TestJSONExtract(t *testing.T) {
 	}
 }
 
+func TestJSONExtractPath(t *testing.T) {
+	got := JSONExtractPath(SQLite3, "m.metadata", "question_id")
+	if got != "json_extract(m.metadata, '$.question_id')" {
+		t.Errorf("sqlite single segment: got %q", got)
+	}
+	got = JSONExtractPath(PGX, "m.metadata", "question_id")
+	if got != "m.metadata::jsonb->>'question_id'" {
+		t.Errorf("pgx single segment: got %q", got)
+	}
+
+	got = JSONExtractPath(SQLite3, "m.metadata", "question", "id")
+	if got != "json_extract(m.metadata, '$.question.id')" {
+		t.Errorf("sqlite nested: got %q", got)
+	}
+	got = JSONExtractPath(PGX, "m.metadata", "question", "id")
+	if got != "m.metadata::jsonb->'question'->>'id'" {
+		t.Errorf("pgx nested: got %q", got)
+	}
+}
+
 func TestJSONExtractIsNotNull(t *testing.T) {
 	got := JSONExtractIsNotNull(SQLite3, "m", "id")
 	if got != "json_extract(m, '$.id') IS NOT NULL" {

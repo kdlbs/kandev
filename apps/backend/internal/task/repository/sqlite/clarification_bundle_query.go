@@ -99,9 +99,22 @@ func clarificationBundleWhereClause(opts models.ListClarificationBundlesOptions)
 // agent's question to its parent, bypassing that ownership check and the
 // parent-only interaction boundary the spec's S2 relies on (Review round 2
 // finding).
+//
+// Per spec L16, it also excludes any bundle where a message's question_id
+// cannot be resolved: the flat metadata.question_id key, falling back to the
+// nested metadata.question.id key, mirroring questionIDFromMetadata
+// (bundle_question.go) exactly so this list stays consistent with what
+// answer_question_kandev's pre-claim validation already rejects. A bundle
+// admitted here with no resolvable question_id could be listed but could
+// never be answered.
 func clarificationBundleQuery(drv, whereExtra string) string {
 	pendingIDExpr := dialect.JSONExtract(drv, "m.metadata", "pending_id")
 	statusExpr := dialect.JSONExtract(drv, "m.metadata", "status")
+	questionIDExpr := fmt.Sprintf(
+		"COALESCE(NULLIF(%s, ''), NULLIF(%s, ''), '')",
+		dialect.JSONExtract(drv, "m.metadata", "question_id"),
+		dialect.JSONExtractPath(drv, "m.metadata", "question", "id"),
+	)
 	notParentQuestion := dialect.ExcludeTruthyMetadataPredicate(drv, "m.metadata", "parent_question")
 	nonTerminalSession := nonTerminalSessionPredicate("m")
 	currentTurn := fmt.Sprintf(`m.turn_id = (
@@ -120,7 +133,8 @@ func clarificationBundleQuery(drv, whereExtra string) string {
 				m.task_session_id AS session_id,
 				COALESCE(NULLIF(MIN(m.task_id), ''), MIN(ts.task_id)) AS task_id,
 				MIN(m.created_at) AS created_at,
-				MAX(CASE WHEN %[2]s IS NULL OR %[2]s NOT IN (%[3]s) THEN 1 ELSE 0 END) AS has_pending
+				MAX(CASE WHEN %[2]s IS NULL OR %[2]s NOT IN (%[3]s) THEN 1 ELSE 0 END) AS has_pending,
+				MAX(CASE WHEN %[8]s = '' THEN 1 ELSE 0 END) AS has_missing_question_id
 			FROM task_session_messages m
 			JOIN task_sessions ts ON ts.id = m.task_session_id
 			WHERE m.type = 'clarification_request'
@@ -131,10 +145,11 @@ func clarificationBundleQuery(drv, whereExtra string) string {
 		) b
 		JOIN tasks t ON t.id = b.task_id
 		WHERE b.has_pending = 1
+		  AND b.has_missing_question_id = 0
 		  %[4]s
 		ORDER BY b.created_at ASC, b.pending_id ASC
 		LIMIT ?
-	`, pendingIDExpr, statusExpr, clarificationTerminalStatusesSQL, whereExtra, notParentQuestion, nonTerminalSession, currentTurn)
+	`, pendingIDExpr, statusExpr, clarificationTerminalStatusesSQL, whereExtra, notParentQuestion, nonTerminalSession, currentTurn, questionIDExpr)
 }
 
 // scanClarificationBundleRows scans the bundle rows. The created_at column
