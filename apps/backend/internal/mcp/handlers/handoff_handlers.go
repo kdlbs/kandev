@@ -48,8 +48,11 @@ func (h *Handlers) handleListRelatedTasks(ctx context.Context, msg *ws.Message) 
 	related, err := svc.ListRelatedForRequest(ctx, service.RelatedReadRequest{
 		CallerTaskID: caller,
 		TargetTaskID: req.TaskID,
-		Scope:        service.RelatedReadScope(req.RelatedReadScope),
-		Verbose:      req.Verbose,
+		// related_read_scope is attested by the agentctl MCP server from its
+		// backend-resolved profile; browser clients are blocked from mcp.*
+		// actions before they can reach this handler.
+		Scope:   service.RelatedReadScope(req.RelatedReadScope),
+		Verbose: req.Verbose,
 	})
 	if err != nil {
 		h.logRelatedReadDecision(req, caller, "denied", err)
