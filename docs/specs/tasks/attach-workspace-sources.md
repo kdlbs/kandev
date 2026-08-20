@@ -83,6 +83,8 @@ filesystem-policy refresh, this refresh fails before agentctl is stopped or rebo
 the user to start a new session. The attachment remains durable but is not reported usable in the
 existing child with stale Git grants.
 
+For ACP agents that advertise `sessionCapabilities.additionalDirectories`, every new session receives the ordered canonical source roots in `session/new.additionalDirectories`, excluding its `cwd` and duplicates. The roots are resolved in the executor's filesystem: host paths for Local and Worktree, and task-root-relative clone destinations for Docker, SSH, and Sprites. A provider that does not advertise the capability receives no extra directories; Kandev does not substitute a parent directory, a host path, or a broader sandbox grant. Materializing an additional remote repository therefore remains supported for file and Git services, while a new ACP session fails with clear recovery guidance only when the requested provider cannot represent the required source scope.
+
 ## Data model
 
 Repository attachments continue to use `task_repositories`; their current uniqueness contract on
