@@ -2114,14 +2114,21 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 	if len(resp.Worktrees) > 0 {
 		return buildTaskEnvironmentRepos(resp.Worktrees)
 	}
-	if resp.WorktreeID == "" {
+	if req.RepositoryID == "" {
 		return nil
+	}
+	branchSlug := req.BranchIdentitySlug
+	if branchSlug == "" {
+		branchSlug = req.BranchSlug
+	}
+	if branchSlug == "" {
+		branchSlug = topLevelBranchIdentitySlug(req)
 	}
 	return []*models.TaskEnvironmentRepo{{
 		RepositoryID:   req.RepositoryID,
-		BranchSlug:     req.BranchSlug,
+		BranchSlug:     worktree.SanitizeBranchSlug(branchSlug),
 		WorktreeID:     resp.WorktreeID,
-		WorktreePath:   resp.WorktreePath,
+		WorktreePath:   computeWorkspacePath(req, resp),
 		WorktreeBranch: resp.WorktreeBranch,
 		Position:       0,
 	}}

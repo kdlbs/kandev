@@ -124,6 +124,24 @@ func TestReuseExistingEnvironment_WorktreeSkippedWhenNotRequested(t *testing.T) 
 	}
 }
 
+func TestEnvironmentReposForLaunch_PersistsRemoteWorkspaceIdentity(t *testing.T) {
+	req := &LaunchAgentRequest{
+		RepositoryID:       "repo-1",
+		BranchIdentitySlug: "feature/task",
+		WorkspacePath:      "/remote/tasks/task-1",
+	}
+	resp := &LaunchAgentResponse{WorkspacePath: "/remote/tasks/task-1"}
+
+	repos := environmentReposForLaunch(req, resp)
+	if len(repos) != 1 {
+		t.Fatalf("environment repos = %#v, want one remote repository row", repos)
+	}
+	got := repos[0]
+	if got.RepositoryID != "repo-1" || got.BranchSlug != "feature-task" || got.WorktreePath != "/remote/tasks/task-1" || got.WorktreeID != "" {
+		t.Fatalf("remote environment repo = %#v", got)
+	}
+}
+
 func TestReuseExistingEnvironment_ContainerReuse(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1"}
