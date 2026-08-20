@@ -113,6 +113,27 @@ func TestStandaloneGitMetadataPreflightRendersCodexPolicy(t *testing.T) {
 	}
 }
 
+func TestStandaloneGitMetadataPreflightAllowsMockAgent(t *testing.T) {
+	projection := newLinkedGitMetadataProjection(t)
+	req := &ExecutorCreateRequest{
+		WorkspacePath:          projection.CheckoutPath,
+		GitMetadataProjections: []*worktree.GitMetadataProjection{projection},
+		AgentConfig:            agents.NewMockAgent(),
+	}
+
+	if err := preflightGitMetadataProjection(context.Background(), &StandaloneExecutor{}, req); err != nil {
+		t.Fatalf("preflightGitMetadataProjection() error = %v", err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal([]byte(req.Env["CODEX_CONFIG"]), &config); err != nil {
+		t.Fatalf("decode CODEX_CONFIG: %v", err)
+	}
+	permissions, ok := config["permissions"].(map[string]any)
+	if !ok || permissions[codexGitMetadataPolicyName] == nil {
+		t.Fatalf("permissions = %#v, want task Git metadata policy", config["permissions"])
+	}
+}
+
 func TestMergeCodexConfigIgnoresMalformedPermissionsOverlay(t *testing.T) {
 	config := map[string]any{"approval_policy": "never"}
 
