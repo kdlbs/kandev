@@ -171,6 +171,11 @@ function smartGitRepository(root: string, relative: string): string | undefined 
   if (repo === root || !repo.startsWith(`${root}${path.sep}`) || !repo.endsWith(".git")) {
     return undefined;
   }
+  try {
+    if (!fs.statSync(repo).isDirectory()) return undefined;
+  } catch {
+    return undefined;
+  }
   return repo;
 }
 
