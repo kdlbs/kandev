@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -64,24 +65,74 @@ func Middleware(svc *auth.Service) gin.HandlerFunc {
 // its own port-scoped cookie name, by setting the header directly. The same
 // trusted list that gates X-Forwarded-For (gin's ClientIP via
 // SetTrustedProxies) gates this header so the two trust decisions cannot
-// diverge; an untrusted value is dropped (with a warning) and the resolver
-// falls back to the request Host. backendapp passes the list returned by its
+// diverge; an untrusted value is dropped (warned once per distinct peer and
+// host, see forwardedHostWarnSet) and the resolver falls back to the request
+// Host. backendapp passes the list returned by its
 // configureTrustedProxies, so the two uses share one configuration.
 func StripUntrustedForwardedHost(trusted []string, log *logger.Logger) gin.HandlerFunc {
 	matcher := newTrustedProxyMatcher(trusted)
+	warned := newForwardedHostWarnSet()
 	return func(c *gin.Context) {
-		if c.GetHeader("X-Forwarded-Host") == "" {
+		forwardedHost := c.GetHeader("X-Forwarded-Host")
+		if forwardedHost == "" {
 			return
 		}
 		peer := remoteAddrHost(c.Request.RemoteAddr)
 		if matcher.contains(peer) {
 			return
 		}
-		log.Warn("ignoring X-Forwarded-Host from untrusted peer",
-			zap.String("peer", peer),
-			zap.String("forwarded_host", c.GetHeader("X-Forwarded-Host")))
+		if warned.first(peer, forwardedHost) {
+			log.Warn("ignoring X-Forwarded-Host from untrusted peer",
+				zap.String("peer", peer),
+				zap.String("forwarded_host", forwardedHost),
+				zap.String("hint", forwardedHostWarnHint))
+		}
 		c.Request.Header.Del("X-Forwarded-Host")
 	}
+}
+
+// forwardedHostWarnHint tells the operator how to fix the common cause: a real
+// reverse proxy missing from the trusted list. The warning is a configuration
+// signal, not a per-request event, so the fix travels with it.
+const forwardedHostWarnHint = "set KANDEV_TRUSTED_PROXIES to this peer's IP or CIDR if it is your reverse proxy"
+
+// forwardedHostWarnLimit bounds the distinct (peer, forwarded host) pairs
+// remembered for warn deduplication. A misconfigured proxy produces one pair;
+// the cap keeps a client that varies either value from growing the set without
+// bound, at the cost of only losing warnings once it is reached.
+const forwardedHostWarnLimit = 64
+
+// forwardedHostWarnSet deduplicates the strip warning. The stripped header is
+// a static property of the deployment (an untrusted proxy keeps forwarding on
+// every request), so warning per request buries the rest of the log in
+// thousands of identical lines while adding nothing after the first. One
+// warning per distinct (peer, forwarded host) pair keeps the operator signal
+// and still surfaces a genuinely new peer or host.
+type forwardedHostWarnSet struct {
+	mu   sync.Mutex
+	seen map[string]struct{}
+}
+
+func newForwardedHostWarnSet() *forwardedHostWarnSet {
+	return &forwardedHostWarnSet{seen: make(map[string]struct{})}
+}
+
+// first reports whether this (peer, forwarded host) pair has not been warned
+// about yet, recording it when so. It returns false once the pair is known or
+// the set is full.
+func (s *forwardedHostWarnSet) first(peer, forwardedHost string) bool {
+	// NUL cannot appear in either value, so it cannot forge a pair boundary.
+	key := peer + "\x00" + forwardedHost
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.seen[key]; ok {
+		return false
+	}
+	if len(s.seen) >= forwardedHostWarnLimit {
+		return false
+	}
+	s.seen[key] = struct{}{}
+	return true
 }
 
 // trustedProxyMatcher matches a peer IP against the trusted-proxy list (bare

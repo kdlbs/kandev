@@ -184,6 +184,14 @@ with a warning naming the bad value, and the whole variable is ignored (fail
 closed: no partial trust). A trailing or doubled comma is treated the same
 way. The backend never crashes on a bad value.
 
+The same list gates `X-Forwarded-Host`, which a proxy sends so the port-scoped
+session cookie can be resolved from the browser's original host. A proxy that
+sends it while missing from the list logs
+`ignoring X-Forwarded-Host from untrusted peer` with the peer address and the
+forwarded host. That warning is logged once per distinct peer and host, not per
+request, so it names the misconfiguration without flooding the log. Add the
+peer it names to `KANDEV_TRUSTED_PROXIES` if it is your reverse proxy.
+
 The variable is read once at startup and must reach the backend process: set
 it in the environment of the process that launches kandev, for example a
 systemd drop-in for `kandev.service` (`systemctl --user edit

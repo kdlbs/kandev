@@ -2,6 +2,7 @@ package httpmw
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -524,5 +525,78 @@ func TestStripUntrustedForwardedHostWarns(t *testing.T) {
 	}
 	if !warned {
 		t.Fatal("no X-Forwarded-Host warning was logged")
+	}
+}
+
+// stripWarnRouter builds a strip-middleware router over an observed logger and
+// returns both, so a test can count the warnings a request sequence produces.
+func stripWarnRouter(t *testing.T) (*gin.Engine, *observer.ObservedLogs) {
+	t.Helper()
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("observer logger: %v", err)
+	}
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(StripUntrustedForwardedHost(nil, log))
+	router.GET("/", echoXFH)
+	return router, logs
+}
+
+// serveStrip sends one request with the given peer and X-Forwarded-Host,
+// asserting the header was stripped so warn counting never masks a behavior
+// regression.
+func serveStrip(t *testing.T, router *gin.Engine, peer, forwardedHost string) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = peer
+	req.Header.Set("X-Forwarded-Host", forwardedHost)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if got := rec.Body.String(); got != "stripped" {
+		t.Fatalf("peer %s host %s: body = %q, want stripped", peer, forwardedHost, got)
+	}
+}
+
+// TestStripUntrustedForwardedHostWarnsOncePerPeer pins the deduplication: an
+// untrusted proxy forwards on every request, so warning per request buries the
+// log in thousands of identical lines. The first request warns; repeats from
+// the same peer and host stay silent, and the header is still stripped.
+func TestStripUntrustedForwardedHostWarnsOncePerPeer(t *testing.T) {
+	router, logs := stripWarnRouter(t)
+	for range 50 {
+		serveStrip(t, router, "203.0.113.9:5555", "public.example:8443")
+	}
+	if got := logs.Len(); got != 1 {
+		t.Fatalf("warnings for 50 identical requests = %d, want 1", got)
+	}
+}
+
+// TestStripUntrustedForwardedHostWarnsPerDistinctPair pins the other half: a
+// new peer, or a known peer presenting a new forwarded host, is genuinely new
+// information and warns again.
+func TestStripUntrustedForwardedHostWarnsPerDistinctPair(t *testing.T) {
+	router, logs := stripWarnRouter(t)
+	serveStrip(t, router, "203.0.113.9:5555", "public.example:8443")
+	serveStrip(t, router, "203.0.113.9:5555", "public.example:8443") // repeat: silent
+	serveStrip(t, router, "198.51.100.4:5555", "public.example:8443")
+	serveStrip(t, router, "203.0.113.9:5555", "other.example:8443")
+	if got := logs.Len(); got != 3 {
+		t.Fatalf("warnings for 3 distinct pairs = %d, want 3", got)
+	}
+}
+
+// TestStripUntrustedForwardedHostWarnSetIsBounded pins the memory bound: a
+// client that varies the forwarded host cannot grow the dedup set without
+// limit. Warnings stop at the cap; stripping does not.
+func TestStripUntrustedForwardedHostWarnSetIsBounded(t *testing.T) {
+	router, logs := stripWarnRouter(t)
+	for i := range forwardedHostWarnLimit * 2 {
+		serveStrip(t, router, "203.0.113.9:5555", fmt.Sprintf("host-%d.example:8443", i))
+	}
+	if got := logs.Len(); got != forwardedHostWarnLimit {
+		t.Fatalf("warnings for %d distinct hosts = %d, want %d (cap)",
+			forwardedHostWarnLimit*2, got, forwardedHostWarnLimit)
 	}
 }
