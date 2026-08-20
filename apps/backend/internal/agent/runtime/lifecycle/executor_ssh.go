@@ -324,7 +324,7 @@ func (r *SSHExecutor) installRemoteGitMetadataPolicy(
 	req *ExecutorCreateRequest,
 	platform SSHRemotePlatform,
 ) error {
-	if len(req.GitMetadataProjections) == 0 {
+	if len(req.GitMetadataProjections) == 0 && !req.RequiresCloneGitMetadataPolicy {
 		return nil
 	}
 	shell := sshShellForRemote(req.Metadata, platform)
@@ -343,7 +343,7 @@ func (r *SSHExecutor) installRemoteGitMetadataPolicy(
 }
 
 func (r *SSHExecutor) resumedStateForCreate(req *ExecutorCreateRequest) (*sshSessionState, bool) {
-	if req == nil || hasManagedGitHubBrokerEnv(req.Env) {
+	if req == nil || hasManagedGitHubBrokerEnv(req.Env) || req.RequiresCloneGitMetadataPolicy {
 		return nil, false
 	}
 	r.mu.Lock()
@@ -533,8 +533,9 @@ func (r *SSHExecutor) buildInstance(
 		Client: agentctl.NewClient(sshAgentctlLoopbackHost, fwd.LocalPort(), r.logger,
 			agentctl.WithExecutionID(req.InstanceID),
 			agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(authToken)),
-		WorkspacePath: taskDir,
-		AuthToken:     authToken,
+		WorkspacePath:        taskDir,
+		WorkspaceSourceRoots: []string{taskDir},
+		AuthToken:            authToken,
 		Metadata: map[string]interface{}{
 			MetadataKeySSHHost:               target.Host,
 			MetadataKeySSHPort:               strconv.Itoa(target.Port),
@@ -567,13 +568,14 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 			agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(state.authToken))
 	}
 	return &ExecutorInstance{
-		InstanceID:    req.InstanceID,
-		TaskID:        req.TaskID,
-		SessionID:     req.SessionID,
-		RuntimeName:   r.Name(),
-		Client:        client,
-		WorkspacePath: taskDir,
-		AuthToken:     state.authToken,
+		InstanceID:           req.InstanceID,
+		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
+		RuntimeName:          r.Name(),
+		Client:               client,
+		WorkspacePath:        taskDir,
+		WorkspaceSourceRoots: []string{taskDir},
+		AuthToken:            state.authToken,
 		Metadata: map[string]interface{}{
 			MetadataKeySSHHost:               state.target.Host,
 			MetadataKeySSHPort:               strconv.Itoa(state.target.Port),

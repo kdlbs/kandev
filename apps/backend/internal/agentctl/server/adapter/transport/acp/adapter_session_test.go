@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"io"
+	"slices"
 	"testing"
 	"time"
 
@@ -109,6 +110,51 @@ func TestMCPSessionNewAndLoadUseHTTPWithSSEFallback(t *testing.T) {
 			}
 			assertCapturedKandevTransport(t, capture.loadRequest.McpServers, tt.wantType)
 		})
+	}
+}
+
+func TestAdditionalDirectoriesExcludeCWDAndDuplicates(t *testing.T) {
+	got := additionalDirectoriesForSession(
+		"/workspace",
+		[]string{"/workspace", "/workspace/api", "/workspace/api", "/workspace/web"},
+	)
+	want := []string{"/workspace/api", "/workspace/web"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("additionalDirectoriesForSession() = %v, want %v", got, want)
+	}
+}
+
+func TestAdditionalDirectoriesRejectRelativeRoots(t *testing.T) {
+	got := additionalDirectoriesForSession("/workspace", []string{"api", "/workspace/api"})
+	want := []string{"/workspace/api"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("additionalDirectoriesForSession() = %v, want %v", got, want)
+	}
+}
+
+func TestNewSessionNegotiatesAdditionalDirectories(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	adapter.capabilities.SessionCapabilities.AdditionalDirectories = &acpsdk.SessionAdditionalDirectoriesCapabilities{}
+
+	if _, err := adapter.NewSessionWithAdditionalDirectories(context.Background(), nil, []string{
+		"/tmp/test", "/tmp/test/api", "/tmp/test/api", "/tmp/test/web",
+	}); err != nil {
+		t.Fatalf("NewSessionWithAdditionalDirectories: %v", err)
+	}
+	want := []string{"/tmp/test/api", "/tmp/test/web"}
+	if !slices.Equal(capture.newRequest.AdditionalDirectories, want) {
+		t.Fatalf("ACP additionalDirectories = %v, want %v", capture.newRequest.AdditionalDirectories, want)
+	}
+}
+
+func TestNewSessionDoesNotSendAdditionalDirectoriesWithoutCapability(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+
+	if _, err := adapter.NewSessionWithAdditionalDirectories(context.Background(), nil, []string{"/tmp/test/api"}); err != nil {
+		t.Fatalf("NewSessionWithAdditionalDirectories: %v", err)
+	}
+	if capture.newRequest.AdditionalDirectories != nil {
+		t.Fatalf("ACP additionalDirectories = %v, want nil without capability", capture.newRequest.AdditionalDirectories)
 	}
 }
 

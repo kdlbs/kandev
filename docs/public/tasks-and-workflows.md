@@ -240,6 +240,11 @@ agentctl-managed workspace processes, so save unsaved work and restart those pro
 Local Docker, SSH, and Sprites attach repository siblings to the current remote workspace and rescan
 without restarting the agent or changing its CWD.
 
+For ACP agents that explicitly support extra workspace directories, Kandev includes only the task's
+canonical repository siblings when it creates the session. Unsupported agents retain their normal task
+workspace boundary. Clone-based Docker, SSH, and Sprites launches validate the executor-side checkout
+and its Git metadata before a mutable session can start.
+
 Folders are live host paths and are available only to **Local/Local PC** and **Worktree** tasks. Repository sources are supported for **Worktree**, **Local/Local PC**, **Local Docker**, **SSH**, and **Sprites**. Local Git rows need a cloneable origin on Docker, SSH, and Sprites; Worktree and Local/Local PC can use the host repository directly. See [Executors](executors.md#workspace-sources) and [Coordinate work](coordination.md#add-sources-after-creation) for runtime limits and recovery behavior.
 
 ### Attachments and local-change consent

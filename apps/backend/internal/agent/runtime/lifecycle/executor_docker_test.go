@@ -96,6 +96,28 @@ func TestDockerExecutor_Name(t *testing.T) {
 	}
 }
 
+func TestDockerExecutorRejectsClonePolicyWithoutCompatibleAgent(t *testing.T) {
+	exec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	err := exec.PrepareGitMetadataProjection(context.Background(), &ExecutorCreateRequest{
+		RequiresCloneGitMetadataPolicy: true,
+		AgentConfig:                    agents.NewClaudeACP(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "filesystem policy") {
+		t.Fatalf("PrepareGitMetadataProjection() error = %v, want incompatible-policy rejection", err)
+	}
+}
+
+func TestDockerExecutorSkipsReconnectWhenClonePolicyRequiresFreshAttestation(t *testing.T) {
+	exec := &DockerExecutor{}
+	instance, reused := exec.tryReconnect(context.Background(), nil, &ExecutorCreateRequest{
+		PreviousExecutionID:            "previous",
+		RequiresCloneGitMetadataPolicy: true,
+	})
+	if instance != nil || reused {
+		t.Fatalf("tryReconnect = (%+v, %t), want a fresh clone-policy launch", instance, reused)
+	}
+}
+
 func TestDockerExecutor_HealthCheck(t *testing.T) {
 	log := newTestDockerLogger()
 	exec := NewDockerExecutor(config.DockerConfig{}, "", log)

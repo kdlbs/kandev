@@ -1,7 +1,7 @@
 ---
 id: "02-acp-additional-directories"
 title: "ACP additional directories"
-status: pending
+status: complete
 wave: 2
 depends_on: ["01-clone-policy-attestation"]
 plan: "plan.md"
@@ -54,4 +54,4 @@ Summary, files changed, protocol and launch/session test receipts, unsupported-p
 
 ## Results
 
-Pending.
+Implemented lifecycle executor-root forwarding through agentctl to ACP `session/new`. The ACP adapter emits deduplicated absolute sibling directories only when the initialized provider advertises `additionalDirectories`; unsupported providers receive none. Clone-based Docker, SSH, and Sprites create and persist executor-visible roots rather than host sources. Focused/package Go tests and race verification pass.

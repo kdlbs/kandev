@@ -41,6 +41,17 @@ func TestMaterializeRepository_ClonesIntoWorkspaceDestination(t *testing.T) {
 	}
 }
 
+func TestAttestMaterializedGitMetadataAcceptsRegularClone(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	destination := filepath.Join(t.TempDir(), "second-repo")
+	if _, err := materializeRepository(context.Background(), origin, destination, "main", ""); err != nil {
+		t.Fatalf("materialize repository: %v", err)
+	}
+	if err := attestMaterializedGitMetadata(context.Background(), destination); err != nil {
+		t.Fatalf("attest materialized Git metadata: %v", err)
+	}
+}
+
 func TestMaterializeRepository_ReusesCheckoutWithGitURLRewrite(t *testing.T) {
 	origin := createMaterializeOrigin(t)
 	configPath := filepath.Join(t.TempDir(), "gitconfig")
