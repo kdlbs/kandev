@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -29,7 +30,14 @@ func TestCreate_ReuseRequiredReturnsCanonicalWorktreeWithoutChangingGitState(t *
 	repoPath := initGitRepoWithRemote(t)
 	worktreePath := filepath.Join(t.TempDir(), "canonical")
 	runGit(t, repoPath, "worktree", "add", "-b", "reuse-required", worktreePath, "main")
+	marker := filepath.Join(worktreePath, "session-a-uncommitted-marker")
+	if err := os.WriteFile(marker, []byte("shared workspace state\n"), 0o600); err != nil {
+		t.Fatalf("write uncommitted marker: %v", err)
+	}
 	before := strings.TrimSpace(runGit(t, repoPath, "worktree", "list", "--porcelain"))
+	beforeBranch := strings.TrimSpace(runGit(t, worktreePath, "branch", "--show-current"))
+	beforeHead := strings.TrimSpace(runGit(t, worktreePath, "rev-parse", "HEAD"))
+	beforeStatus := strings.TrimSpace(runGit(t, worktreePath, "status", "--porcelain"))
 
 	store := newMockStore()
 	store.worktrees["canonical-worktree"] = &Worktree{
@@ -65,5 +73,17 @@ func TestCreate_ReuseRequiredReturnsCanonicalWorktreeWithoutChangingGitState(t *
 	after := strings.TrimSpace(runGit(t, repoPath, "worktree", "list", "--porcelain"))
 	if after != before {
 		t.Fatalf("git worktree list changed during attach-only reuse\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	if branch := strings.TrimSpace(runGit(t, worktreePath, "branch", "--show-current")); branch != beforeBranch {
+		t.Fatalf("branch changed during attach-only reuse: before=%q after=%q", beforeBranch, branch)
+	}
+	if head := strings.TrimSpace(runGit(t, worktreePath, "rev-parse", "HEAD")); head != beforeHead {
+		t.Fatalf("HEAD changed during attach-only reuse: before=%q after=%q", beforeHead, head)
+	}
+	if status := strings.TrimSpace(runGit(t, worktreePath, "status", "--porcelain")); status != beforeStatus {
+		t.Fatalf("status changed during attach-only reuse: before=%q after=%q", beforeStatus, status)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("attach-only reuse lost uncommitted marker: %v", err)
 	}
 }
