@@ -239,9 +239,9 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		// must use the already materialized task directory verbatim. In
 		// particular it must not run the remote prepare script or checkout
 		// verification, either of which can mutate an active shared checkout.
-		taskDir = strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeySSHRemoteTaskDir))
-		if taskDir == "" {
-			return nil, fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+		taskDir, err = reuseRequiredRemoteTaskDir(req)
+		if err != nil {
+			return nil, err
 		}
 	} else {
 		taskDir, err = r.prepareRemoteTaskDir(baseCtx, client, workdir, req)
@@ -290,6 +290,17 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	released = true // ownership transferred to session state; released on StopInstance
 
 	return r.buildInstance(req, target, fwd, taskDir, sessionDir, port, pid, workdir, authToken), nil
+}
+
+func reuseRequiredRemoteTaskDir(req *ExecutorCreateRequest) (string, error) {
+	if req == nil {
+		return "", fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+	}
+	taskDir := strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeySSHRemoteTaskDir))
+	if taskDir == "" {
+		return "", fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
+	}
+	return taskDir, nil
 }
 
 func (r *SSHExecutor) resumedStateForCreate(req *ExecutorCreateRequest) (*sshSessionState, bool) {
