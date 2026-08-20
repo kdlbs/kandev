@@ -40,7 +40,7 @@ func TestListRelatedTasksDispatcherEnforcesRelatedReadAuthorization(t *testing.T
 	var selfPayload service.RelatedTasks
 	require.NoError(t, json.Unmarshal(self.Payload, &selfPayload))
 	assert.Equal(t, "child-a", selfPayload.Task.ID)
-	assert.Empty(t, selfPayload.Task.Description)
+	assertRelatedTasksOmitDescriptions(t, &selfPayload)
 
 	relation := dispatchRelatedRead(t, dispatcher, map[string]any{
 		"task_id": "parent", "caller_task_id": "child-a", "caller_session_id": "session-caller", "verbose": true,
@@ -60,7 +60,7 @@ func TestListRelatedTasksDispatcherEnforcesRelatedReadAuthorization(t *testing.T
 	var compactPayload service.RelatedTasks
 	require.NoError(t, json.Unmarshal(coordinatorCompact.Payload, &compactPayload))
 	assert.Equal(t, "stranger", compactPayload.Task.ID)
-	assert.Empty(t, compactPayload.Task.Description)
+	assertRelatedTasksOmitDescriptions(t, &compactPayload)
 	assert.Empty(t, compactPayload.Task.DocumentKeys)
 
 	ordinary := dispatchRelatedRead(t, dispatcher, map[string]any{
@@ -143,6 +143,35 @@ func assertRelatedReadDenied(t *testing.T, resp *ws.Message, reason string) {
 	assert.Equal(t, ws.ErrorCodeForbidden, payload.Code)
 	assert.Equal(t, "related task access denied", payload.Message)
 	assert.Equal(t, reason, payload.Details["reason"])
+}
+
+func assertRelatedTasksOmitDescriptions(t *testing.T, related *service.RelatedTasks) {
+	t.Helper()
+	require.NotNil(t, related)
+	for _, task := range []*service.RelatedTask{
+		&related.Task,
+		related.Parent,
+	} {
+		assertRelatedTaskOmitsDescription(t, task)
+	}
+	for _, group := range [][]*service.RelatedTask{
+		related.Children,
+		related.Siblings,
+		related.Blockers,
+		related.BlockedBy,
+	} {
+		for _, task := range group {
+			assertRelatedTaskOmitsDescription(t, task)
+		}
+	}
+}
+
+func assertRelatedTaskOmitsDescription(t *testing.T, task *service.RelatedTask) {
+	t.Helper()
+	if task == nil {
+		return
+	}
+	assert.Empty(t, task.Description)
 }
 
 type relatedReadTableSnapshot struct {
