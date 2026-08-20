@@ -234,7 +234,7 @@ func (r *SpritesExecutor) runPrepareScript(
 
 	r.logger.Debug("running prepare script")
 	cmd := sprite.CommandContext(stepCtx, "bash", "-c", script)
-	cmd.Env = r.buildSpriteEnv(req.Env)
+	cmd.Env = r.buildSpriteEnv(req.Env, req.AgentctlStartupConfig)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

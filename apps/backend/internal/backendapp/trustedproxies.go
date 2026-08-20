@@ -35,7 +35,11 @@ func resolveTrustedProxies(raw string) (trusted []string, invalid []string) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, nil
 	}
-	for _, part := range strings.Split(raw, ",") {
+	return resolveTrustedProxyEntries(strings.Split(raw, ","))
+}
+
+func resolveTrustedProxyEntries(entries []string) (trusted []string, invalid []string) {
+	for _, part := range entries {
 		entry := strings.TrimSpace(part)
 		if entry == "" {
 			invalid = append(invalid, emptyTrustedProxyEntry)
@@ -66,8 +70,13 @@ func resolveTrustedProxies(raw string) (trusted []string, invalid []string) {
 // defeat the ClientIP-keyed login rate limiter. It returns the effective
 // trusted list (nil when nothing is trusted) so callers can apply the same
 // trust decision to other forwarded headers.
-func configureTrustedProxies(router *gin.Engine, log *logger.Logger) []string {
-	trusted, invalid := resolveTrustedProxies(os.Getenv(trustedProxiesEnv))
+func configureTrustedProxies(router *gin.Engine, log *logger.Logger, configured ...[]string) []string {
+	var trusted, invalid []string
+	if len(configured) > 0 {
+		trusted, invalid = resolveTrustedProxyEntries(configured[0])
+	} else {
+		trusted, invalid = resolveTrustedProxies(os.Getenv(trustedProxiesEnv))
+	}
 	if len(invalid) > 0 {
 		log.Warn(trustedProxiesWarningMsg, zap.Strings("invalid_entries", invalid))
 		trusted = nil

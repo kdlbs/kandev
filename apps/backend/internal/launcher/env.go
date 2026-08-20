@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/kandev/kandev/internal/common/config"
 )
 
 const healthTokenBytes = 32
@@ -29,16 +31,31 @@ func launchHealthToken() (string, error) {
 	return newHealthToken()
 }
 
-func backendEnv(ports portConfig, logLevel, consoleLogLevel string, debug bool, healthToken string, extra []string) []string {
+func backendEnv(ports portConfig, logLevel, consoleLogLevel string, debug bool, healthToken string, extra []string, configs ...*config.Config) []string {
+	if len(configs) > 0 {
+		return backendEnvForConfig(ports, logLevel, consoleLogLevel, debug, healthToken, extra, configs[0])
+	}
+	return backendEnvForConfig(ports, logLevel, consoleLogLevel, debug, healthToken, extra, nil)
+}
+
+func backendEnvForConfig(ports portConfig, logLevel, consoleLogLevel string, debug bool, healthToken string, extra []string, cfg *config.Config) []string {
 	env := os.Environ()
 	env = upsertEnv(env, "KANDEV_SERVER_PORT", fmt.Sprint(ports.BackendPort))
 	env = upsertEnv(env, "KANDEV_AGENT_STANDALONE_PORT", fmt.Sprint(ports.AgentctlPort))
-	env = upsertEnv(env, "KANDEV_DATABASE_PATH", resolveDatabasePath())
+	if cfg == nil || cfg.SourceFor("database.path") != config.SourceConfiguration || strings.TrimSpace(cfg.Database.Path) == "" {
+		env = upsertEnv(env, "KANDEV_DATABASE_PATH", resolveDatabasePathForConfig(cfg))
+	}
+	if configPath := configFileForChild(cfg); configPath != "" {
+		env = upsertEnv(env, config.InternalConfigFileEnv, configPath)
+		if cfg.Source.HomeFile {
+			env = upsertEnv(env, "KANDEV_INTERNAL_CONFIG_HOME_FILE", "1")
+		}
+	}
 	env = upsertEnv(env, "KANDEV_DESKTOP_HEALTH_TOKEN", healthToken)
 	if ports.WebPort != 0 {
 		env = upsertEnv(env, "KANDEV_WEB_INTERNAL_URL", fmt.Sprintf("http://localhost:%d", ports.WebPort))
 	}
-	if logLevel != "" {
+	if logLevel != "" && (cfg == nil || cfg.SourceFor("logging.level") != config.SourceConfiguration || cfg.Logging.Level != logLevel) {
 		env = upsertEnv(env, "KANDEV_LOG_LEVEL", logLevel)
 	}
 	env = upsertEnv(env, "KANDEV_CONSOLE_LOG_LEVEL", consoleLogLevel)

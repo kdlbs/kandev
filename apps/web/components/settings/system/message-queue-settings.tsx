@@ -10,6 +10,7 @@ import { Label } from "@kandev/ui/label";
 import { Spinner } from "@kandev/ui/spinner";
 import { Switch } from "@kandev/ui/switch";
 import { IconAlertCircle, IconInfoCircle, IconLock } from "@tabler/icons-react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
@@ -36,11 +37,39 @@ function sourceLabelKey(source: MessageQueueSettingsSource): string {
   switch (source) {
     case "setting":
       return "system:messageQueueSourceSetting";
+    case "configuration":
+      return "system:messageQueueSourceConfiguration";
     case "environment":
       return "system:messageQueueSourceEnvironment";
     default:
       return "system:messageQueueSourceDefault";
   }
+}
+
+function queueCapacityLockMessage(
+  t: TFunction,
+  source: MessageQueueSettingsSource | undefined,
+): string {
+  if (source === "configuration") return t("system:messageQueueConfigurationLocked");
+  return t("system:messageQueueEnvironmentLocked", { variable: ENVIRONMENT_VARIABLE });
+}
+
+type QueueSettingsValidationOptions = {
+  parsed: number | null;
+  isAdmin: boolean;
+  isLocked: boolean;
+  isMaxDirty: boolean;
+  lockSource: MessageQueueSettingsSource | undefined;
+};
+
+function queueSettingsInvalidReason(
+  t: TFunction,
+  { parsed, isAdmin, isLocked, isMaxDirty, lockSource }: QueueSettingsValidationOptions,
+): string | undefined {
+  if (parsed === null) return t("system:messageQueueValidation");
+  if (!isAdmin) return t("system:messageQueueAdminOnly");
+  if (isLocked && isMaxDirty) return queueCapacityLockMessage(t, lockSource);
+  return undefined;
 }
 
 /** Loads the persisted snapshot and owns the editable queue-setting drafts.
@@ -194,12 +223,14 @@ function useMessageQueueSettingsDraft() {
   const isAutoMergeDirty = autoMergeBaseline !== undefined && autoMergeDraft !== autoMergeBaseline;
   const isAdmin = role === undefined || role === "admin";
   const isLocked = snapshot?.effective.locked === true;
-  let invalidReason: string | undefined;
-  if (parsed === null) invalidReason = t("system:messageQueueValidation");
-  else if (!isAdmin) invalidReason = t("system:messageQueueAdminOnly");
-  else if (isLocked && isMaxDirty) {
-    invalidReason = t("system:messageQueueEnvironmentLocked", { variable: ENVIRONMENT_VARIABLE });
-  }
+  const lockSource = snapshot?.effective.source;
+  const invalidReason = queueSettingsInvalidReason(t, {
+    parsed,
+    isAdmin,
+    isLocked,
+    isMaxDirty,
+    lockSource,
+  });
 
   useQueueSettingsContributor({
     load,
@@ -227,6 +258,7 @@ function useMessageQueueSettingsDraft() {
     isDirty: isMaxDirty || isMergeDirty || isAutoMergeDirty,
     isAdmin,
     isLocked,
+    lockSource,
     reload: load.reload,
   };
 }
@@ -392,6 +424,7 @@ export function MessageQueueSettings() {
 
   if (!state.snapshot) return null;
   const { settings, effective } = state.snapshot;
+  const isConfigurationLocked = state.lockSource === "configuration";
   const effectiveValue =
     effective.max_per_session === 0
       ? t("system:messageQueueUnlimited")
@@ -420,10 +453,14 @@ export function MessageQueueSettings() {
         {state.isLocked && (
           <Alert>
             <IconLock className="size-4" />
-            <AlertTitle>{t("system:messageQueueEnvironmentLockTitle")}</AlertTitle>
-            <AlertDescription>
-              {t("system:messageQueueEnvironmentLocked", { variable: ENVIRONMENT_VARIABLE })}
-            </AlertDescription>
+            <AlertTitle>
+              {t(
+                isConfigurationLocked
+                  ? "system:messageQueueConfigurationLockTitle"
+                  : "system:messageQueueEnvironmentLockTitle",
+              )}
+            </AlertTitle>
+            <AlertDescription>{queueCapacityLockMessage(t, state.lockSource)}</AlertDescription>
           </Alert>
         )}
         {!state.isAdmin && (

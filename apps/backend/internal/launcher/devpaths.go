@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kandev/kandev/internal/common/config"
 )
 
 // findRepoRoot returns the nearest ancestor of startDir that contains both
@@ -61,9 +63,13 @@ func isInsideKandevTask(repoRoot string) bool {
 // The returned dbPath is display-only; the backend derives its own DB path
 // from KANDEV_HOME_DIR via resolveDatabasePath(). Both resolve to the same
 // location.
-func resolveDevBackendEnv(repoRoot string) (dbPath string, extra []string) {
+func resolveDevBackendEnv(repoRoot string, configs ...*config.Config) (dbPath string, extra []string) {
 	devHome := devKandevHome(repoRoot)
 	devDBPath := filepath.Join(devHome, "data", "kandev.db")
+	var startupConfig *config.Config
+	if len(configs) > 0 {
+		startupConfig = configs[0]
+	}
 
 	// Profile-selector only: the backend reads profiles.yaml at startup and
 	// applies the matching dev: values (mock agent, pprof, feature flags,
@@ -79,6 +85,14 @@ func resolveDevBackendEnv(repoRoot string) (dbPath string, extra []string) {
 			// HomeDir-derived default.
 			"KANDEV_DATABASE_PATH=",
 		)
+	}
+
+	if startupConfig != nil && startupConfig.SourceFor("database.path") == config.SourceConfiguration &&
+		strings.TrimSpace(startupConfig.Database.Path) != "" {
+		return startupConfig.Database.Path, baseExtra
+	}
+	if startupConfig != nil && startupConfig.SourceFor("homeDir") == config.SourceConfiguration {
+		return filepath.Join(startupConfig.ResolvedDataDir(), "kandev.db"), baseExtra
 	}
 
 	if override := strings.TrimSpace(os.Getenv("KANDEV_DATABASE_PATH")); override != "" {

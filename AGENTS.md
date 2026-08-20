@@ -240,6 +240,15 @@ Runtime feature toggles add a SQLite-backed override tier managed through `Setti
 
 Profile selection: `KANDEV_E2E_MOCK=true` → `e2e`, `KANDEV_DEBUG_DEV_MODE=true` or `KANDEV_DEBUG_PPROF_ENABLED=true` → `dev`, otherwise `prod`. The Go dev launcher (`apps/backend/internal/launcher/dev.go`) and `apps/web/e2e/fixtures/backend.ts` set only the selector — they no longer hardcode the underlying values.
 
+Stable operator startup settings have a separate typed source contract in
+`apps/backend/internal/common/config/catalog.go` and `source.go`. The catalog
+owns each canonical YAML key, compatible environment alias, default, source
+provenance, sensitivity, and reviewed exclusion. Configuration discovery uses
+the first existing `config.yaml` candidate in working-directory, home, and
+`/etc/kandev` order; it does not merge files. Environment values override YAML,
+and consumers receive typed values or explicit child-process contracts instead
+of relying on YAML-to-public-environment copying.
+
 For any task that adds, rolls out, promotes, graduates, or removes a release toggle, use `/runtime-feature-flags`. That skill contains the file-by-file checklist, disabled-path requirements, test commands, promotion procedure, and retired-identity removal steps; do not rely on an agent discovering an ADR or public docs. In brief: merge risky features off in every shipped profile, enable a selected install with an admin override or explicit environment, restart when required by registry metadata, then test. Change `prod:` to `"true"` for the all-user release while retaining the registry entry as a kill-switch. Remove the live flag after the feature is permanent, move its key and environment variable to the append-only retired identities in `runtimeflags/registry.go`, and never reuse either identity. Completeness tests cover the registry/profile/frontend contracts. Runtime overrides and restart support are documented in `docs/decisions/0018-runtime-settings-overrides.md` and `docs/decisions/0019-restart-supervisor.md`.
 
 ---

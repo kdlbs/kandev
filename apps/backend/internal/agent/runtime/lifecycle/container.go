@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/gitconfigenv"
@@ -56,10 +57,11 @@ type ContainerConfig struct {
 	McpMode                        string
 	McpProviders                   []string
 	McpProfile                     *mcpprofile.Context
-	PrepareScript                  string                 // Script to run inside container before agent starts (e.g., clone repo)
-	ImageTagOverride               string                 // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
-	LocalClonePath                 string                 // Host path for file:// repository clone URLs; mounted read-only at the same path.
-	BootstrapNonce                 string                 // one-time nonce for agentctl handshake (set internally)
+	PrepareScript                  string // Script to run inside container before agent starts (e.g., clone repo)
+	ImageTagOverride               string // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
+	LocalClonePath                 string // Host path for file:// repository clone URLs; mounted read-only at the same path.
+	BootstrapNonce                 string // one-time nonce for agentctl handshake (set internally)
+	AgentctlStartupConfig          commonconfig.AgentctlStartupConfig
 	Metadata                       map[string]interface{} // Optional metadata (e.g., office runtime dir)
 	// BaseBranches maps RepositoryName → base branch ref; forwarded into
 	// agentctl's CreateInstanceRequest so each WorkspaceTracker resolves
@@ -655,6 +657,9 @@ func (cm *ContainerManager) expandMountSource(source, workspacePath string) stri
 
 // buildEnvVars builds environment variables for the container
 func (cm *ContainerManager) buildEnvVars(config ContainerConfig) ([]string, error) {
+	if err := validateAgentctlStartupConfig(config.AgentctlStartupConfig); err != nil {
+		return nil, fmt.Errorf("invalid agentctl startup configuration: %w", err)
+	}
 	ag := config.AgentConfig
 	rt := ag.Runtime()
 	env := make([]string, 0)
@@ -732,6 +737,9 @@ func (cm *ContainerManager) buildEnvVars(config ContainerConfig) ([]string, erro
 	// Inject bootstrap nonce for agentctl handshake (NOT the auth token)
 	if config.BootstrapNonce != "" {
 		env = append(env, "AGENTCTL_BOOTSTRAP_NONCE="+config.BootstrapNonce)
+	}
+	for key, value := range agentctlStartupEnvironment(config.AgentctlStartupConfig) {
+		env = append(env, key+"="+value)
 	}
 
 	return env, nil

@@ -67,6 +67,23 @@ func TestResolveGitMaxConcurrent(t *testing.T) {
 	}
 }
 
+func TestConfigureCapsUsesTypedStartupValues(t *testing.T) {
+	previousGH := GH().SetCapForTest(defaultGHMaxConcurrent)
+	previousGit := Git().SetCapForTest(defaultGitMaxConcurrent)
+	t.Cleanup(func() {
+		previousGH()
+		previousGit()
+	})
+
+	ConfigureCaps(3, 4)
+	if got := GH().Capacity(); got != 3 {
+		t.Fatalf("GH capacity = %d, want 3", got)
+	}
+	if got := GitCapacity(); got != 4 {
+		t.Fatalf("Git capacity = %d, want 4", got)
+	}
+}
+
 // TestGHGitAreDistinctThrottles verifies the two singletons aren't
 // accidentally aliased. A regression where both helpers return the same
 // pool would let a gh storm starve git ops (or vice-versa) — exactly

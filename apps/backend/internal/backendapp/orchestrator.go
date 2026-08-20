@@ -97,7 +97,7 @@ func provideOrchestrator(
 	if err != nil {
 		return nil, nil, fmt.Errorf("init message queue repo: %w", err)
 	}
-	queueSettings := resolveQueueSettings(pool, log).Effective
+	queueSettings := resolveQueueSettings(pool, log, queueConfiguration(cfg)).Effective
 	maxPerSession := queueSettings.MaxPerSession
 	mergeEnabled := queueSettings.MergeEnabled
 	autoMergeEnabled := queueSettings.AutoMergeEnabled
@@ -282,8 +282,8 @@ func githubCredentialBrokerEndpoint(cfg *config.Config) string {
 // falling back to messagequeue.DefaultMaxPerSession (10) when unset or invalid.
 // Values <= 0 disable the cap entirely (callers can still flood queues — only
 // useful in tests / specialized deployments).
-func resolveQueueMaxPerSession(pool *db.Pool, log *logger.Logger) int {
-	return resolveQueueSettings(pool, log).Effective.MaxPerSession
+func resolveQueueMaxPerSession(pool *db.Pool, log *logger.Logger, startup ...queuesettings.Configuration) int {
+	return resolveQueueSettings(pool, log, startup...).Effective.MaxPerSession
 }
 
 // resolveQueueMergeEnabled honors the persisted message queue setting,
@@ -303,7 +303,11 @@ func resolveQueueAutoMergeEnabled(pool *db.Pool, log *logger.Logger) bool {
 // back to defaults when unset, invalid, or the store is unavailable — and
 // resolves them against the KANDEV_QUEUE_MAX_PER_SESSION environment
 // override.
-func resolveQueueSettings(pool *db.Pool, log *logger.Logger) queuesettings.Resolution {
+func resolveQueueSettings(
+	pool *db.Pool,
+	log *logger.Logger,
+	startup ...queuesettings.Configuration,
+) queuesettings.Resolution {
 	var configured *queuesettings.Settings
 	if pool != nil {
 		rawStore, err := systemsettings.NewStore(pool)
@@ -317,7 +321,7 @@ func resolveQueueSettings(pool *db.Pool, log *logger.Logger) queuesettings.Resol
 			}
 		}
 	}
-	resolution, err := queuesettings.Resolve(configured, queuesettings.ReadEnvironment())
+	resolution, err := queuesettings.Resolve(configured, queuesettings.ReadEnvironment(), startup...)
 	if err != nil {
 		log.Warn("Failed to resolve message queue settings, using defaults", zap.Error(err))
 		return queuesettings.Resolution{Response: queuesettings.Response{
@@ -334,6 +338,13 @@ func resolveQueueSettings(pool *db.Pool, log *logger.Logger) queuesettings.Resol
 			zap.String("environment_variable", queuesettings.EnvironmentVariable))
 	}
 	return resolution
+}
+
+func queueConfiguration(cfg *config.Config) queuesettings.Configuration {
+	if cfg == nil || cfg.SourceFor("messageQueue.maxPerSession") != config.SourceConfiguration {
+		return queuesettings.Configuration{}
+	}
+	return queuesettings.Configuration{Value: cfg.MessageQueue.MaxPerSession, Present: true}
 }
 
 func resolveEventNamespace(cfg *config.Config) string {
