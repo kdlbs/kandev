@@ -24,22 +24,7 @@ func installAttestedCloneGitMetadataPolicy(ctx context.Context, req *ExecutorCre
 	if instance == nil || instance.Client == nil || instance.WorkspacePath == "" {
 		return unsupportedGitMetadataProjection("clone checkout attestation is unavailable; start a new session with a supported executor")
 	}
-	approved, err := instance.Client.AttestWorkspaceGitMetadata(ctx)
-	if err != nil {
-		return unsupportedGitMetadataProjection("clone checkout attestation failed; start a new session with a supported executor")
-	}
-	expectedRoots := append([]string(nil), instance.WorkspaceSourceRoots...)
-	if len(expectedRoots) == 0 {
-		expectedRoots = []string{instance.WorkspacePath}
-	}
-	metadata, err := remoteRegularGitMetadataFromAttestations(approved, expectedRoots)
-	if err != nil {
-		return unsupportedGitMetadataProjection("clone checkout attestation failed; start a new session with a supported executor")
-	}
-	if err := prepareRemoteRegularGitMetadataPolicy(req, metadata...); err != nil {
-		return unsupportedGitMetadataProjection("clone Git metadata policy installation failed; start a new session with a supported executor")
-	}
-	policyEnv, err := remoteGitMetadataRuntimeEnv(req)
+	policyEnv, err := attestedCloneGitMetadataRuntimeEnv(ctx, req, instance.Client, instance.WorkspacePath, instance.WorkspaceSourceRoots)
 	if err != nil {
 		return unsupportedGitMetadataProjection("clone Git metadata policy installation failed; start a new session with a supported executor")
 	}
@@ -50,9 +35,38 @@ func installAttestedCloneGitMetadataPolicy(ctx context.Context, req *ExecutorCre
 	return nil
 }
 
-// remoteRegularGitMetadataFromAttestations accepts only the exact checkout
-// set lifecycle configured for this executor. GitDir values are consumed from
-// agentctl's final proof rather than reconstructed from a checkout string.
+// attestedCloneGitMetadataRuntimeEnv renders a clone policy exclusively from
+// agentctl's final ordered attestation. It is shared by launch and live
+// attachment refreshes so neither path can derive a GitDir from a workspace
+// string after the executor has materialized the checkout.
+func attestedCloneGitMetadataRuntimeEnv(ctx context.Context, req *ExecutorCreateRequest, client *agentctl.Client, workspacePath string, sourceRoots []string) (map[string]string, error) {
+	if !requiresCloneGitMetadataPolicy(req) || client == nil || workspacePath == "" {
+		return nil, errors.New("clone checkout attestation is unavailable")
+	}
+	approved, err := client.AttestWorkspaceGitMetadata(ctx)
+	if err != nil {
+		return nil, errors.New("clone checkout attestation failed")
+	}
+	expectedRoots := append([]string(nil), sourceRoots...)
+	if len(expectedRoots) == 0 {
+		expectedRoots = []string{workspacePath}
+	}
+	metadata, err := remoteRegularGitMetadataFromAttestations(approved, expectedRoots)
+	if err != nil {
+		return nil, err
+	}
+	if err := prepareRemoteRegularGitMetadataPolicy(req, metadata...); err != nil {
+		return nil, err
+	}
+	return remoteGitMetadataRuntimeEnv(req)
+}
+
+// remoteRegularGitMetadataFromAttestations accepts only the exact ordered
+// checkout sequence lifecycle configured for this executor. GitDir values are
+// consumed from agentctl's final proof rather than reconstructed from a
+// checkout string. Ordering binds each primary or secondary root to the
+// corresponding attestation response, so a reordered response cannot move a
+// valid GitDir grant between repositories.
 func remoteRegularGitMetadataFromAttestations(approved []agentctl.GitMetadataAttestation, expectedRoots []string) ([]remoteRegularGitMetadata, error) {
 	if len(approved) == 0 || len(approved) != len(expectedRoots) {
 		return nil, errors.New("clone Git metadata attestation set is incomplete")
@@ -68,19 +82,16 @@ func remoteRegularGitMetadataFromAttestations(approved []agentctl.GitMetadataAtt
 		expected[root] = struct{}{}
 	}
 	metadata := make([]remoteRegularGitMetadata, 0, len(approved))
-	for _, checkout := range approved {
-		if _, ok := expected[checkout.CheckoutPath]; !ok {
+	for index, expectedRoot := range expectedRoots {
+		checkout := approved[index]
+		if checkout.CheckoutPath != expectedRoot {
 			return nil, errors.New("clone Git metadata attestation set is invalid")
 		}
 		item := remoteRegularGitMetadata{CheckoutPath: checkout.CheckoutPath, GitDir: checkout.GitDir}
 		if !validRemoteRegularGitMetadata(item) {
 			return nil, errors.New("clone Git metadata attestation set is invalid")
 		}
-		delete(expected, checkout.CheckoutPath)
 		metadata = append(metadata, item)
-	}
-	if len(expected) != 0 {
-		return nil, errors.New("clone Git metadata attestation set is incomplete")
 	}
 	return metadata, nil
 }
