@@ -15,6 +15,7 @@ import {
   DropdownMenuSubTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
+import { isHealthyAgentProfile } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
@@ -45,14 +46,17 @@ export function useHandoffProfiles(taskId: string, enabled = true): HandoffProfi
   const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
 
   return useMemo(() => {
-    return agentProfiles.filter(isSelectableAgentProfile).map((profile) => {
-      const { label, agentName } = profileDisplayLabel(profile);
-      let disabled = false;
-      if (executorProfile && authLoaded) {
-        disabled = !isAgentConfiguredOnExecutor(profile, executorProfile, authSpecs);
-      }
-      return { id: profile.id, label, agentName, disabled };
-    });
+    return agentProfiles
+      .filter(isSelectableAgentProfile)
+      .filter((profile) => isHealthyAgentProfile(profile))
+      .map((profile) => {
+        const { label, agentName } = profileDisplayLabel(profile);
+        let disabled = false;
+        if (executorProfile && authLoaded) {
+          disabled = !isAgentConfiguredOnExecutor(profile, executorProfile, authSpecs);
+        }
+        return { id: profile.id, label, agentName, disabled };
+      });
   }, [agentProfiles, executorProfile, authSpecs, authLoaded]);
 }
 

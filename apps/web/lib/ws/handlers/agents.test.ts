@@ -165,6 +165,45 @@ describe("agent profile events", () => {
     expect(store.getState().agentProfiles.items).toHaveLength(1);
   });
 
+  it("preserves capability_status on the rebuilt option when a profile update arrives", () => {
+    const store = makeStore();
+    const handlers = handlersFor(store);
+    store.setState((state) => ({
+      ...state,
+      settingsAgents: {
+        items: [
+          {
+            id: "agent-1",
+            name: "claude-acp",
+            supports_mcp: false,
+            profiles: [],
+            capability_status: "not_installed",
+            capability_error: "agent not installed",
+            created_at: TIMESTAMP,
+            updated_at: TIMESTAMP,
+          },
+        ],
+      },
+    }));
+
+    handlers[PROFILE_CREATED](message(PROFILE_CREATED, { profile: profilePayload() }, TIMESTAMP));
+    expect(store.getState().agentProfiles.items[0]?.capability_status).toBe("not_installed");
+
+    const updatedAt = "2026-07-26T14:00:00Z";
+    handlers[PROFILE_UPDATED](
+      message(
+        PROFILE_UPDATED,
+        { profile: profilePayload({ model: "mock-slow", updated_at: updatedAt }) },
+        updatedAt,
+      ),
+    );
+
+    const updated = store.getState().agentProfiles.items[0];
+    expect(updated?.model).toBe("mock-slow");
+    expect(updated?.capability_status).toBe("not_installed");
+    expect(updated?.capability_error).toBe("agent not installed");
+  });
+
   it("ignores office-scoped delete events", () => {
     const store = makeStore();
     const handlers = handlersFor(store);

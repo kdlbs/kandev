@@ -108,4 +108,22 @@ describe("useHandoffProfiles", () => {
     renderHook(() => useHandoffProfiles("task-1", false));
     expect(mockUseTaskExecutorProfile).toHaveBeenCalledWith("task-1", false);
   });
+
+  it.each(["not_installed", "auth_required", "failed", "not_configured"] as const)(
+    "excludes profiles whose agent capability_status is %s",
+    (capability_status) => {
+      mockProfiles = [PROFILE_A, { ...PROFILE_B, capability_status }];
+      const { result } = renderHook(() => useHandoffProfiles("task-1"));
+      expect(result.current.map((p) => p.id)).toEqual(["profile-a"]);
+    },
+  );
+
+  it.each(["ok", "probing", undefined] as const)(
+    "keeps profiles whose agent capability_status is %s",
+    (capability_status) => {
+      mockProfiles = [PROFILE_A, { ...PROFILE_B, capability_status }];
+      const { result } = renderHook(() => useHandoffProfiles("task-1"));
+      expect(result.current.map((p) => p.id)).toEqual(["profile-a", "profile-b"]);
+    },
+  );
 });

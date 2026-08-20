@@ -89,7 +89,12 @@ function handleProfileCreated(
   deletionTombstones.delete(normalized.id); // a genuinely newer create wins
   const agentId = getAgentId(profile);
   const agent = state.settingsAgents.items.find((a) => a.id === agentId);
-  const agentStub = { id: agentId, name: agent?.name ?? "" };
+  const agentStub = {
+    id: agentId,
+    name: agent?.name ?? "",
+    capability_status: agent?.capability_status,
+    capability_error: agent?.capability_error,
+  };
   const nextProfiles = [
     ...state.agentProfiles.items.filter((p) => p.id !== normalized.id),
     toAgentProfileOption(agentStub, normalized),
@@ -125,7 +130,12 @@ function handleProfileUpdated(
   if (isStaleProfileEvent(state, normalized, eventTimestamp)) return {};
   const agentId = getAgentId(profile);
   const agent = state.settingsAgents.items.find((a) => a.id === agentId);
-  const agentStub = { id: agentId, name: agent?.name ?? "" };
+  const agentStub = {
+    id: agentId,
+    name: agent?.name ?? "",
+    capability_status: agent?.capability_status,
+    capability_error: agent?.capability_error,
+  };
   const nextProfiles = state.agentProfiles.items.map((p) =>
     p.id === normalized.id ? toAgentProfileOption(agentStub, normalized) : p,
   );
