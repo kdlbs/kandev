@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -181,8 +182,8 @@ func TestRebindWorkspaceForSessionReadinessTimeoutRollsBack(t *testing.T) {
 	execution.Status = v1.AgentStatusReady
 	execution.WorkspacePath = "/old-workspace"
 	execution.ACPSessionID = "acp-existing"
-	oldProjection := &worktree.GitMetadataProjection{CheckoutPath: "/old-workspace", Hash: "old"}
-	newProjection := &worktree.GitMetadataProjection{CheckoutPath: "/new-workspace", Hash: "new"}
+	oldProjection := newLinkedGitMetadataProjection(t)
+	newProjection := newLinkedGitMetadataProjection(t)
 	execution.GitMetadataProjections = []*worktree.GitMetadataProjection{oldProjection}
 	if err := mgr.RebindWorkspaceWithGitMetadata(context.Background(), execution.SessionID, "/new-workspace", []*worktree.GitMetadataProjection{newProjection}, []string{"/attached"}); err == nil {
 		t.Fatal("RebindWorkspaceForSession unexpectedly succeeded")
@@ -198,6 +199,29 @@ func TestRebindWorkspaceForSessionReadinessTimeoutRollsBack(t *testing.T) {
 	}
 	if loads := server.loads(); len(loads) != 1 || loads[0] != "acp-existing" {
 		t.Fatalf("rollback loaded ACP sessions = %v, want [acp-existing]", loads)
+	}
+}
+
+func TestRebindWorkspaceWithGitMetadataRejectsInvalidReplacementBeforeStopping(t *testing.T) {
+	mgr := &Manager{executionStore: NewExecutionStore()}
+	oldProjection := &worktree.GitMetadataProjection{CheckoutPath: "/old-workspace", Hash: "old"}
+	execution := &AgentExecution{
+		ID:                     "execution",
+		SessionID:              "session",
+		Status:                 v1.AgentStatusReady,
+		ACPSessionID:           "acp-existing",
+		GitMetadataProjections: []*worktree.GitMetadataProjection{oldProjection},
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+
+	err := mgr.RebindWorkspaceWithGitMetadata(context.Background(), execution.SessionID, "/new-workspace", []*worktree.GitMetadataProjection{{CheckoutPath: "/missing-checkout"}}, []string{"/attached"})
+	if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionInvalid) {
+		t.Fatalf("RebindWorkspaceWithGitMetadata error = %v, want %q", err, gitMetadataProjectionInvalid)
+	}
+	if len(execution.GitMetadataProjections) != 1 || execution.GitMetadataProjections[0] != oldProjection {
+		t.Fatalf("projections after rejected replacement = %#v, want old projection", execution.GitMetadataProjections)
 	}
 }
 
