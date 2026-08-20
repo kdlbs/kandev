@@ -39,6 +39,14 @@ func TestGitMetadataMountsMasksSiblingWorktrees(t *testing.T) {
 	for _, path := range projection.WritablePaths {
 		assertGitMount(t, mounts, path, false, false)
 	}
+	for _, mount := range mounts {
+		if mount.Source == repo || mount.Target == repo {
+			t.Fatalf("source checkout must not be mounted: %#v", mount)
+		}
+		if mount.Target == projection.CommonDir && !mount.ReadOnly {
+			t.Fatalf("common git root must not be writable: %#v", mount)
+		}
+	}
 }
 
 func runContainerGit(t *testing.T, dir string, args ...string) {
