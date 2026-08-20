@@ -137,6 +137,32 @@ describe("useSettingsState appearance save", () => {
     expect(setWorkspaces).not.toHaveBeenCalled();
   });
 
+  // A newer keystroke landing before the PATCH from an older one resolves
+  // must survive that response, not get overwritten by the stale echo.
+  it("keeps a draft typed during an in-flight save instead of reverting it", async () => {
+    const ws = workspace();
+    const { storeApi } = makeStoreApi([ws]);
+    let resolveUpdate!: (value: Workspace) => void;
+    mockUpdateWorkspaceAction.mockImplementation(
+      () => new Promise<Workspace>((resolve) => (resolveUpdate = resolve)) as never,
+    );
+
+    const { result } = renderSettings(ws, storeApi);
+    act(() => result.current.setName("Alpha"));
+    let savePromise!: Promise<void>;
+    act(() => {
+      savePromise = result.current.handleSaveAppearance();
+    });
+    act(() => result.current.setName("Alpha2"));
+
+    await act(async () => {
+      resolveUpdate({ ...ws, name: "Alpha" });
+      await savePromise;
+    });
+
+    expect(result.current.name).toBe("Alpha2");
+  });
+
   it("does not clobber a workspace added to the store while the save was in flight", async () => {
     const ws = workspace();
     const concurrent = workspace({ id: "ws-2", name: "Concurrent Workspace" });

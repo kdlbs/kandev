@@ -261,6 +261,8 @@ type SaveAppearanceOptions = {
   name: string;
   description: string;
   storeApi: WorkspaceStoreApi;
+  nameRef: React.RefObject<string>;
+  descriptionRef: React.RefObject<string>;
   setName: (v: string) => void;
   setDescription: (v: string) => void;
   setSaving: (v: boolean) => void;
@@ -272,6 +274,8 @@ function buildSaveAppearanceHandler({
   name,
   description,
   storeApi,
+  nameRef,
+  descriptionRef,
   setName,
   setDescription,
   setSaving,
@@ -290,8 +294,14 @@ function buildSaveAppearanceHandler({
         name: trimmedName,
         description,
       });
-      setName(updated.name);
-      setDescription(updated.description ?? "");
+      // Only echo the server response back into the draft fields if the user
+      // hasn't kept typing since this save started: the PATCH round trip can
+      // take long enough for a newer keystroke to land before the response
+      // does, and unconditionally overwriting the draft here would silently
+      // discard it (refs, not the closed-over name/description, hold the
+      // latest value across that round trip).
+      if (nameRef.current === trimmedName) setName(updated.name);
+      if (descriptionRef.current === description) setDescription(updated.description ?? "");
       // Read the store's current list at save time, not the array captured at
       // render/handler-build time: an in-flight workspace.created/updated/deleted
       // WS event can land during the PATCH round trip, and a stale snapshot here
@@ -440,6 +450,19 @@ export function useSettingsState(
   const recovery = useRecoveryState(activeWorkspace);
   const permissions = usePermissionsState(activeWorkspace);
 
+  // Latest-value refs so the in-flight save handler (a closure fixed at the
+  // moment Save was clicked) can tell whether the draft has moved on since,
+  // instead of blindly trusting the name/description it captured at submit
+  // time.
+  const nameRef = useRef(name);
+  const descriptionRef = useRef(description);
+  useEffect(() => {
+    nameRef.current = name;
+  }, [name]);
+  useEffect(() => {
+    descriptionRef.current = description;
+  }, [description]);
+
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) setLogoPreview(URL.createObjectURL(file));
@@ -450,6 +473,8 @@ export function useSettingsState(
     name,
     description,
     storeApi,
+    nameRef,
+    descriptionRef,
     setName,
     setDescription,
     setSaving: setSavingAppearance,
