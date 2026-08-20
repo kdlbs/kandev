@@ -437,14 +437,6 @@ type CommentResponse struct {
 type CreateCommentRequest struct {
 	Body       string `json:"body"`
 	AuthorType string `json:"author_type"`
-	// AuthorID is NEVER trusted as the identity to persist for an agent
-	// caller — the authenticated agent JWT (officeagents.CallerFromContext)
-	// is the sole source of truth, since trusting this field would let any
-	// JWT holder post as any other agent. It is used only as an optional
-	// cross-check against the caller's own identity; see
-	// handler_comments.go and DashboardService.ResolveCommentAgentAuthor.
-	// Ignored entirely for user-authored comments.
-	AuthorID string `json:"author_id"`
 }
 
 // UpdateWorkspaceSettingsRequest is the request body for updating workspace settings.

@@ -21,12 +21,9 @@ import (
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 )
 
-// commentSecurityFixture wires the minimal stack needed to exercise the
-// comment handler's identity checks: a real agents service (to mint JWTs
-// and answer CallerFromContext via AgentAuthMiddleware) sitting in front
-// of a real dashboard service backed by the same in-memory SQLite. Unlike
-// newTestDeps's router, this one is authenticated, so it can prove what
-// happens when a caller's JWT identity and request-body author_id disagree.
+// commentSecurityFixture wires the authenticated dashboard stack. The route
+// accepts UI requests without a token, but agent tokens must use the runtime
+// endpoint so capability and task-scope checks cannot be bypassed.
 type commentSecurityFixture struct {
 	router    *gin.Engine
 	agentsSvc *agents.AgentService
@@ -96,10 +93,6 @@ func newCommentSecurityFixture(t *testing.T) *commentSecurityFixture {
 	if err != nil {
 		t.Fatalf("create workflows: %v", err)
 	}
-	// GetTaskExecutionFields' assignee projection joins
-	// workflow_step_participants (via RunnerProjection); build the
-	// workflow repo against the same DB so that table exists, mirroring
-	// newTestDeps in handler_test.go.
 	if _, err := workflowrepo.NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("workflow repo: %v", err)
 	}
@@ -118,7 +111,6 @@ func newCommentSecurityFixture(t *testing.T) *commentSecurityFixture {
 	return &commentSecurityFixture{router: r, agentsSvc: agentsSvc, repo: repo}
 }
 
-// seedCommentAgent creates an agent_profiles row in the given workspace.
 func seedCommentAgent(t *testing.T, svc *agents.AgentService, id, workspaceID string) *models.AgentInstance {
 	t.Helper()
 	a := &models.AgentInstance{
@@ -135,8 +127,6 @@ func seedCommentAgent(t *testing.T, svc *agents.AgentService, id, workspaceID st
 	return a
 }
 
-// seedCommentTask inserts a bare task row so GetTaskExecutionFields has
-// something to resolve the workspace from.
 func seedCommentTask(t *testing.T, repo *sqlite.Repository, id, workspaceID, assigneeAgentID string) {
 	t.Helper()
 	_, err := repo.ExecRaw(context.Background(),
@@ -149,9 +139,11 @@ func seedCommentTask(t *testing.T, repo *sqlite.Repository, id, workspaceID, ass
 }
 
 func postCommentReq(taskID, token, body string) *http.Request {
-	req := httptest.NewRequest(http.MethodPost,
+	req := httptest.NewRequest(
+		http.MethodPost,
 		"/api/v1/office/tasks/"+taskID+"/comments",
-		bytes.NewBufferString(body))
+		bytes.NewBufferString(body),
+	)
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -159,161 +151,25 @@ func postCommentReq(taskID, token, body string) *http.Request {
 	return req
 }
 
-// TestCreateComment_AgentAuthorPersistsJWTIdentity is the happy path: an
-// agent's own JWT identity is what gets persisted as author_id.
-func TestCreateComment_AgentAuthorPersistsJWTIdentity(t *testing.T) {
+func TestCreateComment_AgentCallerMustUseRuntimeEndpoint(t *testing.T) {
 	f := newCommentSecurityFixture(t)
-	agentA := seedCommentAgent(t, f.agentsSvc, "agent-a", "ws-1")
-	seedCommentTask(t, f.repo, "task-1", "ws-1", agentA.ID)
+	agent := seedCommentAgent(t, f.agentsSvc, "agent-a", "ws-1")
+	seedCommentTask(t, f.repo, "task-1", "ws-1", agent.ID)
+	seedCommentTask(t, f.repo, "task-2", "ws-1", "")
 
-	token, err := f.agentsSvc.MintRuntimeJWT(agentA.ID, "task-1", agentA.WorkspaceID, "", "sess-1", "")
+	// The token has no post_comment capability and is scoped to task-1. A
+	// dashboard request for task-2 must still be rejected before persistence.
+	token, err := f.agentsSvc.MintRuntimeJWT(agent.ID, "task-1", agent.WorkspaceID, "run-1", "sess-1", "")
 	if err != nil {
 		t.Fatalf("mint jwt: %v", err)
 	}
 	rec := httptest.NewRecorder()
-	f.router.ServeHTTP(rec, postCommentReq("task-1", token,
-		`{"body":"hello","author_type":"agent"}`))
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
-	}
-	comments, err := f.repo.ListTaskComments(context.Background(), "task-1")
-	if err != nil {
-		t.Fatalf("list comments: %v", err)
-	}
-	if len(comments) != 1 || comments[0].AuthorID != agentA.ID {
-		t.Fatalf("comments = %+v, want single comment authored by %q", comments, agentA.ID)
-	}
-}
-
-// TestCreateComment_SpoofedAuthorIDRejectedWithForbidden is the core B1
-// regression: an agent authenticated as A sending author_id: B must not
-// persist B. Before the fix, the handler trusted req.AuthorID outright,
-// letting any agent impersonate any other agent (including the task's own
-// assignee, which would suppress that assignee's wake via the
-// scheduler/reactivity.go self-comment guard).
-func TestCreateComment_SpoofedAuthorIDRejectedWithForbidden(t *testing.T) {
-	f := newCommentSecurityFixture(t)
-	agentA := seedCommentAgent(t, f.agentsSvc, "agent-a", "ws-1")
-	agentB := seedCommentAgent(t, f.agentsSvc, "agent-b", "ws-1")
-	seedCommentTask(t, f.repo, "task-1", "ws-1", agentB.ID)
-
-	token, err := f.agentsSvc.MintRuntimeJWT(agentA.ID, "task-1", agentA.WorkspaceID, "", "sess-1", "")
-	if err != nil {
-		t.Fatalf("mint jwt: %v", err)
-	}
-	rec := httptest.NewRecorder()
-	f.router.ServeHTTP(rec, postCommentReq("task-1", token,
-		`{"body":"hello","author_type":"agent","author_id":"agent-b"}`))
+	f.router.ServeHTTP(rec, postCommentReq("task-2", token, `{"body":"hello"}`))
 
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 (spoofed author_id rejected); body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
 	}
-	comments, err := f.repo.ListTaskComments(context.Background(), "task-1")
-	if err != nil {
-		t.Fatalf("list comments: %v", err)
-	}
-	for _, c := range comments {
-		if c.AuthorID == agentB.ID {
-			t.Fatalf("spoofed author_id %q from request body landed in a persisted comment", agentB.ID)
-		}
-	}
-}
-
-// TestCreateComment_CrossWorkspaceAgentForbidden pins workspace isolation:
-// an agent in one workspace cannot comment as itself on a task that lives
-// in another workspace (GetAgentInstance's name-based lookup can otherwise
-// cross workspace boundaries).
-func TestCreateComment_CrossWorkspaceAgentForbidden(t *testing.T) {
-	f := newCommentSecurityFixture(t)
-	agentA := seedCommentAgent(t, f.agentsSvc, "agent-a", "ws-a")
-	seedCommentTask(t, f.repo, "task-1", "ws-b", "")
-
-	token, err := f.agentsSvc.MintRuntimeJWT(agentA.ID, "task-1", agentA.WorkspaceID, "", "sess-1", "")
-	if err != nil {
-		t.Fatalf("mint jwt: %v", err)
-	}
-	rec := httptest.NewRecorder()
-	f.router.ServeHTTP(rec, postCommentReq("task-1", token,
-		`{"body":"hello","author_type":"agent"}`))
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 (cross-workspace); body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestCreateComment_UnauthenticatedAgentTypeForbidden pins that an
-// agent-typed comment with no JWT at all is rejected outright, rather than
-// falling back to trusting the request body.
-func TestCreateComment_UnauthenticatedAgentTypeForbidden(t *testing.T) {
-	f := newCommentSecurityFixture(t)
-	agentA := seedCommentAgent(t, f.agentsSvc, "agent-a", "ws-1")
-	seedCommentTask(t, f.repo, "task-1", "ws-1", agentA.ID)
-
-	rec := httptest.NewRecorder()
-	f.router.ServeHTTP(rec, postCommentReq("task-1", "",
-		`{"body":"hello","author_type":"agent","author_id":"agent-a"}`))
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 (no authenticated caller); body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestCreateComment_AgentAuthorMatchingBodyIDSucceeds covers the live fast
-// path the Kandev CLI actually uses: an authenticated agent sending its own
-// correct author_id in the body. The mismatch/spoofing tests above only
-// cover an absent or wrong body author_id, leaving this positive case
-// unverified.
-func TestCreateComment_AgentAuthorMatchingBodyIDSucceeds(t *testing.T) {
-	f := newCommentSecurityFixture(t)
-	agentA := seedCommentAgent(t, f.agentsSvc, "agent-a", "ws-1")
-	seedCommentTask(t, f.repo, "task-1", "ws-1", agentA.ID)
-
-	token, err := f.agentsSvc.MintRuntimeJWT(agentA.ID, "task-1", agentA.WorkspaceID, "", "sess-1", "")
-	if err != nil {
-		t.Fatalf("mint jwt: %v", err)
-	}
-	rec := httptest.NewRecorder()
-	f.router.ServeHTTP(rec, postCommentReq("task-1", token,
-		`{"body":"hello","author_type":"agent","author_id":"agent-a"}`))
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
-	}
-	comments, err := f.repo.ListTaskComments(context.Background(), "task-1")
-	if err != nil {
-		t.Fatalf("list comments: %v", err)
-	}
-	if len(comments) != 1 || comments[0].AuthorID != agentA.ID {
-		t.Fatalf("comments = %+v, want single comment authored by %q", comments, agentA.ID)
-	}
-}
-
-// TestCreateComment_AuthenticatedAgentClaimingUserTypeForbidden is the P1
-// regression from PR review: an authenticated agent that submits
-// author_type: "user" must not be silently persisted as a user comment.
-// Before the fix, the agent-attribution branch only ran when author_type
-// was "agent", so a caller with a valid JWT but a "user" (or omitted) body
-// type fell through to the user path — mislabeling the comment and letting
-// it evade the scheduler's self-comment guard, which only suppresses a wake
-// when author_type=="agent".
-func TestCreateComment_AuthenticatedAgentClaimingUserTypeForbidden(t *testing.T) {
-	f := newCommentSecurityFixture(t)
-	agentA := seedCommentAgent(t, f.agentsSvc, "agent-a", "ws-1")
-	seedCommentTask(t, f.repo, "task-1", "ws-1", agentA.ID)
-
-	token, err := f.agentsSvc.MintRuntimeJWT(agentA.ID, "task-1", agentA.WorkspaceID, "", "sess-1", "")
-	if err != nil {
-		t.Fatalf("mint jwt: %v", err)
-	}
-	rec := httptest.NewRecorder()
-	f.router.ServeHTTP(rec, postCommentReq("task-1", token,
-		`{"body":"hello","author_type":"user"}`))
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 (agent JWT claiming user author type); body=%s", rec.Code, rec.Body.String())
-	}
-	comments, err := f.repo.ListTaskComments(context.Background(), "task-1")
+	comments, err := f.repo.ListTaskComments(context.Background(), "task-2")
 	if err != nil {
 		t.Fatalf("list comments: %v", err)
 	}
@@ -322,30 +178,14 @@ func TestCreateComment_AuthenticatedAgentClaimingUserTypeForbidden(t *testing.T)
 	}
 }
 
-// TestCreateComment_AuthenticatedAgentOmittedTypeDefaultsToAgent covers the
-// other half of the same P1 fix: an authenticated agent that omits
-// author_type entirely is attributed as an agent (derived from the JWT),
-// not silently downgraded to the user sentinel.
-func TestCreateComment_AuthenticatedAgentOmittedTypeDefaultsToAgent(t *testing.T) {
+func TestCreateComment_RejectsAgentAuthorTypeWithoutJWT(t *testing.T) {
 	f := newCommentSecurityFixture(t)
-	agentA := seedCommentAgent(t, f.agentsSvc, "agent-a", "ws-1")
-	seedCommentTask(t, f.repo, "task-1", "ws-1", agentA.ID)
+	seedCommentTask(t, f.repo, "task-1", "ws-1", "")
 
-	token, err := f.agentsSvc.MintRuntimeJWT(agentA.ID, "task-1", agentA.WorkspaceID, "", "sess-1", "")
-	if err != nil {
-		t.Fatalf("mint jwt: %v", err)
-	}
 	rec := httptest.NewRecorder()
-	f.router.ServeHTTP(rec, postCommentReq("task-1", token, `{"body":"hello"}`))
+	f.router.ServeHTTP(rec, postCommentReq("task-1", "", `{"body":"hello","author_type":"agent"}`))
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
-	}
-	comments, err := f.repo.ListTaskComments(context.Background(), "task-1")
-	if err != nil {
-		t.Fatalf("list comments: %v", err)
-	}
-	if len(comments) != 1 || comments[0].AuthorType != "agent" || comments[0].AuthorID != agentA.ID {
-		t.Fatalf("comments = %+v, want single agent comment authored by %q", comments, agentA.ID)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
 	}
 }

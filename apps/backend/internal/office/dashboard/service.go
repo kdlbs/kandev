@@ -664,33 +664,6 @@ func (s *DashboardService) GetRunsByCommentIDs(
 	return s.repo.GetRunsByCommentIDs(ctx, commentIDs)
 }
 
-// ResolveCommentAgentAuthor validates that the authenticated agent caller
-// may author a comment on the given task and returns the author id to
-// persist. caller MUST be the identity resolved from the request's agent
-// JWT (officeagents.CallerFromContext) — never the request body's
-// author_id, which any JWT holder could otherwise set to any value,
-// including another agent's id or the task's own assignee. The
-// reactivity pipeline's self-comment guard (scheduler/reactivity.go)
-// matches author_id by exact equality against the task's
-// assignee_agent_profile_id, so a forged author_id can impersonate
-// another agent or, worse, suppress the assignee's wake entirely by
-// claiming to be the assignee.
-func (s *DashboardService) ResolveCommentAgentAuthor(
-	ctx context.Context, taskID string, caller *models.AgentInstance,
-) (string, error) {
-	if caller == nil || caller.ID == "" {
-		return "", fmt.Errorf("agent comments require an authenticated agent caller")
-	}
-	fields, err := s.repo.GetTaskExecutionFields(ctx, taskID)
-	if err != nil {
-		return "", fmt.Errorf("resolve comment author: %w", err)
-	}
-	if caller.WorkspaceID != fields.WorkspaceID {
-		return "", fmt.Errorf("agent %s cannot comment on a task from another workspace", caller.ID)
-	}
-	return caller.ID, nil
-}
-
 // CreateComment creates a new comment on a task and runs the reactivity
 // pipeline so the assignee (and any @-mentioned agents) wake up.
 func (s *DashboardService) CreateComment(ctx context.Context, comment *models.TaskComment) error {
