@@ -70,6 +70,18 @@ func TestCreate_ReuseRequiredReturnsCanonicalWorktreeWithoutChangingGitState(t *
 	if got.ID != "canonical-worktree" || got.Path != worktreePath {
 		t.Fatalf("Create() = %#v, want canonical worktree", got)
 	}
+	_, err = mgr.Create(context.Background(), CreateRequest{
+		TaskID:         "task-1",
+		SessionID:      "session-3",
+		RepositoryID:   "repository-1",
+		RepositoryPath: repoPath,
+		BaseBranch:     "main",
+		WorktreeID:     "canonical-worktree",
+		ReuseRequired:  true,
+	})
+	if !errors.Is(err, ErrReuseWorktreeUnavailable) {
+		t.Fatalf("Create() without TaskEnvironmentID error = %v, want ErrReuseWorktreeUnavailable", err)
+	}
 	after := strings.TrimSpace(runGit(t, repoPath, "worktree", "list", "--porcelain"))
 	if after != before {
 		t.Fatalf("git worktree list changed during attach-only reuse\nbefore:\n%s\nafter:\n%s", before, after)

@@ -165,7 +165,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 // not run contribution setup or repository scripts: another active session
 // may be using this checkout with uncommitted changes.
 func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) (*Worktree, error) {
-	if req.WorktreeID == "" {
+	if req.WorktreeID == "" || req.TaskEnvironmentID == "" {
 		return nil, ErrReuseWorktreeUnavailable
 	}
 	wt, err := m.GetByID(ctx, req.WorktreeID)
@@ -174,7 +174,7 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 	}
 	if wt == nil || wt.Status != StatusActive || wt.TaskID != req.TaskID ||
 		wt.RepositoryID != req.RepositoryID ||
-		(req.TaskEnvironmentID != "" && wt.TaskEnvironmentID != req.TaskEnvironmentID) ||
+		wt.TaskEnvironmentID != req.TaskEnvironmentID ||
 		!m.IsValid(wt.Path) {
 		return nil, ErrReuseWorktreeUnavailable
 	}

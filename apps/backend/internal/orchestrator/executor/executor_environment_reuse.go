@@ -31,6 +31,10 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 	if err != nil {
 		return fmt.Errorf("%w: load canonical workspace inventory", models.ErrWorkspaceReuseUnsafe)
 	}
+	// Hydrate the launch-local environment once with the authoritative rows.
+	// Reuse setup below consumes this same inventory, avoiding a second query
+	// and keeping cancellation attached to the caller's context.
+	env.Repos = rows
 	for _, spec := range specs {
 		if canonicalInventoryMatches(spec, rows, req.UseWorktree) != 1 {
 			return fmt.Errorf("%w: canonical workspace repository inventory is incomplete", models.ErrWorkspaceReuseUnsafe)
@@ -144,7 +148,7 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 		return
 	}
 
-	envWorktreeIDs := e.environmentRepoWorktreeIDs(req, env)
+	envWorktreeIDs := environmentRepoWorktreeIDs(env)
 	var sessionWorktreeIDs map[repositoryWorktreeKey]string
 	if !req.WorkspaceReuseRequired {
 		sessionWorktreeIDs = e.latestSessionWorktreeIDsForEnvironment(ctx, req.TaskID, env.ID)
@@ -294,23 +298,9 @@ func environmentWorktreeBranch(env *models.TaskEnvironment) string {
 	return ""
 }
 
-func (e *Executor) environmentRepoWorktreeIDs(req *LaunchAgentRequest, env *models.TaskEnvironment) map[repositoryWorktreeKey]string {
+func environmentRepoWorktreeIDs(env *models.TaskEnvironment) map[repositoryWorktreeKey]string {
 	result := make(map[repositoryWorktreeKey]string)
 	repos := env.Repos
-	// Some repository implementations hydrate the environment row without its
-	// inventory. Reuse-required launches must still consult the canonical
-	// task_environment_repos rows, never a sibling session projection.
-	if req.WorkspaceReuseRequired && env.ID != "" && e.repo != nil {
-		stored, err := e.repo.ListTaskEnvironmentRepos(context.Background(), env.ID)
-		if err != nil {
-			e.logger.Warn("failed to load task environment worktree inventory",
-				zap.String("task_environment_id", env.ID), zap.Error(err))
-			return result
-		}
-		if len(stored) > 0 {
-			repos = stored
-		}
-	}
 	for _, repo := range repos {
 		if repo.RepositoryID == "" || repo.WorktreeID == "" {
 			continue

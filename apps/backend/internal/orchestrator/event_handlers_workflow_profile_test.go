@@ -563,6 +563,11 @@ func TestSwitchSessionForStep(t *testing.T) {
 			CreatedAt: now, UpdatedAt: now,
 		}
 		_ = repo.CreateTask(ctx, task)
+		if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+			ID: "env-1", TaskID: "t1", Status: models.TaskEnvironmentStatusReady,
+		}); err != nil {
+			t.Fatalf("create task environment: %v", err)
+		}
 
 		// Create current session with profile-A
 		session := &models.TaskSession{
@@ -572,6 +577,7 @@ func TestSwitchSessionForStep(t *testing.T) {
 			ExecutorID:        "exec-local",
 			ExecutorProfileID: "ep1",
 			AgentExecutionID:  "ae1",
+			TaskEnvironmentID: "env-1",
 			State:             models.TaskSessionStateRunning,
 			IsPrimary:         true,
 			StartedAt:         now,
@@ -982,6 +988,11 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			CreatedAt: now, UpdatedAt: now,
 		}
 		_ = repo.CreateTask(ctx, task)
+		if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+			ID: "env-1", TaskID: "t1", Status: models.TaskEnvironmentStatusReady,
+		}); err != nil {
+			t.Fatalf("create task environment: %v", err)
+		}
 
 		session := &models.TaskSession{
 			ID:                "s1",
@@ -989,6 +1000,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			AgentProfileID:    "profile-a",
 			ExecutorID:        "exec-local",
 			ExecutorProfileID: "ep1",
+			TaskEnvironmentID: "env-1",
 			State:             models.TaskSessionStateRunning,
 			IsPrimary:         true,
 			StartedAt:         now,
