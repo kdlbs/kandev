@@ -47,8 +47,11 @@ logic lives in the plugin repository.
   composes a deterministic, separator-safe workspace token into the key
   (`redmine.<base64url(SHA-256(workspace_id))>.api_key`) before storing the API key;
   the token is derived only from the authenticated caller's workspace, never a
-  request-body value. Kandev's encrypted vault, not the plugin, owns encryption at
-  rest. Non-secret connection metadata (base URL, health state, cursor) lives in host
+  request-body value. The authenticated plugin action sends the plaintext only over
+  the private Host RPC to `SetSecret`; Kandev's encrypted vault, not the plugin, owns
+  AES-256-GCM encryption at rest with its persisted master key and a fresh nonce per
+  write. The workspace ID is namespace context, never encryption key material.
+  Non-secret connection metadata (base URL, health state, cursor) lives in host
   `plugin_state` scoped to `workspace`.
 - **Own health polling.** There is no host `healthpoll` equivalent for plugins. The
   plugin runs its own ~90s-interval, jittered health probe against
@@ -83,9 +86,10 @@ logic lives in the plugin repository.
   PRs. Echo suppression via recorded `last_pushed_status_id` /
   `last_pushed_title` / `last_pushed_description_hash` compared against inbound
   observations before applying, so a write-back round-trip never bounces the task.
-  Inbound status changes move the task via the same transition path a manual kanban
-  drag uses (not a raw column write), so `on_exit`/`on_enter` hooks and WS broadcast
-  fire normally.
+  Inbound status changes use the supported `Tasks().Update` workflow-step field. This
+  publishes the normal task-update notification, but does not emulate a manual kanban
+  move or run `on_exit`/`on_enter` hooks; that would require a dedicated host move
+  contract and is not part of this plugin release.
 - **Composer mentions.** `#` search resolves Redmine issues through the plugin's
   `reference_sources` registration with submit-time reauthorization, matching the
   pattern `kandev-plugin-bitbucket` uses for repository/PR references.
@@ -130,17 +134,16 @@ when no config exists.
 
 Secrets: the API key is not a declared `config_schema` field. Credential entry passes
 the plaintext only to the authenticated plugin action, which calls `SetSecret` using
-`redmine.<base64url(SHA-256(workspace_id))>.api_key`; `GetSecret` returns plaintext
-only to the plugin process when it needs to make an outbound Redmine request. Kandev
-encrypts the value at rest with its config-directory master key using AES-256-GCM and a
-fresh random nonce per write. The plugin neither derives encryption key material nor
-handles ciphertext. Thus the Kandev master key survives restart and the vault can
-decrypt existing entries; rotating the Redmine key simply replaces the value under the
-same composed key. Host responses to the settings UI, frontend payloads, logs, and
-task metadata must never contain the key. Revocation calls `DeleteSecret` and clears
-the `plugin_state` connection row. Tests must prove that two workspace-derived keys
-cannot read or delete one another's value across `SetSecret`, `GetSecret`, and
-`DeleteSecret`.
+`redmine.<base64url(SHA-256(workspace_id))>.api_key`. The private Host RPC returns that
+value only to the plugin process through `GetSecret` when it needs to make an outbound
+Redmine request; it is never exposed through settings responses, frontend payloads,
+logs, or task metadata. Kandev encrypts the value at rest with its config-directory
+master key using AES-256-GCM and a fresh random nonce per write. The plugin neither
+derives encryption key material nor handles ciphertext: the persisted master key
+survives restart, so the vault can decrypt existing entries. Rotation replaces the
+value under the same composed key; revocation calls `DeleteSecret` and clears the
+`plugin_state` connection row. Tests must prove that two workspace-derived keys cannot
+read or delete one another's value across `SetSecret`, `GetSecret`, and `DeleteSecret`.
 
 Authorization: only the workspace that owns a connection may read, modify, or use it.
 The plugin enforces this itself since the host's plugin RPC surface has no
@@ -179,7 +182,7 @@ already shipped in `kdlbs/kandev` (landed by PR #2117 and used first by
 - `GetSecret` / `SetSecret` / `DeleteSecret` (flat, plugin-ID-scoped) — host-vault API
   key storage. The plugin provides workspace isolation by using the deterministic key
   composition described above.
-- `OnEvent` with a declared `task.*` subscription — idempotent outbound status
+- `OnEvent` with a declared `task.moved` subscription — idempotent outbound status
   write-back for linked tasks. Redmine polling and watchers remain plugin-owned timers.
 
 Contracts explicitly **not** used: the provider-neutral Git credential broker and
@@ -261,7 +264,7 @@ status
 was sent (closed issues are not silently dropped)
 
 **GIVEN** `autoStatusWriteback` enabled on a connection and the plugin declares a
-`task.*` event subscription
+`task.moved` event subscription
 **WHEN** a linked task moves to a workflow step with a status mapping
 **THEN** its idempotent `OnEvent` handler issues `PUT /issues/:id.json` with the mapped
 status during that event delivery, and the following inbound poll does not re-apply or

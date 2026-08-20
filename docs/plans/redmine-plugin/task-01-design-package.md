@@ -36,12 +36,14 @@ None.
 1. The spec's "API and host contracts" section names only already-shipped seams; no
    new host RPC, manifest field, or frontend registry kind is proposed.
 2. The plugin's manifest will declare exactly the capabilities it uses:
-   `api_read:tasks`, `api_write:tasks`, `state`, `secrets` — and no capability it does
-   not exercise (least privilege, per the create-kandev-plugin skill).
+   `api_read:tasks`, `api_read:workflows`, `api_write:tasks`, `state`, `secrets`, and
+   `events: ["task.moved"]` — and no capability it does not exercise (least privilege,
+   per the create-kandev-plugin skill).
 3. The secret key-composition scheme
    (`redmine.<base64url(SHA-256(workspace_id))>.api_key`, encrypted by Kandev's host
-   vault) and the health-poll convention (~90s interval, jitter, backoff, stored in
-   `plugin_state`) are documented in the spec before task 03 implements them.
+   vault over its authenticated Host RPC) and the health-poll convention (~90s
+   interval, jitter, backoff, stored in `plugin_state`) are documented in the spec
+   before task 03 implements them.
 
 ## Verification
 

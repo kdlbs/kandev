@@ -33,15 +33,17 @@ Task 02.
 1. A valid base URL + API key validates via `GET /users/current.json` and persists;
    the key is stored by Kandev's encrypted secret vault under the plugin's
    separator-safe workspace-composed key. It is not a declared config field; plaintext
-   exists only during credential entry, in the plugin process, and in outbound Redmine
-   requests, never in settings responses, frontend payloads, logs, or task metadata.
+   crosses only the authenticated plugin-to-Host `SetSecret`/`GetSecret` RPC boundary,
+   then exists only in plugin memory and outbound Redmine requests. Kandev owns
+   encryption at rest; settings responses, frontend payloads, logs, and task metadata
+   never expose the key.
 2. An invalid API key is reported as a distinct plugin error (not a bare host-level
    401 — see spec Failure modes on why the native implementation had to avoid 401 for
    this exact case); the stored config is unchanged.
 3. A REST-API-disabled instance (403 on `/users/current.json`) is reported distinctly
    from an invalid key.
 4. An unreachable host is reported distinctly from both of the above.
-5. Rotating the API key replaces the stored ciphertext under the same composed key;
+5. Rotating the API key replaces the host-vault value under the same composed key;
    deleting the connection removes both the secret and connection `plugin_state`.
 6. The health-poll loop runs on its own `Start(ctx)`/`Stop()` lifecycle, selects on
    `ctx.Done()` in every wait (no bare `time.Sleep` in backoff), flips `last_ok`/
@@ -49,8 +51,9 @@ Task 02.
    not leak goroutines across plugin disable/enable cycles.
 7. Two different workspaces' connections cannot read, delete, or affect each other's
    secret or state, even though the host's secret RPCs are namespaced only by plugin
-   ID. Tests cover `SetSecret`, `GetSecret`, and `DeleteSecret` using the separate
-   deterministic workspace-composed keys.
+   ID. Tests cover `SetSecret`, `GetSecret`, and `DeleteSecret` using separate,
+   deterministic workspace-composed keys, and prove that no API key appears in an
+   action response, state value, or log fixture.
 
 ## Verification
 

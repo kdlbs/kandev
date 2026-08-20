@@ -18,9 +18,10 @@ pointer once a valid release exists.
 
 ## Owned paths
 
-- `apps/web/e2e/tests/plugins/redmine-*.spec.ts` (host repo, `kdlbs/kandev`; landing
-  separately via `feature/feat-implement-redmi-ib8`)
-- `plugin-registry/plugins.yaml` (host repo, landing separately once the release exists)
+- `apps/web/e2e/tests/plugins/redmine-*.spec.ts` (host repo, `kdlbs/kandev`; not in
+  this PR, landing separately via `feature/feat-implement-redmi-ib8`)
+- `plugin-registry/plugins.yaml` (host repo; not in this PR, landing separately once
+  the release exists)
 - Attached `yattdev/kandev-plugin-redmine` worktree: release workflow / tag
 
 ## Dependencies
