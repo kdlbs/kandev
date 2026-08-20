@@ -388,7 +388,8 @@ export const test = backendFixture.extend<
 
 /**
  * Restores the fixture's offline origin after a GitLab E2E cleanup removes it.
- * This lets focused tests distinguish a deleted remote ref from a transport error.
+ * Refresh the remote-tracking refs because branch recovery must offer remote
+ * branches, not only the local branch that remains checked out.
  */
 export function restoreSeedRepositoryOrigin(seedData: SeedData) {
   const baseArgs = ["-C", seedData.repositoryPath, "remote"];
@@ -401,6 +402,9 @@ export function restoreSeedRepositoryOrigin(seedData: SeedData) {
       stdio: "ignore",
     });
   }
+  execFileSync("git", ["-C", seedData.repositoryPath, "fetch", "--no-tags", "origin"], {
+    stdio: "ignore",
+  });
 }
 
 /** Points the seed repository at an empty remote whose HEAD cannot resolve. */
