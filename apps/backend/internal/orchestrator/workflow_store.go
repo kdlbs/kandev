@@ -145,10 +145,18 @@ func newWorkflowStore(
 	}
 }
 
+// LoadState tolerates a blank sessionID (the AC-62/F38 case of a task with
+// zero task_sessions rows) by skipping the session lookup entirely rather
+// than erroring: CurrentStepID always comes from the task row, matching the
+// sessionID == "" sentinel convention already used elsewhere (AC-16a).
 func (s *workflowStore) LoadState(ctx context.Context, taskID, sessionID string) (engine.MachineState, error) {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return engine.MachineState{}, fmt.Errorf("load task %s: %w", taskID, err)
+	}
+
+	if sessionID == "" {
+		return assembleMachineState(task, nil, false), nil
 	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)

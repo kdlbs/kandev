@@ -316,20 +316,41 @@ func TestRecordReevaluationSkip_LogsAndCountsSessionUnresolvable(t *testing.T) {
 
 // --- AC-54/57d/60-62: EvaluateStepQuorum read-only diagnostic snapshot ---
 
-func TestEvaluateStepQuorum_EmptySessionOrStepReturnsEmptySnapshot(t *testing.T) {
+func TestEvaluateStepQuorum_NoBoundStepReturnsEmptySnapshot(t *testing.T) {
+	noStepStore := &reevalFakeStore{state: MachineState{WorkflowID: "wf"}, applied: map[string]bool{}}
+	eng := New(noStepStore, MapRegistry{}, WithDecisionStore(newFakeDecisionStore()), WithParticipantStore(fakeParticipants{}))
+	snap, err := eng.EvaluateStepQuorum(context.Background(), "task-1", "sess-1")
+	if err != nil || snap.StepID != "" || len(snap.Guards) != 0 || snap.ReevaluationBlocked {
+		t.Fatalf("expected empty snapshot with no error for blank CurrentStepID, got %#v, err=%v", snap, err)
+	}
+}
+
+// TestEvaluateStepQuorum_BlankSessionStillReflectsReevaluationBlocked is
+// AC-62: a task that has never had a session (sessionID == "", the F38/
+// dispatcher case for a task with zero task_sessions rows) must still
+// compute ReevaluationBlocked live from ListStepDecisions, not
+// short-circuit to false before ever consulting decisions. stepStoreForQuorum's
+// LoadState ignores its sessionID argument and returns the task's real
+// CurrentStepID regardless, mirroring production: CurrentStepID is derived
+// from the task row, not the session.
+func TestEvaluateStepQuorum_BlankSessionStillReflectsReevaluationBlocked(t *testing.T) {
 	store := quorumStore(approvedGuard("reviewer"))
-	eng := New(store, MapRegistry{}, WithDecisionStore(newFakeDecisionStore()), WithParticipantStore(fakeParticipants{}))
+	parts := fakeParticipants{list: []ParticipantInfo{
+		{ID: "p1", Role: "reviewer", DecisionRequired: true, AgentProfileID: "rev-A"},
+	}}
+	decisions := newFakeDecisionStore()
+	decisions.byKey[dkey("task-1", "review")] = []DecisionInfo{{ParticipantID: "p1", Decision: DecisionApproved}}
+	eng := New(store, MapRegistry{}, WithDecisionStore(decisions), WithParticipantStore(parts))
 
 	snap, err := eng.EvaluateStepQuorum(context.Background(), "task-1", "")
-	if err != nil || snap.StepID != "" || len(snap.Guards) != 0 || snap.ReevaluationBlocked {
-		t.Fatalf("expected empty snapshot with no error for blank sessionID, got %#v, err=%v", snap, err)
+	if err != nil {
+		t.Fatalf("EvaluateStepQuorum: %v", err)
 	}
-
-	noStepStore := &reevalFakeStore{state: MachineState{WorkflowID: "wf"}, applied: map[string]bool{}}
-	eng2 := New(noStepStore, MapRegistry{}, WithDecisionStore(newFakeDecisionStore()), WithParticipantStore(fakeParticipants{}))
-	snap2, err := eng2.EvaluateStepQuorum(context.Background(), "task-1", "sess-1")
-	if err != nil || snap2.StepID != "" || len(snap2.Guards) != 0 || snap2.ReevaluationBlocked {
-		t.Fatalf("expected empty snapshot with no error for blank CurrentStepID, got %#v, err=%v", snap2, err)
+	if snap.StepID != "review" {
+		t.Fatalf("StepID = %q, want review", snap.StepID)
+	}
+	if !snap.ReevaluationBlocked {
+		t.Fatalf("ReevaluationBlocked = false, want true: a decision is on record at the current step")
 	}
 }
 

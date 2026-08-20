@@ -633,12 +633,14 @@ type QuorumSnapshot struct {
 //
 // A store error while evaluating one guard surfaces as that guard's
 // ReasonEvaluationError entry, not a method-level error, so one failing
-// guard does not blank the others. sessionID == "" and a task with no bound
-// current step both return an empty, no-error snapshot (AC-24c).
+// guard does not blank the others. A task with no bound current step
+// returns an empty, no-error snapshot (AC-24c). sessionID == "" (a task
+// that has never had a session) is NOT special-cased to an empty snapshot:
+// TransitionStore.LoadState derives CurrentStepID from the task row, not
+// the session, so a blank sessionID still yields the correct step, and
+// AC-62's ReevaluationBlocked must be computed live from that step's
+// decisions rather than short-circuited to false.
 func (e *Engine) EvaluateStepQuorum(ctx context.Context, taskID, sessionID string) (QuorumSnapshot, error) {
-	if sessionID == "" {
-		return QuorumSnapshot{}, nil
-	}
 	state, err := e.store.LoadState(ctx, taskID, sessionID)
 	if err != nil {
 		return QuorumSnapshot{}, err

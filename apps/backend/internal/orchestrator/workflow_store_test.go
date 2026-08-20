@@ -61,6 +61,37 @@ func TestWorkflowStore_LoadState(t *testing.T) {
 	}
 }
 
+// TestWorkflowStore_LoadState_BlankSessionIDResolvesFromTaskRow is AC-62's
+// production-side companion: a task that has never had a session (the F38/
+// dispatcher case for zero task_sessions rows, sessionID == "") must still
+// resolve via LoadState, because CurrentStepID is derived from the task row,
+// not the session. Skipping GetTaskSession/IsPassthroughSession for a blank
+// sessionID mirrors the existing sessionID == "" sentinel convention used
+// elsewhere in this codebase (AC-16a).
+func TestWorkflowStore_LoadState_BlankSessionIDResolvesFromTaskRow(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskWithoutSession(t, repo, "t1", "step1")
+
+	agentMgr := &mockAgentManager{isPassthrough: true}
+	store := newWorkflowStore(repo, newMockStepGetter(), agentMgr, noopPublisher, testLogger())
+
+	state, err := store.LoadState(ctx, "t1", "")
+	if err != nil {
+		t.Fatalf("LoadState failed: %v", err)
+	}
+
+	if state.TaskID != "t1" {
+		t.Errorf("expected TaskID %q, got %q", "t1", state.TaskID)
+	}
+	if state.WorkflowID != "wf1" {
+		t.Errorf("expected WorkflowID %q, got %q", "wf1", state.WorkflowID)
+	}
+	if state.CurrentStepID != "step1" {
+		t.Errorf("expected CurrentStepID %q, got %q", "step1", state.CurrentStepID)
+	}
+}
+
 func TestWorkflowStore_LoadStep(t *testing.T) {
 	ctx := context.Background()
 

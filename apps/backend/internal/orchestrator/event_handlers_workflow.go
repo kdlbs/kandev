@@ -3868,24 +3868,31 @@ func (s *Service) buildMachineState(ctx context.Context, task *models.Task, sess
 
 // assembleMachineState creates an engine.MachineState from pre-loaded models.
 // Shared by Service.buildMachineState and workflowStore.LoadState to avoid duplication.
+// assembleMachineState accepts a nil session for the AC-62/F38 case of a
+// task with zero task_sessions rows (sessionID == ""): CurrentStepID is
+// always derived from the task row, never the session, so SessionID and
+// SessionState are left at their zero values and no workflow_data is
+// available in that case.
 func assembleMachineState(task *models.Task, session *models.TaskSession, isPassthrough bool) engine.MachineState {
 	currentStepID := task.WorkflowStepID
-	var data map[string]any
-	if session.Metadata != nil {
-		if wd, ok := session.Metadata["workflow_data"].(map[string]any); ok {
-			data = wd
-		}
-	}
-	return engine.MachineState{
+	state := engine.MachineState{
 		TaskID:          task.ID,
-		SessionID:       session.ID,
 		WorkflowID:      task.WorkflowID,
 		CurrentStepID:   currentStepID,
-		SessionState:    string(session.State),
 		TaskDescription: task.Description,
 		IsPassthrough:   isPassthrough,
-		Data:            data,
 	}
+	if session == nil {
+		return state
+	}
+	state.SessionID = session.ID
+	state.SessionState = string(session.State)
+	if session.Metadata != nil {
+		if wd, ok := session.Metadata["workflow_data"].(map[string]any); ok {
+			state.Data = wd
+		}
+	}
+	return state
 }
 
 // processOnTurnCompleteViaEngine uses the workflow engine to evaluate on_turn_complete
