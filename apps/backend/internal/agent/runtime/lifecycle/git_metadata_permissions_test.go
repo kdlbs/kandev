@@ -149,6 +149,45 @@ func TestStandaloneGitMetadataPreflightRejectsAgentWithoutFilesystemPolicy(t *te
 	}
 }
 
+func TestCloneExecutorGitMetadataPreflightMatrix(t *testing.T) {
+	projection := newLinkedGitMetadataProjection(t)
+	tests := []struct {
+		name    string
+		runtime ExecutorBackend
+		agent   agents.Agent
+		resume  bool
+		wantErr bool
+	}{
+		{name: "SSH Codex attests remote policy", runtime: &SSHExecutor{}, agent: agents.NewCodexACP()},
+		{name: "Sprites Codex attests remote policy", runtime: &SpritesExecutor{}, agent: agents.NewCodexACP()},
+		{name: "SSH rejects unsupported agent", runtime: &SSHExecutor{}, agent: agents.NewClaudeACP(), wantErr: true},
+		{name: "Sprites rejects unsupported agent", runtime: &SpritesExecutor{}, agent: agents.NewClaudeACP(), wantErr: true},
+		{name: "SSH rejects stale resumed child", runtime: &SSHExecutor{}, agent: agents.NewCodexACP(), resume: true, wantErr: true},
+		{name: "remote Docker stays unsupported before implementation", runtime: &RemoteDockerExecutor{}, agent: agents.NewCodexACP(), wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &ExecutorCreateRequest{
+				GitMetadataProjections: []*worktree.GitMetadataProjection{projection},
+				AgentConfig:            tc.agent,
+			}
+			if tc.resume {
+				req.PreviousExecutionID = "previous"
+			}
+			err := preflightGitMetadataProjection(context.Background(), tc.runtime, req)
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) {
+					t.Fatalf("preflightGitMetadataProjection() error = %v, want %q", err, gitMetadataProjectionUnsupported)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("preflightGitMetadataProjection() error = %v", err)
+			}
+		})
+	}
+}
+
 func newLinkedGitMetadataProjection(t *testing.T) *worktree.GitMetadataProjection {
 	t.Helper()
 	repo := filepath.Join(t.TempDir(), "source")

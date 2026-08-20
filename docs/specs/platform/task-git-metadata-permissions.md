@@ -24,6 +24,14 @@ Every executor either attests a narrow native policy, applies a layered containe
 
 Standalone and ACP agents receive the server-authored additional directories and a compatible filesystem-policy overlay. Docker mounts common metadata read-only, masks sibling worktree administration, and overlays only the owned entry and required writable dependencies. Remote executors resolve their own remote checkout paths and may not import host paths into their policy. Repository-less and read-only environments receive no Git write projection.
 
+| Executor | Git metadata enforcement |
+|---|---|
+| Standalone Codex ACP | A server-authored `CODEX_CONFIG` profile reads common metadata, denies the shared worktrees parent, and reopens only validated writable dependencies. |
+| Local Docker | A deterministic layered mount plan provides the same projection and masks sibling worktree administration. |
+| SSH / Sprites Codex ACP | After the remote prepare step, a regular, non-symlinked task checkout is revalidated on that host. The server sends a `CODEX_CONFIG` profile that writes only that checkout's `.git` directory. A linked remote checkout, multi-repository request, incompatible legacy sandbox setting, or stale SSH child fails before an agent process is used. |
+| Remote Docker | Unsupported until the executor can resolve and attest a remote policy; it fails closed before `CreateInstance`. |
+| Other agents or repository-less workspaces | Agents without an enforceable profile fail closed for mutable repositories. Repository-less and read-only workspaces need no projection. |
+
 ## Attachment and cleanup
 
 An attached repository is usable only after the complete replacement projection is installed and attested. At the existing idle rebind boundary, lifecycle may restart an agent child or recreate a container; failure restores the previous workspace and projection together.

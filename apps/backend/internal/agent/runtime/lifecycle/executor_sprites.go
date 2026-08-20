@@ -114,6 +114,13 @@ func (r *SpritesExecutor) HealthCheck(_ context.Context) error {
 	return nil
 }
 
+// PrepareGitMetadataProjection verifies the remote child can receive an
+// enforceable policy before a Sprite is provisioned. The actual checkout paths
+// are resolved after the prepare script clones into /workspace.
+func (r *SpritesExecutor) PrepareGitMetadataProjection(_ context.Context, req *ExecutorCreateRequest) error {
+	return validateRemoteGitMetadataRequest(req)
+}
+
 func (r *SpritesExecutor) ResumeRemoteInstance(_ context.Context, req *ExecutorCreateRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
@@ -191,6 +198,10 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 		r.cleanupOnFailure(baseCtx, sprite, req.InstanceID, destroyOnFailure)
 		return nil, err
 	}
+	if err := r.installRemoteGitMetadataPolicy(baseCtx, sprite, req); err != nil {
+		r.cleanupOnFailure(baseCtx, sprite, req.InstanceID, destroyOnFailure)
+		return nil, err
+	}
 
 	launchCtx, launchCancel = withLaunchPhaseTimeout(baseCtx)
 	defer launchCancel()
@@ -245,6 +256,24 @@ func (r *SpritesExecutor) preflightGitHubCredentialBroker(
 		cmd.Env = r.buildSpriteEnv(env, req.AgentctlStartupConfig)
 		return cmd.CombinedOutput()
 	})
+}
+
+func (r *SpritesExecutor) installRemoteGitMetadataPolicy(ctx context.Context, sprite *sprites.Sprite, req *ExecutorCreateRequest) error {
+	if len(req.GitMetadataProjections) == 0 {
+		return nil
+	}
+	output, err := sprite.CommandContext(ctx, "sh", "-c", remoteRegularGitMetadataProbeScript(spritesWorkspacePath)).Output()
+	if err != nil {
+		return errors.New("sprites: remote Git metadata policy validation failed")
+	}
+	metadata, err := parseRemoteRegularGitMetadata(string(output))
+	if err != nil {
+		return errors.New("sprites: remote Git metadata policy validation failed")
+	}
+	if err := prepareRemoteRegularGitMetadataPolicy(req, metadata); err != nil {
+		return errors.New("sprites: remote Git metadata policy installation failed")
+	}
+	return nil
 }
 
 // resolveSpriteName determines the sprite name based on request and reconnect state.
@@ -464,7 +493,7 @@ func (r *SpritesExecutor) stepEnsureAgentInstance(
 		port, portErr := r.getExistingInstancePort(ctx, sprite, instanceID)
 		if portErr == nil && port > 0 {
 			switch {
-			case hasManagedGitHubBrokerEnv(req.Env):
+			case hasManagedGitHubBrokerEnv(req.Env), len(req.GitMetadataProjections) > 0:
 				replacementPort, err := replaceSpriteReconnectInstance(ctx,
 					liveSpriteReconnectInstanceControl{executor: r, sprite: sprite}, req, instanceID)
 				if err != nil {
