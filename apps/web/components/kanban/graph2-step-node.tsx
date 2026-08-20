@@ -151,6 +151,7 @@ export function Graph2StepNode({
               foregroundActivity: task.foregroundActivity,
               hasPendingPermission: pendingInput.permission,
               interrupted: task.interrupted,
+              autoStartFailed: task.autoStartFailed,
             })}
           </div>
           <span className="text-[11px] font-medium text-foreground truncate">{step.title}</span>
