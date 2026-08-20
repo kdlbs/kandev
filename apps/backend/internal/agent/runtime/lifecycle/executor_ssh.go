@@ -292,7 +292,7 @@ func (r *SSHExecutor) installRemoteGitMetadataPolicy(
 	req *ExecutorCreateRequest,
 	platform SSHRemotePlatform,
 ) error {
-	if len(req.GitMetadataProjections) == 0 && !req.RequiresCloneGitMetadataPolicy {
+	if len(req.GitMetadataProjections) == 0 && !requiresCloneGitMetadataPolicy(req) {
 		return nil
 	}
 	shell := sshShellForRemote(req.Metadata, platform)
@@ -300,18 +300,14 @@ func (r *SSHExecutor) installRemoteGitMetadataPolicy(
 	if err != nil {
 		return errors.New("ssh: remote Git metadata policy validation failed")
 	}
-	metadata, err := parseRemoteRegularGitMetadata(output)
-	if err != nil {
+	if _, err := parseRemoteRegularGitMetadata(output); err != nil {
 		return errors.New("ssh: remote Git metadata policy validation failed")
-	}
-	if err := prepareRemoteRegularGitMetadataPolicy(req, metadata); err != nil {
-		return errors.New("ssh: remote Git metadata policy installation failed")
 	}
 	return nil
 }
 
 func (r *SSHExecutor) resumedStateForCreate(req *ExecutorCreateRequest) (*sshSessionState, bool) {
-	if req == nil || hasManagedGitHubBrokerEnv(req.Env) || req.RequiresCloneGitMetadataPolicy {
+	if req == nil || hasManagedGitHubBrokerEnv(req.Env) || requiresCloneGitMetadataPolicy(req) {
 		return nil, false
 	}
 	r.mu.Lock()

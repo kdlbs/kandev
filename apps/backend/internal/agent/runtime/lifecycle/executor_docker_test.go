@@ -99,8 +99,8 @@ func TestDockerExecutor_Name(t *testing.T) {
 func TestDockerExecutorRejectsClonePolicyWithoutCompatibleAgent(t *testing.T) {
 	exec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
 	err := exec.PrepareGitMetadataProjection(context.Background(), &ExecutorCreateRequest{
-		RequiresCloneGitMetadataPolicy: true,
-		AgentConfig:                    agents.NewClaudeACP(),
+		GitMetadataRequirement: GitMetadataRequirement{Mode: gitMetadataRequirementMutableClone},
+		AgentConfig:            agents.NewClaudeACP(),
 	})
 	if err == nil || !strings.Contains(err.Error(), "filesystem policy") {
 		t.Fatalf("PrepareGitMetadataProjection() error = %v, want incompatible-policy rejection", err)
@@ -110,11 +110,39 @@ func TestDockerExecutorRejectsClonePolicyWithoutCompatibleAgent(t *testing.T) {
 func TestDockerExecutorSkipsReconnectWhenClonePolicyRequiresFreshAttestation(t *testing.T) {
 	exec := &DockerExecutor{}
 	instance, reused := exec.tryReconnect(context.Background(), nil, &ExecutorCreateRequest{
-		PreviousExecutionID:            "previous",
-		RequiresCloneGitMetadataPolicy: true,
+		PreviousExecutionID:    "previous",
+		GitMetadataRequirement: GitMetadataRequirement{Mode: gitMetadataRequirementMutableClone},
 	})
 	if instance != nil || reused {
 		t.Fatalf("tryReconnect = (%+v, %t), want a fresh clone-policy launch", instance, reused)
+	}
+}
+
+func TestDockerExecutorCloneLaunchWiringUsesPathFreeRequirement(t *testing.T) {
+	exec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	req := &ExecutorCreateRequest{
+		InstanceID:             "instance-1",
+		GitMetadataRequirement: cloneGitMetadataRequirement(true),
+		AgentConfig:            agents.NewCodexACP(),
+		Env:                    map[string]string{"CODEX_CONFIG": `{}`},
+		Metadata:               map[string]interface{}{},
+	}
+
+	config, err := exec.buildContainerLaunchConfig(req)
+	if err != nil {
+		t.Fatalf("buildContainerLaunchConfig: %v", err)
+	}
+	if len(config.GitMetadataProjections) != 0 {
+		t.Fatalf("normal Docker clone wiring synthesized host projections: %#v", config.GitMetadataProjections)
+	}
+	if !config.RequiresCloneGitMetadataPolicy {
+		t.Fatal("normal Docker clone wiring omitted the mutable-clone requirement")
+	}
+	if !strings.Contains(config.PrepareScript, "rev-parse --absolute-git-dir") {
+		t.Fatalf("normal Docker clone prepare script lacks in-container checkout attestation: %s", config.PrepareScript)
+	}
+	if strings.Contains(config.Credentials["CODEX_CONFIG"], "/host/") {
+		t.Fatalf("normal Docker clone wiring leaked a host path: %s", config.Credentials["CODEX_CONFIG"])
 	}
 }
 

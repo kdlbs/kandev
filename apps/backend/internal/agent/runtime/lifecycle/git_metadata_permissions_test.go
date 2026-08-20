@@ -31,8 +31,8 @@ func TestCreateLaunchInstanceRejectsUnsupportedGitMetadataProjection(t *testing.
 
 func TestPreflightGitMetadataProjectionRejectsUnattestedCloneCheckout(t *testing.T) {
 	req := &ExecutorCreateRequest{
-		RequiresCloneGitMetadataPolicy: true,
-		AgentConfig:                    agents.NewCodexACP(),
+		GitMetadataRequirement: GitMetadataRequirement{Mode: gitMetadataRequirementMutableClone},
+		AgentConfig:            agents.NewCodexACP(),
 	}
 
 	err := preflightGitMetadataProjection(context.Background(), &mockStopTracker{}, req)

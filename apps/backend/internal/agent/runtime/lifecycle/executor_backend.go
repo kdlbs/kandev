@@ -389,10 +389,10 @@ type ExecutorCreateRequest struct {
 	PromptTurnID         string
 	WorkspacePath        string
 	WorkspaceSourceRoots []string
-	// RequiresCloneGitMetadataPolicy marks a mutable repository checkout that
-	// is created inside the executor. It deliberately carries no host paths:
-	// the clone executor must attest its canonical checkout before agent start.
-	RequiresCloneGitMetadataPolicy bool
+	// GitMetadataRequirement describes metadata that must be attested by the
+	// executor itself. It deliberately carries no host paths: a clone executor
+	// must validate its canonical checkout before the agent is configured.
+	GitMetadataRequirement GitMetadataRequirement
 	// GitMetadataProjections are fresh, task-owned grants compiled by the
 	// executor; they replace legacy source-repository gitdir metadata.
 	GitMetadataProjections []*worktree.GitMetadataProjection
@@ -424,6 +424,35 @@ type ExecutorCreateRequest struct {
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can
 	// call this to report real-time progress to the frontend.
 	OnProgress PrepareProgressCallback
+}
+
+// GitMetadataRequirementMode identifies an executor-side metadata policy.
+// Only mutable clone checkouts need this descriptor today; the zero value has
+// no special metadata requirement.
+type GitMetadataRequirementMode string
+
+const gitMetadataRequirementMutableClone GitMetadataRequirementMode = "mutable_clone_checkout"
+
+// GitMetadataRequirement is an explicit, path-free request to attest a
+// mutable clone. It is intentionally distinct from GitMetadataProjections,
+// which carry host-visible worktree metadata for local executors.
+type GitMetadataRequirement struct {
+	Mode GitMetadataRequirementMode
+}
+
+func (r GitMetadataRequirement) RequiresMutableCloneCheckout() bool {
+	return r.Mode == gitMetadataRequirementMutableClone
+}
+
+func requiresCloneGitMetadataPolicy(req *ExecutorCreateRequest) bool {
+	return req != nil && req.GitMetadataRequirement.RequiresMutableCloneCheckout()
+}
+
+func cloneGitMetadataRequirement(required bool) GitMetadataRequirement {
+	if !required {
+		return GitMetadataRequirement{}
+	}
+	return GitMetadataRequirement{Mode: gitMetadataRequirementMutableClone}
 }
 
 // ExecutorInstance represents an agentctl instance created by a runtime.

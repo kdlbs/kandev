@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,10 +115,13 @@ func TestMCPSessionNewAndLoadUseHTTPWithSSEFallback(t *testing.T) {
 }
 
 func TestAdditionalDirectoriesExcludeCWDAndDuplicates(t *testing.T) {
-	got := additionalDirectoriesForSession(
+	got, err := additionalDirectoriesForSession(
 		"/workspace",
 		[]string{"/workspace", "/workspace/api", "/workspace/api", "/workspace/web"},
 	)
+	if err != nil {
+		t.Fatalf("additionalDirectoriesForSession: %v", err)
+	}
 	want := []string{"/workspace/api", "/workspace/web"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("additionalDirectoriesForSession() = %v, want %v", got, want)
@@ -125,10 +129,8 @@ func TestAdditionalDirectoriesExcludeCWDAndDuplicates(t *testing.T) {
 }
 
 func TestAdditionalDirectoriesRejectRelativeRoots(t *testing.T) {
-	got := additionalDirectoriesForSession("/workspace", []string{"api", "/workspace/api"})
-	want := []string{"/workspace/api"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("additionalDirectoriesForSession() = %v, want %v", got, want)
+	if _, err := additionalDirectoriesForSession("/workspace", []string{"api", "/workspace/api"}); err == nil {
+		t.Fatal("additionalDirectoriesForSession accepted a relative root")
 	}
 }
 
@@ -150,11 +152,11 @@ func TestNewSessionNegotiatesAdditionalDirectories(t *testing.T) {
 func TestNewSessionDoesNotSendAdditionalDirectoriesWithoutCapability(t *testing.T) {
 	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
 
-	if _, err := adapter.NewSessionWithAdditionalDirectories(context.Background(), nil, []string{"/tmp/test/api"}); err != nil {
-		t.Fatalf("NewSessionWithAdditionalDirectories: %v", err)
+	if _, err := adapter.NewSessionWithAdditionalDirectories(context.Background(), nil, []string{"/tmp/test/api"}); err == nil || !strings.Contains(err.Error(), "git_metadata_projection_unsupported") {
+		t.Fatalf("NewSessionWithAdditionalDirectories error = %v, want unsupported projection", err)
 	}
-	if capture.newRequest.AdditionalDirectories != nil {
-		t.Fatalf("ACP additionalDirectories = %v, want nil without capability", capture.newRequest.AdditionalDirectories)
+	if capture.newRequest.Cwd != "" {
+		t.Fatalf("ACP NewSession was called despite unsupported additional directories: %+v", capture.newRequest)
 	}
 }
 

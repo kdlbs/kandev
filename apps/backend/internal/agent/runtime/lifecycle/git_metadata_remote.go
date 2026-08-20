@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,43 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/worktree"
 )
+
+// installAttestedCloneGitMetadataPolicy renders the agent policy only after
+// agentctl has attested the clone it can actually see. The lifecycle request
+// still contains no host checkout projection; its executor-visible source
+// roots are accepted only after the primary root and materialized siblings
+// have passed their respective in-executor checks.
+func installAttestedCloneGitMetadataPolicy(ctx context.Context, req *ExecutorCreateRequest, instance *ExecutorInstance) error {
+	if !requiresCloneGitMetadataPolicy(req) {
+		return nil
+	}
+	if instance == nil || instance.Client == nil || instance.WorkspacePath == "" {
+		return unsupportedGitMetadataProjection("clone checkout attestation is unavailable; start a new session with a supported executor")
+	}
+	if err := instance.Client.AttestWorkspaceGitMetadata(ctx); err != nil {
+		return unsupportedGitMetadataProjection("clone checkout attestation failed; start a new session with a supported executor")
+	}
+	roots := instance.WorkspaceSourceRoots
+	if len(roots) == 0 {
+		roots = []string{instance.WorkspacePath}
+	}
+	metadata := make([]remoteRegularGitMetadata, 0, len(roots))
+	for _, root := range roots {
+		metadata = append(metadata, remoteRegularGitMetadata{CheckoutPath: root, GitDir: root + "/.git"})
+	}
+	if err := prepareRemoteRegularGitMetadataPolicy(req, metadata...); err != nil {
+		return unsupportedGitMetadataProjection("clone Git metadata policy installation failed; start a new session with a supported executor")
+	}
+	policyEnv, err := remoteGitMetadataRuntimeEnv(req)
+	if err != nil {
+		return unsupportedGitMetadataProjection("clone Git metadata policy installation failed; start a new session with a supported executor")
+	}
+	if instance.Metadata == nil {
+		instance.Metadata = make(map[string]interface{})
+	}
+	instance.Metadata["runtime_env"] = policyEnv
+	return nil
+}
 
 // remoteRegularGitMetadata describes the only repository layout supported by
 // clone-based executors. Their checkout is created inside a task-owned remote
