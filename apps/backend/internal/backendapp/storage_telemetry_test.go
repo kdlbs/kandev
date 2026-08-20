@@ -44,9 +44,6 @@ func TestProvideRepositoriesActivatesTelemetryContracts(t *testing.T) {
 	}
 
 	pool, _, cleanups, err := provideRepositories(ctx, cfg, log, "test")
-	if err != nil {
-		t.Fatalf("provideRepositories: %v", err)
-	}
 	t.Cleanup(func() {
 		for i := len(cleanups) - 1; i >= 0; i-- {
 			if cleanups[i] != nil {
@@ -54,6 +51,9 @@ func TestProvideRepositoriesActivatesTelemetryContracts(t *testing.T) {
 			}
 		}
 	})
+	if err != nil {
+		t.Fatalf("provideRepositories: %v", err)
+	}
 
 	registry := telemetrycontract.Registry()
 	if len(registry) == 0 {

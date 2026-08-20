@@ -94,13 +94,19 @@ func TestRecordTurnStampBumpsCounterAndLogsBothBranches(t *testing.T) {
 	beforeAbsent := expvarMapValue(t, turnStampsTotal, absentKey)
 
 	RecordTurnStamp(log, true)
-	RecordTurnStamp(log, false)
-
 	if got := expvarMapValue(t, turnStampsTotal, presentKey); got != beforePresent+1 {
-		t.Fatalf("telemetry_turn_stamps_total[%s] = %d, want %d", presentKey, got, beforePresent+1)
+		t.Fatalf("telemetry_turn_stamps_total[%s] = %d after the present branch, want %d", presentKey, got, beforePresent+1)
 	}
+	if got := expvarMapValue(t, turnStampsTotal, absentKey); got != beforeAbsent {
+		t.Fatalf("telemetry_turn_stamps_total[%s] = %d after the present branch, want unchanged %d", absentKey, got, beforeAbsent)
+	}
+
+	RecordTurnStamp(log, false)
 	if got := expvarMapValue(t, turnStampsTotal, absentKey); got != beforeAbsent+1 {
-		t.Fatalf("telemetry_turn_stamps_total[%s] = %d, want %d", absentKey, got, beforeAbsent+1)
+		t.Fatalf("telemetry_turn_stamps_total[%s] = %d after the absent branch, want %d", absentKey, got, beforeAbsent+1)
+	}
+	if got := expvarMapValue(t, turnStampsTotal, presentKey); got != beforePresent+1 {
+		t.Fatalf("telemetry_turn_stamps_total[%s] = %d after the absent branch, want unchanged %d", presentKey, got, beforePresent+1)
 	}
 
 	entries := logs.FilterMessage(metricTurnStamped).All()

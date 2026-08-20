@@ -535,7 +535,7 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	// (occurred_at, id) chain invariant under real concurrent load — SQLite's
 	// single-writer connection pool serializes callers regardless, so this
 	// was invisible until exercised against Postgres with real concurrency.
-	task.UpdatedAt = time.Now().UTC()
+	task.UpdatedAt = r.nowUTC()
 
 	updateQuery := `
 		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?

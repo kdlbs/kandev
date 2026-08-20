@@ -434,7 +434,7 @@ No store slice, hook, component, or API client changes.
 
 | What | File | How |
 |---|---|---|
-| A new production statement mutating `tasks.workflow_step_id` fails the build until registered | `internal/task/repository/sqlite/step_transition_writers_pin_test.go` (new) | `go/parser` over the package's non-test files; collect functions whose body contains a string literal matching `INSERT INTO tasks` or an `UPDATE tasks ... workflow_step_id` assignment; assert set equality against the seven registered names |
+| A new production statement mutating `tasks.workflow_step_id` fails the build until registered | `internal/task/repository/sqlite/step_transition_writers_pin_test.go` (new) | `go/parser` scans `apps/backend/internal` recursively; resolve package constants and `fmt.Sprintf` column setters, qualify identities by package and receiver, and assert set equality against the registered names |
 | A ledger row bumps the expvar counter for its trigger and logs `telemetry.metric.step_transition_written` | `internal/steptelemetry/metrics_test.go` (new) | Read the expvar map; assert with `zaptest`'s observed logs |
 | A stamped/unstamped turn bumps the turn counter and logs `telemetry.metric.turn_stamped` | same | Both branches |
 | Boot emits one health line per registered contract with existence, activation, count, recency | `internal/telemetrycontract/health_test.go` (new) | Observed logs against a seeded DB |
@@ -649,8 +649,11 @@ been recorded here. Recording it now closes that gap.
    the historical bug it exists to catch produced only 7/20 failures (~35%).
    Fixed by `TestPostgresReadTaskStepInTxBlocksOnConcurrentRowLock`, a
    channel-gated deterministic lock-hold test mirroring
-   `turn_step_stamp_postgres_test.go`'s existing pattern; the same
-   reintroduced bug now fails 5/5.
+   `turn_step_stamp_postgres_test.go`'s existing pattern. The test now polls
+   `pg_stat_activity` to confirm that the competing backend is waiting on the
+   row lock, and it uses the repository clock seam to prove the transition
+   timestamp is sampled after lock release; the same reintroduced bug fails
+   5/5.
 3. (Round 2, new) `funcIdentity()` keyed registered writers as
    `"ReceiverType.FuncName"` with no package qualification. Since this
    codebase declares a type literally named `Repository` in 11 different
