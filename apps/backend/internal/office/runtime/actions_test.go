@@ -545,6 +545,29 @@ func TestActionsCreateTaskRootFailsClosedWhenProjectLookupErrors(t *testing.T) {
 	}
 }
 
+func TestActionsCreateTaskRootFailsClosedWhenRunTaskProjectLookupErrors(t *testing.T) {
+	creator := &recordingTaskCreator{taskID: "created-task"}
+	lookupErr := errors.New("get task project: transient repository failure")
+	creator.projectLookupErr = lookupErr
+	projects := &recordingProjectManager{projects: []*models.Project{
+		{ID: "project-1", WorkspaceID: "ws-1"},
+	}}
+	actions := NewActions(ActionDependencies{Tasks: creator, Projects: projects})
+	runCtx := RunContext{
+		AgentID: "agent-1", WorkspaceID: "ws-1", TaskID: "task-1",
+		Capabilities: Capabilities{CanCreateTasks: true},
+	}
+
+	_, err := actions.CreateTask(context.Background(), runCtx, CreateTaskInput{Title: "Root task"})
+	if !errors.Is(err, lookupErr) {
+		t.Fatalf("error = %v, want the GetTaskProjectID lookup error surfaced rather than treated as "+
+			"'run task has no project'", err)
+	}
+	if len(creator.calls) != 0 {
+		t.Fatalf("creator called despite run-task project lookup error: %#v", creator.calls)
+	}
+}
+
 func TestActionsCreateTaskDeniesMissingCapabilityBeforePersistence(t *testing.T) {
 	creator := &recordingTaskCreator{}
 	actions := NewActions(ActionDependencies{Tasks: creator})
@@ -1025,6 +1048,7 @@ type recordingTaskCreator struct {
 	taskScopes       map[string]taskScope
 	workspaceLookups []string
 	projectLookups   []string
+	projectLookupErr error
 }
 
 type taskScope struct {
@@ -1069,6 +1093,9 @@ func (c *recordingTaskCreator) GetTaskWorkspaceID(_ context.Context, taskID stri
 
 func (c *recordingTaskCreator) GetTaskProjectID(_ context.Context, taskID string) (string, error) {
 	c.projectLookups = append(c.projectLookups, taskID)
+	if c.projectLookupErr != nil {
+		return "", c.projectLookupErr
+	}
 	return c.taskScopes[taskID].ProjectID, nil
 }
 

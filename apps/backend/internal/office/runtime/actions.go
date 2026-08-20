@@ -130,7 +130,11 @@ func (a *Actions) resolveRootTaskProject(ctx context.Context, runCtx RunContext,
 		return nil
 	}
 	if taskID := strings.TrimSpace(runCtx.TaskID); taskID != "" {
-		if projectID, err := a.deps.Tasks.GetTaskProjectID(ctx, taskID); err == nil && projectID != "" {
+		projectID, err := a.deps.Tasks.GetTaskProjectID(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		if projectID != "" {
 			input.ProjectID = projectID
 			return nil
 		}

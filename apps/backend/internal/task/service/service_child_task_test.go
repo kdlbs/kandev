@@ -248,6 +248,61 @@ func TestCreateTask_Subtask_ExplicitProjectNotOverridden(t *testing.T) {
 	}
 }
 
+// TestCreateTask_Subtask_AutoTitleRejectedRegardlessOfProjectSource is the F3
+// regression: prepareTaskForCreation must classify office-ness once, from the
+// final req.ProjectID, so an inherited project reaches the same
+// ErrAutoTitleUnsupportedForOffice rejection an explicit project_id does.
+// Before the fix, inheritParentProject ran after prepareAutoTitle and
+// validateCreateTaskRequest, so a request with no explicit project_id sailed
+// past both — isOfficeRequest saw ProjectID still empty — then got
+// classified as an office task once the project was inherited, silently
+// creating a task with agent_title_pending set: exactly what the guard
+// exists to prevent.
+func TestCreateTask_Subtask_AutoTitleRejectedRegardlessOfProjectSource(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+
+	ws, err := repo.GetWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	officeWorkflowID := ws.OfficeWorkflowID
+
+	parentResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		Title:       "Parent",
+		ProjectID:   "proj-1",
+	})
+	parent := parentResult.Task
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	_, err = svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		ParentID:    parent.ID,
+		WorkflowID:  officeWorkflowID,
+		ProjectID:   "proj-1",
+		AutoTitle:   true,
+		Description: "please do the thing now",
+	})
+	if !errors.Is(err, ErrAutoTitleUnsupportedForOffice) {
+		t.Fatalf("explicit project: error = %v, want ErrAutoTitleUnsupportedForOffice", err)
+	}
+
+	_, err = svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		ParentID:    parent.ID,
+		WorkflowID:  officeWorkflowID,
+		AutoTitle:   true,
+		Description: "please do the thing now",
+	})
+	if !errors.Is(err, ErrAutoTitleUnsupportedForOffice) {
+		t.Fatalf("inherited project: error = %v, want the SAME ErrAutoTitleUnsupportedForOffice the explicit "+
+			"case gets, not a silently-created office task carrying agent_title_pending", err)
+	}
+}
+
 func TestCreateTask_Subtask_ExplicitRepositoriesNotOverridden(t *testing.T) {
 	svc, repo := setupOfficeTest(t)
 	ctx := context.Background()

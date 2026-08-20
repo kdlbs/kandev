@@ -223,6 +223,17 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 // required validation, workflow/step resolution, and office identifier
 // assignment, producing the in-memory task CreateTask is about to insert.
 func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskRequest, externalID string) (*models.Task, error) {
+	// Subtasks created without an explicit project inherit the parent's, so
+	// office cost events (which copy tasks.project_id verbatim) attribute to
+	// the same project as the rest of the tree instead of leaking. Runs first
+	// so every isOfficeRequest check below — including prepareAutoTitle's —
+	// classifies office-ness from the same, final req.ProjectID: an inherited
+	// project must reach the same auto_title rejection an explicit one does,
+	// not silently create an office task carrying agent_title_pending.
+	if err := s.inheritParentProject(ctx, req); err != nil {
+		return nil, err
+	}
+
 	if err := prepareAutoTitle(req); err != nil {
 		return nil, err
 	}
@@ -238,15 +249,6 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	// parent's worktree (the UI omits repositories expecting this). Mirrors the
 	// MCP create_task path so UI- and agent-created subtasks behave identically.
 	if err := s.inheritParentRepositories(ctx, req); err != nil {
-		return nil, err
-	}
-
-	// Subtasks created without an explicit project inherit the parent's, so
-	// office cost events (which copy tasks.project_id verbatim) attribute to
-	// the same project as the rest of the tree instead of leaking. Runs before
-	// isOfficeRequest below so an inherited project also earns the office
-	// identifier and workflow resolution.
-	if err := s.inheritParentProject(ctx, req); err != nil {
 		return nil, err
 	}
 
