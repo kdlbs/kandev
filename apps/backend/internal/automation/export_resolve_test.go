@@ -160,7 +160,7 @@ func TestResolveDescriptors_AgentProfileUnresolved_OmitsAndWarns(t *testing.T) {
 	if got.AgentProfile != nil {
 		t.Errorf("expected nil AgentProfile, got %+v", got.AgentProfile)
 	}
-	want := []exportWarning{{AutomationName: "Daily Review", AutomationID: "auto-1", Message: "unresolved agent profile"}}
+	want := []exportWarning{{AutomationName: "Daily Review", AutomationID: "auto-1", DedupKey: "auto-1", Message: "unresolved agent profile"}}
 	if len(warnings) != 1 || warnings[0] != want[0] {
 		t.Errorf("warnings = %v, want %v", warnings, want)
 	}

@@ -17,14 +17,17 @@ import (
 // silently drop real references the moment a startup wire is missing.
 var ErrExportLookupUnavailable = errors.New("automation: export descriptor lookup is not available")
 
-// exportWarning is one unformatted warning captured during AC-19 descriptor
-// resolution: an automation name/ID pair plus the fixed-vocabulary message
-// AC-42 defines for it. Ordering (AC-21), dedup, and the final
-// "<name>: <message>" rendering (AC-42) are the warnings engine's job, not
-// this one's.
+// exportWarning is one unformatted warning captured during export: an
+// automation name/ID pair plus a message (already carrying any AC-42-escaped
+// interpolation, such as a trigger type, that a trigger-scoped message
+// embeds) and a DedupKey scoping AC-42's de-duplication rule — the
+// automation ID for an automation-scoped message, the trigger ID for a
+// trigger-scoped one. Ordering (AC-21) and the final "<name>: <message>"
+// rendering (AC-42) are buildWarningsList's job, not this one's.
 type exportWarning struct {
 	AutomationName string
 	AutomationID   string
+	DedupKey       string
 	Message        string
 }
 
@@ -68,7 +71,7 @@ func (s *Service) resolveDescriptors(ctx context.Context, tx *sqlx.Tx, a *Automa
 		if msg == "" {
 			return
 		}
-		warnings = append(warnings, exportWarning{AutomationName: a.Name, AutomationID: a.ID, Message: msg})
+		warnings = append(warnings, exportWarning{AutomationName: a.Name, AutomationID: a.ID, DedupKey: a.ID, Message: msg})
 	}
 	addWarning(agentWarning)
 	addWarning(executorWarning)
