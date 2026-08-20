@@ -133,7 +133,7 @@ func (s *Service) reconcileCompletionIntent(ctx context.Context, store completio
 	// mark the old intent superseded without evaluating its source step.
 	task, err := s.repo.GetTask(ctx, intent.TaskID)
 	if err != nil || task == nil || task.WorkflowStepID != intent.WorkflowStepID {
-		s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSuperseded, now)
+		s.settleMovedCompletionIntent(ctx, store, intent, now)
 		return
 	}
 	session, err := s.repo.GetTaskSession(ctx, intent.SessionID)
@@ -147,6 +147,29 @@ func (s *Service) reconcileCompletionIntent(ctx context.Context, store completio
 	s.setSessionWaitingForInput(ctx, intent.TaskID, intent.SessionID, session)
 	s.processOnTurnCompleteViaEngine(ctx, intent.TaskID, session)
 	s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSettled, now)
+}
+
+func (s *Service) settleMovedCompletionIntent(
+	ctx context.Context,
+	store completionIntentReconciliationStore,
+	intent *models.CompletionIntent,
+	now time.Time,
+) {
+	// The source turn is now terminal, so it must no longer leave the reused
+	// session coarse-RUNNING behind the newer task step. Do not run the old
+	// completion evaluation here: task.moved owns current-step entry and this
+	// intent has been superseded.
+	session, err := s.repo.GetTaskSession(ctx, intent.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to load moved completion intent session", zap.String("intent_id", intent.ID), zap.Error(err))
+	} else {
+		s.setSessionWaitingForInput(ctx, intent.TaskID, intent.SessionID, session)
+		// task.moved may already have recorded the destination handoff while
+		// the source turn was still RUNNING. Now that this exact old turn is
+		// terminal, no provider-ready callback remains to drain it.
+		s.drainQueuedMessageForPromptableSession(ctx, intent.SessionID)
+	}
+	s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSuperseded, now)
 }
 
 func (s *Service) finishCompletionIntent(ctx context.Context, store completionIntentReconciliationStore, intent *models.CompletionIntent, state models.CompletionIntentState, at time.Time) {

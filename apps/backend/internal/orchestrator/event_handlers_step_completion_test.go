@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -186,6 +188,90 @@ func TestReconcileDueCompletionIntentsSettlesOldTurnAfterTaskMoved(t *testing.T)
 	intent, err := repo.GetCompletionIntent(ctx, "intent-1")
 	if err != nil || intent.State != models.CompletionIntentStateSuperseded {
 		t.Fatalf("GetCompletionIntent = (%+v, %v), want superseded", intent, err)
+	}
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil || session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("GetTaskSession = (%+v, %v), want waiting after old turn settlement", session, err)
+	}
+}
+
+func TestReconcileDueCompletionIntentsDoesNotCloseSuccessorTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := repo.CreateTurn(ctx, &models.Turn{ID: "turn-old", TaskID: "t1", TaskSessionID: "s1", StartedAt: now}); err != nil {
+		t.Fatalf("CreateTurn old: %v", err)
+	}
+	if _, _, err := repo.CreateOrGetCompletionIntent(ctx, &models.CompletionIntent{
+		ID: "intent-old", TaskID: "t1", SessionID: "s1", TurnID: "turn-old", WorkflowStepID: "step1",
+		State: models.CompletionIntentStatePending, RequestedAt: now, EligibleAt: now,
+	}); err != nil {
+		t.Fatalf("CreateOrGetCompletionIntent: %v", err)
+	}
+	if err := repo.CompleteTurn(ctx, "turn-old"); err != nil {
+		t.Fatalf("CompleteTurn old: %v", err)
+	}
+	if err := repo.CreateTurn(ctx, &models.Turn{ID: "turn-successor", TaskID: "t1", TaskSessionID: "s1", StartedAt: now.Add(time.Second)}); err != nil {
+		t.Fatalf("CreateTurn successor: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.reconcileDueCompletionIntents(ctx)
+
+	intent, err := repo.GetCompletionIntent(ctx, "intent-old")
+	if err != nil || intent.State != models.CompletionIntentStateSuperseded {
+		t.Fatalf("GetCompletionIntent = (%+v, %v), want superseded", intent, err)
+	}
+	successor, err := repo.GetTurn(ctx, "turn-successor")
+	if err != nil || successor.CompletedAt != nil {
+		t.Fatalf("GetTurn successor = (%+v, %v), want active successor", successor, err)
+	}
+}
+
+func TestReconcileDueCompletionIntentsDrainsMovedStepHandoff(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := repo.CreateTurn(ctx, &models.Turn{ID: "turn-1", TaskID: "t1", TaskSessionID: "s1", StartedAt: now}); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	if _, _, err := repo.CreateOrGetCompletionIntent(ctx, &models.CompletionIntent{
+		ID: "intent-1", TaskID: "t1", SessionID: "s1", TurnID: "turn-1", WorkflowStepID: "step1",
+		State: models.CompletionIntentStatePending, RequestedAt: now, EligibleAt: now,
+	}); err != nil {
+		t.Fatalf("CreateOrGetCompletionIntent: %v", err)
+	}
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	task.WorkflowStepID = "step2"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.turnService = &repoTurnService{repo: repo}
+	if _, err := svc.messageQueue.QueueMessageWithMetadata(ctx, "s1", "t1", "review the change", "", messagequeue.QueuedByWorkflow, false, nil, nil); err != nil {
+		t.Fatalf("QueueMessageWithMetadata: %v", err)
+	}
+
+	svc.reconcileDueCompletionIntents(ctx)
+
+	select {
+	case <-agentMgr.promptDone:
+	case <-time.After(time.Second):
+		t.Fatal("settling old turn did not drain the current-step handoff")
+	}
+	agentMgr.mu.Lock()
+	defer agentMgr.mu.Unlock()
+	if len(agentMgr.capturedPrompts) != 1 || agentMgr.capturedPrompts[0] != "review the change" {
+		t.Fatalf("captured prompts = %#v, want one moved-step handoff", agentMgr.capturedPrompts)
 	}
 }
 
