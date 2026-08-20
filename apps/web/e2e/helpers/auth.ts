@@ -3,9 +3,10 @@ import { expect, type BrowserContext } from "@playwright/test";
 /**
  * Helpers for the opt-in authentication E2E suite.
  *
- * All calls go through a BrowserContext's request API so the kandev_session
- * cookie set by login/setup/invite-accept is shared with pages opened from the
- * same context (matching how the real SPA authenticates).
+ * All calls go through a BrowserContext's request API so the session cookie
+ * (port-scoped name, e.g. kandev_session_<port>) set by login/setup/invite
+ * accept is shared with pages opened from the same context (matching how the
+ * real SPA authenticates).
  */
 
 export type Credentials = {

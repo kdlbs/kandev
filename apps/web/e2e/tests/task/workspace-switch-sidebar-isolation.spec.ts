@@ -10,15 +10,24 @@ import { SessionPage } from "../../pages/session-page";
 
 const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 
-async function activeWorkspaceCookie(page: Page): Promise<string | null> {
-  return page.evaluate((name) => {
-    const prefix = `${name}=`;
-    const match = document.cookie
-      .split(";")
-      .map((part) => part.trim())
-      .find((part) => part.startsWith(prefix));
-    return match ? decodeURIComponent(match.slice(prefix.length)) : null;
-  }, ACTIVE_WORKSPACE_COOKIE);
+// Reads the port-scoped active workspace cookie first, falling back to the
+// legacy unprefixed name (read-only fallback for pre-upgrade selections).
+async function activeWorkspaceCookie(page: Page, port: string): Promise<string | null> {
+  return page.evaluate(
+    ({ baseName, port }) => {
+      const names = port ? [`${baseName}_${port}`, baseName] : [baseName];
+      for (const name of names) {
+        const prefix = `${name}=`;
+        const match = document.cookie
+          .split(";")
+          .map((part) => part.trim())
+          .find((part) => part.startsWith(prefix));
+        if (match) return decodeURIComponent(match.slice(prefix.length));
+      }
+      return null;
+    },
+    { baseName: ACTIVE_WORKSPACE_COOKIE, port },
+  );
 }
 
 async function gotoTaskList(page: Page): Promise<void> {
@@ -101,7 +110,9 @@ test.describe("Sidebar — cross-workspace isolation", () => {
     await expect(testPage.getByTestId("dockview-task-layout")).toHaveCount(0);
     await expect(kanban.taskCard(taskB.id)).toBeVisible({ timeout: 10_000 });
     await expect(kanban.taskCard(taskA.id)).not.toBeVisible();
-    await expect.poll(() => activeWorkspaceCookie(testPage)).toBe(workspaceB.id);
+    await expect
+      .poll(() => activeWorkspaceCookie(testPage, String(backend.port)))
+      .toBe(workspaceB.id);
 
     // A hard reload and the task-list route must bootstrap the same cookie-backed
     // workspace before client effects can fall back to the seed workspace.
@@ -128,6 +139,55 @@ test.describe("Sidebar — cross-workspace isolation", () => {
     await gotoTaskList(testPage);
     await expect(taskInList(testPage, "Workspace B Task")).toBeVisible({ timeout: 10_000 });
     await expect(taskInList(testPage, "Workspace A Task")).not.toBeVisible();
+  });
+
+  test("writes the port-scoped workspace cookie and preserves the legacy name", async ({
+    testPage,
+    apiClient,
+    backend,
+  }) => {
+    const workspaceB = await apiClient.createWorkspace("Workspace B Cookie Scope");
+
+    // Simulate a pre-upgrade jar: the legacy unprefixed cookie exists before
+    // any selection is made post-upgrade.
+    await testPage.addInitScript(
+      ({ baseName }) => {
+        document.cookie = `${baseName}=pre-upgrade; path=/`;
+      },
+      { baseName: ACTIVE_WORKSPACE_COOKIE },
+    );
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await testPage.getByTestId("sidebar-workspace-trigger").click();
+    await testPage.getByTestId(`sidebar-workspace-item-${workspaceB.id}`).click();
+    await expect(testPage).toHaveURL(
+      (url) => url.pathname === "/" && url.searchParams.get("workspaceId") === workspaceB.id,
+    );
+    await expect(kanban.board).toBeVisible();
+
+    // The selection is recorded under the port-scoped name. The legacy
+    // unprefixed name must be left byte-for-byte untouched: on a host serving
+    // a default-port instance it is that instance's live selection cookie,
+    // and for upgraded ported instances it is the validated migration
+    // fallback (spec: no proactive legacy cookie scrubbing).
+    await expect
+      .poll(() => activeWorkspaceCookie(testPage, String(backend.port)))
+      .toBe(workspaceB.id);
+    const cookieState = await testPage.evaluate(
+      ({ baseName, port }) => ({
+        unprefixedValue:
+          document.cookie
+            .split(";")
+            .map((part) => part.trim())
+            .find((part) => part.startsWith(`${baseName}=`))
+            ?.slice(baseName.length + 1) ?? null,
+        scoped: document.cookie.includes(`${baseName}_${port}=`),
+      }),
+      { baseName: ACTIVE_WORKSPACE_COOKIE, port: String(backend.port) },
+    );
+    expect(cookieState.scoped, "scoped cookie must be present").toBe(true);
+    expect(cookieState.unprefixedValue, "legacy cookie must be preserved").toBe("pre-upgrade");
   });
 
   test("creates only in the selected workspace after switching from an open task", async ({

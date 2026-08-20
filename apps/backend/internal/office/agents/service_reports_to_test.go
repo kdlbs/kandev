@@ -107,3 +107,30 @@ func TestUpdateAgentInstance_ReportsToDeepChainNoCycleResolves(t *testing.T) {
 		t.Fatalf("d reports_to = %q, want %q", stored.ReportsTo, created[len(created)-2].ID)
 	}
 }
+
+func TestCreateAgentInstance_ReportsToNameStaysInWorkspace(t *testing.T) {
+	svc, repo := newTestAgentService(t)
+	ctx := context.Background()
+
+	createAndGetAgent(t, svc, repo, &models.AgentInstance{
+		WorkspaceID: "ws-other", Name: "Manager", Role: models.AgentRoleWorker,
+	})
+	manager := createAndGetAgent(t, svc, repo, &models.AgentInstance{
+		WorkspaceID: "ws-1", Name: "Manager", Role: models.AgentRoleWorker,
+	})
+	worker := &models.AgentInstance{
+		WorkspaceID: "ws-1", Name: "Worker", Role: models.AgentRoleWorker,
+		ReportsTo: "Manager",
+	}
+
+	if err := svc.CreateAgentInstance(ctx, worker); err != nil {
+		t.Fatalf("create worker: %v", err)
+	}
+	stored, err := repo.GetAgentInstance(ctx, worker.ID)
+	if err != nil {
+		t.Fatalf("get worker: %v", err)
+	}
+	if stored.ReportsTo != manager.ID {
+		t.Fatalf("worker reports_to = %q, want local manager %q", stored.ReportsTo, manager.ID)
+	}
+}

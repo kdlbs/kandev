@@ -238,7 +238,6 @@
   "dockerImageWithExample": "Imagem Docker (por exemplo, node:20-slim)",
   "duration": "Duração",
   "editable": "Editável",
-  "editOrgChartFromTheAgents": "Edite o organograma a partir da lista de agentes.",
   "editRoutine": "Editar rotina",
   "effectiveActionsThisAgentCanRequest": "Ações efetivas que este agente pode pedir durante as execuções do Office.",
   "eGCodeReview": "por exemplo, code-review",

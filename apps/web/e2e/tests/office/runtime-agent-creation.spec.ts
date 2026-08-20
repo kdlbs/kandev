@@ -33,11 +33,10 @@ test.describe("Office runtime agent creation", () => {
 
     expect(createResponse.status).toBe(201);
     const createdBody = (await createResponse.json()) as { agent: { id: string } };
-    // The office layout's SSR reads agentProfiles for the active
-    // workspace. Confirm the runtime-created agent is visible from
-    // the public list endpoint before we navigate — otherwise the
-    // layout would render "Agent not found." and never paint the
-    // topbar portal (no testid).
+    // The office boot payload gates agentProfiles on the active workspace.
+    // Confirm the runtime-created agent is visible from the public list
+    // endpoint before we navigate — otherwise the office route would render
+    // "Agent not found." and never paint the topbar portal (no testid).
     await expect
       .poll(
         async () => {
