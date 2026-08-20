@@ -498,7 +498,9 @@ not adopt legacy unscoped rows.
 configuration policy an operator saves per step (checked or not, plus an
 optional multiline prompt). This is read-only through `ListSteps` — there is
 no write RPC, since the policy is edited only through Kandev's own Settings
-UI, never by a plugin. `coordinator_monitored` is `false` and
+UI, never by a plugin. The fields are populated only when the plugin declares
+both `api_read: ["workflows"]` and `agent_conversation: true`; an ordinary
+workflow reader receives them redacted as `false` and `""`. `coordinator_monitored` is `false` and
 `coordinator_prompt` is `""` for a step nobody has checked. A plugin
 composes its own base prompt with `coordinator_prompt` only when
 `coordinator_monitored` is `true`; an empty prompt on a checked step adds no

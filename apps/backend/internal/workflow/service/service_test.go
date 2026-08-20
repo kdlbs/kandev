@@ -64,8 +64,9 @@ func insertWorkflow(t *testing.T, db *sqlx.DB, id, name string) {
 
 // mockWorkflowProvider implements WorkflowProvider with in-memory state for tests.
 type mockWorkflowProvider struct {
-	workflows        []*taskmodels.Workflow
-	getWorkflowCalls int
+	workflows           []*taskmodels.Workflow
+	getWorkflowCalls    int
+	forceGetWorkflowErr error
 	// forceUpdateWorkflowErr, when set, makes UpdateWorkflow fail without
 	// mutating state - used to test that a rebind Warn never fires for a
 	// change that was not actually persisted.
@@ -88,6 +89,9 @@ func (m *mockWorkflowProvider) ListWorkflows(_ context.Context, workspaceID stri
 
 func (m *mockWorkflowProvider) GetWorkflow(_ context.Context, id string) (*taskmodels.Workflow, error) {
 	m.getWorkflowCalls++
+	if m.forceGetWorkflowErr != nil {
+		return nil, m.forceGetWorkflowErr
+	}
 	for _, wf := range m.workflows {
 		if wf.ID == id {
 			return wf, nil

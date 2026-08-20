@@ -376,8 +376,10 @@ type WorkflowStep struct {
 	// CoordinatorMonitored and CoordinatorPrompt carry the Settings >
 	// Workspace > Workflow configuration policy an operator saves for this
 	// step (host-owned storage — see docs/specs/coordinator-plugin/spec.md's
-	// "Workflow monitoring policy"). CoordinatorMonitored is false and
-	// CoordinatorPrompt is "" for a step that was never checked. A plugin
+	// "Workflow monitoring policy"). They are populated only for a plugin
+	// with api_read:workflows plus agent_conversation; ordinary workflow
+	// readers receive false and an empty string. CoordinatorMonitored is false
+	// and CoordinatorPrompt is "" for a step that was never checked. A plugin
 	// composes CoordinatorPrompt with its own base prompt only when
 	// CoordinatorMonitored is true; an empty prompt on a monitored step adds
 	// no step-specific instruction.

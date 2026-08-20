@@ -448,6 +448,9 @@ message WorkflowStep {
   // Workspace > Workflow configuration policy an operator saves for this
   // step (host-owned storage, not plugin-owned — see
   // docs/specs/coordinator-plugin/spec.md's "Workflow monitoring policy").
+  // They are populated only for a plugin which declares both
+  // api_read:workflows and agent_conversation; ordinary workflow readers see
+  // the fields redacted as false/empty.
   // coordinator_monitored is false and coordinator_prompt is "" for a step
   // that was never checked. A plugin composes coordinator_prompt with its
   // own base prompt only when coordinator_monitored is true.

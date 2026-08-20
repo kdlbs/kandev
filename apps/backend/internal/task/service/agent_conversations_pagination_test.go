@@ -78,6 +78,18 @@ func (f *acPagingTaskRepo) CreateTask(_ context.Context, task *models.Task) erro
 	return nil
 }
 
+func (f *acPagingTaskRepo) UpdateTask(_ context.Context, task *models.Task) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, existing := range f.tasks {
+		if existing.ID == task.ID {
+			f.tasks[i] = task
+			return nil
+		}
+	}
+	return nil
+}
+
 func (f *acPagingTaskRepo) DeleteTask(_ context.Context, taskID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -152,12 +152,10 @@ type workflowLister interface {
 
 // workflowStepLister is the narrow slice of internal/workflow/service.Service
 // the Workflows().ListSteps RPC needs. GetCoordinatorMonitoring backs the
-// CoordinatorMonitored/CoordinatorPrompt fields ListSteps merges onto each
-// step — the permanent Host read surface for the host-owned Settings >
-// Workspace > Workflow configuration policy (docs/specs/coordinator-plugin/
-// spec.md's "Workflow monitoring policy"), so a plugin declaring the
-// existing workflow_steps api_read capability can compose its per-step
-// prompt without any new capability or RPC.
+// CoordinatorMonitored/CoordinatorPrompt fields ListSteps conditionally merges
+// onto each step for plugins that explicitly declare agent_conversation. Plain
+// api_read:workflows readers receive ordinary workflow shape with the private
+// coordinator policy redacted.
 type workflowStepLister interface {
 	ListStepsByWorkflow(ctx context.Context, workflowID string) ([]*wfmodels.WorkflowStep, error)
 	GetCoordinatorMonitoring(ctx context.Context, workflowID string) ([]wfmodels.CoordinatorStepMonitor, error)
@@ -475,6 +473,13 @@ func (r workflowReader) ListSteps(ctx context.Context, workflowID string) ([]plu
 	steps, err := r.host.workflowSteps.ListStepsByWorkflow(ctx, workflowID)
 	if err != nil {
 		return nil, err
+	}
+	if !r.host.capabilities.AgentConversation {
+		dtos := make([]pluginsdk.WorkflowStep, len(steps))
+		for i, step := range steps {
+			dtos[i] = workflowStepModelToDTO(step, wfmodels.CoordinatorStepMonitor{})
+		}
+		return dtos, nil
 	}
 	monitoring, err := r.host.workflowSteps.GetCoordinatorMonitoring(ctx, workflowID)
 	if err != nil {

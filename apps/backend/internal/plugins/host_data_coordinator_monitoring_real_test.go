@@ -54,7 +54,7 @@ func newRealWorkflowStepHost(t *testing.T) (*pluginHost, *wfservice.Service) {
 
 	host := &pluginHost{
 		pluginID:      "plugin-coordinator",
-		capabilities:  manifest.Capabilities{APIRead: []string{"workflows"}},
+		capabilities:  manifest.Capabilities{APIRead: []string{"workflows"}, AgentConversation: true},
 		workflows:     &fakeWorkflowLister{},
 		workflowSteps: svc,
 	}

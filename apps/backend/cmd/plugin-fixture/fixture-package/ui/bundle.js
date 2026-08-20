@@ -198,6 +198,39 @@
         );
       }
 
+      function CoordinatorPage() {
+        var sessionState = React.useState(null);
+        var session = sessionState[0];
+        var setSession = sessionState[1];
+        var viewState = React.useState("chat");
+        var view = viewState[0];
+        var setView = viewState[1];
+        React.useEffect(function () {
+          var workspaceId = host.store.getState().workspaces.activeId;
+          if (!workspaceId) return;
+          host.api.invokeAction("conversations.ensure", { workspaceId: workspaceId }).then(function (result) {
+            setSession(result);
+          });
+        }, []);
+        var Chat = host.ui.WorkspaceAgentChat;
+        return jsx(
+          "section",
+          { "data-testid": "fixture-coordinator-page", className: "flex min-h-[100dvh] min-w-0 flex-col" },
+          jsx("h1", null, "Coordinator"),
+          jsx(
+            "div",
+            { className: "flex min-h-11 gap-2", role: "tablist" },
+            jsx("button", { type: "button", role: "tab", onClick: function () { setView("chat"); } }, "Chat"),
+            jsx("button", { type: "button", role: "tab", "data-testid": "fixture-coordinator-reports", onClick: function () { setView("reports"); } }, "Reports"),
+          ),
+          view === "reports"
+            ? jsx("div", { "data-testid": "fixture-coordinator-reports-view", className: "min-h-0 flex-1 overflow-y-auto" }, "No reports yet")
+            : session && session.session_id
+              ? jsx("div", { className: "min-h-0 flex-1" }, jsx(Chat, { workspaceId: session.workspace_id, conversationKey: session.conversation_key, sessionId: session.session_id, placeholderOverride: "Message Coordinator" }))
+              : jsx("div", { "data-testid": "fixture-coordinator-loading" }, "Loading Coordinator"),
+        );
+      }
+
       function FixtureReviewPanel(props) {
         return jsx(
           "section",
@@ -561,6 +594,12 @@
         section: "main",
       });
       registry.registerNavItem({
+        id: "e2e-coordinator",
+        label: "Coordinator",
+        path: "/coordinator",
+        section: "integrations",
+      });
+      registry.registerNavItem({
         id: "e2e-insights-tools",
         label: "E2E Insights Tools",
         path: "/plugins/e2e-hello",
@@ -596,6 +635,7 @@
         section: "sidebar-footer",
       });
       registry.registerRoute("/plugins/e2e-hello", PluginPage);
+      registry.registerRoute("/coordinator", CoordinatorPage);
       registry.registerComponent("task-sidebar", SidebarSlot);
       registry.registerComponent("main-top-bar", MainTopBarSlot);
       registry.registerComponent("app-status-bar-left", StatusSlot);

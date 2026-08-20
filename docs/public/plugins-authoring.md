@@ -2153,11 +2153,17 @@ manifest.yaml, then calls:
    task/session for `(workspace_id, conversation_key)`. The returned
    `session_id` and `task_id` are stable across restarts.
 2. **`DispatchAgentConversation`** - send cycle prompts with a stable
-   `occurrence_key` for idempotency. The host queues prompts while the
-   backing session is busy and prompts directly when idle.
+   `occurrence_key` for idempotency. A busy backing session returns
+   `skipped_busy`; the plugin schedules its next eligible occurrence rather
+   than accumulating queued heartbeats.
 3. **Host data API reads** through `Host.Workspaces()`, `Host.Workflows()`,
    `Host.WorkflowSteps()`, `Host.Tasks()`, etc. The plugin monitors
    workflow state between cycles.
+
+Coordinator monitoring selections and their per-step prompts are redacted
+from ordinary workflow readers. A plugin must declare both
+`api_read: ["workflows"]` and `agent_conversation: true` to receive those
+fields from `ListSteps`.
 
 The frontend registers an integration nav item and a route that renders
 `host.ui.WorkspaceAgentChat`:

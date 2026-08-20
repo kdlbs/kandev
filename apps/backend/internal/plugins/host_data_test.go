@@ -550,7 +550,7 @@ func TestPluginHost_Workflows_SucceedsWithCapability(t *testing.T) {
 // false with an empty prompt, and merging never touches unrelated steps or
 // workflows.
 func TestPluginHost_Workflows_ListStepsMergesCoordinatorMonitoring(t *testing.T) {
-	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"workflows"}})
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"workflows"}, AgentConversation: true})
 	d.steps.steps = map[string][]*wfmodels.WorkflowStep{
 		"wf-1": {
 			{ID: "step-checked", WorkflowID: "wf-1", Name: "Spec", Position: 0, StageType: wfmodels.StageType("work")},
@@ -593,13 +593,34 @@ func TestPluginHost_Workflows_ListStepsMergesCoordinatorMonitoring(t *testing.T)
 	}
 }
 
+func TestPluginHost_Workflows_ListStepsRedactsCoordinatorMonitoringWithoutAgentConversation(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"workflows"}})
+	d.steps.steps = map[string][]*wfmodels.WorkflowStep{
+		"wf-1": {{ID: "step-checked", WorkflowID: "wf-1", Name: "Spec", Position: 0, StageType: wfmodels.StageType("work")}},
+	}
+	d.steps.monitoring = map[string][]wfmodels.CoordinatorStepMonitor{
+		"wf-1": {{WorkflowStepID: "step-checked", Selected: true, Prompt: "Private coordinator direction."}},
+	}
+
+	steps, err := d.host.Workflows().ListSteps(context.Background(), "wf-1")
+	if err != nil {
+		t.Fatalf("ListSteps() unexpected error: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("ListSteps() returned %d steps, want 1", len(steps))
+	}
+	if steps[0].CoordinatorMonitored || steps[0].CoordinatorPrompt != "" {
+		t.Fatalf("generic workflow-read capability exposed coordinator policy: %+v", steps[0])
+	}
+}
+
 // TestPluginHost_Workflows_ListStepsPropagatesMonitoringLoadFailure proves a
 // monitoring-store failure fails the whole read loudly (matching every other
 // Host data-read failure mode) rather than silently returning steps with
 // zeroed-out monitoring fields, which would look identical to "nothing is
 // checked" and mislead a plugin into skipping work it should do.
 func TestPluginHost_Workflows_ListStepsPropagatesMonitoringLoadFailure(t *testing.T) {
-	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"workflows"}})
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"workflows"}, AgentConversation: true})
 	d.steps.steps = map[string][]*wfmodels.WorkflowStep{
 		"wf-1": {{ID: "step-1", WorkflowID: "wf-1", Name: "Todo"}},
 	}

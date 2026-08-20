@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 
@@ -73,6 +74,18 @@ func (f *acFakeTaskRepo) CreateTask(_ context.Context, task *models.Task) error 
 	return nil
 }
 
+func (f *acFakeTaskRepo) UpdateTask(_ context.Context, task *models.Task) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, existing := range f.tasks {
+		if existing.ID == task.ID {
+			f.tasks[i] = task
+			return nil
+		}
+	}
+	return errors.New("task not found")
+}
+
 func (f *acFakeTaskRepo) DeleteTask(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -136,6 +149,16 @@ func (f *acFakeSessionRepo) CreateTaskSession(_ context.Context, session *models
 	defer f.mu.Unlock()
 	f.nextIdx++
 	session.ID = "session-" + acItoa(f.nextIdx)
+	f.sessions[session.ID] = session
+	return nil
+}
+
+func (f *acFakeSessionRepo) UpdateTaskSession(_ context.Context, session *models.TaskSession) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.sessions[session.ID]; !ok {
+		return errors.New("session not found")
+	}
 	f.sessions[session.ID] = session
 	return nil
 }
@@ -217,6 +240,13 @@ func (f *acFakeStateRepo) Claim(_ context.Context, pluginID, scope, scopeID, key
 	}
 	f.claims[k] = true
 	return true, nil
+}
+
+func (f *acFakeStateRepo) Delete(_ context.Context, pluginID, scope, scopeID, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.claims, pluginID+"/"+scope+"/"+scopeID+"/"+key)
+	return nil
 }
 
 // acDeliverCall records one call reaching the fake dispatcher — i.e. one
@@ -684,6 +714,123 @@ func TestStoresBasePromptInMetadata(t *testing.T) {
 	}
 	if p, ok := task[0].Metadata["kandev.base_prompt"].(string); !ok || p != "You are a cycle coordinator." {
 		t.Fatalf("base_prompt = %v, want 'You are a cycle coordinator.'", task[0].Metadata["kandev.base_prompt"])
+	}
+}
+
+func TestEnsureReconcilesExistingConversationProfileAndBasePrompt(t *testing.T) {
+	svc, deps := newACTestService()
+	ctx := context.Background()
+
+	_, _, err := svc.Ensure(ctx, "plugin-coordinator", pluginsdk.AgentConversationSpec{
+		WorkspaceID:     "ws-1",
+		ConversationKey: "coordinator",
+		AgentProfileID:  "profile-old",
+		BasePrompt:      "old base prompt",
+	})
+	if err != nil {
+		t.Fatalf("first Ensure: %v", err)
+	}
+
+	desc, statusStr, err := svc.Ensure(ctx, "plugin-coordinator", pluginsdk.AgentConversationSpec{
+		WorkspaceID:     "ws-1",
+		ConversationKey: "coordinator",
+		AgentProfileID:  "profile-new",
+		BasePrompt:      "new base prompt",
+	})
+	if err != nil {
+		t.Fatalf("reconcile Ensure: %v", err)
+	}
+	if statusStr != AgentConversationStatusExists {
+		t.Fatalf("status = %q, want exists", statusStr)
+	}
+	if desc.AgentProfileID != "profile-new" {
+		t.Fatalf("descriptor profile = %q, want profile-new", desc.AgentProfileID)
+	}
+
+	primary, err := deps.sess.GetPrimarySessionByTaskID(ctx, desc.TaskID)
+	if err != nil {
+		t.Fatalf("GetPrimarySessionByTaskID: %v", err)
+	}
+	if primary.AgentProfileID != "profile-new" {
+		t.Fatalf("session profile = %q, want profile-new", primary.AgentProfileID)
+	}
+
+	if _, err := svc.Dispatch(ctx, "plugin-coordinator", "ws-1", "coordinator", "WAKE:CYCLE", ""); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if got := deps.dispatcher.lastCall().text; got != "new base prompt\n\nWAKE:CYCLE" {
+		t.Fatalf("dispatch text = %q, want refreshed base prompt composed with wake", got)
+	}
+}
+
+func TestDispatchRetriesOccurrenceAfterDeliveryFailure(t *testing.T) {
+	svc, deps := newACTestService()
+	ctx := context.Background()
+	if _, _, err := svc.Ensure(ctx, "plugin-coordinator", pluginsdk.AgentConversationSpec{WorkspaceID: "ws-1", ConversationKey: "coordinator"}); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	deps.dispatcher.err = errors.New("temporary dispatcher outage")
+	if _, err := svc.Dispatch(ctx, "plugin-coordinator", "ws-1", "coordinator", "WAKE:CYCLE", "occurrence-1"); err == nil {
+		t.Fatal("first Dispatch error = nil, want delivery failure")
+	}
+	deps.dispatcher.err = nil
+
+	dispatch, err := svc.Dispatch(ctx, "plugin-coordinator", "ws-1", "coordinator", "WAKE:CYCLE", "occurrence-1")
+	if err != nil {
+		t.Fatalf("retry Dispatch: %v", err)
+	}
+	if dispatch.Status != "started" {
+		t.Fatalf("retry status = %q, want started", dispatch.Status)
+	}
+	if got := deps.dispatcher.callCount(); got != 1 {
+		t.Fatalf("dispatcher calls = %d, want one successful retry", got)
+	}
+}
+
+func TestDispatchBusySessionDoesNotConsumeOccurrence(t *testing.T) {
+	svc, deps := newACTestService()
+	ctx := context.Background()
+	desc, _, err := svc.Ensure(ctx, "plugin-coordinator", pluginsdk.AgentConversationSpec{WorkspaceID: "ws-1", ConversationKey: "coordinator"})
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	deps.sess.setState(desc.SessionID, models.TaskSessionStateRunning)
+
+	busy, err := svc.Dispatch(ctx, "plugin-coordinator", "ws-1", "coordinator", "WAKE:CYCLE", "occurrence-1")
+	if err != nil {
+		t.Fatalf("busy Dispatch: %v", err)
+	}
+	if busy.Status != "skipped_busy" {
+		t.Fatalf("busy status = %q, want skipped_busy", busy.Status)
+	}
+
+	deps.sess.setState(desc.SessionID, models.TaskSessionStateIdle)
+	dispatch, err := svc.Dispatch(ctx, "plugin-coordinator", "ws-1", "coordinator", "WAKE:CYCLE", "occurrence-1")
+	if err != nil {
+		t.Fatalf("retry Dispatch: %v", err)
+	}
+	if dispatch.Status != "sent" {
+		t.Fatalf("retry status = %q, want sent", dispatch.Status)
+	}
+}
+
+func TestDeleteRejectsEmptyOwnershipIdentifiers(t *testing.T) {
+	svc, _ := newACTestService()
+
+	for _, tc := range []struct {
+		name, pluginID, workspaceID, conversationKey string
+	}{
+		{name: "plugin", workspaceID: "ws-1", conversationKey: "coordinator"},
+		{name: "workspace", pluginID: "plugin-coordinator", conversationKey: "coordinator"},
+		{name: "key", pluginID: "plugin-coordinator", workspaceID: "ws-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.Delete(context.Background(), tc.pluginID, tc.workspaceID, tc.conversationKey)
+			if status.Code(err) != codes.InvalidArgument {
+				t.Fatalf("Delete error code = %v, want InvalidArgument (err=%v)", status.Code(err), err)
+			}
+		})
 	}
 }
 
