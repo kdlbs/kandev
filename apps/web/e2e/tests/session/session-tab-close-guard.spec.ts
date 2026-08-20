@@ -24,14 +24,13 @@ test.describe("Session tab close guard", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
-    // Find the session tab
-    const sessionTab = testPage.locator("[data-testid^='session-tab-']").first();
-    await expect(sessionTab).toBeVisible({ timeout: 10_000 });
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    const firstSessionId = sessions[0]?.id;
+    expect(firstSessionId).toBeTruthy();
+    if (!firstSessionId) return;
 
-    // The close action inside the session tab should be hidden
-    // (DockviewDefaultTab renders .dv-default-tab-action but hideClose hides it via CSS)
-    const closeAction = sessionTab.locator(".dv-default-tab-action");
-    await expect(closeAction).toBeHidden({ timeout: 5_000 });
+    await expect(session.sessionTabBySessionId(firstSessionId)).toBeVisible({ timeout: 10_000 });
+    await expect(session.sessionTabCloseButton(firstSessionId)).toBeHidden({ timeout: 5_000 });
   });
 
   test("closing one of two session panels hides the remaining panel's close button", async ({
@@ -85,7 +84,11 @@ test.describe("Session tab close guard", () => {
     await expect(session.sessionTabBySessionId(secondSessionId)).toBeVisible();
     await expect(session.sessionTabCloseButton(secondSessionId)).not.toBeVisible();
     await expect
-      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length)
+      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
+        timeout: 10_000,
+        message:
+          "Session count must stay at 2 after tab close (panel close should not delete session)",
+      })
       .toBe(2);
   });
 });

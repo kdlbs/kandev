@@ -252,7 +252,6 @@ function useVisibleSessionPanelCount(
 ): number {
   const [count, setCount] = useState(() => countVisibleSessionPanels(containerApi));
   useEffect(() => {
-    setCount(countVisibleSessionPanels(containerApi));
     const addDisposable = containerApi.onDidAddPanel(() => {
       setCount(countVisibleSessionPanels(containerApi));
     });
