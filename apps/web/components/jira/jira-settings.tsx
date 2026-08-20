@@ -94,7 +94,7 @@ function defaultAuthForInstance(instance: JiraInstanceType): JiraAuthMethod {
 // instance type. Mirrors the backend validation so the user can't submit an
 // invalid combination. session_cookie is Cloud-only today because the backend
 // wraps the secret under cloud.session.token / tenant.session.token cookie
-// names — Server/DC uses JSESSIONID, so the wrapping is a no-op there until we
+// names ΓÇö Server/DC uses JSESSIONID, so the wrapping is a no-op there until we
 // add a Server-aware path.
 function authAllowedForInstance(auth: JiraAuthMethod, instance: JiraInstanceType): boolean {
   if (auth === "api_token") return instance === "cloud";
@@ -251,9 +251,7 @@ type SecretFieldProps = FieldsRowProps & { hasSavedSecret: boolean };
 
 type SecretFieldPropsWithExpiry = SecretFieldProps & { secretExpiresAt?: string | null };
 
-type OAuthFieldsProps = {
-  form: FormState;
-  loading: boolean;
+type OAuthFieldsProps = FieldsRowProps & {
   workspaceId: string;
   connected: boolean;
   tokenExpiresAt?: string | null;
@@ -262,6 +260,7 @@ type OAuthFieldsProps = {
 
 function OAuthFields({
   form,
+  baseline,
   loading,
   workspaceId,
   connected,
@@ -463,8 +462,8 @@ function TestResultAlert({ result }: { result: TestJiraConnectionResult | null }
   return (
     <Alert variant={result.ok ? "default" : "destructive"}>
       <AlertDescription>
-        {/* Both values are Jira's own reply — an account name and an upstream
-            error message — so they travel through `values`, never the catalog. */}
+        {/* Both values are Jira's own reply ΓÇö an account name and an upstream
+            error message ΓÇö so they travel through `values`, never the catalog. */}
         {result.ok
           ? t("jira:connectedAs", {
               name: result.displayName || result.email || result.accountId,
@@ -533,7 +532,7 @@ function useJiraConfigRefresh(workspaceId: string, setConfig: (cfg: JiraConfig |
       getJiraConfig({ workspaceId })
         .then((cfg) => setConfig(cfg))
         .catch(() => {
-          /* transient failures are fine — next tick retries */
+          /* transient failures are fine ΓÇö next tick retries */
         });
     }, INTEGRATION_STATUS_REFRESH_MS);
     return () => clearInterval(id);
@@ -699,8 +698,8 @@ function normalizeComparableSiteUrl(value: string): string {
 // savedSecretMatches reports whether the saved secret can be reused against
 // the current form values. Reuse is only safe when every identity component
 // of the saved credential still matches: same auth method, same instance
-// type, same Jira host, and — for Cloud api_token where the basic pair is
-// email:token — the same email (case-insensitive). Otherwise the user could
+// type, same Jira host, and ΓÇö for Cloud api_token where the basic pair is
+// email:token ΓÇö the same email (case-insensitive). Otherwise the user could
 // change the site URL or Cloud account and silently submit the previous
 // token to a different host/account.
 function savedSecretMatches(config: JiraConfig | null, form: FormState): boolean {
@@ -714,31 +713,26 @@ function savedSecretMatches(config: JiraConfig | null, form: FormState): boolean
   return (config.email ?? "").toLowerCase() === form.email.toLowerCase();
 }
 
-// Compute derived form state for the Jira settings section.
-function useJiraFormState(config: JiraConfig | null, form: FormState, loading: boolean) {
-  const { t } = useTranslation();
-  const baseline = configToForm(config);
-  const savedSecretMatchesMode = savedSecretMatches(config, form);
-  const isOAuth = form.authMethod === "oauth";
-  const missingSecret = !isOAuth && !savedSecretMatchesMode && !form.secret;
-  const oauthNeedsConnect = isOAuth && !config?.hasSecret;
-  const emailRequired = form.instanceType === "cloud" && form.authMethod === "api_token";
-  const disableSave = !form.siteUrl || (emailRequired && !form.email) || missingSecret;
-  const disableTest = missingSecret || oauthNeedsConnect;
-  const revision = JSON.stringify(form);
-  const dirty = !loading && revision !== JSON.stringify(configToForm(config));
-  let invalidReason: string | undefined;
-  if (!form.siteUrl) invalidReason = t("jira:aJiraSiteUrlIsRequired");
-  else if (emailRequired && !form.email) invalidReason = t("jira:anEmailAddressIsRequired");
-  else if (missingSecret) invalidReason = t("jira:aCredentialIsRequired");
-  return { baseline, isOAuth, disableSave, disableTest, revision, dirty, invalidReason };
-}
-
 export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
   const s = useJiraSettings(workspaceId);
-  const { baseline, isOAuth, disableSave, disableTest, revision, dirty, invalidReason } =
-    useJiraFormState(s.config, s.form, s.loading);
+  const baseline = configToForm(s.config);
+  const savedSecretMatchesMode = savedSecretMatches(s.config, s.form);
+  const isOAuth = s.form.authMethod === "oauth";
+  const missingSecret = !isOAuth && !savedSecretMatchesMode && !s.form.secret;
+  const oauthNeedsConnect = isOAuth && !s.config?.hasSecret;
+  const emailRequired = s.form.instanceType === "cloud" && s.form.authMethod === "api_token";
+  const disableSave =
+    s.saving || !s.form.siteUrl || (emailRequired && !s.form.email) || (missingSecret && !isOAuth);
+  const disableTest = missingSecret || (isOAuth && oauthNeedsConnect);
+  const revision = JSON.stringify(s.form);
+  const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
+  // Assigned rather than returned from a helper, but the guard would not see it
+  // either way ΓÇö `invalidReason` is a plain string, never a JSX literal.
+  let invalidReason: string | undefined;
+  if (!s.form.siteUrl) invalidReason = t("jira:aJiraSiteUrlIsRequired");
+  else if (emailRequired && !s.form.email) invalidReason = t("jira:anEmailAddressIsRequired");
+  else if (missingSecret) invalidReason = t("jira:aCredentialIsRequired");
 
   useSettingsSaveContributor({
     id: `jira-config:${workspaceId}`,
@@ -773,7 +767,9 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
           {isOAuth ? (
             <OAuthFields
               form={s.form}
+              baseline={baseline}
               loading={s.loading}
+              update={s.update}
               workspaceId={workspaceId}
               connected={!!s.config?.hasSecret}
               tokenExpiresAt={s.config?.tokenExpiresAt ?? null}
