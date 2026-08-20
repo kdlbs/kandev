@@ -122,13 +122,11 @@ progress() {
   [[ "$QUIET" -eq 1 ]] || printf '%s\n' "$*" >&2
 }
 
-# Mergeability is deliberately absent from `pr-state --summary`, so query it
-# here rather than letting a caller assume a clean merge state. No `|| {}`
-# fallback: a failed query is unknown state, and the caller must treat it that
-# way instead of reading an empty object as "not conflicting".
-fetch_merge_state() {
-  "$GH" pr view "$PR" --json state,mergeable,mergeStateStatus,headRefOid 2>/dev/null
-}
+# Mergeability is deliberately absent from `pr-state --summary`, so it is
+# queried separately below rather than letting a caller assume a clean merge
+# state. There is no `|| {}` fallback: a failed query is unknown state, and the
+# caller must treat it that way instead of reading an empty object as
+# "not conflicting".
 
 # `pr-state` degrades silently under two host toolchains, and both failures
 # surface as a PR that looks clean:
@@ -146,32 +144,96 @@ fetch_merge_state() {
 # Run a command with a wall-clock bound, using nothing but the shell. Stock
 # macOS ships no timeout(1), and those are precisely the hosts carrying the
 # jq this probes for, so depending on it would skip the check where it matters.
-PROBE_TICK=''
+# Run a command with a wall-clock bound, using nothing but the shell. Stock
+# macOS ships no timeout(1), and those are precisely the hosts carrying the jq
+# this guards against, so depending on it would skip the check where it matters.
+#
+# A watchdog rather than a polling loop: `wait` returns the moment the command
+# does, so a healthy read costs nothing. Polling at a fixed tick charged every
+# invocation for the worst case.
+TIMEOUT_BIN=''
+TIMEOUT_RESOLVED=0
+resolve_timeout_bin() {
+  [[ "$TIMEOUT_RESOLVED" -eq 0 ]] || return 0
+  TIMEOUT_RESOLVED=1
+  local candidate
+  for candidate in timeout gtimeout; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      TIMEOUT_BIN="$candidate"
+      return 0
+    fi
+  done
+}
+
+run_bounded_capture() {
+  local secs=$1 outfile=$2
+  shift 2
+  [[ -z "$outfile" ]] || : >"$outfile"
+
+  resolve_timeout_bin
+  if [[ -n "$TIMEOUT_BIN" ]]; then
+    if [[ -n "$outfile" ]]; then
+      "$TIMEOUT_BIN" "$secs" "$@" >"$outfile" 2>/dev/null
+    else
+      "$TIMEOUT_BIN" "$secs" "$@" >/dev/null 2>&1
+    fi
+    return $?
+  fi
+
+  # Fallback for hosts with no timeout(1) - stock macOS among them, which is
+  # exactly where the broken jq this guards against tends to live.
+  #
+  # The watchdog polls in one-second steps and exits by itself once the command
+  # finishes: a shell blocked in `sleep N` does not act on a signal until that
+  # sleep returns, so the parent cannot reliably kill one long sleep. Its fds
+  # are closed because callers capture this with $(...), and any background
+  # process holding that pipe keeps the substitution blocked afterwards.
+  if [[ -n "$outfile" ]]; then
+    "$@" >"$outfile" 2>/dev/null &
+  else
+    "$@" >/dev/null 2>&1 &
+  fi
+  local pid=$!
+  (
+    waited=0
+    while [[ "$waited" -lt "$secs" ]]; do
+      sleep 1
+      kill -0 "$pid" 2>/dev/null || exit 0
+      waited=$((waited + 1))
+    done
+    kill -9 "$pid" 2>/dev/null
+  ) >/dev/null 2>&1 &
+
+  local rc=0
+  wait "$pid" 2>/dev/null || rc=$?
+  # 137 is SIGKILL, which here can only have come from the watchdog.
+  [[ "$rc" -ne 137 ]] || return 124
+  return "$rc"
+}
+
 run_bounded() {
   local secs=$1
   shift
-  # Poll in fractions of a second so a healthy jq costs ~0.1s rather than a
-  # full second on every invocation. BSD and GNU sleep both take fractions;
-  # fall back to whole seconds where that is not true.
-  if [[ -z "$PROBE_TICK" ]]; then
-    if sleep 0.1 2>/dev/null; then PROBE_TICK='0.1'; else PROBE_TICK='1'; fi
-  fi
-  local per_sec=10
-  [[ "$PROBE_TICK" == '0.1' ]] || per_sec=1
-  "$@" >/dev/null 2>&1 &
-  local pid=$! ticks=0
-  local max=$((secs * per_sec))
-  while kill -0 "$pid" 2>/dev/null; do
-    if [[ "$ticks" -ge "$max" ]]; then
-      kill -9 "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
-      return 124
-    fi
-    sleep "$PROBE_TICK"
-    ticks=$((ticks + 1))
-  done
-  wait "$pid"
+  run_bounded_capture "$secs" '' "$@"
 }
+
+# Seconds left before the caller's deadline, floored at zero.
+remaining_budget() {
+  local left=$((DEADLINE_SEC - (SECONDS - START_SEC)))
+  [[ "$left" -gt 0 ]] || left=0
+  printf '%s' "$left"
+}
+
+# Cap on a single GitHub read. A healthy `pr-state --summary` returns in about
+# ten seconds; three minutes means it is wedged, and waiting out a 45 minute
+# default deadline on one wedged read helps nobody.
+READ_CAP=180
+
+# A zero or already-spent deadline still gets exactly one snapshot, so the
+# report can name the pending checks rather than saying nothing at all. That
+# read is bounded tightly: a healthy `pr-state --summary` returns in about ten
+# seconds, and a caller who asked for no waiting should not get a long one.
+READ_FLOOR=15
 
 preflight_toolchain() {
   local jq_bin="${PR_AWAIT_JQ:-jq}"
@@ -198,6 +260,9 @@ clean result would not be trustworthy. Put bash 4.4 or later first on PATH."
 
 TOOLCHAIN='unverified'
 preflight_toolchain
+
+READ_TMP="$(mktemp "${TMPDIR:-/tmp}/pr-await-read-XXXXXX")"
+trap 'rm -f "$READ_TMP"' EXIT INT TERM
 
 DEADLINE_SEC=$((DEADLINE_MIN * 60))
 
@@ -229,7 +294,28 @@ while :; do
   POLLS=$((POLLS + 1))
   ELAPSED=$((SECONDS - START_SEC))
 
-  if ! SUMMARY_JSON="$("$PR_STATE" --summary "$PR" 2>/dev/null)" || ! jq -e . >/dev/null 2>&1 <<<"$SUMMARY_JSON"; then
+  budget="$(remaining_budget)"
+  if [[ "$budget" -le 0 ]]; then
+    if [[ -n "$SUMMARY_JSON" ]]; then
+      OUTCOME='deadline'
+      break
+    fi
+    budget="$READ_FLOOR"
+  fi
+  [[ "$budget" -le "$READ_CAP" ]] || budget="$READ_CAP"
+
+  read_rc=0
+  run_bounded_capture "$budget" "$READ_TMP" "$PR_STATE" --summary "$PR" || read_rc=$?
+  if [[ "$read_rc" -eq 124 ]]; then
+    progress "poll ${POLLS}: pr-state exceeded its ${budget}s bound"
+    OUTCOME='deadline'
+    [[ -n "$SUMMARY_JSON" ]] || OUTCOME='blocked-access'
+    break
+  fi
+  SUMMARY_JSON="$(cat "$READ_TMP")"
+  # A non-zero read is a failed read, whatever it printed. Checking only the
+  # parse would let a pr-state that exited 1 through on an empty snapshot.
+  if [[ "$read_rc" -ne 0 ]] || ! jq -e . >/dev/null 2>&1 <<<"$SUMMARY_JSON"; then
     CONSECUTIVE_ERRORS=$((CONSECUTIVE_ERRORS + 1))
     progress "poll ${POLLS}: pr-state failed (${CONSECUTIVE_ERRORS} in a row)"
     # Three consecutive failures is a lost connection, not a transient blip.
@@ -246,7 +332,26 @@ while :; do
   fi
   CONSECUTIVE_ERRORS=0
 
-  if ! MERGE_JSON="$(fetch_merge_state)" || ! jq -e . >/dev/null 2>&1 <<<"$MERGE_JSON"; then
+  budget="$(remaining_budget)"
+  if [[ "$budget" -le 0 ]]; then
+    if [[ -n "$MERGE_JSON" ]]; then
+      OUTCOME='deadline'
+      break
+    fi
+    budget="$READ_FLOOR"
+  fi
+  [[ "$budget" -le "$READ_CAP" ]] || budget="$READ_CAP"
+
+  read_rc=0
+  run_bounded_capture "$budget" "$READ_TMP" \
+    "$GH" pr view "$PR" --json state,mergeable,mergeStateStatus,headRefOid || read_rc=$?
+  if [[ "$read_rc" -eq 124 ]]; then
+    progress "poll ${POLLS}: gh pr view exceeded its ${budget}s bound"
+    OUTCOME='blocked-merge-state'
+    break
+  fi
+  MERGE_JSON="$(cat "$READ_TMP")"
+  if [[ "$read_rc" -ne 0 ]] || ! jq -e . >/dev/null 2>&1 <<<"$MERGE_JSON"; then
     MERGE_ERRORS=$((MERGE_ERRORS + 1))
     progress "poll ${POLLS}: gh pr view failed (${MERGE_ERRORS} in a row)"
     if [[ "$MERGE_ERRORS" -ge 3 ]]; then
@@ -378,6 +483,11 @@ while :; do
 done
 
 WAITED=$((SECONDS - START_SEC))
+
+if [[ -z "$SUMMARY_JSON" ]] || ! jq -e . >/dev/null 2>&1 <<<"$SUMMARY_JSON"; then
+  emit_blocked 'blocked-access' \
+"BLOCKED: no usable pr-state snapshot was obtained; treat CI state as unknown."
+fi
 
 if [[ "$OUTCOME" == 'blocked-access' ]]; then
   emit_blocked 'blocked-access' \

@@ -553,4 +553,53 @@ jq -e . >/dev/null <<<"$out" || fail "leading-zero PR must not break the JSON en
 pass "a leading-zero PR number normalizes and keeps the JSON envelope valid"
 
 
+# The bounded reads are always captured with $(...). A watchdog that keeps that
+# pipe open blocks the substitution long after the command itself has finished,
+# so a fast run must stay fast when captured, not only when redirected.
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+start=$SECONDS
+out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 30 --quiet 2>/dev/null)" && rc=0 || rc=$?
+elapsed=$((SECONDS - start))
+[[ "$rc" -eq 0 ]] || fail "expected clean, got $rc" "$out"
+[[ "$elapsed" -lt 10 ]] || fail "a captured fast run must not wait on the watchdog, took ${elapsed}s"
+pass "a bounded read does not hold the command substitution open after it finishes"
+
+# --- a stalled GitHub read cannot outlive the deadline ---------------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+cat > "$d/pr-state" <<'HANG'
+#!/usr/bin/env bash
+exec sleep 120
+HANG
+chmod +x "$d/pr-state"
+start=$SECONDS
+out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet 2>/dev/null)" && rc=0 || rc=$?
+elapsed=$((SECONDS - start))
+[[ "$rc" -ne 0 ]] || fail "a stalled pr-state must never exit 0, got $rc" "$out"
+[[ "$elapsed" -lt 25 ]] || fail "a zero deadline must not wait out a 120s read, took ${elapsed}s"
+pass "a stalled pr-state read cannot exceed the deadline"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+cat > "$d/gh" <<'HANGGH'
+#!/usr/bin/env bash
+exec sleep 120
+HANGGH
+chmod +x "$d/gh"
+start=$SECONDS
+out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet 2>/dev/null)" && rc=0 || rc=$?
+elapsed=$((SECONDS - start))
+[[ "$rc" -ne 0 ]] || fail "a stalled gh pr view must never exit 0, got $rc" "$out"
+[[ "$elapsed" -lt 25 ]] || fail "a zero deadline must not wait out a 120s gh read, took ${elapsed}s"
+pass "a stalled gh pr view read cannot exceed the deadline"
+
+# Structural guard: both external reads must go through the bounded helper, or
+# the deadline is only enforced between reads and not during them.
+[[ "$(grep -c 'run_bounded_capture' "$ROOT_DIR/scripts/pr-await")" -ge 3 ]] \
+  || fail "both GitHub reads must run through run_bounded_capture"
+pass "every external GitHub read is bounded by the remaining deadline"
+
+
+
 printf '\nall tests passed\n'
