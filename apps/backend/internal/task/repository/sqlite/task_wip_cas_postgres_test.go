@@ -162,7 +162,7 @@ func TestPostgresUpdateTaskWithWorkflowStepAdmissionIfAtStep_PreconditionReadLoc
 	updateDone := make(chan error, 1)
 	go func() {
 		moved := &models.Task{ID: task.ID, WorkspaceID: task.WorkspaceID, WorkflowID: task.WorkflowID,
-			WorkflowStepID: otherStep, Title: task.Title, WIPAdmitted: true}
+			WorkflowStepID: otherStep, Title: task.Title, Priority: task.Priority, WIPAdmitted: true}
 		updateDone <- repo.UpdateTask(ctx, moved)
 	}()
 
