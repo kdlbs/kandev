@@ -408,6 +408,7 @@ pass "an UNKNOWN mergeability that resolves does not block"
 d="$(make_tmp_dir)"; setup_fake "$d"
 for i in 1 2 3 4 5; do : > "$d/seq/$i.fail"; snapshot "$d" "$i" 0 0 0; done
 out="$(run_await "$d" 12 --interval-sec 30 --deadline-min 0 --quiet 2>/dev/null)" && rc=0 || rc=$?
+: > "$d/sleeps.seen"; [[ -f "$d/sleeps" ]] || : > "$d/sleeps"
 [[ "$rc" -eq 3 ]] || fail "expected blocked, got $rc" "$out"
 sleeps=$(wc -l < "$d/sleeps" 2>/dev/null | tr -d ' ' || echo 0)
 [[ "${sleeps:-0}" -le 1 ]] || fail "a zero deadline must not burn 3 retry intervals, slept $sleeps times"
@@ -418,15 +419,17 @@ pass "a retry path stops at the deadline instead of sleeping out its full strike
 # silently skip on the exact hosts that carry the broken jq.
 d="$(make_tmp_dir)"; setup_fake "$d"
 snapshot "$d" 1 20 0 0
-mkdir -p "$d/minbin"
-for cmd in jq bash sleep kill wc cat printf; do
-  src="$(command -v "$cmd" 2>/dev/null)"; [ -n "$src" ] && ln -sf "$src" "$d/minbin/$cmd" 2>/dev/null || true
-done
-command -v timeout >/dev/null 2>&1 && ! [ -e "$d/minbin/timeout" ] || true
-out="$(PATH="$d/minbin" PROBE_JQ="$d/jq-bad" run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+out="$(PR_AWAIT_NO_TIMEOUT=1 PROBE_JQ="$d/jq-bad" run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
 [[ "$rc" -eq 3 ]] || fail "hanging jq must be caught without timeout(1), got $rc" "$out"
 grep -q 'jq-1.6-fake' <<<"$out" || fail "should still name the bad jq" "$out"
 pass "the jq probe catches a hanging jq with no timeout(1) available"
+
+# The fallback must also complete a normal run, not merely catch a hang.
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+out="$(PR_AWAIT_NO_TIMEOUT=1 run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "the shell fallback must handle a healthy read, got $rc" "$out"
+pass "the shell fallback completes a normal run without timeout(1)"
 
 # --- the suite is wired into make test-scripts ------------------------------
 grep -q 'bash scripts/pr-await.test.sh' "$ROOT_DIR/Makefile" \

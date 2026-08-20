@@ -156,6 +156,10 @@ TIMEOUT_RESOLVED=0
 resolve_timeout_bin() {
   [[ "$TIMEOUT_RESOLVED" -eq 0 ]] || return 0
   TIMEOUT_RESOLVED=1
+  # Set PR_AWAIT_NO_TIMEOUT=1 to exercise the shell fallback on a host that does
+  # have timeout(1). The fallback is the path stock macOS takes, so it needs
+  # coverage somewhere other than stock macOS.
+  [[ -z "${PR_AWAIT_NO_TIMEOUT:-}" ]] || return 0
   local candidate
   for candidate in timeout gtimeout; do
     if command -v "$candidate" >/dev/null 2>&1; then
