@@ -59,6 +59,7 @@ func TestDynamicRouteStateAndAttemptsPersistAcrossRepositoryReads(t *testing.T) 
 	}
 	if loaded == nil {
 		t.Fatal("loaded state is nil")
+		return
 	}
 	if loaded.Generation != 7 || loaded.ExecutionProfileID != "concrete-1" {
 		t.Fatalf("loaded state = %#v", loaded)
