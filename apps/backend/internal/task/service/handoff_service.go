@@ -527,10 +527,16 @@ func (s *HandoffService) ListRelatedForRequest(ctx context.Context, req RelatedR
 func (s *HandoffService) authorizeRelatedRead(ctx context.Context, req RelatedReadRequest) error {
 	caller, err := s.tasks.GetTask(ctx, req.CallerTaskID)
 	if err != nil {
+		if errors.Is(err, repository.ErrTaskNotFound) {
+			return relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller or target task missing")
+		}
 		return err
 	}
 	target, err := s.tasks.GetTask(ctx, req.TargetTaskID)
 	if err != nil {
+		if errors.Is(err, repository.ErrTaskNotFound) {
+			return relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller or target task missing")
+		}
 		return err
 	}
 	if caller == nil || target == nil {
