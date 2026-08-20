@@ -49,9 +49,19 @@ func TestAnswerQuestion_RESTvsMCP_OnlyOneClaims(t *testing.T) {
 
 	mcpH := &Handlers{taskSvc: svc, clarificationResolver: resolver, clarificationBundles: repo, logger: testLogger(t)}
 
-	answers := []map[string]interface{}{
+	// restAnswers and mcpAnswers must be distinguishable, not the same
+	// payload submitted twice: with identical answers, require.JSONEq below
+	// would pass even if a bug handed the loser its own submitted payload
+	// back instead of the winner's, since both payloads are byte-identical
+	// either way. Distinct answers make "the loser gets the winner's
+	// response" an assertion that can actually fail.
+	restAnswers := []map[string]interface{}{
 		{"question_id": "q1", "selected_options": []string{"opt-a"}},
 		{"question_id": "q2", "selected_options": []string{"opt-c"}},
+	}
+	mcpAnswers := []map[string]interface{}{
+		{"question_id": "q1", "selected_options": []string{"opt-b"}},
+		{"question_id": "q2", "selected_options": []string{"opt-d"}},
 	}
 
 	var wg sync.WaitGroup
@@ -63,7 +73,7 @@ func TestAnswerQuestion_RESTvsMCP_OnlyOneClaims(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-start
-		payload, err := json.Marshal(map[string]interface{}{"answers": answers})
+		payload, err := json.Marshal(map[string]interface{}{"answers": restAnswers})
 		require.NoError(t, err)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/clarification/pending-race-1/respond", bytes.NewReader(payload))
 		req.Header.Set("Content-Type", "application/json")
@@ -81,7 +91,7 @@ func TestAnswerQuestion_RESTvsMCP_OnlyOneClaims(t *testing.T) {
 		<-start
 		msg := makeWSMessage(t, ws.ActionMCPAnswerQuestion, map[string]interface{}{
 			"pending_id": "pending-race-1",
-			"answers":    answers,
+			"answers":    mcpAnswers,
 		})
 		mcpResp, mcpErr = mcpH.handleAnswerQuestion(ctx, msg)
 	}()
@@ -108,4 +118,25 @@ func TestAnswerQuestion_RESTvsMCP_OnlyOneClaims(t *testing.T) {
 	// R2/N4: the loser is handed the winner's normalized response verbatim,
 	// not its own -- both entry points must agree on the final answer.
 	require.JSONEq(t, string(restResult.Response), string(mcpResult.Response))
+
+	// Because restAnswers and mcpAnswers are distinguishable, the shared
+	// response must match whichever side actually claimed, not either
+	// side's own submission by coincidence.
+	winnerAnswers := mcpAnswers
+	if restResult.Claimed {
+		winnerAnswers = restAnswers
+	}
+	var parsed struct {
+		Answers []struct {
+			QuestionID      string   `json:"question_id"`
+			SelectedOptions []string `json:"selected_options"`
+		} `json:"answers"`
+	}
+	require.NoError(t, json.Unmarshal(restResult.Response, &parsed))
+	require.Len(t, parsed.Answers, len(winnerAnswers))
+	for i, got := range parsed.Answers {
+		want := winnerAnswers[i]
+		require.Equal(t, want["question_id"], got.QuestionID)
+		require.Equal(t, want["selected_options"], got.SelectedOptions)
+	}
 }
