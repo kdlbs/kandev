@@ -1049,7 +1049,7 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("message_task_kandev",
-			mcp.WithDescription(`Send a prompt to an existing Kandev task session, not a native subagent. Use delivery_mode="queued" (default) for information that can wait, or delivery_mode="interrupt" for urgent replacement work on a running direct child; non-parent interrupts fail and if cancellation is unsafe, the prompt remains queued. Halt-only work uses stop_task_kandev. The primary session is used by default; if it is terminal, Kandev tries the newest session that can accept messages, or names spawn_session_kandev when none can. Pass reply_to_question_id for an autopilot child question. Returns "queued", "sent", or "started".`),
+			mcp.WithDescription(`Send a prompt to an existing Kandev task session, not a native subagent. Use delivery_mode="queued" (default) to wait, or delivery_mode="interrupt" for urgent replacement work on a running direct child. Non-parent interrupts fail; unsafe cancellation means the prompt remains queued. Use stop_task_kandev to halt only. Busy queued peer messages get a durable delivery receipt; repeat idempotency_key to reuse it. The primary session is used by default; terminal tasks use the newest messageable session or spawn_session_kandev. Pass reply_to_question_id for an autopilot child question. Returns "queued", "sent", or "started".`),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task's full UUID (not a truncated prefix)")),
 			mcp.WithString("session_id", mcp.Description("Optional target session ID (must belong to task_id). Omit to message the task's primary session. Required when messaging a sibling session on your OWN task (task_id may then be your own task ID) — e.g. a session you spawned with spawn_session_kandev.")),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The message to deliver to the task's agent")),
@@ -1058,6 +1058,7 @@ func (s *Server) registerKanbanTools() {
 				mcp.DefaultString("queued"),
 				mcp.Description(`How to deliver this message if the target is currently running/starting. "queued" (default): wait for the current turn to finish, like any other peer message. "interrupt": cancel the target's current turn now and deliver this message immediately instead — only allowed when you are the target task's direct parent; requesting "interrupt" as a non-parent is rejected with an error rather than silently queued.`),
 			),
+			mcp.WithString("idempotency_key", mcp.Description("Optional stable key for a queued busy-session message. Repeating it from the same source turn returns the existing delivery receipt.")),
 			mcp.WithString("reply_to_question_id", mcp.Description("Optional question ID from an autopilot child. When set, the direct parent answer is recorded against that pending question and the delivery is idempotent.")),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),

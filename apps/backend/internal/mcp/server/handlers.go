@@ -410,6 +410,7 @@ func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 			"sender_session_id": s.sessionID,
 		}
 		copyOptionalStringArg(payload, req, "delivery_mode")
+		copyOptionalStringArg(payload, req, "idempotency_key")
 		copyOptionalStringArg(payload, req, "session_id")
 		copyOptionalStringArg(payload, req, "reply_to_question_id")
 		var result map[string]interface{}

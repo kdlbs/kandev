@@ -73,6 +73,25 @@ func NewServiceMemory(log *logger.Logger) *Service {
 	return NewService(NewMemoryRepository(), DefaultMaxPerSession, log)
 }
 
+// SupportsDeliveryReceipts reports whether this queue has the durable ledger
+// needed to retain cross-task delivery independently of the sender turn.
+func (s *Service) SupportsDeliveryReceipts() bool {
+	_, ok := s.repo.(DeliveryLedger)
+	return ok
+}
+
+// CreateOrGetDeliveryReceipt persists one idempotent cross-task delivery
+// receipt before target FIFO admission. The recovery worker owns later queue
+// promotion, so a full target queue cannot turn an accepted receipt into a
+// sender-side retry loop.
+func (s *Service) CreateOrGetDeliveryReceipt(ctx context.Context, delivery Delivery) (*Delivery, bool, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, false, errors.New("delivery receipts are not available")
+	}
+	return ledger.CreateOrGetDelivery(ctx, delivery)
+}
+
 // MaxPerSession returns the configured per-session cap.
 func (s *Service) MaxPerSession() int { return int(s.maxPerSession.Load()) }
 

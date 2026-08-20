@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -100,6 +101,14 @@ type SessionRepository interface {
 // binds a signal to its exact active turn before it is published.
 type completionIntentStore interface {
 	taskrepository.CompletionIntentRepository
+	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
+}
+
+// taskMessageActiveTurnReader is the narrow durable source-turn seam used by
+// message_task receipt admission. It deliberately does not share the
+// completion-intent interface: a queued peer report only needs the exact
+// source-turn identity used for idempotency.
+type taskMessageActiveTurnReader interface {
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 }
 
@@ -2304,6 +2313,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		SenderTaskID      string `json:"sender_task_id"`
 		SenderSessionID   string `json:"sender_session_id"`
 		DeliveryMode      string `json:"delivery_mode"`
+		IdempotencyKey    string `json:"idempotency_key"`
 		ReplyToQuestionID string `json:"reply_to_question_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
@@ -2430,6 +2440,21 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 			SessionID: req.SenderSessionID,
 		})
 	}
+	if delivery, admitted, admissionErr := h.admitBusyTaskMessageDelivery(
+		dispatchCtx, req.TaskID, session, wrappedPrompt, senderMeta, req,
+	); admissionErr != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to persist message delivery receipt: "+admissionErr.Error(), nil)
+	} else if admitted {
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+			"task_id":         req.TaskID,
+			"session_id":      delivery.TargetSessionID,
+			stopTaskStatusKey: taskMessageStatusQueued,
+			"delivery_id":     delivery.ID,
+			"delivery_status": delivery.State,
+			"idempotency_key": delivery.IdempotencyKey,
+		})
+	}
 	// pinnedTarget, not `req.SessionID != ""`: a fallback chosen because the
 	// primary is terminal is pinned too, or the idle dispatch path re-resolves
 	// it straight back to that terminal primary.
@@ -2454,6 +2479,99 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		"session_id":      result.sessionID,
 		stopTaskStatusKey: result.status,
 	})
+}
+
+// admitBusyTaskMessageDelivery creates a durable receipt only for the normal
+// queued busy-session path. Interrupts and parent-question replies retain
+// their existing atomic dispatch semantics; idle sessions keep their existing
+// immediate prompt/start behavior. Older in-memory queue implementations and
+// source sessions without a durable active turn continue through the legacy
+// path rather than fabricating a receipt with no exact owner.
+func (h *Handlers) admitBusyTaskMessageDelivery(
+	ctx context.Context,
+	targetTaskID string,
+	targetSession *models.TaskSession,
+	prompt string,
+	metadata map[string]interface{},
+	req struct {
+		TaskID            string `json:"task_id"`
+		SessionID         string `json:"session_id"`
+		Prompt            string `json:"prompt"`
+		SenderTaskID      string `json:"sender_task_id"`
+		SenderSessionID   string `json:"sender_session_id"`
+		DeliveryMode      string `json:"delivery_mode"`
+		IdempotencyKey    string `json:"idempotency_key"`
+		ReplyToQuestionID string `json:"reply_to_question_id"`
+	},
+) (*messagequeue.Delivery, bool, error) {
+	if targetSession == nil || req.DeliveryMode == deliveryModeInterrupt || req.ReplyToQuestionID != "" {
+		return nil, false, nil
+	}
+	if targetSession.State != models.TaskSessionStateRunning && targetSession.State != models.TaskSessionStateStarting {
+		return nil, false, nil
+	}
+	queue := h.sessionLauncher.GetMessageQueue()
+	if queue == nil || !queue.SupportsDeliveryReceipts() {
+		return nil, false, nil
+	}
+	sourceTurn, eligible, err := h.taskMessageSourceTurn(ctx, req.SenderTaskID, req.SenderSessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !eligible {
+		return nil, false, nil
+	}
+	deliveryMode := req.DeliveryMode
+	if deliveryMode == "" {
+		deliveryMode = deliveryModeQueued
+	}
+	key := req.IdempotencyKey
+	if key == "" {
+		key = deriveTaskMessageDeliveryKey(
+			req.SenderSessionID, sourceTurn.ID, targetTaskID, targetSession.ID,
+			deliveryMode, req.ReplyToQuestionID, prompt,
+		)
+	}
+	delivery, _, err := queue.CreateOrGetDeliveryReceipt(ctx, messagequeue.Delivery{
+		SenderTaskID:    req.SenderTaskID,
+		SenderSessionID: req.SenderSessionID,
+		SourceTurnID:    sourceTurn.ID,
+		IdempotencyKey:  key,
+		TargetTaskID:    targetTaskID,
+		TargetSessionID: targetSession.ID,
+		DeliveryMode:    deliveryMode,
+		Content:         prompt,
+		Metadata:        metadata,
+		State:           messagequeue.DeliveryPendingCapacity,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return delivery, true, nil
+}
+
+func (h *Handlers) taskMessageSourceTurn(ctx context.Context, senderTaskID, senderSessionID string) (*models.Turn, bool, error) {
+	turnReader, ok := h.sessionRepo.(taskMessageActiveTurnReader)
+	if !ok || senderSessionID == "" {
+		return nil, false, nil
+	}
+	turn, err := turnReader.GetActiveTurnBySessionID(ctx, senderSessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("load source turn: %w", err)
+	}
+	return turn, turn != nil && turn.TaskID == senderTaskID, nil
+}
+
+func deriveTaskMessageDeliveryKey(
+	senderSessionID, sourceTurnID, targetTaskID, targetSessionID, deliveryMode, replyToQuestionID, prompt string,
+) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		senderSessionID, sourceTurnID, targetTaskID, targetSessionID, deliveryMode, replyToQuestionID, prompt,
+	}, "\x00")))
+	return fmt.Sprintf("derived:%x", sum[:])
 }
 
 // lookupSenderSessionName resolves the sender session's user-supplied name for

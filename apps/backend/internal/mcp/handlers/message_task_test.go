@@ -9,6 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -947,6 +948,105 @@ func TestHandleMessageTask_QueueFull_ReturnsStructuredError(t *testing.T) {
 	queued, ok := errResp.Details["queued_messages"].([]interface{})
 	require.True(t, ok, "queued_messages should be an array")
 	assert.Len(t, queued, messagequeue.DefaultMaxPerSession)
+}
+
+func TestHandleMessageTask_BusyTargetPersistsIdempotentDeliveryReceipt(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	h, orchestrator := newMessageTaskHandler(t, svc, repo)
+
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orchestrator.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	ledger, ok := queueRepo.(messagequeue.DeliveryLedger)
+	require.True(t, ok)
+
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID:            "sender-turn-1",
+		TaskID:        sender.ID,
+		TaskSessionID: "sender-sess-1",
+		StartedAt:     time.Now().UTC(),
+	}))
+	require.NoError(t, func() error {
+		_, err := orchestrator.queue.QueueMessage(ctx, session.ID, target.ID, "already queued", "", messagequeue.QueuedByUser, false, nil)
+		return err
+	}())
+
+	payload := senderPayload(target.ID, "review is ready", sender.ID)
+	payload["idempotency_key"] = "review-report-v1"
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, payload)
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var first map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &first))
+	assert.Equal(t, "pending_capacity", first["delivery_status"])
+	receiptID, ok := first["delivery_id"].(string)
+	require.True(t, ok)
+	assert.NotEmpty(t, receiptID)
+	assert.Equal(t, "review-report-v1", first["idempotency_key"])
+
+	resp, err = h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	var repeated map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &repeated))
+	assert.Equal(t, receiptID, repeated["delivery_id"])
+	assert.Equal(t, "review-report-v1", repeated["idempotency_key"])
+
+	receipt, err := ledger.GetDelivery(ctx, receiptID)
+	require.NoError(t, err)
+	require.NotNil(t, receipt)
+	assert.Equal(t, "sender-turn-1", receipt.SourceTurnID)
+	assert.Equal(t, "review-report-v1", receipt.IdempotencyKey)
+	assert.Equal(t, messagequeue.DeliveryPendingCapacity, receipt.State)
+	assert.Equal(t, 1, orchestrator.queue.GetStatus(ctx, session.ID).Count)
+}
+
+func TestHandleMessageTask_RejectedBusyTargetDoesNotPersistDeliveryReceipt(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	h, orchestrator := newMessageTaskHandler(t, svc, repo)
+
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orchestrator.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	ledger, ok := queueRepo.(messagequeue.DeliveryLedger)
+	require.True(t, ok)
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID:            "sender-turn-rejected",
+		TaskID:        sender.ID,
+		TaskSessionID: "sender-sess-1",
+		StartedAt:     time.Now().UTC(),
+	}))
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, session.ID, models.TaskSessionStateFailed, "provider failed"))
+
+	payload := senderPayload(target.ID, "do not accept this", sender.ID)
+	payload["idempotency_key"] = "rejected-report-v1"
+	resp, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, payload))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeError, resp.Type)
+
+	_, created, err := ledger.CreateOrGetDelivery(ctx, messagequeue.Delivery{
+		SenderTaskID:    sender.ID,
+		SenderSessionID: "sender-sess-1",
+		SourceTurnID:    "sender-turn-rejected",
+		IdempotencyKey:  "rejected-report-v1",
+		TargetTaskID:    target.ID,
+		TargetSessionID: session.ID,
+		Content:         "do not accept this",
+		State:           messagequeue.DeliveryPendingCapacity,
+	})
+	require.NoError(t, err)
+	assert.True(t, created, "a rejected dispatch must not leave an accepted receipt")
 }
 
 func TestHandleMessageTask_WaitingForInput_PromptsAgent(t *testing.T) {

@@ -732,6 +732,7 @@ func TestMessageTask_ForwardsToBackend(t *testing.T) {
 		"session_id":           "sess-target",
 		"prompt":               "follow up",
 		"delivery_mode":        "interrupt",
+		"idempotency_key":      "report-v1",
 		"reply_to_question_id": "question-1",
 	})
 
@@ -744,6 +745,7 @@ func TestMessageTask_ForwardsToBackend(t *testing.T) {
 	assert.Equal(t, "sess-target", payload["session_id"])
 	assert.Equal(t, "follow up", payload["prompt"])
 	assert.Equal(t, "interrupt", payload["delivery_mode"])
+	assert.Equal(t, "report-v1", payload["idempotency_key"])
 	assert.Equal(t, "question-1", payload["reply_to_question_id"])
 	assert.Equal(t, "task-current", payload["sender_task_id"])
 	assert.Equal(t, "test-session", payload["sender_session_id"])
@@ -762,6 +764,8 @@ func TestMessageTask_DescriptionExplainsQueueInterruptAndStop(t *testing.T) {
 	assert.Contains(t, description, `delivery_mode="interrupt"`)
 	assert.Contains(t, description, "stop_task_kandev")
 	assert.Contains(t, description, "prompt remains queued")
+	assert.Contains(t, description, "idempotency_key")
+	assert.Contains(t, description, "durable delivery receipt")
 	assert.Contains(t, description, "reply_to_question_id")
 	// Terminal sessions and the session_id-less defaulting rule are both
 	// documented, so a caller does not have to discover either by trial.

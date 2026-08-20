@@ -126,7 +126,9 @@ For predictable top-level creation, pass `repository_url`, `repository_id`, or `
 | Created but not started     | Starts the session with the message.      |
 | Failed or cancelled         | Returns an error.                         |
 
-The default delivery mode is queued. Each session accepts 10 queued messages by default. An admin can change the install-wide limit under **Settings > Task Behavior > Message Queue**; `0` means unlimited. The saved value applies immediately to new admissions without removing messages already waiting. `KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence, locks only the capacity field, and requires a restart when changed; zero or a negative value means unlimited. Only one queued message drains per agent turn. When the cap is reached, the sender receives a structured `queue_full` error and should retry after space becomes available.
+The default delivery mode is queued. Each session accepts 10 queued messages by default. An admin can change the install-wide limit under **Settings > Task Behavior > Message Queue**; `0` means unlimited. The saved value applies immediately to new admissions without removing messages already waiting. `KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence, locks only the capacity field, and requires a restart when changed; zero or a negative value means unlimited. Only one queued message drains per agent turn.
+
+For a normal queued `message_task_kandev` call to a running or starting session, Kandev first stores a durable receipt. The response includes `delivery_id`, `delivery_status`, and `idempotency_key`. Supply `idempotency_key` when retrying a tool call; the same key in the same source turn returns the original receipt rather than adding another prompt. At capacity the accepted receipt reports `pending_capacity`, and the server retries admission independently. Do not retry just because the target queue is full.
 
 **Automatically merge consecutive messages** is enabled by default on the same settings card. After capacity admission succeeds, a new message may fold into the immediately preceding pending entry when both have the same strict source and compatible task, model, mode, metadata, attachments, and references. Otherwise it remains a separate FIFO entry. The earlier entry survives, so a successful admission may return an older queue-entry ID. The switch affects only later admissions and never sweeps rows already waiting. It is independent from **Enable queued message merging**, which controls the manual **Merge with above** action.
 
@@ -291,7 +293,7 @@ When Office is enabled, it prototypes **Blocked by** and **Blocking** properties
 - **Subtask cannot be created:** confirm the prompt (and title unless **Agent-generated task titles** is enabled), compatible profile, workflow, and the one-level Kanban depth limit.
 - **Subtask creates but its agent or repositories fail to start:** the dialog does not enforce agent/executor compatibility. Confirm the agent is configured on that executor; multi-repository creation supports Worktree, Local Docker, SSH, and Sprites.
 - **Inherited subtask sees unexpected changes:** it intentionally shares the parent's materialized files and branch.
-- **Message remains queued:** the target is busy and only one queued message drains per turn. Check for `queue_full` before retrying.
+- **Message remains queued:** the target is busy and only one queued message drains per turn. If the response includes a `delivery_id`, retain it and do not resend the same report for capacity alone.
 - **Interrupt is rejected:** only the target's direct parent may use interrupt delivery.
 - **Stop is rejected:** `stop_task_kandev` is task-mode only and accepts only a same-workspace direct child of the caller.
 - **Stop reports `stopped` but a process is still visible:** the response confirms logical cancellation and scheduled graceful teardown, not process exit.
