@@ -99,7 +99,8 @@ func (m *Manager) MaterializeRepositoriesForEnvironment(ctx context.Context, tas
 	for _, execution := range clients {
 		created, materializeErr := materializeWorkspaceRepositoriesWithoutRescan(ctx, execution.client, repositories, false)
 		if materializeErr != nil {
-			rollbackErr := rollbackMaterializedWorkspaceRepositoryClients(ctx, materialized)
+			failedCleanup, rollbackErr := rollbackMaterializedWorkspaceRepositoryClients(ctx, materialized)
+			m.failClosedMaterializedWorkspaceRepositoryClients(ctx, failedCleanup)
 			return nil, fmt.Errorf("materialize workspace repositories for session %s: %w", execution.sessionID, errors.Join(materializeErr, rollbackErr))
 		}
 		materialized = append(materialized, materializedWorkspaceRepositoryClient{execution: execution, created: created})
@@ -110,7 +111,8 @@ func (m *Manager) MaterializeRepositoriesForEnvironment(ctx context.Context, tas
 		if isMutableCloneWorkspaceExecution(execution.execution) {
 			refresh, refreshErr := m.refreshCloneWorkspacePolicyAfterMaterialization(ctx, execution.execution, repositories)
 			if refreshErr != nil {
-				cleanupErr := rollbackMaterializedWorkspaceRepositoryClients(ctx, materialized)
+				failedCleanup, cleanupErr := rollbackMaterializedWorkspaceRepositoryClients(ctx, materialized)
+				m.failClosedMaterializedWorkspaceRepositoryClients(ctx, failedCleanup)
 				rollbackErr := m.rollbackCloneWorkspacePolicyRefreshes(ctx, refreshed)
 				return nil, fmt.Errorf("refresh clone workspace policy for session %s: %w", execution.sessionID, errors.Join(refreshErr, cleanupErr, rollbackErr))
 			}
@@ -118,7 +120,8 @@ func (m *Manager) MaterializeRepositoriesForEnvironment(ctx context.Context, tas
 			continue
 		}
 		if err := execution.client.RescanWorkspace(ctx, "", execution.sourceRoots); err != nil {
-			cleanupErr := rollbackMaterializedWorkspaceRepositoryClients(ctx, materialized)
+			failedCleanup, cleanupErr := rollbackMaterializedWorkspaceRepositoryClients(ctx, materialized)
+			m.failClosedMaterializedWorkspaceRepositoryClients(ctx, failedCleanup)
 			reconcileErr := rollbackWorkspaceRepositoryRescans(ctx, rescanned)
 			reconcileErr = errors.Join(reconcileErr, m.rollbackCloneWorkspacePolicyRefreshes(ctx, refreshed))
 			return nil, fmt.Errorf("rescan materialized workspace for session %s: %w", execution.sessionID, errors.Join(err, cleanupErr, reconcileErr))
@@ -137,15 +140,28 @@ type materializedWorkspaceRepositoryClient struct {
 // executor even when an earlier deletion fails. Separate Docker, SSH, and
 // Sprites workspaces each own their clone, so cleanup of one must never decide
 // whether another receives rollback.
-func rollbackMaterializedWorkspaceRepositoryClients(ctx context.Context, clients []materializedWorkspaceRepositoryClient) error {
+func rollbackMaterializedWorkspaceRepositoryClients(ctx context.Context, clients []materializedWorkspaceRepositoryClient) ([]workspaceRepositoryExecution, error) {
 	var errs []error
+	failed := make([]workspaceRepositoryExecution, 0)
 	for index := len(clients) - 1; index >= 0; index-- {
 		client := clients[index]
 		if err := rollbackMaterializedWorkspaceRepositories(ctx, client.execution.client, client.created); err != nil {
 			errs = append(errs, fmt.Errorf("remove materialized workspace repositories for session %s: %w", client.execution.sessionID, err))
+			failed = append(failed, client.execution)
 		}
 	}
-	return errors.Join(errs...)
+	return failed, errors.Join(errs...)
+}
+
+func (m *Manager) failClosedMaterializedWorkspaceRepositoryClients(ctx context.Context, clients []workspaceRepositoryExecution) {
+	for _, client := range clients {
+		if !isMutableCloneWorkspaceExecution(client.execution) {
+			continue
+		}
+		client.execution.promptLifecycleMu.Lock()
+		_ = m.failClosedCloneWorkspacePolicyRefresh(ctx, cloneWorkspacePolicyRefresh{execution: client.execution})
+		client.execution.promptLifecycleMu.Unlock()
+	}
 }
 
 func materializeWorkspaceRepositories(ctx context.Context, client workspaceRepositoryClient, repositories []WorkspaceRepositoryMaterialization, sourceRoots ...[]string) error {

@@ -309,6 +309,7 @@ type workspaceRebindAgentctlServer struct {
 	mu              sync.Mutex
 	startCount      int
 	stopCount       int
+	childRunning    bool
 	neverReady      bool
 	firstStatus     bool
 	statusCallCount int
@@ -319,9 +320,14 @@ type workspaceRebindAgentctlServer struct {
 	attestationErr  bool
 	failAttestAt    int
 	failStartAt     int
+	failConfigureAt int
+	failConfigure   bool
 	failMaterialize bool
+	failRemove      bool
+	failLoadAt      int
 	materialized    map[string]bool
 	operations      []string
+	loadCount       int
 	loadedSessions  []string
 	actionLog       []string
 	connections     []*websocket.Conn
@@ -336,6 +342,7 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 	mux.HandleFunc("/api/v1/stop", func(w http.ResponseWriter, _ *http.Request) {
 		server.mu.Lock()
 		server.stopCount++
+		server.childRunning = false
 		server.operations = append(server.operations, "stop")
 		server.mu.Unlock()
 		workspaceRebindSuccess(w, nil)
@@ -374,6 +381,12 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 			return
 		}
 		server.mu.Lock()
+		if server.failRemove {
+			server.mu.Unlock()
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "removal rejected"})
+			return
+		}
 		delete(server.materialized, request.Destination)
 		server.operations = append(server.operations, "remove")
 		server.mu.Unlock()
@@ -444,7 +457,13 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 		server.mu.Lock()
 		server.configured = append(server.configured, request.Env)
 		server.operations = append(server.operations, "configure")
+		failed := server.failConfigure || server.failConfigureAt == len(server.configured)
 		server.mu.Unlock()
+		if failed {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "configuration rejected"})
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 	})
 	mux.HandleFunc("/api/v1/workspace/rebind", func(w http.ResponseWriter, r *http.Request) {
@@ -467,6 +486,9 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 		server.operations = append(server.operations, "start")
 		failed := server.failStartAt == server.startCount
 		server.firstStatus = true
+		if !failed {
+			server.childRunning = true
+		}
 		server.mu.Unlock()
 		if failed {
 			w.WriteHeader(http.StatusUnprocessableEntity)
@@ -535,8 +557,10 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 			_ = request.ParsePayload(&load)
 			server.mu.Lock()
 			server.loadedSessions = append(server.loadedSessions, load.SessionID)
+			server.loadCount++
+			failed := server.failLoadAt == server.loadCount
 			server.mu.Unlock()
-			response, _ := ws.NewResponse(request.ID, request.Action, map[string]bool{"success": true})
+			response, _ := ws.NewResponse(request.ID, request.Action, map[string]bool{"success": !failed})
 			data, _ := json.Marshal(response)
 			if conn.WriteMessage(websocket.TextMessage, data) != nil {
 				return
@@ -601,6 +625,12 @@ func (s *workspaceRebindAgentctlServer) operationLog() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.operations...)
+}
+
+func (s *workspaceRebindAgentctlServer) running() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.childRunning
 }
 
 func (s *workspaceRebindAgentctlServer) closeConnections() {
