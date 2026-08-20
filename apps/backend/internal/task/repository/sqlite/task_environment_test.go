@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -146,6 +147,51 @@ func TestCreateTaskSessionWithWorkspaceBindingElectsAndAttaches(t *testing.T) {
 	}
 	if attached.TaskEnvironmentID != env.ID {
 		t.Fatalf("attached environment = %q, want %q", attached.TaskEnvironmentID, env.ID)
+	}
+}
+
+func TestCreateTaskSessionWithWorkspaceBindingConcurrentElectionHasOneOwner(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-binding-race")
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-binding-race", WorkspaceID: "workspace-binding-race", Title: "binding"}); err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, id := range []string{"session-race-a", "session-race-b"} {
+		wg.Add(1)
+		go func(sessionID string) {
+			defer wg.Done()
+			<-start
+			errs <- repo.CreateTaskSessionWithWorkspaceBinding(ctx,
+				&models.TaskSession{ID: sessionID, TaskID: "task-binding-race"},
+				&models.TaskEnvironment{TaskID: "task-binding-race", ExecutorType: string(models.ExecutorTypeLocal)})
+		}(id)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	var succeeded, preparing int
+	for err := range errs {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, models.ErrWorkspacePreparing):
+			preparing++
+		default:
+			t.Fatalf("concurrent binding error = %v", err)
+		}
+	}
+	if succeeded != 1 || preparing != 1 {
+		t.Fatalf("election results: success=%d preparing=%d, want one each", succeeded, preparing)
+	}
+	sessions, err := repo.ListTaskSessions(ctx, "task-binding-race")
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("persisted sessions = %+v, %v", sessions, err)
 	}
 }
 
