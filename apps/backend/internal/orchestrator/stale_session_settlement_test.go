@@ -62,6 +62,16 @@ func TestSettleStaleSessionRefusesActiveAdministrativeOwnership(t *testing.T) {
 			wantEvidence: "background_work",
 		},
 		{
+			name: "persisted background work after restart",
+			prepare: func(t *testing.T, _ *Service, repo *sqliterepo.Repository) {
+				t.Helper()
+				if err := repo.SetSessionMetadataKey(context.Background(), "s1", models.SessionMetaKeyBackgroundWorkAttested, true); err != nil {
+					t.Fatalf("persist background attestation: %v", err)
+				}
+			},
+			wantEvidence: "background_work_attested",
+		},
+		{
 			name: "cancellation in flight",
 			prepare: func(t *testing.T, svc *Service, _ *sqliterepo.Repository) {
 				t.Helper()

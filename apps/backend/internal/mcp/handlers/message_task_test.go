@@ -129,6 +129,17 @@ func (f *fakeOrchestrator) PromptTask(_ context.Context, taskID, sessionID, prom
 	return &orchestrator.PromptResult{}, nil
 }
 
+func (f *fakeOrchestrator) PromptTaskWithAcceptedCallback(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, afterDispatch func() error) (*orchestrator.PromptResult, error) {
+	result, err := f.PromptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly)
+	if err != nil || afterDispatch == nil {
+		return result, err
+	}
+	if callbackErr := afterDispatch(); callbackErr != nil {
+		return nil, callbackErr
+	}
+	return result, nil
+}
+
 func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, _, _ bool, _ []v1.MessageAttachment, _ []v1.EntityReference) (*executor.TaskExecution, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

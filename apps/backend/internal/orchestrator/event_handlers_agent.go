@@ -851,17 +851,32 @@ func (s *Service) executeQueuedMessageWithReservation(
 	// worker already claimed the handoff before visible side effects; promptTask
 	// revalidates that ownership while it marks the session RUNNING.
 	afterClaim := s.queuedLifecycleAfterClaim(promptCtx, queuedMsg, attachments, lifecyclePrompt)
+	afterDispatch := s.queuedDeliveryAfterDispatch(promptCtx, reservedSessionID, queuedMsg)
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
 		promptTaskOptions{
 			claimEntryID:    claimEntryID,
 			lifecyclePrompt: lifecyclePrompt,
 			afterClaim:      afterClaim,
+			afterDispatch:   afterDispatch,
 		})
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg,
 		lifecyclePrompt, userMessageRecorded, err,
 	)
+}
+
+func (s *Service) queuedDeliveryAfterDispatch(ctx context.Context, sessionID string, queuedMsg *messagequeue.QueuedMessage) func() error {
+	if queuedMsg == nil || !queuedMsg.IsDurableLifecycle() {
+		return nil
+	}
+	return func() error {
+		if err := s.messageQueue.AcknowledgeQueued(ctx, sessionID, queuedMsg.ID); err != nil {
+			return err
+		}
+		s.publishQueueStatusEvent(ctx, sessionID)
+		return nil
+	}
 }
 
 func (s *Service) queuedLifecycleAfterClaim(

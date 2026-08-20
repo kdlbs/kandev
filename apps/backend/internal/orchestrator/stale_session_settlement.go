@@ -65,7 +65,7 @@ func (s *Service) SettleStaleSession(ctx context.Context, request StaleSessionSe
 	// The reconciler owns the exact CAS and post-settlement workflow handling.
 	// It re-reads state under the same durable predicate, so duplicate manual and
 	// periodic attempts cannot close a successor or re-run a transition.
-	s.reconcileCompletionIntent(ctx, store, intent)
+	s.reconcileCompletionIntentLocked(ctx, store, intent)
 	if !staleSettlementCommitted(ctx, store, request) {
 		return s.rejectStaleSettlement(ctx, audit, request, "settlement_not_committed")
 	}
@@ -136,6 +136,17 @@ func (s *Service) staleSettlementAdministrativeOwnershipEvidence(
 	}
 	if s.hasOutstandingBackgroundWork(request.TargetSessionID) {
 		return "background_work"
+	}
+	// Adapter frames can attest background ownership just before a backend
+	// restart. The in-memory activity map is intentionally empty after that
+	// restart, so manual recovery must read the persisted fail-closed barrier
+	// just like automatic reconciliation does.
+	session, err := s.repo.GetTaskSession(ctx, request.TargetSessionID)
+	if err != nil || session == nil {
+		return "session_check_failed"
+	}
+	if attested, _ := session.Metadata[models.SessionMetaKeyBackgroundWorkAttested].(bool); attested {
+		return "background_work_attested"
 	}
 	pendingTools, ok := s.repo.(pendingTurnToolCallStore)
 	if !ok {

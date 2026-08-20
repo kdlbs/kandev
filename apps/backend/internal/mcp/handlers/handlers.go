@@ -183,6 +183,21 @@ type SessionLauncher interface {
 	RenameSession(ctx context.Context, sessionID, name string) error
 }
 
+// acceptedPromptCallbackLauncher is an optional stronger dispatch seam. The
+// production orchestrator invokes callback synchronously when agentctl accepts
+// the prompt; lightweight handler fakes retain the ordinary PromptTask path.
+type acceptedPromptCallbackLauncher interface {
+	PromptTaskWithAcceptedCallback(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, afterDispatch func() error) (*orchestrator.PromptResult, error)
+}
+
+type taskMessageDirectDeliveryDispatch struct {
+	deliveryID string
+	leaseOwner string
+	accepted   bool
+}
+
+type taskMessageDirectDeliveryContextKey struct{}
+
 // TaskStopper exposes the narrow coordinator halt operation used by
 // stop_task_kandev. The MCP layer owns authorization; lifecycle semantics stay
 // in the orchestrator.
@@ -2449,14 +2464,6 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewResponse(msg.ID, msg.Action, response)
 	}
-	if parentReply != nil {
-		// Claim the durable question before dispatch. A failed status update after
-		// delivery would make a retry send the same answer a second time.
-		if err := h.markParentQuestionAnswered(ctx, parentReply.message, req.Prompt); err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "parent question could not be claimed: "+err.Error(), nil)
-		}
-	}
-
 	// The sender session is the causal actor for anything this dispatch does
 	// on its own behalf, including RestoreTaskMessageRollback if a later
 	// step fails — thread it onto ctx so that rollback's ledger row (if any)
@@ -2478,6 +2485,13 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"failed to persist message delivery receipt: "+admissionErr.Error(), nil)
 	}
+	// Do not close the question until its response has a durable receipt. A
+	// persistence failure must leave the question visible and retryable.
+	if parentReply != nil {
+		if err := h.markParentQuestionAnswered(ctx, parentReply.message, req.Prompt); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "parent question could not be claimed: "+err.Error(), nil)
+		}
+	}
 	if handled {
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"task_id":         req.TaskID,
@@ -2491,6 +2505,9 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	if delivery != nil {
 		senderMeta[messagequeue.MetadataDeliveryID] = delivery.ID
 		senderMeta[messagequeue.MetadataLifecycleDurable] = true
+		if directLeaseOwner != "" {
+			dispatchCtx = context.WithValue(dispatchCtx, taskMessageDirectDeliveryContextKey{}, &taskMessageDirectDeliveryDispatch{deliveryID: delivery.ID, leaseOwner: directLeaseOwner})
+		}
 	}
 	// pinnedTarget, not `req.SessionID != ""`: a fallback chosen because the
 	// primary is terminal is pinned too, or the idle dispatch path re-resolves
@@ -2514,7 +2531,11 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
 	if delivery != nil && directLeaseOwner != "" {
-		delivery, err = h.finalizeDirectTaskMessageDelivery(ctx, delivery, directLeaseOwner, result)
+		if directDispatch, _ := dispatchCtx.Value(taskMessageDirectDeliveryContextKey{}).(*taskMessageDirectDeliveryDispatch); directDispatch != nil && directDispatch.accepted {
+			delivery, err = h.sessionLauncher.GetMessageQueue().GetDeliveryReceipt(ctx, delivery.ID)
+		} else {
+			delivery, err = h.finalizeDirectTaskMessageDelivery(ctx, delivery, directLeaseOwner, result)
+		}
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to finalize message delivery receipt: "+err.Error(), nil)
 		}
@@ -3685,7 +3706,21 @@ func (h *Handlers) deleteRecordedUserMessage(ctx context.Context, message *model
 // Uses dispatch-only mode so the MCP tool returns once the prompt is accepted
 // rather than blocking for the entire target turn.
 func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, prompt string) (string, error) {
-	_, err := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true)
+	promptTask := func() (*orchestrator.PromptResult, error) {
+		if dispatch, _ := ctx.Value(taskMessageDirectDeliveryContextKey{}).(*taskMessageDirectDeliveryDispatch); dispatch != nil {
+			if launcher, ok := h.sessionLauncher.(acceptedPromptCallbackLauncher); ok {
+				return launcher.PromptTaskWithAcceptedCallback(ctx, taskID, sessionID, prompt, "", false, nil, true, func() error {
+					receipt, err := h.sessionLauncher.GetMessageQueue().AcknowledgeDirectDelivery(ctx, dispatch.deliveryID, dispatch.leaseOwner)
+					if err == nil && receipt != nil {
+						dispatch.accepted = true
+					}
+					return err
+				})
+			}
+		}
+		return h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true)
+	}
+	_, err := promptTask()
 	if err == nil {
 		return taskMessageStatusSent, nil
 	}
@@ -3700,7 +3735,7 @@ func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, 
 	if waitErr := h.taskSvc.WaitForSessionReady(ctx, sessionID); waitErr != nil {
 		return "", fmt.Errorf("session not ready after resume: %w", waitErr)
 	}
-	if _, retryErr := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true); retryErr != nil {
+	if _, retryErr := promptTask(); retryErr != nil {
 		return "", fmt.Errorf("failed to send prompt after resume: %w", retryErr)
 	}
 	return taskMessageStatusSent, nil

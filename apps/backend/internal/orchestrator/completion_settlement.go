@@ -111,6 +111,21 @@ func (s *Service) reconcileCompletionIntent(ctx context.Context, store completio
 	if intent == nil {
 		return
 	}
+	lock, release := s.acquireCancelInFlightGuard(intent.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+	s.reconcileCompletionIntentLocked(ctx, store, intent)
+}
+
+// reconcileCompletionIntentLocked keeps the final active-work proof and the
+// pending-to-settling claim under the same per-session guard as cancellation,
+// prompt reservation, and tool/background ownership changes. Callers that
+// already own that guard (manual stale settlement) use this directly.
+func (s *Service) reconcileCompletionIntentLocked(ctx context.Context, store completionIntentReconciliationStore, intent *models.CompletionIntent) {
+	if intent == nil {
+		return
+	}
 	now := time.Now().UTC()
 	turn, proceed := s.prepareCompletionIntentReconciliation(ctx, store, intent, now)
 	if !proceed {

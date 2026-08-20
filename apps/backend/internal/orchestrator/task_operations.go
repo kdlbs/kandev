@@ -3528,10 +3528,21 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	return s.promptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, promptTaskOptions{})
 }
 
+// PromptTaskWithAcceptedCallback runs afterDispatch at the synchronous
+// agentctl-acceptance boundary. It is used by durable peer delivery to commit
+// its receipt before any caller can observe successful prompt acceptance.
+func (s *Service) PromptTaskWithAcceptedCallback(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, afterDispatch func() error) (*PromptResult, error) {
+	return s.promptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, promptTaskOptions{afterDispatch: afterDispatch})
+}
+
 type promptTaskOptions struct {
-	claimEntryID          string
-	lifecyclePrompt       bool
-	afterClaim            func() error
+	claimEntryID    string
+	lifecyclePrompt bool
+	afterClaim      func() error
+	// afterDispatch runs synchronously from the adapter's accepted-prompt
+	// callback. Durable queue owners use it to commit their receipt before the
+	// executor returns, closing the post-acceptance crash window.
+	afterDispatch         func() error
 	preservePromptContext bool
 	// reserveTurnUntilDispatch persists detached-resume ownership before agentctl
 	// dispatch, while delaying the visible turn.started event until acceptance.
@@ -3714,6 +3725,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	dispatchOutcome := &promptDispatchOutcome{}
 	onDispatched := s.promptDispatchCallback(
 		promptCtx, taskID, sessionID, rollback.reservedTurn, foregroundDispatch, dispatchOutcome,
+		options.afterDispatch,
 	)
 	result, err := s.executor.PromptWithDispatchCallback(
 		promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly,
@@ -3867,6 +3879,7 @@ func (s *Service) promptDispatchCallback(
 	reservedTurn *models.Turn,
 	dispatch *foregroundDispatch,
 	outcome *promptDispatchOutcome,
+	afterDispatch ...func() error,
 ) func() {
 	return func() {
 		var publicationErr error
@@ -3892,6 +3905,13 @@ func (s *Service) promptDispatchCallback(
 				s.bindAcceptedDispatchTurn(sessionID, reservedTurn.ID)
 			}
 			s.resolveReservedPromptTurn(sessionID, reservedTurn.ID, true)
+		}
+		if len(afterDispatch) > 0 && afterDispatch[0] != nil {
+			if err := afterDispatch[0](); err != nil {
+				publicationErr = errors.Join(publicationErr, err)
+				s.logger.Error("failed to persist accepted queued delivery",
+					zap.String("session_id", sessionID), zap.Error(err))
+			}
 		}
 		outcome.recordAccepted(publicationErr)
 		if s.acceptForegroundDispatch(dispatch) {

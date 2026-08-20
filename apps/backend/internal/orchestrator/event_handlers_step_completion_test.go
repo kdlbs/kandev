@@ -219,6 +219,45 @@ func TestReconcileDueCompletionIntentsPreservesRestartedBackgroundAttestation(t 
 	}
 }
 
+func TestReconcileCompletionIntentRechecksBarriersInsideSessionGuard(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	now := time.Now().UTC().Add(-models.CompletionIntentQuietGrace)
+	requireNoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "turn-1", TaskID: "t1", TaskSessionID: "s1", StartedAt: now}))
+	_, intent, err := repo.CreateOrGetCompletionIntent(ctx, &models.CompletionIntent{
+		ID: "intent-1", TaskID: "t1", SessionID: "s1", TurnID: "turn-1", WorkflowStepID: "step1",
+		State: models.CompletionIntentStatePending, RequestedAt: now, EligibleAt: now,
+	})
+	requireNoError(t, err)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+
+	lock, release := svc.acquireCancelInFlightGuard("s1")
+	lock.Lock()
+	done := make(chan struct{})
+	go func() {
+		svc.reconcileCompletionIntent(ctx, repo, intent)
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("reconciliation bypassed the session guard")
+	default:
+	}
+	// This models cancellation beginning after the due scan found the intent
+	// but before the reconciler can claim it. The guarded re-check must win.
+	svc.cancellationOperations = map[string]*cancelOperation{"s1": {}}
+	lock.Unlock()
+	release()
+	<-done
+	turn, err := repo.GetTurn(ctx, "turn-1")
+	requireNoError(t, err)
+	if turn.CompletedAt != nil {
+		t.Fatal("reconciliation settled after a guarded cancellation barrier appeared")
+	}
+}
+
 func completionMetricValue(metrics *expvar.Map, key string) int64 {
 	value := metrics.Get(key)
 	if value == nil {
