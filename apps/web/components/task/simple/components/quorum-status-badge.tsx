@@ -1,7 +1,6 @@
 "use client";
 
 import { Badge } from "@kandev/ui/badge";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { useTaskQuorum } from "@/hooks/domains/office/use-task-quorum";
 import type { QuorumGuardEntry } from "@/lib/state/slices/office/quorum-types";
@@ -47,9 +46,9 @@ type QuorumStatusBadgeProps = {
 
 export function QuorumStatusBadge({ task }: QuorumStatusBadgeProps) {
   const { t } = useTranslation();
-  const { quorum } = useTaskQuorum(task.status === "in_review" ? task.id : null);
+  const { quorum } = useTaskQuorum(task.id, task.workspaceId);
 
-  if (task.status !== "in_review" || !quorum) return null;
+  if (!quorum) return null;
 
   const aggregate = aggregateQuorum(quorum.guards, quorum.reevaluation_blocked);
   if (aggregate.state === "clear") return null;
@@ -59,18 +58,10 @@ export function QuorumStatusBadge({ task }: QuorumStatusBadgeProps) {
       ? t(`task:quorumReason.${aggregate.entry.reason}`, { defaultValue: aggregate.entry.reason })
       : t("task:quorumStuckPendingReevaluation");
     return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Badge
-            variant="destructive"
-            className="text-xs cursor-help"
-            data-testid="quorum-status-badge"
-          >
-            {t("task:quorumStuck")}
-          </Badge>
-        </TooltipTrigger>
-        <TooltipContent data-testid="quorum-status-tooltip">{reasonLabel}</TooltipContent>
-      </Tooltip>
+      <Badge variant="destructive" className="text-xs" data-testid="quorum-status-badge">
+        <span>{t("task:quorumStuck")}</span>
+        <span data-testid="quorum-status-reason">{reasonLabel}</span>
+      </Badge>
     );
   }
 
@@ -78,17 +69,12 @@ export function QuorumStatusBadge({ task }: QuorumStatusBadgeProps) {
   const roleLabel = t(ROLE_LABEL_KEYS[entry.role] ?? entry.role, { defaultValue: entry.role });
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Badge variant="outline" className="text-xs cursor-help" data-testid="quorum-status-badge">
-          {t("task:quorumAwaiting", {
-            received: entry.received_count,
-            required: entry.required_count,
-            role: roleLabel,
-          })}
-        </Badge>
-      </TooltipTrigger>
-      <TooltipContent data-testid="quorum-status-tooltip">{roleLabel}</TooltipContent>
-    </Tooltip>
+    <Badge variant="outline" className="text-xs" data-testid="quorum-status-badge">
+      {t("task:quorumAwaiting", {
+        received: entry.received_count,
+        required: entry.required_count,
+        role: roleLabel,
+      })}
+    </Badge>
   );
 }

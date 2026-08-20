@@ -13,6 +13,7 @@ vi.mock("@/lib/api/domains/office-extended-api", () => ({
 const setTaskQuorum = vi.fn();
 let byTaskId: Record<string, unknown> = {};
 let refetchTriggers: Record<string, number> = {};
+const WORKSPACE_ID = "workspace-1";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (sel: (state: unknown) => unknown) =>
@@ -35,14 +36,14 @@ describe("useTaskQuorum", () => {
   });
 
   it("fetches once on mount for a given task", async () => {
-    renderHook(() => useTaskQuorum("task-1"));
+    renderHook(() => useTaskQuorum("task-1", WORKSPACE_ID));
     await waitFor(() => expect(mocks.getTaskQuorum).toHaveBeenCalledTimes(1));
-    expect(mocks.getTaskQuorum).toHaveBeenCalledWith("task-1");
+    expect(mocks.getTaskQuorum).toHaveBeenCalledWith("task-1", WORKSPACE_ID);
   });
 
   it("refetches when taskId changes, even though it already fetched once (AC: task switch)", async () => {
     const { rerender } = renderHook(
-      ({ taskId }: { taskId: string | null }) => useTaskQuorum(taskId),
+      ({ taskId }: { taskId: string | null }) => useTaskQuorum(taskId, WORKSPACE_ID),
       {
         initialProps: { taskId: "task-1" },
       },
@@ -51,7 +52,7 @@ describe("useTaskQuorum", () => {
 
     rerender({ taskId: "task-2" });
     await waitFor(() => expect(mocks.getTaskQuorum).toHaveBeenCalledTimes(2));
-    expect(mocks.getTaskQuorum).toHaveBeenLastCalledWith("task-2");
+    expect(mocks.getTaskQuorum).toHaveBeenLastCalledWith("task-2", WORKSPACE_ID);
   });
 
   it("refetches when a task leaves and re-enters review (null -> id -> null -> id), driven by the WS-bumped trigger rather than the taskId prop alone", async () => {
@@ -60,7 +61,7 @@ describe("useTaskQuorum", () => {
     // review with the same task id — this is what actually invalidates the
     // stale snapshot in production, not the taskId prop toggling alone.
     const { rerender } = renderHook(
-      ({ taskId }: { taskId: string | null }) => useTaskQuorum(taskId),
+      ({ taskId }: { taskId: string | null }) => useTaskQuorum(taskId, WORKSPACE_ID),
       {
         initialProps: { taskId: "task-1" as string | null },
       },
@@ -74,7 +75,7 @@ describe("useTaskQuorum", () => {
   });
 
   it("refetches when office.task.decision_recorded bumps the task's refetch trigger", async () => {
-    const { rerender } = renderHook(() => useTaskQuorum("task-1"));
+    const { rerender } = renderHook(() => useTaskQuorum("task-1", WORKSPACE_ID));
     await waitFor(() => expect(mocks.getTaskQuorum).toHaveBeenCalledTimes(1));
 
     refetchTriggers = { "task:task-1": 1 };
@@ -84,8 +85,8 @@ describe("useTaskQuorum", () => {
 
   it("does not refetch on mount just because the trigger map already has an unrelated entry", async () => {
     refetchTriggers = { "task:task-other": 3 };
-    renderHook(() => useTaskQuorum("task-1"));
+    renderHook(() => useTaskQuorum("task-1", WORKSPACE_ID));
     await waitFor(() => expect(mocks.getTaskQuorum).toHaveBeenCalledTimes(1));
-    expect(mocks.getTaskQuorum).toHaveBeenCalledWith("task-1");
+    expect(mocks.getTaskQuorum).toHaveBeenCalledWith("task-1", WORKSPACE_ID);
   });
 });

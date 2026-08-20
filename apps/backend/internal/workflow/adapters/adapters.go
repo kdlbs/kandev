@@ -29,6 +29,10 @@ type WorkflowRepo interface {
 	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)
 }
 
+type workflowScopedParticipantRepo interface {
+	ListParticipantsForTaskWorkflow(ctx context.Context, taskID, workflowID string) ([]*models.WorkflowStepParticipant, error)
+}
+
 // Compile-time check that *repository.Repository satisfies WorkflowRepo.
 var _ WorkflowRepo = (*repository.Repository)(nil)
 
@@ -77,6 +81,34 @@ func (a *ParticipantAdapter) ListTaskParticipants(
 	rows, err := a.Repo.ListParticipantsForTaskAnyStep(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list task participants: %w", err)
+	}
+	out := make([]engine.ParticipantInfo, 0, len(rows))
+	for _, p := range rows {
+		out = append(out, engine.ParticipantInfo{
+			ID:               p.ID,
+			StepID:           p.StepID,
+			TaskID:           p.TaskID,
+			Role:             string(p.Role),
+			AgentProfileID:   p.AgentProfileID,
+			DecisionRequired: p.DecisionRequired,
+			Position:         p.Position,
+		})
+	}
+	return out, nil
+}
+
+// ListTaskParticipantsForWorkflow satisfies engine.WorkflowScopedParticipantStore
+// when the repository can filter durable task overrides by active workflow.
+func (a *ParticipantAdapter) ListTaskParticipantsForWorkflow(
+	ctx context.Context, taskID, workflowID string,
+) ([]engine.ParticipantInfo, error) {
+	repo, ok := a.Repo.(workflowScopedParticipantRepo)
+	if !ok {
+		return a.ListTaskParticipants(ctx, taskID)
+	}
+	rows, err := repo.ListParticipantsForTaskWorkflow(ctx, taskID, workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("list task participants for workflow: %w", err)
 	}
 	out := make([]engine.ParticipantInfo, 0, len(rows))
 	for _, p := range rows {

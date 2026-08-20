@@ -637,10 +637,14 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	queueExitPending bool,
 	expectedStepID string,
 ) (admitted bool, applied bool, err error) {
-	now := time.Now().UTC()
-	task.UpdatedAt = now
-	if task.Metadata == nil {
-		task.Metadata = map[string]interface{}{}
+	requestedWorkflowID := task.WorkflowID
+	requestedAppliedMoves := map[string]interface{}{}
+	if task.Metadata != nil {
+		if appliedMoves, ok := task.Metadata[models.MetaKeyAppliedDeferredMoves].(map[string]interface{}); ok {
+			for moveID, value := range appliedMoves {
+				requestedAppliedMoves[moveID] = value
+			}
+		}
 	}
 
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -668,31 +672,51 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 		return false, false, err
 	}
 
-	// AC-46/48 compare-and-swap precondition: read the task's current step
-	// inside the transaction, after the workspace lock, via readTaskStepInTx
-	// so the read also takes its row-level FOR UPDATE lock on PostgreSQL. The
-	// workspace lock alone only serializes this method against other callers
-	// that take it (other admission calls); a plain writer like UpdateTask
-	// never takes the workspace lock and instead relies on that same
-	// FOR UPDATE lock via readTaskStepInTx, so a bare (lockless) SELECT here
-	// could read a stale expectedStepID, let UpdateTask commit a concurrent
-	// move, and then have this transaction's own write below overwrite it —
-	// a lost update. Taking the same row lock here blocks that writer until
-	// this transaction commits or rolls back, closing the race. A mismatch
-	// means the task already left expectedStepID (lost the race) — that is
-	// reported as applied=false, not an error, and the transaction is rolled
-	// back untouched.
-	if expectedStepID != "" {
-		_, currentStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
-		if err != nil {
-			return false, false, fmt.Errorf("read task step for admission CAS check: %w", err)
+	// Lock and reload the task row for every admission. The caller may hold a
+	// stale full Task snapshot. A full-row write from that snapshot could
+	// otherwise replace a concurrent title, metadata, assignment, or other
+	// unrelated edit that kept the same workflow_step_id.
+	_, currentStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	if err != nil {
+		return false, false, fmt.Errorf("read task step for admission: %w", err)
+	}
+	if !found {
+		return false, false, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+	}
+	if expectedStepID != "" && currentStepID != expectedStepID {
+		return false, false, nil
+	}
+	currentTask, err := r.scanSingleTask(tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT `+taskSelectColumns("t")+` FROM tasks t WHERE t.id = ?`), task.ID))
+	if err != nil {
+		return false, false, fmt.Errorf("reload task for admission: %w", err)
+	}
+	if requestedWorkflowID == "" {
+		requestedWorkflowID = currentTask.WorkflowID
+	}
+	*task = *currentTask
+	if requestedWorkflowID != "" {
+		task.WorkflowID = requestedWorkflowID
+	}
+	if len(requestedAppliedMoves) > 0 {
+		if task.Metadata == nil {
+			task.Metadata = map[string]interface{}{}
 		}
-		if !found {
-			return false, false, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+		currentAppliedMoves := map[string]interface{}{}
+		if existing, ok := task.Metadata[models.MetaKeyAppliedDeferredMoves].(map[string]interface{}); ok {
+			for moveID, value := range existing {
+				currentAppliedMoves[moveID] = value
+			}
 		}
-		if currentStepID != expectedStepID {
-			return false, false, nil
+		for moveID, value := range requestedAppliedMoves {
+			currentAppliedMoves[moveID] = value
 		}
+		task.Metadata[models.MetaKeyAppliedDeferredMoves] = currentAppliedMoves
+	}
+	now := time.Now().UTC()
+	task.UpdatedAt = now
+	if task.Metadata == nil {
+		task.Metadata = map[string]interface{}{}
 	}
 
 	if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, targetStepID); err != nil {

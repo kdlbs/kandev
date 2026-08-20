@@ -96,6 +96,15 @@ type ParticipantStore interface {
 	ListTaskParticipants(ctx context.Context, taskID string) ([]ParticipantInfo, error)
 }
 
+// WorkflowScopedParticipantStore is an optional refinement of
+// ParticipantStore. It limits per-task overrides to the task's active
+// workflow, so rows left by a previous workflow cannot contribute to a new
+// workflow's quorum. The base interface remains small for plugins and test
+// doubles that do not have workflow-aware storage.
+type WorkflowScopedParticipantStore interface {
+	ListTaskParticipantsForWorkflow(ctx context.Context, taskID, workflowID string) ([]ParticipantInfo, error)
+}
+
 // DecisionStore reads and writes workflow_step_decisions rows. The engine
 // uses it from the wait_for_quorum guard, the clear_decisions action, and
 // Engine.RecordParticipantDecision.

@@ -690,6 +690,9 @@ func TestEngine_RecordParticipantDecision_PersistsAndReevaluates(t *testing.T) {
 	if result.FromStepID != "review" || result.ToStepID != "approval" {
 		t.Fatalf("unexpected transition endpoints: %#v", result)
 	}
+	if len(result.Guards) != 1 || !result.Guards[0].Satisfied || result.Guards[0].TargetStepID != "approval" {
+		t.Fatalf("expected the validated guard snapshot on transition, got %#v", result.Guards)
+	}
 	if store.state.CurrentStepID != "approval" {
 		t.Fatalf("expected store to have moved to 'approval', got %q", store.state.CurrentStepID)
 	}

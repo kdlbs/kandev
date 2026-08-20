@@ -80,6 +80,8 @@ type RecordDecisionResult struct {
 	TransitionAbandoned bool
 	FromStepID          string
 	ToStepID            string
+	// Guards is the engine's pre-transition quorum snapshot.
+	Guards []engine.QuorumGuardState
 }
 
 // Dispatcher resolves a task's active session and invokes the workflow
@@ -240,6 +242,7 @@ func (d *Dispatcher) RecordDecision(ctx context.Context, in RecordDecisionInput)
 		TransitionAbandoned: result.TransitionAbandoned,
 		FromStepID:          result.FromStepID,
 		ToStepID:            result.ToStepID,
+		Guards:              result.Guards,
 	}, nil
 }
 

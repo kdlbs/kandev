@@ -1497,6 +1497,7 @@ func (s *Service) initWorkflowEngine() {
 		return
 	}
 	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved, s.publishTaskQueuePromoted, s.publishTaskStateChanged, s.stepHistoryRecorder)
+	store.setGuardedTransitionLifecycle(s.applyGuardedTransitionLifecycle)
 	callbacks := buildWorkflowCallbacks(s)
 	s.workflowStore = store
 	// AC-24/24a: the engine's own structured "guard did not fire" log needs

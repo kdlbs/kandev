@@ -141,9 +141,17 @@ func TestMapRecordStepDecisionError_ForbiddenMapsTo403(t *testing.T) {
 	assertWSError(t, resp, ws.ErrorCodeForbidden)
 }
 
-func TestMapRecordStepDecisionError_DefaultsToValidation(t *testing.T) {
+func TestMapRecordStepDecisionError_UnexpectedFailureMapsToInternal(t *testing.T) {
 	msg := makeWSMessage(t, ws.ActionMCPRecordStepDecision, map[string]interface{}{})
 	resp, err := mapRecordStepDecisionError(msg, errors.New("task has no workflow step bound"))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+}
+
+func TestMapRecordStepDecisionError_ValidationMapsToValidation(t *testing.T) {
+	msg := makeWSMessage(t, ws.ActionMCPRecordStepDecision, map[string]interface{}{})
+	validationErr := &dashboard.AgentDecisionValidationError{Err: errors.New("reason is required")}
+	resp, err := mapRecordStepDecisionError(msg, validationErr)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }

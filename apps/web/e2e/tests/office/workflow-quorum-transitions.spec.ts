@@ -57,17 +57,6 @@ async function findDoneStepId(apiClient: ApiClient, workflowId: string): Promise
   return step.id;
 }
 
-// The office `status` column is legacy state independent of workflow_step_id
-// (a step move only syncs it on entering/leaving a terminal step — see
-// syncTaskStateForWorkflowMove) and is what QuorumStatusBadge gates on, so
-// it must be set explicitly for the badge to render.
-async function markInReview(apiClient: ApiClient, taskId: string) {
-  const res = await apiClient.rawRequest("PATCH", `/api/v1/office/tasks/${taskId}`, {
-    status: "in_review",
-  });
-  expect(res.ok).toBe(true);
-}
-
 // Decisions must be attributed to the reviewer/approver's own role
 // (role=reviewer vs role=approver), not the singleton-user shortcut: the
 // unauthenticated `X-Office-User-Caller` header always records a decision
@@ -118,9 +107,13 @@ async function recordDecision(apiClient: ApiClient, options: RecordDecisionOptio
 
 async function getQuorumGuards(
   apiClient: { rawRequest: (method: string, path: string) => Promise<Response> },
+  workspaceId: string,
   taskId: string,
 ): Promise<Array<{ role: string; satisfied: boolean; reason?: string }>> {
-  const res = await apiClient.rawRequest("GET", `/api/v1/office/tasks/${taskId}/quorum`);
+  const res = await apiClient.rawRequest(
+    "GET",
+    `/api/v1/office/workspaces/${workspaceId}/tasks/${taskId}/quorum`,
+  );
   expect(res.ok).toBe(true);
   const body = (await res.json()) as {
     guards: Array<{ role: string; satisfied: boolean; reason?: string }>;
@@ -181,12 +174,13 @@ test.describe("Office workflow quorum-guarded transitions", () => {
     // F38), so a task with no session at all always yields an empty
     // snapshot regardless of workflow_step_id.
     await apiClient.ensureTaskSession(task.id);
-    await markInReview(apiClient, task.id);
 
     // AC-25: the Review step's guard is unsatisfied (reviewer has not
     // decided yet), so the diagnostic read reports one awaiting entry.
     await expect
-      .poll(async () => (await getQuorumGuards(apiClient, task.id))[0]?.role)
+      .poll(
+        async () => (await getQuorumGuards(apiClient, officeSeed.workspaceId, task.id))[0]?.role,
+      )
       .toBe("reviewer");
 
     // AC-25 UI presentation: the badge renders the awaiting state.
@@ -212,7 +206,9 @@ test.describe("Office workflow quorum-guarded transitions", () => {
     // AC-61: the card-level state now reflects the Approval step's guard
     // (role=approver) rather than the cleared Review guard.
     await expect
-      .poll(async () => (await getQuorumGuards(apiClient, task.id))[0]?.role)
+      .poll(
+        async () => (await getQuorumGuards(apiClient, officeSeed.workspaceId, task.id))[0]?.role,
+      )
       .toBe("approver");
 
     // The task now sits on Approval (confirmed by the guard poll above), so
@@ -241,7 +237,9 @@ test.describe("Office workflow quorum-guarded transitions", () => {
       comment: "shipping it",
     });
 
-    await expect.poll(async () => (await getQuorumGuards(apiClient, task.id)).length).toBe(0);
+    await expect
+      .poll(async () => (await getQuorumGuards(apiClient, officeSeed.workspaceId, task.id)).length)
+      .toBe(0);
 
     // Engine-driven transitions (both the ordinary ApplyTransition path and
     // this feature's AC-46/48 compare-and-swap) move workflow_step_id only —
@@ -325,9 +323,8 @@ test.describe("Office workflow quorum-guarded transitions", () => {
     });
     expect(clearAssignee.ok).toBe(true);
 
-    await markInReview(apiClient, task.id);
     await expect
-      .poll(async () => (await getQuorumGuards(apiClient, task.id)).length)
+      .poll(async () => (await getQuorumGuards(apiClient, officeSeed.workspaceId, task.id)).length)
       .toBeGreaterThan(0);
 
     // any_reject fires on a single veto: the task returns to Work, which
@@ -339,7 +336,9 @@ test.describe("Office workflow quorum-guarded transitions", () => {
       agentProfileId: reviewerId,
       comment: "please rework this",
     });
-    await expect.poll(async () => (await getQuorumGuards(apiClient, task.id)).length).toBe(0);
+    await expect
+      .poll(async () => (await getQuorumGuards(apiClient, officeSeed.workspaceId, task.id)).length)
+      .toBe(0);
 
     // Re-enter Review. Its on_enter action clears superseded decisions, so
     // the stale any_reject vote must not immediately fire the same guard
@@ -348,20 +347,20 @@ test.describe("Office workflow quorum-guarded transitions", () => {
     await apiClient.moveTask(task.id, officeSeed.workflowId, reviewStepId);
 
     await expect
-      .poll(async () => (await getQuorumGuards(apiClient, task.id))[0]?.reason)
+      .poll(
+        async () => (await getQuorumGuards(apiClient, officeSeed.workspaceId, task.id))[0]?.reason,
+      )
       .toBe("threshold_not_met");
 
     // Confirm it stays put rather than bouncing back to Work shortly after.
     await dwell(500, "negative-assertion", "asserting the guard does not re-fire on stale state");
-    const guardsAfterDwell = await getQuorumGuards(apiClient, task.id);
+    const guardsAfterDwell = await getQuorumGuards(apiClient, officeSeed.workspaceId, task.id);
     expect(guardsAfterDwell[0]?.role).toBe("reviewer");
     expect(guardsAfterDwell[0]?.satisfied).toBe(false);
 
-    // AC-25 UI presentation of the stable awaiting state. The earlier
-    // markInReview call (before the reviewer's decision) already set the
-    // legacy status column: neither the decision's own step move nor the
-    // re-entry moveTask above touch it (only entering/leaving a terminal
-    // step or the status PATCH do), so status is still "in_review" here.
+    // AC-25 UI presentation of the stable awaiting state. The badge fetches
+    // by task and workspace, so it does not depend on the legacy status
+    // column matching the workflow step.
     await testPage.goto(`/office/tasks/${task.id}`);
     await expect(testPage.getByRole("heading", { name: "Quorum Reject Task" })).toBeVisible({
       timeout: 10_000,

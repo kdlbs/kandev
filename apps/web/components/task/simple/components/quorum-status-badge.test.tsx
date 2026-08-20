@@ -115,14 +115,17 @@ function seedQuorum(quorum: QuorumResponseDTO) {
 }
 
 describe("QuorumStatusBadge", () => {
-  it("hides when status is not in_review", () => {
+  it("fetches when a guarded workflow step has an in-progress legacy status", async () => {
+    seedQuorum({ guards: [awaitingEntry], reevaluation_blocked: false });
     render(
       <Wrapper>
         <QuorumStatusBadge task={{ ...baseTask, status: "todo" }} />
       </Wrapper>,
     );
-    expect(getTaskQuorumMock).not.toHaveBeenCalled();
-    expect(screen.queryByTestId(BADGE_TEST_ID)).toBeNull();
+    await vi.waitFor(() =>
+      expect(getTaskQuorumMock).toHaveBeenCalledWith(baseTask.id, baseTask.workspaceId),
+    );
+    expect(await screen.findByTestId(BADGE_TEST_ID)).toBeTruthy();
   });
 
   it("hides when the guard list aggregates to clear", async () => {
@@ -132,7 +135,9 @@ describe("QuorumStatusBadge", () => {
         <QuorumStatusBadge task={baseTask} />
       </Wrapper>,
     );
-    await vi.waitFor(() => expect(getTaskQuorumMock).toHaveBeenCalledWith(baseTask.id));
+    await vi.waitFor(() =>
+      expect(getTaskQuorumMock).toHaveBeenCalledWith(baseTask.id, baseTask.workspaceId),
+    );
     expect(screen.queryByTestId(BADGE_TEST_ID)).toBeNull();
   });
 
@@ -158,6 +163,7 @@ describe("QuorumStatusBadge", () => {
     );
     const badge = await screen.findByTestId(BADGE_TEST_ID);
     expect(badge.getAttribute("data-variant")).toBe("destructive");
+    expect(screen.getByTestId("quorum-status-reason").textContent).not.toBe("");
   });
 
   it("renders stuck when only reevaluation_blocked fires with a satisfied entry", async () => {

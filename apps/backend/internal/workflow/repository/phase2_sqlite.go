@@ -291,6 +291,49 @@ func (r *Repository) ListParticipantsForTaskAnyStep(
 	return all, nil
 }
 
+// ListParticipantsForTaskWorkflow returns every per-task participant row for
+// a task whose step belongs to workflowID. Participant overrides remain
+// durable when a task changes workflow, but they must not leak into quorum
+// evaluation for the new workflow.
+func (r *Repository) ListParticipantsForTaskWorkflow(
+	ctx context.Context, taskID, workflowID string,
+) ([]*models.WorkflowStepParticipant, error) {
+	if taskID == "" {
+		return nil, errors.New("task_id is required")
+	}
+	if workflowID == "" {
+		return nil, errors.New("workflow_id is required")
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT p.id, p.step_id, p.task_id, p.role, p.agent_profile_id, p.decision_required, p.position
+		FROM workflow_step_participants p
+		JOIN workflow_steps ws ON ws.id = p.step_id
+		WHERE p.task_id = ? AND ws.workflow_id = ?
+		ORDER BY p.role ASC, p.position ASC, p.id ASC
+	`), taskID, workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("list participants for task workflow: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	all := make([]*models.WorkflowStepParticipant, 0)
+	for rows.Next() {
+		p := &models.WorkflowStepParticipant{}
+		var role string
+		var decisionRequired int
+		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position); err != nil {
+			return nil, fmt.Errorf("scan step participant: %w", err)
+		}
+		p.Role = models.ParticipantRole(role)
+		p.DecisionRequired = decisionRequired == 1
+		all = append(all, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return all, nil
+}
+
 // mergeParticipantRows enforces the per-task-precedence rule. Given a set of
 // rows for one step (mixed template-level and per-task), drop any
 // template-level row whose (role, agent_profile_id) is also present in a

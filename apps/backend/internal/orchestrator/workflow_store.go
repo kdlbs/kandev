@@ -27,6 +27,8 @@ type taskMovedPublisher func(ctx context.Context, task *models.Task, fromWorkflo
 type taskQueuePromotedPublisher func(ctx context.Context, task *models.Task)
 type taskStateChangedPublisher func(ctx context.Context, task *models.Task, oldState v1.TaskState)
 
+type guardedTransitionLifecycle func(ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger) (bool, error)
+
 type workflowMoveLimitsRepository interface {
 	CountTasksByWorkflowStepExcludingTask(ctx context.Context, stepID, excludeTaskID string) (int, error)
 }
@@ -97,6 +99,7 @@ type workflowStore struct {
 	publishStateChanged taskStateChangedPublisher
 	logger              *logger.Logger
 	stepHistoryRecorder StepHistoryRecorder
+	guardedLifecycle    guardedTransitionLifecycle
 	appliedOps          sync.Map
 }
 
@@ -143,6 +146,10 @@ func newWorkflowStore(
 		logger:              log,
 		stepHistoryRecorder: history,
 	}
+}
+
+func (s *workflowStore) setGuardedTransitionLifecycle(fn guardedTransitionLifecycle) {
+	s.guardedLifecycle = fn
 }
 
 // LoadState tolerates a blank sessionID (the AC-62/F38 case of a task with
@@ -297,52 +304,31 @@ func (s *workflowStore) applyTransition(ctx context.Context, taskID, sessionID, 
 
 // ApplyTransitionIfAtStep is the AC-46/48 compare-and-swap variant of
 // ApplyTransition used by the workflow engine's guarded-transition
-// re-evaluation apply path (Engine.reevaluateGuardedTransitions). applied
-// false means the task's persisted step no longer equals expectedStepID by
-// the time the underlying repository checked — a concurrent transition
-// already moved it — which is not an error: no task.updated event is
-// published, no review-status clear runs, and no queue vacate-pull runs.
+// re-evaluation apply path (Engine.reevaluateGuardedTransitions). The service
+// can install a lifecycle bridge so this CAS goes through the same
+// orchestrator hooks as other engine transitions. applied=false means the
+// task's persisted step no longer equals expectedStepID by the time the
+// underlying repository checked — a concurrent transition already moved it —
+// which is not an error.
 func (s *workflowStore) ApplyTransitionIfAtStep(
 	ctx context.Context, taskID, sessionID, expectedStepID, toStepID string, trigger engine.Trigger,
 ) (bool, error) {
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil {
-		return false, fmt.Errorf("load task for CAS transition: %w", err)
+	if s.guardedLifecycle != nil {
+		return s.guardedLifecycle(ctx, taskID, sessionID, expectedStepID, toStepID, trigger)
 	}
-	targetStep, err := s.workflowStepGetter.GetStep(ctx, toStepID)
-	if err != nil {
-		return false, fmt.Errorf("load target step for CAS transition: %w", err)
-	}
-	if targetStep == nil {
-		return false, fmt.Errorf("target step %s not found for CAS transition", toStepID)
-	}
-	casRepo, ok := s.repo.(workflowMoveAdmissionCASRepository)
-	if !ok {
-		return false, fmt.Errorf("workflow step CAS admission repository unavailable for step %s", toStepID)
-	}
+	return s.applyTransitionIfAtStep(ctx, taskID, sessionID, expectedStepID, toStepID, trigger)
+}
 
-	oldWorkflowID := task.WorkflowID
-	task.WorkflowID = targetStep.WorkflowID
-	task.WorkflowStepID = toStepID
-	task.WIPAdmitted = true
-	task.QueuedForStepID = ""
-	task.QueuedAt = nil
-	if task.Metadata != nil {
-		delete(task.Metadata, models.MetaKeyQueuedMoveExitPending)
-		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
-		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
-	}
-	task.UpdatedAt = time.Now().UTC()
-
+func (s *workflowStore) applyTransitionIfAtStep(
+	ctx context.Context, taskID, sessionID, expectedStepID, toStepID string, trigger engine.Trigger,
+) (bool, error) {
 	transitionCtx := ctx
 	if !steptelemetry.HasTrigger(transitionCtx) {
 		transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
 	}
-	applied, err := casRepo.UpdateTaskWithWorkflowStepAdmissionIfAtStep(
-		transitionCtx, task, expectedStepID, toStepID, targetStep.WIPLimit,
-	)
+	task, oldWorkflowID, applied, err := s.applyTransitionIfAtStepRaw(transitionCtx, taskID, expectedStepID, toStepID)
 	if err != nil {
-		return false, fmt.Errorf("update task workflow step (CAS): %w", err)
+		return false, err
 	}
 	if !applied {
 		return false, nil
@@ -367,6 +353,54 @@ func (s *workflowStore) ApplyTransitionIfAtStep(
 	s.pullNextTaskOnVacate(ctx, expectedStepID, taskID)
 
 	return true, nil
+}
+
+// applyTransitionIfAtStepRaw commits the guarded move without publishing
+// events or changing session state. The service lifecycle wrapper uses this
+// commit point after credential preflight and on_exit, then performs the
+// remaining transition lifecycle after the CAS succeeds.
+func (s *workflowStore) applyTransitionIfAtStepRaw(
+	ctx context.Context, taskID, expectedStepID, toStepID string,
+) (*models.Task, string, bool, error) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("load task for CAS transition: %w", err)
+	}
+	targetStep, err := s.workflowStepGetter.GetStep(ctx, toStepID)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("load target step for CAS transition: %w", err)
+	}
+	if targetStep == nil {
+		return nil, "", false, fmt.Errorf("target step %s not found for CAS transition", toStepID)
+	}
+	casRepo, ok := s.repo.(workflowMoveAdmissionCASRepository)
+	if !ok {
+		return nil, "", false, fmt.Errorf("workflow step CAS admission repository unavailable for step %s", toStepID)
+	}
+
+	oldWorkflowID := task.WorkflowID
+	task.WorkflowID = targetStep.WorkflowID
+	task.WorkflowStepID = toStepID
+	task.WIPAdmitted = true
+	task.QueuedForStepID = ""
+	task.QueuedAt = nil
+	if task.Metadata != nil {
+		delete(task.Metadata, models.MetaKeyQueuedMoveExitPending)
+		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
+		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
+	}
+	task.UpdatedAt = time.Now().UTC()
+
+	applied, err := casRepo.UpdateTaskWithWorkflowStepAdmissionIfAtStep(
+		ctx, task, expectedStepID, toStepID, targetStep.WIPLimit,
+	)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("update task workflow step (CAS): %w", err)
+	}
+	if !applied {
+		return nil, oldWorkflowID, false, nil
+	}
+	return task, oldWorkflowID, true, nil
 }
 
 func markDeferredMoveApplied(task *models.Task, moveID string) error {

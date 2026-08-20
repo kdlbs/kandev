@@ -91,7 +91,7 @@ func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo label
 	api.POST("/tasks/:id/approve", h.approveTask)
 	api.POST("/tasks/:id/request-changes", h.requestTaskChanges)
 	api.GET("/tasks/:id/decisions", h.listTaskDecisions)
-	api.GET("/tasks/:id/quorum", h.getTaskQuorum)
+	api.GET("/workspaces/:wsId/tasks/:id/quorum", h.getTaskQuorum)
 	api.POST("/workspaces/:wsId/git/clone", h.gitClone)
 	api.POST("/workspaces/:wsId/git/pull", h.gitPull)
 	api.POST("/workspaces/:wsId/git/push", h.gitPush)

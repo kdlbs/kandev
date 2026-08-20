@@ -65,6 +65,9 @@ func (h *Handlers) handleRecordStepDecision(ctx context.Context, msg *ws.Message
 		Reason:         req.Reason,
 	})
 	if err != nil {
+		if !errors.Is(err, shared.ErrForbidden) && !dashboard.IsAgentDecisionValidationError(err) {
+			h.logger.Error("record_step_decision: failed to record decision", zap.String("task_id", req.TaskID), zap.Error(err))
+		}
 		return mapRecordStepDecisionError(msg, err)
 	}
 
@@ -80,13 +83,14 @@ func (h *Handlers) handleRecordStepDecision(ctx context.Context, msg *ws.Message
 }
 
 // mapRecordStepDecisionError classifies RecordAgentDecision failures into
-// WS error codes. shared.ErrForbidden is AC-3's permission rejection;
-// everything else — unbound step (AC-7), invalid verdict (AC-5), empty
-// reason (AC-6), or an unwired dispatcher — is a validation-shaped error
-// the agent can act on, so none of it is logged as a server-side failure.
+// WS error codes. Only typed validation failures are safe to expose. Raw
+// repository and engine failures become an opaque internal error.
 func mapRecordStepDecisionError(msg *ws.Message, err error) (*ws.Message, error) {
 	if errors.Is(err, shared.ErrForbidden) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), nil)
 	}
-	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	if dashboard.IsAgentDecisionValidationError(err) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record step decision", nil)
 }

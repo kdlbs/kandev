@@ -27,6 +27,39 @@ type RecordAgentDecisionInput struct {
 	Reason         string
 }
 
+// AgentDecisionValidationError marks an error caused by a caller-provided
+// decision field or a task precondition that the caller can correct. The MCP
+// transport uses this type to keep unexpected repository and engine failures
+// opaque to agents.
+type AgentDecisionValidationError struct {
+	Err error
+}
+
+func (e *AgentDecisionValidationError) Error() string {
+	if e == nil || e.Err == nil {
+		return "invalid agent decision"
+	}
+	return e.Err.Error()
+}
+
+func (e *AgentDecisionValidationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// IsAgentDecisionValidationError reports whether err is safe to expose as a
+// validation response at the MCP boundary.
+func IsAgentDecisionValidationError(err error) bool {
+	var target *AgentDecisionValidationError
+	return errors.As(err, &target)
+}
+
+func agentDecisionValidation(err error) error {
+	return &AgentDecisionValidationError{Err: err}
+}
+
 // RecordAgentDecisionResult is the AC-64 tool-contract return shape.
 type RecordAgentDecisionResult struct {
 	Decision          string
@@ -83,7 +116,7 @@ func (s *DashboardService) RecordAgentDecision(
 		return nil, fmt.Errorf("resolve task workflow_step_id: %w", err)
 	}
 	if stepID == "" {
-		return nil, fmt.Errorf("task %s has no workflow step bound", in.TaskID)
+		return nil, agentDecisionValidation(fmt.Errorf("task %s has no workflow step bound", in.TaskID))
 	}
 
 	// AC-55(2)/AC-3/AC-4/AC-4a.
@@ -97,11 +130,11 @@ func (s *DashboardService) RecordAgentDecision(
 
 	// AC-55(3)/AC-5.
 	if in.Decision != engine.DecisionApproved && in.Decision != engine.DecisionRejected {
-		return nil, fmt.Errorf("invalid decision: %q", in.Decision)
+		return nil, agentDecisionValidation(fmt.Errorf("invalid decision: %q", in.Decision))
 	}
 	// AC-55(4)/AC-6.
 	if strings.TrimSpace(in.Reason) == "" {
-		return nil, fmt.Errorf("%s", agentDecisionReasonRequiredErr)
+		return nil, agentDecisionValidation(fmt.Errorf("%s", agentDecisionReasonRequiredErr))
 	}
 
 	result, err := dispatcher.RecordDecision(ctx, officeenginedispatcher.RecordDecisionInput{
@@ -147,22 +180,16 @@ func (s *DashboardService) RecordAgentDecision(
 }
 
 // agentDecisionGuardsSnapshot builds the AC-64 guards field after a
-// successful write. AC-64/F36: only attempts the AC-57d snapshot when this
-// decision's own re-evaluation did NOT already apply a transition. When
-// result.Transitioned is true, the task has necessarily left the validated
-// step by the time any snapshot read would run, so comparing "current step
-// != validated step" would spuriously read as the AC-37 race and wrongly
-// downgrade a genuine transition to guards:[]/transition_applied:false.
-// Scoping the comparison to the branch where Transitioned is already false
-// avoids that self-contradiction — transition_applied is already false
-// there, so the AC-15/AC-37 fallback (guards:[], transition_applied:false)
-// is a true no-op, never an override of a real transition.
+// successful write. A transition result already carries the engine's
+// pre-transition snapshot, so it must not issue a second read after the task
+// has moved to another step. For non-transition results, the read remains a
+// best-effort diagnostic and is discarded if the task moved concurrently.
 func (s *DashboardService) agentDecisionGuardsSnapshot(
 	ctx context.Context, taskID string, result officeenginedispatcher.RecordDecisionResult,
 ) []GuardStateDTO {
 	guards := []GuardStateDTO{}
 	if result.Transitioned {
-		return guards
+		return guardStateDTOsFromSnapshot(result.Guards)
 	}
 	qd, ok := s.engineDispatcher.(quorumEvaluatingDispatcher)
 	if !ok {

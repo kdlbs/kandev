@@ -169,7 +169,7 @@ func (e *Engine) computeGuardOutcome(ctx context.Context, state MachineState, gu
 		return outcome
 	}
 
-	seats, err := e.requiredSeats(ctx, state.CurrentStepID, state.TaskID, guard.Role)
+	seats, err := e.requiredSeatsForWorkflow(ctx, state.CurrentStepID, state.TaskID, state.WorkflowID, guard.Role)
 	if err != nil {
 		return GuardOutcome{Reason: ReasonEvaluationError, Err: fmt.Errorf("build required slate for quorum: %w", err)}
 	}
@@ -190,7 +190,17 @@ func (e *Engine) computeGuardOutcome(ctx context.Context, state MachineState, gu
 // collapse (AC-20, one row per (role, agent_profile_id), per-task winning
 // over template).
 func (e *Engine) requiredSeats(ctx context.Context, stepID, taskID, role string) ([]ParticipantInfo, error) {
-	perTask, err := e.participants.ListTaskParticipants(ctx, taskID)
+	return e.requiredSeatsForWorkflow(ctx, stepID, taskID, "", role)
+}
+
+func (e *Engine) requiredSeatsForWorkflow(ctx context.Context, stepID, taskID, workflowID, role string) ([]ParticipantInfo, error) {
+	var perTask []ParticipantInfo
+	var err error
+	if scoped, ok := e.participants.(WorkflowScopedParticipantStore); ok && workflowID != "" {
+		perTask, err = scoped.ListTaskParticipantsForWorkflow(ctx, taskID, workflowID)
+	} else {
+		perTask, err = e.participants.ListTaskParticipants(ctx, taskID)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("list task participants for quorum: %w", err)
 	}
@@ -444,6 +454,9 @@ type RecordDecisionResult struct {
 	TransitionAbandoned bool
 	FromStepID          string
 	ToStepID            string
+	// Guards is the pre-transition quorum snapshot used by the decision
+	// response. It remains available after a successful CAS move.
+	Guards []QuorumGuardState
 }
 
 // RecordParticipantDecision is the engine's single decision-recording entry
@@ -500,6 +513,7 @@ func (e *Engine) RecordParticipantDecision(
 	result.TransitionAbandoned = handled.TransitionAbandoned
 	result.FromStepID = handled.FromStepID
 	result.ToStepID = handled.ToStepID
+	result.Guards = handled.Guards
 	return result, nil
 }
 
@@ -554,9 +568,13 @@ func (e *Engine) reevaluateGuardedTransitions(
 // guard is satisfied, applies it via the AC-46/48 compare-and-swap. Emits
 // the AC-24/24a observability unit for every guard that is evaluated and
 // does not fire, same as the ordinary HandleTrigger path.
+//
+//nolint:cyclop // ordered guard evaluation keeps first-transition semantics explicit.
 func (e *Engine) applyFirstSatisfiedGuardedTransition(
 	ctx context.Context, taskID, sessionID string, state MachineState, step StepSpec,
 ) (HandleResult, error) {
+	guards := make([]QuorumGuardState, 0)
+	var selectedTarget string
 	for _, action := range step.Events[TriggerOnTurnComplete] {
 		if !isTransitionAction(action.Kind) || action.RequiresApproval {
 			continue
@@ -564,30 +582,70 @@ func (e *Engine) applyFirstSatisfiedGuardedTransition(
 		if action.Guard == nil || action.Guard.WaitForQuorum == nil {
 			continue
 		}
-		outcome := e.evaluateTransitionGuard(ctx, state, action)
-		if !outcome.Satisfied {
-			e.recordGuardNotFired(state, action, outcome)
+		entry, targetStepID, targetErr, satisfied := e.evaluateGuardForTransition(ctx, state, step, action)
+		guards = append(guards, entry)
+		if targetErr != nil {
+			// Preserve the old write-side behavior for the first satisfied
+			// guard, which returned this target-resolution error. A malformed
+			// later guard must not prevent an earlier satisfied transition from
+			// firing, and an unmet guard can still report its diagnostic state.
+			if satisfied && selectedTarget == "" {
+				return HandleResult{}, targetErr
+			}
+			e.recordGuardNotFired(state, action, GuardOutcome{Reason: entry.Reason, Err: entry.Error, RequiredCount: entry.RequiredCount, ReceivedCount: entry.ReceivedCount})
 			continue
 		}
-		targetStepID, err := e.resolveTransitionTarget(ctx, state, step, action)
-		if err != nil {
-			return HandleResult{}, err
+		if !satisfied {
+			e.recordGuardNotFired(state, action, GuardOutcome{Reason: entry.Reason, Err: entry.Error, RequiredCount: entry.RequiredCount, ReceivedCount: entry.ReceivedCount})
+			continue
 		}
 		if targetStepID == "" || targetStepID == state.CurrentStepID {
 			continue
 		}
-		applied, err := e.store.ApplyTransitionIfAtStep(
-			ctx, taskID, sessionID, state.CurrentStepID, targetStepID, TriggerOnTurnComplete,
-		)
-		if err != nil {
-			return HandleResult{}, err
+		if selectedTarget == "" {
+			selectedTarget = targetStepID
 		}
-		if !applied {
-			return HandleResult{TransitionAbandoned: true, FromStepID: state.CurrentStepID, ToStepID: targetStepID}, nil
-		}
-		return HandleResult{Transitioned: true, FromStepID: state.CurrentStepID, ToStepID: targetStepID}, nil
 	}
-	return HandleResult{}, nil
+	if selectedTarget == "" {
+		return HandleResult{Guards: guards}, nil
+	}
+	applied, err := e.store.ApplyTransitionIfAtStep(
+		ctx, taskID, sessionID, state.CurrentStepID, selectedTarget, TriggerOnTurnComplete,
+	)
+	if err != nil {
+		return HandleResult{}, err
+	}
+	if !applied {
+		return HandleResult{Guards: guards, TransitionAbandoned: true, FromStepID: state.CurrentStepID, ToStepID: selectedTarget}, nil
+	}
+	return HandleResult{Guards: guards, Transitioned: true, FromStepID: state.CurrentStepID, ToStepID: selectedTarget}, nil
+}
+
+func (e *Engine) evaluateGuardForTransition(
+	ctx context.Context, state MachineState, step StepSpec, action Action,
+) (QuorumGuardState, string, error, bool) {
+	outcome := e.evaluateTransitionGuard(ctx, state, action)
+	targetStepID, targetErr := e.resolveTransitionTarget(ctx, state, step, action)
+	if targetErr != nil {
+		return QuorumGuardState{
+			TargetStepID: targetStepID,
+			Role:         action.Guard.WaitForQuorum.Role,
+			Threshold:    action.Guard.WaitForQuorum.Threshold,
+			Satisfied:    false,
+			Reason:       ReasonEvaluationError,
+			Error:        targetErr,
+		}, targetStepID, targetErr, outcome.Satisfied
+	}
+	return QuorumGuardState{
+		TargetStepID:  targetStepID,
+		Role:          action.Guard.WaitForQuorum.Role,
+		Threshold:     action.Guard.WaitForQuorum.Threshold,
+		RequiredCount: outcome.RequiredCount,
+		ReceivedCount: outcome.ReceivedCount,
+		Satisfied:     outcome.Satisfied,
+		Reason:        outcome.Reason,
+		Error:         outcome.Err,
+	}, targetStepID, nil, outcome.Satisfied
 }
 
 // QuorumGuardState is one guarded transition's read-only quorum state,
@@ -713,11 +771,15 @@ func (e *Engine) ResolveParticipantRole(
 	if agentProfileID == "" {
 		return "", "", ErrParticipantNotFound
 	}
+	workflowID := ""
+	if state, stateErr := e.store.LoadState(ctx, taskID, ""); stateErr == nil {
+		workflowID = state.WorkflowID
+	}
 	for _, r := range []wfmodels.ParticipantRole{
 		wfmodels.ParticipantRoleApprover,
 		wfmodels.ParticipantRoleReviewer,
 	} {
-		seats, seatsErr := e.requiredSeats(ctx, stepID, taskID, string(r))
+		seats, seatsErr := e.requiredSeatsForWorkflow(ctx, stepID, taskID, workflowID, string(r))
 		if seatsErr != nil {
 			return "", "", fmt.Errorf("resolve participant role: %w", seatsErr)
 		}

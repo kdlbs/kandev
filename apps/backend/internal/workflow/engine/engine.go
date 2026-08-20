@@ -97,9 +97,13 @@ type HandleResult struct {
 	Transitioned bool
 	FromStepID   string
 	ToStepID     string
-	DataPatch    map[string]any
-	Idempotent   bool
-	ActionCount  int
+	// Guards is the read-only quorum state captured while evaluating a
+	// guarded transition. Decision recording returns this snapshot even when
+	// the successful evaluation moves the task to the next step.
+	Guards      []QuorumGuardState
+	DataPatch   map[string]any
+	Idempotent  bool
+	ActionCount int
 
 	// TransitionAbandoned is true when a guarded transition's outcome was
 	// satisfied but ApplyTransitionIfAtStep (AC-46/48) lost the race — the

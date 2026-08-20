@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getTaskQuorum } from "@/lib/api/domains/office-extended-api";
 import type { QuorumResponseDTO } from "@/lib/state/slices/office/quorum-types";
@@ -13,7 +13,10 @@ export type UseTaskQuorumResult = {
   refresh: () => Promise<void>;
 };
 
-export function useTaskQuorum(taskId: string | null): UseTaskQuorumResult {
+export function useTaskQuorum(
+  taskId: string | null,
+  workspaceId: string | null,
+): UseTaskQuorumResult {
   const quorum = useAppStore((s) => (taskId ? s.office.taskQuorum.byTaskId[taskId] : undefined));
   const setTaskQuorum = useAppStore((s) => s.setTaskQuorum);
   // office.task.decision_recorded (lib/ws/handlers/office.ts) bumps this
@@ -25,32 +28,40 @@ export function useTaskQuorum(taskId: string | null): UseTaskQuorumResult {
   );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fetchedTaskId, setFetchedTaskId] = useState<string | null>(null);
+  const [fetchedScope, setFetchedScope] = useState<string | null>(null);
+  const requestGeneration = useRef(0);
 
   const refresh = useCallback(async () => {
-    if (!taskId) return;
+    if (!taskId || !workspaceId) return;
+    const generation = ++requestGeneration.current;
     setIsLoading(true);
     setError(null);
     try {
-      const res = await getTaskQuorum(taskId);
+      const res = await getTaskQuorum(taskId, workspaceId);
+      if (generation !== requestGeneration.current) return;
       setTaskQuorum(taskId, res);
-      setFetchedTaskId(taskId);
+      setFetchedScope(`${workspaceId}:${taskId}`);
     } catch (e) {
+      if (generation !== requestGeneration.current) return;
       setError(e instanceof Error ? e.message : t("office:failedToLoadTaskQuorum"));
     } finally {
-      setIsLoading(false);
+      if (generation === requestGeneration.current) setIsLoading(false);
     }
-  }, [taskId, setTaskQuorum]);
+  }, [taskId, workspaceId, setTaskQuorum]);
 
   useEffect(() => {
-    if (!taskId || fetchedTaskId === taskId) return;
-    void refresh();
-  }, [taskId, fetchedTaskId, refresh]);
+    requestGeneration.current += 1;
+  }, [taskId, workspaceId]);
 
   useEffect(() => {
-    if (!taskId || decisionRefetchTrigger === undefined) return;
+    if (!taskId || !workspaceId || fetchedScope === `${workspaceId}:${taskId}`) return;
     void refresh();
-  }, [taskId, decisionRefetchTrigger, refresh]);
+  }, [taskId, workspaceId, fetchedScope, refresh]);
+
+  useEffect(() => {
+    if (!taskId || !workspaceId || decisionRefetchTrigger === undefined) return;
+    void refresh();
+  }, [taskId, workspaceId, decisionRefetchTrigger, refresh]);
 
   return { quorum, isLoading, error, refresh };
 }

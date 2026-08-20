@@ -160,6 +160,35 @@ func TestListParticipantsForTaskAnyStep_RejectsEmptyTaskID(t *testing.T) {
 	}
 }
 
+func TestListParticipantsForTaskWorkflow_ScopesRowsToActiveWorkflow(t *testing.T) {
+	repo, db := setupTestRepoWithDB(t)
+	ctx := context.Background()
+	if _, err := db.Exec(`INSERT INTO workflows (id, workspace_id, name, created_at, updated_at)
+		VALUES ('wf-other', '', 'Other', datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("insert second workflow: %v", err)
+	}
+	review := newPhase2TestStep(t, repo, "Review")
+	other := &models.WorkflowStep{WorkflowID: "wf-other", Name: "Other review", Position: 0}
+	if err := repo.CreateStep(ctx, other); err != nil {
+		t.Fatalf("create other step: %v", err)
+	}
+	for _, p := range []*models.WorkflowStepParticipant{
+		{StepID: review.ID, TaskID: "task-1", Role: models.ParticipantRoleReviewer, AgentProfileID: "active", DecisionRequired: true},
+		{StepID: other.ID, TaskID: "task-1", Role: models.ParticipantRoleReviewer, AgentProfileID: "stale", DecisionRequired: true},
+	} {
+		if err := repo.UpsertStepParticipant(ctx, p); err != nil {
+			t.Fatalf("upsert participant: %v", err)
+		}
+	}
+	got, err := repo.ListParticipantsForTaskWorkflow(ctx, "task-1", "wf-test")
+	if err != nil {
+		t.Fatalf("list scoped participants: %v", err)
+	}
+	if len(got) != 1 || got[0].AgentProfileID != "active" {
+		t.Fatalf("got scoped participants %+v, want only active row", got)
+	}
+}
+
 func TestDeleteStepParticipant_RemovesRow(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()

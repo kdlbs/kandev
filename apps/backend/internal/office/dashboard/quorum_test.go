@@ -113,7 +113,7 @@ func TestGetTaskQuorumEndpoint_NotFound(t *testing.T) {
 	deps := newTestDeps(t)
 
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/v1/office/tasks/does-not-exist/quorum", nil)
+		"/api/v1/office/workspaces/ws-q/tasks/does-not-exist/quorum", nil)
 	w := httptest.NewRecorder()
 	deps.router.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
@@ -130,7 +130,7 @@ func TestGetTaskQuorumEndpoint_EmptyListForNoGuardedTransition(t *testing.T) {
 	insertTestTask(t, deps.db, "q1", "ws-q", "Q", "in_review", 2)
 
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/v1/office/tasks/q1/quorum", nil)
+		"/api/v1/office/workspaces/ws-q/tasks/q1/quorum", nil)
 	w := httptest.NewRecorder()
 	deps.router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -156,7 +156,7 @@ func TestGetTaskQuorumEndpoint_EmptyListForUnboundStep(t *testing.T) {
 	insertTestTaskNoStep(t, deps, "q2", "ws-q", "Q2")
 
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/v1/office/tasks/q2/quorum", nil)
+		"/api/v1/office/workspaces/ws-q/tasks/q2/quorum", nil)
 	w := httptest.NewRecorder()
 	deps.router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -168,5 +168,18 @@ func TestGetTaskQuorumEndpoint_EmptyListForUnboundStep(t *testing.T) {
 	}
 	if len(resp.Guards) != 0 {
 		t.Fatalf("Guards = %d, want 0", len(resp.Guards))
+	}
+}
+
+func TestGetTaskQuorumEndpoint_RejectsWrongWorkspace(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "q3", "ws-q", "Q3", "in_review", 2)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/office/workspaces/ws-other/tasks/q3/quorum", nil)
+	w := httptest.NewRecorder()
+	deps.router.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
 	}
 }

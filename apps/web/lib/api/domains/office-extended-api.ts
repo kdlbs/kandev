@@ -340,8 +340,11 @@ export function listTaskDecisions(taskId: string, options?: ApiRequestOptions) {
 
 // --- Task quorum (AC-24b diagnostic read) ---
 
-export function getTaskQuorum(taskId: string, options?: ApiRequestOptions) {
-  return fetchJson<QuorumResponseDTO>(`${BASE}/tasks/${taskId}/quorum`, options);
+export function getTaskQuorum(taskId: string, workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<QuorumResponseDTO>(
+    `${BASE}/workspaces/${workspaceId}/tasks/${taskId}/quorum`,
+    options,
+  );
 }
 
 // --- Comments ---

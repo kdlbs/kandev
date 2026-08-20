@@ -82,6 +82,52 @@ func TestUpdateTaskWithWorkflowStepAdmissionIfAtStep_AppliesOnlyWhenExpectedStep
 	}
 }
 
+func TestUpdateTaskWithWorkflowStepAdmissionIfAtStep_PreservesConcurrentTaskEdits(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-cas-preserve")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "workflow-cas-preserve", WorkspaceID: "workspace-cas-preserve", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedCASWorkflowStep(t, repo, "workflow-cas-preserve", "step-source", 0)
+	seedCASWorkflowStep(t, repo, "workflow-cas-preserve", "step-target", 1)
+
+	task := &models.Task{
+		ID: "task-cas-preserve", WorkspaceID: "workspace-cas-preserve", WorkflowID: "workflow-cas-preserve",
+		WorkflowStepID: "step-source", Title: "original", WIPAdmitted: true,
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	stale, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	current, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask current: %v", err)
+	}
+	current.Title = "edited concurrently"
+	if err := repo.UpdateTask(ctx, current); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+
+	applied, err := repo.UpdateTaskWithWorkflowStepAdmissionIfAtStep(ctx, stale, "step-source", "step-target", 0)
+	if err != nil {
+		t.Fatalf("UpdateTaskWithWorkflowStepAdmissionIfAtStep: %v", err)
+	}
+	if !applied {
+		t.Fatal("expected the step compare-and-swap to apply")
+	}
+	reloaded, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask after CAS: %v", err)
+	}
+	if reloaded.Title != "edited concurrently" {
+		t.Fatalf("title = %q, want concurrent edit preserved", reloaded.Title)
+	}
+}
+
 // TestUpdateTaskWithWorkflowStepAdmissionIfAtStep_QueuesWhenStepIsFull mirrors
 // the unconditional admission method's "limited full target queues instead
 // of rejecting" behavior (it never rejects for WIP capacity, only for the
