@@ -4,6 +4,7 @@ import type { WsHandlers } from "@/lib/ws/handlers/types";
 import { compareTimestamps, toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import { normalizeAgentProfile } from "@/lib/api/domains/agent-profile-normalize";
 import type { AgentProfile } from "@/lib/types/agent-profile";
+import type { AvailableAgent, CapabilityStatus } from "@/lib/types/http-agents";
 
 function buildProfileEntry(profile: unknown): AgentProfile {
   return normalizeAgentProfile(profile);
@@ -188,16 +189,62 @@ function handleProfileDeleted(
   };
 }
 
+/**
+ * Maps an AvailableAgent's host-utility probe result to AgentProfileOption's
+ * capability fields. `buildModelConfigFromHostUtility` (backend) emits the
+ * literal "not_configured" on a cache miss, while the AgentDTO path used by
+ * agent.profile.created/updated leaves the field empty for the same case —
+ * map it back to undefined so both paths agree with isHealthyAgentProfile,
+ * which treats undefined as healthy and "not_configured" as unhealthy.
+ */
+function toProfileCapability(agent: AvailableAgent): {
+  capability_status?: CapabilityStatus;
+  capability_error?: string;
+} {
+  if (agent.model_config.status === "not_configured") {
+    return { capability_status: undefined, capability_error: undefined };
+  }
+  return {
+    capability_status: agent.model_config.status,
+    capability_error: agent.model_config.error,
+  };
+}
+
+/**
+ * Refreshes capability_status/capability_error on agent profile options from
+ * a fresh agent.available.updated snapshot, matched by agent name. Nothing
+ * else refetches this field after boot (see agents.ts F3), so without this a
+ * profile hidden from Handoff at boot stays hidden even after its agent is
+ * installed or reconnected, until a full page reload.
+ */
+function refreshProfileCapabilities(
+  profiles: AppState["agentProfiles"]["items"],
+  agents: AvailableAgent[],
+): AppState["agentProfiles"]["items"] {
+  if (agents.length === 0) return profiles;
+  const byName = new Map(agents.map((agent) => [agent.name, agent]));
+  return profiles.map((profile) => {
+    const match = byName.get(profile.agent_name);
+    if (!match) return profile;
+    return { ...profile, ...toProfileCapability(match) };
+  });
+}
+
 export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "agent.available.updated": (message) => {
+      const agents = message.payload.agents ?? [];
       store.setState((state) => ({
         ...state,
         availableAgents: {
-          items: message.payload.agents ?? [],
+          items: agents,
           tools: message.payload.tools ?? state.availableAgents.tools,
           loaded: true,
           loading: false,
+        },
+        agentProfiles: {
+          ...state.agentProfiles,
+          items: refreshProfileCapabilities(state.agentProfiles.items, agents),
         },
       }));
     },

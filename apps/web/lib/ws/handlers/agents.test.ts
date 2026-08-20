@@ -18,6 +18,7 @@ const NOTIFICATION_TYPE = "notification";
 const PROFILE_CREATED = "agent.profile.created";
 const PROFILE_UPDATED = "agent.profile.updated";
 const PROFILE_DELETED = "agent.profile.deleted";
+const AGENT_NAME = "claude-acp";
 
 /** Builds a WS notification message fixture with the given action, payload, and timestamp. */
 function message(action: string, payload: unknown, timestamp = TIMESTAMP) {
@@ -39,6 +40,30 @@ function profilePayload(overrides: Record<string, unknown> = {}) {
     model: "mock-fast",
     enabled: true,
     created_at: TIMESTAMP,
+    updated_at: TIMESTAMP,
+    ...overrides,
+  };
+}
+
+/** Builds an AvailableAgent fixture (agent.available.updated payload entry), overridable per test. */
+function availableAgentPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    name: AGENT_NAME,
+    display_name: "Claude",
+    supports_mcp: false,
+    installation_paths: [],
+    available: true,
+    capabilities: {
+      supports_session_resume: false,
+      supports_shell: false,
+      supports_workspace_only: false,
+    },
+    model_config: {
+      default_model: "default",
+      available_models: [],
+      supports_dynamic_models: false,
+      status: "ok",
+    },
     updated_at: TIMESTAMP,
     ...overrides,
   };
@@ -71,7 +96,7 @@ describe("agent update job websocket handlers", () => {
     const handlers = handlersFor(store);
     const snapshot = {
       job_id: "update-1",
-      agent_name: "claude-acp",
+      agent_name: AGENT_NAME,
       status: "updating",
       current_version: "1.0.0",
       target_version: "1.1.0",
@@ -82,7 +107,7 @@ describe("agent update job websocket handlers", () => {
     handlers["agent.update.output"](
       message("agent.update.output", {
         job_id: "update-1",
-        agent_name: "claude-acp",
+        agent_name: AGENT_NAME,
         chunk: "downloaded\n",
       }),
     );
@@ -99,7 +124,7 @@ describe("agent update job websocket handlers", () => {
         store.getState() as unknown as {
           updateJobs: { byAgent: Record<string, { status: string; output: string }> };
         }
-      ).updateJobs.byAgent["claude-acp"],
+      ).updateJobs.byAgent[AGENT_NAME],
     ).toMatchObject({ status: "succeeded", output: "downloaded\n" });
   });
 });
@@ -174,7 +199,7 @@ describe("agent profile events", () => {
         items: [
           {
             id: "agent-1",
-            name: "claude-acp",
+            name: AGENT_NAME,
             supports_mcp: false,
             profiles: [],
             capability_status: "not_installed",
@@ -211,6 +236,78 @@ describe("agent profile events", () => {
 
     expect(store.getState().agentProfiles.items).toHaveLength(0);
     expect(store.getState().settingsAgents.items).toHaveLength(0);
+  });
+});
+
+describe("agent.available.updated capability refresh", () => {
+  it("refreshes capability_status on matching profiles when agent.available.updated reports the agent is ready", () => {
+    const store = makeStore();
+    const handlers = handlersFor(store);
+    store.setState((state) => ({
+      ...state,
+      agentProfiles: {
+        ...state.agentProfiles,
+        items: [
+          {
+            id: "profile-1",
+            label: "Claude • Default",
+            agent_id: "agent-1",
+            agent_name: AGENT_NAME,
+            cli_passthrough: false,
+            capability_status: "not_installed",
+            capability_error: "agent not installed",
+          },
+        ],
+      },
+    }));
+
+    handlers["agent.available.updated"](
+      message("agent.available.updated", { agents: [availableAgentPayload()] }),
+    );
+
+    const updated = store.getState().agentProfiles.items[0];
+    expect(updated?.capability_status).toBe("ok");
+    expect(updated?.capability_error).toBeUndefined();
+  });
+
+  it("maps the not_configured cache-miss sentinel back to undefined so the profile stays healthy", () => {
+    const store = makeStore();
+    const handlers = handlersFor(store);
+    store.setState((state) => ({
+      ...state,
+      agentProfiles: {
+        ...state.agentProfiles,
+        items: [
+          {
+            id: "profile-1",
+            label: "Claude • Default",
+            agent_id: "agent-1",
+            agent_name: AGENT_NAME,
+            cli_passthrough: false,
+          },
+        ],
+      },
+    }));
+
+    handlers["agent.available.updated"](
+      message("agent.available.updated", {
+        agents: [
+          availableAgentPayload({
+            model_config: {
+              default_model: "default",
+              available_models: [],
+              supports_dynamic_models: false,
+              status: "not_configured",
+              error: "no host-utility entry",
+            },
+          }),
+        ],
+      }),
+    );
+
+    const updated = store.getState().agentProfiles.items[0];
+    expect(updated?.capability_status).toBeUndefined();
+    expect(updated?.capability_error).toBeUndefined();
   });
 });
 
