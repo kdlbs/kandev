@@ -107,6 +107,15 @@ func (s *Service) ProcessDueDeliveries(ctx context.Context, now time.Time, worke
 }
 
 func (s *Service) processClaimedDelivery(ctx context.Context, ledger DeliveryLedger, delivery Delivery, workerID string, now time.Time) {
+	queueEntryID, found, err := s.findQueueEntryForDelivery(ctx, delivery.TargetSessionID, delivery.ID)
+	if err != nil {
+		s.deferClaimedDelivery(ctx, ledger, delivery, workerID, now, err)
+		return
+	}
+	if found {
+		s.acknowledgeDeliveryQueueAdmission(ctx, ledger, delivery, workerID, queueEntryID)
+		return
+	}
 	metadata := copyMessageMetadata(delivery.Metadata, 2)
 	metadata[MetadataDeliveryID] = delivery.ID
 	metadata[MetadataLifecycleDurable] = true
@@ -118,9 +127,31 @@ func (s *Service) processClaimedDelivery(ctx context.Context, ledger DeliveryLed
 		s.deferClaimedDelivery(ctx, ledger, delivery, workerID, now, err)
 		return
 	}
-	if _, err := ledger.MarkDeliveryQueued(ctx, delivery.ID, workerID, queued.ID); err != nil {
+	s.acknowledgeDeliveryQueueAdmission(ctx, ledger, delivery, workerID, queued.ID)
+}
+
+// findQueueEntryForDelivery recovers the acknowledgement gap between FIFO
+// insertion and the receipt update. A leased retry must reuse that persisted
+// entry instead of creating a duplicate report after a worker crash or a
+// transient ledger write failure.
+func (s *Service) findQueueEntryForDelivery(ctx context.Context, sessionID, deliveryID string) (string, bool, error) {
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return "", false, fmt.Errorf("list queue entries for delivery: %w", err)
+	}
+	for i := range entries {
+		entryDeliveryID, _ := entries[i].Metadata[MetadataDeliveryID].(string)
+		if entryDeliveryID == deliveryID {
+			return entries[i].ID, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+func (s *Service) acknowledgeDeliveryQueueAdmission(ctx context.Context, ledger DeliveryLedger, delivery Delivery, workerID, queueEntryID string) {
+	if _, err := ledger.MarkDeliveryQueued(ctx, delivery.ID, workerID, queueEntryID); err != nil {
 		s.logger.Error("delivery queue admission acknowledgement failed",
-			zap.String("delivery_id", delivery.ID), zap.String("queue_entry_id", queued.ID), zap.Error(err))
+			zap.String("delivery_id", delivery.ID), zap.String("queue_entry_id", queueEntryID), zap.Error(err))
 	}
 }
 

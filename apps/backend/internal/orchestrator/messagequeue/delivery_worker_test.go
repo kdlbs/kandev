@@ -2,6 +2,7 @@ package messagequeue
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -9,6 +10,22 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type failingDeliveryQueueAcknowledgementRepository struct {
+	Repository
+	DeliveryLedger
+	failQueueAcknowledgement bool
+}
+
+func (r *failingDeliveryQueueAcknowledgementRepository) MarkDeliveryQueued(
+	ctx context.Context,
+	deliveryID, leaseOwner, queueEntryID string,
+) (*Delivery, error) {
+	if r.failQueueAcknowledgement {
+		return nil, errors.New("transient delivery queue acknowledgement failure")
+	}
+	return r.DeliveryLedger.MarkDeliveryQueued(ctx, deliveryID, leaseOwner, queueEntryID)
+}
 
 func TestProcessDueDeliveriesRetainsFullQueueReceiptAndPromotesItOnce(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
@@ -63,6 +80,53 @@ func TestProcessDueDeliveriesRetainsFullQueueReceiptAndPromotesItOnce(t *testing
 	stored, err = ledger.GetDelivery(ctx, delivery.ID)
 	require.NoError(t, err)
 	assert.Equal(t, DeliveryDelivered, stored.State)
+}
+
+func TestProcessDueDeliveriesReusesExistingQueueEntryAfterAcknowledgementFailure(t *testing.T) {
+	baseRepo := newTestSQLiteRepo(t)
+	ledger := baseRepo.(DeliveryLedger)
+	repo := &failingDeliveryQueueAcknowledgementRepository{
+		Repository:               baseRepo,
+		DeliveryLedger:           ledger,
+		failQueueAcknowledgement: true,
+	}
+	service := NewService(repo, 2, logger.Default())
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID:    "source-task",
+		SenderSessionID: "source-session",
+		SourceTurnID:    "source-turn",
+		IdempotencyKey:  "report-v1",
+		TargetTaskID:    "target-task",
+		TargetSessionID: "target-session",
+		Content:         "review is ready",
+		State:           DeliveryPendingCapacity,
+		NextAttemptAt:   now,
+	})
+	require.NoError(t, err)
+
+	processed, err := service.ProcessDueDeliveries(ctx, now, "worker-a")
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+	stored, err := ledger.GetDelivery(ctx, delivery.ID)
+	require.NoError(t, err)
+	require.Equal(t, DeliveryReserved, stored.State)
+	require.False(t, stored.LeaseExpiresAt.IsZero())
+
+	repo.failQueueAcknowledgement = false
+	processed, err = service.ProcessDueDeliveries(ctx, stored.LeaseExpiresAt, "worker-b")
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+	stored, err = ledger.GetDelivery(ctx, delivery.ID)
+	require.NoError(t, err)
+	require.Equal(t, DeliveryQueued, stored.State)
+
+	entries, err := baseRepo.ListBySession(ctx, "target-session")
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, stored.QueueEntryID, entries[0].ID)
+	assert.Equal(t, delivery.ID, entries[0].Metadata[MetadataDeliveryID])
 }
 
 func TestDeliveryRecoveryLifecycleProcessesStartupScanAndStops(t *testing.T) {
