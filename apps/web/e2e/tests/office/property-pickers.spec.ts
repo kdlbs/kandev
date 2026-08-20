@@ -370,12 +370,6 @@ test.describe("property pickers", () => {
     const task = await apiClient.createTask(officeSeed.workspaceId, "Picker Timeline Task", {
       workflow_id: officeSeed.workflowId,
     });
-    await gotoTaskPage(testPage, task.id, "Picker Timeline Task");
-
-    const startedRow = testPage.getByTestId("started-row");
-    const completedRow = testPage.getByTestId("completed-row");
-    await expect(startedRow).toHaveText("--");
-    await expect(completedRow).toHaveText("--");
 
     // startedAt/completedAt are derived server-side from the status-change
     // timeline (see deriveTaskTimestamps in the backend) and delivered to
@@ -384,6 +378,19 @@ test.describe("property pickers", () => {
     // live-page refetch rather than a reload, so a regression of the
     // refetch itself fails this test.
     const taskDetailPath = new RegExp(`^/api/v1/office/tasks/${task.id}$`);
+
+    // gotoTaskPage only waits for the title heading, which can render before
+    // the sidebar's own render pass picks up the same task fetch; wait for
+    // the initial GET explicitly instead of racing the property rows against
+    // an unbudgeted paint (see e2e/helpers/causal-waits.ts).
+    const initialLoad = waitForHttp(testPage, "GET", taskDetailPath);
+    await gotoTaskPage(testPage, task.id, "Picker Timeline Task");
+    await initialLoad;
+
+    const startedRow = testPage.getByTestId("started-row");
+    const completedRow = testPage.getByTestId("completed-row");
+    await expect(startedRow).toHaveText("--");
+    await expect(completedRow).toHaveText("--");
 
     const startedRefetch = waitForHttp(testPage, "GET", taskDetailPath);
     await testPage.getByTestId("status-picker-trigger").click();
