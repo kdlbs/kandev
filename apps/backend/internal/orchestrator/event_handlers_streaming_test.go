@@ -2644,6 +2644,72 @@ func TestSessionStartClearsInterruptedMarker(t *testing.T) {
 	})
 }
 
+func TestSessionStartClearsAutoStartFailedMarker(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("state hook transition to STARTING", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyAutoStartFailed, true))
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		_, changed := svc.updateTaskSessionStateWithHook(
+			ctx, "t1", "s1", models.TaskSessionStateStarting, "", false, nil,
+		)
+		require.True(t, changed)
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		_, marked := task.Metadata[models.MetaKeyAutoStartFailed]
+		require.False(t, marked)
+		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs)
+	})
+
+	t.Run("launch path via setSessionStarting", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyAutoStartFailed, true))
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		session.State = models.TaskSessionStateStarting
+		session.ErrorMessage = ""
+		session.UpdatedAt = time.Now().UTC()
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		require.NoError(t, svc.setSessionStarting(ctx, "t1", session, models.TaskSessionStateRunning, true))
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		_, marked := task.Metadata[models.MetaKeyAutoStartFailed]
+		require.False(t, marked)
+		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs)
+	})
+}
+
+func TestAutoStartFailureDoesNotMarkTaskWithActiveSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx, "s1", models.TaskSessionStateStarting, "",
+	))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.setTaskAutoStartFailedMarker(ctx, "t1", "task.moved")
+
+	task, err := repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	_, marked := task.Metadata[models.MetaKeyAutoStartFailed]
+	require.False(t, marked, "a late failure must not mark a task with active work")
+}
+
 // Nothing else ever retires a stored agent failure, so without this clear every
 // path that re-derives task status from session metadata resurrects it and the
 // error icon never goes away.

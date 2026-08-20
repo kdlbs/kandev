@@ -73,6 +73,48 @@ func TestQueueRun_InsertsRow(t *testing.T) {
 	}
 }
 
+func TestQueueRun_DoesNotCoalesceTaskAssignedAcrossTasks(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	for _, taskID := range []string{"task-a", "task-b"} {
+		if err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+			AgentProfileID: "agent-primary",
+			TaskID:         taskID,
+			WorkflowStepID: "step-1",
+			Reason:         "task_assigned",
+			IdempotencyKey: "task_assigned:" + taskID + ":agent-primary:step-1",
+		}); err != nil {
+			t.Fatalf("queue %s: %v", taskID, err)
+		}
+	}
+
+	var payloads []string
+	if err := repo.Reader().SelectContext(ctx, &payloads,
+		`SELECT payload FROM runs WHERE agent_profile_id = ? ORDER BY requested_at`,
+		"agent-primary"); err != nil {
+		t.Fatalf("list queued payloads: %v", err)
+	}
+	if len(payloads) != 2 {
+		t.Fatalf("queued task_assigned runs = %d, want 2", len(payloads))
+	}
+	seen := make(map[string]bool, len(payloads))
+	for _, raw := range payloads {
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			t.Fatalf("decode payload %q: %v", raw, err)
+		}
+		taskID, ok := payload["task_id"].(string)
+		if !ok {
+			t.Fatalf("payload task_id = %v, want string", payload["task_id"])
+		}
+		seen[taskID] = true
+	}
+	if !seen["task-a"] || !seen["task-b"] {
+		t.Fatalf("queued task IDs = %#v, want task-a and task-b", seen)
+	}
+}
+
 func TestQueueRun_UsesRequestAgentProfileIDAndAddsEnvelopePayload(t *testing.T) {
 	svc, _, repo := newTestServiceWithRepo(t)
 	ctx := context.Background()

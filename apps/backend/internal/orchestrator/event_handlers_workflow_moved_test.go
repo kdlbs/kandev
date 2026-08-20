@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -346,6 +347,9 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 			if req.Reason != officeAutoStartRunReason {
 				t.Errorf("Reason = %q, want %q", req.Reason, officeAutoStartRunReason)
 			}
+			if req.IdempotencyKey != "task_assigned:t-office:resolved-primary:step2" {
+				t.Errorf("IdempotencyKey = %q, want task_assigned:t-office:resolved-primary:step2", req.IdempotencyKey)
+			}
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for QueueRun call")
 		}
@@ -446,6 +450,47 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 		select {
 		case <-queued.calls:
 			t.Error("QueueRun must not be called when no agent profile could be resolved")
+		default:
+		}
+	})
+
+	t.Run("office task does not fall back after primary resolver failure", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+		requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+		requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+		requireNoError(t, repo.CreateTask(ctx, &models.Task{
+			ID:                     "t-office-primary-error",
+			WorkspaceID:            "ws1",
+			WorkflowID:             "wf1",
+			WorkflowStepID:         "step1",
+			ProjectID:              "proj1",
+			Title:                  "Office Task",
+			Description:            "prompt",
+			State:                  v1.TaskStateCreated,
+			AssigneeAgentProfileID: "stale-assignee",
+			CreatedAt:              now,
+			UpdatedAt:              now,
+		}))
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Work", Position: 1,
+			Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}}},
+		}
+		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), failIfLaunched(t))
+		queued := &fakeRunQueueAdapter{calls: make(chan engine.QueueRunRequest, 1)}
+		svc.engineRunQueue = queued
+		svc.enginePrimary = &fakePrimaryAgentResolver{err: errors.New("runner lookup failed")}
+
+		svc.handleTaskMovedNoSession(ctx, watcher.TaskMovedEventData{
+			TaskID: "t-office-primary-error", ToStepID: "step2",
+		})
+
+		waitForAutoStartFailedMarker(t, repo, ctx, "t-office-primary-error")
+		select {
+		case req := <-queued.calls:
+			t.Fatalf("QueueRun called with %q after primary resolver failure", req.AgentProfileID)
 		default:
 		}
 	})

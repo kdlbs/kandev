@@ -360,7 +360,18 @@ func (r *Repository) CoalesceRun(
 	ctx context.Context, agentInstanceID, reason string, windowSecs int, payload string,
 ) (bool, error) {
 	cutoff := time.Now().UTC().Add(-time.Duration(windowSecs) * time.Second)
-	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	taskID := taskIDFromPayload(payload)
+	taskPredicate := ""
+	args := []interface{}{payload, agentInstanceID, reason, cutoff, commentkeys.TaskCommentPrefix + "%"}
+	// Assignment wakes are task-specific: merging two tasks for the same
+	// agent would replace the first task's payload and silently drop its
+	// launch. Other reasons, such as task comments, intentionally retain
+	// their existing cross-task coalescing behaviour.
+	if taskID != "" && reason == "task_assigned" {
+		taskPredicate = fmt.Sprintf(" AND %s = ?", dialect.JSONExtract(r.db.DriverName(), "payload", "task_id"))
+		args = append(args, taskID)
+	}
+	query := fmt.Sprintf(`
 		UPDATE runs
 		SET coalesced_count = coalesced_count + 1, payload = ?
 		WHERE id = (
@@ -368,10 +379,12 @@ func (r *Repository) CoalesceRun(
 			WHERE agent_profile_id = ? AND reason = ? AND status = 'queued'
 			  AND requested_at > ?
 			  AND (idempotency_key IS NULL OR idempotency_key NOT LIKE ?)
+			%s
 			ORDER BY requested_at DESC
 			LIMIT 1
 		)
-	`), payload, agentInstanceID, reason, cutoff, commentkeys.TaskCommentPrefix+"%")
+	`, taskPredicate)
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, err
 	}
@@ -380,6 +393,15 @@ func (r *Repository) CoalesceRun(
 		return false, err
 	}
 	return rows > 0, nil
+}
+
+func taskIDFromPayload(payload string) string {
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(payload), &raw); err != nil {
+		return ""
+	}
+	taskID, _ := raw["task_id"].(string)
+	return taskID
 }
 
 // ClaimNextEligibleRun atomically claims the next queued run,

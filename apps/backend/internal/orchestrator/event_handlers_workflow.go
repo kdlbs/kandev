@@ -39,6 +39,10 @@ type taskMetadataKeySetter interface {
 	SetTaskMetadataKey(context.Context, string, string, interface{}) error
 }
 
+type taskMetadataKeySetterIfNoActiveSession interface {
+	SetTaskMetadataKeyIfNoActiveSession(context.Context, string, string, interface{}) (bool, error)
+}
+
 type lifecycleTaskMetadataLister interface {
 	ListTasksWithMetadataKey(context.Context, string) ([]*models.Task, error)
 }
@@ -1178,7 +1182,11 @@ func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task
 	}
 	agentProfileID := task.AssigneeAgentProfileID
 	if s.enginePrimary != nil {
-		if resolved, err := s.enginePrimary.PrimaryAgentProfileID(ctx, step.ID, task.ID); err == nil && resolved != "" {
+		resolved, err := s.enginePrimary.PrimaryAgentProfileID(ctx, step.ID, task.ID)
+		if err != nil {
+			return fmt.Errorf("resolve primary agent for office auto-start on task %s: %w", task.ID, err)
+		}
+		if resolved != "" {
 			agentProfileID = resolved
 		}
 	}
@@ -1190,6 +1198,7 @@ func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task
 		TaskID:         task.ID,
 		WorkflowStepID: step.ID,
 		Reason:         officeAutoStartRunReason,
+		IdempotencyKey: fmt.Sprintf("%s:%s:%s:%s", officeAutoStartRunReason, task.ID, agentProfileID, step.ID),
 		Payload:        map[string]any{"task_id": task.ID},
 	})
 }
@@ -1342,13 +1351,21 @@ func (s *Service) restoreAutoStartClaim(ctx context.Context, taskID, eventName s
 // clearTaskAutoStartFailedMarker when a session for the task next reaches
 // STARTING/RUNNING.
 func (s *Service) setTaskAutoStartFailedMarker(ctx context.Context, taskID, eventName string) {
-	setter, ok := s.repo.(taskMetadataKeySetter)
+	setter, ok := s.repo.(taskMetadataKeySetterIfNoActiveSession)
 	if !ok {
+		s.logger.Warn(eventName+": repository cannot conditionally set auto-start-failed marker",
+			zap.String("task_id", taskID))
 		return
 	}
-	if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyAutoStartFailed, true); err != nil {
+	written, err := setter.SetTaskMetadataKeyIfNoActiveSession(ctx, taskID, models.MetaKeyAutoStartFailed, true)
+	if err != nil {
 		s.logger.Warn(eventName+": failed to set auto-start-failed marker",
 			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	if !written {
+		s.logger.Debug(eventName+": skipped auto-start-failed marker because task work is active",
+			zap.String("task_id", taskID))
 		return
 	}
 	task, err := s.repo.GetTask(ctx, taskID)

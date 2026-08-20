@@ -198,7 +198,14 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 	}
 
 	// Staleness check.
-	if cancel, reason := si.evaluateRunStaleness(ctx, run); cancel {
+	cancel, reason, staleErr := si.evaluateRunStaleness(ctx, run)
+	if staleErr != nil {
+		si.logger.Warn("run staleness check failed; retrying run",
+			zap.String("run_id", runID), zap.Error(staleErr))
+		_ = si.svc.HandleRunFailure(ctx, run, staleErr)
+		return
+	}
+	if cancel {
 		si.cancelStaleRun(ctx, run, agent, reason)
 		return
 	}
