@@ -22,19 +22,19 @@ background chip, so no frontend change is required for the golden path.
 
 ## Resolved decision and implemented seam
 
-The pinned ACP fork still routes inbound client extension handling only for
-method names starting with `_`, so `cursor/task` would still fall through to the
-generated `ClientSideConnection.handle` switch and return `-32601` if Kandev
-used the SDK connection directly.
+The upstream ACP client routes inbound client extension handling only for
+method names starting with `_`, so `cursor/task` would fall through to the
+generated `ClientSideConnection.handle` switch and return `-32601`.
 
-The implementation that landed in this workspace keeps the client-owned
-allow/deny policy in `apps/backend/internal/agentctl/server/acp/client.go`, then
-adds a repo-local client connection helper in
-`apps/backend/internal/agentctl/server/acp/connection.go`. That helper proxies
-the agent-to-client JSON-RPC stream, intercepts inbound vendor request methods
-before the SDK rejects them, routes them through `Client.HandleExtensionMethod`,
-replies on the shared writer, and forwards all normal ACP traffic unchanged into
-the SDK connection.
+The implementation that landed widens that seam in the pinned ACP fork instead
+of proxying it in-repo: the fork routes any unrecognized inbound client
+*request* to the client's `ExtensionMethodHandler`, and Kandev keeps the
+client-owned allow/deny policy in
+`apps/backend/internal/agentctl/server/acp/client.go`. The adapter registers a
+`CursorTaskHandler` via `acpclient.WithCursorTaskHandler` and passes the client
+straight to `acp.NewClientSideConnection` (`adapter.go`), so there is no
+repo-local connection proxy. The relaxation is inbound-accept only; the outbound
+`CallExtension`/`NotifyExtension` `_`-prefix contract is unchanged.
 
 ---
 
@@ -44,11 +44,9 @@ the SDK connection.
 Kandev implements `HandleExtensionMethod(ctx, method, params)` on
 `acpclient.Client` (`apps/backend/internal/agentctl/server/acp/client.go`),
 returning an empty result for `cursor/task` and `NewMethodNotFound` otherwise.
-`apps/backend/internal/agentctl/server/acp/connection.go` adds a repo-local
-client-side connection helper that intercepts vendor request methods on the wire
-and routes them through that handler before the ACP SDK rejects them. A
-`CursorTaskHandler` option (mirroring `WithUpdateHandler`) hands the raw params
-to the adapter.
+The pinned ACP fork routes any unrecognized inbound client request to that
+handler, so no repo-local connection helper is needed. A `CursorTaskHandler`
+option (mirroring `WithUpdateHandler`) hands the raw params to the adapter.
 
 ### Area 2 — parse + correlate cursor/task (Task 02)
 New `dialect_cursor.go` in `apps/backend/internal/agentctl/server/adapter/transport/acp/`: parse the `cursor/task` params (`agentId`, `description`, `model`, `prompt`, `toolCallId`; `subagentType` is an object and is ignored) defensively over untyped maps. The adapter keeps a per-session `map[toolCallId]cursorTaskMeta` (bounded, cleared on session teardown). On either the `cursor/task` request or the subagent `tool_call` (whichever is second), merge onto the `SubagentTaskPayload` via the existing fill-if-present rule (extend `applySubagentResult` or a sibling `applyCursorTaskMeta`). Wire the adapter's `CursorTaskHandler` in `adapter.go` next to `enqueueACPUpdate`.
@@ -110,7 +108,7 @@ Extend `cursorSubagentResult` (`subagent.go:349`) to read `rawOutput.isBackgroun
 
 ## Implementation Waves And Parallel Candidates
 
-```
+```text
 Wave 1:
 - [x] [task-01-sdk-extension-seam](task-01-sdk-extension-seam.md)
 

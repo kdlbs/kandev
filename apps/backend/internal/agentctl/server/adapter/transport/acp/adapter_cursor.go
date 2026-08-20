@@ -67,6 +67,19 @@ func (a *Adapter) storeCursorTaskMetaLocked(sessionID string, meta cursorTaskMet
 	a.cursorTaskMetaBySession[sessionID][meta.ToolCallID] = mergeCursorTaskMeta(stored, meta)
 }
 
+// sweepCursorTaskMetaOnPromptEnd drops any pending cursor/task metadata for the
+// session that never matched a subagent tool_call during the turn. The entries
+// are keyed by wire tool-call ID, which Cursor can reuse across turns, so an
+// unmatched entry left behind would attach to an unrelated subagent later.
+func (a *Adapter) sweepCursorTaskMetaOnPromptEnd(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	a.mu.Lock()
+	a.clearCursorTaskMetaLocked(sessionID)
+	a.mu.Unlock()
+}
+
 func (a *Adapter) clearCursorTaskMetaLocked(sessionID string) {
 	if sessionID == "" {
 		clear(a.cursorTaskMetaBySession)

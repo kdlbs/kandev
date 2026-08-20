@@ -60,7 +60,7 @@ not start with `_`, so the stock SDK extension hook
 
 Observed request params (wire capture, `composer-2.5`):
 
-```
+```text
 cursor/task  (request, has id)
   agentId       string   e.g. "eaa12f70-...-60506ebd5c78"
   description   string   e.g. "Summarize src JS files"

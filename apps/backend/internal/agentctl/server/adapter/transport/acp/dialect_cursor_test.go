@@ -100,6 +100,38 @@ func TestCursorTaskRequestAfterToolCallEmitsUpdate(t *testing.T) {
 	}
 }
 
+func TestCursorTaskUnmatchedMetaClearedAtPromptEnd(t *testing.T) {
+	a := newTestAdapter()
+	a.sessionID = "session-1"
+
+	// An unmatched cursor/task arrives (no subagent tool_call this turn).
+	a.handleCursorTask(json.RawMessage(`{"toolCallId":"tool-1","description":"Stale","prompt":"stale prompt"}`))
+	if pending := len(a.cursorTaskMetaBySession["session-1"]); pending != 1 {
+		t.Fatalf("pending cursor/task entries = %d, want 1 before prompt end", pending)
+	}
+
+	a.sweepCursorTaskMetaOnPromptEnd("session-1")
+	if pending := len(a.cursorTaskMetaBySession["session-1"]); pending != 0 {
+		t.Fatalf("pending cursor/task entries = %d, want 0 after prompt end", pending)
+	}
+
+	// A later turn reuses tool-1 for an unrelated subagent. Without the
+	// prompt-end sweep the stale "Stale" metadata would attach here.
+	event := a.convertToolCallUpdate("session-1", &acpsdk.SessionUpdateToolCall{
+		ToolCallId: "tool-1",
+		Kind:       "other",
+		Title:      "Task: Subagent task",
+		Status:     toolStatusInProgress,
+		RawInput:   map[string]any{"_toolName": "task"},
+	})
+	if event == nil || event.Type != streams.EventTypeToolCall {
+		t.Fatalf("event = %+v, want initial tool_call", event)
+	}
+	if sa := event.NormalizedPayload.SubagentTask(); sa.Description == "Stale" || sa.Prompt == "stale prompt" {
+		t.Fatalf("stale cursor/task metadata leaked into later turn: %+v", sa)
+	}
+}
+
 func TestCursorTaskCleanupDropsUnmatchedSessionState(t *testing.T) {
 	a := newTestAdapter()
 	a.mu.Lock()

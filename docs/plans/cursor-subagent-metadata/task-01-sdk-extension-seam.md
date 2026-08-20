@@ -14,15 +14,17 @@ Open a seam so the ACP client can accept the non-`_`-prefixed `cursor/task`
 request instead of returning `-32601`, and expose the parsed request to the
 adapter.
 
-The pinned ACP fork still rejects non-`_` inbound methods on the client side, so
-the implementation that landed here opens the seam inside Kandev's client
-connection layer instead: `acpclient.NewClientSideConnection` intercepts vendor
-request methods on the wire and routes them through `Client.HandleExtensionMethod`.
+Upstream ACP rejects non-`_` inbound methods on the client side. The
+implementation that landed opens the seam in the pinned ACP fork instead: the
+fork routes any unrecognized inbound client request to the client's
+`ExtensionMethodHandler`, and Kandev passes its client to
+`acp.NewClientSideConnection` with `WithCursorTaskHandler` (no repo-local
+connection helper is involved).
 
 ## Acceptance
-- A repo-local ACP client connection helper routes inbound vendor request
-  methods (including `cursor/task`) to `Client.HandleExtensionMethod` before the
-  ACP SDK rejects them.
+- The pinned ACP fork routes inbound vendor request methods (including
+  `cursor/task`) to `Client.HandleExtensionMethod`; the outbound `_`-prefix
+  contract is unchanged (inbound-accept only).
 - `apps/backend/internal/agentctl/server/acp/client.go` `Client` implements the
   extension handler: `cursor/task` returns an empty success result; any other
   unrecognized method returns `acp.NewMethodNotFound(method)`.
@@ -33,11 +35,11 @@ request methods on the wire and routes them through `Client.HandleExtensionMetho
 `cd apps/backend && go test ./internal/agentctl/server/acp/...`
 
 ## Files likely touched
-- `apps/backend/internal/agentctl/server/acp/connection.go` (new) — proxy the
-  inbound JSON-RPC stream and reply to intercepted vendor requests.
 - `apps/backend/internal/agentctl/server/acp/client.go` — add
   `HandleExtensionMethod`, `WithCursorTaskHandler`, and the handler field.
 - `apps/backend/internal/agentctl/server/acp/client_test.go` — dispatch tests.
+- The pinned ACP fork (`kdlbs/acp-go-sdk` PR #3) — widen the client extension
+  seam; consumed via the `go.mod` `replace`.
 - `apps/backend/internal/agentctl/server/acp/connection_test.go` (new) — live
   wire-path test for `cursor/task` and unknown vendor requests.
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter.go` and
@@ -64,6 +66,5 @@ and the `plan.md` Wave 1 checkbox.
 ## Results
 - Added `CursorTaskHandler`, `WithCursorTaskHandler`, `SetCursorTaskHandler`,
   and `HandleExtensionMethod` to `apps/backend/internal/agentctl/server/acp/client.go` so `cursor/task` returns a success result and unknown vendor methods still return `-32601`.
-- Added `apps/backend/internal/agentctl/server/acp/connection.go`, a repo-local client-side ACP connection helper that intercepts inbound vendor request methods on the wire, routes them through `HandleExtensionMethod`, replies on the shared writer, and forwards normal ACP traffic unchanged to the SDK.
-- Switched the live ACP call-sites in the adapter and utility executor/probe paths to the new helper.
-- `cd apps/backend && go test ./internal/agentctl/server/acp/... ./internal/agentctl/server/utility/...` passed.
+- Widened the client extension seam in the pinned ACP fork (`kdlbs/acp-go-sdk` PR #3) so any unrecognized inbound client request routes to `HandleExtensionMethod`; consumed via the `go.mod` `replace`. No repo-local connection proxy was added; the adapter passes its client to `acp.NewClientSideConnection` with `WithCursorTaskHandler`.
+- `cd apps/backend && go test ./internal/agentctl/server/acp/...` passed.

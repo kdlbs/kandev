@@ -196,6 +196,23 @@ func TestExtractSubagentResult_CursorBackground(t *testing.T) {
 	}
 }
 
+// TestExtractSubagentResult_CursorBackgroundNoDuration covers a Cursor result
+// carrying only isBackground: the async flag must still be recognized when
+// durationMs is absent.
+func TestExtractSubagentResult_CursorBackgroundNoDuration(t *testing.T) {
+	rawOutput := map[string]any{"isBackground": true}
+	res, ok := extractSubagentResult(nil, rawOutput)
+	if !ok {
+		t.Fatal("expected Cursor result to be extracted from isBackground alone")
+	}
+	if res.DurationMs != 0 {
+		t.Errorf("DurationMs = %d, want 0 when durationMs absent", res.DurationMs)
+	}
+	if !res.IsAsync {
+		t.Error("IsAsync = false, want true when isBackground=true without durationMs")
+	}
+}
+
 // TestExtractSubagentResult_ClaudeAsyncLaunched covers the claude-acp
 // envelope for `run_in_background: true`: status=async_launched plus the
 // isAsync/outputFile/canReadOutputFile fields.
