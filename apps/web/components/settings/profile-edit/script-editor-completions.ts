@@ -53,12 +53,13 @@ export function createPlaceholderCompletionProvider(
       // Find the range to replace (from {{ to cursor)
       const match = textBefore.match(/\{\{([\w.]*)$/);
       const startCol = match ? position.column - match[1].length : position.column;
+      const existingPlaceholderSuffix = textAfter.match(/^([\w.]*)\}\}/);
 
       const range: IRange = {
         startLineNumber: position.lineNumber,
         startColumn: startCol,
         endLineNumber: position.lineNumber,
-        endColumn: position.column,
+        endColumn: position.column + (existingPlaceholderSuffix?.[1].length ?? 0),
       };
 
       const filtered = executorType
@@ -75,7 +76,7 @@ export function createPlaceholderCompletionProvider(
         kind: monaco.languages.CompletionItemKind.Variable,
         detail: p.description,
         documentation: p.example ? `Example: ${p.example}` : undefined,
-        insertText: textAfter.startsWith("}}") ? p.key : `${p.key}}}`,
+        insertText: existingPlaceholderSuffix ? p.key : p.key + "}}",
         range,
         sortText: String(i).padStart(3, "0"),
       }));
@@ -84,8 +85,6 @@ export function createPlaceholderCompletionProvider(
     },
   };
 }
-
-const MENTION_NAME_PATTERN = /[\w-]*$/;
 
 function isMentionStartColumn(line: string, atColumn: number): boolean {
   if (atColumn === 1) return true;
@@ -109,25 +108,24 @@ export function createPromptMentionCompletionProvider(
   prompts: PromptReference[],
 ): languages.CompletionItemProvider {
   return {
-    triggerCharacters: ["@"],
+    triggerCharacters: ["@", " "],
     provideCompletionItems(
       model: editor.ITextModel,
       position: { lineNumber: number; column: number },
     ): languages.ProviderResult<languages.CompletionList> {
       const line = model.getLineContent(position.lineNumber);
       const textBefore = line.substring(0, position.column - 1);
+      const atIndex = textBefore.lastIndexOf("@");
+      const atColumn = atIndex + 1;
 
-      const nameMatch = textBefore.match(MENTION_NAME_PATTERN);
-      const namePrefix = nameMatch ? nameMatch[0] : "";
-      const atColumn = position.column - namePrefix.length - 1;
-
-      if (atColumn < 1 || line[atColumn - 1] !== "@" || !isMentionStartColumn(line, atColumn)) {
+      if (atIndex < 0 || !isMentionStartColumn(line, atColumn)) {
         return { suggestions: [] };
       }
 
+      const namePrefix = textBefore.slice(atIndex + 1);
       const range: IRange = {
         startLineNumber: position.lineNumber,
-        startColumn: atColumn + 1,
+        startColumn: position.column - namePrefix.length,
         endLineNumber: position.lineNumber,
         endColumn: position.column,
       };

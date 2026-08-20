@@ -14,10 +14,15 @@ spec: "../../specs/ui/settings-prompt-editor.md"
 
 - Selecting a placeholder at `{{|}}` produces exactly `{{key}}` and does not
   duplicate the existing closing braces.
+- Selecting a placeholder after `ta` in `{{ta_prompt}}` replaces the full
+  partial token name and produces exactly `{{key}}`.
 - Selecting a placeholder at an unfinished `{{|` still produces exactly
   `{{key}}`.
 - Saved-prompt completion labels remain `@name`, while typing a name prefix
   keeps matching suggestions available and selection still inserts `@name`.
+- Saved prompts with spaces remain filterable after typing a prefix such as
+  `@Daily `.
+- Two mounted prompt editors share one in-flight saved-prompt request.
 - Desktop and mobile shared prompt-editor flows retain the same behavior.
 
 ## Verification
@@ -29,6 +34,7 @@ From `apps`:
 
 ```bash
 pnpm --filter @kandev/web test -- --run components/settings/profile-edit/script-editor-completions.test.ts
+pnpm --filter @kandev/web test -- --run hooks/domains/settings/use-custom-prompts.test.tsx
 ```
 
 After the unit fix, rebuild the production web/backend artifacts required by
@@ -75,6 +81,14 @@ Report the RED failures, implementation result, files changed, exact commands
 and outcomes, any browser screenshot or cleanup evidence, and synchronized task
 and plan status.
 
+## Review fixup scope
+
+- Cover the partial `{{ta_prompt}}` replacement range and multi-word `@Daily `
+  filtering contract.
+- Deduplicate prompt loading for two mounted editors and deliver one settled
+  result to both consumers.
+- Use unique prompt fixtures and restore GitHub action presets in `finally`.
+
 ## Results
 
 - RED: `pnpm --filter @kandev/web test -- --run components/settings/profile-edit/script-editor-completions.test.ts` failed with the expected two assertions: `filterText` was undefined and `{{}}` completion returned `task_prompt}}`.
@@ -87,3 +101,6 @@ and plan status.
 - Desktop Playwright command passed 5/5; mobile Playwright command passed 1/1.
 - `pnpm run typecheck`, focused ESLint, and `git diff --check` passed.
 - No temporary browser artifacts were added; generated E2E failure artifacts were produced only under the existing ignored test-results directory.
+- Review fixup GREEN: the partial placeholder, multi-word mention, and
+  two-editor request regressions passed. Chromium passed 5/5 and mobile passed
+  1/1 after the fixture cleanup changes.

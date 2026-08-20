@@ -55,9 +55,9 @@ const prompts: PromptReference[] = [
 ];
 
 describe("createPromptMentionCompletionProvider", () => {
-  it("has @ as its only trigger character", () => {
+  it("triggers after @ and spaces so multi-word names can be filtered", () => {
     const provider = createPromptMentionCompletionProvider(monacoStub, prompts);
-    expect(provider.triggerCharacters).toEqual(["@"]);
+    expect(provider.triggerCharacters).toEqual(["@", " "]);
   });
 
   it("suggests prompts when @ is at the start of a line", () => {
@@ -104,6 +104,19 @@ describe("createPromptMentionCompletionProvider", () => {
     expect(suggestions[0].label).toBe("@changes-walkthrough");
     expect(suggestions[0].filterText).toBe("changes-walkthrough");
   });
+
+  it("keeps suggestions available while filtering a multi-word prompt name", () => {
+    const { suggestions } = complete(
+      [{ id: "1", name: "Daily Summary", content: "Summarize the daily work." }],
+      "@Daily ",
+      8,
+    );
+
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0].label).toBe("@Daily Summary");
+    expect(suggestions[0].filterText).toBe("Daily Summary");
+    expect(suggestions[0].range).toMatchObject({ startColumn: 2, endColumn: 8 });
+  });
 });
 
 describe("createPlaceholderCompletionProvider", () => {
@@ -115,6 +128,13 @@ describe("createPlaceholderCompletionProvider", () => {
     const { suggestions } = completePlaceholder(placeholders, "{{}}", 3);
 
     expect(suggestions[0].insertText).toBe("task_prompt");
+  });
+
+  it("replaces the remaining partial placeholder name before existing braces", () => {
+    const { suggestions } = completePlaceholder(placeholders, "{{ta_prompt}}", 5);
+
+    expect(suggestions[0].insertText).toBe("task_prompt");
+    expect(suggestions[0].range).toMatchObject({ startColumn: 3, endColumn: 12 });
   });
 
   it("adds one closing brace pair for an unfinished placeholder token", () => {

@@ -8,21 +8,30 @@ status: done
 
 ## Overview
 
-Correct two completion metadata errors in the shared Monaco prompt editor. The
-placeholder provider must account for closing braces already present after the
-cursor, and the saved-prompt provider must expose the prompt name as its
-filtering value while keeping the `@name` display label. The repair remains
-frontend-only and preserves the existing plain-text and save contracts.
+Correct completion metadata and loading races in the shared Monaco prompt
+editor. Placeholder completion must account for an unfinished name suffix
+before existing closing braces. Saved-prompt completion must expose the prompt
+name as its filtering value, keep the `@name` display label, and continue
+filtering across spaces in valid multi-word names. Multiple mounted editors
+must share one in-flight prompt request. The repair remains frontend-only and
+preserves the existing plain-text and save contracts.
 
 ## Confirmed Root Cause
 
 - For `{{|}}`, the placeholder provider uses the cursor-only replacement range
-  and always inserts `${key}}}`. The existing `}}` remains after the cursor, so
-  selection produces `{{key}}}}`.
-- For `@c`, the saved-prompt provider uses an `@name` label but its replacement
-  range starts after `@`. Monaco filters the typed name prefix against the
-  label when `filterText` is absent, so a valid prefix such as `c` does not
-  match the label's first character, `@`.
+  and always inserts `${key}}}`. The existing `}}` remains after the cursor,
+  so selection produces `{{key}}}}`. The same range bug leaves a suffix such
+  as `_prompt}}` behind when the cursor is inside `{{ta_prompt}}`.
+- For `@c`, the saved-prompt provider uses an `@name` label but its
+  replacement range starts after `@`. Monaco filters the typed name prefix
+  against the label when `filterText` is absent, so a valid prefix such as
+  `c` does not match the label's first character, `@`.
+- The `[\w-]*` mention-prefix pattern stops at a space. A valid prompt named
+  `Daily Summary` therefore loses its mention start when the user types
+  `@Daily `.
+- Every mounted editor can observe `loading=false` in the same render and
+  start its own request. A late failure can then overwrite the shared prompt
+  list with an empty result.
 
 ## Frontend
 
@@ -31,11 +40,17 @@ frontend-only and preserves the existing plain-text and save contracts.
 Update `apps/web/components/settings/profile-edit/script-editor-completions.ts`:
 
 - Make placeholder completion insert only the placeholder name when the text
-  after the cursor already starts with `}}`.
+  after the cursor contains the remaining placeholder name followed by `}}`.
+  Extend the replacement range across that suffix.
 - Keep the existing insertion of one closing pair for an unfinished token.
 - Set each saved-prompt completion item's `filterText` to `prompt.name` while
   retaining the `@${prompt.name}` display label and the existing insertion
   value.
+- Find the whitespace-bounded mention start directly, use the complete
+  substring after `@` as the active prefix, and retrigger completion after a
+  space.
+- Share an in-flight `listPrompts` request across mounted hook instances while
+  applying the settled result to each subscribing store consumer.
 
 No component API, backend contract, persistence format, or mobile composition
 changes are required.
@@ -65,6 +80,24 @@ changes are required.
   **Files:** `apps/web/e2e/tests/integrations/github-quick-action-prompt-autocomplete.spec.ts`
   and its mobile counterpart.
 
+## Review fixup scope
+
+The review follow-up extends the original repair with these cases:
+
+- A partially typed `{{ta_prompt}}` replaces the remaining name suffix before
+  existing `}}` and inserts only the selected key.
+- A whitespace-bounded mention such as `@Daily ` keeps a valid multi-word
+  prompt name available. Space retriggers use the full text after `@` as the
+  active replacement range.
+- Two mounted prompt editors share one in-flight `listPrompts` request, and
+  each consumer receives the settled result.
+- Desktop and mobile fixtures use unique prompt names. The GitHub quick-action
+  fixture resets action presets in `finally` after it saves a draft.
+
+The focused provider suite and hook suite cover the first three cases. The
+existing desktop and mobile completion scenarios cover browser filtering and
+cleanup.
+
 ## Verification Results
 
 - RED: `pnpm --filter @kandev/web test -- --run components/settings/profile-edit/script-editor-completions.test.ts` failed as expected with 2 regression failures: duplicated placeholder braces and missing saved-prompt `filterText`.
@@ -75,6 +108,15 @@ changes are required.
 - `pnpm run typecheck` passed.
 - Focused ESLint passed for the changed completion source and unit test.
 - `git diff --check` passed. No temporary source or browser fixture files remain.
+- Review fixup RED: provider regressions failed for the partial placeholder and
+  multi-word mention, while the two-editor hook regression observed two prompt
+  requests.
+- Review fixup GREEN: focused provider, hook, shared-editor, and Monaco suites
+  passed 21 tests; web typecheck and focused ESLint passed.
+- Review fixup GREEN: `make build-backend build-web-e2e
+  build-e2e-plugin-package` passed; Chromium coverage passed 5/5 and mobile
+  coverage passed 1/1. The GitHub test completed its prompt and preset cleanup.
+- Review fixup GREEN: `git diff --check` passed.
 
 ## Implementation Waves And Parallel Candidates
 

@@ -15,7 +15,7 @@ test.describe("GitHub quick action prompt autocomplete", () => {
   }) => {
     test.setTimeout(90_000);
     const prompt = await apiClient.createPrompt(
-      "e2e-github-action-prompt",
+      `e2e-github-action-prompt-${Date.now()}`,
       "Reusable review guidance",
     );
 
@@ -65,6 +65,7 @@ test.describe("GitHub quick action prompt autocomplete", () => {
       });
     } finally {
       await apiClient.deletePrompt(prompt.id).catch(() => undefined);
+      await apiClient.resetGitHubActionPresets(seedData.workspaceId).catch(() => undefined);
     }
   });
 });

@@ -81,7 +81,7 @@ test.describe("Workflow step prompt autocomplete", () => {
     seedData,
     apiClient,
   }) => {
-    const promptName = `c-e2e-mention-prompt-${Date.now()}`;
+    const promptName = `Daily Summary ${Date.now()}`;
     await apiClient.createPrompt(promptName, "Some reusable prompt content for e2e mentions.");
 
     try {
@@ -105,8 +105,8 @@ test.describe("Workflow step prompt autocomplete", () => {
       // textarea. See the note in the first test.
       await expect(monacoEditor.locator(".native-edit-context")).toBeFocused({ timeout: 5_000 });
 
-      // Type a name prefix to trigger and filter the prompt-mention autocomplete
-      await testPage.keyboard.type("@c");
+      // Type a multi-word name prefix to trigger and filter the prompt-mention autocomplete
+      await testPage.keyboard.type("@Daily ");
 
       // The Monaco suggest widget should appear with the seeded prompt
       const suggestWidget = testPage.locator(".monaco-editor .suggest-widget");

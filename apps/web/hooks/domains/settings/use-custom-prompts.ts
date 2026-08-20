@@ -3,10 +3,29 @@
 import { useEffect } from "react";
 import { listPrompts } from "@/lib/api";
 import { useAppStore } from "@/components/state-provider";
+import type { CustomPrompt } from "@/lib/types/http";
 
 type UseCustomPromptsOptions = {
   enabled?: boolean;
 };
+
+let inFlightPromptsRequest: Promise<CustomPrompt[]> | null = null;
+
+function requestPrompts() {
+  if (inFlightPromptsRequest) return inFlightPromptsRequest;
+
+  const request = listPrompts({ cache: "no-store" }).then((response) => response.prompts ?? []);
+  inFlightPromptsRequest = request;
+  void request.then(
+    () => {
+      if (inFlightPromptsRequest === request) inFlightPromptsRequest = null;
+    },
+    () => {
+      if (inFlightPromptsRequest === request) inFlightPromptsRequest = null;
+    },
+  );
+  return request;
+}
 
 export function useCustomPrompts({ enabled = true }: UseCustomPromptsOptions = {}) {
   const prompts = useAppStore((state) => state.prompts.items);
@@ -18,9 +37,9 @@ export function useCustomPrompts({ enabled = true }: UseCustomPromptsOptions = {
   useEffect(() => {
     if (!enabled || loaded || loading) return;
     setPromptsLoading(true);
-    listPrompts({ cache: "no-store" })
-      .then((response) => {
-        setPrompts(response.prompts ?? []);
+    requestPrompts()
+      .then((nextPrompts) => {
+        setPrompts(nextPrompts);
       })
       .catch(() => {
         setPrompts([]);

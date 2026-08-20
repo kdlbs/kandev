@@ -21,6 +21,9 @@ Prompt fields in Settings use different editors and completion rules. Users cann
 - Typing `@` shows saved prompts when the runtime resolves saved-prompt references for that field.
 - Typing a name prefix after `@` keeps saved prompts whose names match that
   prefix available for selection.
+- Prompt names may contain spaces. The active mention starts at a
+  whitespace-bounded `@`, and the full text after it remains part of the
+  filtering range while the user types.
 - A selected saved prompt inserts its `@name` reference. The editor does not inline or copy the saved prompt content.
 - The saved-prompt list updates when a prompt is added, edited, or removed.
 - A custom prompt can reference other saved prompts. Its editor does not suggest the prompt that is currently open.
@@ -51,6 +54,8 @@ The shared editor does not replace script, query, JSON, or description fields. T
 - If a field has no configured placeholders, `{{` shows no placeholder items.
 - If Monaco loads slowly, the field shows the existing localized editor loading state. The controlled draft remains unchanged.
 - If two prompt editors are mounted together, each editor uses only its own placeholders and saved-prompt rules.
+- Concurrent mounted editors share one in-flight saved-prompt request. A
+  failed request cannot replace a successful result from another editor.
 
 ## Persistence guarantees
 
@@ -69,8 +74,15 @@ Selecting a completion item changes only the local draft. The existing settings 
 - **GIVEN** an editor contains an unfinished `{{` token, **WHEN** the user
   selects `{{task_prompt}}`, **THEN** the draft contains exactly
   `{{task_prompt}}` with one closing brace pair.
+- **GIVEN** an editor contains `{{ta_prompt}}` with the cursor after `ta`,
+  **WHEN** the user selects `{{task_prompt}}`, **THEN** the partial name and
+  its existing suffix are replaced and the draft contains exactly
+  `{{task_prompt}}`.
 - **GIVEN** a saved prompt named `changes-walkthrough`, **WHEN** a user types
   `@c`, **THEN** the completion list keeps `@changes-walkthrough` available.
+- **GIVEN** a saved prompt named `Daily Summary`, **WHEN** a user types
+  `@Daily `, **THEN** the completion list keeps `@Daily Summary` available
+  and selecting it inserts the complete mention.
 - **GIVEN** two open editors with different placeholder lists, **WHEN** a user types `{{` in either editor, **THEN** only that editor's placeholders appear.
 - **GIVEN** an open workflow prompt, **WHEN** another route adds a saved prompt, **THEN** the next `@` list includes it.
 - **GIVEN** a custom prompt named `release`, **WHEN** the user edits `release` and types `@`, **THEN** the list omits `@release` and includes other saved prompts.
