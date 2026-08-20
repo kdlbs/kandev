@@ -66,7 +66,7 @@ func scpStyleHTTPSCloneURL(value string) string {
 	if !found || host == "" || strings.Contains(host, "/") {
 		return ""
 	}
-	if !isSafeRawAuthority(user + "@" + host) {
+	if !IsSafeRawAuthority(user + "@" + host) {
 		return ""
 	}
 	path = strings.TrimPrefix(path, "/")
@@ -102,11 +102,11 @@ func ValidateHTTPSCloneOrigin(cloneURL, providerHost string) error {
 
 func hasSafeRawAuthority(value string) bool {
 	authority, found := rawAuthority(value)
-	return found && isSafeRawAuthority(authority)
+	return found && IsSafeRawAuthority(authority)
 }
 
 func rawAuthority(value string) (string, bool) {
-	if schemeEnd := strings.Index(value, "://"); schemeEnd >= 0 {
+	if schemeEnd := strings.Index(value, "://"); schemeEnd >= 0 && isURLScheme(value[:schemeEnd]) {
 		value = value[schemeEnd+len("://"):]
 	}
 	if authorityEnd := strings.IndexAny(value, "/?#"); authorityEnd >= 0 {
@@ -115,11 +115,29 @@ func rawAuthority(value string) (string, bool) {
 	return value, value != ""
 }
 
-func isSafeRawAuthority(authority string) bool {
+// IsSafeRawAuthority reports whether a raw authority stays ASCII-only and
+// percent-free before any URL parsing or case folding can reinterpret it.
+func IsSafeRawAuthority(authority string) bool {
 	for i := 0; i < len(authority); i++ {
 		if authority[i] > 0x7f || authority[i] == '%' {
 			return false
 		}
 	}
 	return true
+}
+
+func isURLScheme(value string) bool {
+	if value == "" || !isASCIILetter(value[0]) {
+		return false
+	}
+	for i := 1; i < len(value); i++ {
+		if !isASCIILetter(value[i]) && (value[i] < '0' || value[i] > '9') && value[i] != '+' && value[i] != '-' && value[i] != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIILetter(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'
 }

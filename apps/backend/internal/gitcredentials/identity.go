@@ -177,7 +177,7 @@ func repositoryIdentityError(repositoryID, detail string) error {
 
 func hasSafeRemoteAuthority(value string) bool {
 	authority, found := rawRemoteAuthority(value)
-	return found && isSafeRawAuthority(authority)
+	return found && repoclone.IsSafeRawAuthority(authority)
 }
 
 func rawRemoteAuthority(value string) (string, bool) {
@@ -203,7 +203,7 @@ func hasSafeProviderHostAuthority(value string) bool {
 		value = value[schemeEnd+len("://"):]
 	}
 	authority, found := authorityBeforePath(value)
-	return found && isSafeRawAuthority(authority)
+	return found && repoclone.IsSafeRawAuthority(authority)
 }
 
 func authorityBeforePath(value string) (string, bool) {
@@ -227,13 +227,4 @@ func isURLScheme(value string) bool {
 
 func isASCIILetter(value byte) bool {
 	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'
-}
-
-func isSafeRawAuthority(authority string) bool {
-	for i := 0; i < len(authority); i++ {
-		if authority[i] > 0x7f || authority[i] == '%' {
-			return false
-		}
-	}
-	return true
 }

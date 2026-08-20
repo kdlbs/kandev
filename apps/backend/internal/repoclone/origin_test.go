@@ -46,6 +46,9 @@ func TestCanonicalHTTPSCloneURL(t *testing.T) {
 func TestHTTPSProviderOriginRejectsUnsafeAuthority(t *testing.T) {
 	t.Parallel()
 	for _, providerHost := range []string{
+		"gİthub.com",
+		"g%C4%B0thub.com",
+		"g%25C4%25B0thub.com",
 		"https://gİthub.com",
 		"https://g%C4%B0thub.com",
 		"https://g%25C4%25B0thub.com",
@@ -117,6 +120,12 @@ func TestValidateHTTPSCloneOrigin(t *testing.T) {
 			name:         "unsafe provider authority",
 			cloneURL:     "https://github.com/acme/widgets.git",
 			providerHost: "https://gİthub.com",
+			wantErr:      true,
+		},
+		{
+			name:         "bare Unicode provider authority",
+			cloneURL:     "https://github.com/acme/widgets.git",
+			providerHost: "gİthub.com",
 			wantErr:      true,
 		},
 	}
