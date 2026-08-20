@@ -1,10 +1,18 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { IconAlertTriangle, IconGitBranch, IconTerminal2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type {
@@ -22,57 +30,60 @@ import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { buildBranchKeywords } from "./task-create-dialog-pill";
 
 type OptionItem = {
   value: string;
   label: string;
   renderLabel: () => React.ReactNode;
+  renderTriggerLabel?: () => React.ReactNode;
   disabled?: boolean;
   disabledReason?: string;
 };
 
 function ModelProbeWarning({ note }: { note: string }) {
-  const [open, setOpen] = useState(false);
-  const pointerTypeRef = useRef<string | null>(null);
+  const usesTouchDrawer = useTouchDrawer();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const trigger = (
+    <button
+      type="button"
+      className="inline-flex min-h-11 min-w-8 shrink-0 cursor-help items-center justify-center rounded-sm border-0 bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      aria-label={note}
+      aria-expanded={usesTouchDrawer ? drawerOpen : undefined}
+      aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
+      data-testid="agent-profile-model-probe-warning"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <IconAlertTriangle className="size-3.5 text-amber-500" aria-hidden />
+    </button>
+  );
+
+  if (usesTouchDrawer) {
+    return (
+      <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle className="sr-only">{note}</DrawerTitle>
+            <DrawerDescription>{note}</DrawerDescription>
+          </DrawerHeader>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
 
   return (
-    <Tooltip
-      open={open}
-      onOpenChange={(nextOpen) => {
-        // Radix does not open tooltips from touch pointers. Keep its normal
-        // focus/hover behavior, then let the explicit tap handler below open
-        // the advisory on mobile.
-        if (nextOpen && pointerTypeRef.current === "touch") return;
-        setOpen(nextOpen);
-      }}
-    >
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          className="inline-flex min-h-11 min-w-8 shrink-0 cursor-help items-center justify-center rounded-sm border-0 bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label={note}
-          aria-expanded={open}
-          data-testid="agent-profile-model-probe-warning"
-          onPointerDown={(event) => {
-            pointerTypeRef.current = event.pointerType;
-            event.stopPropagation();
-          }}
-          onClick={(event) => {
-            event.stopPropagation();
-            if (pointerTypeRef.current === "touch") {
-              setOpen((currentlyOpen) => !currentlyOpen);
-            }
-            pointerTypeRef.current = null;
-          }}
-          onBlur={() => setOpen(false)}
-        >
-          <IconAlertTriangle className="size-3.5 text-amber-500" aria-hidden />
-        </button>
-      </TooltipTrigger>
+    <Tooltip>
+      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
       <TooltipContent side="top">{note}</TooltipContent>
     </Tooltip>
   );
+}
+
+function ModelProbeWarningIndicator({ note }: { note: string }) {
+  return <IconAlertTriangle className="size-3.5 text-amber-500" title={note} aria-hidden />;
 }
 
 export function useRepositoryOptions(
@@ -196,38 +207,44 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
       const modelProbeNote = startModelGone
         ? t("settings:profileStartModelNotAdvertisedOnHost", { model: profile.model })
         : undefined;
+      const renderProfileLabel = (modelProbeWarning: React.ReactNode) => (
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="flex shrink-0 items-center justify-between gap-2">
+            <span className="flex shrink-0 items-center gap-1.5">
+              <AgentLogo agentName={profile.agent_name} className="shrink-0" />
+              <span>{agentLabel}</span>
+              {warning && (
+                <warning.Icon className={`size-3.5 ${warning.color}`} title={warning.title} />
+              )}
+              {modelProbeWarning}
+            </span>
+            <span className="flex shrink-0 items-center gap-1.5">
+              {isPassthrough && (
+                <IconTerminal2
+                  className="size-3.5 text-muted-foreground"
+                  title={t("common:cliModeYourPromptWillBe")}
+                />
+              )}
+              {profileLabel ? (
+                <ScrollOnOverflow className="rounded-full border border-border px-2 py-0.5 text-xs">
+                  {profileLabel}
+                </ScrollOnOverflow>
+              ) : null}
+            </span>
+          </span>
+        </span>
+      );
       return {
         value: profile.id,
         label: profile.label,
         disabled: undefined,
         disabledReason: undefined,
-        renderLabel: () => (
-          <span className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="flex shrink-0 items-center justify-between gap-2">
-              <span className="flex shrink-0 items-center gap-1.5">
-                <AgentLogo agentName={profile.agent_name} className="shrink-0" />
-                <span>{agentLabel}</span>
-                {warning && (
-                  <warning.Icon className={`size-3.5 ${warning.color}`} title={warning.title} />
-                )}
-                {modelProbeNote && <ModelProbeWarning note={modelProbeNote} />}
-              </span>
-              <span className="flex shrink-0 items-center gap-1.5">
-                {isPassthrough && (
-                  <IconTerminal2
-                    className="size-3.5 text-muted-foreground"
-                    title={t("common:cliModeYourPromptWillBe")}
-                  />
-                )}
-                {profileLabel ? (
-                  <ScrollOnOverflow className="rounded-full border border-border px-2 py-0.5 text-xs">
-                    {profileLabel}
-                  </ScrollOnOverflow>
-                ) : null}
-              </span>
-            </span>
-          </span>
-        ),
+        renderLabel: () =>
+          renderProfileLabel(modelProbeNote ? <ModelProbeWarning note={modelProbeNote} /> : null),
+        renderTriggerLabel: () =>
+          renderProfileLabel(
+            modelProbeNote ? <ModelProbeWarningIndicator note={modelProbeNote} /> : null,
+          ),
       };
     });
   }, [agentProfiles, availableAgents, t]);

@@ -11,9 +11,10 @@ status: implemented
 Replace the always-visible host-probe mismatch sentence in the shared agent
 profile option renderer with a single warning icon. The profile remains
 selectable, and the existing localized sentence remains available through a
-focusable and hoverable tooltip. The change is frontend-only and covers every
-consumer of `useAgentProfileOptions`, including task creation, new sessions,
-subtasks, Quick Chat, and Office setup.
+focusable and hoverable tooltip on fine pointers or a drawer on coarse
+pointers. The change is frontend-only and covers every consumer of
+`useAgentProfileOptions`, including task creation, new sessions, subtasks,
+Quick Chat, and Office setup.
 
 ## Frontend
 
@@ -21,25 +22,29 @@ subtasks, Quick Chat, and Office setup.
 
 - `apps/web/components/task-create-dialog-options.tsx`
   - Keep `modelProbeNote` derived from the existing host catalog comparison.
-  - Render it as one amber `IconAlertTriangle` tooltip trigger instead of a
-    persistent text row.
+  - Render it as one amber `IconAlertTriangle` tooltip/drawer trigger instead
+    of a persistent text row.
   - Give the trigger a stable test id, accessible label, focus behavior, and a
     touch-usable hit area. Preserve the existing capability warning and
     terminal-mode indicators.
-  - Keep the trigger inside the option label so the behavior is reused by all
-    existing profile-picker consumers without changing selection state.
+  - Keep the interactive trigger inside dropdown options, and render a
+    noninteractive warning indicator in the selected combobox trigger so the
+    shared option renderer never nests a button inside the combobox button.
+
+- `apps/web/components/combobox.tsx`
+  - Allow an option to provide a selected-trigger renderer distinct from its
+    dropdown renderer.
 
 ## Mobile contract
 
 - Desktop and mobile keep the existing `AgentSelector` combobox and option
   list. The warning is supplementary and never blocks profile selection.
-- The warning icon is a focusable/hoverable disclosure in the option row; the
-  option list remains the single scroll owner and keeps its existing viewport
-  containment.
-- The nearest shipped pattern is the existing Radix tooltip usage in the
-  shared web UI and `Combobox` disabled-option reasons. No new mobile surface
-  is needed because the text is short advisory context and the trigger remains
-  reachable by touch/focus.
+- The warning icon is a focusable/hoverable disclosure in the option row on
+  fine pointers, and opens the shared coarse-pointer drawer on touch devices.
+  The option list remains the single scroll owner and keeps its existing
+  viewport containment.
+- Reuse the existing Radix tooltip and `useTouchDrawer`/Drawer patterns from
+  the shared web UI.
 
 ## Tests
 
@@ -65,16 +70,16 @@ subtasks, Quick Chat, and Office setup.
 ### Mobile E2E
 
 - **Scenario:** the same mismatched profile is reachable in the mobile create
-  task picker; tapping or focusing the warning icon reveals the message.
+  task picker; tapping the warning icon opens the advisory drawer.
 - **File:** `apps/web/e2e/tests/settings/mobile-no-silent-model-fallback.spec.ts`
-- **What to verify:** the icon is reachable by touch, the tooltip/disclosure is
-  visible, the profile remains enabled, and the document has no horizontal
-  overflow.
+- **What to verify:** the icon is reachable by touch, the drawer is visible,
+  the profile remains enabled, and the document has no horizontal overflow.
 
 ## Verification Results
 
 - `cd apps && pnpm install --frozen-lockfile` — passed.
-- `cd apps/web && pnpm vitest run components/task-create-dialog-options.test.tsx` — passed, 16 tests.
+- `cd apps/web && pnpm vitest run components/task-create-dialog-options.test.tsx` — passed, 17 tests.
+- `cd apps/web && pnpm exec eslint components/combobox.tsx components/task-create-dialog-options.tsx components/task-create-dialog-options.test.tsx e2e/tests/settings/no-silent-model-fallback.spec.ts e2e/tests/settings/mobile-no-silent-model-fallback.spec.ts` — passed.
 - `cd apps/web && pnpm run typecheck` — passed.
 - `cd apps/web && pnpm run i18n:ratchet` — passed, zero new or modified violations.
 - `cd apps/web && pnpm e2e:run --project chromium tests/settings/no-silent-model-fallback.spec.ts` — passed, 1 test.
@@ -82,6 +87,8 @@ subtasks, Quick Chat, and Office setup.
 - `git diff --check` — passed.
 - Fresh synthetic desktop and mobile screenshots were captured, inspected, and
   compressed for the PR description.
+- Review remediation: the selected trigger now uses a noninteractive
+  indicator, and coarse-pointer inspection uses a Drawer instead of a tooltip.
 
 ## Implementation Waves And Parallel Candidates
 

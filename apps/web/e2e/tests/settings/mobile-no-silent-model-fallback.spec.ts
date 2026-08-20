@@ -33,7 +33,7 @@ test.describe("executor-authoritative model selection on mobile", () => {
       await warning.tap();
       await expect(
         testPage
-          .locator('[data-slot="tooltip-content"]:not([data-state="closed"])')
+          .locator('[data-slot="drawer-content"][data-state="open"]')
           .filter({ hasText: warningText }),
       ).toBeVisible();
       await assertNoDocumentHorizontalOverflow(testPage, "mobile model mismatch selector");

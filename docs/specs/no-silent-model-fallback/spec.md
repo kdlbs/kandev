@@ -369,9 +369,10 @@ This difference is advisory only.
 
 - Every profile remains selectable.
 - A missing host model shows one amber warning icon beside the profile name.
-- Hovering or focusing the warning icon reveals the full localized advisory
-  that the executor decides availability at launch. The advisory is not shown
-  as an always-visible secondary row in the option list.
+- On fine pointers, hovering or focusing the warning icon reveals the full
+  localized advisory that the executor decides availability at launch. On
+  coarse pointers, tapping the icon opens the same advisory in a drawer. The
+  advisory is not shown as an always-visible secondary row in the option list.
 - The warning does not promise that an explicit fallback will be available.
 - The warning does not change the saved profile model.
 
@@ -442,7 +443,7 @@ E2E (Playwright, `apps/web/e2e`):
 - Mock backend (`KANDEV_E2E_MOCK=true`): create a profile whose start model
   is not in the host catalog. Make sure that the task-create picker keeps the
   profile selectable, shows one warning icon, and reveals the advisory warning
-  when the icon is hovered or focused.
+  through the fine-pointer tooltip or coarse-pointer drawer.
 - Launch with an executor catalog that omits the profile model. Make sure that
   no model-selection call occurs, the task continues, and chat shows one warning.
 - Reload the task page. Make sure that the warning remains in chat.

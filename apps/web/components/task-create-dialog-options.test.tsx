@@ -207,6 +207,21 @@ describe("useAgentProfileOptions executor-authoritative model hint", () => {
     );
   });
 
+  it("uses a non-interactive warning indicator in the selected trigger", () => {
+    const { result } = renderHook(() =>
+      useAgentProfileOptions([profileOption({ model: GONE_MODEL })]),
+    );
+
+    render(
+      <TooltipProvider>
+        <div>{result.current[0]?.renderTriggerLabel?.()}</div>
+      </TooltipProvider>,
+    );
+
+    expect(screen.queryByTestId(MODEL_PROBE_WARNING_TEST_ID)).toBeNull();
+    expect(screen.getByTitle(/claude-gone/)).toBeTruthy();
+  });
+
   it("does not gate when the agent model list is unknown (probe not landed)", () => {
     setAvailableAgents([]);
     const option = renderOptions([profileOption({ model: GONE_MODEL })]);

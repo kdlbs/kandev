@@ -35,6 +35,8 @@ test.describe("executor-authoritative model selection", () => {
           .locator('[data-slot="tooltip-content"]:not([data-state="closed"])')
           .filter({ hasText: warningText }),
       ).toBeVisible();
+      await option.click();
+      await expect(selector.locator("button")).toHaveCount(0);
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true).catch(() => {});
     }
