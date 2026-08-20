@@ -37,7 +37,7 @@ export function registerOfficeHandlers(store: StoreApi<AppState>): WsHandlers {
   // writing office.tasks.items directly, so a raw wire status (e.g.
   // "SCHEDULING") gets the same normalization as API-sourced task loads.
   const updateTaskStatus = (taskId: string, fields: Record<string, unknown>) => {
-    store.getState().patchTaskInStore(taskId, fields as Partial<OfficeTaskType>);
+    store.getState().patchTaskInStore(taskId, fields as Partial<OfficeTask>);
   };
 
   return {
@@ -288,5 +288,3 @@ function normalizeIssueFields(p: Record<string, unknown>): Record<string, unknow
   if (p.assignee_agent_profile_id != null) out.assigneeAgentProfileId = p.assignee_agent_profile_id;
   return out;
 }
-
-type OfficeTaskType = OfficeTask;
