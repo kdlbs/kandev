@@ -552,6 +552,16 @@ func (s *Service) inheritParentRepositories(ctx context.Context, req *CreateTask
 // projectIDForTask) with no ancestry walk or fallback, so a subtask left
 // projectless never rolls up to its tree's budget even though its parent
 // has one.
+//
+// CreateTask authorizes only req.WorkspaceID, never the parent, and the MCP
+// create-task path deliberately allows an explicit req.WorkspaceID that
+// differs from the parent's (TestHandleCreateTask_SubtaskHonorsExplicitWorkspaceAndWorkflow) —
+// so a workspace mismatch cannot be rejected outright without breaking that
+// flow. Inheritance is skipped instead: a caller authorized only for
+// workspace A that passes a parent from workspace B gets a projectless
+// subtask in A, never B's project silently attributed to A. This mirrors
+// the pre-fix behavior for every subtask (blank project) rather than
+// introducing a new failure mode.
 func (s *Service) inheritParentProject(ctx context.Context, req *CreateTaskRequest) error {
 	if req.ParentID == "" || req.ProjectID != "" {
 		return nil
@@ -559,6 +569,9 @@ func (s *Service) inheritParentProject(ctx context.Context, req *CreateTaskReque
 	parent, err := s.tasks.GetTask(ctx, req.ParentID)
 	if err != nil {
 		return fmt.Errorf("get parent task for project inheritance: %w", err)
+	}
+	if parent.WorkspaceID != req.WorkspaceID {
+		return nil
 	}
 	req.ProjectID = parent.ProjectID
 	return nil

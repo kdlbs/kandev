@@ -451,3 +451,63 @@ func TestCreateTask_SubtaskOfSubtask_Office_Allowed(t *testing.T) {
 		t.Errorf("parent_id = %q, want %q", got.ParentID, child.ID)
 	}
 }
+
+// Regression: a caller authorized only for req.WorkspaceID must not have a
+// foreign workspace's project silently attributed to a subtask it creates.
+// Explicit cross-workspace subtask creation is itself a supported MCP flow
+// (TestHandleCreateTask_SubtaskHonorsExplicitWorkspaceAndWorkflow), so this
+// must not reject the create outright — only project inheritance is at
+// stake. Without this guard, POST /tasks with a foreign parent_id and no
+// project_id landed a task in the caller's workspace carrying another
+// workspace's project id: cost attribution leaking across a workspace
+// boundary, the same class of bug this card exists to close, pointed
+// sideways instead of down the tree.
+func TestCreateTask_Subtask_CrossWorkspaceParentDoesNotInheritForeignProject(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+
+	ws, err := repo.GetWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	officeWorkflowID := ws.OfficeWorkflowID
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Other Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace ws-2: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-2", Name: "Board"}); err != nil {
+		t.Fatalf("CreateWorkflow wf-2: %v", err)
+	}
+
+	foreignParentResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-2",
+		WorkflowID:  "wf-2",
+		Title:       "Foreign parent",
+		ProjectID:   "proj-ws2",
+	})
+	if err != nil {
+		t.Fatalf("create foreign parent: %v", err)
+	}
+	foreignParent := foreignParentResult.Task
+
+	childResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  officeWorkflowID,
+		ParentID:    foreignParent.ID,
+		Title:       "Child",
+		Origin:      models.TaskOriginAgentCreated,
+	})
+	if err != nil {
+		t.Fatalf("create child with cross-workspace parent: %v", err)
+	}
+	child := childResult.Task
+	if child.WorkspaceID != "ws-1" {
+		t.Errorf("workspace_id = %q, want ws-1 (the requested, authorized workspace)", child.WorkspaceID)
+	}
+	if child.ProjectID == "proj-ws2" {
+		t.Fatalf("project_id = %q: leaked workspace ws-2's project into a ws-1 task", child.ProjectID)
+	}
+	if child.ProjectID != "" {
+		t.Errorf("project_id = %q, want empty (no same-workspace project to inherit)", child.ProjectID)
+	}
+}
