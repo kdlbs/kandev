@@ -526,6 +526,20 @@ func (s *Service) hasBackgroundTask(sessionID, toolCallID string, executionIDs .
 	return work.executionID == executionIDs[0]
 }
 
+// hasOutstandingBackgroundWork is the conservative stale-settlement guard for
+// live adapter-attested background work. This is observation state, not a
+// persistence authority: if it is present, an exact-turn settlement must not
+// interrupt the still-owned work; if it is absent after a restart, the durable
+// completion intent and its quiet grace remain the settlement evidence.
+func (s *Service) hasOutstandingBackgroundWork(sessionID string) bool {
+	ta := s.lockTurnActivity(sessionID, false)
+	if ta == nil {
+		return false
+	}
+	defer ta.mu.Unlock()
+	return len(ta.background) > 0
+}
+
 // completeBackgroundTaskForExecution clears a previously-registered background
 // task, scoped to the execution that owns it (an empty executionID matches any
 // owner — see the test-only completeBackgroundTask wrapper). When no

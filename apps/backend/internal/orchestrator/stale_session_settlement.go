@@ -32,6 +32,14 @@ type sessionControlEventStore interface {
 	CreateSessionControlEvent(ctx context.Context, event *models.SessionControlEvent) error
 }
 
+// pendingTurnToolCallStore lets stale settlement prove that no unfinished tool
+// call is still owned by the captured turn. It is intentionally a narrow
+// optional repository capability so older test doubles fail closed instead of
+// silently widening stale-settlement authority.
+type pendingTurnToolCallStore interface {
+	HasPendingToolCallsForTurn(ctx context.Context, turnID string) (bool, error)
+}
+
 // SettleStaleSession settles only the current durable turn named by request.
 // An eligible completion intent is both the terminal evidence and the quiet
 // grace proof; general long-running turns remain ineligible by design.
@@ -94,6 +102,9 @@ func (s *Service) staleSettlementStores() (completionIntentReconciliationStore, 
 }
 
 func (s *Service) staleSettlementCandidate(ctx context.Context, store completionIntentReconciliationStore, request StaleSessionSettlementRequest) (*models.CompletionIntent, string) {
+	if s.isCancelInFlight(request.TargetSessionID) {
+		return nil, "cancellation_in_flight"
+	}
 	session, err := s.repo.GetTaskSession(ctx, request.TargetSessionID)
 	if err != nil || session == nil {
 		return nil, "session_not_running"
@@ -105,14 +116,39 @@ func (s *Service) staleSettlementCandidate(ctx context.Context, store completion
 	if err != nil || turn == nil || turn.ID != request.TargetTurnID {
 		return nil, "successor_or_missing_turn"
 	}
-	if staleSettlementHasPromptReservation(turn.Metadata) {
-		return nil, "prompt_reservation"
+	if evidence := s.staleSettlementAdministrativeOwnershipEvidence(ctx, request, turn); evidence != "" {
+		return nil, evidence
 	}
 	intent, err := store.GetCompletionIntentForTurn(ctx, request.TargetSessionID, request.TargetTurnID)
 	if err != nil || !completionIntentIsEligible(intent, request.TargetTaskID) {
 		return nil, "completion_evidence_missing"
 	}
 	return intent, ""
+}
+
+func (s *Service) staleSettlementAdministrativeOwnershipEvidence(
+	ctx context.Context,
+	request StaleSessionSettlementRequest,
+	turn *models.Turn,
+) string {
+	if staleSettlementHasPromptReservation(turn.Metadata) {
+		return "prompt_reservation"
+	}
+	if s.hasOutstandingBackgroundWork(request.TargetSessionID) {
+		return "background_work"
+	}
+	pendingTools, ok := s.repo.(pendingTurnToolCallStore)
+	if !ok {
+		return "pending_tool_check_unavailable"
+	}
+	pending, err := pendingTools.HasPendingToolCallsForTurn(ctx, request.TargetTurnID)
+	if err != nil {
+		return "pending_tool_check_failed"
+	}
+	if pending {
+		return "pending_tool_call"
+	}
+	return ""
 }
 
 func completionIntentIsEligible(intent *models.CompletionIntent, taskID string) bool {
