@@ -2,12 +2,14 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/worktree"
 )
@@ -61,6 +63,92 @@ func TestCreateLaunchInstanceRequiresGitMetadataAttestation(t *testing.T) {
 	}
 }
 
+func TestStandaloneGitMetadataPreflightRendersCodexPolicy(t *testing.T) {
+	projection := newLinkedGitMetadataProjection(t)
+	codexHome := t.TempDir()
+	runtime := &StandaloneExecutor{}
+	req := &ExecutorCreateRequest{
+		WorkspacePath:          projection.CheckoutPath,
+		GitMetadataProjections: []*worktree.GitMetadataProjection{projection},
+		AgentConfig:            agents.NewCodexACP(),
+		Env: map[string]string{
+			"CODEX_HOME":   codexHome,
+			"CODEX_CONFIG": `{"approval_policy":"never","permissions":{"existing":{"network":{"enabled":true}}}}`,
+		},
+	}
+
+	if err := preflightGitMetadataProjection(context.Background(), runtime, req); err != nil {
+		t.Fatalf("preflightGitMetadataProjection() error = %v", err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal([]byte(req.Env["CODEX_CONFIG"]), &config); err != nil {
+		t.Fatalf("decode CODEX_CONFIG: %v", err)
+	}
+	if got := config["approval_policy"]; got != "never" {
+		t.Fatalf("approval policy = %#v, want preserved value", got)
+	}
+	permissions, ok := config["permissions"].(map[string]any)
+	if !ok {
+		t.Fatalf("permissions = %#v, want object", config["permissions"])
+	}
+	if _, ok := permissions["existing"]; !ok {
+		t.Fatalf("existing policy lost: %#v", permissions)
+	}
+	profile, ok := permissions[codexGitMetadataPolicyName].(map[string]any)
+	if !ok {
+		t.Fatalf("task metadata policy missing: %#v", permissions)
+	}
+	rules := profile["filesystem"].(map[string]any)
+	if got := rules[projection.CommonDir]; got != "read" {
+		t.Fatalf("common Git root = %#v, want read", got)
+	}
+	if got := rules[projection.WorktreesDir]; got != "deny" {
+		t.Fatalf("common worktrees directory = %#v, want deny", got)
+	}
+	if got := rules[projection.GitDir]; got != "write" {
+		t.Fatalf("owned gitdir = %#v, want write", got)
+	}
+	if got := rules[projection.ObjectDir]; got != "write" {
+		t.Fatalf("object directory = %#v, want write", got)
+	}
+}
+
+func TestStandaloneGitMetadataPreflightRejectsLegacyCodexSandbox(t *testing.T) {
+	projection := newLinkedGitMetadataProjection(t)
+	codexHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte(`sandbox_mode = "workspace-write"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	req := &ExecutorCreateRequest{
+		WorkspacePath:          projection.CheckoutPath,
+		GitMetadataProjections: []*worktree.GitMetadataProjection{projection},
+		AgentConfig:            agents.NewCodexACP(),
+		Env:                    map[string]string{"CODEX_HOME": codexHome},
+	}
+
+	err := preflightGitMetadataProjection(context.Background(), &StandaloneExecutor{}, req)
+	if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) {
+		t.Fatalf("preflightGitMetadataProjection() error = %v, want %q", err, gitMetadataProjectionUnsupported)
+	}
+	if strings.Contains(err.Error(), codexHome) {
+		t.Fatalf("legacy sandbox error leaked config path: %v", err)
+	}
+}
+
+func TestStandaloneGitMetadataPreflightRejectsAgentWithoutFilesystemPolicy(t *testing.T) {
+	projection := newLinkedGitMetadataProjection(t)
+	req := &ExecutorCreateRequest{
+		WorkspacePath:          projection.CheckoutPath,
+		GitMetadataProjections: []*worktree.GitMetadataProjection{projection},
+		AgentConfig:            agents.NewClaudeACP(),
+	}
+
+	err := preflightGitMetadataProjection(context.Background(), &StandaloneExecutor{}, req)
+	if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) {
+		t.Fatalf("preflightGitMetadataProjection() error = %v, want %q", err, gitMetadataProjectionUnsupported)
+	}
+}
+
 func newLinkedGitMetadataProjection(t *testing.T) *worktree.GitMetadataProjection {
 	t.Helper()
 	repo := filepath.Join(t.TempDir(), "source")
@@ -98,7 +186,7 @@ type gitMetadataAttestingExecutor struct {
 	created          bool
 }
 
-func (r *gitMetadataAttestingExecutor) PrepareGitMetadataProjection(_ context.Context, _ []*worktree.GitMetadataProjection) error {
+func (r *gitMetadataAttestingExecutor) PrepareGitMetadataProjection(_ context.Context, _ *ExecutorCreateRequest) error {
 	r.attested = true
 	return r.attestationError
 }

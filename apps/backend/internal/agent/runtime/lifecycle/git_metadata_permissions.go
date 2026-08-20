@@ -2,10 +2,16 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 
+	"github.com/pelletier/go-toml/v2"
+
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/worktree"
 )
@@ -13,6 +19,7 @@ import (
 const (
 	gitMetadataProjectionInvalid     = "git_metadata_projection_invalid"
 	gitMetadataProjectionUnsupported = "git_metadata_projection_unsupported"
+	codexGitMetadataPolicyName       = "kandev_task_git_metadata"
 )
 
 // GitMetadataProjectionEnforcer is implemented only by executors that can
@@ -21,28 +28,186 @@ const (
 // paths reconstructed from request metadata, so an executor cannot silently
 // widen a task's Git access.
 type GitMetadataProjectionEnforcer interface {
-	PrepareGitMetadataProjection(context.Context, []*worktree.GitMetadataProjection) error
+	PrepareGitMetadataProjection(context.Context, *ExecutorCreateRequest) error
 }
 
 // preflightGitMetadataProjection verifies a fresh projection and requires an
 // executor-specific enforcement attestation. A runtime without this capability
 // must fail before CreateInstance: starting an agent that can edit the checkout
 // but not its linked metadata reproduces the original index.lock failure.
-func preflightGitMetadataProjection(ctx context.Context, runtime ExecutorBackend, projections []*worktree.GitMetadataProjection) error {
-	if len(projections) == 0 {
+func preflightGitMetadataProjection(ctx context.Context, runtime ExecutorBackend, req *ExecutorCreateRequest) error {
+	if len(req.GitMetadataProjections) == 0 {
 		return nil
 	}
-	if err := validateGitMetadataProjections(projections); err != nil {
+	if err := validateGitMetadataProjections(req.GitMetadataProjections); err != nil {
 		return err
 	}
 	enforcer, ok := runtime.(GitMetadataProjectionEnforcer)
 	if !ok {
 		return fmt.Errorf("%s: executor %q cannot enforce task Git metadata permissions; update the executor or start a new session", gitMetadataProjectionUnsupported, runtime.Name())
 	}
-	if err := enforcer.PrepareGitMetadataProjection(ctx, projections); err != nil {
+	if err := enforcer.PrepareGitMetadataProjection(ctx, req); err != nil {
 		return fmt.Errorf("%s: executor %q could not attest task Git metadata permissions; update the executor or start a new session", gitMetadataProjectionUnsupported, runtime.Name())
 	}
 	return nil
+}
+
+// prepareCodexGitMetadataPolicy is the standalone half of the projection
+// contract. The host filesystem sandbox is owned by Codex itself, so the
+// executor must install a server-authored profile before creating agentctl.
+// Docker retains its own layered mount enforcement and does not reach this
+// path.
+func prepareCodexGitMetadataPolicy(req *ExecutorCreateRequest) error {
+	policyAgent, ok := req.AgentConfig.(agents.FilesystemPolicyAgent)
+	if !ok {
+		return errors.New("agent does not support filesystem policy")
+	}
+	descriptor, ok := policyAgent.FilesystemPolicyDescriptor()
+	if !ok || descriptor == nil || descriptor.ConfigEnvKey == "" || descriptor.Renderer == nil {
+		return errors.New("agent filesystem policy is unavailable")
+	}
+	if err := rejectLegacyCodexSandbox(req); err != nil {
+		return err
+	}
+	config, err := codexConfigFromEnvironment(req.Env, descriptor.ConfigEnvKey)
+	if err != nil {
+		return err
+	}
+	if hasLegacyCodexSandbox(config) {
+		return errors.New("legacy Codex sandbox configuration conflicts with task filesystem policy")
+	}
+	policy, err := descriptor.Renderer.Render(gitMetadataFilesystemPolicy(req.GitMetadataProjections))
+	if err != nil {
+		return err
+	}
+	mergeCodexConfig(config, policy)
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("encode agent filesystem policy: %w", err)
+	}
+	if req.Env == nil {
+		req.Env = make(map[string]string)
+	}
+	req.Env[descriptor.ConfigEnvKey] = string(encoded)
+	return nil
+}
+
+func gitMetadataFilesystemPolicy(projections []*worktree.GitMetadataProjection) agents.FilesystemPolicy {
+	rules := make([]agents.FilesystemPolicyRule, 0, len(projections)*8)
+	seen := make(map[string]struct{}, len(projections)*8)
+	add := func(path string, access agents.FilesystemAccess) {
+		if path == "" {
+			return
+		}
+		key := string(access) + "\x00" + path
+		if _, exists := seen[key]; exists {
+			return
+		}
+		seen[key] = struct{}{}
+		rules = append(rules, agents.FilesystemPolicyRule{Path: path, Access: access})
+	}
+	add(":minimal", agents.FilesystemAccessRead)
+	for _, projection := range projections {
+		add(projection.CommonDir, agents.FilesystemAccessRead)
+		add(projection.WorktreesDir, agents.FilesystemAccessDeny)
+		for _, path := range projection.WritablePaths {
+			add(path, agents.FilesystemAccessWrite)
+		}
+	}
+	sort.Slice(rules, func(i, j int) bool {
+		if rules[i].Path == rules[j].Path {
+			return rules[i].Access < rules[j].Access
+		}
+		return rules[i].Path < rules[j].Path
+	})
+	return agents.FilesystemPolicy{Name: codexGitMetadataPolicyName, Rules: rules}
+}
+
+func rejectLegacyCodexSandbox(req *ExecutorCreateRequest) error {
+	for _, path := range codexConfigPaths(req) {
+		contents, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return errors.New("unable to validate Codex sandbox configuration")
+		}
+		var config map[string]any
+		if err := toml.Unmarshal(contents, &config); err != nil {
+			return errors.New("unable to validate Codex sandbox configuration")
+		}
+		if hasLegacyCodexSandbox(config) {
+			return errors.New("legacy Codex sandbox configuration conflicts with task filesystem policy")
+		}
+	}
+	return nil
+}
+
+func codexConfigPaths(req *ExecutorCreateRequest) []string {
+	home := ""
+	if req != nil && req.Env != nil {
+		home = req.Env["CODEX_HOME"]
+	}
+	if home == "" {
+		home = os.Getenv("CODEX_HOME")
+	}
+	if home == "" {
+		baseHome := ""
+		if req != nil && req.Env != nil {
+			baseHome = req.Env["HOME"]
+		}
+		if baseHome == "" {
+			baseHome, _ = os.UserHomeDir()
+		}
+		if baseHome != "" {
+			home = filepath.Join(baseHome, ".codex")
+		}
+	}
+	paths := make([]string, 0, 2)
+	if home != "" {
+		paths = append(paths, filepath.Join(home, "config.toml"))
+	}
+	if req != nil && req.WorkspacePath != "" {
+		paths = append(paths, filepath.Join(req.WorkspacePath, ".codex", "config.toml"))
+	}
+	return paths
+}
+
+func codexConfigFromEnvironment(env map[string]string, key string) (map[string]any, error) {
+	config := make(map[string]any)
+	if env == nil || env[key] == "" {
+		return config, nil
+	}
+	if err := json.Unmarshal([]byte(env[key]), &config); err != nil {
+		return nil, errors.New("unable to validate Codex session configuration")
+	}
+	return config, nil
+}
+
+func hasLegacyCodexSandbox(config map[string]any) bool {
+	if config == nil {
+		return false
+	}
+	_, sandboxMode := config["sandbox_mode"]
+	_, workspaceWrite := config["sandbox_workspace_write"]
+	return sandboxMode || workspaceWrite
+}
+
+func mergeCodexConfig(base, overlay map[string]any) {
+	for key, value := range overlay {
+		if key != "permissions" {
+			base[key] = value
+			continue
+		}
+		existing, _ := base[key].(map[string]any)
+		if existing == nil {
+			existing = make(map[string]any)
+			base[key] = existing
+		}
+		for name, profile := range value.(map[string]any) {
+			existing[name] = profile
+		}
+	}
 }
 
 // validateGitMetadataProjections is the policy-independent half of launch
