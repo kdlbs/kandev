@@ -44,11 +44,12 @@ logic lives in the plugin repository.
   `GET /users/current.json` before being accepted.
 - **Workspace-scoped secrets on a flat namespace.** The host's plugin secret RPCs are
   keyed only by plugin ID (`plugin:<id>:secret:<key>`), not by workspace. The plugin
-  composes the workspace ID into the secret key itself and encrypts the API key with
-  workspace-derived key material before storing it, mirroring the pattern
-  `kdlbs/kandev-plugin-bitbucket` uses for its own credential isolation. Non-secret
-  connection metadata (base URL, health state, cursor) lives in host `plugin_state`
-  scoped to `workspace`.
+  composes a deterministic, separator-safe workspace token into the key
+  (`redmine.<base64url(SHA-256(workspace_id))>.api_key`) before storing the API key;
+  the token is derived only from the authenticated caller's workspace, never a
+  request-body value. Kandev's encrypted vault, not the plugin, owns encryption at
+  rest. Non-secret connection metadata (base URL, health state, cursor) lives in host
+  `plugin_state` scoped to `workspace`.
 - **Own health polling.** There is no host `healthpoll` equivalent for plugins. The
   plugin runs its own ~90s-interval, jittered health probe against
   `GET /users/current.json` per connected workspace, the same convention
@@ -72,7 +73,9 @@ logic lives in the plugin repository.
 - **Task linking via the shared host dialog.** A Kandev task links to a Redmine issue
   through `registerTaskAction({placement:"link"})` and `host.openTaskLinkDialog` — the
   same shared native Link surface GitHub/Bitbucket use — not a plugin-drawn modal.
-  Linking writes issue id/url onto the task via `Tasks().Update`.
+  The authenticated link action persists the issue id/url in workspace-scoped plugin
+  state keyed by the Kandev task ID. `Tasks().Update` cannot write task metadata or
+  external references.
 - **Bidirectional sync.** Polling with a stored `updated_on` cursor per connection
   (1-second overlap subtraction — Redmine's `updated_on` has only second granularity),
   `status_id=*` always sent. Manual write-back by default; two per-connection opt-in
@@ -89,8 +92,9 @@ logic lives in the plugin repository.
 - **Issue watchers.** A structured filter creates one Kandev task per newly matching
   issue, deduplicated by `(issue_watch_id, issue_id)`, with a per-watch
   `maxInflightTasks` throttle. Watcher-created tasks are plugin-owned
-  (`Tasks().Create` with `plugin:<id>` provenance), so `PluginOwnedTaskTrees` cascade
-  delete cleans them up if the watch or connection is removed.
+  (`Tasks().Create` with `plugin:<id>` provenance). The plugin deletes each watch's
+  task trees through `PluginOwnedTaskTrees` before deleting that watch or its
+  connection; host uninstall itself does not invoke this per-root operation.
 - **Settings UI.** `registerIntegrationSettings({ id: "redmine", label, description,
   icon, Component })` contributes the connection form, project picker, field-mapping
   table, sync-option toggles, and watcher management — natively rendered inside the
@@ -124,14 +128,19 @@ connection is `connected` once `GET /users/current.json` succeeds; `degraded` wh
 last health probe failed but the key has not been explicitly removed; `disconnected`
 when no config exists.
 
-Secrets: the plugin encrypts the Redmine API key with workspace-derived key material
-before calling `SetSecret("redmine:<workspace_id>:api_key", ...)` — the workspace ID
-is folded into the secret key itself, since the host's `GetSecret`/`SetSecret`/
-`DeleteSecret` RPCs are namespaced only by plugin ID, not by workspace. Rotation
-replaces the stored ciphertext under the same key; revocation calls `DeleteSecret` and
-clears the `plugin_state` connection row. `GetConfig` (which returns secret values in
-cleartext to the plugin process) is never logged in full, and the API key never
-appears in a host RPC response, log line, or task metadata.
+Secrets: the API key is not a declared `config_schema` field. Credential entry passes
+the plaintext only to the authenticated plugin action, which calls `SetSecret` using
+`redmine.<base64url(SHA-256(workspace_id))>.api_key`; `GetSecret` returns plaintext
+only to the plugin process when it needs to make an outbound Redmine request. Kandev
+encrypts the value at rest with its config-directory master key using AES-256-GCM and a
+fresh random nonce per write. The plugin neither derives encryption key material nor
+handles ciphertext. Thus the Kandev master key survives restart and the vault can
+decrypt existing entries; rotating the Redmine key simply replaces the value under the
+same composed key. Host responses to the settings UI, frontend payloads, logs, and
+task metadata must never contain the key. Revocation calls `DeleteSecret` and clears
+the `plugin_state` connection row. Tests must prove that two workspace-derived keys
+cannot read or delete one another's value across `SetSecret`, `GetSecret`, and
+`DeleteSecret`.
 
 Authorization: only the workspace that owns a connection may read, modify, or use it.
 The plugin enforces this itself since the host's plugin RPC surface has no
@@ -154,20 +163,24 @@ already shipped in `kdlbs/kandev` (landed by PR #2117 and used first by
 - `registerIntegrationSettings({ id, label, description, icon?, Component })` — the
   settings page, index card, and workspace navigation entry.
 - `registerTaskAction({ placement: "link" })` + `host.openTaskLinkDialog` — the shared
-  native Link surface; the plugin supplies issue search/resolution, the host renders
-  the dialog.
+  native Link surface; the plugin supplies issue search/resolution and its
+  authenticated link action persists the association in plugin state, while the host
+  renders the dialog.
 - `reference_sources` dynamic composer search-source registration with submit-time
   reauthorization — for `#` issue mentions.
 - `PluginOwnedTaskTrees` (`PreviewPluginOwnedTaskTree` / `DeletePluginOwnedTaskTreeRequest`)
   — cascade delete for watcher-created tasks.
-- `Tasks().Create` / `Tasks().Update` with `plugin:<id>` provenance — task creation and
-  metadata writes.
-- `GetState` / `SetState` (scope `workspace`) — connection metadata, sync cursor,
-  health state, echo-suppression bookkeeping.
-- `GetSecret` / `SetSecret` / `DeleteSecret` (flat, plugin-ID-scoped) — encrypted API
-  key storage, workspace isolation built by the plugin as described above.
-- `OnEvent` — none required for v1; sync and watcher polling run on the plugin's own
-  timers, not host event subscriptions.
+- `Tasks().Create` / `Tasks().Update` with `plugin:<id>` provenance — task creation
+  and the supported title/description/state/workflow-step updates only. They do not
+  write task metadata or external references.
+- `GetState` / `SetState` (scope `workspace`) — connection metadata, task-link
+  associations keyed by task ID, sync cursor, health state, and echo-suppression
+  bookkeeping.
+- `GetSecret` / `SetSecret` / `DeleteSecret` (flat, plugin-ID-scoped) — host-vault API
+  key storage. The plugin provides workspace isolation by using the deterministic key
+  composition described above.
+- `OnEvent` with a declared `task.*` subscription — idempotent outbound status
+  write-back for linked tasks. Redmine polling and watchers remain plugin-owned timers.
 
 Contracts explicitly **not** used: the provider-neutral Git credential broker and
 native repository-provider extensions (source-control-specific; Redmine is an issue
@@ -192,16 +205,19 @@ Redmine issue is not a code review).
 - A Redmine outage does not prevent the Kandev host from starting or degrade any other
   plugin or integration — failures are isolated to this plugin's own process per the
   host's plugin supervision model.
-- Disabling the plugin preserves its config, state, secrets, and watcher data;
-  uninstalling removes them, including cascading deletion of watcher-created task
-  trees via `PluginOwnedTaskTrees`.
+- Disabling the plugin preserves its config, state, secrets, and watcher data.
+  Uninstalling removes plugin secrets, state, and package data, but does not invoke
+  `PluginOwnedTaskTrees`; users must remove watches or the connection first so the
+  plugin can delete its watcher-created task trees while it is still running.
 
 ## Persistence guarantees
 
 - Connection metadata, sync cursor, and health state live in host `plugin_state`
   scoped to `workspace` — durable across plugin restarts and upgrades.
 - The Redmine API key lives only in the host's encrypted secret store, keyed by the
-  plugin-composed `redmine:<workspace_id>:api_key` string.
+  plugin-composed `redmine.<base64url(SHA-256(workspace_id))>.api_key` string.
+- Task-to-issue associations live in workspace-scoped plugin state keyed by task ID;
+  they are not task metadata.
 - Issue-watch dedup keys `(issue_watch_id, issue_id)` and echo-suppression fields
   (`last_pushed_status_id`, `last_pushed_title`, `last_pushed_description_hash`) are
   plugin-owned durable state — either `plugin_state` or the plugin's own
@@ -236,7 +252,7 @@ with no hardcoded names anywhere in the plugin source
 **GIVEN** a Kandev task
 **WHEN** the user links it to a Redmine issue via the native Link action
 **THEN** the shared host Link dialog opens, the plugin resolves the issue, and the
-task carries the issue id/url afterward
+workspace-scoped plugin state keyed by that task stores the issue id/url afterward
 
 **GIVEN** a linked task and a Redmine issue whose status changes to a mapped, closed
 status
@@ -244,10 +260,12 @@ status
 **THEN** the Kandev task transitions to the mapped workflow step, proving `status_id=*`
 was sent (closed issues are not silently dropped)
 
-**GIVEN** `autoStatusWriteback` enabled on a connection
+**GIVEN** `autoStatusWriteback` enabled on a connection and the plugin declares a
+`task.*` event subscription
 **WHEN** a linked task moves to a workflow step with a status mapping
-**THEN** the plugin issues `PUT /issues/:id.json` with the mapped status within one
-event-loop turn, and the following inbound poll does not re-apply or bounce the change
+**THEN** its idempotent `OnEvent` handler issues `PUT /issues/:id.json` with the mapped
+status during that event delivery, and the following inbound poll does not re-apply or
+bounce the change
 
 **GIVEN** `autoStatusWriteback` disabled
 **WHEN** a linked task moves to a mapped workflow step
@@ -272,8 +290,9 @@ stops
 
 **GIVEN** the plugin is uninstalled
 **WHEN** the uninstall completes
-**THEN** all watcher-created task trees are cascade-deleted via `PluginOwnedTaskTrees`,
-and all secrets/state/data-dir content are removed
+**THEN** all secrets/state/data-dir content are removed; watcher-created task trees
+were already cascade-deleted when their watch or connection was removed before
+uninstall
 
 **GIVEN** the plugin is merely disabled (not uninstalled)
 **WHEN** it is re-enabled later

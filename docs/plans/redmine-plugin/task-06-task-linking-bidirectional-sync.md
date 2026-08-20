@@ -28,8 +28,10 @@ Tasks 03, 04, 05.
 ## Acceptance
 
 1. Linking a task to a Redmine issue goes through `host.openTaskLinkDialog`, not a
-   plugin-drawn modal; the task carries issue id/url afterward via `Tasks().Update`.
-2. The sync poll sends `updated_on=><cursor>` and `status_id=*`; the cursor advances to
+   plugin-drawn modal; its authenticated action persists the issue id/url in
+   workspace-scoped plugin state keyed by task ID. `Tasks().Update` is used only for
+   supported task fields, not link metadata.
+2. The sync poll sends `updated_on=%3E%3D<cursor>` and `status_id=*`; the cursor advances to
    the newest observed `updated_on` minus a 1-second overlap; restarting the plugin
    resumes from the persisted cursor, not from zero.
 3. A linked issue's status change to a mapped, different workflow step moves the
@@ -37,10 +39,10 @@ Tasks 03, 04, 05.
 4. With `syncTitleDescription` enabled, a Redmine-side subject/description change
    updates the Kandev task's title/description on the next poll; with it disabled,
    neither changes.
-5. With `autoStatusWriteback` enabled, moving a linked task to a mapped workflow step
-   issues `PUT /issues/:id.json` with the mapped status within one event-loop turn;
-   with it disabled, no PUT is issued and a manual "Set Redmine status" action still
-   works.
+5. The manifest declares `task.*` and its idempotent `OnEvent` handler processes a
+   linked task move. With `autoStatusWriteback` enabled, it issues
+   `PUT /issues/:id.json` with the mapped status during that event delivery; with it
+   disabled, no PUT is issued and a manual "Set Redmine status" action still works.
 6. Echo suppression: a write-back PUT followed by the next inbound poll does not
    re-apply the change or bounce the task back — zero additional workflow transitions
    after one round trip.

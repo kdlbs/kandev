@@ -31,8 +31,10 @@ Task 02.
 ## Acceptance
 
 1. A valid base URL + API key validates via `GET /users/current.json` and persists;
-   the key is retrievable only via the plugin's own encrypted secret call, never in a
-   host RPC response, log line, or task metadata.
+   the key is stored by Kandev's encrypted secret vault under the plugin's
+   separator-safe workspace-composed key. It is not a declared config field; plaintext
+   exists only during credential entry, in the plugin process, and in outbound Redmine
+   requests, never in settings responses, frontend payloads, logs, or task metadata.
 2. An invalid API key is reported as a distinct plugin error (not a bare host-level
    401 — see spec Failure modes on why the native implementation had to avoid 401 for
    this exact case); the stored config is unchanged.
@@ -45,8 +47,10 @@ Task 02.
    `ctx.Done()` in every wait (no bare `time.Sleep` in backoff), flips `last_ok`/
    `last_error` in `plugin_state` without deleting the stored key on failure, and does
    not leak goroutines across plugin disable/enable cycles.
-7. Two different workspaces' connections cannot read or affect each other's secret or
-   state, even though the host's secret RPCs are namespaced only by plugin ID.
+7. Two different workspaces' connections cannot read, delete, or affect each other's
+   secret or state, even though the host's secret RPCs are namespaced only by plugin
+   ID. Tests cover `SetSecret`, `GetSecret`, and `DeleteSecret` using the separate
+   deterministic workspace-composed keys.
 
 ## Verification
 

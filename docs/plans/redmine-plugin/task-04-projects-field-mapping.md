@@ -32,8 +32,10 @@ Task 02. Runs in parallel with tasks 03 and 05.
 2. Selected project set persists and only issues in selected projects are polled by
    task 06/07's sync and watcher loops.
 3. Field options (`/issue_statuses.json`, `/trackers.json`,
-   `/enumerations/issue_priorities.json`) are fetched live; a grep across the plugin
-   repo's source finds no literal status, tracker, or priority name.
+   `/enumerations/issue_priorities.json`) are fetched live. Tests use distinct fixture
+   status, tracker, and priority names and assert that the persisted options and
+   mappings retain those server-provided values, proving no fixed-name fallback is
+   used.
 4. Status→workflow-step, tracker→task-label, and priority→task-priority mappings
    persist, including the `isClosed` flag captured per status.
 5. Custom fields come from `/custom_fields.json` when the key is admin; when that
@@ -45,7 +47,6 @@ Task 02. Runs in parallel with tasks 03 and 05.
 
 ```sh
 go test ./internal/projects/... ./internal/fieldmapping/... -race
-grep -rniE '"(new|open|closed|resolved|rejected|feedback)"' internal/ && echo "FAIL: hardcoded status literal found" || echo "ok"
 ```
 
 ## Risks

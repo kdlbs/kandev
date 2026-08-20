@@ -18,8 +18,9 @@ pointer once a valid release exists.
 
 ## Owned paths
 
-- `apps/web/e2e/tests/plugins/redmine-*.spec.ts` (host repo, `kdlbs/kandev`)
-- `plugin-registry/plugins.yaml` (host repo, added only after step 3 below)
+- `apps/web/e2e/tests/plugins/redmine-*.spec.ts` (host repo, `kdlbs/kandev`; landing
+  separately via `feature/feat-implement-redmi-ib8`)
+- `plugin-registry/plugins.yaml` (host repo, landing separately once the release exists)
 - Attached `yattdev/kandev-plugin-redmine` worktree: release workflow / tag
 
 ## Dependencies
@@ -34,8 +35,9 @@ Tasks 06, 07, 08.
    instance/database/credentials): config validation, permission failures, lifecycle
    restart, watcher/event delivery, and native UI registration all exercised and
    passing, including duplicate-event idempotency and a plugin disable/uninstall data
-   lifecycle check (disable preserves state; uninstall removes it and cascades watcher
-   task-tree deletion).
+   lifecycle check (disable preserves state; uninstall removes plugin data). Remove
+   watches or the connection before uninstall and verify their task-tree cascade then;
+   host uninstall does not run the plugin's per-root task-tree deletion API.
 3. A GitHub Release exists on `yattdev/kandev-plugin-redmine` with the release asset
    named `kandev-plugin-redmine-<version>.tar.gz`, and `min_kandev_version` in the
    manifest is pinned to the Kandev version tested against.

@@ -33,9 +33,10 @@ Task 02. Runs in parallel with tasks 03 and 04.
 3. `POST /issues.json` creates an issue with subject, description, project, tracker,
    status, priority, and custom-field values, returning its id and URL.
 4. `PUT /issues/:id.json` updates an existing issue with the same field set.
-5. Attaching a file performs `POST /uploads.json` (`Content-Type:
-   application/octet-stream`), then includes the returned token in the issue payload's
-   `uploads` array; the attachment appears on the created/updated issue.
+5. Attaching a file performs `POST /uploads.json?filename=<URL-encoded filename>`
+   (`Content-Type: application/octet-stream`) with the raw file body. The issue
+   payload's `uploads` array then includes the returned `token` plus that `filename`
+   and its `content_type`; tests assert the complete upload request and issue payload.
 
 ## Verification
 

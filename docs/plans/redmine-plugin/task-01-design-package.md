@@ -38,10 +38,10 @@ None.
 2. The plugin's manifest will declare exactly the capabilities it uses:
    `api_read:tasks`, `api_write:tasks`, `state`, `secrets` — and no capability it does
    not exercise (least privilege, per the create-kandev-plugin skill).
-3. The secret key-composition scheme (`redmine:<workspace_id>:api_key`, encrypted with
-   workspace-derived key material before calling `SetSecret`) and the health-poll
-   convention (~90s interval, jitter, backoff, stored in `plugin_state`) are documented
-   in the spec before task 03 implements them.
+3. The secret key-composition scheme
+   (`redmine.<base64url(SHA-256(workspace_id))>.api_key`, encrypted by Kandev's host
+   vault) and the health-poll convention (~90s interval, jitter, backoff, stored in
+   `plugin_state`) are documented in the spec before task 03 implements them.
 
 ## Verification
 

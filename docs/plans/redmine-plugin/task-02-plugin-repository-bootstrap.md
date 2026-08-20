@@ -45,7 +45,7 @@ Task 01.
 # From the attached plugin worktree:
 make test
 make package-host
-tar -tzf dist/redmine-*.tar.gz | grep -E 'manifest.yaml|checksums.txt'
+tar -tzf dist/kandev-plugin-redmine-*.tar.gz | grep -E 'manifest.yaml|checksums.txt'
 ```
 
 ## Risks
