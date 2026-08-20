@@ -624,7 +624,12 @@ func (si *SchedulerIntegration) tryCheckout(
 	if err != nil {
 		si.logger.Error("task checkout error",
 			zap.String("run_id", run.ID), zap.Error(err))
-		_ = si.svc.FinishRun(ctx, run.ID)
+		// A transient CheckoutTask error (e.g. SQLITE_BUSY) is not a
+		// successful completion: route it through the same
+		// retry-then-escalate path as every other run failure in this
+		// file, rather than FinishRun, which would silently mark a run
+		// that never executed as finished.
+		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return false
 	}
 	if !acquired {

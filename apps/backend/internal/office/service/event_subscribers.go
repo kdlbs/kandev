@@ -338,8 +338,16 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	// (Review round 4, BLOCKING FINDING 2), so releasing here (rather than
 	// unconditionally inside transitionRunTerminal) is safe — see
 	// transitionRunTerminal's doc comment.
+	//
+	// Finish before releasing: if FinishRun's DB update fails, the checkout
+	// must stay held so ReapStaleCheckouts (not a same-agent race) is what
+	// eventually reclaims it, instead of releasing a lock for a run that
+	// never actually reached a terminal state.
+	if err := s.FinishRun(ctx, run.ID); err != nil {
+		return err
+	}
 	s.releaseTaskCheckoutForRun(ctx, run)
-	return s.FinishRun(ctx, run.ID)
+	return nil
 }
 
 // markRoutingSuccess delegates to the routing dispatcher (when wired)
@@ -391,8 +399,14 @@ func (s *Service) handleTasklessAgentCompleted(
 	// actually launched. Taskless runs typically carry no task_id, so this
 	// is a no-op in the common case, but call it for the same reason as
 	// handleAgentCompleted — see transitionRunTerminal's doc comment.
+	//
+	// Finish before releasing, same as handleAgentCompleted: a failed
+	// FinishRun must not still give up the checkout.
+	if err := s.FinishRun(ctx, run.ID); err != nil {
+		return err
+	}
 	s.releaseTaskCheckoutForRun(ctx, run)
-	return s.FinishRun(ctx, run.ID)
+	return nil
 }
 
 // refreshContinuationSummary rebuilds the continuation summary for the
