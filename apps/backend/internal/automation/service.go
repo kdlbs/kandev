@@ -122,6 +122,19 @@ type Service struct {
 	// disabled). Set via SetWorkspaceAuthorizer.
 	authorizeWorkspace func(ctx context.Context, workspaceID string) error
 
+	// exportAgentProfileLookup, exportExecutorProfileLookup,
+	// exportWorkflowLookup, exportWorkflowStepLookup, and
+	// exportRepositoryLookup resolve an automation's descriptor references
+	// for the AC-29 YAML export. Unlike the validation-only lookups above,
+	// nil is not "skip enforcement" — resolveDescriptors fails closed with
+	// ErrExportLookupUnavailable for any reference it cannot resolve because
+	// the matching lookup was never wired.
+	exportAgentProfileLookup    ExportAgentProfileLookup
+	exportExecutorProfileLookup ExportExecutorProfileLookup
+	exportWorkflowLookup        ExportWorkflowLookup
+	exportWorkflowStepLookup    ExportWorkflowStepLookup
+	exportRepositoryLookup      ExportRepositoryLookup
+
 	// runLocks serializes run creation (RecordRun, the concurrency-cap skip
 	// insert) against DeleteAllRuns per automation ID. Without this, a run
 	// created between DeleteAllRuns' task-id snapshot and its final row
@@ -242,6 +255,36 @@ func (s *Service) TaskOriginLookup() TaskOriginLookup {
 // silently skipping validation — see validateRepositoryIDs.
 func (s *Service) SetRepositoryLookup(lookup RepositoryLookup) {
 	s.repoLookup = lookup
+}
+
+// SetExportAgentProfileLookup wires the agent profile resolver the YAML
+// export uses to build exportAgentProfile descriptors.
+func (s *Service) SetExportAgentProfileLookup(l ExportAgentProfileLookup) {
+	s.exportAgentProfileLookup = l
+}
+
+// SetExportExecutorProfileLookup wires the executor profile resolver the
+// YAML export uses to build exportExecutorProfile descriptors.
+func (s *Service) SetExportExecutorProfileLookup(l ExportExecutorProfileLookup) {
+	s.exportExecutorProfileLookup = l
+}
+
+// SetExportWorkflowLookup wires the workflow resolver the YAML export uses
+// to build exportWorkflow descriptors.
+func (s *Service) SetExportWorkflowLookup(l ExportWorkflowLookup) {
+	s.exportWorkflowLookup = l
+}
+
+// SetExportWorkflowStepLookup wires the workflow step resolver the YAML
+// export uses to populate exportWorkflow.Step.
+func (s *Service) SetExportWorkflowStepLookup(l ExportWorkflowStepLookup) {
+	s.exportWorkflowStepLookup = l
+}
+
+// SetExportRepositoryLookup wires the repository resolver the YAML export
+// uses to resolve repository_ids to names.
+func (s *Service) SetExportRepositoryLookup(l ExportRepositoryLookup) {
+	s.exportRepositoryLookup = l
 }
 
 func (s *Service) authorizeWs(ctx context.Context, workspaceID string) error {
