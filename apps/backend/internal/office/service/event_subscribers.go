@@ -321,7 +321,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	}
 	run, err := s.repo.GetClaimedRunByTaskAndAgent(ctx, data.TaskID, data.AgentProfileID)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		return err
@@ -481,7 +481,7 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	}
 	run, err := s.repo.GetClaimedRunByTaskAndAgent(ctx, data.TaskID, data.AgentProfileID)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		return err

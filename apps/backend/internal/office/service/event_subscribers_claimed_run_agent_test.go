@@ -131,3 +131,120 @@ func TestSchedulerTick_AgentCompletedForNonLatestClaimReleasesTheCompletingAgent
 		t.Fatalf("run-claimed-a status = %q, want claimed (untouched - it never completed)", runA.Status)
 	}
 }
+
+// TestSchedulerTick_AgentFailedForNonLatestClaimReleasesTheFailingAgentsOwnRun
+// is the failure-path sibling of
+// TestSchedulerTick_AgentCompletedForNonLatestClaimReleasesTheCompletingAgentsOwnRun.
+// handleAgentFailed resolves the failing run via the same
+// GetClaimedRunByTaskAndAgent scoping fix as handleAgentCompleted, so it
+// needs the identical two-agent regression pin: an unscoped lookup could
+// resolve to a different agent's still-live claimed run, releasing that
+// agent's checkout and failing its run out from under it.
+func TestSchedulerTick_AgentFailedForNonLatestClaimReleasesTheFailingAgentsOwnRun(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	svc.SetSyncHandlers(true)
+	ctx := context.Background()
+	eb := bus.NewMemoryEventBus(logger.Default())
+	if err := svc.RegisterEventSubscribers(eb); err != nil {
+		t.Fatalf("register subscribers: %v", err)
+	}
+
+	agentA := &models.AgentInstance{
+		ID:          "agent-failed-a",
+		WorkspaceID: "ws-1",
+		Name:        "failed-a",
+		Role:        models.AgentRoleWorker,
+		Status:      models.AgentStatusIdle,
+	}
+	if err := svc.CreateAgentInstance(ctx, agentA); err != nil {
+		t.Fatalf("create agent A: %v", err)
+	}
+	agentB := &models.AgentInstance{
+		ID:          "agent-failed-b",
+		WorkspaceID: "ws-1",
+		Name:        "failed-b",
+		Role:        models.AgentRoleWorker,
+		Status:      models.AgentStatusIdle,
+	}
+	if err := svc.CreateAgentInstance(ctx, agentB); err != nil {
+		t.Fatalf("create agent B: %v", err)
+	}
+
+	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES ('task-failed-race-1', 'ws-1', 'Failed Race Task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+
+	base := time.Now().UTC().Add(-time.Hour)
+
+	// Agent B's run: claimed first (older claimed_at), and B is the one
+	// that actually acquired the checkout and is now failing.
+	svc.ExecSQL(t, `
+		INSERT INTO runs (
+			id, agent_profile_id, reason, payload, status, coalesced_count,
+			context_snapshot, requested_at, claimed_at
+		) VALUES (
+			'run-failed-b', ?, 'task_assigned', '{"task_id":"task-failed-race-1"}',
+			'claimed', 1, '{}', ?, ?
+		)
+	`, agentB.ID, base, base)
+	ok, err := svc.CheckoutTask(ctx, "task-failed-race-1", agentB.ID)
+	if err != nil || !ok {
+		t.Fatalf("seed B's checkout: ok=%v err=%v", ok, err)
+	}
+
+	// Agent A's run: claimed AFTER B's (newer claimed_at), but A never
+	// actually reached checkoutTask and is not the run that is failing.
+	svc.ExecSQL(t, `
+		INSERT INTO runs (
+			id, agent_profile_id, reason, payload, status, coalesced_count,
+			context_snapshot, requested_at, claimed_at
+		) VALUES (
+			'run-failed-a', ?, 'task_assigned', '{"task_id":"task-failed-race-1"}',
+			'claimed', 1, '{}', ?, ?
+		)
+	`, agentA.ID, base, base.Add(time.Minute))
+
+	event := bus.NewEvent(events.AgentFailed, "test", map[string]string{
+		"task_id":          "task-failed-race-1",
+		"session_id":       "session-failed-b",
+		"agent_profile_id": agentB.ID,
+		"error_message":    "boom",
+	})
+	if err := eb.Publish(ctx, events.AgentFailed, event); err != nil {
+		t.Fatalf("publish agent failed: %v", err)
+	}
+
+	// B's checkout must be released: a third agent must now be able to
+	// take it. An unscoped lookup would instead have tried to release A's
+	// checkout (a no-op) and left B's leaked.
+	stillHeld, err := svc.CheckoutTask(ctx, "task-failed-race-1", "agent-third")
+	if err != nil {
+		t.Fatalf("checkout after failure: %v", err)
+	}
+	if !stillHeld {
+		t.Fatal("expected task checkout to be released after B's AgentFailed, but it is still held (leaked)")
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	byID := make(map[string]models.Run, len(runs))
+	for _, r := range runs {
+		byID[r.ID] = *r
+	}
+	runA, okA := byID["run-failed-a"]
+	if !okA {
+		t.Fatalf("expected run-failed-a to still exist, got: %v", runs)
+	}
+	runB, okB := byID["run-failed-b"]
+	if !okB {
+		t.Fatalf("expected run-failed-b to still exist, got: %v", runs)
+	}
+	if runB.Status != service.RunStatusFailed {
+		t.Fatalf("run-failed-b status = %q, want failed (it is the run that actually failed)", runB.Status)
+	}
+	if runA.Status != service.RunStatusClaimed {
+		t.Fatalf("run-failed-a status = %q, want claimed (untouched - it never failed)", runA.Status)
+	}
+}
