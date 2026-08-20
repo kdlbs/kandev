@@ -26,13 +26,15 @@ type remoteRegularGitMetadata struct {
 // provisioning an agent process.
 func validateRemoteGitMetadataRequest(req *ExecutorCreateRequest) error {
 	if req == nil {
-		return errors.New("remote git metadata request is required")
+		return unsupportedGitMetadataProjection("remote Git metadata policy is unavailable; start a new session with a supported executor")
 	}
 	if len(req.GitMetadataProjections) > 1 {
-		return errors.New("remote executor cannot yet attest multiple repository metadata policies")
+		return unsupportedGitMetadataProjection("remote multi-repository Git metadata is not available; use local Docker or standalone Codex, or start a single-repository session")
 	}
-	_, err := remoteFilesystemPolicyDescriptor(req)
-	return err
+	if _, err := remoteFilesystemPolicyDescriptor(req); err != nil {
+		return unsupportedGitMetadataProjection("remote Git metadata requires a compatible Codex ACP filesystem policy; update Codex or choose local Docker")
+	}
+	return nil
 }
 
 func remoteFilesystemPolicyDescriptor(req *ExecutorCreateRequest) (*agents.FilesystemPolicyDescriptor, error) {

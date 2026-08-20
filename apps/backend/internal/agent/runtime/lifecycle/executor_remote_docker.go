@@ -38,6 +38,14 @@ func (r *RemoteDockerExecutor) HealthCheck(ctx context.Context) error {
 	return nil
 }
 
+// PrepareGitMetadataProjection is intentionally explicit even though remote
+// Docker does not yet implement CreateInstance. The lifecycle must never treat
+// a missing capability as an accidental writable checkout: mutable tasks get a
+// precise, recoverable failure before any remote container is created.
+func (r *RemoteDockerExecutor) PrepareGitMetadataProjection(_ context.Context, _ *ExecutorCreateRequest) error {
+	return unsupportedGitMetadataProjection("remote Docker cannot yet attest task Git metadata; choose local Docker, SSH, or Sprites with Codex")
+}
+
 func (r *RemoteDockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
 	// TODO: Implement remote docker instance creation.
 	// Flow:
