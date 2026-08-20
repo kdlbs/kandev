@@ -20,6 +20,8 @@ type HTTPGitFixture = {
 };
 
 export type HTTPGitFixtureOptions = {
+  /** Override the Docker bridge address for direct host-side fixture tests. */
+  bridgeGateway?: string;
   onListening?: (server: Server, port: number) => void;
   writeBackendGitConfig?: (file: string, content: string) => void;
   closeServer?: (server: Server) => Promise<void>;
@@ -60,7 +62,7 @@ export async function startHTTPGitFixture(
   const port = await listen(server);
   try {
     options.onListening?.(server, port);
-    const fixtureOrigin = `http://${dockerBridgeGateway()}:${port}/`;
+    const fixtureOrigin = `http://${options.bridgeGateway ?? dockerBridgeGateway()}:${port}/`;
     const remoteURL = `https://gitlab.com/fixture/${name}.git`;
     execFileSync("git", ["remote", "set-url", "origin", remoteURL], { cwd: checkout });
     const backendGitConfigPath = path.join(root, "fixture", `${name}.gitconfig`);
@@ -106,6 +108,7 @@ function createStaticGitServer(root: string): Server {
       return;
     }
     try {
+      refreshGitAdvertisement(root, relative);
       const stat = fs.statSync(file);
       if (!stat.isFile()) throw new Error("not a file");
       response.writeHead(200, { "content-length": stat.size });
@@ -114,6 +117,20 @@ function createStaticGitServer(root: string): Server {
       response.writeHead(404).end();
     }
   });
+}
+
+/**
+ * A static HTTP Git server is a dumb transport, so clients discover refs from
+ * `info/refs`. Refresh that advertisement immediately before it is read: the
+ * test workers push source commits after fixture startup and Git's hook is not
+ * a sufficient synchronization point across all transport implementations.
+ */
+function refreshGitAdvertisement(root: string, relative: string): void {
+  if (!relative.startsWith("fixture/") || !relative.endsWith(".git/info/refs")) return;
+
+  const repo = path.resolve(root, relative.slice(0, -"/info/refs".length));
+  if (repo !== root && !repo.startsWith(`${root}${path.sep}`)) return;
+  execFileSync("git", ["--git-dir", repo, "update-server-info"]);
 }
 
 function dockerBridgeGateway(): string {
