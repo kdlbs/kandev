@@ -150,6 +150,32 @@ func TestPurgeTaskCancelsUndeliveredDeliveryReceipts(t *testing.T) {
 	assert.Equal(t, DeliveryCancelled, stored.State)
 }
 
+func TestDeliveryLedgerRetryReopensOnlyRecoverableReceipt(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ledger := repo.(DeliveryLedger)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn",
+		IdempotencyKey: "report-v1", TargetTaskID: "target-task", TargetSessionID: "target-session",
+		Content: "review is ready", State: DeliveryPendingCapacity, NextAttemptAt: now,
+	})
+	require.NoError(t, err)
+	claimed, err := ledger.ClaimDueDeliveries(ctx, now, "worker-a", time.Minute, 1)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1)
+	_, err = ledger.MarkDeliveryRecoverable(ctx, delivery.ID, "worker-a", "target_queue_full")
+	require.NoError(t, err)
+
+	retried, err := ledger.RetryDelivery(ctx, delivery.ID, now.Add(time.Minute))
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryPendingCapacity, retried.State)
+	assert.Empty(t, retried.LastError)
+
+	_, err = ledger.RetryDelivery(ctx, delivery.ID, now.Add(2*time.Minute))
+	assert.ErrorIs(t, err, ErrEntryNotFound, "a pending receipt cannot be retried twice as a recovery action")
+}
+
 // TestDeliveryLedgerPostgreSQLParity is test-only contract coverage for the
 // already-shared repository implementation. It exercises the dialect-sensitive
 // conflict, lease, acknowledgement, and cancellation paths on PostgreSQL.

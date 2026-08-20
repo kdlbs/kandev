@@ -540,6 +540,18 @@ func (s *Service) hasOutstandingBackgroundWork(sessionID string) bool {
 	return len(ta.background) > 0
 }
 
+// persistBackgroundWorkAttestation is a fail-closed restart bridge for
+// completion settlement. It persists only a boolean ownership barrier, never
+// provider payload or command content; a later terminal frame writes false.
+func (s *Service) persistBackgroundWorkAttestation(ctx context.Context, sessionID string) {
+	if sessionID == "" || s.repo == nil {
+		return
+	}
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyBackgroundWorkAttested, s.hasOutstandingBackgroundWork(sessionID)); err != nil {
+		s.logger.Warn("failed to persist background work attestation", zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
 // completeBackgroundTaskForExecution clears a previously-registered background
 // task, scoped to the execution that owns it (an empty executionID matches any
 // owner — see the test-only completeBackgroundTask wrapper). When no

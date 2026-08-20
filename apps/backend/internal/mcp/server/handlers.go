@@ -422,6 +422,47 @@ func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 	}
 }
 
+func (s *Server) getMessageDeliveryHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		deliveryID, err := req.RequireString("delivery_id")
+		if err != nil {
+			return mcp.NewToolResultError("delivery_id is required"), nil
+		}
+		result, err := s.messageDeliveryRequest(ctx, ws.ActionMCPGetMessageDelivery, deliveryID)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) retryMessageDeliveryHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		deliveryID, err := req.RequireString("delivery_id")
+		if err != nil {
+			return mcp.NewToolResultError("delivery_id is required"), nil
+		}
+		result, err := s.messageDeliveryRequest(ctx, ws.ActionMCPRetryMessageDelivery, deliveryID)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) messageDeliveryRequest(ctx context.Context, action, deliveryID string) (map[string]interface{}, error) {
+	payload := map[string]interface{}{
+		"delivery_id": deliveryID, "sender_task_id": s.taskID, "sender_session_id": s.sessionID,
+	}
+	var result map[string]interface{}
+	if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (s *Server) stopTaskHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		taskID, err := req.RequireString(mcpKeyTaskID)

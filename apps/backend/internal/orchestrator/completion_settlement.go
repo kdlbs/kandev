@@ -111,18 +111,16 @@ func (s *Service) reconcileCompletionIntent(ctx context.Context, store completio
 	if intent == nil {
 		return
 	}
+	now := time.Now().UTC()
+	turn, proceed := s.prepareCompletionIntentReconciliation(ctx, store, intent, now)
+	if !proceed {
+		return
+	}
 	claimed, err := store.TransitionCompletionIntent(ctx, intent.ID, models.CompletionIntentStatePending, models.CompletionIntentStateSettling, time.Time{})
 	if err != nil || !claimed {
 		if err != nil {
 			s.logger.Warn("failed to claim completion intent", zap.String("intent_id", intent.ID), zap.Error(err))
 		}
-		return
-	}
-	now := time.Now().UTC()
-	turn, err := s.turnService.GetActiveTurn(ctx, intent.SessionID)
-	if err != nil && !isNoActiveTurnError(err) {
-		s.logger.Warn("failed to load active turn for completion intent", zap.String("intent_id", intent.ID), zap.Error(err))
-		s.retryCompletionIntent(ctx, store, intent)
 		return
 	}
 	if turn != nil && turn.ID != intent.TurnID {
@@ -162,6 +160,67 @@ func (s *Service) reconcileCompletionIntent(ctx context.Context, store completio
 	s.setSessionWaitingForInput(ctx, intent.TaskID, intent.SessionID, session)
 	s.processOnTurnCompleteViaEngine(ctx, intent.TaskID, session)
 	s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSettled, now, "quiet_grace")
+}
+
+func (s *Service) prepareCompletionIntentReconciliation(
+	ctx context.Context,
+	store completionIntentReconciliationStore,
+	intent *models.CompletionIntent,
+	now time.Time,
+) (*models.Turn, bool) {
+	turn, err := s.turnService.GetActiveTurn(ctx, intent.SessionID)
+	if err != nil && !isNoActiveTurnError(err) {
+		s.logger.Warn("failed to load active turn for completion intent", zap.String("intent_id", intent.ID), zap.Error(err))
+		return nil, false
+	}
+	evidence := s.completionIntentActiveWorkEvidence(ctx, intent, turn)
+	if evidence == "" {
+		return turn, true
+	}
+	if _, err := store.RearmCompletionIntent(ctx, intent.ID, now, now.Add(models.CompletionIntentQuietGrace)); err != nil {
+		s.logger.Warn("failed to rearm completion intent behind active work", zap.String("intent_id", intent.ID), zap.String("evidence", evidence), zap.Error(err))
+	}
+	return nil, false
+}
+
+// completionIntentActiveWorkEvidence deliberately reuses the manual stale
+// settlement barriers before an automatic reconciler claims a pending intent.
+// A quiet timestamp alone is not authority to interrupt a cancellation,
+// reserved successor prompt, unfinished tool, or adapter-attested background
+// workload. Persisted background attestation closes the restart gap where the
+// in-memory tracker has not yet received a fresh provider frame.
+func (s *Service) completionIntentActiveWorkEvidence(ctx context.Context, intent *models.CompletionIntent, turn *models.Turn) string {
+	if s.isCancelInFlight(intent.SessionID) {
+		return "cancellation_in_flight"
+	}
+	if turn != nil && turn.ID == intent.TurnID && staleSettlementHasPromptReservation(turn.Metadata) {
+		return "prompt_reservation"
+	}
+	if s.hasOutstandingBackgroundWork(intent.SessionID) {
+		return "background_work"
+	}
+	session, err := s.repo.GetTaskSession(ctx, intent.SessionID)
+	if err != nil {
+		return "session_check_failed"
+	}
+	if session != nil {
+		attested, _ := session.Metadata[models.SessionMetaKeyBackgroundWorkAttested].(bool)
+		if attested {
+			return "background_work_attested"
+		}
+	}
+	tools, ok := s.repo.(pendingTurnToolCallStore)
+	if !ok {
+		return "pending_tool_check_unavailable"
+	}
+	pending, err := tools.HasPendingToolCallsForTurn(ctx, intent.TurnID)
+	if err != nil {
+		return "pending_tool_check_failed"
+	}
+	if pending {
+		return "pending_tool_call"
+	}
+	return ""
 }
 
 func (s *Service) settleMovedCompletionIntent(

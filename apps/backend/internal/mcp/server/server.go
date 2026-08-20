@@ -1064,6 +1064,23 @@ func (s *Server) registerKanbanTools() {
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
 	)
 	s.mcpServer.AddTool(
+		mcp.NewTool("get_message_delivery_kandev",
+			mcp.WithDescription("Get the safe status of a durable message_task delivery receipt. Only the receipt's source or exact target session may inspect it; prompt content is not returned."),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithString("delivery_id", mcp.Required(), mcp.Description("The delivery_id returned by message_task_kandev")),
+		),
+		s.wrapHandler("get_message_delivery_kandev", s.getMessageDeliveryHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("retry_message_delivery_kandev",
+			mcp.WithDescription("Retry a recoverable message delivery receipt. This reopens bounded server-side admission; it does not require the source agent turn to remain active."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithString("delivery_id", mcp.Required(), mcp.Description("The recoverable delivery_id to retry")),
+		),
+		s.wrapHandler("retry_message_delivery_kandev", s.retryMessageDeliveryHandler()),
+	)
+	s.mcpServer.AddTool(
 		mcp.NewTool("stop_task_kandev",
 			mcp.WithDescription(`Stop all live sessions on a direct child task. Only its direct parent may call this halt-only tool; self, sibling, parent, grandparent, unrelated, and cross-workspace requests fail. It does not send a prompt or start a replacement turn; use message_task_kandev with delivery_mode="interrupt" to stop and steer. Accepted sessions become CANCELLED and teardown runs asynchronously; an eligible active task moves to REVIEW. If nothing is running, returns status="not_running" without changing state. Worktrees, commits, records, descendants, and queued messages are preserved. CANCELLED sessions cannot be resumed; use spawn_session_kandev with a new prompt to restart in the same workspace.`),
 			mcp.WithReadOnlyHintAnnotation(false),

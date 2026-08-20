@@ -15,7 +15,8 @@ import (
 type failingDeliveryQueueAcknowledgementRepository struct {
 	Repository
 	DeliveryLedger
-	failQueueAcknowledgement bool
+	failQueueAcknowledgement    bool
+	failDispatchAcknowledgement bool
 }
 
 func (r *failingDeliveryQueueAcknowledgementRepository) MarkDeliveryQueued(
@@ -26,6 +27,26 @@ func (r *failingDeliveryQueueAcknowledgementRepository) MarkDeliveryQueued(
 		return nil, errors.New("transient delivery queue acknowledgement failure")
 	}
 	return r.DeliveryLedger.MarkDeliveryQueued(ctx, deliveryID, leaseOwner, queueEntryID)
+}
+
+func (r *failingDeliveryQueueAcknowledgementRepository) AcknowledgeQueueEntryAndDelivery(
+	ctx context.Context, sessionID, queueEntryID string, deliveredAt time.Time,
+) error {
+	if r.failDispatchAcknowledgement {
+		return errors.New("injected atomic dispatch acknowledgement failure")
+	}
+	return r.DeliveryLedger.(interface {
+		AcknowledgeQueueEntryAndDelivery(context.Context, string, string, time.Time) error
+	}).AcknowledgeQueueEntryAndDelivery(ctx, sessionID, queueEntryID, deliveredAt)
+}
+
+func (r *failingDeliveryQueueAcknowledgementRepository) AcknowledgeDeliveryByQueueEntry(
+	ctx context.Context, queueEntryID string, deliveredAt time.Time,
+) (*Delivery, error) {
+	if r.failDispatchAcknowledgement {
+		return nil, errors.New("injected dispatch acknowledgement failure")
+	}
+	return r.DeliveryLedger.AcknowledgeDeliveryByQueueEntry(ctx, queueEntryID, deliveredAt)
 }
 
 func TestProcessDueDeliveriesRetainsFullQueueReceiptAndPromotesItOnce(t *testing.T) {
@@ -128,6 +149,46 @@ func TestProcessDueDeliveriesReusesExistingQueueEntryAfterAcknowledgementFailure
 	require.Len(t, entries, 1)
 	assert.Equal(t, stored.QueueEntryID, entries[0].ID)
 	assert.Equal(t, delivery.ID, entries[0].Metadata[MetadataDeliveryID])
+}
+
+func TestAcknowledgeQueuedDeliveryFailurePreservesReceiptAndFIFOForRetry(t *testing.T) {
+	baseRepo := newTestSQLiteRepo(t)
+	ledger := baseRepo.(DeliveryLedger)
+	repo := &failingDeliveryQueueAcknowledgementRepository{
+		Repository: baseRepo, DeliveryLedger: ledger, failDispatchAcknowledgement: true,
+	}
+	service := NewService(repo, 2, logger.Default())
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn",
+		IdempotencyKey: "report-v1", TargetTaskID: "target-task", TargetSessionID: "target-session",
+		Content: "review is ready", State: DeliveryPendingCapacity, NextAttemptAt: now,
+	})
+	require.NoError(t, err)
+
+	_, err = service.ProcessDueDeliveries(ctx, now, "worker-a")
+	require.NoError(t, err)
+	reserved, ok := service.ReserveQueued(ctx, "target-session")
+	require.True(t, ok)
+	require.Error(t, service.AcknowledgeQueued(ctx, "target-session", reserved.ID))
+
+	stored, err := ledger.GetDelivery(ctx, delivery.ID)
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryQueued, stored.State)
+	entries, err := baseRepo.ListBySession(ctx, "target-session")
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "a failed acknowledgement must not drop the only FIFO copy")
+	assert.Equal(t, reserved.ID, entries[0].ID)
+
+	repo.failDispatchAcknowledgement = false
+	require.NoError(t, service.AcknowledgeQueued(ctx, "target-session", reserved.ID))
+	stored, err = ledger.GetDelivery(ctx, delivery.ID)
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryDelivered, stored.State)
+	entries, err = baseRepo.ListBySession(ctx, "target-session")
+	require.NoError(t, err)
+	assert.Empty(t, entries, "retry acknowledges exactly the original delivery without a duplicate")
 }
 
 func TestDeliveryRecoveryLifecycleProcessesStartupScanAndStops(t *testing.T) {

@@ -160,6 +160,65 @@ func TestReconcileDueCompletionIntentsSettlesCapturedTurn(t *testing.T) {
 	}
 }
 
+func TestReconcileDueCompletionIntentsRearmsBehindPendingToolWork(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	now := time.Now().UTC().Add(-models.CompletionIntentQuietGrace)
+	requireNoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "turn-1", TaskID: "t1", TaskSessionID: "s1", StartedAt: now}))
+	_, _, err := repo.CreateOrGetCompletionIntent(ctx, &models.CompletionIntent{
+		ID: "intent-1", TaskID: "t1", SessionID: "s1", TurnID: "turn-1", WorkflowStepID: "step1",
+		State: models.CompletionIntentStatePending, RequestedAt: now, EligibleAt: now,
+	})
+	requireNoError(t, err)
+	requireNoError(t, repo.CreateMessage(ctx, &models.Message{
+		ID: "tool-pending", TaskID: "t1", TaskSessionID: "s1", TurnID: "turn-1",
+		AuthorType: models.MessageAuthorAgent, Type: models.MessageTypeToolCall,
+		Metadata: map[string]interface{}{"tool_call_id": "call-1", "status": "running"}, CreatedAt: now, UpdatedAt: now,
+	}))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.reconcileDueCompletionIntents(ctx)
+
+	turn, err := repo.GetTurn(ctx, "turn-1")
+	requireNoError(t, err)
+	if turn.CompletedAt != nil {
+		t.Fatal("automatic reconciliation must not settle a turn with pending tool work")
+	}
+	intent, err := repo.GetCompletionIntent(ctx, "intent-1")
+	requireNoError(t, err)
+	if intent.State != models.CompletionIntentStatePending || !intent.EligibleAt.After(now) {
+		t.Fatalf("intent after active-work gate = %+v, want pending and rearmed", intent)
+	}
+}
+
+func TestReconcileDueCompletionIntentsPreservesRestartedBackgroundAttestation(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	now := time.Now().UTC().Add(-models.CompletionIntentQuietGrace)
+	requireNoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "turn-1", TaskID: "t1", TaskSessionID: "s1", StartedAt: now}))
+	_, _, err := repo.CreateOrGetCompletionIntent(ctx, &models.CompletionIntent{
+		ID: "intent-1", TaskID: "t1", SessionID: "s1", TurnID: "turn-1", WorkflowStepID: "step1",
+		State: models.CompletionIntentStatePending, RequestedAt: now, EligibleAt: now,
+	})
+	requireNoError(t, err)
+	// This is the durable shape written from an adapter-attested background
+	// frame before a backend restart. The fresh service deliberately has no
+	// in-memory activity map, so this proves recovery remains fail-closed.
+	requireNoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyBackgroundWorkAttested, true))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.reconcileDueCompletionIntents(ctx)
+	turn, err := repo.GetTurn(ctx, "turn-1")
+	requireNoError(t, err)
+	if turn.CompletedAt != nil {
+		t.Fatal("restart recovery must not settle an adapter-attested background turn")
+	}
+}
+
 func completionMetricValue(metrics *expvar.Map, key string) int64 {
 	value := metrics.Get(key)
 	if value == nil {

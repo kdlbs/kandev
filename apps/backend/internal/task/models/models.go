@@ -564,6 +564,12 @@ const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
 // failure for UI surfaces that need to keep the error visible after auto-resume.
 const SessionMetaKeyLastAgentError = "last_agent_error"
 
+// SessionMetaKeyBackgroundWorkAttested records that an adapter positively
+// observed detached background work for this session. Completion reconciliation
+// treats a persisted true value as a fail-closed stale-settlement barrier after
+// a backend restart, until a terminal adapter frame clears it.
+const SessionMetaKeyBackgroundWorkAttested = "background_work_attested"
+
 // LastAgentError is persisted under TaskSession.Metadata[SessionMetaKeyLastAgentError].
 // RemediationURL is only ever set from an adapter-validated provider
 // diagnostic; it is never reconstructed from the error message.

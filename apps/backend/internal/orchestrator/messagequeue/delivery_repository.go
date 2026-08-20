@@ -25,6 +25,110 @@ type DeliveryLedger interface {
 	AcknowledgeDelivery(ctx context.Context, deliveryID, queueEntryID string, deliveredAt time.Time) (*Delivery, error)
 	AcknowledgeDeliveryByQueueEntry(ctx context.Context, queueEntryID string, deliveredAt time.Time) (*Delivery, error)
 	MarkDeliveryRecoverable(ctx context.Context, deliveryID, leaseOwner, lastError string) (*Delivery, error)
+	RetryDelivery(ctx context.Context, deliveryID string, nextAttemptAt time.Time) (*Delivery, error)
+}
+
+// RetryDelivery explicitly reopens a retained recovery receipt. Delivered,
+// cancelled, and terminal rows cannot be resurrected by an operator retry.
+func (r *sqliteRepository) RetryDelivery(ctx context.Context, deliveryID string, nextAttemptAt time.Time) (*Delivery, error) {
+	if nextAttemptAt.IsZero() {
+		nextAttemptAt = time.Now().UTC()
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE message_deliveries
+		SET state = ?, next_attempt_at = ?, last_error = '', lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+		WHERE id = ? AND state = ?
+	`), DeliveryPendingCapacity, nextAttemptAt, time.Now().UTC(), deliveryID, DeliveryRecoverable)
+	if err != nil {
+		return nil, fmt.Errorf("retry delivery: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, ErrEntryNotFound
+	}
+	return r.GetDelivery(ctx, deliveryID)
+}
+
+// deliveryQueueAcknowledger commits FIFO removal and its delivery-ledger
+// terminal transition together. It is intentionally optional so older test
+// repositories retain their legacy queue behavior, while the production SQL
+// repository never leaves a queued receipt behind after deleting its only
+// queue entry.
+type deliveryQueueAcknowledger interface {
+	AcknowledgeQueueEntryAndDelivery(ctx context.Context, sessionID, queueEntryID string, deliveredAt time.Time) error
+}
+
+// AcknowledgeQueueEntryAndDelivery atomically deletes a reserved FIFO entry
+// and records its durable receipt as delivered. The transaction is the commit
+// point after executor acceptance: a crash or injected failure rolls back both
+// mutations, so retrying the acknowledgement cannot lose or duplicate work.
+func (r *sqliteRepository) AcknowledgeQueueEntryAndDelivery(
+	ctx context.Context, sessionID, queueEntryID string, deliveredAt time.Time,
+) error {
+	if deliveredAt.IsZero() {
+		deliveredAt = time.Now().UTC()
+	}
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delivery queue acknowledgement: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+
+	// Not every queued entry has a delivery receipt. Preserve the ordinary
+	// acknowledgement behavior while requiring a receipt transition whenever
+	// a durable delivery owns this exact entry.
+	var deliveryID string
+	err = tx.GetContext(ctx, &deliveryID, r.db.Rebind(`
+		SELECT id FROM message_deliveries WHERE queue_entry_id = ?
+	`), queueEntryID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("load delivery queue acknowledgement: %w", err)
+	}
+	if err == nil {
+		result, updateErr := tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE message_deliveries
+			SET state = ?, delivered_at = ?, updated_at = ?
+			WHERE id = ? AND queue_entry_id = ? AND state = ?
+		`), DeliveryDelivered, deliveredAt, deliveredAt, deliveryID, queueEntryID, DeliveryQueued)
+		if updateErr != nil {
+			return fmt.Errorf("acknowledge delivery in queue transaction: %w", updateErr)
+		}
+		affected, rowsErr := result.RowsAffected()
+		if rowsErr != nil {
+			return rowsErr
+		}
+		if affected != 1 {
+			return ErrEntryNotFound
+		}
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages WHERE id = ? AND session_id = ?
+	`), queueEntryID, sessionID)
+	if err != nil {
+		return fmt.Errorf("acknowledge queued delivery entry: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrEntryNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delivery queue acknowledgement: %w", err)
+	}
+	if deliveryID != "" {
+		adminmetrics.RecordMessageDeliveryOutcome(string(DeliveryDelivered), 1)
+	}
+	return nil
 }
 
 // CreateOrGetDelivery atomically creates a source-turn idempotency receipt or

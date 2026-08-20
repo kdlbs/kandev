@@ -1008,6 +1008,50 @@ func TestHandleMessageTask_BusyTargetPersistsIdempotentDeliveryReceipt(t *testin
 	assert.Equal(t, 1, orchestrator.queue.GetStatus(ctx, session.ID).Count)
 }
 
+func TestMessageDeliveryRecoveryIsScopedToRecordedSourceSession(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	h, orchestrator := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orchestrator.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	ledger := queueRepo.(messagequeue.DeliveryLedger)
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, messagequeue.Delivery{
+		SenderTaskID: sender.ID, SenderSessionID: "sender-sess-1", SourceTurnID: "sender-turn-1",
+		IdempotencyKey: "recover-v1", TargetTaskID: target.ID, TargetSessionID: session.ID,
+		Content: "retained report", State: messagequeue.DeliveryPendingCapacity,
+	})
+	require.NoError(t, err)
+	claimed, err := ledger.ClaimDueDeliveries(ctx, time.Now().UTC(), "worker-a", time.Minute, 1)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1)
+	_, err = ledger.MarkDeliveryRecoverable(ctx, delivery.ID, "worker-a", "target_queue_full")
+	require.NoError(t, err)
+
+	payload := map[string]interface{}{"delivery_id": delivery.ID, "sender_task_id": sender.ID, "sender_session_id": "sender-sess-1"}
+	resp, err := h.handleGetMessageDelivery(ctx, makeWSMessage(t, ws.ActionMCPGetMessageDelivery, payload))
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+	var status map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &status))
+	assert.Equal(t, "recoverable", status["delivery_status"])
+	assert.NotContains(t, status, "content")
+
+	resp, err = h.handleRetryMessageDelivery(ctx, makeWSMessage(t, ws.ActionMCPRetryMessageDelivery, payload))
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+	restored, err := ledger.GetDelivery(ctx, delivery.ID)
+	require.NoError(t, err)
+	assert.Equal(t, messagequeue.DeliveryPendingCapacity, restored.State)
+
+	payload["sender_session_id"] = session.ID
+	resp, err = h.handleGetMessageDelivery(ctx, makeWSMessage(t, ws.ActionMCPGetMessageDelivery, payload))
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeError, resp.Type, "a task ID alone cannot inspect another recorded session's receipt")
+}
+
 func TestHandleMessageTask_RejectedBusyTargetDoesNotPersistDeliveryReceipt(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newTestTaskService(t)

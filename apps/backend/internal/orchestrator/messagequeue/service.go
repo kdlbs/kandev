@@ -80,6 +80,26 @@ func (s *Service) SupportsDeliveryReceipts() bool {
 	return ok
 }
 
+// GetDeliveryReceipt loads a durable receipt. Callers outside this package
+// must project a safe status view rather than returning Content.
+func (s *Service) GetDeliveryReceipt(ctx context.Context, deliveryID string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	return ledger.GetDelivery(ctx, deliveryID)
+}
+
+// RetryDeliveryReceipt reopens a recoverable receipt for bounded worker
+// admission without requiring the original source turn to remain active.
+func (s *Service) RetryDeliveryReceipt(ctx context.Context, deliveryID string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	return ledger.RetryDelivery(ctx, deliveryID, time.Now().UTC())
+}
+
 // CreateOrGetDeliveryReceipt persists one idempotent cross-task delivery
 // receipt before target FIFO admission. The recovery worker owns later queue
 // promotion, so a full target queue cannot turn an accepted receipt into a
@@ -580,6 +600,12 @@ func (s *Service) ReserveQueued(ctx context.Context, sessionID string) (*QueuedM
 
 // AcknowledgeQueued removes a server-reserved entry after prompt acceptance.
 func (s *Service) AcknowledgeQueued(ctx context.Context, sessionID, entryID string) error {
+	if acknowledger, ok := s.repo.(deliveryQueueAcknowledger); ok {
+		if err := acknowledger.AcknowledgeQueueEntryAndDelivery(ctx, sessionID, entryID, time.Now().UTC()); err != nil && !errors.Is(err, ErrEntryNotFound) {
+			return err
+		}
+		return nil
+	}
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		return s.repo.AcknowledgeByID(admittedCtx, sessionID, entryID)
 	})
