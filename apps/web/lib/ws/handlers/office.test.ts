@@ -139,7 +139,7 @@ describe("office WS handler — task field updates delegate to patchTaskInStore"
     vi.clearAllMocks();
   });
 
-  it("passes the raw status through on office.task.updated (normalization is the store's job)", () => {
+  it("maps the producer state field on office.task.updated", () => {
     const { store, patchTaskInStore } = makeStore(ACTIVE_WS);
     const handlers = registerOfficeHandlers(store);
     const handler = handlers["office.task.updated"]!;
@@ -147,7 +147,7 @@ describe("office WS handler — task field updates delegate to patchTaskInStore"
     handler({
       type: "notification",
       action: "office.task.updated",
-      payload: { workspace_id: ACTIVE_WS, task_id: "t-1", status: "SCHEDULING" },
+      payload: { workspace_id: ACTIVE_WS, task_id: "t-1", state: "SCHEDULING" },
     } as Parameters<typeof handler>[0]);
 
     expect(patchTaskInStore).toHaveBeenCalledWith(
@@ -156,18 +156,26 @@ describe("office WS handler — task field updates delegate to patchTaskInStore"
     );
   });
 
-  it("passes the raw new_status through on office.task.moved", () => {
-    const { store, patchTaskInStore } = makeStore(ACTIVE_WS);
+  it("refreshes tasks for a producer task.moved payload without a status", () => {
+    const { store, patchTaskInStore, setOfficeRefetchTrigger } = makeStore(ACTIVE_WS);
     const handlers = registerOfficeHandlers(store);
     const handler = handlers["office.task.moved"]!;
 
     handler({
       type: "notification",
       action: "office.task.moved",
-      payload: { workspace_id: ACTIVE_WS, task_id: "t-1", new_status: "REVIEW" },
+      payload: {
+        workspace_id: ACTIVE_WS,
+        task_id: "t-1",
+        from_step_id: "step-todo",
+        to_step_id: "step-review",
+        session_id: "session-1",
+      },
     } as Parameters<typeof handler>[0]);
 
-    expect(patchTaskInStore).toHaveBeenCalledWith("t-1", { status: "REVIEW" });
+    expect(patchTaskInStore).not.toHaveBeenCalled();
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("tasks");
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("dashboard");
   });
 
   it("passes the raw new_status through on office.task.status_changed", () => {

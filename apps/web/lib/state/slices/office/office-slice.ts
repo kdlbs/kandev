@@ -1,9 +1,6 @@
 import type { StateCreator } from "zustand";
 import type { OfficeSlice, OfficeSliceState } from "./types";
-// The office UI route owns status canonicalization; the store re-uses it so
-// every write path into office.tasks.items normalizes the same way instead
-// of each consumer having to remember to.
-import { normalizeTaskStatus } from "@/app/office/tasks/normalize-status";
+import { normalizeOfficeTask, normalizeTaskStatus } from "@/lib/api/domains/office-task-normalize";
 
 export const defaultTaskFilters = {
   statuses: [] as string[],
@@ -152,7 +149,7 @@ type StoredTask = OfficeSlice["office"]["tasks"]["items"][number];
 // normalization value on `rawStatus` for the few consumers that need a
 // sub-state the canonical union collapses (see OfficeTask.rawStatus).
 function normalizeIngestedTask(task: StoredTask): StoredTask {
-  return { ...task, rawStatus: task.status, status: normalizeTaskStatus(task.status) };
+  return normalizeOfficeTask(task);
 }
 
 function createTaskActions(set: SetFn) {

@@ -281,6 +281,7 @@ function normalizeIssueFields(p: Record<string, unknown>): Record<string, unknow
   const out: Record<string, unknown> = {};
   if (p.title != null) out.title = p.title;
   if (p.description != null) out.description = p.description;
+  if (p.state != null) out.status = p.state;
   if (p.status != null) out.status = p.status;
   if (p.new_status != null) out.status = p.new_status;
   if (p.priority != null) out.priority = p.priority;

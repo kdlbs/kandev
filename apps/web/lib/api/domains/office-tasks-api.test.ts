@@ -5,6 +5,7 @@ vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: "http://api.test" }),
 }));
 
+import { searchTasks } from "./office-extended-api";
 import { listTasks, type ListTasksParams } from "./office-tasks-api";
 
 type FetchInput = Parameters<typeof fetch>[0];
@@ -34,6 +35,7 @@ function lastUrl(): string {
 }
 
 const BASE = "http://api.test/api/v1/office/workspaces/ws-1/tasks";
+const SEARCH_BASE = "http://api.test/api/v1/office/workspaces/ws-1/tasks/search";
 
 describe("listTasks — query string building", () => {
   it("emits no query string when no params are passed", async () => {
@@ -101,5 +103,42 @@ describe("listTasks — query string building", () => {
   it("treats a second arg without ApiRequestOptions keys as params", async () => {
     await listTasks("ws-1", { status: ["DONE"] });
     expect(lastUrl()).toContain("status=DONE");
+  });
+});
+
+describe("Office task API status normalization", () => {
+  it("normalizes raw statuses before returning paginated tasks", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ tasks: [{ id: "task-1", status: "CREATED" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const response = await listTasks("ws-1");
+
+    expect(response.tasks[0]).toMatchObject({
+      id: "task-1",
+      status: "todo",
+      rawStatus: "CREATED",
+    });
+  });
+
+  it("normalizes raw statuses before returning search results", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ tasks: [{ id: "task-1", status: "CREATED" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const response = await searchTasks("ws-1", "created task");
+
+    expect(lastUrl()).toBe(`${SEARCH_BASE}?q=created+task&limit=50`);
+    expect(response.tasks[0]).toMatchObject({
+      id: "task-1",
+      status: "todo",
+      rawStatus: "CREATED",
+    });
   });
 });

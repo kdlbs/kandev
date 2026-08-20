@@ -1,5 +1,6 @@
 import { fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client";
-import type { DashboardData, OfficeTask } from "@/lib/state/slices/office/types";
+import type { DashboardData } from "@/lib/state/slices/office/types";
+import { normalizeOfficeTask, type OfficeTaskWire } from "./office-task-normalize";
 
 const BASE = "/api/v1/office";
 
@@ -161,10 +162,10 @@ export type TimelineEvent = {
 };
 
 export function getTask(taskId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ task: OfficeTask; timeline?: TimelineEvent[] }>(
+  return fetchJson<{ task: OfficeTaskWire; timeline?: TimelineEvent[] }>(
     `${BASE}/tasks/${taskId}`,
     options,
-  );
+  ).then((response) => ({ ...response, task: normalizeOfficeTask(response.task) }));
 }
 
 // --- Task mutations (PATCH /tasks/:id) ---
@@ -378,10 +379,13 @@ export function searchTasks(
   options?: ApiRequestOptions,
 ) {
   const params = new URLSearchParams({ q: query, limit: String(limit) });
-  return fetchJson<{ tasks: OfficeTask[] }>(
+  return fetchJson<{ tasks: OfficeTaskWire[] }>(
     `${BASE}/workspaces/${workspaceId}/tasks/search?${params.toString()}`,
     options,
-  );
+  ).then((response) => ({
+    ...response,
+    tasks: response.tasks.map(normalizeOfficeTask),
+  }));
 }
 
 // --- Instructions ---
