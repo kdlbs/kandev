@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -117,4 +118,20 @@ func TestService_CoordinatorMonitoring_FallsBackWithoutProvider(t *testing.T) {
 	require.NoError(t, db.Get(&stored,
 		"SELECT workspace_id FROM workflow_coordinator_monitoring WHERE workflow_id = ?", "wf-1"))
 	assert.Equal(t, "ws-fallback", stored)
+}
+
+func TestService_CoordinatorMonitoring_ProviderFailureDoesNotPersistCallerWorkspace(t *testing.T) {
+	svc, db, provider := setupTestServiceWithProvider(t)
+	insertWorkflow(t, db, "wf-1", "Workflow 1")
+	step := &models.WorkflowStep{WorkflowID: "wf-1", Name: "Step A", Position: 0}
+	createStep(t, svc, step)
+	provider.forceGetWorkflowErr = errors.New("workflow provider unavailable")
+
+	_, err := svc.SetCoordinatorMonitoring(context.Background(), "attacker-supplied-workspace", "wf-1",
+		[]models.CoordinatorStepMonitor{{WorkflowStepID: step.ID, Selected: true, Prompt: "watch"}})
+	require.Error(t, err)
+
+	var count int
+	require.NoError(t, db.Get(&count, "SELECT COUNT(*) FROM workflow_coordinator_monitoring WHERE workflow_id = ?", "wf-1"))
+	assert.Zero(t, count, "provider failure must not persist caller-controlled workspace provenance")
 }

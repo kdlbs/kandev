@@ -66,6 +66,7 @@ type agentConversationTaskRepo interface {
 	// because it always scopes to one workspace_id.
 	ListEphemeralTasksAllWorkspaces(ctx context.Context) ([]*models.Task, error)
 	CreateTask(ctx context.Context, task *models.Task) error
+	UpdateTask(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, taskID string) error
 }
 
@@ -74,6 +75,7 @@ type agentConversationTaskRepo interface {
 type agentConversationSessionRepo interface {
 	GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
+	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 }
 
 // AgentConversationProfileInfo is the minimal agent-profile information
@@ -102,6 +104,7 @@ type agentConversationProfileRepo interface {
 // map — multiple backend instances.
 type agentConversationStateRepo interface {
 	Claim(ctx context.Context, pluginID, scope, scopeID, key string, value json.RawMessage) (claimed bool, err error)
+	Delete(ctx context.Context, pluginID, scope, scopeID, key string) error
 }
 
 // agentConversationEventBus is the narrow event-bus interface for
@@ -206,12 +209,12 @@ func (s *AgentConversationService) getDispatcher() agentConversationDispatcher {
 // conversationKey) tuple. See the ensureLocks field doc comment.
 func (s *AgentConversationService) lockEnsureKey(key string) func() {
 	s.ensureLocksMu.Lock()
+	if s.ensureLocks == nil {
+		s.ensureLocks = make(map[string]*sync.Mutex)
+	}
 	l, ok := s.ensureLocks[key]
 	if !ok {
 		l = &sync.Mutex{}
-		if s.ensureLocks == nil {
-			s.ensureLocks = make(map[string]*sync.Mutex)
-		}
 		s.ensureLocks[key] = l
 	}
 	s.ensureLocksMu.Unlock()
@@ -358,35 +361,18 @@ func (s *AgentConversationService) validateProfile(ctx context.Context, profileI
 // AgentConversationStatusConfigurationRequired rather than creating a new
 // session against an invalid profile.
 func (s *AgentConversationService) repairIfNeeded(ctx context.Context, existing *models.Task, spec pluginsdk.AgentConversationSpec) (pluginsdk.AgentConversationDescriptor, string, error) {
-	profileID := ""
-	if existing.Metadata != nil {
-		if p, ok := existing.Metadata[models.MetaKeyAgentProfileID].(string); ok {
-			profileID = p
-		}
-	}
-	if profileID == "" {
-		// A partial conversation created by an older host may not have stamped
-		// the profile metadata. Ensure has already resolved spec to a concrete
-		// effective profile, so use it to repair the missing primary session.
-		profileID = spec.AgentProfileID
+	// Ensure resolved and validated this concrete profile before locating the
+	// existing conversation. Treat it as authoritative on every call so a
+	// changed plugin setting is reconciled instead of silently continuing with
+	// an old (or subsequently disabled) binding.
+	profileID := spec.AgentProfileID
+	if err := s.reconcileConversationTask(ctx, existing, profileID, spec.BasePrompt); err != nil {
+		return pluginsdk.AgentConversationDescriptor{}, "", err
 	}
 
-	primary, err := s.sess.GetPrimarySessionByTaskID(ctx, existing.ID)
+	primary, err := s.ensureConversationPrimarySession(ctx, existing.ID, profileID)
 	if err != nil {
-		return pluginsdk.AgentConversationDescriptor{}, "", fmt.Errorf("failed to check existing conversation session: %w", err)
-	}
-	if primary == nil {
-		ok, err := s.validateProfile(ctx, profileID)
-		if err != nil {
-			return pluginsdk.AgentConversationDescriptor{}, "", err
-		}
-		if !ok {
-			return pluginsdk.AgentConversationDescriptor{}, AgentConversationStatusConfigurationRequired, nil
-		}
-		primary, err = s.createPrimarySession(ctx, existing.ID, profileID)
-		if err != nil {
-			return pluginsdk.AgentConversationDescriptor{}, "", fmt.Errorf("failed to repair conversation session: %w", err)
-		}
+		return pluginsdk.AgentConversationDescriptor{}, "", err
 	}
 
 	return pluginsdk.AgentConversationDescriptor{
@@ -396,6 +382,60 @@ func (s *AgentConversationService) repairIfNeeded(ctx context.Context, existing 
 		ConversationKey: spec.ConversationKey,
 		AgentProfileID:  profileID,
 	}, AgentConversationStatusExists, nil
+}
+
+func (s *AgentConversationService) ensureConversationPrimarySession(ctx context.Context, taskID, profileID string) (*models.TaskSession, error) {
+	primary, err := s.sess.GetPrimarySessionByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check existing conversation session: %w", err)
+	}
+	if primary == nil {
+		primary, err = s.createPrimarySession(ctx, taskID, profileID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to repair conversation session: %w", err)
+		}
+		return primary, nil
+	}
+	if primary.AgentProfileID == profileID {
+		return primary, nil
+	}
+	primary.AgentProfileID = profileID
+	primary.UpdatedAt = time.Now().UTC()
+	if err := s.sess.UpdateTaskSession(ctx, primary); err != nil {
+		return nil, fmt.Errorf("failed to reconcile conversation session profile: %w", err)
+	}
+	return primary, nil
+}
+
+// reconcileConversationTask refreshes the mutable, server-owned config
+// stamped on an existing backing task. BasePrompt is deliberately replaced
+// even when it becomes empty so a settings save can remove a previously
+// configured instruction.
+func (s *AgentConversationService) reconcileConversationTask(ctx context.Context, task *models.Task, profileID, basePrompt string) error {
+	if task.Metadata == nil {
+		task.Metadata = make(map[string]interface{})
+	}
+	changed := false
+	if current, _ := task.Metadata[models.MetaKeyAgentProfileID].(string); current != profileID {
+		task.Metadata[models.MetaKeyAgentProfileID] = profileID
+		changed = true
+	}
+	if current, _ := task.Metadata["kandev.base_prompt"].(string); current != basePrompt {
+		if basePrompt == "" {
+			delete(task.Metadata, "kandev.base_prompt")
+		} else {
+			task.Metadata["kandev.base_prompt"] = basePrompt
+		}
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	task.UpdatedAt = time.Now().UTC()
+	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+		return fmt.Errorf("failed to reconcile conversation task configuration: %w", err)
+	}
+	return nil
 }
 
 // createPrimarySession creates a primary session row for the given task.
@@ -445,64 +485,38 @@ func (s *AgentConversationService) Dispatch(ctx context.Context, pluginID, works
 		return pluginsdk.AgentConversationDispatch{}, status.Error(codes.InvalidArgument, "plugin_id, workspace_id, and conversation_key are required")
 	}
 
-	// 1. Durably and atomically claim the occurrence key.
-	idempotencyID := uuid.New().String()
-	if occurrenceKey != "" {
-		alreadyClaimed, err := s.claimOccurrenceKey(ctx, pluginID, workspaceID, conversationKey, occurrenceKey)
-		if err != nil {
-			return pluginsdk.AgentConversationDispatch{}, fmt.Errorf("failed to claim occurrence key: %w", err)
-		}
-		if alreadyClaimed {
-			return pluginsdk.AgentConversationDispatch{
-				Status: "duplicate_occurrence",
-			}, nil
-		}
-		// Derive a stable message id from the same coordinates so the
-		// message-table primary key is a second, independent idempotency
-		// boundary — defense in depth if two callers ever raced past the
-		// occurrence claim (e.g. a state-store outage).
-		idempotencyID = deriveOccurrenceMessageID(pluginID, workspaceID, conversationKey, occurrenceKey)
-	}
-
-	// 2. Find the conversation.
-	existing, err := s.findManagedConversation(ctx, pluginID, workspaceID, conversationKey)
+	existing, primary, busy, err := s.dispatchTarget(ctx, pluginID, workspaceID, conversationKey)
 	if err != nil {
 		return pluginsdk.AgentConversationDispatch{}, err
 	}
-	if existing == nil {
-		return pluginsdk.AgentConversationDispatch{}, status.Error(codes.NotFound, "conversation not found, call Ensure first")
+	if busy != nil {
+		return *busy, nil
 	}
 
-	// 3. Get the primary session and check if it's mid-turn.
-	primary, err := s.sess.GetPrimarySessionByTaskID(ctx, existing.ID)
-	if err != nil {
-		return pluginsdk.AgentConversationDispatch{}, err
-	}
-	if primary == nil {
-		return pluginsdk.AgentConversationDispatch{}, status.Error(codes.NotFound, "conversation has no session, call Ensure first")
-	}
-	if primary.State == models.TaskSessionStateRunning || primary.State == models.TaskSessionStateStarting {
-		return pluginsdk.AgentConversationDispatch{
-			SessionID: primary.ID,
-			Status:    "skipped_busy",
-			Descriptor: pluginsdk.AgentConversationDescriptor{
-				TaskID:          existing.ID,
-				SessionID:       primary.ID,
-				WorkspaceID:     workspaceID,
-				ConversationKey: conversationKey,
-			},
-		}, nil
-	}
-
-	// 4. Deliver through the real agent runtime (start a never-launched
-	// session, or prompt/resume an idle one).
+	// 3. Resolve the runtime before consuming a durable occurrence key. A
+	// restart may leave this dependency temporarily unavailable; that must not
+	// turn a later retry into duplicate_occurrence.
 	dispatcher := s.getDispatcher()
 	if dispatcher == nil {
 		return pluginsdk.AgentConversationDispatch{}, status.Error(codes.Unavailable, "agent conversation dispatch is not ready yet")
 	}
-	deliverStatus, err := dispatcher.Deliver(ctx, existing.ID, primary, text, "plugin:"+pluginID, idempotencyID)
+
+	// 4. Atomically claim only after every precondition which cannot deliver
+	// has passed. The claim is released if Deliver fails, so a transient
+	// runtime error can safely retry the same scheduled occurrence.
+	idempotencyID, claimedOccurrence, duplicate, err := s.claimDispatchOccurrence(ctx, pluginID, workspaceID, conversationKey, occurrenceKey)
 	if err != nil {
-		return pluginsdk.AgentConversationDispatch{}, fmt.Errorf("failed to deliver message: %w", err)
+		return pluginsdk.AgentConversationDispatch{}, err
+	}
+	if duplicate {
+		return pluginsdk.AgentConversationDispatch{Status: "duplicate_occurrence"}, nil
+	}
+
+	// 5. Deliver through the real agent runtime (start a never-launched
+	// session, or prompt/resume an idle one).
+	deliverStatus, err := s.deliverConversationPrompt(ctx, dispatcher, existing, primary, text, pluginID, workspaceID, conversationKey, idempotencyID, claimedOccurrence, occurrenceKey)
+	if err != nil {
+		return pluginsdk.AgentConversationDispatch{}, err
 	}
 
 	return pluginsdk.AgentConversationDispatch{
@@ -515,6 +529,78 @@ func (s *AgentConversationService) Dispatch(ctx context.Context, pluginID, works
 			ConversationKey: conversationKey,
 		},
 	}, nil
+}
+
+func (s *AgentConversationService) dispatchTarget(ctx context.Context, pluginID, workspaceID, conversationKey string) (*models.Task, *models.TaskSession, *pluginsdk.AgentConversationDispatch, error) {
+	existing, err := s.findManagedConversation(ctx, pluginID, workspaceID, conversationKey)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if existing == nil {
+		return nil, nil, nil, status.Error(codes.NotFound, "conversation not found, call Ensure first")
+	}
+	primary, err := s.sess.GetPrimarySessionByTaskID(ctx, existing.ID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if primary == nil {
+		return nil, nil, nil, status.Error(codes.NotFound, "conversation has no session, call Ensure first")
+	}
+	if primary.State != models.TaskSessionStateRunning && primary.State != models.TaskSessionStateStarting {
+		return existing, primary, nil, nil
+	}
+	return nil, nil, &pluginsdk.AgentConversationDispatch{
+		SessionID: primary.ID,
+		Status:    "skipped_busy",
+		Descriptor: pluginsdk.AgentConversationDescriptor{
+			TaskID:          existing.ID,
+			SessionID:       primary.ID,
+			WorkspaceID:     workspaceID,
+			ConversationKey: conversationKey,
+		},
+	}, nil
+}
+
+func (s *AgentConversationService) claimDispatchOccurrence(ctx context.Context, pluginID, workspaceID, conversationKey, occurrenceKey string) (string, bool, bool, error) {
+	if occurrenceKey == "" {
+		return uuid.New().String(), false, false, nil
+	}
+	alreadyClaimed, err := s.claimOccurrenceKey(ctx, pluginID, workspaceID, conversationKey, occurrenceKey)
+	if err != nil {
+		return "", false, false, fmt.Errorf("failed to claim occurrence key: %w", err)
+	}
+	if alreadyClaimed {
+		return "", false, true, nil
+	}
+	return deriveOccurrenceMessageID(pluginID, workspaceID, conversationKey, occurrenceKey), true, false, nil
+}
+
+func (s *AgentConversationService) deliverConversationPrompt(ctx context.Context, dispatcher agentConversationDispatcher, task *models.Task, primary *models.TaskSession, text, pluginID, workspaceID, conversationKey, idempotencyID string, claimedOccurrence bool, occurrenceKey string) (string, error) {
+	deliverStatus, err := dispatcher.Deliver(ctx, task.ID, primary, composeConversationPrompt(task, text), "plugin:"+pluginID, idempotencyID)
+	if err == nil {
+		return deliverStatus, nil
+	}
+	if !claimedOccurrence {
+		return "", fmt.Errorf("failed to deliver message: %w", err)
+	}
+	if releaseErr := s.releaseOccurrenceKey(ctx, pluginID, workspaceID, conversationKey, occurrenceKey); releaseErr != nil {
+		return "", fmt.Errorf("failed to deliver message: %w; failed to release occurrence key: %v", err, releaseErr)
+	}
+	return "", fmt.Errorf("failed to deliver message: %w", err)
+}
+
+func composeConversationPrompt(task *models.Task, text string) string {
+	if task == nil || task.Metadata == nil {
+		return text
+	}
+	basePrompt, _ := task.Metadata["kandev.base_prompt"].(string)
+	if basePrompt == "" {
+		return text
+	}
+	if text == "" {
+		return basePrompt
+	}
+	return basePrompt + "\n\n" + text
 }
 
 // deriveOccurrenceMessageID derives a stable, collision-free message id from
@@ -530,6 +616,9 @@ func deriveOccurrenceMessageID(pluginID, workspaceID, conversationKey, occurrenc
 // Delete removes all managed conversations owned by pluginID matching
 // workspaceID and conversationKey. Returns the count of deleted tasks.
 func (s *AgentConversationService) Delete(ctx context.Context, pluginID, workspaceID, conversationKey string) (int32, error) {
+	if pluginID == "" || workspaceID == "" || conversationKey == "" {
+		return 0, status.Error(codes.InvalidArgument, "plugin_id, workspace_id, and conversation_key are required")
+	}
 	tasks, err := s.listManagedConversations(ctx, pluginID, workspaceID, conversationKey)
 	if err != nil {
 		return 0, err
@@ -707,6 +796,11 @@ func (s *AgentConversationService) claimOccurrenceKey(ctx context.Context, plugi
 		return false, err
 	}
 	return !claimed, nil
+}
+
+func (s *AgentConversationService) releaseOccurrenceKey(ctx context.Context, pluginID, workspaceID, conversationKey, occurrenceKey string) error {
+	scopeID := workspaceID + "/" + conversationKey
+	return s.state.Delete(ctx, pluginID, agentConversationOccurrenceScope, scopeID, occurrenceKey)
 }
 
 // IsManagedConversationTask is a public predicate that reports whether a

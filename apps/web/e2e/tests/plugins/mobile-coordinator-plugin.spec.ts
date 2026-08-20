@@ -1,0 +1,37 @@
+import { expect, test } from "../../fixtures/test-base";
+import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
+import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+
+test.describe("Mobile coordinator workspace-agent fixture", () => {
+  test.afterEach(async ({ apiClient }) => {
+    await apiClient.rawRequest("DELETE", `/api/plugins/${PLUGIN_ID}`).catch(() => undefined);
+  });
+
+  test("opens Coordinator from mobile Integrations without overflow", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    await apiClient.updateWorkspace(seedData.workspaceId, {
+      default_agent_profile_id: seedData.agentProfileId,
+    });
+    await installFixturePlugin(testPage);
+
+    const kanban = new MobileKanbanPage(testPage);
+    await kanban.goto();
+    await kanban.mobileMenuButton.click();
+    const sheet = testPage.getByRole("dialog");
+    const coordinator = sheet.getByTestId("plugin-nav-item-e2e-coordinator");
+    await expect(coordinator).toBeVisible({ timeout: 15_000 });
+    expect((await coordinator.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await coordinator.click();
+
+    await expect(testPage).toHaveURL(/\/coordinator$/);
+    await expect(testPage.getByTestId("fixture-coordinator-page")).toBeVisible();
+    await expect(testPage.getByTestId("workspace-agent-chat")).toBeVisible({ timeout: 20_000 });
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
+      await testPage.evaluate(() => document.documentElement.clientWidth),
+    );
+  });
+});

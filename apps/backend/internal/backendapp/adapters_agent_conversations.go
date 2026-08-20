@@ -24,6 +24,7 @@ type agentConversationTaskAdapter struct {
 		ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*taskmodels.Task, int, error)
 		ListEphemeralTasksAllWorkspaces(ctx context.Context) ([]*taskmodels.Task, error)
 		CreateTask(ctx context.Context, task *taskmodels.Task) error
+		UpdateTask(ctx context.Context, task *taskmodels.Task) error
 		DeleteTask(ctx context.Context, taskID string) error
 	}
 }
@@ -44,6 +45,10 @@ func (a agentConversationTaskAdapter) CreateTask(ctx context.Context, task *task
 	return a.repo.CreateTask(ctx, task)
 }
 
+func (a agentConversationTaskAdapter) UpdateTask(ctx context.Context, task *taskmodels.Task) error {
+	return a.repo.UpdateTask(ctx, task)
+}
+
 func (a agentConversationTaskAdapter) DeleteTask(ctx context.Context, taskID string) error {
 	return a.repo.DeleteTask(ctx, taskID)
 }
@@ -54,6 +59,7 @@ type agentConversationSessionAdapter struct {
 	repo interface {
 		GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*taskmodels.TaskSession, error)
 		CreateTaskSession(ctx context.Context, session *taskmodels.TaskSession) error
+		UpdateTaskSession(ctx context.Context, session *taskmodels.TaskSession) error
 	}
 }
 
@@ -63,6 +69,10 @@ func (a agentConversationSessionAdapter) GetPrimarySessionByTaskID(ctx context.C
 
 func (a agentConversationSessionAdapter) CreateTaskSession(ctx context.Context, session *taskmodels.TaskSession) error {
 	return a.repo.CreateTaskSession(ctx, session)
+}
+
+func (a agentConversationSessionAdapter) UpdateTaskSession(ctx context.Context, session *taskmodels.TaskSession) error {
+	return a.repo.UpdateTaskSession(ctx, session)
 }
 
 // agentConversationProfileAdapter wraps the agent settings repository to
@@ -106,6 +116,10 @@ func (a agentConversationStateStoreAdapter) Claim(ctx context.Context, pluginID,
 	return a.store.Claim(ctx, pluginID, scope, scopeID, key, value)
 }
 
+func (a agentConversationStateStoreAdapter) Delete(ctx context.Context, pluginID, scope, scopeID, key string) error {
+	return a.store.Delete(ctx, pluginID, scope, scopeID, key)
+}
+
 // agentConversationDispatcherAdapter adapts pluginsTaskMessengerAdapter's
 // idempotent delivery primitive to the taskservice.AgentConversationService
 // dispatcher seam, so a scheduled coordinator wake reaches the same real
@@ -131,9 +145,11 @@ func NewAgentConversationService(
 		ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*taskmodels.Task, int, error)
 		ListEphemeralTasksAllWorkspaces(ctx context.Context) ([]*taskmodels.Task, error)
 		CreateTask(ctx context.Context, task *taskmodels.Task) error
+		UpdateTask(ctx context.Context, task *taskmodels.Task) error
 		DeleteTask(ctx context.Context, taskID string) error
 		GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*taskmodels.TaskSession, error)
 		CreateTaskSession(ctx context.Context, session *taskmodels.TaskSession) error
+		UpdateTaskSession(ctx context.Context, session *taskmodels.TaskSession) error
 	},
 	profileRepo interface {
 		GetAgentProfile(ctx context.Context, id string) (*agentsettingsmodels.AgentProfile, error)

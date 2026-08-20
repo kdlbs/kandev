@@ -49,6 +49,9 @@ actions:
   - key: "conversations.probe"
     scope: "workspace"
     max_body_bytes: 4096
+  - key: "conversations.ensure"
+    scope: "workspace"
+    max_body_bytes: 4096
 
 reference_sources:
   - source: "fixture-pull-requests"

@@ -142,6 +142,35 @@ func TestConversationProbe_RunsEnsureDispatchAndDelete(t *testing.T) {
 	}
 }
 
+func TestConversationEnsure_RetainsConversationForWorkspaceAgentChat(t *testing.T) {
+	p, mgr := newConvProbePlugin(t)
+
+	resp, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{
+		ActionKey: conversationEnsureActionKey,
+		Context:   pluginsdk.VerifiedActionContext{WorkspaceID: "ws-chat"},
+	})
+	if err != nil {
+		t.Fatalf("conversations.ensure: %v", err)
+	}
+	if mgr.ensureSpec.WorkspaceID != "ws-chat" {
+		t.Errorf("Ensure workspace = %q, want ws-chat", mgr.ensureSpec.WorkspaceID)
+	}
+	if mgr.ensureSpec.ConversationKey != conversationProbeKey {
+		t.Errorf("Ensure conversation key = %q, want %q", mgr.ensureSpec.ConversationKey, conversationProbeKey)
+	}
+	if mgr.deleteCalls != 0 {
+		t.Errorf("Delete calls = %d, want 0 for a retained chat conversation", mgr.deleteCalls)
+	}
+
+	out := probeResult(t, resp)
+	if out["session_id"] != "session-conv-1" {
+		t.Errorf("session_id = %v, want session-conv-1", out["session_id"])
+	}
+	if out["conversation_key"] != conversationProbeKey {
+		t.Errorf("conversation_key = %v, want %s", out["conversation_key"], conversationProbeKey)
+	}
+}
+
 // Each probe run must claim a distinct occurrence key, otherwise a second run
 // would be deduplicated as a repeat of the first and silently dispatch nothing.
 func TestConversationProbe_UsesAFreshOccurrenceKeyPerRun(t *testing.T) {
