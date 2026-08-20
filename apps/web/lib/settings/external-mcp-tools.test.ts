@@ -3,13 +3,14 @@ import { EXTERNAL_MCP_TOOL_GROUPS, countExternalMcpTools } from "./external-mcp-
 import enSettings from "@/src/locales/en/settings.json";
 
 describe("external MCP tool catalog", () => {
-  // Pins the catalog against `ModeExternal`'s registered tool count: 12
-  // workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp +
-  // 5 executor + 7 task (incl. list_task_sessions + get_task_conversation) +
-  // 1 create_task + 2 task-dependency + 2 question-answering (list_pending_questions
-  // + answer_question) = 37 — see `TestServerModeExternal_ToolCount`.
-  it("lists 37 tools, matching every tool ModeExternal registers", () => {
-    expect(countExternalMcpTools()).toBe(37);
+  // Pins the catalog against `ModeExternal`'s registered tool count: 13
+  // workflow (incl. list_repositories + import_workflow + export_workflow) +
+  // 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions +
+  // get_task_conversation) + 1 create_task + 2 task-dependency + 2
+  // question-answering (list_pending_questions + answer_question) = 38 —
+  // see `TestServerModeExternal_ToolCount`.
+  it("lists 38 tools, matching every tool ModeExternal registers", () => {
+    expect(countExternalMcpTools()).toBe(38);
   });
 
   it("every tool name is unique and ends with the kandev suffix", () => {

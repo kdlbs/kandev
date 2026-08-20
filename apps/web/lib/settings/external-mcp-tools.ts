@@ -42,6 +42,7 @@ export const EXTERNAL_MCP_TOOL_GROUPS: ExternalMcpToolGroup[] = [
       { name: "update_workflow_kandev", descriptionKey: "settings:externalMcpToolUpdateWorkflow" },
       { name: "delete_workflow_kandev", descriptionKey: "settings:externalMcpToolDeleteWorkflow" },
       { name: "import_workflow_kandev", descriptionKey: "settings:externalMcpToolImportWorkflow" },
+      { name: "export_workflow_kandev", descriptionKey: "settings:externalMcpToolExportWorkflow" },
     ],
   },
   {

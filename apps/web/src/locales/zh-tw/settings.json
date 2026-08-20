@@ -277,6 +277,7 @@
   "externalMcpToolGetMcpConfig": "讀取設定的 MCP 伺服器對映。",
   "externalMcpToolGetTaskConversation": "擷取任務的對話歷史，可選指定特定工作階段。",
   "externalMcpToolImportWorkflow": "從可移植的 YAML/JSON 匯出檔案匯入一個或多個工作流程。",
+  "externalMcpToolExportWorkflow": "將一個工作流程匯出為可移植的 JSON 檔案，可直接匯入另一個工作區。",
   "externalMcpToolListAgentProfiles": "列出代理程式的設定。",
   "externalMcpToolListAgents": "列出已設定的代理程式及其設定。",
   "externalMcpToolListExecutorProfiles": "列出執行器的設定。",

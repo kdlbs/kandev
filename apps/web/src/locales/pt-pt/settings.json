@@ -272,6 +272,7 @@
   "externalMcpToolGetMcpConfig": "Ler o mapa de servidores MCP de um perfil.",
   "externalMcpToolGetTaskConversation": "Obter o histórico de conversa de uma tarefa, opcionalmente para uma sessão específica.",
   "externalMcpToolImportWorkflow": "Importar um ou mais fluxos de trabalho a partir de um documento de exportação portátil em YAML/JSON.",
+  "externalMcpToolExportWorkflow": "Exportar um fluxo de trabalho como um documento JSON portátil, pronto para importar noutro espaço de trabalho.",
   "externalMcpToolListAgentProfiles": "Listar os perfis de um agente.",
   "externalMcpToolListAgents": "Listar os agentes configurados e os respetivos perfis.",
   "externalMcpToolListExecutorProfiles": "Listar os perfis de um executor.",
