@@ -105,6 +105,15 @@ func (r *SSHExecutor) HealthCheck(_ context.Context) error {
 	return nil
 }
 
+// PrepareGitMetadataProjection attests the agent-side policy capability before
+// SSH provisioning. Remote paths are resolved only after the checkout exists.
+func (r *SSHExecutor) PrepareGitMetadataProjection(_ context.Context, req *ExecutorCreateRequest) error {
+	if req != nil && req.PreviousExecutionID != "" {
+		return errors.New("SSH resume cannot attest a replacement Git metadata policy; start a new session")
+	}
+	return validateRemoteGitMetadataRequest(req)
+}
+
 // Close terminates every still-tracked SSH session. Normal teardown happens
 // session-by-session via StopInstance; Close is the shutdown safety net for
 // sessions whose StopInstance didn't run (e.g. a hard kandev exit).
@@ -262,6 +271,9 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	} else if err := ensureReuseRequiredRemoteTaskDirExists(launchCtx, client, taskDir); err != nil {
 		return nil, err
 	}
+	if err := r.installRemoteGitMetadataPolicy(launchCtx, client, taskDir, req, platform); err != nil {
+		return nil, err
+	}
 	sessionDir, err := r.prepareRemoteSessionDir(launchCtx, client, taskDir, req)
 	if err != nil {
 		return nil, err
@@ -303,6 +315,31 @@ func reuseRequiredRemoteTaskDir(req *ExecutorCreateRequest) (string, error) {
 		return "", fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
 	}
 	return taskDir, nil
+}
+
+func (r *SSHExecutor) installRemoteGitMetadataPolicy(
+	ctx context.Context,
+	client *ssh.Client,
+	taskDir string,
+	req *ExecutorCreateRequest,
+	platform SSHRemotePlatform,
+) error {
+	if len(req.GitMetadataProjections) == 0 {
+		return nil
+	}
+	shell := sshShellForRemote(req.Metadata, platform)
+	output, _, err := runSSHCommand(ctx, client, WrapLoginShell(shell, remoteRegularGitMetadataProbeScript(taskDir)))
+	if err != nil {
+		return errors.New("ssh: remote Git metadata policy validation failed")
+	}
+	metadata, err := parseRemoteRegularGitMetadata(output)
+	if err != nil {
+		return errors.New("ssh: remote Git metadata policy validation failed")
+	}
+	if err := prepareRemoteRegularGitMetadataPolicy(req, metadata); err != nil {
+		return errors.New("ssh: remote Git metadata policy installation failed")
+	}
+	return nil
 }
 
 func (r *SSHExecutor) resumedStateForCreate(req *ExecutorCreateRequest) (*sshSessionState, bool) {
