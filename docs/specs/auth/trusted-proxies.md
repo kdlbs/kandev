@@ -24,10 +24,10 @@ client.
   resolve from the first valid forwarded-IP header in gin's configured order
   (`X-Forwarded-For`, then `X-Real-IP`), falling back to the peer only when
   neither header yields a valid address.
-- When the variable is unset or empty, or the peer is not in the list, the
+- When the configured list is unset or empty, or the peer is not in the list, the
   client IP SHALL be the TCP peer; forwarded headers are ignored.
 - When any entry fails to parse as an IP or CIDR, startup SHALL log a warning
-  naming the bad value(s) and the whole variable SHALL be ignored (fail
+  naming the bad value(s) and the whole configured list SHALL be ignored (fail
   closed; no partial trust). Startup SHALL NOT fail.
 - The resolved client IP feeds the same consumers as today: the session IP
   recorded for login, setup, invite acceptance, and plugin-provided SSO
@@ -35,13 +35,13 @@ client.
 
 ## Failure modes
 
-- **Invalid entries.** A warning names the bad values and the variable is
+- **Invalid entries.** A warning names the bad values and the configured list is
   ignored entirely; `X-Forwarded-For` is never trusted and the recorded IP
   stays the TCP peer. No crash.
 - **No valid forwarded-IP header** on a request from a trusted peer: gin
   falls back to the TCP peer (only when neither `X-Forwarded-For` nor
   `X-Real-IP` yields a valid address).
-- **Spoofing.** An operator who sets the variable while the backend is
+- **Spoofing.** An operator who configures the list while the backend is
   directly reachable lets any caller whose peer address falls inside a
   configured trusted IP/CIDR forge the client IP, including the login
   rate-limiter key. Callers outside every configured range still fall back to

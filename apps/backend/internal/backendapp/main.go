@@ -31,6 +31,7 @@ import (
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/profiles"
 
 	// Event bus
 	"github.com/kandev/kandev/internal/events"
@@ -206,6 +207,10 @@ func Run(args []string, build BuildInfo) int {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
+		return 1
+	}
+	if _, _, err := profiles.ApplyProfile(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to apply profile defaults: %v\n", err)
 		return 1
 	}
 	constants.ApplyPreparationTimeout(cfg.Tasks.PreparationTimeout)

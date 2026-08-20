@@ -91,7 +91,8 @@ func resolveDevBackendEnv(repoRoot string, configs ...*config.Config) (dbPath st
 		strings.TrimSpace(startupConfig.Database.Path) != "" {
 		return startupConfig.Database.Path, baseExtra
 	}
-	if startupConfig != nil && startupConfig.SourceFor("homeDir") == config.SourceConfiguration {
+	if startupConfig != nil && (startupConfig.SourceFor("homeDir") == config.SourceConfiguration ||
+		startupConfig.SourceFor("homeDir") == config.SourceEnvironment) {
 		return filepath.Join(startupConfig.ResolvedDataDir(), "kandev.db"), baseExtra
 	}
 

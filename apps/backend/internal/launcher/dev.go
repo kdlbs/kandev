@@ -164,12 +164,33 @@ func devStartupConfig(configs ...*config.Config) (*config.Config, int) {
 			return nil, 1
 		}
 	}
-	startupConfig, err := loadBootstrapConfig()
+	startupConfig, err := loadDevBootstrapConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return nil, 1
 	}
 	return startupConfig, 0
+}
+
+func loadDevBootstrapConfig() (*config.Config, error) {
+	if os.Getenv("KANDEV_E2E_MOCK") != "" || os.Getenv("KANDEV_DEBUG_DEV_MODE") != "" {
+		return loadBootstrapConfig()
+	}
+
+	const selector = "KANDEV_DEBUG_DEV_MODE"
+	previous, present := os.LookupEnv(selector)
+	if err := os.Setenv(selector, "true"); err != nil {
+		return nil, err
+	}
+	cfg, err := loadBootstrapConfig()
+	if present {
+		if restoreErr := os.Setenv(selector, previous); err == nil {
+			err = restoreErr
+		}
+	} else if restoreErr := os.Unsetenv(selector); err == nil {
+		err = restoreErr
+	}
+	return cfg, err
 }
 
 // backupProductionDBIfNeeded snapshots the resolved DB before dev mode runs

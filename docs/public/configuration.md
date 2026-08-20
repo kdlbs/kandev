@@ -161,10 +161,10 @@ startup setting, not a database or Settings value.
 | `limits.ghMaxConcurrent` | `KANDEV_GH_MAX_CONCURRENT` | positive integer, `8` | Process-wide `gh` subprocess admission cap. |
 | `limits.gitMaxConcurrent` | `KANDEV_GIT_MAX_CONCURRENT` | positive integer, `12` | Process-wide `git` subprocess admission cap. |
 | `limits.lspMaxConnections` | `KANDEV_LSP_MAX_CONNECTIONS` | positive integer, `8` | Active browser-to-task-host language-server connection cap. |
-| `messageQueue.maxPerSession` | `KANDEV_QUEUE_MAX_PER_SESSION` | integer `>= 0`, `10` | Per-session pending-message cap. Zero means unlimited. A YAML or valid environment value locks capacity in Settings; environment wins over YAML. |
+| `messageQueue.maxPerSession` | `KANDEV_QUEUE_MAX_PER_SESSION` | integer `>= 0`, `10` | Per-session pending-message cap. Zero means unlimited. A non-negative YAML or environment value locks capacity in Settings; a negative environment value means unlimited, and invalid environment input falls through to the lower-precedence source. |
 | `agentctl.idleTimeout` | `KANDEV_ACP_IDLE_TIMEOUT` | Go duration, `1h` | Idle managed-agent reaping timeout. Zero disables reaping. |
 | `agentctl.idleReaperInterval` | `KANDEV_ACP_IDLE_REAPER_INTERVAL` | Go duration, `1m` | Interval between idle-agent scans. |
-| `agentctl.notificationQueueCapacity` | `KANDEV_ACP_NOTIF_QUEUE` | integer `1024`-`131072`, `131072` | ACP inbound notification queue capacity. |
+| `agentctl.notificationQueueCapacity` | `KANDEV_ACP_NOTIF_QUEUE` | integer `1024`-`131072`, `131072` | ACP inbound notification queue capacity. An out-of-range YAML value fails startup; an invalid or out-of-range environment value uses the built-in default. |
 | `planning.coalesceWindowMs` | `KANDEV_PLAN_COALESCE_WINDOW_MS` | integer `>= 0`, `300000` | Same-author plan revision coalescing window in milliseconds. |
 | `observability.otlpEndpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | URL, empty | OTLP tracing endpoint. Treat the value and emitted spans as sensitive. |
 | `office.schedulerTickMs` | `KANDEV_OFFICE_SCHEDULER_TICK_MS` | positive integer, `5000` | Office queued/retry run safety-net interval in milliseconds. |
@@ -187,10 +187,7 @@ through a private process contract.
 | `auth.cookieName` | `KANDEV_AUTH_COOKIE_NAME` | empty | Session cookie base name. Empty (default) means the effective name is derived from the request host: `kandev_session` on a default-port host, `kandev_session_<port>` on a ported host. This isolates multiple instances on one host (see [authentication](authentication.md#multiple-instances-on-one-host)). A non-empty value is used verbatim (never port-suffixed) and disables automatic isolation, so it must be unique per cookie host. Precedence: environment over config file over default. |
 | `office.jwtSigningKey` | `KANDEV_OFFICE_JWTSIGNINGKEY` | random per start | HMAC key for Office agent-runtime JWTs. Set a stable secret when Office tasks must survive restarts. |
 | `githubCredentialBroker.publicBaseUrl` | `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL` | empty | Public HTTPS base URL used by remote executors to resolve GitHub credentials. Loopback HTTP is allowed for development. |
-| `features.office` | `KANDEV_FEATURES_OFFICE` | `false` in production | Experimental Office UI, routes, services, and automation. |
-| `features.auth` | `KANDEV_FEATURES_AUTH` | `false` in production | Opt-in authentication and per-user workspaces. The first visitor after enabling completes setup and becomes the admin. |
-| `features.claude_background_prompt_handoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | `false` | High-risk experiment that lets Claude Code accept a new prompt after its foreground yields while adapter-attested background work remains active. Other providers keep the coarse busy gate. |
-| `features.claude_mid_turn_steering` | `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING` | `false` | High-risk experiment that delivers a new prompt into a Claude turn that is still generating (mid-turn steering) instead of queuing it, for agents that advertise prompt queueing. Whether the agent folds the prompt into the running turn or runs it next is the agent's decision; other providers keep the coarse busy gate. |
+Runtime feature flags are documented in [Runtime feature toggles](#runtime-feature-toggles); they are profile, environment, and database-backed controls, not canonical YAML settings.
 
 Do not infer security from `auth.jwtSecret`: setting it currently does not turn the local server into an authenticated public service. Office's JWT key has a narrower, active purpose. Store both active secrets and third-party API keys in your deployment secret manager; never commit them in `config.yaml`.
 
@@ -426,10 +423,6 @@ office:
   jwtSigningKey: ""
   schedulerTickMs: 5000
 
-features:
-  office: false
-  auth: false
-  claude_background_prompt_handoff: false
 ```
 
 Copying this entire file is unnecessary and can freeze old defaults in a deployment. Keep only deliberate overrides. On Windows, do not copy the Unix Docker host/path literals from this example.
@@ -442,11 +435,12 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 
 | Key | Environment lock | Production default | Effect |
 |---|---|---|---|
-| `features.office` | `KANDEV_FEATURES_OFFICE` | off | Experimental autonomous-agent Office surfaces and automation. |
-| `features.auth` | `KANDEV_FEATURES_AUTH` | off | Authentication and per-user workspaces for the whole install. |
-| `features.claudeBackgroundPromptHandoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | off | High-risk Claude Code experiment that exposes recognized background-only activity and admits a successor prompt. |
-| `features.claudeMidTurnSteering` | `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING` | off | High-risk Claude Code experiment that delivers a prompt into a still-generating turn (mid-turn steering) instead of queuing it, for agents advertising prompt queueing. |
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` | off | High-risk diagnostic endpoints and ACP frame logging. |
+
+The `KANDEV_FEATURES_*` values have no canonical YAML keys. They are selected
+from the embedded profile and can be overridden by the environment or the
+database-backed toggle controls in this section. Use **Settings → System →
+Feature Toggles** for persistent product changes.
 
 UI changes are persisted in the database and require a restart. An explicitly set environment value wins and locks the UI control. Otherwise a database override wins over the embedded profile/default. Resetting a toggle removes its database override.
 
@@ -501,15 +495,15 @@ overrides.
 | `limits.ghMaxConcurrent` | `KANDEV_GH_MAX_CONCURRENT` | `8` | Positive integer process-wide cap for `gh` subprocesses; invalid/non-positive uses default. |
 | `limits.gitMaxConcurrent` | `KANDEV_GIT_MAX_CONCURRENT` | `12` | Positive integer process-wide cap for `git` subprocesses; invalid/non-positive uses default. |
 | `limits.lspMaxConnections` | `KANDEV_LSP_MAX_CONNECTIONS` | `8` | Positive integer cap for active browser-to-task-host language-server streams; invalid/non-positive uses default. |
-| `messageQueue.maxPerSession` | `KANDEV_QUEUE_MAX_PER_SESSION` | `10` | Pending messages per session. YAML or a valid environment value locks the saved UI capacity; zero/negative means unlimited, while invalid environment input falls through to YAML, the saved setting, or default. |
+| `messageQueue.maxPerSession` | `KANDEV_QUEUE_MAX_PER_SESSION` | `10` | Pending messages per session. A non-negative YAML value locks the saved UI capacity; a valid environment value overrides YAML and locks it; a negative environment value means unlimited; malformed environment input falls through to YAML, the saved setting, or default. |
 | `agentctl.idleTimeout` | `KANDEV_ACP_IDLE_TIMEOUT` | `1h` | Go duration after which idle managed agentctl instances are reaped; `0` disables. Invalid uses default. |
 | `agentctl.idleReaperInterval` | `KANDEV_ACP_IDLE_REAPER_INTERVAL` | `1m` | Go duration between idle scans. |
-| `agentctl.notificationQueueCapacity` | `KANDEV_ACP_NOTIF_QUEUE` | `131072` | Per-connection ACP inbound notification capacity; values clamp to `1024`-`131072`. |
+| `agentctl.notificationQueueCapacity` | `KANDEV_ACP_NOTIF_QUEUE` | `131072` | Per-connection ACP inbound notification capacity. YAML values outside `1024`-`131072` fail startup; invalid or out-of-range environment values use `131072`. |
 | `planning.coalesceWindowMs` | `KANDEV_PLAN_COALESCE_WINDOW_MS` | `300000` | Non-negative milliseconds for same-author plan revision coalescing; invalid/negative uses five minutes. |
 | `office.schedulerTickMs` | `KANDEV_OFFICE_SCHEDULER_TICK_MS` | `5000` | Positive integer safety-net interval for queued/retry run claiming. New-run signals are event-driven. |
 | `observability.otlpEndpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Enables OTLP/HTTP tracing for backend and agentctl spans; unset uses a no-op tracer. |
 
-Changing concurrency values trades process pressure against throughput and requires a restart. Under **Settings > Task Behavior > Message Queue**, an admin can save an install-wide capacity and independently control manual and automatic merging. The merge switches apply live and persist across restarts. `messageQueue.maxPerSession` resolves as environment, YAML, saved setting, then default; a YAML or environment value locks only capacity. `0` means unlimited. Lowering the live limit does not prune existing rows; new admissions remain blocked until the pending count drops below the limit, while retries of already accepted work remain eligible. The default-on automatic switch affects only later admissions and never bypasses capacity or sweeps existing rows.
+Changing concurrency values trades process pressure against throughput and requires a restart. Under **Settings > Task Behavior > Message Queue**, an admin can save an install-wide capacity and independently control manual and automatic merging. The merge switches apply live and persist across restarts. `messageQueue.maxPerSession` resolves as environment, YAML, saved setting, then default; a non-negative YAML value or any valid environment value locks only capacity. A negative environment value means unlimited, while malformed environment input falls through to the lower-precedence source. `0` means unlimited. Lowering the live limit does not prune existing rows; new admissions remain blocked until the pending count drops below the limit, while retries of already accepted work remain eligible. The default-on automatic switch affects only later admissions and never bypasses capacity or sweeps existing rows.
 
 The current OTLP exporter strips an `http://` or `https://` prefix from the configured endpoint and always uses `WithInsecure()`. Treat this as implementation-bound cleartext transport: send it only to a trusted private collector over a protected network, not directly across an untrusted network. The service name is `kandev-agentctl`, and spans can include task/session/execution IDs plus raw agent-event JSON truncated to 8192 characters. That payload can contain prompts, files, and tool data. Use collector-side access controls and retention accordingly.
 

@@ -109,7 +109,7 @@ var startupCatalog = []CatalogEntry{
 
 var startupExclusions = []CatalogExclusion{
 	{EnvVar: InternalConfigFileEnv, Class: "internal wiring", Reason: "launcher-selected configuration file handoff"},
-	{EnvVar: internalConfigHomeFileEnv, Class: "internal wiring", Reason: "launcher-selected home-file handoff"},
+	{EnvVar: InternalConfigHomeFileEnv, Class: "internal wiring", Reason: "launcher-selected home-file handoff"},
 	{EnvVar: InternalAgentctlStartupConfigEnv, Class: "internal wiring", Reason: "resolved agentctl child configuration handoff"},
 	{EnvVar: "KANDEV_LAUNCHER_PARENT_PID", Class: "internal wiring", Reason: "launcher parent-watchdog handoff"},
 	{EnvVar: "KANDEV_BACKEND_PID_FILE", Class: "internal wiring", Reason: "supervisor-owned process state"},

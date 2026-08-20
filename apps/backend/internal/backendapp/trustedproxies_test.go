@@ -147,7 +147,7 @@ func TestConfigureTrustedProxiesInvalidEntryWarnsAndFallsBack(t *testing.T) {
 	}
 	warned := false
 	for _, entry := range logs.All() {
-		if !strings.Contains(entry.Message, "KANDEV_TRUSTED_PROXIES") {
+		if !strings.Contains(entry.Message, "trusted-proxy setting") {
 			continue
 		}
 		for _, field := range entry.Context {

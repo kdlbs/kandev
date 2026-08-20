@@ -103,6 +103,7 @@ launcher:
 func TestHomeConfigDiscovery(t *testing.T) {
 	t.Setenv("KANDEV_SERVER_PORT", "")
 	homeDir := t.TempDir()
+	t.Chdir(t.TempDir())
 	if err := os.WriteFile(filepath.Join(homeDir, "config.yaml"), []byte("server:\n  port: 40123\n"), 0o600); err != nil {
 		t.Fatalf("write home config: %v", err)
 	}
@@ -120,6 +121,7 @@ func TestHomeConfigDiscovery(t *testing.T) {
 func TestHomeConfigCannotRelocateItself(t *testing.T) {
 	t.Setenv("KANDEV_SERVER_PORT", "")
 	homeDir := t.TempDir()
+	t.Chdir(t.TempDir())
 	if err := os.WriteFile(filepath.Join(homeDir, "config.yaml"), []byte("homeDir: /different\n"), 0o600); err != nil {
 		t.Fatalf("write home config: %v", err)
 	}
@@ -177,6 +179,37 @@ func TestConfigPrecedenceEnvironmentOverYAML(t *testing.T) {
 	}
 	if got := cfg.SourceFor("messageQueue.maxPerSession"); got != SourceEnvironment {
 		t.Fatalf("messageQueue.maxPerSession source = %q, want %q", got, SourceEnvironment)
+	}
+}
+
+func TestEmptyCredentialsEnvironmentClearsYAML(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("credentials:\n  file: /run/secrets/credentials\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("KANDEV_CREDENTIALS_FILE", "")
+
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if cfg.Credentials.File != "" {
+		t.Fatalf("credentials.file = %q, want empty environment override", cfg.Credentials.File)
+	}
+	if got := cfg.SourceFor("credentials.file"); got != SourceEnvironment {
+		t.Fatalf("credentials.file source = %q, want environment", got)
+	}
+}
+
+func TestRepositoryDiscoveryRootsEnvironmentUsesCommaSeparatedValues(t *testing.T) {
+	t.Setenv("KANDEV_REPOSITORYDISCOVERY_ROOTS", "/one,/two")
+
+	cfg, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if !reflect.DeepEqual(cfg.RepositoryDiscovery.Roots, []string{"/one", "/two"}) {
+		t.Fatalf("repositoryDiscovery.roots = %#v, want comma-separated paths", cfg.RepositoryDiscovery.Roots)
 	}
 }
 

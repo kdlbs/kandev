@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/profiles"
 )
 
 const healthTokenBytes = 32
@@ -39,7 +40,7 @@ func backendEnv(ports portConfig, logLevel, consoleLogLevel string, debug bool, 
 }
 
 func backendEnvForConfig(ports portConfig, logLevel, consoleLogLevel string, debug bool, healthToken string, extra []string, cfg *config.Config) []string {
-	env := os.Environ()
+	env := stripAppliedProfileEnvironment(os.Environ())
 	env = upsertEnv(env, "KANDEV_SERVER_PORT", fmt.Sprint(ports.BackendPort))
 	env = upsertEnv(env, "KANDEV_AGENT_STANDALONE_PORT", fmt.Sprint(ports.AgentctlPort))
 	if cfg == nil || cfg.SourceFor("database.path") != config.SourceConfiguration || strings.TrimSpace(cfg.Database.Path) == "" {
@@ -48,7 +49,7 @@ func backendEnvForConfig(ports portConfig, logLevel, consoleLogLevel string, deb
 	if configPath := configFileForChild(cfg); configPath != "" {
 		env = upsertEnv(env, config.InternalConfigFileEnv, configPath)
 		if cfg.Source.HomeFile {
-			env = upsertEnv(env, "KANDEV_INTERNAL_CONFIG_HOME_FILE", "1")
+			env = upsertEnv(env, config.InternalConfigHomeFileEnv, "1")
 		}
 	}
 	env = upsertEnv(env, "KANDEV_DESKTOP_HEALTH_TOKEN", healthToken)
@@ -71,6 +72,22 @@ func backendEnvForConfig(ports portConfig, logLevel, consoleLogLevel string, deb
 		}
 	}
 	return env
+}
+
+func stripAppliedProfileEnvironment(env []string) []string {
+	defaults, err := profiles.EnvironmentDefaults()
+	if err != nil {
+		return env
+	}
+	filtered := make([]string, 0, len(env))
+	for _, item := range env {
+		key, value, ok := strings.Cut(item, "=")
+		if ok && profiles.WasApplied(key) && defaults[key] == value {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
 }
 
 func upsertEnv(env []string, key, value string) []string {

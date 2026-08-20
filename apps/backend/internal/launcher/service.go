@@ -593,7 +593,7 @@ func renderSystemdUnit(input nativeServiceUnitInput) string {
 	if input.ConfigFile != "" {
 		env = append(env, serviceEnvLine(config.InternalConfigFileEnv, input.ConfigFile))
 		if input.ConfigHomeFile {
-			env = append(env, serviceEnvLine("KANDEV_INTERNAL_CONFIG_HOME_FILE", "1"))
+			env = append(env, serviceEnvLine(config.InternalConfigHomeFileEnv, "1"))
 		}
 	}
 	if input.Port != 0 {
@@ -643,7 +643,7 @@ func renderLaunchdPlist(input nativeServiceUnitInput) string {
 	if input.ConfigFile != "" {
 		envEntries = append(envEntries, [2]string{config.InternalConfigFileEnv, input.ConfigFile})
 		if input.ConfigHomeFile {
-			envEntries = append(envEntries, [2]string{"KANDEV_INTERNAL_CONFIG_HOME_FILE", "1"})
+			envEntries = append(envEntries, [2]string{config.InternalConfigHomeFileEnv, "1"})
 		}
 	}
 	if input.Port != 0 {

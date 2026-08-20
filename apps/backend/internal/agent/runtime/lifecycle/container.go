@@ -738,11 +738,23 @@ func (cm *ContainerManager) buildEnvVars(config ContainerConfig) ([]string, erro
 	if config.BootstrapNonce != "" {
 		env = append(env, "AGENTCTL_BOOTSTRAP_NONCE="+config.BootstrapNonce)
 	}
+	env = removeEnvKey(env, commonconfig.InternalAgentctlStartupConfigEnv)
 	for key, value := range agentctlStartupEnvironment(config.AgentctlStartupConfig) {
 		env = append(env, key+"="+value)
 	}
 
 	return env, nil
+}
+
+func removeEnvKey(env []string, key string) []string {
+	prefix := key + "="
+	filtered := env[:0]
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 // generateBootstrapNonce creates a cryptographically random 32-byte hex-encoded nonce.

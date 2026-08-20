@@ -7,12 +7,16 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/profiles"
 )
 
 func loadBootstrapConfig() (*config.Config, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, fmt.Errorf("load startup configuration: %w", err)
+	}
+	if _, _, err := profiles.ApplyProfile(); err != nil {
+		return nil, fmt.Errorf("apply profile defaults: %w", err)
 	}
 	return cfg, nil
 }

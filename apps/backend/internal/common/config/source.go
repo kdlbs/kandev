@@ -21,7 +21,8 @@ import (
 // configuration variable, and is intentionally excluded from the catalog.
 const (
 	InternalConfigFileEnv     = "KANDEV_INTERNAL_CONFIG_FILE"
-	internalConfigHomeFileEnv = "KANDEV_INTERNAL_CONFIG_HOME_FILE"
+	InternalConfigHomeFileEnv = "KANDEV_INTERNAL_CONFIG_HOME_FILE"
+	windowsOS                 = "windows"
 )
 
 // ConfigSource records configuration provenance without retaining any decoded
@@ -90,7 +91,7 @@ func isYAMLOnlyStartupKey(key string) bool {
 func configCandidates(configPath string) ([]configCandidate, error) {
 	if configPath != "" {
 		path := explicitConfigFile(configPath)
-		return []configCandidate{{path: path, isHome: isHomeConfigFile(path) || os.Getenv(internalConfigHomeFileEnv) == "1"}}, nil
+		return []configCandidate{{path: path, isHome: isHomeConfigFile(path) || os.Getenv(InternalConfigHomeFileEnv) == "1"}}, nil
 	}
 
 	workingDir, err := os.Getwd()
@@ -235,7 +236,7 @@ func applyStartupDefaultsAndEnvironment(
 		sources[entry.Key] = sourceForEntry(entry, yamlKeys, profileDefaults, envSnapshot)
 	}
 	applyStartupDefaults(cfg, yamlKeys, profileDefaults, sources)
-	applyStartupEnvironment(cfg, yamlKeys, envSnapshot, sources)
+	applyStartupEnvironment(cfg, envSnapshot, sources)
 	return sources
 }
 
@@ -289,37 +290,36 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 		cfg.Observability.OTLPEndpoint = ""
 	}
 	setDefaultInt("launcher.webPort", &cfg.Launcher.WebPort, 0)
-	healthDefault := 45000
-	if profiles.DetectEnvironment() == profiles.EnvDev || profiles.DetectEnvironment() == profiles.EnvE2E {
-		healthDefault = 600000
-	}
-	setDefaultInt("launcher.healthTimeoutMs", &cfg.Launcher.HealthTimeoutMs, healthDefault)
+	setDefaultInt("launcher.healthTimeoutMs", &cfg.Launcher.HealthTimeoutMs, launcherHealthTimeoutDefault())
 	if !yamlKeys["launcher.noBrowser"] {
 		cfg.Launcher.NoBrowser = false
 	}
 }
 
-func applyStartupEnvironment(cfg *Config, yamlKeys map[string]bool, envSnapshot map[string]string, sources map[string]SettingSource) {
-	healthDefault := 45000
+func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources map[string]SettingSource) {
+	applyTrustedProxiesEnv(cfg, envSnapshot, sources)
+	applyDurationEnv("tasks.preparationTimeout", &cfg.Tasks.PreparationTimeout, 10*time.Minute, envSnapshot, sources)
+	applyStringEnvAllowEmpty("credentials.file", &cfg.Credentials.File, envSnapshot, sources)
+	applyPositiveIntEnv("limits.ghMaxConcurrent", &cfg.Limits.GHMaxConcurrent, 8, envSnapshot, sources)
+	applyPositiveIntEnv("limits.gitMaxConcurrent", &cfg.Limits.GitMaxConcurrent, 12, envSnapshot, sources)
+	applyPositiveIntEnv("limits.lspMaxConnections", &cfg.Limits.LSPMaxConnections, 8, envSnapshot, sources)
+	applyNonNegativeIntEnv("messageQueue.maxPerSession", &cfg.MessageQueue.MaxPerSession, 10, envSnapshot, sources)
+	applyNonNegativeDurationEnv("agentctl.idleTimeout", &cfg.Agentctl.IdleTimeout, time.Hour, envSnapshot, sources)
+	applyDurationEnv("agentctl.idleReaperInterval", &cfg.Agentctl.IdleReaperInterval, time.Minute, envSnapshot, sources)
+	applyBoundedIntEnv("agentctl.notificationQueueCapacity", &cfg.Agentctl.NotificationQueueCapacity, 131072, 1024, 131072, envSnapshot, sources)
+	applyNonNegativeIntEnv("planning.coalesceWindowMs", &cfg.Planning.CoalesceWindowMs, 300000, envSnapshot, sources)
+	applyPositiveIntEnv("office.schedulerTickMs", &cfg.Office.SchedulerTickMs, 5000, envSnapshot, sources)
+	applyStringEnvAllowEmpty("observability.otlpEndpoint", &cfg.Observability.OTLPEndpoint, envSnapshot, sources)
+	applyBoundedIntEnv("launcher.webPort", &cfg.Launcher.WebPort, 0, 1, 65535, envSnapshot, sources)
+	applyPositiveIntEnv("launcher.healthTimeoutMs", &cfg.Launcher.HealthTimeoutMs, launcherHealthTimeoutDefault(), envSnapshot, sources)
+	applyBoolEnv("launcher.noBrowser", &cfg.Launcher.NoBrowser, false, envSnapshot, sources)
+}
+
+func launcherHealthTimeoutDefault() int {
 	if profiles.DetectEnvironment() == profiles.EnvDev || profiles.DetectEnvironment() == profiles.EnvE2E {
-		healthDefault = 600000
+		return 600000
 	}
-	applyTrustedProxiesEnv(cfg, yamlKeys, envSnapshot, sources)
-	applyDurationEnv("tasks.preparationTimeout", &cfg.Tasks.PreparationTimeout, 10*time.Minute, yamlKeys, envSnapshot, sources)
-	applyStringEnv("credentials.file", &cfg.Credentials.File, yamlKeys, envSnapshot, sources)
-	applyPositiveIntEnv("limits.ghMaxConcurrent", &cfg.Limits.GHMaxConcurrent, 8, yamlKeys, envSnapshot, sources)
-	applyPositiveIntEnv("limits.gitMaxConcurrent", &cfg.Limits.GitMaxConcurrent, 12, yamlKeys, envSnapshot, sources)
-	applyPositiveIntEnv("limits.lspMaxConnections", &cfg.Limits.LSPMaxConnections, 8, yamlKeys, envSnapshot, sources)
-	applyNonNegativeIntEnv("messageQueue.maxPerSession", &cfg.MessageQueue.MaxPerSession, 10, yamlKeys, envSnapshot, sources)
-	applyNonNegativeDurationEnv("agentctl.idleTimeout", &cfg.Agentctl.IdleTimeout, time.Hour, yamlKeys, envSnapshot, sources)
-	applyDurationEnv("agentctl.idleReaperInterval", &cfg.Agentctl.IdleReaperInterval, time.Minute, yamlKeys, envSnapshot, sources)
-	applyBoundedIntEnv("agentctl.notificationQueueCapacity", &cfg.Agentctl.NotificationQueueCapacity, 131072, 1024, 131072, yamlKeys, envSnapshot, sources)
-	applyNonNegativeIntEnv("planning.coalesceWindowMs", &cfg.Planning.CoalesceWindowMs, 300000, yamlKeys, envSnapshot, sources)
-	applyPositiveIntEnv("office.schedulerTickMs", &cfg.Office.SchedulerTickMs, 5000, yamlKeys, envSnapshot, sources)
-	applyStringEnvAllowEmpty("observability.otlpEndpoint", &cfg.Observability.OTLPEndpoint, yamlKeys, envSnapshot, sources)
-	applyBoundedIntEnv("launcher.webPort", &cfg.Launcher.WebPort, 0, 1, 65535, yamlKeys, envSnapshot, sources)
-	applyPositiveIntEnv("launcher.healthTimeoutMs", &cfg.Launcher.HealthTimeoutMs, healthDefault, yamlKeys, envSnapshot, sources)
-	applyBoolEnv("launcher.noBrowser", &cfg.Launcher.NoBrowser, false, yamlKeys, envSnapshot, sources)
+	return 45000
 }
 
 func sourceForEntry(entry CatalogEntry, yamlKeys map[string]bool, profileDefaults, envSnapshot map[string]string) SettingSource {
@@ -335,7 +335,7 @@ func sourceForEntry(entry CatalogEntry, yamlKeys map[string]bool, profileDefault
 	return SourceDefault
 }
 
-func applyTrustedProxiesEnv(cfg *Config, yamlKeys map[string]bool, env map[string]string, sources map[string]SettingSource) {
+func applyTrustedProxiesEnv(cfg *Config, env map[string]string, sources map[string]SettingSource) {
 	entry, ok := CatalogEntryForKey("server.trustedProxies")
 	if !ok {
 		return
@@ -352,7 +352,7 @@ func applyTrustedProxiesEnv(cfg *Config, yamlKeys map[string]bool, env map[strin
 	sources[entry.Key] = SourceEnvironment
 }
 
-func applyDurationEnv(key string, target *time.Duration, fallback time.Duration, yamlKeys map[string]bool, env map[string]string, sources map[string]SettingSource) {
+func applyDurationEnv(key string, target *time.Duration, fallback time.Duration, env map[string]string, sources map[string]SettingSource) {
 	entry, ok := CatalogEntryForKey(key)
 	if !ok {
 		return
@@ -371,7 +371,7 @@ func applyDurationEnv(key string, target *time.Duration, fallback time.Duration,
 	sources[key] = SourceEnvironment
 }
 
-func applyNonNegativeDurationEnv(key string, target *time.Duration, fallback time.Duration, yamlKeys map[string]bool, env map[string]string, sources map[string]SettingSource) {
+func applyNonNegativeDurationEnv(key string, target *time.Duration, fallback time.Duration, env map[string]string, sources map[string]SettingSource) {
 	entry, ok := CatalogEntryForKey(key)
 	if !ok {
 		return
@@ -390,18 +390,7 @@ func applyNonNegativeDurationEnv(key string, target *time.Duration, fallback tim
 	sources[key] = SourceEnvironment
 }
 
-func applyStringEnv(key string, target *string, yamlKeys map[string]bool, env map[string]string, sources map[string]SettingSource) {
-	entry, ok := CatalogEntryForKey(key)
-	if !ok {
-		return
-	}
-	if raw, found := nonEmptyEnv(env, entry.EnvVars...); found {
-		*target = strings.TrimSpace(raw)
-		sources[key] = SourceEnvironment
-	}
-}
-
-func applyStringEnvAllowEmpty(key string, target *string, yamlKeys map[string]bool, env map[string]string, sources map[string]SettingSource) {
+func applyStringEnvAllowEmpty(key string, target *string, env map[string]string, sources map[string]SettingSource) {
 	entry, ok := CatalogEntryForKey(key)
 	if !ok {
 		return
@@ -412,15 +401,15 @@ func applyStringEnvAllowEmpty(key string, target *string, yamlKeys map[string]bo
 	}
 }
 
-func applyPositiveIntEnv(key string, target *int, fallback int, yamlKeys map[string]bool, env map[string]string, sources map[string]SettingSource) {
-	applyBoundedIntEnv(key, target, fallback, 1, int(^uint(0)>>1), yamlKeys, env, sources)
+func applyPositiveIntEnv(key string, target *int, fallback int, env map[string]string, sources map[string]SettingSource) {
+	applyBoundedIntEnv(key, target, fallback, 1, int(^uint(0)>>1), env, sources)
 }
 
-func applyNonNegativeIntEnv(key string, target *int, fallback int, yamlKeys map[string]bool, env map[string]string, sources map[string]SettingSource) {
-	applyBoundedIntEnv(key, target, fallback, 0, int(^uint(0)>>1), yamlKeys, env, sources)
+func applyNonNegativeIntEnv(key string, target *int, fallback int, env map[string]string, sources map[string]SettingSource) {
+	applyBoundedIntEnv(key, target, fallback, 0, int(^uint(0)>>1), env, sources)
 }
 
-func applyBoundedIntEnv(key string, target *int, fallback, minimum, maximum int, yamlKeys map[string]bool, env map[string]string, sources map[string]SettingSource) {
+func applyBoundedIntEnv(key string, target *int, fallback, minimum, maximum int, env map[string]string, sources map[string]SettingSource) {
 	entry, ok := CatalogEntryForKey(key)
 	if !ok {
 		return
@@ -439,7 +428,7 @@ func applyBoundedIntEnv(key string, target *int, fallback, minimum, maximum int,
 	sources[key] = SourceEnvironment
 }
 
-func applyBoolEnv(key string, target *bool, fallback bool, yamlKeys map[string]bool, env map[string]string, sources map[string]SettingSource) {
+func applyBoolEnv(key string, target *bool, fallback bool, env map[string]string, sources map[string]SettingSource) {
 	entry, ok := CatalogEntryForKey(key)
 	if !ok {
 		return
@@ -487,7 +476,7 @@ func buildConfigSource(selection configSelection, v *viper.Viper, sources map[st
 }
 
 func inspectSecretPermissions(selection configSelection, v *viper.Viper) []string {
-	if selection.path == "" || runtime.GOOS == "windows" {
+	if selection.path == "" || runtime.GOOS == windowsOS {
 		return nil
 	}
 	info, err := os.Stat(selection.path)
@@ -507,5 +496,6 @@ func inspectSecretPermissions(selection configSelection, v *viper.Viper) []strin
 func decodeConfig(v *viper.Viper, cfg *Config) error {
 	return v.Unmarshal(cfg, viper.DecodeHook(mapstructure.ComposeDecodeHookFunc(
 		mapstructure.StringToTimeDurationHookFunc(),
+		mapstructure.StringToSliceHookFunc(","),
 	)))
 }

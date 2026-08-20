@@ -36,6 +36,9 @@ func TestAgentctlStartupContractReachesContainerSpriteAndSSHEnvironments(t *test
 	if !containsEnvValue(containerEnv, commonconfig.InternalAgentctlStartupConfigEnv, encoded) {
 		t.Fatalf("container environment did not carry the resolved contract: %v", containerEnv)
 	}
+	if got := countEnvKey(containerEnv, commonconfig.InternalAgentctlStartupConfigEnv); got != 1 {
+		t.Fatalf("container environment contains %d startup contracts, want exactly one: %v", got, containerEnv)
+	}
 
 	spriteEnv := (&SpritesExecutor{}).buildSpriteEnv(map[string]string{
 		commonconfig.InternalAgentctlStartupConfigEnv: "host-value",
@@ -68,4 +71,15 @@ func containsEnvValue(env []string, key, want string) bool {
 		}
 	}
 	return false
+}
+
+func countEnvKey(env []string, key string) int {
+	prefix := key + "="
+	count := 0
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			count++
+		}
+	}
+	return count
 }

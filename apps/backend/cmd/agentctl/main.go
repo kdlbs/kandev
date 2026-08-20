@@ -31,6 +31,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
+	"github.com/kandev/kandev/internal/profiles"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
@@ -87,6 +88,10 @@ func runMain() int {
 	} else {
 		cfg = config.Load()
 		tracing.ConfigureEndpoint(cfg.OTLPEndpoint)
+	}
+	if _, _, err := profiles.ApplyProfile(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to apply profile defaults: %v\n", err)
+		return 1
 	}
 
 	// Override with CLI flags if provided

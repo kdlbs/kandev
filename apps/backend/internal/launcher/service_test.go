@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 )
 
 func TestRenderSystemdUnitExecsNativeKandev(t *testing.T) {
@@ -35,9 +37,13 @@ func TestRenderSystemdUnitPinsSelectedConfigWithoutOverridingYAML(t *testing.T) 
 		LogDir:            "/srv/kandev/logs",
 		ConfigFile:        "/etc/kandev/config.yaml",
 		HomeDirFromConfig: true,
+		ConfigHomeFile:    true,
 	})
 	if !strings.Contains(unit, "Environment=KANDEV_INTERNAL_CONFIG_FILE=/etc/kandev/config.yaml") {
 		t.Fatalf("unit missing selected config handoff:\n%s", unit)
+	}
+	if !strings.Contains(unit, "Environment="+commonconfig.InternalConfigHomeFileEnv+"=1") {
+		t.Fatalf("unit missing home-config handoff:\n%s", unit)
 	}
 	if strings.Contains(unit, "Environment=KANDEV_HOME_DIR=") {
 		t.Fatalf("unit copied YAML homeDir into public environment:\n%s", unit)

@@ -75,6 +75,33 @@ func TestResolveQueueMaxPerSessionUsesYAMLConfigurationBeforePersistedSetting(t 
 	}
 }
 
+func TestResolveQueueMaxPerSessionYAMLZeroLocksUnlimitedCapacity(t *testing.T) {
+	pool := newMessageQueueSettingsTestPool(t)
+	raw, err := systemsettings.NewStore(pool)
+	if err != nil {
+		t.Fatalf("new system settings store: %v", err)
+	}
+	if err := queuesettings.NewStore(raw).Save(context.Background(), queuesettings.Settings{
+		MaxPerSession: 6, MergeEnabled: true, AutoMergeEnabled: true,
+	}); err != nil {
+		t.Fatalf("save setting: %v", err)
+	}
+
+	cfg := &commonconfig.Config{
+		MessageQueue: commonconfig.MessageQueueConfig{MaxPerSession: 0},
+		Source: commonconfig.ConfigSource{Values: map[string]commonconfig.SettingSource{
+			"messageQueue.maxPerSession": commonconfig.SourceConfiguration,
+		}},
+	}
+	t.Setenv(queuesettings.EnvironmentVariable, "")
+	resolution := resolveQueueSettings(pool, testLogger(t), queueConfiguration(cfg))
+	if resolution.Effective.MaxPerSession != 0 ||
+		resolution.Effective.Source != queuesettings.SourceConfiguration ||
+		!resolution.Effective.Locked {
+		t.Fatalf("resolution = %+v, want locked YAML unlimited value", resolution.Effective)
+	}
+}
+
 func TestResolveQueueMergeEnabledPrecedence(t *testing.T) {
 	tests := []struct {
 		name      string

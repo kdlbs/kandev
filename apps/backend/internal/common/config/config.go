@@ -686,7 +686,7 @@ func LoadWithPath(configPath string) (*Config, error) {
 
 	// Set defaults next. setDefaults seeds non-feature config
 	// (server, database, logging, …); feature-flag defaults flow
-	// through env via ApplyProfile + AutomaticEnv below.
+	// through EnvironmentDefaults and AutomaticEnv below.
 	setDefaults(v)
 
 	// Seed Viper's features.* keyspace from profiles.yaml so the
@@ -735,9 +735,6 @@ func LoadWithPath(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 	sources := applyStartupDefaultsAndEnvironment(&cfg, yamlKeys, profileDefaults, envSnapshot)
-	if _, _, err := profiles.ApplyProfile(); err != nil {
-		return nil, fmt.Errorf("apply profile defaults: %w", err)
-	}
 	warnings := inspectSecretPermissions(selection, v)
 	cfg.Source = buildConfigSource(selection, v, sources, warnings)
 
