@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // remoteRegularGitMetadata describes the only repository layout supported by
@@ -120,19 +121,7 @@ func validRemoteRegularGitMetadata(metadata remoteRegularGitMetadata) bool {
 	if strings.ContainsAny(metadata.CheckoutPath, "\x00\n\r") || strings.ContainsAny(metadata.GitDir, "\x00\n\r") {
 		return false
 	}
-	return metadata.CurrentRef == "" || validRemoteBranchRef(metadata.CurrentRef)
-}
-
-func validRemoteBranchRef(ref string) bool {
-	if !strings.HasPrefix(ref, "refs/heads/") || strings.Contains(ref, "\\") {
-		return false
-	}
-	for _, part := range strings.Split(ref, "/") {
-		if part == "" || part == "." || part == ".." {
-			return false
-		}
-	}
-	return true
+	return metadata.CurrentRef == "" || worktree.ValidBranchRef(metadata.CurrentRef)
 }
 
 // remoteRegularGitMetadataProbeScript writes canonical checkout path, gitdir,
