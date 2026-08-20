@@ -187,6 +187,11 @@ func TestGitMetadataProjectionRepairsReadOnlyExternalIndexLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(projection.GitDir, gitDirInfo.Mode().Perm()) })
+	probePath := filepath.Join(projection.GitDir, "permission-probe")
+	if err := os.WriteFile(probePath, []byte("probe"), 0o600); err == nil {
+		_ = os.Remove(probePath)
+		t.Skip("test environment bypasses Git metadata directory permissions")
+	}
 	output, err := exec.Command("git", "-C", checkout, "add", "tracked.txt").CombinedOutput()
 	if err == nil || !strings.Contains(string(output), "index.lock") {
 		t.Fatalf("git add error=%v output=%s, want read-only index.lock failure", err, output)

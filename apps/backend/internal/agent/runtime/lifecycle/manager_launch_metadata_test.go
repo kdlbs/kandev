@@ -159,6 +159,76 @@ func TestLaunchResumeWorktreeRebuildsGitMetadataProjection(t *testing.T) {
 	}
 }
 
+func TestLaunchResumeMultiRepoWorktreeRebuildsGitMetadataProjections(t *testing.T) {
+	sourceA := filepath.Join(t.TempDir(), "source-a")
+	sourceB := filepath.Join(t.TempDir(), "source-b")
+	for _, repositoryPath := range []string{sourceA, sourceB} {
+		runContainerGit(t, "", "init", "-b", "main", repositoryPath)
+		runContainerGit(t, repositoryPath, "config", "user.email", "test@example.com")
+		runContainerGit(t, repositoryPath, "config", "user.name", "Test")
+		if err := os.WriteFile(filepath.Join(repositoryPath, "tracked.txt"), []byte("initial\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runContainerGit(t, repositoryPath, "add", "tracked.txt")
+		runContainerGit(t, repositoryPath, "commit", "-m", "initial")
+	}
+	taskRoot := filepath.Join(t.TempDir(), "task-checkout")
+	checkoutA := filepath.Join(taskRoot, "frontend")
+	checkoutB := filepath.Join(taskRoot, "backend-feature-x")
+	runContainerGit(t, sourceA, "worktree", "add", "-b", "task-frontend", checkoutA)
+	runContainerGit(t, sourceB, "worktree", "add", "-b", "task-backend", checkoutB)
+
+	log := newTestLogger()
+	execRegistry := NewExecutorRegistry(log)
+	backend := &gitMetadataResumeCreateInstanceExecutor{
+		createInstanceExecutor: createInstanceExecutor{
+			MockExecutor: MockExecutor{name: executor.NameStandalone},
+			client:       newReadyAgentctlClient(t, log),
+		},
+	}
+	execRegistry.Register(backend)
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session-resume": {WorkspacePath: taskRoot},
+	}}
+
+	_, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-resume",
+		SessionID:      "session-resume",
+		AgentProfileID: "profile-1",
+		ExecutorType:   string(models.ExecutorTypeWorktree),
+		RepositoryPath: sourceA,
+		UseWorktree:    true,
+		ACPSessionID:   "acp-session",
+		StartAgent:     false,
+		Repositories: []RepoLaunchSpec{
+			{RepositoryID: "frontend", RepositoryPath: sourceA, RepoName: "frontend"},
+			{RepositoryID: "backend", RepositoryPath: sourceB, RepoName: "backend", BranchSlug: "feature-x"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if !backend.attested {
+		t.Fatal("resumed multi-repo worktree launch did not preflight Git metadata projections")
+	}
+	if backend.lastRequest == nil || len(backend.lastRequest.GitMetadataProjections) != 2 {
+		t.Fatalf("GitMetadataProjections = %#v, want two projections", backend.lastRequest)
+	}
+	checkouts := map[string]bool{}
+	for _, projection := range backend.lastRequest.GitMetadataProjections {
+		checkouts[projection.CheckoutPath] = true
+	}
+	if !checkouts[checkoutA] || !checkouts[checkoutB] {
+		t.Fatalf("projection checkouts = %#v, want %q and %q", checkouts, checkoutA, checkoutB)
+	}
+}
+
 type gitMetadataResumeCreateInstanceExecutor struct {
 	createInstanceExecutor
 	attested bool

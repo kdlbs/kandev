@@ -1206,14 +1206,60 @@ func (m *Manager) publishLaunchPrepareCompleted(req *LaunchRequest, result *EnvP
 }
 
 func gitMetadataProjectionForResumedWorktree(req *LaunchRequest, workspacePath string) ([]*worktree.GitMetadataProjection, error) {
-	if req == nil || !req.UseWorktree || req.RepositoryPath == "" || workspacePath == "" {
+	if req == nil || !req.UseWorktree || workspacePath == "" {
 		return nil, nil
 	}
-	projection, err := worktree.ResolveGitMetadataForRepository(workspacePath, req.RepositoryPath)
-	if err != nil {
+	specs := req.RepoSpecs()
+	if len(specs) <= 1 {
+		if req.RepositoryPath == "" {
+			return nil, nil
+		}
+		projection, err := worktree.ResolveGitMetadataForRepository(workspacePath, req.RepositoryPath)
+		if err != nil {
+			return nil, errors.New(gitMetadataProjectionInvalid)
+		}
+		return []*worktree.GitMetadataProjection{projection}, nil
+	}
+
+	projections := make([]*worktree.GitMetadataProjection, 0, len(specs))
+	seen := make(map[string]struct{}, len(specs))
+	for _, spec := range specs {
+		checkoutPath, err := resumedWorktreeCheckoutPath(workspacePath, spec)
+		if err != nil {
+			return nil, errors.New(gitMetadataProjectionInvalid)
+		}
+		if _, exists := seen[checkoutPath]; exists {
+			return nil, errors.New(gitMetadataProjectionInvalid)
+		}
+		projection, err := worktree.ResolveGitMetadataForRepository(checkoutPath, spec.RepositoryPath)
+		if err != nil {
+			return nil, errors.New(gitMetadataProjectionInvalid)
+		}
+		seen[checkoutPath] = struct{}{}
+		projections = append(projections, projection)
+	}
+	if err := validateGitMetadataProjections(projections); err != nil {
 		return nil, errors.New(gitMetadataProjectionInvalid)
 	}
-	return []*worktree.GitMetadataProjection{projection}, nil
+	return projections, nil
+}
+
+func resumedWorktreeCheckoutPath(taskRoot string, spec RepoLaunchSpec) (string, error) {
+	if spec.RepositoryPath == "" {
+		return "", errors.New(gitMetadataProjectionInvalid)
+	}
+	repoName := worktree.SanitizeRepoDirName(spec.RepoName)
+	if repoName == "" {
+		return "", errors.New(gitMetadataProjectionInvalid)
+	}
+	if spec.BranchSlug != "" {
+		branchSlug := worktree.SanitizeBranchSlug(spec.BranchSlug)
+		if branchSlug == "" {
+			return "", errors.New(gitMetadataProjectionInvalid)
+		}
+		repoName += "-" + branchSlug
+	}
+	return filepath.Join(taskRoot, repoName), nil
 }
 
 // Launch launches a new agent for a task. Concurrent calls for the same
