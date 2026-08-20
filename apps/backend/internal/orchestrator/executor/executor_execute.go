@@ -1141,6 +1141,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 				zap.String("acp_session_id", token))
 		}
 	}
+	if err := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); err != nil {
+		return nil, err
+	}
 
 	// Pass attachments for the initial prompt
 	if len(opts.Attachments) > 0 {

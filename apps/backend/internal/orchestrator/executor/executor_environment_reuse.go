@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"sort"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -9,6 +10,48 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 	"go.uber.org/zap"
 )
+
+// validateReuseEnvironmentInventory proves that every repository/branch slot
+// selected for this launch has one active canonical environment row before any
+// lifecycle preparer can touch the workspace. It intentionally consults the
+// durable environment inventory rather than a sibling session projection.
+func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *LaunchAgentRequest, env *models.TaskEnvironment) error {
+	if !req.WorkspaceReuseRequired || env == nil || env.ID == "" || e.repo == nil {
+		return nil
+	}
+	specs := req.Repositories
+	if len(specs) == 0 {
+		spec, ok := topLevelLaunchRepoSpec(req)
+		if !ok {
+			return nil
+		}
+		specs = []RepoSpec{spec}
+	}
+	rows, err := e.repo.ListTaskEnvironmentRepos(ctx, env.ID)
+	if err != nil {
+		return fmt.Errorf("%w: load canonical workspace inventory", models.ErrWorkspaceReuseUnsafe)
+	}
+	for _, spec := range specs {
+		if canonicalInventoryMatches(spec, rows, req.UseWorktree) != 1 {
+			return fmt.Errorf("%w: canonical workspace repository inventory is incomplete", models.ErrWorkspaceReuseUnsafe)
+		}
+	}
+	return nil
+}
+
+func canonicalInventoryMatches(spec RepoSpec, rows []*models.TaskEnvironmentRepo, useWorktree bool) int {
+	matches := 0
+	for _, row := range rows {
+		if row.RepositoryID != spec.RepositoryID || worktree.SanitizeBranchSlug(row.BranchSlug) != launchRepoBranchIdentitySlug(spec) {
+			continue
+		}
+		if row.DeletedAt != nil || row.Status == "failed" || row.Status == "deleted" || (useWorktree && row.WorktreeID == "") {
+			continue
+		}
+		matches++
+	}
+	return matches
+}
 
 // reuseExistingEnvironment carries forward worktree, container, sandbox, and
 // runtime metadata from an existing TaskEnvironment into the launch request
