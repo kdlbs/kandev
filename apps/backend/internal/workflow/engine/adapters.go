@@ -45,6 +45,12 @@ type ParticipantInfo struct {
 }
 
 // DecisionInfo is a lightweight projection of a workflow_step_decisions row.
+//
+// DeciderType, DeciderID, Role and Comment carry the decider's identity and
+// human-facing reason. Role is the role the decision was recorded under
+// (which may differ from a guard's role — AC-42/58). Comment is the
+// human-facing reason column; Note is a separate, unrelated field no Office
+// surface reads.
 type DecisionInfo struct {
 	ID            string
 	TaskID        string
@@ -52,6 +58,11 @@ type DecisionInfo struct {
 	ParticipantID string
 	Decision      string
 	Note          string
+
+	DeciderType string
+	DeciderID   string
+	Role        string
+	Comment     string
 }
 
 // ParticipantStore reads the workflow_step_participants table for an engine
@@ -64,8 +75,16 @@ type DecisionInfo struct {
 // template-level rows with per-task rows for that task and return the
 // resolved set. Returning nil/empty list is valid and signals a
 // single-agent step for that task.
+//
+// ListTaskParticipants returns every per-task row (task_id = taskID)
+// regardless of step_id — the AC-49 port that makes AC-18's cross-step
+// counting expressible. Template rows are never returned by this method;
+// callers combine it with ListStepParticipants(stepID, "") to gather
+// template rows scoped to one step (AC-50 step 1). An empty result is
+// valid, not an error.
 type ParticipantStore interface {
 	ListStepParticipants(ctx context.Context, stepID, taskID string) ([]ParticipantInfo, error)
+	ListTaskParticipants(ctx context.Context, taskID string) ([]ParticipantInfo, error)
 }
 
 // DecisionStore reads and writes workflow_step_decisions rows. The engine

@@ -207,6 +207,46 @@ func (r *Repository) ListStepParticipantsForTask(
 	return mergeParticipantRows(all), nil
 }
 
+// ListParticipantsForTaskAnyStep returns every per-task participant row for
+// a task (task_id = taskID) regardless of step_id, unmerged with any
+// template-level row. Used by the quorum engine's requiredSeats to build the
+// AC-49/50 required slate, which combines this with template rows scoped to
+// the evaluating step. An empty result is valid, not an error.
+func (r *Repository) ListParticipantsForTaskAnyStep(
+	ctx context.Context, taskID string,
+) ([]*models.WorkflowStepParticipant, error) {
+	if taskID == "" {
+		return nil, errors.New("task_id is required")
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position
+		FROM workflow_step_participants
+		WHERE task_id = ?
+		ORDER BY role ASC, position ASC, id ASC
+	`), taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list participants for task: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	all := make([]*models.WorkflowStepParticipant, 0)
+	for rows.Next() {
+		p := &models.WorkflowStepParticipant{}
+		var role string
+		var decisionRequired int
+		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position); err != nil {
+			return nil, fmt.Errorf("scan step participant: %w", err)
+		}
+		p.Role = models.ParticipantRole(role)
+		p.DecisionRequired = decisionRequired == 1
+		all = append(all, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return all, nil
+}
+
 // mergeParticipantRows enforces the per-task-precedence rule. Given a set of
 // rows for one step (mixed template-level and per-task), drop any
 // template-level row whose (role, agent_profile_id) is also present in a

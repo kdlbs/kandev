@@ -115,6 +115,51 @@ func TestListStepParticipants_OrderedByRoleAndPosition(t *testing.T) {
 	}
 }
 
+func TestListParticipantsForTaskAnyStep_ReturnsPerTaskRowsAcrossSteps(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	review := newPhase2TestStep(t, repo, "Review")
+	approval := newPhase2TestStep(t, repo, "Approval")
+
+	mustUpsert := func(stepID, taskID string, role models.ParticipantRole, profile string) {
+		t.Helper()
+		if err := repo.UpsertStepParticipant(ctx, &models.WorkflowStepParticipant{
+			StepID: stepID, TaskID: taskID, Role: role, AgentProfileID: profile,
+		}); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+	mustUpsert(review.ID, "task-1", models.ParticipantRoleReviewer, "rev-A")
+	mustUpsert(approval.ID, "task-1", models.ParticipantRoleApprover, "app-A")
+	mustUpsert(review.ID, "", models.ParticipantRoleReviewer, "rev-template") // template row, not per-task
+	mustUpsert(review.ID, "task-2", models.ParticipantRoleReviewer, "rev-B")  // different task
+
+	got, err := repo.ListParticipantsForTaskAnyStep(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 per-task rows across both steps, got %d: %+v", len(got), got)
+	}
+	steps := map[string]bool{}
+	for _, p := range got {
+		if p.TaskID != "task-1" {
+			t.Fatalf("unexpected task_id in result: %+v", p)
+		}
+		steps[p.StepID] = true
+	}
+	if !steps[review.ID] || !steps[approval.ID] {
+		t.Fatalf("expected rows from both review and approval steps, got %+v", got)
+	}
+}
+
+func TestListParticipantsForTaskAnyStep_RejectsEmptyTaskID(t *testing.T) {
+	repo := setupTestRepo(t)
+	if _, err := repo.ListParticipantsForTaskAnyStep(context.Background(), ""); err == nil {
+		t.Fatal("expected error for empty task_id")
+	}
+}
+
 func TestDeleteStepParticipant_RemovesRow(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()

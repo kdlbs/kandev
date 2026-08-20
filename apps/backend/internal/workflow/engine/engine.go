@@ -272,11 +272,8 @@ func (e *Engine) evaluateActions(
 	dataPatch := map[string]any{}
 	for _, action := range actions {
 		if targetStepID == "" && isTransitionAction(action.Kind) && !action.RequiresApproval {
-			permitted, err := e.evaluateTransitionGuard(ctx, state, action)
-			if err != nil {
-				return "", nil, err
-			}
-			if !permitted {
+			outcome := e.evaluateTransitionGuard(ctx, state, action)
+			if !outcome.Satisfied {
 				continue
 			}
 			resolvedTarget, err := e.resolveTransitionTarget(ctx, state, step, action)
