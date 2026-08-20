@@ -44,22 +44,29 @@ const (
 var ErrGitHubCredentialBrokerURL = errors.New("invalid Git credential broker URL")
 
 type githubCredentialScope struct {
-	Lease            string `json:"lease"`
-	TaskID           string `json:"task_id"`
-	SessionID        string `json:"session_id"`
-	RepositoryID     string `json:"repository_id"`
-	Owner            string `json:"owner"`
-	Repo             string `json:"repo"`
-	Host             string `json:"host"`
-	Path             string `json:"path"`
-	ProviderID       string `json:"provider_id,omitempty"`
-	ParentProviderID string `json:"parent_provider_id,omitempty"`
+	Lease             string `json:"lease"`
+	ReissueCapability string `json:"reissue_capability,omitempty"`
+	TaskID            string `json:"task_id"`
+	SessionID         string `json:"session_id"`
+	RepositoryID      string `json:"repository_id"`
+	Owner             string `json:"owner"`
+	Repo              string `json:"repo"`
+	Host              string `json:"host"`
+	Path              string `json:"path"`
+	ProviderID        string `json:"provider_id,omitempty"`
+	ParentProviderID  string `json:"parent_provider_id,omitempty"`
 }
 
 // GitCredentialLeaseIssuer creates opaque helper leases. *gitcredentials.Broker
 // satisfies it directly; credentials never enter an executor payload.
 type GitCredentialLeaseIssuer interface {
 	Issue(context.Context, gitcredentials.Scope) (gitcredentials.Lease, error)
+}
+
+// GitCredentialLeaseReissuer is optionally implemented by brokers that can
+// give a launched helper a restart-safe, scope-bound replacement capability.
+type GitCredentialLeaseReissuer interface {
+	IssueWithReissueCapability(context.Context, gitcredentials.Scope) (gitcredentials.Lease, gitcredentials.ReissueCapability, error)
 }
 
 // GitHubCredentialLease preserves the historical executor-facing lease name
@@ -376,6 +383,7 @@ func (e *Executor) configureGitCredentialEnvironment(
 	primary := scopes[0]
 	req.Env[githubauth.CredentialBrokerURLEnv] = e.gitCredentialBrokerURL
 	req.Env[githubauth.CredentialLeaseEnv] = primary.Lease
+	req.Env[githubauth.CredentialReissueCapabilityEnv] = primary.ReissueCapability
 	req.Env[githubauth.CredentialTaskIDEnv] = primary.TaskID
 	req.Env[githubauth.CredentialSessionIDEnv] = primary.SessionID
 	req.Env[githubauth.CredentialRepositoryEnv] = primary.RepositoryID
@@ -443,6 +451,7 @@ func removeManagedGitCredentials(req *LaunchAgentRequest) error {
 		githubauth.CredentialBrokerURLEnv,
 		githubauth.CredentialHelperPathEnv,
 		githubauth.CredentialLeaseEnv,
+		githubauth.CredentialReissueCapabilityEnv,
 		githubauth.CredentialTaskIDEnv,
 		githubauth.CredentialSessionIDEnv,
 		githubauth.CredentialRepositoryEnv,
@@ -500,7 +509,7 @@ func (e *Executor) issueGitCredentialScope(
 	if err := validateGitHubCredentialBrokerURL(e.gitCredentialBrokerURL, req.ExecutorType); err != nil {
 		return nil, err
 	}
-	lease, err := e.gitCredentialIssuer.Issue(ctx, gitcredentials.Scope{
+	scope := gitcredentials.Scope{
 		ProviderID: providerID, WorkspaceID: req.WorkspaceID, TaskID: req.TaskID, SessionID: req.SessionID,
 		RepositoryID: info.RepositoryID, Host: host, Path: path,
 		IdentityProviderID: func() string {
@@ -509,7 +518,8 @@ func (e *Executor) issueGitCredentialScope(
 			}
 			return ""
 		}(),
-	})
+	}
+	lease, capability, err := e.issueGitCredentialLease(ctx, scope)
 	if err != nil {
 		return nil, fmt.Errorf("issue Git credential lease: %w", err)
 	}
@@ -517,7 +527,7 @@ func (e *Executor) issueGitCredentialScope(
 		return nil, fmt.Errorf("issue Git credential lease: empty lease")
 	}
 	return &githubCredentialScope{
-		Lease: lease.Token, TaskID: req.TaskID, SessionID: req.SessionID,
+		Lease: lease.Token, ReissueCapability: capability.Token, TaskID: req.TaskID, SessionID: req.SessionID,
 		RepositoryID: info.RepositoryID, Owner: owner, Repo: repo, Host: host, Path: path,
 		ProviderID: func() string {
 			if providerID == gitHubProviderID {
@@ -629,7 +639,7 @@ func (e *Executor) issueGitHubCredentialScopeForIdentity(
 		}
 		scope.CredentialBinding = string(encodedBinding)
 	}
-	lease, err := e.gitCredentialIssuer.Issue(ctx, scope)
+	lease, capability, err := e.issueGitCredentialLease(ctx, scope)
 	if err != nil {
 		return nil, fmt.Errorf("issue Git credential lease: %w", err)
 	}
@@ -637,10 +647,27 @@ func (e *Executor) issueGitHubCredentialScopeForIdentity(
 		return nil, fmt.Errorf("issue Git credential lease: empty lease")
 	}
 	return &githubCredentialScope{
-		Lease: lease.Token, TaskID: req.TaskID, SessionID: req.SessionID,
+		Lease: lease.Token, ReissueCapability: capability.Token, TaskID: req.TaskID, SessionID: req.SessionID,
 		RepositoryID: repositoryID, Owner: owner, Repo: repo, Host: host, Path: path,
 		ProviderID: providerID, ParentProviderID: parentProviderID,
 	}, nil
+}
+
+func (e *Executor) issueGitCredentialLease(
+	ctx context.Context,
+	scope gitcredentials.Scope,
+) (gitcredentials.Lease, gitcredentials.ReissueCapability, error) {
+	if issuer, ok := e.gitCredentialIssuer.(GitCredentialLeaseReissuer); ok {
+		lease, capability, err := issuer.IssueWithReissueCapability(ctx, scope)
+		if err == nil {
+			return lease, capability, nil
+		}
+		if !errors.Is(err, gitcredentials.ErrReissueUnavailable) {
+			return gitcredentials.Lease{}, gitcredentials.ReissueCapability{}, err
+		}
+	}
+	lease, err := e.gitCredentialIssuer.Issue(ctx, scope)
+	return lease, gitcredentials.ReissueCapability{}, err
 }
 
 func managedGitCredentialProvider(repository *models.Repository, githubManaged bool, env map[string]string) string {

@@ -25,6 +25,8 @@ export type ComboboxOption = {
   description?: string;
   keywords?: string[];
   renderLabel?: () => React.ReactNode;
+  /** Optional label renderer for the selected value inside the trigger. */
+  renderTriggerLabel?: () => React.ReactNode;
   /** When true the option renders dimmed and isn't selectable. */
   disabled?: boolean;
   /** Tooltip shown on hover when disabled is true. */
@@ -72,6 +74,9 @@ function TriggerLabel({
   plainTrigger: boolean;
   placeholder: string;
 }) {
+  if (!plainTrigger && selectedOption?.renderTriggerLabel) {
+    return selectedOption.renderTriggerLabel();
+  }
   if (!plainTrigger && selectedOption?.renderLabel) {
     return selectedOption.renderLabel();
   }

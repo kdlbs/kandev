@@ -8,6 +8,7 @@ type SnapshotTask = {
   title: string;
   position: number;
   state: "IN_PROGRESS";
+  autoStartFailed?: boolean;
   parentTaskId?: string;
   statusSummary?: {
     revision: number;
@@ -235,6 +236,58 @@ describe("useAllWorkflowSnapshots in-flight websocket tasks", () => {
           expect.objectContaining({
             id: "task-with-live-status",
             statusSummary: expect.objectContaining({ revision: 4 }),
+          }),
+        ],
+      }),
+    );
+  });
+});
+
+describe("useAllWorkflowSnapshots auto-start marker races", () => {
+  it("keeps a newer live auto-start marker when an older snapshot finishes later", async () => {
+    resetState();
+    let resolveFetch: (value: unknown) => void = () => {};
+    mocks.fetchWorkflowSnapshot.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    renderHook(() => useAllWorkflowSnapshots(WORKSPACE_ID));
+    await waitFor(() =>
+      expect(mocks.fetchWorkflowSnapshot).toHaveBeenCalledWith(WORKFLOW_ID, expect.anything()),
+    );
+
+    setLightweightSnapshot({
+      id: "task-with-live-auto-start-marker",
+      workflowStepId: STEP_ID,
+      title: "Live auto-start marker",
+      position: 0,
+      state: "IN_PROGRESS",
+      autoStartFailed: true,
+    });
+    resolveFetch({
+      steps: [{ id: STEP_ID, name: "Doing", color: null, position: 0 }],
+      tasks: [
+        {
+          id: "task-with-live-auto-start-marker",
+          workflow_step_id: STEP_ID,
+          title: "Live auto-start marker",
+          position: 0,
+          state: "IN_PROGRESS",
+          auto_start_failed: false,
+        },
+      ],
+    });
+
+    await waitFor(() => expect(mocks.setWorkflowSnapshot).toHaveBeenCalled());
+    expect(mocks.setWorkflowSnapshot).toHaveBeenCalledWith(
+      WORKFLOW_ID,
+      expect.objectContaining({
+        tasks: [
+          expect.objectContaining({
+            id: "task-with-live-auto-start-marker",
+            autoStartFailed: true,
           }),
         ],
       }),

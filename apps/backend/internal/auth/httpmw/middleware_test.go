@@ -211,6 +211,7 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 
 		{name: "github credential broker readiness", method: http.MethodGet, path: "/api/v1/github/credentials/resolve"},
 		{name: "github credential broker resolve", method: http.MethodPost, path: "/api/v1/github/credentials/resolve"},
+		{name: "github credential broker reissue", method: http.MethodPost, path: "/api/v1/github/credentials/reissue"},
 		{
 			name: "github app webhook", method: http.MethodPost,
 			path: "/api/v1/github/app/registrations/reg1/webhook",

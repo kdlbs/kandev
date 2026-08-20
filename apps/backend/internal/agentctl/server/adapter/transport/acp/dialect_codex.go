@@ -31,6 +31,8 @@ func newCodexACPDialect() acpDialect {
 	return acpDialect{
 		subagentFrame:        parseCodexSubagentFrame,
 		normalizePromptUsage: normalizeCodexPromptUsage,
+		mcpToolCall:          parseCodexMCPToolCall,
+		mcpToolResult:        normalizeCodexMCPToolResult,
 	}
 }
 
@@ -55,6 +57,44 @@ func normalizeCodexPromptUsage(
 		usage.Estimated = true
 	}
 	return usage
+}
+
+// parseCodexMCPToolCall recognizes Codex's observed MCP-over-ACP envelope.
+// Codex reports these as the broad ACP "execute" kind and puts the actual MCP
+// identity and arguments in rawInput. Require the explicit implementation
+// marker plus the complete envelope so ordinary execute tools remain shells.
+func parseCodexMCPToolCall(meta map[string]any, rawInput any) (mcpToolCallFrame, bool) {
+	isMCP, _ := meta["is_mcp_tool_call"].(bool)
+	if !isMCP {
+		return mcpToolCallFrame{}, false
+	}
+	input, ok := rawInput.(map[string]any)
+	if !ok {
+		return mcpToolCallFrame{}, false
+	}
+	server, _ := input["server"].(string)
+	tool, _ := input["tool"].(string)
+	arguments, ok := input["arguments"].(map[string]any)
+	server = strings.TrimSpace(server)
+	tool = strings.TrimSpace(tool)
+	if server == "" || tool == "" || !ok {
+		return mcpToolCallFrame{}, false
+	}
+	return mcpToolCallFrame{name: server + "/" + tool, arguments: arguments}, true
+}
+
+// normalizeCodexMCPToolResult removes Codex's transport-only
+// {error, result} wrapper while retaining the standard MCP CallToolResult.
+func normalizeCodexMCPToolResult(rawOutput any) (any, bool) {
+	output, ok := rawOutput.(map[string]any)
+	if !ok {
+		return rawOutput, rawOutput != nil
+	}
+	result, exists := output["result"]
+	if !exists {
+		return rawOutput, true
+	}
+	return result, true
 }
 
 // codexSystemErrorMeta reports the explicit thread-status marker emitted by

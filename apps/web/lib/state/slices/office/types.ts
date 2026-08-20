@@ -20,8 +20,6 @@ export type {
 export type { OfficeAgentProfile as AgentProfile } from "@/lib/types/agent-profile";
 
 import type { OfficeAgentProfile as AgentProfile } from "@/lib/types/agent-profile";
-import type { TaskRepository } from "@/lib/types/http";
-import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 export type SkillSourceType =
   | "inline"
@@ -257,35 +255,8 @@ export type TaskLabel = {
   color: string;
 };
 
-export type OfficeTask = {
-  id: string;
-  workspaceId: string;
-  identifier: string;
-  title: string;
-  description?: string;
-  status: OfficeTaskStatus;
-  // Pre-normalization backend value (e.g. "SCHEDULING"); read only for a raw
-  // sub-state the canonical union erases (ExecutionIndicator's "Live" dot).
-  rawStatus?: string;
-  priority: OfficeTaskPriority;
-  parentId?: string;
-  projectId?: string;
-  assigneeAgentProfileId?: string;
-  labels?: TaskLabel[] | string[];
-  blockedBy?: string[];
-  children?: OfficeTask[];
-  executionPolicy?: string;
-  executionState?: string;
-  createdAt: string;
-  updatedAt: string;
-  // True when the task lives in a kandev-managed system workflow
-  // (today: standing coordination; future: routine-fired). The Tasks
-  // UI renders a "System" badge for these when the dev toggle reveals
-  // them.
-  isSystem?: boolean;
-  statusSummary?: TaskStatusSummary | null;
-  repositories?: TaskRepository[];
-};
+import type { OfficeTask } from "./office-task-type";
+export type { OfficeTask } from "./office-task-type";
 
 export type TaskFilterState = {
   statuses: OfficeTaskStatus[];
@@ -528,11 +499,6 @@ import type {
 
 // --- Slice state & actions ---
 
-export type OfficeRefetchTrigger = {
-  type: string;
-  timestamp: number;
-};
-
 /**
  * Office collections that belong to one workspace, stored per workspace id
  * rather than as a single current value.
@@ -567,7 +533,12 @@ export type OfficeSliceState = {
     tasks: TasksState;
     meta: OfficeMeta | null;
     isLoading: boolean;
-    refetchTrigger: OfficeRefetchTrigger | null;
+    // Per-type counters rather than one "last trigger" value: a single WS
+    // handler often fires several distinct types in the same synchronous
+    // call (e.g. `task:${id}` then `dashboard`), and React/Zustand coalesce
+    // those into one render, so a shared last-value field would only ever
+    // let the final type's subscribers see a change. See useOfficeRefetch.
+    refetchTriggers: Record<string, number>;
     routing: RoutingState;
     providerHealth: ProviderHealthSliceState;
     runAttempts: RunAttemptsState;

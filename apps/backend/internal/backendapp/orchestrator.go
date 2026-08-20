@@ -274,13 +274,13 @@ func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(
 func githubCredentialBrokerEndpoint(cfg *config.Config) string {
 	if cfg != nil {
 		if publicBaseURL := strings.TrimRight(strings.TrimSpace(cfg.GitHubCredentialBroker.PublicBaseURL), "/"); publicBaseURL != "" {
-			return publicBaseURL + "/api/v1/github/credentials/resolve"
+			return publicBaseURL + "/api/v1/git/credentials/resolve"
 		}
 		if cfg.Server.Port != 0 {
-			return fmt.Sprintf("http://localhost:%d/api/v1/github/credentials/resolve", cfg.Server.Port)
+			return fmt.Sprintf("http://localhost:%d/api/v1/git/credentials/resolve", cfg.Server.Port)
 		}
 	}
-	return fmt.Sprintf("http://localhost:%d/api/v1/github/credentials/resolve", portsBackendDefault)
+	return fmt.Sprintf("http://localhost:%d/api/v1/git/credentials/resolve", portsBackendDefault)
 }
 
 // resolveQueueMaxPerSession honors the KANDEV_QUEUE_MAX_PER_SESSION env var,

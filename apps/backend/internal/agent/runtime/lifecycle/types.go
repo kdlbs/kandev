@@ -28,7 +28,11 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
-	ID                string
+	ID string
+	// RunID identifies the Office run that launched this execution. It is
+	// retained after runtime environment cleanup so delayed stop events can
+	// still be attributed to the correct run.
+	RunID             string
 	TaskID            string
 	SessionID         string
 	TaskEnvironmentID string // Env owning this execution; sessions in the same task share one env

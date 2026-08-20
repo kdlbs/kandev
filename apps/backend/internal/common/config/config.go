@@ -51,7 +51,8 @@ type Config struct {
 // used by managed remote executors. It is independent of GitHub App setup so
 // PAT and named gh CLI workspaces can use remote executors.
 type GitHubCredentialBrokerConfig struct {
-	PublicBaseURL string `mapstructure:"publicBaseUrl" json:"-"`
+	PublicBaseURL     string `mapstructure:"publicBaseUrl" json:"-"`
+	ReissueSigningKey string `mapstructure:"reissueSigningKey" json:"-"`
 }
 
 func (c GitHubCredentialBrokerConfig) validate() error {
@@ -672,6 +673,10 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv(
 		"githubCredentialBroker.publicBaseUrl",
 		"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL",
+	)
+	_ = v.BindEnv(
+		"githubCredentialBroker.reissueSigningKey",
+		"KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY",
 	)
 
 	// Configure config file

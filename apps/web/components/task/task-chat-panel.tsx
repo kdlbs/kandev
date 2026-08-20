@@ -217,7 +217,7 @@ type TaskChatPanelProps = {
    * it also drives plan mode, the composer, and read tracking.
    */
   statusTaskId?: string | null;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
   /** Callback to open a file at a specific line (for comment clicks) */

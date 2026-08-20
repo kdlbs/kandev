@@ -190,7 +190,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		pluginsSvc.SetKandevVersion(version)
 		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
 	}
-	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task)
+	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, cfg.GitHubCredentialBroker.ReissueSigningKey)
 	if pluginsSvc != nil {
 		pluginsSvc.SetGitCredentialLeaseRevoker(gitCredentialBroker.RevokeProvider)
 	}

@@ -146,6 +146,14 @@ const (
 	// surfaces show the red interruption icon; the orchestrator removes the
 	// key when a session of the task next enters STARTING/RUNNING.
 	MetaKeyInterruptedAt = "interrupted_at"
+	// MetaKeyAutoStartFailed is set when a workflow step's auto_start_agent
+	// on_enter action fails to launch a run (kanban StartTask error, or an
+	// Office task queue-run error/unresolvable agent). Its presence makes the
+	// task DTO report `auto_start_failed: true` so the failure surfaces on
+	// the card instead of only in backend logs; the orchestrator removes the
+	// key when a session of the task next enters STARTING/RUNNING (mirrors
+	// MetaKeyInterruptedAt).
+	MetaKeyAutoStartFailed = "auto_start_failed"
 	// MetaKeyAgentTitlePending marks tasks created in prompt-first mode whose
 	// provisional title still needs the first eligible agent session to replace it.
 	MetaKeyAgentTitlePending = "agent_title_pending"
@@ -2169,21 +2177,22 @@ func (t *Task) ToAPI() *v1.Task {
 	}
 
 	result := &v1.Task{
-		ID:           t.ID,
-		WorkspaceID:  t.WorkspaceID,
-		WorkflowID:   t.WorkflowID,
-		Title:        t.Title,
-		Description:  t.Description,
-		State:        t.State,
-		Priority:     t.Priority,
-		Repositories: repositories,
-		CreatedAt:    t.CreatedAt,
-		UpdatedAt:    t.UpdatedAt,
-		Metadata:     t.Metadata,
-		Interrupted:  t.Metadata[MetaKeyInterruptedAt] != nil,
-		IsEphemeral:  t.IsEphemeral,
-		ParentID:     t.ParentID,
-		Autopilot:    t.Autopilot,
+		ID:              t.ID,
+		WorkspaceID:     t.WorkspaceID,
+		WorkflowID:      t.WorkflowID,
+		Title:           t.Title,
+		Description:     t.Description,
+		State:           t.State,
+		Priority:        t.Priority,
+		Repositories:    repositories,
+		CreatedAt:       t.CreatedAt,
+		UpdatedAt:       t.UpdatedAt,
+		Metadata:        t.Metadata,
+		Interrupted:     t.Metadata[MetaKeyInterruptedAt] != nil,
+		AutoStartFailed: t.Metadata[MetaKeyAutoStartFailed] != nil,
+		IsEphemeral:     t.IsEphemeral,
+		ParentID:        t.ParentID,
+		Autopilot:       t.Autopilot,
 	}
 	if t.Identifier != "" {
 		result.Identifier = t.Identifier
