@@ -44,13 +44,14 @@ logic lives in the plugin repository.
   `GET /users/current.json` before being accepted.
 - **Workspace-scoped secrets on a flat namespace.** The host's plugin secret RPCs are
   keyed only by plugin ID (`plugin:<id>:secret:<key>`), not by workspace. The plugin
-  composes a deterministic, separator-safe workspace token into the key
-  (`redmine.<base64url(SHA-256(workspace_id))>.api_key`) before storing the API key;
-  the token is derived only from the authenticated caller's workspace, never a
-  request-body value. The authenticated plugin action sends the plaintext only over
-  the private Host RPC to `SetSecret`; Kandev's encrypted vault, not the plugin, owns
-  AES-256-GCM encryption at rest with its persisted master key and a fresh nonce per
-  write. The workspace ID is namespace context, never encryption key material.
+  composes the authenticated workspace ID into the v0.1.0 key
+  (`redmine.<workspace_id>.api_key`; dots are required because host secret keys reject
+  colons), never from a request-body value. Before `SetSecret`, the released plugin
+  encrypts the API key with AES-256-GCM using key material derived from that workspace
+  ID; the host vault then encrypts this ciphertext at rest with its persisted master
+  key and a fresh nonce per write. The inner layer fails closed when a value is read
+  with the wrong workspace ID. This corrects the design record to the shipped v0.1.0
+  format, so there is no alternate legacy key to dual-read or migrate.
   Non-secret connection metadata (base URL, health state, cursor) lives in host
   `plugin_state` scoped to `workspace`.
 - **Own health polling.** There is no host `healthpoll` equivalent for plugins. The
@@ -87,9 +88,11 @@ logic lives in the plugin repository.
   `last_pushed_title` / `last_pushed_description_hash` compared against inbound
   observations before applying, so a write-back round-trip never bounces the task.
   Inbound status changes use the supported `Tasks().Update` workflow-step field. This
-  publishes the normal task-update notification, but does not emulate a manual kanban
-  move or run `on_exit`/`on_enter` hooks; that would require a dedicated host move
-  contract and is not part of this plugin release.
+  publishes only the normal task-update notification and records a system task-update
+  transition; it does not emit `task.moved`, emulate a manual kanban move, or run
+  `on_exit`/`on_enter` hooks. The released plugin receives `task.moved` only when the
+  host's dedicated workflow-move path moves a linked task, and uses that event for
+  opt-in outbound write-back. There is no plugin-callable host move RPC in v0.1.0.
 - **Composer mentions.** `#` search resolves Redmine issues through the plugin's
   `reference_sources` registration with submit-time reauthorization, matching the
   pattern `kandev-plugin-bitbucket` uses for repository/PR references.
@@ -133,17 +136,16 @@ last health probe failed but the key has not been explicitly removed; `disconnec
 when no config exists.
 
 Secrets: the API key is not a declared `config_schema` field. Credential entry passes
-the plaintext only to the authenticated plugin action, which calls `SetSecret` using
-`redmine.<base64url(SHA-256(workspace_id))>.api_key`. The private Host RPC returns that
-value only to the plugin process through `GetSecret` when it needs to make an outbound
-Redmine request; it is never exposed through settings responses, frontend payloads,
-logs, or task metadata. Kandev encrypts the value at rest with its config-directory
-master key using AES-256-GCM and a fresh random nonce per write. The plugin neither
-derives encryption key material nor handles ciphertext: the persisted master key
-survives restart, so the vault can decrypt existing entries. Rotation replaces the
-value under the same composed key; revocation calls `DeleteSecret` and clears the
-`plugin_state` connection row. Tests must prove that two workspace-derived keys cannot
-read or delete one another's value across `SetSecret`, `GetSecret`, and `DeleteSecret`.
+the plaintext only to the authenticated plugin action. v0.1.0 encrypts it with
+workspace-derived AES-256-GCM key material, then calls `SetSecret` using
+`redmine.<workspace_id>.api_key`; the host vault encrypts that ciphertext at rest with
+its config-directory master key. `GetSecret` returns the ciphertext only to the plugin
+process, which decrypts it with the authenticated workspace ID only when making an
+outbound Redmine request. The key is never exposed through settings responses,
+frontend payloads, logs, or task metadata. Rotation replaces the value under the same
+composed key; revocation calls `DeleteSecret` and clears the `plugin_state` connection
+row. Tests must prove that two workspace-derived keys cannot read or delete one
+another's value across `SetSecret`, `GetSecret`, and `DeleteSecret`.
 
 Authorization: only the workspace that owns a connection may read, modify, or use it.
 The plugin enforces this itself since the host's plugin RPC surface has no
@@ -175,7 +177,13 @@ already shipped in `kdlbs/kandev` (landed by PR #2117 and used first by
   — cascade delete for watcher-created tasks.
 - `Tasks().Create` / `Tasks().Update` with `plugin:<id>` provenance — task creation
   and the supported title/description/state/workflow-step updates only. They do not
-  write task metadata or external references.
+  write task metadata or external references, and a generic workflow-step update is
+  not a workflow move: it does not emit `task.moved` or invoke step hooks.
+- Manifest least privilege — `api_read: ["tasks", "workflows"]`,
+  `api_write: ["tasks"]`, and `events: ["task.moved"]`, plus `state` and `secrets`.
+  Task reads support sync/write-back; workflow reads populate valid mapping steps;
+  task writes create watchers and update linked tasks; the one event supports outbound
+  write-back after a host workflow move.
 - `GetState` / `SetState` (scope `workspace`) — connection metadata, task-link
   associations keyed by task ID, sync cursor, health state, and echo-suppression
   bookkeeping.
@@ -217,8 +225,9 @@ Redmine issue is not a code review).
 
 - Connection metadata, sync cursor, and health state live in host `plugin_state`
   scoped to `workspace` — durable across plugin restarts and upgrades.
-- The Redmine API key lives only in the host's encrypted secret store, keyed by the
-  plugin-composed `redmine.<base64url(SHA-256(workspace_id))>.api_key` string.
+- The Redmine API key is encrypted first by the plugin with workspace-derived key
+  material, then by the host's encrypted secret store, under the released v0.1.0 key
+  `redmine.<workspace_id>.api_key`.
 - Task-to-issue associations live in workspace-scoped plugin state keyed by task ID;
   they are not task metadata.
 - Issue-watch dedup keys `(issue_watch_id, issue_id)` and echo-suppression fields
@@ -260,8 +269,9 @@ workspace-scoped plugin state keyed by that task stores the issue id/url afterwa
 **GIVEN** a linked task and a Redmine issue whose status changes to a mapped, closed
 status
 **WHEN** the next sync poll runs
-**THEN** the Kandev task transitions to the mapped workflow step, proving `status_id=*`
-was sent (closed issues are not silently dropped)
+**THEN** the Kandev task's workflow-step field is updated to the mapped step, proving
+`status_id=*` was sent (closed issues are not silently dropped); this generic update
+does not run workflow move hooks or emit `task.moved`
 
 **GIVEN** `autoStatusWriteback` enabled on a connection and the plugin declares a
 `task.moved` event subscription

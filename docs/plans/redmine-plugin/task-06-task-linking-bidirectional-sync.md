@@ -36,13 +36,14 @@ Tasks 03, 04, 05.
    resumes from the persisted cursor, not from zero.
 3. A linked issue's status change to a mapped, different workflow step updates the
    Kandev task on the next poll, verified specifically for a **closed** status. It uses
-   the supported `Tasks().Update` field and therefore does not promise the manual-move
-   `on_exit`/`on_enter` hook path.
+   the supported generic `Tasks().Update` field: this records a task update but does
+   not emit `task.moved` or promise the manual-move `on_exit`/`on_enter` hook path.
 4. With `syncTitleDescription` enabled, a Redmine-side subject/description change
    updates the Kandev task's title/description on the next poll; with it disabled,
    neither changes.
 5. The manifest declares `task.moved` and its idempotent `OnEvent` handler processes a
-   linked task move. With `autoStatusWriteback` enabled, it issues
+   linked task moved by the host's dedicated workflow-move path. With
+   `autoStatusWriteback` enabled, it issues
    `PUT /issues/:id.json` with the mapped status during that event delivery; with it
    disabled, no PUT is issued and a manual "Set Redmine status" action still works.
 6. Echo suppression: a write-back PUT followed by the next inbound poll does not

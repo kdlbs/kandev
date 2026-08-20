@@ -35,7 +35,14 @@ None required. All seams this plugin needs already exist on `main`:
 - `registerTaskAction({placement:"link"})` + `host.openTaskLinkDialog`
 - `reference_sources` dynamic composer search with submit-time reauthorization
 - `PluginOwnedTaskTrees` (`PreviewPluginOwnedTaskTree` / `DeletePluginOwnedTaskTreeRequest`)
-- `Tasks().Create` / `Tasks().Update`, `GetState`/`SetState`, `GetSecret`/`SetSecret`/`DeleteSecret`
+- `Tasks().Create` / `Tasks().Update` (generic updates only, not workflow moves),
+  `Workflows().List` / `.ListSteps`, `GetState`/`SetState`,
+  `GetSecret`/`SetSecret`/`DeleteSecret`, and `OnEvent(task.moved)`
+
+The released manifest uses least privilege: `api_read: ["tasks", "workflows"]`,
+`api_write: ["tasks"]`, and `events: ["task.moved"]`, with `state` and `secrets`.
+`Tasks().Update` may set a workflow-step field but does not invoke workflow hooks or
+emit `task.moved`; the latter comes only from the host's dedicated move path.
 
 If implementation surfaces a genuine host gap (not just an inconvenience solvable
 plugin-side, per the `kandev-plugin-bitbucket` precedent of building its own
@@ -120,7 +127,10 @@ full detail.
 - **Secret isolation is entirely plugin-built.** The host's flat
   `plugin:<id>:secret:<key>` namespace has no workspace dimension; a bug in the
   plugin's own key-composition or encryption layer is a cross-workspace credential
-  leak, not merely a missing feature. Treat this with the same rigor the native
+  leak, not merely a missing feature. Released v0.1.0 composes
+  `redmine.<workspace_id>.api_key`, encrypts with workspace-derived key material, and
+  stores that ciphertext in the host vault; the spec records that shipped format.
+  Treat this with the same rigor the native
   integrations' `AGENTS.md` demands of `resolveWorkspaceID`/`authorizeWorkspaceAccess`.
 - **No host healthpoll or watchreset equivalent.** The plugin must get its own
   polling/backoff/health loop and its own watcher dedup/cursor/reset logic right,

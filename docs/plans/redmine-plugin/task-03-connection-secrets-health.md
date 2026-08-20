@@ -14,8 +14,9 @@ spec: "../../specs/redmine-plugin/spec.md"
 
 Implement the Redmine REST client's auth path and the plugin's own connection
 lifecycle: validate a base URL + API key against `GET /users/current.json`,
-distinguish invalid-credentials / API-disabled / unreachable failures, store the key
-with workspace-composed encryption, and run a ~90s jittered health-poll loop per
+distinguish invalid-credentials / API-disabled / unreachable failures, encrypt the key
+with workspace-derived material under its workspace-composed key before host-vault
+storage, and run a ~90s jittered health-poll loop per
 connected workspace that flips `plugin_state` health without deleting the key on
 failure.
 
@@ -31,20 +32,21 @@ Task 02.
 ## Acceptance
 
 1. A valid base URL + API key validates via `GET /users/current.json` and persists;
-   the key is stored by Kandev's encrypted secret vault under the plugin's
-   separator-safe workspace-composed key. It is not a declared config field; plaintext
-   crosses only the authenticated plugin-to-Host `SetSecret`/`GetSecret` RPC boundary,
-   then exists only in plugin memory and outbound Redmine requests. Kandev owns
-   encryption at rest; settings responses, frontend payloads, logs, and task metadata
-   never expose the key.
+   v0.1.0 encrypts the key with workspace-derived AES-256-GCM key material and stores
+   that ciphertext under `redmine.<workspace_id>.api_key` in Kandev's encrypted secret
+   vault. It is not a declared config field: plaintext reaches only the authenticated
+   plugin action and plugin process, while `SetSecret`/`GetSecret` carry the inner
+   ciphertext. The host vault adds encryption at rest; settings responses, frontend
+   payloads, logs, and task metadata never expose the key.
 2. An invalid API key is reported as a distinct plugin error (not a bare host-level
    401 — see spec Failure modes on why the native implementation had to avoid 401 for
    this exact case); the stored config is unchanged.
 3. A REST-API-disabled instance (403 on `/users/current.json`) is reported distinctly
    from an invalid key.
 4. An unreachable host is reported distinctly from both of the above.
-5. Rotating the API key replaces the host-vault value under the same composed key;
-   deleting the connection removes both the secret and connection `plugin_state`.
+5. Rotating the API key replaces the host-vault value under the same
+   `redmine.<workspace_id>.api_key` key; deleting the connection removes both the
+   secret and connection `plugin_state`.
 6. The health-poll loop runs on its own `Start(ctx)`/`Stop()` lifecycle, selects on
    `ctx.Done()` in every wait (no bare `time.Sleep` in backoff), flips `last_ok`/
    `last_error` in `plugin_state` without deleting the stored key on failure, and does
