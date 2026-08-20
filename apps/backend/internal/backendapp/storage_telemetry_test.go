@@ -4,7 +4,12 @@ import (
 	"context"
 	"testing"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/telemetrycontract"
 )
 
@@ -17,13 +22,26 @@ import (
 // missing rows on every real boot with the rest of the suite fully green —
 // mirrors TestProvideRepositoriesBackfillsSessionCachedTokens's rationale for
 // the neighboring backfillSessionCachedTokens call.
+//
+// telemetry_activations itself is created unconditionally by
+// telemetrycontract.NewWithDB, independent of ordering, so a row-count
+// assertion alone cannot catch activateTelemetryContracts running ahead of a
+// contract's backing repository's initSchema — Store.Activate writes the
+// activation row regardless of whether those backing objects exist yet. The
+// ordering-sensitive signal is LogHealth's per-contract "exists" field, so
+// this test also captures the boot log via an observer core and asserts
+// every registered contract reports exists=true.
 func TestProvideRepositoriesActivatesTelemetryContracts(t *testing.T) {
 	ctx := context.Background()
 	cfg := &config.Config{
 		HomeDir:  t.TempDir(),
 		Database: config.DatabaseConfig{Driver: "sqlite"},
 	}
-	log := newTestLogger()
+	core, recorded := observer.New(zapcore.InfoLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("NewFromZap: %v", err)
+	}
 
 	pool, _, cleanups, err := provideRepositories(ctx, cfg, log, "test")
 	if err != nil {
@@ -54,5 +72,36 @@ func TestProvideRepositoriesActivatesTelemetryContracts(t *testing.T) {
 			t.Errorf("telemetry_activations row count for %s v%d = %d, want 1 (activateTelemetryContracts must run during provideRepositories boot)",
 				c.Key, c.Version, count)
 		}
+
+		exists, found := contractExistsFromHealthLog(recorded, c.Key, c.Version)
+		if !found {
+			t.Errorf("no telemetry.contract.health log entry for %s v%d (activateTelemetryContracts must call LogHealth during provideRepositories boot)",
+				c.Key, c.Version)
+			continue
+		}
+		if !exists {
+			t.Errorf("telemetry.contract.health exists=%v for %s v%d, want true (activateTelemetryContracts must run after every repository's initSchema, so the contract's backing objects already exist)",
+				exists, c.Key, c.Version)
+		}
 	}
+}
+
+// contractExistsFromHealthLog finds the "telemetry.contract.health" entry for
+// (key, version) in the observed log and reports its "exists" field.
+func contractExistsFromHealthLog(recorded *observer.ObservedLogs, key string, version int) (exists bool, found bool) {
+	for _, entry := range recorded.All() {
+		if entry.Message != "telemetry.contract.health" {
+			continue
+		}
+		fields := entry.ContextMap()
+		if fields["contract_key"] != key {
+			continue
+		}
+		if v, ok := fields["contract_version"].(int64); !ok || int(v) != version {
+			continue
+		}
+		existsVal, _ := fields["exists"].(bool)
+		return existsVal, true
+	}
+	return false, false
 }

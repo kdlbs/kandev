@@ -467,6 +467,9 @@ func TestFindWorkflowStepIDMutatorsCatchesEvasiveShapes(t *testing.T) {
 		"RepoB.updateTaskTx",                         // (c) distinct from RepoA's, not collapsed
 		"nested/NestedRepo.deeplyNestedStepMutator",  // (d, partial) recursion into a subdirectory — package-qualified since it's one level below the scan root
 	}
+	if len(found) != len(want) {
+		t.Errorf("findWorkflowStepIDMutators found %d mutators from fixtures, want %d: found=%v", len(found), len(want), found)
+	}
 	for _, name := range want {
 		if !found[name] {
 			t.Errorf("expected findWorkflowStepIDMutators to catch %q, but it did not (found: %v)", name, found)
