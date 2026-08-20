@@ -5,12 +5,14 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/auth/authn"
@@ -90,6 +92,15 @@ type SessionRepository interface {
 	// pending-completion bag for a step. It preserves first-signal-wins for
 	// concurrent requests and replaces a stale signal from an older step.
 	SetSessionMetadataKeyIfAbsentOrDifferentStep(ctx context.Context, sessionID, key, stepID string, value interface{}) (bool, error)
+}
+
+// completionIntentStore is intentionally a narrow optional extension of the
+// session repository. Alternate MCP test doubles and older repositories keep
+// their existing signal-bag behavior, while the production task repository
+// binds a signal to its exact active turn before it is published.
+type completionIntentStore interface {
+	taskrepository.CompletionIntentRepository
+	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 }
 
 // conditionalSessionStateUpdater is implemented by repositories that can
@@ -2063,7 +2074,24 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
 	}
 	if !stored {
+		// A prior successful bag write can outlive a failed intent write. A
+		// duplicate call repairs that partial admission from the original,
+		// authoritative signal rather than from this retry's potentially
+		// different summary.
+		if existing, ok := models.LoadPendingStepSignal(session.Metadata); ok && existing.StepID == task.WorkflowStepID {
+			if _, err := h.createCompletionIntent(ctx, session, task, existing); err != nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record completion intent", nil)
+			}
+		}
 		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, task.WorkflowStepID, session)
+	}
+	intent, err := h.createCompletionIntent(ctx, session, task, signal)
+	if err != nil {
+		h.logger.Error("failed to persist step-completion intent",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.SessionID),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record completion intent", nil)
 	}
 
 	// Counted here, at the durable bag write, not after publishStepCompletionEvent
@@ -2083,11 +2111,58 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return errMsg, err
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+	response := map[string]interface{}{
 		"accepted":    true,
 		"step_id":     task.WorkflowStepID,
 		"signaled_at": signal.SignaledAt,
-	})
+	}
+	if intent != nil {
+		response["completion_intent_id"] = intent.ID
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+// createCompletionIntent records the durable exact-turn owner for a signal.
+// A no-turn response remains compatible with old WAITING_FOR_INPUT callers;
+// a live RUNNING provider session always has a durable turn and therefore gets
+// an intent that later reconciliation can settle without trusting memory.
+func (h *Handlers) createCompletionIntent(
+	ctx context.Context,
+	session *models.TaskSession,
+	task *models.Task,
+	signal models.PendingStepCompletionSignal,
+) (*models.CompletionIntent, error) {
+	store, ok := h.sessionRepo.(completionIntentStore)
+	if !ok {
+		return nil, nil
+	}
+	turn, err := store.GetActiveTurnBySessionID(ctx, session.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load active turn: %w", err)
+	}
+	requestedAt := signal.SignaledAt
+	intent := &models.CompletionIntent{
+		ID:               uuid.NewString(),
+		TaskID:           task.ID,
+		SessionID:        session.ID,
+		TurnID:           turn.ID,
+		WorkflowStepID:   task.WorkflowStepID,
+		AgentExecutionID: session.AgentExecutionID,
+		State:            models.CompletionIntentStatePending,
+		Summary:          signal.Summary,
+		Handoff:          signal.Handoff,
+		Blockers:         signal.Blockers,
+		RequestedAt:      requestedAt,
+		EligibleAt:       requestedAt,
+	}
+	_, stored, err := store.CreateOrGetCompletionIntent(ctx, intent)
+	if err != nil {
+		return nil, fmt.Errorf("create or get completion intent: %w", err)
+	}
+	return stored, nil
 }
 
 func (h *Handlers) handleDuplicateStepComplete(
