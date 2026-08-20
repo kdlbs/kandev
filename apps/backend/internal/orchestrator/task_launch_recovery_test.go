@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,7 +212,9 @@ func TestRecoverTaskLaunchRecordsUnresolvedDefaultAndDoesNotLaunch(t *testing.T)
 	seedTaskLaunchRecoveryFixture(t, repo, "task-default-unresolved", "task-repo-default-unresolved", models.RecoveryActionRetryDefault)
 	fake := &taskLaunchRecoveryServiceFake{}
 	svc := recoveryFixtureService(t, repo, fake)
-	svc.taskLaunchRecoveryWorktree = taskLaunchRecoveryWorktreeFake{err: worktree.ErrRemoteDefaultUnresolved}
+	svc.taskLaunchRecoveryWorktree = taskLaunchRecoveryWorktreeFake{
+		err: fmt.Errorf("token=ghp_abcdefghijklmnopqrstuvwxyz1234567890AB: %w", worktree.ErrRemoteDefaultUnresolved),
+	}
 
 	_, err := svc.RecoverTaskLaunch(context.Background(), &TaskLaunchRecoveryRequest{
 		TaskID: "task-default-unresolved", TaskRepositoryID: "task-repo-default-unresolved", Action: models.RecoveryActionRetryDefault,
@@ -229,6 +233,67 @@ func TestRecoverTaskLaunchRecordsUnresolvedDefaultAndDoesNotLaunch(t *testing.T)
 	launchError, ok := models.LoadTaskLaunchError(task.Metadata)
 	if !ok || launchError.Code != models.LaunchErrorCategoryDefaultBranchUnresolved || !containsRecoveryAction(launchError.RecoveryActions, models.RecoveryActionPickBaseBranch) {
 		t.Fatalf("stored launch error = %#v, want unresolved default with branch picker", launchError)
+	}
+	if launchError.Details == "" || strings.Contains(launchError.Details, "abcdefghijklmnopqrstuvwxyz") {
+		t.Fatalf("task launch details were not sanitized: %q", launchError.Details)
+	}
+}
+
+func TestRecoverTaskLaunchRecordsUnresolvedDefaultForSessionSource(t *testing.T) {
+	repo := setupTestRepo(t)
+	const (
+		taskID           = "task-session-default-unresolved"
+		taskRepositoryID = "task-repo-session-default-unresolved"
+		sessionID        = "session-default-unresolved"
+	)
+	seedTaskLaunchRecoveryFixture(t, repo, taskID, taskRepositoryID, models.RecoveryActionRetryDefault)
+	if removed, err := repo.RemoveTaskMetadataKeyIfStamp(context.Background(), taskID, models.MetaKeyLastLaunchError, "recovery-stamp"); err != nil || !removed {
+		t.Fatalf("remove task launch error: removed=%v err=%v", removed, err)
+	}
+	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateFailed,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyLastAgentError: models.LastAgentError{
+				Message:          "session launch failed",
+				OccurredAt:       time.Now().UTC(),
+				Code:             models.LaunchErrorCategoryBaseBranchMissing,
+				RecoveryActions:  []string{models.RecoveryActionRetryDefault},
+				TaskRepositoryID: taskRepositoryID,
+				StampValue:       "session-recovery-stamp",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	fake := &taskLaunchRecoveryServiceFake{}
+	svc := recoveryFixtureService(t, repo, fake)
+	svc.taskLaunchRecoveryWorktree = taskLaunchRecoveryWorktreeFake{
+		err: fmt.Errorf("token=ghp_abcdefghijklmnopqrstuvwxyz1234567890AB: %w", worktree.ErrRemoteDefaultUnresolved),
+	}
+	_, err := svc.RecoverTaskLaunch(context.Background(), &TaskLaunchRecoveryRequest{
+		TaskID: taskID, SessionID: sessionID, TaskRepositoryID: taskRepositoryID,
+		Action: models.RecoveryActionRetryDefault, ErrorStamp: "session-recovery-stamp",
+	})
+	if !errors.Is(err, worktree.ErrRemoteDefaultUnresolved) {
+		t.Fatalf("session unresolved default error = %v, want unresolved error", err)
+	}
+	updated, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	lastError, ok := models.LoadLastAgentError(updated.Metadata)
+	if !ok || lastError.Code != models.LaunchErrorCategoryDefaultBranchUnresolved {
+		t.Fatalf("stored session launch error = %#v, want unresolved default", lastError)
+	}
+	if containsRecoveryAction(lastError.RecoveryActions, models.RecoveryActionRetryDefault) {
+		t.Fatal("unresolved session error still offers retry_default")
+	}
+	if !containsRecoveryAction(lastError.RecoveryActions, models.RecoveryActionPickBaseBranch) {
+		t.Fatal("unresolved session error does not offer branch selection")
+	}
+	if len(lastError.Details) == 0 || lastError.Details == "token=ghp_abcdefghijklmnopqrstuvwxyz1234567890AB" {
+		t.Fatalf("session launch details were not sanitized: %q", lastError.Details)
 	}
 }
 

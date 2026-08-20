@@ -3423,6 +3423,28 @@ func TestCancelIntentDoesNotFollowSharedGuard(t *testing.T) {
 
 // --- StartCreatedSession ---
 
+func requirePersistedSessionLaunchError(t *testing.T, repo *sqliterepo.Repository, sessionID string) models.LastAgentError {
+	t.Helper()
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	lastError, ok := models.LoadLastAgentError(session.Metadata)
+	if !ok {
+		t.Fatalf("session %q has no typed launch error: %#v", sessionID, session.Metadata)
+	}
+	if lastError.Code == "" || lastError.Stamp() == "" {
+		t.Fatalf("session %q has incomplete typed launch error: %#v", sessionID, lastError)
+	}
+	return lastError
+}
+
+func sessionMessageCount(messages *mockMessageCreator) int {
+	messages.mu.Lock()
+	defer messages.mu.Unlock()
+	return len(messages.sessionMessages)
+}
+
 func TestStartCreatedSession_WrongTask(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -3448,7 +3470,7 @@ func TestStartCreatedSession_NotInCreatedState(t *testing.T) {
 	}
 }
 
-func TestStartCreatedSession_MissingRemoteRefCreatesNeutralRecoveryMessage(t *testing.T) {
+func TestStartCreatedSession_MissingRemoteRefPersistsTypedRecoveryError(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
@@ -3479,15 +3501,16 @@ func TestStartCreatedSession_MissingRemoteRefCreatesNeutralRecoveryMessage(t *te
 		t.Fatalf("StartCreatedSession error = %v, want %v", err, launchErr)
 	}
 
-	if len(messages.sessionMessages) != 0 {
-		t.Fatalf("typed launch failure created legacy guidance messages: %d", len(messages.sessionMessages))
+	if got := sessionMessageCount(messages); got != 0 {
+		t.Fatalf("typed launch failure created legacy guidance messages: %d", got)
 	}
 	if _, suppressed := svc.suppressToast.Load("session1"); suppressed {
 		t.Fatal("typed launch failure must not suppress the pointer toast")
 	}
+	requirePersistedSessionLaunchError(t, repo, "session1")
 }
 
-func TestStartCreatedSession_MissingRemoteRefDoesNotDuplicateExecutorRecoveryMessage(t *testing.T) {
+func TestStartCreatedSession_MissingRemoteRefDoesNotDuplicateTypedRecoveryError(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
@@ -3515,12 +3538,13 @@ func TestStartCreatedSession_MissingRemoteRefDoesNotDuplicateExecutorRecoveryMes
 	if !errors.Is(err, launchErr) {
 		t.Fatalf("StartCreatedSession error = %v, want %v", err, launchErr)
 	}
-	if len(messages.sessionMessages) != 0 {
-		t.Fatalf("typed launch failure created legacy guidance messages: %d", len(messages.sessionMessages))
+	if got := sessionMessageCount(messages); got != 0 {
+		t.Fatalf("typed launch failure created legacy guidance messages: %d", got)
 	}
 	if _, suppressed := svc.suppressToast.Load("session1"); suppressed {
 		t.Fatal("typed launch failure must not suppress the pointer toast")
 	}
+	requirePersistedSessionLaunchError(t, repo, "session1")
 }
 
 func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
@@ -3539,7 +3563,7 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 		}
 	}
 
-	t.Run("early missing remote ref creates one neutral recovery message", func(t *testing.T) {
+	t.Run("early missing remote ref stays neutral before executor classification", func(t *testing.T) {
 		baseRepo := setupTestRepo(t)
 		seedTaskAndSession(t, baseRepo, taskID, "existing-session", models.TaskSessionStateCreated)
 		failureRepo := &taskEnvironmentFailureRepo{
@@ -3570,9 +3594,6 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 			t.Fatalf("PrepareTaskSession: %v", err)
 		}
 
-		if len(messages.sessionMessages) != 0 {
-			t.Fatalf("typed launch failure created legacy guidance messages: %d", len(messages.sessionMessages))
-		}
 		require.Eventually(t, func() bool {
 			failedSession, getErr := baseRepo.GetTaskSession(context.Background(), sessionID)
 			return getErr == nil && failedSession.State == models.TaskSessionStateFailed
@@ -3584,6 +3605,9 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 		}, time.Second, 10*time.Millisecond, "expected early launch failure to mark the task FAILED")
 		if _, suppressed := svc.suppressToast.Load(sessionID); suppressed {
 			t.Fatal("typed launch failure must not suppress the pointer toast")
+		}
+		if got := sessionMessageCount(messages); got != 0 {
+			t.Fatalf("typed launch failure created legacy guidance messages: %d", got)
 		}
 	})
 
@@ -3667,8 +3691,9 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 			session, getErr := repo.GetTaskSession(context.Background(), sessionID)
 			return getErr == nil && session.State == models.TaskSessionStateFailed
 		}, time.Second, 10*time.Millisecond, "expected failed state after workspace launch error")
-		if len(messages.sessionMessages) != 0 {
-			t.Fatalf("typed launch failure created legacy guidance messages: %d", len(messages.sessionMessages))
+		requirePersistedSessionLaunchError(t, repo, sessionID)
+		if got := sessionMessageCount(messages); got != 0 {
+			t.Fatalf("typed launch failure created legacy guidance messages: %d", got)
 		}
 	})
 }

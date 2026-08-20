@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -75,4 +76,35 @@ func TestStableLaunchErrorStampIsDeterministicAndBounded(t *testing.T) {
 	require.Equal(t, first, second)
 	require.Len(t, first, 32)
 	require.NotEqual(t, first, StableLaunchErrorStamp("repo-1", "123", "closed"))
+}
+
+func TestLaunchErrorNormalizationBoundsPersistedMessages(t *testing.T) {
+	longMessage := strings.Repeat("x", maxLaunchErrorMessageBytes+100)
+
+	taskMetadata := map[string]interface{}{
+		MetaKeyLastLaunchError: TaskLaunchError{Message: longMessage},
+	}
+	taskError, ok := LoadTaskLaunchError(taskMetadata)
+	require.True(t, ok)
+	require.Len(t, taskError.Message, maxLaunchErrorMessageBytes)
+
+	sessionMetadata := map[string]interface{}{
+		SessionMetaKeyLastAgentError: LastAgentError{Message: longMessage},
+	}
+	sessionError, ok := LoadLastAgentError(sessionMetadata)
+	require.True(t, ok)
+	require.Len(t, sessionError.Message, maxLaunchErrorMessageBytes)
+}
+
+func TestLaunchErrorMatchesStampDoesNotFallBackWhenExplicitStampExists(t *testing.T) {
+	occurredAt := time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC)
+	legacyStamp := occurredAt.Format(time.RFC3339Nano) + ":boom"
+
+	taskError := TaskLaunchError{Message: "boom", OccurredAt: occurredAt, StampValue: "explicit-task"}
+	require.True(t, taskError.MatchesStamp("explicit-task"))
+	require.False(t, taskError.MatchesStamp(legacyStamp))
+
+	sessionError := LastAgentError{Message: "boom", OccurredAt: occurredAt, StampValue: "explicit-session"}
+	require.True(t, sessionError.MatchesStamp("explicit-session"))
+	require.False(t, sessionError.MatchesStamp(legacyStamp))
 }

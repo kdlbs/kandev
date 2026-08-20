@@ -994,6 +994,10 @@ func NewService(
 			})
 		}
 	}
+	var taskLaunchRecoveryRepo taskLaunchRecoveryRepository
+	if recoveryRepo, ok := repo.(taskLaunchRecoveryRepository); ok {
+		taskLaunchRecoveryRepo = recoveryRepo
+	}
 
 	// Create the service (watcher will be created after we have handlers)
 	sendNowCtx, sendNowCancel := context.WithCancel(context.Background())
@@ -1008,7 +1012,7 @@ func NewService(
 		executor:                     exec,
 		scheduler:                    sched,
 		messageQueue:                 msgQueue,
-		taskLaunchRecoveryRepo:       repo,
+		taskLaunchRecoveryRepo:       taskLaunchRecoveryRepo,
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
 		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
@@ -2649,12 +2653,6 @@ func taskRepositoryPRNumber(metadata map[string]interface{}) int {
 		}
 	}
 	return 0
-}
-
-// handleSessionLaunchFailed is retained as a no-op compatibility callback for
-// older integrations. Typed launch errors are owned by the executor and the
-// bounded task status projection.
-func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, sessionID, repositoryID string, launchErr error) {
 }
 
 // IsRunning returns true if the service is running

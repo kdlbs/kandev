@@ -66,3 +66,9 @@ Add a task-scoped WebSocket action for pre-session and session launch errors.
   passed (2,841 tests in 9 packages).
 - PR fixup verification: `cd apps/backend && go test ./internal/orchestrator/... ./internal/common/netutil/... ./internal/task/repository/sqlite/...`
   passed (3,468 tests in 11 packages), and `make lint` reported zero issues.
+
+Second PR fixup hardening added a column-scoped, expected-value guarded default
+branch update; it also rejects a relaunch with no session and keeps a successful
+relaunch successful when compare-and-clear logging is the only failure. Session
+recovery now uses the repository contract directly, and unresolved-default
+details are sanitized before task or session persistence.

@@ -49,3 +49,7 @@ Verification:
 - `cd apps/web && pnpm run typecheck`: passed.
 - `cd apps/web && pnpm run lint`: passed.
 - PR fixup verification: focused tests passed in 3 files with 64 tests.
+
+Second PR fixup hardening requires equal session error stamps before suppressing
+a summary card and keeps non-typed status errors on the normal responsive
+layout path.

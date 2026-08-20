@@ -32,6 +32,7 @@ const (
 
 const (
 	maxLaunchErrorRecoveryActions = 3
+	maxLaunchErrorMessageBytes    = 4096
 	maxLaunchErrorStampBytes      = 256
 	maxLaunchErrorCategoryBytes   = 64
 	maxLaunchErrorDetailsBytes    = 4096
@@ -83,6 +84,7 @@ func isKnownRecoveryAction(action string) bool {
 }
 
 func normalizeLastAgentError(value LastAgentError) LastAgentError {
+	value.Message = truncateUTF8Bytes(value.Message, maxLaunchErrorMessageBytes)
 	value.RecoveryActions = NormalizeRecoveryActions(value.RecoveryActions)
 	value.TaskRepositoryID = truncateUTF8Bytes(value.TaskRepositoryID, maxTaskRepositoryIDBytes)
 	value.StampValue = boundedLaunchErrorStamp(value.StampValue)
@@ -91,6 +93,7 @@ func normalizeLastAgentError(value LastAgentError) LastAgentError {
 }
 
 func normalizeTaskLaunchError(value TaskLaunchError) TaskLaunchError {
+	value.Message = truncateUTF8Bytes(value.Message, maxLaunchErrorMessageBytes)
 	value.RecoveryActions = NormalizeRecoveryActions(value.RecoveryActions)
 	value.TaskRepositoryID = truncateUTF8Bytes(value.TaskRepositoryID, maxTaskRepositoryIDBytes)
 	value.StampValue = boundedLaunchErrorStamp(value.StampValue)
@@ -162,6 +165,9 @@ func (e TaskLaunchError) Stamp() string {
 func (e TaskLaunchError) MatchesStamp(stamp string) bool {
 	if stamp == e.Stamp() {
 		return true
+	}
+	if boundedLaunchErrorStamp(e.StampValue) != "" {
+		return false
 	}
 	suffix := ":" + e.Message
 	if !strings.HasSuffix(stamp, suffix) {

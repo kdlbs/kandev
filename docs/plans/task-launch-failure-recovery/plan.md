@@ -285,6 +285,21 @@ PR #2832 review and CI findings were addressed before delivery.
 - `cd apps/web && pnpm run typecheck`: passed.
 - Focused frontend fixup tests: 3 files and 64 tests passed.
 
+### Second PR fixup
+
+- Removed the no-op launch-failure callback and retargeted its test to the real
+  state-transition fallback.
+- Added bounded message persistence, exact explicit-stamp matching, sanitized
+  unresolved-default details, and an environment-gated Postgres CAS test.
+- Replaced stale full-row default-branch writes with an expected-value guarded
+  column update.
+- Rejected empty relaunch responses, preserved successful relaunches when
+  compare-and-clear logging is needed, and added session-owned recovery tests.
+- Required matching session error stamps in the chat timeline and rendered
+  only typed task errors in the recovery layout branch.
+- Added focused positive typed-error assertions and mutex-safe background
+  launch checks.
+
 ## Implementation Waves And Parallel Candidates
 
 ```text

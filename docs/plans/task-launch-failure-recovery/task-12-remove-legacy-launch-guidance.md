@@ -36,9 +36,10 @@ Keep unrelated recovery and toast behavior.
 
 - Removed the handled launch-failure warning, archive/delete actions, toast
   suppression, and legacy `missing_pr_branch_recovery_claimed` write.
-- Kept the compatibility callback inert so older integrations cannot recreate
-  the removed guidance path.
-- Updated the focused missing-branch and launch-failure tests to assert typed
-  error ownership.
+- Removed the unused compatibility callback so older integrations cannot
+  recreate the removed guidance path.
+- Updated the focused launch-failure tests to assert the executor ownership
+  boundary. Early workspace failures remain neutral until executor
+  classification exists.
 - Verification: `cd apps/backend && go test ./internal/orchestrator/... -race`
   passed (2,841 tests in 9 packages).

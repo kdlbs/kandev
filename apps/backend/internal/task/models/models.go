@@ -572,6 +572,9 @@ func (e LastAgentError) MatchesStamp(stamp string) bool {
 	if stamp == e.Stamp() {
 		return true
 	}
+	if boundedLaunchErrorStamp(e.StampValue) != "" {
+		return false
+	}
 	suffix := ":" + e.Message
 	if !strings.HasSuffix(stamp, suffix) {
 		return false

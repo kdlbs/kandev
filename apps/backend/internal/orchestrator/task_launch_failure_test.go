@@ -6,18 +6,23 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func TestHandledLaunchFailureLeavesTypedErrorOwnerWithoutLegacyGuidance(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
 
 	messages := &mockMessageCreator{}
-	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 	svc.messageCreator = messages
 	err := errors.New("environment preparation failed: fatal: couldn't find remote ref feature/deleted")
-	svc.handleSessionLaunchFailed(ctx, "task1", "session1", "repo-a", err)
+	if got := svc.handleSessionLaunchFailure(ctx, "task1", "session1", err); !errors.Is(got, err) {
+		t.Fatalf("handleSessionLaunchFailure error = %v, want %v", got, err)
+	}
 
 	if len(messages.sessionMessages) != 0 {
 		t.Fatalf("legacy launch guidance messages = %d, want 0", len(messages.sessionMessages))
@@ -28,6 +33,9 @@ func TestHandledLaunchFailureLeavesTypedErrorOwnerWithoutLegacyGuidance(t *testi
 	session, getErr := repo.GetTaskSession(ctx, "session1")
 	if getErr != nil {
 		t.Fatalf("get failed session: %v", getErr)
+	}
+	if session.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %s, want FAILED", session.State)
 	}
 	if _, claimed := session.Metadata["missing_pr_branch_recovery_claimed"]; claimed {
 		t.Fatal("legacy missing-branch claim must not be written")

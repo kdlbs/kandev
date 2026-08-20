@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
@@ -60,7 +61,8 @@ type taskLaunchRecoveryTaskService interface {
 type taskLaunchRecoveryRepository interface {
 	ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error)
 	GetRepository(context.Context, string) (*models.Repository, error)
-	UpdateRepository(context.Context, *models.Repository) error
+	UpdateRepositoryDefaultBranch(context.Context, string, string, string) error
+	RemoveSessionMetadataKeyIfStamp(context.Context, string, string, string) (bool, error)
 }
 
 type taskLaunchRecoverySource struct {
@@ -110,11 +112,8 @@ func (s *Service) RecoverTaskLaunch(ctx context.Context, req *TaskLaunchRecovery
 		if err := s.recoverTaskLaunchBranch(ctx, req, source); err != nil {
 			return nil, err
 		}
-		responseSessionID, err = s.relaunchRecoveredTask(ctx, req, source)
+		responseSessionID, err = s.relaunchAndClearTaskLaunchRecovery(ctx, req, source)
 		if err != nil {
-			return nil, err
-		}
-		if err := s.clearTaskLaunchRecoverySource(ctx, source); err != nil {
 			return nil, err
 		}
 	case taskLaunchRecoveryMarkDone:
@@ -130,6 +129,27 @@ func (s *Service) RecoverTaskLaunch(ctx context.Context, req *TaskLaunchRecovery
 	}
 
 	return &TaskLaunchRecoveryResponse{OK: true, TaskID: req.TaskID, SessionID: responseSessionID}, nil
+}
+
+func (s *Service) relaunchAndClearTaskLaunchRecovery(
+	ctx context.Context,
+	req *TaskLaunchRecoveryRequest,
+	source *taskLaunchRecoverySource,
+) (string, error) {
+	responseSessionID, err := s.relaunchRecoveredTask(ctx, req, source)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(responseSessionID) == "" {
+		return "", fmt.Errorf("task launch recovery relaunch did not create a session")
+	}
+	if err := s.clearTaskLaunchRecoverySource(ctx, source); err != nil && s.logger != nil {
+		s.logger.Warn("task launch recovery relaunched successfully but could not clear the source error",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", responseSessionID),
+			zap.Error(err))
+	}
+	return responseSessionID, nil
 }
 
 func (s *Service) validateTaskLaunchRecoveryRequest(req *TaskLaunchRecoveryRequest) error {
@@ -366,9 +386,7 @@ func (s *Service) recoverTaskLaunchBranch(ctx context.Context, req *TaskLaunchRe
 	}
 
 	if req.Action == taskLaunchRecoveryRetryDefault && repository.DefaultBranch != baseBranch {
-		updated := *repository
-		updated.DefaultBranch = baseBranch
-		if err := s.taskLaunchRecoveryRepo.UpdateRepository(ctx, &updated); err != nil {
+		if err := s.taskLaunchRecoveryRepo.UpdateRepositoryDefaultBranch(ctx, repository.ID, repository.DefaultBranch, baseBranch); err != nil {
 			return fmt.Errorf("update repository default branch: %w", err)
 		}
 	}
@@ -441,7 +459,7 @@ func (s *Service) recordUnresolvedDefaultBranch(ctx context.Context, source *tas
 	const message = "The remote default branch could not be resolved."
 	details := ""
 	if cause != nil {
-		details = cause.Error()
+		details = routingerr.SanitizeError(cause).Error()
 	}
 	stamp := models.StableLaunchErrorStamp("default_branch_unresolved", taskRepositoryID, source.errorStamp)
 	if source.sessionOwned {
@@ -471,6 +489,7 @@ func (s *Service) recordUnresolvedDefaultBranch(ctx context.Context, source *tas
 		Message:          message,
 		OccurredAt:       time.Now().UTC(),
 		Code:             models.LaunchErrorCategoryDefaultBranchUnresolved,
+		Details:          details,
 		RecoveryActions:  []string{models.RecoveryActionPickBaseBranch},
 		TaskRepositoryID: taskRepositoryID,
 		StampValue:       stamp,
@@ -487,6 +506,9 @@ func (s *Service) relaunchRecoveredTask(ctx context.Context, req *TaskLaunchReco
 		if err != nil {
 			return "", err
 		}
+		if response == nil {
+			return "", nil
+		}
 		return response.SessionID, nil
 	}
 	response, err := s.LaunchSession(ctx, &LaunchSessionRequest{
@@ -496,6 +518,9 @@ func (s *Service) relaunchRecoveredTask(ctx context.Context, req *TaskLaunchReco
 	})
 	if err != nil {
 		return "", err
+	}
+	if response == nil {
+		return "", nil
 	}
 	return response.SessionID, nil
 }
@@ -553,13 +578,10 @@ func (s *Service) findTerminalFinalWorkflowStep(ctx context.Context, task *model
 
 func (s *Service) clearTaskLaunchRecoverySource(ctx context.Context, source *taskLaunchRecoverySource) error {
 	if source.sessionOwned {
-		remover, ok := s.repo.(interface {
-			RemoveSessionMetadataKeyIfStamp(context.Context, string, string, string) (bool, error)
-		})
-		if !ok {
+		if s.taskLaunchRecoveryRepo == nil {
 			return fmt.Errorf("session launch-error compare-and-clear is unavailable")
 		}
-		_, err := remover.RemoveSessionMetadataKeyIfStamp(ctx, source.session.ID, models.SessionMetaKeyLastAgentError, source.errorStamp)
+		_, err := s.taskLaunchRecoveryRepo.RemoveSessionMetadataKeyIfStamp(ctx, source.session.ID, models.SessionMetaKeyLastAgentError, source.errorStamp)
 		return err
 	}
 	s.clearTaskLaunchErrorIfStamp(ctx, source.task.ID, source.errorStamp)

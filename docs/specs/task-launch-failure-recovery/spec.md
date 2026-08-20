@@ -56,6 +56,7 @@ TaskLaunchError
   message             string       safe user-readable message
   occurred_at         timestamp
   code                string       stable failure category
+  details             string       optional bounded safe diagnostic detail
   recovery_actions    []string     ordered known values, maximum 3
   task_repository_id  string       optional exact affected row
   stamp               string       stable identity for idempotent replay

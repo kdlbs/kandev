@@ -87,8 +87,7 @@ export function hasMatchingSessionLaunchError(
   if (!summarySessionId) return false;
   return runErrors.some(
     (error) =>
-      error.sessionId === summarySessionId &&
-      (!summaryStamp || !error.errorStamp || error.errorStamp === summaryStamp),
+      error.sessionId === summarySessionId && (!summaryStamp || error.errorStamp === summaryStamp),
   );
 }
 
