@@ -85,6 +85,12 @@ func TestResolveGitMetadataRejectsTraversalCurrentBranchRef(t *testing.T) {
 	}
 }
 
+func TestValidBranchRefRejectsNullByte(t *testing.T) {
+	if ValidBranchRef("refs/heads/main\x00unsafe") {
+		t.Fatal("ValidBranchRef accepted a null byte in the branch ref")
+	}
+}
+
 func TestResolveGitMetadataForRepositoryRejectsDifferentValidCommonDirectory(t *testing.T) {
 	repositoryA := initGitMetadataRepository(t)
 	repositoryB := initGitMetadataRepository(t)

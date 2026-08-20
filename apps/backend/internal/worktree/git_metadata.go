@@ -292,14 +292,16 @@ func readCurrentBranchRef(headPath string) (string, error) {
 		return "", nil // detached HEAD: commits update HEAD, which is in GitDir.
 	}
 	ref := strings.TrimSpace(strings.TrimPrefix(value, "ref: "))
-	if !validBranchRef(ref) {
+	if !ValidBranchRef(ref) {
 		return "", errors.New("invalid HEAD ref")
 	}
 	return ref, nil
 }
 
-func validBranchRef(ref string) bool {
-	if !strings.HasPrefix(ref, "refs/heads/") || strings.Contains(ref, "\\") {
+// ValidBranchRef reports whether ref is a canonical local branch ref that is
+// safe to use below a Git metadata directory.
+func ValidBranchRef(ref string) bool {
+	if !strings.HasPrefix(ref, "refs/heads/") || strings.ContainsAny(ref, "\\\x00") {
 		return false
 	}
 	for _, part := range strings.Split(ref, "/") {

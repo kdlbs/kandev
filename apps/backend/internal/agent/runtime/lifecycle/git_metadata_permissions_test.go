@@ -113,6 +113,20 @@ func TestStandaloneGitMetadataPreflightRendersCodexPolicy(t *testing.T) {
 	}
 }
 
+func TestMergeCodexConfigIgnoresMalformedPermissionsOverlay(t *testing.T) {
+	config := map[string]any{"approval_policy": "never"}
+
+	mergeCodexConfig(config, map[string]any{"permissions": "not-an-object"})
+
+	if got := config["approval_policy"]; got != "never" {
+		t.Fatalf("approval policy = %#v, want preserved value", got)
+	}
+	permissions, ok := config["permissions"].(map[string]any)
+	if !ok || len(permissions) != 0 {
+		t.Fatalf("permissions = %#v, want no malformed overlay entries", config["permissions"])
+	}
+}
+
 func TestStandaloneGitMetadataPreflightRejectsLegacyCodexSandbox(t *testing.T) {
 	projection := newLinkedGitMetadataProjection(t)
 	codexHome := t.TempDir()
