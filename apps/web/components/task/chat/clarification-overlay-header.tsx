@@ -2,6 +2,7 @@
 
 import { IconChevronDown, IconCheck, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Spinner } from "@kandev/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
@@ -88,7 +89,7 @@ export function ClarificationHeaderActions({
               )}
             >
               {isSubmitting ? t("task:submitting") : t("task:submit")}
-              <IconCheck className="h-3 w-3" />
+              {isSubmitting ? <Spinner className="size-3" /> : <IconCheck className="h-3 w-3" />}
             </button>
           </span>
         </KeyboardShortcutTooltip>
