@@ -180,6 +180,33 @@ func (r *sqliteRepository) initSchema() error {
 	CREATE TABLE IF NOT EXISTS queue_session_locks (
 		session_id TEXT PRIMARY KEY
 	);
+
+	CREATE TABLE IF NOT EXISTS message_deliveries (
+		id                TEXT PRIMARY KEY,
+		sender_task_id    TEXT NOT NULL DEFAULT '',
+		sender_session_id TEXT NOT NULL,
+		source_turn_id    TEXT NOT NULL,
+		idempotency_key   TEXT NOT NULL,
+		target_task_id    TEXT NOT NULL,
+		target_session_id TEXT NOT NULL,
+		delivery_mode     TEXT NOT NULL DEFAULT '',
+		content           TEXT NOT NULL,
+		metadata_json     TEXT NOT NULL DEFAULT '{}',
+		state             TEXT NOT NULL,
+		queue_entry_id    TEXT NOT NULL DEFAULT '',
+		attempts          INTEGER NOT NULL DEFAULT 0,
+		next_attempt_at   TIMESTAMP NOT NULL,
+		lease_owner       TEXT,
+		lease_expires_at  TIMESTAMP,
+		last_error        TEXT NOT NULL DEFAULT '',
+		created_at        TIMESTAMP NOT NULL,
+		updated_at        TIMESTAMP NOT NULL,
+		delivered_at      TIMESTAMP
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_message_deliveries_source_idempotency
+		ON message_deliveries(sender_session_id, source_turn_id, idempotency_key);
+	CREATE INDEX IF NOT EXISTS idx_message_deliveries_due
+		ON message_deliveries(state, next_attempt_at, lease_expires_at);
 	`)
 	if err != nil {
 		return err

@@ -1,0 +1,125 @@
+package messagequeue
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestDeliveryLedgerCreateOrGetIsIdempotentPerSourceTurn(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ledger, ok := repo.(DeliveryLedger)
+	require.True(t, ok, "queue repository must expose durable delivery storage")
+
+	first, created, err := ledger.CreateOrGetDelivery(context.Background(), Delivery{
+		SenderTaskID:    "source-task",
+		SenderSessionID: "source-session",
+		SourceTurnID:    "source-turn",
+		IdempotencyKey:  "report-v1",
+		TargetTaskID:    "target-task",
+		TargetSessionID: "target-session",
+		Content:         "review is ready",
+		State:           DeliveryPendingCapacity,
+	})
+	require.NoError(t, err)
+	require.True(t, created)
+	require.NotEmpty(t, first.ID)
+
+	second, created, err := ledger.CreateOrGetDelivery(context.Background(), Delivery{
+		SenderTaskID:    "source-task",
+		SenderSessionID: "source-session",
+		SourceTurnID:    "source-turn",
+		IdempotencyKey:  "report-v1",
+		TargetTaskID:    "target-task",
+		TargetSessionID: "target-session",
+		Content:         "must not create another delivery",
+		State:           DeliveryPendingCapacity,
+	})
+	require.NoError(t, err)
+	assert.False(t, created)
+	assert.Equal(t, first.ID, second.ID)
+	assert.Equal(t, "review is ready", second.Content)
+}
+
+func TestDeliveryLedgerClaimDueRowsUsesExpiringLease(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ledger, ok := repo.(DeliveryLedger)
+	require.True(t, ok, "queue repository must expose durable delivery storage")
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+
+	delivery, _, err := ledger.CreateOrGetDelivery(context.Background(), Delivery{
+		SenderTaskID:    "source-task",
+		SenderSessionID: "source-session",
+		SourceTurnID:    "source-turn",
+		IdempotencyKey:  "report-v1",
+		TargetTaskID:    "target-task",
+		TargetSessionID: "target-session",
+		Content:         "review is ready",
+		State:           DeliveryPendingCapacity,
+		NextAttemptAt:   now,
+	})
+	require.NoError(t, err)
+
+	claimed, err := ledger.ClaimDueDeliveries(context.Background(), now, "worker-a", time.Minute, 10)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1)
+	assert.Equal(t, delivery.ID, claimed[0].ID)
+	assert.Equal(t, DeliveryReserved, claimed[0].State)
+	assert.Equal(t, 1, claimed[0].Attempts)
+
+	claimed, err = ledger.ClaimDueDeliveries(context.Background(), now.Add(30*time.Second), "worker-b", time.Minute, 10)
+	require.NoError(t, err)
+	assert.Empty(t, claimed)
+
+	claimed, err = ledger.ClaimDueDeliveries(context.Background(), now.Add(time.Minute), "worker-b", time.Minute, 10)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1)
+	assert.Equal(t, "worker-b", claimed[0].LeaseOwner)
+	assert.Equal(t, 2, claimed[0].Attempts)
+}
+
+func TestDeliveryLedgerRetryAndAcknowledgementRequireTheCurrentLease(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ledger, ok := repo.(DeliveryLedger)
+	require.True(t, ok, "queue repository must expose durable delivery storage")
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+
+	delivery, _, err := ledger.CreateOrGetDelivery(context.Background(), Delivery{
+		SenderTaskID:    "source-task",
+		SenderSessionID: "source-session",
+		SourceTurnID:    "source-turn",
+		IdempotencyKey:  "report-v1",
+		TargetTaskID:    "target-task",
+		TargetSessionID: "target-session",
+		Content:         "review is ready",
+		State:           DeliveryPendingCapacity,
+		NextAttemptAt:   now,
+	})
+	require.NoError(t, err)
+	claimed, err := ledger.ClaimDueDeliveries(context.Background(), now, "worker-a", time.Minute, 1)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1)
+
+	_, err = ledger.RescheduleDelivery(context.Background(), delivery.ID, "worker-b", now.Add(time.Minute), "target is full")
+	require.ErrorIs(t, err, ErrDeliveryLeaseLost)
+	retried, err := ledger.RescheduleDelivery(context.Background(), delivery.ID, "worker-a", now.Add(time.Minute), "target is full")
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryRetryWait, retried.State)
+	assert.Equal(t, "target is full", retried.LastError)
+
+	claimed, err = ledger.ClaimDueDeliveries(context.Background(), now.Add(time.Minute), "worker-b", time.Minute, 1)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1)
+	queued, err := ledger.MarkDeliveryQueued(context.Background(), delivery.ID, "worker-b", "queue-entry")
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryQueued, queued.State)
+	assert.Equal(t, "queue-entry", queued.QueueEntryID)
+
+	delivered, err := ledger.AcknowledgeDelivery(context.Background(), delivery.ID, "queue-entry", now.Add(2*time.Minute))
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryDelivered, delivered.State)
+	assert.False(t, delivered.DeliveredAt.IsZero())
+}
