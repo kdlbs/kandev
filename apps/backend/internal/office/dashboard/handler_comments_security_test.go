@@ -186,13 +186,13 @@ func TestCreateComment_AgentAuthorPersistsJWTIdentity(t *testing.T) {
 	}
 }
 
-// TestCreateComment_AgentAuthorIgnoresSpoofedBodyID is the core B1
+// TestCreateComment_SpoofedAuthorIDRejectedWithForbidden is the core B1
 // regression: an agent authenticated as A sending author_id: B must not
 // persist B. Before the fix, the handler trusted req.AuthorID outright,
 // letting any agent impersonate any other agent (including the task's own
 // assignee, which would suppress that assignee's wake via the
 // scheduler/reactivity.go self-comment guard).
-func TestCreateComment_AgentAuthorIgnoresSpoofedBodyID(t *testing.T) {
+func TestCreateComment_SpoofedAuthorIDRejectedWithForbidden(t *testing.T) {
 	f := newCommentSecurityFixture(t)
 	agentA := seedCommentAgent(t, f.agentsSvc, "agent-a", "ws-1")
 	agentB := seedCommentAgent(t, f.agentsSvc, "agent-b", "ws-1")
@@ -256,5 +256,96 @@ func TestCreateComment_UnauthenticatedAgentTypeForbidden(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403 (no authenticated caller); body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestCreateComment_AgentAuthorMatchingBodyIDSucceeds covers the live fast
+// path the Kandev CLI actually uses: an authenticated agent sending its own
+// correct author_id in the body. The mismatch/spoofing tests above only
+// cover an absent or wrong body author_id, leaving this positive case
+// unverified.
+func TestCreateComment_AgentAuthorMatchingBodyIDSucceeds(t *testing.T) {
+	f := newCommentSecurityFixture(t)
+	agentA := seedCommentAgent(t, f.agentsSvc, "agent-a", "ws-1")
+	seedCommentTask(t, f.repo, "task-1", "ws-1", agentA.ID)
+
+	token, err := f.agentsSvc.MintRuntimeJWT(agentA.ID, "task-1", agentA.WorkspaceID, "", "sess-1", "")
+	if err != nil {
+		t.Fatalf("mint jwt: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, postCommentReq("task-1", token,
+		`{"body":"hello","author_type":"agent","author_id":"agent-a"}`))
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	comments, err := f.repo.ListTaskComments(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("list comments: %v", err)
+	}
+	if len(comments) != 1 || comments[0].AuthorID != agentA.ID {
+		t.Fatalf("comments = %+v, want single comment authored by %q", comments, agentA.ID)
+	}
+}
+
+// TestCreateComment_AuthenticatedAgentClaimingUserTypeForbidden is the P1
+// regression from PR review: an authenticated agent that submits
+// author_type: "user" must not be silently persisted as a user comment.
+// Before the fix, the agent-attribution branch only ran when author_type
+// was "agent", so a caller with a valid JWT but a "user" (or omitted) body
+// type fell through to the user path — mislabeling the comment and letting
+// it evade the scheduler's self-comment guard, which only suppresses a wake
+// when author_type=="agent".
+func TestCreateComment_AuthenticatedAgentClaimingUserTypeForbidden(t *testing.T) {
+	f := newCommentSecurityFixture(t)
+	agentA := seedCommentAgent(t, f.agentsSvc, "agent-a", "ws-1")
+	seedCommentTask(t, f.repo, "task-1", "ws-1", agentA.ID)
+
+	token, err := f.agentsSvc.MintRuntimeJWT(agentA.ID, "task-1", agentA.WorkspaceID, "", "sess-1", "")
+	if err != nil {
+		t.Fatalf("mint jwt: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, postCommentReq("task-1", token,
+		`{"body":"hello","author_type":"user"}`))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (agent JWT claiming user author type); body=%s", rec.Code, rec.Body.String())
+	}
+	comments, err := f.repo.ListTaskComments(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("list comments: %v", err)
+	}
+	if len(comments) != 0 {
+		t.Fatalf("comments = %+v, want none persisted", comments)
+	}
+}
+
+// TestCreateComment_AuthenticatedAgentOmittedTypeDefaultsToAgent covers the
+// other half of the same P1 fix: an authenticated agent that omits
+// author_type entirely is attributed as an agent (derived from the JWT),
+// not silently downgraded to the user sentinel.
+func TestCreateComment_AuthenticatedAgentOmittedTypeDefaultsToAgent(t *testing.T) {
+	f := newCommentSecurityFixture(t)
+	agentA := seedCommentAgent(t, f.agentsSvc, "agent-a", "ws-1")
+	seedCommentTask(t, f.repo, "task-1", "ws-1", agentA.ID)
+
+	token, err := f.agentsSvc.MintRuntimeJWT(agentA.ID, "task-1", agentA.WorkspaceID, "", "sess-1", "")
+	if err != nil {
+		t.Fatalf("mint jwt: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, postCommentReq("task-1", token, `{"body":"hello"}`))
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	comments, err := f.repo.ListTaskComments(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("list comments: %v", err)
+	}
+	if len(comments) != 1 || comments[0].AuthorType != "agent" || comments[0].AuthorID != agentA.ID {
+		t.Fatalf("comments = %+v, want single agent comment authored by %q", comments, agentA.ID)
 	}
 }

@@ -73,15 +73,35 @@ func (h *Handler) createComment(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "body is required"})
 		return
 	}
+	taskID := c.Param("id")
+	caller := agents.CallerFromContext(c)
+
 	authorType := req.AuthorType
 	if authorType == "" {
 		authorType = userSentinel
 	}
+	// An authenticated agent JWT is authoritative over the request body: a
+	// non-nil caller means the request came through agent-JWT auth, so it is
+	// always attributed as an agent comment, even when author_type is
+	// omitted. An explicit "user" claim from that same caller is rejected
+	// rather than silently downgraded — trusting it would mislabel the
+	// comment as user-authored and let it evade the scheduler's
+	// self-comment guard (scheduler/reactivity.go), which only suppresses a
+	// wake when author_type=="agent".
+	if caller != nil {
+		if req.AuthorType != "" && req.AuthorType != activityActorTypeAgent {
+			h.logger.Warn("reject agent comment claiming non-agent author type",
+				zap.String("task_id", taskID),
+				zap.String("claimed_author_type", req.AuthorType),
+				zap.String("caller_id", caller.ID))
+			c.JSON(http.StatusForbidden, gin.H{"error": "author_type must be \"agent\" for an authenticated agent caller"})
+			return
+		}
+		authorType = activityActorTypeAgent
+	}
 	authorID := userSentinel
 	source := userSentinel
 	if authorType == activityActorTypeAgent {
-		taskID := c.Param("id")
-		caller := agents.CallerFromContext(c)
 		// req.AuthorID is never trusted as the identity to persist — see
 		// ResolveCommentAgentAuthor. It is only cross-checked here as a
 		// cheap diagnostic: a mismatch means the CLI's KANDEV_AGENT_ID
@@ -109,7 +129,7 @@ func (h *Handler) createComment(c *gin.Context) {
 	}
 	comment := &models.TaskComment{
 		ID:         uuid.New().String(),
-		TaskID:     c.Param("id"),
+		TaskID:     taskID,
 		AuthorType: authorType,
 		AuthorID:   authorID,
 		Body:       req.Body,
