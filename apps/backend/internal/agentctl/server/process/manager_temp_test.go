@@ -143,6 +143,26 @@ func TestManager_StartProcessInheritsAgentEnvironment(t *testing.T) {
 	}
 }
 
+func TestManagerConfigureReplacesExistingEnvironmentValue(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir:   t.TempDir(),
+		AgentArgs: []string{"echo"},
+		AgentEnv:  []string{"CODEX_CONFIG=old", "PATH=/usr/bin"},
+	}, newTestLogger(t))
+	if err := mgr.Configure("echo", []string{"echo"}, true, map[string]string{"CODEX_CONFIG": "new"}, "", "", nil, false); err != nil {
+		t.Fatalf("Configure() error = %v", err)
+	}
+	var values []string
+	for _, entry := range mgr.cfg.AgentEnv {
+		if strings.HasPrefix(entry, "CODEX_CONFIG=") {
+			values = append(values, strings.TrimPrefix(entry, "CODEX_CONFIG="))
+		}
+	}
+	if len(values) != 1 || values[0] != "new" {
+		t.Fatalf("CODEX_CONFIG entries = %#v, want only refreshed policy", values)
+	}
+}
+
 func TestManager_ProcessEnvironmentMergesIndexedGitConfig(t *testing.T) {
 	mgr := NewManager(&config.InstanceConfig{
 		AgentEnv: []string{

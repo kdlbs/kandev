@@ -49,6 +49,14 @@ func (r *StandaloneExecutor) HealthCheck(ctx context.Context) error {
 	return r.ctl.Health(ctx)
 }
 
+// PrepareGitMetadataProjection installs the narrow Codex session profile before
+// agentctl is created. A standalone host has no container mount boundary, so a
+// runtime that cannot render this agent-side policy must fail closed rather
+// than reproducing a writable checkout with a read-only external index.
+func (r *StandaloneExecutor) PrepareGitMetadataProjection(_ context.Context, req *ExecutorCreateRequest) error {
+	return prepareCodexGitMetadataPolicy(req)
+}
+
 // SubprocessAdmission returns the admission snapshot from the host agentctl
 // control server for backend diagnostics.
 func (r *StandaloneExecutor) SubprocessAdmission(ctx context.Context) (subproc.Snapshot, error) {

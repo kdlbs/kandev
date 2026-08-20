@@ -1526,6 +1526,7 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 	// Merge additional env vars
 	if len(env) > 0 {
 		for k, v := range env {
+			m.cfg.AgentEnv = utility.RemoveEnvEntry(m.cfg.AgentEnv, k)
 			m.cfg.AgentEnv = append(m.cfg.AgentEnv, fmt.Sprintf("%s=%s", k, v))
 		}
 	}

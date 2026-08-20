@@ -183,9 +183,9 @@ func TestRebindWorkspaceForSessionReadinessTimeoutRollsBack(t *testing.T) {
 	execution.Status = v1.AgentStatusReady
 	execution.WorkspacePath = "/old-workspace"
 	execution.ACPSessionID = "acp-existing"
-	execution.RuntimeName = executor.NameStandalone
+	execution.RuntimeName = executor.NameDocker
 	mgr.executorRegistry = NewExecutorRegistry(newTestRegistryLogger())
-	mgr.executorRegistry.Register(&gitMetadataAttestingExecutor{MockExecutor: MockExecutor{name: executor.NameStandalone}})
+	mgr.executorRegistry.Register(&gitMetadataAttestingExecutor{MockExecutor: MockExecutor{name: executor.NameDocker}})
 	oldProjection := newLinkedGitMetadataProjection(t)
 	newProjection := newLinkedGitMetadataProjection(t)
 	execution.GitMetadataProjections = []*worktree.GitMetadataProjection{oldProjection}

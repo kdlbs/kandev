@@ -812,7 +812,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 func createLaunchInstance(ctx context.Context, rt ExecutorBackend, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
 	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
 	defer launchCancel()
-	if err := preflightGitMetadataProjection(launchCtx, rt, req.GitMetadataProjections); err != nil {
+	if err := preflightGitMetadataProjection(launchCtx, rt, req); err != nil {
 		return nil, err
 	}
 	if err := resumeRemoteInstancePreflight(launchCtx, rt, req); err != nil {

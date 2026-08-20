@@ -20,7 +20,6 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/scriptengine"
-	"github.com/kandev/kandev/internal/worktree"
 )
 
 const dockerWorkspacePath = "/workspace"
@@ -207,8 +206,8 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 // layered mount plan before a container or child process is created. The
 // container builder compiles the same plan again immediately before launch;
 // that final compilation closes the normal resolve-to-mount freshness window.
-func (r *DockerExecutor) PrepareGitMetadataProjection(_ context.Context, projections []*worktree.GitMetadataProjection) error {
-	_, err := gitMetadataMounts(projections)
+func (r *DockerExecutor) PrepareGitMetadataProjection(_ context.Context, req *ExecutorCreateRequest) error {
+	_, err := gitMetadataMounts(req.GitMetadataProjections)
 	return err
 }
 
