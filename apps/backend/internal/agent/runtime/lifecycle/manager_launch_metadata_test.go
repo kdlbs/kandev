@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -96,6 +97,76 @@ func TestBuildLaunchMetadataProjectsWorktreeAndRepoFields(t *testing.T) {
 	require.Equal(t, "main", metadata[MetadataKeyBaseBranch])
 	require.Equal(t, map[string]string{"": "main"}, metadata[MetadataKeyBaseBranches],
 		"the single-repo base branch is recorded under the empty key for single-repo trackers")
+}
+
+func TestLaunchResumeWorktreeRebuildsGitMetadataProjection(t *testing.T) {
+	repositoryPath := filepath.Join(t.TempDir(), "source")
+	runContainerGit(t, "", "init", "-b", "main", repositoryPath)
+	runContainerGit(t, repositoryPath, "config", "user.email", "test@example.com")
+	runContainerGit(t, repositoryPath, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repositoryPath, "tracked.txt"), []byte("initial\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runContainerGit(t, repositoryPath, "add", "tracked.txt")
+	runContainerGit(t, repositoryPath, "commit", "-m", "initial")
+	checkoutPath := filepath.Join(t.TempDir(), "task-checkout")
+	runContainerGit(t, repositoryPath, "worktree", "add", "-b", "task-branch", checkoutPath)
+
+	log := newTestLogger()
+	execRegistry := NewExecutorRegistry(log)
+	backend := &gitMetadataResumeCreateInstanceExecutor{
+		createInstanceExecutor: createInstanceExecutor{
+			MockExecutor: MockExecutor{name: executor.NameStandalone},
+			client:       newReadyAgentctlClient(t, log),
+		},
+	}
+	execRegistry.Register(backend)
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session-resume": {WorkspacePath: checkoutPath},
+	}}
+
+	execution, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-resume",
+		SessionID:      "session-resume",
+		AgentProfileID: "profile-1",
+		ExecutorType:   string(models.ExecutorTypeWorktree),
+		RepositoryPath: repositoryPath,
+		UseWorktree:    true,
+		ACPSessionID:   "acp-session",
+		StartAgent:     false,
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if execution == nil {
+		t.Fatal("Launch returned nil execution")
+	}
+	if !backend.attested {
+		t.Fatal("resumed worktree launch did not preflight Git metadata projection")
+	}
+	if backend.lastRequest == nil || len(backend.lastRequest.GitMetadataProjections) != 1 {
+		t.Fatalf("GitMetadataProjections = %#v, want one projection", backend.lastRequest)
+	}
+	projection := backend.lastRequest.GitMetadataProjections[0]
+	if projection.CheckoutPath != checkoutPath || projection.CommonDir != filepath.Join(repositoryPath, ".git") {
+		t.Fatalf("projection = %#v, want checkout %q bound to repository %q", projection, checkoutPath, repositoryPath)
+	}
+}
+
+type gitMetadataResumeCreateInstanceExecutor struct {
+	createInstanceExecutor
+	attested bool
+}
+
+func (e *gitMetadataResumeCreateInstanceExecutor) PrepareGitMetadataProjection(_ context.Context, _ *ExecutorCreateRequest) error {
+	e.attested = true
+	return nil
 }
 
 func TestBuildLaunchMetadataOmitsEmptyOptionalKeys(t *testing.T) {
