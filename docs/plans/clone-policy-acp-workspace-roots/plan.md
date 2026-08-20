@@ -3,7 +3,7 @@ specs:
   - docs/specs/platform/task-git-metadata-permissions.md
   - docs/specs/tasks/attach-workspace-sources.md
 created: 2026-08-20
-status: draft
+status: in_progress
 ---
 
 # Implementation Plan: Clone Policy Attestation and ACP Workspace Roots
@@ -38,17 +38,17 @@ Cover initial launch, reset/restart, attachment rebind/rollback, and terminal cl
 
 ## Verification Results
 
-Pending implementation. The Docker Playwright project requires a reachable Docker daemon. SSH coverage requires the Docker-hosted SSH fixture; Sprites requires its provider token and intentionally invokes a remote sandbox.
+Focused and package-level Go tests, race detection, backend lint, and public-docs validation pass. Container E2E was attempted with the managed runner on 2026-08-20, but its disposable `node:22-slim` image cannot run `apt-get update`: Debian metadata responses are intercepted as `NOSPLIT` and report that the network requires authentication. Docker daemon access itself is present. The SSH fixture uses the same container build and is therefore gated by the same failure. No Sprites provider credential is present in this environment. These are environment gates, not passing E2E evidence.
 
 ## Implementation Waves And Parallel Candidates
 
 Wave 1:
 
-- [ ] [task-01-clone-policy-attestation](task-01-clone-policy-attestation.md)
+- [x] [task-01-clone-policy-attestation](task-01-clone-policy-attestation.md)
 
 Wave 2:
 
-- [ ] [task-02-acp-additional-directories](task-02-acp-additional-directories.md)
+- [x] [task-02-acp-additional-directories](task-02-acp-additional-directories.md)
 
 Wave 3:
 

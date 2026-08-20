@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -356,6 +357,31 @@ func TestHandleWSNewSessionStartsAndConfiguresMCPAttachmentAttempt(t *testing.T)
 	}
 }
 
+func TestHandleWSNewSessionForwardsServerOwnedAdditionalDirectories(t *testing.T) {
+	log := newTestLogger()
+	workspace := t.TempDir()
+	apiRoot := filepath.Join(workspace, "api")
+	if err := os.Mkdir(apiRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.InstanceConfig{Port: 0, WorkDir: workspace, WorkspaceSourceRoots: []string{workspace, apiRoot}}
+	procMgr := process.NewManager(cfg, log)
+	s := NewServer(cfg, procMgr, nil, nil, log)
+	capture := &additionalDirectoriesCaptureAdapter{}
+	s.procMgr.SetAdapterForTest(capture)
+
+	msg, err := ws.NewRequest("req-1", "agent.session.new", NewSessionRequest{})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if response := s.handleWSNewSession(context.Background(), msg); response.Type != ws.MessageTypeResponse {
+		t.Fatalf("response type = %q, want response", response.Type)
+	}
+	if !slices.Equal(capture.directories, []string{workspace, apiRoot}) {
+		t.Fatalf("additional directories = %v, want %v", capture.directories, []string{workspace, apiRoot})
+	}
+}
+
 func TestHandleWSLoadSession_NoAdapter(t *testing.T) {
 	s := newTestServer(t)
 	ctx := context.Background()
@@ -547,6 +573,16 @@ type mcpCaptureAdapter struct {
 	promptErrorAdapter
 	newSessionServers  []types.McpServer
 	loadSessionServers []types.McpServer
+}
+
+type additionalDirectoriesCaptureAdapter struct {
+	promptErrorAdapter
+	directories []string
+}
+
+func (a *additionalDirectoriesCaptureAdapter) NewSessionWithAdditionalDirectories(_ context.Context, _ []types.McpServer, directories []string) (string, error) {
+	a.directories = append([]string(nil), directories...)
+	return "new-session", nil
 }
 
 type mcpResultCaptureAdapter struct{ mcpCaptureAdapter }

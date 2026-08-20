@@ -214,6 +214,23 @@ func TestBuildContainerConfigBoundsPrepareScriptBeforeAgentctl(t *testing.T) {
 	}
 }
 
+func TestCloneGitMetadataPrepareScriptAttestsCanonicalWorkspace(t *testing.T) {
+	script := cloneGitMetadataPrepareScript("git clone https://example.test/repo /workspace")
+	if !strings.Contains(script, "git clone https://example.test/repo /workspace") {
+		t.Fatalf("prepare script lost clone command: %s", script)
+	}
+	if !strings.Contains(script, "git -C \"$workspace\" rev-parse --absolute-git-dir") {
+		t.Fatalf("prepare script does not attest canonical Git directory: %s", script)
+	}
+}
+
+func TestBuildContainerCreateInstanceRequestUsesContainerWorkspaceSourceRoot(t *testing.T) {
+	request := buildContainerCreateInstanceRequest(ContainerConfig{InstanceID: "instance-1"}, "codex", false, false, false, false, nil)
+	if !equalStrings(request.WorkspaceSourceRoots, []string{dockerWorkspacePath}) {
+		t.Fatalf("WorkspaceSourceRoots = %v, want the container workspace only", request.WorkspaceSourceRoots)
+	}
+}
+
 func TestBuildContainerConfigPublishesManagedGitCredentialHelperBeforeAgentctlStartup(t *testing.T) {
 	cm := newCMTest(t)
 	cfg := ContainerConfig{

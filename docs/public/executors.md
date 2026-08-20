@@ -227,6 +227,10 @@ An idle, non-archived repository-backed task can add sources from its **Files** 
 
 Every repository row records a base branch. Worktree, Docker, SSH, and Sprites may also materialize an existing checkout branch for repository rows. Local/Local PC always uses the repository's current checkout and does not offer or perform a branch switch.
 
+For clone-based Docker, SSH, and Sprites tasks, Kandev validates the executor's own checkout before a mutable agent session starts. Git metadata access is limited to the task checkout and its materialized repository siblings; Kandev never uses a host checkout path to authorize a remote executor. A failed checkout or metadata validation stops the launch. Reset or relaunch creates a fresh checked workspace when this policy must be reapplied.
+
+When an ACP agent advertises support for additional workspace directories, Kandev passes only the canonical repository siblings already attached to that task. Agents that do not advertise the capability keep their existing workspace-only session; Kandev does not widen their access.
+
 Arbitrary folders are supported only on **Worktree** and **Local/Local PC**. They remain live host paths; Kandev links them into its task workspace and never copies, moves, or deletes their contents. Docker and remote executors do not offer folders and reject a forged folder request. Remote Docker remains unavailable because its runtime is not implemented.
 
 Source batches are atomic: if validation, cloning, or runtime adoption fails, Kandev removes the new records and Kandev-owned entries while preserving existing task contents. Persisted attachments are reapplied after reload, relaunch, or **Reset Environment**; a previously attached folder that later disappears is reported instead of silently skipped. See [Tasks and workflows](tasks-and-workflows.md#add-sources-to-an-existing-task).

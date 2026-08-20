@@ -29,6 +29,18 @@ func TestCreateLaunchInstanceRejectsUnsupportedGitMetadataProjection(t *testing.
 	}
 }
 
+func TestPreflightGitMetadataProjectionRejectsUnattestedCloneCheckout(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		RequiresCloneGitMetadataPolicy: true,
+		AgentConfig:                    agents.NewCodexACP(),
+	}
+
+	err := preflightGitMetadataProjection(context.Background(), &mockStopTracker{}, req)
+	if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) {
+		t.Fatalf("preflightGitMetadataProjection() error = %v, want %q", err, gitMetadataProjectionUnsupported)
+	}
+}
+
 func TestCreateLaunchInstanceSanitizesInvalidGitMetadataProjection(t *testing.T) {
 	runtime := &gitMetadataRecordingExecutor{MockExecutor: MockExecutor{name: executor.NameDocker}}
 	req := &ExecutorCreateRequest{

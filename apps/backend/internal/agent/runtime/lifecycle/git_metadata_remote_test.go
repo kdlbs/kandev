@@ -43,6 +43,32 @@ func TestRemoteRegularGitMetadataPolicyOnlyWritesTaskGitDir(t *testing.T) {
 	}
 }
 
+func TestRemoteRegularGitMetadataPolicyWritesOnlyAttestedCloneDirectories(t *testing.T) {
+	req := &ExecutorCreateRequest{AgentConfig: agents.NewCodexACP()}
+	metadata := []remoteRegularGitMetadata{
+		{CheckoutPath: "/workspace", GitDir: "/workspace/.git"},
+		{CheckoutPath: "/workspace/frontend-main", GitDir: "/workspace/frontend-main/.git"},
+	}
+	if err := prepareRemoteRegularGitMetadataPolicy(req, metadata...); err != nil {
+		t.Fatalf("prepareRemoteRegularGitMetadataPolicy() error = %v", err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal([]byte(req.Env["CODEX_CONFIG"]), &config); err != nil {
+		t.Fatalf("decode CODEX_CONFIG: %v", err)
+	}
+	rules := config["permissions"].(map[string]any)[codexGitMetadataPolicyName].(map[string]any)["filesystem"].(map[string]any)
+	for _, item := range metadata {
+		if rules[item.GitDir] != "write" {
+			t.Fatalf("GitDir %q permission = %#v, want write", item.GitDir, rules[item.GitDir])
+		}
+	}
+	for path := range rules {
+		if path != ":minimal" && path != metadata[0].GitDir && path != metadata[1].GitDir {
+			t.Fatalf("unexpected filesystem policy path %q", path)
+		}
+	}
+}
+
 func TestRemoteGitMetadataRequestFailsClosed(t *testing.T) {
 	t.Run("agent has no renderer", func(t *testing.T) {
 		err := validateRemoteGitMetadataRequest(&ExecutorCreateRequest{AgentConfig: agents.NewClaudeACP()})
@@ -193,5 +219,8 @@ func TestSpriteReconnectReplacesChildWhenGitPolicyChanges(t *testing.T) {
 	}
 	if !shouldReplaceSpriteAgentInstance(&ExecutorCreateRequest{GitMetadataProjections: []*worktree.GitMetadataProjection{{}}}) {
 		t.Fatal("Git metadata projection must replace stale Sprite child")
+	}
+	if !shouldReplaceSpriteAgentInstance(&ExecutorCreateRequest{RequiresCloneGitMetadataPolicy: true}) {
+		t.Fatal("clone Git metadata policy must replace stale Sprite child")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -55,6 +56,23 @@ func remoteWorkspaceProjectionFromLaunch(req *LaunchRequest) ([]WorkspaceReposit
 	return projection, nil
 }
 
+// remoteWorkspaceSourceRoots returns only executor-visible, server-derived
+// directories. Repository destinations have already been sanitized by the
+// durable projection builder, so no host checkout path can enter agentctl.
+func remoteWorkspaceSourceRoots(workspacePath string, repositories []WorkspaceRepositoryMaterialization) []string {
+	roots := make([]string, 0, len(repositories)+1)
+	if workspacePath == "" {
+		return roots
+	}
+	roots = append(roots, workspacePath)
+	for _, repository := range repositories {
+		if repository.Destination != "" {
+			roots = append(roots, filepath.Join(workspacePath, repository.Destination))
+		}
+	}
+	return roots
+}
+
 type workspaceRepositoryClient interface {
 	MaterializeRepository(context.Context, agentctl.MaterializeRepositoryRequest) (*agentctl.MaterializeRepositoryResponse, error)
 	RemoveMaterializedRepository(context.Context, agentctl.RemoveMaterializedRepositoryRequest) error
@@ -74,7 +92,7 @@ func (m *Manager) MaterializeRepositoriesForEnvironment(ctx context.Context, tas
 	if len(clients) == 0 {
 		return nil, fmt.Errorf("workspace execution has no agentctl client")
 	}
-	created, err := materializeWorkspaceRepositoriesWithoutRescan(ctx, clients[0].client, repositories)
+	created, err := materializeWorkspaceRepositoriesWithoutRescan(ctx, clients[0].client, repositories, false)
 	if err != nil {
 		return nil, err
 	}
@@ -93,12 +111,12 @@ func (m *Manager) MaterializeRepositoriesForEnvironment(ctx context.Context, tas
 	return workspaceRepositorySessionIDs(executions), nil
 }
 
-func materializeWorkspaceRepositories(ctx context.Context, client workspaceRepositoryClient, repositories []WorkspaceRepositoryMaterialization) error {
-	created, err := materializeWorkspaceRepositoriesWithoutRescan(ctx, client, repositories)
+func materializeWorkspaceRepositories(ctx context.Context, client workspaceRepositoryClient, repositories []WorkspaceRepositoryMaterialization, sourceRoots ...[]string) error {
+	created, err := materializeWorkspaceRepositoriesWithoutRescan(ctx, client, repositories, true)
 	if err != nil {
 		return err
 	}
-	if err := client.RescanWorkspace(ctx, ""); err != nil {
+	if err := client.RescanWorkspace(ctx, "", sourceRoots...); err != nil {
 		cleanupErr := rollbackMaterializedWorkspaceRepositories(ctx, client, created)
 		var reconcileErr error
 		if cleanupErr == nil {
@@ -175,7 +193,7 @@ func workspaceRepositorySessionIDs(executions []*AgentExecution) []string {
 	return ids
 }
 
-func materializeWorkspaceRepositoriesWithoutRescan(ctx context.Context, client workspaceRepositoryClient, repositories []WorkspaceRepositoryMaterialization) ([]WorkspaceRepositoryMaterialization, error) {
+func materializeWorkspaceRepositoriesWithoutRescan(ctx context.Context, client workspaceRepositoryClient, repositories []WorkspaceRepositoryMaterialization, requireGitMetadataAttestation bool) ([]WorkspaceRepositoryMaterialization, error) {
 	if client == nil {
 		return nil, fmt.Errorf("agentctl client is required")
 	}
@@ -196,6 +214,10 @@ func materializeWorkspaceRepositoriesWithoutRescan(ctx context.Context, client w
 		if response == nil {
 			rollbackErr := rollbackMaterializedWorkspaceRepositories(ctx, client, created)
 			return nil, fmt.Errorf("materialize workspace repository %q: %w", repository.Destination, errors.Join(errors.New("empty response"), rollbackErr))
+		}
+		if requireGitMetadataAttestation && !response.GitMetadataAttested {
+			rollbackErr := rollbackMaterializedWorkspaceRepositories(ctx, client, created)
+			return nil, fmt.Errorf("materialize workspace repository %q: %w", repository.Destination, errors.Join(errors.New("git metadata attestation missing"), rollbackErr))
 		}
 		if !response.Reused {
 			created = append(created, repository)

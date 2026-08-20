@@ -1,7 +1,7 @@
 ---
 id: "03-regression-and-documentation"
 title: "Regression and documentation"
-status: pending
+status: in_progress
 wave: 3
 depends_on: ["01-clone-policy-attestation", "02-acp-additional-directories"]
 plan: "plan.md"
@@ -53,4 +53,10 @@ Summary, files changed, exact terminal evidence, Docker/SSH/Sprites gates, docs 
 
 ## Results
 
-Pending.
+- PASS: `GOCACHE=/tmp/kandev-gocache go test ./internal/agent/runtime/lifecycle ./internal/agentctl/server/api ./internal/agentctl/server/adapter/transport/acp ./internal/agent/runtime/agentctl`
+- PASS: `GOCACHE=/tmp/kandev-gocache go test -race ./internal/agent/runtime/lifecycle ./internal/agentctl/server/adapter/transport/acp`
+- PASS: `GOCACHE=/tmp/kandev-gocache make lint`
+- PASS: `node --test scripts/validate-public-docs.test.mjs` and `node scripts/validate-public-docs.mjs`
+- GATED: `pnpm e2e:run --project containers tests/docker/add-workspace-sources.spec.ts tests/docker/plugin-git-credentials.spec.ts` built the backend and web assets, then failed before tests ran because `apt-get update` in the disposable `node:22-slim` fixture image received Debian `NOSPLIT` metadata errors stating that network authentication is required. A diagnostic no-build retry produced the same result. Docker daemon access is available; SSH uses this Docker fixture and is gated by the same failure. No Sprites environment credential is present.
+
+Public docs updated: `docs/public/executors.md` (reference) and `docs/public/tasks-and-workflows.md` (how-to) state the clone-policy and ACP capability boundaries. Provider Usage dependents were not modified.

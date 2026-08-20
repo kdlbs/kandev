@@ -451,6 +451,13 @@ func (m *Manager) currentWorkspaceSourceRoots() []string {
 	return append([]string(nil), m.workspaceSourceRoots...)
 }
 
+// WorkspaceSourceRoots returns the canonical server-owned roots that may be
+// represented in an ACP session. The API owns the caller boundary so a remote
+// client cannot inject arbitrary filesystem scope into a provider request.
+func (m *Manager) WorkspaceSourceRoots() []string {
+	return m.currentWorkspaceSourceRoots()
+}
+
 // lookupBaseBranch reads the task's recorded base branch for a given
 // repository name from the per-instance map. The empty key "" addresses the
 // single-repo / root tracker. Falls back to the empty-key entry when the

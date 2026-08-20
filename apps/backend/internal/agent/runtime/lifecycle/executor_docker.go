@@ -217,6 +217,15 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 // container builder compiles the same plan again immediately before launch;
 // that final compilation closes the normal resolve-to-mount freshness window.
 func (r *DockerExecutor) PrepareGitMetadataProjection(_ context.Context, req *ExecutorCreateRequest) error {
+	if req != nil && req.RequiresCloneGitMetadataPolicy {
+		if err := validateRemoteGitMetadataRequest(req); err != nil {
+			return err
+		}
+		return prepareRemoteRegularGitMetadataPolicy(req, remoteRegularGitMetadata{
+			CheckoutPath: dockerWorkspacePath,
+			GitDir:       dockerWorkspacePath + "/.git",
+		})
+	}
 	_, err := gitMetadataMounts(req.GitMetadataProjections)
 	return err
 }
@@ -241,7 +250,7 @@ func reportCreateInstanceProgress(req *ExecutorCreateRequest, errPtr *error) fun
 // container that's healthy enough to resume; otherwise (nil, false) and the
 // caller falls back to provisioning a fresh container.
 func (r *DockerExecutor) tryReconnect(ctx context.Context, dockerClient *docker.Client, req *ExecutorCreateRequest) (*ExecutorInstance, bool) {
-	if req.PreviousExecutionID == "" && strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyContainerID)) == "" {
+	if (req.PreviousExecutionID == "" && strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyContainerID)) == "") || req.RequiresCloneGitMetadataPolicy {
 		return nil, false
 	}
 	reconnected, reconnectErr := r.reconnectToContainer(ctx, dockerClient, req)
@@ -286,6 +295,9 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 	if err != nil {
 		return ContainerConfig{}, err
 	}
+	if req.RequiresCloneGitMetadataPolicy {
+		prepareScript = cloneGitMetadataPrepareScript(prepareScript)
+	}
 	return ContainerConfig{
 		AgentConfig:                    req.AgentConfig,
 		WorkspacePath:                  "", // Empty = no workspace mount; we clone inside container.
@@ -296,6 +308,8 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		ExecutorProfileID:              getMetadataString(req.Metadata, "executor_profile_id"),
 		InstanceID:                     req.InstanceID,
 		GitMetadataProjections:         req.GitMetadataProjections,
+		RequiresCloneGitMetadataPolicy: req.RequiresCloneGitMetadataPolicy,
+		WorkspaceSourceRoots:           []string{dockerWorkspacePath},
 		Credentials:                    req.Env,
 		AutoApprovePermissions:         req.AutoApprovePermissions,
 		AutoApprovePermissionsOverride: req.AutoApprovePermissionsOverride,
@@ -313,6 +327,14 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 	}, nil
 }
 
+// cloneGitMetadataPrepareScript makes the container bootstrap prove the
+// checkout produced by its own prepare command is the canonical regular clone
+// before agentctl can accept a mutable agent session. It intentionally embeds
+// only the in-container /workspace path.
+func cloneGitMetadataPrepareScript(prepareScript string) string {
+	return prepareScript + "\n" + remoteRegularGitMetadataProbeScript(dockerWorkspacePath)
+}
+
 func (r *DockerExecutor) buildCreatedInstance(req *ExecutorCreateRequest, result *LaunchResult, containerIP string) *ExecutorInstance {
 	metadata := map[string]interface{}{
 		MetadataKeyIsRemote: true,
@@ -323,17 +345,18 @@ func (r *DockerExecutor) buildCreatedInstance(req *ExecutorCreateRequest, result
 		metadata["worktree_branch"] = getMetadataString(req.Metadata, MetadataKeyWorktreeBranch)
 	}
 	return &ExecutorInstance{
-		InstanceID:     req.InstanceID,
-		TaskID:         req.TaskID,
-		SessionID:      req.SessionID,
-		RuntimeName:    r.Name(),
-		Client:         result.Client,
-		ContainerID:    result.ContainerID,
-		ContainerIP:    containerIP,
-		WorkspacePath:  dockerWorkspacePath,
-		Metadata:       metadata,
-		AuthToken:      result.AuthToken,
-		BootstrapNonce: result.BootstrapNonce,
+		InstanceID:           req.InstanceID,
+		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
+		RuntimeName:          r.Name(),
+		Client:               result.Client,
+		ContainerID:          result.ContainerID,
+		ContainerIP:          containerIP,
+		WorkspacePath:        dockerWorkspacePath,
+		WorkspaceSourceRoots: []string{dockerWorkspacePath},
+		Metadata:             metadata,
+		AuthToken:            result.AuthToken,
+		BootstrapNonce:       result.BootstrapNonce,
 	}
 }
 
@@ -372,14 +395,15 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 		refreshedAuthToken = conn.authToken
 	}
 	return &ExecutorInstance{
-		InstanceID:    req.InstanceID,
-		TaskID:        req.TaskID,
-		SessionID:     req.SessionID,
-		RuntimeName:   r.Name(),
-		Client:        client,
-		ContainerID:   info.ID,
-		ContainerIP:   containerIP,
-		WorkspacePath: dockerWorkspacePath,
+		InstanceID:           req.InstanceID,
+		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
+		RuntimeName:          r.Name(),
+		Client:               client,
+		ContainerID:          info.ID,
+		ContainerIP:          containerIP,
+		WorkspacePath:        dockerWorkspacePath,
+		WorkspaceSourceRoots: []string{dockerWorkspacePath},
 		Metadata: map[string]interface{}{
 			MetadataKeyIsRemote:      true,
 			MetadataKeyContainerID:   info.ID,
