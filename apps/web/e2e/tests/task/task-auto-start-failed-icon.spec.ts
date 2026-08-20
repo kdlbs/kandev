@@ -8,6 +8,13 @@ import { KanbanPage } from "../../pages/kanban-page";
 // instead of silently sitting there looking normal. Seeding `auto_start_failed`
 // through the public task-metadata surface is the deterministic stand-in for
 // a real failed launch; the icon itself must render from that marker alone.
+//
+// The fixture is left in a session-less IN_PROGRESS state on purpose: a real
+// failed launch comes from startTask setting the task to SCHEDULING/IN_PROGRESS
+// before session creation, then failing before a session ever attaches. That
+// shape makes shouldShowTaskRunningSpinner report true, which previously
+// short-circuited renderTaskStatusIcon straight to the launch spinner before
+// the auto-start-failed marker ever got a chance to render.
 
 test.describe("Kanban card — auto-start-failed icon", () => {
   test("shows the red auto-start-failed icon only for marked, non-terminal tasks", async ({
@@ -23,7 +30,10 @@ test.describe("Kanban card — auto-start-failed icon", () => {
       repository_ids: [seedData.repositoryId],
       metadata: { auto_start_failed: "true" },
     });
-    await apiClient.updateTaskState(failed.id, "REVIEW");
+    // Session-less IN_PROGRESS: the exact shape a launch failure before
+    // session creation leaves behind, and the one the running-spinner
+    // short-circuit previously masked the marker in.
+    await apiClient.updateTaskState(failed.id, "IN_PROGRESS");
 
     const plain = await apiClient.createTask(seedData.workspaceId, "Plain Fixture", {
       workflow_id: seedData.workflowId,

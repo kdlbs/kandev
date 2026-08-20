@@ -104,6 +104,34 @@ describe("renderTaskStatusIcon — auto-start failed", () => {
     expect(iconType(node)).toBe(AutoStartFailedTaskIcon);
   });
 
+  // The real shape a failed kanban auto-start leaves behind: startTask sets the
+  // task to SCHEDULING before the launch, so a failure before session creation
+  // produces a session-less SCHEDULING/IN_PROGRESS task, which is exactly what
+  // shouldShowTaskRunningSpinner reads as "still launching" (showRunningSpinner
+  // true). The triangle must not be masked by the launch-spinner short-circuit
+  // the way needsMe already isn't.
+  it("shows the triangle over the launch spinner for a session-less SCHEDULING task", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "SCHEDULING", autoStartFailed: true }),
+      true,
+      false,
+      false,
+    );
+    expect(iconType(node)).toBe(AutoStartFailedTaskIcon);
+    expect(iconType(node)).not.toBe(IconLoader2);
+  });
+
+  it("shows the triangle over the launch spinner for a session-less IN_PROGRESS task", () => {
+    const node = renderTaskStatusIcon(
+      task({ state: "IN_PROGRESS", autoStartFailed: true }),
+      true,
+      false,
+      false,
+    );
+    expect(iconType(node)).toBe(AutoStartFailedTaskIcon);
+    expect(iconType(node)).not.toBe(IconLoader2);
+  });
+
   it("keeps the terminal done check over a lingering auto-start-failed marker", () => {
     const node = renderTaskStatusIcon(
       task({ state: "COMPLETED", autoStartFailed: true }),
