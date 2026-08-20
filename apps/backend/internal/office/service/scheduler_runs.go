@@ -94,6 +94,13 @@ func (s *Service) transitionRunTerminal(ctx context.Context, id, status string) 
 // inactive/idle and never reached the checkout attempt in processRun) must
 // not clear a different, currently-active agent's lock out from under it —
 // that inverted the invariant this whole release path exists to protect.
+//
+// This only guards the CROSS-agent case. checkout_agent_id has no run-ID
+// component, so it cannot tell apart two runs of the SAME agent on the
+// same task: a second, pre-checkout run for that agent finishing or
+// failing can still release a first run's live checkout out from under
+// it. Closing that gap needs the checkout to carry its owning run's ID,
+// which is a schema change (tracked as a known follow-up, not fixed here).
 func (s *Service) releaseTaskCheckoutForRun(ctx context.Context, run *models.Run) {
 	if run == nil {
 		return
