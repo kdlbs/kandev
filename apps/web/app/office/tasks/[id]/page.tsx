@@ -28,7 +28,6 @@ import { useSessionLiveSyncSubscriptions } from "./use-session-live-sync";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { mapOfficeTaskToTask } from "./map-office-task";
-export { mapOfficeTaskToTask };
 
 type IssueDetailPageProps = {
   params: Promise<{ id: string }>;

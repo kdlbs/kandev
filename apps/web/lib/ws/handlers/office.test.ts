@@ -156,7 +156,7 @@ describe("office WS handler — task field updates", () => {
     );
   });
 
-  it("refreshes tasks for a producer task.moved payload without a status", () => {
+  it("refreshes the task detail and activity for a producer task.moved payload without a status", () => {
     const { store, patchTaskInStore, setOfficeRefetchTrigger } = makeStore(ACTIVE_WS);
     const handlers = registerOfficeHandlers(store);
     const handler = handlers["office.task.moved"]!;
@@ -176,6 +176,8 @@ describe("office WS handler — task field updates", () => {
     expect(patchTaskInStore).not.toHaveBeenCalled();
     expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("tasks");
     expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("dashboard");
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("task:t-1");
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("activity");
   });
 
   it("passes the raw new_status through on office.task.status_changed", () => {

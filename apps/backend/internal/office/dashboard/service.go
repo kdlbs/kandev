@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/office/shared"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	"go.uber.org/zap"
 )
@@ -465,6 +466,36 @@ func (s *DashboardService) SetRetryCanceller(c RetryCanceller) {
 // rows are logged with an empty run_id.
 func (s *DashboardService) SetRunResolver(r RunResolver) {
 	s.runResolver = r
+}
+
+// LogTaskStateChange records a task state transition for Office tasks before
+// the task service publishes its state-change notification. This keeps the
+// activity-backed timeline durable before clients refetch the task detail.
+// Non-Office tasks use the shared task service and are ignored here.
+func (s *DashboardService) LogTaskStateChange(
+	ctx context.Context, task *taskmodels.Task, oldState v1.TaskState,
+) {
+	if task == nil || oldState == task.State || s.activity == nil {
+		return
+	}
+	fields, err := s.repo.GetTaskExecutionFields(ctx, task.ID)
+	if err != nil || fields == nil || !fields.IsFromOffice {
+		return
+	}
+	wsID := fields.WorkspaceID
+	if wsID == "" {
+		wsID = task.WorkspaceID
+	}
+	runID := ""
+	if s.runResolver != nil {
+		runID = s.runResolver.ResolveRunForTask(ctx, task.ID)
+	}
+	details, _ := json.Marshal(map[string]string{
+		"new_status": string(task.State),
+		"old_status": string(oldState),
+	})
+	s.activity.LogActivityWithRun(ctx, wsID, "system", "orchestrator",
+		"task_status_changed", "task", task.ID, string(details), runID, "")
 }
 
 // SetTaskCanceller sets the canceller used to hard-cancel sessions when

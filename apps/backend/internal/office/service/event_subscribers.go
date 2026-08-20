@@ -834,12 +834,13 @@ func (s *Service) queueTaskAssignedRun(
 	return s.QueueRun(ctx, agentProfileID, RunReasonTaskAssigned, payload, key)
 }
 
-// handleTaskMoved logs the step change to the activity log and queues
+// handleTaskMoved keeps the legacy named-step activity fallback and queues
 // downstream blocker / children-completed runs when a task lands in a
-// terminal step. Stage progression itself is owned by the workflow
-// engine (the orchestrator subscribes to TaskMoved and fires
-// on_exit / on_enter); this handler covers the side-effects the engine
-// path doesn't yet emit.
+// terminal step. Canonical task-state activity is written by the task service
+// before task.state_changed is published, so the workflow move path is durable
+// before any WebSocket refetch can run. Stage progression itself is owned by
+// the workflow engine (the orchestrator subscribes to TaskMoved and fires
+// on_exit / on_enter).
 func (s *Service) handleTaskMoved(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[TaskMovedData](event)
 	if err != nil || data.AssigneeAgentProfileID == "" {

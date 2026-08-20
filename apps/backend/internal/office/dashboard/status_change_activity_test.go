@@ -8,6 +8,8 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/dashboard"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // hasStatusChangeActivity reports whether the office_activity_log already
@@ -48,6 +50,27 @@ func TestUpdateTaskStatus_LogsActivitySynchronously(t *testing.T) {
 
 	if !hasStatusChangeActivity(t, deps, "sync-task", "ws-sync") {
 		t.Fatal("expected task_status_changed activity row immediately after UpdateTaskStatus returns")
+	}
+}
+
+// LogTaskStateChange is the task-service seam used by workflow moves. It must
+// write the same durable projection as the Office status endpoint.
+func TestLogTaskStateChange_LogsOfficeTask(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "workflow-task", "ws-workflow", "Workflow Task", "in_progress", 0)
+	if _, err := deps.db.Exec(`INSERT INTO workspaces (id, office_workflow_id) VALUES ('ws-workflow', 'wf-office')`); err != nil {
+		t.Fatalf("create Office workspace: %v", err)
+	}
+	if _, err := deps.db.Exec(`UPDATE tasks SET workflow_id = 'wf-office' WHERE id = 'workflow-task'`); err != nil {
+		t.Fatalf("attach task to Office workflow: %v", err)
+	}
+
+	deps.svc.LogTaskStateChange(context.Background(), &taskmodels.Task{
+		ID: "workflow-task", WorkspaceID: "ws-workflow", State: v1.TaskStateCompleted,
+	}, v1.TaskStateInProgress)
+
+	if !hasStatusChangeActivity(t, deps, "workflow-task", "ws-workflow") {
+		t.Fatal("expected task_status_changed activity row for a workflow state transition")
 	}
 }
 

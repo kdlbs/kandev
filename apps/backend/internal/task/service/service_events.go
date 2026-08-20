@@ -434,6 +434,12 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 	for k, v := range extra {
 		data[k] = v
 	}
+	if eventType == events.TaskStateChanged && oldState != nil && s.taskStateActivity != nil {
+		// Write the Office read-model row before publishing the event. The
+		// WebSocket broadcaster can then trigger a detail GET without racing
+		// the activity projection that supplies Started and Completed.
+		s.taskStateActivity.LogTaskStateChange(ctx, task, *oldState)
+	}
 
 	event := bus.NewEvent(eventType, "task-service", data)
 	err := s.eventBus.Publish(ctx, eventType, event)

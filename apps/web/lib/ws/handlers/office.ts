@@ -79,12 +79,19 @@ function buildTaskHandlers(
       if (!isCurrentWorkspace(p)) return;
       const taskId = (p.task_id ?? p.id) as string | undefined;
       const newStatus = p.new_status as string | undefined;
-      if (!taskId || !newStatus) {
+      if (!taskId) {
         triggerRefetch("tasks");
         triggerRefetch("dashboard");
         return;
       }
-      updateTaskStatus(taskId, { status: newStatus as OfficeTaskStatus });
+      // The task service publishes task.moved without new_status. Keep the
+      // direct patch when a producer provides one, but always refresh the
+      // detail and activity projections for a known task.
+      if (newStatus) {
+        updateTaskStatus(taskId, { status: newStatus as OfficeTaskStatus });
+      } else {
+        triggerRefetch("tasks");
+      }
       triggerRefetch(`task:${taskId}`);
       triggerRefetch("dashboard");
       triggerRefetch("activity");

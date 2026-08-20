@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -499,95 +498,6 @@ func (h *Handler) attachDecisions(ctx context.Context, c *gin.Context, taskID st
 	for i := range decisions {
 		dto.Decisions[i] = h.decisionToDTO(c, &decisions[i])
 	}
-}
-
-func buildStatusTimeline(changes []TimelineEvent) []TimelineEventDTO {
-	timeline := make([]TimelineEventDTO, len(changes))
-	for i, ev := range changes {
-		timeline[i] = TimelineEventDTO{
-			Type: "status_change",
-			From: ev.From,
-			To:   ev.To,
-			At:   ev.At,
-		}
-	}
-	return timeline
-}
-
-// timelineStatusIsInProgress and timelineStatusIsDone classify a timeline
-// event's "to" value into the office in_progress/done status buckets. The
-// office activity log's task_status_changed entries are written by two
-// different producers with different value domains: DashboardService.
-// UpdateTaskStatus publishes the raw request status (normaliseStatus's
-// output is assigned to a separate local and never reaches the published
-// event, but req.NewStatus is itself constrained to that same vocabulary,
-// so it lowercases to the same bucket), while the generic workflow engine's
-// TaskMoved handler logs raw step names (categorizeStep's "In Progress" /
-// "Done"). Both must resolve to the same bucket so timestamp derivation
-// doesn't depend on which path wrote the entry.
-func timelineStatusIsInProgress(raw string) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case statusInProgressLowercase, "in progress":
-		return true
-	default:
-		return false
-	}
-}
-
-func timelineStatusIsDone(raw string) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	// "done" is the office API vocabulary (normaliseStatus's "done"
-	// alias); "completed" covers a caller that instead passes the
-	// persisted DB-state enum value ("COMPLETED", see stateCompleted)
-	// as NewStatus, which normaliseStatus also accepts and which then
-	// flows through to this raw activity-log value unnormalized.
-	case statusDoneLowercase, "completed":
-		return true
-	default:
-		return false
-	}
-}
-
-// deriveTaskTimestamps derives the task detail sidebar's Started/Completed
-// timestamps from its status-change timeline. startedAt is the earliest
-// transition into in_progress; completedAt is the latest transition into
-// done, since a reopened task (done -> in_progress -> done) can re-enter
-// done more than once and the most recent completion is the meaningful one.
-//
-// This function itself does not know the task's current status, so a
-// reopened task's completedAt here still reflects the last time it entered
-// done - even though it may no longer be done. Callers that need "is this
-// task currently done" must clear completedAt themselves against the
-// current status (see getTask), rather than trying to infer it from the
-// timeline's "from" status: the office direct-update path
-// (DashboardService.UpdateTaskStatus -> handleTaskStatusChanged) writes
-// task_status_changed activity entries with only new_status, no
-// old_status - the vocabulary the Office status picker, the REST status
-// endpoint, and agent/MCP status updates all go through. Only the generic
-// workflow engine's TaskMoved handler populates old_status, so a
-// from-based rule inside this function would silently do nothing on the
-// paths Office users actually take.
-//
-// Both are best-effort: ListActivityEntriesByTarget caps the underlying
-// query at the 50 most recent activity entries for the task, with no
-// filter on activity type, so a task with many non-status events (blocker
-// add/remove, reviewer/approver changes, decisions, ...) can push every
-// status-change entry - not just the earliest in_progress transition -
-// out of the window.
-func deriveTaskTimestamps(changes []TimelineEvent) (startedAt, completedAt string) {
-	for _, ev := range changes {
-		switch {
-		case timelineStatusIsInProgress(ev.To):
-			if startedAt == "" || ev.At < startedAt {
-				startedAt = ev.At
-			}
-		case timelineStatusIsDone(ev.To):
-			if ev.At > completedAt {
-				completedAt = ev.At
-			}
-		}
-	}
-	return startedAt, completedAt
 }
 
 func taskRowToDTO(r *sqlite.TaskRow, lbls []*sqlite.Label) *TaskDTO {

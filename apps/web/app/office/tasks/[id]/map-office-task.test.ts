@@ -43,4 +43,19 @@ describe("mapOfficeTaskToTask", () => {
 
     expect(task.createdBy).toBe("");
   });
+
+  // The detail page seeds its Task from the store-held OfficeTask before the
+  // API GET resolves. Preserve rawStatus so execution indicators keep their
+  // live/ready distinction during that initial render.
+  it("carries rawStatus through when the store holds one", () => {
+    const mapped = mapOfficeTaskToTask(baseOfficeTask({ status: "todo", rawStatus: "SCHEDULING" }));
+
+    expect(mapped.rawStatus).toBe("SCHEDULING");
+  });
+
+  it("falls back to the canonical status when rawStatus is absent", () => {
+    const mapped = mapOfficeTaskToTask(baseOfficeTask({ status: "in_progress" }));
+
+    expect(mapped.rawStatus).toBe("in_progress");
+  });
 });
