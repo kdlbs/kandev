@@ -2196,8 +2196,15 @@ func (s *Service) maybySwitchSessionForProfile(
 // order, and reports whether an auto_start_agent action was among them.
 // Extracted from processOnEnter to keep that function's cognitive
 // complexity within the repo's lint threshold.
+//
+// AC-C2: if clear_decisions fails, no further on_enter action for this step
+// entry may execute — stale decision rows plus a fresh participant fan-out
+// could otherwise satisfy wait_for_quorum without every current-round
+// participant actually voting. The loop stops entirely (not just further
+// engine-owned actions) the moment that happens.
 func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, entryID int64, isPassthrough, hasPlanMode bool) bool {
 	hasAutoStart := false
+dispatchLoop:
 	for i, action := range step.Events.OnEnter {
 		switch action.Type {
 		case wfmodels.OnEnterEnablePlanMode:
@@ -2215,7 +2222,16 @@ func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, ses
 			// Already handled earlier in processOnEnter (context reset must run
 			// before auto_start_agent; session config runs right after it).
 		case wfmodels.OnEnterClearDecisions, wfmodels.OnEnterQueueRunForEachParticipant:
-			s.dispatchEngineOwnedOnEnterAction(ctx, taskID, step, action, i, entryID)
+			failed, cause := s.dispatchEngineOwnedOnEnterAction(ctx, taskID, step, action, i, entryID)
+			if failed && action.Type == wfmodels.OnEnterClearDecisions {
+				s.logger.Error("processOnEnter: clear_decisions failed, aborting remaining on_enter actions for step entry",
+					zap.String("workflow_id", step.WorkflowID),
+					zap.String("step_id", step.ID),
+					zap.String("task_id", taskID),
+					zap.String("cause", cause),
+				)
+				break dispatchLoop
+			}
 		case wfmodels.OnEnterQueueRun, wfmodels.OnEnterRunCodeReview:
 			// Engine-owned per the spec, but their on_enter dispatch (AC-A7/
 			// AC-A8) is explicitly deferred to a later Build round — see
@@ -2422,19 +2438,27 @@ func (s *Service) launchAfterProfileSwitchOrWait(
 // a deliberate, scoped-down gap (E2/E3/E5 in the task plan's scope note),
 // not a regression: dispatch through those paths is a no-op until a later
 // round wires their write sites the same way applyEngineTransition's is.
+//
+// failed reports whether this call ended (or left) the action in a
+// non-done outcome — either the callback itself returned an error, or the
+// marker couldn't even be claimed, so the caller (dispatchOnEnterActions,
+// AC-C2) cannot assume the action ran. failed is false for the no-op paths
+// above and for "already claimed" (AC-D3/AC-D4's at-most-once outcome,
+// handled by an earlier call, not a fresh failure to react to here). cause
+// is the underlying error string when failed is true, empty otherwise.
 func (s *Service) dispatchEngineOwnedOnEnterAction(
 	ctx context.Context, taskID string, step *wfmodels.WorkflowStep, action wfmodels.OnEnterAction, position int, entryID int64,
-) {
+) (failed bool, cause string) {
 	if entryID == 0 {
-		return
+		return false, ""
 	}
 	compiled, ok := engine.CompileOnEnterAction(action)
 	if !ok {
-		return
+		return false, ""
 	}
 	callback := s.engineOnEnterCallback(action.Type)
 	if callback == nil {
-		return
+		return false, ""
 	}
 	operationID := fmt.Sprintf("step_entry:%d:%d", entryID, position)
 	now := time.Now()
@@ -2443,13 +2467,13 @@ func (s *Service) dispatchEngineOwnedOnEnterAction(
 		s.logger.Error("processOnEnter: claim step entry marker failed",
 			zap.Error(err), zap.String("task_id", taskID), zap.String("step_id", step.ID),
 			zap.Int64("entry_id", entryID), zap.Int("position", position))
-		return
+		return true, err.Error()
 	}
 	if !claimed {
 		// Already claimed by a concurrent or prior attempt, or already
 		// terminal — AC-D3/AC-D4's at-most-once guarantee for this
 		// step-entry. Not an error: this is the expected outcome on retry.
-		return
+		return false, ""
 	}
 	in := engine.ActionInput{
 		Trigger:     engine.TriggerOnEnter,
@@ -2458,18 +2482,19 @@ func (s *Service) dispatchEngineOwnedOnEnterAction(
 		Action:      compiled,
 		OperationID: operationID,
 	}
-	state, cause := stepentry.MarkerDone, ""
+	state, execCause := stepentry.MarkerDone, ""
 	if _, execErr := callback.Execute(ctx, in); execErr != nil {
-		state, cause = stepentry.MarkerFailed, execErr.Error()
+		state, execCause = stepentry.MarkerFailed, execErr.Error()
 		s.logger.Error("processOnEnter: engine-owned on_enter action failed",
 			zap.Error(execErr), zap.String("task_id", taskID), zap.String("step_id", step.ID),
 			zap.String("action_type", string(action.Type)))
 	}
-	if err := s.repo.CompleteStepEntryMarker(ctx, entryID, position, state, cause, time.Now()); err != nil {
+	if err := s.repo.CompleteStepEntryMarker(ctx, entryID, position, state, execCause, time.Now()); err != nil {
 		s.logger.Error("processOnEnter: complete step entry marker failed",
 			zap.Error(err), zap.String("task_id", taskID), zap.String("step_id", step.ID),
 			zap.Int64("entry_id", entryID), zap.Int("position", position))
 	}
+	return state == stepentry.MarkerFailed, execCause
 }
 
 // engineOnEnterCallback returns the Phase 2 callback for an engine-owned

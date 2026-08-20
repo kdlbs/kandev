@@ -2,10 +2,16 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -239,5 +245,70 @@ func TestProcessOnEnter_QueueRunForEachParticipant_SecondEntryAfterRejection_Que
 
 	if got := f.runQueue.callCount(); got != 2 {
 		t.Fatalf("queued run count after second Review entry = %d, want 2 (AC-D4: not suppressed)", got)
+	}
+}
+
+// failingDecisionStore wraps fakeDecisionStore but always fails
+// ClearStepDecisions, for AC-C2 below.
+type failingDecisionStore struct {
+	fakeDecisionStore
+}
+
+func (f *failingDecisionStore) ClearStepDecisions(_ context.Context, _, _ string) (int64, error) {
+	f.mu.Lock()
+	f.clearCalls++
+	f.mu.Unlock()
+	return 0, errors.New("boom: clear_decisions failure")
+}
+
+// TestProcessOnEnter_ClearDecisionsFailure_BlocksSubsequentOnEnterActions
+// covers AC-C2: "IF clear_decisions fails, THEN the system shall not
+// execute any remaining on_enter action for that step entry." Review's
+// on_enter declares queue_run_for_each_participant immediately after
+// clear_decisions (the exact order the Office Default workflow uses) — a
+// stale decision from a previous round combined with a fresh participant
+// fan-out could otherwise satisfy wait_for_quorum without every
+// current-round reviewer actually voting.
+func TestProcessOnEnter_ClearDecisionsFailure_BlocksSubsequentOnEnterActions(t *testing.T) {
+	ctx := context.Background()
+	f := newReviewLoopFixture(t)
+	f.svc.SetEngineDecisionStore(&failingDecisionStore{})
+
+	core, logs := observer.New(zapcore.ErrorLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("build observed logger: %v", err)
+	}
+	f.svc.logger = log
+
+	if !f.fireOnTurnComplete(t, ctx) {
+		t.Fatalf("expected a transition from Work -> Review, got none")
+	}
+
+	if got := f.runQueue.callCount(); got != 0 {
+		t.Fatalf("queued run count after clear_decisions failure = %d, want 0 (AC-C2)", got)
+	}
+
+	var acC2Errors []observer.LoggedEntry
+	for _, e := range logs.All() {
+		if e.Message == "processOnEnter: clear_decisions failed, aborting remaining on_enter actions for step entry" {
+			acC2Errors = append(acC2Errors, e)
+		}
+	}
+	if len(acC2Errors) != 1 {
+		t.Fatalf("got %d AC-C2 ERROR log(s), want exactly 1 (all entries: %+v)", len(acC2Errors), logs.All())
+	}
+	fields := acC2Errors[0].ContextMap()
+	if fields["workflow_id"] != "wf1" {
+		t.Errorf("AC-C2 error workflow_id = %v, want %q", fields["workflow_id"], "wf1")
+	}
+	if fields["step_id"] != f.nameToID["Review"] {
+		t.Errorf("AC-C2 error step_id = %v, want %q", fields["step_id"], f.nameToID["Review"])
+	}
+	if fields["task_id"] != "t1" {
+		t.Errorf("AC-C2 error task_id = %v, want %q", fields["task_id"], "t1")
+	}
+	if cause, _ := fields["cause"].(string); cause == "" {
+		t.Errorf("AC-C2 error missing cause field: %+v", fields)
 	}
 }
