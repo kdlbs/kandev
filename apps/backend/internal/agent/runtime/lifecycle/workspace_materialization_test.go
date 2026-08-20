@@ -347,6 +347,40 @@ func TestMaterializeRepositoriesForEnvironmentCompensatesFirstCloneExecutorWhenS
 	}
 }
 
+func TestMaterializeRepositoriesForEnvironmentFailsClosedWhenPartialCloneCleanupFails(t *testing.T) {
+	server := newWorkspaceRebindAgentctlServer(t, false)
+	server.failMaterializeAt = 2
+	server.failRemove = true
+	t.Cleanup(server.Close)
+	t.Cleanup(server.closeConnections)
+
+	manager, execution := workspaceSourceTestManager(t, server.URL, []string{"/executor/workspace"})
+	manager.registry = registry.NewRegistry(newTestLogger())
+	manager.registry.LoadDefaults()
+	manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
+	configureCloneAttachmentExecution(execution, "execution", "session", "environment-1", "/executor/workspace")
+
+	_, err := manager.MaterializeRepositoriesForEnvironment(context.Background(), "environment-1", []WorkspaceRepositoryMaterialization{
+		{RepositoryURL: "https://github.com/acme/one.git", Destination: "one-main", BaseBranch: "main"},
+		{RepositoryURL: "https://github.com/acme/two.git", Destination: "two-main", BaseBranch: "main"},
+	})
+	if err == nil {
+		t.Fatal("MaterializeRepositoriesForEnvironment succeeded despite partial clone cleanup failure")
+	}
+	if execution.Status != v1.AgentStatusFailed || server.running() {
+		t.Fatalf("execution = status:%q running:%v, want failed stopped recovery state", execution.Status, server.running())
+	}
+	if !strings.Contains(execution.ErrorMessage, "recovery required") {
+		t.Fatalf("execution recovery guidance = %q", execution.ErrorMessage)
+	}
+	if !server.hasMaterialized("one-main") {
+		t.Fatal("fixture did not retain the unreverted first checkout")
+	}
+	if strings.Contains(execution.RuntimeEnvironment()["CODEX_CONFIG"], "one-main/.git") {
+		t.Fatalf("partial checkout widened live policy: %s", execution.RuntimeEnvironment()["CODEX_CONFIG"])
+	}
+}
+
 func TestMaterializeRepositoriesForEnvironmentCompensatesRefreshedCloneExecutors(t *testing.T) {
 	for _, testCase := range []struct {
 		name              string
