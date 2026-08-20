@@ -385,4 +385,3 @@ export function JiraPageClient({ workspaceId, workflows, steps }: JiraPageClient
     </PageShell>
   );
 }
-
