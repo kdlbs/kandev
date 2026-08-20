@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 type AgentAvatarProps = {
   role?: string | null;
   name?: string | null;
+  icon?: string | null;
   className?: string;
   size?: "xs" | "sm" | "md" | "lg";
 };
@@ -26,6 +27,9 @@ const SIZE: Record<NonNullable<AgentAvatarProps["size"]>, string> = {
   md: "h-8 w-8 text-xs",
   lg: "h-10 w-10 text-sm",
 };
+
+// i18n-exempt: legacy persisted default agent icon value.
+const DEFAULT_AGENT_ICON = "🤖";
 
 const TINTS = [
   "bg-amber-500/15 text-amber-600 ring-amber-500/30 dark:text-amber-400",
@@ -61,8 +65,9 @@ export function agentTint(name: string | null | undefined): string {
   return tintFor((name ?? "").trim() || "Agent");
 }
 
-export function AgentAvatar({ name, className, size = "md" }: AgentAvatarProps) {
+export function AgentAvatar({ name, icon, className, size = "md" }: AgentAvatarProps) {
   const safeName = (name ?? "").trim() || "Agent";
+  const safeIcon = icon?.trim();
   const tint = tintFor(safeName);
   return (
     <span
@@ -74,7 +79,7 @@ export function AgentAvatar({ name, className, size = "md" }: AgentAvatarProps) 
       )}
       aria-hidden
     >
-      {initials(safeName)}
+      {safeIcon && safeIcon !== DEFAULT_AGENT_ICON ? safeIcon : initials(safeName)}
     </span>
   );
 }

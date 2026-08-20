@@ -15,14 +15,14 @@ afterEach(() => cleanup());
 
 const TS = "2026-05-01T00:00:00Z";
 
-function makeAgent(id: string, name: string): AgentProfile {
+function makeAgent(id: string, name: string, icon = "🤖"): AgentProfile {
   return {
     id: toAgentProfileId(id),
     workspaceId: toWorkspaceId("ws-1"),
     name,
     agentProfileId: toAgentProfileId("p1"),
     role: "worker",
-    icon: "🤖",
+    icon,
     status: "idle",
     reportsTo: "",
     permissions: {},
@@ -199,5 +199,16 @@ describe("ApproversPicker chip avatars", () => {
     expect(screen.getByText("BO")).toBeTruthy();
     expect(screen.getByText("CA")).toBeTruthy();
     expect(screen.queryByText("🤖")).toBeNull();
+  });
+
+  it("preserves a configured custom icon", () => {
+    const customTask = { ...baseTask, approvers: ["a-custom"], decisions: [] };
+    render(
+      <Wrapper task={customTask} agents={[makeAgent("a-custom", "Custom Agent", "🦾")]}>
+        <ApproversPicker task={customTask} />
+      </Wrapper>,
+    );
+    expect(screen.getByText("🦾")).toBeTruthy();
+    expect(screen.queryByText("CU")).toBeNull();
   });
 });
