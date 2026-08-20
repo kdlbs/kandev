@@ -3,6 +3,7 @@ package messagequeue
 import (
 	"context"
 	"errors"
+	"expvar"
 	"testing"
 	"time"
 
@@ -180,6 +181,10 @@ func TestProcessDueDeliveriesRetainsExhaustedCapacityFailureForRecovery(t *testi
 	repo := newTestSQLiteRepo(t)
 	service := NewService(repo, 1, logger.Default())
 	ledger := repo.(DeliveryLedger)
+	retries := expvar.Get("administrative_turn_message_delivery_retries_total").(*expvar.Int)
+	outcomes := expvar.Get("administrative_turn_message_delivery_outcomes_total").(*expvar.Map)
+	beforeRetries := retries.Value()
+	beforeRecoverable := expvarMapInt(t, outcomes, "outcome=recoverable")
 	ctx := context.Background()
 	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
 	_, err := service.QueueMessage(ctx, "target-session", "target-task", "existing", "", QueuedByAgent, false, nil)
@@ -207,8 +212,21 @@ func TestProcessDueDeliveriesRetainsExhaustedCapacityFailureForRecovery(t *testi
 			assert.Equal(t, DeliveryRecoverable, stored.State)
 			assert.Equal(t, "review is ready", stored.Content)
 			assert.Equal(t, "target_queue_full", stored.LastError)
+			assert.Equal(t, beforeRetries+defaultDeliveryAttemptLimit-1, retries.Value())
+			assert.Equal(t, beforeRecoverable+1, expvarMapInt(t, outcomes, "outcome=recoverable"))
 			return
 		}
 		now = stored.NextAttemptAt
 	}
+}
+
+func expvarMapInt(t *testing.T, m *expvar.Map, key string) int64 {
+	t.Helper()
+	v := m.Get(key)
+	if v == nil {
+		return 0
+	}
+	counter, ok := v.(*expvar.Int)
+	require.True(t, ok, "metric %q must be an integer counter", key)
+	return counter.Value()
 }

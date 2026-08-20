@@ -79,6 +79,19 @@ func (r *Repository) ListDueCompletionIntents(ctx context.Context, now time.Time
 	return intents, nil
 }
 
+// CountPendingCompletionIntents supplies the restart-safe pending gauge. The
+// reconciler uses this indexed state count instead of deriving a value from
+// process-local workers or active-turn caches.
+func (r *Repository) CountPendingCompletionIntents(ctx context.Context) (int, error) {
+	var count int
+	if err := r.ro.GetContext(ctx, &count, r.ro.Rebind(`
+		SELECT COUNT(*) FROM session_completion_intents WHERE state = ?
+	`), models.CompletionIntentStatePending); err != nil {
+		return 0, fmt.Errorf("count pending completion intents: %w", err)
+	}
+	return count, nil
+}
+
 func (r *Repository) RearmCompletionIntent(ctx context.Context, id string, activityAt, eligibleAt time.Time) (bool, error) {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE session_completion_intents

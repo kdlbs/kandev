@@ -639,13 +639,14 @@ func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskI
 	`), taskID); err != nil {
 		return 0, fmt.Errorf("advance lifecycle queue generation: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, db.Rebind(`
+	_, err = tx.ExecContext(ctx, db.Rebind(`
 		UPDATE message_deliveries
 		SET state = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
 		WHERE (sender_task_id = ? OR target_task_id = ?)
 		  AND state NOT IN (?, ?, ?)
 	`), DeliveryCancelled, time.Now().UTC(), taskID, taskID,
-		DeliveryDelivered, DeliveryCancelled, DeliveryTerminalFailed); err != nil {
+		DeliveryDelivered, DeliveryCancelled, DeliveryTerminalFailed)
+	if err != nil {
 		return 0, fmt.Errorf("cancel delivery receipts for purged task: %w", err)
 	}
 	return int(removed), nil

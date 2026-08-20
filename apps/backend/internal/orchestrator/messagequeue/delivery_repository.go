@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/adminmetrics"
 )
 
 // DeliveryLedger persists sender-independent cross-task delivery work. Queue
@@ -57,6 +58,11 @@ func (r *sqliteRepository) CreateOrGetDelivery(ctx context.Context, delivery Del
 	stored, err := r.getDeliveryBySourceKey(ctx, delivery.SenderSessionID, delivery.SourceTurnID, delivery.IdempotencyKey)
 	if err != nil {
 		return nil, false, err
+	}
+	if created == 1 {
+		adminmetrics.RecordMessageDeliveryOutcome(string(stored.State), 1)
+	} else {
+		adminmetrics.RecordMessageDeliveryDuplicate()
 	}
 	return stored, created == 1, nil
 }
@@ -112,7 +118,11 @@ func (r *sqliteRepository) RescheduleDelivery(ctx context.Context, deliveryID, l
 	if err != nil {
 		return nil, fmt.Errorf("reschedule delivery: %w", err)
 	}
-	return r.deliveryAfterLeasedUpdate(ctx, deliveryID, result)
+	stored, err := r.deliveryAfterLeasedUpdate(ctx, deliveryID, result)
+	if err == nil {
+		adminmetrics.RecordMessageDeliveryRetry()
+	}
+	return stored, err
 }
 
 // MarkDeliveryQueued records that a leased receipt reached the target FIFO.
@@ -128,7 +138,11 @@ func (r *sqliteRepository) MarkDeliveryQueued(ctx context.Context, deliveryID, l
 	if err != nil {
 		return nil, fmt.Errorf("mark delivery queued: %w", err)
 	}
-	return r.deliveryAfterLeasedUpdate(ctx, deliveryID, result)
+	stored, err := r.deliveryAfterLeasedUpdate(ctx, deliveryID, result)
+	if err == nil {
+		adminmetrics.RecordMessageDeliveryOutcome(string(DeliveryQueued), 1)
+	}
+	return stored, err
 }
 
 // AcknowledgeDelivery marks the receipt terminal only after the queue entry
@@ -156,6 +170,9 @@ func (r *sqliteRepository) AcknowledgeDelivery(ctx context.Context, deliveryID, 
 	if affected == 0 && (stored == nil || stored.State != DeliveryDelivered || stored.QueueEntryID != queueEntryID) {
 		return nil, ErrEntryNotFound
 	}
+	if affected == 1 {
+		adminmetrics.RecordMessageDeliveryOutcome(string(DeliveryDelivered), 1)
+	}
 	return stored, nil
 }
 
@@ -180,6 +197,7 @@ func (r *sqliteRepository) AcknowledgeDeliveryByQueueEntry(ctx context.Context, 
 	if affected == 0 {
 		return nil, nil
 	}
+	adminmetrics.RecordMessageDeliveryOutcome(string(DeliveryDelivered), 1)
 	return r.getDeliveryByQueueEntry(ctx, queueEntryID)
 }
 
@@ -194,7 +212,11 @@ func (r *sqliteRepository) MarkDeliveryRecoverable(ctx context.Context, delivery
 	if err != nil {
 		return nil, fmt.Errorf("mark delivery recoverable: %w", err)
 	}
-	return r.deliveryAfterLeasedUpdate(ctx, deliveryID, result)
+	stored, err := r.deliveryAfterLeasedUpdate(ctx, deliveryID, result)
+	if err == nil {
+		adminmetrics.RecordMessageDeliveryOutcome(string(DeliveryRecoverable), 1)
+	}
+	return stored, err
 }
 
 func validateDeliveryIdentity(delivery Delivery) error {

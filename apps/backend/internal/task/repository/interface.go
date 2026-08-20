@@ -312,6 +312,7 @@ type CompletionIntentRepository interface {
 	// elapsed, in eligible-time order. The bounded reconciler uses this indexed
 	// query instead of scanning all running sessions after a restart.
 	ListDueCompletionIntents(ctx context.Context, now time.Time, limit int) ([]*models.CompletionIntent, error)
+	CountPendingCompletionIntents(ctx context.Context) (int, error)
 	// RearmCompletionIntent moves the quiet-grace deadline forward after
 	// observed foreground or tool activity, but never revives a claimed intent.
 	RearmCompletionIntent(ctx context.Context, id string, activityAt, eligibleAt time.Time) (bool, error)

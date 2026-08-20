@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/adminmetrics"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/auth/authn"
@@ -2186,6 +2187,11 @@ func (h *Handlers) createCompletionIntent(
 	_, stored, err := store.CreateOrGetCompletionIntent(ctx, intent)
 	if err != nil {
 		return nil, fmt.Errorf("create or get completion intent: %w", err)
+	}
+	if count, countErr := store.CountPendingCompletionIntents(ctx); countErr != nil {
+		h.logger.Warn("failed to count pending completion intents", zap.Error(countErr))
+	} else {
+		adminmetrics.RecordCompletionPending(count)
 	}
 	return stored, nil
 }

@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/adminmetrics"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -21,6 +22,7 @@ const (
 // production repository provides durable, indexed recovery.
 type completionIntentReconciliationStore interface {
 	ListDueCompletionIntents(ctx context.Context, now time.Time, limit int) ([]*models.CompletionIntent, error)
+	CountPendingCompletionIntents(ctx context.Context) (int, error)
 	GetCompletionIntentForTurn(ctx context.Context, sessionID, turnID string) (*models.CompletionIntent, error)
 	RearmCompletionIntent(ctx context.Context, id string, activityAt, eligibleAt time.Time) (bool, error)
 	TransitionCompletionIntent(ctx context.Context, id string, from, to models.CompletionIntentState, settledAt time.Time) (bool, error)
@@ -42,6 +44,7 @@ func (s *Service) reconcileDueCompletionIntents(ctx context.Context) {
 	for _, intent := range intents {
 		s.reconcileCompletionIntent(ctx, store, intent)
 	}
+	s.recordPendingCompletionIntentMetric(ctx, store)
 }
 
 // resetCompletionIntentReconciler creates the owner context used by the
@@ -123,7 +126,7 @@ func (s *Service) reconcileCompletionIntent(ctx context.Context, store completio
 		return
 	}
 	if turn != nil && turn.ID != intent.TurnID {
-		s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSuperseded, now)
+		s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSuperseded, now, "successor_turn")
 		return
 	}
 	if turn != nil {
@@ -158,7 +161,7 @@ func (s *Service) reconcileCompletionIntent(ctx context.Context, store completio
 	// lifecycle callback to perform that release for us.
 	s.setSessionWaitingForInput(ctx, intent.TaskID, intent.SessionID, session)
 	s.processOnTurnCompleteViaEngine(ctx, intent.TaskID, session)
-	s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSettled, now)
+	s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSettled, now, "quiet_grace")
 }
 
 func (s *Service) settleMovedCompletionIntent(
@@ -182,7 +185,7 @@ func (s *Service) settleMovedCompletionIntent(
 	// the source turn was still RUNNING. Now that this exact old turn is
 	// terminal, no provider-ready callback remains to drain it.
 	s.drainQueuedMessageForPromptableSession(ctx, intent.SessionID)
-	s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSuperseded, now)
+	s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSuperseded, now, "task_moved")
 }
 
 // retryCompletionIntent releases a transient reconciliation claim. The next
@@ -200,9 +203,15 @@ func (s *Service) retryCompletionIntent(ctx context.Context, store completionInt
 	}
 }
 
-func (s *Service) finishCompletionIntent(ctx context.Context, store completionIntentReconciliationStore, intent *models.CompletionIntent, state models.CompletionIntentState, at time.Time) {
-	if _, err := store.TransitionCompletionIntent(ctx, intent.ID, models.CompletionIntentStateSettling, state, at); err != nil {
+func (s *Service) finishCompletionIntent(ctx context.Context, store completionIntentReconciliationStore, intent *models.CompletionIntent, state models.CompletionIntentState, at time.Time, cause string) {
+	settled, err := store.TransitionCompletionIntent(ctx, intent.ID, models.CompletionIntentStateSettling, state, at)
+	if err != nil {
 		s.logger.Warn("failed to finish completion intent", zap.String("intent_id", intent.ID), zap.Error(err))
+		return
+	}
+	if settled {
+		adminmetrics.RecordCompletionReconciled(string(state), cause)
+		s.recordPendingCompletionIntentMetric(ctx, store)
 	}
 }
 
@@ -232,7 +241,16 @@ func (s *Service) settleCompletionIntentForProviderTurn(ctx context.Context, ses
 		}
 		return
 	}
-	s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSettled, time.Now().UTC())
+	s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSettled, time.Now().UTC(), "provider_terminal")
+}
+
+func (s *Service) recordPendingCompletionIntentMetric(ctx context.Context, store completionIntentReconciliationStore) {
+	count, err := store.CountPendingCompletionIntents(ctx)
+	if err != nil {
+		s.logger.Warn("failed to count pending completion intents", zap.Error(err))
+		return
+	}
+	adminmetrics.RecordCompletionPending(count)
 }
 
 // rearmCompletionIntentForActivity moves a pending intent's quiet window

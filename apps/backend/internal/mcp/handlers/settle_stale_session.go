@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/adminmetrics"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -34,6 +35,7 @@ func (h *Handlers) handleSettleStaleSession(ctx context.Context, msg *ws.Message
 	}
 	basis, allowed := staleSettlementAuthority(actor, actorSession, target, targetSession)
 	if !allowed {
+		adminmetrics.RecordStaleControlDenial("relation_denied")
 		h.logStaleSessionDenied(req, "relation_denied")
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "caller is not authorized to settle this session", nil)
 	}

@@ -2,6 +2,7 @@ package messagequeue
 
 import (
 	"context"
+	"expvar"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ func TestDeliveryLedgerCreateOrGetIsIdempotentPerSourceTurn(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ledger, ok := repo.(DeliveryLedger)
 	require.True(t, ok, "queue repository must expose durable delivery storage")
+	duplicates := expvar.Get("administrative_turn_message_delivery_duplicates_total").(*expvar.Int)
 
 	first, created, err := ledger.CreateOrGetDelivery(context.Background(), Delivery{
 		SenderTaskID:    "source-task",
@@ -28,6 +30,7 @@ func TestDeliveryLedgerCreateOrGetIsIdempotentPerSourceTurn(t *testing.T) {
 	require.True(t, created)
 	require.NotEmpty(t, first.ID)
 
+	beforeDuplicates := duplicates.Value()
 	second, created, err := ledger.CreateOrGetDelivery(context.Background(), Delivery{
 		SenderTaskID:    "source-task",
 		SenderSessionID: "source-session",
@@ -42,6 +45,7 @@ func TestDeliveryLedgerCreateOrGetIsIdempotentPerSourceTurn(t *testing.T) {
 	assert.False(t, created)
 	assert.Equal(t, first.ID, second.ID)
 	assert.Equal(t, "review is ready", second.Content)
+	assert.Equal(t, beforeDuplicates+1, duplicates.Value(), "duplicate suppression must be observable")
 }
 
 func TestDeliveryLedgerClaimDueRowsUsesExpiringLease(t *testing.T) {
@@ -144,4 +148,59 @@ func TestPurgeTaskCancelsUndeliveredDeliveryReceipts(t *testing.T) {
 	stored, err := ledger.GetDelivery(context.Background(), delivery.ID)
 	require.NoError(t, err)
 	assert.Equal(t, DeliveryCancelled, stored.State)
+}
+
+// TestDeliveryLedgerPostgreSQLParity is test-only contract coverage for the
+// already-shared repository implementation. It exercises the dialect-sensitive
+// conflict, lease, acknowledgement, and cancellation paths on PostgreSQL.
+func TestDeliveryLedgerPostgreSQLParity(t *testing.T) {
+	repo := newTestPostgresRepo(t)
+	ledger := repo.(DeliveryLedger)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+
+	first, created, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn",
+		IdempotencyKey: "report-v1", TargetTaskID: "target-task", TargetSessionID: "target-session",
+		Content: "review is ready", State: DeliveryPendingCapacity, NextAttemptAt: now,
+	})
+	require.NoError(t, err)
+	require.True(t, created)
+	duplicate, created, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn",
+		IdempotencyKey: "report-v1", TargetTaskID: "target-task", TargetSessionID: "target-session",
+		Content: "must be suppressed", State: DeliveryPendingCapacity, NextAttemptAt: now,
+	})
+	require.NoError(t, err)
+	assert.False(t, created)
+	assert.Equal(t, first.ID, duplicate.ID)
+
+	claimed, err := ledger.ClaimDueDeliveries(ctx, now, "worker-a", time.Minute, 1)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1)
+	assert.Equal(t, 1, claimed[0].Attempts)
+	retried, err := ledger.RescheduleDelivery(ctx, first.ID, "worker-a", now.Add(time.Minute), "target_queue_full")
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryRetryWait, retried.State)
+	claimed, err = ledger.ClaimDueDeliveries(ctx, retried.NextAttemptAt, "worker-b", time.Minute, 1)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1)
+	queued, err := ledger.MarkDeliveryQueued(ctx, first.ID, "worker-b", "queue-entry")
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryQueued, queued.State)
+	delivered, err := ledger.AcknowledgeDelivery(ctx, first.ID, "queue-entry", now.Add(2*time.Minute))
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryDelivered, delivered.State)
+
+	pending, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn-2",
+		IdempotencyKey: "report-v2", TargetTaskID: "target-task", TargetSessionID: "target-session",
+		Content: "cancel me", State: DeliveryPendingCapacity, NextAttemptAt: now,
+	})
+	require.NoError(t, err)
+	_, err = repo.PurgeTask(ctx, "target-task")
+	require.NoError(t, err)
+	cancelled, err := ledger.GetDelivery(ctx, pending.ID)
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryCancelled, cancelled.State)
 }

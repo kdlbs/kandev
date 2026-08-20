@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"expvar"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -122,6 +123,8 @@ func TestProcessOnTurnComplete_ExplicitSignalGating(t *testing.T) {
 
 func TestReconcileDueCompletionIntentsSettlesCapturedTurn(t *testing.T) {
 	ctx := context.Background()
+	reconciled := expvar.Get("administrative_turn_completion_reconciled_total").(*expvar.Map)
+	beforeSettled := completionMetricValue(reconciled, "outcome=settled;cause=quiet_grace")
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -152,6 +155,21 @@ func TestReconcileDueCompletionIntentsSettlesCapturedTurn(t *testing.T) {
 	if err != nil || session.State != models.TaskSessionStateWaitingForInput {
 		t.Fatalf("GetTaskSession = (%+v, %v), want waiting session", session, err)
 	}
+	if got := completionMetricValue(reconciled, "outcome=settled;cause=quiet_grace"); got != beforeSettled+1 {
+		t.Fatalf("completion reconciliation metric = %d, want %d", got, beforeSettled+1)
+	}
+}
+
+func completionMetricValue(metrics *expvar.Map, key string) int64 {
+	value := metrics.Get(key)
+	if value == nil {
+		return 0
+	}
+	counter, ok := value.(*expvar.Int)
+	if !ok {
+		return 0
+	}
+	return counter.Value()
 }
 
 func TestReconcileDueCompletionIntentsRetriesTransientTurnLookupFailure(t *testing.T) {

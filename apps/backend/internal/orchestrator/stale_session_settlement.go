@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/kandev/kandev/internal/adminmetrics"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -130,6 +131,7 @@ func staleSettlementCommitted(ctx context.Context, store completionIntentReconci
 }
 
 func (s *Service) rejectStaleSettlement(ctx context.Context, audit sessionControlEventStore, request StaleSessionSettlementRequest, evidence string) (StaleSessionSettlementResult, error) {
+	adminmetrics.RecordStaleControlDenial(evidence)
 	if err := audit.CreateSessionControlEvent(ctx, &models.SessionControlEvent{
 		ActorTaskID: request.ActorTaskID, ActorSessionID: request.ActorSessionID,
 		TargetTaskID: request.TargetTaskID, TargetSessionID: request.TargetSessionID,

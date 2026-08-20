@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/adminmetrics"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/db"
@@ -2342,6 +2343,10 @@ func (r *Repository) DeleteTaskSession(ctx context.Context, id string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	cancelled, err := r.cancelSessionDeliveryReceipts(ctx, tx, id)
+	if err != nil {
+		return err
+	}
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_sessions WHERE id = ?`), id)
 	if err != nil {
@@ -2358,7 +2363,35 @@ func (r *Repository) DeleteTaskSession(ctx context.Context, id string) error {
 			return fmt.Errorf("purge queued messages for session %s: %w", id, err)
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	adminmetrics.RecordMessageDeliveryOutcome("cancelled", cancelled)
+	return nil
+}
+
+// cancelSessionDeliveryReceipts tombstones delivery work that cannot outlive a
+// deleted source or target session. A queue worker may run after the session
+// row is gone, so clearing only queued_messages would otherwise let it revive
+// a retained receipt into an orphan prompt.
+func (r *Repository) cancelSessionDeliveryReceipts(ctx context.Context, tx *sqlx.Tx, sessionID string) (int64, error) {
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE message_deliveries
+		SET state = 'cancelled', lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+		WHERE (sender_session_id = ? OR target_session_id = ?)
+		  AND state NOT IN ('delivered', 'cancelled', 'terminal_failed')
+	`), time.Now().UTC(), sessionID, sessionID)
+	if db.IsMissingTableError(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("cancel delivery receipts for session %s: %w", sessionID, err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count cancelled delivery receipts for session %s: %w", sessionID, err)
+	}
+	return count, nil
 }
 
 // Task Session Worktree operations
