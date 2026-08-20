@@ -2,11 +2,13 @@ package httpmw
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
@@ -598,5 +600,99 @@ func TestStripUntrustedForwardedHostWarnSetIsBounded(t *testing.T) {
 	if got := logs.Len(); got != forwardedHostWarnLimit {
 		t.Fatalf("warnings for %d distinct hosts = %d, want %d (cap)",
 			forwardedHostWarnLimit*2, got, forwardedHostWarnLimit)
+	}
+}
+
+// oversizedHost builds a forwarded host near net/http's default 1 MiB header
+// budget, which backendapp leaves unset: the largest value an unauthenticated
+// client can actually get past the server.
+func oversizedHost(seed int) string {
+	return fmt.Sprintf("%d.", seed) + strings.Repeat("a", 1<<20-16) + ".example:8443"
+}
+
+// TestStripUntrustedForwardedHostRetainsFixedSizeKeys pins the memory bound in
+// bytes, not just in entries: the forwarded host is unauthenticated and can
+// approach the whole header budget, so retaining raw pair values would let 64
+// oversized requests pin tens of MiB for the process lifetime despite the entry
+// cap. Keys are fixed-size digests, so retention does not scale with header
+// size, and distinct oversized hosts still dedup independently.
+func TestStripUntrustedForwardedHostRetainsFixedSizeKeys(t *testing.T) {
+	set := newForwardedHostWarnSet()
+	for i := range forwardedHostWarnLimit {
+		host := oversizedHost(i)
+		if !set.first("203.0.113.9", host) {
+			t.Fatalf("first oversized host %d: got false, want true", i)
+		}
+		if set.first("203.0.113.9", host) {
+			t.Fatalf("repeat oversized host %d: got true, want false", i)
+		}
+	}
+	retained := 0
+	for key := range set.seen {
+		retained += len(key)
+	}
+	if want := forwardedHostWarnLimit * sha256.Size; retained != want {
+		t.Fatalf("retained key bytes = %d, want %d (fixed-size digests)", retained, want)
+	}
+}
+
+// TestStripUntrustedForwardedHostDistinguishesLongSharedPrefixes pins what the
+// digest buys over simply retaining a fixed-size prefix of the pair: hosts that
+// differ only past the key width must still be told apart. A prefix key would
+// collide here and silently swallow the second host's warning, which is the one
+// an operator most needs when a proxy starts forwarding something new.
+func TestStripUntrustedForwardedHostDistinguishesLongSharedPrefixes(t *testing.T) {
+	shared := strings.Repeat("a", 1<<20-64)
+	router, logs := stripWarnRouter(t)
+	serveStrip(t, router, "203.0.113.9:5555", shared+"-one.example:8443")
+	serveStrip(t, router, "203.0.113.9:5555", shared+"-two.example:8443")
+	if got := logs.Len(); got != 2 {
+		t.Fatalf("warnings for 2 hosts sharing a %d-byte prefix = %d, want 2", len(shared), got)
+	}
+}
+
+// TestStripUntrustedForwardedHostTruncatesLoggedHost pins the other half of the
+// same bound: an oversized header must not be echoed into the log verbatim,
+// which would recreate in one line the flooding this deduplication exists to
+// stop. The value is still stripped and still warned about once.
+func TestStripUntrustedForwardedHostTruncatesLoggedHost(t *testing.T) {
+	router, logs := stripWarnRouter(t)
+	host := oversizedHost(0)
+	serveStrip(t, router, "203.0.113.9:5555", host)
+	serveStrip(t, router, "203.0.113.9:5555", host)
+	if got := logs.Len(); got != 1 {
+		t.Fatalf("warnings for repeated oversized host = %d, want 1", got)
+	}
+	logged := ""
+	for _, field := range logs.All()[0].Context {
+		if field.Key == "forwarded_host" {
+			logged = field.String
+		}
+	}
+	if want := forwardedHostLogMaxLen + len("...(truncated)"); len(logged) > want {
+		t.Fatalf("logged forwarded_host = %d bytes, want <= %d", len(logged), want)
+	}
+	if !strings.HasSuffix(logged, "...(truncated)") {
+		t.Fatalf("logged forwarded_host = %q, want a truncation marker", logged)
+	}
+	if !strings.HasPrefix(host, strings.TrimSuffix(logged, "...(truncated)")) {
+		t.Fatalf("logged forwarded_host %q is not a prefix of the header", logged)
+	}
+}
+
+// TestTruncateForLogPreservesShortValuesAndRuneBoundaries pins the two edges of
+// the truncation helper: a normal hostname is logged verbatim, and an oversized
+// multi-byte value is cut on a rune boundary so the log field stays valid UTF-8.
+func TestTruncateForLogPreservesShortValuesAndRuneBoundaries(t *testing.T) {
+	if got := truncateForLog("public.example:8443"); got != "public.example:8443" {
+		t.Fatalf("short value = %q, want it unchanged", got)
+	}
+	// "é" is 2 bytes, so the cap lands mid-rune for at least one repeat count.
+	for _, extra := range []int{0, 1} {
+		value := strings.Repeat("é", forwardedHostLogMaxLen/2+extra+8)
+		got := truncateForLog(value)
+		if !utf8.ValidString(got) {
+			t.Fatalf("truncated multi-byte value is not valid UTF-8: %q", got)
+		}
 	}
 }

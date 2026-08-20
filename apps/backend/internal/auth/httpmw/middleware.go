@@ -13,11 +13,13 @@
 package httpmw
 
 import (
+	"crypto/sha256"
 	"net"
 	"net/http"
 	"net/netip"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -84,7 +86,7 @@ func StripUntrustedForwardedHost(trusted []string, log *logger.Logger) gin.Handl
 		if warned.first(peer, forwardedHost) {
 			log.Warn("ignoring X-Forwarded-Host from untrusted peer",
 				zap.String("peer", peer),
-				zap.String("forwarded_host", forwardedHost),
+				zap.String("forwarded_host", truncateForLog(forwardedHost)),
 				zap.String("hint", forwardedHostWarnHint))
 		}
 		c.Request.Header.Del("X-Forwarded-Host")
@@ -102,27 +104,65 @@ const forwardedHostWarnHint = "set KANDEV_TRUSTED_PROXIES to this peer's IP or C
 // bound, at the cost of only losing warnings once it is reached.
 const forwardedHostWarnLimit = 64
 
+// forwardedHostLogMaxLen caps the forwarded-host bytes written to the log. The
+// header is unauthenticated and may run to the server's whole header budget
+// (backendapp leaves MaxHeaderBytes at net/http's 1 MiB default), and dumping a
+// megabyte per line would recreate, in one line, the flooding this
+// deduplication exists to stop. The prefix is enough to recognize a hostname.
+const forwardedHostLogMaxLen = 256
+
+// truncateForLog shortens an attacker-controlled value to a bounded, readable
+// prefix, cutting on a rune boundary so the log field stays valid UTF-8.
+func truncateForLog(value string) string {
+	if len(value) <= forwardedHostLogMaxLen {
+		return value
+	}
+	cut := forwardedHostLogMaxLen
+	for cut > 0 && !utf8.RuneStart(value[cut]) {
+		cut--
+	}
+	return value[:cut] + "...(truncated)"
+}
+
 // forwardedHostWarnSet deduplicates the strip warning. The stripped header is
 // a static property of the deployment (an untrusted proxy keeps forwarding on
 // every request), so warning per request buries the rest of the log in
 // thousands of identical lines while adding nothing after the first. One
 // warning per distinct (peer, forwarded host) pair keeps the operator signal
 // and still surfaces a genuinely new peer or host.
+//
+// Keys are SHA-256 digests rather than the pair itself: the forwarded host is
+// unauthenticated and can approach the server's whole header budget, so
+// retaining the raw values would let 64 oversized requests pin tens of MiB for
+// the process lifetime despite the entry cap. A fixed-size digest bounds
+// retention at forwardedHostWarnLimit * 32 bytes whatever the header size.
 type forwardedHostWarnSet struct {
 	mu   sync.Mutex
-	seen map[string]struct{}
+	seen map[[sha256.Size]byte]struct{}
 }
 
 func newForwardedHostWarnSet() *forwardedHostWarnSet {
-	return &forwardedHostWarnSet{seen: make(map[string]struct{})}
+	return &forwardedHostWarnSet{seen: make(map[[sha256.Size]byte]struct{})}
+}
+
+// forwardedHostWarnKey digests a (peer, forwarded host) pair into a fixed-size
+// dedup key. The NUL separator cannot appear in either value, so no pair can
+// forge another pair's digest by moving the boundary.
+func forwardedHostWarnKey(peer, forwardedHost string) [sha256.Size]byte {
+	digest := sha256.New()
+	digest.Write([]byte(peer))
+	digest.Write([]byte{0})
+	digest.Write([]byte(forwardedHost))
+	var key [sha256.Size]byte
+	copy(key[:], digest.Sum(nil))
+	return key
 }
 
 // first reports whether this (peer, forwarded host) pair has not been warned
 // about yet, recording it when so. It returns false once the pair is known or
 // the set is full.
 func (s *forwardedHostWarnSet) first(peer, forwardedHost string) bool {
-	// NUL cannot appear in either value, so it cannot forge a pair boundary.
-	key := peer + "\x00" + forwardedHost
+	key := forwardedHostWarnKey(peer, forwardedHost)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.seen[key]; ok {
