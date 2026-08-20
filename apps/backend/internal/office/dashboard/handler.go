@@ -545,11 +545,23 @@ func timelineStatusIsDone(raw string) bool {
 // transition into in_progress; completedAt is the latest transition into
 // done, since a reopened task (done -> in_progress -> done) can re-enter
 // done more than once and the most recent completion is the meaningful one.
+//
+// completedAt is cleared if a later transition leaves the done bucket
+// (From in the done bucket, To not) after that latest completion - a
+// reopen (done -> in_progress) that is never re-completed must not keep
+// reporting the stale completion time while the task is actively open.
+// done -> cancelled is deliberately handled the same way: cancelled is not
+// in the done bucket (timelineStatusIsDone), so completing then cancelling
+// a task also clears completedAt rather than silently keeping the old
+// completion timestamp on a task that never finished. This matches the
+// spec's "rows reflect events, not stale state" rule (docs/specs/office/tasks.md).
+//
 // Both are best-effort: ListActivityEntriesByTarget caps the underlying
 // query at the 50 most recent activity entries for the task, so a very
 // busy task can push its earliest in_progress transition out of the
 // window.
 func deriveTaskTimestamps(changes []TimelineEvent) (startedAt, completedAt string) {
+	var latestDoneLeftAt string
 	for _, ev := range changes {
 		switch {
 		case timelineStatusIsInProgress(ev.To):
@@ -561,6 +573,12 @@ func deriveTaskTimestamps(changes []TimelineEvent) (startedAt, completedAt strin
 				completedAt = ev.At
 			}
 		}
+		if timelineStatusIsDone(ev.From) && !timelineStatusIsDone(ev.To) && ev.At > latestDoneLeftAt {
+			latestDoneLeftAt = ev.At
+		}
+	}
+	if completedAt != "" && latestDoneLeftAt > completedAt {
+		completedAt = ""
 	}
 	return startedAt, completedAt
 }
