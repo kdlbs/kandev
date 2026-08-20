@@ -242,6 +242,35 @@ func TestRebindWorkspaceWithGitMetadataFailsClosedWithoutRefreshCapability(t *te
 	}
 }
 
+func TestRebindWorkspaceWithGitMetadataRejectsRemoteChildBeforeStopping(t *testing.T) {
+	server := newWorkspaceRebindAgentctlServer(t, false)
+	mgr, execution := workspaceSourceTestManager(t, server.URL, []string{"/old"})
+	t.Cleanup(server.Close)
+	t.Cleanup(server.closeConnections)
+
+	oldProjection := newLinkedGitMetadataProjection(t)
+	execution.Status = v1.AgentStatusReady
+	execution.ACPSessionID = "acp-existing"
+	execution.RuntimeName = executor.NameSSH
+	execution.GitMetadataProjections = []*worktree.GitMetadataProjection{oldProjection}
+	mgr.executorRegistry = NewExecutorRegistry(newTestRegistryLogger())
+	mgr.executorRegistry.Register(&SSHExecutor{})
+
+	err := mgr.RebindWorkspaceWithGitMetadata(context.Background(), execution.SessionID, "/new-workspace", []*worktree.GitMetadataProjection{newLinkedGitMetadataProjection(t)}, []string{"/attached"})
+	if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) {
+		t.Fatalf("RebindWorkspaceWithGitMetadata error = %v, want %q", err, gitMetadataProjectionUnsupported)
+	}
+	if got := server.reboundPaths(); len(got) != 0 {
+		t.Fatalf("remote child was rebound before policy refresh: %v", got)
+	}
+	if execution.Status != v1.AgentStatusReady || execution.WorkspacePath != "" || !sameStrings(execution.WorkspaceSourceRoots, []string{"/old"}) {
+		t.Fatalf("execution changed after rejected remote rebind: status=%q path=%q roots=%v", execution.Status, execution.WorkspacePath, execution.WorkspaceSourceRoots)
+	}
+	if len(execution.GitMetadataProjections) != 1 || execution.GitMetadataProjections[0] != oldProjection {
+		t.Fatalf("projection changed after rejected remote rebind: %#v", execution.GitMetadataProjections)
+	}
+}
+
 type workspaceRebindAgentctlServer struct {
 	*httptest.Server
 	mu              sync.Mutex
