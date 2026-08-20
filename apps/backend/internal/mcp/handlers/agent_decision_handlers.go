@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -47,7 +47,7 @@ func (h *Handlers) handleRecordStepDecision(ctx context.Context, msg *ws.Message
 
 	session, err := h.sessionRepo.GetTaskSession(ctx, req.SessionID)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found", nil)
 		}
 		h.logger.Error("record_step_decision: failed to load session",

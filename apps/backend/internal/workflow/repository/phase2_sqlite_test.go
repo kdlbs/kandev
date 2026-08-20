@@ -395,6 +395,85 @@ func TestIsDecisionActiveDeciderViolation_MatchesSQLiteConstraintMessage(t *test
 	}
 }
 
+// TestInitPhase2Schema_DedupesPreExistingDuplicateActiveDecisionsBeforeUniqueIndex
+// reproduces an existing install that hit the pre-fix AC-27/29 concurrent
+// double-insert race (commit 73226d29b): two active rows already share the
+// same (task_id, step_id, decider_id, role) identity by the time the new
+// uniq_workflow_step_decisions_active_decider index is introduced. Without
+// dedupeActiveStepDecisionsBeforeUniqueIndex running first,
+// CREATE UNIQUE INDEX fails outright and aborts backend startup. This drops
+// the index the initial setupTestRepo call already created, reinserts the
+// duplicate-row scenario directly (bypassing RecordStepDecision's own
+// supersede step, matching the sibling classifier test above), and reruns
+// initPhase2Schema to prove it is safe to run again against a database that
+// already has the conflicting rows.
+func TestInitPhase2Schema_DedupesPreExistingDuplicateActiveDecisionsBeforeUniqueIndex(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	step := newPhase2TestStep(t, repo, "Review")
+
+	if _, err := repo.db.Exec(`DROP INDEX IF EXISTS ` + decisionActiveDeciderIndexName); err != nil {
+		t.Fatalf("drop unique index to simulate a pre-fix install: %v", err)
+	}
+
+	older := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	newer := time.Now().UTC().Truncate(time.Millisecond)
+	insertActive := func(id, taskID, deciderID, role string, decidedAt time.Time) {
+		t.Helper()
+		if _, err := repo.db.Exec(repo.db.Rebind(`
+			INSERT INTO workflow_step_decisions
+				(id, task_id, step_id, participant_id, decision, decided_at, decider_type, decider_id, role)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`), id, taskID, step.ID, "p1", "approved", decidedAt, "agent", deciderID, role); err != nil {
+			t.Fatalf("insert duplicate active decision %s: %v", id, err)
+		}
+	}
+	// Duplicate group: same (task_id, step_id, decider_id, role) identity,
+	// both active (superseded_at NULL) — the exact shape the pre-fix race left
+	// behind.
+	insertActive("dup-older", "t-dedupe", "alice", "reviewer", older)
+	insertActive("dup-newer", "t-dedupe", "alice", "reviewer", newer)
+	// A distinct decider's active row must survive untouched.
+	insertActive("solo-active", "t-dedupe", "bob", "reviewer", newer)
+
+	if err := repo.initPhase2Schema(); err != nil {
+		t.Fatalf("initPhase2Schema did not tolerate pre-existing duplicate active decisions: %v", err)
+	}
+
+	active, err := repo.ListActiveTaskDecisions(ctx, "t-dedupe")
+	if err != nil {
+		t.Fatalf("list active: %v", err)
+	}
+	if len(active) != 2 {
+		t.Fatalf("expected 2 active decisions after dedupe (1 per decider), got %d: %+v", len(active), active)
+	}
+	byID := map[string]*models.WorkflowStepDecision{}
+	for _, d := range active {
+		byID[d.ID] = d
+	}
+	if byID["dup-newer"] == nil {
+		t.Fatalf("expected the newest duplicate (dup-newer) to remain active, got %+v", active)
+	}
+	if byID["solo-active"] == nil {
+		t.Fatalf("expected the unrelated decider's active row (solo-active) to remain untouched, got %+v", active)
+	}
+	if byID["dup-older"] != nil {
+		t.Fatalf("expected the older duplicate (dup-older) to be superseded, but it is still active")
+	}
+
+	// The index must now genuinely be enforcing uniqueness again: a fresh
+	// conflicting insert should fail the same way it would on a database that
+	// never had duplicates.
+	_, err = repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO workflow_step_decisions
+			(id, task_id, step_id, participant_id, decision, decided_at, decider_type, decider_id, role)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), "post-dedupe-conflict", "t-dedupe", step.ID, "p1", "approved", time.Now().UTC(), "agent", "alice", "reviewer")
+	if !isDecisionActiveDeciderViolation(err) {
+		t.Fatalf("expected the recreated unique index to reject a new conflicting active row, got err=%v", err)
+	}
+}
+
 // TestRecordStepDecision_DifferentDecidersIndependent verifies decisions
 // recorded by distinct deciders coexist as separate active rows.
 func TestRecordStepDecision_DifferentDecidersIndependent(t *testing.T) {

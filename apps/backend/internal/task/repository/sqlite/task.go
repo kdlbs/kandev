@@ -669,21 +669,26 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	}
 
 	// AC-46/48 compare-and-swap precondition: read the task's current step
-	// inside the transaction, after the workspace lock, so a concurrent
-	// admission for the same workspace on PostgreSQL cannot land between this
-	// check and the write below. A mismatch means the task already left
-	// expectedStepID (lost the race) — that is reported as applied=false,
-	// not an error, and the transaction is rolled back untouched.
+	// inside the transaction, after the workspace lock, via readTaskStepInTx
+	// so the read also takes its row-level FOR UPDATE lock on PostgreSQL. The
+	// workspace lock alone only serializes this method against other callers
+	// that take it (other admission calls); a plain writer like UpdateTask
+	// never takes the workspace lock and instead relies on that same
+	// FOR UPDATE lock via readTaskStepInTx, so a bare (lockless) SELECT here
+	// could read a stale expectedStepID, let UpdateTask commit a concurrent
+	// move, and then have this transaction's own write below overwrite it —
+	// a lost update. Taking the same row lock here blocks that writer until
+	// this transaction commits or rolls back, closing the race. A mismatch
+	// means the task already left expectedStepID (lost the race) — that is
+	// reported as applied=false, not an error, and the transaction is rolled
+	// back untouched.
 	if expectedStepID != "" {
-		var currentStepID string
-		queryErr := tx.QueryRowContext(
-			ctx, r.db.Rebind(`SELECT workflow_step_id FROM tasks WHERE id = ?`), task.ID,
-		).Scan(&currentStepID)
-		if queryErr != nil {
-			if errors.Is(queryErr, sql.ErrNoRows) {
-				return false, false, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
-			}
-			return false, false, fmt.Errorf("read task step for admission CAS check: %w", queryErr)
+		_, currentStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
+		if err != nil {
+			return false, false, fmt.Errorf("read task step for admission CAS check: %w", err)
+		}
+		if !found {
+			return false, false, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 		}
 		if currentStepID != expectedStepID {
 			return false, false, nil

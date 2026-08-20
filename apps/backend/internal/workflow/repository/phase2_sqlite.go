@@ -66,15 +66,54 @@ func (r *Repository) initPhase2Schema() error {
 	CREATE INDEX IF NOT EXISTS idx_workflow_step_decisions_participant ON workflow_step_decisions(participant_id);
 	CREATE INDEX IF NOT EXISTS idx_workflow_step_decisions_active
 		ON workflow_step_decisions(task_id, role) WHERE superseded_at IS NULL;
-	CREATE UNIQUE INDEX IF NOT EXISTS ` + decisionActiveDeciderIndexName + `
-		ON workflow_step_decisions(task_id, step_id, decider_id, role)
-		WHERE superseded_at IS NULL AND decider_id != '' AND role != '';
 	`
 	if _, err := r.db.Exec(decisionsSchema); err != nil {
 		return fmt.Errorf("failed to create workflow_step_decisions table: %w", err)
 	}
 
+	// Must run before decisionActiveDeciderIndexName is created below: an
+	// install that hit the pre-fix AC-27/29 concurrent double-insert race
+	// (commit 73226d29b) can already hold duplicate active rows for the same
+	// (task_id, step_id, decider_id, role) identity, and CREATE UNIQUE INDEX
+	// over them fails outright, aborting backend startup.
+	if err := r.dedupeActiveStepDecisionsBeforeUniqueIndex(); err != nil {
+		return fmt.Errorf("failed to dedupe workflow_step_decisions before unique index: %w", err)
+	}
+
+	if _, err := r.db.Exec(`
+	CREATE UNIQUE INDEX IF NOT EXISTS ` + decisionActiveDeciderIndexName + `
+		ON workflow_step_decisions(task_id, step_id, decider_id, role)
+		WHERE superseded_at IS NULL AND decider_id != '' AND role != '';
+	`); err != nil {
+		return fmt.Errorf("failed to create %s: %w", decisionActiveDeciderIndexName, err)
+	}
+
 	return nil
+}
+
+// dedupeActiveStepDecisionsBeforeUniqueIndex supersedes every active
+// workflow_step_decisions row except the newest per (task_id, step_id,
+// decider_id, role) group, using the same last-row-wins ordering
+// (decided_at DESC, id DESC) the engine already uses to evaluate quorum.
+// Idempotent: a database with no duplicate active rows leaves this a no-op.
+// Mirrors normalizeDuplicateStartSteps below.
+func (r *Repository) dedupeActiveStepDecisionsBeforeUniqueIndex() error {
+	_, err := r.db.Exec(`
+		WITH ranked AS (
+			SELECT
+				id,
+				ROW_NUMBER() OVER (
+					PARTITION BY task_id, step_id, decider_id, role
+					ORDER BY decided_at DESC, id DESC
+				) AS decision_rank
+			FROM workflow_step_decisions
+			WHERE superseded_at IS NULL AND decider_id != '' AND role != ''
+		)
+		UPDATE workflow_step_decisions
+		SET superseded_at = decided_at
+		WHERE id IN (SELECT id FROM ranked WHERE decision_rank > 1)
+	`)
+	return err
 }
 
 // ----------------------------------------------------------------------------

@@ -16,9 +16,16 @@ export type UseTaskQuorumResult = {
 export function useTaskQuorum(taskId: string | null): UseTaskQuorumResult {
   const quorum = useAppStore((s) => (taskId ? s.office.taskQuorum.byTaskId[taskId] : undefined));
   const setTaskQuorum = useAppStore((s) => s.setTaskQuorum);
+  // office.task.decision_recorded (lib/ws/handlers/office.ts) bumps this
+  // counter for `task:${taskId}` — recording a decision changes the guard's
+  // approve/reject count, so the cached snapshot must be invalidated even
+  // though taskId itself hasn't changed.
+  const decisionRefetchTrigger = useAppStore((s) =>
+    taskId ? s.office.refetchTriggers[`task:${taskId}`] : undefined,
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fetched, setFetched] = useState(false);
+  const [fetchedTaskId, setFetchedTaskId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!taskId) return;
@@ -27,7 +34,7 @@ export function useTaskQuorum(taskId: string | null): UseTaskQuorumResult {
     try {
       const res = await getTaskQuorum(taskId);
       setTaskQuorum(taskId, res);
-      setFetched(true);
+      setFetchedTaskId(taskId);
     } catch (e) {
       setError(e instanceof Error ? e.message : t("office:failedToLoadTaskQuorum"));
     } finally {
@@ -36,9 +43,14 @@ export function useTaskQuorum(taskId: string | null): UseTaskQuorumResult {
   }, [taskId, setTaskQuorum]);
 
   useEffect(() => {
-    if (!taskId || fetched) return;
+    if (!taskId || fetchedTaskId === taskId) return;
     void refresh();
-  }, [taskId, fetched, refresh]);
+  }, [taskId, fetchedTaskId, refresh]);
+
+  useEffect(() => {
+    if (!taskId || decisionRefetchTrigger === undefined) return;
+    void refresh();
+  }, [taskId, decisionRefetchTrigger, refresh]);
 
   return { quorum, isLoading, error, refresh };
 }
