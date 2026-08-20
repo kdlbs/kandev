@@ -364,6 +364,37 @@ func TestRecordStepDecision_SupersedesPriorByDeciderRole(t *testing.T) {
 	}
 }
 
+// TestIsDecisionActiveDeciderViolation_MatchesSQLiteConstraintMessage forces
+// the exact constraint violation decisionActiveDeciderIndexName exists to
+// catch — a second active row for the same (task, step, decider, role) —
+// by inserting it directly, bypassing RecordStepDecision's own supersede
+// step (which would otherwise correctly find and supersede the first row,
+// never reaching the index). This is what a writer that lost the AC-27/29
+// race produces, and confirms the SQLite branch of the classifier
+// RecordStepDecision's retry loop depends on actually recognizes it.
+func TestIsDecisionActiveDeciderViolation_MatchesSQLiteConstraintMessage(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	step := newPhase2TestStep(t, repo, "Review")
+
+	first := &models.WorkflowStepDecision{
+		TaskID: "t-race-classify", StepID: step.ID, ParticipantID: "p1",
+		Decision: "approved", DeciderType: "agent", DeciderID: "alice", Role: "reviewer",
+	}
+	if err := repo.RecordStepDecision(ctx, first); err != nil {
+		t.Fatalf("record first: %v", err)
+	}
+
+	_, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO workflow_step_decisions
+			(id, task_id, step_id, participant_id, decision, decided_at, decider_type, decider_id, role)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), "manual-conflict-id", "t-race-classify", step.ID, "p1", "approved", time.Now().UTC(), "agent", "alice", "reviewer")
+	if !isDecisionActiveDeciderViolation(err) {
+		t.Fatalf("expected isDecisionActiveDeciderViolation to recognize this constraint violation, got err=%v", err)
+	}
+}
+
 // TestRecordStepDecision_DifferentDecidersIndependent verifies decisions
 // recorded by distinct deciders coexist as separate active rows.
 func TestRecordStepDecision_DifferentDecidersIndependent(t *testing.T) {

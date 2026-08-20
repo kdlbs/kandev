@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/workflow/models"
@@ -64,6 +66,9 @@ func (r *Repository) initPhase2Schema() error {
 	CREATE INDEX IF NOT EXISTS idx_workflow_step_decisions_participant ON workflow_step_decisions(participant_id);
 	CREATE INDEX IF NOT EXISTS idx_workflow_step_decisions_active
 		ON workflow_step_decisions(task_id, role) WHERE superseded_at IS NULL;
+	CREATE UNIQUE INDEX IF NOT EXISTS ` + decisionActiveDeciderIndexName + `
+		ON workflow_step_decisions(task_id, step_id, decider_id, role)
+		WHERE superseded_at IS NULL AND decider_id != '' AND role != '';
 	`
 	if _, err := r.db.Exec(decisionsSchema); err != nil {
 		return fmt.Errorf("failed to create workflow_step_decisions table: %w", err)
@@ -550,6 +555,48 @@ func (r *Repository) FindParticipantID(
 // WorkflowStepDecision CRUD
 // ----------------------------------------------------------------------------
 
+// decisionActiveDeciderIndexName is the partial unique index enforcing at
+// most one non-superseded decision per (task_id, step_id, decider_id, role).
+// Naming it explicitly keeps isDecisionActiveDeciderViolation attributable
+// to this constraint specifically (AC-27/29): under PostgreSQL READ
+// COMMITTED, two concurrent RecordStepDecision calls for the same decider
+// identity can both run the "supersede prior" UPDATE and see zero matching
+// rows (neither has committed yet), then both INSERT — this index turns the
+// second INSERT into a constraint violation instead of a silent duplicate
+// active row, and recordStepDecisionTx retries on that specific violation so
+// the loser's write still lands (properly superseding the winner's row)
+// rather than surfacing an error to the caller.
+const decisionActiveDeciderIndexName = "uniq_workflow_step_decisions_active_decider"
+
+// sqliteDecisionActiveDeciderViolationMessage is the substring go-sqlite3
+// puts in a UNIQUE-constraint error for this index's column list.
+const sqliteDecisionActiveDeciderViolationMessage = "UNIQUE constraint failed: workflow_step_decisions.task_id, " +
+	"workflow_step_decisions.step_id, workflow_step_decisions.decider_id, workflow_step_decisions.role"
+
+// isDecisionActiveDeciderViolation reports whether err is a violation of
+// decisionActiveDeciderIndexName specifically, not any unique violation. On
+// PostgreSQL it inspects the typed pgconn.PgError's constraint name; on
+// SQLite (no typed access to the constraint name) it matches the
+// column-list message documented above.
+func isDecisionActiveDeciderViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505" && pgErr.ConstraintName == decisionActiveDeciderIndexName
+	}
+	return strings.Contains(err.Error(), sqliteDecisionActiveDeciderViolationMessage)
+}
+
+// recordStepDecisionMaxAttempts bounds the retry loop in RecordStepDecision.
+// One retry resolves the race this index exists for (a second concurrent
+// writer's supersede-then-insert observes the first writer's now-committed
+// row and correctly supersedes it); further attempts only matter if a third
+// writer interleaves in the same narrow window, which two spare attempts
+// comfortably covers without ever looping unbounded.
+const recordStepDecisionMaxAttempts = 3
+
 // RecordStepDecision inserts a new decision row. If id is empty a UUID is
 // generated. If decided_at is the zero value the current UTC time is used.
 //
@@ -560,7 +607,9 @@ func (r *Repository) FindParticipantID(
 // the prior row superseded inside a transaction, then inserts the new one.
 // When decider_id is empty (engine-side callers that only know the
 // participant_id) the prior-row check falls back to (task, step,
-// participant_id). The transaction guarantees readers never observe a row gap.
+// participant_id). The transaction guarantees readers never observe a row
+// gap. See decisionActiveDeciderIndexName for why a decider_id+role write
+// retries instead of erroring on a lost supersede race.
 func (r *Repository) RecordStepDecision(ctx context.Context, d *models.WorkflowStepDecision) error {
 	if d == nil {
 		return errors.New("decision must not be nil")
@@ -578,6 +627,22 @@ func (r *Repository) RecordStepDecision(ctx context.Context, d *models.WorkflowS
 		d.DecidedAt = time.Now().UTC()
 	}
 
+	var err error
+	for attempt := 0; attempt < recordStepDecisionMaxAttempts; attempt++ {
+		err = r.recordStepDecisionTx(ctx, d)
+		if err == nil || !isDecisionActiveDeciderViolation(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("record step decision: exhausted retries on active-decider race: %w", err)
+}
+
+// recordStepDecisionTx runs one supersede-then-insert attempt in its own
+// transaction. A caller that loses the AC-27/29 race gets its INSERT
+// rejected by decisionActiveDeciderIndexName; RecordStepDecision's retry
+// loop then re-runs this from scratch so the supersede UPDATE sees the
+// winner's now-committed row.
+func (r *Repository) recordStepDecisionTx(ctx context.Context, d *models.WorkflowStepDecision) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -611,6 +676,9 @@ func (r *Repository) RecordStepDecision(ctx context.Context, d *models.WorkflowS
 		VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
 	`), d.ID, d.TaskID, d.StepID, d.ParticipantID, d.Decision, d.Note, d.DecidedAt,
 		d.DeciderType, d.DeciderID, d.Role, d.Comment); err != nil {
+		if isDecisionActiveDeciderViolation(err) {
+			return err
+		}
 		return fmt.Errorf("record step decision: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
