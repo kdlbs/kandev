@@ -545,6 +545,51 @@ describe("resolveSessionTabSyncTarget", () => {
   });
 });
 
+describe("runAutoSessionTabEffect sibling visibility", () => {
+  it("automatically creates a sibling panel for a newly added backend session", () => {
+    const activeSessionId = "session-active";
+    const newSessionId = "session-new";
+    const { api } = makeReorderingAutoSessionApi();
+    const refs = makeAutoSessionRefs();
+
+    withDockviewState({ api, preMaximizeLayout: null }, () => {
+      runAutoSessionTabEffect(
+        activeSessionId,
+        makeAutoSessionAppStore(AUTO_TASK_ID, [activeSessionId]) as never,
+        refs as never,
+      );
+      expect(api.getPanel(`session:${newSessionId}`)).toBeNull();
+
+      runAutoSessionTabEffect(
+        activeSessionId,
+        makeAutoSessionAppStore(AUTO_TASK_ID, [activeSessionId, newSessionId]) as never,
+        refs as never,
+      );
+    });
+
+    expect(api.getPanel(`session:${newSessionId}`)).not.toBeNull();
+  });
+
+  it("does not recreate a sibling panel that the user already closed", () => {
+    const activeSessionId = "session-active";
+    const closedSessionId = "session-closed";
+    const { api } = makeReorderingAutoSessionApi();
+    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, [activeSessionId, closedSessionId]);
+    const refs = makeAutoSessionRefs();
+
+    withDockviewState({ api, preMaximizeLayout: null }, () => {
+      runAutoSessionTabEffect(activeSessionId, appStore as never, refs as never);
+      const siblingPanel = api.getPanel(`session:${closedSessionId}`);
+      expect(siblingPanel).not.toBeNull();
+      if (siblingPanel) api.removePanel(siblingPanel);
+
+      runAutoSessionTabEffect(activeSessionId, appStore as never, refs as never);
+    });
+
+    expect(api.getPanel(`session:${closedSessionId}`)).toBeNull();
+  });
+});
+
 describe("runAutoSessionTabEffect", () => {
   it("keeps chat active when replacing its placeholder beside a Plan tab", () => {
     const sessionId = "session-current";

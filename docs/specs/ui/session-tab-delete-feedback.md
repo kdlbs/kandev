@@ -1,19 +1,22 @@
 ---
 status: shipped
 created: 2026-08-05
-amended: 2026-08-22
+ amended: 2026-08-20
 owner: kandev
 ---
 
-# Session tab delete feedback
+# Session tab close and delete feedback
 
 ## Why
 
-Deleting an agent session from the task tab currently shows both a progress toast and a success
-toast. The repeated global notifications are noisy for an action whose initiating control can show
-its progress directly, and the pending tab control must use the same circular visual language as
-the neighboring terminal-tab close action. Promoting a session to primary is also a routine tab
-state change whose successful result does not need a global toast.
+The X on an agent-session tab is a standard panel-close affordance, but it permanently deletes the
+session. Users need to hide an agent panel without losing its conversation. The existing
+**Close Others** action also removes panels only briefly because session synchronization recreates
+every missing sibling panel.
+
+Permanent deletion remains a deliberate lifecycle action in the session context menu and mobile
+Sessions picker. Promoting a session to primary is also a routine tab state change whose successful
+result does not need a global toast.
 
 Session deletion is available from several surfaces. Confirmation should stay beside the
 initiating action where the layout permits, instead of opening a second blocking surface that
@@ -21,72 +24,63 @@ hides the session context the user is acting on.
 
 ## What
 
-- Clicking the X on a deletable agent-session tab continues to open the existing delete
-  confirmation dialog.
-- Choosing Delete from a desktop session context menu keeps that menu mounted and opens a compact,
-  non-modal confirmation popover anchored to the Delete item. Cancelling or dismissing the popover
-  leaves the session unchanged.
-- On phone, choosing Delete from a row in the Sessions picker morphs that row into touch-sized
-  Cancel and Delete actions. It does not open another dialog or drawer. Cancelling, selecting
-  another session, or closing the picker clears the pending confirmation without deleting.
-- Desktop and phone confirmation surfaces share the same conversation-deletion,
-  workspace-retention, primary-session, and only-session warnings.
-- After the user confirms, the X is replaced in place by a compact circular indeterminate spinner
-  matching the terminal-tab close action, not the grid-shaped activity spinner, until the delete
-  request settles. The close action is non-interactive and exposed as busy while the request is
-  pending.
-- X-initiated deletion does not show progress or success toasts.
-- Successful deletion keeps the existing behavior: the deleted session and its tab disappear, and
-  another session becomes active when needed.
-- If deletion fails, the session and tab remain, the spinner returns to the X, and one error toast
-  explains the failure so the user can retry.
-- Promoting a non-primary agent session to primary updates the primary marker without a progress or
-  success toast. If the promotion fails, one error toast explains the failure.
-- After local confirmation, context-menu and mobile deletion retain the default request progress,
-  success, and error feedback.
+ - Clicking a desktop agent-session tab's X removes only that Dockview panel. It does not call the
+  session deletion API, remove the session from application state, or show a confirmation dialog.
+- The X is available only while more than one agent-session panel is visible. After a close leaves
+  one visible agent panel, that remaining panel has no X even when the task still has other hidden
+  sessions.
+- A hidden session remains available under **+ > Agents** and reopening it restores the same
+  session and conversation.
+- **Close Others** removes the other visible agent-session panels in the current group. It does not
+  close neighboring Plan, review, file, or other non-session panels, and synchronization does not
+  recreate the hidden agent panels.
+- A newly added backend session still opens automatically. A session panel that this mounted layout
+  already created and that is now absent is treated as intentionally closed until explicit reopen.
+- Deletion from the session context menu continues to open the existing confirmation dialog, then
+  permanently removes the session and uses the existing toast feedback.
+ - Deletion from the mobile Sessions picker remains available and keeps its existing confirmation
+   and feedback behavior.
+ - Promoting a non-primary agent session to primary updates the primary marker without a progress or
+   success toast. If the promotion fails, one error toast explains the failure.
 
 ## Failure modes
 
-- A rejected or timed-out delete request does not remove local session state or its Dockview panel.
-  The close action becomes available again and the existing error detail is surfaced in one toast.
+- A panel close that races with active-session synchronization remains closed; synchronization may
+  ensure the effective active session but must not auto-create intentionally hidden siblings.
+- A rejected or timed-out explicit delete request does not remove local session state or its
+  Dockview panel, and the existing error detail is surfaced in one toast.
 - A failed primary-session promotion leaves the existing primary session unchanged and surfaces one
   error toast; a successful promotion surfaces no progress or success toast.
-- Repeated activation while deletion is pending does not dispatch another delete request.
 
 ## Scenarios
 
-- **GIVEN** a task with two deletable agent sessions, **WHEN** the user clicks one tab's X and
-  confirms deletion, **THEN** that X shows a spinner without progress or success toasts until the
-  session and tab are removed.
-- **GIVEN** an X-initiated delete request is pending, **WHEN** the session tab renders its pending
-  close state, **THEN** the close affordance shows the compact circular spinner used for terminal-tab
-  closing and does not render the grid-spinner treatment.
-- **GIVEN** an X-initiated delete request is pending, **WHEN** the user attempts to activate the
-  close control again, **THEN** no duplicate delete request is dispatched.
-- **GIVEN** an X-initiated delete request fails, **WHEN** the request settles, **THEN** the session
-  tab remains, the X becomes available again, and one error toast is shown.
+- **GIVEN** a task with two visible agent-session tabs, **WHEN** the user clicks one tab's X,
+  **THEN** that panel closes without a dialog and both sessions remain on the task.
+- **GIVEN** a session panel was closed with its X, **WHEN** the user opens **+ > Agents** and selects
+  that session, **THEN** the same session panel opens again with its existing conversation.
+- **GIVEN** only one agent-session panel remains visible, **WHEN** its tab renders, **THEN** it does
+  not offer an X even if another task session is hidden.
+- **GIVEN** two visible session tabs and neighboring non-session panels, **WHEN** the user chooses
+  **Close Others** on one session tab, **THEN** only the other session tabs close and remain hidden
+  through active-session synchronization.
+- **GIVEN** a session was explicitly deleted from the desktop context menu, **WHEN** deletion
+  succeeds, **THEN** its backend session and panel are removed.
 - **GIVEN** a task with a non-primary agent session, **WHEN** the user chooses Set as Primary from
   an agent-session action menu, **THEN** the selected session becomes primary without a progress or
   success toast.
 - **GIVEN** a primary-session promotion request fails, **WHEN** the request settles, **THEN** the
   current primary session remains unchanged and one error toast is shown.
-- **GIVEN** the user cancels the delete confirmation, **WHEN** the dialog closes, **THEN** the tab
-  remains unchanged and no spinner or deletion toast appears.
-- **GIVEN** a desktop session context menu, **WHEN** the user chooses Delete, **THEN** a compact
-  confirmation popover stays anchored to that menu item without opening an alert dialog or starting
-  deletion.
-- **GIVEN** a phone viewport, **WHEN** the user chooses Delete from a Sessions picker row, **THEN**
-  that row shows touch-sized inline Cancel and Delete actions without opening an alert dialog.
-- **GIVEN** a phone row has pending delete confirmation, **WHEN** the user closes the Sessions
-  picker externally, **THEN** the pending confirmation is cleared and reopening the picker shows
-  the normal row actions without dispatching deletion.
-- **GIVEN** a phone viewport, **WHEN** the user confirms deletion from the inline row actions,
-  **THEN** the selected session is removed and the remaining session stays reachable without
-  relying on a desktop tab X.
+ - **GIVEN** the user cancels an explicit delete confirmation, **WHEN** the dialog closes, **THEN**
+  the session and its panel remain unchanged.
+- **GIVEN** a phone viewport, **WHEN** the user deletes a session from the Sessions picker, **THEN**
+  the mobile flow remains reachable and removes the selected session without relying on a desktop
+  tab X.
 
 ## Out of scope
 
-- Removing or redesigning the tab-X delete confirmation dialog.
-- Changing backend session-deletion semantics, active-session selection, or Dockview reconciliation.
-- Changing the Sessions picker hierarchy, drawer, or non-delete row actions.
+- Removing or redesigning the explicit delete confirmation dialog.
+ - Changing backend session-deletion semantics or active-session selection.
+ - Changing the mobile session picker layout or controls; its shared primary-session action follows
+   the same no-success-toast feedback rule.
 - Replacing feedback for context-menu, mobile, stop, or resume actions.
+- Persisting the set of hidden session panels across a full layout remount or browser restart.
