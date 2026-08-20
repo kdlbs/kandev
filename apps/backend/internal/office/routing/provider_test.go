@@ -470,6 +470,7 @@ func TestProvider_PreviewAgentTierSourceMatchesResolveDespiteConfigRaceBetweenRe
 	}
 	if item == nil {
 		t.Fatal("PreviewAgent returned nil item")
+		return
 	}
 	if item.TierSource != TierSourceWorkspace {
 		t.Errorf("TierSource = %q, want %q — must match what Resolve actually computed against"+
