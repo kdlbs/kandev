@@ -77,7 +77,7 @@ func runDev(ctx context.Context, opts Options) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	if err := waitForURLFn(ctx, webURL, webProc, healthTimeout(healthTimeoutDevMS)); err != nil {
+	if err := waitForURLFn(ctx, webURL, webProc, healthTimeoutForConfig(healthTimeoutDevMS, cfg.startup)); err != nil {
 		supervisor.shutdown("web readiness failure")
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1

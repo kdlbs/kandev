@@ -122,3 +122,13 @@ Files changed:
 - `apps/backend/internal/common/config/source_test.go`
 - `apps/backend/internal/common/config/validation.go`
 - `apps/backend/internal/profiles/profiles.go`
+
+Review remediation:
+
+- The completeness test now compares catalog entries and exclusions with an
+  independent audited startup-environment inventory.
+- A synthetic uncataloged variable regression proves that the audit rejects
+  omissions instead of relying on a minimum count or selected keys.
+- GREEN: `go test ./internal/common/config -count=1` passed with 81 tests;
+  `go test ./internal/common/config ./internal/runtimeflags -count=1` passed
+  with 115 tests.

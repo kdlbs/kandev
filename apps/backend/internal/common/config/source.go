@@ -88,17 +88,17 @@ func isYAMLOnlyStartupKey(key string) bool {
 	return ok
 }
 
-func configCandidates(configPath string) ([]configCandidate, error) {
+func configCandidates(configPath, homeDir string) ([]configCandidate, error) {
 	if configPath != "" {
 		path := explicitConfigFile(configPath)
-		return []configCandidate{{path: path, isHome: isHomeConfigFile(path) || os.Getenv(InternalConfigHomeFileEnv) == "1"}}, nil
+		return []configCandidate{{path: path, isHome: isHomeConfigFile(path, homeDir) || os.Getenv(InternalConfigHomeFileEnv) == "1"}}, nil
 	}
 
 	workingDir, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("resolve config working directory: %w", err)
 	}
-	homeDir := bootstrapHomeDir()
+	homeDir = bootstrapHomeDirFor(homeDir)
 	return []configCandidate{
 		{path: filepath.Join(workingDir, "config.yaml")},
 		{path: filepath.Join(homeDir, "config.yaml"), isHome: true},
@@ -106,12 +106,12 @@ func configCandidates(configPath string) ([]configCandidate, error) {
 	}, nil
 }
 
-func isHomeConfigFile(path string) bool {
+func isHomeConfigFile(path, homeDir string) bool {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return false
 	}
-	absHome, err := filepath.Abs(bootstrapHomeDir())
+	absHome, err := filepath.Abs(bootstrapHomeDirFor(homeDir))
 	if err != nil {
 		return false
 	}
@@ -140,8 +140,15 @@ func bootstrapHomeDir() string {
 	return filepath.Join(home, kandevHomeSubdir)
 }
 
-func selectConfigFile(configPath string) (configSelection, bool, error) {
-	candidates, err := configCandidates(configPath)
+func bootstrapHomeDirFor(homeDir string) string {
+	if raw := strings.TrimSpace(homeDir); raw != "" {
+		return expandTilde(raw)
+	}
+	return bootstrapHomeDir()
+}
+
+func selectConfigFile(configPath, homeDir string) (configSelection, bool, error) {
+	candidates, err := configCandidates(configPath, homeDir)
 	if err != nil {
 		return configSelection{}, false, err
 	}

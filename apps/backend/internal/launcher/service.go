@@ -26,20 +26,21 @@ type serviceArgs struct {
 }
 
 const (
-	actionInstall          = "install"
-	actionUninstall        = "uninstall"
-	actionRestart          = "restart"
-	actionConfig           = "config"
-	actionLogs             = "logs"
-	actionStatus           = "status"
-	actionStop             = "stop"
-	actionSelfUpdate       = "self-update"
-	flagHelp               = "--help"
-	goosLinux              = "linux"
-	goosDarwin             = "darwin"
-	managedMarker          = "managed by kandev"
-	serviceUnitName        = "kandev.service"
-	defaultServiceLogLevel = "info"
+	actionInstall               = "install"
+	actionUninstall             = "uninstall"
+	actionRestart               = "restart"
+	actionConfig                = "config"
+	actionLogs                  = "logs"
+	actionStatus                = "status"
+	actionStop                  = "stop"
+	actionSelfUpdate            = "self-update"
+	flagHelp                    = "--help"
+	goosLinux                   = "linux"
+	goosDarwin                  = "darwin"
+	managedMarker               = "managed by kandev"
+	serviceUnitName             = "kandev.service"
+	defaultServiceLogLevel      = "info"
+	defaultSystemServiceHomeDir = "/var/lib/kandev"
 )
 
 const serviceHelp = `kandev service — install kandev as an OS-managed service
@@ -79,7 +80,7 @@ func runService(argv []string, build BuildInfo) int {
 		return 0
 	}
 	if args.Action == actionInstall {
-		startupConfig, err := loadBootstrapConfig()
+		startupConfig, err := loadServiceBootstrapConfig(args)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 			return 1
@@ -268,7 +269,7 @@ func installSystemd(args serviceArgs, build BuildInfo, unitPath string) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	homeDir := serviceHomeDir(args)
+	homeDir, homeSource := resolveServiceHome(args)
 	logDir := filepath.Join(homeDir, "logs")
 	bundleDir := serviceBundleDir(self)
 	systemUser, err := resolveAndValidateSystemIdentity(args, unitPath, nativeServiceManagerSystemd, homeDir)
@@ -288,7 +289,7 @@ func installSystemd(args serviceArgs, build BuildInfo, unitPath string) int {
 		Version:           serviceVersion(build.Version),
 		PathPrefixes:      serviceNodeToolBinDirs(),
 		ConfigFile:        configFileForChild(args.Startup),
-		HomeDirFromConfig: args.Startup != nil && args.Startup.SourceFor("homeDir") == config.SourceConfiguration,
+		HomeDirFromConfig: homeSource == config.SourceConfiguration,
 		ConfigHomeFile:    args.Startup != nil && args.Startup.Source.HomeFile,
 		LogLevel:          serviceLogLevel(args.Startup),
 	}
@@ -385,7 +386,7 @@ func installLaunchd(args serviceArgs, build BuildInfo, plistPath, target, domain
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	homeDir := serviceHomeDir(args)
+	homeDir, homeSource := resolveServiceHome(args)
 	logDir := filepath.Join(homeDir, "logs")
 	bundleDir := serviceBundleDir(self)
 	systemUser, err := resolveAndValidateSystemIdentity(args, plistPath, nativeServiceManagerLaunchd, homeDir)
@@ -405,7 +406,7 @@ func installLaunchd(args serviceArgs, build BuildInfo, plistPath, target, domain
 		Version:           serviceVersion(build.Version),
 		PathPrefixes:      serviceNodeToolBinDirs(),
 		ConfigFile:        configFileForChild(args.Startup),
-		HomeDirFromConfig: args.Startup != nil && args.Startup.SourceFor("homeDir") == config.SourceConfiguration,
+		HomeDirFromConfig: homeSource == config.SourceConfiguration,
 		ConfigHomeFile:    args.Startup != nil && args.Startup.Source.HomeFile,
 		LogLevel:          serviceLogLevel(args.Startup),
 	}
@@ -799,19 +800,28 @@ func systemctlScope(system bool) []string {
 }
 
 func serviceHomeDir(args serviceArgs) string {
-	if args.HomeDir != "" {
-		return args.HomeDir
+	dir, _ := resolveServiceHome(args)
+	return dir
+}
+
+func resolveServiceHome(args serviceArgs) (string, config.SettingSource) {
+	if strings.TrimSpace(args.HomeDir) != "" {
+		return args.HomeDir, config.SourceFlag
 	}
-	if args.Startup != nil && args.Startup.SourceFor("homeDir") == config.SourceConfiguration {
-		return args.Startup.ResolvedHomeDir()
+	if args.Startup != nil {
+		source := args.Startup.SourceFor("homeDir")
+		switch source {
+		case config.SourceConfiguration, config.SourceEnvironment, config.SourceProfile:
+			return args.Startup.ResolvedHomeDir(), source
+		}
+	}
+	if raw := strings.TrimSpace(os.Getenv("KANDEV_HOME_DIR")); raw != "" {
+		return expandHome(raw), config.SourceEnvironment
 	}
 	if args.System {
-		return "/var/lib/kandev"
+		return defaultSystemServiceHomeDir, config.SourceDefault
 	}
-	if args.Startup != nil && configSourceIsExplicit(args.Startup, "homeDir") {
-		return args.Startup.ResolvedHomeDir()
-	}
-	return resolveHomeDir()
+	return resolveHomeDir(), config.SourceDefault
 }
 
 func serviceLogLevel(cfg *config.Config) string {

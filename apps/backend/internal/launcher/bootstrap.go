@@ -11,7 +11,11 @@ import (
 )
 
 func loadBootstrapConfig() (*config.Config, error) {
-	cfg, err := config.Load()
+	return loadBootstrapConfigWithHome("")
+}
+
+func loadBootstrapConfigWithHome(homeDir string) (*config.Config, error) {
+	cfg, err := config.LoadWithHome(homeDir)
 	if err != nil {
 		return nil, fmt.Errorf("load startup configuration: %w", err)
 	}
@@ -19,6 +23,23 @@ func loadBootstrapConfig() (*config.Config, error) {
 		return nil, fmt.Errorf("apply profile defaults: %w", err)
 	}
 	return cfg, nil
+}
+
+func loadServiceBootstrapConfig(args serviceArgs) (*config.Config, error) {
+	return loadBootstrapConfigWithHome(serviceBootstrapHomeDir(args))
+}
+
+func serviceBootstrapHomeDir(args serviceArgs) string {
+	if strings.TrimSpace(args.HomeDir) != "" {
+		return args.HomeDir
+	}
+	if raw := strings.TrimSpace(os.Getenv("KANDEV_HOME_DIR")); raw != "" {
+		return expandHome(raw)
+	}
+	if args.System {
+		return defaultSystemServiceHomeDir
+	}
+	return resolveHomeDir()
 }
 
 func configSourceIsExplicit(cfg *config.Config, key string) bool {

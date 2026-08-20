@@ -98,3 +98,16 @@ child handoff behavior, files changed, and remaining risks in `## Results`.
 - Service units preserve YAML home/logging values and emit the private file
   handoff. Existing no-file defaults and `KANDEV_BACKEND_PORT` over
   `KANDEV_PORT` behavior remain covered by the complete launcher suite.
+
+Review remediation:
+
+- Service bootstrap discovery now resolves flag, explicit environment, and
+  service-mode default homes before selecting `config.yaml`. Systemd and
+  launchd tests cover flag-over-YAML and environment-over-YAML service metadata.
+- The generated service unit emits `KANDEV_HOME_DIR` unless YAML is the actual
+  winning source, so a stronger flag or environment value cannot be shadowed
+  by the pinned file.
+- Dev backend and Vite readiness waits now use the same typed YAML health
+  timeout. The regression captures both timeout arguments.
+- GREEN: `go test ./internal/launcher -count=1` passed with 230 tests;
+  `go build ./cmd/kandev` passed; changed-file `golangci-lint` passed.

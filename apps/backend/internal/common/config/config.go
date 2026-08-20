@@ -669,14 +669,26 @@ func defaultDockerVolumePath() string {
 // Environment variables use the prefix KANDEV_ with snake_case naming.
 // Config file should be named config.yaml and placed in the current directory or /etc/kandev/.
 func Load() (*Config, error) {
+	return LoadWithHome("")
+}
+
+// LoadWithHome reads the selected configuration while using homeDir as the
+// bootstrap directory for home-file discovery. The override affects file
+// selection only; environment variables still retain their normal precedence
+// over values read from the selected file.
+func LoadWithHome(homeDir string) (*Config, error) {
 	if path := strings.TrimSpace(os.Getenv(InternalConfigFileEnv)); path != "" {
-		return LoadWithPath(path)
+		return loadWithPath(path, homeDir)
 	}
-	return LoadWithPath("")
+	return loadWithPath("", homeDir)
 }
 
 // LoadWithPath reads configuration from the specified path or default locations.
 func LoadWithPath(configPath string) (*Config, error) {
+	return loadWithPath(configPath, "")
+}
+
+func loadWithPath(configPath, homeDir string) (*Config, error) {
 	v := viper.New()
 
 	profileDefaults, err := profiles.EnvironmentDefaults()
@@ -715,7 +727,7 @@ func LoadWithPath(configPath string) (*Config, error) {
 		"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL",
 	)
 
-	selection, found, err := selectConfigFile(configPath)
+	selection, found, err := selectConfigFile(configPath, homeDir)
 	if err != nil {
 		return nil, fmt.Errorf("select configuration file: %w", err)
 	}
