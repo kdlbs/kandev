@@ -135,7 +135,11 @@ function TaskLinkMenu({
           </ContextMenuItem>
         ) : null}
         {onLinkMergeRequest ? (
-          <ContextMenuItem disabled={disabled} onSelect={onLinkMergeRequest}>
+          <ContextMenuItem
+            className="min-h-12! sm:min-h-7!"
+            disabled={disabled}
+            onSelect={onLinkMergeRequest}
+          >
             <IconBrandGitlab className="mr-2 h-4 w-4" />
             {t("task:gitlabMergeRequest")}
           </ContextMenuItem>
