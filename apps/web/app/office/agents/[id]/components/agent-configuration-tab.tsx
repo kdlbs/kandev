@@ -11,6 +11,7 @@ import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
+import { ApiError } from "@/lib/api/client";
 import type { AgentProfile, AgentRole } from "@/lib/state/slices/office/types";
 import { AgentRoutingCard } from "./agent-routing-card";
 import { reportsToOptions } from "./reports-to-options";
@@ -19,6 +20,25 @@ import { useTranslation } from "react-i18next";
 type AgentConfigurationTabProps = {
   agent: AgentProfile;
 };
+
+function agentValidationMessage(error: unknown, translate: (key: string) => string): string | null {
+  if (!(error instanceof ApiError) || !error.body || typeof error.body !== "object") return null;
+  const code = "code" in error.body ? error.body.code : null;
+  if (typeof code !== "string") return null;
+  // i18n-exempt: backend validation codes, not user-facing copy.
+  switch (code) {
+    case "agent_ceo_reports_to":
+      return translate("office:agentCeoReportsToError");
+    case "agent_reports_to_invalid":
+      return translate("office:agentReportsToInvalidError");
+    case "agent_reports_to_self":
+      return translate("office:agentReportsToSelfError");
+    case "agent_reports_to_cycle":
+      return translate("office:agentReportsToCycleError");
+    default:
+      return null;
+  }
+}
 
 // Catalog keys, not copy — module scope freezes a `t()` at the boot locale.
 // The record keys are wire values and stay untranslated.
@@ -239,7 +259,10 @@ function useAgentConfigurationForm(agent: AgentProfile) {
       setDirty(false);
       toast.success(t("office:agentConfigurationUpdated"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("office:failedToUpdateAgent"));
+      toast.error(
+        agentValidationMessage(err, t) ??
+          (err instanceof Error ? err.message : t("office:failedToUpdateAgent")),
+      );
     } finally {
       if (activeAgentIdRef.current === targetAgentId && saveRequestRef.current === requestId) {
         setSaving(false);

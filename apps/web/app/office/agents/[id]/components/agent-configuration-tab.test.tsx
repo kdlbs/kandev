@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { toast } from "sonner";
 import { StateProvider } from "@/components/state-provider";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
+import { ApiError } from "@/lib/api/client";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { defaultOfficeState } from "@/lib/state/slices/office/office-slice";
@@ -211,6 +213,20 @@ describe("AgentConfigurationTab save errors", () => {
 
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: SAVE_BUTTON })).not.toBeNull();
+    });
+  });
+
+  it("translates a reporting validation error code", async () => {
+    vi.mocked(updateAgentProfile).mockRejectedValueOnce(
+      new ApiError("raw backend message", 400, { code: "agent_reports_to_cycle" }),
+    );
+    renderConfigTab([baseAgent], baseAgent);
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Retry CEO" } });
+    fireEvent.click(screen.getByRole("button", { name: SAVE_BUTTON }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("The reporting structure cannot contain a cycle.");
     });
   });
 });
