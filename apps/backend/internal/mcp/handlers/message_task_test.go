@@ -65,6 +65,17 @@ type failingQueueSnapshotRepository struct {
 	failSessionID string
 }
 
+type failingDirectDeliveryAcknowledgementRepository struct {
+	messagequeue.Repository
+	messagequeue.DeliveryLedger
+}
+
+func (failingDirectDeliveryAcknowledgementRepository) AcknowledgeDirectDelivery(
+	context.Context, string, string, time.Time,
+) (*messagequeue.Delivery, error) {
+	return nil, errors.New("injected direct delivery acknowledgement failure")
+}
+
 func (r *failingQueueSnapshotRepository) ListBySession(
 	ctx context.Context,
 	sessionID string,
@@ -1080,6 +1091,38 @@ func TestHandleMessageTask_WaitingReceiptIsDeliveredOnce(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, processed)
 	require.Len(t, orch.promptCalls, 1)
+}
+
+func TestHandleMessageTask_WaitingReceiptAcknowledgementFailureIsAmbiguous(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	ledger := queueRepo.(messagequeue.DeliveryLedger)
+	orch.queue = messagequeue.NewService(failingDirectDeliveryAcknowledgementRepository{
+		Repository: queueRepo, DeliveryLedger: ledger,
+	}, 1, testLogger(t))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "waiting-source-turn-ambiguous", TaskID: sender.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+
+	response, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "durable waiting", sender.ID)))
+	require.NoError(t, err)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	assert.Equal(t, "sent", payload["status"])
+	assert.Equal(t, "ambiguous", payload["delivery_status"])
+	require.Len(t, orch.promptCalls, 1)
+
+	stored, err := ledger.GetDelivery(ctx, payload["delivery_id"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, messagequeue.DeliveryAmbiguous, stored.State)
+	processed, err := orch.queue.ProcessDueDeliveries(ctx, time.Now().UTC().Add(2*time.Minute), "restart-worker")
+	require.NoError(t, err)
+	assert.Zero(t, processed, "an ambiguous accepted direct prompt must not replay")
+	assert.Len(t, orch.promptCalls, 1)
+	_ = session
 }
 
 func TestHandleMessageTask_CreatedReceiptStartsOnce(t *testing.T) {

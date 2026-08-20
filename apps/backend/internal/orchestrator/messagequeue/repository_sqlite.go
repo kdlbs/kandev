@@ -936,11 +936,7 @@ func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*
 		return nil, fmt.Errorf("reserve head: %w", err)
 	}
 	if msg.IsDurableLifecycle() {
-		if deliveryID, _ := msg.Metadata[MetadataDeliveryID].(string); deliveryID != "" && msg.IsReservedInFlight() {
-			// A peer-delivery receipt was already handed to an executor before a
-			// crash. Its acceptance is externally observable, so automatically
-			// replaying this ambiguous row could duplicate the prompt. Keep the
-			// payload/receipt for explicit recovery instead of guessing.
+		if msg.IsReservedInFlight() && r.peerDeliveryReservationIsAmbiguous(ctx, tx, msg) {
 			return nil, nil
 		}
 		// Keep the row for crash recovery but stop reporting it as pending.
@@ -988,6 +984,21 @@ func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*
 		return nil, err
 	}
 	return msg, nil
+}
+
+func (r *sqliteRepository) peerDeliveryReservationIsAmbiguous(ctx context.Context, tx *sqlx.Tx, msg *QueuedMessage) bool {
+	if msg == nil {
+		return false
+	}
+	deliveryID, _ := msg.Metadata[MetadataDeliveryID].(string)
+	if deliveryID == "" {
+		return false
+	}
+	var state DeliveryState
+	err := tx.GetContext(ctx, &state, r.db.Rebind(`
+		SELECT state FROM message_deliveries WHERE id = ? AND queue_entry_id = ?
+	`), deliveryID, msg.ID)
+	return err == nil && state == DeliveryAmbiguous
 }
 
 // AcknowledgeByID removes a reserved durable entry after executor acceptance.

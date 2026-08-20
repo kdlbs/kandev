@@ -302,9 +302,6 @@ func (r *memoryRepository) ReserveHead(_ context.Context, sessionID string) (*Qu
 	head := list[0]
 	out := *head
 	if head.IsDurableLifecycle() {
-		if deliveryID, _ := head.Metadata[MetadataDeliveryID].(string); deliveryID != "" && head.IsReservedInFlight() {
-			return nil, nil
-		}
 		// Mirror the SQLite reservation: the stored row is flagged in flight so
 		// queue status stops listing it, while the returned copy keeps the
 		// unmarked metadata a requeue would write back.

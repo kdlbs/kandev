@@ -10,7 +10,7 @@ Task-to-task messages can be rejected while a target FIFO is full. Asking the so
 
 ## Decision
 
-Task-mode peer messages create or return a durable, idempotent delivery receipt before ordinary queue admission. Capacity saturation returns `pending_capacity`, not an LLM retry instruction. A bounded, lease-based worker promotes the retained payload, records reserve/acknowledgement outcomes, and leaves exhausted or nonretryable rows recoverable with their payload and error.
+Task-mode peer messages create or return a durable, idempotent delivery receipt before ordinary queue admission. Capacity saturation returns `pending_capacity`, not an LLM retry instruction. A bounded, lease-based worker promotes the retained payload, records reserve/acknowledgement outcomes, and leaves exhausted or nonretryable rows recoverable with their payload and error. A receipt whose executor acceptance occurred but whose terminal acknowledgement cannot be confirmed is retained as `ambiguous` and never automatically replayed.
 
 The idempotency identity is caller supplied when present, otherwise a stable source-session/source-turn fingerprint. Workflow control deliveries use a committed transition identity and do not consume ordinary peer-message capacity.
 

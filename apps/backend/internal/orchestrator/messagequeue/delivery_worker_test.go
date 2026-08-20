@@ -182,7 +182,7 @@ func TestProcessDueDeliveriesReusesExistingQueueEntryAfterAcknowledgementFailure
 	assert.Equal(t, delivery.ID, entries[0].Metadata[MetadataDeliveryID])
 }
 
-func TestAcknowledgeQueuedDeliveryFailurePreservesReceiptAndFIFOForRetry(t *testing.T) {
+func TestAcknowledgeQueuedDeliveryFailureRetainsAmbiguousReceiptWithoutReplay(t *testing.T) {
 	baseRepo := newTestSQLiteRepo(t)
 	ledger := baseRepo.(DeliveryLedger)
 	repo := &failingDeliveryQueueAcknowledgementRepository{
@@ -206,20 +206,51 @@ func TestAcknowledgeQueuedDeliveryFailurePreservesReceiptAndFIFOForRetry(t *test
 
 	stored, err := ledger.GetDelivery(ctx, delivery.ID)
 	require.NoError(t, err)
-	assert.Equal(t, DeliveryQueued, stored.State)
+	assert.Equal(t, DeliveryAmbiguous, stored.State)
 	entries, err := baseRepo.ListBySession(ctx, "target-session")
 	require.NoError(t, err)
 	require.Len(t, entries, 1, "a failed acknowledgement must not drop the only FIFO copy")
 	assert.Equal(t, reserved.ID, entries[0].ID)
 
-	repo.failDispatchAcknowledgement = false
+	// An operator can inspect this receipt, but the ordinary recovery action
+	// must not blindly send a prompt that the executor may have already taken.
+	_, err = service.RetryDeliveryReceipt(ctx, delivery.ID)
+	require.ErrorIs(t, err, ErrEntryNotFound)
+	restarted := NewService(baseRepo, 2, logger.Default())
+	_, replayed := restarted.ReserveQueued(ctx, "target-session")
+	assert.False(t, replayed, "accepted-but-unfinalized delivery must not auto-replay")
+}
+
+func TestAcknowledgeQueuedDeliveryFinalizesDirectInterruptReceiptFromEntryMetadata(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	service := NewService(repo, 2, logger.Default())
+	ledger := repo.(DeliveryLedger)
+	ctx := context.Background()
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn",
+		IdempotencyKey: "interrupt-v1", TargetTaskID: "target-task", TargetSessionID: "target-session",
+		Content: "stop and take this", State: DeliveryPendingCapacity,
+	})
+	require.NoError(t, err)
+	_, claimed, err := ledger.ReserveDeliveryForDirectDispatch(ctx, delivery.ID, "mcp-interrupt", time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	queued, err := service.QueueMessageWithMetadata(ctx, "target-session", "target-task", delivery.Content, "", QueuedByAgent, false, nil,
+		map[string]interface{}{MetadataLifecycleDurable: true, MetadataDeliveryID: delivery.ID})
+	require.NoError(t, err)
+	reserved, ok := service.ReserveQueued(ctx, "target-session")
+	require.True(t, ok)
+	require.Equal(t, queued.ID, reserved.ID)
+
+	// QueueAndInterrupt can accept this entry before its caller returns to
+	// attach queue_entry_id. The callback must still terminalize this exact
+	// reserved direct receipt from the trusted FIFO metadata.
 	require.NoError(t, service.AcknowledgeQueued(ctx, "target-session", reserved.ID))
-	stored, err = ledger.GetDelivery(ctx, delivery.ID)
+	stored, err := ledger.GetDelivery(ctx, delivery.ID)
 	require.NoError(t, err)
 	assert.Equal(t, DeliveryDelivered, stored.State)
-	entries, err = baseRepo.ListBySession(ctx, "target-session")
-	require.NoError(t, err)
-	assert.Empty(t, entries, "retry acknowledges exactly the original delivery without a duplicate")
+	assert.Equal(t, queued.ID, stored.QueueEntryID)
+	assert.Empty(t, service.GetStatus(ctx, "target-session").Entries)
 }
 
 func TestDeliveryRecoveryLifecycleProcessesStartupScanAndStops(t *testing.T) {

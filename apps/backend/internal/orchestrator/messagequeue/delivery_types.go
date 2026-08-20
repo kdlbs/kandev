@@ -15,8 +15,13 @@ const (
 	DeliveryDelivered       DeliveryState = "delivered"
 	DeliveryRetryWait       DeliveryState = "retry_wait"
 	DeliveryRecoverable     DeliveryState = "recoverable"
-	DeliveryTerminalFailed  DeliveryState = "terminal_failed"
-	DeliveryCancelled       DeliveryState = "cancelled"
+	// DeliveryAmbiguous retains a prompt that may already have reached its
+	// executor but whose terminal receipt transaction could not be confirmed.
+	// It is deliberately excluded from automatic retries: replay could create
+	// a duplicate prompt.
+	DeliveryAmbiguous      DeliveryState = "ambiguous"
+	DeliveryTerminalFailed DeliveryState = "terminal_failed"
+	DeliveryCancelled      DeliveryState = "cancelled"
 )
 
 // ErrDeliveryLeaseLost means another worker owns, released, or reclaimed a

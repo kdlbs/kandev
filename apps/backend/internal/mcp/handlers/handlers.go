@@ -3707,21 +3707,22 @@ func (h *Handlers) deleteRecordedUserMessage(ctx context.Context, message *model
 // rather than blocking for the entire target turn.
 func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, prompt string) (string, error) {
 	promptTask := func() (*orchestrator.PromptResult, error) {
-		if dispatch, _ := ctx.Value(taskMessageDirectDeliveryContextKey{}).(*taskMessageDirectDeliveryDispatch); dispatch != nil {
-			if launcher, ok := h.sessionLauncher.(acceptedPromptCallbackLauncher); ok {
-				return launcher.PromptTaskWithAcceptedCallback(ctx, taskID, sessionID, prompt, "", false, nil, true, func() error {
-					receipt, err := h.sessionLauncher.GetMessageQueue().AcknowledgeDirectDelivery(ctx, dispatch.deliveryID, dispatch.leaseOwner)
-					if err == nil && receipt != nil {
-						dispatch.accepted = true
-					}
-					return err
-				})
+		if launcher, ok := h.sessionLauncher.(acceptedPromptCallbackLauncher); ok {
+			if callback := h.directDeliveryAcceptedCallback(ctx); callback != nil {
+				return launcher.PromptTaskWithAcceptedCallback(ctx, taskID, sessionID, prompt, "", false, nil, true, callback)
 			}
 		}
 		return h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true)
 	}
 	_, err := promptTask()
 	if err == nil {
+		return taskMessageStatusSent, nil
+	}
+	if dispatch, _ := ctx.Value(taskMessageDirectDeliveryContextKey{}).(*taskMessageDirectDeliveryDispatch); dispatch != nil && dispatch.accepted {
+		return taskMessageStatusSent, nil
+	}
+	var accepted interface{ DetachedResumeAccepted() bool }
+	if errors.As(err, &accepted) && accepted.DetachedResumeAccepted() {
 		return taskMessageStatusSent, nil
 	}
 	if !errors.Is(err, executor.ErrExecutionNotFound) {
@@ -3739,6 +3740,24 @@ func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, 
 		return "", fmt.Errorf("failed to send prompt after resume: %w", retryErr)
 	}
 	return taskMessageStatusSent, nil
+}
+
+func (h *Handlers) directDeliveryAcceptedCallback(ctx context.Context) func() error {
+	dispatch, _ := ctx.Value(taskMessageDirectDeliveryContextKey{}).(*taskMessageDirectDeliveryDispatch)
+	if dispatch == nil {
+		return nil
+	}
+	return func() error {
+		dispatch.accepted = true
+		_, err := h.sessionLauncher.GetMessageQueue().AcknowledgeDirectDelivery(ctx, dispatch.deliveryID, dispatch.leaseOwner)
+		if err == nil {
+			return nil
+		}
+		_, ambiguousErr := h.sessionLauncher.GetMessageQueue().MarkDirectDeliveryAmbiguous(
+			ctx, dispatch.deliveryID, dispatch.leaseOwner, "accepted_prompt_acknowledgement_failed",
+		)
+		return errors.Join(err, ambiguousErr)
+	}
 }
 
 // publishQueueStatusEvent fires a queue.status_changed event so the frontend

@@ -139,6 +139,25 @@ func (s *Service) AcknowledgeDirectDelivery(ctx context.Context, deliveryID, lea
 	return ledger.AcknowledgeDirectDelivery(ctx, deliveryID, leaseOwner, time.Now().UTC())
 }
 
+func (s *Service) MarkDirectDeliveryAmbiguous(ctx context.Context, deliveryID, leaseOwner, lastError string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	return ledger.MarkDirectDeliveryAmbiguous(ctx, deliveryID, leaseOwner, lastError)
+}
+
+// MarkQueuedDeliveryAmbiguous retains an accepted prompt when the queue-entry
+// acknowledgement could not be confirmed. The record is intentionally not
+// eligible for automatic retry.
+func (s *Service) MarkQueuedDeliveryAmbiguous(ctx context.Context, queueEntryID, lastError string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	return ledger.MarkDeliveryAmbiguousByQueueEntry(ctx, queueEntryID, lastError)
+}
+
 func (s *Service) MarkDeliveryQueued(ctx context.Context, deliveryID, leaseOwner, queueEntryID string) (*Delivery, error) {
 	ledger, ok := s.repo.(DeliveryLedger)
 	if !ok {
@@ -651,10 +670,7 @@ func (s *Service) ReserveQueued(ctx context.Context, sessionID string) (*QueuedM
 // AcknowledgeQueued removes a server-reserved entry after prompt acceptance.
 func (s *Service) AcknowledgeQueued(ctx context.Context, sessionID, entryID string) error {
 	if acknowledger, ok := s.repo.(deliveryQueueAcknowledger); ok {
-		if err := acknowledger.AcknowledgeQueueEntryAndDelivery(ctx, sessionID, entryID, time.Now().UTC()); err != nil && !errors.Is(err, ErrEntryNotFound) {
-			return err
-		}
-		return nil
+		return s.acknowledgeQueuedDurably(ctx, acknowledger, sessionID, entryID)
 	}
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		return s.repo.AcknowledgeByID(admittedCtx, sessionID, entryID)
@@ -671,6 +687,27 @@ func (s *Service) AcknowledgeQueued(ctx context.Context, sessionID, entryID stri
 	}
 	_, err = ledger.AcknowledgeDeliveryByQueueEntry(ctx, entryID, time.Now().UTC())
 	return err
+}
+
+func (s *Service) acknowledgeQueuedDurably(
+	ctx context.Context, acknowledger deliveryQueueAcknowledger, sessionID, entryID string,
+) error {
+	err := acknowledger.AcknowledgeQueueEntryAndDelivery(ctx, sessionID, entryID, time.Now().UTC())
+	if err == nil || errors.Is(err, ErrEntryNotFound) {
+		return nil
+	}
+	// This method is called only from the executor-acceptance callback. If the
+	// atomic terminal transaction cannot be confirmed, retain an explicit
+	// non-replayable receipt instead of treating the row as pre-dispatch.
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return err
+	}
+	_, markErr := ledger.MarkDeliveryAmbiguousByQueueEntry(ctx, entryID, "accepted_prompt_acknowledgement_failed")
+	if markErr == nil || errors.Is(markErr, ErrEntryNotFound) {
+		return err
+	}
+	return errors.Join(err, markErr)
 }
 
 // IsCurrentLifecycleReservation verifies that msg is still the durable row

@@ -21,12 +21,14 @@ type DeliveryLedger interface {
 	GetDeliveryBySourceKey(ctx context.Context, senderSessionID, sourceTurnID, idempotencyKey string) (*Delivery, error)
 	ReserveDeliveryForDirectDispatch(ctx context.Context, deliveryID, leaseOwner string, leaseDuration time.Duration) (*Delivery, bool, error)
 	AcknowledgeDirectDelivery(ctx context.Context, deliveryID, leaseOwner string, deliveredAt time.Time) (*Delivery, error)
+	MarkDirectDeliveryAmbiguous(ctx context.Context, deliveryID, leaseOwner, lastError string) (*Delivery, error)
 	GetDelivery(ctx context.Context, deliveryID string) (*Delivery, error)
 	ClaimDueDeliveries(ctx context.Context, now time.Time, leaseOwner string, leaseDuration time.Duration, limit int) ([]Delivery, error)
 	RescheduleDelivery(ctx context.Context, deliveryID, leaseOwner string, nextAttemptAt time.Time, lastError string) (*Delivery, error)
 	MarkDeliveryQueued(ctx context.Context, deliveryID, leaseOwner, queueEntryID string) (*Delivery, error)
 	AcknowledgeDelivery(ctx context.Context, deliveryID, queueEntryID string, deliveredAt time.Time) (*Delivery, error)
 	AcknowledgeDeliveryByQueueEntry(ctx context.Context, queueEntryID string, deliveredAt time.Time) (*Delivery, error)
+	MarkDeliveryAmbiguousByQueueEntry(ctx context.Context, queueEntryID, lastError string) (*Delivery, error)
 	MarkDeliveryRecoverable(ctx context.Context, deliveryID, leaseOwner, lastError string) (*Delivery, error)
 	RetryDelivery(ctx context.Context, deliveryID string, nextAttemptAt time.Time) (*Delivery, error)
 }
@@ -85,32 +87,16 @@ func (r *sqliteRepository) AcknowledgeQueueEntryAndDelivery(
 		return err
 	}
 
-	// Not every queued entry has a delivery receipt. Preserve the ordinary
-	// acknowledgement behavior while requiring a receipt transition whenever
-	// a durable delivery owns this exact entry.
-	var deliveryID string
-	err = tx.GetContext(ctx, &deliveryID, r.db.Rebind(`
-		SELECT id FROM message_deliveries WHERE queue_entry_id = ?
-	`), queueEntryID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("load delivery queue acknowledgement: %w", err)
+	// Not every queued entry has a delivery receipt. A direct interrupt may
+	// reach executor acceptance before its caller can attach queue_entry_id to
+	// the reserved receipt, so resolve the backend-owned metadata fallback in
+	// the same transaction as the FIFO deletion.
+	deliveryID, err := r.deliveryIDForQueueEntryTx(ctx, tx, queueEntryID)
+	if err != nil {
+		return err
 	}
-	if err == nil {
-		result, updateErr := tx.ExecContext(ctx, r.db.Rebind(`
-			UPDATE message_deliveries
-			SET state = ?, delivered_at = ?, updated_at = ?
-			WHERE id = ? AND queue_entry_id = ? AND state = ?
-		`), DeliveryDelivered, deliveredAt, deliveredAt, deliveryID, queueEntryID, DeliveryQueued)
-		if updateErr != nil {
-			return fmt.Errorf("acknowledge delivery in queue transaction: %w", updateErr)
-		}
-		affected, rowsErr := result.RowsAffected()
-		if rowsErr != nil {
-			return rowsErr
-		}
-		if affected != 1 {
-			return ErrEntryNotFound
-		}
+	if err := r.markQueueDeliveryDeliveredTx(ctx, tx, deliveryID, queueEntryID, deliveredAt); err != nil {
+		return err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM queued_messages WHERE id = ? AND session_id = ?
@@ -132,6 +118,63 @@ func (r *sqliteRepository) AcknowledgeQueueEntryAndDelivery(
 		adminmetrics.RecordMessageDeliveryOutcome(string(DeliveryDelivered), 1)
 	}
 	return nil
+}
+
+func (r *sqliteRepository) markQueueDeliveryDeliveredTx(
+	ctx context.Context, tx *sqlx.Tx, deliveryID, queueEntryID string, deliveredAt time.Time,
+) error {
+	if deliveryID == "" {
+		return nil
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE message_deliveries
+			SET state = ?, queue_entry_id = ?, delivered_at = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+			WHERE id = ? AND (
+				(queue_entry_id = ? AND state = ?)
+				OR (queue_entry_id = '' AND state = ?)
+			)
+	`), DeliveryDelivered, queueEntryID, deliveredAt, deliveredAt, deliveryID, queueEntryID, DeliveryQueued, DeliveryReserved)
+	if err != nil {
+		return fmt.Errorf("acknowledge delivery in queue transaction: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 1 {
+		return nil
+	}
+	var state DeliveryState
+	err = tx.GetContext(ctx, &state, r.db.Rebind(`SELECT state FROM message_deliveries WHERE id = ?`), deliveryID)
+	if err != nil || state != DeliveryDelivered {
+		return ErrEntryNotFound
+	}
+	return nil
+}
+
+func (r *sqliteRepository) deliveryIDForQueueEntryTx(ctx context.Context, tx *sqlx.Tx, queueEntryID string) (string, error) {
+	var deliveryID string
+	err := tx.GetContext(ctx, &deliveryID, r.db.Rebind(`SELECT id FROM message_deliveries WHERE queue_entry_id = ?`), queueEntryID)
+	if err == nil {
+		return deliveryID, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("load delivery queue acknowledgement: %w", err)
+	}
+	var metadataJSON string
+	err = tx.GetContext(ctx, &metadataJSON, r.db.Rebind(`SELECT metadata_json FROM queued_messages WHERE id = ?`), queueEntryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("load queued delivery metadata: %w", err)
+	}
+	metadata := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		return "", fmt.Errorf("decode queued delivery metadata: %w", err)
+	}
+	deliveryID, _ = metadata[MetadataDeliveryID].(string)
+	return deliveryID, nil
 }
 
 // CreateOrGetDelivery atomically creates a source-turn idempotency receipt or
@@ -216,6 +259,25 @@ func (r *sqliteRepository) AcknowledgeDirectDelivery(ctx context.Context, delive
 	stored, err := r.deliveryAfterLeasedUpdate(ctx, deliveryID, result)
 	if err == nil {
 		adminmetrics.RecordMessageDeliveryOutcome(string(DeliveryDelivered), 1)
+	}
+	return stored, err
+}
+
+// MarkDirectDeliveryAmbiguous preserves an externally accepted direct prompt
+// when its receipt terminalization cannot be confirmed. Unlike a lease expiry,
+// this state is never reclaimed by the automatic worker.
+func (r *sqliteRepository) MarkDirectDeliveryAmbiguous(ctx context.Context, deliveryID, leaseOwner, lastError string) (*Delivery, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE message_deliveries
+		SET state = ?, last_error = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+		WHERE id = ? AND state = ? AND lease_owner = ?
+	`), DeliveryAmbiguous, lastError, time.Now().UTC(), deliveryID, DeliveryReserved, leaseOwner)
+	if err != nil {
+		return nil, fmt.Errorf("mark direct delivery ambiguous: %w", err)
+	}
+	stored, err := r.deliveryAfterLeasedUpdate(ctx, deliveryID, result)
+	if err == nil {
+		adminmetrics.RecordMessageDeliveryOutcome(string(DeliveryAmbiguous), 1)
 	}
 	return stored, err
 }
@@ -360,6 +422,68 @@ func (r *sqliteRepository) AcknowledgeDeliveryByQueueEntry(ctx context.Context, 
 	}
 	adminmetrics.RecordMessageDeliveryOutcome(string(DeliveryDelivered), 1)
 	return r.getDeliveryByQueueEntry(ctx, queueEntryID)
+}
+
+// MarkDeliveryAmbiguousByQueueEntry records an accepted-prompt acknowledgement
+// failure without guessing that the prompt can be replayed. It is idempotent
+// for the same receipt so a callback that observes an uncertain commit cannot
+// turn an already delivered receipt back into a retryable one.
+func (r *sqliteRepository) MarkDeliveryAmbiguousByQueueEntry(ctx context.Context, queueEntryID, lastError string) (*Delivery, error) {
+	deliveryID, err := r.deliveryIDForQueueEntry(ctx, queueEntryID)
+	if err != nil {
+		return nil, err
+	}
+	if deliveryID == "" {
+		return nil, ErrEntryNotFound
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE message_deliveries
+		SET state = ?, last_error = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+		WHERE id = ? AND state IN (?, ?)
+	`), DeliveryAmbiguous, lastError, time.Now().UTC(), deliveryID, DeliveryQueued, DeliveryReserved)
+	if err != nil {
+		return nil, fmt.Errorf("mark delivery ambiguous: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("mark delivery ambiguous rows affected: %w", err)
+	}
+	delivery, err := r.GetDelivery(ctx, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 && delivery.State != DeliveryAmbiguous && delivery.State != DeliveryDelivered {
+		return nil, ErrEntryNotFound
+	}
+	if affected == 1 {
+		adminmetrics.RecordMessageDeliveryOutcome(string(DeliveryAmbiguous), 1)
+	}
+	return delivery, nil
+}
+
+func (r *sqliteRepository) deliveryIDForQueueEntry(ctx context.Context, queueEntryID string) (string, error) {
+	var deliveryID string
+	err := r.db.GetContext(ctx, &deliveryID, r.db.Rebind(`SELECT id FROM message_deliveries WHERE queue_entry_id = ?`), queueEntryID)
+	if err == nil {
+		return deliveryID, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("load delivery queue receipt: %w", err)
+	}
+	var metadataJSON string
+	err = r.db.GetContext(ctx, &metadataJSON, r.db.Rebind(`SELECT metadata_json FROM queued_messages WHERE id = ?`), queueEntryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("load queued delivery metadata: %w", err)
+	}
+	metadata := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		return "", fmt.Errorf("decode queued delivery metadata: %w", err)
+	}
+	deliveryID, _ = metadata[MetadataDeliveryID].(string)
+	return deliveryID, nil
 }
 
 // MarkDeliveryRecoverable ends automatic retries while retaining the payload

@@ -257,6 +257,39 @@ func TestDeliveryLedgerPostgreSQLParity(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, DeliveryDelivered, directDelivered.State)
 
+	// PostgreSQL must use the same transaction for FIFO removal and receipt
+	// terminalization. This also covers the direct-interrupt metadata fallback:
+	// the entry can reach the executor before queue_entry_id is attached.
+	interrupt, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn-interrupt",
+		IdempotencyKey: "interrupt-v1", TargetTaskID: "target-task", TargetSessionID: "target-session",
+		Content: "take this now", State: DeliveryPendingCapacity,
+	})
+	require.NoError(t, err)
+	_, claimedInterrupt, err := ledger.ReserveDeliveryForDirectDispatch(ctx, interrupt.ID, "mcp-interrupt", time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimedInterrupt)
+	entry := &QueuedMessage{
+		SessionID: "target-session", TaskID: "target-task", Content: interrupt.Content, QueuedBy: QueuedByAgent,
+		Metadata: map[string]interface{}{MetadataLifecycleDurable: true, MetadataDeliveryID: interrupt.ID},
+	}
+	require.NoError(t, repo.Insert(ctx, entry, 0))
+	reserved, err := repo.ReserveHead(ctx, entry.SessionID)
+	require.NoError(t, err)
+	require.NotNil(t, reserved)
+	acknowledger, ok := repo.(interface {
+		AcknowledgeQueueEntryAndDelivery(context.Context, string, string, time.Time) error
+	})
+	require.True(t, ok)
+	require.NoError(t, acknowledger.AcknowledgeQueueEntryAndDelivery(ctx, entry.SessionID, entry.ID, now.Add(4*time.Minute)))
+	interruptDelivered, err := ledger.GetDelivery(ctx, interrupt.ID)
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryDelivered, interruptDelivered.State)
+	assert.Equal(t, entry.ID, interruptDelivered.QueueEntryID)
+	entries, err := repo.ListBySession(ctx, entry.SessionID)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+
 	pending, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
 		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn-2",
 		IdempotencyKey: "report-v2", TargetTaskID: "target-task", TargetSessionID: "target-session",
