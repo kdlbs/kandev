@@ -359,6 +359,7 @@ func TestHandleWSNewSessionStartsAndConfiguresMCPAttachmentAttempt(t *testing.T)
 
 func TestHandleWSNewSessionForwardsServerOwnedAdditionalDirectories(t *testing.T) {
 	log := newTestLogger()
+	sourceCheckout := t.TempDir()
 	workspace := t.TempDir()
 	apiRoot := filepath.Join(workspace, "api")
 	if err := os.Mkdir(apiRoot, 0o755); err != nil {
@@ -379,6 +380,45 @@ func TestHandleWSNewSessionForwardsServerOwnedAdditionalDirectories(t *testing.T
 	}
 	if !slices.Equal(capture.directories, []string{workspace, apiRoot}) {
 		t.Fatalf("additional directories = %v, want %v", capture.directories, []string{workspace, apiRoot})
+	}
+	if slices.Contains(capture.directories, sourceCheckout) {
+		t.Fatalf("source checkout was exposed through ACP additional directories: %v", capture.directories)
+	}
+}
+
+func TestHandleWSNewSessionRejectsChangedAdditionalDirectoryBeforeProviderSession(t *testing.T) {
+	log := newTestLogger()
+	workspace := t.TempDir()
+	attached := filepath.Join(workspace, "attached")
+	if err := os.Mkdir(attached, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.InstanceConfig{Port: 0, WorkDir: workspace, WorkspaceSourceRoots: []string{workspace, attached}}
+	procMgr := process.NewManager(cfg, log)
+	s := NewServer(cfg, procMgr, nil, nil, log)
+	capture := &additionalDirectoriesCaptureAdapter{}
+	s.procMgr.SetAdapterForTest(capture)
+	if err := os.Remove(attached); err != nil {
+		t.Fatal(err)
+	}
+
+	msg, err := ws.NewRequest("req-1", "agent.session.new", NewSessionRequest{})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	response := s.handleWSNewSession(context.Background(), msg)
+	if response.Type != ws.MessageTypeError {
+		t.Fatalf("response type = %q, want error", response.Type)
+	}
+	var payload ws.ErrorPayload
+	if err := response.ParsePayload(&payload); err != nil {
+		t.Fatalf("ParsePayload: %v", err)
+	}
+	if !strings.Contains(payload.Message, "git_metadata_projection_unsupported") {
+		t.Fatalf("error message = %q, want unsupported projection", payload.Message)
+	}
+	if capture.directories != nil {
+		t.Fatalf("provider session started with changed roots: %v", capture.directories)
 	}
 }
 

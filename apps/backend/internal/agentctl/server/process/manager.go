@@ -458,6 +458,26 @@ func (m *Manager) WorkspaceSourceRoots() []string {
 	return m.currentWorkspaceSourceRoots()
 }
 
+// ValidatedWorkspaceSourceRoots re-resolves every lifecycle-authorized root
+// immediately before an ACP session consumes it. The snapshot must remain the
+// exact canonical allowlist; a removed, swapped, or widened root fails closed.
+func (m *Manager) ValidatedWorkspaceSourceRoots() ([]string, error) {
+	roots := m.currentWorkspaceSourceRoots()
+	if len(roots) == 0 {
+		return nil, errors.New("workspace source roots are unavailable")
+	}
+	validated := canonicalWorkspaceSourceRoots(roots)
+	if len(validated) != len(roots) {
+		return nil, errors.New("workspace source roots changed")
+	}
+	for index := range roots {
+		if validated[index] != roots[index] {
+			return nil, errors.New("workspace source roots changed")
+		}
+	}
+	return validated, nil
+}
+
 // lookupBaseBranch reads the task's recorded base branch for a given
 // repository name from the per-instance map. The empty key "" addresses the
 // single-repo / root tracker. Falls back to the empty-key entry when the
