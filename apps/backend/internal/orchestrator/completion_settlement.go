@@ -49,11 +49,6 @@ func (s *Service) reconcileCompletionIntent(ctx context.Context, store completio
 		return
 	}
 	now := time.Now().UTC()
-	task, err := s.repo.GetTask(ctx, intent.TaskID)
-	if err != nil || task == nil || task.WorkflowStepID != intent.WorkflowStepID {
-		s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSuperseded, now)
-		return
-	}
 	turn, err := s.turnService.GetActiveTurn(ctx, intent.SessionID)
 	if err != nil && !isNoActiveTurnError(err) {
 		s.logger.Warn("failed to load active turn for completion intent", zap.String("intent_id", intent.ID), zap.Error(err))
@@ -69,6 +64,14 @@ func (s *Service) reconcileCompletionIntent(ctx context.Context, store completio
 			return
 		}
 		s.activeTurns.CompareAndDelete(intent.SessionID, intent.TurnID)
+	}
+	// A later workflow move must never replay this old completion, but it does
+	// not own the captured stale turn. Release that exact ownership first, then
+	// mark the old intent superseded without evaluating its source step.
+	task, err := s.repo.GetTask(ctx, intent.TaskID)
+	if err != nil || task == nil || task.WorkflowStepID != intent.WorkflowStepID {
+		s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSuperseded, now)
+		return
 	}
 	session, err := s.repo.GetTaskSession(ctx, intent.SessionID)
 	if err != nil {
