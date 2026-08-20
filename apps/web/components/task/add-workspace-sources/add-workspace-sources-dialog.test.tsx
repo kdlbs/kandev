@@ -205,9 +205,8 @@ describe("AddWorkspaceSourcesDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
     const addFolder = screen.getByRole("button", { name: /Add folder/ }) as HTMLButtonElement;
     expect(addFolder.disabled).toBe(true);
-    expect(
-      screen.getByText("Waiting to confirm this task's executor supports folders"),
-    ).toBeTruthy();
+    const hint = screen.getByText("Waiting to confirm this task's executor supports folders");
+    expect(hint.className).toContain("text-xs");
   });
 
   it("keeps Add folder absent once the executor is known not to support folders", async () => {

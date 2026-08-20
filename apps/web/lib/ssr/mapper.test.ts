@@ -159,6 +159,18 @@ describe("snapshotToState", () => {
     expect(state.kanban?.tasks[0]?.isRemoteExecutor).toBe(false);
   });
 
+  it("leaves an explicitly undefined executor binding unset", () => {
+    // Reviewer-requested wire-contract coverage. JSON omits undefined values,
+    // but typed snapshot fixtures can retain the property; both representations
+    // must produce the same unresolved client state.
+    const snapshot = snapshotWithPendingAction(undefined);
+    snapshot.tasks[0].primary_executor_type = undefined;
+
+    const state = snapshotToState(snapshot);
+
+    expect(state.kanban?.tasks[0]?.primaryExecutorType).toBeUndefined();
+  });
+
   it("preserves workflow step WIP fields", () => {
     const state = snapshotToState({
       workflow: {

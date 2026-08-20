@@ -28,7 +28,7 @@ export function AddFolderButton({
       <span className="flex flex-col items-start">
         <span>{t("task:addFolder")}</span>
         {!capabilities.executorCapabilitiesKnown && (
-          <span className="text-[10px] text-muted-foreground normal-case">
+          <span className="text-xs text-muted-foreground normal-case">
             {t("task:addFolderExecutorUnknown")}
           </span>
         )}
