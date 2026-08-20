@@ -146,7 +146,7 @@ func (m *Manager) preflightGitMetadataRebind(ctx context.Context, execution *Age
 		}
 		req.AgentConfig = agentConfig
 	}
-	if err := preflightGitMetadataProjection(ctx, runtime, req); err != nil {
+	if err := preflightGitMetadataProjectionRebind(ctx, runtime, req); err != nil {
 		return nil, err
 	}
 	return req, nil

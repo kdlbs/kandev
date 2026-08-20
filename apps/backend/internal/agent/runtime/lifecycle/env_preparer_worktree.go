@@ -87,7 +87,7 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	if err != nil {
 		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: err.Error(), Error: err, Duration: time.Since(start)}, nil
 	}
-	projection, err := worktree.ResolveGitMetadata(wt.Path)
+	projection, err := worktree.ResolveGitMetadataForRepository(wt.Path, req.RepositoryPath)
 	if err != nil {
 		if req.WorktreeID == "" || wt.ID != req.WorktreeID {
 			p.rollbackWorktrees(ctx, []string{wt.ID})
@@ -438,7 +438,7 @@ func (p *WorktreePreparer) prepareMultiRepo(
 		if spec.WorktreeID == "" || wt.ID != spec.WorktreeID {
 			createdIDs = append(createdIDs, wt.ID)
 		}
-		projection, projectionErr := worktree.ResolveGitMetadata(wt.Path)
+		projection, projectionErr := worktree.ResolveGitMetadataForRepository(wt.Path, spec.RepositoryPath)
 		if projectionErr != nil {
 			p.rollbackWorktrees(ctx, createdIDs)
 			return &EnvPrepareResult{

@@ -264,6 +264,11 @@ func (r *gitMetadataAttestingExecutor) PrepareGitMetadataProjection(_ context.Co
 	return r.attestationError
 }
 
+func (r *gitMetadataAttestingExecutor) PrepareGitMetadataProjectionRebind(_ context.Context, _ *ExecutorCreateRequest) error {
+	r.attested = true
+	return r.attestationError
+}
+
 func (r *gitMetadataAttestingExecutor) CreateInstance(_ context.Context, _ *ExecutorCreateRequest) (*ExecutorInstance, error) {
 	r.created = true
 	return &ExecutorInstance{}, nil
