@@ -1093,6 +1093,7 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 	client := createTestClient(t, mock.server.URL)
 	defer client.Close()
 
+	accepted := make(chan struct{}, 1)
 	execution := &AgentExecution{
 		ID:            "test-exec",
 		TaskID:        "test-task",
@@ -1100,6 +1101,9 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 		WorkspacePath: "/workspace",
 		agentctl:      client,
 		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+		initialPromptAccepted: func() {
+			accepted <- struct{}{}
+		},
 	}
 
 	agentConfig := &testAgent{
@@ -1123,6 +1127,11 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 	}, StartModelPolicy{}, "", nil)
 	if err != nil {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
+	}
+	select {
+	case <-accepted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("initial-prompt acceptance callback was not invoked")
 	}
 
 	// Wait for the prompt to be sent asynchronously

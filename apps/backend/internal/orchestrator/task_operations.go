@@ -354,6 +354,27 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 // autoStart marks the launch as having been triggered by an automated path
 // (only consumed when skipMessageRecord is false — callers that store their
 // own message control its metadata directly).
+type startCreatedAcceptanceCallbackKey struct{}
+
+// StartCreatedSessionWithAcceptedCallback preserves StartCreatedSession's
+// public contract while binding a delivery receipt to the real initial prompt
+// acceptance boundary. The callback is deliberately carried in context only
+// through this in-process launch; durable recovery remains owned by the
+// delivery ledger if the process dies before acceptance.
+func (s *Service) StartCreatedSessionWithAcceptedCallback(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	afterDispatch func() error,
+) (*executor.TaskExecution, error) {
+	return s.StartCreatedSession(
+		context.WithValue(ctx, startCreatedAcceptanceCallbackKey{}, afterDispatch),
+		taskID, sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references,
+	)
+}
+
 // references contains validated entity references whose exact server-generated
 // context block may survive first-turn canonicalization.
 //
@@ -559,7 +580,15 @@ func (s *Service) StartCreatedSession(
 		mcpMode = executor.McpModeOffice
 	}
 	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
-	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments, TurnID: initialTurnID})
+	var onInitialPromptAccepted func()
+	if afterDispatch, _ := ctx.Value(startCreatedAcceptanceCallbackKey{}).(func() error); afterDispatch != nil {
+		onInitialPromptAccepted = func() {
+			if err := afterDispatch(); err != nil {
+				s.logger.Error("failed to record accepted initial prompt delivery", zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+			}
+		}
+	}
+	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments, TurnID: initialTurnID, OnInitialPromptAccepted: onInitialPromptAccepted})
 	if err != nil {
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
 		// failures here; the session-level claim makes either completion order safe.

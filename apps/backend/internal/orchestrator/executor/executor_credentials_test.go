@@ -880,7 +880,7 @@ func TestStartAgentOnExistingWorkspaceRefreshesWorkspaceGitLabCredentials(t *tes
 
 	_, _ = exec.startAgentOnExistingWorkspace(context.Background(), task, session, "prompt", true, "", map[string]string{
 		envGitLabToken: "stale-token",
-	})
+	}, nil)
 	if captured[envGitLabToken] != "prepared-token" || captured[envKandevGitLabHost] != "https://gitlab.a.example" {
 		t.Fatalf("prepared workspace env = %#v", captured)
 	}

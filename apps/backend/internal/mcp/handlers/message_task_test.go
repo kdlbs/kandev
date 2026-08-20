@@ -50,6 +50,10 @@ type fakeOrchestrator struct {
 	// the retry-after-resume path can succeed on the second call.
 	promptErrFirst  error
 	startCreatedErr error
+	// deferInitialAcceptance models a runtime crash/window before agentctl has
+	// accepted the initial prompt. Otherwise the fake accepts synchronously.
+	deferInitialAcceptance  bool
+	startCreatedCallbackErr error
 	// interruptErr is returned by every InterruptForPeerMessage call — lets
 	// tests exercise the "interrupt failed, message must stay queued" path.
 	interruptErr error
@@ -165,6 +169,21 @@ func (f *fakeOrchestrator) StartCreatedSession(_ context.Context, taskID, sessio
 		return nil, f.startCreatedErr
 	}
 	return &executor.TaskExecution{SessionID: sessionID}, nil
+}
+
+func (f *fakeOrchestrator) StartCreatedSessionWithAcceptedCallback(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference, afterDispatch func() error) (*executor.TaskExecution, error) {
+	execution, err := f.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references)
+	if err != nil || f.deferInitialAcceptance || afterDispatch == nil {
+		return execution, err
+	}
+	if f.startCreatedCallbackErr != nil {
+		return execution, f.startCreatedCallbackErr
+	}
+	// The production launch goroutine records callback failure as an ambiguous
+	// receipt after agentctl has accepted; it must not make the already accepted
+	// launch look rejected to its caller.
+	_ = afterDispatch()
+	return execution, nil
 }
 
 func (f *fakeOrchestrator) ResumeTaskSession(_ context.Context, _, _ string) (*executor.TaskExecution, error) {
@@ -665,10 +684,9 @@ func TestHandleMessageTask_RunningSession_Queues(t *testing.T) {
 // naturally. Being the parent is necessary but not sufficient - the caller
 // must opt in; see TestHandleMessageTask_ParentToChildRunningSession_OmittedDeliveryMode_DoesNotInterrupt
 // for the (default) queued-and-wait behavior parents get otherwise. The
-// reported status is "sent" (not "queued") because the interrupt actually
-// dispatched it immediately - see queueThenInterruptTaskMessage's doc
-// comment. See InterruptForPeerMessage's doc comment for why this matters
-// for long-running children.
+// reported status remains "queued" until the asynchronously scheduled
+// execution reaches agentctl acceptance. See InterruptForPeerMessage's doc
+// comment for why this matters for long-running children.
 func TestHandleMessageTask_ParentToChildRunningSession_Interrupts(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
@@ -683,7 +701,7 @@ func TestHandleMessageTask_ParentToChildRunningSession_Interrupts(t *testing.T) 
 
 	var payload map[string]interface{}
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
-	assert.Equal(t, "sent", payload["status"])
+	assert.Equal(t, "queued", payload["status"])
 
 	// The message was queued first exactly like any other message_task
 	// call...
@@ -725,6 +743,35 @@ func TestHandleMessageTask_InterruptReceiptQueuesOnceWhenDispatchIsDeferred(t *t
 	assert.Equal(t, "queued", firstPayload["status"])
 	assert.Equal(t, "queued", firstPayload["delivery_status"])
 	assert.Equal(t, firstPayload["delivery_id"], secondPayload["delivery_id"])
+	assert.Equal(t, 1, orch.queue.GetStatus(ctx, session.ID).Count)
+}
+
+func TestHandleMessageTask_InterruptSchedulingNeverClaimsDelivery(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	parent, child, session := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "sender-sess-1", TaskID: parent.ID, State: models.TaskSessionStateRunning}))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "interrupt-scheduled-source-turn", TaskID: parent.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orch.queue = messagequeue.NewService(queueRepo, 2, testLogger(t))
+
+	response, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "scheduled but unaccepted", parent.ID, deliveryModeInterrupt)))
+	require.NoError(t, err)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	assert.Equal(t, "queued", payload["status"])
+	assert.Equal(t, "queued", payload["delivery_status"])
+
+	// The fake reports the same "dispatched" scheduling result as the real
+	// interrupt path. It deliberately does not run agentctl acceptance, so a
+	// false delivered receipt here would expose the old post-return bug.
+	require.Len(t, orch.interruptCalls, 1)
+	stored, err := queueRepo.(messagequeue.DeliveryLedger).GetDelivery(ctx, payload["delivery_id"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, messagequeue.DeliveryQueued, stored.State)
 	assert.Equal(t, 1, orch.queue.GetStatus(ctx, session.ID).Count)
 }
 
@@ -1145,6 +1192,68 @@ func TestHandleMessageTask_CreatedReceiptStartsOnce(t *testing.T) {
 	require.NoError(t, json.Unmarshal(first.Payload, &payload))
 	assert.Equal(t, "started", payload["status"])
 	assert.Equal(t, "delivered", payload["delivery_status"])
+	require.Len(t, orch.startCreatedCalls, 1)
+}
+
+func TestHandleMessageTask_CreatedReceiptBeforeAcceptanceRemainsReclaimable(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orch.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	orch.deferInitialAcceptance = true
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "created-crash-source-turn", TaskID: sender.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+
+	message := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "initial crash boundary", sender.ID))
+	response, err := h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	assert.Equal(t, "started", payload["status"])
+	assert.Equal(t, string(messagequeue.DeliveryReserved), payload["delivery_status"])
+
+	// A duplicate source-turn request observes the same durable receipt rather
+	// than starting a second first turn while the original has not accepted.
+	_, err = h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	require.Len(t, orch.startCreatedCalls, 1)
+
+	// Simulate restart after the direct lease expires. Pre-acceptance work is
+	// reclaimable; only the callback failure/accepted case becomes ambiguous.
+	processed, err := orch.queue.ProcessDueDeliveries(ctx, time.Now().UTC().Add(2*time.Minute), "restart-worker")
+	require.NoError(t, err)
+	assert.Equal(t, 1, processed)
+	receipt, err := queueRepo.(messagequeue.DeliveryLedger).GetDelivery(ctx, payload["delivery_id"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, messagequeue.DeliveryQueued, receipt.State)
+	assert.Equal(t, 1, orch.queue.GetStatus(ctx, session.ID).Count)
+}
+
+func TestHandleMessageTask_CreatedReceiptAcknowledgementFailureIsAmbiguous(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	ledger := queueRepo.(messagequeue.DeliveryLedger)
+	orch.queue = messagequeue.NewService(failingDirectDeliveryAcknowledgementRepository{Repository: queueRepo, DeliveryLedger: ledger}, 1, testLogger(t))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "created-ambiguous-source-turn", TaskID: sender.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+
+	response, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "accepted initial prompt", sender.ID)))
+	require.NoError(t, err)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	assert.Equal(t, "started", payload["status"])
+	assert.Equal(t, string(messagequeue.DeliveryAmbiguous), payload["delivery_status"])
+
+	processed, err := orch.queue.ProcessDueDeliveries(ctx, time.Now().UTC().Add(2*time.Minute), "restart-worker")
+	require.NoError(t, err)
+	assert.Zero(t, processed, "an accepted initial prompt with failed receipt acknowledgement must not replay")
 	require.Len(t, orch.startCreatedCalls, 1)
 }
 

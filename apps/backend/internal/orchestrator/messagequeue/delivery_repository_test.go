@@ -3,6 +3,7 @@ package messagequeue
 import (
 	"context"
 	"expvar"
+	"sync"
 	"testing"
 	"time"
 
@@ -289,6 +290,66 @@ func TestDeliveryLedgerPostgreSQLParity(t *testing.T) {
 	entries, err := repo.ListBySession(ctx, entry.SessionID)
 	require.NoError(t, err)
 	assert.Empty(t, entries)
+
+	// A queue-entry acknowledgement whose delete predicate fails must roll the
+	// receipt update back in the same PostgreSQL transaction. Otherwise a crash
+	// between the two writes could hide an undelivered FIFO entry behind a
+	// delivered receipt.
+	rollback, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn-rollback",
+		IdempotencyKey: "rollback-v1", TargetTaskID: "target-task", TargetSessionID: "rollback-session",
+		Content: "must remain queued", State: DeliveryPendingCapacity,
+	})
+	require.NoError(t, err)
+	_, claimedRollback, err := ledger.ReserveDeliveryForDirectDispatch(ctx, rollback.ID, "rollback-owner", time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimedRollback)
+	rollbackEntry := &QueuedMessage{SessionID: "rollback-session", TaskID: "target-task", Content: rollback.Content, QueuedBy: QueuedByAgent, Metadata: map[string]interface{}{MetadataLifecycleDurable: true, MetadataDeliveryID: rollback.ID}}
+	require.NoError(t, repo.Insert(ctx, rollbackEntry, 0))
+	require.ErrorIs(t, acknowledger.AcknowledgeQueueEntryAndDelivery(ctx, "wrong-session", rollbackEntry.ID, now.Add(5*time.Minute)), ErrEntryNotFound)
+	rollbackStored, err := ledger.GetDelivery(ctx, rollback.ID)
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryReserved, rollbackStored.State)
+	rollbackEntries, err := repo.ListBySession(ctx, rollbackEntry.SessionID)
+	require.NoError(t, err)
+	require.Len(t, rollbackEntries, 1)
+
+	// A concurrent expired-lease claim and FIFO acknowledgement may race on a
+	// restarted worker. PostgreSQL must leave exactly one durable outcome: a
+	// delivered/deleted entry, or a reclaimed reserved entry that still exists.
+	// The latter is safe to retry; neither outcome duplicates the prompt.
+	repoA, repoB, _ := newTestPostgresRepoPair(t)
+	ledgerA := repoA.(DeliveryLedger)
+	race, _, err := ledgerA.CreateOrGetDelivery(ctx, Delivery{SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn-race", IdempotencyKey: "race-v1", TargetTaskID: "race-task", TargetSessionID: "race-session", Content: "race payload", State: DeliveryPendingCapacity})
+	require.NoError(t, err)
+	reservedRace, claimedRace, err := ledgerA.ReserveDeliveryForDirectDispatch(ctx, race.ID, "expired-owner", time.Nanosecond)
+	require.NoError(t, err)
+	require.True(t, claimedRace)
+	raceEntry := &QueuedMessage{SessionID: "race-session", TaskID: "race-task", Content: race.Content, QueuedBy: QueuedByAgent, Metadata: map[string]interface{}{MetadataLifecycleDurable: true, MetadataDeliveryID: race.ID}}
+	require.NoError(t, repoA.Insert(ctx, raceEntry, 0))
+	var raceWG sync.WaitGroup
+	raceWG.Add(2)
+	go func() {
+		defer raceWG.Done()
+		_, _ = repoA.(DeliveryLedger).ClaimDueDeliveries(ctx, reservedRace.LeaseExpiresAt.Add(time.Second), "worker-race", time.Minute, 1)
+	}()
+	go func() {
+		defer raceWG.Done()
+		_ = repoB.(interface {
+			AcknowledgeQueueEntryAndDelivery(context.Context, string, string, time.Time) error
+		}).AcknowledgeQueueEntryAndDelivery(ctx, raceEntry.SessionID, raceEntry.ID, now.Add(6*time.Minute))
+	}()
+	raceWG.Wait()
+	raceStored, err := ledgerA.GetDelivery(ctx, race.ID)
+	require.NoError(t, err)
+	raceEntries, err := repoA.ListBySession(ctx, raceEntry.SessionID)
+	require.NoError(t, err)
+	if raceStored.State == DeliveryDelivered {
+		assert.Empty(t, raceEntries)
+	} else {
+		assert.Equal(t, DeliveryReserved, raceStored.State)
+		require.Len(t, raceEntries, 1)
+	}
 
 	pending, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
 		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn-2",

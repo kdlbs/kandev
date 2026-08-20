@@ -352,9 +352,12 @@ type LaunchAgentRequest struct {
 	Branch               string
 	TaskDescription      string                 // Task description to send via ACP prompt
 	Attachments          []v1.MessageAttachment // Attachments for the initial prompt (images/files)
-	Priority             string
-	Metadata             map[string]interface{}
-	Env                  map[string]string
+	// OnInitialPromptAccepted is an in-process receipt callback. It runs only
+	// after the initial prompt crosses the agentctl acceptance boundary.
+	OnInitialPromptAccepted func()
+	Priority                string
+	Metadata                map[string]interface{}
+	Env                     map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys that SSH may
 	// forward in addition to its managed credential allowlist. Values are
 	// still taken only from Env; the key list is the explicit repository grant.
@@ -495,6 +498,9 @@ type LaunchOptions struct {
 	McpProfile           *mcpprofile.Context
 	Attachments          []v1.MessageAttachment
 	Env                  map[string]string
+	// OnInitialPromptAccepted runs only after agentctl accepts the first
+	// prompt. Launch completion is intentionally not treated as acceptance.
+	OnInitialPromptAccepted func()
 	// RouteOverride carries a provider-routing override resolved by the
 	// office scheduler. When nil, launch behavior is identical to today.
 	RouteOverride *RouteOverride

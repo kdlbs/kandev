@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -190,10 +191,20 @@ type acceptedPromptCallbackLauncher interface {
 	PromptTaskWithAcceptedCallback(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, afterDispatch func() error) (*orchestrator.PromptResult, error)
 }
 
+// acceptedCreatedSessionCallbackLauncher exposes the initial-prompt acceptance
+// boundary. A created session returns as soon as the runtime is launching, not
+// when agentctl has accepted its first prompt, so receipt finalization must use
+// this callback instead of StartCreatedSession's return.
+type acceptedCreatedSessionCallbackLauncher interface {
+	StartCreatedSessionWithAcceptedCallback(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference, afterDispatch func() error) (*executor.TaskExecution, error)
+}
+
 type taskMessageDirectDeliveryDispatch struct {
 	deliveryID string
 	leaseOwner string
+	mu         sync.Mutex
 	accepted   bool
+	pending    bool
 }
 
 type taskMessageDirectDeliveryContextKey struct{}
@@ -2531,7 +2542,12 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
 	if delivery != nil && directLeaseOwner != "" {
-		if directDispatch, _ := dispatchCtx.Value(taskMessageDirectDeliveryContextKey{}).(*taskMessageDirectDeliveryDispatch); directDispatch != nil && directDispatch.accepted {
+		if directDispatch, _ := dispatchCtx.Value(taskMessageDirectDeliveryContextKey{}).(*taskMessageDirectDeliveryDispatch); directDispatch != nil && directDispatch.snapshot().accepted {
+			delivery, err = h.sessionLauncher.GetMessageQueue().GetDeliveryReceipt(ctx, delivery.ID)
+		} else if directDispatch != nil && directDispatch.snapshot().pending {
+			// The initial prompt has been handed to the runtime but has not yet
+			// crossed agentctl's acceptance boundary. Leave the receipt reserved;
+			// an expired pre-acceptance reservation is reclaimable after restart.
 			delivery, err = h.sessionLauncher.GetMessageQueue().GetDeliveryReceipt(ctx, delivery.ID)
 		} else {
 			delivery, err = h.finalizeDirectTaskMessageDelivery(ctx, delivery, directLeaseOwner, result)
@@ -2555,6 +2571,14 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 
 func (h *Handlers) finalizeDirectTaskMessageDelivery(ctx context.Context, delivery *messagequeue.Delivery, leaseOwner string, result taskMessageDispatchResult) (*messagequeue.Delivery, error) {
 	queue := h.sessionLauncher.GetMessageQueue()
+	// An interrupt schedules FIFO execution asynchronously. Its accepted-prompt
+	// callback can win before this handler regains control, so never overwrite
+	// that terminal/ambiguous outcome with a post-return direct finalization.
+	if current, err := queue.GetDeliveryReceipt(ctx, delivery.ID); err != nil || current == nil {
+		return current, err
+	} else if current.State == messagequeue.DeliveryQueued || current.State == messagequeue.DeliveryDelivered || current.State == messagequeue.DeliveryAmbiguous {
+		return current, nil
+	}
 	if result.status != taskMessageStatusQueued {
 		return queue.AcknowledgeDirectDelivery(ctx, delivery.ID, leaseOwner)
 	}
@@ -3252,9 +3276,20 @@ func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID strin
 			// Record before starting so the message is tied to the turn produced
 			// by launch. If launch fails, delete the row below.
 			recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
-			if _, err := h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, true, nil, nil); err != nil {
+			var startErr error
+			if launcher, ok := h.sessionLauncher.(acceptedCreatedSessionCallbackLauncher); ok {
+				if callback := h.directDeliveryAcceptedCallback(ctx); callback != nil {
+					directDeliveryDispatchFromContext(ctx).setPending()
+					_, startErr = launcher.StartCreatedSessionWithAcceptedCallback(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, true, nil, nil, callback)
+				} else {
+					_, startErr = h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, true, nil, nil)
+				}
+			} else {
+				_, startErr = h.sessionLauncher.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, prompt, true, false, true, nil, nil)
+			}
+			if startErr != nil {
 				h.deleteRecordedUserMessage(ctx, recorded)
-				return taskMessageDispatchResult{}, fmt.Errorf("failed to start session: %w", err)
+				return taskMessageDispatchResult{}, fmt.Errorf("failed to start session: %w", startErr)
 			}
 			return taskMessageDispatchResult{status: "started", sessionID: session.ID}, nil
 		}
@@ -3339,13 +3374,10 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 // QueueAndInterruptForPeerMessage's doc comment for the full race this
 // closes.
 //
-// The returned status reflects what actually happened: "sent" only when
-// the interrupt actually dispatched the message immediately (the returned
-// bool), or "queued" when the cancel-and-take step ran but genuinely
-// failed to dispatch anything (see cancelAndTakeForPeerMessage's doc
-// comment for that case — it does not include lock contention, since
-// QueueAndInterruptForPeerMessage always waits for the lock rather than
-// skipping a busy one).
+// The returned status remains "queued" until the asynchronous FIFO execution
+// has crossed the agentctl acceptance boundary. The returned bool only means
+// cancellation and scheduling succeeded; it is never evidence that a prompt
+// was accepted.
 // A failure past the queue insert is deliberately NOT surfaced as an error to the caller —
 // the message is already safely persisted and will still be delivered by
 // the normal turn-completion drain, so the interrupt is purely a latency
@@ -3380,11 +3412,11 @@ func (h *Handlers) queueThenInterruptTaskMessage(ctx context.Context, taskID str
 			zap.Error(err))
 		return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID}, nil
 	}
-	result := taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID}
-	if dispatched {
-		result.status = taskMessageStatusSent
-	}
-	return result, nil
+	// dispatchTakenQueuedMessage only schedules asynchronous execution. The
+	// durable receipt remains queued until that execution reaches the real
+	// agentctl acceptance callback.
+	_ = dispatched
+	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID}, nil
 }
 
 func (h *Handlers) prepareSessionForTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, pinnedTarget bool) (*models.TaskSession, orchestrator.ProcessOnTurnStartResult, error) {
@@ -3718,7 +3750,7 @@ func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, 
 	if err == nil {
 		return taskMessageStatusSent, nil
 	}
-	if dispatch, _ := ctx.Value(taskMessageDirectDeliveryContextKey{}).(*taskMessageDirectDeliveryDispatch); dispatch != nil && dispatch.accepted {
+	if dispatch := directDeliveryDispatchFromContext(ctx); dispatch != nil && dispatch.snapshot().accepted {
 		return taskMessageStatusSent, nil
 	}
 	var accepted interface{ DetachedResumeAccepted() bool }
@@ -3743,21 +3775,55 @@ func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, 
 }
 
 func (h *Handlers) directDeliveryAcceptedCallback(ctx context.Context) func() error {
-	dispatch, _ := ctx.Value(taskMessageDirectDeliveryContextKey{}).(*taskMessageDirectDeliveryDispatch)
+	dispatch := directDeliveryDispatchFromContext(ctx)
 	if dispatch == nil {
 		return nil
 	}
+	// CREATED-session acceptance happens in the launch goroutine after this
+	// MCP handler can return. Preserve trusted request values but do not let a
+	// completed transport request cancel durable receipt terminalization.
+	callbackCtx := context.WithoutCancel(ctx)
 	return func() error {
-		dispatch.accepted = true
-		_, err := h.sessionLauncher.GetMessageQueue().AcknowledgeDirectDelivery(ctx, dispatch.deliveryID, dispatch.leaseOwner)
+		dispatch.markAccepted()
+		_, err := h.sessionLauncher.GetMessageQueue().AcknowledgeDirectDelivery(callbackCtx, dispatch.deliveryID, dispatch.leaseOwner)
 		if err == nil {
 			return nil
 		}
 		_, ambiguousErr := h.sessionLauncher.GetMessageQueue().MarkDirectDeliveryAmbiguous(
-			ctx, dispatch.deliveryID, dispatch.leaseOwner, "accepted_prompt_acknowledgement_failed",
+			callbackCtx, dispatch.deliveryID, dispatch.leaseOwner, "accepted_prompt_acknowledgement_failed",
 		)
 		return errors.Join(err, ambiguousErr)
 	}
+}
+
+func directDeliveryDispatchFromContext(ctx context.Context) *taskMessageDirectDeliveryDispatch {
+	dispatch, _ := ctx.Value(taskMessageDirectDeliveryContextKey{}).(*taskMessageDirectDeliveryDispatch)
+	return dispatch
+}
+
+func (d *taskMessageDirectDeliveryDispatch) setPending() {
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	d.pending = true
+	d.mu.Unlock()
+}
+
+func (d *taskMessageDirectDeliveryDispatch) markAccepted() {
+	d.mu.Lock()
+	d.accepted = true
+	d.pending = false
+	d.mu.Unlock()
+}
+
+func (d *taskMessageDirectDeliveryDispatch) snapshot() struct{ accepted, pending bool } {
+	if d == nil {
+		return struct{ accepted, pending bool }{}
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return struct{ accepted, pending bool }{accepted: d.accepted, pending: d.pending}
 }
 
 // publishQueueStatusEvent fires a queue.status_changed event so the frontend
