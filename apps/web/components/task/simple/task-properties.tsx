@@ -116,11 +116,18 @@ function TimelineSection({ task }: { task: Task }) {
   const { t } = useTranslation();
   const dateOrDash = (d?: string | null) =>
     d ? formatDate(d) : <span className="text-muted-foreground">--</span>;
+  const orDash = (v?: string | null) => (v ? v : <span className="text-muted-foreground">--</span>);
   return (
     <>
-      <PropertyRow label={t("task:createdBy")}>{task.createdBy}</PropertyRow>
-      <PropertyRow label={t("task:started")}>{dateOrDash(task.startedAt)}</PropertyRow>
-      <PropertyRow label={t("task:completed")}>{dateOrDash(task.completedAt)}</PropertyRow>
+      <PropertyRow label={t("task:createdBy")} testId="created-by-row">
+        {orDash(task.createdBy)}
+      </PropertyRow>
+      <PropertyRow label={t("task:started")} testId="started-row">
+        {dateOrDash(task.startedAt)}
+      </PropertyRow>
+      <PropertyRow label={t("task:completed")} testId="completed-row">
+        {dateOrDash(task.completedAt)}
+      </PropertyRow>
       <PropertyRow label={t("task:created")}>{formatDate(task.createdAt)}</PropertyRow>
       <PropertyRow label={t("task:updated")}>{formatRelativeTime(task.updatedAt)}</PropertyRow>
     </>

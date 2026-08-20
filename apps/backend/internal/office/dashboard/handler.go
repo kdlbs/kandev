@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -462,6 +463,7 @@ func (h *Handler) getTask(c *gin.Context) {
 	h.attachDecisions(ctx, c, task.ID, dto)
 
 	statusChanges, _ := h.svc.ListStatusChanges(ctx, task.WorkspaceID, task.ID)
+	dto.StartedAt, dto.CompletedAt = deriveTaskTimestamps(statusChanges)
 	c.JSON(http.StatusOK, TaskResponse{Task: dto, Timeline: buildStatusTimeline(statusChanges)})
 }
 
@@ -507,6 +509,58 @@ func buildStatusTimeline(changes []TimelineEvent) []TimelineEventDTO {
 		}
 	}
 	return timeline
+}
+
+// timelineStatusIsInProgress and timelineStatusIsDone classify a timeline
+// event's "to" value into the office in_progress/done status buckets. The
+// office activity log's task_status_changed entries are written by two
+// different producers with different value domains: DashboardService.
+// UpdateTaskStatus logs already-normalized lowercase status strings (see
+// normaliseStatus), while the generic workflow engine's TaskMoved handler
+// logs raw step names (categorizeStep's "In Progress" / "Done"). Both must
+// resolve to the same bucket so timestamp derivation doesn't depend on
+// which path wrote the entry.
+func timelineStatusIsInProgress(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case statusInProgressLowercase, "in progress":
+		return true
+	default:
+		return false
+	}
+}
+
+func timelineStatusIsDone(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case statusDoneLowercase, "completed":
+		return true
+	default:
+		return false
+	}
+}
+
+// deriveTaskTimestamps derives the task detail sidebar's Started/Completed
+// timestamps from its status-change timeline. startedAt is the earliest
+// transition into in_progress; completedAt is the latest transition into
+// done, since a reopened task (done -> in_progress -> done) can re-enter
+// done more than once and the most recent completion is the meaningful one.
+// Both are best-effort: ListActivityEntriesByTarget caps the underlying
+// query at the 50 most recent activity entries for the task, so a very
+// busy task can push its earliest in_progress transition out of the
+// window.
+func deriveTaskTimestamps(changes []TimelineEvent) (startedAt, completedAt string) {
+	for _, ev := range changes {
+		switch {
+		case timelineStatusIsInProgress(ev.To):
+			if startedAt == "" || ev.At < startedAt {
+				startedAt = ev.At
+			}
+		case timelineStatusIsDone(ev.To):
+			if ev.At > completedAt {
+				completedAt = ev.At
+			}
+		}
+	}
+	return startedAt, completedAt
 }
 
 func taskRowToDTO(r *sqlite.TaskRow, lbls []*sqlite.Label) *TaskDTO {

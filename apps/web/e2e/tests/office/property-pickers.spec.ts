@@ -360,4 +360,42 @@ test.describe("property pickers", () => {
       expect(after).toBe(before);
     }).toPass({ timeout: 5_000 });
   });
+
+  test("started and completed rows show timestamps after a todo -> in_progress -> done transition", async ({
+    testPage,
+    apiClient,
+    officeSeed,
+  }) => {
+    const task = await apiClient.createTask(officeSeed.workspaceId, "Picker Timeline Task", {
+      workflow_id: officeSeed.workflowId,
+    });
+    await gotoTaskPage(testPage, task.id, "Picker Timeline Task");
+
+    const startedRow = testPage.getByTestId("started-row");
+    const completedRow = testPage.getByTestId("completed-row");
+    await expect(startedRow).toHaveText("--");
+    await expect(completedRow).toHaveText("--");
+
+    await testPage.getByTestId("status-picker-trigger").click();
+    await testPage.getByTestId("status-picker-option-in_progress").click();
+    await expect(testPage.getByTestId("status-picker-trigger")).toContainText(/In Progress/i, {
+      timeout: 15_000,
+    });
+
+    await testPage.getByTestId("status-picker-trigger").click();
+    await testPage.getByTestId("status-picker-option-done").click();
+    await expect(testPage.getByTestId("status-picker-trigger")).toContainText(/Done/i, {
+      timeout: 15_000,
+    });
+
+    // startedAt/completedAt are derived server-side from the status-change
+    // timeline (see deriveTaskTimestamps in the backend); the client only
+    // learns the derived values on the next full task-detail fetch, so
+    // reload rather than assert against the optimistic local patch.
+    await testPage.reload();
+    await gotoTaskPage(testPage, task.id, "Picker Timeline Task");
+
+    await expect(testPage.getByTestId("started-row")).not.toHaveText("--", { timeout: 10_000 });
+    await expect(testPage.getByTestId("completed-row")).not.toHaveText("--", { timeout: 10_000 });
+  });
 });

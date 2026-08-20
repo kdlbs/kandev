@@ -254,33 +254,8 @@ export type TaskLabel = {
   color: string;
 };
 
-export type OfficeTask = {
-  id: string;
-  workspaceId: string;
-  identifier: string;
-  title: string;
-  description?: string;
-  status: OfficeTaskStatus;
-  // Pre-normalization backend value (e.g. "SCHEDULING"); read only for a raw
-  // sub-state the canonical union erases (ExecutionIndicator's "Live" dot).
-  rawStatus?: string;
-  priority: OfficeTaskPriority;
-  parentId?: string;
-  projectId?: string;
-  assigneeAgentProfileId?: string;
-  labels?: TaskLabel[] | string[];
-  blockedBy?: string[];
-  children?: OfficeTask[];
-  executionPolicy?: string;
-  executionState?: string;
-  createdAt: string;
-  updatedAt: string;
-  // True when the task lives in a kandev-managed system workflow
-  // (today: standing coordination; future: routine-fired). The Tasks
-  // UI renders a "System" badge for these when the dev toggle reveals
-  // them.
-  isSystem?: boolean;
-};
+import type { OfficeTask } from "./office-task-type";
+export type { OfficeTask } from "./office-task-type";
 
 export type TaskFilterState = {
   statuses: OfficeTaskStatus[];
