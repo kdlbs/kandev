@@ -138,7 +138,13 @@ function AppearanceSection({
       </div>
       {dirty && (
         <div className="flex justify-end pt-2">
-          <Button size="sm" onClick={onSave} disabled={saving} className="cursor-pointer">
+          <Button
+            size="sm"
+            onClick={onSave}
+            disabled={saving}
+            className="cursor-pointer"
+            data-testid="appearance-save-button"
+          >
             <IconDeviceFloppy className="h-4 w-4 mr-1.5" />
             {saving ? t("office:saving") : t("common:save")}
           </Button>
@@ -449,6 +455,19 @@ export function useSettingsState(
   const [savingAppearance, setSavingAppearance] = useState(false);
   const recovery = useRecoveryState(activeWorkspace);
   const permissions = usePermissionsState(activeWorkspace);
+  const activeWorkspaceId = activeWorkspace?.id;
+
+  // If the active workspace's identity changes without this page
+  // remounting - e.g. a workspace.deleted WS event elsewhere reassigns
+  // workspaces.activeId while this page stays mounted - the draft must
+  // reset to the new workspace's values. Otherwise the stale draft from
+  // the old workspace looks "dirty" against the new one's name, and Save
+  // would persist the old workspace's data onto the new, unrelated one.
+  useEffect(() => {
+    setName(activeWorkspace?.name ?? "");
+    setDescription(activeWorkspace?.description ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWorkspaceId]);
 
   // Latest-value refs so the in-flight save handler (a closure fixed at the
   // moment Save was clicked) can tell whether the draft has moved on since,
@@ -468,18 +487,23 @@ export function useSettingsState(
     if (file) setLogoPreview(URL.createObjectURL(file));
   };
 
-  const handleSaveAppearance = buildSaveAppearanceHandler({
-    activeWorkspace,
-    name,
-    description,
-    storeApi,
-    nameRef,
-    descriptionRef,
-    setName,
-    setDescription,
-    setSaving: setSavingAppearance,
-    t,
-  });
+  // useCallback (matching handleSavePermissions/handleSaveRecovery) so the
+  // handler only gets a new identity when an input it actually reads changes.
+  const handleSaveAppearance = useCallback(
+    buildSaveAppearanceHandler({
+      activeWorkspace,
+      name,
+      description,
+      storeApi,
+      nameRef,
+      descriptionRef,
+      setName,
+      setDescription,
+      setSaving: setSavingAppearance,
+      t,
+    }),
+    [activeWorkspace, name, description, storeApi, nameRef, descriptionRef, t],
+  );
 
   const origName = activeWorkspace?.name ?? "";
   const origDescription = activeWorkspace?.description ?? "";

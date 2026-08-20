@@ -9,10 +9,10 @@ vi.mock("@/app/actions/workspaces", () => ({
   updateWorkspaceAction: vi.fn(),
 }));
 
-vi.mock("@/lib/api/domains/office-api", () => ({
-  updateWorkspaceSettings: vi.fn(),
-  getWorkspaceSettings: vi.fn(),
-}));
+vi.mock("@/lib/api/domains/office-api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/domains/office-api")>();
+  return { ...actual, updateWorkspaceSettings: vi.fn(), getWorkspaceSettings: vi.fn() };
+});
 
 const mockUpdateWorkspaceAction = vi.mocked(updateWorkspaceAction);
 const mockGetWorkspaceSettings = vi.mocked(getWorkspaceSettings);
@@ -64,32 +64,40 @@ function renderSettings(
   });
 }
 
+// Combines the two setup calls every test needs: a store double plus the
+// hook rendered against it.
+function renderWithStore(items: Workspace[], onSetWorkspaces?: (items: Workspace[]) => void) {
+  const store = makeStoreApi(items, onSetWorkspaces);
+  return { ...store, ...renderSettings(items[0], store.storeApi) };
+}
+
+async function saveAppearance(result: ReturnType<typeof renderSettings>["result"]) {
+  await act(async () => {
+    await result.current.handleSaveAppearance();
+  });
+}
+
 describe("useSettingsState appearance save", () => {
   beforeEach(() => {
-    mockUpdateWorkspaceAction.mockReset();
-    mockGetWorkspaceSettings.mockReset();
+    vi.resetAllMocks();
     mockGetWorkspaceSettings.mockResolvedValue({ settings: {} } as never);
   });
 
   it("saves the trimmed name and description through updateWorkspaceAction and syncs the store", async () => {
     const ws = workspace();
-    const { storeApi, setWorkspaces } = makeStoreApi([ws]);
+    const { setWorkspaces, result, rerender } = renderWithStore([ws]);
     mockUpdateWorkspaceAction.mockResolvedValue({
       ...ws,
       name: "Renamed",
       description: NEW_DESCRIPTION,
     } as never);
 
-    const { result, rerender } = renderSettings(ws, storeApi);
-
     act(() => {
       result.current.setName("  Renamed  ");
       result.current.setDescription(NEW_DESCRIPTION);
     });
 
-    await act(async () => {
-      await result.current.handleSaveAppearance();
-    });
+    await saveAppearance(result);
 
     expect(mockUpdateWorkspaceAction).toHaveBeenCalledWith(WORKSPACE_ID, {
       name: "Renamed",
@@ -108,18 +116,13 @@ describe("useSettingsState appearance save", () => {
   });
 
   it("clears the dirty flag once the store reflects the saved workspace", async () => {
-    const ws = workspace();
-    const { storeApi, getItems } = makeStoreApi([ws]);
-    mockUpdateWorkspaceAction.mockResolvedValue({ ...ws, name: "Renamed" } as never);
-
-    const { result, rerender } = renderSettings(ws, storeApi);
+    const { getItems, result, rerender } = renderWithStore([workspace()]);
+    mockUpdateWorkspaceAction.mockResolvedValue({ ...workspace(), name: "Renamed" } as never);
 
     act(() => result.current.setName("Renamed"));
     expect(result.current.appearanceDirty).toBe(true);
 
-    await act(async () => {
-      await result.current.handleSaveAppearance();
-    });
+    await saveAppearance(result);
 
     // Simulate the Zustand store propagating the update back into
     // `activeWorkspace`, the way SettingsContent's subscription would on the
@@ -130,31 +133,37 @@ describe("useSettingsState appearance save", () => {
   });
 
   it("refuses to save an all-whitespace name", async () => {
-    const ws = workspace();
-    const { storeApi, setWorkspaces } = makeStoreApi([ws]);
-    const { result } = renderSettings(ws, storeApi);
+    const { setWorkspaces, result } = renderWithStore([workspace()]);
 
     act(() => result.current.setName("   "));
 
-    await act(async () => {
-      await result.current.handleSaveAppearance();
-    });
+    await saveAppearance(result);
 
     expect(mockUpdateWorkspaceAction).not.toHaveBeenCalled();
     expect(setWorkspaces).not.toHaveBeenCalled();
+  });
+
+  it("clears saving state and does not update the store when the action throws", async () => {
+    mockUpdateWorkspaceAction.mockRejectedValue(new Error("network error"));
+    const { setWorkspaces, result } = renderWithStore([workspace()]);
+
+    act(() => result.current.setName("Changed"));
+    await saveAppearance(result);
+
+    expect(setWorkspaces).not.toHaveBeenCalled();
+    expect(result.current.savingAppearance).toBe(false);
   });
 
   // A newer keystroke landing before the PATCH from an older one resolves
   // must survive that response, not get overwritten by the stale echo.
   it("keeps a draft typed during an in-flight save instead of reverting it", async () => {
     const ws = workspace();
-    const { storeApi } = makeStoreApi([ws]);
     let resolveUpdate!: (value: Workspace) => void;
     mockUpdateWorkspaceAction.mockImplementation(
       () => new Promise<Workspace>((resolve) => (resolveUpdate = resolve)) as never,
     );
 
-    const { result } = renderSettings(ws, storeApi);
+    const { result } = renderWithStore([ws]);
     act(() => result.current.setName("Alpha"));
     let savePromise!: Promise<void>;
     act(() => {
@@ -170,10 +179,22 @@ describe("useSettingsState appearance save", () => {
     expect(result.current.name).toBe("Alpha2");
   });
 
+  // A workspace.deleted WS event elsewhere can reassign the active workspace
+  // without this page remounting; the draft must reset to the new one's values.
+  it("resets the draft when the active workspace's identity changes", async () => {
+    const { result, rerender } = renderWithStore([workspace()]);
+    act(() => result.current.setName("Unsaved Draft"));
+    expect(result.current.appearanceDirty).toBe(true);
+    rerender({ ws: workspace({ id: "ws-2", name: "Other Workspace", description: "Other desc" }) });
+    expect(result.current.name).toBe("Other Workspace");
+    expect(result.current.description).toBe("Other desc");
+    expect(result.current.appearanceDirty).toBe(false);
+  });
+
   it("does not clobber a workspace added to the store while the save was in flight", async () => {
     const ws = workspace();
     const concurrent = workspace({ id: "ws-2", name: "Concurrent Workspace" });
-    const { storeApi, setWorkspaces, setItems } = makeStoreApi([ws]);
+    const { setWorkspaces, setItems, result } = renderWithStore([ws]);
 
     // Simulate a `workspace.created` WS event landing mid-PATCH: the store
     // gains a second workspace between render (when the old code captured
@@ -183,16 +204,12 @@ describe("useSettingsState appearance save", () => {
       return { ...ws, name: "Renamed", description: NEW_DESCRIPTION } as never;
     });
 
-    const { result } = renderSettings(ws, storeApi);
-
     act(() => {
       result.current.setName("Renamed");
       result.current.setDescription(NEW_DESCRIPTION);
     });
 
-    await act(async () => {
-      await result.current.handleSaveAppearance();
-    });
+    await saveAppearance(result);
 
     expect(setWorkspaces).toHaveBeenCalledWith([
       { ...ws, name: "Renamed", description: NEW_DESCRIPTION },
