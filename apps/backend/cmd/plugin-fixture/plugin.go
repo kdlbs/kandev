@@ -247,11 +247,10 @@ func (p *fixturePlugin) handleConversationProbe(ctx context.Context, workspaceID
 
 	// 1. Ensure — idempotent create-or-get.
 	descriptor, ensureStatus, err := conv.Ensure(ctx, pluginsdk.AgentConversationSpec{
-		WorkspaceID:       workspaceID,
-		ConversationKey:   conversationProbeKey,
-		BasePrompt:        "You are the fixture coordinator.",
-		AgentProfileID:    "",
-		ExecutorProfileID: "",
+		WorkspaceID:     workspaceID,
+		ConversationKey: conversationProbeKey,
+		BasePrompt:      "You are the fixture coordinator.",
+		AgentProfileID:  "",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("plugin-fixture: EnsureAgentConversation: %w", err)

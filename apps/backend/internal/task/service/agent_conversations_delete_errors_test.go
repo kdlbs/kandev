@@ -167,3 +167,39 @@ func newRepoWithTwoConversations(t *testing.T) (repo *sqliterepo.Repository, vic
 
 // compile-time guard: the wrapper must satisfy the interface it embeds.
 var _ agentConversationTaskRepo = (*acFailingDeleteRepo)(nil)
+
+type acRecordingTaskDeleter struct {
+	delete func(context.Context, string) error
+	calls  []string
+	err    error
+}
+
+func (d *acRecordingTaskDeleter) DeleteTask(ctx context.Context, id string) error {
+	d.calls = append(d.calls, id)
+	if d.delete != nil {
+		return d.delete(ctx, id)
+	}
+	return d.err
+}
+
+func TestDeleteUsesLifecycleAwareTaskDeleterWhenAvailable(t *testing.T) {
+	realRepo, victim, _ := newRepoWithTwoConversations(t)
+	svc := NewAgentConversationService(realRepo, realRepo, nil, newACFakeStateRepo(), nil)
+	svc.SetDispatcher(newACFakeDispatcher())
+	deleter := &acRecordingTaskDeleter{delete: realRepo.DeleteTask}
+	svc.SetTaskDeleter(deleter)
+
+	count, err := svc.Delete(context.Background(), "plugin-coordinator", "ws-one", "coordinator")
+	if err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("count = %d, want 1", count)
+	}
+	if len(deleter.calls) != 1 || deleter.calls[0] != victim {
+		t.Fatalf("deleter calls = %#v, want [%q]", deleter.calls, victim)
+	}
+	if taskExists(t, realRepo, victim) {
+		t.Fatal("lifecycle deleter did not remove the managed conversation")
+	}
+}

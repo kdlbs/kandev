@@ -13,6 +13,9 @@ import (
 // a workflow (checked steps and their custom prompts). Steps with no saved
 // row are simply absent from the result.
 func (s *Service) GetCoordinatorMonitoring(ctx context.Context, workflowID string) ([]models.CoordinatorStepMonitor, error) {
+	if _, err := s.resolveCoordinatorWorkspaceID(ctx, workflowID, ""); err != nil {
+		return nil, err
+	}
 	entries, err := s.repo.GetCoordinatorMonitoring(ctx, workflowID)
 	if err != nil {
 		s.logger.Error("failed to get coordinator monitoring", zap.String("workflow_id", workflowID), zap.Error(err))

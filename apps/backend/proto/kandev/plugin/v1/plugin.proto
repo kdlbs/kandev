@@ -729,8 +729,6 @@ message AgentConversationSpec {
   // An explicit profile that is disabled/deleted produces a typed
   // configuration-required result.
   string agent_profile_id = 4;
-  // Executor profile id. Empty means "use the workspace default".
-  string executor_profile_id = 5;
 }
 
 // EnsureAgentConversationRequest carries the Ensure request.
@@ -741,6 +739,7 @@ message EnsureAgentConversationRequest {
 // EnsureAgentConversationResponse carries the result.
 message EnsureAgentConversationResponse {
   AgentConversationDescriptor conv_descriptor = 1;
+  // One of "created", "exists", or "configuration_required".
   string status = 2;
 }
 
@@ -758,6 +757,7 @@ message DispatchAgentConversationRequest {
 // DispatchAgentConversationResponse carries the dispatch result.
 message DispatchAgentConversationResponse {
   string session_id = 1;
+  // One of "started", "queued", "duplicate_occurrence", or "skipped_busy".
   string status = 2;
   AgentConversationDescriptor conv_descriptor = 3;
 }

@@ -107,6 +107,14 @@ type agentConversationStateRepo interface {
 	Delete(ctx context.Context, pluginID, scope, scopeID, key string) error
 }
 
+// agentConversationTaskDeleter performs lifecycle-aware task deletion. The
+// task repository's bare DeleteTask only removes rows; managed conversation
+// cleanup must use the full task-service path when it is available so agent
+// processes, worktrees, and cleanup jobs are handled consistently.
+type agentConversationTaskDeleter interface {
+	DeleteTask(ctx context.Context, id string) error
+}
+
 // agentConversationEventBus is the narrow event-bus interface for
 // publishing task.created events. Matches bus.EventBus.Publish.
 type agentConversationEventBus interface {
@@ -145,6 +153,7 @@ type AgentConversationService struct {
 	profile agentConversationProfileRepo
 	state   agentConversationStateRepo
 	eventer agentConversationEventBus
+	deleter agentConversationTaskDeleter
 
 	// dispatcher delivers Dispatch's text to the real agent runtime. It is
 	// wired late (SetDispatcher), after the orchestrator exists — mirroring
@@ -199,10 +208,25 @@ func (s *AgentConversationService) SetDispatcher(d agentConversationDispatcher) 
 	s.dispatcher = d
 }
 
+// SetTaskDeleter wires the lifecycle-aware delete path used by the main task
+// service. When unset, tests and bare setups fall back to the repository's
+// DeleteTask.
+func (s *AgentConversationService) SetTaskDeleter(d agentConversationTaskDeleter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleter = d
+}
+
 func (s *AgentConversationService) getDispatcher() agentConversationDispatcher {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.dispatcher
+}
+
+func (s *AgentConversationService) getTaskDeleter() agentConversationTaskDeleter {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.deleter
 }
 
 // lockEnsureKey serializes Ensure calls for one (pluginID, workspaceID,
@@ -624,8 +648,9 @@ func (s *AgentConversationService) Delete(ctx context.Context, pluginID, workspa
 		return 0, err
 	}
 	var count int32
+	deleter := s.getTaskDeleter()
 	for _, t := range tasks {
-		if err := s.tasks.DeleteTask(ctx, t.ID); err != nil {
+		if err := s.deleteManagedConversationTask(ctx, deleter, t.ID); err != nil {
 			// Already gone is the goal state here for the same reason it is in
 			// DeleteAllForPlugin: the listing above is not held under a lock, so
 			// an uninstall cleanup or a retried delete can remove the row in
@@ -665,11 +690,12 @@ func (s *AgentConversationService) DeleteAllForPlugin(ctx context.Context, plugi
 	}
 	var count int32
 	var firstErr error
+	deleter := s.getTaskDeleter()
 	for _, task := range tasks {
 		if !isManagedConversationOwnedByPlugin(task, pluginID) {
 			continue
 		}
-		if err := s.tasks.DeleteTask(ctx, task.ID); err != nil {
+		if err := s.deleteManagedConversationTask(ctx, deleter, task.ID); err != nil {
 			// The conversation being gone already is the goal state, not a
 			// failure: the listing above is not held under a lock, so a
 			// concurrent cleanup (or a retried uninstall racing itself) can
@@ -687,6 +713,13 @@ func (s *AgentConversationService) DeleteAllForPlugin(ctx context.Context, plugi
 		count++
 	}
 	return count, firstErr
+}
+
+func (s *AgentConversationService) deleteManagedConversationTask(ctx context.Context, deleter agentConversationTaskDeleter, taskID string) error {
+	if deleter != nil {
+		return deleter.DeleteTask(ctx, taskID)
+	}
+	return s.tasks.DeleteTask(ctx, taskID)
 }
 
 // managedConversationPageSize is the page size used when scanning a

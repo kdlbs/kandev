@@ -197,6 +197,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		// dispatcher is wired later, once the orchestrator exists — see
 		// SetAgentConversationsDispatcher in main.go.
 		agentConversationsSvc = NewAgentConversationService(repos.Task, repos.AgentSettings, pluginsSvc.StateStore(), eventBus)
+		agentConversationsSvc.SetTaskDeleter(taskSvc)
 		pluginsSvc.SetAgentConversations(agentConversationsSvc)
 	}
 	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task)

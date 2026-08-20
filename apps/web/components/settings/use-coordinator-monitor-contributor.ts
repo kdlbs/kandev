@@ -66,16 +66,23 @@ export function useCoordinatorMonitorContributor({
   const { toast } = useToast();
   const [draftConfig, setDraftConfig] = useState<MonitorConfigMap>({});
   const [savedConfig, setSavedConfig] = useState<MonitorConfigMap>({});
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(!workflowId.startsWith(TEMP_WORKFLOW_PREFIX));
   const draftConfigRef = useRef(draftConfig);
   draftConfigRef.current = draftConfig;
   const savedConfigRef = useRef(savedConfig);
   savedConfigRef.current = savedConfig;
 
   useEffect(() => {
-    if (workflowId.startsWith(TEMP_WORKFLOW_PREFIX)) return;
+    if (workflowId.startsWith(TEMP_WORKFLOW_PREFIX)) {
+      setDraftConfig({});
+      setSavedConfig({});
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     const load = async () => {
+      setDraftConfig({});
+      setSavedConfig({});
       setLoading(true);
       try {
         const res = await getCoordinatorMonitoringAction(workflowId);

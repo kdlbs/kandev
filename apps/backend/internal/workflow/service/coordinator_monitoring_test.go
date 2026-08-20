@@ -135,3 +135,12 @@ func TestService_CoordinatorMonitoring_ProviderFailureDoesNotPersistCallerWorksp
 	require.NoError(t, db.Get(&count, "SELECT COUNT(*) FROM workflow_coordinator_monitoring WHERE workflow_id = ?", "wf-1"))
 	assert.Zero(t, count, "provider failure must not persist caller-controlled workspace provenance")
 }
+
+func TestService_CoordinatorMonitoring_GetRequiresAuthorizedWorkflowLookup(t *testing.T) {
+	svc, _, provider := setupTestServiceWithProvider(t)
+	provider.forceGetWorkflowErr = errors.New("workflow access denied")
+
+	_, err := svc.GetCoordinatorMonitoring(context.Background(), "wf-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "workflow access denied")
+}

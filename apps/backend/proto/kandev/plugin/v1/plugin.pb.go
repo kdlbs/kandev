@@ -3285,6 +3285,9 @@ type WorkflowStep struct {
 	// Workspace > Workflow configuration policy an operator saves for this
 	// step (host-owned storage, not plugin-owned — see
 	// docs/specs/coordinator-plugin/spec.md's "Workflow monitoring policy").
+	// They are populated only for a plugin which declares both
+	// api_read:workflows and agent_conversation; ordinary workflow readers see
+	// the fields redacted as false/empty.
 	// coordinator_monitored is false and coordinator_prompt is "" for a step
 	// that was never checked. A plugin composes coordinator_prompt with its
 	// own base prompt only when coordinator_monitored is true.
@@ -5892,10 +5895,8 @@ type AgentConversationSpec struct {
 	// An explicit profile that is disabled/deleted produces a typed
 	// configuration-required result.
 	AgentProfileId string `protobuf:"bytes,4,opt,name=agent_profile_id,json=agentProfileId,proto3" json:"agent_profile_id,omitempty"`
-	// Executor profile id. Empty means "use the workspace default".
-	ExecutorProfileId string `protobuf:"bytes,5,opt,name=executor_profile_id,json=executorProfileId,proto3" json:"executor_profile_id,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *AgentConversationSpec) Reset() {
@@ -5956,13 +5957,6 @@ func (x *AgentConversationSpec) GetAgentProfileId() string {
 	return ""
 }
 
-func (x *AgentConversationSpec) GetExecutorProfileId() string {
-	if x != nil {
-		return x.ExecutorProfileId
-	}
-	return ""
-}
-
 // EnsureAgentConversationRequest carries the Ensure request.
 type EnsureAgentConversationRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -6012,9 +6006,10 @@ func (x *EnsureAgentConversationRequest) GetSpec() *AgentConversationSpec {
 type EnsureAgentConversationResponse struct {
 	state          protoimpl.MessageState       `protogen:"open.v1"`
 	ConvDescriptor *AgentConversationDescriptor `protobuf:"bytes,1,opt,name=conv_descriptor,json=convDescriptor,proto3" json:"conv_descriptor,omitempty"`
-	Status         string                       `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// One of "created", "exists", or "configuration_required".
+	Status        string `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EnsureAgentConversationResponse) Reset() {
@@ -6135,8 +6130,9 @@ func (x *DispatchAgentConversationRequest) GetOccurrenceKey() string {
 
 // DispatchAgentConversationResponse carries the dispatch result.
 type DispatchAgentConversationResponse struct {
-	state          protoimpl.MessageState       `protogen:"open.v1"`
-	SessionId      string                       `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// One of "started", "queued", "duplicate_occurrence", or "skipped_busy".
 	Status         string                       `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 	ConvDescriptor *AgentConversationDescriptor `protobuf:"bytes,3,opt,name=conv_descriptor,json=convDescriptor,proto3" json:"conv_descriptor,omitempty"`
 	unknownFields  protoimpl.UnknownFields
@@ -6798,14 +6794,13 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"session_id\x18\x02 \x01(\tR\tsessionId\x12!\n" +
 	"\fworkspace_id\x18\x03 \x01(\tR\vworkspaceId\x12)\n" +
 	"\x10conversation_key\x18\x04 \x01(\tR\x0fconversationKey\x12(\n" +
-	"\x10agent_profile_id\x18\x05 \x01(\tR\x0eagentProfileId\"\xe0\x01\n" +
+	"\x10agent_profile_id\x18\x05 \x01(\tR\x0eagentProfileId\"\xb0\x01\n" +
 	"\x15AgentConversationSpec\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12)\n" +
 	"\x10conversation_key\x18\x02 \x01(\tR\x0fconversationKey\x12\x1f\n" +
 	"\vbase_prompt\x18\x03 \x01(\tR\n" +
 	"basePrompt\x12(\n" +
-	"\x10agent_profile_id\x18\x04 \x01(\tR\x0eagentProfileId\x12.\n" +
-	"\x13executor_profile_id\x18\x05 \x01(\tR\x11executorProfileId\"]\n" +
+	"\x10agent_profile_id\x18\x04 \x01(\tR\x0eagentProfileId\"]\n" +
 	"\x1eEnsureAgentConversationRequest\x12;\n" +
 	"\x04spec\x18\x01 \x01(\v2'.kandev.plugin.v1.AgentConversationSpecR\x04spec\"\x91\x01\n" +
 	"\x1fEnsureAgentConversationResponse\x12V\n" +
