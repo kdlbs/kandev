@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -307,6 +308,7 @@ type workspaceRebindAgentctlServer struct {
 	*httptest.Server
 	mu              sync.Mutex
 	startCount      int
+	stopCount       int
 	neverReady      bool
 	firstStatus     bool
 	statusCallCount int
@@ -315,7 +317,11 @@ type workspaceRebindAgentctlServer struct {
 	configured      []map[string]string
 	attestations    int
 	attestationErr  bool
+	failAttestAt    int
 	failStartAt     int
+	failMaterialize bool
+	materialized    map[string]bool
+	operations      []string
 	loadedSessions  []string
 	actionLog       []string
 	connections     []*websocket.Conn
@@ -327,11 +333,50 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.HandleFunc("/api/v1/stop", workspaceRebindSuccess)
-	mux.HandleFunc("/api/v1/workspace/materialize-repository", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/api/v1/stop", func(w http.ResponseWriter, _ *http.Request) {
+		server.mu.Lock()
+		server.stopCount++
+		server.operations = append(server.operations, "stop")
+		server.mu.Unlock()
+		workspaceRebindSuccess(w, nil)
+	})
+	mux.HandleFunc("/api/v1/workspace/materialize-repository", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Destination string `json:"destination"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		server.mu.Lock()
+		if server.failMaterialize {
+			server.mu.Unlock()
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "materialization rejected"})
+			return
+		}
+		if server.materialized == nil {
+			server.materialized = make(map[string]bool)
+		}
+		server.materialized[request.Destination] = true
+		server.operations = append(server.operations, "materialize")
+		server.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]any{"destination": "added-main", "git_metadata_attested": true})
 	})
-	mux.HandleFunc("/api/v1/workspace/materialize-repository/remove", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/api/v1/workspace/materialize-repository/remove", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Destination string `json:"destination"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		server.mu.Lock()
+		delete(server.materialized, request.Destination)
+		server.operations = append(server.operations, "remove")
+		server.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]bool{"removed": true})
 	})
 	mux.HandleFunc("/api/v1/workspace/rescan", func(w http.ResponseWriter, r *http.Request) {
@@ -345,6 +390,7 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 		}
 		server.mu.Lock()
 		server.workspaceRoots = append(server.workspaceRoots, append([]string(nil), request.WorkspaceSourceRoots...))
+		server.operations = append(server.operations, "rescan")
 		server.mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	})
@@ -359,14 +405,21 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 		}
 		server.mu.Lock()
 		server.workspaceRoots = append(server.workspaceRoots, append([]string(nil), request.WorkspaceSourceRoots...))
+		server.operations = append(server.operations, "reconcile")
 		server.mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	})
 	mux.HandleFunc("/api/v1/workspace/attest-git-metadata", func(w http.ResponseWriter, _ *http.Request) {
 		server.mu.Lock()
 		server.attestations++
-		failed := server.attestationErr
+		server.operations = append(server.operations, "attest")
+		failed := server.attestationErr || server.failAttestAt == server.attestations
 		roots := append([]string(nil), server.workspaceRoots[len(server.workspaceRoots)-1]...)
+		for _, root := range roots[1:] {
+			if !server.materialized[filepath.Base(root)] {
+				failed = true
+			}
+		}
 		server.mu.Unlock()
 		if failed {
 			w.WriteHeader(http.StatusUnprocessableEntity)
@@ -390,6 +443,7 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 		}
 		server.mu.Lock()
 		server.configured = append(server.configured, request.Env)
+		server.operations = append(server.operations, "configure")
 		server.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 	})
@@ -410,6 +464,7 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 	mux.HandleFunc("/api/v1/start", func(w http.ResponseWriter, _ *http.Request) {
 		server.mu.Lock()
 		server.startCount++
+		server.operations = append(server.operations, "start")
 		failed := server.failStartAt == server.startCount
 		server.firstStatus = true
 		server.mu.Unlock()
@@ -534,6 +589,18 @@ func (s *workspaceRebindAgentctlServer) attestationCalls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.attestations
+}
+
+func (s *workspaceRebindAgentctlServer) hasMaterialized(destination string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.materialized[destination]
+}
+
+func (s *workspaceRebindAgentctlServer) operationLog() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.operations...)
 }
 
 func (s *workspaceRebindAgentctlServer) closeConnections() {
