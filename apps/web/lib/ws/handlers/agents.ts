@@ -1,10 +1,14 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
-import { compareTimestamps, toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import {
+  compareTimestamps,
+  refreshProfileCapabilities,
+  refreshSettingsAgentsCapabilities,
+  toAgentProfileOption,
+} from "@/lib/state/slices/settings/types";
 import { normalizeAgentProfile } from "@/lib/api/domains/agent-profile-normalize";
 import type { AgentProfile } from "@/lib/types/agent-profile";
-import type { AvailableAgent, CapabilityStatus } from "@/lib/types/http-agents";
 
 function buildProfileEntry(profile: unknown): AgentProfile {
   return normalizeAgentProfile(profile);
@@ -187,93 +191,6 @@ function handleProfileDeleted(
     },
     settingsAgents: { items: nextAgents },
   };
-}
-
-/**
- * Maps an AvailableAgent's host-utility probe result to AgentProfileOption's
- * capability fields. `buildModelConfigFromHostUtility` (backend) emits the
- * literal "not_configured" on a cache miss, while the AgentDTO path used by
- * agent.profile.created/updated leaves the field empty for the same case —
- * map it back to undefined so both paths agree with isHealthyAgentProfile,
- * which treats undefined as healthy and "not_configured" as unhealthy.
- */
-function toProfileCapability(agent: AvailableAgent): {
-  capability_status?: CapabilityStatus;
-  capability_error?: string;
-} {
-  if (agent.model_config.status === "not_configured") {
-    return { capability_status: undefined, capability_error: undefined };
-  }
-  return {
-    capability_status: agent.model_config.status,
-    capability_error: agent.model_config.error,
-  };
-}
-
-/**
- * Refreshes capability_status/capability_error on agent profile options from
- * a fresh agent.available.updated snapshot, matched by agent name. Nothing
- * else refetches this field after boot (see agents.ts F3), so without this a
- * profile hidden from Handoff at boot stays hidden even after its agent is
- * installed or reconnected, until a full page reload. Returns the original
- * array/entries when nothing actually changed so an identical snapshot does
- * not invalidate every `agentProfiles.items` subscriber.
- */
-function refreshProfileCapabilities(
-  profiles: AppState["agentProfiles"]["items"],
-  agents: AvailableAgent[],
-): AppState["agentProfiles"]["items"] {
-  if (agents.length === 0) return profiles;
-  const byName = new Map(agents.map((agent) => [agent.name, agent]));
-  let changed = false;
-  const next = profiles.map((profile) => {
-    const match = byName.get(profile.agent_name);
-    if (!match) return profile;
-    const capability = toProfileCapability(match);
-    if (
-      profile.capability_status === capability.capability_status &&
-      profile.capability_error === capability.capability_error
-    ) {
-      return profile;
-    }
-    changed = true;
-    return { ...profile, ...capability };
-  });
-  return changed ? next : profiles;
-}
-
-/**
- * Refreshes capability_status/capability_error on `settingsAgents.items` from
- * a fresh agent.available.updated snapshot, matched by agent name. This is
- * the single source `agent.profile.created`/`updated` and
- * `applyProfileDuplicated` rebuild profile options FROM (agents.ts:92-101,
- * :133-141; use-profile-duplicate.ts:56-58) — without refreshing it here too,
- * any later profile create/update/duplicate silently reverts a profile's
- * capability back to its stale boot-time value, in both directions: an
- * install can make an installed-but-just-edited profile vanish from Handoff,
- * or a break can bring an uninstalled provider back into it.
- */
-function refreshSettingsAgentsCapabilities(
-  settingsAgents: AppState["settingsAgents"]["items"],
-  agents: AvailableAgent[],
-): AppState["settingsAgents"]["items"] {
-  if (agents.length === 0) return settingsAgents;
-  const byName = new Map(agents.map((agent) => [agent.name, agent]));
-  let changed = false;
-  const next = settingsAgents.map((item) => {
-    const match = byName.get(item.name);
-    if (!match) return item;
-    const capability = toProfileCapability(match);
-    if (
-      item.capability_status === capability.capability_status &&
-      item.capability_error === capability.capability_error
-    ) {
-      return item;
-    }
-    changed = true;
-    return { ...item, ...capability };
-  });
-  return changed ? next : settingsAgents;
 }
 
 export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
