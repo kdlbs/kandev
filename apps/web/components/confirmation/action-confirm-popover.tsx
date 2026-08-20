@@ -54,6 +54,9 @@ export function ActionConfirmPopover({
   const cancelRef = useRef<HTMLButtonElement>(null);
   const confirmedRef = useRef(false);
 
+  // Intentionally runs on every render: an anchor can disappear through live
+  // data without changing the confirmation's open state, so each render must
+  // re-check the guard before the shell can invoke a stale action.
   useLayoutEffect(() => {
     if (!open) {
       confirmedRef.current = false;
@@ -70,7 +73,7 @@ export function ActionConfirmPopover({
       onOpenChange(true);
       return;
     }
-    closeActionConfirm(confirmedRef, anchorRef, onCancel, onOpenChange);
+    closeActionConfirm(confirmedRef, onCancel, onOpenChange);
   };
 
   const handleConfirm = () => {
@@ -80,7 +83,11 @@ export function ActionConfirmPopover({
     }
     confirmedRef.current = true;
     handleOpenChange(false);
-    queueMicrotask(() => void onConfirm());
+    queueMicrotask(() => {
+      void Promise.resolve()
+        .then(onConfirm)
+        .catch(() => undefined);
+    });
   };
 
   return (
@@ -199,13 +206,11 @@ function ActionConfirmPopoverContent({
 
 function closeActionConfirm(
   confirmedRef: { current: boolean },
-  anchorRef: RefObject<HTMLElement | null>,
   onCancel: (() => void) | undefined,
   onOpenChange: (open: boolean) => void,
 ) {
   if (!confirmedRef.current) onCancel?.();
   onOpenChange(false);
-  if (!confirmedRef.current && isConnected(anchorRef.current)) anchorRef.current.focus();
 }
 
 function isConnected(element: HTMLElement | null): element is HTMLElement {

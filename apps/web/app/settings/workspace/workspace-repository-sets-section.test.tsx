@@ -7,11 +7,13 @@ import { repositoryId, workspaceId } from "@/lib/types/ids";
 const REPO_WEB = "repo-web";
 const REPO_GATEWAY = "repo-gateway";
 const FULL_STACK = "Full-stack";
+const BACKEND = "Backend";
 const NAME_INPUT = "repository-set-editor-name";
 const SAVE = "repository-set-editor-save";
 const SET_ROW = "repository-set-row";
 const CREATE = "repository-set-create";
 const DELETE = "repository-set-delete-set-1";
+const DELETE_SECOND = "repository-set-delete-set-2";
 const DELETE_CONFIRM_POPOVER = "repository-set-delete-confirm-popover";
 const DELETE_CONFIRM = "repository-set-delete-confirm";
 const DELETE_INLINE = "repository-set-delete-inline-confirmation";
@@ -200,15 +202,19 @@ describe("WorkspaceRepositorySetsSection deletion confirmation", () => {
     expect(screen.queryByTestId("repository-set-delete-dialog")).toBeNull();
   });
 
-  it("cancels locally and returns focus to the delete control", () => {
+  it("cancels locally and returns focus to the delete control", async () => {
     renderSection();
 
     const trigger = screen.getByTestId(DELETE);
     fireEvent.click(trigger);
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(
+      within(screen.getByTestId(DELETE_CONFIRM_POPOVER)).getByRole("button", {
+        name: "Cancel",
+      }),
+    );
 
     expect(mockDelete).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(trigger);
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 
   it("keeps the row and shows local failure feedback when deletion fails", async () => {
@@ -234,6 +240,7 @@ describe("WorkspaceRepositorySetsSection deletion confirmation", () => {
 
     const inline = screen.getByTestId(DELETE_INLINE);
     expect(screen.queryByTestId(DELETE_CONFIRM_POPOVER)).toBeNull();
+    expect(inline.textContent).toContain("repositories");
     expect(within(inline).getByTestId(DELETE_CONFIRM).className).toContain("h-11");
     expect(within(inline).getByTestId(DELETE_CONFIRM).className).toContain("min-w-11");
 
@@ -243,6 +250,22 @@ describe("WorkspaceRepositorySetsSection deletion confirmation", () => {
     fireEvent.click(screen.getByTestId(DELETE));
     fireEvent.click(within(screen.getByTestId(DELETE_INLINE)).getByTestId(DELETE_CONFIRM));
     await waitFor(() => expect(mockRemove).toHaveBeenCalledWith("ws-1", "set-1"));
+  });
+
+  it("clears a previous deletion error before confirming a different set", async () => {
+    const first = repositorySet("set-1", FULL_STACK, [REPO_WEB]);
+    const second = repositorySet("set-2", BACKEND, [REPO_GATEWAY]);
+    mockSets = [first, second];
+    mockDelete.mockRejectedValueOnce(new Error("server error"));
+    renderSection();
+
+    fireEvent.click(screen.getByTestId(DELETE));
+    fireEvent.click(within(screen.getByTestId(DELETE_CONFIRM_POPOVER)).getByTestId(DELETE_CONFIRM));
+    await waitFor(() => expect(screen.queryByTestId(DELETE_ERROR)).not.toBeNull());
+
+    fireEvent.click(screen.getByTestId(DELETE_SECOND));
+
+    expect(screen.queryByTestId(DELETE_ERROR)).toBeNull();
   });
 });
 

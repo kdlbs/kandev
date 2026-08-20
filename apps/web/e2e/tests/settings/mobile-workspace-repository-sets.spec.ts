@@ -20,6 +20,9 @@ test.describe("Mobile workspace repository sets", () => {
     await row.getByTestId(`repository-set-delete-${created.id}`).tap();
     const inline = row.getByTestId("repository-set-delete-inline-confirmation");
     await expect(inline).toBeVisible();
+    await expect(inline).toContainText(
+      "The set is removed. Its repositories, and any task already using them, are not affected.",
+    );
     await expect(testPage.getByTestId("repository-set-delete-confirm-popover")).toHaveCount(0);
 
     for (const control of [

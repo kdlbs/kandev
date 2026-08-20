@@ -180,10 +180,23 @@ function RepositorySetRow({
           deleteAnchorRef={deleteAnchorRef}
           onEdit={onEdit}
           onDelete={onDelete}
-          onDeleteCancel={onDeleteCancel}
-          onDeleteConfirm={onDeleteConfirm}
         />
       </div>
+      {!isFinePointer && confirmingDelete ? (
+        <InlineConfirmActions
+          density="touch"
+          testId="repository-set-delete-inline-confirmation"
+          ariaLabel={t("workspaces:repositorySetsDeleteTitle", { name: set.name })}
+          description={t("workspaces:repositorySetsDeleteDescription")}
+          cancelLabel={t("common:cancel")}
+          confirmLabel={t("workspaces:repositorySetsDelete")}
+          confirmAriaLabel={t("workspaces:repositorySetsDeleteTitle", { name: set.name })}
+          confirmTestId="repository-set-delete-confirm"
+          onCancel={onDeleteCancel}
+          onClose={() => onDeleteOpenChange(false)}
+          onConfirm={onDeleteConfirm}
+        />
+      ) : null}
       {deleteError ? (
         <p className="mt-2 text-xs text-destructive" data-testid="repository-set-delete-error">
           {deleteError}
@@ -224,8 +237,6 @@ type RepositorySetRowActionsProps = {
   deleteAnchorRef: RefObject<HTMLButtonElement | null>;
   onEdit: () => void;
   onDelete: () => void;
-  onDeleteCancel: () => void;
-  onDeleteConfirm: () => void;
 };
 
 function RepositorySetRowActions({
@@ -236,49 +247,35 @@ function RepositorySetRowActions({
   deleteAnchorRef,
   onEdit,
   onDelete,
-  onDeleteCancel,
-  onDeleteConfirm,
 }: RepositorySetRowActionsProps) {
   const { t } = useTranslation();
   if (readOnly) return null;
-  if (isFinePointer || !confirmingDelete) {
-    return (
-      <div className="flex shrink-0 gap-1">
-        <Button
-          size="sm"
-          variant="ghost"
-          className="cursor-pointer"
-          aria-label={t("workspaces:repositorySetsEdit")}
-          onClick={onEdit}
-          data-testid={`repository-set-edit-${set.id}`}
-        >
-          <IconPencil className="h-4 w-4" />
-        </Button>
-        <Button
-          ref={deleteAnchorRef}
-          size="sm"
-          variant="ghost"
-          className="cursor-pointer"
-          aria-label={t("workspaces:repositorySetsDelete")}
-          onClick={onDelete}
-          data-testid={`repository-set-delete-${set.id}`}
-        >
-          <IconTrash className="h-4 w-4" />
-        </Button>
-      </div>
-    );
-  }
+  // Fine pointers keep the Delete button as the popover anchor. Coarse
+  // pointers replace that button with the row-owned inline confirmation.
+  if (!isFinePointer && confirmingDelete) return null;
   return (
-    <InlineConfirmActions
-      density="touch"
-      testId="repository-set-delete-inline-confirmation"
-      ariaLabel={t("workspaces:repositorySetsDeleteTitle", { name: set.name })}
-      cancelLabel={t("common:cancel")}
-      confirmLabel={t("workspaces:repositorySetsDelete")}
-      confirmAriaLabel={t("workspaces:repositorySetsDeleteTitle", { name: set.name })}
-      confirmTestId="repository-set-delete-confirm"
-      onCancel={onDeleteCancel}
-      onConfirm={onDeleteConfirm}
-    />
+    <div className="flex shrink-0 gap-1">
+      <Button
+        size="sm"
+        variant="ghost"
+        className="cursor-pointer"
+        aria-label={t("workspaces:repositorySetsEdit")}
+        onClick={onEdit}
+        data-testid={`repository-set-edit-${set.id}`}
+      >
+        <IconPencil className="h-4 w-4" />
+      </Button>
+      <Button
+        ref={deleteAnchorRef}
+        size="sm"
+        variant="ghost"
+        className="cursor-pointer"
+        aria-label={t("workspaces:repositorySetsDelete")}
+        onClick={onDelete}
+        data-testid={`repository-set-delete-${set.id}`}
+      >
+        <IconTrash className="h-4 w-4" />
+      </Button>
+    </div>
   );
 }

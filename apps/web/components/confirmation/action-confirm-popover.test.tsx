@@ -48,7 +48,7 @@ describe("ActionConfirmPopover", () => {
     ).toContain("min-h-11");
   });
 
-  it("closes before invoking an unresolved confirmation and returns focus on cancel", () => {
+  it("closes before invoking an unresolved confirmation and returns focus on cancel", async () => {
     const onConfirm = vi.fn(() => new Promise<void>(() => {}));
     render(<Harness onConfirm={onConfirm} />);
 
@@ -58,7 +58,7 @@ describe("ActionConfirmPopover", () => {
 
     expect(onConfirm).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog", { name: deleteTitle })).toBeNull();
-    expect(document.activeElement).toBe(anchor);
+    await waitFor(() => expect(document.activeElement).toBe(anchor));
   });
 
   it("removes the shell before invoking the confirmation callback", async () => {
@@ -77,6 +77,31 @@ describe("ActionConfirmPopover", () => {
     await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1));
     expect(shellClosed).toBe(true);
   });
+
+  it("handles a rejected callback without an unhandled rejection", async () => {
+    const unhandled = vi.fn();
+    const onUnhandled = (event: PromiseRejectionEvent) => {
+      event.preventDefault();
+      unhandled(event.reason);
+    };
+    window.addEventListener("unhandledrejection", onUnhandled);
+    const onConfirm = vi.fn(() => Promise.reject(new Error("delete failed")));
+    render(<Harness onConfirm={onConfirm} />);
+
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: deleteTitle })).getByRole("button", {
+        name: "Delete",
+      }),
+    );
+
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1));
+    expect(unhandled).not.toHaveBeenCalled();
+    window.removeEventListener("unhandledrejection", onUnhandled);
+  });
+});
+
+describe("ActionConfirmPopover anchor lifecycle", () => {
+  afterEach(cleanup);
 
   it("dismisses without confirming when the anchor disappears", async () => {
     function DisappearingHarness() {
@@ -110,9 +135,14 @@ describe("ActionConfirmPopover", () => {
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
+});
 
-  it("keeps the popover open while focus moves inside the optional menu boundary", () => {
+describe("ActionConfirmPopover focus boundaries", () => {
+  afterEach(cleanup);
+
+  it("keeps the popover open while focus moves inside the optional menu boundary", async () => {
     function MenuHarness() {
+      const [open, setOpen] = useState(true);
       const anchorRef = useRef<HTMLButtonElement>(null);
       const menuRef = useRef<HTMLDivElement>(null);
       return (
@@ -120,18 +150,18 @@ describe("ActionConfirmPopover", () => {
           <button ref={anchorRef} type="button">
             Delete
           </button>
-          <div ref={menuRef} data-testid="menu-boundary">
+          <div ref={menuRef} data-testid="menu-boundary" tabIndex={0}>
             Menu
           </div>
           <ActionConfirmPopover
-            open
+            open={open}
             anchorRef={anchorRef}
             focusBoundaryRef={menuRef}
             title={deleteTitle}
             description="This cannot be undone."
             cancelLabel="Cancel"
             confirmLabel="Delete"
-            onOpenChange={vi.fn()}
+            onOpenChange={setOpen}
             onConfirm={vi.fn()}
           />
         </>
@@ -139,9 +169,45 @@ describe("ActionConfirmPopover", () => {
     }
 
     render(<MenuHarness />);
-    const dialog = screen.getByRole("dialog", { name: deleteTitle });
-    fireEvent.focusOut(dialog, { relatedTarget: screen.getByTestId("menu-boundary") });
+    screen.getByTestId("menu-boundary").focus();
 
-    expect(screen.getByRole("dialog", { name: deleteTitle })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: deleteTitle })).toBeTruthy());
+  });
+
+  it("dismisses when focus moves outside the optional menu boundary", async () => {
+    function MenuHarness() {
+      const [open, setOpen] = useState(true);
+      const anchorRef = useRef<HTMLButtonElement>(null);
+      const menuRef = useRef<HTMLDivElement>(null);
+      return (
+        <>
+          <button ref={anchorRef} type="button">
+            Delete
+          </button>
+          <div ref={menuRef} data-testid="menu-boundary" tabIndex={0}>
+            Menu
+          </div>
+          <button type="button" data-testid="outside">
+            Outside
+          </button>
+          <ActionConfirmPopover
+            open={open}
+            anchorRef={anchorRef}
+            focusBoundaryRef={menuRef}
+            title={deleteTitle}
+            description="This cannot be undone."
+            cancelLabel="Cancel"
+            confirmLabel="Delete"
+            onOpenChange={setOpen}
+            onConfirm={vi.fn()}
+          />
+        </>
+      );
+    }
+
+    render(<MenuHarness />);
+    screen.getByTestId("outside").focus();
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: deleteTitle })).toBeNull());
   });
 });
