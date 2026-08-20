@@ -102,6 +102,46 @@ func TestGetTaskEnvironmentMissingReturnsSentinel(t *testing.T) {
 	}
 }
 
+func TestTaskEnvironment_PersistsDockerBootstrapNonceReference(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-docker-bootstrap")
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-docker-bootstrap", WorkspaceID: "workspace-docker-bootstrap", Title: "Docker bootstrap"}); err != nil {
+		t.Fatal(err)
+	}
+	env := &models.TaskEnvironment{
+		ID:                              "env-docker-bootstrap",
+		TaskID:                          "task-docker-bootstrap",
+		ExecutorType:                    string(models.ExecutorTypeLocalDocker),
+		Status:                          models.TaskEnvironmentStatusReady,
+		ContainerID:                     "container-1",
+		ContainerBootstrapNonceSecretID: "bootstrap-secret-1",
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	got, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if got.ContainerBootstrapNonceSecretID != "bootstrap-secret-1" {
+		t.Fatalf("bootstrap nonce secret = %q, want bootstrap-secret-1", got.ContainerBootstrapNonceSecretID)
+	}
+
+	got.ContainerBootstrapNonceSecretID = "bootstrap-secret-2"
+	if err := repo.UpdateTaskEnvironment(ctx, got); err != nil {
+		t.Fatalf("UpdateTaskEnvironment: %v", err)
+	}
+	got, err = repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment after update: %v", err)
+	}
+	if got.ContainerBootstrapNonceSecretID != "bootstrap-secret-2" {
+		t.Fatalf("updated bootstrap nonce secret = %q, want bootstrap-secret-2", got.ContainerBootstrapNonceSecretID)
+	}
+}
+
 func TestCreateTaskSessionWithWorkspaceBindingElectsAndAttaches(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

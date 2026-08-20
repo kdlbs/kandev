@@ -106,6 +106,13 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 		if env.ContainerID != "" {
 			metadata[lifecycle.MetadataKeyContainerID] = env.ContainerID
 		}
+		// The bootstrap nonce is an environment control-plane capability, not a
+		// session runtime credential. It lets a new session authenticate to the
+		// canonical container's agentctl and create its own instance; never copy
+		// a sibling's auth token, execution ID, port, or session directory.
+		if env.ContainerBootstrapNonceSecretID != "" {
+			metadata[lifecycle.MetadataKeyBootstrapNonceSecret] = env.ContainerBootstrapNonceSecretID
+		}
 		if env.SandboxID != "" {
 			metadata["sprite_name"] = env.SandboxID
 		}
@@ -128,6 +135,14 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 			applyExecutorRunningMetadata(req, running)
 		}
 	}
+}
+
+func extractContainerBootstrapNonceSecretID(metadata map[string]interface{}) string {
+	if metadata == nil {
+		return ""
+	}
+	secretID, _ := metadata[lifecycle.MetadataKeyBootstrapNonceSecret].(string)
+	return secretID
 }
 
 type repositoryWorktreeKey struct {
