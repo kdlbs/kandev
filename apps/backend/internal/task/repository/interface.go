@@ -295,6 +295,13 @@ type TurnRepository interface {
 type CompletionIntentRepository interface {
 	CreateOrGetCompletionIntent(ctx context.Context, intent *models.CompletionIntent) (created bool, stored *models.CompletionIntent, err error)
 	GetCompletionIntent(ctx context.Context, id string) (*models.CompletionIntent, error)
+	// ListDueCompletionIntents returns pending intents whose quiet grace has
+	// elapsed, in eligible-time order. The bounded reconciler uses this indexed
+	// query instead of scanning all running sessions after a restart.
+	ListDueCompletionIntents(ctx context.Context, now time.Time, limit int) ([]*models.CompletionIntent, error)
+	// RearmCompletionIntent moves the quiet-grace deadline forward after
+	// observed foreground or tool activity, but never revives a claimed intent.
+	RearmCompletionIntent(ctx context.Context, id string, activityAt, eligibleAt time.Time) (bool, error)
 	TransitionCompletionIntent(ctx context.Context, id string, from, to models.CompletionIntentState, settledAt time.Time) (bool, error)
 }
 

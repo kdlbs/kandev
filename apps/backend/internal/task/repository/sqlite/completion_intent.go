@@ -44,6 +44,49 @@ func (r *Repository) GetCompletionIntent(ctx context.Context, id string) (*model
 	return scanCompletionIntent(row)
 }
 
+func (r *Repository) ListDueCompletionIntents(ctx context.Context, now time.Time, limit int) ([]*models.CompletionIntent, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(completionIntentSelect+`
+		WHERE state = ? AND eligible_at <= ?
+		ORDER BY eligible_at ASC, requested_at ASC, id ASC
+		LIMIT ?`), models.CompletionIntentStatePending, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list due completion intents: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	intents := make([]*models.CompletionIntent, 0)
+	for rows.Next() {
+		intent, scanErr := scanCompletionIntent(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		intents = append(intents, intent)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate due completion intents: %w", err)
+	}
+	return intents, nil
+}
+
+func (r *Repository) RearmCompletionIntent(ctx context.Context, id string, activityAt, eligibleAt time.Time) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE session_completion_intents
+		SET last_post_signal_activity_at = ?, eligible_at = ?
+		WHERE id = ? AND state = ?
+	`), activityAt, eligibleAt, id, models.CompletionIntentStatePending)
+	if err != nil {
+		return false, fmt.Errorf("rearm completion intent: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("inspect rearmed completion intent: %w", err)
+	}
+	return affected == 1, nil
+}
+
 func (r *Repository) getCompletionIntentByIdentity(ctx context.Context, sessionID, turnID, stepID string) (*models.CompletionIntent, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(completionIntentSelect+` WHERE session_id = ? AND turn_id = ? AND workflow_step_id = ?`), sessionID, turnID, stepID)
 	return scanCompletionIntent(row)
