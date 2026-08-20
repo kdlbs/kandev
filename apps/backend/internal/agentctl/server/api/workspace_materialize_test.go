@@ -97,7 +97,7 @@ func TestWorkspaceGitMetadataAttestationFailsClosedForNonRepository(t *testing.T
 	}
 }
 
-func TestWorkspaceGitMetadataAttestationRevalidatesEveryAuthorizedCheckout(t *testing.T) {
+func TestWorkspaceGitMetadataAttestationRejectsCheckoutSwapAfterChildStop(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink setup requires platform-specific privileges")
 	}
@@ -122,6 +122,13 @@ func TestWorkspaceGitMetadataAttestationRevalidatesEveryAuthorizedCheckout(t *te
 	if w := attest(); w.Code != http.StatusOK {
 		t.Fatalf("initial batch attestation status = %d, body = %s", w.Code, w.Body.String())
 	}
+	stop := httptest.NewRequest(http.MethodPost, "/api/v1/stop", nil)
+	stop.Header.Set("Authorization", "Bearer test-token")
+	stopResponse := httptest.NewRecorder()
+	s.router.ServeHTTP(stopResponse, stop)
+	if stopResponse.Code != http.StatusOK {
+		t.Fatalf("stop status = %d, body = %s", stopResponse.Code, stopResponse.Body.String())
+	}
 
 	realGitDir := filepath.Join(secondary, ".git.real")
 	if err := os.Rename(filepath.Join(secondary, ".git"), realGitDir); err != nil {
@@ -131,7 +138,7 @@ func TestWorkspaceGitMetadataAttestationRevalidatesEveryAuthorizedCheckout(t *te
 		t.Fatal(err)
 	}
 	if w := attest(); w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("swapped secondary batch attestation status = %d, body = %s", w.Code, w.Body.String())
+		t.Fatalf("post-stop swapped secondary attestation status = %d, body = %s", w.Code, w.Body.String())
 	}
 }
 
