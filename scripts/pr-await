@@ -192,12 +192,22 @@ run_bounded_capture() {
   # sleep returns, so the parent cannot reliably kill one long sleep. Its fds
   # are closed because callers capture this with $(...), and any background
   # process holding that pipe keeps the substitution blocked afterwards.
+  # Job control makes the background job a process-group leader, so the
+  # watchdog can kill the whole tree. Killing the pr-state shell alone leaves
+  # the `gh` it is blocked on running and still issuing requests.
+  local had_monitor=0
+  case "$-" in
+    *m*) had_monitor=1 ;;
+  esac
+  set -m
   if [[ -n "$outfile" ]]; then
     "$@" >"$outfile" 2>/dev/null &
   else
     "$@" >/dev/null 2>&1 &
   fi
   local pid=$!
+  [[ "$had_monitor" -eq 1 ]] || set +m
+
   (
     waited=0
     while [[ "$waited" -lt "$secs" ]]; do
@@ -205,7 +215,7 @@ run_bounded_capture() {
       kill -0 "$pid" 2>/dev/null || exit 0
       waited=$((waited + 1))
     done
-    kill -9 "$pid" 2>/dev/null
+    kill -9 -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
   ) >/dev/null 2>&1 &
 
   local rc=0
@@ -237,7 +247,7 @@ READ_CAP=180
 # report can name the pending checks rather than saying nothing at all. That
 # read is bounded tightly: a healthy `pr-state --summary` returns in about ten
 # seconds, and a caller who asked for no waiting should not get a long one.
-READ_FLOOR=15
+READ_FLOOR="${PR_AWAIT_READ_FLOOR:-15}"
 
 preflight_toolchain() {
   local jq_bin="${PR_AWAIT_JQ:-jq}"
@@ -385,6 +395,15 @@ while :; do
     FIRST_HEAD="$head_oid"
     EVIDENCE_ERRORS=0
     MERGE_UNKNOWN=0
+    # The snapshot in hand describes the previous head. Keeping it would let a
+    # deadline reached before the next read print those checks under the new
+    # SHA; with no snapshot the run reports blocked, which is the truth.
+    SUMMARY_JSON=''
+    if ! sleep_or_stop; then
+      OUTCOME='deadline'
+      break
+    fi
+    continue
   fi
 
   if [[ "$pr_state" == 'MERGED' || "$pr_state" == 'CLOSED' ]]; then
@@ -400,13 +419,23 @@ while :; do
 
   progress "poll ${POLLS} (+$((SECONDS - START_SEC))s): ${passed} passed, ${failed} failed, ${pending} pending"
 
-  # Everything below decides on check evidence, so none of it may run against a
-  # snapshot describing a head that has already been replaced.
-  snapshot_is_current=0
-  [[ -n "$checks_head" && "$checks_head" == "$head_oid" ]] && snapshot_is_current=1
+  # Everything below decides on check evidence, so a snapshot describing a head
+  # that has already been replaced is discarded outright rather than guarded
+  # against case by case. Every snapshot retained past this point is therefore
+  # current-head by construction, and a deadline reached with none in hand
+  # reports blocked instead of printing the previous head's checks under the
+  # new SHA.
+  if [[ -z "$checks_head" || "$checks_head" != "$head_oid" ]]; then
+    progress "poll ${POLLS}: snapshot is for ${checks_head:0:9}, head is ${head_oid:0:9}; discarding"
+    SUMMARY_JSON=''
+    if ! sleep_or_stop; then
+      OUTCOME='deadline'
+      break
+    fi
+    continue
+  fi
 
-  if [[ "$snapshot_is_current" -eq 1 ]] &&
-    [[ "$(jq -r '.approval_required_runs | length' <<<"$SUMMARY_JSON")" -gt 0 ]]; then
+  if [[ "$(jq -r '.approval_required_runs | length' <<<"$SUMMARY_JSON")" -gt 0 ]]; then
     # action_required reads as green-or-skipped in a naive check count. It is
     # blocked verification: waiting for it to finish would never terminate.
     OUTCOME='blocked-approval'
@@ -416,7 +445,7 @@ while :; do
   # GitHub can expose a new head before Actions has registered any check. An
   # empty rollup satisfies "nothing pending" without any evidence behind it;
   # in this repository the required jobs always run, so zero means not yet.
-  if [[ "$snapshot_is_current" -eq 1 && $((passed + failed + pending)) -eq 0 ]]; then
+  if [[ $((passed + failed + pending)) -eq 0 ]]; then
     progress "poll ${POLLS}: no checks registered at this head yet; waiting"
     if ! sleep_or_stop; then
       OUTCOME='deadline'
@@ -428,17 +457,11 @@ while :; do
   # A failed job can be visible while its parent workflow is still running, so
   # in all-terminal mode a failure is never on its own a reason to stop.
   if [[ "$MODE" == 'first-failure' && "$failed" -gt 0 ]]; then
-    # A push between this snapshot and the head query leaves `failed` describing
-    # a head that no longer exists. Reporting it would contradict the
-    # restart-on-push behaviour the gate advertises.
-    if [[ "$snapshot_is_current" -eq 1 ]]; then
-      OUTCOME='terminal'
-      break
-    fi
-    progress "poll ${POLLS}: failure belongs to a superseded head; discarding"
+    OUTCOME='terminal'
+    break
   fi
 
-  if [[ "$pending" -eq 0 && "$complete" == 'true' && "$snapshot_is_current" -eq 1 ]]; then
+  if [[ "$pending" -eq 0 && "$complete" == 'true' ]]; then
     # Terminal by check state, but only trustworthy if the snapshot is whole.
     # A partial fetch reports `errors`, and a failed thread query leaves the
     # unresolved count null - which `// 0` would otherwise launder into "clean".

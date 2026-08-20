@@ -577,10 +577,10 @@ exec sleep 120
 HANG
 chmod +x "$d/pr-state"
 start=$SECONDS
-out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet 2>/dev/null)" && rc=0 || rc=$?
+out="$(PR_AWAIT_READ_FLOOR=2 run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet 2>/dev/null)" && rc=0 || rc=$?
 elapsed=$((SECONDS - start))
 [[ "$rc" -ne 0 ]] || fail "a stalled pr-state must never exit 0, got $rc" "$out"
-[[ "$elapsed" -lt 25 ]] || fail "a zero deadline must not wait out a 120s read, took ${elapsed}s"
+[[ "$elapsed" -lt 12 ]] || fail "a zero deadline must not wait out a 120s read, took ${elapsed}s"
 pass "a stalled pr-state read cannot exceed the deadline"
 
 d="$(make_tmp_dir)"; setup_fake "$d"
@@ -591,10 +591,10 @@ exec sleep 120
 HANGGH
 chmod +x "$d/gh"
 start=$SECONDS
-out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet 2>/dev/null)" && rc=0 || rc=$?
+out="$(PR_AWAIT_READ_FLOOR=2 run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet 2>/dev/null)" && rc=0 || rc=$?
 elapsed=$((SECONDS - start))
 [[ "$rc" -ne 0 ]] || fail "a stalled gh pr view must never exit 0, got $rc" "$out"
-[[ "$elapsed" -lt 25 ]] || fail "a zero deadline must not wait out a 120s gh read, took ${elapsed}s"
+[[ "$elapsed" -lt 12 ]] || fail "a zero deadline must not wait out a 120s gh read, took ${elapsed}s"
 pass "a stalled gh pr view read cannot exceed the deadline"
 
 # Structural guard: both external reads must go through the bounded helper, or
@@ -603,6 +603,45 @@ pass "a stalled gh pr view read cannot exceed the deadline"
   || fail "both GitHub reads must run through run_bounded_capture"
 pass "every external GitHub read is bounded by the remaining deadline"
 
+
+
+# --- a head change voids the snapshot in hand ------------------------------
+# Otherwise a deadline reached before the next read renders the old head's
+# checks under the new SHA.
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 3 2 7 true aaaaaaaaaaaa
+snapshot "$d" 2 3 2 7 true aaaaaaaaaaaa
+cat > "$d/gh" <<'GHMOVED'
+#!/usr/bin/env bash
+printf '{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"bbbbbbbbbbbb"}'
+GHMOVED
+chmod +x "$d/gh"
+out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "a deadline with only stale evidence must block, got $rc" "$out"
+grep -q 'Failing' <<<"$out" && fail "must not report the old head's checks under the new SHA" "$out"
+pass "a head change voids the snapshot, so a deadline cannot report stale checks"
+
+# --- a timed-out read takes its children with it ---------------------------
+# On timeout-less hosts, killing only pr-state's shell leaves its gh child
+# running and still issuing requests.
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+cat > "$d/pr-state" <<'SPAWN'
+#!/usr/bin/env bash
+sleep 300 &
+printf '%s' "$!" > "$FAKE_DIR/childpid"
+wait
+SPAWN
+chmod +x "$d/pr-state"
+PR_AWAIT_NO_TIMEOUT=1 PR_AWAIT_READ_FLOOR=2 run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet >/dev/null 2>&1 || true
+child="$(cat "$d/childpid" 2>/dev/null || echo '')"
+[[ -n "$child" ]] || fail "the fake did not record its child pid"
+sleep 1
+if kill -0 "$child" 2>/dev/null; then
+  kill -9 "$child" 2>/dev/null || true
+  fail "a timed-out read left its child process running (pid $child)"
+fi
+pass "a timed-out read terminates the whole process group, not just the shell"
 
 
 printf '\nall tests passed\n'
