@@ -1961,6 +1961,13 @@ func (e *Executor) injectHandoverIfNeeded(ctx context.Context, taskID, currentSe
 // which is also what becomes cmd.Dir of the agent process. So persisting it
 // as-is keeps a single source of truth.
 func computeWorkspacePath(req *LaunchAgentRequest, resp *LaunchAgentResponse) string {
+	// SSH materializes repositories on the remote host. RepositoryPath still
+	// identifies the source checkout on this host, so persisting it would make a
+	// later sibling attach to a different remote directory. The lifecycle
+	// response is the canonical remote task-directory handle.
+	if req.ExecutorType == string(models.ExecutorTypeSSH) && resp.WorkspacePath != "" {
+		return resp.WorkspacePath
+	}
 	if resp.WorktreePath != "" {
 		return resp.WorktreePath
 	}
