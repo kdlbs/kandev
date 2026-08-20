@@ -18,6 +18,16 @@ async function gotoTaskPage(testPage: Page, taskId: string, title: string) {
   });
 }
 
+// Mirrors AgentAvatar's initials() in agent-avatar.tsx, so the assertion
+// stays correct for whichever agent the picker actually resolved to
+// (freshly created, or the seed fallback when creation fails).
+function expectedInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
 test.describe("property pickers", () => {
   test("status picker updates task status and persists", async ({
     testPage,
@@ -245,6 +255,8 @@ test.describe("property pickers", () => {
       })
       .catch(() => undefined)) as Record<string, unknown> | undefined;
     const reviewerId = (created?.id as string) ?? officeSeed.agentId;
+    // "CEO" is the fallback seed agent's name set in office-fixture.ts.
+    const reviewerName = created ? "Picker Reviewer Agent" : "CEO";
 
     const task = await apiClient.createTask(officeSeed.workspaceId, "Picker Reviewer Task", {
       workflow_id: officeSeed.workflowId,
@@ -256,11 +268,13 @@ test.describe("property pickers", () => {
     await trigger.click();
     await testPage.getByTestId(`multi-select-add-${reviewerId}`).click();
 
-    // The chip should render a per-agent initials avatar (AL/BO/CA-style),
-    // not the generic robot glyph every agent used to share.
-    if (created) {
-      await expect(trigger.getByText("PR")).toBeVisible({ timeout: 5_000 });
-    }
+    // The chip should render a per-agent initials avatar, not the generic
+    // robot glyph every agent used to share. Unconditional regardless of
+    // whether agent creation above succeeded, so this assertion can never
+    // silently no-op.
+    await expect(trigger.getByText(expectedInitials(reviewerName))).toBeVisible({
+      timeout: 5_000,
+    });
     await expect(trigger.getByText("🤖")).not.toBeVisible();
 
     // Re-open if the popover auto-closed and remove the reviewer.
