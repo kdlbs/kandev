@@ -464,6 +464,9 @@ func (h *Handler) getTask(c *gin.Context) {
 
 	statusChanges, _ := h.svc.ListStatusChanges(ctx, task.WorkspaceID, task.ID)
 	dto.StartedAt, dto.CompletedAt = deriveTaskTimestamps(statusChanges)
+	if !timelineStatusIsDone(dto.Status) {
+		dto.CompletedAt = ""
+	}
 	c.JSON(http.StatusOK, TaskResponse{Task: dto, Timeline: buildStatusTimeline(statusChanges)})
 }
 
@@ -533,6 +536,11 @@ func timelineStatusIsInProgress(raw string) bool {
 
 func timelineStatusIsDone(raw string) bool {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
+	// "done" is the office API vocabulary (normaliseStatus's "done"
+	// alias); "completed" covers a caller that instead passes the
+	// persisted DB-state enum value ("COMPLETED", see stateCompleted)
+	// as NewStatus, which normaliseStatus also accepts and which then
+	// flows through to this raw activity-log value unnormalized.
 	case statusDoneLowercase, "completed":
 		return true
 	default:
@@ -546,17 +554,19 @@ func timelineStatusIsDone(raw string) bool {
 // done, since a reopened task (done -> in_progress -> done) can re-enter
 // done more than once and the most recent completion is the meaningful one.
 //
-// completedAt does NOT clear when a task is reopened (done -> in_progress
-// with no re-completion). Clearing would need to know the timeline event's
-// "from" status, but the office direct-update path (DashboardService.
-// UpdateTaskStatus -> handleTaskStatusChanged) writes task_status_changed
-// activity entries with only new_status, no old_status - the vocabulary
-// the Office status picker, the REST status endpoint, and agent/MCP status
-// updates all go through. Only the generic workflow engine's TaskMoved
-// handler populates old_status, so a from-based clearing rule would only
-// ever fire for Kanban-style moves, silently doing nothing on the paths
-// Office users actually take. Until old_status is added to that event,
-// a stale completedAt on a reopened task is a known, accepted gap.
+// This function itself does not know the task's current status, so a
+// reopened task's completedAt here still reflects the last time it entered
+// done - even though it may no longer be done. Callers that need "is this
+// task currently done" must clear completedAt themselves against the
+// current status (see getTask), rather than trying to infer it from the
+// timeline's "from" status: the office direct-update path
+// (DashboardService.UpdateTaskStatus -> handleTaskStatusChanged) writes
+// task_status_changed activity entries with only new_status, no
+// old_status - the vocabulary the Office status picker, the REST status
+// endpoint, and agent/MCP status updates all go through. Only the generic
+// workflow engine's TaskMoved handler populates old_status, so a
+// from-based rule inside this function would silently do nothing on the
+// paths Office users actually take.
 //
 // Both are best-effort: ListActivityEntriesByTarget caps the underlying
 // query at the 50 most recent activity entries for the task, with no
