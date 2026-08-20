@@ -8,10 +8,10 @@ import { useAppStoreApi } from "@/components/state-provider";
 
 type SubmitState = "idle" | "submitting" | "ok" | "error";
 
-// The bundle status the backend can report on a resolved response (R10). A
-// loss can resolve to any of the three — a winning cancel resolves every
-// other in-flight submit's status to "cancelled" too (W3a).
-type ResolvedStatus = "answered" | "rejected" | "cancelled";
+// The bundle status the backend can report on a resolved response (R10).
+// Upstream's claim cannot produce a cancelled winner, so a loss only ever
+// resolves to one of these two (W3a is retired: no "cancelled" union member).
+type ResolvedStatus = "answered" | "rejected";
 
 // Parsed shape of the clarification respond/cancel envelope
 // (internal/clarification/handlers.go's writeResolutionResult). Both the
@@ -62,7 +62,7 @@ function questionIdsFromMessages(messages: readonly Message[]): string[] {
 
 // postClarification posts the respond body and, on a 200, parses the R10
 // envelope so the caller can tell a win from a loss (W3) and read the
-// winner's own status/answers off the same response (W3a). credentials:
+// winner's own status/answers off the same response. credentials:
 // "include" matches the shared client (lib/api/client.ts) — without it,
 // split-origin dev mode drops the session cookie and an auth-enabled backend
 // rejects the request before ever reaching the resolver (W1).
@@ -128,9 +128,8 @@ function postClarificationSkip(
 // should write. A win (claimed true, or claimed absent — an older backend
 // that predates R10) keeps today's behavior: this client's own submitted
 // status and answers. A loss (claimed: false) applies the winner's returned
-// status and answers instead (W3) — including "cancelled" when the winner
-// was a cancel (W3a) — since R2 guarantees no later WS broadcast will ever
-// correct an optimistic write of this client's own losing answers.
+// status and answers instead (W3), since R2 guarantees no later WS broadcast
+// will ever correct an optimistic write of this client's own losing answers.
 function resolveOptimisticUpdate(
   result: ClarificationRespondResult,
   ownStatus: ResolvedStatus,

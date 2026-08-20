@@ -411,7 +411,7 @@ describe("useClarificationGroup — credentials", () => {
 // Queues a claimed:false R10 envelope as the next fetch response, with the
 // winner's status/answers the assertion cares about.
 function mockLostRaceResponse(opts: {
-  status: "answered" | "rejected" | "cancelled";
+  status: "answered" | "rejected";
   answers?: Array<{ question_id: string; selected_options?: string[]; custom_text?: string }>;
 }) {
   fetchMock.mockResolvedValueOnce(
@@ -427,7 +427,7 @@ function mockLostRaceResponse(opts: {
   );
 }
 
-// W2/W3/W3a: a `claimed: false` response is a successful submit (the overlay
+// W2/W3: a `claimed: false` response is a successful submit (the overlay
 // closes exactly as it does on 409), but the optimistic update must reflect
 // the winner's own status and answers — never this client's losing ones,
 // since R2 guarantees no later WS broadcast will ever correct that write.
@@ -472,21 +472,6 @@ describe("useClarificationGroup — losing a race (claimed: false)", () => {
       question_id: "q1",
       selected_options: ["winner-option"],
     });
-  });
-
-  it("submitCollected writes 'cancelled' when the winner was a cancel, not 'answered'", async () => {
-    mockLostRaceResponse({ status: "cancelled" });
-    const msgs = [clarMessage({ id: "m1", pendingId: "p1", questionId: "q1", index: 0, total: 1 })];
-    const { result } = renderHook(() => useClarificationGroup(msgs));
-
-    await act(async () => {
-      await result.current.submitCollected({
-        q1: { question_id: "q1", selected_options: ["o1"] },
-      });
-    });
-
-    expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
-    expect(mockUpdateMessage.mock.calls[0][0].metadata.status).toBe("cancelled");
   });
 });
 
