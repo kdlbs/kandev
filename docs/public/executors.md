@@ -201,7 +201,7 @@ An idle, non-archived repository-backed task can add sources from its **Files** 
 
 Every repository row records a base branch. Worktree, Docker, SSH, and Sprites may also materialize an existing checkout branch for repository rows. Local/Local PC always uses the repository's current checkout and does not offer or perform a branch switch.
 
-For clone-based Docker, SSH, and Sprites tasks, Kandev validates the executor's own checkout before configuring a mutable agent session. Git metadata access is limited to the attested task checkout and its materialized repository siblings; Kandev never uses a host checkout path to authorize a remote executor. A failed checkout or metadata validation stops the launch. Reset or relaunch creates a fresh checked workspace when this policy must be reapplied.
+For clone-based Docker, SSH, and Sprites tasks, Kandev validates the executor's own checkout before configuring a mutable agent session. Git metadata access is limited to the attested task checkout and its materialized repository siblings; Kandev never uses a host checkout path to authorize a remote executor. When an idle task adds a repository, Kandev revalidates the complete checkout set and safely refreshes the running agent before the new repository is usable. A failed checkout, metadata validation, or refresh leaves the previous session and source set intact.
 
 When an ACP agent advertises support for additional workspace directories, Kandev passes only the canonical repository siblings already attached to that task. If an attached sibling requires that capability and the agent does not advertise it, session creation fails with an explicit recovery error; Kandev never silently widens or narrows the authorized scope.
 

@@ -71,8 +71,9 @@ manually moving files into the task workspace.
   root, and Kandev rehydrates the recorded conversation context with the next prompt.
 - Worktree and Local/Local PC rebinds stop terminal shells, the task editor server, dev servers, and
   other agentctl-managed workspace processes; users must reopen or restart them. Docker, SSH, and
-  Sprites attach repository siblings through the live workspace and rescan without restarting the
-  agent or those processes.
+  Sprites attach repository siblings through the live workspace, revalidate every task-owned clone,
+  and atomically restart the agent with the refreshed policy. A failed refresh restores the previous
+  roots, policy, and child session before the attachment is reported as failed.
 - When **Add Repositories to workspace** is unavailable, the combined Files action remains
   reachable so **Open workspace folder** still works. The repository action is disabled and shows
   the reason in touch-visible text rather than relying on a tooltip.

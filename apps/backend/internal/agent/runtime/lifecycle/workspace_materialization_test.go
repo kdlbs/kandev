@@ -10,7 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/registry"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 type workspaceMaterializerClientStub struct {
@@ -216,6 +219,107 @@ func TestMaterializeRepositoriesForEnvironment_RescansEveryDistinctClient(t *tes
 	}
 	if rescans != 2 {
 		t.Fatalf("rescans = %d, want 2 for both live executions", rescans)
+	}
+}
+
+func TestMaterializeRepositoriesForEnvironmentRefreshesMutableClonePolicyForEveryRemoteRuntime(t *testing.T) {
+	for _, runtimeName := range []executor.Name{executor.NameDocker, executor.NameRemoteDocker, executor.NameSSH, executor.NameSprites} {
+		t.Run(string(runtimeName), func(t *testing.T) {
+			server := newWorkspaceRebindAgentctlServer(t, false)
+			t.Cleanup(server.Close)
+			t.Cleanup(server.closeConnections)
+
+			manager, execution := workspaceSourceTestManager(t, server.URL, []string{"/executor/workspace"})
+			manager.registry = registry.NewRegistry(newTestLogger())
+			manager.registry.LoadDefaults()
+			manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
+			execution.TaskEnvironmentID = "environment-1"
+			execution.RuntimeName = runtimeName
+			execution.WorkspacePath = "/executor/workspace"
+			execution.Status = v1.AgentStatusReady
+			execution.ACPSessionID = "acp-existing"
+			execution.AgentID = "codex-acp"
+			execution.AgentProfileID = "profile-1"
+			execution.AgentCommand = "codex-acp"
+			execution.setRuntimeEnvironment(map[string]string{"CODEX_CONFIG": `{}`})
+
+			_, err := manager.MaterializeRepositoriesForEnvironment(context.Background(), "environment-1", []WorkspaceRepositoryMaterialization{{
+				RepositoryURL: "https://github.com/acme/added.git",
+				Destination:   "added-main",
+				BaseBranch:    "main",
+			}})
+			if err != nil {
+				t.Fatalf("MaterializeRepositoriesForEnvironment: %v", err)
+			}
+			wantRoots := []string{"/executor/workspace", "/executor/workspace/added-main"}
+			if !sameStrings(execution.WorkspaceSourceRoots, wantRoots) {
+				t.Fatalf("workspace roots = %v, want %v", execution.WorkspaceSourceRoots, wantRoots)
+			}
+			if configs := server.configuredEnvs(); len(configs) != 1 || !strings.Contains(configs[0]["CODEX_CONFIG"], "/executor/workspace/added-main/.git") {
+				t.Fatalf("configured clone policies = %#v, want final attached GitDir", configs)
+			}
+			if server.attestationCalls() != 1 {
+				t.Fatalf("attestation calls = %d, want one final batch attestation", server.attestationCalls())
+			}
+			if loads := server.loads(); !sameStrings(loads, []string{"acp-existing"}) {
+				t.Fatalf("restored ACP sessions = %v, want [acp-existing]", loads)
+			}
+		})
+	}
+}
+
+func TestMaterializeRepositoriesForEnvironmentRollsBackClonePolicyOnAttestationOrRestartFailure(t *testing.T) {
+	for _, testCase := range []struct {
+		name          string
+		configure     func(*workspaceRebindAgentctlServer)
+		wantConfigs   int
+		wantStartCall int
+	}{
+		{name: "attestation", configure: func(server *workspaceRebindAgentctlServer) { server.attestationErr = true }},
+		{name: "restart", configure: func(server *workspaceRebindAgentctlServer) { server.failStartAt = 1 }, wantConfigs: 2, wantStartCall: 2},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			server := newWorkspaceRebindAgentctlServer(t, false)
+			testCase.configure(server)
+			t.Cleanup(server.Close)
+			t.Cleanup(server.closeConnections)
+
+			manager, execution := workspaceSourceTestManager(t, server.URL, []string{"/executor/workspace"})
+			manager.registry = registry.NewRegistry(newTestLogger())
+			manager.registry.LoadDefaults()
+			manager.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{AgentName: "codex-acp"}}
+			execution.TaskEnvironmentID = "environment-1"
+			execution.RuntimeName = executor.NameDocker
+			execution.WorkspacePath = "/executor/workspace"
+			execution.Status = v1.AgentStatusReady
+			execution.ACPSessionID = "acp-existing"
+			execution.AgentID = "codex-acp"
+			execution.AgentProfileID = "profile-1"
+			execution.AgentCommand = "codex-acp"
+			execution.setRuntimeEnvironment(map[string]string{"CODEX_CONFIG": `{}`})
+
+			_, err := manager.MaterializeRepositoriesForEnvironment(context.Background(), "environment-1", []WorkspaceRepositoryMaterialization{{
+				RepositoryURL: "https://github.com/acme/added.git", Destination: "added-main", BaseBranch: "main",
+			}})
+			if err == nil {
+				t.Fatal("MaterializeRepositoriesForEnvironment succeeded despite policy refresh failure")
+			}
+			if !sameStrings(execution.WorkspaceSourceRoots, []string{"/executor/workspace"}) {
+				t.Fatalf("workspace roots after failure = %v, want only prior task root", execution.WorkspaceSourceRoots)
+			}
+			if got := execution.RuntimeEnvironment()["CODEX_CONFIG"]; got != `{}` {
+				t.Fatalf("runtime policy after failure = %q, want original policy", got)
+			}
+			if configs := server.configuredEnvs(); len(configs) != testCase.wantConfigs {
+				t.Fatalf("configure calls = %#v, want %d", configs, testCase.wantConfigs)
+			}
+			if testCase.wantConfigs == 2 && server.configuredEnvs()[1]["CODEX_CONFIG"] != `{}` {
+				t.Fatalf("rollback policy = %q, want original config", server.configuredEnvs()[1]["CODEX_CONFIG"])
+			}
+			if testCase.wantStartCall > 0 && server.startCount != testCase.wantStartCall {
+				t.Fatalf("start calls = %d, want %d", server.startCount, testCase.wantStartCall)
+			}
+		})
 	}
 }
 

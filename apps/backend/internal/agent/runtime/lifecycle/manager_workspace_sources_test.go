@@ -311,6 +311,11 @@ type workspaceRebindAgentctlServer struct {
 	firstStatus     bool
 	statusCallCount int
 	paths           []string
+	workspaceRoots  [][]string
+	configured      []map[string]string
+	attestations    int
+	attestationErr  bool
+	failStartAt     int
 	loadedSessions  []string
 	actionLog       []string
 	connections     []*websocket.Conn
@@ -323,6 +328,71 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("/api/v1/stop", workspaceRebindSuccess)
+	mux.HandleFunc("/api/v1/workspace/materialize-repository", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"destination": "added-main", "git_metadata_attested": true})
+	})
+	mux.HandleFunc("/api/v1/workspace/materialize-repository/remove", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]bool{"removed": true})
+	})
+	mux.HandleFunc("/api/v1/workspace/rescan", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			WorkspaceSourceRoots []string `json:"workspace_source_roots"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		server.mu.Lock()
+		server.workspaceRoots = append(server.workspaceRoots, append([]string(nil), request.WorkspaceSourceRoots...))
+		server.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/api/v1/workspace/reconcile", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			WorkspaceSourceRoots []string `json:"workspace_source_roots"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		server.mu.Lock()
+		server.workspaceRoots = append(server.workspaceRoots, append([]string(nil), request.WorkspaceSourceRoots...))
+		server.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/api/v1/workspace/attest-git-metadata", func(w http.ResponseWriter, _ *http.Request) {
+		server.mu.Lock()
+		server.attestations++
+		failed := server.attestationErr
+		roots := append([]string(nil), server.workspaceRoots[len(server.workspaceRoots)-1]...)
+		server.mu.Unlock()
+		if failed {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "attestation rejected"})
+			return
+		}
+		checkouts := make([]map[string]string, 0, len(roots))
+		for _, root := range roots {
+			checkouts = append(checkouts, map[string]string{"checkout_path": root, "git_dir": root + "/.git"})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"attested": true, "checkouts": checkouts})
+	})
+	mux.HandleFunc("/api/v1/agent/configure", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Env map[string]string `json:"env"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		server.mu.Lock()
+		server.configured = append(server.configured, request.Env)
+		server.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	})
 	mux.HandleFunc("/api/v1/workspace/rebind", func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			WorkDir string `json:"work_dir"`
@@ -340,8 +410,14 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 	mux.HandleFunc("/api/v1/start", func(w http.ResponseWriter, _ *http.Request) {
 		server.mu.Lock()
 		server.startCount++
+		failed := server.failStartAt == server.startCount
 		server.firstStatus = true
 		server.mu.Unlock()
+		if failed {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "restart rejected"})
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
 	})
 	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, _ *http.Request) {
@@ -442,6 +518,22 @@ func (s *workspaceRebindAgentctlServer) actions() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.actionLog...)
+}
+
+func (s *workspaceRebindAgentctlServer) configuredEnvs() []map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	configs := make([]map[string]string, len(s.configured))
+	for index, env := range s.configured {
+		configs[index] = cloneStringMap(env)
+	}
+	return configs
+}
+
+func (s *workspaceRebindAgentctlServer) attestationCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.attestations
 }
 
 func (s *workspaceRebindAgentctlServer) closeConnections() {
