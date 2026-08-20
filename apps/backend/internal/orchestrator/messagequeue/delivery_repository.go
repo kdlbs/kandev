@@ -22,6 +22,8 @@ type DeliveryLedger interface {
 	RescheduleDelivery(ctx context.Context, deliveryID, leaseOwner string, nextAttemptAt time.Time, lastError string) (*Delivery, error)
 	MarkDeliveryQueued(ctx context.Context, deliveryID, leaseOwner, queueEntryID string) (*Delivery, error)
 	AcknowledgeDelivery(ctx context.Context, deliveryID, queueEntryID string, deliveredAt time.Time) (*Delivery, error)
+	AcknowledgeDeliveryByQueueEntry(ctx context.Context, queueEntryID string, deliveredAt time.Time) (*Delivery, error)
+	MarkDeliveryRecoverable(ctx context.Context, deliveryID, leaseOwner, lastError string) (*Delivery, error)
 }
 
 // CreateOrGetDelivery atomically creates a source-turn idempotency receipt or
@@ -157,6 +159,44 @@ func (r *sqliteRepository) AcknowledgeDelivery(ctx context.Context, deliveryID, 
 	return stored, nil
 }
 
+// AcknowledgeDeliveryByQueueEntry joins executor acknowledgement to the
+// receipt without trusting caller-provided delivery identity.
+func (r *sqliteRepository) AcknowledgeDeliveryByQueueEntry(ctx context.Context, queueEntryID string, deliveredAt time.Time) (*Delivery, error) {
+	if deliveredAt.IsZero() {
+		deliveredAt = time.Now().UTC()
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE message_deliveries
+		SET state = ?, delivered_at = ?, updated_at = ?
+		WHERE queue_entry_id = ? AND state = ?
+	`), DeliveryDelivered, deliveredAt, deliveredAt, queueEntryID, DeliveryQueued)
+	if err != nil {
+		return nil, fmt.Errorf("acknowledge delivery by queue entry: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("acknowledge delivery by queue entry rows affected: %w", err)
+	}
+	if affected == 0 {
+		return nil, nil
+	}
+	return r.getDeliveryByQueueEntry(ctx, queueEntryID)
+}
+
+// MarkDeliveryRecoverable ends automatic retries while retaining the payload
+// and error for an authorized explicit recovery operation.
+func (r *sqliteRepository) MarkDeliveryRecoverable(ctx context.Context, deliveryID, leaseOwner, lastError string) (*Delivery, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE message_deliveries
+		SET state = ?, last_error = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+		WHERE id = ? AND state = ? AND lease_owner = ?
+	`), DeliveryRecoverable, lastError, time.Now().UTC(), deliveryID, DeliveryReserved, leaseOwner)
+	if err != nil {
+		return nil, fmt.Errorf("mark delivery recoverable: %w", err)
+	}
+	return r.deliveryAfterLeasedUpdate(ctx, deliveryID, result)
+}
+
 func validateDeliveryIdentity(delivery Delivery) error {
 	if delivery.SenderSessionID == "" || delivery.SourceTurnID == "" || delivery.IdempotencyKey == "" {
 		return errors.New("delivery source session, turn, and idempotency key are required")
@@ -193,6 +233,16 @@ func (r *sqliteRepository) getDeliveryBySourceKey(ctx context.Context, senderSes
 	`), senderSessionID, sourceTurnID, idempotencyKey))
 	if err != nil {
 		return nil, fmt.Errorf("get delivery receipt: %w", err)
+	}
+	return delivery, nil
+}
+
+func (r *sqliteRepository) getDeliveryByQueueEntry(ctx context.Context, queueEntryID string) (*Delivery, error) {
+	delivery, err := scanDelivery(r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT `+deliveryColumns+` FROM message_deliveries WHERE queue_entry_id = ?
+	`), queueEntryID))
+	if err != nil {
+		return nil, fmt.Errorf("get delivery by queue entry: %w", err)
 	}
 	return delivery, nil
 }

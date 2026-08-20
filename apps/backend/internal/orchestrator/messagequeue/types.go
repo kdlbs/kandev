@@ -68,6 +68,10 @@ const MetadataLifecycleGeneration = "lifecycle_queue_generation"
 // carries the flag.
 const MetadataLifecycleReserved = "lifecycle_reserved_in_flight"
 
+// MetadataDeliveryID ties a durable queued row to its sender-independent
+// delivery receipt. It is backend-owned and never originates from a client.
+const MetadataDeliveryID = "delivery_id"
+
 // MetadataSenderTaskID identifies the task that produced an agent message. Two
 // agent entries may only merge when their sender task ids match, so the merge
 // never mixes prompts issued by different agents.
@@ -140,6 +144,9 @@ func (m *QueuedMessage) IsDurableLifecycle() bool {
 		return false
 	}
 	if durable, _ := m.Metadata[MetadataLifecycleDurable].(bool); durable {
+		return true
+	}
+	if deliveryID, _ := m.Metadata[MetadataDeliveryID].(string); deliveryID != "" {
 		return true
 	}
 	origin, _ := m.Metadata["origin"].(string)

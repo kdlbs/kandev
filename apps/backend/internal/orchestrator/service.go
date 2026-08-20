@@ -2130,6 +2130,9 @@ func (s *Service) Start(ctx context.Context) error {
 		return err
 	}
 	s.startCompletionIntentReconciler()
+	if s.messageQueue != nil {
+		s.messageQueue.StartDeliveryRecovery(ctx)
+	}
 
 	// Subscribe to GitHub integration events
 	s.subscribeGitHubEvents()
@@ -2185,6 +2188,9 @@ func (s *Service) Stop() error {
 	var errs []error
 	s.stopReservedPromptCallbacks()
 	s.stopCompletionIntentReconciler()
+	if s.messageQueue != nil {
+		s.messageQueue.StopDeliveryRecovery()
+	}
 
 	if err := s.scheduler.Stop(); err != nil {
 		s.logger.Error("failed to stop scheduler", zap.Error(err))

@@ -923,7 +923,7 @@ func (s *Service) finishQueuedMessageExecution(
 		)
 		return
 	}
-	if lifecyclePrompt {
+	if lifecyclePrompt || queuedMsg.IsReservedLifecycleDelivery() {
 		s.acknowledgeLifecycleQueueEntry(ctx, reservedSessionID, queuedMsg)
 	}
 }

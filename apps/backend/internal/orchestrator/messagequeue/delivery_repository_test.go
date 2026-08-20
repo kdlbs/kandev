@@ -123,3 +123,25 @@ func TestDeliveryLedgerRetryAndAcknowledgementRequireTheCurrentLease(t *testing.
 	assert.Equal(t, DeliveryDelivered, delivered.State)
 	assert.False(t, delivered.DeliveredAt.IsZero())
 }
+
+func TestPurgeTaskCancelsUndeliveredDeliveryReceipts(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ledger := repo.(DeliveryLedger)
+	delivery, _, err := ledger.CreateOrGetDelivery(context.Background(), Delivery{
+		SenderTaskID:    "source-task",
+		SenderSessionID: "source-session",
+		SourceTurnID:    "source-turn",
+		IdempotencyKey:  "report-v1",
+		TargetTaskID:    "target-task",
+		TargetSessionID: "target-session",
+		Content:         "review is ready",
+		State:           DeliveryPendingCapacity,
+	})
+	require.NoError(t, err)
+
+	_, err = repo.PurgeTask(context.Background(), "target-task")
+	require.NoError(t, err)
+	stored, err := ledger.GetDelivery(context.Background(), delivery.ID)
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryCancelled, stored.State)
+}

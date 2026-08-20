@@ -23,13 +23,20 @@ import (
 
 // Service manages queued messages for sessions, backed by Repository.
 type Service struct {
-	repo             Repository
-	maxPerSession    atomic.Int64
-	mergeEnabled     atomic.Bool
-	autoMergeEnabled atomic.Bool
-	logger           *logger.Logger
-	admissionMu      sync.Mutex
-	admissions       map[string]*sessionAdmission
+	repo                   Repository
+	maxPerSession          atomic.Int64
+	mergeEnabled           atomic.Bool
+	autoMergeEnabled       atomic.Bool
+	logger                 *logger.Logger
+	admissionMu            sync.Mutex
+	admissions             map[string]*sessionAdmission
+	deliveryWorkerMu       sync.Mutex
+	deliveryWorkerCtx      context.Context
+	deliveryWorkerCancel   context.CancelFunc
+	deliveryWorkerStarted  bool
+	deliveryWorkerStopped  bool
+	deliveryWorkerWG       sync.WaitGroup
+	deliveryWorkerInterval time.Duration
 }
 
 type sessionAdmission struct {
@@ -56,6 +63,7 @@ func NewService(repo Repository, maxPerSession int, log *logger.Logger) *Service
 	service.SetMaxPerSession(maxPerSession)
 	service.mergeEnabled.Store(true)
 	service.autoMergeEnabled.Store(true)
+	service.deliveryWorkerInterval = time.Second
 	return service
 }
 
@@ -542,6 +550,14 @@ func (s *Service) AcknowledgeQueued(ctx context.Context, sessionID, entryID stri
 	if errors.Is(err, ErrEntryNotFound) {
 		return nil
 	}
+	if err != nil {
+		return err
+	}
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil
+	}
+	_, err = ledger.AcknowledgeDeliveryByQueueEntry(ctx, entryID, time.Now().UTC())
 	return err
 }
 
