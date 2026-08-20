@@ -925,6 +925,17 @@ type Service struct {
 	sendNowCancel  context.CancelFunc
 	sendNowStopped bool
 	sendNowWorkers sync.WaitGroup
+
+	// completionIntentReconciler retries only durable, due completion intents.
+	// Its lifecycle is independent from the provider turn that created an
+	// intent, and shutdown waits for the single bounded scanner to exit.
+	completionIntentReconcileMu       sync.Mutex
+	completionIntentReconcileCtx      context.Context
+	completionIntentReconcileCancel   context.CancelFunc
+	completionIntentReconcileStopped  bool
+	completionIntentReconcileStarted  bool
+	completionIntentReconcileWorkers  sync.WaitGroup
+	completionIntentReconcileInterval time.Duration
 }
 
 // Status contains orchestrator status information
@@ -993,21 +1004,22 @@ func NewService(
 	// Create the service (watcher will be created after we have handlers)
 	sendNowCtx, sendNowCancel := context.WithCancel(context.Background())
 	s := &Service{
-		config:                       cfg,
-		logger:                       svcLogger,
-		eventBus:                     eventBus,
-		taskRepo:                     taskRepo,
-		repo:                         repo,
-		agentManager:                 agentManager,
-		queue:                        taskQueue,
-		executor:                     exec,
-		scheduler:                    sched,
-		messageQueue:                 msgQueue,
-		clarificationWatchdogTimeout: 15 * time.Second,
-		gitSnapshotCache:             newGitSnapshotCache(),
-		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
-		sendNowCtx:                   sendNowCtx,
-		sendNowCancel:                sendNowCancel,
+		config:                            cfg,
+		logger:                            svcLogger,
+		eventBus:                          eventBus,
+		taskRepo:                          taskRepo,
+		repo:                              repo,
+		agentManager:                      agentManager,
+		queue:                             taskQueue,
+		executor:                          exec,
+		scheduler:                         sched,
+		messageQueue:                      msgQueue,
+		clarificationWatchdogTimeout:      15 * time.Second,
+		gitSnapshotCache:                  newGitSnapshotCache(),
+		reservedPromptCallbacks:           newReservedPromptCallbackOwner(),
+		sendNowCtx:                        sendNowCtx,
+		sendNowCancel:                     sendNowCancel,
+		completionIntentReconcileInterval: completionIntentReconcileInterval,
 	}
 	// Always publish queue-status after a task-scoped queue purge so the
 	// status-summary projector zeros queued_prompt_count. Unlike the
@@ -2067,6 +2079,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.logger.Info("starting orchestrator service")
 	s.resetReservedPromptCallbacks()
 	s.resetSendNowWorkers()
+	s.resetCompletionIntentReconciler()
 
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily
@@ -2116,6 +2129,7 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return err
 	}
+	s.startCompletionIntentReconciler()
 
 	// Subscribe to GitHub integration events
 	s.subscribeGitHubEvents()
@@ -2170,6 +2184,7 @@ func (s *Service) Stop() error {
 	// Stop components in reverse order
 	var errs []error
 	s.stopReservedPromptCallbacks()
+	s.stopCompletionIntentReconciler()
 
 	if err := s.scheduler.Stop(); err != nil {
 		s.logger.Error("failed to stop scheduler", zap.Error(err))

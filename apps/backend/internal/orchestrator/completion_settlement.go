@@ -9,7 +9,10 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-const completionIntentReconcileBatchSize = 32
+const (
+	completionIntentReconcileBatchSize = 32
+	completionIntentReconcileInterval  = 30 * time.Second
+)
 
 // completionIntentReconciliationStore is deliberately narrow so the
 // orchestrator can be constructed with older test repositories while the
@@ -35,6 +38,66 @@ func (s *Service) reconcileDueCompletionIntents(ctx context.Context) {
 	for _, intent := range intents {
 		s.reconcileCompletionIntent(ctx, store, intent)
 	}
+}
+
+// resetCompletionIntentReconciler creates the owner context used by the
+// periodic recovery worker. It is called at startup only after a previous
+// owner has stopped, so no old worker can observe the new context.
+func (s *Service) resetCompletionIntentReconciler() {
+	s.completionIntentReconcileMu.Lock()
+	defer s.completionIntentReconcileMu.Unlock()
+	s.completionIntentReconcileStopped = false
+	s.completionIntentReconcileStarted = false
+	s.completionIntentReconcileCtx, s.completionIntentReconcileCancel = context.WithCancel(context.Background())
+}
+
+// startCompletionIntentReconciler keeps bounded due scans independent from a
+// provider terminal event. Claiming remains compare-and-set in the repository,
+// so duplicate ticks and instances cannot settle the same intent twice.
+func (s *Service) startCompletionIntentReconciler() {
+	s.completionIntentReconcileMu.Lock()
+	if s.completionIntentReconcileStopped || s.completionIntentReconcileStarted {
+		s.completionIntentReconcileMu.Unlock()
+		return
+	}
+	if s.completionIntentReconcileCtx == nil {
+		s.completionIntentReconcileCtx, s.completionIntentReconcileCancel = context.WithCancel(context.Background())
+	}
+	workerCtx := s.completionIntentReconcileCtx
+	interval := s.completionIntentReconcileInterval
+	if interval <= 0 {
+		interval = completionIntentReconcileInterval
+	}
+	s.completionIntentReconcileStarted = true
+	s.completionIntentReconcileWorkers.Add(1)
+	s.completionIntentReconcileMu.Unlock()
+
+	go func() {
+		defer s.completionIntentReconcileWorkers.Done()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-workerCtx.Done():
+				return
+			case <-ticker.C:
+				s.reconcileDueCompletionIntents(workerCtx)
+			}
+		}
+	}()
+}
+
+// stopCompletionIntentReconciler prevents shutdown from leaving a background
+// settlement path that could race a successor turn after the service stops.
+func (s *Service) stopCompletionIntentReconciler() {
+	s.completionIntentReconcileMu.Lock()
+	s.completionIntentReconcileStopped = true
+	cancel := s.completionIntentReconcileCancel
+	s.completionIntentReconcileMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	s.completionIntentReconcileWorkers.Wait()
 }
 
 func (s *Service) reconcileCompletionIntent(ctx context.Context, store completionIntentReconciliationStore, intent *models.CompletionIntent) {

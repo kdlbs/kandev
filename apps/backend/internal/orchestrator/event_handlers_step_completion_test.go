@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -9,6 +10,16 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
+
+type countingCompletionTurnService struct {
+	TurnService
+	completeCalls atomic.Int32
+}
+
+func (s *countingCompletionTurnService) CompleteTurn(ctx context.Context, turnID string) error {
+	s.completeCalls.Add(1)
+	return s.TurnService.CompleteTurn(ctx, turnID)
+}
 
 // TestProcessOnTurnComplete_ExplicitSignalGating verifies the ADR 0015
 // gating: when AutoAdvanceRequiresSignal=true, turn-end without a matching
@@ -175,6 +186,69 @@ func TestReconcileDueCompletionIntentsSettlesOldTurnAfterTaskMoved(t *testing.T)
 	intent, err := repo.GetCompletionIntent(ctx, "intent-1")
 	if err != nil || intent.State != models.CompletionIntentStateSuperseded {
 		t.Fatalf("GetCompletionIntent = (%+v, %v), want superseded", intent, err)
+	}
+}
+
+func TestCompletionIntentReconcilerProcessesDueWorkAndStops(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := repo.CreateTurn(ctx, &models.Turn{ID: "turn-1", TaskID: "t1", TaskSessionID: "s1", StartedAt: now}); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	if _, _, err := repo.CreateOrGetCompletionIntent(ctx, &models.CompletionIntent{
+		ID: "intent-1", TaskID: "t1", SessionID: "s1", TurnID: "turn-1", WorkflowStepID: "step1",
+		State: models.CompletionIntentStatePending, RequestedAt: now, EligibleAt: now,
+	}); err != nil {
+		t.Fatalf("CreateOrGetCompletionIntent: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	turns := &countingCompletionTurnService{TurnService: &repoTurnService{repo: repo}}
+	svc.turnService = turns
+	svc.completionIntentReconcileInterval = time.Millisecond
+	svc.resetCompletionIntentReconciler()
+	svc.startCompletionIntentReconciler()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		intent, err := repo.GetCompletionIntent(ctx, "intent-1")
+		if err != nil {
+			t.Fatalf("GetCompletionIntent: %v", err)
+		}
+		if intent.State == models.CompletionIntentStateSettled {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("due completion intent was not settled by periodic reconciler: %+v", intent)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := turns.completeCalls.Load(); got != 1 {
+		t.Fatalf("CompleteTurn calls = %d, want exactly one", got)
+	}
+
+	svc.stopCompletionIntentReconciler()
+	if err := repo.CreateTurn(ctx, &models.Turn{ID: "turn-2", TaskID: "t1", TaskSessionID: "s1", StartedAt: now}); err != nil {
+		t.Fatalf("CreateTurn after worker shutdown: %v", err)
+	}
+	if _, _, err := repo.CreateOrGetCompletionIntent(ctx, &models.CompletionIntent{
+		ID: "intent-2", TaskID: "t1", SessionID: "s1", TurnID: "turn-2", WorkflowStepID: "step1",
+		State: models.CompletionIntentStatePending, RequestedAt: now, EligibleAt: now,
+	}); err != nil {
+		t.Fatalf("CreateOrGetCompletionIntent after worker shutdown: %v", err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	intent, err := repo.GetCompletionIntent(ctx, "intent-2")
+	if err != nil {
+		t.Fatalf("GetCompletionIntent after worker shutdown: %v", err)
+	}
+	if intent.State != models.CompletionIntentStatePending {
+		t.Fatalf("stopped reconciler changed a later intent to %q", intent.State)
+	}
+	if got := turns.completeCalls.Load(); got != 1 {
+		t.Fatalf("CompleteTurn calls after shutdown = %d, want exactly one", got)
 	}
 }
 
