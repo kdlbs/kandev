@@ -18,6 +18,9 @@ import (
 // receipt that was already accepted from the source turn.
 type DeliveryLedger interface {
 	CreateOrGetDelivery(ctx context.Context, delivery Delivery) (*Delivery, bool, error)
+	GetDeliveryBySourceKey(ctx context.Context, senderSessionID, sourceTurnID, idempotencyKey string) (*Delivery, error)
+	ReserveDeliveryForDirectDispatch(ctx context.Context, deliveryID, leaseOwner string, leaseDuration time.Duration) (*Delivery, bool, error)
+	AcknowledgeDirectDelivery(ctx context.Context, deliveryID, leaseOwner string, deliveredAt time.Time) (*Delivery, error)
 	GetDelivery(ctx context.Context, deliveryID string) (*Delivery, error)
 	ClaimDueDeliveries(ctx context.Context, now time.Time, leaseOwner string, leaseDuration time.Duration, limit int) ([]Delivery, error)
 	RescheduleDelivery(ctx context.Context, deliveryID, leaseOwner string, nextAttemptAt time.Time, lastError string) (*Delivery, error)
@@ -146,12 +149,12 @@ func (r *sqliteRepository) CreateOrGetDelivery(ctx context.Context, delivery Del
 		INSERT INTO message_deliveries (
 			id, sender_task_id, sender_session_id, source_turn_id, idempotency_key,
 			target_task_id, target_session_id, delivery_mode, content, metadata_json,
-			state, queue_entry_id, attempts, next_attempt_at, last_error, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0, ?, '', ?, ?)
+			state, queue_entry_id, attempts, next_attempt_at, lease_owner, lease_expires_at, last_error, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0, ?, ?, ?, '', ?, ?)
 		ON CONFLICT(sender_session_id, source_turn_id, idempotency_key) DO NOTHING
 	`), delivery.ID, delivery.SenderTaskID, delivery.SenderSessionID, delivery.SourceTurnID,
 		delivery.IdempotencyKey, delivery.TargetTaskID, delivery.TargetSessionID, delivery.DeliveryMode,
-		delivery.Content, string(metadataJSON), delivery.State, delivery.NextAttemptAt, delivery.CreatedAt, delivery.UpdatedAt)
+		delivery.Content, string(metadataJSON), delivery.State, delivery.NextAttemptAt, nullableDeliveryString(delivery.LeaseOwner), nullableDeliveryTime(delivery.LeaseExpiresAt), delivery.CreatedAt, delivery.UpdatedAt)
 	if err != nil {
 		return nil, false, fmt.Errorf("insert delivery receipt: %w", err)
 	}
@@ -171,6 +174,52 @@ func (r *sqliteRepository) CreateOrGetDelivery(ctx context.Context, delivery Del
 	return stored, created == 1, nil
 }
 
+// ReserveDeliveryForDirectDispatch keeps an accepted direct prompt out of the
+// recovery worker while the MCP handler commits the real prompt/start. A
+// repeated tool call observes the existing receipt and never dispatches a
+// second prompt.
+func (r *sqliteRepository) ReserveDeliveryForDirectDispatch(ctx context.Context, deliveryID, leaseOwner string, leaseDuration time.Duration) (*Delivery, bool, error) {
+	if leaseOwner == "" || leaseDuration <= 0 {
+		return nil, false, errors.New("direct delivery lease is required")
+	}
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE message_deliveries
+		SET state = ?, lease_owner = ?, lease_expires_at = ?, updated_at = ?
+		WHERE id = ? AND state = ?
+	`), DeliveryReserved, leaseOwner, now.Add(leaseDuration), now, deliveryID, DeliveryPendingCapacity)
+	if err != nil {
+		return nil, false, fmt.Errorf("reserve direct delivery: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return nil, false, err
+	}
+	stored, err := r.GetDelivery(ctx, deliveryID)
+	return stored, affected == 1, err
+}
+
+// AcknowledgeDirectDelivery is the direct-dispatch counterpart to FIFO
+// acknowledgement. It can only finish the exact handler reservation.
+func (r *sqliteRepository) AcknowledgeDirectDelivery(ctx context.Context, deliveryID, leaseOwner string, deliveredAt time.Time) (*Delivery, error) {
+	if deliveredAt.IsZero() {
+		deliveredAt = time.Now().UTC()
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE message_deliveries
+		SET state = ?, delivered_at = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+		WHERE id = ? AND state = ? AND lease_owner = ?
+	`), DeliveryDelivered, deliveredAt, deliveredAt, deliveryID, DeliveryReserved, leaseOwner)
+	if err != nil {
+		return nil, fmt.Errorf("acknowledge direct delivery: %w", err)
+	}
+	stored, err := r.deliveryAfterLeasedUpdate(ctx, deliveryID, result)
+	if err == nil {
+		adminmetrics.RecordMessageDeliveryOutcome(string(DeliveryDelivered), 1)
+	}
+	return stored, err
+}
+
 // GetDelivery loads one durable receipt by immutable delivery identity.
 func (r *sqliteRepository) GetDelivery(ctx context.Context, deliveryID string) (*Delivery, error) {
 	delivery, err := scanDelivery(r.ro.QueryRowxContext(ctx, r.ro.Rebind(deliverySelectByID), deliveryID))
@@ -181,6 +230,14 @@ func (r *sqliteRepository) GetDelivery(ctx context.Context, deliveryID string) (
 		return nil, fmt.Errorf("get delivery: %w", err)
 	}
 	return delivery, nil
+}
+
+func (r *sqliteRepository) GetDeliveryBySourceKey(ctx context.Context, senderSessionID, sourceTurnID, idempotencyKey string) (*Delivery, error) {
+	delivery, err := r.getDeliveryBySourceKey(ctx, senderSessionID, sourceTurnID, idempotencyKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return delivery, err
 }
 
 // ClaimDueDeliveries leases a bounded batch. The compare-and-set update makes
@@ -350,6 +407,20 @@ func prepareNewDelivery(delivery *Delivery) {
 	if delivery.UpdatedAt.IsZero() {
 		delivery.UpdatedAt = now
 	}
+}
+
+func nullableDeliveryString(value string) interface{} {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func nullableDeliveryTime(value time.Time) interface{} {
+	if value.IsZero() {
+		return nil
+	}
+	return value
 }
 
 func (r *sqliteRepository) getDeliveryBySourceKey(ctx context.Context, senderSessionID, sourceTurnID, idempotencyKey string) (*Delivery, error) {

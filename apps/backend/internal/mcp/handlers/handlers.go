@@ -2402,14 +2402,6 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
-	if parentReply != nil && parentReply.alreadyAnswered {
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-			"task_id":              req.TaskID,
-			"reply_to_question_id": req.ReplyToQuestionID,
-			stopTaskStatusKey:      "already_answered",
-		})
-	}
-
 	session, pinnedTarget, errResp := h.resolveMessageTargetSession(ctx, msg, req.TaskID, req.SessionID)
 	if errResp != nil {
 		return errResp, nil
@@ -2442,6 +2434,21 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
 			`delivery_mode="interrupt" is only allowed when the sender is the target task's direct parent`, nil)
 	}
+	if parentReply != nil && parentReply.alreadyAnswered {
+		delivery, lookupErr := h.existingTaskMessageDelivery(ctx, req.TaskID, session, wrappedPrompt, req)
+		if lookupErr != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load message delivery receipt: "+lookupErr.Error(), nil)
+		}
+		response := map[string]interface{}{
+			"task_id": req.TaskID, "reply_to_question_id": req.ReplyToQuestionID, stopTaskStatusKey: "already_answered",
+		}
+		if delivery != nil {
+			response["delivery_id"] = delivery.ID
+			response["delivery_status"] = delivery.State
+			response["idempotency_key"] = delivery.IdempotencyKey
+		}
+		return ws.NewResponse(msg.ID, msg.Action, response)
+	}
 	if parentReply != nil {
 		// Claim the durable question before dispatch. A failed status update after
 		// delivery would make a retry send the same answer a second time.
@@ -2464,12 +2471,14 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 			SessionID: req.SenderSessionID,
 		})
 	}
-	if delivery, admitted, admissionErr := h.admitBusyTaskMessageDelivery(
+	delivery, handled, directLeaseOwner, admissionErr := h.admitTaskMessageDelivery(
 		dispatchCtx, req.TaskID, session, wrappedPrompt, senderMeta, req,
-	); admissionErr != nil {
+	)
+	if admissionErr != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"failed to persist message delivery receipt: "+admissionErr.Error(), nil)
-	} else if admitted {
+	}
+	if handled {
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"task_id":         req.TaskID,
 			"session_id":      delivery.TargetSessionID,
@@ -2479,12 +2488,18 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 			"idempotency_key": delivery.IdempotencyKey,
 		})
 	}
+	if delivery != nil {
+		senderMeta[messagequeue.MetadataDeliveryID] = delivery.ID
+		senderMeta[messagequeue.MetadataLifecycleDurable] = true
+	}
 	// pinnedTarget, not `req.SessionID != ""`: a fallback chosen because the
 	// primary is terminal is pinned too, or the idle dispatch path re-resolves
 	// it straight back to that terminal primary.
 	result, err := h.dispatchTaskMessage(dispatchCtx, req.TaskID, session, wrappedPrompt, senderMeta, wantsInterrupt, pinnedTarget)
 	if err != nil {
-		if parentReply != nil {
+		if delivery != nil && directLeaseOwner != "" {
+			_, _ = h.sessionLauncher.GetMessageQueue().RescheduleDelivery(ctx, delivery.ID, directLeaseOwner, "direct_dispatch_failed")
+		} else if parentReply != nil {
 			if restoreErr := h.restoreParentQuestionPending(ctx, parentReply.message); restoreErr != nil {
 				h.logger.Error("failed to restore parent question after answer dispatch failure",
 					zap.String(parentQuestionIDKey, parentReply.message.ID), zap.Error(restoreErr))
@@ -2498,20 +2513,82 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+	if delivery != nil && directLeaseOwner != "" {
+		delivery, err = h.finalizeDirectTaskMessageDelivery(ctx, delivery, directLeaseOwner, result)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to finalize message delivery receipt: "+err.Error(), nil)
+		}
+	}
+	response := map[string]interface{}{
 		"task_id":         req.TaskID,
 		"session_id":      result.sessionID,
 		stopTaskStatusKey: result.status,
-	})
+	}
+	if delivery != nil {
+		response["delivery_id"] = delivery.ID
+		response["delivery_status"] = delivery.State
+		response["idempotency_key"] = delivery.IdempotencyKey
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
-// admitBusyTaskMessageDelivery creates a durable receipt only for the normal
-// queued busy-session path. Interrupts and parent-question replies retain
-// their existing atomic dispatch semantics; idle sessions keep their existing
-// immediate prompt/start behavior. Older in-memory queue implementations and
-// source sessions without a durable active turn continue through the legacy
-// path rather than fabricating a receipt with no exact owner.
-func (h *Handlers) admitBusyTaskMessageDelivery(
+func (h *Handlers) finalizeDirectTaskMessageDelivery(ctx context.Context, delivery *messagequeue.Delivery, leaseOwner string, result taskMessageDispatchResult) (*messagequeue.Delivery, error) {
+	queue := h.sessionLauncher.GetMessageQueue()
+	if result.status != taskMessageStatusQueued {
+		return queue.AcknowledgeDirectDelivery(ctx, delivery.ID, leaseOwner)
+	}
+	queueEntryID := result.queuedEntryID
+	if queueEntryID == "" {
+		var found bool
+		var err error
+		queueEntryID, found, err = queue.FindQueueEntryForDelivery(ctx, result.sessionID, delivery.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return nil, errors.New("queued delivery entry not found")
+		}
+	}
+	return queue.MarkDeliveryQueued(ctx, delivery.ID, leaseOwner, queueEntryID)
+}
+
+func (h *Handlers) existingTaskMessageDelivery(ctx context.Context, targetTaskID string, targetSession *models.TaskSession, prompt string, req struct {
+	TaskID            string `json:"task_id"`
+	SessionID         string `json:"session_id"`
+	Prompt            string `json:"prompt"`
+	SenderTaskID      string `json:"sender_task_id"`
+	SenderSessionID   string `json:"sender_session_id"`
+	DeliveryMode      string `json:"delivery_mode"`
+	IdempotencyKey    string `json:"idempotency_key"`
+	ReplyToQuestionID string `json:"reply_to_question_id"`
+}) (*messagequeue.Delivery, error) {
+	if h.sessionLauncher == nil || targetSession == nil {
+		return nil, nil
+	}
+	queue := h.sessionLauncher.GetMessageQueue()
+	if queue == nil || !queue.SupportsDeliveryReceipts() {
+		return nil, nil
+	}
+	turn, eligible, err := h.taskMessageSourceTurn(ctx, req.SenderTaskID, req.SenderSessionID)
+	if err != nil || !eligible {
+		return nil, err
+	}
+	mode := req.DeliveryMode
+	if mode == "" {
+		mode = deliveryModeQueued
+	}
+	key := req.IdempotencyKey
+	if key == "" {
+		key = deriveTaskMessageDeliveryKey(req.SenderSessionID, turn.ID, targetTaskID, targetSession.ID, mode, req.ReplyToQuestionID, prompt)
+	}
+	return queue.GetDeliveryReceiptBySourceKey(ctx, req.SenderSessionID, turn.ID, key)
+}
+
+// admitTaskMessageDelivery persists every eligible task-mode handoff before
+// dispatch. Busy sessions leave their receipt pending for the worker; direct
+// WAITING/CREATED, interrupt, and reply paths lease the receipt so a replay
+// observes it instead of starting a second prompt.
+func (h *Handlers) admitTaskMessageDelivery(
 	ctx context.Context,
 	targetTaskID string,
 	targetSession *models.TaskSession,
@@ -2527,23 +2604,17 @@ func (h *Handlers) admitBusyTaskMessageDelivery(
 		IdempotencyKey    string `json:"idempotency_key"`
 		ReplyToQuestionID string `json:"reply_to_question_id"`
 	},
-) (*messagequeue.Delivery, bool, error) {
-	if targetSession == nil || req.DeliveryMode == deliveryModeInterrupt || req.ReplyToQuestionID != "" {
-		return nil, false, nil
-	}
-	if targetSession.State != models.TaskSessionStateRunning && targetSession.State != models.TaskSessionStateStarting {
-		return nil, false, nil
-	}
-	queue := h.sessionLauncher.GetMessageQueue()
-	if queue == nil || !queue.SupportsDeliveryReceipts() {
-		return nil, false, nil
+) (*messagequeue.Delivery, bool, string, error) {
+	queue := h.taskMessageReceiptQueue(targetSession)
+	if queue == nil {
+		return nil, false, "", nil
 	}
 	sourceTurn, eligible, err := h.taskMessageSourceTurn(ctx, req.SenderTaskID, req.SenderSessionID)
 	if err != nil {
-		return nil, false, err
+		return nil, false, "", err
 	}
 	if !eligible {
-		return nil, false, nil
+		return nil, false, "", nil
 	}
 	deliveryMode := req.DeliveryMode
 	if deliveryMode == "" {
@@ -2556,7 +2627,7 @@ func (h *Handlers) admitBusyTaskMessageDelivery(
 			deliveryMode, req.ReplyToQuestionID, prompt,
 		)
 	}
-	delivery, _, err := queue.CreateOrGetDeliveryReceipt(ctx, messagequeue.Delivery{
+	delivery, created, err := queue.CreateOrGetDeliveryReceipt(ctx, messagequeue.Delivery{
 		SenderTaskID:    req.SenderTaskID,
 		SenderSessionID: req.SenderSessionID,
 		SourceTurnID:    sourceTurn.ID,
@@ -2569,9 +2640,38 @@ func (h *Handlers) admitBusyTaskMessageDelivery(
 		State:           messagequeue.DeliveryPendingCapacity,
 	})
 	if err != nil {
-		return nil, false, err
+		return nil, false, "", err
 	}
-	return delivery, true, nil
+	busy := targetSession.State == models.TaskSessionStateRunning || targetSession.State == models.TaskSessionStateStarting
+	if busy && req.DeliveryMode != deliveryModeInterrupt && req.ReplyToQuestionID == "" {
+		return delivery, true, "", nil
+	}
+	if !created {
+		return delivery, true, "", nil
+	}
+	leaseOwner := "mcp-direct-" + uuid.NewString()
+	delivery, claimed, err := queue.ReserveDeliveryForDirectDispatch(ctx, delivery.ID, leaseOwner)
+	if err != nil {
+		return nil, false, "", err
+	}
+	if !claimed {
+		return delivery, true, "", nil
+	}
+	return delivery, false, leaseOwner, nil
+}
+
+func (h *Handlers) taskMessageReceiptQueue(targetSession *models.TaskSession) *messagequeue.Service {
+	if targetSession == nil || h.sessionLauncher == nil {
+		return nil
+	}
+	if targetSession.State == models.TaskSessionStateFailed || targetSession.State == models.TaskSessionStateCancelled {
+		return nil
+	}
+	queue := h.sessionLauncher.GetMessageQueue()
+	if queue == nil || !queue.SupportsDeliveryReceipts() {
+		return nil
+	}
+	return queue
 }
 
 func (h *Handlers) taskMessageSourceTurn(ctx context.Context, senderTaskID, senderSessionID string) (*models.Turn, bool, error) {

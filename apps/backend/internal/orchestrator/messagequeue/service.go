@@ -90,6 +90,14 @@ func (s *Service) GetDeliveryReceipt(ctx context.Context, deliveryID string) (*D
 	return ledger.GetDelivery(ctx, deliveryID)
 }
 
+func (s *Service) GetDeliveryReceiptBySourceKey(ctx context.Context, senderSessionID, sourceTurnID, idempotencyKey string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	return ledger.GetDeliveryBySourceKey(ctx, senderSessionID, sourceTurnID, idempotencyKey)
+}
+
 // RetryDeliveryReceipt reopens a recoverable receipt for bounded worker
 // admission without requiring the original source turn to remain active.
 func (s *Service) RetryDeliveryReceipt(ctx context.Context, deliveryID string) (*Delivery, error) {
@@ -110,6 +118,48 @@ func (s *Service) CreateOrGetDeliveryReceipt(ctx context.Context, delivery Deliv
 		return nil, false, errors.New("delivery receipts are not available")
 	}
 	return ledger.CreateOrGetDelivery(ctx, delivery)
+}
+
+// ReserveDeliveryForDirectDispatch serializes a direct WAITING/CREATED or
+// interrupt/reply handoff with recovery workers. The returned false means a
+// prior source-turn call already owns or completed the receipt.
+func (s *Service) ReserveDeliveryForDirectDispatch(ctx context.Context, deliveryID, leaseOwner string) (*Delivery, bool, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, false, ErrEntryNotFound
+	}
+	return ledger.ReserveDeliveryForDirectDispatch(ctx, deliveryID, leaseOwner, time.Minute)
+}
+
+func (s *Service) AcknowledgeDirectDelivery(ctx context.Context, deliveryID, leaseOwner string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	return ledger.AcknowledgeDirectDelivery(ctx, deliveryID, leaseOwner, time.Now().UTC())
+}
+
+func (s *Service) MarkDeliveryQueued(ctx context.Context, deliveryID, leaseOwner, queueEntryID string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	return ledger.MarkDeliveryQueued(ctx, deliveryID, leaseOwner, queueEntryID)
+}
+
+func (s *Service) RescheduleDelivery(ctx context.Context, deliveryID, leaseOwner, lastError string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	return ledger.RescheduleDelivery(ctx, deliveryID, leaseOwner, time.Now().UTC(), lastError)
+}
+
+// FindQueueEntryForDelivery closes the small direct-dispatch gap where an
+// existing workflow handoff queues through QueueUserPrompt, whose legacy
+// interface predates queue entry IDs.
+func (s *Service) FindQueueEntryForDelivery(ctx context.Context, sessionID, deliveryID string) (string, bool, error) {
+	return s.findQueueEntryForDelivery(ctx, sessionID, deliveryID)
 }
 
 // MaxPerSession returns the configured per-session cap.

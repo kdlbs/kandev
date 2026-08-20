@@ -128,6 +128,33 @@ func TestDeliveryLedgerRetryAndAcknowledgementRequireTheCurrentLease(t *testing.
 	assert.False(t, delivered.DeliveredAt.IsZero())
 }
 
+func TestDeliveryLedgerDirectReservationRecoversAfterRestartLeaseExpiry(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ledger := repo.(DeliveryLedger)
+	ctx := context.Background()
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn",
+		IdempotencyKey: "direct-v1", TargetTaskID: "target-task", TargetSessionID: "target-session",
+		Content: "durable direct prompt", State: DeliveryPendingCapacity,
+	})
+	require.NoError(t, err)
+	reserved, claimed, err := ledger.ReserveDeliveryForDirectDispatch(ctx, delivery.ID, "mcp-direct-a", time.Millisecond)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	assert.Equal(t, DeliveryReserved, reserved.State)
+	duplicate, claimed, err := ledger.ReserveDeliveryForDirectDispatch(ctx, delivery.ID, "mcp-direct-b", time.Minute)
+	require.NoError(t, err)
+	assert.False(t, claimed, "a replay must not create another direct dispatch")
+	assert.Equal(t, "mcp-direct-a", duplicate.LeaseOwner)
+
+	claimedRows, err := ledger.ClaimDueDeliveries(ctx, reserved.LeaseExpiresAt.Add(time.Millisecond), "restarted-worker", time.Minute, 1)
+	require.NoError(t, err)
+	require.Len(t, claimedRows, 1, "a crash before direct acknowledgement is recoverable")
+	queued, err := ledger.MarkDeliveryQueued(ctx, delivery.ID, "restarted-worker", "recovered-entry")
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryQueued, queued.State)
+}
+
 func TestPurgeTaskCancelsUndeliveredDeliveryReceipts(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ledger := repo.(DeliveryLedger)
@@ -217,6 +244,18 @@ func TestDeliveryLedgerPostgreSQLParity(t *testing.T) {
 	delivered, err := ledger.AcknowledgeDelivery(ctx, first.ID, "queue-entry", now.Add(2*time.Minute))
 	require.NoError(t, err)
 	assert.Equal(t, DeliveryDelivered, delivered.State)
+	direct, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn-direct",
+		IdempotencyKey: "direct-v1", TargetTaskID: "target-task", TargetSessionID: "target-session",
+		Content: "direct prompt", State: DeliveryPendingCapacity,
+	})
+	require.NoError(t, err)
+	_, claimedDirect, err := ledger.ReserveDeliveryForDirectDispatch(ctx, direct.ID, "mcp-direct", time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimedDirect)
+	directDelivered, err := ledger.AcknowledgeDirectDelivery(ctx, direct.ID, "mcp-direct", now.Add(3*time.Minute))
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryDelivered, directDelivered.State)
 
 	pending, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
 		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn-2",

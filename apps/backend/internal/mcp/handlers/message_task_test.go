@@ -679,6 +679,33 @@ func TestHandleMessageTask_ParentToChildRunningSession_Interrupts(t *testing.T) 
 	assert.Equal(t, status.Entries[0].ID, orch.interruptCalls[0].entryID)
 }
 
+func TestHandleMessageTask_InterruptReceiptQueuesOnceWhenDispatchIsDeferred(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	parent, child, session := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "sender-sess-1", TaskID: parent.ID, State: models.TaskSessionStateRunning}))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "interrupt-source-turn", TaskID: parent.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orch.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	orch.interruptErr = errors.New("defer interrupt")
+
+	message := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "durable interrupt", parent.ID, deliveryModeInterrupt))
+	first, err := h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	second, err := h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	var firstPayload, secondPayload map[string]interface{}
+	require.NoError(t, json.Unmarshal(first.Payload, &firstPayload))
+	require.NoError(t, json.Unmarshal(second.Payload, &secondPayload))
+	assert.Equal(t, "queued", firstPayload["status"])
+	assert.Equal(t, "queued", firstPayload["delivery_status"])
+	assert.Equal(t, firstPayload["delivery_id"], secondPayload["delivery_id"])
+	assert.Equal(t, 1, orch.queue.GetStatus(ctx, session.ID).Count)
+}
+
 // TestHandleMessageTask_ParentToChildRunningSession_InterruptFailure_KeepsMessageQueued
 // pins the failure contract: an interrupt failure must NOT surface as an MCP
 // error. The message was already safely persisted by queueTaskMessage and is
@@ -1006,6 +1033,82 @@ func TestHandleMessageTask_BusyTargetPersistsIdempotentDeliveryReceipt(t *testin
 	assert.Equal(t, "review-report-v1", receipt.IdempotencyKey)
 	assert.Equal(t, messagequeue.DeliveryPendingCapacity, receipt.State)
 	assert.Equal(t, 1, orchestrator.queue.GetStatus(ctx, session.ID).Count)
+}
+
+func TestHandleMessageTask_WaitingReceiptIsDeliveredOnce(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orch.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "waiting-source-turn", TaskID: sender.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+
+	message := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "durable waiting", sender.ID))
+	first, err := h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	second, err := h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	var firstPayload, secondPayload map[string]interface{}
+	require.NoError(t, json.Unmarshal(first.Payload, &firstPayload))
+	require.NoError(t, json.Unmarshal(second.Payload, &secondPayload))
+	assert.Equal(t, "sent", firstPayload["status"])
+	assert.Equal(t, "delivered", firstPayload["delivery_status"])
+	assert.Equal(t, firstPayload["delivery_id"], secondPayload["delivery_id"])
+	require.Len(t, orch.promptCalls, 1)
+	receipt, err := queueRepo.(messagequeue.DeliveryLedger).GetDelivery(ctx, firstPayload["delivery_id"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, messagequeue.DeliveryDelivered, receipt.State)
+	assert.Equal(t, session.ID, receipt.TargetSessionID)
+}
+
+func TestHandleMessageTask_CreatedReceiptStartsOnce(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orch.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "created-source-turn", TaskID: sender.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+
+	message := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "durable created", sender.ID))
+	first, err := h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	_, err = h.handleMessageTask(ctx, message)
+	require.NoError(t, err)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(first.Payload, &payload))
+	assert.Equal(t, "started", payload["status"])
+	assert.Equal(t, "delivered", payload["delivery_status"])
+	require.Len(t, orch.startCreatedCalls, 1)
+}
+
+func TestHandleMessageTask_DirectReceiptFindsTransitionQueuedEntry(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orch.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	orch.turnStartResult.Queued = true
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "transition-source-turn", TaskID: sender.ID, TaskSessionID: "sender-sess-1", StartedAt: time.Now().UTC()}))
+
+	response, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "queue behind transition", sender.ID)))
+	require.NoError(t, err)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	assert.Equal(t, "queued", payload["status"])
+	assert.Equal(t, "queued", payload["delivery_status"])
+	receipt, err := queueRepo.(messagequeue.DeliveryLedger).GetDelivery(ctx, payload["delivery_id"].(string))
+	require.NoError(t, err)
+	assert.NotEmpty(t, receipt.QueueEntryID)
+	assert.Equal(t, 1, orch.queue.GetStatus(ctx, session.ID).Count)
 }
 
 func TestMessageDeliveryRecoveryIsScopedToRecordedSourceSession(t *testing.T) {
