@@ -530,10 +530,10 @@ export type PluginUIApi = {
  * from the descriptor.
  */
 export interface WorkspaceAgentChatProps {
-  /** Workspace ID the conversation belongs to. */
-  workspaceId: string;
-  /** Stable conversation key (e.g. "coordinator"). */
-  conversationKey: string;
+  /** Optional plugin-side context; host behavior resolves from sessionId. */
+  workspaceId?: string;
+  /** Optional plugin-side context; host behavior resolves from sessionId. */
+  conversationKey?: string;
   /** Unique task id for the conversation session (filled by host on open). */
   sessionId: string;
   /**

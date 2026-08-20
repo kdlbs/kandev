@@ -21,10 +21,10 @@ import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-do
 import { useTranslation } from "react-i18next";
 
 interface WorkspaceAgentChatProps {
-  /** Workspace ID the conversation belongs to. */
-  workspaceId: string;
-  /** Stable conversation key (e.g. "coordinator"). */
-  conversationKey: string;
+  /** Optional plugin-side context; host behavior resolves from sessionId. */
+  workspaceId?: string;
+  /** Optional plugin-side context; host behavior resolves from sessionId. */
+  conversationKey?: string;
   /** Resolved session ID for the managed conversation. */
   sessionId: string;
   /** Optional placeholder in the chat composer. */

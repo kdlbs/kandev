@@ -571,9 +571,10 @@ conversation_key)`:
 **`EnsureAgentConversation`** — idempotent create-or-get for a hidden workflowless
 ephemeral task/session. The plugin provides an `AgentConversationSpec` with
 `workspace_id`, `conversation_key`, optional `base_prompt` (baked into every
-dispatch), optional `agent_profile_id`, and optional `executor_profile_id`. The
-host guarantees at most one backing task per tuple, even across concurrent requests
-or Kandev restarts. Returns an `AgentConversationDescriptor` with `task_id`,
+dispatch), and optional `agent_profile_id`. The current implementation guarantees
+at most one backing task per tuple within one backend process and preserves that
+mapping across restarts; it does not yet claim durable cross-instance uniqueness.
+Returns an `AgentConversationDescriptor` with `task_id`,
 `session_id`, `workspace_id`, `conversation_key`, and the effective
 `agent_profile_id`.
 
@@ -583,7 +584,6 @@ message AgentConversationSpec {
   string conversation_key = 2;
   string base_prompt = 3;
   string agent_profile_id = 4;
-  string executor_profile_id = 5;
 }
 
 message AgentConversationDescriptor {
@@ -600,7 +600,8 @@ plugin provides `workspace_id`, `conversation_key`, `text`, and a stable
 `occurrence_key` for idempotency (e.g. a hash of the trigger event and due
 timestamp). An already-claimed key returns the prior dispatch result silently.
 If the backing session is busy, the prompt is queued; if idle, the agent is
-prompted. Returns the `session_id`, a `status` string, and the
+prompted. Returns the `session_id`, a `status` string (`started`, `queued`,
+`duplicate_occurrence`, or `skipped_busy`), and the
 `AgentConversationDescriptor`.
 
 ```proto

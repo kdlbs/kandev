@@ -1108,20 +1108,18 @@ func messageDispatchFromProto(p *pluginv1.SendMessageResponse) *MessageDispatch 
 
 // AgentConversationSpec controls how Ensure creates a conversation.
 type AgentConversationSpec struct {
-	WorkspaceID       string
-	ConversationKey   string
-	BasePrompt        string
-	AgentProfileID    string
-	ExecutorProfileID string
+	WorkspaceID     string
+	ConversationKey string
+	BasePrompt      string
+	AgentProfileID  string
 }
 
 func (s AgentConversationSpec) toProto() *pluginv1.AgentConversationSpec {
 	return &pluginv1.AgentConversationSpec{
-		WorkspaceId:       s.WorkspaceID,
-		ConversationKey:   s.ConversationKey,
-		BasePrompt:        s.BasePrompt,
-		AgentProfileId:    s.AgentProfileID,
-		ExecutorProfileId: s.ExecutorProfileID,
+		WorkspaceId:     s.WorkspaceID,
+		ConversationKey: s.ConversationKey,
+		BasePrompt:      s.BasePrompt,
+		AgentProfileId:  s.AgentProfileID,
 	}
 }
 
@@ -1130,11 +1128,10 @@ func agentConversationSpecFromProto(p *pluginv1.AgentConversationSpec) AgentConv
 		return AgentConversationSpec{}
 	}
 	return AgentConversationSpec{
-		WorkspaceID:       p.GetWorkspaceId(),
-		ConversationKey:   p.GetConversationKey(),
-		BasePrompt:        p.GetBasePrompt(),
-		AgentProfileID:    p.GetAgentProfileId(),
-		ExecutorProfileID: p.GetExecutorProfileId(),
+		WorkspaceID:     p.GetWorkspaceId(),
+		ConversationKey: p.GetConversationKey(),
+		BasePrompt:      p.GetBasePrompt(),
+		AgentProfileID:  p.GetAgentProfileId(),
 	}
 }
 

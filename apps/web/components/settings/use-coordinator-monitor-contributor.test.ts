@@ -59,6 +59,14 @@ beforeEach(() => {
 });
 
 describe("useCoordinatorMonitorContributor: loading", () => {
+  it("starts in loading for persisted workflows so edits stay disabled until the load settles", () => {
+    const view = renderHook(() =>
+      useCoordinatorMonitorContributor({ workflowId: WORKFLOW_ID, workspaceId: WORKSPACE_ID }),
+    );
+
+    expect(view.result.current.loading).toBe(true);
+  });
+
   it("loads saved entries into both draft and saved config", async () => {
     vi.mocked(getCoordinatorMonitoringAction).mockResolvedValueOnce({
       entries: [{ workflow_step_id: "step-1", selected: true, prompt: "watch closely" }],
@@ -92,6 +100,39 @@ describe("useCoordinatorMonitorContributor: loading", () => {
     await renderLoaded();
 
     expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
+  });
+
+  it("clears stale draft state and reloads when workflowId changes", async () => {
+    vi.mocked(getCoordinatorMonitoringAction)
+      .mockResolvedValueOnce({
+        entries: [{ workflow_step_id: "step-1", selected: true, prompt: "first workflow" }],
+      })
+      .mockResolvedValueOnce({
+        entries: [{ workflow_step_id: "step-2", selected: true, prompt: "second workflow" }],
+      });
+
+    const view = renderHook(
+      ({ workflowId }) =>
+        useCoordinatorMonitorContributor({ workflowId, workspaceId: WORKSPACE_ID }),
+      { initialProps: { workflowId: "workflow-1" } },
+    );
+
+    await waitFor(() => expect(view.result.current.loading).toBe(false));
+    expect(view.result.current.draftConfig).toEqual({
+      "step-1": { selected: true, prompt: "first workflow" },
+    });
+
+    act(() => {
+      view.rerender({ workflowId: "workflow-2" });
+    });
+
+    expect(view.result.current.loading).toBe(true);
+    expect(view.result.current.draftConfig).toEqual({});
+
+    await waitFor(() => expect(view.result.current.loading).toBe(false));
+    expect(view.result.current.draftConfig).toEqual({
+      "step-2": { selected: true, prompt: "second workflow" },
+    });
   });
 });
 

@@ -594,10 +594,10 @@ the resolved `sessionId`.
 
 ```ts
 interface WorkspaceAgentChatProps {
-  /** Workspace ID the conversation belongs to. */
-  workspaceId: string;
-  /** Stable conversation key scoped to this plugin (e.g. "coordinator"). */
-  conversationKey: string;
+  /** Optional plugin-side context; host behavior resolves from sessionId. */
+  workspaceId?: string;
+  /** Optional plugin-side context; host behavior resolves from sessionId. */
+  conversationKey?: string;
   /** Resolved session ID for the managed conversation. */
   sessionId: string;
   /** Optional placeholder in the chat composer. */
@@ -607,8 +607,10 @@ interface WorkspaceAgentChatProps {
 
 The `sessionId` is returned by the plugin's `api.invokeAction("conversations.ensure")`
 action declared in the manifest, which calls the host's agent conversation service.
-The host guarantees at most one backing task/session per `(pluginId, workspaceId,
-conversationKey)` tuple, even across concurrent requests or Kandev restarts. See the
+The current implementation guarantees at most one backing task/session per
+`(pluginId, workspaceId, conversationKey)` tuple within one backend process and
+preserves that mapping across restarts; it does not yet claim durable
+cross-instance uniqueness. See the
 [Agent conversation contract](#agent-conversation-contract) in GRPC-CONTRACT.md for
 the backend RPC details.
 

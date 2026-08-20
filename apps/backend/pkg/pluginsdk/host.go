@@ -267,7 +267,8 @@ type AgentConversationManager interface {
 	// plugin/workspace/key. Returns a typed configuration-required result
 	// (status="configuration_required") when the referenced agent profile is
 	// missing, disabled, or incompatible — the conversation is neither created
-	// nor dispatched until the operator resolves the profile.
+	// nor dispatched until the operator resolves the profile. Status is one of
+	// "created", "exists", or "configuration_required".
 	Ensure(ctx context.Context, spec AgentConversationSpec) (AgentConversationDescriptor, string, error)
 
 	// Dispatch sends text to an ensured conversation. OccurrenceKey provides
@@ -276,7 +277,8 @@ type AgentConversationManager interface {
 	// occurrence_key matches a previously dispatched occurrence (same session
 	// for in-flight turns, skipped for busy-session coalesced drops).
 	// Returns "skipped_busy" when the session is mid-turn and the dispatch
-	// was coalesced rather than queued.
+	// was coalesced rather than queued. Other statuses come from the existing
+	// launch/prompt delivery path and are currently "started" and "queued".
 	Dispatch(ctx context.Context, workspaceID, conversationKey, text, occurrenceKey string) (AgentConversationDispatch, error)
 
 	// Delete removes all conversations matching the workspace and key owned
