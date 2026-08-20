@@ -106,6 +106,40 @@ func TestProcessOnTurnComplete_ExplicitSignalGating(t *testing.T) {
 	})
 }
 
+func TestReconcileDueCompletionIntentsSettlesCapturedTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := repo.CreateTurn(ctx, &models.Turn{ID: "turn-1", TaskID: "t1", TaskSessionID: "s1", StartedAt: now}); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	_, _, err := repo.CreateOrGetCompletionIntent(ctx, &models.CompletionIntent{
+		ID: "intent-1", TaskID: "t1", SessionID: "s1", TurnID: "turn-1", WorkflowStepID: "step1",
+		State: models.CompletionIntentStatePending, RequestedAt: now, EligibleAt: now,
+	})
+	if err != nil {
+		t.Fatalf("CreateOrGetCompletionIntent: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.reconcileDueCompletionIntents(ctx)
+
+	turn, err := repo.GetTurn(ctx, "turn-1")
+	if err != nil || turn.CompletedAt == nil {
+		t.Fatalf("GetTurn = (%+v, %v), want completed captured turn", turn, err)
+	}
+	intent, err := repo.GetCompletionIntent(ctx, "intent-1")
+	if err != nil || intent.State != models.CompletionIntentStateSettled {
+		t.Fatalf("GetCompletionIntent = (%+v, %v), want settled", intent, err)
+	}
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil || session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("GetTaskSession = (%+v, %v), want waiting session", session, err)
+	}
+}
+
 func TestProcessOnTurnComplete_BlocksWhileClarificationPending(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
