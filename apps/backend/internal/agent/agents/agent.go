@@ -94,6 +94,56 @@ type ManagedNPMRuntimeAgent interface {
 	ManagedNPMRuntime() ManagedNPMRuntimeSpec
 }
 
+// FilesystemAccess is an agent-neutral access value for a server-authored
+// filesystem policy. Agents that do not implement FilesystemPolicyAgent keep
+// their existing runtime behavior; lifecycle uses this optional capability only
+// when an executor needs an agent-side sandbox policy.
+type FilesystemAccess string
+
+const (
+	FilesystemAccessRead  FilesystemAccess = "read"
+	FilesystemAccessWrite FilesystemAccess = "write"
+	FilesystemAccessDeny  FilesystemAccess = "deny"
+)
+
+// FilesystemPolicyRule grants one exact path a filesystem access value.
+// Paths are already canonicalized by lifecycle and are not interpreted by an
+// agent implementation as authority to widen a task's scope.
+type FilesystemPolicyRule struct {
+	Path   string
+	Access FilesystemAccess
+}
+
+// FilesystemPolicy is the neutral input to an agent filesystem-policy
+// renderer. It deliberately contains no lifecycle or worktree types so other
+// agents can opt in without importing runtime implementation details.
+type FilesystemPolicy struct {
+	Name  string
+	Rules []FilesystemPolicyRule
+}
+
+// FilesystemPolicyRenderer renders a server-authored policy into the agent's
+// native session configuration. The returned value is encoded into the
+// descriptor's ConfigEnvKey for the subprocess; it must not contain paths the
+// renderer derived independently.
+type FilesystemPolicyRenderer interface {
+	Render(FilesystemPolicy) (map[string]any, error)
+}
+
+// FilesystemPolicyDescriptor identifies an agent-native policy renderer and
+// the environment variable through which its configuration is supplied.
+type FilesystemPolicyDescriptor struct {
+	ConfigEnvKey string
+	Renderer     FilesystemPolicyRenderer
+}
+
+// FilesystemPolicyAgent is an optional agent capability for runtimes that
+// require a narrow agent-side filesystem sandbox in addition to host or
+// container isolation.
+type FilesystemPolicyAgent interface {
+	FilesystemPolicyDescriptor() (*FilesystemPolicyDescriptor, bool)
+}
+
 // PassthroughAgent is an optional capability for agents that support CLI passthrough mode.
 type PassthroughAgent interface {
 	PassthroughConfig() PassthroughConfig
