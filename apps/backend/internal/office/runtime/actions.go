@@ -139,7 +139,10 @@ func (a *Actions) resolveRootTaskProject(ctx context.Context, runCtx RunContext,
 		return nil
 	}
 	projects, err := a.deps.Projects.ListProjects(ctx, runCtx.WorkspaceID)
-	if err != nil || len(projects) == 0 {
+	if err != nil {
+		return err
+	}
+	if len(projects) == 0 {
 		return nil
 	}
 	ids := make([]string, 0, len(projects))
@@ -166,9 +169,7 @@ func (a *Actions) validateTaskRelations(ctx context.Context, workspaceID string,
 		if err != nil {
 			return ErrWorkspaceOutOfScope
 		}
-		// Only a mismatch against a non-empty parent project is rejected, so a
-		// subtask may still carry its own project when the parent has none.
-		if input.ProjectID != "" && parentProjectID != "" && input.ProjectID != parentProjectID {
+		if input.ProjectID != "" && input.ProjectID != parentProjectID {
 			return ErrWorkspaceOutOfScope
 		}
 	}

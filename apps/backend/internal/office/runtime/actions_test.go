@@ -458,7 +458,7 @@ func TestActionsCreateTaskRootDefaultsToRunTaskProject(t *testing.T) {
 	}
 }
 
-func TestActionsCreateTaskSubtaskMaySupplyProjectWhenParentHasNone(t *testing.T) {
+func TestActionsCreateTaskSubtaskRejectsProjectMismatchWhenParentHasNone(t *testing.T) {
 	creator := &recordingTaskCreator{taskID: "child-1", taskScopes: map[string]taskScope{
 		"parent-1": {WorkspaceID: "ws-1"},
 	}}
@@ -474,14 +474,15 @@ func TestActionsCreateTaskSubtaskMaySupplyProjectWhenParentHasNone(t *testing.T)
 		},
 	}
 
-	taskID, err := actions.CreateTask(context.Background(), runCtx, CreateTaskInput{
+	_, err := actions.CreateTask(context.Background(), runCtx, CreateTaskInput{
 		Title: "child", ParentTaskID: "parent-1", ProjectID: "project-1",
 	})
-	if err != nil {
-		t.Fatalf("create task: %v", err)
+	if !errors.Is(err, ErrWorkspaceOutOfScope) {
+		t.Fatalf("error = %v, want ErrWorkspaceOutOfScope: a caller-supplied project_id is unreachable on the "+
+			"subtask path and must not be silently dropped", err)
 	}
-	if taskID != "child-1" || len(creator.calls) != 1 {
-		t.Fatalf("task id/calls = %q/%d", taskID, len(creator.calls))
+	if len(creator.calls) != 0 {
+		t.Fatalf("creator called on rejected project mismatch: %#v", creator.calls)
 	}
 }
 
@@ -521,6 +522,26 @@ func TestActionsCreateTaskRootAllowsEmptyProjectWhenWorkspaceHasNone(t *testing.
 	}
 	if taskID != "created-task" || len(creator.calls) != 1 || creator.calls[0].ProjectID != "" {
 		t.Fatalf("task id/calls = %q/%#v, want empty project_id preserved", taskID, creator.calls)
+	}
+}
+
+func TestActionsCreateTaskRootFailsClosedWhenProjectLookupErrors(t *testing.T) {
+	creator := &recordingTaskCreator{taskID: "created-task"}
+	lookupErr := errors.New("list projects: transient repository failure")
+	projects := &recordingProjectManager{listErr: lookupErr}
+	actions := NewActions(ActionDependencies{Tasks: creator, Projects: projects})
+	runCtx := RunContext{
+		AgentID: "agent-1", WorkspaceID: "ws-1",
+		Capabilities: Capabilities{CanCreateTasks: true},
+	}
+
+	_, err := actions.CreateTask(context.Background(), runCtx, CreateTaskInput{Title: "Root task"})
+	if !errors.Is(err, lookupErr) {
+		t.Fatalf("error = %v, want the ListProjects lookup error surfaced rather than treated as "+
+			"'workspace has no projects'", err)
+	}
+	if len(creator.calls) != 0 {
+		t.Fatalf("creator called despite project lookup error: %#v", creator.calls)
 	}
 }
 
@@ -1093,6 +1114,7 @@ type recordingProjectManager struct {
 	projects         []*models.Project
 	listWorkspaceIDs []string
 	created          []*models.Project
+	listErr          error
 }
 
 func (m *recordingProjectManager) ListProjects(
@@ -1100,6 +1122,9 @@ func (m *recordingProjectManager) ListProjects(
 	workspaceID string,
 ) ([]*models.Project, error) {
 	m.listWorkspaceIDs = append(m.listWorkspaceIDs, workspaceID)
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
 	return m.projects, nil
 }
 
