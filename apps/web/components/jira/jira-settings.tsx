@@ -816,4 +816,3 @@ export function JiraIntegrationPage({ workspaceId }: { workspaceId?: string } = 
     </div>
   );
 }
-
