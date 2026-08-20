@@ -33,10 +33,13 @@ func (s *stubQuorumDispatcher) EvaluateStepQuorum(
 	return s.snapshot, s.err
 }
 
-// TestGetTaskQuorum_DispatcherNotWired is AC-24b's "diagnostic read never
-// fails" contract extended to the unwired case: newTestDeps' fixture wires
-// a real dispatcher, so this test swaps in one that satisfies only the base
-// HandleTrigger capability, not quorumEvaluatingDispatcher.
+// TestGetTaskQuorum_DispatcherNotWired is AC-57c/57d's "no office-side
+// fallback" contract: when the engine dispatcher isn't wired, the AC-24b
+// read side must fail closed exactly like the write side
+// (decisionRecordingDispatcher in decisions.go), never report a healthy
+// empty result. newTestDeps' fixture wires a real dispatcher, so this test
+// swaps in one that satisfies only the base HandleTrigger capability, not
+// quorumEvaluatingDispatcher.
 type baseOnlyDispatcher struct{}
 
 func (baseOnlyDispatcher) HandleTrigger(
@@ -49,15 +52,9 @@ func TestGetTaskQuorum_DispatcherNotWired(t *testing.T) {
 	deps := newTestDeps(t)
 	deps.svc.SetWorkflowEngineDispatcher(baseOnlyDispatcher{})
 
-	resp, err := deps.svc.GetTaskQuorum(context.Background(), "any-task")
-	if err != nil {
-		t.Fatalf("GetTaskQuorum: %v", err)
-	}
-	if resp.Guards == nil || len(resp.Guards) != 0 {
-		t.Fatalf("Guards = %#v, want empty non-nil slice", resp.Guards)
-	}
-	if resp.ReevaluationBlocked {
-		t.Fatalf("ReevaluationBlocked = true, want false")
+	_, err := deps.svc.GetTaskQuorum(context.Background(), "any-task")
+	if err == nil {
+		t.Fatalf("GetTaskQuorum: got nil error, want an error (AC-57c: no office-side fallback)")
 	}
 }
 
