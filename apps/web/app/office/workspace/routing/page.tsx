@@ -32,6 +32,13 @@ import { useTranslation } from "react-i18next";
 
 const DEFAULT_PROFILE: ProviderProfile = { tier_map: {} };
 
+// Stable fallback: a Zustand selector that returns a fresh `[]` on every call
+// (when `office.meta` hasn't loaded yet) breaks useSyncExternalStore's
+// reference-equality snapshot check and infinite-loops into React error #185
+// ("Maximum update depth exceeded"), caught by the route error boundary. See
+// EMPTY_PREVIEW / EMPTY_HEALTH in the sibling hooks for the same pattern.
+const EMPTY_ROLES: RoleMeta[] = [];
+
 function emptyConfig(): WorkspaceRouting {
   return {
     enabled: false,
@@ -45,7 +52,7 @@ function emptyConfig(): WorkspaceRouting {
 export default function ProviderRoutingPage() {
   const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const roles = useAppStore((s) => s.office.meta?.roles ?? []);
+  const roles = useAppStore((s) => s.office.meta?.roles ?? EMPTY_ROLES);
   const routing = useWorkspaceRouting(workspaceId);
   const health = useProviderHealth(workspaceId);
   const preview = useRoutingPreview(workspaceId);
