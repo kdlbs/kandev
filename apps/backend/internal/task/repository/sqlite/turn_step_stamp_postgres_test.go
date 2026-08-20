@@ -180,9 +180,19 @@ func TestPostgresCreateTurnWithStepStampBlocksOnConcurrentStepMove(t *testing.T)
 		}
 		moverDone <- tx.Commit()
 	}()
+	t.Cleanup(func() {
+		release()
+		select {
+		case <-moverFinished:
+		case <-time.After(5 * time.Second):
+			t.Errorf("timed out waiting for mover goroutine during cleanup")
+		}
+	})
 
 	select {
 	case <-lockHeld:
+	case err := <-moverDone:
+		t.Fatalf("mover goroutine exited before acquiring the row lock: %v", err)
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for the mover goroutine to acquire the row lock")
 	}
@@ -205,11 +215,6 @@ func TestPostgresCreateTurnWithStepStampBlocksOnConcurrentStepMove(t *testing.T)
 	}()
 	t.Cleanup(func() {
 		release()
-		select {
-		case <-moverFinished:
-		case <-time.After(5 * time.Second):
-			t.Errorf("timed out waiting for mover goroutine during cleanup")
-		}
 		select {
 		case <-turnDone:
 		case <-time.After(5 * time.Second):
