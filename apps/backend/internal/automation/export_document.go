@@ -2,6 +2,7 @@ package automation
 
 import (
 	"bytes"
+	"io"
 
 	"gopkg.in/yaml.v3"
 )
@@ -17,14 +18,20 @@ func newExportDocument(automations []exportAutomation, warnings []string) *expor
 	}
 }
 
-// marshalExportDocument renders a document to YAML bytes with a pinned 2-space
-// indent (AC-12: package-level yaml.Marshal defaults to 4 spaces, which this
-// deliberately overrides via an explicit Encoder rather than relying on the
-// package-level default).
+// newPinnedYAMLEncoder returns an Encoder configured the one way this package ever
+// emits YAML: 2-space indent (AC-12; yaml.Marshal's package-level default is 4). The
+// prompt-fidelity probes (export_prompt.go) reuse this so a probe's encoder
+// configuration can never drift from the real document encoder's.
+func newPinnedYAMLEncoder(w io.Writer) *yaml.Encoder {
+	enc := yaml.NewEncoder(w)
+	enc.SetIndent(2)
+	return enc
+}
+
+// marshalExportDocument renders a document to YAML bytes with the pinned encoder.
 func marshalExportDocument(doc *exportDocument) ([]byte, error) {
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
+	enc := newPinnedYAMLEncoder(&buf)
 	if err := enc.Encode(doc); err != nil {
 		return nil, err
 	}
