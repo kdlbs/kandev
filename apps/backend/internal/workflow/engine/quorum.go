@@ -2,15 +2,22 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/quorummetrics"
 	"go.uber.org/zap"
 )
+
+// ErrParticipantNotFound is returned by ResolveParticipantRole when the
+// caller does not occupy a reviewer or approver seat with
+// decision_required = 1 at the given step (AC-3).
+var ErrParticipantNotFound = errors.New("workflow engine: participant not found")
 
 // Threshold values understood by wait_for_quorum.
 const (
@@ -685,4 +692,47 @@ func (e *Engine) evaluateGuardStateReadOnly(
 		entry.Threshold = action.Guard.WaitForQuorum.Threshold
 	}
 	return entry
+}
+
+// ResolveParticipantRole resolves the role and seat id an agent decider
+// occupies at stepID, for the agent decision tool's AC-2 (seat id),
+// AC-3 (permission), AC-4 (approver-wins) and AC-4a (slate-consistent
+// population) requirements. It reuses requiredSeats — the exact AC-50
+// slate construction the quorum evaluator itself uses — so role
+// resolution and slate membership can never disagree about who
+// participates, per AC-57's "exactly once, in the engine" mandate.
+// Approver is checked before reviewer, matching the existing
+// approver-wins precedence in office/dashboard/decisions.go's
+// resolveDeciderRole (AC-4). Returns ErrParticipantNotFound when the
+// agent occupies neither seat.
+func (e *Engine) ResolveParticipantRole(
+	ctx context.Context, taskID, stepID, agentProfileID string,
+) (role, participantID string, err error) {
+	if agentProfileID == "" {
+		return "", "", ErrParticipantNotFound
+	}
+	for _, r := range []wfmodels.ParticipantRole{
+		wfmodels.ParticipantRoleApprover,
+		wfmodels.ParticipantRoleReviewer,
+	} {
+		seats, seatsErr := e.requiredSeats(ctx, stepID, taskID, string(r))
+		if seatsErr != nil {
+			return "", "", fmt.Errorf("resolve participant role: %w", seatsErr)
+		}
+		if id, ok := seatIDFor(seats, agentProfileID); ok {
+			return string(r), id, nil
+		}
+	}
+	return "", "", ErrParticipantNotFound
+}
+
+// seatIDFor scans seats for one occupied by agentProfileID, returning its
+// AC-50 canonical seat id.
+func seatIDFor(seats []ParticipantInfo, agentProfileID string) (string, bool) {
+	for _, s := range seats {
+		if s.AgentProfileID == agentProfileID {
+			return s.ID, true
+		}
+	}
+	return "", false
 }

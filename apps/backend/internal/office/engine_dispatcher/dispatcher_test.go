@@ -51,6 +51,14 @@ type fakeEngine struct {
 	quorumSession string
 	quorumResult  engine.QuorumSnapshot
 	quorumErr     error
+
+	roleCalled         bool
+	roleTaskID         string
+	roleStepID         string
+	roleAgentProfileID string
+	roleResult         string
+	roleParticipantID  string
+	roleErr            error
 }
 
 func (f *fakeEngine) HandleTrigger(_ context.Context, in engine.HandleInput) (engine.HandleResult, error) {
@@ -75,6 +83,16 @@ func (f *fakeEngine) EvaluateStepQuorum(
 	f.quorumTaskID = taskID
 	f.quorumSession = sessionID
 	return f.quorumResult, f.quorumErr
+}
+
+func (f *fakeEngine) ResolveParticipantRole(
+	_ context.Context, taskID, stepID, agentProfileID string,
+) (string, string, error) {
+	f.roleCalled = true
+	f.roleTaskID = taskID
+	f.roleStepID = stepID
+	f.roleAgentProfileID = agentProfileID
+	return f.roleResult, f.roleParticipantID, f.roleErr
 }
 
 type realRunsAdapter struct {

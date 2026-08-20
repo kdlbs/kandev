@@ -47,6 +47,11 @@ type EngineHandle interface {
 	// narrow caller-side interface, mirroring handledWorkflowEngineDispatcher.
 	RecordParticipantDecision(ctx context.Context, sessionID string, in engine.DecisionInfo) (engine.RecordDecisionResult, error)
 	EvaluateStepQuorum(ctx context.Context, taskID, sessionID string) (engine.QuorumSnapshot, error)
+	// ResolveParticipantRole is the AC-2/3/4/4a role-and-seat resolution
+	// entry point the agent decision tool needs. Reached the same way as
+	// the two methods above: via Dispatcher.ResolveParticipantRole plus a
+	// narrow caller-side type assertion.
+	ResolveParticipantRole(ctx context.Context, taskID, stepID, agentProfileID string) (role, participantID string, err error)
 }
 
 // RecordDecisionInput is what a transport must resolve before calling
@@ -250,6 +255,17 @@ func (d *Dispatcher) EvaluateStepQuorum(ctx context.Context, taskID string) (eng
 		snapshot.ReevaluationBlocked = noActiveSession
 	}
 	return snapshot, nil
+}
+
+// ResolveParticipantRole is the AC-2/3/4/4a engine entry point: resolves
+// the calling agent's role and seat id at the given step by reusing the
+// AC-50 slate construction (approver before reviewer, per AC-4). Unlike
+// RecordDecision/EvaluateStepQuorum this needs no session resolution — the
+// slate read has no session dependency.
+func (d *Dispatcher) ResolveParticipantRole(
+	ctx context.Context, taskID, stepID, agentProfileID string,
+) (role, participantID string, err error) {
+	return d.engine.ResolveParticipantRole(ctx, taskID, stepID, agentProfileID)
 }
 
 // resolveActiveSessionID returns AC-16's active-session id, or "" when no
