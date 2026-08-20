@@ -179,3 +179,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-17-separate-task-activity-from-summary-freshness | [Separate Task Activity From Summary Freshness](2026-08-17-separate-task-activity-from-summary-freshness.md) | accepted | backend, frontend, protocol | 2026-08-17 |
 | 2026-08-17-release-pr-ruleset-bypass | [Give Stable Release PRs an Administrator Token Bypass](2026-08-17-release-pr-ruleset-bypass.md) | accepted | infra, workflow, security | 2026-08-17 |
 | 2026-08-18-never-started-agent-stall-terminal | [Treat Never-Started Agent Stalls as Terminal](2026-08-18-never-started-agent-stall-terminal.md) | accepted | backend, frontend, protocol | 2026-08-18 |
+| 2026-08-20-mcp-related-task-read-authorization | [Separate compact task-tree reads from document access](2026-08-20-mcp-related-task-read-authorization.md) | accepted | backend, protocol, security | 2026-08-20 |

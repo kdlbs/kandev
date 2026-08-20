@@ -44,3 +44,17 @@ func TestLegacyExternalHasNoQuestionCapability(t *testing.T) {
 		t.Fatalf("external capabilities = %#v, want no question capability", ctx.Capabilities)
 	}
 }
+
+func TestWorkspaceTaskTreeReadIsExplicitAndImmutable(t *testing.T) {
+	base := New(SurfaceOfficeTask, nil, nil)
+	if base.HasCapability(CapabilityWorkspaceTaskTreeRead) {
+		t.Fatal("workspace task-tree read must not be granted by the Office surface")
+	}
+	coordinator := base.WithCapability(CapabilityWorkspaceTaskTreeRead)
+	if !coordinator.HasCapability(CapabilityWorkspaceTaskTreeRead) {
+		t.Fatal("coordinator capability missing")
+	}
+	if base.HasCapability(CapabilityWorkspaceTaskTreeRead) {
+		t.Fatal("deriving coordinator profile mutated source profile")
+	}
+}

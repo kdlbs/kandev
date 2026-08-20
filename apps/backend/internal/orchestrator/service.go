@@ -1130,6 +1130,12 @@ func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 	s.executor.SetAttachmentReader(reader)
 }
 
+// SetCoordinatorProfileResolver wires the persisted Office CEO identity into
+// the executor's backend-owned MCP profile derivation.
+func (s *Service) SetCoordinatorProfileResolver(resolver executor.CoordinatorProfileResolver) {
+	s.executor.SetCoordinatorProfileResolver(resolver)
+}
+
 // SetOnPrimarySessionSet sets a callback on the executor for when the first session
 // of a task is marked primary. Used to publish a task.updated event so the frontend
 // receives the primary_session_id.

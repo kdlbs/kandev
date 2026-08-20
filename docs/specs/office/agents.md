@@ -458,6 +458,7 @@ Agent routing and Office ownership are independent. Workflow-level defaults, per
 - 4 plan tools (`create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, `delete_task_plan_kandev`).
 - `ask_user_question_kandev` (only meaningful when the user opens the task in advanced mode).
 - `list_related_tasks_kandev`.
+- A persisted CEO/Coordinator Office session receives the read-only `workspace-task-tree-read` capability. It permits compact monitoring of unrelated same-workspace task trees only; task documents and verbose descriptions retain their relation-scoped authorization.
 - 3 task-document tools (`list_task_documents_kandev`, `get_task_document_kandev`, `write_task_document_kandev`).
 
 `ModeOffice` excludes kanban tools, config tools, `list_workspaces_kandev`, `list_workflows_kandev`, `list_workflow_steps_kandev`, and `step_complete_kandev`. Office advances work through its Office task and approval surfaces, not the Kanban workflow-step completion signal. The first-turn Office context lists only tools registered in `ModeOffice` and directs Office mutations to `$KANDEV_CLI`; it never advertises an excluded tool.
