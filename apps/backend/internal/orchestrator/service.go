@@ -37,6 +37,8 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/stepentry"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -339,6 +341,10 @@ type sessionExecutorStore interface {
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	// Step-entry CAS markers (see internal/workflow/stepentry) — claim/complete
+	// an engine-owned on_enter action at most once per step-entry.
+	ClaimStepEntryMarker(ctx context.Context, entryID int64, position int, kind, operationID string, claimedAt time.Time) (bool, error)
+	CompleteStepEntryMarker(ctx context.Context, entryID int64, position int, state stepentry.MarkerState, cause string, completedAt time.Time) error
 }
 
 // ClaimTaskTitleSession claims the first-turn generated-title handoff for a
