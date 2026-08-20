@@ -1916,7 +1916,11 @@ type TaskEnvironment struct {
 	// already-owned Docker container. It is deliberately not exposed in API
 	// responses and is distinct from session runtime/auth metadata.
 	ContainerBootstrapNonceSecretID string `json:"-"`
-	SandboxID                       string `json:"sandbox_id,omitempty"`
+	// ContainerControlAuthTokenSecretID is the environment-scoped encrypted
+	// agentctl control-token reference for a running Docker container. It is
+	// deliberately separate from a session's agent runtime/auth metadata.
+	ContainerControlAuthTokenSecretID string `json:"-"`
+	SandboxID                         string `json:"sandbox_id,omitempty"`
 
 	// TaskDirName is the semantic directory name for the task (e.g. "fix-bug_ab12").
 	// Set when the task uses the multi-repo task-directory layout

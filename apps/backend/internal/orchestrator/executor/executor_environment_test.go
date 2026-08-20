@@ -146,8 +146,9 @@ func TestReuseExistingEnvironment_ContainerReuse(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1", WorkspaceReuseRequired: true}
 	env := &models.TaskEnvironment{
-		ContainerID:                     "container-abc",
-		ContainerBootstrapNonceSecretID: "bootstrap-secret-abc",
+		ContainerID:                       "container-abc",
+		ContainerBootstrapNonceSecretID:   "bootstrap-secret-abc",
+		ContainerControlAuthTokenSecretID: "container-control-secret-abc",
 	}
 
 	e.reuseExistingEnvironment(context.Background(), req, env)
@@ -160,6 +161,9 @@ func TestReuseExistingEnvironment_ContainerReuse(t *testing.T) {
 	}
 	if req.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] != "bootstrap-secret-abc" {
 		t.Errorf("expected canonical bootstrap nonce reference, got %v", req.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret])
+	}
+	if req.Metadata[lifecycle.MetadataKeyContainerControlAuthSecret] != "container-control-secret-abc" {
+		t.Errorf("expected canonical container control secret reference, got %v", req.Metadata[lifecycle.MetadataKeyContainerControlAuthSecret])
 	}
 }
 
@@ -178,7 +182,8 @@ func TestPersistTaskEnvironment_DockerBootstrapNonceBecomesEnvironmentHandle(t *
 	e.persistTaskEnvironment(context.Background(), "task-1", session, env,
 		&LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeLocalDocker)},
 		&LaunchAgentResponse{ContainerID: "container-1", Metadata: map[string]interface{}{
-			lifecycle.MetadataKeyBootstrapNonceSecret: "bootstrap-secret-1",
+			lifecycle.MetadataKeyBootstrapNonceSecret:       "bootstrap-secret-1",
+			lifecycle.MetadataKeyContainerControlAuthSecret: "container-control-secret-1",
 		}},
 		executorConfig{ExecutorID: "docker"})
 
@@ -189,6 +194,9 @@ func TestPersistTaskEnvironment_DockerBootstrapNonceBecomesEnvironmentHandle(t *
 	if persisted.ContainerBootstrapNonceSecretID != "bootstrap-secret-1" {
 		t.Fatalf("ContainerBootstrapNonceSecretID = %q, want bootstrap-secret-1", persisted.ContainerBootstrapNonceSecretID)
 	}
+	if persisted.ContainerControlAuthTokenSecretID != "container-control-secret-1" {
+		t.Fatalf("ContainerControlAuthTokenSecretID = %q, want container-control-secret-1", persisted.ContainerControlAuthTokenSecretID)
+	}
 	attach := &LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeLocalDocker), WorkspaceReuseRequired: true}
 	e.reuseExistingEnvironment(context.Background(), attach, persisted)
 	if attach.PreviousExecutionID != "" {
@@ -196,6 +204,9 @@ func TestPersistTaskEnvironment_DockerBootstrapNonceBecomesEnvironmentHandle(t *
 	}
 	if got := attach.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret]; got != "bootstrap-secret-1" {
 		t.Fatalf("bootstrap nonce reference = %v, want canonical environment handle", got)
+	}
+	if got := attach.Metadata[lifecycle.MetadataKeyContainerControlAuthSecret]; got != "container-control-secret-1" {
+		t.Fatalf("container control secret reference = %v, want canonical environment handle", got)
 	}
 }
 
