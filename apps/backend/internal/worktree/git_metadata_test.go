@@ -55,6 +55,33 @@ func TestResolveGitMetadataRejectsForgedLinkedWorktreePointer(t *testing.T) {
 	}
 }
 
+func TestGitMetadataProjectionPreservesNativeIndexLockAndCommit(t *testing.T) {
+	repo := initGitMetadataRepository(t)
+	checkout := filepath.Join(t.TempDir(), "task-checkout")
+	runGitMetadata(t, repo, "worktree", "add", "-b", "task-branch", checkout)
+	projection, err := ResolveGitMetadata(checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(projection.GitDir, "index.lock")
+	if err := os.WriteFile(lockPath, []byte("held"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output, err := exec.Command("git", "-C", checkout, "add", "tracked.txt").CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "index.lock") {
+		t.Fatalf("git add error=%v output=%s, want native index.lock conflict", err, output)
+	}
+	if err := os.Remove(lockPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "tracked.txt"), []byte("changed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitMetadata(t, checkout, "add", "tracked.txt")
+	runGitMetadata(t, checkout, "commit", "-m", "task change")
+	runGitMetadata(t, checkout, "fsck", "--strict")
+}
+
 func initGitMetadataRepository(t *testing.T) string {
 	t.Helper()
 	repo := filepath.Join(t.TempDir(), "repo")
