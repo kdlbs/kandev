@@ -58,6 +58,7 @@ const (
 // agentConversationTaskRepo is the narrow task-repository interface for
 // managed conversation operations.
 type agentConversationTaskRepo interface {
+	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
 	// ListEphemeralTasksAllWorkspaces returns every ephemeral task across
 	// every workspace, unpaginated. Used only by DeleteAllForPlugin (plugin
@@ -231,24 +232,27 @@ func (s *AgentConversationService) Ensure(ctx context.Context, pluginID string, 
 	unlock := s.lockEnsureKey(pluginID + "/" + spec.WorkspaceID + "/" + spec.ConversationKey)
 	defer unlock()
 
-	// 1. Check for an existing conversation.
+	// 1. Resolve and validate the effective agent profile BEFORE creating
+	// any row. Plugins may deliberately leave AgentProfileID empty to use the
+	// workspace default, but the managed session must still be born with a
+	// concrete, usable profile. A missing, disabled, or deleted effective
+	// profile returns configuration_required without partial task/session rows.
+	effectiveProfileID, ok, err := s.resolveEffectiveProfile(ctx, spec.WorkspaceID, spec.AgentProfileID)
+	if err != nil {
+		return pluginsdk.AgentConversationDescriptor{}, "", err
+	}
+	if !ok {
+		return pluginsdk.AgentConversationDescriptor{}, AgentConversationStatusConfigurationRequired, nil
+	}
+	spec.AgentProfileID = effectiveProfileID
+
+	// 2. Check for an existing conversation.
 	existing, err := s.findManagedConversation(ctx, pluginID, spec.WorkspaceID, spec.ConversationKey)
 	if err != nil {
 		return pluginsdk.AgentConversationDescriptor{}, "", err
 	}
 	if existing != nil {
 		return s.repairIfNeeded(ctx, existing, spec)
-	}
-
-	// 2. Resolve and validate the configured agent profile BEFORE creating
-	// any row. A missing, disabled, or deleted profile must leave zero
-	// partial state — no task, no session.
-	ok, err := s.validateProfile(ctx, spec.AgentProfileID)
-	if err != nil {
-		return pluginsdk.AgentConversationDescriptor{}, "", err
-	}
-	if !ok {
-		return pluginsdk.AgentConversationDescriptor{}, AgentConversationStatusConfigurationRequired, nil
 	}
 
 	// 3. Create the backing task.
@@ -284,7 +288,7 @@ func (s *AgentConversationService) Ensure(ctx context.Context, pluginID string, 
 	}
 
 	// 4. Create the primary session.
-	primary, err := s.createPrimarySession(ctx, task.ID)
+	primary, err := s.createPrimarySession(ctx, task.ID, spec.AgentProfileID)
 	if err != nil {
 		return pluginsdk.AgentConversationDescriptor{}, "", fmt.Errorf("failed to create conversation session: %w", err)
 	}
@@ -301,16 +305,36 @@ func (s *AgentConversationService) Ensure(ctx context.Context, pluginID string, 
 	}, AgentConversationStatusCreated, nil
 }
 
-// validateProfile reports whether profileID can back a new or repaired
-// conversation. An empty profileID means the plugin did not request a
-// specific profile — Ensure proceeds and the orchestrator falls back to its
-// own default-profile resolution at launch time, matching the pre-existing
-// "no explicit profile" behavior. A non-empty profileID names a profile the
-// plugin explicitly configured, and must resolve to an existing, enabled
-// row or Ensure refuses to create/repair anything.
+// resolveEffectiveProfile converts an optional plugin profile into a concrete
+// usable profile. An empty plugin value intentionally means the workspace
+// default, not an unconfigured session: the real turn path requires an agent
+// profile before it can start the primary session.
+func (s *AgentConversationService) resolveEffectiveProfile(ctx context.Context, workspaceID, profileID string) (string, bool, error) {
+	if profileID == "" {
+		workspace, err := s.tasks.GetWorkspace(ctx, workspaceID)
+		if err != nil {
+			return "", false, fmt.Errorf("failed to resolve workspace default agent profile: %w", err)
+		}
+		if workspace == nil || workspace.DefaultAgentProfileID == nil {
+			return "", false, nil
+		}
+		profileID = *workspace.DefaultAgentProfileID
+	}
+	if profileID == "" {
+		return "", false, nil
+	}
+	ok, err := s.validateProfile(ctx, profileID)
+	if err != nil || !ok {
+		return "", ok, err
+	}
+	return profileID, true, nil
+}
+
+// validateProfile reports whether a concrete profile can back a new or
+// repaired conversation. It must resolve to an existing, enabled row.
 func (s *AgentConversationService) validateProfile(ctx context.Context, profileID string) (bool, error) {
 	if profileID == "" {
-		return true, nil
+		return false, nil
 	}
 	if s.profile == nil {
 		// No validator wired (e.g. a bare test service): fail open only when
@@ -340,6 +364,12 @@ func (s *AgentConversationService) repairIfNeeded(ctx context.Context, existing 
 			profileID = p
 		}
 	}
+	if profileID == "" {
+		// A partial conversation created by an older host may not have stamped
+		// the profile metadata. Ensure has already resolved spec to a concrete
+		// effective profile, so use it to repair the missing primary session.
+		profileID = spec.AgentProfileID
+	}
 
 	primary, err := s.sess.GetPrimarySessionByTaskID(ctx, existing.ID)
 	if err != nil {
@@ -353,7 +383,7 @@ func (s *AgentConversationService) repairIfNeeded(ctx context.Context, existing 
 		if !ok {
 			return pluginsdk.AgentConversationDescriptor{}, AgentConversationStatusConfigurationRequired, nil
 		}
-		primary, err = s.createPrimarySession(ctx, existing.ID)
+		primary, err = s.createPrimarySession(ctx, existing.ID, profileID)
 		if err != nil {
 			return pluginsdk.AgentConversationDescriptor{}, "", fmt.Errorf("failed to repair conversation session: %w", err)
 		}
@@ -369,14 +399,15 @@ func (s *AgentConversationService) repairIfNeeded(ctx context.Context, existing 
 }
 
 // createPrimarySession creates a primary session row for the given task.
-func (s *AgentConversationService) createPrimarySession(ctx context.Context, taskID string) (*models.TaskSession, error) {
+func (s *AgentConversationService) createPrimarySession(ctx context.Context, taskID, agentProfileID string) (*models.TaskSession, error) {
 	primary := &models.TaskSession{
-		ID:        uuid.New().String(),
-		TaskID:    taskID,
-		State:     models.TaskSessionStateCreated,
-		IsPrimary: true,
-		StartedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
+		ID:             uuid.New().String(),
+		TaskID:         taskID,
+		AgentProfileID: agentProfileID,
+		State:          models.TaskSessionStateCreated,
+		IsPrimary:      true,
+		StartedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
 	}
 	if err := s.sess.CreateTaskSession(ctx, primary); err != nil {
 		return nil, err

@@ -20,11 +20,16 @@ import (
 // exact method signatures we need.
 type agentConversationTaskAdapter struct {
 	repo interface {
+		GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error)
 		ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*taskmodels.Task, int, error)
 		ListEphemeralTasksAllWorkspaces(ctx context.Context) ([]*taskmodels.Task, error)
 		CreateTask(ctx context.Context, task *taskmodels.Task) error
 		DeleteTask(ctx context.Context, taskID string) error
 	}
+}
+
+func (a agentConversationTaskAdapter) GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error) {
+	return a.repo.GetWorkspace(ctx, id)
 }
 
 func (a agentConversationTaskAdapter) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*taskmodels.Task, int, error) {
@@ -122,6 +127,7 @@ func (a agentConversationDispatcherAdapter) Deliver(ctx context.Context, taskID 
 // the orchestrator exists — see SetAgentConversationsDispatcher.
 func NewAgentConversationService(
 	taskRepo interface {
+		GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error)
 		ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*taskmodels.Task, int, error)
 		ListEphemeralTasksAllWorkspaces(ctx context.Context) ([]*taskmodels.Task, error)
 		CreateTask(ctx context.Context, task *taskmodels.Task) error

@@ -18,9 +18,20 @@ import (
 // ── fakes ────────────────────────────────────────────────────────────────
 
 type acFakeTaskRepo struct {
-	mu      sync.Mutex
-	tasks   []*models.Task
-	nextIdx int
+	mu        sync.Mutex
+	tasks     []*models.Task
+	nextIdx   int
+	workspace *models.Workspace
+}
+
+func (f *acFakeTaskRepo) GetWorkspace(_ context.Context, _ string) (*models.Workspace, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.workspace == nil {
+		profileID := "profile-workspace-default"
+		return &models.Workspace{ID: "workspace-1", DefaultAgentProfileID: &profileID}, nil
+	}
+	return f.workspace, nil
 }
 
 func (f *acFakeTaskRepo) ListTasksByWorkspace(ctx context.Context, workspaceID, _, _, _ string, page, pageSize int, _ string, _, includeEphemeral, onlyEphemeral, _ bool) ([]*models.Task, int, error) {
@@ -340,6 +351,76 @@ func TestEnsureCreatesConversation(t *testing.T) {
 	}
 	if published[0].Type != events.TaskCreated {
 		t.Fatalf("event type = %q, want %q", published[0].Type, events.TaskCreated)
+	}
+}
+
+func TestEnsureUsesWorkspaceDefaultProfileWhenPluginOmitsProfile(t *testing.T) {
+	svc, deps := newACTestService()
+	profileID := "workspace-profile"
+	deps.tasks.workspace = &models.Workspace{ID: "ws-1", DefaultAgentProfileID: &profileID}
+
+	desc, gotStatus, err := svc.Ensure(context.Background(), "plugin-coordinator", pluginsdk.AgentConversationSpec{
+		WorkspaceID: "ws-1", ConversationKey: "coordinator",
+	})
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if gotStatus != AgentConversationStatusCreated {
+		t.Fatalf("status = %q, want %q", gotStatus, AgentConversationStatusCreated)
+	}
+	if desc.AgentProfileID != profileID {
+		t.Fatalf("descriptor profile = %q, want %q", desc.AgentProfileID, profileID)
+	}
+	if deps.tasks.count() != 1 || deps.sess.count() != 1 {
+		t.Fatalf("created tasks/sessions = %d/%d, want 1/1", deps.tasks.count(), deps.sess.count())
+	}
+	if got := deps.tasks.tasks[0].Metadata[models.MetaKeyAgentProfileID]; got != profileID {
+		t.Fatalf("task profile metadata = %v, want %q", got, profileID)
+	}
+	for _, session := range deps.sess.sessions {
+		if session.AgentProfileID != profileID {
+			t.Fatalf("session profile = %q, want %q", session.AgentProfileID, profileID)
+		}
+	}
+}
+
+func TestEnsureRejectsMissingWorkspaceDefaultProfileWithoutPartialRows(t *testing.T) {
+	svc, deps := newACTestService()
+	missing := "missing-profile"
+	deps.tasks.workspace = &models.Workspace{ID: "ws-1", DefaultAgentProfileID: &missing}
+	deps.profiles.markMissing(missing)
+
+	_, gotStatus, err := svc.Ensure(context.Background(), "plugin-coordinator", pluginsdk.AgentConversationSpec{
+		WorkspaceID: "ws-1", ConversationKey: "coordinator",
+	})
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if gotStatus != AgentConversationStatusConfigurationRequired {
+		t.Fatalf("status = %q, want %q", gotStatus, AgentConversationStatusConfigurationRequired)
+	}
+	if deps.tasks.count() != 0 || deps.sess.count() != 0 {
+		t.Fatalf("partial rows = tasks:%d sessions:%d, want 0/0", deps.tasks.count(), deps.sess.count())
+	}
+}
+
+func TestEnsureRejectsDisabledWorkspaceDefaultProfileWithoutPartialRows(t *testing.T) {
+	svc, deps := newACTestService()
+	disabled := "disabled-profile"
+	deps.tasks.workspace = &models.Workspace{ID: "ws-1", DefaultAgentProfileID: &disabled}
+	deps.profiles.markDisabled(disabled)
+
+	_, gotStatus, err := svc.Ensure(context.Background(), "plugin-coordinator", pluginsdk.AgentConversationSpec{
+		WorkspaceID: "ws-1", ConversationKey: "coordinator",
+	})
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if gotStatus != AgentConversationStatusConfigurationRequired {
+		t.Fatalf("status = %q, want %q", gotStatus, AgentConversationStatusConfigurationRequired)
+	}
+	if deps.tasks.count() != 0 || deps.sess.count() != 0 {
+		t.Fatalf("partial rows = tasks:%d sessions:%d, want 0/0", deps.tasks.count(), deps.sess.count())
 	}
 }
 
