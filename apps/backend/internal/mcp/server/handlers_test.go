@@ -643,6 +643,9 @@ func TestAddBranchToTask_RejectsAnotherTask(t *testing.T) {
 func TestAddWorkspaceSourcesDefaultsTaskAndForwardsMixedSources(t *testing.T) {
 	backend := &testBackend{response: map[string]interface{}{"task_id": "task-current"}}
 	s := newTaskModeServer(t, backend, "task-current")
+	properties := toolInputProperties(t, s, "add_workspace_sources_kandev")
+	assert.NotContains(t, properties, "caller_task_id")
+	assert.NotContains(t, properties, "caller_session_id")
 
 	result := callTool(t, s, "add_workspace_sources_kandev", map[string]interface{}{
 		"sources": []interface{}{

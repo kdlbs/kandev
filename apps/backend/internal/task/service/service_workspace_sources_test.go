@@ -11,6 +11,8 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAttachWorkspaceSourcesDerivesLegacyPrimaryBranchForWorktreeProjection(t *testing.T) {
@@ -931,6 +933,174 @@ func TestAttachWorkspaceSourcesExactRetriesSkipRuntimeSideEffects(t *testing.T) 
 	if len(rows) != 2 {
 		t.Fatalf("task repositories after exact retry = %d, want 2", len(rows))
 	}
+}
+
+func TestAttachWorkspaceSourcesExactFolderRetryCanonicalizesPathWithoutSideEffects(t *testing.T) {
+	svc, eventBus, repo, task := newWorkspaceSourceRetryFixture(t)
+	ctx := context.Background()
+	folder := t.TempDir()
+	source := WorkspaceSourceInput{Kind: WorkspaceSourceFolder, LocalPath: folder, DisplayName: "docs"}
+	_, err := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{source}})
+	require.NoError(t, err)
+
+	eventBus.ClearEvents()
+	materializer := &recordingWorkspaceSourceMaterializer{}
+	refresher := &recordingWorkspaceSourceProviderRefresher{}
+	svc.SetWorkspaceSourceMaterializer(materializer)
+	svc.SetWorkspaceSourceProviderRefresher(refresher)
+	retry, err := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{{
+		Kind: WorkspaceSourceFolder, LocalPath: filepath.Join(folder, "."), DisplayName: "docs",
+	}}})
+	require.NoError(t, err)
+	require.False(t, retry.Changed)
+	require.False(t, materializer.called)
+	require.Zero(t, refresher.calls)
+	require.Empty(t, eventBus.GetPublishedEvents())
+	folders, err := repo.ListTaskWorkspaceFolders(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, folders, 1)
+}
+
+func TestAttachWorkspaceSourcesMixedDuplicateAndNewFoldersCommitsOnlyNewSource(t *testing.T) {
+	svc, eventBus, repo, task := newWorkspaceSourceRetryFixture(t)
+	ctx := context.Background()
+	existing := t.TempDir()
+	newFolder := t.TempDir()
+	_, err := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{{
+		Kind: WorkspaceSourceFolder, LocalPath: existing, DisplayName: "existing",
+	}}})
+	require.NoError(t, err)
+
+	eventBus.ClearEvents()
+	materializer := &recordingWorkspaceSourceMaterializer{}
+	refresher := &recordingWorkspaceSourceProviderRefresher{}
+	svc.SetWorkspaceSourceMaterializer(materializer)
+	svc.SetWorkspaceSourceProviderRefresher(refresher)
+	result, err := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{
+		{Kind: WorkspaceSourceFolder, LocalPath: filepath.Join(existing, "."), DisplayName: "existing"},
+		{Kind: WorkspaceSourceFolder, LocalPath: newFolder, DisplayName: "new"},
+	}})
+	require.NoError(t, err)
+	require.True(t, result.Changed)
+	require.True(t, materializer.called)
+	require.Equal(t, 1, refresher.calls)
+	require.NotEmpty(t, eventBus.GetPublishedEvents())
+	folders, err := repo.ListTaskWorkspaceFolders(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, folders, 2)
+	require.Equal(t, "existing", folders[0].DisplayName)
+	require.Equal(t, "new", folders[1].DisplayName)
+}
+
+func TestAttachWorkspaceSourcesRejectsContradictoryFolderDuplicates(t *testing.T) {
+	svc, eventBus, repo, task := newWorkspaceSourceRetryFixture(t)
+	ctx := context.Background()
+	folder := t.TempDir()
+	_, err := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{{
+		Kind: WorkspaceSourceFolder, LocalPath: folder, DisplayName: "docs",
+	}}})
+	require.NoError(t, err)
+
+	for _, testCase := range []struct {
+		name   string
+		source WorkspaceSourceInput
+	}{
+		{name: "same path different name", source: WorkspaceSourceInput{Kind: WorkspaceSourceFolder, LocalPath: filepath.Join(folder, "."), DisplayName: "renamed"}},
+		{name: "same name different path", source: WorkspaceSourceInput{Kind: WorkspaceSourceFolder, LocalPath: t.TempDir(), DisplayName: "docs"}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			eventBus.ClearEvents()
+			result, attachErr := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{testCase.source}})
+			require.ErrorIs(t, attachErr, ErrWorkspaceSourceConflict)
+			require.Nil(t, result)
+			require.Empty(t, eventBus.GetPublishedEvents())
+			folders, listErr := repo.ListTaskWorkspaceFolders(ctx, task.ID)
+			require.NoError(t, listErr)
+			require.Len(t, folders, 1)
+		})
+	}
+}
+
+func TestAttachWorkspaceSourcesExactRepositoryRetryNormalizesDefaultBaseBranch(t *testing.T) {
+	svc, eventBus, repo, task := newWorkspaceSourceRetryFixture(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{ID: "repo-retry-added", WorkspaceID: "ws-retry", Name: "added", DefaultBranch: "main"}))
+	source := WorkspaceSourceInput{Kind: WorkspaceSourceRepository, RepositoryID: "repo-retry-added", CheckoutBranch: "feature/retry"}
+	_, err := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{source}})
+	require.NoError(t, err)
+
+	eventBus.ClearEvents()
+	materializer := &recordingWorkspaceSourceMaterializer{}
+	refresher := &recordingWorkspaceSourceProviderRefresher{}
+	svc.SetWorkspaceSourceMaterializer(materializer)
+	svc.SetWorkspaceSourceProviderRefresher(refresher)
+	retry, err := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{{
+		Kind: WorkspaceSourceRepository, RepositoryID: "repo-retry-added", BaseBranch: "main", CheckoutBranch: "feature/retry",
+	}}})
+	require.NoError(t, err)
+	require.False(t, retry.Changed)
+	require.False(t, materializer.called)
+	require.Zero(t, refresher.calls)
+	require.Empty(t, eventBus.GetPublishedEvents())
+	repositories, err := repo.ListTaskRepositories(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, repositories, 2)
+}
+
+func TestAttachWorkspaceSourcesConcurrentExactFolderRetriesRemainNoOps(t *testing.T) {
+	svc, eventBus, repo, task := newWorkspaceSourceRetryFixture(t)
+	ctx := context.Background()
+	folder := t.TempDir()
+	source := WorkspaceSourceInput{Kind: WorkspaceSourceFolder, LocalPath: folder, DisplayName: "docs"}
+	_, err := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{source}})
+	require.NoError(t, err)
+	eventBus.ClearEvents()
+
+	results := make(chan *AttachWorkspaceSourcesResult, 2)
+	errors := make(chan error, 2)
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	for range 2 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			result, attachErr := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{source}})
+			results <- result
+			errors <- attachErr
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(results)
+	close(errors)
+	for attachErr := range errors {
+		require.NoError(t, attachErr)
+	}
+	for result := range results {
+		require.NotNil(t, result)
+		require.False(t, result.Changed)
+	}
+	require.Empty(t, eventBus.GetPublishedEvents())
+	folders, err := repo.ListTaskWorkspaceFolders(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, folders, 1)
+}
+
+func newWorkspaceSourceRetryFixture(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repository, *models.Task) {
+	t.Helper()
+	svc, eventBus, repo := createTestService(t)
+	svc.workspaceFolders = repo
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-retry", Name: "Retry"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-retry", WorkspaceID: "ws-retry", Name: "Workflow"}))
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{ID: "repo-retry-primary", WorkspaceID: "ws-retry", Name: "primary", DefaultBranch: "main"}))
+	created, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-retry", WorkflowID: "wf-retry", WorkflowStepID: "step", Title: "Retry task",
+		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-retry-primary", BaseBranch: "main"}},
+	})
+	require.NoError(t, err)
+	return svc, eventBus, repo, created.Task
 }
 
 func TestAttachWorkspaceSourcesRejectsSanitizedBranchCollisionWithinBatch(t *testing.T) {

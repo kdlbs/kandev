@@ -339,8 +339,14 @@ func (s *Service) validateRepositoryWorkspaceSourceInput(ctx context.Context, ta
 	if repositoryLocatorCount(input) != 1 {
 		return fmt.Errorf("%w: repository source requires exactly one locator", ErrInvalidWorkspaceSource)
 	}
-	if err := validateWorkspaceSourceBranches(input.BaseBranch, input.CheckoutBranch); err != nil {
-		return err
+	// base_branch may be omitted when the resolved repository has a default
+	// branch. Validate a supplied value here and the effective value after
+	// resolution in prepareRepositoryWorkspaceSource.
+	if input.BaseBranch != "" && !securityutil.IsValidBranchName(input.BaseBranch) {
+		return fmt.Errorf("%w: base_branch %q is not a safe git branch", ErrInvalidWorkspaceSource, input.BaseBranch)
+	}
+	if input.CheckoutBranch != "" && !securityutil.IsValidBranchName(input.CheckoutBranch) {
+		return fmt.Errorf("%w: checkout_branch %q is not a safe git branch", ErrInvalidWorkspaceSource, input.CheckoutBranch)
 	}
 	if input.RepositoryID == "" {
 		return nil
@@ -376,6 +382,9 @@ func (s *Service) resolveWorkspaceSourceBaseBranch(ctx context.Context, task *mo
 		if err != nil {
 			return nil, "", fmt.Errorf("%w: resolve local repository branch: %v", ErrInvalidWorkspaceSource, err)
 		}
+	}
+	if base == "" {
+		base = repo.DefaultBranch
 	}
 	if base == "" {
 		return nil, "", fmt.Errorf("%w: repository source requires base_branch", ErrInvalidWorkspaceSource)
