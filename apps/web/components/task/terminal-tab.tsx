@@ -354,28 +354,37 @@ export function TerminalTabMenu({
   onTerminatePanel: () => void;
 }) {
   const { t } = useTranslation();
-  const requestTerminateAfterCloseRef = useRef(false);
+  const pendingActionAfterCloseRef = useRef<"rename" | "terminate" | null>(null);
+
+  const handleRename = useCallback(() => {
+    pendingActionAfterCloseRef.current = "rename";
+  }, []);
 
   const handleTerminate = useCallback(() => {
     if (!canMutate) {
       onClosePanel();
       return;
     }
-    requestTerminateAfterCloseRef.current = true;
+    pendingActionAfterCloseRef.current = "terminate";
   }, [canMutate, onClosePanel]);
 
   return (
     <ContextMenuContent
       onCloseAutoFocus={(event) => {
-        if (!requestTerminateAfterCloseRef.current) return;
-        requestTerminateAfterCloseRef.current = false;
+        const pendingAction = pendingActionAfterCloseRef.current;
+        if (!pendingAction) return;
+        pendingActionAfterCloseRef.current = null;
         event.preventDefault();
+        if (pendingAction === "rename") {
+          queueMicrotask(onStartRename);
+          return;
+        }
         onTerminatePanel();
       }}
     >
       {canMutate && (
         <>
-          <ContextMenuItem onClick={onStartRename}>{t("task:rename2")}</ContextMenuItem>
+          <ContextMenuItem onClick={handleRename}>{t("task:rename2")}</ContextMenuItem>
           <ContextMenuSeparator />
         </>
       )}

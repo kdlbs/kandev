@@ -87,6 +87,13 @@ async function listTerminalIds(
     .filter((id): id is string => Boolean(id));
 }
 
+async function settleBrowserFrames(page: Page) {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+}
+
 async function clickNewTerminalInPlusMenu(page: Page, session: SessionPage) {
   await session.addPanelButton().click();
   const menu = page
@@ -112,6 +119,7 @@ test.describe("Terminals — dockview UI", () => {
     const { sessions } = await apiClient.listTaskSessions(task.id);
     const environmentId = sessions[0]?.task_environment_id;
     expect(environmentId).toBeTruthy();
+    if (!environmentId) throw new Error("task session is missing an environment id");
 
     const first = await apiClient.wsRequest<{ terminal_id: string }>("user_shell.create", {
       task_id: task.id,
@@ -124,14 +132,24 @@ test.describe("Terminals — dockview UI", () => {
     await openTabletTask(tabletTestPage, task.id);
     const firstTab = tabletTestPage.getByTestId(`terminal-tab-${first.terminal_id}`);
     const secondTab = tabletTestPage.getByTestId(`terminal-tab-${second.terminal_id}`);
+    const firstRenameInput = tabletTestPage
+      .getByTestId(`terminal-tab-${first.terminal_id}`)
+      .locator("..")
+      .getByTestId(`terminal-tab-${first.terminal_id}-content`)
+      .getByTestId("terminal-tab-rename-input");
+    const secondRenameInput = tabletTestPage
+      .getByTestId(`terminal-tab-${second.terminal_id}`)
+      .locator("..")
+      .getByTestId(`terminal-tab-${second.terminal_id}-content`)
+      .getByTestId("terminal-tab-rename-input");
     await expect(firstTab).toBeVisible({ timeout: 15_000 });
     await expect(secondTab).toBeVisible({ timeout: 15_000 });
 
     // Double-click keeps the existing inline rename entry point functional.
     await firstTab.dblclick();
-    const renameInput = tabletTestPage.getByTestId("terminal-tab-rename-input");
-    await expect(renameInput).toBeVisible();
-    await renameInput.fill("double click rename");
+    await expect(firstRenameInput).toBeVisible();
+    await expect(firstRenameInput).toBeFocused();
+    await firstRenameInput.fill("double click rename");
     await tabletTestPage.keyboard.press("Enter");
     await expect(firstTab).toContainText("double click rename", { timeout: 10_000 });
 
@@ -155,8 +173,9 @@ test.describe("Terminals — dockview UI", () => {
     });
     await secondTab.click({ button: "right" });
     await tabletTestPage.getByRole("menuitem", { name: /^Rename/ }).click();
-    await expect(renameInput).toBeVisible();
-    await renameInput.fill("context menu rename");
+    await expect(secondRenameInput).toBeVisible();
+    await expect(secondRenameInput).toBeFocused();
+    await secondRenameInput.fill("context menu rename");
     await tabletTestPage.keyboard.press("Enter");
     await expect(secondTab).toContainText("context menu rename", { timeout: 10_000 });
 
@@ -164,12 +183,12 @@ test.describe("Terminals — dockview UI", () => {
     await tabletTestPage.getByRole("menuitem", { name: /^Terminate/ }).click();
     await expect(closeConfirmation).toBeVisible();
     expect(nativeDialogSeen).toBe(false);
-    await expect
-      .poll(() => listTerminalIds(apiClient, task.id, environmentId), {
-        message: "context-menu terminate must wait for confirmation",
-      })
-      .toContain(second.terminal_id);
     await expect(secondTab).toBeVisible();
+    await settleBrowserFrames(tabletTestPage);
+    expect(
+      await listTerminalIds(apiClient, task.id, environmentId),
+      "context-menu terminate must wait for confirmation",
+    ).toContain(second.terminal_id);
 
     await closeConfirmation.getByRole("button", { name: "Close terminal", exact: true }).click();
     await expect(secondTab).toHaveCount(0, { timeout: 10_000 });

@@ -72,6 +72,51 @@ function CollapseIcon({ isCollapsed }: { isCollapsed: boolean }) {
   );
 }
 
+function getTabWidthClass(truncate: boolean | undefined) {
+  return truncate === false ? "max-w-[200px]" : "max-w-[120px]";
+}
+
+function DefaultTabContent({ tab }: { tab: SessionTab }) {
+  return (
+    <>
+      {tab.icon}
+      {tab.badge && (
+        <span
+          data-testid={`${tab.testId ?? tab.id}-seq-badge`}
+          className="mr-1 inline-flex items-center justify-center rounded-sm bg-muted text-muted-foreground text-[10px] font-mono leading-none px-1 py-0.5"
+        >
+          {tab.badge}
+        </span>
+      )}
+      <span className={`truncate ${tab.icon ? "ml-1.5" : ""}`} style={{ textOverflow: "clip" }}>
+        {tab.label}
+      </span>
+    </>
+  );
+}
+
+function TabCloseControl({
+  tab,
+  closeAnchorRef,
+}: {
+  tab: SessionTab;
+  closeAnchorRef: RefObject<HTMLElement | null>;
+}) {
+  if (!tab.closable || !tab.onClose) return null;
+  return (
+    <span
+      ref={closeAnchorRef}
+      role="button"
+      tabIndex={-1}
+      data-testid={tab.closeTestId}
+      className={`absolute right-1 rounded bg-background hover:bg-muted hover:text-foreground text-muted-foreground transition-opacity ${tab.alwaysShowClose ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+      onClick={tab.onClose}
+    >
+      <CloseIcon />
+    </span>
+  );
+}
+
 function SessionTabItem({
   tab,
   index,
@@ -82,47 +127,36 @@ function SessionTabItem({
   separatorAfterIndex?: number;
 }) {
   const closeAnchorRef = useRef<HTMLElement>(null);
+  const tabWidthClass = getTabWidthClass(tab.truncate);
+  const triggerClassName =
+    (tab.className ?? "") + " group relative py-1 cursor-pointer rounded-sm " + tabWidthClass;
   const trigger = (
     <TabsTrigger
       value={tab.id}
       data-testid={tab.testId}
+      aria-label={tab.content ? tab.label : undefined}
       onContextMenu={tab.onContextMenu}
       onDoubleClick={tab.onDoubleClick}
-      className={
-        (tab.className ?? "") +
-        " group relative py-1 cursor-pointer rounded-sm " +
-        (tab.truncate === false ? "max-w-[200px]" : "max-w-[120px]")
-      }
+      className={`${triggerClassName} ${tab.content ? "absolute inset-0 z-0 !max-w-none !flex-none" : ""}`}
     >
-      {tab.content ?? (
-        <>
-          {tab.icon}
-          {tab.badge && (
-            <span
-              data-testid={`${tab.testId ?? tab.id}-seq-badge`}
-              className="mr-1 inline-flex items-center justify-center rounded-sm bg-muted text-muted-foreground text-[10px] font-mono leading-none px-1 py-0.5"
-            >
-              {tab.badge}
-            </span>
-          )}
-          <span className={`truncate ${tab.icon ? "ml-1.5" : ""}`} style={{ textOverflow: "clip" }}>
-            {tab.label}
-          </span>
-        </>
-      )}
-      {tab.closable && tab.onClose && (
-        <span
-          ref={closeAnchorRef}
-          role="button"
-          tabIndex={-1}
-          data-testid={tab.closeTestId}
-          className={`absolute right-1 rounded bg-background hover:bg-muted hover:text-foreground text-muted-foreground transition-opacity ${tab.alwaysShowClose ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
-          onClick={tab.onClose}
-        >
-          <CloseIcon />
-        </span>
-      )}
+      {tab.content ? <span className="sr-only">{tab.label}</span> : <DefaultTabContent tab={tab} />}
+      <TabCloseControl tab={tab} closeAnchorRef={closeAnchorRef} />
     </TabsTrigger>
+  );
+  const tabTarget = tab.content ? (
+    <div
+      className={`group relative inline-flex h-full min-w-0 flex-1 items-center ${tabWidthClass}`}
+    >
+      {trigger}
+      <div
+        data-testid={`${tab.testId ?? tab.id}-content`}
+        className="relative z-10 flex h-full min-w-0 items-center pr-5"
+      >
+        {tab.content}
+      </div>
+    </div>
+  ) : (
+    trigger
   );
 
   return (
@@ -132,11 +166,11 @@ function SessionTabItem({
       )}
       {tab.renderContextMenu ? (
         <ContextMenu>
-          <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
+          <ContextMenuTrigger asChild>{tabTarget}</ContextMenuTrigger>
           {tab.renderContextMenu(closeAnchorRef)}
         </ContextMenu>
       ) : (
-        trigger
+        tabTarget
       )}
     </Fragment>
   );

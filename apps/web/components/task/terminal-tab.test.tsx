@@ -71,14 +71,30 @@ vi.mock("@kandev/ui/context-menu", () => ({
   }: {
     children: React.ReactNode;
     [key: string]: unknown;
-  }) => <div {...props}>{children}</div>,
+  }) => (
+    <div tabIndex={-1} {...props}>
+      {children}
+    </div>
+  ),
   ContextMenuContent: ({
     children,
     onCloseAutoFocus,
   }: {
     children: React.ReactNode;
     onCloseAutoFocus?: (event: { preventDefault: () => void }) => void;
-  }) => <div onClick={() => onCloseAutoFocus?.({ preventDefault: vi.fn() })}>{children}</div>,
+  }) => (
+    <div
+      onClick={() => {
+        const preventDefault = vi.fn();
+        onCloseAutoFocus?.({ preventDefault });
+        if (!preventDefault.mock.calls.length) {
+          document.querySelector<HTMLElement>('[data-testid="terminal-tab-shell-1"]')?.focus();
+        }
+      }}
+    >
+      {children}
+    </div>
+  ),
   ContextMenuItem: ({
     children,
     onClick,
@@ -167,6 +183,16 @@ describe("TerminalTab", () => {
     expect(screen.queryByRole("status", { name: "Closing terminal" })).toBeNull();
     expect(mockClose).toHaveBeenCalledTimes(1);
     expect(mockDestroyUserShell).toHaveBeenCalledTimes(1);
+  });
+
+  it("focuses the inline rename input after the context menu closes", async () => {
+    render(<TerminalTab {...makeProps()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Rename/ }));
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByTestId("terminal-tab-rename-input"));
+    });
   });
 
   it("keeps the panel dismissed and reports an error if destroy fails", async () => {

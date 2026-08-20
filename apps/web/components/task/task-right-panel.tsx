@@ -125,6 +125,18 @@ function useRightPanelPersistence({
   }, [isBottomCollapsed]);
 }
 
+function useRightPanelTabChange(
+  sessionId: string | null,
+  setRightPanelActiveTab: (sessionId: string, tabId: string) => void,
+) {
+  return useCallback(
+    (value: string) => {
+      if (sessionId) setRightPanelActiveTab(sessionId, value);
+    },
+    [sessionId, setRightPanelActiveTab],
+  );
+}
+
 function useRightPanelTabs({
   hasScripts,
   terminals,
@@ -150,16 +162,18 @@ function useRightPanelTabs({
   const handleStartRename = useCallback((terminalId: string) => {
     setRenamingTerminalId(terminalId);
   }, []);
-
   const handleRenameCommit = useCallback(
     async (terminalId: string, next: string) => {
       setRenamingTerminalId(null);
       const trimmed = next.trim();
-      await renameTerminal(terminalId, trimmed === "" ? null : trimmed);
+      try {
+        await renameTerminal(terminalId, trimmed === "" ? null : trimmed);
+      } catch (error) {
+        console.error(error);
+      }
     },
     [renameTerminal],
   );
-
   const handleRenameCancel = useCallback(() => {
     setRenamingTerminalId(null);
   }, []);
@@ -175,7 +189,6 @@ function useRightPanelTabs({
     ),
     [handleStartRename, requestCloseFromContext],
   );
-
   const renderTerminalContent = useCallback(
     (terminal: Terminal) => {
       if (renamingTerminalId !== terminal.id) return undefined;
@@ -194,7 +207,6 @@ function useRightPanelTabs({
     },
     [handleRenameCancel, handleRenameCommit, renamingTerminalId, t],
   );
-
   const tabs: SessionTab[] = useMemo(() => {
     const commandsTabs: SessionTab[] = hasScripts
       ? [{ id: "commands", label: t("common:commandGroupCommands") }]
@@ -220,13 +232,7 @@ function useRightPanelTabs({
     handleStartRename,
     t,
   ]);
-
-  const handleTabChange = useCallback(
-    (value: string) => {
-      if (sessionId) setRightPanelActiveTab(sessionId, value);
-    },
-    [sessionId, setRightPanelActiveTab],
-  );
+  const handleTabChange = useRightPanelTabChange(sessionId, setRightPanelActiveTab);
 
   return { tabs, handleTabChange };
 }
@@ -267,13 +273,6 @@ function useConfirmableTerminalClose({
     [requestClose, handleCloseTab],
   );
 
-  const handleRequestCloseFromContext = useCallback(
-    (terminalId: string, anchor: HTMLElement | null) => {
-      requestClose(terminalId, anchor);
-    },
-    [requestClose],
-  );
-
   const handleConfirmClose = useCallback(async () => {
     if (!pendingClose) return;
     await destroyTerminal(pendingClose.id);
@@ -284,7 +283,7 @@ function useConfirmableTerminalClose({
     setPendingClose,
     closeAnchorRef,
     handleAskCloseTab,
-    handleRequestCloseFromContext,
+    requestClose,
     handleConfirmClose,
   };
 }
@@ -499,7 +498,7 @@ function useTaskRightPanel({
     handleCloseDevTab,
     handleCloseTab: closeConfirm.handleAskCloseTab,
     renameTerminal,
-    requestCloseFromContext: closeConfirm.handleRequestCloseFromContext,
+    requestCloseFromContext: closeConfirm.requestClose,
     sessionId,
     setRightPanelActiveTab,
   });
