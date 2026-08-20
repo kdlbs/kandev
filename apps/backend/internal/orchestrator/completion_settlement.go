@@ -119,6 +119,7 @@ func (s *Service) reconcileCompletionIntent(ctx context.Context, store completio
 	turn, err := s.turnService.GetActiveTurn(ctx, intent.SessionID)
 	if err != nil && !isNoActiveTurnError(err) {
 		s.logger.Warn("failed to load active turn for completion intent", zap.String("intent_id", intent.ID), zap.Error(err))
+		s.retryCompletionIntent(ctx, store, intent)
 		return
 	}
 	if turn != nil && turn.ID != intent.TurnID {
@@ -128,6 +129,7 @@ func (s *Service) reconcileCompletionIntent(ctx context.Context, store completio
 	if turn != nil {
 		if err := s.turnService.CompleteTurn(ctx, intent.TurnID); err != nil {
 			s.logger.Warn("failed to settle completion intent turn", zap.String("intent_id", intent.ID), zap.Error(err))
+			s.retryCompletionIntent(ctx, store, intent)
 			return
 		}
 		s.activeTurns.CompareAndDelete(intent.SessionID, intent.TurnID)
@@ -136,13 +138,19 @@ func (s *Service) reconcileCompletionIntent(ctx context.Context, store completio
 	// not own the captured stale turn. Release that exact ownership first, then
 	// mark the old intent superseded without evaluating its source step.
 	task, err := s.repo.GetTask(ctx, intent.TaskID)
-	if err != nil || task == nil || task.WorkflowStepID != intent.WorkflowStepID {
+	if err != nil {
+		s.logger.Warn("failed to load completion intent task", zap.String("intent_id", intent.ID), zap.Error(err))
+		s.retryCompletionIntent(ctx, store, intent)
+		return
+	}
+	if task == nil || task.WorkflowStepID != intent.WorkflowStepID {
 		s.settleMovedCompletionIntent(ctx, store, intent, now)
 		return
 	}
 	session, err := s.repo.GetTaskSession(ctx, intent.SessionID)
 	if err != nil {
 		s.logger.Warn("failed to load completion intent session", zap.String("intent_id", intent.ID), zap.Error(err))
+		s.retryCompletionIntent(ctx, store, intent)
 		return
 	}
 	// Release coarse RUNNING ownership before workflow evaluation. The normal
@@ -166,14 +174,30 @@ func (s *Service) settleMovedCompletionIntent(
 	session, err := s.repo.GetTaskSession(ctx, intent.SessionID)
 	if err != nil {
 		s.logger.Warn("failed to load moved completion intent session", zap.String("intent_id", intent.ID), zap.Error(err))
-	} else {
-		s.setSessionWaitingForInput(ctx, intent.TaskID, intent.SessionID, session)
-		// task.moved may already have recorded the destination handoff while
-		// the source turn was still RUNNING. Now that this exact old turn is
-		// terminal, no provider-ready callback remains to drain it.
-		s.drainQueuedMessageForPromptableSession(ctx, intent.SessionID)
+		s.retryCompletionIntent(ctx, store, intent)
+		return
 	}
+	s.setSessionWaitingForInput(ctx, intent.TaskID, intent.SessionID, session)
+	// task.moved may already have recorded the destination handoff while
+	// the source turn was still RUNNING. Now that this exact old turn is
+	// terminal, no provider-ready callback remains to drain it.
+	s.drainQueuedMessageForPromptableSession(ctx, intent.SessionID)
 	s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSuperseded, now)
+}
+
+// retryCompletionIntent releases a transient reconciliation claim. The next
+// bounded due scan can safely retry the same exact turn; a concurrent provider
+// callback still has to win the same pending-to-settling compare-and-set.
+func (s *Service) retryCompletionIntent(ctx context.Context, store completionIntentReconciliationStore, intent *models.CompletionIntent) {
+	if _, err := store.TransitionCompletionIntent(
+		ctx,
+		intent.ID,
+		models.CompletionIntentStateSettling,
+		models.CompletionIntentStatePending,
+		time.Time{},
+	); err != nil {
+		s.logger.Warn("failed to release completion intent retry claim", zap.String("intent_id", intent.ID), zap.Error(err))
+	}
 }
 
 func (s *Service) finishCompletionIntent(ctx context.Context, store completionIntentReconciliationStore, intent *models.CompletionIntent, state models.CompletionIntentState, at time.Time) {

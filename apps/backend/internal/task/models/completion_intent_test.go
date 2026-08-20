@@ -10,6 +10,7 @@ func TestCompletionIntentStateCanTransitionTo(t *testing.T) {
 		want bool
 	}{
 		{name: "pending settles", from: CompletionIntentStatePending, to: CompletionIntentStateSettling, want: true},
+		{name: "settling retries", from: CompletionIntentStateSettling, to: CompletionIntentStatePending, want: true},
 		{name: "settling settles", from: CompletionIntentStateSettling, to: CompletionIntentStateSettled, want: true},
 		{name: "pending reopens", from: CompletionIntentStatePending, to: CompletionIntentStateReopened, want: true},
 		{name: "settled cannot reopen", from: CompletionIntentStateSettled, to: CompletionIntentStateReopened, want: false},

@@ -624,9 +624,10 @@ const (
 	CompletionIntentStateRejected   CompletionIntentState = "rejected"
 )
 
-// CanTransitionTo permits only the forward, compare-and-set transitions used
-// by completion admission and exact-turn settlement. It deliberately rejects
-// same-state writes so duplicate callbacks must observe an existing outcome.
+// CanTransitionTo permits the compare-and-set transitions used by completion
+// admission and exact-turn settlement. A transient settlement failure may
+// release its claim back to pending, while same-state writes remain rejected
+// so duplicate callbacks must observe an existing outcome.
 func (state CompletionIntentState) CanTransitionTo(next CompletionIntentState) bool {
 	switch state {
 	case CompletionIntentStatePending:
@@ -635,7 +636,8 @@ func (state CompletionIntentState) CanTransitionTo(next CompletionIntentState) b
 			next == CompletionIntentStateSuperseded ||
 			next == CompletionIntentStateRejected
 	case CompletionIntentStateSettling:
-		return next == CompletionIntentStateSettled ||
+		return next == CompletionIntentStatePending ||
+			next == CompletionIntentStateSettled ||
 			next == CompletionIntentStateSuperseded ||
 			next == CompletionIntentStateRejected
 	default:

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -150,6 +151,45 @@ func TestReconcileDueCompletionIntentsSettlesCapturedTurn(t *testing.T) {
 	session, err := repo.GetTaskSession(ctx, "s1")
 	if err != nil || session.State != models.TaskSessionStateWaitingForInput {
 		t.Fatalf("GetTaskSession = (%+v, %v), want waiting session", session, err)
+	}
+}
+
+func TestReconcileDueCompletionIntentsRetriesTransientTurnLookupFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := repo.CreateTurn(ctx, &models.Turn{ID: "turn-1", TaskID: "t1", TaskSessionID: "s1", StartedAt: now}); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	if _, _, err := repo.CreateOrGetCompletionIntent(ctx, &models.CompletionIntent{
+		ID: "intent-1", TaskID: "t1", SessionID: "s1", TurnID: "turn-1", WorkflowStepID: "step1",
+		State: models.CompletionIntentStatePending, RequestedAt: now, EligibleAt: now,
+	}); err != nil {
+		t.Fatalf("CreateOrGetCompletionIntent: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	turns := &failingActiveTurnLookup{
+		TurnService: &repoTurnService{repo: repo},
+		err:         errors.New("transient active turn lookup failure"),
+	}
+	svc.turnService = turns
+	svc.reconcileDueCompletionIntents(ctx)
+
+	intent, err := repo.GetCompletionIntent(ctx, "intent-1")
+	if err != nil {
+		t.Fatalf("GetCompletionIntent after transient failure: %v", err)
+	}
+	if intent.State != models.CompletionIntentStatePending {
+		t.Fatalf("intent state after transient failure = %q, want pending for retry", intent.State)
+	}
+
+	turns.err = nil
+	svc.reconcileDueCompletionIntents(ctx)
+	intent, err = repo.GetCompletionIntent(ctx, "intent-1")
+	if err != nil || intent.State != models.CompletionIntentStateSettled {
+		t.Fatalf("GetCompletionIntent after retry = (%+v, %v), want settled", intent, err)
 	}
 }
 
