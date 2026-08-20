@@ -300,7 +300,7 @@ function buildSaveAppearanceHandler({
       // does, and unconditionally overwriting the draft here would silently
       // discard it (refs, not the closed-over name/description, hold the
       // latest value across that round trip).
-      if (nameRef.current === trimmedName) setName(updated.name);
+      if (nameRef.current === name) setName(updated.name);
       if (descriptionRef.current === description) setDescription(updated.description ?? "");
       // Read the store's current list at save time, not the array captured at
       // render/handler-build time: an in-flight workspace.created/updated/deleted

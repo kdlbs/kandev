@@ -80,7 +80,7 @@ describe("useSettingsState appearance save", () => {
       description: NEW_DESCRIPTION,
     } as never);
 
-    const { result } = renderSettings(ws, storeApi);
+    const { result, rerender } = renderSettings(ws, storeApi);
 
     act(() => {
       result.current.setName("  Renamed  ");
@@ -98,6 +98,13 @@ describe("useSettingsState appearance save", () => {
     expect(setWorkspaces).toHaveBeenCalledWith([
       { ...ws, name: "Renamed", description: NEW_DESCRIPTION },
     ]);
+
+    // The submitted draft had leading/trailing whitespace; the echo guard
+    // must compare against that raw draft, not its trimmed form, or the
+    // input keeps the whitespace forever and the dirty flag never clears.
+    rerender({ ws: { ...ws, name: "Renamed", description: NEW_DESCRIPTION } });
+    expect(result.current.name).toBe("Renamed");
+    expect(result.current.appearanceDirty).toBe(false);
   });
 
   it("clears the dirty flag once the store reflects the saved workspace", async () => {
