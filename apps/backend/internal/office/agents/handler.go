@@ -1,7 +1,9 @@
 package agents
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -120,7 +122,7 @@ func (h *Handler) listAgents(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, AgentListResponse{Agents: agents})
+	c.JSON(http.StatusOK, AgentListResponse{Agents: newAgentResponseBodies(agents)})
 }
 
 func (h *Handler) createAgent(c *gin.Context) {
@@ -165,7 +167,7 @@ func (h *Handler) createAgent(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusCreated, AgentResponse{Agent: agent})
+	c.JSON(http.StatusCreated, AgentResponse{Agent: newAgentResponseBody(agent)})
 }
 
 func (h *Handler) getAgent(c *gin.Context) {
@@ -174,7 +176,7 @@ func (h *Handler) getAgent(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, AgentResponse{Agent: agent})
+	c.JSON(http.StatusOK, AgentResponse{Agent: newAgentResponseBody(agent)})
 }
 
 func (h *Handler) updateAgent(c *gin.Context) {
@@ -191,8 +193,33 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
+	// Buffered once and decoded twice: a presence check against the raw
+	// keys (below), then the typed decode further down. Gin's
+	// ShouldBindJSON reads and discards the body in one step, so it
+	// cannot be used for both — this is why the body is read directly
+	// here instead.
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if agent.Role != "" {
+		hasModel, err := requestBodyHasKey(body, "model")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if hasModel {
+			respondRoutingValidation(c, &routing.ValidationError{
+				Field: "model",
+				Message: "model no longer selects a launched model for an Office agent; " +
+					"update the agent routing override or workspace tier profiles",
+			})
+			return
+		}
+	}
 	var req UpdateAgentRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -221,7 +248,19 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, AgentResponse{Agent: agent})
+	c.JSON(http.StatusOK, AgentResponse{Agent: newAgentResponseBody(agent)})
+}
+
+// requestBodyHasKey reports whether the top-level JSON object in body
+// carries key, without caring about its value — {"model":"x"},
+// {"model":""}, and {"model":null} must all be detected identically.
+func requestBodyHasKey(body []byte, key string) (bool, error) {
+	raw := map[string]json.RawMessage{}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return false, err
+	}
+	_, ok := raw[key]
+	return ok, nil
 }
 
 // applyRoutingOverride validates the override blob and writes it onto
@@ -322,7 +361,7 @@ func (h *Handler) updateAgentStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, AgentResponse{Agent: agent})
+	c.JSON(http.StatusOK, AgentResponse{Agent: newAgentResponseBody(agent)})
 }
 
 // -- Instruction handlers --

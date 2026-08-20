@@ -6,55 +6,63 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Badge } from "@kandev/ui/badge";
 import { IconInfoCircle, IconAlertTriangle } from "@tabler/icons-react";
 import type {
+  AgentRole,
+  RoleMeta,
+  RoleTierMap,
   Tier,
-  TierPerReason,
-  WakeReason,
   WorkspaceRouting,
 } from "@/lib/state/slices/office/types";
 import { providerLabel } from "./provider-order-editor";
 import { TIER_NAME_KEYS } from "../../../lib/label-keys";
-import { USE_AGENT_TIER, WAKE_REASONS, type WakeReasonCopy } from "./wake-reason-info";
+import { firstProviderWithTier } from "./wake-reason-tier-card";
 import { useTranslation } from "react-i18next";
 
+// USE_WORKSPACE_DEFAULT is the sentinel used in the per-role tier dropdown
+// to mean "no role entry — use the workspace default tier." Persisting this
+// removes the role's key from the workspace's role_tiers map.
+const USE_WORKSPACE_DEFAULT = "__workspace_default__" as const;
+
 type Props = {
+  roles: RoleMeta[];
   config: WorkspaceRouting;
-  value: TierPerReason;
-  onChange: (next: TierPerReason) => void;
+  value: RoleTierMap;
+  onChange: (next: RoleTierMap) => void;
   disabled?: boolean;
 };
 
-// WakeReasonTierCard renders the per-wake-reason tier policy table on
-// the workspace routing settings page. Every row has visible helper
-// text so a new user understands what the row controls before touching
-// the dropdown.
-export function WakeReasonTierCard({ config, value, onChange, disabled }: Props) {
+// RoleTierCard renders the per-role tier policy table on the workspace
+// routing settings page: the third of four precedence levels, below a
+// wake-reason policy and a per-agent override, above the workspace default.
+// See docs/specs/office-agent-tier-routing/spec.md.
+export function RoleTierCard({ roles, config, value, onChange, disabled }: Props) {
   const { t } = useTranslation();
-  const handleRowChange = (reason: WakeReason, tier: Tier | typeof USE_AGENT_TIER) => {
-    const next: TierPerReason = { ...value };
-    if (tier === USE_AGENT_TIER) {
-      delete next[reason];
+  const handleRowChange = (role: AgentRole, tier: Tier | typeof USE_WORKSPACE_DEFAULT) => {
+    const next: RoleTierMap = { ...value };
+    if (tier === USE_WORKSPACE_DEFAULT) {
+      delete next[role];
     } else {
-      next[reason] = tier;
+      next[role] = tier;
     }
     onChange(next);
   };
+  if (roles.length === 0) return null;
   return (
     <Card>
       <CardHeader className="space-y-1">
-        <CardTitle className="text-sm">{t("office:wakeReasonTierPolicy")}</CardTitle>
+        <CardTitle className="text-sm">{t("office:roleTierPolicy")}</CardTitle>
         <p className="text-xs text-muted-foreground leading-relaxed">
-          {t("office:overrideWhichModelTierRunsFor")}
+          {t("office:setADefaultTierForEveryAgentOfA")}
         </p>
       </CardHeader>
       <CardContent className="divide-y divide-border">
-        {WAKE_REASONS.map((row) => (
-          <WakeReasonRow
-            key={row.id}
-            row={row}
-            tier={value[row.id]}
+        {roles.map((role) => (
+          <RoleRow
+            key={role.id}
+            role={role}
+            tier={value[role.id as AgentRole]}
             config={config}
             disabled={disabled}
-            onChange={(tier) => handleRowChange(row.id, tier)}
+            onChange={(tier) => handleRowChange(role.id as AgentRole, tier)}
           />
         ))}
       </CardContent>
@@ -63,47 +71,42 @@ export function WakeReasonTierCard({ config, value, onChange, disabled }: Props)
 }
 
 type RowProps = {
-  row: WakeReasonCopy;
+  role: RoleMeta;
   tier: Tier | undefined;
   config: WorkspaceRouting;
   disabled?: boolean;
-  onChange: (tier: Tier | typeof USE_AGENT_TIER) => void;
+  onChange: (tier: Tier | typeof USE_WORKSPACE_DEFAULT) => void;
 };
 
-function WakeReasonRow({ row, tier, config, disabled, onChange }: RowProps) {
-  const { t } = useTranslation();
+function RoleRow({ role, tier, config, disabled, onChange }: RowProps) {
   return (
     <div className="py-3 space-y-2 first:pt-0 last:pb-0">
       <div className="flex items-center justify-between gap-3">
-        <RowLabel row={row} />
+        <RowLabel role={role} />
         <TierSelect tier={tier} onChange={onChange} disabled={disabled} />
       </div>
-      <p className="text-xs text-muted-foreground leading-relaxed pl-1">{t(row.shortKey)}</p>
-      <p className="text-[11px] text-muted-foreground/80 leading-relaxed pl-1">
-        {t(row.recommendationKey)}
-      </p>
       <ResolvedRow tier={tier} config={config} />
     </div>
   );
 }
 
-function RowLabel({ row }: { row: WakeReasonCopy }) {
+function RowLabel({ role }: { role: RoleMeta }) {
   const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-sm font-medium uppercase tracking-wide">{t(row.labelKey)}</span>
+      <span className="text-sm font-medium">{role.label}</span>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
-            aria-label={t("office:moreInfoAbout", { label: t(row.labelKey) })}
+            aria-label={t("office:moreInfoAbout", { label: role.label })}
             className="cursor-pointer text-muted-foreground hover:text-foreground"
           >
             <IconInfoCircle className="h-3.5 w-3.5" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="right" className="max-w-xs text-xs leading-relaxed">
-          {t(row.longKey)}
+          {role.description || t("office:roleTierRowInfo")}
         </TooltipContent>
       </Tooltip>
     </div>
@@ -123,23 +126,23 @@ function TierSelect({
   disabled,
 }: {
   tier: Tier | undefined;
-  onChange: (tier: Tier | typeof USE_AGENT_TIER) => void;
+  onChange: (tier: Tier | typeof USE_WORKSPACE_DEFAULT) => void;
   disabled?: boolean;
 }) {
   const { t } = useTranslation();
-  const selected = tier ?? USE_AGENT_TIER;
+  const selected = tier ?? USE_WORKSPACE_DEFAULT;
   return (
     <Select
       value={selected}
-      onValueChange={(v) => onChange(v as Tier | typeof USE_AGENT_TIER)}
+      onValueChange={(v) => onChange(v as Tier | typeof USE_WORKSPACE_DEFAULT)}
       disabled={disabled}
     >
       <SelectTrigger className="w-[220px] cursor-pointer">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value={USE_AGENT_TIER} className="cursor-pointer">
-          {t("office:useAgentSNormalTier")}
+        <SelectItem value={USE_WORKSPACE_DEFAULT} className="cursor-pointer">
+          {t("office:useWorkspaceDefaultTier")}
         </SelectItem>
         {TIER_OPTIONS.map((opt) => (
           <SelectItem key={opt.value} value={opt.value} className="cursor-pointer">
@@ -151,8 +154,8 @@ function TierSelect({
   );
 }
 
-// ResolvedRow shows "Currently maps to: <provider> / <model>" so users
-// see the concrete (provider, model) their selection produces. When the
+// ResolvedRow shows "Currently maps to: <provider> / <model>" so users see
+// the concrete (provider, model) their selection produces. When the
 // selected tier is not mapped on any provider in the order we surface a
 // warning chip directing them to the provider tier mapping section.
 function ResolvedRow({ tier, config }: { tier: Tier | undefined; config: WorkspaceRouting }) {
@@ -171,8 +174,6 @@ function ResolvedRow({ tier, config }: { tier: Tier | undefined; config: Workspa
   }
   return (
     <p className="text-[11px] text-muted-foreground pl-1">
-      {/* The clause and the provider/model chip: the chip is a data token, so
-          the sentence keeps its own key and the chip trails it. */}
       {t("office:currentlyMapsTo")}{" "}
       <Tooltip>
         <TooltipTrigger asChild>
@@ -186,18 +187,4 @@ function ResolvedRow({ tier, config }: { tier: Tier | undefined; config: Workspa
       </Tooltip>
     </p>
   );
-}
-
-// Exported for reuse by RoleTierCard's own ResolvedRow (same "currently
-// maps to" lookup, one level down the tier precedence chain).
-export function firstProviderWithTier(
-  tier: Tier,
-  config: WorkspaceRouting,
-): { providerId: string; model: string } | null {
-  for (const providerId of config.provider_order) {
-    const profile = config.provider_profiles[providerId];
-    const model = profile?.tier_map?.[tier];
-    if (model) return { providerId, model };
-  }
-  return null;
 }

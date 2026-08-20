@@ -22,6 +22,7 @@ The office umbrella covers kandev's autonomous-agent product surface: workspaces
 | [scheduler](office/scheduler.md) | draft |
 | [runtime](office/runtime.md) | draft |
 | [routing](office/routing.md) | draft |
+| [per-agent + per-role tier selection](office-agent-tier-routing/spec.md) | draft |
 | [costs](office/costs.md) | in-progress |
 | [dashboard](office/dashboard.md) | draft |
 | [live-updates](office/live-updates.md) | draft |

@@ -22,8 +22,15 @@ import (
 // eligible candidate); when not degraded these equal the primary.
 // When every provider is skipped, both Current fields are empty.
 type PreviewItem struct {
-	AgentID                   string
-	AgentName                 string
+	AgentID   string
+	AgentName string
+	// TierSource names the precedence level supplying EffectiveTier:
+	// one of TierSourceWakeReason, TierSourceOverride, TierSourceRole,
+	// TierSourceWorkspace (see effectiveTier). Always computed with an
+	// empty reason (AC-18b), so this never reports TierSourceWakeReason
+	// even when the agent's own wake-reason policy would shadow it at
+	// runtime — the frontend surfaces that shadowing separately from
+	// the agent's TierPerReason data, not from this field.
 	TierSource                string
 	EffectiveTier             string
 	PrimaryProviderID         string
@@ -607,17 +614,21 @@ func primaryProviderModel(res *Resolution, cfg *WorkspaceConfig) (string, string
 	return string(first), prof.ExecutionProfileID(res.RequestedTier), prof.TierMap.Model(res.RequestedTier)
 }
 
-// tierSourceForAgent returns "override" when the agent's settings flip
-// TierSource explicitly; "inherit" otherwise.
-func tierSourceForAgent(agent models.AgentInstance, _ *WorkspaceConfig) string {
-	ov, err := ReadAgentOverrides(agent.Settings)
-	if err != nil {
-		return "inherit"
+// tierSourceForAgent delegates to effectiveTier — the resolve path's
+// producer — rather than deciding independently, so preview and resolve
+// never diverge on which precedence level supplied the tier (AC-20d).
+// Always called with an empty reason (AC-18b): a preview never carries
+// run context, so this can never report TierSourceWakeReason. A parse
+// error on the agent's settings blob falls back to zero-value overrides
+// rather than a fixed string, so the result still lands on one of the
+// four widened values instead of the old error-only "inherit" literal.
+func tierSourceForAgent(agent models.AgentInstance, cfg *WorkspaceConfig) string {
+	ov, _ := ReadAgentOverrides(agent.Settings)
+	if cfg == nil {
+		cfg = &WorkspaceConfig{}
 	}
-	if ov.TierSource == TierSourceOverride && ov.Tier != "" {
-		return "override"
-	}
-	return "inherit"
+	_, source := effectiveTier(cfg, ov, string(agent.Role), "")
+	return source
 }
 
 // effectivePreviewTier returns the tier the resolver consumed, falling
