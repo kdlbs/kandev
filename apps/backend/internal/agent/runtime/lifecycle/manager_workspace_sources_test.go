@@ -183,9 +183,9 @@ func TestRebindWorkspaceForSessionReadinessTimeoutRollsBack(t *testing.T) {
 	execution.Status = v1.AgentStatusReady
 	execution.WorkspacePath = "/old-workspace"
 	execution.ACPSessionID = "acp-existing"
-	execution.RuntimeName = executor.NameDocker
+	execution.RuntimeName = executor.NameLocal
 	mgr.executorRegistry = NewExecutorRegistry(newTestRegistryLogger())
-	mgr.executorRegistry.Register(&gitMetadataAttestingExecutor{MockExecutor: MockExecutor{name: executor.NameDocker}})
+	mgr.executorRegistry.Register(&gitMetadataAttestingExecutor{MockExecutor: MockExecutor{name: executor.NameLocal}})
 	oldProjection := newLinkedGitMetadataProjection(t)
 	newProjection := newLinkedGitMetadataProjection(t)
 	execution.GitMetadataProjections = []*worktree.GitMetadataProjection{oldProjection}
@@ -268,6 +268,38 @@ func TestRebindWorkspaceWithGitMetadataRejectsRemoteChildBeforeStopping(t *testi
 	}
 	if len(execution.GitMetadataProjections) != 1 || execution.GitMetadataProjections[0] != oldProjection {
 		t.Fatalf("projection changed after rejected remote rebind: %#v", execution.GitMetadataProjections)
+	}
+}
+
+func TestRebindWorkspaceWithGitMetadataRejectsDockerBeforeStopping(t *testing.T) {
+	server := newWorkspaceRebindAgentctlServer(t, false)
+	mgr, execution := workspaceSourceTestManager(t, server.URL, []string{"/old"})
+	t.Cleanup(server.Close)
+	t.Cleanup(server.closeConnections)
+
+	oldProjection := newLinkedGitMetadataProjection(t)
+	execution.Status = v1.AgentStatusReady
+	execution.ACPSessionID = "acp-existing"
+	execution.RuntimeName = executor.NameDocker
+	execution.GitMetadataProjections = []*worktree.GitMetadataProjection{oldProjection}
+	mgr.executorRegistry = NewExecutorRegistry(newTestRegistryLogger())
+	mgr.executorRegistry.Register(&MockExecutor{name: executor.NameDocker})
+
+	err := mgr.RebindWorkspaceWithGitMetadata(context.Background(), execution.SessionID, "/new-workspace", []*worktree.GitMetadataProjection{newLinkedGitMetadataProjection(t)}, []string{"/attached"})
+	if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) {
+		t.Fatalf("RebindWorkspaceWithGitMetadata error = %v, want %q", err, gitMetadataProjectionUnsupported)
+	}
+	if !strings.Contains(err.Error(), "atomically replace") {
+		t.Fatalf("RebindWorkspaceWithGitMetadata error = %v, want recovery guidance", err)
+	}
+	if got := server.reboundPaths(); len(got) != 0 {
+		t.Fatalf("Docker child was rebound before mount refresh: %v", got)
+	}
+	if execution.Status != v1.AgentStatusReady || execution.WorkspacePath != "" || !sameStrings(execution.WorkspaceSourceRoots, []string{"/old"}) {
+		t.Fatalf("execution changed after rejected Docker rebind: status=%q path=%q roots=%v", execution.Status, execution.WorkspacePath, execution.WorkspaceSourceRoots)
+	}
+	if len(execution.GitMetadataProjections) != 1 || execution.GitMetadataProjections[0] != oldProjection {
+		t.Fatalf("projection changed after rejected Docker rebind: %#v", execution.GitMetadataProjections)
 	}
 }
 

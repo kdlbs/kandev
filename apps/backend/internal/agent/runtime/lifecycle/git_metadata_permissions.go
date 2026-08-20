@@ -31,6 +31,14 @@ type GitMetadataProjectionEnforcer interface {
 	PrepareGitMetadataProjection(context.Context, *ExecutorCreateRequest) error
 }
 
+// GitMetadataProjectionRebindEnforcer is deliberately separate from launch
+// attestation. A replacement policy must become effective atomically for an
+// existing child; mount-based runtimes cannot satisfy that merely by compiling
+// a new plan because their bind mounts are immutable.
+type GitMetadataProjectionRebindEnforcer interface {
+	PrepareGitMetadataProjectionRebind(context.Context, *ExecutorCreateRequest) error
+}
+
 // gitMetadataProjectionCapabilityError carries a bounded recovery action from
 // an executor capability check. It must never include a resolved checkout or
 // configuration path: those are authorization inputs, not user-facing data.
@@ -65,6 +73,24 @@ func preflightGitMetadataProjection(ctx context.Context, runtime ExecutorBackend
 			return fmt.Errorf("%s: %s", gitMetadataProjectionUnsupported, capabilityErr.recovery)
 		}
 		return fmt.Errorf("%s: executor %q could not attest task Git metadata permissions; update the executor or start a new session", gitMetadataProjectionUnsupported, runtime.Name())
+	}
+	return nil
+}
+
+func preflightGitMetadataProjectionRebind(ctx context.Context, runtime ExecutorBackend, req *ExecutorCreateRequest) error {
+	if err := validateGitMetadataProjections(req.GitMetadataProjections); err != nil {
+		return err
+	}
+	enforcer, ok := runtime.(GitMetadataProjectionRebindEnforcer)
+	if !ok {
+		return fmt.Errorf("%s: %s cannot atomically replace task Git metadata permissions during workspace attachment; start a new session", gitMetadataProjectionUnsupported, runtime.Name())
+	}
+	if err := enforcer.PrepareGitMetadataProjectionRebind(ctx, req); err != nil {
+		var capabilityErr *gitMetadataProjectionCapabilityError
+		if errors.As(err, &capabilityErr) {
+			return fmt.Errorf("%s: %s", gitMetadataProjectionUnsupported, capabilityErr.recovery)
+		}
+		return fmt.Errorf("%s: %s could not atomically replace task Git metadata permissions during workspace attachment; start a new session", gitMetadataProjectionUnsupported, runtime.Name())
 	}
 	return nil
 }

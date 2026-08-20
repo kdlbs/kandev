@@ -78,6 +78,10 @@ Decisions: [ADR-2026-07-22-runtime-mutable-task-workspace-sources](../../decisio
 and [ADR-2026-07-27-legacy-add-branch-live-rescan](../../decisions/2026-07-27-legacy-add-branch-live-rescan.md).
 Repository attachments also refresh the complete task-scoped Git metadata permission projection at
 the same idle rebind boundary; see [task Git metadata permissions](../platform/task-git-metadata-permissions.md).
+When a mutable linked-worktree task is running in a runtime with immutable mounts or no atomic
+filesystem-policy refresh, this refresh fails before agentctl is stopped or rebound and instructs
+the user to start a new session. The attachment remains durable but is not reported usable in the
+existing child with stale Git grants.
 
 ## Data model
 
