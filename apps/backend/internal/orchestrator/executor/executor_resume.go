@@ -1304,12 +1304,38 @@ func (e *Executor) applyResumeCloneURL(req *LaunchAgentRequest, repository *mode
 func (e *Executor) applyResumeMultiRepoConfig(task *v1.Task, req *LaunchAgentRequest, existingEnv *models.TaskEnvironment, allRepos []*repoInfo) error {
 	if len(allRepos) > 1 {
 		req.Repositories = buildRepoSpecs(allRepos)
+		if req.UseWorktree {
+			applyResumeWorktreePaths(req.Repositories, allRepos, existingEnv)
+		}
 		for i := range req.Repositories {
 			req.Repositories[i].WorktreeBranchTicket = req.WorktreeBranchTicket
 		}
 		req.TaskDirName = resolveResumeTaskDirName(existingEnv, task)
 	}
 	return nil
+}
+
+// applyResumeWorktreePaths carries the task environment's persisted physical
+// checkout identity to lifecycle. Position is durable within an environment;
+// using it with RepositoryID avoids deriving the path from repository names or
+// branch-layout slugs that may have changed after materialization.
+func applyResumeWorktreePaths(specs []RepoSpec, infos []*repoInfo, env *models.TaskEnvironment) {
+	if env == nil {
+		return
+	}
+	for index, info := range infos {
+		if index >= len(specs) || info == nil {
+			continue
+		}
+		for _, environmentRepo := range env.Repos {
+			if environmentRepo == nil || environmentRepo.RepositoryID != info.RepositoryID ||
+				environmentRepo.Position != info.Position || environmentRepo.WorktreePath == "" {
+				continue
+			}
+			specs[index].WorktreePath = environmentRepo.WorktreePath
+			break
+		}
+	}
 }
 
 // applyResumeWorktreeConfig stamps the worktree-related fields on req for a

@@ -1223,6 +1223,9 @@ func gitMetadataProjectionForResumedWorktree(req *LaunchRequest, workspacePath s
 }
 
 func resumedWorktreeCheckoutPath(taskRoot string, spec RepoLaunchSpec) (string, error) {
+	if spec.WorktreePath != "" {
+		return spec.WorktreePath, nil
+	}
 	if spec.RepositoryPath == "" {
 		return "", errors.New(gitMetadataProjectionInvalid)
 	}

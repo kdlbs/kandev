@@ -439,6 +439,20 @@ func TestResumeSession_MultiRepo_PopulatesRequestRepositories(t *testing.T) {
 	const sessionID = "session-multi-resume"
 	seedMultiRepoTask(t, repo, taskID)
 	seedWorktreeExecutor(repo)
+	// Repository display names may change after initial materialization. The
+	// environment rows remain the physical-worktree authority for a resume.
+	repo.repositories["repo-front"].Name = "frontend-renamed"
+	repo.taskEnvironments["env-resume"] = &models.TaskEnvironment{
+		ID:           "env-resume",
+		TaskID:       taskID,
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{
+			{TaskEnvironmentID: "env-resume", RepositoryID: "repo-front", WorktreeID: "wt-front", WorktreePath: "/tasks/x/frontend-original", Position: 0},
+			{TaskEnvironmentID: "env-resume", RepositoryID: "repo-back", WorktreeID: "wt-back", WorktreePath: "/tasks/x/backend-original", Position: 1},
+		},
+	}
+	repo.taskEnvironmentRepos["env-resume"] = repo.taskEnvironments["env-resume"].Repos
 
 	// Mirrors the raw repository GetTask: no Repositories slice attached.
 	repo.tasks[taskID] = &models.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Multi Resume"}
@@ -483,6 +497,10 @@ func TestResumeSession_MultiRepo_PopulatesRequestRepositories(t *testing.T) {
 	}
 	if captured.Repositories[0].RepositoryID != "repo-front" || captured.Repositories[1].RepositoryID != "repo-back" {
 		t.Errorf("unexpected repo order: %+v", captured.Repositories)
+	}
+	if captured.Repositories[0].WorktreePath != "/tasks/x/frontend-original" ||
+		captured.Repositories[1].WorktreePath != "/tasks/x/backend-original" {
+		t.Errorf("resume worktree paths = %+v, want durable environment paths", captured.Repositories)
 	}
 	if got, want := captured.McpProviders, []string{"github", "gitlab"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("McpProviders = %#v, want %#v", got, want)
