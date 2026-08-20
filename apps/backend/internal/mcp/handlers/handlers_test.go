@@ -84,18 +84,19 @@ func newTestTaskServiceWithEventBus(t *testing.T) (*service.Service, *sqliterepo
 	eventBus := bus.NewMemoryEventBus(log)
 	t.Cleanup(func() { eventBus.Close() })
 	svc := service.NewService(service.Repos{
-		Workspaces:   repo,
-		Tasks:        repo,
-		TaskRepos:    repo,
-		Workflows:    repo,
-		Messages:     repo,
-		Turns:        repo,
-		Sessions:     repo,
-		GitSnapshots: repo,
-		RepoEntities: repo,
-		Executors:    repo,
-		Environments: repo,
-		Reviews:      repo,
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		WorkspaceFolders: repo,
+		Workflows:        repo,
+		Messages:         repo,
+		Turns:            repo,
+		Sessions:         repo,
+		GitSnapshots:     repo,
+		RepoEntities:     repo,
+		Executors:        repo,
+		Environments:     repo,
+		Reviews:          repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
 	return svc, repo, eventBus
 }
@@ -122,18 +123,19 @@ func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo
 	eventBus := bus.NewMemoryEventBus(log)
 	t.Cleanup(func() { eventBus.Close() })
 	svc := service.NewService(service.Repos{
-		Workspaces:   repo,
-		Tasks:        repo,
-		TaskRepos:    repo,
-		Workflows:    repo,
-		Messages:     repo,
-		Turns:        repo,
-		Sessions:     repo,
-		GitSnapshots: repo,
-		RepoEntities: repo,
-		Executors:    repo,
-		Environments: repo,
-		Reviews:      repo,
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		WorkspaceFolders: repo,
+		Workflows:        repo,
+		Messages:         repo,
+		Turns:            repo,
+		Sessions:         repo,
+		GitSnapshots:     repo,
+		RepoEntities:     repo,
+		Executors:        repo,
+		Environments:     repo,
+		Reviews:          repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
 	t.Cleanup(func() { _ = workflowSvc.Close() })

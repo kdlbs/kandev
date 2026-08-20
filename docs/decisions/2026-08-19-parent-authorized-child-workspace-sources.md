@@ -1,8 +1,15 @@
-# Parent-authorized child workspace sources
+# ADR-2026-08-19-parent-authorized-child-workspace-sources: Parent-authorized child workspace sources
 
 **Status:** accepted
 **Date:** 2026-08-19
 **Area:** backend, protocol, security
+
+## Context
+
+An idle child can be blocked by a missing repository or SDK and therefore cannot repair its own
+workspace. The task-mode MCP transport used to reject every explicit target before the backend
+could apply the task-tree authorization policy, while broad same-workspace access would let
+unrelated tasks grant one another source access.
 
 ## Decision
 
@@ -14,6 +21,6 @@ Exact normalized retries are no-ops after the idle check. They return the author
 
 This permits a coordinator parent to repair an idle child's missing repository or SDK without granting sibling, ancestor, descendant, cross-workspace, or generic same-owner mutation. `add_branch_to_task_kandev` remains current-task-only because its active-turn live-rescan contract is intentionally different.
 
-## Alternatives rejected
+## Alternatives Considered
 
 Keeping the tool self-only leaves blocked children unable to recover. Authorizing in agentctl would duplicate task-tree policy and bypass the backend's authoritative service boundary. Broad same-workspace authority would allow unrelated tasks to mutate one another.

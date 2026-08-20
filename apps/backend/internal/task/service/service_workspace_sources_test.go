@@ -886,6 +886,53 @@ func TestAttachWorkspaceSourcesCollapsesDuplicateRepositoryWithinBatch(t *testin
 	}
 }
 
+func TestAttachWorkspaceSourcesExactRetriesSkipRuntimeSideEffects(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	svc.workspaceFolders = repo
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-idempotent-retry", Name: "Retry"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-idempotent-retry", WorkspaceID: "ws-idempotent-retry", Name: "WF"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-idempotent-retry", WorkspaceID: "ws-idempotent-retry", Name: "app", DefaultBranch: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-idempotent-retry", WorkflowID: "wf-idempotent-retry", Title: "Task",
+		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-idempotent-retry", BaseBranch: "main"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := taskResult.Task
+	source := WorkspaceSourceInput{Kind: WorkspaceSourceRepository, RepositoryID: "repo-idempotent-retry", BaseBranch: "release", CheckoutBranch: "feature/retry"}
+	if _, err := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{source}}); err != nil {
+		t.Fatalf("initial attachment: %v", err)
+	}
+	eventBus.ClearEvents()
+	materializer := &recordingWorkspaceSourceMaterializer{}
+	refresher := &recordingWorkspaceSourceProviderRefresher{}
+	svc.SetWorkspaceSourceMaterializer(materializer)
+	svc.SetWorkspaceSourceProviderRefresher(refresher)
+
+	result, err := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{source}})
+	if err != nil {
+		t.Fatalf("exact retry: %v", err)
+	}
+	if result.Changed || materializer.called || refresher.calls != 0 || len(eventBus.GetPublishedEvents()) != 0 {
+		t.Fatalf("exact retry changed=%t materialized=%t refreshes=%d events=%d, want no side effects", result.Changed, materializer.called, refresher.calls, len(eventBus.GetPublishedEvents()))
+	}
+	rows, err := repo.ListTaskRepositories(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("task repositories after exact retry = %d, want 2", len(rows))
+	}
+}
+
 func TestAttachWorkspaceSourcesRejectsSanitizedBranchCollisionWithinBatch(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	svc.workspaceFolders = repo
