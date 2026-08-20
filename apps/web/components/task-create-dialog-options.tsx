@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { IconAlertTriangle, IconGitBranch, IconTerminal2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type {
   LocalRepository,
   Repository,
@@ -30,6 +31,49 @@ type OptionItem = {
   disabled?: boolean;
   disabledReason?: string;
 };
+
+function ModelProbeWarning({ note }: { note: string }) {
+  const [open, setOpen] = useState(false);
+  const pointerTypeRef = useRef<string | null>(null);
+
+  return (
+    <Tooltip
+      open={open}
+      onOpenChange={(nextOpen) => {
+        // Radix does not open tooltips from touch pointers. Keep its normal
+        // focus/hover behavior, then let the explicit tap handler below open
+        // the advisory on mobile.
+        if (nextOpen && pointerTypeRef.current === "touch") return;
+        setOpen(nextOpen);
+      }}
+    >
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex min-h-11 min-w-8 shrink-0 cursor-help items-center justify-center rounded-sm border-0 bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={note}
+          aria-expanded={open}
+          data-testid="agent-profile-model-probe-warning"
+          onPointerDown={(event) => {
+            pointerTypeRef.current = event.pointerType;
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (pointerTypeRef.current === "touch") {
+              setOpen((currentlyOpen) => !currentlyOpen);
+            }
+            pointerTypeRef.current = null;
+          }}
+          onBlur={() => setOpen(false)}
+        >
+          <IconAlertTriangle className="size-3.5 text-amber-500" aria-hidden />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top">{note}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 export function useRepositoryOptions(
   repositories: Repository[],
@@ -166,12 +210,7 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
                 {warning && (
                   <warning.Icon className={`size-3.5 ${warning.color}`} title={warning.title} />
                 )}
-                {modelProbeNote && (
-                  <IconAlertTriangle
-                    className="size-3.5 shrink-0 text-amber-500"
-                    title={modelProbeNote}
-                  />
-                )}
+                {modelProbeNote && <ModelProbeWarning note={modelProbeNote} />}
               </span>
               <span className="flex shrink-0 items-center gap-1.5">
                 {isPassthrough && (
@@ -187,12 +226,6 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
                 ) : null}
               </span>
             </span>
-            {modelProbeNote && (
-              <span className="flex items-center gap-1.5 pl-1 text-xs text-amber-600">
-                <IconAlertTriangle className="size-3 shrink-0" aria-hidden />
-                {modelProbeNote}
-              </span>
-            )}
           </span>
         ),
       };
