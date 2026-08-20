@@ -429,6 +429,9 @@ const (
 	ActionMCPListPluginTools   = "mcp.list_plugin_tools"
 	ActionMCPInvokePluginTool  = "mcp.invoke_plugin_tool"
 
+	// Office quorum decision recording.
+	ActionMCPRecordStepDecision = "mcp.record_step_decision"
+
 	// Config-mode MCP actions (agent-native configuration)
 	ActionMCPCreateWorkflow = "mcp.create_workflow"
 	ActionMCPUpdateWorkflow = "mcp.update_workflow"
