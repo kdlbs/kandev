@@ -1,0 +1,287 @@
+#!/usr/bin/env bash
+# Block until a pull request's CI reaches a terminal state, then emit one snapshot.
+#
+# Usage:
+#   scripts/pr-await <PR> [options]
+#
+# Options:
+#   --mode all-terminal | first-failure
+#                        all-terminal (default) waits until no check is pending,
+#                        so every failure lands in a single report and a single
+#                        fix pass. first-failure returns as soon as one check
+#                        fails; it exists for the interactive case and costs an
+#                        extra full CI cycle per failure.
+#   --deadline-min N     Hard stop, in minutes (default 45).
+#   --interval-sec N     Seconds between polls (default 60).
+#   --format text | json Report format (default text).
+#   --quiet              Suppress per-poll progress on stderr.
+#
+# Why this exists: `pr-state --summary` is a one-shot snapshot, so waiting for CI
+# costs one model round-trip per snapshot. Measured over 6,658 such round-trips,
+# each re-read ~177k of cached context at ~$0.26. This script moves the waiting
+# below the model: one invocation, one report, regardless of how long CI runs.
+#
+# stdout carries ONLY the final report, so a caller can capture it verbatim.
+# Progress goes to stderr.
+#
+# Exit codes:
+#   0  terminal and clean      - no failed checks, no unresolved threads
+#   1  terminal with findings  - failures and/or review threads to act on
+#   2  deadline reached        - checks still pending; names reported
+#   3  blocked                 - merged/closed, approval required, or access lost
+#
+# Requires: gh (authenticated), jq, and scripts/pr-state alongside this script.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PR_STATE="${PR_AWAIT_PR_STATE:-$SCRIPT_DIR/pr-state}"
+GH="${PR_AWAIT_GH:-gh}"
+SLEEP="${PR_AWAIT_SLEEP:-sleep}"
+
+usage() {
+  sed -n '2,/^# Requires:/p' "$0" | sed 's|^# \{0,1\}||'
+  exit "${1:-1}"
+}
+
+PR=''
+MODE='all-terminal'
+DEADLINE_MIN=45
+INTERVAL_SEC=60
+FORMAT='text'
+QUIET=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mode)
+      shift
+      [[ $# -gt 0 ]] || usage 1
+      case "$1" in
+        all-terminal | first-failure) MODE=$1 ;;
+        *) usage 1 ;;
+      esac
+      shift
+      ;;
+    --deadline-min)
+      shift
+      [[ $# -gt 0 && "$1" =~ ^[0-9]+$ ]] || usage 1
+      DEADLINE_MIN=$1
+      shift
+      ;;
+    --interval-sec)
+      shift
+      [[ $# -gt 0 && "$1" =~ ^[0-9]+$ && "$1" -gt 0 ]] || usage 1
+      INTERVAL_SEC=$1
+      shift
+      ;;
+    --format)
+      shift
+      [[ $# -gt 0 ]] || usage 1
+      case "$1" in
+        text | json) FORMAT=$1 ;;
+        *) usage 1 ;;
+      esac
+      shift
+      ;;
+    --quiet)
+      QUIET=1
+      shift
+      ;;
+    -h | --help) usage 0 ;;
+    -*) usage 1 ;;
+    *)
+      [[ -z "$PR" ]] || usage 1
+      PR=$1
+      shift
+      ;;
+  esac
+done
+
+[[ -n "$PR" && "$PR" =~ ^[0-9]+$ ]] || usage 1
+
+progress() {
+  [[ "$QUIET" -eq 1 ]] || printf '%s\n' "$*" >&2
+}
+
+# Mergeability is deliberately absent from `pr-state --summary`, so query it
+# here rather than letting a caller assume a clean merge state.
+fetch_merge_state() {
+  "$GH" pr view "$PR" --json state,mergeable,mergeStateStatus,headRefOid 2>/dev/null || printf '{}'
+}
+
+DEADLINE_SEC=$((DEADLINE_MIN * 60))
+START_SEC=$SECONDS
+POLLS=0
+CONSECUTIVE_ERRORS=0
+HEAD_CHANGES=0
+FIRST_HEAD=''
+SUMMARY_JSON=''
+MERGE_JSON=''
+OUTCOME=''
+
+while :; do
+  POLLS=$((POLLS + 1))
+  ELAPSED=$((SECONDS - START_SEC))
+
+  if ! SUMMARY_JSON="$("$PR_STATE" --summary "$PR" 2>/dev/null)" || ! jq -e . >/dev/null 2>&1 <<<"$SUMMARY_JSON"; then
+    CONSECUTIVE_ERRORS=$((CONSECUTIVE_ERRORS + 1))
+    progress "poll ${POLLS}: pr-state failed (${CONSECUTIVE_ERRORS} in a row)"
+    # Three consecutive failures is a lost connection, not a transient blip.
+    # Reporting "blocked" beats looping silently against revoked access.
+    if [[ "$CONSECUTIVE_ERRORS" -ge 3 ]]; then
+      OUTCOME='blocked-access'
+      break
+    fi
+    "$SLEEP" "$INTERVAL_SEC"
+    continue
+  fi
+  CONSECUTIVE_ERRORS=0
+
+  MERGE_JSON="$(fetch_merge_state)"
+  pr_state="$(jq -r '.state // ""' <<<"$MERGE_JSON")"
+  head_oid="$(jq -r '.headRefOid // ""' <<<"$MERGE_JSON")"
+  [[ -n "$head_oid" ]] || head_oid="$(jq -r '.pr.head_ref_oid // ""' <<<"$SUMMARY_JSON")"
+  [[ -n "$FIRST_HEAD" ]] || FIRST_HEAD="$head_oid"
+
+  # A push during the wait restarts CI. Every check counted so far belongs to a
+  # head that no longer exists, so the deadline restarts with it rather than
+  # letting a stale clock cut the new run short.
+  if [[ -n "$head_oid" && "$head_oid" != "$FIRST_HEAD" ]]; then
+    HEAD_CHANGES=$((HEAD_CHANGES + 1))
+    progress "poll ${POLLS}: head moved ${FIRST_HEAD:0:9} -> ${head_oid:0:9}; restarting wait"
+    FIRST_HEAD="$head_oid"
+    START_SEC=$SECONDS
+  fi
+
+  if [[ "$pr_state" == 'MERGED' || "$pr_state" == 'CLOSED' ]]; then
+    OUTCOME='blocked-pr-state'
+    break
+  fi
+
+  approval_required="$(jq -r '.approval_required_runs | length' <<<"$SUMMARY_JSON")"
+  if [[ "$approval_required" -gt 0 ]]; then
+    # action_required reads as green-or-skipped in a naive check count. It is
+    # blocked verification: waiting for it to finish would never terminate.
+    OUTCOME='blocked-approval'
+    break
+  fi
+
+  failed="$(jq -r '.failed_checks | length' <<<"$SUMMARY_JSON")"
+  pending="$(jq -r '.pending_checks | length' <<<"$SUMMARY_JSON")"
+  passed="$(jq -r '.passed_check_count // 0' <<<"$SUMMARY_JSON")"
+  complete="$(jq -r '.checks_snapshot_complete' <<<"$SUMMARY_JSON")"
+  checks_head="$(jq -r '.checks_head_sha // ""' <<<"$SUMMARY_JSON")"
+
+  progress "poll ${POLLS} (+$((SECONDS - START_SEC))s): ${passed} passed, ${failed} failed, ${pending} pending"
+
+  # A failed job can be visible while its parent workflow is still running, so
+  # in all-terminal mode a failure is never on its own a reason to stop.
+  if [[ "$MODE" == 'first-failure' && "$failed" -gt 0 ]]; then
+    OUTCOME='terminal'
+    break
+  fi
+
+  if [[ "$pending" -eq 0 && "$complete" == 'true' && -n "$checks_head" && "$checks_head" == "$head_oid" ]]; then
+    OUTCOME='terminal'
+    break
+  fi
+
+  if [[ $((SECONDS - START_SEC)) -ge "$DEADLINE_SEC" ]]; then
+    OUTCOME='deadline'
+    break
+  fi
+
+  "$SLEEP" "$INTERVAL_SEC"
+done
+
+WAITED=$((SECONDS - START_SEC))
+
+if [[ "$OUTCOME" == 'blocked-access' ]]; then
+  printf 'PR %s\nBLOCKED: pr-state failed %d times in a row; treat CI state as unknown.\n' \
+    "$PR" "$CONSECUTIVE_ERRORS"
+  exit 3
+fi
+
+failed_n="$(jq -r '.failed_checks | length' <<<"$SUMMARY_JSON")"
+pending_n="$(jq -r '.pending_checks | length' <<<"$SUMMARY_JSON")"
+passed_n="$(jq -r '.passed_check_count // 0' <<<"$SUMMARY_JSON")"
+threads_n="$(jq -r '.unresolved_review_thread_count // 0' <<<"$SUMMARY_JSON")"
+hidden_n="$(jq -r '.hidden_unresolved_threads | length' <<<"$SUMMARY_JSON")"
+comments_n="$(jq -r '.actionable_issue_comment_count // 0' <<<"$SUMMARY_JSON")"
+mergeable="$(jq -r '.mergeable // "UNKNOWN"' <<<"$MERGE_JSON")"
+merge_status="$(jq -r '.mergeStateStatus // "UNKNOWN"' <<<"$MERGE_JSON")"
+
+conflicted=0
+[[ "$mergeable" == 'CONFLICTING' || "$merge_status" == 'DIRTY' ]] && conflicted=1
+
+findings=$((failed_n + threads_n + hidden_n + comments_n + conflicted))
+
+case "$OUTCOME" in
+  blocked-pr-state | blocked-approval) code=3 ;;
+  deadline) code=2 ;;
+  *) [[ "$findings" -gt 0 ]] && code=1 || code=0 ;;
+esac
+
+if [[ "$FORMAT" == 'json' ]]; then
+  jq -n \
+    --argjson summary "$SUMMARY_JSON" \
+    --argjson merge "${MERGE_JSON:-{\}}" \
+    --arg outcome "$OUTCOME" \
+    --arg mode "$MODE" \
+    --argjson waited_sec "$WAITED" \
+    --argjson polls "$POLLS" \
+    --argjson head_changes "$HEAD_CHANGES" \
+    --argjson exit_code "$code" \
+    '{outcome: $outcome, mode: $mode, waited_sec: $waited_sec, polls: $polls,
+      head_changes: $head_changes, exit_code: $exit_code,
+      mergeable: ($merge.mergeable // "UNKNOWN"),
+      merge_state_status: ($merge.mergeStateStatus // "UNKNOWN"),
+      summary: $summary}'
+  exit "$code"
+fi
+
+branch="$(jq -r '.pr.head_ref_name // "?"' <<<"$SUMMARY_JSON")"
+base="$(jq -r '.pr.base_ref_name // "?"' <<<"$SUMMARY_JSON")"
+printf 'PR %s @ %s (%s -> %s)\n' "$PR" "${FIRST_HEAD:0:9}" "$branch" "$base"
+printf 'gate: %s | outcome: %s | waited %dm%02ds over %d poll(s)\n' \
+  "$MODE" "$OUTCOME" "$((WAITED / 60))" "$((WAITED % 60))" "$POLLS"
+[[ "$HEAD_CHANGES" -gt 0 ]] && printf 'note: head moved %d time(s) during the wait\n' "$HEAD_CHANGES"
+printf 'checks: %s passed, %s failed, %s pending\n' "$passed_n" "$failed_n" "$pending_n"
+printf 'merge: %s / %s\n' "$mergeable" "$merge_status"
+
+if [[ "$failed_n" -gt 0 ]]; then
+  printf '\nFAILED CHECKS:\n'
+  jq -r '.failed_checks[] | "  \(.name)  run=\(.run_id // "?") job=\(.job_id // "?")  \(.conclusion // "?")"' <<<"$SUMMARY_JSON"
+fi
+
+if [[ "$pending_n" -gt 0 ]]; then
+  printf '\nSTILL PENDING:\n'
+  jq -r '.pending_checks[] | "  \(.name)  run=\(.run_id // "?")"' <<<"$SUMMARY_JSON"
+fi
+
+if [[ "$threads_n" -gt 0 || "$hidden_n" -gt 0 ]]; then
+  printf '\nUNRESOLVED THREADS (%s visible, %s hidden):\n' "$threads_n" "$hidden_n"
+  jq -r '(.unresolved_threads + .hidden_unresolved_threads)[]
+         | "  \(.thread_id)  c=\(.comment_id)  \(.author)  \(.path // "-")"' <<<"$SUMMARY_JSON"
+fi
+
+[[ "$comments_n" -gt 0 ]] && printf '\nACTIONABLE ISSUE COMMENTS: %s\n' "$comments_n"
+
+printf '\nNEXT: '
+case "$OUTCOME" in
+  blocked-pr-state) printf 'PR is %s. Do not push a stale head.\n' "$pr_state" ;;
+  blocked-approval) printf 'workflow approval required; CI cannot complete unattended.\n' ;;
+  deadline) printf 'deadline hit with %s check(s) pending. Re-run or raise --deadline-min.\n' "$pending_n" ;;
+  *)
+    if [[ "$conflicted" -eq 1 ]]; then
+      printf 'resolve the merge conflict before triaging checks or threads.\n'
+    elif [[ "$findings" -eq 0 ]]; then
+      printf 'clean at this head.\n'
+    else
+      printf 'fix %s failed check(s) and %s thread(s) in one pass, then push once.\n' \
+        "$failed_n" "$((threads_n + hidden_n))"
+    fi
+    ;;
+esac
+
+exit "$code"
