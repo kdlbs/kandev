@@ -753,18 +753,21 @@ func (e *Executor) ExecuteWithFullProfile(ctx context.Context, task *v1.Task, ag
 // This allows the caller to get the session ID immediately and launch the agent later.
 // Returns the session ID.
 func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string) (string, error) {
-	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true)
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true, "")
 }
 
 // PrepareSessionForExistingEnvironment creates a workflow replacement session
 // that will be bound by its caller to an already selected canonical
 // environment. It must not claim a temporary task-local materialization.
-func (e *Executor) PrepareSessionForExistingEnvironment(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string) (string, error) {
-	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, false)
+func (e *Executor) PrepareSessionForExistingEnvironment(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, taskEnvironmentID string) (string, error) {
+	if taskEnvironmentID == "" {
+		return "", fmt.Errorf("%w: workflow replacement requires a canonical workspace", models.ErrWorkspaceReuseUnsafe)
+	}
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, false, taskEnvironmentID)
 }
 
 //nolint:cyclop,funlen // Session construction keeps its existing validation sequence in one transaction boundary.
-func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool) (string, error) {
+func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string) (string, error) {
 	if agentProfileID == "" {
 		e.logger.Error("task has no agent_profile_id configured", zap.String("task_id", task.ID))
 		return "", ErrNoAgentProfileID
@@ -844,6 +847,9 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 		IsPrimary:            isPrimarySession,
 		IsPassthrough:        isPassthrough,
 		Metadata:             metadata,
+	}
+	if taskEnvironmentID != "" {
+		session.TaskEnvironmentID = taskEnvironmentID
 	}
 	// workflow_step_id is a task-level field; no longer stored on sessions.
 
