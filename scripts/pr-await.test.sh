@@ -434,4 +434,57 @@ grep -q 'bash scripts/pr-await.test.sh' "$ROOT_DIR/Makefile" \
 pass "the suite runs under make test-scripts"
 
 
+# --- the deadline is absolute, not restarted by every push -----------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+for i in 1 2 3 4 5 6; do snapshot "$d" "$i" 2 0 5 true "head$i"; done
+cat > "$d/gh" <<'GHMOVE'
+#!/usr/bin/env bash
+n=$(cat "$FAKE_DIR/counter" 2>/dev/null || echo 1)
+printf '{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"head%s"}' "$n"
+GHMOVE
+chmod +x "$d/gh"
+out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 2 ]] || fail "a repeatedly-moving head must still hit the deadline, got $rc" "$out"
+pass "a repeatedly-moving head still reaches the deadline"
+
+# The behavioural test above cannot separate "clock reset" from "clock kept"
+# without waiting out a real deadline, so assert the invariant directly: the
+# deadline is absolute for the invocation, and a push discards stale evidence,
+# never the caller's time limit.
+[[ "$(grep -c 'START_SEC=\$SECONDS' "$ROOT_DIR/scripts/pr-await")" -eq 1 ]] \
+  || fail "the deadline clock must be assigned once, not reset on head change"
+pass "the deadline clock is assigned exactly once (a push cannot defer the hard stop)"
+
+# --- blocked outcomes still honor --format json ----------------------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+for i in 1 2 3; do : > "$d/seq/$i.fail"; snapshot "$d" "$i" 0 0 0; done
+out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "expected 3, got $rc" "$out"
+jq -e . >/dev/null <<<"$out" || fail "blocked-access must still emit JSON" "$out"
+[[ "$(jq -r '.outcome' <<<"$out")" == 'blocked-access' ]] || fail "outcome missing" "$out"
+[[ "$(jq -r '.exit_code' <<<"$out")" == '3' ]] || fail "exit_code missing" "$out"
+pass "a blocked-access result is still valid JSON under --format json"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+out="$(PROBE_JQ="$d/jq-bad" run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "expected 3, got $rc" "$out"
+jq -e . >/dev/null <<<"$out" || fail "preflight failure must emit JSON too" "$out"
+[[ "$(jq -r '.outcome' <<<"$out")" == 'blocked-toolchain' ]] || fail "outcome missing" "$out"
+grep -q 'jq-1.6-fake' <<<"$(jq -r '.message' <<<"$out")" || fail "message should name the jq" "$out"
+pass "a preflight toolchain failure is still valid JSON under --format json"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+cat > "$d/gh" <<'GHF'
+#!/usr/bin/env bash
+exit 1
+GHF
+chmod +x "$d/gh"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+jq -e . >/dev/null <<<"$out" || fail "merge-state failure must emit JSON" "$out"
+[[ "$(jq -r '.outcome' <<<"$out")" == 'blocked-merge-state' ]] || fail "outcome missing" "$out"
+pass "a blocked merge-state result is still valid JSON under --format json"
+
+
 printf '\nall tests passed\n'

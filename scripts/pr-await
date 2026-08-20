@@ -39,6 +39,21 @@ PR_STATE="${PR_AWAIT_PR_STATE:-$SCRIPT_DIR/pr-state}"
 GH="${PR_AWAIT_GH:-gh}"
 SLEEP="${PR_AWAIT_SLEEP:-sleep}"
 
+# Blocked results leave the poll loop before a snapshot exists, but a caller
+# that asked for JSON still needs to parse the answer.
+emit_blocked() {
+  local outcome=$1 message=$2
+  if [[ "${FORMAT:-text}" == 'json' ]]; then
+    jq -n --argjson pr "$PR" --arg outcome "$outcome" --arg message "$message" \
+      --arg toolchain "${TOOLCHAIN:-unverified}" \
+      '{pr: $pr, outcome: $outcome, exit_code: 3, message: $message,
+        toolchain: $toolchain, summary: null}'
+  else
+    printf 'PR %s\n%s\n' "$PR" "$message"
+  fi
+  exit 3
+}
+
 usage() {
   sed -n '2,/^# Requires:/p' "$0" | sed 's|^# \{0,1\}||'
   exit "${1:-1}"
@@ -164,16 +179,16 @@ preflight_toolchain() {
   bash_ver="$("$bash_bin" -c 'printf "%s" "${BASH_VERSION%%(*}"' 2>/dev/null || printf 'unknown')"
 
   if ! run_bounded 3 "$jq_bin" -n '"x" | gsub("a?"; "")'; then
-    printf 'PR %s\nBLOCKED: %s loops on an empty-matching gsub, which pr-state uses.\n' "$PR" "$jq_ver"
-    printf 'CI state cannot be read at all. Install jq 1.7 or later and put it first on PATH.\n'
-    exit 3
+    emit_blocked 'blocked-toolchain' \
+"BLOCKED: $jq_ver loops on an empty-matching gsub, which pr-state uses.
+CI state cannot be read at all. Install jq 1.7 or later and put it first on PATH."
   fi
 
   if ! "$bash_bin" -c 'set -u; a=(); printf "%s" "${a[@]}"' >/dev/null 2>&1; then
-    printf 'PR %s\nBLOCKED: bash %s aborts empty-array expansion under set -u.\n' "$PR" "$bash_ver"
-    printf 'pr-state silently reports zero unresolved review threads on this shell, so a\n'
-    printf 'clean result would not be trustworthy. Put bash 4.4 or later first on PATH.\n'
-    exit 3
+    emit_blocked 'blocked-toolchain' \
+"BLOCKED: bash $bash_ver aborts empty-array expansion under set -u.
+pr-state silently reports zero unresolved review threads on this shell, so a
+clean result would not be trustworthy. Put bash 4.4 or later first on PATH."
   fi
 
   TOOLCHAIN="$jq_ver, bash $bash_ver"
@@ -249,14 +264,16 @@ while :; do
   [[ -n "$head_oid" ]] || head_oid="$(jq -r '.pr.head_ref_oid // ""' <<<"$SUMMARY_JSON")"
   [[ -n "$FIRST_HEAD" ]] || FIRST_HEAD="$head_oid"
 
-  # A push during the wait restarts CI. Every check counted so far belongs to a
-  # head that no longer exists, so the deadline restarts with it rather than
-  # letting a stale clock cut the new run short.
+  # A push during the wait restarts CI, so every check counted so far belongs to
+  # a head that no longer exists. Discard that evidence, but not the caller's
+  # clock: --deadline-min is a hard stop, and a PR receiving periodic commits
+  # would otherwise defer it forever.
   if [[ -n "$head_oid" && "$head_oid" != "$FIRST_HEAD" ]]; then
     HEAD_CHANGES=$((HEAD_CHANGES + 1))
-    progress "poll ${POLLS}: head moved ${FIRST_HEAD:0:9} -> ${head_oid:0:9}; restarting wait"
+    progress "poll ${POLLS}: head moved ${FIRST_HEAD:0:9} -> ${head_oid:0:9}; discarding stale evidence"
     FIRST_HEAD="$head_oid"
-    START_SEC=$SECONDS
+    EVIDENCE_ERRORS=0
+    MERGE_UNKNOWN=0
   fi
 
   if [[ "$pr_state" == 'MERGED' || "$pr_state" == 'CLOSED' ]]; then
@@ -344,16 +361,14 @@ done
 WAITED=$((SECONDS - START_SEC))
 
 if [[ "$OUTCOME" == 'blocked-access' ]]; then
-  printf 'PR %s\nBLOCKED: pr-state failed %d times in a row; treat CI state as unknown.\n' \
-    "$PR" "$CONSECUTIVE_ERRORS"
-  exit 3
+  emit_blocked 'blocked-access' \
+"BLOCKED: pr-state failed $CONSECUTIVE_ERRORS times in a row; treat CI state as unknown."
 fi
 
 if [[ "$OUTCOME" == 'blocked-merge-state' ]]; then
-  printf 'PR %s\nBLOCKED: gh pr view failed %d times in a row, so merge state is unknown.\n' \
-    "$PR" "$MERGE_ERRORS"
-  printf 'A conflicted or closed PR is indistinguishable from a clean one here.\n'
-  exit 3
+  emit_blocked 'blocked-merge-state' \
+"BLOCKED: gh pr view failed $MERGE_ERRORS times in a row, so merge state is unknown.
+A conflicted or closed PR is indistinguishable from a clean one here."
 fi
 
 failed_n="$(jq -r '.failed_checks | length' <<<"$SUMMARY_JSON")"
