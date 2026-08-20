@@ -135,6 +135,58 @@ func TestInstallAttestedCloneGitMetadataPolicyRejectsForeignFinalCheckout(t *tes
 	}
 }
 
+func TestInstallAttestedCloneGitMetadataPolicyRejectsReorderedFinalCheckouts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"attested":true,"checkouts":[{"checkout_path":"/executor/workspace/second-main","git_dir":"/executor/workspace/second-main/.git"},{"checkout_path":"/executor/workspace","git_dir":"/executor/workspace/.git"}]}`))
+	}))
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	req := &ExecutorCreateRequest{
+		GitMetadataRequirement: cloneGitMetadataRequirement(true),
+		AgentConfig:            agents.NewCodexACP(),
+		Env:                    map[string]string{"CODEX_CONFIG": `{}`},
+	}
+	instance := &ExecutorInstance{
+		Client:               agentctl.NewClient(parsed.Hostname(), port, log),
+		WorkspacePath:        "/executor/workspace",
+		WorkspaceSourceRoots: []string{"/executor/workspace", "/executor/workspace/second-main"},
+	}
+
+	err = installAttestedCloneGitMetadataPolicy(context.Background(), req, instance)
+	if err == nil || !strings.Contains(err.Error(), "start a new session") {
+		t.Fatalf("installAttestedCloneGitMetadataPolicy error = %v, want reordered attestation rejection", err)
+	}
+	if instance.Metadata != nil || req.Env["CODEX_CONFIG"] != `{}` {
+		t.Fatalf("reordered checkout produced clone policy: metadata=%#v config=%s", instance.Metadata, req.Env["CODEX_CONFIG"])
+	}
+}
+
+func TestRemoteRegularGitMetadataFromAttestationsRejectsIncompleteOrUnexpectedOrderedResponses(t *testing.T) {
+	expected := []string{"/executor/workspace", "/executor/workspace/second-main"}
+	for _, testCase := range []struct {
+		name     string
+		approved []agentctl.GitMetadataAttestation
+	}{
+		{name: "duplicate", approved: []agentctl.GitMetadataAttestation{{CheckoutPath: expected[0], GitDir: expected[0] + "/.git"}, {CheckoutPath: expected[0], GitDir: expected[0] + "/.git"}}},
+		{name: "missing", approved: []agentctl.GitMetadataAttestation{{CheckoutPath: expected[0], GitDir: expected[0] + "/.git"}}},
+		{name: "unexpected", approved: []agentctl.GitMetadataAttestation{{CheckoutPath: expected[0], GitDir: expected[0] + "/.git"}, {CheckoutPath: "/foreign/repository", GitDir: "/foreign/repository/.git"}}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if _, err := remoteRegularGitMetadataFromAttestations(testCase.approved, expected); err == nil {
+				t.Fatalf("remoteRegularGitMetadataFromAttestations(%s) succeeded", testCase.name)
+			}
+		})
+	}
+}
+
 func TestRemoteRegularGitMetadataPolicyOnlyWritesTaskGitDir(t *testing.T) {
 	req := &ExecutorCreateRequest{AgentConfig: agents.NewCodexACP()}
 	metadata := remoteRegularGitMetadata{
