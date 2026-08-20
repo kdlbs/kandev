@@ -124,4 +124,4 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 )
 
-replace github.com/coder/acp-go-sdk => github.com/kdlbs/acp-go-sdk v0.13.6-0.20260722160645-1ce4653527f6
+replace github.com/coder/acp-go-sdk => github.com/carlosflorencio/acp-go-sdk v0.13.6-0.20260820221917-af8a4fe6b5d9

@@ -352,6 +352,9 @@ func cursorSubagentResult(out map[string]any, res *SubagentTaskResult) bool {
 		return false
 	}
 	res.DurationMs = asInt64(dur)
+	if background, ok := out["isBackground"].(bool); ok && background {
+		res.IsAsync = true
+	}
 	return true
 }
 

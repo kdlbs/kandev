@@ -180,6 +180,20 @@ func TestExtractSubagentResult_Cursor(t *testing.T) {
 	if res.DurationMs != 4200 {
 		t.Errorf("DurationMs = %d", res.DurationMs)
 	}
+	if res.IsAsync {
+		t.Error("IsAsync = true, want false when isBackground=false")
+	}
+}
+
+func TestExtractSubagentResult_CursorBackground(t *testing.T) {
+	rawOutput := map[string]any{"durationMs": float64(4200), "isBackground": true}
+	res, ok := extractSubagentResult(nil, rawOutput)
+	if !ok {
+		t.Fatal("expected Cursor result to be extracted")
+	}
+	if !res.IsAsync {
+		t.Error("IsAsync = false, want true when isBackground=true")
+	}
 }
 
 // TestExtractSubagentResult_ClaudeAsyncLaunched covers the claude-acp
@@ -1483,6 +1497,18 @@ func TestEnrichSubagentResult_Cursor(t *testing.T) {
 	n.EnrichSubagentResult(payload, nil, map[string]any{"durationMs": float64(4200), "isBackground": false})
 	if payload.SubagentTask().DurationMs != 4200 {
 		t.Errorf("DurationMs = %d", payload.SubagentTask().DurationMs)
+	}
+	if payload.SubagentTask().IsAsync {
+		t.Error("IsAsync = true, want false when isBackground=false")
+	}
+}
+
+func TestEnrichSubagentResult_CursorBackground(t *testing.T) {
+	n := NewNormalizer("")
+	payload := streams.NewSubagentTask("", "", "")
+	n.EnrichSubagentResult(payload, nil, map[string]any{"durationMs": float64(4200), "isBackground": true})
+	if !payload.SubagentTask().IsAsync {
+		t.Error("IsAsync = false, want true when isBackground=true")
 	}
 }
 
