@@ -551,6 +551,9 @@ func TestUpdateProfile_ModelOnlyLeavesNameUnchanged(t *testing.T) {
 	if stored.Name != "Product Manager" {
 		t.Fatalf("stored name = %q, want unchanged %q", stored.Name, "Product Manager")
 	}
+	if stored.AgentDisplayName != "Test Agent" {
+		t.Fatalf("stored agent_display_name = %q, want unchanged %q", stored.AgentDisplayName, "Test Agent")
+	}
 	if stored.Model != model {
 		t.Fatalf("stored model = %q, want %q", stored.Model, model)
 	}
@@ -597,6 +600,9 @@ func TestUpdateProfile_NameOnlyLeavesModelUnchanged(t *testing.T) {
 	stored, err := st.GetAgentProfile(context.Background(), profile.ID)
 	if err != nil {
 		t.Fatalf("GetAgentProfile: %v", err)
+	}
+	if stored.Name != newName {
+		t.Fatalf("stored name = %q, want %q", stored.Name, newName)
 	}
 	if stored.Model != "opus" {
 		t.Fatalf("stored model = %q, want unchanged %q", stored.Model, "opus")
