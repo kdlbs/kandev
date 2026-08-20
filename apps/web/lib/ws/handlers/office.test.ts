@@ -134,7 +134,7 @@ describe("office WS handler — workspace filter", () => {
   });
 });
 
-describe("office WS handler — task field updates delegate to patchTaskInStore", () => {
+describe("office WS handler — task field updates", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -190,6 +190,37 @@ describe("office WS handler — task field updates delegate to patchTaskInStore"
     } as Parameters<typeof handler>[0]);
 
     expect(patchTaskInStore).toHaveBeenCalledWith("t-1", { status: "CREATED" });
+  });
+
+  it("refreshes the per-task DTO and dashboard on office.task.status_changed", () => {
+    const { store, setOfficeRefetchTrigger } = makeStore(ACTIVE_WS);
+    const handlers = registerOfficeHandlers(store);
+    const handler = handlers["office.task.status_changed"]!;
+
+    handler({
+      type: "notification",
+      action: "office.task.status_changed",
+      payload: { workspace_id: ACTIVE_WS, task_id: "t-42", new_status: "done" },
+    } as Parameters<typeof handler>[0]);
+
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("task:t-42");
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("dashboard");
+  });
+
+  it("refreshes the per-task DTO, dashboard, and activity on office.task.moved", () => {
+    const { store, setOfficeRefetchTrigger } = makeStore(ACTIVE_WS);
+    const handlers = registerOfficeHandlers(store);
+    const handler = handlers["office.task.moved"]!;
+
+    handler({
+      type: "notification",
+      action: "office.task.moved",
+      payload: { workspace_id: ACTIVE_WS, task_id: "t-99", new_status: "in_progress" },
+    } as Parameters<typeof handler>[0]);
+
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("task:t-99");
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("dashboard");
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("activity");
   });
 });
 
