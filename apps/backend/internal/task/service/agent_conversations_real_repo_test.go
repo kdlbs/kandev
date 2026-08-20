@@ -28,7 +28,12 @@ func newAgentConversationServiceOverRealRepo(t *testing.T) (*AgentConversationSe
 
 func seedConversationWorkspace(t *testing.T, repo *sqliterepo.Repository, workspaceID string) {
 	t.Helper()
-	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{ID: workspaceID, Name: workspaceID}); err != nil {
+	profileID := "test-workspace-default-profile"
+	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{
+		ID:                    workspaceID,
+		Name:                  workspaceID,
+		DefaultAgentProfileID: &profileID,
+	}); err != nil {
 		t.Fatalf("create workspace %s: %v", workspaceID, err)
 	}
 }

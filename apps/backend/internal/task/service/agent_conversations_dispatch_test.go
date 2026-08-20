@@ -88,11 +88,11 @@ func TestEnsureProfileValidatorReceivesConfiguredID(t *testing.T) {
 	}
 }
 
-func TestEnsureWithoutProfileConfiguredSkipsValidation(t *testing.T) {
+func TestEnsureWithoutProfileConfiguredUsesWorkspaceDefault(t *testing.T) {
 	svc, deps := newACTestService()
 
 	spec := pluginsdk.AgentConversationSpec{WorkspaceID: "ws-1", ConversationKey: "coordinator"}
-	_, statusStr, err := svc.Ensure(context.Background(), "plugin-coordinator", spec)
+	desc, statusStr, err := svc.Ensure(context.Background(), "plugin-coordinator", spec)
 	if err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
@@ -102,8 +102,11 @@ func TestEnsureWithoutProfileConfiguredSkipsValidation(t *testing.T) {
 	deps.profiles.mu.Lock()
 	calls := len(deps.profiles.calls)
 	deps.profiles.mu.Unlock()
-	if calls != 0 {
-		t.Fatalf("expected no profile validation call when no profile is configured, got %d", calls)
+	if calls != 1 {
+		t.Fatalf("expected one workspace-default profile validation call, got %d", calls)
+	}
+	if desc.AgentProfileID != "profile-workspace-default" {
+		t.Fatalf("descriptor profile = %q, want workspace default", desc.AgentProfileID)
 	}
 }
 
