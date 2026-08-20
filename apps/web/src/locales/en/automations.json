@@ -61,6 +61,8 @@
   "excludeDraftPrs": "Exclude draft PRs",
   "executorProfileLabel": "Executor Profile",
   "executorProfilePlaceholder": "Select executor",
+  "exportFailed": "Could not export automations",
+  "exportZip": "Export",
   "failedToDeleteAutomation": "Failed to delete automation",
   "failedToDeleteRun": "Failed to delete run",
   "failedToDeleteRuns": "Failed to delete runs",

@@ -177,6 +177,12 @@ A run that produced a task opens its conversation. A run that never produced one
 
 Deleting one run also deletes its associated task. **Delete all runs** deletes all associated tasks and history for that automation and is irreversible.
 
+## Export automations
+
+The automations settings page (**Settings > Workspaces > _Workspace_ > Automations**) has an **Export** control next to **New Automation**. It downloads every automation in the workspace as a zip, one YAML file per automation at `.kandev/automations/<slug>.yml`, ready to read, diff, or check into a repository. A workspace with no automations still downloads a (empty) zip rather than showing an error.
+
+The same data is available directly over REST for scripting: `GET /api/v1/workspaces/:workspaceId/automations/export` returns one YAML document (`application/yaml`) listing every automation, and `GET /api/v1/workspaces/:workspaceId/automations/export/zip` returns the same per-file zip the UI control downloads (`application/zip`). Both are read-only and deterministic: exporting an unchanged workspace twice produces byte-identical output. A workspace you cannot access and a workspace that does not exist both return `404` with no distinguishing detail; any other failure returns `500`.
+
 ## Task MCP
 
 Kandev automatically injects a task-aware MCP server into supported agent sessions. You do not need to add it to the profile. It lets the active agent use current IDs and structured operations instead of inferring board state from text.
