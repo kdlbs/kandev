@@ -7,6 +7,8 @@ import { SessionMobileLayout, SessionTabletLayout } from "./mobile";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import type { Layout } from "react-resizable-panels";
+import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error";
+import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 
 // Re-export for backwards compatibility
 export type { SelectedDiff } from "@/hooks/use-session-layout-state";
@@ -61,6 +63,24 @@ export const TaskLayout = memo(function TaskLayout({
   isArchived,
 }: TaskLayoutProps) {
   const { isMobile, usesDesktopWorkbench, isFullDesktop } = useResponsiveBreakpoint();
+  const launchErrorContext = useTaskLaunchErrorContext();
+
+  if (!sessionId && launchErrorContext?.statusSummary?.active_error) {
+    return (
+      <div
+        className="flex h-full min-h-0 min-w-0 flex-col overflow-auto px-4"
+        data-testid="session-chat"
+      >
+        <TaskChatLaunchError
+          taskId={launchErrorContext.taskId}
+          workspaceId={launchErrorContext.workspaceId}
+          statusSummary={launchErrorContext.statusSummary}
+          runErrors={[]}
+          repositories={launchErrorContext.repositories}
+        />
+      </div>
+    );
+  }
 
   // Mobile layout
   if (isMobile) {

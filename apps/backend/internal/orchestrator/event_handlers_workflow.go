@@ -1041,6 +1041,9 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 	if s.dependencyBlocksAutoStart(ctx, taskID, eventName) {
 		return
 	}
+	if task != nil && s.shouldSkipTerminalPRAutoStart(ctx, task) {
+		return
+	}
 	if s.launchDeferredTask(ctx, task, eventName) {
 		return
 	}
@@ -1059,6 +1062,9 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 
 func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool) {
 	if task == nil || task.QueuedForStepID != "" || step == nil {
+		return
+	}
+	if s.shouldSkipTerminalPRAutoStart(ctx, task) {
 		return
 	}
 	if s.launchDeferredTask(ctx, task, eventName) {

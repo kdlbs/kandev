@@ -1,6 +1,7 @@
 import type { CommentTurnContext } from "./turn-context";
 import { groupSortKey, type SessionGroup } from "./session-groups";
 import { normalizeRemediationUrl } from "@/lib/remediation-url";
+import { lastAgentErrorStamp, readLastAgentError } from "@/lib/session-last-agent-error";
 import type {
   RunError,
   TaskComment,
@@ -58,6 +59,7 @@ export function buildRunErrorsFromSessions(sessions: TaskSession[]): RunError[] 
     if (s.state !== "FAILED") continue;
     const failedAt = s.completedAt ?? s.updatedAt ?? s.startedAt ?? "";
     const lastError = lastAgentErrorFromSessionMetadata(s.metadata);
+    const parsedLastError = readLastAgentError(s.metadata);
     errors.push({
       id: `re-${s.id}`,
       sessionId: s.id,
@@ -66,11 +68,28 @@ export function buildRunErrorsFromSessions(sessions: TaskSession[]): RunError[] 
       failedAt,
       failureCode: lastError?.code,
       failureDetails: lastError?.details,
+      message: parsedLastError?.message,
+      recoveryActions: parsedLastError?.recoveryActions,
+      taskRepositoryId: parsedLastError?.taskRepositoryId,
+      errorStamp: parsedLastError ? lastAgentErrorStamp(parsedLastError) : undefined,
       remediationUrl:
         normalizeRemediationUrl(remediationUrlFromSessionMetadata(s.metadata)) ?? undefined,
     });
   }
   return errors;
+}
+
+export function hasMatchingSessionLaunchError(
+  summarySessionId: string | undefined,
+  summaryStamp: string | undefined,
+  runErrors: RunError[],
+): boolean {
+  if (!summarySessionId) return false;
+  return runErrors.some(
+    (error) =>
+      error.sessionId === summarySessionId &&
+      (!summaryStamp || !error.errorStamp || error.errorStamp === summaryStamp),
+  );
 }
 
 export function mergeLiveSessionMetadata(

@@ -1,37 +1,40 @@
 ---
 id: "01-failure-taxonomy-contracts"
-title: "Failure taxonomy and typed reason contracts"
-status: pending
+title: "Launch-error persistence contracts"
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
 spec: "../../specs/task-launch-failure-recovery/spec.md"
 ---
 
-# Task 01: Failure taxonomy and typed reason contracts
+# Task 01: Launch-error persistence contracts
 
-Introduce the typed launch-failure taxonomy and extend the persisted reason structure, without
-changing behavior yet. This is the shared contract every other backend task consumes.
+Define the shared categories, actions, and persistence owners.
+Do not change launch behavior in this task.
 
 - **Acceptance:**
-  1. `internal/task/models/models.go` `LastAgentError` has a new
-     `RecoveryActions []string` field with tag `json:"recovery_actions,omitempty"`.
-  2. A `FailureCategory` string constant set exists (`base_branch_missing`, `pr_already_closed`,
-     `default_branch_unresolved`, `generic_launch_failure`) plus a `RecoveryAction` constant set
-     (`retry_default`, `pick_base_branch`, `mark_review_done`), in a single place callers import.
-  3. `internal/worktree/errors.go` exposes a way for callers to detect the missing-base case
-     (confirm `ErrInvalidBaseBranch` is usable with `errors.Is`; add a doc note if so).
+  1. `LastAgentError` gains recovery actions, task-repository identity, and an explicit bounded stamp.
+  2. `TaskLaunchError` persists under `tasks.metadata["last_launch_error"]` with the spec fields.
+  3. Typed category and recovery-action constants exist in one importable package.
+  4. Load, normalize, and stable-stamp helpers have focused tests.
+  5. Typed session errors use the explicit stamp. Legacy errors retain their computed-stamp fallback.
+  6. Rewriting the same task-owned stamp does not change `occurred_at` or task metadata.
+  7. `ErrInvalidBaseBranch` remains detectable through `errors.Is`.
 
 - **Verification:**
-  `cd apps/backend && go build ./... && go test ./internal/task/models/... ./internal/worktree/...`
+  `cd apps/backend && go test ./internal/task/models/... ./internal/worktree/...`
 
 - **Files likely touched:**
   `apps/backend/internal/task/models/models.go`,
-  `apps/backend/internal/worktree/errors.go` (doc/const only).
+  `apps/backend/internal/task/models/models_test.go`,
+  `apps/backend/internal/worktree/errors.go`.
 
 - **Dependencies:** None.
 - **Parallelism:** parallel-safe (disjoint from task-02).
-- **Inputs:** spec "Data model" and "Failure modes"; plan "Failure taxonomy + typed reason".
+- **Inputs:** spec "Data model" and "Persistence guarantees".
 
 ## Results
-Pending.
+- Added bounded task/session launch-error contracts, typed categories/actions, explicit stamps, deterministic stamp hashing, and compare-by-stamp in-memory helpers.
+- Added focused persistence, normalization, no-op rewrite, clear, and sentinel tests.
+- Verification: `go test ./internal/task/models/... ./internal/worktree/...` passed.

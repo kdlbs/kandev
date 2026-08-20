@@ -16,6 +16,7 @@ import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-k
 import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
 import { t } from "@/lib/i18n";
 import { maybeMarkQuickChatUnseenIdle } from "@/lib/ws/handlers/quick-chat-unseen";
+import { readLastAgentError } from "@/lib/session-last-agent-error";
 
 const debug = createDebugLogger("session:state");
 
@@ -553,12 +554,24 @@ function maybeNotifySessionFailure(store: StoreApi<AppState>, ctx: SessionFailur
     return;
   }
 
+  const metadata =
+    payload.session_metadata && typeof payload.session_metadata === "object"
+      ? (payload.session_metadata as Record<string, unknown>)
+      : null;
+  const launchError = readLastAgentError(metadata);
+  const isLaunchFailure = Boolean(launchError?.recoveryActions?.length);
+  let message = t("task:sessionFailedUnexpectedly");
+  if (isLaunchFailure) {
+    message = t("task:launchFailedSeeDetails");
+  } else if (payload.error_message) {
+    message = String(payload.error_message);
+  }
+
   store.getState().setSessionFailureNotification({
     sessionId,
     taskId,
-    message: payload.error_message
-      ? String(payload.error_message)
-      : t("task:sessionFailedUnexpectedly"),
+    message,
+    ...(isLaunchFailure ? { isLaunchFailure: true } : {}),
   });
 }
 

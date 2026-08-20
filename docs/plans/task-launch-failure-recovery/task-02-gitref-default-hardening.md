@@ -1,27 +1,24 @@
 ---
 id: "02-gitref-default-hardening"
-title: "gitref default-branch detection hardening"
-status: pending
+title: "Local default-branch detection"
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
 spec: "../../specs/task-launch-failure-recovery/spec.md"
 ---
 
-# Task 02: gitref default-branch detection hardening
+# Task 02: Local default-branch detection
 
-Stop persisting a feature branch as a repository default, and add a live remote-default resolver used
-by the retry path.
+Stop persistence callers from recording a current-`HEAD`-only feature branch.
+Keep `gitref` local and free of subprocess work.
 
 - **Acceptance:**
-  1. `DefaultBranchOrEmpty` (`internal/common/gitref/gitref.go:74-80`) returns `""` when the resolved
-     value came only from the current-HEAD last resort (`readHEADBranchFallback`) with no origin or
-     local `main`/`master` ref present. `DefaultBranch` keeps its existing contract for changes-panel
-     callers.
-  2. A new exported `ResolveRemoteDefaultBranch(repoPath string) (string, error)` reads the live
-     `origin/HEAD` (best-effort `git remote set-head -a` allowed via `subproc` classified git helper)
-     and returns the real default, or an error when it cannot be determined.
-  3. Detection order and existing behavior for repos that DO have origin refs is unchanged.
+  1. An internal result identifies whether the branch came only from `readHEADBranchFallback`.
+  2. `DefaultBranchOrEmpty` returns `""` for that source.
+  3. `DefaultBranch` keeps its existing display-fallback behavior.
+  4. Origin refs and local `main` or `master` keep their current detection order.
+  5. The package adds no `os/exec`, `subproc`, network, or context dependency.
 
 - **Verification:**
   `cd apps/backend && go test ./internal/common/gitref/...`
@@ -32,8 +29,9 @@ by the retry path.
 
 - **Dependencies:** None.
 - **Parallelism:** parallel-safe (disjoint from task-01).
-- **Inputs:** spec "What" (default-branch hardening), plan "gitref hardening"; note `subproc`
-  git-command rule in `apps/backend/AGENTS.md`.
+- **Inputs:** spec "Default-branch resolution" and plan "Local default detection".
 
 ## Results
-Pending.
+- `DefaultBranch` retains its existing integration-branch precedence.
+- `DefaultBranchOrEmpty` now returns empty only when the current HEAD is the final fallback, including feature-only repositories.
+- Verification: `go test ./internal/common/gitref/...` passed.

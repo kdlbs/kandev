@@ -27,6 +27,25 @@ func TestExecutionToLaunchResponseReportsAgentProfile(t *testing.T) {
 	}
 }
 
+func TestExecutionToLaunchResponseHandlesNilExecution(t *testing.T) {
+	// A guarded automatic launch can return a successful no-op without an
+	// execution. The response helper is defensive for callers that use it
+	// directly or through another launch path.
+	response := executionToLaunchResponse("task-1", nil)
+	if response == nil {
+		t.Fatal("expected a response")
+	}
+	if !response.Success {
+		t.Fatal("expected a successful no-op response")
+	}
+	if response.TaskID != "task-1" {
+		t.Fatalf("task_id = %q, want task-1", response.TaskID)
+	}
+	if response.SessionID != "" {
+		t.Fatalf("session_id = %q, want empty", response.SessionID)
+	}
+}
+
 func TestResolveIntent(t *testing.T) {
 	tests := []struct {
 		name string

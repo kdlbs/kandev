@@ -133,13 +133,16 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	}
 
 	return &EnvPrepareResult{
-		Success:        true,
-		Steps:          steps,
-		WorkspacePath:  workspacePath,
-		Duration:       time.Since(start),
-		WorktreeID:     wt.ID,
-		WorktreeBranch: wt.Branch,
-		MainRepoGitDir: mainRepoGitDir,
+		Success:                   true,
+		Steps:                     steps,
+		WorkspacePath:             workspacePath,
+		Duration:                  time.Since(start),
+		WorktreeID:                wt.ID,
+		WorktreeBranch:            wt.Branch,
+		MainRepoGitDir:            mainRepoGitDir,
+		RequestedBaseBranch:       req.BaseBranch,
+		BaseBranch:                wt.BaseBranch,
+		BaseBranchFallbackWarning: wt.BaseBranchFallbackWarning,
 	}, nil
 }
 
@@ -414,12 +417,16 @@ func (p *WorktreePreparer) prepareMultiRepo(
 			createdIDs = append(createdIDs, wt.ID)
 		}
 		worktrees = append(worktrees, RepoWorktreeResult{
-			RepositoryID:   spec.RepositoryID,
-			BranchSlug:     repoBranchIdentitySlug(spec),
-			WorktreeID:     wt.ID,
-			WorktreeBranch: wt.Branch,
-			WorktreePath:   wt.Path,
-			MainRepoGitDir: filepath.Join(spec.RepositoryPath, ".git"),
+			TaskRepositoryID:          spec.TaskRepositoryID,
+			RepositoryID:              spec.RepositoryID,
+			BranchSlug:                repoBranchIdentitySlug(spec),
+			WorktreeID:                wt.ID,
+			WorktreeBranch:            wt.Branch,
+			WorktreePath:              wt.Path,
+			MainRepoGitDir:            filepath.Join(spec.RepositoryPath, ".git"),
+			RequestedBaseBranch:       spec.BaseBranch,
+			BaseBranch:                wt.BaseBranch,
+			BaseBranchFallbackWarning: wt.BaseBranchFallbackWarning,
 		})
 	}
 
@@ -443,6 +450,9 @@ func (p *WorktreePreparer) prepareMultiRepo(
 		res.WorktreeID = worktrees[0].WorktreeID
 		res.WorktreeBranch = worktrees[0].WorktreeBranch
 		res.MainRepoGitDir = worktrees[0].MainRepoGitDir
+		res.RequestedBaseBranch = worktrees[0].RequestedBaseBranch
+		res.BaseBranch = worktrees[0].BaseBranch
+		res.BaseBranchFallbackWarning = worktrees[0].BaseBranchFallbackWarning
 	}
 	return res, nil
 }
@@ -489,6 +499,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	// Sync (optional) + Create — reuses single-repo helper by translating spec→req.
 	subReq := *req
 	subReq.RepositoryID = spec.RepositoryID
+	subReq.TaskRepositoryID = spec.TaskRepositoryID
 	subReq.RepositoryPath = spec.RepositoryPath
 	subReq.RepoName = spec.RepoName
 	subReq.BaseBranch = spec.BaseBranch

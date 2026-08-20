@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- this file is the canonical Office entity contract. */
 // --- Office entity types ---
 //
 // Per ADR 0005 Wave E the canonical `AgentProfile`, `AgentRole`, `AgentStatus`,
@@ -19,6 +20,8 @@ export type {
 export type { OfficeAgentProfile as AgentProfile } from "@/lib/types/agent-profile";
 
 import type { OfficeAgentProfile as AgentProfile } from "@/lib/types/agent-profile";
+import type { TaskRepository } from "@/lib/types/http";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 export type SkillSourceType =
   | "inline"
@@ -277,6 +280,8 @@ export type OfficeTask = {
   // UI renders a "System" badge for these when the dev toggle reveals
   // them.
   isSystem?: boolean;
+  statusSummary?: TaskStatusSummary | null;
+  repositories?: TaskRepository[];
 };
 
 export type TaskFilterState = {

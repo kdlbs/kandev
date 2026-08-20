@@ -10,12 +10,88 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/system/storage"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/worktree/copyfiles"
 )
+
+// ResolveRemoteDefaultBranch returns the default branch advertised by the
+// origin remote. It reads the local symref first, then refreshes it once with
+// non-interactive Git when the local ref is absent.
+func (m *Manager) ResolveRemoteDefaultBranch(ctx context.Context, repoPath string) (string, error) {
+	branch, err := readRemoteDefaultBranch(repoPath)
+	if err != nil {
+		return "", err
+	}
+	if branch != "" {
+		return branch, nil
+	}
+
+	output, runErr := m.runBoundedGitInspect(ctx, repoPath, "remote", "set-head", "origin", "--auto")
+	if runErr != nil {
+		return "", classifyRemoteDefaultError(output, runErr)
+	}
+	branch, err = readRemoteDefaultBranch(repoPath)
+	if err != nil {
+		return "", err
+	}
+	if branch == "" {
+		return "", ErrRemoteDefaultUnresolved
+	}
+	return branch, nil
+}
+
+func readRemoteDefaultBranch(repoPath string) (string, error) {
+	gitDir, err := gitref.ResolveGitDir(repoPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", fmt.Errorf("resolve git directory: %w", err)
+	}
+	commonDir := gitref.ResolveCommonGitDir(gitDir)
+	path := filepath.Join(commonDir, "refs", "remotes", "origin", "HEAD")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read origin default branch: %w", err)
+	}
+	line := strings.TrimSpace(string(data))
+	const prefix = "ref: refs/remotes/origin/"
+	if !strings.HasPrefix(line, prefix) {
+		return "", nil
+	}
+	branch := strings.TrimPrefix(line, prefix)
+	if branch == "" || strings.ContainsAny(branch, "\r\n") {
+		return "", nil
+	}
+	return branch, nil
+}
+
+func classifyRemoteDefaultError(output string, runErr error) error {
+	if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
+		return runErr
+	}
+	lowerOutput := strings.ToLower(output)
+	switch {
+	case containsAuthFailure(lowerOutput):
+		return fmt.Errorf("%w: %s", ErrAuthFailed, strings.TrimSpace(output))
+	case strings.Contains(lowerOutput, "could not resolve host"),
+		strings.Contains(lowerOutput, "connection timed out"),
+		strings.Contains(lowerOutput, "network is unreachable"),
+		strings.Contains(lowerOutput, "could not connect"):
+		return fmt.Errorf("%w: %s", ErrRemoteDefaultNetwork, strings.TrimSpace(output))
+	case isRemoteRefMissingError(fmt.Errorf("%s", output)):
+		return fmt.Errorf("%w: %s", ErrRemoteDefaultUnresolved, strings.TrimSpace(output))
+	default:
+		return ClassifyGitError(output, runErr)
+	}
+}
 
 // Create creates a new worktree for a session, or returns an existing one.
 // Each session gets its own worktree for isolation. Checks by SessionID first,
@@ -199,27 +275,54 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 	}
 
 	fallback := strings.TrimSpace(req.FallbackBaseBranch)
-	if fallback == "" || fallback == baseRef {
+	resolvedFallback := ""
+	if fallback != "" && fallback != baseRef {
+		resolvedFallback = m.resolveFallbackRef(ctx, req, fallback)
+		fallbackExists, fallbackErr := m.branchExists(ctx, req.RepositoryPath, resolvedFallback)
+		if fallbackErr != nil {
+			return "", "", "", fmt.Errorf("could not verify fallback base branch %q: %w", resolvedFallback, fallbackErr)
+		}
+		if fallbackExists {
+			return m.finishBaseFallback(req, baseRef, fallback, resolvedFallback)
+		}
+	}
+
+	// The persisted repository default can be stale or absent. Resolve the
+	// live remote default only after the requested branch and stored fallback
+	// have both failed.
+	liveFallback, liveErr := m.ResolveRemoteDefaultBranch(ctx, req.RepositoryPath)
+	if liveErr != nil {
+		if errors.Is(liveErr, ErrRemoteDefaultUnresolved) {
+			return "", "", "", fmt.Errorf("%w: %s (fallback %q also not found)", ErrInvalidBaseBranch, baseRef, fallback)
+		}
+		return "", "", "", liveErr
+	}
+	if liveFallback == baseRef {
 		return "", "", "", fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
 	}
-	// Best-effort fetch of the fallback so it is available locally in
-	// containerized / shallow-clone environments where the fallback may
-	// only exist on the remote. pullBaseBranch may resolve the name to a
-	// remote-tracking ref (e.g. "main" -> "origin/main") which we must use
-	// for the existence check and downstream git operations.
-	resolvedFallback := fallback
-	if req.RemoteSyncHandled {
-		resolvedFallback = m.preferRefreshedRemoteRef(ctx, req.RepositoryPath, fallback)
-	} else if req.PullBeforeWorktree {
-		resolvedFallback = m.pullBaseBranch(ctx, req.RepositoryPath, fallback, nil)
-	}
+	resolvedFallback = m.resolveFallbackRef(ctx, req, liveFallback)
 	fallbackExists, fallbackErr := m.branchExists(ctx, req.RepositoryPath, resolvedFallback)
 	if fallbackErr != nil {
-		return "", "", "", fmt.Errorf("could not verify fallback base branch %q: %w", resolvedFallback, fallbackErr)
+		return "", "", "", fmt.Errorf("could not verify live fallback base branch %q: %w", resolvedFallback, fallbackErr)
 	}
 	if !fallbackExists {
-		return "", "", "", fmt.Errorf("%w: %s (fallback %q also not found)", ErrInvalidBaseBranch, baseRef, fallback)
+		return "", "", "", fmt.Errorf("%w: %s (fallback %q also not found)", ErrInvalidBaseBranch, baseRef, liveFallback)
 	}
+	fallback = liveFallback
+	return m.finishBaseFallback(req, baseRef, fallback, resolvedFallback)
+}
+
+func (m *Manager) resolveFallbackRef(ctx context.Context, req *CreateRequest, fallback string) string {
+	if req.RemoteSyncHandled {
+		return m.preferRefreshedRemoteRef(ctx, req.RepositoryPath, fallback)
+	}
+	if req.PullBeforeWorktree {
+		return m.pullBaseBranch(ctx, req.RepositoryPath, fallback, nil)
+	}
+	return fallback
+}
+
+func (m *Manager) finishBaseFallback(req *CreateRequest, baseRef, fallback, resolvedFallback string) (string, string, string, error) {
 	m.logger.Warn("requested base branch not found, falling back",
 		zap.String("repository_path", req.RepositoryPath),
 		zap.String("requested_branch", baseRef),
@@ -227,8 +330,8 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 	// Use req.BaseBranch (the user-supplied name) in the user-facing warning
 	// rather than baseRef, which may carry an internal "origin/<x>" form
 	// produced by pullBaseBranch when PullBeforeWorktree is set.
-	warning = fmt.Sprintf("Requested base branch %q not found, used %q instead", req.BaseBranch, fallback)
-	detail = fmt.Sprintf("git rev-parse --verify %s failed; recovered using fallback branch %q (typically the repository's default_branch)", baseRef, fallback)
+	warning := fmt.Sprintf("Requested base branch %q not found, used %q instead", req.BaseBranch, fallback)
+	detail := fmt.Sprintf("git rev-parse --verify %s failed; recovered using fallback branch %q (typically the repository's default_branch)", baseRef, fallback)
 	// Reflect the resolved branch in the persisted worktree record so
 	// downstream consumers (UI, queries, debug logs) see the actual base
 	// rather than the requested-but-missing one.
@@ -536,7 +639,7 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 		return nil, fmt.Errorf("could not verify local branch %q after fetch failure (%s): %w", branch, strings.TrimSpace(outputStr), existsErr)
 	}
 	if !exists {
-		return nil, fmt.Errorf("branch %q not found locally or on remote: %s", branch, outputStr)
+		return nil, fmt.Errorf("%w: branch %q not found locally or on remote: %s", ErrInvalidBaseBranch, branch, outputStr)
 	}
 
 	reason := classifyGitFallbackReason(err, outputStr, fetchCtxErr)

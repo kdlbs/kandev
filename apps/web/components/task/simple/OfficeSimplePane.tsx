@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import {
@@ -58,6 +58,9 @@ import type {
   TimelineEvent,
 } from "@/app/office/tasks/[id]/types";
 import { toast } from "@/lib/toast/sonner";
+import { useAppStore } from "@/components/state-provider";
+import { selectTaskStatusSummary } from "@/lib/task-status-summary";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 const COMMENTABLE_DONE_SESSION_STATES = new Set<TaskSession["state"]>([
   "CREATED",
@@ -77,6 +80,30 @@ type OfficeSimplePaneProps = {
   onToggleAdvanced?: () => void;
   onCommentsChanged?: () => void;
 };
+
+function useChatTaskWithLiveStatusSummary(task: Task): Task {
+  const liveStatusSummary = useAppStore((state) => {
+    const candidates: Array<TaskStatusSummary | null | undefined> = [];
+    const addCandidate = (candidate: { id: string; statusSummary?: TaskStatusSummary | null }) => {
+      if (candidate.id === task.id) candidates.push(candidate.statusSummary);
+    };
+    state.kanban.tasks.forEach(addCandidate);
+    Object.values(state.kanbanMulti.snapshots).forEach((snapshot) =>
+      snapshot.tasks.forEach(addCandidate),
+    );
+    Object.values(state.sidebarArchivedTasks.itemsByWorkspaceId).forEach((items) =>
+      items.forEach(addCandidate),
+    );
+    return selectTaskStatusSummary(undefined, candidates);
+  });
+  return useMemo(
+    () => ({
+      ...task,
+      statusSummary: selectTaskStatusSummary(task.statusSummary, [liveStatusSummary]),
+    }),
+    [liveStatusSummary, task],
+  );
+}
 
 function sessionSortTime(session: TaskSession): number {
   const value = session.updatedAt ?? session.completedAt ?? session.startedAt ?? "";
@@ -469,6 +496,7 @@ export function OfficeSimplePane({
   const [subIssueOpen, setSubIssueOpen] = useState(false);
   const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
   const { treePreview, activeHold, refreshTreePreview } = useTaskTreePreview(task.id);
+  const chatTask = useChatTaskWithLiveStatusSummary(task);
 
   return (
     <ActiveSessionRefProvider>
@@ -525,7 +553,7 @@ export function OfficeSimplePane({
           <TaskDocuments taskId={task.id} />
           <TaskContextSection taskId={task.id} revisionKey={task.updatedAt} />
           <ChatActivityTabs
-            task={task}
+            task={chatTask}
             comments={comments}
             timeline={timeline}
             activity={activity}

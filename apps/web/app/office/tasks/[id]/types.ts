@@ -1,4 +1,7 @@
 import type { TaskPriority } from "@/lib/types/http";
+import type { TaskRepository } from "@/lib/types/http";
+import type { TaskLaunchRecoveryAction } from "@/lib/types/task-launch-error";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 export type { TaskPriority } from "@/lib/types/http";
 
 /**
@@ -106,6 +109,10 @@ export type RunError = {
   remediationUrl?: string;
   failureCode?: string;
   failureDetails?: string;
+  message?: string;
+  recoveryActions?: TaskLaunchRecoveryAction[];
+  taskRepositoryId?: string;
+  errorStamp?: string;
 };
 
 export type TaskLabelLocal = {
@@ -166,4 +173,6 @@ export type Task = {
   updatedAt: string;
   executionPolicy?: string;
   executionState?: string;
+  statusSummary?: TaskStatusSummary | null;
+  repositories?: TaskRepository[];
 };

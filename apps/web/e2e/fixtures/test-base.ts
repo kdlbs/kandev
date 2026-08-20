@@ -379,6 +379,7 @@ export const test = backendFixture.extend<
         await use();
       } finally {
         await apiClient.clearGitLabRepositoryRemote(seedData.repositoryId).catch(() => undefined);
+        restoreSeedRepositoryOrigin(seedData);
       }
     },
     { auto: true },
@@ -392,9 +393,40 @@ export const test = backendFixture.extend<
 export function restoreSeedRepositoryOrigin(seedData: SeedData) {
   const baseArgs = ["-C", seedData.repositoryPath, "remote"];
   try {
-    execFileSync("git", [...baseArgs, "set-url", "origin", seedData.repositoryRemoteURL]);
+    execFileSync("git", [...baseArgs, "set-url", "origin", seedData.repositoryRemoteURL], {
+      stdio: "ignore",
+    });
   } catch {
-    execFileSync("git", [...baseArgs, "add", "origin", seedData.repositoryRemoteURL]);
+    execFileSync("git", [...baseArgs, "add", "origin", seedData.repositoryRemoteURL], {
+      stdio: "ignore",
+    });
+  }
+}
+
+/** Points the seed repository at an empty remote whose HEAD cannot resolve. */
+export function pointSeedRepositoryAtUnresolvedOrigin(seedData: SeedData, tmpDir: string) {
+  const remoteDir = path.join(
+    tmpDir,
+    "repos",
+    `e2e-unresolved-remote-${Date.now()}-${process.pid}.git`,
+  );
+  fs.mkdirSync(path.dirname(remoteDir), { recursive: true });
+  execFileSync("git", ["init", "--bare", "--initial-branch=main", remoteDir], {
+    env: makeGitEnv(tmpDir),
+    stdio: "ignore",
+  });
+  try {
+    execFileSync(
+      "git",
+      ["-C", seedData.repositoryPath, "remote", "set-url", "origin", `file://${remoteDir}`],
+      { env: makeGitEnv(tmpDir), stdio: "ignore" },
+    );
+  } catch {
+    execFileSync(
+      "git",
+      ["-C", seedData.repositoryPath, "remote", "add", "origin", `file://${remoteDir}`],
+      { env: makeGitEnv(tmpDir), stdio: "ignore" },
+    );
   }
 }
 

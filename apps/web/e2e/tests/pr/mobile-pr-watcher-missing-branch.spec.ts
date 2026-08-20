@@ -4,7 +4,7 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("mobile PR watcher missing branch", () => {
-  test("keeps the recovery summary and task actions reachable", async ({
+  test("keeps the typed recovery card reachable", async ({
     testPage,
     apiClient,
     seedData,
@@ -20,8 +20,8 @@ test.describe("mobile PR watcher missing branch", () => {
     await apiClient.mockGitHubAddPRs([
       {
         number: 1000,
-        title: "Already merged mobile feature",
-        state: "closed",
+        title: "Open mobile feature with deleted branch",
+        state: "open",
         head_branch: prBranch,
         base_branch: "main",
         author_login: "test-user",
@@ -32,7 +32,7 @@ test.describe("mobile PR watcher missing branch", () => {
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
-      "PR #1000: Already merged mobile feature",
+      "PR #1000: Open mobile feature with deleted branch",
       seedData.agentProfileId,
       {
         workflow_id: seedData.workflowId,
@@ -61,31 +61,25 @@ test.describe("mobile PR watcher missing branch", () => {
       repo: "testrepo",
       pr_number: 1000,
       pr_url: "https://github.com/testorg/testrepo/pull/1000",
-      pr_title: "Already merged mobile feature",
+      pr_title: "Open mobile feature with deleted branch",
       head_branch: prBranch,
       base_branch: "main",
       author_login: "test-user",
-      state: "closed",
+      state: "open",
     });
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
+    await session.waitForLoad();
     const chat = session.activeChat();
-    const recovery = chat.getByTestId("missing-branch-recovery");
+    const recovery = chat.getByTestId("task-launch-error-entry");
 
     await expect(recovery).toHaveCount(1, { timeout: 30_000 });
-    await expect(
-      recovery.getByRole("heading", { name: "Branch is no longer available" }),
-    ).toBeVisible();
-    await expect(recovery).toContainText("***");
+    await expect(recovery).toContainText("The selected base branch is not available.");
     await expect(recovery).not.toContainText(prBranch);
-    await expect(
-      chat.getByRole("status", { name: /Session failed|Environment setup failed/i }),
-    ).toHaveCount(0);
-
-    const archiveButton = recovery.getByTestId("missing-branch-archive-button");
-    const deleteButton = recovery.getByTestId("missing-branch-delete-button");
-    for (const button of [archiveButton, deleteButton]) {
+    const actionButtons = recovery.locator("button[data-testid^='task-launch-']");
+    await expect(actionButtons).not.toHaveCount(0);
+    for (const button of await actionButtons.all()) {
       await expect(button).toBeVisible();
       await expect(button).toBeInViewport();
       const box = await button.boundingBox();
@@ -93,19 +87,7 @@ test.describe("mobile PR watcher missing branch", () => {
       expect(box!.height).toBeGreaterThanOrEqual(44);
     }
 
-    const technicalDetails = recovery.locator("details");
-    const technicalOutput = technicalDetails.locator("pre");
-    await expect(technicalDetails).not.toHaveAttribute("open");
-    await expect(technicalOutput).not.toBeVisible();
-    const disclosure = recovery.getByText("Technical details", { exact: true });
-    await disclosure.tap();
-    await expect(technicalOutput).toBeVisible();
-    await expect(technicalOutput).toContainText("couldn't find remote ref pull/1000/head");
-    const disclosureBox = await disclosure.boundingBox();
-    expect(disclosureBox).not.toBeNull();
-    expect(disclosureBox!.height).toBeGreaterThanOrEqual(44);
-
-    await assertNoDocumentHorizontalOverflow(testPage, "missing branch recovery");
+    await assertNoDocumentHorizontalOverflow(testPage, "typed launch recovery");
     await testPage.screenshot({
       path: testInfo.outputPath("missing-pr-branch-mobile.png"),
       fullPage: true,

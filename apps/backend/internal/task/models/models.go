@@ -532,6 +532,9 @@ type LastAgentError struct {
 	RemediationURL   string     `json:"remediation_url,omitempty"`
 	Code             string     `json:"code,omitempty"`
 	Details          string     `json:"details,omitempty"`
+	RecoveryActions  []string   `json:"recovery_actions,omitempty"`
+	TaskRepositoryID string     `json:"task_repository_id,omitempty"`
+	StampValue       string     `json:"stamp,omitempty"`
 	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
 }
 
@@ -547,7 +550,7 @@ func LoadLastAgentError(metadata map[string]interface{}) (LastAgentError, bool) 
 	if err := mapToLastAgentError(raw, &out); err != nil || out.Message == "" {
 		return LastAgentError{}, false
 	}
-	return out, true
+	return normalizeLastAgentError(out), true
 }
 
 func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
@@ -559,6 +562,9 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 }
 
 func (e LastAgentError) Stamp() string {
+	if stamp := boundedLaunchErrorStamp(e.StampValue); stamp != "" {
+		return stamp
+	}
 	return e.OccurredAt.UTC().Format(time.RFC3339Nano) + ":" + e.Message
 }
 

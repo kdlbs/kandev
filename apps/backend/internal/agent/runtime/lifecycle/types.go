@@ -746,6 +746,7 @@ func (ae *AgentExecution) EndSessionSpan() {
 // the top level. When LaunchRequest.Repositories is set, each entry produces
 // one prepared worktree under the shared TaskDirName.
 type RepoLaunchSpec struct {
+	TaskRepositoryID        string
 	RepositoryID            string
 	RepositoryPath          string
 	RepositoryURL           string // Clone URL for remote executors that need to clone
@@ -884,6 +885,7 @@ type LaunchRequest struct {
 	UseWorktree             bool   // Whether to use a Git worktree for isolation
 	WorktreeID              string // Existing worktree ID to reuse (skip creation if set)
 	RepositoryID            string // Repository ID for worktree tracking
+	TaskRepositoryID        string // Exact task_repositories row for worktree recovery
 	RepositoryPath          string // Path to the main repository (for worktree creation)
 	BaseBranch              string // Base branch for the worktree (e.g., "main")
 	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
@@ -929,6 +931,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		return nil
 	}
 	return []RepoLaunchSpec{{
+		TaskRepositoryID:        r.TaskRepositoryID,
 		RepositoryID:            r.RepositoryID,
 		RepositoryPath:          r.RepositoryPath,
 		RepoName:                r.RepoName,

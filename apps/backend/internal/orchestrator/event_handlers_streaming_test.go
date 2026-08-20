@@ -449,6 +449,45 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 	require.Equal(t, []bool{true}, canceller.expireContextDeadline)
 }
 
+func TestTransitionTaskSessionStatePublishesMetadataWrittenByHook(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+	errorValue := models.LastAgentError{
+		Message:    "The selected base branch is not available.",
+		Code:       "base_branch_missing",
+		OccurredAt: time.Date(2026, 8, 19, 23, 10, 41, 0, time.UTC),
+		StampValue: "launch-error-stamp",
+	}
+
+	changed, _, err := svc.transitionTaskSessionState(
+		ctx,
+		"t1",
+		"s1",
+		models.TaskSessionStateFailed,
+		errorValue.Message,
+		func() {
+			require.NoError(t, repo.SetSessionMetadataKey(
+				ctx, "s1", models.SessionMetaKeyLastAgentError, errorValue,
+			))
+		},
+	)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Len(t, eb.events, 1)
+	data, ok := eb.events[0].event.Data.(map[string]interface{})
+	require.True(t, ok)
+	metadata, ok := data["session_metadata"].(map[string]interface{})
+	require.True(t, ok)
+	lastError, ok := metadata[models.SessionMetaKeyLastAgentError].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "base_branch_missing", lastError["code"])
+}
+
 func TestTransitionTaskSessionStateReportsPersistenceFailure(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
