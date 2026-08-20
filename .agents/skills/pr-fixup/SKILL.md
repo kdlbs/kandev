@@ -67,9 +67,24 @@ failure. Pass `--deadline-min` for a user-stated limit; on exit 2 report the
 named pending checks as "CI in progress."
 
 Read its exit code rather than re-deriving state: 0 clean, 1 terminal with
-findings, 2 deadline with checks still pending, 3 blocked (merged/closed,
-workflow approval required, or access lost). A push during the wait restarts
-the gate against the new head and is reported.
+findings, 2 deadline with checks still pending, 3 blocked. Exit 3 covers every
+case where a clean answer cannot be trusted: the PR merged or closed, a workflow
+needs approval, access was lost, the merge-state query failed, the snapshot
+reported `errors` or a null unresolved-thread count, or the host toolchain
+cannot run `pr-state` correctly. Never downgrade an exit 3 to "probably clean."
+
+Exit 1 counts blocking reviews, not only threads: a current-head
+`CHANGES_REQUESTED` review can exist with no unresolved thread attached.
+
+The toolchain check is not optional ceremony. `pr-state` fails silently in two
+host environments, and both look like a clean PR: jq 1.6 loops on the
+empty-matching `gsub` in its review-evidence filter, and bash 3.2 aborts
+review-thread pagination under `set -u` so the unresolved count returns null.
+Measured against a PR with four unresolved threads, bash 3.2 reported none and
+still exited 0. `pr-await` probes both behaviours before polling and records the
+verified versions in every report; if it exits 3 naming the toolchain, fix PATH
+rather than working around the gate. A push during the wait restarts the gate
+against the new head and is reported.
 
 Do not use interactive `gh pr checks --watch` in the primary conversation: its
 TTY redraws make captured output unusable. Use the read-only `pr-poller` only

@@ -42,6 +42,31 @@ FAKE
 #!/usr/bin/env bash
 cat "$FAKE_DIR/gh.json" 2>/dev/null || printf '{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"aaaaaaaaaaaa"}'
 FAKEGH
+  cat >"$dir/jq-ok" <<'JQOK'
+#!/usr/bin/env bash
+[ "$1" = "--version" ] && { echo "jq-1.7.1-fake"; exit 0; }
+exit 0
+JQOK
+  cat >"$dir/jq-bad" <<'JQBAD'
+#!/usr/bin/env bash
+[ "$1" = "--version" ] && { echo "jq-1.6-fake"; exit 0; }
+exec sleep 30
+JQBAD
+  cat >"$dir/bash-ok" <<'BASHOK'
+#!/usr/bin/env bash
+case "$2" in
+  *BASH_VERSION*) printf '5.9.9-fake' ;;
+  *) exit 0 ;;
+esac
+BASHOK
+  cat >"$dir/bash-bad" <<'BASHBAD'
+#!/usr/bin/env bash
+case "$2" in
+  *BASH_VERSION*) printf '3.2.57-fake' ;;
+  *) exit 1 ;;
+esac
+BASHBAD
+  chmod +x "$dir/jq-ok" "$dir/jq-bad" "$dir/bash-ok" "$dir/bash-bad"
   cat >"$dir/sleep" <<'FAKESLEEP'
 #!/usr/bin/env bash
 printf 'slept %s\n' "$1" >> "$FAKE_DIR/sleeps"
@@ -63,13 +88,17 @@ snapshot() {
       checks_head_sha: $head, checks_snapshot_complete: $complete,
       approval_required_runs: [], unresolved_review_thread_count: 0,
       unresolved_threads: [], hidden_unresolved_threads: [],
-      actionable_issue_comment_count: 0} * $extra' > "$dir/seq/$idx.json"
+      actionable_issue_comment_count: 0, errors: [],
+      review_evidence: {active_changes_requested_count: 0,
+                        blocked_exact_current_head_review_count: 0}} * $extra' > "$dir/seq/$idx.json"
 }
 
 run_await() {
   local dir=$1; shift
   FAKE_DIR="$dir" PR_AWAIT_PR_STATE="$dir/pr-state" PR_AWAIT_GH="$dir/gh" \
-    PR_AWAIT_SLEEP="$dir/sleep" "$SCRIPT" "$@"
+    PR_AWAIT_SLEEP="$dir/sleep" \
+    PR_AWAIT_JQ="${PROBE_JQ:-$dir/jq-ok}" PR_AWAIT_PROBE_BASH="${PROBE_BASH:-$dir/bash-ok}" \
+    "$SCRIPT" "$@"
 }
 
 # --- argument validation ---------------------------------------------------
@@ -221,5 +250,134 @@ snapshot "$d" 8 20 0 0
 run_await "$d" 12 --interval-sec 1 --quiet >/dev/null 2>&1 || true
 [[ "$(wc -l < "$d/sleeps" | tr -d ' ')" -eq 7 ]] || fail "expected 7 internal sleeps" "$(cat "$d/sleeps")"
 pass "eight polls happen inside a single invocation (7 internal sleeps, 0 caller round-trips)"
+
+# --- P1: a snapshot carrying errors is never clean ---------------------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+for i in 1 2 3 4; do
+  snapshot "$d" "$i" 20 0 0 true aaaaaaaaaaaa \
+    '{"errors":[{"source":"review_threads","message":"graphql failed"}]}'
+done
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "errors in snapshot must not exit 0, got $rc" "$out"
+grep -q 'review_threads' <<<"$out" || fail "should name the failing source" "$out"
+pass "a pr-state snapshot with non-empty errors exits 3, never clean"
+
+# --- P1: a transient error that clears is fine ------------------------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0 true aaaaaaaaaaaa '{"errors":[{"source":"x","message":"blip"}]}'
+snapshot "$d" 2 20 0 0
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "a cleared transient error should exit 0, got $rc" "$out"
+pass "an error that clears on a later poll does not block"
+
+# --- P1: an unknown thread count is unknown, not zero -----------------------
+# This is the observed bash-3.2 pr-state failure: pagination dies non-fatally
+# and the count comes back null while GitHub has unresolved threads.
+d="$(make_tmp_dir)"; setup_fake "$d"
+for i in 1 2 3 4; do
+  snapshot "$d" "$i" 20 0 0 true aaaaaaaaaaaa '{"unresolved_review_thread_count":null}'
+done
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "null thread count must not read as 0/clean, got $rc" "$out"
+pass "a null unresolved_review_thread_count blocks instead of counting as zero"
+
+# --- P1: blocking reviews count as findings ---------------------------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0 true aaaaaaaaaaaa \
+  '{"review_evidence":{"active_changes_requested_count":1,"blocked_exact_current_head_review_count":0}}'
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 1 ]] || fail "CHANGES_REQUESTED with no threads should exit 1, got $rc" "$out"
+grep -qi 'changes requested' <<<"$out" || fail "should report the blocking review" "$out"
+pass "an active CHANGES_REQUESTED review is a finding even with zero threads"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0 true aaaaaaaaaaaa \
+  '{"review_evidence":{"active_changes_requested_count":0,"blocked_exact_current_head_review_count":2}}'
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 1 ]] || fail "blocked exact-head reviews should exit 1, got $rc" "$out"
+pass "blocked exact-current-head reviews count as findings"
+
+# --- P1: a failed merge-state query is unknown, not clean -------------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+cat > "$d/gh" <<'GHFAIL'
+#!/usr/bin/env bash
+exit 1
+GHFAIL
+chmod +x "$d/gh"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "failed gh pr view must not exit 0, got $rc" "$out"
+grep -qi 'merge state' <<<"$out" || fail "should say merge state is unknown" "$out"
+pass "a failed merge-state query exits 3 instead of reporting clean"
+
+# --- P2: first-failure must not act on a stale head -------------------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+# snapshot 1 describes the OLD head; gh already reports the NEW one.
+snapshot "$d" 1 10 1 5 true aaaaaaaaaaaa
+snapshot "$d" 2 20 0 0 true bbbbbbbbbbbb
+cat > "$d/gh" <<'GH3'
+#!/usr/bin/env bash
+printf '{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"bbbbbbbbbbbb"}'
+GH3
+chmod +x "$d/gh"
+out="$(run_await "$d" 12 --mode first-failure --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "stale first-failure snapshot must be discarded, got $rc" "$out"
+grep -q '0 failed' <<<"$out" || fail "should report the NEW head, not the stale failure" "$out"
+pass "first-failure discards a snapshot whose checks belong to a superseded head"
+
+# --- P2: leading-zero arguments are decimal, not octal ---------------------
+# Assert the parsed values rather than timing the wait: "010" as octal is 8,
+# which a duration test would only catch by waiting out the difference.
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 09 --quiet --format json 2>"$d/err")" || true
+grep -q 'value too great for base' "$d/err" && fail "09 must not be read as octal" "$(cat "$d/err")"
+[[ "$(jq -r '.deadline_sec' <<<"$out")" == '540' ]] \
+  || fail "--deadline-min 09 should be 540s, got $(jq -r '.deadline_sec' <<<"$out")" "$out"
+pass "--deadline-min 09 parses as 9 minutes, not an octal error"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+out="$(run_await "$d" 12 --interval-sec 010 --deadline-min 010 --quiet --format json 2>"$d/err")" || true
+[[ "$(jq -r '.interval_sec' <<<"$out")" == '10' ]] \
+  || fail "--interval-sec 010 should be 10, got $(jq -r '.interval_sec' <<<"$out")" "$out"
+[[ "$(jq -r '.deadline_sec' <<<"$out")" == '600' ]] \
+  || fail "--deadline-min 010 should be 600s (octal would be 480), got $(jq -r '.deadline_sec' <<<"$out")" "$out"
+pass "--interval-sec 010 and --deadline-min 010 parse as decimal 10, not octal 8"
+
+
+# --- toolchain preflight: pr-state degrades silently, so refuse to run ------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+out="$(PROBE_JQ="$d/jq-bad" run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "jq that loops on empty-match gsub must block, got $rc" "$out"
+grep -q 'jq-1.6-fake' <<<"$out" || fail "should name the jq version" "$out"
+grep -qi 'cannot be read' <<<"$out" || fail "should explain the impact" "$out"
+pass "a jq whose gsub loops blocks before any polling"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+out="$(PROBE_BASH="$d/bash-bad" run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "bash that fails empty-array expansion must block, got $rc" "$out"
+grep -q '3.2.57-fake' <<<"$out" || fail "should name the bash version" "$out"
+grep -qi 'unresolved review threads' <<<"$out" || fail "should explain the silent thread loss" "$out"
+pass "a bash that aborts empty-array expansion blocks before any polling"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "a good toolchain should not block, got $rc" "$out"
+grep -q 'toolchain: jq-1.7.1-fake, bash 5.9.9-fake' <<<"$out" \
+  || fail "the report must record the verified toolchain" "$out"
+pass "a verified toolchain is recorded in every report"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)"
+[[ "$(jq -r '.toolchain' <<<"$out")" == 'jq-1.7.1-fake, bash 5.9.9-fake' ]] \
+  || fail "json report must carry the toolchain" "$out"
+[[ "$(jq -r '.evidence_complete' <<<"$out")" == 'true' ]] || fail "evidence_complete missing" "$out"
+pass "json report carries toolchain and evidence_complete"
+
 
 printf '\nall tests passed\n'

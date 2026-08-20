@@ -65,13 +65,15 @@ while [[ $# -gt 0 ]]; do
     --deadline-min)
       shift
       [[ $# -gt 0 && "$1" =~ ^[0-9]+$ ]] || usage 1
-      DEADLINE_MIN=$1
+      # 10# forces base 10. Without it "09" aborts arithmetic under set -e and
+      # "010" silently means 8, because Bash reads a leading zero as octal.
+      DEADLINE_MIN=$((10#$1))
       shift
       ;;
     --interval-sec)
       shift
-      [[ $# -gt 0 && "$1" =~ ^[0-9]+$ && "$1" -gt 0 ]] || usage 1
-      INTERVAL_SEC=$1
+      [[ $# -gt 0 && "$1" =~ ^[0-9]+$ && $((10#$1)) -gt 0 ]] || usage 1
+      INTERVAL_SEC=$((10#$1))
       shift
       ;;
     --format)
@@ -104,15 +106,67 @@ progress() {
 }
 
 # Mergeability is deliberately absent from `pr-state --summary`, so query it
-# here rather than letting a caller assume a clean merge state.
+# here rather than letting a caller assume a clean merge state. No `|| {}`
+# fallback: a failed query is unknown state, and the caller must treat it that
+# way instead of reading an empty object as "not conflicting".
 fetch_merge_state() {
-  "$GH" pr view "$PR" --json state,mergeable,mergeStateStatus,headRefOid 2>/dev/null || printf '{}'
+  "$GH" pr view "$PR" --json state,mergeable,mergeStateStatus,headRefOid 2>/dev/null
 }
+
+# `pr-state` degrades silently under two host toolchains, and both failures
+# surface as a PR that looks clean:
+#
+#   jq 1.6   - its review-evidence filter runs a gsub whose pattern can match
+#              the empty string, which loops. Observed burning ~105s of CPU on
+#              9 KB of input before dying with "cannot allocate memory".
+#   bash 3.2 - `"${arr[@]}"` on an empty array under `set -u` is an error, so
+#              review-thread pagination aborts non-fatally and the unresolved
+#              count comes back null. Measured against a PR with 4 unresolved
+#              threads, `pr-state` reported none and still exited 0.
+#
+# Probe the behaviour rather than parsing version strings: vendors backport
+# (`jq-1.7.1-apple`), and the defect is what matters, not the number.
+TOOLCHAIN_NOTE=''
+preflight_toolchain() {
+  local jq_bin="${PR_AWAIT_JQ:-jq}"
+  local bash_bin="${PR_AWAIT_PROBE_BASH:-bash}"
+  local jq_ver bash_ver timeout_bin=''
+  jq_ver="$("$jq_bin" --version 2>/dev/null || printf 'unknown')"
+  bash_ver="$("$bash_bin" -c 'printf "%s" "${BASH_VERSION%%(*}"' 2>/dev/null || printf 'unknown')"
+
+  for candidate in timeout gtimeout; do
+    command -v "$candidate" >/dev/null 2>&1 && timeout_bin="$candidate" && break
+  done
+
+  if [[ -n "$timeout_bin" ]]; then
+    if ! "$timeout_bin" 5 "$jq_bin" -n '"x" | gsub("a?"; "")' >/dev/null 2>&1; then
+      printf 'PR %s\nBLOCKED: %s loops on an empty-matching gsub, which pr-state uses.\n' "$PR" "$jq_ver"
+      printf 'CI state cannot be read at all. Install jq 1.7 or later and put it first on PATH.\n'
+      exit 3
+    fi
+  else
+    TOOLCHAIN_NOTE=' (jq probe skipped: no timeout command)'
+  fi
+
+  if ! "$bash_bin" -c 'set -u; a=(); printf "%s" "${a[@]}"' >/dev/null 2>&1; then
+    printf 'PR %s\nBLOCKED: bash %s aborts empty-array expansion under set -u.\n' "$PR" "$bash_ver"
+    printf 'pr-state silently reports zero unresolved review threads on this shell, so a\n'
+    printf 'clean result would not be trustworthy. Put bash 4.4 or later first on PATH.\n'
+    exit 3
+  fi
+
+  TOOLCHAIN="$jq_ver, bash $bash_ver${TOOLCHAIN_NOTE}"
+}
+
+TOOLCHAIN='unverified'
+preflight_toolchain
 
 DEADLINE_SEC=$((DEADLINE_MIN * 60))
 START_SEC=$SECONDS
 POLLS=0
 CONSECUTIVE_ERRORS=0
+MERGE_ERRORS=0
+EVIDENCE_ERRORS=0
 HEAD_CHANGES=0
 FIRST_HEAD=''
 SUMMARY_JSON=''
@@ -137,7 +191,18 @@ while :; do
   fi
   CONSECUTIVE_ERRORS=0
 
-  MERGE_JSON="$(fetch_merge_state)"
+  if ! MERGE_JSON="$(fetch_merge_state)" || ! jq -e . >/dev/null 2>&1 <<<"$MERGE_JSON"; then
+    MERGE_ERRORS=$((MERGE_ERRORS + 1))
+    progress "poll ${POLLS}: gh pr view failed (${MERGE_ERRORS} in a row)"
+    if [[ "$MERGE_ERRORS" -ge 3 ]]; then
+      OUTCOME='blocked-merge-state'
+      break
+    fi
+    "$SLEEP" "$INTERVAL_SEC"
+    continue
+  fi
+  MERGE_ERRORS=0
+
   pr_state="$(jq -r '.state // ""' <<<"$MERGE_JSON")"
   head_oid="$(jq -r '.headRefOid // ""' <<<"$MERGE_JSON")"
   [[ -n "$head_oid" ]] || head_oid="$(jq -r '.pr.head_ref_oid // ""' <<<"$SUMMARY_JSON")"
@@ -177,11 +242,33 @@ while :; do
   # A failed job can be visible while its parent workflow is still running, so
   # in all-terminal mode a failure is never on its own a reason to stop.
   if [[ "$MODE" == 'first-failure' && "$failed" -gt 0 ]]; then
-    OUTCOME='terminal'
-    break
+    # A push between this snapshot and the head query leaves `failed` describing
+    # a head that no longer exists. Reporting it would contradict the
+    # restart-on-push behaviour the gate advertises.
+    if [[ -n "$checks_head" && "$checks_head" == "$head_oid" ]]; then
+      OUTCOME='terminal'
+      break
+    fi
+    progress "poll ${POLLS}: failure belongs to a superseded head; discarding"
   fi
 
   if [[ "$pending" -eq 0 && "$complete" == 'true' && -n "$checks_head" && "$checks_head" == "$head_oid" ]]; then
+    # Terminal by check state, but only trustworthy if the snapshot is whole.
+    # A partial fetch reports `errors`, and a failed thread query leaves the
+    # unresolved count null - which `// 0` would otherwise launder into "clean".
+    snapshot_errors="$(jq -r '.errors // [] | length' <<<"$SUMMARY_JSON")"
+    threads_known="$(jq -r 'if .unresolved_review_thread_count == null then "no" else "yes" end' <<<"$SUMMARY_JSON")"
+    if [[ "$snapshot_errors" -gt 0 || "$threads_known" == 'no' ]]; then
+      EVIDENCE_ERRORS=$((EVIDENCE_ERRORS + 1))
+      progress "poll ${POLLS}: checks terminal but evidence incomplete (${EVIDENCE_ERRORS} in a row)"
+      if [[ "$EVIDENCE_ERRORS" -ge 3 ]]; then
+        OUTCOME='blocked-evidence'
+        break
+      fi
+      "$SLEEP" "$INTERVAL_SEC"
+      continue
+    fi
+    EVIDENCE_ERRORS=0
     OUTCOME='terminal'
     break
   fi
@@ -202,22 +289,37 @@ if [[ "$OUTCOME" == 'blocked-access' ]]; then
   exit 3
 fi
 
+if [[ "$OUTCOME" == 'blocked-merge-state' ]]; then
+  printf 'PR %s\nBLOCKED: gh pr view failed %d times in a row, so merge state is unknown.\n' \
+    "$PR" "$MERGE_ERRORS"
+  printf 'A conflicted or closed PR is indistinguishable from a clean one here.\n'
+  exit 3
+fi
+
 failed_n="$(jq -r '.failed_checks | length' <<<"$SUMMARY_JSON")"
 pending_n="$(jq -r '.pending_checks | length' <<<"$SUMMARY_JSON")"
 passed_n="$(jq -r '.passed_check_count // 0' <<<"$SUMMARY_JSON")"
 threads_n="$(jq -r '.unresolved_review_thread_count // 0' <<<"$SUMMARY_JSON")"
 hidden_n="$(jq -r '.hidden_unresolved_threads | length' <<<"$SUMMARY_JSON")"
 comments_n="$(jq -r '.actionable_issue_comment_count // 0' <<<"$SUMMARY_JSON")"
+changes_req_n="$(jq -r '.review_evidence.active_changes_requested_count // 0' <<<"$SUMMARY_JSON")"
+blocked_rev_n="$(jq -r '.review_evidence.blocked_exact_current_head_review_count // 0' <<<"$SUMMARY_JSON")"
+evidence_errors_n="$(jq -r '.errors // [] | length' <<<"$SUMMARY_JSON")"
+error_sources="$(jq -r '[.errors // [] | .[].source] | join(", ")' <<<"$SUMMARY_JSON")"
+threads_known_final="$(jq -r 'if .unresolved_review_thread_count == null then "no" else "yes" end' <<<"$SUMMARY_JSON")"
 mergeable="$(jq -r '.mergeable // "UNKNOWN"' <<<"$MERGE_JSON")"
 merge_status="$(jq -r '.mergeStateStatus // "UNKNOWN"' <<<"$MERGE_JSON")"
 
 conflicted=0
 [[ "$mergeable" == 'CONFLICTING' || "$merge_status" == 'DIRTY' ]] && conflicted=1
 
-findings=$((failed_n + threads_n + hidden_n + comments_n + conflicted))
+# A CHANGES_REQUESTED review, or one whose body carries an explicit blocker,
+# can exist with no unresolved thread and no issue comment attached. Counting
+# only threads would report such a PR clean.
+findings=$((failed_n + threads_n + hidden_n + comments_n + conflicted + changes_req_n + blocked_rev_n))
 
 case "$OUTCOME" in
-  blocked-pr-state | blocked-approval) code=3 ;;
+  blocked-pr-state | blocked-approval | blocked-evidence) code=3 ;;
   deadline) code=2 ;;
   *) [[ "$findings" -gt 0 ]] && code=1 || code=0 ;;
 esac
@@ -232,8 +334,14 @@ if [[ "$FORMAT" == 'json' ]]; then
     --argjson polls "$POLLS" \
     --argjson head_changes "$HEAD_CHANGES" \
     --argjson exit_code "$code" \
+    --arg toolchain "$TOOLCHAIN" \
+    --argjson deadline_sec "$DEADLINE_SEC" \
+    --argjson interval_sec "$INTERVAL_SEC" \
+    --argjson evidence_complete "$([[ "$evidence_errors_n" -eq 0 && "$threads_known_final" == 'yes' ]] && echo true || echo false)" \
     '{outcome: $outcome, mode: $mode, waited_sec: $waited_sec, polls: $polls,
       head_changes: $head_changes, exit_code: $exit_code,
+      toolchain: $toolchain, evidence_complete: $evidence_complete,
+      deadline_sec: $deadline_sec, interval_sec: $interval_sec,
       mergeable: ($merge.mergeable // "UNKNOWN"),
       merge_state_status: ($merge.mergeStateStatus // "UNKNOWN"),
       summary: $summary}'
@@ -248,6 +356,7 @@ printf 'gate: %s | outcome: %s | waited %dm%02ds over %d poll(s)\n' \
 [[ "$HEAD_CHANGES" -gt 0 ]] && printf 'note: head moved %d time(s) during the wait\n' "$HEAD_CHANGES"
 printf 'checks: %s passed, %s failed, %s pending\n' "$passed_n" "$failed_n" "$pending_n"
 printf 'merge: %s / %s\n' "$mergeable" "$merge_status"
+printf 'toolchain: %s\n' "$TOOLCHAIN"
 
 if [[ "$failed_n" -gt 0 ]]; then
   printf '\nFAILED CHECKS:\n'
@@ -267,10 +376,24 @@ fi
 
 [[ "$comments_n" -gt 0 ]] && printf '\nACTIONABLE ISSUE COMMENTS: %s\n' "$comments_n"
 
+if [[ "$changes_req_n" -gt 0 || "$blocked_rev_n" -gt 0 ]]; then
+  printf '\nBLOCKING REVIEWS: %s active changes requested, %s blocked at this head\n' \
+    "$changes_req_n" "$blocked_rev_n"
+  jq -r '.review_evidence.blocked_exact_current_head_reviews // [] | .[]
+         | "  \(.author)  \(.verdict // .state // "?")"' <<<"$SUMMARY_JSON" 2>/dev/null || true
+fi
+
+if [[ "$evidence_errors_n" -gt 0 || "$threads_known_final" == 'no' ]]; then
+  printf '\nINCOMPLETE EVIDENCE: %s\n' "${error_sources:-unresolved review thread count is null}"
+fi
+
 printf '\nNEXT: '
 case "$OUTCOME" in
   blocked-pr-state) printf 'PR is %s. Do not push a stale head.\n' "$pr_state" ;;
   blocked-approval) printf 'workflow approval required; CI cannot complete unattended.\n' ;;
+  blocked-evidence)
+    printf 'checks finished but review evidence is incomplete (%s). Treat as unknown, not clean.\n' \
+      "${error_sources:-null unresolved thread count}" ;;
   deadline) printf 'deadline hit with %s check(s) pending. Re-run or raise --deadline-min.\n' "$pending_n" ;;
   *)
     if [[ "$conflicted" -eq 1 ]]; then
