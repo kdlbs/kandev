@@ -135,6 +135,13 @@ type Service struct {
 	exportWorkflowStepLookup    ExportWorkflowStepLookup
 	exportRepositoryLookup      ExportRepositoryLookup
 
+	// exportWorkspaceLookup answers AC-44 step 2's workspace-existence check.
+	// Nil is a construction error, not "skip enforcement": the endpoint
+	// cannot honour AC-35 without it, so collectExportAutomations fails
+	// closed with ErrExportWorkspaceLookupUnavailable rather than falling
+	// through to a 200 for a workspace that may never have existed.
+	exportWorkspaceLookup ExportWorkspaceLookup
+
 	// runLocks serializes run creation (RecordRun, the concurrency-cap skip
 	// insert) against DeleteAllRuns per automation ID. Without this, a run
 	// created between DeleteAllRuns' task-id snapshot and its final row
@@ -285,6 +292,12 @@ func (s *Service) SetExportWorkflowStepLookup(l ExportWorkflowStepLookup) {
 // uses to resolve repository_ids to names.
 func (s *Service) SetExportRepositoryLookup(l ExportRepositoryLookup) {
 	s.exportRepositoryLookup = l
+}
+
+// SetExportWorkspaceLookup wires the workspace-existence check the YAML
+// export uses for AC-44 step 2.
+func (s *Service) SetExportWorkspaceLookup(l ExportWorkspaceLookup) {
+	s.exportWorkspaceLookup = l
 }
 
 func (s *Service) authorizeWs(ctx context.Context, workspaceID string) error {
