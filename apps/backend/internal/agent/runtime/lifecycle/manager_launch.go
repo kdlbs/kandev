@@ -1205,6 +1205,17 @@ func (m *Manager) publishLaunchPrepareCompleted(req *LaunchRequest, result *EnvP
 	m.eventPublisher.PublishPrepareCompleted(req.SessionID, payload)
 }
 
+func gitMetadataProjectionForResumedWorktree(req *LaunchRequest, workspacePath string) ([]*worktree.GitMetadataProjection, error) {
+	if req == nil || !req.UseWorktree || req.RepositoryPath == "" || workspacePath == "" {
+		return nil, nil
+	}
+	projection, err := worktree.ResolveGitMetadataForRepository(workspacePath, req.RepositoryPath)
+	if err != nil {
+		return nil, errors.New(gitMetadataProjectionInvalid)
+	}
+	return []*worktree.GitMetadataProjection{projection}, nil
+}
+
 // Launch launches a new agent for a task. Concurrent calls for the same
 // req.SessionID are collapsed via the same singleflight bucket used by
 // EnsureWorkspaceExecutionForSession and GetOrEnsureExecution — this closes
@@ -1450,6 +1461,13 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		// state; otherwise standalone receives the repository path (or an empty
 		// path) that was present before preparation completed.
 		reqWithWorktree.WorkspacePath = workspacePath
+	}
+	if req.ACPSessionID != "" && len(gitMetadata) == 0 {
+		gitMetadata, err = gitMetadataProjectionForResumedWorktree(&reqWithWorktree, workspacePath)
+		if err != nil {
+			m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
+			return nil, err
+		}
 	}
 
 	// 6b. Deploy per-profile skills + custom prompt (ADR 0005 Wave A).
