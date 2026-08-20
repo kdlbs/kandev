@@ -102,7 +102,9 @@ export function CoordinatorMonitorSection({
                 <Label
                   htmlFor={`monitor-${workflowId}-${step.id}`}
                   className="text-sm font-normal cursor-pointer"
-                />
+                >
+                  <span>{step.name}</span>
+                </Label>
               </div>
               {stepConfig.selected && (
                 <div className="ml-6">

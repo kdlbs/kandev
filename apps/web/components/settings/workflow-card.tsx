@@ -426,6 +426,7 @@ function useWorkflowCardState(props: WorkflowCardProps) {
     setSessionConfigResolutionPending,
     coordinatorMonitorConfig: coordinatorMonitor.draftConfig,
     setCoordinatorMonitorConfig: coordinatorMonitor.setDraftConfig,
+    coordinatorMonitorLoading: coordinatorMonitor.loading,
   };
 }
 
@@ -470,7 +471,7 @@ export function WorkflowCard(props: WorkflowCardProps) {
               steps={s.workflowSteps}
               config={s.coordinatorMonitorConfig}
               onChange={s.setCoordinatorMonitorConfig}
-              disabled={s.readOnly}
+              disabled={s.readOnly || s.coordinatorMonitorLoading}
             />
           )}
           <WorkflowCardHeaderActions

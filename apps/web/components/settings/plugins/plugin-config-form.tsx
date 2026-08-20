@@ -15,6 +15,7 @@ import type { PluginConfigField } from "@/lib/plugins/config-schema";
  * collide with it, and Radix rejects value="" items. */
 const ENUM_UNSET_SENTINEL = "__kandev_enum_unset__";
 const UTILITY_AGENT_UNSET_SENTINEL = "__kandev_utility_agent_unset__";
+const AGENT_PROFILE_UNSET_SENTINEL = "__kandev_agent_profile_unset__";
 
 type PluginConfigFormProps = {
   fields: PluginConfigField[];
@@ -358,5 +359,3 @@ function AgentProfileSelect({
     </Select>
   );
 }
-
-const AGENT_PROFILE_UNSET_SENTINEL = "__kandev_agent_profile_unset__";

@@ -213,20 +213,29 @@
           });
         }, []);
         var Chat = host.ui.WorkspaceAgentChat;
+        var pageStyle = {
+          display: "flex",
+          flexDirection: "column",
+          height: "calc(100dvh - 44px)",
+          minWidth: 0,
+        };
+        var tabStyle = { display: "flex", minHeight: 44, gap: 8, flexShrink: 0 };
+        var surfaceStyle = { minHeight: 0, flex: "1 1 0", display: "flex" };
+        var reportsStyle = { minHeight: 0, flex: "1 1 0", overflowY: "auto" };
         return jsx(
           "section",
-          { "data-testid": "fixture-coordinator-page", className: "flex min-h-[100dvh] min-w-0 flex-col" },
+          { "data-testid": "fixture-coordinator-page", style: pageStyle },
           jsx("h1", null, "Coordinator"),
           jsx(
             "div",
-            { className: "flex min-h-11 gap-2", role: "tablist" },
+            { role: "tablist", style: tabStyle },
             jsx("button", { type: "button", role: "tab", onClick: function () { setView("chat"); } }, "Chat"),
             jsx("button", { type: "button", role: "tab", "data-testid": "fixture-coordinator-reports", onClick: function () { setView("reports"); } }, "Reports"),
           ),
           view === "reports"
-            ? jsx("div", { "data-testid": "fixture-coordinator-reports-view", className: "min-h-0 flex-1 overflow-y-auto" }, "No reports yet")
+            ? jsx("div", { "data-testid": "fixture-coordinator-reports-view", style: reportsStyle }, "No reports yet")
             : session && session.session_id
-              ? jsx("div", { className: "min-h-0 flex-1" }, jsx(Chat, { workspaceId: session.workspace_id, conversationKey: session.conversation_key, sessionId: session.session_id, placeholderOverride: "Message Coordinator" }))
+              ? jsx("div", { style: surfaceStyle }, jsx(Chat, { workspaceId: session.workspace_id, conversationKey: session.conversation_key, sessionId: session.session_id, placeholderOverride: "Message Coordinator" }))
               : jsx("div", { "data-testid": "fixture-coordinator-loading" }, "Loading Coordinator"),
         );
       }
