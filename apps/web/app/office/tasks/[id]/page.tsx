@@ -4,6 +4,7 @@ import { use, useState, useEffect, useRef, useCallback, useMemo, Suspense } from
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
+import { useLatestOnly } from "@/hooks/use-latest-only";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
 import {
   getTask,
@@ -250,9 +251,19 @@ function useTaskOptimisticHelpers(
   // (priority / project / parent / blockers / participants / assignee).
   // The optimistic patch we applied locally gets reconciled with server
   // state.
+  //
+  // A WS-driven trigger can fire again before a prior GET resolves (two
+  // status changes in quick succession, ordinary network jitter). Without
+  // a guard, a slower earlier response can land after a faster later one
+  // and overwrite fresher task state with stale data. useLatestOnly
+  // discards a response once a newer refetchTask call has started,
+  // regardless of arrival order.
+  const { begin, isCurrent } = useLatestOnly();
   const refetchTask = useCallback(async () => {
+    const token = begin();
     try {
       const res = await getTask(id);
+      if (!isCurrent(token)) return;
       if (res.task) {
         setTask(mapOfficeTaskToTask(res.task));
         if (res.timeline) setTimeline(res.timeline);
@@ -260,7 +271,7 @@ function useTaskOptimisticHelpers(
     } catch {
       /* swallow — next user action will retry */
     }
-  }, [id, setTask, setTimeline]);
+  }, [id, setTask, setTimeline, begin, isCurrent]);
   useOfficeRefetch(`task:${id}`, () => {
     void refetchTask();
   });

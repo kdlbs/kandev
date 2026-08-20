@@ -144,6 +144,14 @@ type RetryCanceller interface {
 	CancelPendingRetriesForTask(ctx context.Context, taskID string) error
 }
 
+// RunResolver resolves the originating office run id for a task, used
+// to attribute the task_status_changed activity row back to the run
+// that produced the transition. Optional dependency — when nil, the
+// activity row is logged with an empty run_id. Mirrors channels.RunResolver.
+type RunResolver interface {
+	ResolveRunForTask(ctx context.Context, taskID string) string
+}
+
 // TaskCanceller hard-cancels a task's active execution. Used by the
 // reactivity pipeline when a task is moved to "cancelled" status.
 type TaskCanceller interface {
@@ -351,6 +359,7 @@ type DashboardService struct {
 	decisions        DecisionStore                   // workflow-domain decisions store (ADR 0005 Wave E); nil disables decision endpoints
 	routingProvider  RoutingProvider                 // optional; nil disables /routing endpoints (503)
 	attemptLister    RouteAttemptLister              // optional; nil disables attempt embedding on run-detail responses
+	runResolver      RunResolver                     // optional; nil means status-change activity rows have no run_id
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the
@@ -449,6 +458,13 @@ func (s *DashboardService) SetSettingsProvider(p SettingsProvider) {
 // SetRetryCanceller sets the service used to cancel pending retries when a task is reassigned.
 func (s *DashboardService) SetRetryCanceller(c RetryCanceller) {
 	s.retryCanceller = c
+}
+
+// SetRunResolver wires the seam used to attribute status-change activity
+// rows back to the office run that produced them. Optional; when unset,
+// rows are logged with an empty run_id.
+func (s *DashboardService) SetRunResolver(r RunResolver) {
+	s.runResolver = r
 }
 
 // SetTaskCanceller sets the canceller used to hard-cancel sessions when

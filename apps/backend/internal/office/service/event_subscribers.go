@@ -90,15 +90,6 @@ type ApprovalResolvedData struct {
 	Type                      string `json:"type"`
 }
 
-// TaskStatusChangedData represents the payload of an office.task.status_changed event.
-type TaskStatusChangedData struct {
-	TaskID       string `json:"task_id"`
-	WorkspaceID  string `json:"workspace_id"`
-	NewStatus    string `json:"new_status"`
-	Comment      string `json:"comment"`
-	ActorAgentID string `json:"actor_agent_id"`
-}
-
 // AgentLifecycleData is the subset of agent lifecycle event data needed by office.
 //
 // AgentID is populated by the lifecycle manager for taskless runs
@@ -219,7 +210,6 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 		{events.TaskMoved, s.handleTaskMoved},
 		{events.OfficeApprovalResolved, s.handleApprovalResolved},
 		{events.OfficeCommentCreated, s.handleCommentCreated},
-		{events.OfficeTaskStatusChanged, s.handleTaskStatusChanged},
 		{events.AgentCompleted, maybeAsync(s.handleAgentCompleted)},
 		// AgentStopped fires when StopAgent is called (e.g. office
 		// fire-and-forget turn-complete teardown). Same handler — both
@@ -994,33 +984,6 @@ func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string
 	}
 	return s.dispatchEngineTrigger(ctx, parentID, engine.TriggerOnChildrenCompleted,
 		engine.OnChildrenCompletedPayload{ChildSummaries: summaries}, key)
-}
-
-// handleTaskStatusChanged logs status-change activity. Stage progression
-// (Work → Review → Approval → Done) is owned by the workflow engine via
-// the on_exit / on_enter triggers fired by the orchestrator on
-// TaskMoved; the legacy ExecutionPolicy transition path was removed in
-// Phase 4 of task-model-unification.
-func (s *Service) handleTaskStatusChanged(ctx context.Context, event *bus.Event) error {
-	data, err := decodeEventData[TaskStatusChangedData](event)
-	if err != nil || data.TaskID == "" || data.NewStatus == "" {
-		return nil
-	}
-
-	fields, _ := s.repo.GetTaskExecutionFields(ctx, data.TaskID)
-	if fields != nil && fields.WorkspaceID != "" {
-		actorType := "system"
-		actorID := "office-scheduler"
-		if data.ActorAgentID != "" {
-			actorType = participantTypeAgent
-			actorID = data.ActorAgentID
-		}
-		runID := s.ResolveRunForTask(ctx, data.TaskID)
-		s.LogActivityWithRun(ctx, fields.WorkspaceID, actorType, actorID,
-			"task_status_changed", "task", data.TaskID,
-			fmt.Sprintf(`{"new_status":%q}`, data.NewStatus), runID, "")
-	}
-	return nil
 }
 
 // handleCommentCreated loads the comment and relays it to external channels.
