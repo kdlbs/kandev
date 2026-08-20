@@ -148,7 +148,7 @@ func (s *Store) migrateTaskMROptionsToMRScope() error {
 }
 
 func (s *Store) unmigratedMROptionRows() ([]legacyMROptionsRow, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.ro.Query(`
 		SELECT task_id, auto_fix_enabled, auto_merge_enabled, prompt_on_review_requested,
 			prompt_on_merged, prompt_on_closed
 		FROM gitlab_task_mr_options
