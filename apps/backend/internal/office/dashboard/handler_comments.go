@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/office/agents"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"go.uber.org/zap"
@@ -79,13 +80,28 @@ func (h *Handler) createComment(c *gin.Context) {
 	authorID := userSentinel
 	source := userSentinel
 	if authorType == activityActorTypeAgent {
-		resolvedID, err := h.svc.ResolveCommentAgentAuthor(c.Request.Context(), req.AuthorID)
+		taskID := c.Param("id")
+		caller := agents.CallerFromContext(c)
+		// req.AuthorID is never trusted as the identity to persist — see
+		// ResolveCommentAgentAuthor. It is only cross-checked here as a
+		// cheap diagnostic: a mismatch means the CLI's KANDEV_AGENT_ID
+		// disagrees with its own JWT, which should never happen and is
+		// worth rejecting loudly rather than silently using the JWT's
+		// (correct) identity.
+		if caller != nil && req.AuthorID != "" && req.AuthorID != caller.ID {
+			h.logger.Warn("reject agent comment with mismatched author",
+				zap.String("task_id", taskID),
+				zap.String("claimed_author_id", req.AuthorID),
+				zap.String("caller_id", caller.ID))
+			c.JSON(http.StatusForbidden, gin.H{"error": "author_id does not match the authenticated agent"})
+			return
+		}
+		resolvedID, err := h.svc.ResolveCommentAgentAuthor(c.Request.Context(), taskID, caller)
 		if err != nil {
-			h.logger.Warn("reject agent comment with unresolved author",
-				zap.String("task_id", c.Param("id")),
-				zap.String("author_id", req.AuthorID),
+			h.logger.Warn("reject agent comment with unauthorized author",
+				zap.String("task_id", taskID),
 				zap.Error(err))
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 			return
 		}
 		authorID = resolvedID
