@@ -1,4 +1,6 @@
 import { type Page, test as base } from "@playwright/test";
+import { execFileSync } from "node:child_process";
+import path from "node:path";
 import { backendFixture, type BackendContext } from "./backend";
 import {
   buildE2EImage,
@@ -8,6 +10,7 @@ import {
   waitForScopedKandevContainersRemoved,
 } from "./docker-probe";
 import { ApiClient } from "../helpers/api-client";
+import { makeGitEnv } from "../helpers/git-helper";
 import { startHTTPGitFixture } from "../helpers/http-git-server";
 import type { WorkflowStep } from "../../lib/types/http";
 
@@ -87,20 +90,21 @@ export const dockerTest = backendFixture.extend<
       // bind source. Use the bridge-reachable HTTP fixture and preserve the
       // canonical GitLab identity through the executor-local URL rewrite.
       const gitFixture = await startHTTPGitFixture(backend.tmpDir, "e2e-docker");
+      const repoDir = path.join(backend.tmpDir, "repos", "e2e-docker-repo");
+      execFileSync(
+        "git",
+        ["clone", path.join(backend.tmpDir, "fixture", "e2e-docker.git"), repoDir],
+        { env: makeGitEnv(backend.tmpDir) },
+      );
 
       try {
-        const repo = await apiClient.createRepository(
-          workspace.id,
-          gitFixture.checkoutPath,
-          "main",
-          {
-            name: "fixture/e2e-docker",
-            provider: "gitlab",
-            provider_host: "https://gitlab.com",
-            provider_owner: "fixture",
-            provider_name: "e2e-docker",
-          },
-        );
+        const repo = await apiClient.createRepository(workspace.id, repoDir, "main", {
+          name: "fixture/e2e-docker",
+          provider: "gitlab",
+          provider_host: "https://gitlab.com",
+          provider_owner: "fixture",
+          provider_name: "e2e-docker",
+        });
 
         const { agents } = await apiClient.listAgents();
         const mock = agents.find((a) => a.name === "mock-agent");
