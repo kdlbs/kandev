@@ -632,6 +632,64 @@ func TestHandleAnswerQuestion_Rejected(t *testing.T) {
 	}
 }
 
+// TestHandleAnswerQuestion_SecondCaller_RejectedWinner_ClaimedFalseSameOutcome
+// covers R2b's rejected branch of reconstructWinnerResolution, which was
+// otherwise untested: TestHandleAnswerQuestion_Rejected only exercises the
+// winner's own path, and TestHandleAnswerQuestion_SecondCaller_ClaimedFalseSameOutcome
+// only exercises replay of an answered winner. When the winner rejected the
+// bundle, a loser arriving after the claim was already lost -- even one that
+// submitted real answers of its own -- must be handed the winner's
+// reconstructed rejected outcome (Rejected: true, no answers), not its own
+// submission. Per reconstructWinnerResolution's own doc comment, reject_reason
+// does not survive replay (upstream stores no reject reason on the message
+// rows), so the loser's reconstructed reason is always "" even though the
+// winner's own claim response carried the real one -- this asymmetry is part
+// of R2b's contract, not a bug, so it is asserted explicitly rather than via
+// a blanket JSONEq of the two responses.
+func TestHandleAnswerQuestion_SecondCaller_RejectedWinner_ClaimedFalseSameOutcome(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	seedBundle(t, ctx, svc, repo, "pending-reject-2")
+
+	store := clarification.NewStore(time.Minute)
+	resolver := newTestResolver(t, store, repo, svc)
+	h := &Handlers{taskSvc: svc, clarificationResolver: resolver, clarificationBundles: repo, logger: testLogger(t)}
+
+	first, err := h.handleAnswerQuestion(ctx, makeWSMessage(t, ws.ActionMCPAnswerQuestion, map[string]interface{}{
+		"pending_id":    "pending-reject-2",
+		"rejected":      true,
+		"reject_reason": "not needed",
+	}))
+	require.NoError(t, err)
+	var firstBody answerQuestionResponse
+	require.NoError(t, json.Unmarshal(first.Payload, &firstBody))
+	require.True(t, firstBody.Claimed)
+	require.Equal(t, string(clarification.StatusRejected), firstBody.Status)
+
+	second, err := h.handleAnswerQuestion(ctx, makeWSMessage(t, ws.ActionMCPAnswerQuestion, map[string]interface{}{
+		"pending_id": "pending-reject-2",
+		"answers": []map[string]interface{}{
+			{"question_id": "q1", "selected_options": []string{"opt-a"}},
+			{"question_id": "q2", "selected_options": []string{"opt-c"}},
+		},
+	}))
+	require.NoError(t, err)
+	var secondBody answerQuestionResponse
+	require.NoError(t, json.Unmarshal(second.Payload, &secondBody))
+	require.False(t, secondBody.Claimed)
+	require.Equal(t, firstBody.Status, secondBody.Status)
+
+	var parsed struct {
+		Rejected     bool             `json:"rejected"`
+		RejectReason string           `json:"reject_reason"`
+		Answers      []map[string]any `json:"answers"`
+	}
+	require.NoError(t, json.Unmarshal(secondBody.Response, &parsed))
+	require.True(t, parsed.Rejected)
+	require.Empty(t, parsed.Answers)
+	require.Empty(t, parsed.RejectReason)
+}
+
 func TestHandleAnswerQuestion_UnknownPendingID_NotFound(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	store := clarification.NewStore(time.Minute)
