@@ -407,6 +407,33 @@ func TestUpdateAgent_RejectsModelKeyForOfficeAgent(t *testing.T) {
 	}
 }
 
+// TestUpdateAgent_RejectsOversizedBody pins the request-body size cap on
+// PATCH /agents/:id: a body larger than maxUpdateAgentBodyBytes must be
+// rejected with 413 before JSON decoding runs, not buffered unbounded into
+// memory.
+func TestUpdateAgent_RejectsOversizedBody(t *testing.T) {
+	svc, _ := newTestAgentService(t)
+	ctx := context.Background()
+	agent := &models.AgentInstance{WorkspaceID: "ws-1", Name: "Worker", Role: models.AgentRoleWorker}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	oversized := `{"name":"` + strings.Repeat("x", maxUpdateAgentBodyBytes+1) + `"}`
+	rec := newPatchAgentRecorder(t, svc, agent.ID, oversized)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body=%s", rec.Code, rec.Body.String())
+	}
+
+	stored, err := svc.GetAgentFromConfig(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if stored.Name != "Worker" {
+		t.Errorf("name changed despite 413: %q", stored.Name)
+	}
+}
+
 // AC-14c (AC-40 test #4): the model-key rejection uses the same structured
 // ValidationError shape (field + details) as applyRoutingOverride, not the
 // bare {"error": "..."} shape the pre-existing agent_profile_id rejection

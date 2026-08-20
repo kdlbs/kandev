@@ -21,6 +21,12 @@ const (
 	ctxKeyAgentCaller = "agent_caller"
 )
 
+// maxUpdateAgentBodyBytes bounds the update-agent request body via
+// http.MaxBytesReader, writing the 413 response below when exceeded.
+// UpdateAgentRequest carries only short scalar fields plus a routing
+// override blob, so this is generous relative to any legitimate payload.
+const maxUpdateAgentBodyBytes = 64 * 1024
+
 // Handler provides HTTP handlers for agent routes.
 type Handler struct {
 	svc    *AgentService
@@ -198,8 +204,14 @@ func (h *Handler) updateAgent(c *gin.Context) {
 	// ShouldBindJSON reads and discards the body in one step, so it
 	// cannot be used for both — this is why the body is read directly
 	// here instead.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUpdateAgentBodyBytes)
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
