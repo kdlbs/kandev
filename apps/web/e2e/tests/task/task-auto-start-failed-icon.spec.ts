@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
+import { watchWs } from "../../helpers/causal-waits";
 
 // Auto-start-failed indicator: when a workflow step's `auto_start_agent`
 // on_enter action cannot launch a run (for example an Office task moved into
@@ -82,5 +83,54 @@ test.describe("Kanban card — auto-start-failed icon", () => {
     await expect(
       kanban.taskCardByTitle("Plain Fixture").getByTestId("task-state-auto-start-failed"),
     ).toHaveCount(0);
+  });
+
+  // Every other case in this file seeds `auto_start_failed` before the page
+  // ever loads, so it only ever exercises the HTTP snapshot / boot-payload
+  // producer. That left the WS producer (task.updated -> kanban.update store
+  // merge) unverified: it hand-builds its payload separately and had silently
+  // dropped the field, so a failure that happened while the board was already
+  // open never showed the badge until a reload. This test sets and clears the
+  // marker via a live PATCH while the board stays open, so only the WS path
+  // can make it pass.
+  test("shows and hides the auto-start-failed icon over a live WS update, without a reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const task = await apiClient.createTask(seedData.workspaceId, "Live WS Auto Start Fixture", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    await apiClient.updateTaskState(task.id, "IN_PROGRESS");
+
+    const kanban = new KanbanPage(testPage);
+    const ws = watchWs(testPage);
+    await kanban.goto();
+
+    const card = kanban.taskCardByTitle("Live WS Auto Start Fixture");
+    await expect(card).toBeVisible({ timeout: 20_000 });
+    await expect(card.getByTestId("task-state-auto-start-failed")).toHaveCount(0);
+
+    const markerSet = ws.waitForEvent("task.updated", {
+      where: (payload) => payload.task_id === task.id && payload.auto_start_failed === true,
+    });
+    await apiClient.updateTaskMetadata(task.id, { auto_start_failed: "true" });
+    await markerSet;
+
+    await expect(card.getByTestId("task-state-auto-start-failed")).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const markerCleared = ws.waitForEvent("task.updated", {
+      where: (payload) => payload.task_id === task.id && payload.auto_start_failed === false,
+    });
+    await apiClient.updateTaskMetadata(task.id, {});
+    await markerCleared;
+
+    await expect(card.getByTestId("task-state-auto-start-failed")).toHaveCount(0);
   });
 });

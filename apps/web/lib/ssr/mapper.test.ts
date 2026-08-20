@@ -47,6 +47,7 @@ function snapshotWithPendingAction(action: unknown): WorkflowSnapshot {
   };
 }
 
+// eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
 describe("snapshotToState", () => {
   it("keeps known primary session pending action values", () => {
     const state = snapshotToState(snapshotWithPendingAction("permission"));
@@ -84,6 +85,22 @@ describe("snapshotToState", () => {
 
     expect(state.kanban?.tasks[0]?.activeSubagentCount).toBe(expected);
   });
+
+  it.each([
+    [true, true],
+    [false, false],
+    [undefined, false],
+  ])(
+    "maps auto_start_failed %s so a page reload does not hide or resurrect the badge",
+    (wireValue, expected) => {
+      const snapshot = snapshotWithPendingAction(undefined);
+      snapshot.tasks[0].auto_start_failed = wireValue;
+
+      const state = snapshotToState(snapshot);
+
+      expect(state.kanban?.tasks[0]?.autoStartFailed).toBe(expected);
+    },
+  );
 
   it("hydrates the task status summary into the initial kanban state", () => {
     const snapshot = snapshotWithPendingAction(undefined);

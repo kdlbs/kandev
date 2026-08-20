@@ -385,6 +385,12 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		// Consumers that restore quick-chat tabs filter on origin, so it has to
 		// travel with the event and not just the HTTP DTO.
 		"origin": task.Origin,
+		// Sent as an explicit true/false (never omitted) so a clear reaches
+		// open clients too: preserveOmittedField on the frontend only pins the
+		// previous value when the key is absent from the payload, and an
+		// omitted key here would make clearTaskAutoStartFailedMarker's publish
+		// as invisible as the set it is meant to undo.
+		"auto_start_failed": task.Metadata[models.MetaKeyAutoStartFailed] != nil,
 	}
 	data["queued_for_step_id"] = task.QueuedForStepID
 	if task.QueuedAt != nil {
