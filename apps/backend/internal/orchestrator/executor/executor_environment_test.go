@@ -729,7 +729,7 @@ func TestApplyRepositoryConfig_DockerUsesRepositoryPathWhenCloneURLIsUnavailable
 	}
 }
 
-func TestApplyRepositoryConfig_DockerUsesAbsoluteRepositoryPathFallbackWhenBackendCannotStatIt(t *testing.T) {
+func TestApplyRepositoryConfig_DockerRejectsMissingRepositoryPathFallback(t *testing.T) {
 	e := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
 	req := &LaunchAgentRequest{TaskID: "task-1"}
 	task := &v1.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "Some task"}
@@ -741,12 +741,8 @@ func TestApplyRepositoryConfig_DockerUsesAbsoluteRepositoryPathFallbackWhenBacke
 	}
 	execCfg := executorConfig{ExecutorID: "docker", ExecutorType: string(models.ExecutorTypeLocalDocker)}
 
-	metadata, err := e.applyRepositoryConfig(req, task, info, execCfg, nil)
-	if err != nil {
-		t.Fatalf("applyRepositoryConfig: %v", err)
-	}
-	if req.RepositoryURL != source || metadata["repository_clone_url"] != source {
-		t.Fatalf("Docker clone source = %q / %#v, want Docker-host repository path", req.RepositoryURL, metadata)
+	if _, err := e.applyRepositoryConfig(req, task, info, execCfg, nil); !errors.Is(err, ErrNoCloneURL) {
+		t.Fatalf("applyRepositoryConfig error = %v, want ErrNoCloneURL", err)
 	}
 }
 
