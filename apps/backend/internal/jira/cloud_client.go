@@ -150,24 +150,33 @@ func (c *CloudClient) do(ctx context.Context, method, path string, body interfac
 	if err == nil {
 		return nil
 	}
-	// Auto-refresh on 401 for OAuth: refresh the token and retry once.
-	if c.authMethod == AuthMethodOAuth && c.refresher != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusUnauthorized {
-			if refreshErr := c.refresher.RefreshOAuthToken(ctx, c.workspaceID); refreshErr != nil {
-				return fmt.Errorf("oauth token refresh failed: %w; original error: %v", refreshErr, err)
-			}
-			newToken, revealErr := c.refresher.RevealAccessToken(ctx, c.workspaceID)
-			if revealErr != nil {
-				return fmt.Errorf("reveal refreshed token: %w; original error: %v", revealErr, err)
-			}
-			c.secretMu.Lock()
-			c.secret = newToken
-			c.secretMu.Unlock()
-			return c.doOnce(ctx, method, path, body, out)
-		}
+	if c.tryRefreshOn401(ctx, err) {
+		return c.doOnce(ctx, method, path, body, out)
 	}
 	return err
+}
+
+// tryRefreshOn401 checks if the error is a 401 and refreshes the OAuth token.
+// Returns true if the token was refreshed and the caller should retry.
+func (c *CloudClient) tryRefreshOn401(ctx context.Context, err error) bool {
+	if c.authMethod != AuthMethodOAuth || c.refresher == nil {
+		return false
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusUnauthorized {
+		return false
+	}
+	if refreshErr := c.refresher.RefreshOAuthToken(ctx, c.workspaceID); refreshErr != nil {
+		return false
+	}
+	newToken, revealErr := c.refresher.RevealAccessToken(ctx, c.workspaceID)
+	if revealErr != nil {
+		return false
+	}
+	c.secretMu.Lock()
+	c.secret = newToken
+	c.secretMu.Unlock()
+	return true
 }
 
 // doOnce executes a single request attempt without retry logic.

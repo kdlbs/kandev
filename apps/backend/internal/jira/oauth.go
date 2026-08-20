@@ -343,7 +343,19 @@ func postMCPTokenRequest(body string) (*mcpTokenResponse, error) {
 // resolve the cloudId. The MCP OAuth token doesn't work for direct
 // api.atlassian.com calls, but it works through the MCP server.
 func resolveCloudIDViaMCP(accessToken, siteURL string) (string, error) {
-	// Initialize MCP session
+	sessionID, err := mcpInitSession(accessToken)
+	if err != nil {
+		return "", err
+	}
+	result, err := mcpCallTool(accessToken, sessionID, "getAccessibleAtlassianResources", map[string]interface{}{})
+	if err != nil {
+		return "", err
+	}
+	return matchAccessibleResource(result, siteURL)
+}
+
+// mcpInitSession creates a one-off MCP session for the resolveCloudIDViaMCP flow.
+func mcpInitSession(accessToken string) (string, error) {
 	initReq, _ := json.Marshal(mcpRequest{
 		JSONRPC: "2.0",
 		Method:  "initialize",
@@ -358,10 +370,7 @@ func resolveCloudIDViaMCP(accessToken, siteURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set("MCP-Protocol-Version", mcpProtocol)
+	setMCPHeaders(req, accessToken, "")
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -372,37 +381,38 @@ func resolveCloudIDViaMCP(accessToken, siteURL string) (string, error) {
 	if sessionID == "" {
 		return "", errors.New("MCP initialize: no session ID")
 	}
+	return sessionID, nil
+}
 
-	// Call getAccessibleAtlassianResources
+// mcpCallTool sends a tools/call request to the MCP server and returns the
+// text content of the first result.
+func mcpCallTool(accessToken, sessionID, toolName string, args map[string]interface{}) (string, error) {
 	callReq, _ := json.Marshal(mcpRequest{
 		JSONRPC: "2.0",
 		Method:  "tools/call",
 		Params: map[string]interface{}{
-			"name":      "getAccessibleAtlassianResources",
-			"arguments": map[string]interface{}{},
+			"name":      toolName,
+			"arguments": args,
 		},
 		ID: nextMCPID(),
 	})
-	req2, err := http.NewRequest("POST", mcpEndpoint, bytes.NewReader(callReq))
+	req, err := http.NewRequest("POST", mcpEndpoint, bytes.NewReader(callReq))
 	if err != nil {
 		return "", err
 	}
-	req2.Header.Set("Authorization", "Bearer "+accessToken)
-	req2.Header.Set("Content-Type", "application/json")
-	req2.Header.Set("Accept", "application/json, text/event-stream")
-	req2.Header.Set("MCP-Protocol-Version", mcpProtocol)
-	req2.Header.Set("Mcp-Session-Id", sessionID)
-	resp2, err := client.Do(req2)
+	setMCPHeaders(req, accessToken, sessionID)
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = resp2.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(resp2.Body, 1<<20))
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return "", err
 	}
-	if resp2.StatusCode < 200 || resp2.StatusCode >= 300 {
-		return "", fmt.Errorf("MCP getAccessibleAtlassianResources: %d: %s", resp2.StatusCode, string(raw))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("MCP %s: %d: %s", toolName, resp.StatusCode, string(raw))
 	}
 	data := parseSSE(raw)
 	if data == "" {
@@ -418,8 +428,24 @@ func resolveCloudIDViaMCP(accessToken, siteURL string) (string, error) {
 	if len(mcpr.Result.Content) == 0 {
 		return "", errors.New("MCP returned no content")
 	}
+	return mcpr.Result.Content[0].Text, nil
+}
+
+// setMCPHeaders sets the standard MCP HTTP headers on a request.
+func setMCPHeaders(req *http.Request, accessToken, sessionID string) {
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("MCP-Protocol-Version", mcpProtocol)
+	if sessionID != "" {
+		req.Header.Set("Mcp-Session-Id", sessionID)
+	}
+}
+
+// matchAccessibleResource parses accessible-resources JSON and matches by URL.
+func matchAccessibleResource(raw, siteURL string) (string, error) {
 	var resources []accessibleResource
-	if err := json.Unmarshal([]byte(mcpr.Result.Content[0].Text), &resources); err != nil {
+	if err := json.Unmarshal([]byte(raw), &resources); err != nil {
 		return "", fmt.Errorf("decode accessible-resources: %w", err)
 	}
 	normalized := strings.TrimRight(siteURL, "/")
@@ -434,46 +460,8 @@ func resolveCloudIDViaMCP(accessToken, siteURL string) (string, error) {
 	return "", fmt.Errorf("site URL %q not found in accessible resources", siteURL)
 }
 
-// resolveCloudID calls the accessible-resources endpoint directly. Only works
-// with traditional OAuth 3LO tokens, not MCP tokens.
-func resolveCloudID(accessToken, siteURL string) (string, error) {
-	req, err := http.NewRequest("GET", "https://api.atlassian.com/oauth/token/accessible-resources", nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Accept", "application/json")
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("accessible-resources returned %d: %s", resp.StatusCode, string(raw))
-	}
-	var resources []accessibleResource
-	if err := json.Unmarshal(raw, &resources); err != nil {
-		return "", fmt.Errorf("decode accessible-resources: %w", err)
-	}
-	normalized := strings.TrimRight(siteURL, "/")
-	if normalized != "" && !strings.Contains(normalized, "://") {
-		normalized = "https://" + normalized
-	}
-	for _, r := range resources {
-		if strings.TrimRight(r.URL, "/") == normalized {
-			return r.ID, nil
-		}
-	}
-	if len(resources) > 0 {
-		return resources[0].ID, nil
-	}
-	return "", errors.New("no accessible resources found")
-}
+// (resolveCloudID removed — the MCP OAuth token doesn't work for direct
+// api.atlassian.com calls, so resolveCloudIDViaMCP is used instead.)
 
 // accessibleResource is one entry from the accessible-resources response.
 type accessibleResource struct {

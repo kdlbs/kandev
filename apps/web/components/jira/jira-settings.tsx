@@ -714,26 +714,31 @@ function savedSecretMatches(config: JiraConfig | null, form: FormState): boolean
   return (config.email ?? "").toLowerCase() === form.email.toLowerCase();
 }
 
+// Compute derived form state for the Jira settings section.
+function useJiraFormState(config: JiraConfig | null, form: FormState, loading: boolean) {
+  const { t } = useTranslation();
+  const baseline = configToForm(config);
+  const savedSecretMatchesMode = savedSecretMatches(config, form);
+  const isOAuth = form.authMethod === "oauth";
+  const missingSecret = !isOAuth && !savedSecretMatchesMode && !form.secret;
+  const oauthNeedsConnect = isOAuth && !config?.hasSecret;
+  const emailRequired = form.instanceType === "cloud" && form.authMethod === "api_token";
+  const disableSave = !form.siteUrl || (emailRequired && !form.email) || missingSecret;
+  const disableTest = missingSecret || oauthNeedsConnect;
+  const revision = JSON.stringify(form);
+  const dirty = !loading && revision !== JSON.stringify(configToForm(config));
+  let invalidReason: string | undefined;
+  if (!form.siteUrl) invalidReason = t("jira:aJiraSiteUrlIsRequired");
+  else if (emailRequired && !form.email) invalidReason = t("jira:anEmailAddressIsRequired");
+  else if (missingSecret) invalidReason = t("jira:aCredentialIsRequired");
+  return { baseline, isOAuth, disableSave, disableTest, revision, dirty, invalidReason };
+}
+
 export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
   const s = useJiraSettings(workspaceId);
-  const baseline = configToForm(s.config);
-  const savedSecretMatchesMode = savedSecretMatches(s.config, s.form);
-  const isOAuth = s.form.authMethod === "oauth";
-  const missingSecret = !isOAuth && !savedSecretMatchesMode && !s.form.secret;
-  const oauthNeedsConnect = isOAuth && !s.config?.hasSecret;
-
-  const disableSave =
-    s.saving || !s.form.siteUrl || (emailRequired && !s.form.email) || missingSecret;
-  const disableTest = missingSecret || oauthNeedsConnect;
-  const revision = JSON.stringify(s.form);
-  const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
-  // Assigned rather than returned from a helper, but the guard would not see it
-  // either way — `invalidReason` is a plain string, never a JSX literal.
-  let invalidReason: string | undefined;
-  if (!s.form.siteUrl) invalidReason = t("jira:aJiraSiteUrlIsRequired");
-  else if (emailRequired && !s.form.email) invalidReason = t("jira:anEmailAddressIsRequired");
-  else if (missingSecret) invalidReason = t("jira:aCredentialIsRequired");
+  const { baseline, isOAuth, disableSave, disableTest, revision, dirty, invalidReason } =
+    useJiraFormState(s.config, s.form, s.loading);
 
   useSettingsSaveContributor({
     id: `jira-config:${workspaceId}`,

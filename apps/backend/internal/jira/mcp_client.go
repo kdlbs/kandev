@@ -100,25 +100,35 @@ func (c *MCPClient) call(ctx context.Context, method string, params interface{})
 	if err == nil {
 		return result, nil
 	}
-	if c.refresher != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.StatusCode == 401 {
-			if refreshErr := c.refresher.RefreshOAuthToken(ctx, c.workspaceID); refreshErr != nil {
-				return "", fmt.Errorf("oauth token refresh failed: %w; original: %v", refreshErr, err)
-			}
-			newToken, revealErr := c.refresher.RevealAccessToken(ctx, c.workspaceID)
-			if revealErr != nil {
-				return "", fmt.Errorf("reveal refreshed token: %w; original: %v", revealErr, err)
-			}
-			c.setToken(newToken)
-			c.sessionMu.Lock()
-			c.sessionID = ""
-			c.initialized = false
-			c.sessionMu.Unlock()
-			return c.callOnce(ctx, method, params)
-		}
+	if c.tryRefreshOn401(ctx, err) {
+		return c.callOnce(ctx, method, params)
 	}
 	return "", err
+}
+
+// tryRefreshOn401 refreshes the OAuth token on 401 and resets the session.
+// Returns true if the caller should retry.
+func (c *MCPClient) tryRefreshOn401(ctx context.Context, err error) bool {
+	if c.refresher == nil {
+		return false
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 401 {
+		return false
+	}
+	if refreshErr := c.refresher.RefreshOAuthToken(ctx, c.workspaceID); refreshErr != nil {
+		return false
+	}
+	newToken, revealErr := c.refresher.RevealAccessToken(ctx, c.workspaceID)
+	if revealErr != nil {
+		return false
+	}
+	c.setToken(newToken)
+	c.sessionMu.Lock()
+	c.sessionID = ""
+	c.initialized = false
+	c.sessionMu.Unlock()
+	return true
 }
 
 func (c *MCPClient) callOnce(ctx context.Context, method string, params interface{}) (string, error) {
