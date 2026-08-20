@@ -724,13 +724,42 @@ func (r *Repository) GetCheckoutAgentBySession(ctx context.Context, sessionID st
 	return agentID, nil
 }
 
-// CheckoutTask atomically acquires an exclusive lock on a task for an agent.
-// Returns true if the lock was acquired, false if another agent holds it.
+// CheckoutTask atomically acquires a legacy task lock for an agent.
+// New scheduler launches must use CheckoutTaskForRun so the lock records the
+// exact run that owns it. This compatibility method keeps older callers and
+// migrated rows working without erasing a run-scoped lock.
 func (r *Repository) CheckoutTask(ctx context.Context, taskID, agentID string) (bool, error) {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET checkout_agent_id = ?, checkout_at = datetime('now')
-		WHERE id = ? AND (checkout_agent_id IS NULL OR checkout_agent_id = '' OR checkout_agent_id = ?)
+		UPDATE tasks SET checkout_agent_id = ?, checkout_at = datetime('now'), checkout_run_id = NULL
+		WHERE id = ? AND (
+			checkout_agent_id IS NULL OR checkout_agent_id = '' OR
+			(checkout_agent_id = ? AND (checkout_run_id IS NULL OR checkout_run_id = ''))
+		)
 	`), agentID, taskID, agentID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+// CheckoutTaskForRun atomically acquires an exclusive task lock for a run.
+// A run can renew its own lock, but another run, including one for the same
+// agent, cannot replace the recorded owner.
+func (r *Repository) CheckoutTaskForRun(ctx context.Context, taskID, agentID, runID string) (bool, error) {
+	if runID == "" {
+		return r.CheckoutTask(ctx, taskID, agentID)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET checkout_agent_id = ?, checkout_at = datetime('now'), checkout_run_id = ?
+		WHERE id = ? AND (
+			checkout_agent_id IS NULL OR checkout_agent_id = '' OR
+			(checkout_agent_id = ? AND (checkout_run_id IS NULL OR checkout_run_id = '' OR checkout_run_id = ?))
+		)
+	`), agentID, runID, taskID, agentID, runID)
 	if err != nil {
 		return false, err
 	}
@@ -744,7 +773,7 @@ func (r *Repository) CheckoutTask(ctx context.Context, taskID, agentID string) (
 // ReleaseTaskCheckout releases the exclusive lock on a task.
 func (r *Repository) ReleaseTaskCheckout(ctx context.Context, taskID string) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL WHERE id = ?
+		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL, checkout_run_id = NULL WHERE id = ?
 	`), taskID)
 	return err
 }
@@ -756,13 +785,28 @@ func (r *Repository) ReleaseTaskCheckout(ctx context.Context, taskID string) err
 // checkout out from under them.
 func (r *Repository) ReleaseTaskCheckoutForAgent(ctx context.Context, taskID, agentID string) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL
+		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL, checkout_run_id = NULL
 		WHERE id = ? AND checkout_agent_id = ?
 	`), taskID, agentID)
 	return err
 }
 
-// ReapStaleCheckouts clears checkout_agent_id/checkout_at on tasks whose
+// ReleaseTaskCheckoutForRun releases a task lock only when the run still
+// owns it. The empty-owner fallback is for rows created before
+// checkout_run_id was introduced; all new scheduler rows carry a run ID.
+func (r *Repository) ReleaseTaskCheckoutForRun(ctx context.Context, taskID, agentID, runID string) error {
+	if runID == "" {
+		return r.ReleaseTaskCheckoutForAgent(ctx, taskID, agentID)
+	}
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL, checkout_run_id = NULL
+		WHERE id = ? AND checkout_agent_id = ?
+		  AND (checkout_run_id = ? OR checkout_run_id IS NULL OR checkout_run_id = '')
+	`), taskID, agentID, runID)
+	return err
+}
+
+// ReapStaleCheckouts clears checkout_agent_id/checkout_at/checkout_run_id on tasks whose
 // checkout is older than olderThan and that have no queued or claimed run
 // *belonging to the checkout holder* in flight. This is a backstop for
 // callers that fail to release the checkout on a terminal run transition
@@ -785,16 +829,22 @@ func (r *Repository) ReleaseTaskCheckoutForAgent(ctx context.Context, taskID, ag
 // still-executing holder.
 func (r *Repository) ReapStaleCheckouts(ctx context.Context, olderThan time.Time) (int64, error) {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL
+		UPDATE tasks SET checkout_agent_id = NULL, checkout_at = NULL, checkout_run_id = NULL
 		WHERE checkout_agent_id IS NOT NULL
 		  AND checkout_agent_id != ''
 		  AND checkout_at IS NOT NULL
 		  AND checkout_at < ?
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w
-		      WHERE json_extract(w.payload, '$.task_id') = tasks.id
-		        AND w.agent_profile_id = tasks.checkout_agent_id
-		        AND w.status IN ('queued', 'claimed')
+		      WHERE (
+					(tasks.checkout_run_id IS NOT NULL AND tasks.checkout_run_id != ''
+					 AND w.id = tasks.checkout_run_id)
+					OR (COALESCE(tasks.checkout_run_id, '') = ''
+					 AND json_extract(w.payload, '$.task_id') = tasks.id)
+				  )
+				AND w.agent_profile_id = tasks.checkout_agent_id
+				AND json_extract(w.payload, '$.task_id') = tasks.id
+				AND w.status IN ('queued', 'claimed')
 		  )
 	`), olderThan)
 	if err != nil {

@@ -248,3 +248,85 @@ func TestSchedulerTick_AgentFailedForNonLatestClaimReleasesTheFailingAgentsOwnRu
 		t.Fatalf("run-failed-a status = %q, want claimed (untouched - it never failed)", runA.Status)
 	}
 }
+
+// TestSchedulerTick_StaleLifecycleEventDoesNotFinishSuccessorRun pins the
+// immutable run identity carried by lifecycle events. When a predecessor
+// execution is stopped while a successor is already claimed, the predecessor
+// event can arrive after the successor claim. Resolving only by task and agent
+// would finish and release the successor instead of the run that emitted the
+// event.
+func TestSchedulerTick_StaleLifecycleEventDoesNotFinishSuccessorRun(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	svc.SetSyncHandlers(true)
+	ctx := context.Background()
+	eb := bus.NewMemoryEventBus(logger.Default())
+	if err := svc.RegisterEventSubscribers(eb); err != nil {
+		t.Fatalf("register subscribers: %v", err)
+	}
+
+	agent := &models.AgentInstance{
+		ID:          "agent-lifecycle-race",
+		WorkspaceID: "ws-1",
+		Name:        "lifecycle-race",
+		Role:        models.AgentRoleWorker,
+		Status:      models.AgentStatusIdle,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES ('task-lifecycle-race', 'ws-1', 'Lifecycle Race Task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+
+	base := time.Now().UTC().Add(-time.Hour)
+	svc.ExecSQL(t, `
+		INSERT INTO runs (
+			id, agent_profile_id, reason, payload, status, coalesced_count,
+			context_snapshot, requested_at, claimed_at
+		) VALUES (
+			'run-lifecycle-predecessor', ?, 'task_assigned', '{"task_id":"task-lifecycle-race"}',
+			'claimed', 1, '{}', ?, ?
+		)`, agent.ID, base, base)
+	svc.ExecSQL(t, `
+		INSERT INTO runs (
+			id, agent_profile_id, reason, payload, status, coalesced_count,
+			context_snapshot, requested_at, claimed_at
+		) VALUES (
+			'run-lifecycle-successor', ?, 'task_assigned', '{"task_id":"task-lifecycle-race"}',
+			'claimed', 1, '{}', ?, ?
+		)`, agent.ID, base, base.Add(time.Minute))
+	if ok, err := svc.CheckoutTaskForRun(ctx, "task-lifecycle-race", agent.ID, "run-lifecycle-successor"); err != nil || !ok {
+		t.Fatalf("seed successor checkout: ok=%v err=%v", ok, err)
+	}
+
+	event := bus.NewEvent(events.AgentStopped, "test", map[string]string{
+		"task_id":          "task-lifecycle-race",
+		"session_id":       "session-predecessor",
+		"agent_profile_id": agent.ID,
+		"run_id":           "run-lifecycle-predecessor",
+	})
+	if err := eb.Publish(ctx, events.AgentStopped, event); err != nil {
+		t.Fatalf("publish stale agent stopped: %v", err)
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	byID := make(map[string]models.Run, len(runs))
+	for _, run := range runs {
+		byID[run.ID] = *run
+	}
+	if got := byID["run-lifecycle-predecessor"].Status; got != service.RunStatusFinished {
+		t.Fatalf("predecessor status = %q, want finished", got)
+	}
+	if got := byID["run-lifecycle-successor"].Status; got != service.RunStatusClaimed {
+		t.Fatalf("successor status = %q, want claimed", got)
+	}
+	if ok, err := svc.CheckoutTask(ctx, "task-lifecycle-race", "agent-third"); err != nil {
+		t.Fatalf("successor checkout probe: %v", err)
+	} else if ok {
+		t.Fatal("stale predecessor event released the successor checkout")
+	}
+}

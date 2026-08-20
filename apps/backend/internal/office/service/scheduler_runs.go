@@ -88,19 +88,12 @@ func (s *Service) transitionRunTerminal(ctx context.Context, id, status string) 
 // finishRun/checkBudget call sites (releaseCheckoutIfNeeded): idempotent,
 // owner-scoped SET NULL.
 //
-// Owner-scoped by run.AgentProfileID, not just task ID: a run that never
+// Owner-scoped by run ID and run.AgentProfileID: a run that never
 // held the checkout (the loser of a checkout-contention race escalating via
 // escalateFailure, or a run for an agent that turned out to be
 // inactive/idle and never reached the checkout attempt in processRun) must
 // not clear a different, currently-active agent's lock out from under it —
 // that inverted the invariant this whole release path exists to protect.
-//
-// This only guards the CROSS-agent case. checkout_agent_id has no run-ID
-// component, so it cannot tell apart two runs of the SAME agent on the
-// same task: a second, pre-checkout run for that agent finishing or
-// failing can still release a first run's live checkout out from under
-// it. Closing that gap needs the checkout to carry its owning run's ID,
-// which is a schema change (tracked as a known follow-up, not fixed here).
 func (s *Service) releaseTaskCheckoutForRun(ctx context.Context, run *models.Run) {
 	if run == nil {
 		return
@@ -109,7 +102,7 @@ func (s *Service) releaseTaskCheckoutForRun(ctx context.Context, run *models.Run
 	if taskID == "" {
 		return
 	}
-	if err := s.repo.ReleaseTaskCheckoutForAgent(ctx, taskID, run.AgentProfileID); err != nil {
+	if err := s.repo.ReleaseTaskCheckoutForRun(ctx, taskID, run.AgentProfileID, run.ID); err != nil {
 		s.logger.Error("failed to release task checkout on terminal transition",
 			zap.String("run_id", run.ID),
 			zap.String("task_id", taskID),

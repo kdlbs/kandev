@@ -119,11 +119,36 @@ type TaskStatusChangedData struct {
 // field, not AgentID (Review round 4, BLOCKING FINDING 2).
 type AgentLifecycleData struct {
 	TaskID         string                 `json:"task_id"`
+	RunID          string                 `json:"run_id"`
 	AgentID        string                 `json:"agent_id"`
 	AgentProfileID string                 `json:"agent_profile_id"`
 	SessionID      string                 `json:"session_id"`
 	ErrorMessage   string                 `json:"error_message"`
 	ProviderError  *streams.ProviderError `json:"provider_error,omitempty"`
+}
+
+// resolveLifecycleRun resolves the exact claimed run named by a lifecycle
+// event. The task-and-agent fallback keeps compatibility with older events
+// that predate run_id, while every current Office launch carries the exact
+// identity and avoids predecessor/successor races.
+func (s *Service) resolveLifecycleRun(ctx context.Context, data AgentLifecycleData) (*models.Run, error) {
+	if data.RunID != "" {
+		run, err := s.repo.GetClaimedRunByID(ctx, data.RunID)
+		if err != nil {
+			return nil, err
+		}
+		if data.AgentProfileID != "" && run.AgentProfileID != data.AgentProfileID {
+			return nil, sql.ErrNoRows
+		}
+		if data.TaskID != "" && taskIDFromRunPayload(run.Payload) != data.TaskID {
+			return nil, sql.ErrNoRows
+		}
+		return run, nil
+	}
+	if data.TaskID != "" {
+		return s.repo.GetClaimedRunByTaskAndAgent(ctx, data.TaskID, data.AgentProfileID)
+	}
+	return s.repo.GetClaimedTasklessRunForAgent(ctx, data.AgentID)
 }
 
 type PromptUsageData struct {
@@ -319,7 +344,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	if data.TaskID == "" {
 		return s.handleTasklessAgentCompleted(ctx, data)
 	}
-	run, err := s.repo.GetClaimedRunByTaskAndAgent(ctx, data.TaskID, data.AgentProfileID)
+	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
@@ -332,12 +357,10 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		"session_id": data.SessionID,
 	})
 	s.markRoutingSuccess(ctx, run)
-	// run came from GetClaimedRunByTaskAndAgent, scoped to data.AgentProfileID:
-	// it is the specific run that actually launched and holds the checkout,
-	// not just whichever run on this task happened to claim most recently
-	// (Review round 4, BLOCKING FINDING 2), so releasing here (rather than
-	// unconditionally inside transitionRunTerminal) is safe — see
-	// transitionRunTerminal's doc comment.
+	// resolveLifecycleRun prefers the immutable run ID from the event and
+	// falls back to task plus agent only for legacy events. Releasing here
+	// (rather than unconditionally inside transitionRunTerminal) is safe —
+	// see transitionRunTerminal's doc comment.
 	//
 	// Finish before releasing: if FinishRun's DB update fails, the checkout
 	// must stay held so ReapStaleCheckouts (not a same-agent race) is what
@@ -380,10 +403,10 @@ func (s *Service) markRoutingSuccess(ctx context.Context, run *models.Run) {
 func (s *Service) handleTasklessAgentCompleted(
 	ctx context.Context, data *AgentLifecycleData,
 ) error {
-	if data == nil || data.AgentID == "" {
+	if data == nil || (data.AgentID == "" && data.RunID == "") {
 		return nil
 	}
-	run, err := s.repo.GetClaimedTasklessRunForAgent(ctx, data.AgentID)
+	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
@@ -493,7 +516,7 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	if err != nil || data.TaskID == "" {
 		return nil
 	}
-	run, err := s.repo.GetClaimedRunByTaskAndAgent(ctx, data.TaskID, data.AgentProfileID)
+	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil

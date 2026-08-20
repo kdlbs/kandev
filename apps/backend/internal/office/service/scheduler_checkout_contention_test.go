@@ -257,3 +257,54 @@ func TestSchedulerTick_StaleContendedRunDoesNotStealADifferentAgentsLiveCheckout
 		t.Fatal("LOCK STOLEN: a third agent acquired the checkout while agent-stale-holder still held it")
 	}
 }
+
+// TestSchedulerTick_StaleSameAgentRunDoesNotStealLiveCheckout pins the
+// run-identity half of the checkout ownership contract. A retrying run can
+// become stale before it reaches checkoutTask while an earlier run for the
+// same agent still owns the task. Agent-only release cannot distinguish those
+// runs and clears the live checkout.
+func TestSchedulerTick_StaleSameAgentRunDoesNotStealLiveCheckout(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		ID:          "agent-stale-same-holder",
+		WorkspaceID: "ws-1",
+		Name:        "checkout-stale-same-holder",
+		Role:        models.AgentRoleWorker,
+		Status:      models.AgentStatusIdle,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES ('task-stale-same-1', 'ws-1', 'Stale Same-Agent Task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+
+	// An earlier live run for this agent already owns the checkout.
+	ok, err := svc.CheckoutTaskForRun(ctx, "task-stale-same-1", agent.ID, "run-live-same")
+	if err != nil || !ok {
+		t.Fatalf("seed checkout: ok=%v err=%v", ok, err)
+	}
+
+	// A newer retry for the same agent never reaches checkoutTask. It is old
+	// enough for the staleness guard to cancel it before launch.
+	svc.ExecSQL(t, `
+		INSERT INTO runs (
+			id, agent_profile_id, reason, payload, status, coalesced_count,
+			context_snapshot, retry_count, requested_at
+		) VALUES (
+			'run-stale-same', ?, 'task_assigned', '{"task_id":"task-stale-same-1"}',
+			'queued', 1, '{}', 1, datetime('now', '-3 hours')
+		)`, agent.ID)
+
+	service.RunSchedulerTick(svc, ctx)
+
+	stillHeld, err := svc.CheckoutTask(ctx, "task-stale-same-1", "agent-third")
+	if err != nil {
+		t.Fatalf("holder-checkout probe: %v", err)
+	}
+	if stillHeld {
+		t.Fatal("LOCK STOLEN: a stale same-agent run cleared the live checkout")
+	}
+}

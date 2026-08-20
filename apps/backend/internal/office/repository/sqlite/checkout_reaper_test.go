@@ -87,6 +87,46 @@ func TestReapStaleCheckouts_SkipsTaskWithInFlightRun(t *testing.T) {
 	}
 }
 
+// TestReapStaleCheckouts_UsesExactCheckoutRun proves that a queued run for
+// the same agent cannot keep a stale checkout alive after the run that owns
+// the checkout has finished. Reaping follows checkout_run_id, not the
+// holder's agent identity.
+func TestReapStaleCheckouts_UsesExactCheckoutRun(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	insertTask(t, repo, ctx, "task-reap-run-id", "ws-1", "Run-owned stale checkout", "", "")
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO runs (
+			id, agent_profile_id, reason, payload, status, coalesced_count,
+			context_snapshot, requested_at
+		) VALUES
+			('run-finished-owner', 'agent-owner', 'task_assigned', '{"task_id":"task-reap-run-id"}',
+			 'finished', 1, '{}', CURRENT_TIMESTAMP),
+			('run-queued-successor', 'agent-owner', 'task_assigned', '{"task_id":"task-reap-run-id"}',
+			 'queued', 1, '{}', CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed runs: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks
+		SET checkout_agent_id = 'agent-owner',
+		    checkout_run_id = 'run-finished-owner',
+		    checkout_at = datetime('now', '-1 hour')
+		WHERE id = 'task-reap-run-id'
+	`); err != nil {
+		t.Fatalf("seed stale run-owned checkout: %v", err)
+	}
+
+	count, err := repo.ReapStaleCheckouts(ctx, time.Now().UTC().Add(-30*time.Minute))
+	if err != nil {
+		t.Fatalf("reap: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("reaped count = %d, want 1", count)
+	}
+}
+
 // TestReapStaleCheckouts_ReapsWhenOnlyRunBelongsToAnotherAgent is the
 // regression test for the compound scenario this card was filed about: the
 // checkout holder's own run finished (leaking the checkout), and a

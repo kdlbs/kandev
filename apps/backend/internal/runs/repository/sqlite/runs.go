@@ -177,6 +177,20 @@ func (r *Repository) GetRunByID(ctx context.Context, id string) (*models.Run, er
 	return &run, nil
 }
 
+// GetClaimedRunByID returns a run only while it is still claimed. Lifecycle
+// events carry this immutable run identity so a delayed predecessor event
+// cannot finish a newer claimed run for the same task and agent.
+func (r *Repository) GetClaimedRunByID(ctx context.Context, id string) (*models.Run, error) {
+	var run models.Run
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT * FROM runs WHERE id = ? AND status = 'claimed'
+	`), id).StructScan(&run)
+	if err != nil {
+		return nil, err
+	}
+	return &run, nil
+}
+
 // CommentRunStatus is the slim per-comment run snapshot returned by
 // GetRunsByCommentIDs. The backend maps these onto CommentDTO so the
 // frontend can render a Queued / Working / Failed badge on the user

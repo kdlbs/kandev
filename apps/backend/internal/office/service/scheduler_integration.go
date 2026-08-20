@@ -620,7 +620,7 @@ const checkoutContendedRetryDelay = 60 * time.Second
 func (si *SchedulerIntegration) tryCheckout(
 	ctx context.Context, run *models.Run, taskID, agentID string,
 ) bool {
-	acquired, err := si.svc.repo.CheckoutTask(ctx, taskID, agentID)
+	acquired, err := si.svc.repo.CheckoutTaskForRun(ctx, taskID, agentID, run.ID)
 	if err != nil {
 		si.logger.Error("task checkout error",
 			zap.String("run_id", run.ID), zap.Error(err))
