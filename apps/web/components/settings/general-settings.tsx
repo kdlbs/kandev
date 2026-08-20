@@ -3,12 +3,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "@/components/theme/app-theme";
 import {
-  IconActivity,
   IconBinaryTree,
   IconCommand,
   IconPalette,
   IconKeyboard,
-  IconGitBranch,
   IconArchive,
   IconArrowBackUp,
   IconListCheck,
@@ -24,7 +22,6 @@ import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { settingsControlClassName } from "@/components/settings/settings-control";
 import { SettingsPageHeader } from "@/components/settings/settings-typography";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
-import { SystemMetricsSettingsCard } from "@/components/settings/system-metrics-settings-card";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import type { Theme } from "@/lib/settings/types";
@@ -44,8 +41,9 @@ import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { StartupPageSettingsCard } from "@/components/settings/startup-page-settings-card";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { SleepInhibitionSettings } from "@/components/settings/sleep-inhibition-settings";
-import { AppStatusBarSettingsCard } from "@/components/settings/app-status-bar-settings-card";
 import { SettingsMenuModeCard } from "@/components/settings/settings-menu-mode-card";
+import { RichOutputMotionSettingsCard } from "@/components/settings/rich-output-motion-settings-card";
+import { AppearanceAccountSections } from "@/components/settings/appearance-account-sections";
 import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
@@ -138,51 +136,6 @@ function ChatSubmitKeyCard({
   );
 }
 
-function ChangesPanelLayoutCard({
-  value,
-  isDirty,
-  onChange,
-}: {
-  value: "flat" | "tree";
-  isDirty: boolean;
-  onChange: (value: "flat" | "tree") => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <SettingsCard
-      isDirty={isDirty}
-      discoveryTargetId={GENERAL_SETTINGS_TARGETS.changesPanelLayout}
-      data-testid="changes-panel-layout-card"
-    >
-      <CardHeader>
-        <CardTitle className="text-base">{t("settings:changesPanelLayout")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <Label htmlFor="changes-panel-layout">{t("settings:fileListView")}</Label>
-          <Select value={value} onValueChange={(next) => onChange(next as "flat" | "tree")}>
-            <SelectTrigger
-              id="changes-panel-layout"
-              data-testid="changes-panel-layout-select"
-              data-settings-dirty={isDirty}
-              className="cursor-pointer"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="flat">{t("settings:flatList")}</SelectItem>
-              <SelectItem value="tree">{t("settings:tree")}</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            {t("settings:displayChangedFilesAsAFlat")}
-          </p>
-        </div>
-      </CardContent>
-    </SettingsCard>
-  );
-}
-
 function StartupPageSettingsSection({
   value,
   isDirty,
@@ -237,12 +190,18 @@ function SettingsMenuModeSection({
 
 function AppearanceThemeSection({
   theme,
-  isDirty,
-  onChange,
+  isThemeDirty,
+  onThemeChange,
+  richOutputAnimationsEnabled,
+  isRichOutputMotionDirty,
+  onRichOutputMotionChange,
 }: {
   theme: Theme;
-  isDirty: boolean;
-  onChange: (theme: Theme) => void;
+  isThemeDirty: boolean;
+  onThemeChange: (theme: Theme) => void;
+  richOutputAnimationsEnabled: boolean;
+  isRichOutputMotionDirty: boolean;
+  onRichOutputMotionChange: (enabled: boolean) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -251,32 +210,15 @@ function AppearanceThemeSection({
       title={t("settings:appearance")}
       description={t("settings:customizeHowTheApplicationLooks")}
     >
-      <ThemeSettingsCard theme={theme} isDirty={isDirty} onChange={onChange} />
+      <div className="space-y-4">
+        <ThemeSettingsCard theme={theme} isDirty={isThemeDirty} onChange={onThemeChange} />
+        <RichOutputMotionSettingsCard
+          enabled={richOutputAnimationsEnabled}
+          isDirty={isRichOutputMotionDirty}
+          onChange={onRichOutputMotionChange}
+        />
+      </div>
     </SettingsSection>
-  );
-}
-
-function AppStatusBarSettingsSection({
-  enabled,
-  isDirty,
-  onChange,
-}: {
-  enabled: boolean;
-  isDirty: boolean;
-  onChange: (enabled: boolean) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <>
-      <Separator />
-      <SettingsSection
-        icon={<IconActivity className="h-5 w-5" />}
-        title={t("settings:statusBar")}
-        description={t("settings:configureStatusBarVisibility")}
-      >
-        <AppStatusBarSettingsCard enabled={enabled} isDirty={isDirty} onChange={onChange} />
-      </SettingsSection>
-    </>
   );
 }
 
@@ -352,6 +294,9 @@ function useAppearanceSaveContributor({
   const previewMenuMode = useAppStore((state) => state.previewSettingsMenuMode);
   const commitMenuMode = useAppStore((state) => state.commitSettingsMenuMode);
   const restoreMenuMode = useAppStore((state) => state.restoreSettingsMenuMode);
+  const previewRichOutputAnimations = useAppStore((state) => state.previewRichOutputAnimations);
+  const commitRichOutputAnimations = useAppStore((state) => state.commitRichOutputAnimations);
+  const restoreRichOutputAnimations = useAppStore((state) => state.restoreRichOutputAnimations);
   const revision = appearanceRevision(draft);
 
   useSettingsSaveContributor({
@@ -369,6 +314,7 @@ function useAppearanceSaveContributor({
         const response = Object.keys(patch).length > 0 ? await updateUserSettings(patch) : null;
         commitTheme(submitted.theme);
         commitMenuMode(submitted.settingsMenuMode);
+        commitRichOutputAnimations(submitted.richOutputAnimationsEnabled);
         // A draft edited while the save was in flight keeps its preview: what was
         // submitted is now persisted, but the screen should still show what the
         // user is currently looking at.
@@ -377,6 +323,11 @@ function useAppearanceSaveContributor({
         }
         if (draftRef.current.settingsMenuMode !== submitted.settingsMenuMode) {
           previewMenuMode(draftRef.current.settingsMenuMode);
+        }
+        if (
+          draftRef.current.richOutputAnimationsEnabled !== submitted.richOutputAnimationsEnabled
+        ) {
+          previewRichOutputAnimations(draftRef.current.richOutputAnimationsEnabled);
         }
         const latestUserSettings = storeApi.getState().userSettings;
         let responseIsCurrent = false;
@@ -395,6 +346,7 @@ function useAppearanceSaveContributor({
         const confirmed = createAppearanceSavedState(
           submitted.theme,
           submitted.settingsMenuMode,
+          submitted.richOutputAnimationsEnabled,
           nextUserSettings,
         );
         setSaved(confirmed);
@@ -410,6 +362,7 @@ function useAppearanceSaveContributor({
       setDraft(saved);
       restoreTheme();
       restoreMenuMode();
+      restoreRichOutputAnimations();
     },
   });
 }
@@ -439,22 +392,31 @@ function AppearanceSettingsSections({
   updateDraft,
   previewTheme,
   previewMenuMode,
+  previewRichOutputAnimations,
 }: {
   draft: AppearanceState;
   saved: AppearanceState;
   updateDraft: (patch: Partial<AppearanceState>) => void;
   previewTheme: (theme: Theme) => void;
   previewMenuMode: (mode: SettingsMenuMode) => void;
+  previewRichOutputAnimations: (enabled: boolean) => void;
 }) {
-  const { t } = useTranslation();
   return (
     <>
       <AppearanceThemeSection
         theme={draft.theme}
-        isDirty={draft.theme !== saved.theme}
-        onChange={(theme) => {
+        isThemeDirty={draft.theme !== saved.theme}
+        onThemeChange={(theme) => {
           updateDraft({ theme });
           previewTheme(theme);
+        }}
+        richOutputAnimationsEnabled={draft.richOutputAnimationsEnabled}
+        isRichOutputMotionDirty={
+          draft.richOutputAnimationsEnabled !== saved.richOutputAnimationsEnabled
+        }
+        onRichOutputMotionChange={(richOutputAnimationsEnabled) => {
+          updateDraft({ richOutputAnimationsEnabled });
+          previewRichOutputAnimations(richOutputAnimationsEnabled);
         }}
       />
 
@@ -476,43 +438,7 @@ function AppearanceSettingsSections({
       />
 
       <LanguageSettings />
-
-      <AppStatusBarSettingsSection
-        enabled={draft.appStatusBarEnabled}
-        isDirty={draft.appStatusBarEnabled !== saved.appStatusBarEnabled}
-        onChange={(appStatusBarEnabled) => updateDraft({ appStatusBarEnabled })}
-      />
-
-      <Separator />
-
-      <SettingsSection
-        icon={<IconGitBranch className="h-5 w-5" />}
-        title={t("settings:changesPanel")}
-        description={t("settings:customizeHowChangedFilesAreDisplayed")}
-      >
-        <ChangesPanelLayoutCard
-          value={draft.changesPanelLayout}
-          isDirty={draft.changesPanelLayout !== saved.changesPanelLayout}
-          onChange={(changesPanelLayout) => updateDraft({ changesPanelLayout })}
-        />
-      </SettingsSection>
-
-      <Separator />
-
-      <SettingsSection
-        icon={<IconActivity className="h-5 w-5" />}
-        title={t("settings:resourceMetrics")}
-        description={t("settings:configureBackendAndExecutionResourceSampling")}
-      >
-        <SystemMetricsSettingsCard
-          showInTopbar={draft.showMetrics}
-          isShowInTopbarDirty={draft.showMetrics !== saved.showMetrics}
-          onShowInTopbarChange={(showMetrics) => updateDraft({ showMetrics })}
-          simplified={draft.simplifiedMetrics}
-          isSimplifiedDirty={draft.simplifiedMetrics !== saved.simplifiedMetrics}
-          onSimplifiedChange={(simplifiedMetrics) => updateDraft({ simplifiedMetrics })}
-        />
-      </SettingsSection>
+      <AppearanceAccountSections draft={draft} saved={saved} updateDraft={updateDraft} />
     </>
   );
 }
@@ -522,9 +448,11 @@ export function AppearanceSettings() {
   const userSettings = useAppStore((state) => state.userSettings);
   const { savedTheme, previewTheme } = useTheme();
   const savedMenuMode = useAppStore((state) => state.settingsMenu.savedMode);
+  const savedRichOutputAnimations = useAppStore((state) => state.richOutputMotion.savedEnabled);
   const previewMenuMode = useAppStore((state) => state.previewSettingsMenuMode);
+  const previewRichOutputAnimations = useAppStore((state) => state.previewRichOutputAnimations);
   const [saved, setSaved] = useState(() =>
-    createAppearanceSavedState(savedTheme, savedMenuMode, userSettings),
+    createAppearanceSavedState(savedTheme, savedMenuMode, savedRichOutputAnimations, userSettings),
   );
   const [draft, setDraft] = useState(saved);
   const draftRef = useRef(draft);
@@ -538,6 +466,7 @@ export function AppearanceSettings() {
     const nextSaved = createAppearanceSavedState(
       previousSaved.theme,
       previousSaved.settingsMenuMode,
+      previousSaved.richOutputAnimationsEnabled,
       userSettings,
     );
     setDraft(
@@ -575,6 +504,7 @@ export function AppearanceSettings() {
         updateDraft={updateDraft}
         previewTheme={previewTheme}
         previewMenuMode={previewMenuMode}
+        previewRichOutputAnimations={previewRichOutputAnimations}
       />
     </div>
   );

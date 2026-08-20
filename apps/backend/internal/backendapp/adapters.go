@@ -614,6 +614,16 @@ func (a *lifecycleAdapter) CleanupStaleExecutionBySessionID(ctx context.Context,
 	return a.mgr.CleanupStaleExecutionBySessionID(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) CleanupStaleExecutionBySessionIDIfCurrent(
+	ctx context.Context,
+	sessionID, expectedExecutionID string,
+	expectedUpdatedAt time.Time,
+) error {
+	return a.mgr.CleanupStaleExecutionBySessionIDIfCurrent(
+		ctx, sessionID, expectedExecutionID, expectedUpdatedAt,
+	)
+}
+
 func (a *lifecycleAdapter) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
 	_, err := a.mgr.EnsureWorkspaceExecutionForSession(ctx, taskID, sessionID)
 	return err

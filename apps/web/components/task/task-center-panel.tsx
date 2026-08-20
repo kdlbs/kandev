@@ -152,7 +152,7 @@ function useFileTabOperations({
   );
 
   const handleOpenFileFromChat = useCallback(
-    async (filePath: string) => {
+    async (filePath: string, repo?: string) => {
       const client = getWebSocketClient();
       if (!client || !activeSessionId) return;
       try {
@@ -160,11 +160,13 @@ function useFileTabOperations({
           client,
           activeSessionId,
           filePath,
+          repo,
         );
         const fileName = filePath.split("/").pop() || filePath;
         const hash = await calculateHash(response.content);
         addFileTab({
           path: filePath,
+          repo,
           name: fileName,
           content: response.content,
           originalContent: response.content,

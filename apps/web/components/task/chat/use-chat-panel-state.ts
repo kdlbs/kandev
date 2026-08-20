@@ -340,7 +340,7 @@ type ChatContextItemsOptions = {
   unpinFile: (sid: string, path: string) => void;
   comments: CommentsState;
   taskId: string | null;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   onOpenFileAtLine?: (filePath: string) => void;
 };
 
@@ -510,7 +510,7 @@ function deriveQueueAwareSessionInput(
 export type UseChatPanelStateOptions = {
   sessionId: string | null;
   taskId?: string | null;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   onOpenFileAtLine?: (filePath: string) => void;
 };
 

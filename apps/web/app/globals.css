@@ -15,7 +15,8 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
   --font-mono:
-    "Monaspace Neon", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    "Monaspace Neon", "Geist Mono", "NerdFontLocalGlyphs", "NerdFontBundledGlyphs", ui-monospace,
+    SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --font-mono-size: 12px;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -72,11 +73,15 @@
 
 :root {
   --app-status-bar-height: 0px;
-  --font-geist-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-sans: "Figtree", "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-geist-sans:
+    "Geist", "NerdFontLocalGlyphs", "NerdFontBundledGlyphs", ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", sans-serif;
+  --font-sans:
+    "Figtree", "Geist", "NerdFontLocalGlyphs", "NerdFontBundledGlyphs", ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", sans-serif;
   --font-geist-mono:
-    "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
+    "Geist Mono", "NerdFontLocalGlyphs", "NerdFontBundledGlyphs", ui-monospace, "SFMono-Regular",
+    Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -919,8 +924,8 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   color: var(--foreground);
   overflow-wrap: anywhere;
   font-family:
-    -apple-system, "system-ui", "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji";
+    -apple-system, "system-ui", "Segoe UI", "Noto Sans", Helvetica, Arial, "NerdFontLocalGlyphs",
+    "NerdFontBundledGlyphs", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
 }
 
 .markdown-body h1,
@@ -1810,8 +1815,8 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
 .chat-message-list {
   font-size: 13px;
   font-family:
-    -apple-system, "system-ui", "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji";
+    -apple-system, "system-ui", "Segoe UI", "Noto Sans", Helvetica, Arial, "NerdFontLocalGlyphs",
+    "NerdFontBundledGlyphs", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
 }
 
 /* Shiki code block styling */

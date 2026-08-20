@@ -11,6 +11,7 @@ import (
 // AgentEventPayload is the payload for agent lifecycle events (started, stopped, ready, completed, failed).
 type AgentEventPayload struct {
 	AgentExecutionID   string                 `json:"agent_execution_id"`
+	RunID              string                 `json:"run_id,omitempty"`
 	TaskID             string                 `json:"task_id"`
 	SessionID          string                 `json:"session_id,omitempty"`
 	AgentID            string                 `json:"agent_id,omitempty"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -174,16 +175,42 @@ func (s *Service) pruneOrRepairExecutorRow(ctx context.Context, running *models.
 // satisfying #1597's "never leave a row claiming a dead process" expected
 // behavior. Best-effort; a missing row is not an error.
 func (s *Service) repairDeadRowLiveness(ctx context.Context, running *models.ExecutorRunning) error {
-	err := s.repo.RepairExecutorRunningDead(ctx, running.SessionID)
+	var err error
+	if repairer, ok := s.repo.(executionIdentityRepairer); ok {
+		err = repairer.RepairExecutorRunningDeadIfCurrent(
+			ctx,
+			running.SessionID,
+			running.AgentExecutionID,
+			running.UpdatedAt,
+		)
+	} else {
+		err = s.repo.RepairExecutorRunningDead(ctx, running.SessionID)
+	}
 	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
 		s.logger.Warn("failed to repair executor row liveness during reconciliation",
 			zap.String("session_id", running.SessionID),
 			zap.Error(err))
 	}
-	if errors.Is(err, models.ErrExecutorRunningNotFound) {
+	if errors.Is(err, models.ErrExecutorRunningNotFound) || errors.Is(err, models.ErrExecutionRotated) {
 		return nil
 	}
 	return err
+}
+
+type executionIdentityRepairer interface {
+	RepairExecutorRunningDeadIfCurrent(
+		ctx context.Context,
+		sessionID, expectedExecutionID string,
+		expectedUpdatedAt time.Time,
+	) error
+}
+
+type executionIdentityCleaner interface {
+	CleanupStaleExecutionBySessionIDIfCurrent(
+		ctx context.Context,
+		sessionID, expectedExecutionID string,
+		expectedUpdatedAt time.Time,
+	) error
 }
 
 func (s *Service) probeAgentRunning(ctx context.Context, sessionID string) (bool, error) {
@@ -240,9 +267,8 @@ func classifyIdleReclaim(sessionState models.TaskSessionState, agentRunning bool
 // Completed}) when no live agent process and no active turn can be
 // observed. Resume token and worktree path are preserved so a later resume
 // can re-attach the session without losing context. Never touches a
-// running executor; never called from a periodic reaper (a runtime
-// auto-convergence tick is a pre-existing design gap handled by an
-// independent task, see plan docs).
+// running executor. Synchronous settle points and the periodic reaper use
+// the same fail-closed primitive.
 //
 // Synchronous call sites so far:
 //   - setSessionWaitingForInputIfRequested: subtask terminal collapse to
@@ -293,10 +319,21 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 			zap.Bool("has_active_turn", hasActiveTurn))
 		return nil
 	}
-	if err := s.agentManager.CleanupStaleExecutionBySessionID(ctx, sessionID); err != nil {
+	var cleanupErr error
+	if cleaner, ok := s.agentManager.(executionIdentityCleaner); ok {
+		cleanupErr = cleaner.CleanupStaleExecutionBySessionIDIfCurrent(
+			ctx,
+			sessionID,
+			running.AgentExecutionID,
+			running.UpdatedAt,
+		)
+	} else {
+		cleanupErr = s.agentManager.CleanupStaleExecutionBySessionID(ctx, sessionID)
+	}
+	if cleanupErr != nil {
 		s.logger.Warn("idle reclaim: cleanup failed; row preserved",
 			zap.String("session_id", sessionID),
-			zap.Error(err))
+			zap.Error(cleanupErr))
 		return nil
 	}
 	if err := s.repairDeadRowLiveness(ctx, running); err != nil {

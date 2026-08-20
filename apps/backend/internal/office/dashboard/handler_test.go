@@ -651,6 +651,38 @@ func TestCreateComment_RequiresBody(t *testing.T) {
 	}
 }
 
+// TestCreateComment_UserAuthorUnchanged locks in that the UI comment path
+// (author_type unset or "user") still persists the user sentinel — the
+// fix must not touch this path.
+func TestCreateComment_UserAuthorUnchanged(t *testing.T) {
+	deps := newTestDeps(t)
+
+	body := `{"body":"hello from the UI","author_type":"user"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/office/tasks/taskUser/comments",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	deps.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp dashboard.CommentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Comment == nil {
+		t.Fatal("expected comment in response")
+	}
+	if resp.Comment.AuthorID != "user" {
+		t.Errorf("expected authorId 'user', got %q", resp.Comment.AuthorID)
+	}
+	if resp.Comment.Source != "user" {
+		t.Errorf("expected source 'user', got %q", resp.Comment.Source)
+	}
+}
+
 func TestUpdateWorkspaceSettings_ReturnsOK(t *testing.T) {
 	deps := newTestDeps(t)
 

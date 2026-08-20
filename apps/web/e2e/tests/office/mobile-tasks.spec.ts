@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/office-fixture";
 import type { OfficeApiClient } from "../../helpers/office-api-client";
 
 const ROUTING_PROFILE_WAIT_MS = 20_000;
+const ROUTING_MOCK_MODEL = "mock-fast";
 
 test.describe("Tasks on mobile", () => {
   test("cleans only the stale profile from workspace routing", async ({
@@ -15,20 +16,22 @@ test.describe("Tasks on mobile", () => {
     const { agents } = await apiClient.listAgents();
     const claudeAgent = agents.find((agent) => agent.name === "claude-acp");
     const codexAgent = agents.find((agent) => agent.name === "codex-acp");
-    const claudeProfile = claudeAgent?.profiles[0];
-    const codexProfile = codexAgent?.profiles[0];
-    if (!claudeAgent || !claudeProfile || !codexAgent || !codexProfile) {
-      throw new Error("E2E seed has no Claude and Codex profiles");
+    if (!claudeAgent || !codexAgent) {
+      throw new Error("E2E seed has no Claude and Codex agents");
     }
 
+    // User-modified profiles intentionally keep an empty model as "use the
+    // provider default". Routing requires an explicit launch model, so use
+    // the mock providers' advertised model instead of inheriting an optional
+    // seed profile value.
     const profile = await apiClient.createAgentProfile(claudeAgent.id, "Routing cleanup profile", {
-      model: claudeProfile.model,
+      model: ROUTING_MOCK_MODEL,
     });
     const preservedProfile = await apiClient.createAgentProfile(
       codexAgent.id,
       "Preserved routing profile",
       {
-        model: codexProfile.model,
+        model: ROUTING_MOCK_MODEL,
       },
     );
     const routingProfile = await waitForRoutingProfile(

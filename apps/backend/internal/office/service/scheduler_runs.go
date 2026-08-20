@@ -49,6 +49,22 @@ func (s *Service) FailRun(ctx context.Context, id string) error {
 // published payload self-contained even when the caller doesn't hold a
 // reference to the model. Publish errors are logged at debug and
 // swallowed; persistence errors are returned to the caller.
+//
+// Deliberately does NOT release the task checkout: transitionRunTerminal
+// is reached by every terminal run, including ones that never held the
+// checkout in the first place (the "agent not active" / idle-skip /
+// tree-gated / checkout-contended-error branches in processRun, all of
+// which finish a run before it ever reaches checkoutTask). Owner-scoping
+// releaseTaskCheckoutForRun by run.AgentProfileID guards a DIFFERENT
+// agent's live lock, but not the case where a second, pre-checkout run
+// for the SAME agent + task races a first run that is genuinely still
+// executing and holds the checkout — that second run's release matches
+// the first run's own checkout_agent_id and steals its own live lock out
+// from under it (Review round 3, BLOCKING FINDING 1). Callers that KNOW
+// their run actually held the checkout call releaseTaskCheckoutForRun
+// explicitly instead: handleAgentCompleted / handleTasklessAgentCompleted
+// (event_subscribers.go) for the launched-run completion path, and
+// HandleAgentFailure (failure.go) for the launched-run failure path.
 func (s *Service) transitionRunTerminal(ctx context.Context, id, status string) error {
 	run, getErr := s.repo.GetRunByID(ctx, id)
 	if getErr != nil && !errors.Is(getErr, sql.ErrNoRows) {
@@ -62,6 +78,36 @@ func (s *Service) transitionRunTerminal(ctx context.Context, id, status string) 
 	}
 	s.publishRunProcessed(ctx, id, status, run)
 	return nil
+}
+
+// releaseTaskCheckoutForRun releases the run's task checkout. Call this
+// only when the caller knows run genuinely held the checkout (a launched
+// run that reached checkoutTask) — see transitionRunTerminal's doc for why
+// it is not called unconditionally on every terminal transition. Safe to
+// call redundantly alongside SchedulerIntegration's own synchronous
+// finishRun/checkBudget call sites (releaseCheckoutIfNeeded): idempotent,
+// owner-scoped SET NULL.
+//
+// Owner-scoped by run ID and run.AgentProfileID: a run that never
+// held the checkout (the loser of a checkout-contention race escalating via
+// escalateFailure, or a run for an agent that turned out to be
+// inactive/idle and never reached the checkout attempt in processRun) must
+// not clear a different, currently-active agent's lock out from under it —
+// that inverted the invariant this whole release path exists to protect.
+func (s *Service) releaseTaskCheckoutForRun(ctx context.Context, run *models.Run) {
+	if run == nil {
+		return
+	}
+	taskID := taskIDFromRunPayload(run.Payload)
+	if taskID == "" {
+		return
+	}
+	if err := s.repo.ReleaseTaskCheckoutForRun(ctx, taskID, run.AgentProfileID, run.ID); err != nil {
+		s.logger.Error("failed to release task checkout on terminal transition",
+			zap.String("run_id", run.ID),
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
 }
 
 // publishRunProcessed emits an OfficeRunProcessed bus event with the

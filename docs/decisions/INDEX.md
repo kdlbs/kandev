@@ -180,3 +180,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-17-release-pr-ruleset-bypass | [Give Stable Release PRs an Administrator Token Bypass](2026-08-17-release-pr-ruleset-bypass.md) | accepted | infra, workflow, security | 2026-08-17 |
 | 2026-08-18-never-started-agent-stall-terminal | [Treat Never-Started Agent Stalls as Terminal](2026-08-18-never-started-agent-stall-terminal.md) | accepted | backend, frontend, protocol | 2026-08-18 |
 | 2026-08-20-settings-prompt-editor-provider-ownership | [Settings Prompt Editors Own Monaco Completion Providers](2026-08-20-settings-prompt-editor-provider-ownership.md) | accepted | frontend | 2026-08-20 |
+| 2026-08-14-kandev-native-agent-rich-output | [Keep Agent Rich Output Host Native](2026-08-14-kandev-native-agent-rich-output.md) | accepted | backend, frontend, protocol, security | 2026-08-14 |

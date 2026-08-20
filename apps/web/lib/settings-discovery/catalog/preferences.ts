@@ -16,6 +16,7 @@ const TASK_BEHAVIOR_ID = "preferences-task-behavior";
 export const TASK_BEHAVIOR_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/task-behavior`;
 export const GENERAL_SETTINGS_TARGETS = {
   colorTheme: "setting-color-theme",
+  richOutputMotion: "setting-rich-output-motion",
   settingsMenuMode: "setting-settings-menu-mode",
   startupPage: "setting-startup-page",
   displayLanguage: "setting-display-language",
@@ -63,6 +64,17 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     order: 11,
   },
   {
+    id: "appearance-rich-output-motion",
+    kind: "control",
+    labelKey: "settings:animateRichOutputCharts",
+    aliasesKey: "settings:discoveryAliasesRichOutputMotion",
+    parentId: APPEARANCE_ID,
+    groupId: "preferences",
+    href: APPEARANCE_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.richOutputMotion,
+    order: 12,
+  },
+  {
     id: "appearance-settings-menu",
     kind: "control",
     labelKey: "settings:settingsMenu",
@@ -71,7 +83,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.settingsMenuMode,
-    order: 12,
+    order: 13,
   },
   {
     id: "appearance-startup-page",
@@ -82,7 +94,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.startupPage,
-    order: 13,
+    order: 14,
   },
   {
     id: "appearance-display-language",
@@ -93,7 +105,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.displayLanguage,
-    order: 14,
+    order: 15,
   },
   {
     id: "appearance-status-bar",
@@ -104,7 +116,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.appStatusBar,
-    order: 15,
+    order: 16,
   },
   {
     id: "appearance-changes-panel-layout",
@@ -114,7 +126,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.changesPanelLayout,
-    order: 16,
+    order: 17,
   },
   {
     id: "appearance-resource-metrics",
@@ -125,7 +137,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.resourceMetrics,
-    order: 17,
+    order: 18,
   },
   {
     id: "preferences-layouts",

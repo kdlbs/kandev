@@ -82,6 +82,38 @@ func TestGetClaimedRunByTaskID_MatchesThePayloadTaskAndPrefersTheLatestClaim(t *
 	}
 }
 
+// TestGetClaimedRunByTaskAndAgent_ScopesToTheAgentEvenWhenAnotherAgentsClaimIsNewer
+// pins the Review round-4 BLOCKING FINDING 2 fix: two different agents can
+// each have a claimed run on the same task at once (ClaimNextEligibleRun's
+// busy-lock is per-agent, not per-task), so a caller that knows which
+// agent's lifecycle event it is handling must not fall back to "most
+// recently claimed" like GetClaimedRunByTaskID does.
+func TestGetClaimedRunByTaskAndAgent_ScopesToTheAgentEvenWhenAnotherAgentsClaimIsNewer(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	wantAgent := seedTaskRun(t, repo, "older-claim-a1", "a1", "t1", "queued")
+	setStatus(t, repo, wantAgent.ID, "claimed", timePtr(base), nil)
+	otherAgent := seedTaskRun(t, repo, "newer-claim-a2", "a2", "t1", "queued")
+	setStatus(t, repo, otherAgent.ID, "claimed", timePtr(base.Add(time.Hour)), nil)
+
+	got, err := repo.GetClaimedRunByTaskAndAgent(ctx, "t1", "a1")
+	if err != nil {
+		t.Fatalf("get claimed run: %v", err)
+	}
+	if got.ID != wantAgent.ID {
+		t.Errorf("claimed run = %q, want %q (a1's own claim, not a2's newer one)", got.ID, wantAgent.ID)
+	}
+
+	if _, err := repo.GetClaimedRunByTaskAndAgent(ctx, "t1", "a-unknown"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("unknown agent err = %v, want sql.ErrNoRows", err)
+	}
+	if _, err := repo.GetClaimedRunByTaskAndAgent(ctx, "t-unknown", "a1"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("unknown task err = %v, want sql.ErrNoRows", err)
+	}
+}
+
 // TestGetClaimedTasklessRunForAgent_OnlyMatchesRunsWithoutATask pins the
 // heartbeat attribution rule: a missing or empty payload task_id counts
 // as taskless, a populated one never does.

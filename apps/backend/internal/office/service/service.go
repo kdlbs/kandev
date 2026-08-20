@@ -775,6 +775,13 @@ func (s *Service) CheckoutTask(ctx context.Context, taskID, agentID string) (boo
 	return s.repo.CheckoutTask(ctx, taskID, agentID)
 }
 
+// CheckoutTaskForRun atomically acquires a task checkout for the exact run
+// that is about to launch. A same-agent successor cannot replace a live
+// predecessor's checkout.
+func (s *Service) CheckoutTaskForRun(ctx context.Context, taskID, agentID, runID string) (bool, error) {
+	return s.repo.CheckoutTaskForRun(ctx, taskID, agentID, runID)
+}
+
 // ReleaseTaskCheckout releases the exclusive lock on a task.
 func (s *Service) ReleaseTaskCheckout(ctx context.Context, taskID string) error {
 	return s.repo.ReleaseTaskCheckout(ctx, taskID)
