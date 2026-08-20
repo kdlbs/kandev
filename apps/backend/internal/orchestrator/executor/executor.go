@@ -745,16 +745,24 @@ type GitLabCredentialResolver interface {
 	ResolveGitLabExecutionCredentials(ctx context.Context, workspaceID string) (host, token string, err error)
 }
 
+// CoordinatorProfileResolver resolves the persisted Office CEO profile for a
+// task's workspace. It is deliberately a narrow read-only seam so MCP
+// capabilities cannot be inferred from agent-provided role claims.
+type CoordinatorProfileResolver interface {
+	ResolveCEOAgentProfileID(ctx context.Context, taskID string) (string, error)
+}
+
 // Executor manages agent execution for tasks
 type Executor struct {
-	agentManager      AgentManagerClient
-	attachmentReader  AttachmentReader
-	repo              executorStore
-	secretStore       secrets.SecretStore
-	shellPrefs        ShellPreferenceProvider
-	capabilities      ExecutorTypeCapabilities
-	gitlabCredentials GitLabCredentialResolver
-	logger            *logger.Logger
+	agentManager        AgentManagerClient
+	attachmentReader    AttachmentReader
+	repo                executorStore
+	secretStore         secrets.SecretStore
+	shellPrefs          ShellPreferenceProvider
+	capabilities        ExecutorTypeCapabilities
+	gitlabCredentials   GitLabCredentialResolver
+	coordinatorResolver CoordinatorProfileResolver
+	logger              *logger.Logger
 
 	gitCredentialIssuer            GitCredentialLeaseIssuer
 	gitCredentialBrokerURL         string
@@ -970,6 +978,12 @@ func NewExecutor(agentManager AgentManagerClient, repo executorStore, log *logge
 // claimed descriptors into passthrough workspaces.
 func (e *Executor) SetAttachmentReader(reader AttachmentReader) {
 	e.attachmentReader = reader
+}
+
+// SetCoordinatorProfileResolver wires the persisted Office CEO lookup used
+// only to derive the additive workspace task-tree read capability.
+func (e *Executor) SetCoordinatorProfileResolver(resolver CoordinatorProfileResolver) {
+	e.coordinatorResolver = resolver
 }
 
 // SetOnTaskStateChange sets a callback for task state changes.

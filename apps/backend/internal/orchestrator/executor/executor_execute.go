@@ -97,7 +97,32 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	if allowTitleTool && surface == mcpprofile.SurfaceKanbanTask && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		capabilities = append(capabilities, mcpprofile.CapabilityTaskTitle)
 	}
+	if surface == mcpprofile.SurfaceOfficeTask {
+		capabilities, err = e.addCoordinatorTaskTreeReadCapability(ctx, task.ID, session, capabilities)
+		if err != nil {
+			return mcpprofile.Context{}, err
+		}
+	}
 	return mcpprofile.New(surface, capabilities, nil), nil
+}
+
+func (e *Executor) addCoordinatorTaskTreeReadCapability(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	capabilities []mcpprofile.Capability,
+) ([]mcpprofile.Capability, error) {
+	if session == nil || session.AgentProfileID == "" || e.coordinatorResolver == nil {
+		return capabilities, nil
+	}
+	ceoProfileID, err := e.coordinatorResolver.ResolveCEOAgentProfileID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve Office coordinator profile: %w", err)
+	}
+	if ceoProfileID == "" || session.AgentProfileID != ceoProfileID {
+		return capabilities, nil
+	}
+	return append(capabilities, mcpprofile.CapabilityWorkspaceTaskTreeRead), nil
 }
 
 // isContainerizedExecutor returns true for executor types that run agents in
