@@ -2,6 +2,10 @@ package lifecycle
 
 import (
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -54,7 +58,7 @@ func TestRemoteGitMetadataRequestFailsClosed(t *testing.T) {
 				{}, {},
 			},
 		})
-		if err == nil || !strings.Contains(err.Error(), "multiple repository") {
+		if err == nil || !strings.Contains(err.Error(), "multi-repository") {
 			t.Fatalf("validateRemoteGitMetadataRequest() error = %v, want multi-repository rejection", err)
 		}
 	})
@@ -64,7 +68,7 @@ func TestRemoteGitMetadataRequestFailsClosed(t *testing.T) {
 			AgentConfig: agents.NewCodexACP(),
 			Env:         map[string]string{"CODEX_CONFIG": `{"sandbox_mode":"workspace-write"}`},
 		})
-		if err == nil || !strings.Contains(err.Error(), "legacy Codex sandbox") {
+		if err == nil || !strings.Contains(err.Error(), "compatible Codex ACP") {
 			t.Fatalf("validateRemoteGitMetadataRequest() error = %v, want legacy sandbox rejection", err)
 		}
 	})
@@ -108,6 +112,65 @@ func TestRemoteRegularGitMetadataProbeRejectsLegacyAndSymlinkedState(t *testing.
 	}
 }
 
+func TestRemoteRegularGitMetadataProbeRunsAgainstRealCheckout(t *testing.T) {
+	workspace := t.TempDir()
+	runContainerGit(t, "", "init", "-b", "main", workspace)
+	runContainerGit(t, workspace, "config", "user.email", "test@example.com")
+	runContainerGit(t, workspace, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(workspace, "tracked"), []byte("initial\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runContainerGit(t, workspace, "add", "tracked")
+	runContainerGit(t, workspace, "commit", "-m", "initial")
+
+	output, err := runRemoteRegularGitMetadataProbe(t, workspace)
+	if err != nil {
+		t.Fatalf("remote probe on regular checkout: %v", err)
+	}
+	metadata, err := parseRemoteRegularGitMetadata(output)
+	if err != nil {
+		t.Fatalf("parse probe output: %v", err)
+	}
+	if metadata.GitDir != filepath.Join(workspace, ".git") || metadata.CurrentRef != "refs/heads/main" {
+		t.Fatalf("metadata = %+v, want task regular checkout", metadata)
+	}
+
+	if err := os.Mkdir(filepath.Join(workspace, ".codex"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".codex", "config.toml"), []byte(`sandbox_mode = "workspace-write"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runRemoteRegularGitMetadataProbe(t, workspace); err == nil {
+		t.Fatal("remote probe accepted a legacy Codex sandbox setting")
+	}
+	if err := os.Remove(filepath.Join(workspace, ".codex", "config.toml")); err != nil {
+		t.Fatal(err)
+	}
+
+	if runtime.GOOS == "windows" {
+		return
+	}
+	if err := os.Rename(filepath.Join(workspace, ".git"), filepath.Join(workspace, ".git-real")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(workspace, ".git-real"), filepath.Join(workspace, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runRemoteRegularGitMetadataProbe(t, workspace); err == nil {
+		t.Fatal("remote probe accepted a symlinked .git directory")
+	}
+}
+
+func runRemoteRegularGitMetadataProbe(t *testing.T, workspace string) (string, error) {
+	t.Helper()
+	home := t.TempDir()
+	cmd := exec.Command("sh", "-c", remoteRegularGitMetadataProbeScript(workspace))
+	cmd.Env = append(os.Environ(), "HOME="+home, "CODEX_HOME="+filepath.Join(home, ".codex"))
+	output, err := cmd.Output()
+	return string(output), err
+}
+
 func TestSSHRemoteAgentEnvForwardsGeneratedFilesystemPolicy(t *testing.T) {
 	env := sshRemoteAgentEnv(&ExecutorCreateRequest{
 		AgentConfig: agents.NewCodexACP(),
@@ -121,5 +184,14 @@ func TestSSHRemoteAgentEnvForwardsGeneratedFilesystemPolicy(t *testing.T) {
 	}
 	if _, leaked := env["UNRELATED"]; leaked {
 		t.Fatalf("remote environment leaked unrelated key: %+v", env)
+	}
+}
+
+func TestSpriteReconnectReplacesChildWhenGitPolicyChanges(t *testing.T) {
+	if shouldReplaceSpriteAgentInstance(&ExecutorCreateRequest{}) {
+		t.Fatal("empty request should reuse healthy Sprite child")
+	}
+	if !shouldReplaceSpriteAgentInstance(&ExecutorCreateRequest{GitMetadataProjections: []*worktree.GitMetadataProjection{{}}}) {
+		t.Fatal("Git metadata projection must replace stale Sprite child")
 	}
 }

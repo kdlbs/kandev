@@ -287,6 +287,7 @@ func TestRemoveExecutionRevokesGitMetadataProjection(t *testing.T) {
 		SessionID:              "session-1",
 		GitMetadataProjections: []*worktree.GitMetadataProjection{{CheckoutPath: "/task-checkout"}},
 	}
+	execution.setRuntimeEnvironment(map[string]string{"CODEX_CONFIG": `{"default_permissions":"kandev_task_git_metadata"}`})
 	if err := mgr.executionStore.Add(execution); err != nil {
 		t.Fatal(err)
 	}
@@ -294,6 +295,9 @@ func TestRemoveExecutionRevokesGitMetadataProjection(t *testing.T) {
 	mgr.RemoveExecution(execution.ID)
 	if execution.GitMetadataProjections != nil {
 		t.Fatalf("GitMetadataProjections after removal = %#v, want revoked", execution.GitMetadataProjections)
+	}
+	if runtimeEnv := execution.RuntimeEnvironment(); runtimeEnv != nil {
+		t.Fatalf("runtime environment after removal = %#v, want revoked", runtimeEnv)
 	}
 }
 func (m *mockStopTracker) RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error) {

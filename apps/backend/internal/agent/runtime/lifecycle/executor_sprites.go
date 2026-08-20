@@ -493,7 +493,7 @@ func (r *SpritesExecutor) stepEnsureAgentInstance(
 		port, portErr := r.getExistingInstancePort(ctx, sprite, instanceID)
 		if portErr == nil && port > 0 {
 			switch {
-			case hasManagedGitHubBrokerEnv(req.Env), len(req.GitMetadataProjections) > 0:
+			case shouldReplaceSpriteAgentInstance(req):
 				replacementPort, err := replaceSpriteReconnectInstance(ctx,
 					liveSpriteReconnectInstanceControl{executor: r, sprite: sprite}, req, instanceID)
 				if err != nil {
@@ -527,6 +527,10 @@ func (r *SpritesExecutor) stepEnsureAgentInstance(
 	completeStepSuccess(&step)
 	report(spriteStepAgentInstance, step)
 	return instancePort, reusingExisting, nil
+}
+
+func shouldReplaceSpriteAgentInstance(req *ExecutorCreateRequest) bool {
+	return req != nil && (hasManagedGitHubBrokerEnv(req.Env) || len(req.GitMetadataProjections) > 0)
 }
 
 // stepApplyNetworkPolicy handles step 6: apply network policy from the executor profile.

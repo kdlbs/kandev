@@ -31,6 +31,19 @@ type GitMetadataProjectionEnforcer interface {
 	PrepareGitMetadataProjection(context.Context, *ExecutorCreateRequest) error
 }
 
+// gitMetadataProjectionCapabilityError carries a bounded recovery action from
+// an executor capability check. It must never include a resolved checkout or
+// configuration path: those are authorization inputs, not user-facing data.
+type gitMetadataProjectionCapabilityError struct {
+	recovery string
+}
+
+func (e *gitMetadataProjectionCapabilityError) Error() string { return e.recovery }
+
+func unsupportedGitMetadataProjection(recovery string) error {
+	return &gitMetadataProjectionCapabilityError{recovery: recovery}
+}
+
 // preflightGitMetadataProjection verifies a fresh projection and requires an
 // executor-specific enforcement attestation. A runtime without this capability
 // must fail before CreateInstance: starting an agent that can edit the checkout
@@ -47,6 +60,10 @@ func preflightGitMetadataProjection(ctx context.Context, runtime ExecutorBackend
 		return fmt.Errorf("%s: executor %q cannot enforce task Git metadata permissions; update the executor or start a new session", gitMetadataProjectionUnsupported, runtime.Name())
 	}
 	if err := enforcer.PrepareGitMetadataProjection(ctx, req); err != nil {
+		var capabilityErr *gitMetadataProjectionCapabilityError
+		if errors.As(err, &capabilityErr) {
+			return fmt.Errorf("%s: %s", gitMetadataProjectionUnsupported, capabilityErr.recovery)
+		}
 		return fmt.Errorf("%s: executor %q could not attest task Git metadata permissions; update the executor or start a new session", gitMetadataProjectionUnsupported, runtime.Name())
 	}
 	return nil
