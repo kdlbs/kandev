@@ -180,6 +180,27 @@ func TestValidateOutcome_N8b_ReasonAtCapAccepted(t *testing.T) {
 	}
 }
 
+// TestValidateOutcome_N3aRule3_CustomTextOverCapWithTrailingWhitespaceRejected
+// proves N3a rule 3's ordering requirement: validation runs on the caller's
+// RAW, untrimmed input, before normalizeAnswer's trimming. A value that is
+// over the cap only counting trailing whitespace must still be rejected, even
+// though trimming it would bring it under the cap — trimming happens strictly
+// after validation, never before.
+func TestValidateOutcome_N3aRule3_CustomTextOverCapWithTrailingWhitespaceRejected(t *testing.T) {
+	long := make([]rune, answerTextRuneCap-1)
+	for i := range long {
+		long[i] = 'a'
+	}
+	overCapWithTrailingSpace := string(long) + "  " // answerTextRuneCap+1 runes, only trims to answerTextRuneCap-1
+
+	err := validateOutcome(twoQuestionBundle(), Outcome{
+		Answers: []Answer{{QuestionID: "q1", CustomText: overCapWithTrailingSpace}, {QuestionID: "q2"}},
+	})
+	if err == nil || !IsValidationError(err) {
+		t.Fatalf("expected a validation error for a raw value one rune over the cap (even though trimming would bring it under), got %v", err)
+	}
+}
+
 // TestValidateOutcome_N6a_L16BundleUnanswerableExceptByRejection proves L16:
 // a bundle whose sole question carries an empty question_id can never pass
 // answers validation, whatever the caller submits, and can only be
