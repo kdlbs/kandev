@@ -893,6 +893,20 @@ type Task struct {
 	IsFromOffice bool `json:"is_from_office,omitempty"`
 }
 
+// TaskStepTransition is the immutable ledger identity for one committed task
+// workflow-step change. ID is monotonic and therefore authoritative when
+// clock timestamps are equal or move backwards.
+type TaskStepTransition struct {
+	ID                 int64     `json:"id"`
+	TaskID             string    `json:"task_id"`
+	SessionID          string    `json:"session_id,omitempty"`
+	FromWorkflowID     string    `json:"from_workflow_id,omitempty"`
+	FromWorkflowStepID string    `json:"from_workflow_step_id,omitempty"`
+	ToWorkflowID       string    `json:"to_workflow_id,omitempty"`
+	ToWorkflowStepID   string    `json:"to_workflow_step_id,omitempty"`
+	OccurredAt         time.Time `json:"occurred_at"`
+}
+
 // IsOfficeOwnedAndAssigned reports whether runtime behavior belongs to an
 // Office-owned task with a designated runner. Kanban tasks may also project a
 // runner from their workflow step, but retain normal per-session semantics.

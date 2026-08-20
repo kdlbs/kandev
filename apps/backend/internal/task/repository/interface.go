@@ -148,6 +148,15 @@ type TaskRepository interface {
 	ReleaseTaskExternalID(ctx context.Context, workspaceID, externalID string) (*models.Task, error)
 }
 
+// TaskStepTransitionRepository reads authoritative workflow-step ledger
+// identities. It remains separate from TaskRepository so older adapters can
+// continue serving ordinary task reads while transition-keyed consumers opt in.
+type TaskStepTransitionRepository interface {
+	// GetLatestTaskStepTransition returns the greatest committed ledger ID for
+	// taskID, or nil when the task has no workflow-step history.
+	GetLatestTaskStepTransition(ctx context.Context, taskID string) (*models.TaskStepTransition, error)
+}
+
 // TaskStatusSummaryRepository stores the bounded task-level projection used by
 // list and switcher surfaces. Implementations must compare revisions and the
 // semantic payload atomically so retries and concurrent source observations do
