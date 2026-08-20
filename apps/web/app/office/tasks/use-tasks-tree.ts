@@ -7,7 +7,6 @@ import type {
   TaskSortDir,
   TaskFilterState,
 } from "@/lib/state/slices/office/types";
-import { normalizeTaskStatus } from "./normalize-status";
 
 const FALLBACK_STATUS_ORDER: Record<OfficeTaskStatus, number> = {
   backlog: 0,
@@ -31,8 +30,7 @@ function matchesFilters(task: OfficeTask, filters: TaskFilterState): boolean {
   if (filters.search && !task.title.toLowerCase().includes(filters.search.toLowerCase())) {
     return false;
   }
-  if (filters.statuses.length > 0 && !filters.statuses.includes(normalizeTaskStatus(task.status)))
-    return false;
+  if (filters.statuses.length > 0 && !filters.statuses.includes(task.status)) return false;
   if (filters.priorities.length > 0 && !filters.priorities.includes(task.priority)) return false;
   if (
     filters.assigneeIds.length > 0 &&
@@ -60,9 +58,7 @@ function compareIssues(a: OfficeTask, b: OfficeTask, ctx: SortContext): number {
   let cmp = 0;
   switch (ctx.field) {
     case "status":
-      cmp =
-        (ctx.statusOrder[normalizeTaskStatus(a.status)] ?? 99) -
-        (ctx.statusOrder[normalizeTaskStatus(b.status)] ?? 99);
+      cmp = (ctx.statusOrder[a.status] ?? 99) - (ctx.statusOrder[b.status] ?? 99);
       break;
     case "priority":
       cmp = (ctx.priorityOrder[a.priority] ?? 4) - (ctx.priorityOrder[b.priority] ?? 4);

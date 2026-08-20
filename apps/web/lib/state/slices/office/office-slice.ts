@@ -1,5 +1,9 @@
 import type { StateCreator } from "zustand";
 import type { OfficeSlice, OfficeSliceState } from "./types";
+// The office UI route owns status canonicalization; the store re-uses it so
+// every write path into office.tasks.items normalizes the same way instead
+// of each consumer having to remember to.
+import { normalizeTaskStatus } from "@/app/office/tasks/normalize-status";
 
 export const defaultTaskFilters = {
   statuses: [] as string[],
@@ -142,11 +146,20 @@ function createProjectActions(set: SetFn) {
   };
 }
 
+type StoredTask = OfficeSlice["office"]["tasks"]["items"][number];
+
+// Normalizes a freshly-ingested task's status, keeping the raw pre-
+// normalization value on `rawStatus` for the few consumers that need a
+// sub-state the canonical union collapses (see OfficeTask.rawStatus).
+function normalizeIngestedTask(task: StoredTask): StoredTask {
+  return { ...task, rawStatus: task.status, status: normalizeTaskStatus(task.status) };
+}
+
 function createTaskActions(set: SetFn) {
   return {
     setTasks: (tasks: OfficeSlice["office"]["tasks"]["items"]) =>
       set((draft) => {
-        draft.office.tasks.items = tasks;
+        draft.office.tasks.items = tasks.map(normalizeIngestedTask);
       }),
     appendTasks: (tasks: OfficeSlice["office"]["tasks"]["items"]) =>
       set((draft) => {
@@ -154,18 +167,28 @@ function createTaskActions(set: SetFn) {
         const existing = new Set(draft.office.tasks.items.map((t) => t.id));
         for (const t of tasks) {
           if (!existing.has(t.id)) {
-            draft.office.tasks.items.push(t);
+            draft.office.tasks.items.push(normalizeIngestedTask(t));
             existing.add(t.id);
           }
         }
       }),
-    patchTaskInStore: (
-      taskId: string,
-      patch: Partial<OfficeSlice["office"]["tasks"]["items"][number]>,
-    ) =>
+    patchTaskInStore: (taskId: string, patch: Partial<StoredTask>) =>
       set((draft) => {
         const idx = draft.office.tasks.items.findIndex((t) => t.id === taskId);
-        if (idx >= 0) Object.assign(draft.office.tasks.items[idx], patch);
+        if (idx < 0) return;
+        if (patch.status === undefined) {
+          Object.assign(draft.office.tasks.items[idx], patch);
+          return;
+        }
+        // `patch.rawStatus` is only already set when the caller is restoring
+        // a full prior snapshot (see useOptimisticTaskMutation's rollback) —
+        // preserve it rather than re-deriving from the (already-canonical)
+        // snapshot status.
+        Object.assign(draft.office.tasks.items[idx], {
+          ...patch,
+          rawStatus: patch.rawStatus ?? patch.status,
+          status: normalizeTaskStatus(patch.status),
+        });
       }),
     setTaskFilters: (filters: Partial<OfficeSlice["office"]["tasks"]["filters"]>) =>
       set((draft) => {

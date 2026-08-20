@@ -6,7 +6,6 @@ import { useAppStore } from "@/components/state-provider";
 import type { OfficeTask, OfficeTaskStatus } from "@/lib/state/slices/office/types";
 import { StatusIcon } from "./status-icon";
 import { STATUS_LABEL_KEYS } from "../lib/label-keys";
-import { normalizeTaskStatus } from "./normalize-status";
 import { useTranslation } from "react-i18next";
 
 // `labelKey`, not `label` — see the note in `status-labels.ts`. The workspace's
@@ -73,9 +72,8 @@ function BoardColumn({
 }
 
 // Board columns are keyed on the canonical lowercase OfficeTaskStatus
-// vocabulary, but `task.status` can carry a raw backend enum value (e.g.
-// "CREATED") — see normalize-status.ts. Normalize before bucketing so those
-// tasks land in their canonical column instead of being silently dropped.
+// vocabulary. `task.status` is normalized to that vocabulary at ingestion
+// (office-slice.ts), so no per-consumer normalization is needed here.
 export function groupTasksByStatus(
   tasks: OfficeTask[],
   columnStatuses: OfficeTaskStatus[],
@@ -85,7 +83,7 @@ export function groupTasksByStatus(
     grouped.set(status, []);
   }
   for (const task of tasks) {
-    const list = grouped.get(normalizeTaskStatus(task.status));
+    const list = grouped.get(task.status);
     if (list) list.push(task);
   }
   return grouped;

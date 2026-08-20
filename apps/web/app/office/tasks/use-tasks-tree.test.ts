@@ -132,35 +132,30 @@ describe("office task tree", () => {
     ]);
   });
 
-  it("includes a raw backend CREATED task when filtering by the todo status", () => {
-    const created = task("created", "Created task", undefined, "CREATED" as OfficeTask["status"]);
-    const done = task("done", "Done task", undefined, "COMPLETED" as OfficeTask["status"]);
+  // office.tasks.items is normalized to the canonical OfficeTaskStatus
+  // vocabulary at ingestion (office-slice.ts setTasks/appendTasks/
+  // patchTaskInStore), so buildTaskTreeNodes only ever sees canonical
+  // values — coverage for the raw-backend-status case (e.g. "CREATED")
+  // lives in office-tasks.test.ts instead.
+  it("filters to the todo status", () => {
+    const todo = task("todo-task", "Todo task", undefined, "todo");
+    const done = task("done-task", "Done task", undefined, "done");
 
-    const nodes = buildNodes([created, done], new Set(), "title", "asc", {
+    const nodes = buildNodes([todo, done], new Set(), "title", "asc", {
       ...FILTERS,
       statuses: ["todo"],
     });
 
-    expect(nodes.map((node) => node.task.id)).toEqual([created.id]);
+    expect(nodes.map((node) => node.task.id)).toEqual([todo.id]);
   });
 
-  it("sorts a raw backend CREATED task into the todo band, not last", () => {
-    const created = task("created", "Created task", undefined, "CREATED" as OfficeTask["status"]);
-    const inProgress = task(
-      "in-progress",
-      "In progress task",
-      undefined,
-      "IN_PROGRESS" as OfficeTask["status"],
-    );
-    const cancelled = task(
-      "cancelled",
-      "Cancelled task",
-      undefined,
-      "CANCELLED" as OfficeTask["status"],
-    );
+  it("sorts by status order", () => {
+    const todo = task("todo-task", "Todo task", undefined, "todo");
+    const inProgress = task("in-progress", "In progress task", undefined, "in_progress");
+    const cancelled = task("cancelled", "Cancelled task", undefined, "cancelled");
 
-    const nodes = buildNodes([cancelled, inProgress, created], new Set(), "status", "asc");
+    const nodes = buildNodes([cancelled, inProgress, todo], new Set(), "status", "asc");
 
-    expect(nodes.map((node) => node.task.id)).toEqual([created.id, inProgress.id, cancelled.id]);
+    expect(nodes.map((node) => node.task.id)).toEqual([todo.id, inProgress.id, cancelled.id]);
   });
 });

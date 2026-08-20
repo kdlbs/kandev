@@ -101,7 +101,7 @@ export function TaskRow({
           })}
         </span>
       )}
-      <ExecutionIndicator status={task.status} />
+      <ExecutionIndicator status={task.rawStatus ?? task.status} />
       {agentName && (
         <span className="text-xs text-muted-foreground shrink-0 truncate max-w-[100px]">
           {agentName}
