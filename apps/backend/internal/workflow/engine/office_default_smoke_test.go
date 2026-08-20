@@ -288,6 +288,17 @@ func (s *smokeStore) ApplyTransition(_ context.Context, _, _, fromStepID, toStep
 	return nil
 }
 
+func (s *smokeStore) ApplyTransitionIfAtStep(
+	_ context.Context, _, _, expectedStepID, toStepID string, _ Trigger,
+) (bool, error) {
+	if s.currentStepID != expectedStepID {
+		return false, nil
+	}
+	s.transitions = append(s.transitions, expectedStepID+"->"+toStepID)
+	s.currentStepID = toStepID
+	return true, nil
+}
+
 func (s *smokeStore) PersistData(_ context.Context, _ string, _ map[string]any) error { return nil }
 
 func (s *smokeStore) IsOperationApplied(_ context.Context, op string) (bool, error) {

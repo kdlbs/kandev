@@ -1,6 +1,9 @@
 package engine
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // RunQueueAdapter is the engine's contract with the runs queue. The Phase 2
 // final integration emits QueueRun requests through this interface; Phase 3
@@ -51,6 +54,11 @@ type ParticipantInfo struct {
 // (which may differ from a guard's role — AC-42/58). Comment is the
 // human-facing reason column; Note is a separate, unrelated field no Office
 // surface reads.
+//
+// ID and DecidedAt are stamped by Engine.RecordParticipantDecision (AC-66,
+// AC-57b-i) before the write — DecisionStore.RecordStepDecision receives
+// DecisionInfo by value and never generates or echoes back either field, so
+// a caller cannot read them off the row after the call.
 type DecisionInfo struct {
 	ID            string
 	TaskID        string
@@ -58,6 +66,7 @@ type DecisionInfo struct {
 	ParticipantID string
 	Decision      string
 	Note          string
+	DecidedAt     time.Time
 
 	DeciderType string
 	DeciderID   string

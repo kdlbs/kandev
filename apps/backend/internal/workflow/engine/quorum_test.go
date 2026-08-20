@@ -72,6 +72,15 @@ func (s *stepStoreForQuorum) LoadPreviousStep(_ context.Context, _ string, _ int
 func (s *stepStoreForQuorum) ApplyTransition(_ context.Context, _, _, _, _ string, _ Trigger) error {
 	return nil
 }
+func (s *stepStoreForQuorum) ApplyTransitionIfAtStep(
+	_ context.Context, _, _, expectedStepID, toStepID string, _ Trigger,
+) (bool, error) {
+	if s.state.CurrentStepID != expectedStepID {
+		return false, nil
+	}
+	s.state.CurrentStepID = toStepID
+	return true, nil
+}
 func (s *stepStoreForQuorum) PersistData(_ context.Context, _ string, _ map[string]any) error {
 	return nil
 }
@@ -663,9 +672,28 @@ func TestEngine_RecordParticipantDecision_PersistsAndReevaluates(t *testing.T) {
 	}}
 	eng := New(store, MapRegistry{}, WithDecisionStore(decisions), WithParticipantStore(parts))
 
-	if err := eng.RecordParticipantDecision(context.Background(), "task-1", "sess-1", "review", "p1", DecisionApproved, "lgtm"); err != nil {
+	result, err := eng.RecordParticipantDecision(context.Background(), "sess-1", DecisionInfo{
+		TaskID: "task-1", StepID: "review", ParticipantID: "p1", Decision: DecisionApproved, Note: "lgtm",
+	})
+	if err != nil {
 		t.Fatalf("RecordParticipantDecision: %v", err)
 	}
+	if result.DecisionID == "" {
+		t.Fatalf("expected a generated decision id")
+	}
+	if result.DecidedAt.IsZero() {
+		t.Fatalf("expected DecidedAt to be stamped")
+	}
+	if !result.Transitioned || result.TransitionAbandoned {
+		t.Fatalf("expected the sole reviewer's approval to satisfy all_approve and transition: %#v", result)
+	}
+	if result.FromStepID != "review" || result.ToStepID != "approval" {
+		t.Fatalf("unexpected transition endpoints: %#v", result)
+	}
+	if store.state.CurrentStepID != "approval" {
+		t.Fatalf("expected store to have moved to 'approval', got %q", store.state.CurrentStepID)
+	}
+
 	got, _ := decisions.ListStepDecisions(context.Background(), "task-1", "review")
 	if len(got) != 1 {
 		t.Fatalf("expected 1 recorded decision, got %d", len(got))
@@ -673,12 +701,17 @@ func TestEngine_RecordParticipantDecision_PersistsAndReevaluates(t *testing.T) {
 	if got[0].Decision != DecisionApproved || got[0].Note != "lgtm" {
 		t.Fatalf("unexpected decision shape: %#v", got[0])
 	}
+	if got[0].ID != result.DecisionID || !got[0].DecidedAt.Equal(result.DecidedAt) {
+		t.Fatalf("persisted decision does not carry the id/DecidedAt returned to the caller: %#v", got[0])
+	}
 }
 
 func TestEngine_RecordParticipantDecision_RequiresStore(t *testing.T) {
 	store := quorumStore(nil)
 	eng := New(store, MapRegistry{}) // no DecisionStore wired
-	err := eng.RecordParticipantDecision(context.Background(), "task-1", "sess-1", "review", "p1", DecisionApproved, "")
+	_, err := eng.RecordParticipantDecision(context.Background(), "sess-1", DecisionInfo{
+		TaskID: "task-1", StepID: "review", ParticipantID: "p1", Decision: DecisionApproved,
+	})
 	if err == nil {
 		t.Fatalf("expected error when DecisionStore missing")
 	}
@@ -701,10 +734,17 @@ func TestEngine_RecordParticipantDecision_RequiresIDs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Signature: (ctx, taskID, sessionID, stepID, participantID, decision, note)
-			err := eng.RecordParticipantDecision(context.Background(), tc.task, "", tc.step, tc.participant, tc.decision, "")
+			result, err := eng.RecordParticipantDecision(context.Background(), "", DecisionInfo{
+				TaskID: tc.task, StepID: tc.step, ParticipantID: tc.participant, Decision: tc.decision,
+			})
 			if (err != nil) != tc.expectErr {
 				t.Fatalf("err=%v, expectErr=%v", err, tc.expectErr)
+			}
+			if err == nil && !result.ReevaluationSkipped {
+				t.Fatalf("expected ReevaluationSkipped with a blank sessionID: %#v", result)
+			}
+			if err == nil && result.SkipReason != ReasonSessionUnresolvable {
+				t.Fatalf("expected SkipReason=%s, got %q", ReasonSessionUnresolvable, result.SkipReason)
 			}
 		})
 	}

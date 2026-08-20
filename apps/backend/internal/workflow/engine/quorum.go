@@ -6,6 +6,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/workflow/quorummetrics"
+	"go.uber.org/zap"
 )
 
 // Threshold values understood by wait_for_quorum.
@@ -80,6 +84,54 @@ func (e *Engine) evaluateTransitionGuard(ctx context.Context, state MachineState
 		return GuardOutcome{Reason: ReasonGuardVariantUnrecognized}
 	}
 	return e.computeGuardOutcome(ctx, state, action.Guard.WaitForQuorum)
+}
+
+// recordGuardNotFired emits the AC-24/24a observability unit for a guarded
+// transition that evaluated and did not fire: the quorummetrics counter
+// (unconditional) and, when a logger is wired, a structured log record.
+// Called from both the ordinary HandleTrigger/evaluateActions path and the
+// AC-65-scoped decision re-evaluation path — the two "engine-path"
+// evaluators AC-24 covers. The AC-24b/57d read-only diagnostic snapshot
+// (EvaluateStepQuorum) must never call this.
+func (e *Engine) recordGuardNotFired(state MachineState, action Action, outcome GuardOutcome) {
+	quorummetrics.RecordGuardNotFired(outcome.Reason)
+	if e.logger == nil {
+		return
+	}
+	fields := []zap.Field{
+		zap.String("task_id", state.TaskID),
+		zap.String("step_id", state.CurrentStepID),
+		zap.Int("required_count", outcome.RequiredCount),
+		zap.Int("received_count", outcome.ReceivedCount),
+		zap.String("reason", outcome.Reason),
+	}
+	if action.Guard != nil && action.Guard.WaitForQuorum != nil {
+		fields = append(fields,
+			zap.String("guard_role", action.Guard.WaitForQuorum.Role),
+			zap.String("guard_threshold", action.Guard.WaitForQuorum.Threshold),
+		)
+	}
+	if outcome.Err != nil {
+		fields = append(fields, zap.Error(outcome.Err))
+	}
+	e.logger.Warn("workflow quorum guard did not fire", fields...)
+}
+
+// recordReevaluationSkip emits the AC-24/24a observability unit for the
+// AC-16a/F39 skip: a decision was recorded but re-evaluation could not run
+// because the task's active session is unresolvable. Task-level only — no
+// guard was evaluated, so guard-scoped fields (role, threshold, counts) are
+// omitted.
+func (e *Engine) recordReevaluationSkip(taskID, stepID string) {
+	quorummetrics.RecordGuardNotFired(ReasonSessionUnresolvable)
+	if e.logger == nil {
+		return
+	}
+	e.logger.Warn("workflow quorum reevaluation skipped: session unresolvable",
+		zap.String("task_id", taskID),
+		zap.String("step_id", stepID),
+		zap.String("reason", ReasonSessionUnresolvable),
+	)
 }
 
 // computeGuardOutcome evaluates a single wait_for_quorum guard against the
@@ -364,55 +416,273 @@ func finishApproveStyle(satisfied bool, required, received int) GuardOutcome {
 	return outcome
 }
 
-// RecordParticipantDecision writes a new decision row and immediately re-
-// evaluates pending transitions for that (task, step) so any wait_for_quorum
-// guard that just became satisfied can fire.
+// RecordDecisionResult reports the outcome of RecordParticipantDecision: the
+// stamped decision identity (AC-66/57b-i) plus what happened to
+// re-evaluation.
+type RecordDecisionResult struct {
+	DecisionID string
+	DecidedAt  time.Time
+
+	// ReevaluationSkipped is true under AC-16a/F39: the decision was
+	// recorded but re-evaluation did not run because sessionID was blank
+	// (the caller could not resolve the task's active session). SkipReason
+	// is ReasonSessionUnresolvable in that case.
+	ReevaluationSkipped bool
+	SkipReason          string
+
+	// Transitioned / TransitionAbandoned / FromStepID / ToStepID mirror
+	// HandleResult's fields for the transition (if any) the re-evaluation
+	// applied.
+	Transitioned        bool
+	TransitionAbandoned bool
+	FromStepID          string
+	ToStepID            string
+}
+
+// RecordParticipantDecision is the engine's single decision-recording entry
+// point (AC-57): it writes a new decision row, stamping ID and DecidedAt
+// itself (AC-66/57b-i) since DecisionStore.RecordStepDecision takes
+// DecisionInfo by value and never echoes generated fields back. When
+// sessionID resolves, it then re-evaluates — in "committing mode", applying
+// at most one satisfied transition itself (AC-46/47/65) — only the guarded
+// on_turn_complete transition actions at the decision's step, never a plain
+// HandleTrigger(TriggerOnTurnComplete) call, which would re-fire every
+// on_turn_complete action (queue_run, clear_decisions, ...) once per
+// decision instead of once per completed turn.
 //
-// The returned HandleResult mirrors HandleTrigger: Transitioned indicates a
-// transition was applied. EvaluateOnly is honoured if set on the input.
-//
-// Callers that want to suppress re-evaluation (e.g. record-only flows) can
-// pass an empty EvaluateInput by leaving Trigger blank — only the recording
-// step runs in that case.
+// in.ID and in.DecidedAt are ignored — always overwritten with a fresh
+// UUID and the current time. sessionID is optional: blank means the caller
+// could not resolve the task's active session (AC-16a), so the decision is
+// recorded and re-evaluation is skipped without erroring, reported under
+// AC-23 as ReasonSessionUnresolvable so it's distinguishable from
+// "re-evaluated and found threshold unmet."
 func (e *Engine) RecordParticipantDecision(
 	ctx context.Context,
-	taskID, sessionID, stepID, participantID, decision, note string,
-) error {
+	sessionID string,
+	in DecisionInfo,
+) (RecordDecisionResult, error) {
 	if e.decisions == nil {
-		return fmt.Errorf("workflow engine: decision store not wired")
+		return RecordDecisionResult{}, fmt.Errorf("workflow engine: decision store not wired")
 	}
-	if taskID == "" || stepID == "" || participantID == "" {
-		return fmt.Errorf("record decision requires task_id, step_id, and participant_id")
+	if in.TaskID == "" || in.StepID == "" || in.ParticipantID == "" {
+		return RecordDecisionResult{}, fmt.Errorf("record decision requires task_id, step_id, and participant_id")
 	}
-	if decision == "" {
-		return fmt.Errorf("record decision verdict must not be empty")
+	if in.Decision == "" {
+		return RecordDecisionResult{}, fmt.Errorf("record decision verdict must not be empty")
 	}
-	if err := e.decisions.RecordStepDecision(ctx, DecisionInfo{
-		TaskID:        taskID,
-		StepID:        stepID,
-		ParticipantID: participantID,
-		Decision:      decision,
-		Note:          note,
-	}); err != nil {
-		return err
+
+	in.ID = uuid.New().String()
+	in.DecidedAt = time.Now().UTC()
+	if err := e.decisions.RecordStepDecision(ctx, in); err != nil {
+		return RecordDecisionResult{}, err
 	}
-	// Re-evaluate transitions: fire on_turn_complete in evaluate-only mode so
-	// callers (the office service) receive the transition payload and decide
-	// how to apply it. Idempotency is keyed off a synthetic operation id.
-	//
-	// SessionID is optional here — when blank we skip re-evaluation rather
-	// than synthesise a fake session. Callers that want a re-eval pass the
-	// canonical session id for the (task, step) — typically the task's
-	// primary session.
+
+	result := RecordDecisionResult{DecisionID: in.ID, DecidedAt: in.DecidedAt}
 	if sessionID == "" {
-		return nil
+		result.ReevaluationSkipped = true
+		result.SkipReason = ReasonSessionUnresolvable
+		e.recordReevaluationSkip(in.TaskID, in.StepID)
+		return result, nil
 	}
-	_, err := e.HandleTrigger(ctx, HandleInput{
-		TaskID:       taskID,
-		SessionID:    sessionID,
-		Trigger:      TriggerOnTurnComplete,
-		EvaluateOnly: true,
-		OperationID:  fmt.Sprintf("decision:%s:%s:%s:%d", taskID, stepID, participantID, time.Now().UnixNano()),
-	})
-	return err
+
+	handled, err := e.reevaluateGuardedTransitions(ctx, in.TaskID, sessionID, in.StepID, in.ID)
+	if err != nil {
+		return result, err
+	}
+	result.Transitioned = handled.Transitioned
+	result.TransitionAbandoned = handled.TransitionAbandoned
+	result.FromStepID = handled.FromStepID
+	result.ToStepID = handled.ToStepID
+	return result, nil
+}
+
+// reevaluateGuardedTransitions implements the AC-13-17/AC-65 re-evaluation
+// scope: it loads the step the decision was recorded against directly (not
+// the task's possibly-since-moved current step — the CAS apply below is
+// what protects against that race) and applies at most the first satisfied
+// guarded on_turn_complete transition action, in configured order. Actions
+// without a wait_for_quorum guard, and every non-transition action
+// (queue_run, clear_decisions, ...), are out of scope for this path — they
+// already ran once for the turn that produced these decisions and must not
+// re-run per decision.
+//
+// The AC-30 operation id is marked applied only once this function has
+// fully determined the outcome (transitioned, abandoned, or nothing
+// satisfied) — never before, so a crash mid-evaluation does not leave a
+// decision's re-evaluation permanently skipped.
+func (e *Engine) reevaluateGuardedTransitions(
+	ctx context.Context, taskID, sessionID, stepID, decisionID string,
+) (HandleResult, error) {
+	opID := fmt.Sprintf("decision:%s:%s:%s", taskID, stepID, decisionID)
+	applied, err := e.store.IsOperationApplied(ctx, opID)
+	if err != nil {
+		return HandleResult{}, err
+	}
+	if applied {
+		return HandleResult{Idempotent: true}, nil
+	}
+
+	state, err := e.store.LoadState(ctx, taskID, sessionID)
+	if err != nil {
+		return HandleResult{}, err
+	}
+	state.CurrentStepID = stepID
+	step, err := e.store.LoadStep(ctx, state.WorkflowID, stepID)
+	if err != nil {
+		return HandleResult{}, err
+	}
+
+	result, err := e.applyFirstSatisfiedGuardedTransition(ctx, taskID, sessionID, state, step)
+	if err != nil {
+		return HandleResult{}, err
+	}
+	if err := e.markOperationApplied(ctx, opID); err != nil {
+		return HandleResult{}, err
+	}
+	return result, nil
+}
+
+// applyFirstSatisfiedGuardedTransition evaluates on_turn_complete's guarded
+// transition actions in order and, for the first one whose wait_for_quorum
+// guard is satisfied, applies it via the AC-46/48 compare-and-swap. Emits
+// the AC-24/24a observability unit for every guard that is evaluated and
+// does not fire, same as the ordinary HandleTrigger path.
+func (e *Engine) applyFirstSatisfiedGuardedTransition(
+	ctx context.Context, taskID, sessionID string, state MachineState, step StepSpec,
+) (HandleResult, error) {
+	for _, action := range step.Events[TriggerOnTurnComplete] {
+		if !isTransitionAction(action.Kind) || action.RequiresApproval {
+			continue
+		}
+		if action.Guard == nil || action.Guard.WaitForQuorum == nil {
+			continue
+		}
+		outcome := e.evaluateTransitionGuard(ctx, state, action)
+		if !outcome.Satisfied {
+			e.recordGuardNotFired(state, action, outcome)
+			continue
+		}
+		targetStepID, err := e.resolveTransitionTarget(ctx, state, step, action)
+		if err != nil {
+			return HandleResult{}, err
+		}
+		if targetStepID == "" || targetStepID == state.CurrentStepID {
+			continue
+		}
+		applied, err := e.store.ApplyTransitionIfAtStep(
+			ctx, taskID, sessionID, state.CurrentStepID, targetStepID, TriggerOnTurnComplete,
+		)
+		if err != nil {
+			return HandleResult{}, err
+		}
+		if !applied {
+			return HandleResult{TransitionAbandoned: true, FromStepID: state.CurrentStepID, ToStepID: targetStepID}, nil
+		}
+		return HandleResult{Transitioned: true, FromStepID: state.CurrentStepID, ToStepID: targetStepID}, nil
+	}
+	return HandleResult{}, nil
+}
+
+// QuorumGuardState is one guarded transition's read-only quorum state,
+// returned by EvaluateStepQuorum (AC-54/57d). Satisfied=true entries omit
+// Reason entirely (AC-60).
+type QuorumGuardState struct {
+	TargetStepID  string
+	Role          string
+	Threshold     string
+	RequiredCount int
+	ReceivedCount int
+	Satisfied     bool
+	Reason        string
+	Error         error
+}
+
+// QuorumSnapshot is the AC-54/57d read-only diagnostic snapshot for a
+// task's current step.
+type QuorumSnapshot struct {
+	StepID string
+	// ReevaluationBlocked reflects only the "task has at least one decision
+	// at its current step" conjunct (AC-62) — the engine has no access to
+	// the AC-16 active-session query, so it cannot compute the full
+	// conjunction with "no active session" by itself. The caller
+	// (shared.WorkflowEngineDispatcher's EvaluateStepQuorum, which does have
+	// session-resolution access) ANDs in that second conjunct.
+	ReevaluationBlocked bool
+	// Guards is ordered to match the step's configured on_turn_complete
+	// action order (AC-57d), tying AC-61's selection rule to AC-17's
+	// first-transition-wins.
+	Guards []QuorumGuardState
+}
+
+// EvaluateStepQuorum computes the read-only AC-54/57d snapshot for the step
+// the given session currently resolves to. sessionID is used only to
+// satisfy TransitionStore.LoadState's signature — MachineState.CurrentStepID
+// is derived from the task row, not the session, so any valid session for
+// the task yields the correct step (see production TransitionStore
+// implementations). Applies no transition, writes no row, executes no
+// action callback, emits no AC-24 log, and increments no AC-24a counter — a
+// diagnostic read never fails on, or mutates, the state it exists to
+// diagnose.
+//
+// A store error while evaluating one guard surfaces as that guard's
+// ReasonEvaluationError entry, not a method-level error, so one failing
+// guard does not blank the others. sessionID == "" and a task with no bound
+// current step both return an empty, no-error snapshot (AC-24c).
+func (e *Engine) EvaluateStepQuorum(ctx context.Context, taskID, sessionID string) (QuorumSnapshot, error) {
+	if sessionID == "" {
+		return QuorumSnapshot{}, nil
+	}
+	state, err := e.store.LoadState(ctx, taskID, sessionID)
+	if err != nil {
+		return QuorumSnapshot{}, err
+	}
+	if state.CurrentStepID == "" {
+		return QuorumSnapshot{}, nil
+	}
+	step, err := e.store.LoadStep(ctx, state.WorkflowID, state.CurrentStepID)
+	if err != nil {
+		return QuorumSnapshot{}, err
+	}
+
+	snapshot := QuorumSnapshot{StepID: state.CurrentStepID}
+	for _, action := range step.Events[TriggerOnTurnComplete] {
+		if !isTransitionAction(action.Kind) || action.Guard == nil {
+			continue
+		}
+		snapshot.Guards = append(snapshot.Guards, e.evaluateGuardStateReadOnly(ctx, state, step, action))
+	}
+
+	if e.decisions != nil {
+		decisions, derr := e.decisions.ListStepDecisions(ctx, taskID, state.CurrentStepID)
+		if derr == nil {
+			snapshot.ReevaluationBlocked = len(decisions) > 0
+		}
+	}
+
+	return snapshot, nil
+}
+
+// evaluateGuardStateReadOnly computes one QuorumGuardState entry without any
+// side effect (no logging, no counters, no apply).
+func (e *Engine) evaluateGuardStateReadOnly(
+	ctx context.Context, state MachineState, step StepSpec, action Action,
+) QuorumGuardState {
+	outcome := e.evaluateTransitionGuard(ctx, state, action)
+	targetStepID, err := e.resolveTransitionTarget(ctx, state, step, action)
+	if err != nil {
+		outcome = GuardOutcome{Reason: ReasonEvaluationError, Err: err}
+	}
+	entry := QuorumGuardState{
+		TargetStepID:  targetStepID,
+		Satisfied:     outcome.Satisfied,
+		Reason:        outcome.Reason,
+		Error:         outcome.Err,
+		RequiredCount: outcome.RequiredCount,
+		ReceivedCount: outcome.ReceivedCount,
+	}
+	if action.Guard.WaitForQuorum != nil {
+		entry.Role = action.Guard.WaitForQuorum.Role
+		entry.Threshold = action.Guard.WaitForQuorum.Threshold
+	}
+	return entry
 }

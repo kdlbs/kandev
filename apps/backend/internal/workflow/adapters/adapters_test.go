@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/workflow/engine"
 	"github.com/kandev/kandev/internal/workflow/models"
@@ -179,6 +180,39 @@ func TestDecisionAdapter_List_TranslatesAllRows(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("len = %d, want 2", len(got))
+	}
+}
+
+func TestDecisionAdapter_Record_CarriesDecidedAt(t *testing.T) {
+	repo := &fakeRepo{}
+	a := NewDecisionAdapter(repo)
+	decidedAt := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	err := a.RecordStepDecision(context.Background(), engine.DecisionInfo{
+		ID: "d-1", TaskID: "t-1", StepID: "s-1",
+		ParticipantID: "p-1", Decision: "approved", DecidedAt: decidedAt,
+	})
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if !repo.recorded.DecidedAt.Equal(decidedAt) {
+		t.Fatalf("decided_at not carried through: got %v, want %v", repo.recorded.DecidedAt, decidedAt)
+	}
+}
+
+func TestDecisionAdapter_List_CarriesDecidedAt(t *testing.T) {
+	decidedAt := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	repo := &fakeRepo{
+		decisions: []*models.WorkflowStepDecision{
+			{ID: "d-1", Decision: "approved", DecidedAt: decidedAt},
+		},
+	}
+	a := NewDecisionAdapter(repo)
+	got, err := a.ListStepDecisions(context.Background(), "t", "s")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 1 || !got[0].DecidedAt.Equal(decidedAt) {
+		t.Fatalf("decided_at not carried through: %+v", got)
 	}
 }
 

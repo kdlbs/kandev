@@ -43,6 +43,17 @@ type workflowMoveAdmissionRepository interface {
 	UpdateTaskWithWorkflowStepAdmission(ctx context.Context, task *models.Task, targetStepID string, limit int) (bool, error)
 }
 
+// workflowMoveAdmissionCASRepository is the AC-46/48 compare-and-swap
+// variant of workflowMoveAdmissionRepository. It is a separate interface
+// (rather than a new method on workflowMoveAdmissionRepository) so fakes in
+// tests that only exercise the unconditional move path do not need to grow a
+// method they never call.
+type workflowMoveAdmissionCASRepository interface {
+	UpdateTaskWithWorkflowStepAdmissionIfAtStep(
+		ctx context.Context, task *models.Task, expectedStepID, targetStepID string, limit int,
+	) (applied bool, err error)
+}
+
 type workflowQueuedTaskPromoter interface {
 	PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, fromStepID, destinationStepID string, limit int) (bool, error)
 }
@@ -274,6 +285,80 @@ func (s *workflowStore) applyTransition(ctx context.Context, taskID, sessionID, 
 	s.pullNextTaskOnVacate(ctx, fromStepID, taskID)
 
 	return nil
+}
+
+// ApplyTransitionIfAtStep is the AC-46/48 compare-and-swap variant of
+// ApplyTransition used by the workflow engine's guarded-transition
+// re-evaluation apply path (Engine.reevaluateGuardedTransitions). applied
+// false means the task's persisted step no longer equals expectedStepID by
+// the time the underlying repository checked — a concurrent transition
+// already moved it — which is not an error: no task.updated event is
+// published, no review-status clear runs, and no queue vacate-pull runs.
+func (s *workflowStore) ApplyTransitionIfAtStep(
+	ctx context.Context, taskID, sessionID, expectedStepID, toStepID string, trigger engine.Trigger,
+) (bool, error) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return false, fmt.Errorf("load task for CAS transition: %w", err)
+	}
+	targetStep, err := s.workflowStepGetter.GetStep(ctx, toStepID)
+	if err != nil {
+		return false, fmt.Errorf("load target step for CAS transition: %w", err)
+	}
+	if targetStep == nil {
+		return false, fmt.Errorf("target step %s not found for CAS transition", toStepID)
+	}
+	casRepo, ok := s.repo.(workflowMoveAdmissionCASRepository)
+	if !ok {
+		return false, fmt.Errorf("workflow step CAS admission repository unavailable for step %s", toStepID)
+	}
+
+	oldWorkflowID := task.WorkflowID
+	task.WorkflowID = targetStep.WorkflowID
+	task.WorkflowStepID = toStepID
+	task.WIPAdmitted = true
+	task.QueuedForStepID = ""
+	task.QueuedAt = nil
+	if task.Metadata != nil {
+		delete(task.Metadata, models.MetaKeyQueuedMoveExitPending)
+		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
+		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
+	}
+	task.UpdatedAt = time.Now().UTC()
+
+	transitionCtx := ctx
+	if !steptelemetry.HasTrigger(transitionCtx) {
+		transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
+	}
+	applied, err := casRepo.UpdateTaskWithWorkflowStepAdmissionIfAtStep(
+		transitionCtx, task, expectedStepID, toStepID, targetStep.WIPLimit,
+	)
+	if err != nil {
+		return false, fmt.Errorf("update task workflow step (CAS): %w", err)
+	}
+	if !applied {
+		return false, nil
+	}
+
+	s.publishTaskUpdated(ctx, task, oldWorkflowID)
+
+	if task.QueuedForStepID == "" {
+		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
+			s.logger.Warn("failed to clear session review status",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
+
+	s.logger.Info("workflow transition applied (compare-and-swap)",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("from_step_id", expectedStepID),
+		zap.String("to_step_id", toStepID))
+
+	s.pullNextTaskOnVacate(ctx, expectedStepID, taskID)
+
+	return true, nil
 }
 
 func markDeferredMoveApplied(task *models.Task, moveID string) error {

@@ -112,6 +112,12 @@ func (commentWorkflowStore) ApplyTransition(context.Context, string, string, str
 	return errors.New("unexpected transition")
 }
 
+func (commentWorkflowStore) ApplyTransitionIfAtStep(
+	context.Context, string, string, string, string, engine.Trigger,
+) (bool, error) {
+	return false, errors.New("unexpected transition")
+}
+
 func (commentWorkflowStore) PersistData(context.Context, string, map[string]any) error {
 	return nil
 }
@@ -173,6 +179,17 @@ func (s *transitionWorkflowStore) ApplyTransition(
 	s.appliedTo = toStepID
 	s.appliedTrigger = trigger
 	return nil
+}
+
+func (s *transitionWorkflowStore) ApplyTransitionIfAtStep(
+	_ context.Context, taskID, sessionID, expectedStepID, toStepID string, trigger engine.Trigger,
+) (bool, error) {
+	s.appliedTaskID = taskID
+	s.appliedSessionID = sessionID
+	s.appliedFrom = expectedStepID
+	s.appliedTo = toStepID
+	s.appliedTrigger = trigger
+	return true, nil
 }
 
 func (s *transitionWorkflowStore) PersistData(context.Context, string, map[string]any) error {
