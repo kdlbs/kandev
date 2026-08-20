@@ -9,10 +9,10 @@ owner: kandev
 
 ## Why
 
-The X on an agent-session tab is a standard panel-close affordance, but it permanently deletes the
-session. Users need to hide an agent panel without losing its conversation. The existing
-**Close Others** action also removes panels only briefly because session synchronization recreates
-every missing sibling panel.
+The X on an agent-session tab is a standard panel-close affordance, but it previously permanently
+deleted the session. Users need to hide an agent panel without losing its conversation. The existing
+**Close Others** action also previously removed panels only briefly because session synchronization
+recreated every missing sibling panel.
 
 Permanent deletion remains a deliberate lifecycle action in the session context menu and mobile
 Sessions picker. Promoting a session to primary is also a routine tab state change whose successful
