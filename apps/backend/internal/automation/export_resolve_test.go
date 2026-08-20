@@ -22,9 +22,13 @@ import (
 type fakeExportAgentProfileLookup struct {
 	profiles map[string]*settingsmodels.AgentProfile
 	err      error
+	// gotTx records the transaction handle the most recent call received,
+	// for AC-29's handle-identity assertion.
+	gotTx *sqlx.Tx
 }
 
-func (f *fakeExportAgentProfileLookup) GetAgentProfileTx(_ context.Context, _ *sqlx.Tx, id string) (*settingsmodels.AgentProfile, bool, error) {
+func (f *fakeExportAgentProfileLookup) GetAgentProfileTx(_ context.Context, tx *sqlx.Tx, id string) (*settingsmodels.AgentProfile, bool, error) {
+	f.gotTx = tx
 	if f.err != nil {
 		return nil, false, f.err
 	}
@@ -35,9 +39,11 @@ func (f *fakeExportAgentProfileLookup) GetAgentProfileTx(_ context.Context, _ *s
 type fakeExportExecutorProfileLookup struct {
 	profiles map[string]*taskmodels.ExecutorProfile
 	err      error
+	gotTx    *sqlx.Tx
 }
 
-func (f *fakeExportExecutorProfileLookup) GetExecutorProfileTx(_ context.Context, _ *sqlx.Tx, id string) (*taskmodels.ExecutorProfile, bool, error) {
+func (f *fakeExportExecutorProfileLookup) GetExecutorProfileTx(_ context.Context, tx *sqlx.Tx, id string) (*taskmodels.ExecutorProfile, bool, error) {
+	f.gotTx = tx
 	if f.err != nil {
 		return nil, false, f.err
 	}
@@ -48,9 +54,11 @@ func (f *fakeExportExecutorProfileLookup) GetExecutorProfileTx(_ context.Context
 type fakeExportWorkflowLookup struct {
 	workflows map[string]*taskmodels.Workflow
 	err       error
+	gotTx     *sqlx.Tx
 }
 
-func (f *fakeExportWorkflowLookup) GetWorkflowTx(_ context.Context, _ *sqlx.Tx, id string) (*taskmodels.Workflow, bool, error) {
+func (f *fakeExportWorkflowLookup) GetWorkflowTx(_ context.Context, tx *sqlx.Tx, id string) (*taskmodels.Workflow, bool, error) {
+	f.gotTx = tx
 	if f.err != nil {
 		return nil, false, f.err
 	}
@@ -61,9 +69,11 @@ func (f *fakeExportWorkflowLookup) GetWorkflowTx(_ context.Context, _ *sqlx.Tx, 
 type fakeExportWorkflowStepLookup struct {
 	steps map[string]*workflowmodels.WorkflowStep
 	err   error
+	gotTx *sqlx.Tx
 }
 
-func (f *fakeExportWorkflowStepLookup) GetStepTx(_ context.Context, _ *sqlx.Tx, id string) (*workflowmodels.WorkflowStep, bool, error) {
+func (f *fakeExportWorkflowStepLookup) GetStepTx(_ context.Context, tx *sqlx.Tx, id string) (*workflowmodels.WorkflowStep, bool, error) {
+	f.gotTx = tx
 	if f.err != nil {
 		return nil, false, f.err
 	}
@@ -74,9 +84,11 @@ func (f *fakeExportWorkflowStepLookup) GetStepTx(_ context.Context, _ *sqlx.Tx, 
 type fakeExportRepositoryLookup struct {
 	repositories map[string]*taskmodels.Repository
 	err          error
+	gotTx        *sqlx.Tx
 }
 
-func (f *fakeExportRepositoryLookup) GetRepositoryTx(_ context.Context, _ *sqlx.Tx, id string) (*taskmodels.Repository, bool, error) {
+func (f *fakeExportRepositoryLookup) GetRepositoryTx(_ context.Context, tx *sqlx.Tx, id string) (*taskmodels.Repository, bool, error) {
+	f.gotTx = tx
 	if f.err != nil {
 		return nil, false, f.err
 	}
@@ -334,5 +346,74 @@ func TestResolveDescriptors_LookupNotWired_FailsClosed(t *testing.T) {
 	_, _, err := svc.resolveDescriptors(context.Background(), tx, &Automation{ID: "a1", Name: "A", AgentProfileID: "agent-1"})
 	if !errors.Is(err, ErrExportLookupUnavailable) {
 		t.Fatalf("err = %v, want wrapping ErrExportLookupUnavailable", err)
+	}
+}
+
+// AC-29: the export path must obtain its read-transaction snapshot once and
+// pass that exact handle to every read — the automation store's own read
+// and every descriptor lookup alike — never a nil handle, never a distinct
+// one. Service.store is a concrete *Store (not an interface; introducing
+// one purely for this test would be an out-of-scope architectural change),
+// so this test uses the real store's own BeginReadTx to obtain the one
+// handle under test, then asserts every lookup double recorded that exact
+// pointer. This is the direct, mechanical version of AC-29's own text: "the
+// test asserts, with a store double and four lookup doubles that each
+// record the handle they were given, that every recorded handle is the
+// same one and that no read arrived with no handle."
+func TestResolveDescriptors_AC29_SameTransactionHandleReachesStoreAndEveryLookup(t *testing.T) {
+	svc, agentLookup, executorLookup, workflowLookup, stepLookup, repoLookup := resolveTestFixture(t)
+	agentLookup.profiles["agent-1"] = &settingsmodels.AgentProfile{Name: "Reviewer", Model: "claude-sonnet-5", Mode: "plan"}
+	executorLookup.profiles["exec-1"] = &taskmodels.ExecutorProfile{ExecutorID: "local_docker", Name: "Default"}
+	workflowLookup.workflows["wf-1"] = &taskmodels.Workflow{Name: "Review Flow"}
+	stepLookup.steps["step-1"] = &workflowmodels.WorkflowStep{Name: "In Review"}
+	repoLookup.repositories["repo-a"] = &taskmodels.Repository{Name: "repo-a-name"}
+
+	ctx := context.Background()
+	a := &Automation{
+		WorkspaceID:       "ws-1",
+		Name:              "Daily Review",
+		Enabled:           true,
+		MaxConcurrentRuns: 1,
+		AgentProfileID:    "agent-1",
+		ExecutorProfileID: "exec-1",
+		WorkflowID:        "wf-1",
+		WorkflowStepID:    "step-1",
+		RepositoryIDs:     []string{"repo-a"},
+	}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatalf("CreateAutomation: %v", err)
+	}
+
+	// This is the one handle under test: the store's own read (mirroring
+	// export_store_test.go) and every descriptor lookup below must all see
+	// this exact *sqlx.Tx.
+	tx := beginTestReadTx(t, svc)
+
+	automations, err := svc.store.ListAutomationsForExportTx(ctx, tx, "ws-1")
+	if err != nil {
+		t.Fatalf("ListAutomationsForExportTx: %v", err)
+	}
+	if len(automations) != 1 {
+		t.Fatalf("expected 1 automation, got %d", len(automations))
+	}
+
+	if _, _, err := svc.resolveDescriptors(ctx, tx, automations[0]); err != nil {
+		t.Fatalf("resolveDescriptors: %v", err)
+	}
+
+	for name, got := range map[string]*sqlx.Tx{
+		"agent profile":    agentLookup.gotTx,
+		"executor profile": executorLookup.gotTx,
+		"workflow":         workflowLookup.gotTx,
+		"workflow step":    stepLookup.gotTx,
+		"repository":       repoLookup.gotTx,
+	} {
+		if got == nil {
+			t.Errorf("%s lookup received a nil transaction handle, want the store's snapshot handle", name)
+			continue
+		}
+		if got != tx {
+			t.Errorf("%s lookup received a different transaction handle than the store read used", name)
+		}
 	}
 }
