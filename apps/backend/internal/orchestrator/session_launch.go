@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -87,6 +88,28 @@ type SpawnOrigin struct {
 	TaskID      string
 	SessionID   string
 	SessionName string
+}
+
+// persistSpawnSupervision writes server-verified spawn provenance exactly
+// once. A session without complete verified origin deliberately receives no
+// record, so legacy/externally-created sessions cannot gain authority later.
+func (s *Service) persistSpawnSupervision(ctx context.Context, sessionID string, origin *SpawnOrigin) error {
+	if sessionID == "" || origin == nil || origin.TaskID == "" || origin.SessionID == "" {
+		return nil
+	}
+	record := models.SessionSpawnSupervision{
+		SupervisorTaskID:    origin.TaskID,
+		SupervisorSessionID: origin.SessionID,
+		SpawnedAt:           time.Now().UTC(),
+	}
+	stored, err := s.repo.SetSessionMetadataKeyIfAbsent(ctx, sessionID, models.SessionMetaKeySpawnSupervision, record)
+	if err != nil {
+		return fmt.Errorf("persist session spawn supervision: %w", err)
+	}
+	if !stored {
+		return fmt.Errorf("session spawn supervision already exists: %s", sessionID)
+	}
+	return nil
 }
 
 // LaunchSessionResponse is the unified response for session.launch.

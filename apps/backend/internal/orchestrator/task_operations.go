@@ -955,6 +955,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err != nil {
 		return nil, err
 	}
+	if sessionCreated && opts.SpawnOrigin != nil {
+		if err := s.persistSpawnSupervision(ctx, sessionID, opts.SpawnOrigin); err != nil {
+			return nil, err
+		}
+	}
 	// Seed a matching conditional session configuration before lifecycle
 	// startup. The ACP manager applies this durable runtime layer after the
 	// selected profile and before the first prompt, preserving the original

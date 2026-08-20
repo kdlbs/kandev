@@ -207,11 +207,53 @@ const (
 	SessionCreatedByWorkflowSwitch = "workflow_switch"
 	// SessionMetaKeyOrigin identifies immutable task-session provenance. Unlike
 	// IsPrimary, it never changes when the user selects another conversation tab.
-	SessionMetaKeyOrigin                 = "origin"
+	SessionMetaKeyOrigin = "origin"
+	// SessionMetaKeySpawnSupervision is immutable server-derived provenance
+	// for a session created by spawn_session_kandev. Legacy sessions leave it
+	// absent and therefore never grant supervisor authority.
+	SessionMetaKeySpawnSupervision       = "spawn_supervision"
 	SessionOriginTaskInitial             = "task_initial"
 	SessionMetaKeyContextWindow          = "context_window"
 	SessionMetaKeyContextCompactionCount = "context_compaction_count"
 )
+
+// SessionSpawnSupervision records the verified task/session that spawned a
+// session. It is written exactly once during session creation and never comes
+// from MCP tool arguments or prompt text.
+type SessionSpawnSupervision struct {
+	SupervisorTaskID    string    `json:"supervisor_task_id"`
+	SupervisorSessionID string    `json:"supervisor_session_id"`
+	SpawnedAt           time.Time `json:"spawned_at"`
+}
+
+// IsValid reports whether this record is safe to use for authority checks.
+func (s SessionSpawnSupervision) IsValid() bool {
+	return s.SupervisorTaskID != "" && s.SupervisorSessionID != "" && !s.SpawnedAt.IsZero()
+}
+
+// LoadSessionSpawnSupervision decodes the write-once supervision record from
+// session metadata after JSON round trips.
+func LoadSessionSpawnSupervision(metadata map[string]interface{}) (SessionSpawnSupervision, bool) {
+	if metadata == nil {
+		return SessionSpawnSupervision{}, false
+	}
+	raw, ok := metadata[SessionMetaKeySpawnSupervision]
+	if !ok || raw == nil {
+		return SessionSpawnSupervision{}, false
+	}
+	if supervision, ok := raw.(SessionSpawnSupervision); ok {
+		return supervision, supervision.IsValid()
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return SessionSpawnSupervision{}, false
+	}
+	var supervision SessionSpawnSupervision
+	if err := json.Unmarshal(encoded, &supervision); err != nil {
+		return SessionSpawnSupervision{}, false
+	}
+	return supervision, supervision.IsValid()
+}
 
 // SessionMetaKeySessionMode records the agent's last-known session permission
 // mode (auto / default / accept-edits, etc.) so it survives a backend restart or
