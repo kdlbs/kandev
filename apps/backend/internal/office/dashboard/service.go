@@ -664,6 +664,27 @@ func (s *DashboardService) GetRunsByCommentIDs(
 	return s.repo.GetRunsByCommentIDs(ctx, commentIDs)
 }
 
+// ResolveCommentAgentAuthor validates that authorID resolves to a real
+// agent instance and returns its canonical ID. Comments persisted with
+// author_type="agent" MUST carry a resolvable agent's ID as author_id:
+// the reactivity pipeline's self-comment guard (scheduler/reactivity.go)
+// matches by exact equality against the task's assignee_agent_profile_id,
+// so an unresolved or placeholder author_id silently defeats it and the
+// agent gets woken by its own comment.
+func (s *DashboardService) ResolveCommentAgentAuthor(ctx context.Context, authorID string) (string, error) {
+	if authorID == "" {
+		return "", fmt.Errorf("author_id is required when author_type is agent")
+	}
+	agent, err := s.agents.GetAgentInstance(ctx, authorID)
+	if err != nil {
+		return "", fmt.Errorf("resolve comment author: %w", err)
+	}
+	if agent == nil || agent.ID == "" {
+		return "", fmt.Errorf("comment author not found: %s", authorID)
+	}
+	return agent.ID, nil
+}
+
 // CreateComment creates a new comment on a task and runs the reactivity
 // pipeline so the assignee (and any @-mentioned agents) wake up.
 func (s *DashboardService) CreateComment(ctx context.Context, comment *models.TaskComment) error {

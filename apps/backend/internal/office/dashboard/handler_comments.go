@@ -76,13 +76,28 @@ func (h *Handler) createComment(c *gin.Context) {
 	if authorType == "" {
 		authorType = userSentinel
 	}
+	authorID := userSentinel
+	source := userSentinel
+	if authorType == activityActorTypeAgent {
+		resolvedID, err := h.svc.ResolveCommentAgentAuthor(c.Request.Context(), req.AuthorID)
+		if err != nil {
+			h.logger.Warn("reject agent comment with unresolved author",
+				zap.String("task_id", c.Param("id")),
+				zap.String("author_id", req.AuthorID),
+				zap.Error(err))
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		authorID = resolvedID
+		source = activityActorTypeAgent
+	}
 	comment := &models.TaskComment{
 		ID:         uuid.New().String(),
 		TaskID:     c.Param("id"),
 		AuthorType: authorType,
-		AuthorID:   userSentinel,
+		AuthorID:   authorID,
 		Body:       req.Body,
-		Source:     userSentinel,
+		Source:     source,
 	}
 	if err := h.svc.CreateComment(c.Request.Context(), comment); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

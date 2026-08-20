@@ -651,6 +651,102 @@ func TestCreateComment_RequiresBody(t *testing.T) {
 	}
 }
 
+// TestCreateComment_AgentAuthorPersistsResolvedIdentity guards against the
+// handler silently stamping author_id="user" on agent-authored comments,
+// which defeats the scheduler's self-comment guard (reactivity.go) and
+// wakes the agent on its own comment.
+func TestCreateComment_AgentAuthorPersistsResolvedIdentity(t *testing.T) {
+	deps := newTestDeps(t)
+	deps.agents.names = map[string]string{"agent-analyst": "Analyst"}
+
+	body := `{"body":"Landscape scan complete","author_type":"agent","author_id":"agent-analyst"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/office/tasks/taskAgent/comments",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	deps.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp dashboard.CommentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Comment == nil {
+		t.Fatal("expected comment in response")
+	}
+	if resp.Comment.AuthorID != "agent-analyst" {
+		t.Errorf("expected authorId 'agent-analyst', got %q", resp.Comment.AuthorID)
+	}
+	if resp.Comment.Source != "agent" {
+		t.Errorf("expected source 'agent', got %q", resp.Comment.Source)
+	}
+}
+
+// TestCreateComment_UserAuthorUnchanged locks in that the UI comment path
+// (author_type unset or "user") still persists the user sentinel — the
+// fix must not touch this path.
+func TestCreateComment_UserAuthorUnchanged(t *testing.T) {
+	deps := newTestDeps(t)
+
+	body := `{"body":"hello from the UI","author_type":"user"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/office/tasks/taskUser/comments",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	deps.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp dashboard.CommentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Comment == nil {
+		t.Fatal("expected comment in response")
+	}
+	if resp.Comment.AuthorID != "user" {
+		t.Errorf("expected authorId 'user', got %q", resp.Comment.AuthorID)
+	}
+	if resp.Comment.Source != "user" {
+		t.Errorf("expected source 'user', got %q", resp.Comment.Source)
+	}
+}
+
+// TestCreateComment_AgentAuthorWithoutIDRejected asserts the invariant:
+// author_type="agent" with an empty (or unresolvable) author_id must be
+// rejected rather than silently degrading to the user sentinel, since that
+// degradation is exactly what defeats the self-comment guard.
+func TestCreateComment_AgentAuthorWithoutIDRejected(t *testing.T) {
+	deps := newTestDeps(t)
+
+	body := `{"body":"no author id","author_type":"agent"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/office/tasks/taskNoAuthor/comments",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	deps.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/office/tasks/taskNoAuthor/comments", nil)
+	listW := httptest.NewRecorder()
+	deps.router.ServeHTTP(listW, listReq)
+	var listResp dashboard.CommentListResponse
+	if err := json.NewDecoder(listW.Body).Decode(&listResp); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(listResp.Comments) != 0 {
+		t.Fatalf("expected no comment written, got %d", len(listResp.Comments))
+	}
+}
+
 func TestUpdateWorkspaceSettings_ReturnsOK(t *testing.T) {
 	deps := newTestDeps(t)
 

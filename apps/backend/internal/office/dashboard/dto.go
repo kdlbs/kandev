@@ -437,6 +437,10 @@ type CommentResponse struct {
 type CreateCommentRequest struct {
 	Body       string `json:"body"`
 	AuthorType string `json:"author_type"`
+	// AuthorID identifies the acting agent when AuthorType is "agent". It
+	// is ignored for user-authored comments (author_id is always the
+	// singleton user sentinel there).
+	AuthorID string `json:"author_id"`
 }
 
 // UpdateWorkspaceSettingsRequest is the request body for updating workspace settings.
