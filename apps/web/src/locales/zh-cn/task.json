@@ -802,6 +802,7 @@
   "noAgentProfileConfiguredFor": "未为 <2>“{{name}}”</2> 配置智能体配置。请在“设置 → 执行器”中配置凭据。",
   "noAgentProfilesConfigured": "未配置智能体配置",
   "noAgentProfilesConfiguredAddOne": "未配置智能体配置。请先在“设置 → 智能体”中添加。",
+  "noAgentProfilesReadyForHandoff": "没有可用的智能体配置。请在“设置 → 智能体”中安装或重新连接智能体 CLI。",
   "noAgentRunning": "无智能体运行中",
   "noAgentsFound": "未找到智能体。",
   "noAgentsFound2": "未找到智能体",

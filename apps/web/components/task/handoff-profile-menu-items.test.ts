@@ -51,7 +51,7 @@ vi.mock("@/lib/agent-executor-compat", () => ({
   ) => profile.id === "profile-a",
 }));
 
-import { useHandoffProfiles } from "./handoff-profile-menu-items";
+import { useHandoffProfiles, useHasSelectableAgentProfiles } from "./handoff-profile-menu-items";
 
 describe("useHandoffProfiles", () => {
   afterEach(() => {
@@ -126,4 +126,34 @@ describe("useHandoffProfiles", () => {
       expect(result.current.map((p) => p.id)).toEqual(["profile-a", "profile-b"]);
     },
   );
+});
+
+describe("useHasSelectableAgentProfiles", () => {
+  afterEach(() => {
+    mockProfiles = [PROFILE_A, PROFILE_B];
+  });
+
+  it("is true when a selectable profile exists, even if every agent is unhealthy", () => {
+    mockProfiles = [
+      { ...PROFILE_A, capability_status: "not_installed" },
+      { ...PROFILE_B, capability_status: "failed" },
+    ];
+    const { result } = renderHook(() => useHasSelectableAgentProfiles());
+    expect(result.current).toBe(true);
+  });
+
+  it("is false when there are no profiles at all", () => {
+    mockProfiles = [];
+    const { result } = renderHook(() => useHasSelectableAgentProfiles());
+    expect(result.current).toBe(false);
+  });
+
+  it("is false when every profile is disabled (not selectable)", () => {
+    mockProfiles = [
+      { ...PROFILE_A, enabled: false },
+      { ...PROFILE_B, enabled: false },
+    ];
+    const { result } = renderHook(() => useHasSelectableAgentProfiles());
+    expect(result.current).toBe(false);
+  });
 });

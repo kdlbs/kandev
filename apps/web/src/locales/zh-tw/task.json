@@ -802,6 +802,7 @@
   "noAgentProfileConfiguredFor": "未為 <2>「{{name}}」</2> 設定代理程式設定檔。請在「設定 → 執行器」中設定認證資訊。",
   "noAgentProfilesConfigured": "未設定代理程式設定檔",
   "noAgentProfilesConfiguredAddOne": "未設定代理程式設定檔。請先在「設定 → 代理程式」中新增。",
+  "noAgentProfilesReadyForHandoff": "沒有可用的代理程式設定檔。請在「設定 → 代理程式」中安裝或重新連線代理程式 CLI。",
   "noAgentRunning": "無代理程式執行中",
   "noAgentsFound": "未找到代理程式。",
   "noAgentsFound2": "未找到代理程式",
