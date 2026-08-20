@@ -57,7 +57,7 @@ func unsupportedGitMetadataProjection(recovery string) error {
 // must fail before CreateInstance: starting an agent that can edit the checkout
 // but not its linked metadata reproduces the original index.lock failure.
 func preflightGitMetadataProjection(ctx context.Context, runtime ExecutorBackend, req *ExecutorCreateRequest) error {
-	if len(req.GitMetadataProjections) == 0 && !req.RequiresCloneGitMetadataPolicy {
+	if len(req.GitMetadataProjections) == 0 && !requiresCloneGitMetadataPolicy(req) {
 		return nil
 	}
 	if len(req.GitMetadataProjections) > 0 {

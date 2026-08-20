@@ -18,7 +18,7 @@ Extend `ExecutorCreateRequest` and launch construction in `apps/backend/internal
 
 ### ACP additional-directory negotiation
 
-Add the ordered executor-side roots to the lifecycle → agentctl instance and WebSocket session-new request path. Teach `adapter/transport/acp.Adapter` to retain the initialized `SessionCapabilities.AdditionalDirectories` advertisement and include only normalized, absolute, deduplicated roots other than `cwd` in ACP `NewSessionRequest.AdditionalDirectories`. Unsupported providers receive none. Remote materialization must derive roots from canonical task workspace destinations, not durable host records; a request that would require unsupported additional roots must fail explicitly rather than widening to the task parent.
+Add the ordered executor-side roots to the lifecycle → agentctl instance and WebSocket session-new request path. Teach `adapter/transport/acp.Adapter` to retain the initialized `SessionCapabilities.AdditionalDirectories` advertisement and include only lifecycle-authorized, canonical, absolute, deduplicated roots other than `cwd` in ACP `NewSessionRequest.AdditionalDirectories`. Reject malformed roots rather than filtering them. A provider without the capability must return `git_metadata_projection_unsupported` when sibling scope is required. Remote materialization must derive roots from canonical task workspace destinations, not durable host records; a request that would require unsupported additional roots must fail explicitly rather than widening to the task parent.
 
 ### Lifecycle and cleanup integration
 
@@ -27,7 +27,7 @@ Cover initial launch, reset/restart, attachment rebind/rollback, and terminal cl
 ## Tests
 
 - **Clone policy:** `apps/backend/internal/agent/runtime/lifecycle/git_metadata_remote_test.go`, Docker/SSH/Sprites lifecycle tests, and launch metadata tests. Exercise `git add`, `git commit`, ref/reflog locks, common metadata denial, forged checkout rejection, restart/rebind rollback, cleanup, and host-path sanitization.
-- **ACP protocol:** `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_session_test.go` and client/API tests. Assert advertised providers receive canonical ordered additional directories; unsupported providers receive none and do not receive a parent or host path.
+- **ACP protocol:** `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_session_test.go` and client/API tests. Assert advertised providers receive canonical ordered additional directories; malformed roots are rejected and unsupported providers return `git_metadata_projection_unsupported` without a `session/new` request.
 - **Launch/session path:** lifecycle session and workspace-materialization tests. Assert multi-repository canonical destinations reach agentctl before `session/new`, unsupported-provider behavior is explicit, and source rollback preserves the old session state.
 - **Race/lint:** run focused `go test -race` packages and `make -C apps/backend lint` after affected package tests pass.
 

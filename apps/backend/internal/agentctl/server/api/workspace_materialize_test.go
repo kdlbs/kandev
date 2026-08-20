@@ -52,6 +52,46 @@ func TestAttestMaterializedGitMetadataAcceptsRegularClone(t *testing.T) {
 	}
 }
 
+func TestWorkspaceGitMetadataAttestationUsesAgentctlWorkdir(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	if _, err := materializeRepository(context.Background(), origin, workspace, "main", ""); err != nil {
+		t.Fatalf("materialize repository: %v", err)
+	}
+	s := newMaterializeTestServer(t, workspace)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/attest-git-metadata", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("attestation status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"attested":true`) {
+		t.Fatalf("attestation response = %s, want attested", w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), workspace) {
+		t.Fatalf("attestation response disclosed workspace path: %s", w.Body.String())
+	}
+}
+
+func TestWorkspaceGitMetadataAttestationFailsClosedForNonRepository(t *testing.T) {
+	s := newMaterializeTestServer(t, t.TempDir())
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/attest-git-metadata", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("attestation status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "workspace") && strings.Contains(w.Body.String(), string(filepath.Separator)) {
+		t.Fatalf("attestation response disclosed a path: %s", w.Body.String())
+	}
+}
+
 func TestMaterializeRepository_ReusesCheckoutWithGitURLRewrite(t *testing.T) {
 	origin := createMaterializeOrigin(t)
 	configPath := filepath.Join(t.TempDir(), "gitconfig")

@@ -259,19 +259,15 @@ func (r *SpritesExecutor) preflightGitHubCredentialBroker(
 }
 
 func (r *SpritesExecutor) installRemoteGitMetadataPolicy(ctx context.Context, sprite *sprites.Sprite, req *ExecutorCreateRequest) error {
-	if len(req.GitMetadataProjections) == 0 && !req.RequiresCloneGitMetadataPolicy {
+	if len(req.GitMetadataProjections) == 0 && !requiresCloneGitMetadataPolicy(req) {
 		return nil
 	}
 	output, err := sprite.CommandContext(ctx, "sh", "-c", remoteRegularGitMetadataProbeScript(spritesWorkspacePath)).Output()
 	if err != nil {
 		return errors.New("sprites: remote Git metadata policy validation failed")
 	}
-	metadata, err := parseRemoteRegularGitMetadata(string(output))
-	if err != nil {
+	if _, err := parseRemoteRegularGitMetadata(string(output)); err != nil {
 		return errors.New("sprites: remote Git metadata policy validation failed")
-	}
-	if err := prepareRemoteRegularGitMetadataPolicy(req, metadata); err != nil {
-		return errors.New("sprites: remote Git metadata policy installation failed")
 	}
 	return nil
 }
@@ -530,7 +526,7 @@ func (r *SpritesExecutor) stepEnsureAgentInstance(
 }
 
 func shouldReplaceSpriteAgentInstance(req *ExecutorCreateRequest) bool {
-	return req != nil && (hasManagedGitHubBrokerEnv(req.Env) || len(req.GitMetadataProjections) > 0 || req.RequiresCloneGitMetadataPolicy)
+	return req != nil && (hasManagedGitHubBrokerEnv(req.Env) || len(req.GitMetadataProjections) > 0 || requiresCloneGitMetadataPolicy(req))
 }
 
 // stepApplyNetworkPolicy handles step 6: apply network policy from the executor profile.

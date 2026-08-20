@@ -30,6 +30,36 @@ type MaterializeRepositoryResponse struct {
 	Error               string `json:"error,omitempty"`
 }
 
+// GitMetadataAttestationResponse reports whether agentctl validated its own
+// canonical primary checkout. It intentionally contains no filesystem path.
+type GitMetadataAttestationResponse struct {
+	Attested bool   `json:"attested"`
+	Error    string `json:"error,omitempty"`
+}
+
+// AttestWorkspaceGitMetadata asks agentctl to validate the regular .git
+// directory in its current workspace before lifecycle configures a mutable
+// agent. This is the executor-side attestation boundary for clone launches.
+func (c *Client) AttestWorkspaceGitMetadata(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/workspace/attest-git-metadata", nil)
+	if err != nil {
+		return fmt.Errorf("create workspace Git metadata attestation request: %w", err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send workspace Git metadata attestation request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var response GitMetadataAttestationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return fmt.Errorf("decode workspace Git metadata attestation response: %w", err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices || !response.Attested {
+		return fmt.Errorf("workspace Git metadata attestation failed")
+	}
+	return nil
+}
+
 // RemoveMaterializedRepositoryRequest identifies an owned checkout for
 // rollback after a later item in a remote materialization batch fails.
 type RemoveMaterializedRepositoryRequest struct {
