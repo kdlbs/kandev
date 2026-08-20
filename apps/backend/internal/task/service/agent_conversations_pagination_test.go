@@ -20,6 +20,11 @@ type acPagingTaskRepo struct {
 	tasks []*models.Task
 }
 
+func (f *acPagingTaskRepo) GetWorkspace(_ context.Context, id string) (*models.Workspace, error) {
+	profileID := "profile-workspace-default"
+	return &models.Workspace{ID: id, DefaultAgentProfileID: &profileID}, nil
+}
+
 func (f *acPagingTaskRepo) ListTasksByWorkspace(_ context.Context, workspaceID, _, _, _ string, page, pageSize int, _ string, _, includeEphemeral, onlyEphemeral, _ bool) ([]*models.Task, int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
