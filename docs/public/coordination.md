@@ -246,9 +246,11 @@ record may not carry over. This intentional restart is not reported as an agent 
 
 That host rebind stops open task terminals, dev servers, the task editor server, and other
 agentctl-managed workspace processes. Save unsaved work first, then reopen or restart those
-processes after attachment. Local Docker, SSH, and Sprites instead clone the new repository under
-the current remote workspace and rescan it without changing the agent CWD or restarting the agent
-and workspace processes.
+processes after attachment. Local Docker, SSH, and Sprites clone the new repository independently
+in every live executor workspace. Kandev pauses the agent, verifies the exact task-owned checkout
+set, then restores the agent with the expanded workspace. If that verification or restoration fails,
+the attachment is rejected and the prior session is restored; if it cannot be restored safely, the
+session remains stopped and asks you to start a new one.
 
 Task agents can call `add_workspace_sources_kandev` with the same mixed batch; `task_id` defaults to the current task, and the operation remains idle-only. A direct parent in the same workspace can use it to recover an idle child that is missing a repository or SDK; siblings and other task relationships cannot target that child. Exact retries are safe no-ops. `add_branch_to_task_kandev` remains the current-task-only Worktree legacy one-repository/branch path and may run during an active turn: it creates a sibling worktree under the task directory, promotes the Files root to that parent, and rescans without restarting the agent, terminals, or workspace processes. Its `worktree_path` is the exact new location, `task_workspace_path` is the Files root, and `agent_cwd_changed` is always `false`; the agent's current directory stays unchanged.
 
