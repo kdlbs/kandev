@@ -258,6 +258,21 @@ func (a *automationTaskOriginLookupAdapter) TaskWorkspaceAndAutomationOrigin(ctx
 	return task.WorkspaceID, task.Origin == models.TaskOriginAutomationRun, true
 }
 
+// automationExportWorkspaceLookupAdapter satisfies automation.ExportWorkspaceLookup
+// over the task service's GetWorkspace, which already returns
+// repoerrors.ErrWorkspaceNotFound (wrapped) both for a missing row and for a
+// workspace the caller's scoped identity cannot see - exactly the
+// errors.Is-classifiable shape AC-44 step 2 needs, with no translation
+// required.
+type automationExportWorkspaceLookupAdapter struct {
+	svc *taskservice.Service
+}
+
+func (a *automationExportWorkspaceLookupAdapter) WorkspaceExists(ctx context.Context, workspaceID string) error {
+	_, err := a.svc.GetWorkspace(ctx, workspaceID)
+	return err
+}
+
 // repositoryLookupAdapter satisfies the linear/jira/sentry RepositoryLookup
 // interface over the task service. It is the validation seam for a watcher's
 // optional repository binding. The task service's GetRepository filters
