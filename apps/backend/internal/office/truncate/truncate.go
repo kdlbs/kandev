@@ -1,8 +1,8 @@
-// Package truncate holds the rune-safe byte truncation shared by the
-// office continuation-summary builder and its repository. Both cap the
-// same blob at the same byte budget, so the cut belongs in one place:
-// the two copies this replaces were byte-for-byte identical, which is
-// how a future correctness fix lands in one and not the other.
+// Package truncate provides rune-safe byte truncation for office content.
+//
+// It exists so the cut lives in exactly one place. The implementations it
+// replaces were byte-for-byte identical copies in separate packages, which
+// is how a future correctness fix lands in one and silently misses another.
 package truncate
 
 // UTF8 returns s truncated to at most maxBytes, cutting at a rune
