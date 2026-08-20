@@ -595,10 +595,10 @@ func (r *Repository) CreateTaskSessionWithWorkspaceBinding(
 		return err
 	}
 
-	var envID, status string
+	var envID, status, materializationSessionID string
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT id, status FROM task_environments WHERE task_id = ?
-	`), session.TaskID).Scan(&envID, &status)
+		SELECT id, status, materialization_session_id FROM task_environments WHERE task_id = ?
+	`), session.TaskID).Scan(&envID, &status, &materializationSessionID)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		if candidate.ID == "" {
@@ -624,6 +624,16 @@ func (r *Repository) CreateTaskSessionWithWorkspaceBinding(
 	case err != nil:
 		return fmt.Errorf("load workspace binding: %w", err)
 	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusCreating:
+		abandoned, err := r.failAbandonedWorkspaceMaterialization(ctx, tx, envID, materializationSessionID)
+		if err != nil {
+			return err
+		}
+		if abandoned {
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("persist abandoned workspace materialization failure: %w", err)
+			}
+			return fmt.Errorf("%w: the initial workspace materialization did not complete", models.ErrWorkspaceReuseUnsafe)
+		}
 		return fmt.Errorf("%w: retry after the initial workspace launch completes", models.ErrWorkspacePreparing)
 	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusReady || models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusStopped:
 		session.TaskEnvironmentID = envID
@@ -638,6 +648,40 @@ func (r *Repository) CreateTaskSessionWithWorkspaceBinding(
 		return err
 	}
 	return tx.Commit()
+}
+
+func (r *Repository) failAbandonedWorkspaceMaterialization(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	environmentID string,
+	ownerID string,
+) (bool, error) {
+	var ownerState models.TaskSessionState
+	ownerErr := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state FROM task_sessions WHERE id = ?`), ownerID).Scan(&ownerState)
+	abandoned := ownerID == "" || errors.Is(ownerErr, sql.ErrNoRows) || isTerminalWorkspaceMaterializerState(ownerState)
+	if ownerErr != nil && !errors.Is(ownerErr, sql.ErrNoRows) {
+		return false, fmt.Errorf("load workspace materialization owner: %w", ownerErr)
+	}
+	if !abandoned {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_environments
+		SET status = ?, materialization_session_id = '', updated_at = ?
+		WHERE id = ? AND status = ?
+	`), string(models.TaskEnvironmentStatusFailed), r.nowUTC(), environmentID, string(models.TaskEnvironmentStatusCreating)); err != nil {
+		return false, fmt.Errorf("fail abandoned workspace materialization: %w", err)
+	}
+	return true, nil
+}
+
+func isTerminalWorkspaceMaterializerState(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateCompleted, models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 // applyInitialRuntimeSeedTx preserves CreateTaskSessionWithInitialRuntimeSeed's
