@@ -126,26 +126,47 @@ fetch_merge_state() {
 #
 # Probe the behaviour rather than parsing version strings: vendors backport
 # (`jq-1.7.1-apple`), and the defect is what matters, not the number.
-TOOLCHAIN_NOTE=''
+# Run a command with a wall-clock bound, using nothing but the shell. Stock
+# macOS ships no timeout(1), and those are precisely the hosts carrying the
+# jq this probes for, so depending on it would skip the check where it matters.
+PROBE_TICK=''
+run_bounded() {
+  local secs=$1
+  shift
+  # Poll in fractions of a second so a healthy jq costs ~0.1s rather than a
+  # full second on every invocation. BSD and GNU sleep both take fractions;
+  # fall back to whole seconds where that is not true.
+  if [[ -z "$PROBE_TICK" ]]; then
+    if sleep 0.1 2>/dev/null; then PROBE_TICK='0.1'; else PROBE_TICK='1'; fi
+  fi
+  local per_sec=10
+  [[ "$PROBE_TICK" == '0.1' ]] || per_sec=1
+  "$@" >/dev/null 2>&1 &
+  local pid=$! ticks=0
+  local max=$((secs * per_sec))
+  while kill -0 "$pid" 2>/dev/null; do
+    if [[ "$ticks" -ge "$max" ]]; then
+      kill -9 "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      return 124
+    fi
+    sleep "$PROBE_TICK"
+    ticks=$((ticks + 1))
+  done
+  wait "$pid"
+}
+
 preflight_toolchain() {
   local jq_bin="${PR_AWAIT_JQ:-jq}"
   local bash_bin="${PR_AWAIT_PROBE_BASH:-bash}"
-  local jq_ver bash_ver timeout_bin=''
+  local jq_ver bash_ver
   jq_ver="$("$jq_bin" --version 2>/dev/null || printf 'unknown')"
   bash_ver="$("$bash_bin" -c 'printf "%s" "${BASH_VERSION%%(*}"' 2>/dev/null || printf 'unknown')"
 
-  for candidate in timeout gtimeout; do
-    command -v "$candidate" >/dev/null 2>&1 && timeout_bin="$candidate" && break
-  done
-
-  if [[ -n "$timeout_bin" ]]; then
-    if ! "$timeout_bin" 5 "$jq_bin" -n '"x" | gsub("a?"; "")' >/dev/null 2>&1; then
-      printf 'PR %s\nBLOCKED: %s loops on an empty-matching gsub, which pr-state uses.\n' "$PR" "$jq_ver"
-      printf 'CI state cannot be read at all. Install jq 1.7 or later and put it first on PATH.\n'
-      exit 3
-    fi
-  else
-    TOOLCHAIN_NOTE=' (jq probe skipped: no timeout command)'
+  if ! run_bounded 3 "$jq_bin" -n '"x" | gsub("a?"; "")'; then
+    printf 'PR %s\nBLOCKED: %s loops on an empty-matching gsub, which pr-state uses.\n' "$PR" "$jq_ver"
+    printf 'CI state cannot be read at all. Install jq 1.7 or later and put it first on PATH.\n'
+    exit 3
   fi
 
   if ! "$bash_bin" -c 'set -u; a=(); printf "%s" "${a[@]}"' >/dev/null 2>&1; then
@@ -155,18 +176,32 @@ preflight_toolchain() {
     exit 3
   fi
 
-  TOOLCHAIN="$jq_ver, bash $bash_ver${TOOLCHAIN_NOTE}"
+  TOOLCHAIN="$jq_ver, bash $bash_ver"
 }
 
 TOOLCHAIN='unverified'
 preflight_toolchain
 
 DEADLINE_SEC=$((DEADLINE_MIN * 60))
+
+# Sleep until the next poll unless the deadline arrives first, capping the last
+# sleep to whatever time is left. Returns 1 when the caller must stop, so a
+# retry path cannot outlive a limit the caller asked for.
+sleep_or_stop() {
+  local remaining=$((DEADLINE_SEC - (SECONDS - START_SEC)))
+  [[ "$remaining" -gt 0 ]] || return 1
+  if [[ "$remaining" -lt "$INTERVAL_SEC" ]]; then
+    "$SLEEP" "$remaining"
+  else
+    "$SLEEP" "$INTERVAL_SEC"
+  fi
+}
 START_SEC=$SECONDS
 POLLS=0
 CONSECUTIVE_ERRORS=0
 MERGE_ERRORS=0
 EVIDENCE_ERRORS=0
+MERGE_UNKNOWN=0
 HEAD_CHANGES=0
 FIRST_HEAD=''
 SUMMARY_JSON=''
@@ -186,7 +221,10 @@ while :; do
       OUTCOME='blocked-access'
       break
     fi
-    "$SLEEP" "$INTERVAL_SEC"
+    if ! sleep_or_stop; then
+      OUTCOME='blocked-access'
+      break
+    fi
     continue
   fi
   CONSECUTIVE_ERRORS=0
@@ -198,7 +236,10 @@ while :; do
       OUTCOME='blocked-merge-state'
       break
     fi
-    "$SLEEP" "$INTERVAL_SEC"
+    if ! sleep_or_stop; then
+      OUTCOME='blocked-merge-state'
+      break
+    fi
     continue
   fi
   MERGE_ERRORS=0
@@ -265,20 +306,39 @@ while :; do
         OUTCOME='blocked-evidence'
         break
       fi
-      "$SLEEP" "$INTERVAL_SEC"
+      if ! sleep_or_stop; then
+        OUTCOME='blocked-evidence'
+        break
+      fi
       continue
     fi
     EVIDENCE_ERRORS=0
+
+    # GitHub reports UNKNOWN while it is still computing mergeability. Deciding
+    # on it would call a PR clean before the answer exists.
+    if [[ "$(jq -r '.mergeable // "UNKNOWN"' <<<"$MERGE_JSON")" == 'UNKNOWN' ]]; then
+      MERGE_UNKNOWN=$((MERGE_UNKNOWN + 1))
+      progress "poll ${POLLS}: mergeability still UNKNOWN (${MERGE_UNKNOWN} in a row)"
+      if [[ "$MERGE_UNKNOWN" -ge 3 ]]; then
+        OUTCOME='blocked-merge-unknown'
+        break
+      fi
+      if ! sleep_or_stop; then
+        OUTCOME='blocked-merge-unknown'
+        break
+      fi
+      continue
+    fi
+    MERGE_UNKNOWN=0
+
     OUTCOME='terminal'
     break
   fi
 
-  if [[ $((SECONDS - START_SEC)) -ge "$DEADLINE_SEC" ]]; then
+  if ! sleep_or_stop; then
     OUTCOME='deadline'
     break
   fi
-
-  "$SLEEP" "$INTERVAL_SEC"
 done
 
 WAITED=$((SECONDS - START_SEC))
@@ -319,7 +379,7 @@ conflicted=0
 findings=$((failed_n + threads_n + hidden_n + comments_n + conflicted + changes_req_n + blocked_rev_n))
 
 case "$OUTCOME" in
-  blocked-pr-state | blocked-approval | blocked-evidence) code=3 ;;
+  blocked-pr-state | blocked-approval | blocked-evidence | blocked-merge-unknown) code=3 ;;
   deadline) code=2 ;;
   *) [[ "$findings" -gt 0 ]] && code=1 || code=0 ;;
 esac
@@ -394,6 +454,8 @@ case "$OUTCOME" in
   blocked-evidence)
     printf 'checks finished but review evidence is incomplete (%s). Treat as unknown, not clean.\n' \
       "${error_sources:-null unresolved thread count}" ;;
+  blocked-merge-unknown)
+    printf 'GitHub still reports mergeability as UNKNOWN. Re-run before treating this head as clean.\n' ;;
   deadline) printf 'deadline hit with %s check(s) pending. Re-run or raise --deadline-min.\n' "$pending_n" ;;
   *)
     if [[ "$conflicted" -eq 1 ]]; then

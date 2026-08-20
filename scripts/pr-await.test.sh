@@ -380,4 +380,58 @@ out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)"
 pass "json report carries toolchain and evidence_complete"
 
 
+# --- mergeable UNKNOWN is inconclusive, not clean ---------------------------
+# GitHub returns UNKNOWN while it computes mergeability; merge-conflicts.md
+# says query again rather than deciding.
+d="$(make_tmp_dir)"; setup_fake "$d"
+for i in 1 2 3 4; do snapshot "$d" "$i" 20 0 0; done
+printf '{"state":"OPEN","mergeable":"UNKNOWN","mergeStateStatus":"UNKNOWN","headRefOid":"aaaaaaaaaaaa"}' > "$d/gh.json"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "persistent mergeable=UNKNOWN must not exit 0, got $rc" "$out"
+grep -qi 'mergeability' <<<"$out" || fail "should explain the unknown mergeability" "$out"
+pass "a persistently UNKNOWN mergeability exits 3 instead of clean"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0; snapshot "$d" 2 20 0 0
+cat > "$d/gh" <<'GHU'
+#!/usr/bin/env bash
+n=$(cat "$FAKE_DIR/counter" 2>/dev/null || echo 1)
+if [[ $n -le 1 ]]; then m=UNKNOWN; else m=MERGEABLE; fi
+printf '{"state":"OPEN","mergeable":"%s","mergeStateStatus":"CLEAN","headRefOid":"aaaaaaaaaaaa"}' "$m"
+GHU
+chmod +x "$d/gh"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "UNKNOWN that resolves should exit 0, got $rc" "$out"
+pass "an UNKNOWN mergeability that resolves does not block"
+
+# --- the deadline is honored while retrying, not only while polling ---------
+d="$(make_tmp_dir)"; setup_fake "$d"
+for i in 1 2 3 4 5; do : > "$d/seq/$i.fail"; snapshot "$d" "$i" 0 0 0; done
+out="$(run_await "$d" 12 --interval-sec 30 --deadline-min 0 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "expected blocked, got $rc" "$out"
+sleeps=$(wc -l < "$d/sleeps" 2>/dev/null | tr -d ' ' || echo 0)
+[[ "${sleeps:-0}" -le 1 ]] || fail "a zero deadline must not burn 3 retry intervals, slept $sleeps times"
+pass "a retry path stops at the deadline instead of sleeping out its full strike count"
+
+# --- the jq probe works without timeout(1) on PATH --------------------------
+# Stock macOS ships no /usr/bin/timeout, so a probe that depends on it would
+# silently skip on the exact hosts that carry the broken jq.
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+mkdir -p "$d/minbin"
+for cmd in jq bash sleep kill wc cat printf; do
+  src="$(command -v "$cmd" 2>/dev/null)"; [ -n "$src" ] && ln -sf "$src" "$d/minbin/$cmd" 2>/dev/null || true
+done
+command -v timeout >/dev/null 2>&1 && ! [ -e "$d/minbin/timeout" ] || true
+out="$(PATH="$d/minbin" PROBE_JQ="$d/jq-bad" run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "hanging jq must be caught without timeout(1), got $rc" "$out"
+grep -q 'jq-1.6-fake' <<<"$out" || fail "should still name the bad jq" "$out"
+pass "the jq probe catches a hanging jq with no timeout(1) available"
+
+# --- the suite is wired into make test-scripts ------------------------------
+grep -q 'bash scripts/pr-await.test.sh' "$ROOT_DIR/Makefile" \
+  || fail "pr-await.test.sh must be registered in make test-scripts"
+pass "the suite runs under make test-scripts"
+
+
 printf '\nall tests passed\n'
