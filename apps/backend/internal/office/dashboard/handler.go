@@ -546,22 +546,25 @@ func timelineStatusIsDone(raw string) bool {
 // done, since a reopened task (done -> in_progress -> done) can re-enter
 // done more than once and the most recent completion is the meaningful one.
 //
-// completedAt is cleared if a later transition leaves the done bucket
-// (From in the done bucket, To not) after that latest completion - a
-// reopen (done -> in_progress) that is never re-completed must not keep
-// reporting the stale completion time while the task is actively open.
-// done -> cancelled is deliberately handled the same way: cancelled is not
-// in the done bucket (timelineStatusIsDone), so completing then cancelling
-// a task also clears completedAt rather than silently keeping the old
-// completion timestamp on a task that never finished. This matches the
-// spec's "rows reflect events, not stale state" rule (docs/specs/office/tasks.md).
+// completedAt does NOT clear when a task is reopened (done -> in_progress
+// with no re-completion). Clearing would need to know the timeline event's
+// "from" status, but the office direct-update path (DashboardService.
+// UpdateTaskStatus -> handleTaskStatusChanged) writes task_status_changed
+// activity entries with only new_status, no old_status - the vocabulary
+// the Office status picker, the REST status endpoint, and agent/MCP status
+// updates all go through. Only the generic workflow engine's TaskMoved
+// handler populates old_status, so a from-based clearing rule would only
+// ever fire for Kanban-style moves, silently doing nothing on the paths
+// Office users actually take. Until old_status is added to that event,
+// a stale completedAt on a reopened task is a known, accepted gap.
 //
 // Both are best-effort: ListActivityEntriesByTarget caps the underlying
-// query at the 50 most recent activity entries for the task, so a very
-// busy task can push its earliest in_progress transition out of the
-// window.
+// query at the 50 most recent activity entries for the task, with no
+// filter on activity type, so a task with many non-status events (blocker
+// add/remove, reviewer/approver changes, decisions, ...) can push every
+// status-change entry - not just the earliest in_progress transition -
+// out of the window.
 func deriveTaskTimestamps(changes []TimelineEvent) (startedAt, completedAt string) {
-	var latestDoneLeftAt string
 	for _, ev := range changes {
 		switch {
 		case timelineStatusIsInProgress(ev.To):
@@ -573,12 +576,6 @@ func deriveTaskTimestamps(changes []TimelineEvent) (startedAt, completedAt strin
 				completedAt = ev.At
 			}
 		}
-		if timelineStatusIsDone(ev.From) && !timelineStatusIsDone(ev.To) && ev.At > latestDoneLeftAt {
-			latestDoneLeftAt = ev.At
-		}
-	}
-	if completedAt != "" && latestDoneLeftAt > completedAt {
-		completedAt = ""
 	}
 	return startedAt, completedAt
 }

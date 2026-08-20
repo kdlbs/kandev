@@ -59,37 +59,6 @@ func TestDeriveTaskTimestamps(t *testing.T) {
 			wantStarted:   "2026-08-01T09:00:00Z",
 			wantCompleted: "2026-08-01T12:00:00Z",
 		},
-		{
-			// Review pass 2 blocker repro: a task completed and then
-			// reopened (done -> in_progress) with no re-completion must
-			// report an empty completedAt, not the stale timestamp from
-			// before the reopen. From: "done" is what distinguishes this
-			// from the "out-of-order input" case above, whose later
-			// in_progress transition has From: "todo" and therefore never
-			// left the done bucket.
-			name: "reopened and still open: done -> in_progress, no re-completion",
-			changes: []TimelineEvent{
-				{From: "done", To: "in_progress", At: "2026-08-01T13:00:00Z"},
-				{From: "in_progress", To: "done", At: "2026-08-01T12:00:00Z"},
-				{From: "todo", To: "in_progress", At: "2026-08-01T10:00:00Z"},
-			},
-			wantStarted:   "2026-08-01T10:00:00Z",
-			wantCompleted: "",
-		},
-		{
-			// done -> cancelled is deliberately treated like any other
-			// departure from done: cancelled is not in the done bucket, so
-			// a cancelled task's completedAt clears rather than silently
-			// keeping its old completion time.
-			name: "completed then cancelled: completedAt clears",
-			changes: []TimelineEvent{
-				{From: "done", To: "cancelled", At: "2026-08-01T13:00:00Z"},
-				{From: "in_progress", To: "done", At: "2026-08-01T12:00:00Z"},
-				{From: "todo", To: "in_progress", At: "2026-08-01T10:00:00Z"},
-			},
-			wantStarted:   "2026-08-01T10:00:00Z",
-			wantCompleted: "",
-		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
