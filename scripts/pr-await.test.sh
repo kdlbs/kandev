@@ -487,4 +487,70 @@ jq -e . >/dev/null <<<"$out" || fail "merge-state failure must emit JSON" "$out"
 pass "a blocked merge-state result is still valid JSON under --format json"
 
 
+# --- hidden threads are a subset of the total, not an addition -------------
+# pr-state:922 counts every unresolved thread; hidden_unresolved_threads is the
+# subset filtered out of unresolved_threads. Summing both double-counts.
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0 true aaaaaaaaaaaa \
+  '{"unresolved_review_thread_count":4,"unresolved_threads":[],
+    "hidden_unresolved_threads":[{"thread_id":"t1","comment_id":1,"author":"bot","path":"a.go"},
+                                 {"thread_id":"t2","comment_id":2,"author":"bot","path":"b.go"},
+                                 {"thread_id":"t3","comment_id":3,"author":"bot","path":"c.go"},
+                                 {"thread_id":"t4","comment_id":4,"author":"bot","path":"d.go"}]}'
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 1 ]] || fail "expected findings, got $rc" "$out"
+grep -q 'fix 0 failed check(s) and 4 thread(s)' <<<"$out" \
+  || fail "4 unresolved threads must count as 4, not 8" "$out"
+grep -q '4 total: 0 visible, 4 hidden' <<<"$out" \
+  || fail "the header must not label the total as visible" "$out"
+pass "hidden threads are counted once, and the total is not labelled visible"
+
+# --- an empty check rollup is not terminal ---------------------------------
+# Right after a push GitHub can expose the new head before Actions registers
+# any checks. Zero of everything is "not yet", not "clean".
+d="$(make_tmp_dir)"; setup_fake "$d"
+for i in 1 2 3; do snapshot "$d" "$i" 0 0 0; done
+snapshot "$d" 4 20 0 0
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "expected clean once checks appeared, got $rc" "$out"
+grep -q '4 poll' <<<"$out" || fail "must wait for checks to appear, not stop at the empty rollup" "$out"
+pass "an empty check rollup keeps waiting instead of reporting clean"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+for i in 1 2 3 4 5; do snapshot "$d" "$i" 0 0 0; done
+out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -ne 0 ]] || fail "a permanently empty rollup must never exit 0" "$out"
+pass "a rollup that never populates does not become clean at the deadline"
+
+# --- a base that advanced leaves the merge result untested -----------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0 true aaaaaaaaaaaa '{"pr":{"base_advanced_since_head":true}}'
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 1 ]] || fail "base_advanced_since_head must prevent a clean verdict, got $rc" "$out"
+grep -qi 'base advanced' <<<"$out" || fail "should report the advanced base" "$out"
+pass "an advanced base is reported and prevents a clean verdict"
+
+# --- approval-required must belong to the current head ---------------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 10 0 2 true aaaaaaaaaaaa \
+  '{"approval_required_runs":[{"run_id":9,"name":"E2E","conclusion":"action_required"}]}'
+snapshot "$d" 2 20 0 0 true bbbbbbbbbbbb
+cat > "$d/gh" <<'GHAP'
+#!/usr/bin/env bash
+printf '{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"bbbbbbbbbbbb"}'
+GHAP
+chmod +x "$d/gh"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "approval for a superseded head must be discarded, got $rc" "$out"
+pass "an approval-required run from a superseded head is not actionable"
+
+# --- a leading-zero PR number survives the JSON path -----------------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+for i in 1 2 3; do : > "$d/seq/$i.fail"; snapshot "$d" "$i" 0 0 0; done
+out="$(run_await "$d" 0012 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+jq -e . >/dev/null <<<"$out" || fail "leading-zero PR must not break the JSON envelope" "$out"
+[[ "$(jq -r '.pr' <<<"$out")" == '12' ]] || fail "PR should normalize to 12" "$out"
+pass "a leading-zero PR number normalizes and keeps the JSON envelope valid"
+
+
 printf '\nall tests passed\n'
