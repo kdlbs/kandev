@@ -98,13 +98,21 @@ export const dockerTest = backendFixture.extend<
       );
 
       try {
-        const repo = await apiClient.createRepository(workspace.id, repoDir, "main", {
-          name: "fixture/e2e-docker",
-          provider: "gitlab",
-          provider_host: "https://gitlab.com",
-          provider_owner: "fixture",
-          provider_name: "e2e-docker",
-        });
+        // Register the canonical-URL checkout so the Docker executor resolves
+        // the HTTP fixture through its profile rewrite. The separate local
+        // clone above remains the mutable push target used by LSP tests.
+        const repo = await apiClient.createRepository(
+          workspace.id,
+          gitFixture.checkoutPath,
+          "main",
+          {
+            name: "fixture/e2e-docker",
+            provider: "gitlab",
+            provider_host: "https://gitlab.com",
+            provider_owner: "fixture",
+            provider_name: "e2e-docker",
+          },
+        );
 
         const { agents } = await apiClient.listAgents();
         const mock = agents.find((a) => a.name === "mock-agent");
