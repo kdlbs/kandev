@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -82,6 +84,10 @@ func TestHandleAddWorkspaceSourcesRejectsUnrelatedAndMismatchedCallers(t *testin
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "parent-session", TaskID: parent.ID}))
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "child-session", TaskID: child.ID}))
 	sibling := createWorkspaceSourceAuthorizationTask(t, svc, parent.WorkspaceID, "Sibling", "")
+	grandparent := createWorkspaceSourceAuthorizationTask(t, svc, parent.WorkspaceID, "Grandparent", "")
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "grandparent-session", TaskID: grandparent.ID}))
+	_, err := repo.DB().ExecContext(ctx, "UPDATE tasks SET parent_id = ? WHERE id = ?", grandparent.ID, parent.ID)
+	require.NoError(t, err)
 	h := &Handlers{taskSvc: svc, sessionRepo: repo, logger: testLogger(t).WithFields()}
 
 	for _, testCase := range []struct {
@@ -90,6 +96,7 @@ func TestHandleAddWorkspaceSourcesRejectsUnrelatedAndMismatchedCallers(t *testin
 		callerSessionID string
 	}{
 		{name: "sibling", targetTaskID: sibling.ID, callerSessionID: "parent-session"},
+		{name: "grandparent", targetTaskID: child.ID, callerSessionID: "grandparent-session"},
 		{name: "mismatched session", targetTaskID: child.ID, callerSessionID: "child-session"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -105,6 +112,73 @@ func TestHandleAddWorkspaceSourcesRejectsUnrelatedAndMismatchedCallers(t *testin
 			require.Empty(t, folders)
 		})
 	}
+}
+
+func TestHandleAddWorkspaceSourcesReturnsInternalErrorWhenCallerSessionLookupFails(t *testing.T) {
+	h := &Handlers{
+		taskSvc:     &service.Service{},
+		sessionRepo: failingCallerSessionRepository{err: errors.New("database unavailable")},
+	}
+
+	response, err := h.handleAddWorkspaceSources(context.Background(), makeWSMessage(t, ws.ActionMCPAddWorkspaceSources, map[string]interface{}{
+		"task_id": "target-task", "caller_task_id": "caller-task", "caller_session_id": "caller-session",
+		"sources": []interface{}{map[string]interface{}{"kind": "folder", "local_path": t.TempDir(), "display_name": "docs"}},
+	}))
+	require.NoError(t, err)
+	assertWSError(t, response, ws.ErrorCodeInternalError)
+}
+
+func TestHandleAddWorkspaceSourcesReturnsInternalErrorWhenCallerTaskLookupFails(t *testing.T) {
+	h := &Handlers{
+		taskSvc: service.NewService(service.Repos{
+			Tasks: failingCallerTaskRepository{err: errors.New("database unavailable")},
+		}, nil, testLogger(t), service.RepositoryDiscoveryConfig{}),
+		sessionRepo: staticCallerSessionRepository{session: &models.TaskSession{ID: "caller-session", TaskID: "caller-task"}},
+	}
+
+	response, err := h.handleAddWorkspaceSources(context.Background(), makeWSMessage(t, ws.ActionMCPAddWorkspaceSources, map[string]interface{}{
+		"task_id": "target-task", "caller_task_id": "caller-task", "caller_session_id": "caller-session",
+		"sources": []interface{}{map[string]interface{}{"kind": "folder", "local_path": t.TempDir(), "display_name": "docs"}},
+	}))
+	require.NoError(t, err)
+	assertWSError(t, response, ws.ErrorCodeInternalError)
+}
+
+type failingCallerSessionRepository struct{ err error }
+
+func (r failingCallerSessionRepository) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
+	return nil, r.err
+}
+
+func (failingCallerSessionRepository) UpdateTaskSessionState(context.Context, string, models.TaskSessionState, string) error {
+	return nil
+}
+
+func (failingCallerSessionRepository) SetSessionMetadataKeyIfAbsentOrDifferentStep(context.Context, string, string, string, interface{}) (bool, error) {
+	return false, nil
+}
+
+type staticCallerSessionRepository struct{ session *models.TaskSession }
+
+func (r staticCallerSessionRepository) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
+	return r.session, nil
+}
+
+func (staticCallerSessionRepository) UpdateTaskSessionState(context.Context, string, models.TaskSessionState, string) error {
+	return nil
+}
+
+func (staticCallerSessionRepository) SetSessionMetadataKeyIfAbsentOrDifferentStep(context.Context, string, string, string, interface{}) (bool, error) {
+	return false, nil
+}
+
+type failingCallerTaskRepository struct {
+	taskrepository.TaskRepository
+	err error
+}
+
+func (r failingCallerTaskRepository) GetTask(context.Context, string) (*models.Task, error) {
+	return nil, r.err
 }
 
 func TestHandleAddWorkspaceSourcesSelfTargetSucceeds(t *testing.T) {

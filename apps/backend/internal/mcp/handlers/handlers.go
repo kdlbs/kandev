@@ -1849,15 +1849,33 @@ func (h *Handlers) handleAddWorkspaceSources(ctx context.Context, msg *ws.Messag
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "workspace source authorization is not configured", nil)
 	}
 	callerSession, err := h.sessionRepo.GetTaskSession(ctx, req.CallerSessionID)
-	if err != nil || callerSession == nil || callerSession.TaskID != req.CallerTaskID {
+	if err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "caller session is not authorized for the calling task", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to verify caller session", nil)
+	}
+	if callerSession == nil || callerSession.TaskID != req.CallerTaskID {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "caller session is not authorized for the calling task", nil)
 	}
 	caller, err := h.taskSvc.GetTask(ctx, req.CallerTaskID)
-	if err != nil || caller == nil {
+	if err != nil {
+		if errors.Is(err, taskrepository.ErrTaskNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "caller task is not authorized", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to verify caller task", nil)
+	}
+	if caller == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "caller task is not authorized", nil)
 	}
 	target, err := h.taskSvc.GetTask(ctx, req.TaskID)
-	if err != nil || target == nil {
+	if err != nil {
+		if errors.Is(err, taskrepository.ErrTaskNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target task not found", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load target task", nil)
+	}
+	if target == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target task not found", nil)
 	}
 	if req.TaskID != req.CallerTaskID && !canDirectParentAccess(caller, target) {
