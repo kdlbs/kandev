@@ -306,31 +306,33 @@ func TestRebindWorkspaceWithGitMetadataRejectsDockerBeforeStopping(t *testing.T)
 
 type workspaceRebindAgentctlServer struct {
 	*httptest.Server
-	mu              sync.Mutex
-	startCount      int
-	stopCount       int
-	childRunning    bool
-	neverReady      bool
-	firstStatus     bool
-	statusCallCount int
-	paths           []string
-	workspaceRoots  [][]string
-	configured      []map[string]string
-	attestations    int
-	attestationErr  bool
-	failAttestAt    int
-	failStartAt     int
-	failConfigureAt int
-	failConfigure   bool
-	failMaterialize bool
-	failRemove      bool
-	failLoadAt      int
-	materialized    map[string]bool
-	operations      []string
-	loadCount       int
-	loadedSessions  []string
-	actionLog       []string
-	connections     []*websocket.Conn
+	mu                sync.Mutex
+	startCount        int
+	stopCount         int
+	childRunning      bool
+	neverReady        bool
+	firstStatus       bool
+	statusCallCount   int
+	paths             []string
+	workspaceRoots    [][]string
+	configured        []map[string]string
+	attestations      int
+	attestationErr    bool
+	failAttestAt      int
+	failStartAt       int
+	failConfigureAt   int
+	failConfigure     bool
+	failMaterialize   bool
+	failMaterializeAt int
+	failRemove        bool
+	failLoadAt        int
+	materialized      map[string]bool
+	operations        []string
+	materializeCount  int
+	loadCount         int
+	loadedSessions    []string
+	actionLog         []string
+	connections       []*websocket.Conn
 }
 
 func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceRebindAgentctlServer {
@@ -357,7 +359,8 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 			return
 		}
 		server.mu.Lock()
-		if server.failMaterialize {
+		server.materializeCount++
+		if server.failMaterialize || server.failMaterializeAt == server.materializeCount {
 			server.mu.Unlock()
 			w.WriteHeader(http.StatusUnprocessableEntity)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "materialization rejected"})
