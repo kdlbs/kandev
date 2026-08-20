@@ -21,6 +21,9 @@ responsive composition changes are required.
 - `apps/web/components/task/chat/clarification-overlay-header.tsx`
   - Import `Spinner` from `@kandev/ui/spinner`.
   - Render the spinner instead of `IconCheck` when `isSubmitting` is true.
+  - Mark the decorative spinner `aria-hidden` so the translated submitting
+    label remains the accessible status without exposing the shared English
+    `Loading` label.
   - Preserve the existing translated labels, disabled state, tooltip gating,
     button dimensions, and idle check icon.
 - The component is shared by task chat and Quick Chat, so both surfaces inherit
@@ -79,6 +82,8 @@ Passed.
 - `cd ../.. && git diff --check` passed.
 - The managed E2E runs rebuilt the backend and pseudo-locale Vite assets and cleaned their isolated test artifacts. No blockers remain.
 - Fresh phone and desktop pending-state screenshots were captured with synthetic E2E data, visually inspected, compressed, and validated through `apps/web/.pr-assets/manifest.json`; the disposable capture specs were removed afterward.
+- Fixup: addressed the P2 accessibility review by hiding the decorative spinner from assistive technology; the translated `Submitting...` button text remains exposed.
+- Fixup verification: `cd apps/web && pnpm run typecheck`, `cd apps/web && pnpm run lint`, and the focused desktop/mobile E2E commands above all passed.
 
 ## Implementation Waves And Parallel Candidates
 

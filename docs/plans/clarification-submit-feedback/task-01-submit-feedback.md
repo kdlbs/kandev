@@ -76,3 +76,5 @@ vertical slice.
 - Final files: `apps/web/components/task/chat/clarification-overlay-header.tsx`, `apps/web/e2e/tests/chat/clarification.spec.ts`, `apps/web/e2e/tests/chat/mobile-clarification.spec.ts`, `docs/specs/ui/clarification-submit-feedback.md`, `docs/plans/clarification-submit-feedback/plan.md`, and this task file.
 - The managed E2E runs rebuilt the backend and pseudo-locale Vite assets and cleaned their isolated test artifacts. No E2E blockers or failure artifacts remain.
 - Fresh phone and desktop pending-state screenshots were captured with synthetic E2E data, visually inspected, compressed, and validated through `apps/web/.pr-assets/manifest.json`; the disposable capture specs were removed afterward.
+- Fixup: addressed the P2 accessibility review by adding `aria-hidden="true"` to the decorative spinner and asserting that attribute in both desktop and mobile E2E coverage.
+- Fixup verification passed: `cd apps/web && pnpm run typecheck`, `cd apps/web && pnpm run lint`, and the focused desktop/mobile E2E commands above.

@@ -902,6 +902,7 @@ test.describe("Multi-question clarification carousel", () => {
     await expect(submit).toContainText("Submitting");
     await expect(submit).toBeDisabled();
     await expect(submit.locator('[role="status"]')).toBeVisible();
+    await expect(submit.locator('[role="status"]')).toHaveAttribute("aria-hidden", "true");
     await expect(submit.locator("svg.tabler-icon-check")).toHaveCount(0);
 
     await testPage.keyboard.press("ArrowLeft");

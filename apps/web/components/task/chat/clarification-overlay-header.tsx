@@ -89,7 +89,11 @@ export function ClarificationHeaderActions({
               )}
             >
               {isSubmitting ? t("task:submitting") : t("task:submit")}
-              {isSubmitting ? <Spinner className="size-3" /> : <IconCheck className="h-3 w-3" />}
+              {isSubmitting ? (
+                <Spinner aria-hidden="true" className="size-3" />
+              ) : (
+                <IconCheck className="h-3 w-3" />
+              )}
             </button>
           </span>
         </KeyboardShortcutTooltip>
