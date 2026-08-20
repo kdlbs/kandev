@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -13,6 +14,49 @@ const (
 	gitMetadataProjectionInvalid     = "git_metadata_projection_invalid"
 	gitMetadataProjectionUnsupported = "git_metadata_projection_unsupported"
 )
+
+// GitMetadataProjectionEnforcer is implemented only by executors that can
+// install and attest the task-owned Git metadata policy before an agent
+// process starts. It intentionally accepts the typed projections rather than
+// paths reconstructed from request metadata, so an executor cannot silently
+// widen a task's Git access.
+type GitMetadataProjectionEnforcer interface {
+	PrepareGitMetadataProjection(context.Context, []*worktree.GitMetadataProjection) error
+}
+
+// preflightGitMetadataProjection verifies a fresh projection and requires an
+// executor-specific enforcement attestation. A runtime without this capability
+// must fail before CreateInstance: starting an agent that can edit the checkout
+// but not its linked metadata reproduces the original index.lock failure.
+func preflightGitMetadataProjection(ctx context.Context, runtime ExecutorBackend, projections []*worktree.GitMetadataProjection) error {
+	if len(projections) == 0 {
+		return nil
+	}
+	if err := validateGitMetadataProjections(projections); err != nil {
+		return err
+	}
+	enforcer, ok := runtime.(GitMetadataProjectionEnforcer)
+	if !ok {
+		return fmt.Errorf("%s: executor %q cannot enforce task Git metadata permissions; update the executor or start a new session", gitMetadataProjectionUnsupported, runtime.Name())
+	}
+	if err := enforcer.PrepareGitMetadataProjection(ctx, projections); err != nil {
+		return fmt.Errorf("%s: executor %q could not attest task Git metadata permissions; update the executor or start a new session", gitMetadataProjectionUnsupported, runtime.Name())
+	}
+	return nil
+}
+
+// validateGitMetadataProjections is the policy-independent half of launch
+// preflight. Workspace rebind uses it before stopping an existing child so a
+// forged replacement can never interrupt a healthy session or replace its
+// authoritative in-memory projection.
+func validateGitMetadataProjections(projections []*worktree.GitMetadataProjection) error {
+	for _, projection := range projections {
+		if projection == nil || projection.Revalidate() != nil {
+			return errors.New(gitMetadataProjectionInvalid)
+		}
+	}
+	return nil
+}
 
 // projectionsFromPrepareResult returns a complete, revalidated projection set.
 // A partial set is never handed to an executor because it would make a

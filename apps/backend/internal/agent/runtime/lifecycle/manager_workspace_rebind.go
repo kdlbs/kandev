@@ -40,6 +40,11 @@ func (m *Manager) RebindWorkspaceWithGitMetadata(ctx context.Context, sessionID,
 		// failing a batch because an old session is no longer live.
 		return nil
 	}
+	if projections != nil {
+		if err := validateGitMetadataProjections(projections); err != nil {
+			return err
+		}
+	}
 	if execution.IsPassthrough || execution.agentctl == nil || execution.ACPSessionID == "" {
 		return fmt.Errorf("workspace rebind is unsupported for this session; start a new session after attaching sources")
 	}

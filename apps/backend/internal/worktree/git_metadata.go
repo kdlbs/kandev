@@ -129,7 +129,17 @@ func buildGitMetadataProjection(checkout, gitDir, commonDir, worktreeName string
 		if err := rejectSymlinkComponents(refPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, invalidGitMetadata(err)
 		}
-		paths = append(paths, refPath, reflogPath)
+		// Git creates ref.lock and reflog lock siblings before replacing the
+		// current files. Grant their immediate directories as well as the files;
+		// neither directory can be the common Git root because current refs are
+		// constrained to refs/heads/..., and this remains narrower than a common
+		// metadata grant.
+		paths = append(paths,
+			refPath,
+			filepath.Dir(refPath),
+			reflogPath,
+			filepath.Dir(reflogPath),
+		)
 	}
 	projection := &GitMetadataProjection{
 		Version:        GitMetadataProjectionVersion,
