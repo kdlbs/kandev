@@ -157,6 +157,7 @@ func TestHandleAddWorkspaceSourcesDenialsLeaveWorkspaceSourcesUntouched(t *testi
 		expectedCode    string
 	}{
 		{name: "cross workspace direct parent", callerTaskID: otherParentResult.Task.ID, callerSessionID: "other-parent-session", expectedCode: ws.ErrorCodeForbidden},
+		{name: "unknown caller session", callerTaskID: parent.ID, callerSessionID: "missing-parent-session", expectedCode: ws.ErrorCodeForbidden},
 		{name: "mismatched caller session", callerTaskID: parent.ID, callerSessionID: "child-session", expectedCode: ws.ErrorCodeForbidden},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
