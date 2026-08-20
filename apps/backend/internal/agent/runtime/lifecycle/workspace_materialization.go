@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/task/models"
@@ -94,9 +95,14 @@ func (m *Manager) MaterializeRepositoriesForEnvironment(ctx context.Context, tas
 	if len(clients) == 0 {
 		return nil, fmt.Errorf("workspace execution has no agentctl client")
 	}
-	created, err := materializeWorkspaceRepositoriesWithoutRescan(ctx, clients[0].client, repositories, false)
-	if err != nil {
-		return nil, err
+	materialized := make([]materializedWorkspaceRepositoryClient, 0, len(clients))
+	for _, execution := range clients {
+		created, materializeErr := materializeWorkspaceRepositoriesWithoutRescan(ctx, execution.client, repositories, false)
+		if materializeErr != nil {
+			rollbackErr := rollbackMaterializedWorkspaceRepositoryClients(ctx, materialized)
+			return nil, fmt.Errorf("materialize workspace repositories for session %s: %w", execution.sessionID, errors.Join(materializeErr, rollbackErr))
+		}
+		materialized = append(materialized, materializedWorkspaceRepositoryClient{execution: execution, created: created})
 	}
 	rescanned := make([]workspaceRepositoryExecution, 0, len(clients))
 	refreshed := make([]cloneWorkspacePolicyRefresh, 0, len(clients))
@@ -104,28 +110,42 @@ func (m *Manager) MaterializeRepositoriesForEnvironment(ctx context.Context, tas
 		if isMutableCloneWorkspaceExecution(execution.execution) {
 			refresh, refreshErr := m.refreshCloneWorkspacePolicyAfterMaterialization(ctx, execution.execution, repositories)
 			if refreshErr != nil {
-				cleanupErr := rollbackMaterializedWorkspaceRepositories(ctx, clients[0].client, created)
-				var rollbackErr error
-				if cleanupErr == nil {
-					rollbackErr = m.rollbackCloneWorkspacePolicyRefreshes(ctx, refreshed)
-				}
+				cleanupErr := rollbackMaterializedWorkspaceRepositoryClients(ctx, materialized)
+				rollbackErr := m.rollbackCloneWorkspacePolicyRefreshes(ctx, refreshed)
 				return nil, fmt.Errorf("refresh clone workspace policy for session %s: %w", execution.sessionID, errors.Join(refreshErr, cleanupErr, rollbackErr))
 			}
 			refreshed = append(refreshed, refresh)
 			continue
 		}
 		if err := execution.client.RescanWorkspace(ctx, "", execution.sourceRoots); err != nil {
-			cleanupErr := rollbackMaterializedWorkspaceRepositories(ctx, clients[0].client, created)
-			var reconcileErr error
-			if cleanupErr == nil {
-				reconcileErr = rollbackWorkspaceRepositoryRescans(ctx, rescanned)
-				reconcileErr = errors.Join(reconcileErr, m.rollbackCloneWorkspacePolicyRefreshes(ctx, refreshed))
-			}
+			cleanupErr := rollbackMaterializedWorkspaceRepositoryClients(ctx, materialized)
+			reconcileErr := rollbackWorkspaceRepositoryRescans(ctx, rescanned)
+			reconcileErr = errors.Join(reconcileErr, m.rollbackCloneWorkspacePolicyRefreshes(ctx, refreshed))
 			return nil, fmt.Errorf("rescan materialized workspace for session %s: %w", execution.sessionID, errors.Join(err, cleanupErr, reconcileErr))
 		}
 		rescanned = append(rescanned, execution)
 	}
 	return workspaceRepositorySessionIDs(executions), nil
+}
+
+type materializedWorkspaceRepositoryClient struct {
+	execution workspaceRepositoryExecution
+	created   []WorkspaceRepositoryMaterialization
+}
+
+// rollbackMaterializedWorkspaceRepositoryClients compensates every distinct
+// executor even when an earlier deletion fails. Separate Docker, SSH, and
+// Sprites workspaces each own their clone, so cleanup of one must never decide
+// whether another receives rollback.
+func rollbackMaterializedWorkspaceRepositoryClients(ctx context.Context, clients []materializedWorkspaceRepositoryClient) error {
+	var errs []error
+	for index := len(clients) - 1; index >= 0; index-- {
+		client := clients[index]
+		if err := rollbackMaterializedWorkspaceRepositories(ctx, client.execution.client, client.created); err != nil {
+			errs = append(errs, fmt.Errorf("remove materialized workspace repositories for session %s: %w", client.execution.sessionID, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func materializeWorkspaceRepositories(ctx context.Context, client workspaceRepositoryClient, repositories []WorkspaceRepositoryMaterialization, sourceRoots ...[]string) error {
@@ -202,10 +222,11 @@ func distinctWorkspaceRepositoryClients(executions []*AgentExecution) []workspac
 // It carries no host checkout information: all roots are executor-visible and
 // every new GitDir is supplied by agentctl's final attestation.
 type cloneWorkspacePolicyRefresh struct {
-	execution *AgentExecution
-	oldRoots  []string
-	oldEnv    map[string]string
-	oldACP    string
+	execution   *AgentExecution
+	oldRoots    []string
+	oldEnv      map[string]string
+	oldACP      string
+	agentConfig agents.Agent
 }
 
 func isMutableCloneWorkspaceExecution(execution *AgentExecution) bool {
@@ -277,8 +298,13 @@ func (m *Manager) refreshCloneWorkspacePolicyAfterMaterialization(ctx context.Co
 	refresh.oldRoots = append([]string(nil), execution.WorkspaceSourceRoots...)
 	refresh.oldEnv = execution.RuntimeEnvironment()
 	refresh.oldACP = execution.ACPSessionID
+	refresh.agentConfig = agentConfig
+	execution.Status = v1.AgentStatusStarting
+	if err := execution.agentctl.Stop(ctx); err != nil {
+		return refresh, m.failClosedCloneWorkspacePolicyRefresh(ctx, refresh)
+	}
 	if err := execution.agentctl.RescanWorkspace(ctx, "", newRoots); err != nil {
-		return refresh, unsupportedGitMetadataProjection("clone workspace policy refresh failed; start a new session with a supported executor")
+		return refresh, m.rollbackCloneWorkspacePolicyRefresh(ctx, refresh, unsupportedGitMetadataProjection("clone workspace policy refresh failed; start a new session with a supported executor"))
 	}
 	request := &ExecutorCreateRequest{
 		WorkspacePath:          execution.WorkspacePath,
@@ -289,14 +315,7 @@ func (m *Manager) refreshCloneWorkspacePolicyAfterMaterialization(ctx context.Co
 	}
 	newEnv, err := attestedCloneGitMetadataRuntimeEnv(ctx, request, execution.agentctl, execution.WorkspacePath, newRoots)
 	if err != nil {
-		_ = execution.agentctl.ReconcileWorkspace(context.WithoutCancel(ctx), refresh.oldRoots)
-		return refresh, unsupportedGitMetadataProjection("clone workspace policy refresh failed; start a new session with a supported executor")
-	}
-	execution.Status = v1.AgentStatusStarting
-	if err := execution.agentctl.Stop(ctx); err != nil {
-		execution.Status = v1.AgentStatusReady
-		_ = execution.agentctl.ReconcileWorkspace(context.WithoutCancel(ctx), refresh.oldRoots)
-		return refresh, unsupportedGitMetadataProjection("clone workspace policy refresh failed; start a new session with a supported executor")
+		return refresh, m.rollbackCloneWorkspacePolicyRefresh(ctx, refresh, unsupportedGitMetadataProjection("clone workspace policy refresh failed; start a new session with a supported executor"))
 	}
 	if err := m.configureCloneWorkspacePolicy(ctx, execution, newEnv); err != nil {
 		return refresh, m.rollbackCloneWorkspacePolicyRefresh(ctx, refresh, unsupportedGitMetadataProjection("clone workspace policy refresh failed; start a new session with a supported executor"))
@@ -352,29 +371,84 @@ func (m *Manager) rollbackCloneWorkspacePolicyRefresh(ctx context.Context, refre
 	if err := execution.agentctl.ReconcileWorkspace(rollbackCtx, refresh.oldRoots); err != nil {
 		rollbackErr = errors.Join(rollbackErr, fmt.Errorf("rollback clone workspace roots: %w", err))
 	}
-	if err := m.configureCloneWorkspacePolicy(rollbackCtx, execution, refresh.oldEnv); err != nil {
-		rollbackErr = errors.Join(rollbackErr, fmt.Errorf("rollback clone child policy: %w", err))
-	} else if _, err := execution.agentctl.Start(rollbackCtx); err != nil {
-		rollbackErr = errors.Join(rollbackErr, fmt.Errorf("rollback restart clone child: %w", err))
-	} else if refresh.oldACP != "" {
-		if err := m.restoreReboundACPSession(rollbackCtx, execution, refresh.oldACP, false); err != nil {
-			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("rollback restore clone child session: %w", err))
-		}
+	if rollbackErr != nil {
+		return m.failClosedCloneWorkspacePolicyRefresh(rollbackCtx, refresh)
+	}
+	oldEnv, attestErr := m.attestedCloneWorkspacePolicyEnvironment(rollbackCtx, refresh)
+	if attestErr != nil {
+		return m.failClosedCloneWorkspacePolicyRefresh(rollbackCtx, refresh)
+	}
+	if rollbackErr := m.restoreCloneWorkspacePolicyChild(rollbackCtx, refresh, oldEnv); rollbackErr != nil {
+		return m.failClosedCloneWorkspacePolicyRefresh(rollbackCtx, refresh)
 	}
 	execution.WorkspaceSourceRoots = append([]string(nil), refresh.oldRoots...)
-	execution.setRuntimeEnvironment(refresh.oldEnv)
-	execution.setMetadataValue("runtime_env", cloneStringMap(refresh.oldEnv))
+	execution.setRuntimeEnvironment(oldEnv)
+	execution.setMetadataValue("runtime_env", cloneStringMap(oldEnv))
 	execution.Status = v1.AgentStatusReady
-	if rollbackErr != nil {
-		// The attachment caller receives only stable recovery guidance. Agentctl
-		// transport failures can include executor paths and must not escape this
-		// authenticated lifecycle boundary, but the execution still records that
-		// automatic restoration was incomplete for operator recovery.
-		if m.executionStore != nil {
-			m.executionStore.UpdateError(execution.ID, "clone workspace policy rollback failed; start a new session")
+	return cause
+}
+
+func (m *Manager) attestedCloneWorkspacePolicyEnvironment(ctx context.Context, refresh cloneWorkspacePolicyRefresh) (map[string]string, error) {
+	execution := refresh.execution
+	if execution == nil || execution.agentctl == nil {
+		return nil, errors.New("rollback clone workspace policy is unavailable")
+	}
+	request := &ExecutorCreateRequest{
+		WorkspacePath:          execution.WorkspacePath,
+		WorkspaceSourceRoots:   refresh.oldRoots,
+		GitMetadataRequirement: cloneGitMetadataRequirement(true),
+		AgentConfig:            refresh.agentConfig,
+		Env:                    cloneStringMap(refresh.oldEnv),
+	}
+	env, err := attestedCloneGitMetadataRuntimeEnv(ctx, request, execution.agentctl, execution.WorkspacePath, refresh.oldRoots)
+	if err != nil {
+		return nil, fmt.Errorf("rollback attest clone workspace policy: %w", err)
+	}
+	return env, nil
+}
+
+func (m *Manager) restoreCloneWorkspacePolicyChild(ctx context.Context, refresh cloneWorkspacePolicyRefresh, runtimeEnv map[string]string) error {
+	execution := refresh.execution
+	if err := m.configureCloneWorkspacePolicy(ctx, execution, runtimeEnv); err != nil {
+		return fmt.Errorf("rollback clone child policy: %w", err)
+	}
+	if _, err := execution.agentctl.Start(ctx); err != nil {
+		return fmt.Errorf("rollback restart clone child: %w", err)
+	}
+	if refresh.oldACP == "" {
+		return nil
+	}
+	if err := m.restoreReboundACPSession(ctx, execution, refresh.oldACP, false); err != nil {
+		return fmt.Errorf("rollback restore clone child session: %w", err)
+	}
+	return nil
+}
+
+// failClosedCloneWorkspacePolicyRefresh records that a live clone child could
+// not be proven back at its previous policy. The caller only receives recovery
+// guidance: agentctl transport errors can contain executor filesystem details.
+func (m *Manager) failClosedCloneWorkspacePolicyRefresh(ctx context.Context, refresh cloneWorkspacePolicyRefresh) error {
+	execution := refresh.execution
+	if execution == nil {
+		return unsupportedGitMetadataProjection("clone workspace policy refresh failed; start a new session with a supported executor")
+	}
+	stopUnconfirmed := false
+	if execution.agentctl != nil {
+		// A second stop is deliberate. A failed stop reply does not prove the
+		// child is gone, and a failed rollback must never leave it usable.
+		if err := execution.agentctl.Stop(context.WithoutCancel(ctx)); err != nil {
+			stopUnconfirmed = true
 		}
 	}
-	return cause
+	execution.Status = v1.AgentStatusFailed
+	execution.ErrorMessage = "clone workspace policy recovery required; start a new session"
+	if stopUnconfirmed {
+		execution.ErrorMessage = "clone workspace policy recovery required and child stop could not be confirmed; start a new session"
+	}
+	if m.executionStore != nil {
+		m.executionStore.UpdateError(execution.ID, execution.ErrorMessage)
+	}
+	return unsupportedGitMetadataProjection("clone workspace policy refresh failed; start a new session with a supported executor")
 }
 
 func workspaceRepositorySessionIDs(executions []*AgentExecution) []string {
