@@ -593,6 +593,37 @@ func TestProvider_UpdateClearsParkedWhenExecutionProfileChanges(t *testing.T) {
 	}
 }
 
+func TestProvider_UpdateClearsParkedOnRoleTiersOnlyChange(t *testing.T) {
+	prev := &WorkspaceConfig{
+		Enabled:       true,
+		DefaultTier:   TierBalanced,
+		ProviderOrder: []ProviderID{"claude-acp"},
+		ProviderProfiles: map[ProviderID]ProviderProfile{
+			"claude-acp": {
+				TierMap: TierMap{Frontier: "opus", Balanced: "sonnet"},
+				ExecutionProfileIDs: ExecutionProfileIDs{
+					Frontier: "claude-opus", Balanced: "claude-sonnet",
+				},
+			},
+		},
+		RoleTiers: RoleTierMap{"qa": TierFrontier},
+	}
+	p, repo := newProviderTest(prev, nil)
+	// Only RoleTiers changes; DefaultTier, ProviderOrder, and
+	// ProviderProfiles stay identical. A run parked because the "qa"
+	// role resolved to frontier with no usable candidate should unblock
+	// once that role is remapped to balanced.
+	next := *prev
+	next.RoleTiers = RoleTierMap{"qa": TierBalanced}
+
+	if err := p.UpdateConfig(context.Background(), "ws-1", next); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	if len(repo.clearedParkedFor) != 1 || repo.clearedParkedFor[0] != "ws-1" {
+		t.Fatalf("role-tiers-only change did not clear parked runs: %v", repo.clearedParkedFor)
+	}
+}
+
 func TestProvider_UpdateDoesNotClearWhenConfigUnchanged(t *testing.T) {
 	prev := &WorkspaceConfig{
 		Enabled:       true,

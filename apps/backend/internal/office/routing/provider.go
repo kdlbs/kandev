@@ -173,14 +173,15 @@ func (p *Provider) ListExecutionProfiles(
 //   - enabled→disabled: parked runs would otherwise sit forever waiting
 //     on a provider that no longer matters.
 //   - enabled→enabled with a material change (provider order, default
-//     tier, or provider profiles): a user fixing a missing tier mapping
-//     should unblock blocked_provider_action_required runs immediately;
-//     without this, those parks persist until the user manually retries.
+//     tier, role tiers, or provider profiles): a user fixing a missing
+//     tier mapping should unblock blocked_provider_action_required runs
+//     immediately; without this, those parks persist until the user
+//     manually retries.
 //
 // "Material" is defined coarsely — any change to ProviderOrder,
-// DefaultTier, or ProviderProfiles triggers a clear. False positives
-// (clearing when the change couldn't affect any block reason) are
-// harmless because runs simply re-dispatch and re-park with the
+// DefaultTier, RoleTiers, or ProviderProfiles triggers a clear. False
+// positives (clearing when the change couldn't affect any block reason)
+// are harmless because runs simply re-dispatch and re-park with the
 // latest verdict.
 func (p *Provider) UpdateConfig(
 	ctx context.Context, workspaceID string, cfg WorkspaceConfig,
@@ -403,8 +404,8 @@ func shouldClearParked(prev *WorkspaceConfig, next WorkspaceConfig) bool {
 
 // routingConfigEqual reports whether two enabled configs are
 // behaviorally identical for routing decisions. Compares provider
-// order, default tier, and per-provider profile maps. The Enabled
-// field is intentionally not compared — callers check that.
+// order, default tier, per-provider profile maps, and role tiers. The
+// Enabled field is intentionally not compared — callers check that.
 func routingConfigEqual(a, b WorkspaceConfig) bool {
 	if a.DefaultTier != b.DefaultTier {
 		return false
@@ -412,7 +413,22 @@ func routingConfigEqual(a, b WorkspaceConfig) bool {
 	if !providerOrderEqual(a.ProviderOrder, b.ProviderOrder) {
 		return false
 	}
+	if !roleTiersEqual(a.RoleTiers, b.RoleTiers) {
+		return false
+	}
 	return providerProfilesEqual(a.ProviderProfiles, b.ProviderProfiles)
+}
+
+func roleTiersEqual(a, b RoleTierMap) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, va := range a {
+		if vb, ok := b[k]; !ok || va != vb {
+			return false
+		}
+	}
+	return true
 }
 
 func providerOrderEqual(a, b []ProviderID) bool {
