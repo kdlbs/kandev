@@ -224,10 +224,10 @@ test.describe("Workflow settings", () => {
     await expect(card).toBeVisible();
 
     // Custom workflows get default steps (Todo, In Progress, Review, Done)
-    await expect(card.getByText("Todo")).toBeVisible();
-    await expect(card.getByText("In Progress")).toBeVisible();
-    await expect(card.getByText("Review")).toBeVisible();
-    await expect(card.getByText("Done")).toBeVisible();
+    await expect(page.stepNodeByName(card, "Todo")).toBeVisible();
+    await expect(page.stepNodeByName(card, "In Progress")).toBeVisible();
+    await expect(page.stepNodeByName(card, "Review")).toBeVisible();
+    await expect(page.stepNodeByName(card, "Done")).toBeVisible();
 
     await page.saveChanges();
     await page.goto(seedData.workspaceId);
@@ -258,7 +258,7 @@ test.describe("Workflow settings", () => {
 
     await page.addStepButton(persistedCard).click();
 
-    await expect(persistedCard.getByText("New Step")).toBeVisible();
+    await expect(page.stepNodeByName(persistedCard, "New Step")).toBeVisible();
     expect((await apiClient.listWorkflowSteps(workflow!.id)).steps).toHaveLength(
       stepsBefore.steps.length,
     );
@@ -268,7 +268,7 @@ test.describe("Workflow settings", () => {
     await page.goto(seedData.workspaceId);
     const reloadedCard = await page.findWorkflowCard("Step Add Test");
     await expect(reloadedCard).toBeVisible();
-    await expect(reloadedCard.getByText("New Step")).toBeVisible();
+    await expect(page.stepNodeByName(reloadedCard, "New Step")).toBeVisible();
   });
 
   test("configures an all child tasks complete transition", async ({
@@ -404,7 +404,7 @@ test.describe("Workflow settings", () => {
     await page.goto(seedData.workspaceId);
     const reloadedCard = await page.findWorkflowCard(workflow.name);
     await expect(reloadedCard).toBeVisible();
-    await expect(reloadedCard.getByText("Renamed Step")).toBeVisible();
+    await expect(page.stepNodeByName(reloadedCard, "Renamed Step")).toBeVisible();
   });
 
   test("shows delete confirmation dialog when removing a persisted step", async ({
@@ -431,7 +431,7 @@ test.describe("Workflow settings", () => {
     // Cancel — step should still exist
     await page.stepDeleteDialog.getByRole("button", { name: "Cancel" }).click();
     await expect(page.stepDeleteDialog).not.toBeVisible();
-    await expect(card.getByText("Review")).toBeVisible();
+    await expect(page.stepNodeByName(card, "Review")).toBeVisible();
 
     // Delete again and confirm
     await page.clickDeleteStepButton(card, "Review");
@@ -634,8 +634,8 @@ test.describe("Seed protection", () => {
     await page.goto(seedData.workspaceId);
     const kanbanCard = await page.findWorkflowCard("My Kanban");
     await expect(kanbanCard).toBeVisible();
-    await expect(kanbanCard.getByText("Backlog")).toBeVisible();
-    await expect(kanbanCard.getByText("Review")).toBeVisible();
+    await expect(page.stepNodeByName(kanbanCard, "Backlog")).toBeVisible();
+    await expect(page.stepNodeByName(kanbanCard, "Review")).toBeVisible();
 
     const prCard = await page.findWorkflowCard("My PR Review");
     await expect(prCard).toBeVisible();

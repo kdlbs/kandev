@@ -113,8 +113,8 @@ workflows:
     await page.goto(seedData.workspaceId);
     const card = await page.findWorkflowCard("Pasted Workflow");
     await expect(card).toBeVisible();
-    await expect(card.getByText("Open")).toBeVisible();
-    await expect(card.getByText("Closed")).toBeVisible();
+    await expect(page.stepNodeByName(card, "Open")).toBeVisible();
+    await expect(page.stepNodeByName(card, "Closed")).toBeVisible();
   });
 
   test("import shows skip message for duplicate workflow name", async ({ testPage, seedData }) => {
@@ -186,9 +186,9 @@ workflows:
     await page.goto(seedData.workspaceId);
     const reimportedCard = await page.findWorkflowCard("Roundtrip WF");
     await expect(reimportedCard).toBeVisible();
-    await expect(reimportedCard.getByText("Plan")).toBeVisible();
-    await expect(reimportedCard.getByText("Implementation")).toBeVisible();
-    await expect(reimportedCard.getByText("Done")).toBeVisible();
+    await expect(page.stepNodeByName(reimportedCard, "Plan")).toBeVisible();
+    await expect(page.stepNodeByName(reimportedCard, "Implementation")).toBeVisible();
+    await expect(page.stepNodeByName(reimportedCard, "Done")).toBeVisible();
 
     // Verify custom prompt survived via API
     const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
