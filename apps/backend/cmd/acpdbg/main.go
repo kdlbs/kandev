@@ -240,12 +240,18 @@ func runPrompt(ctx context.Context, args []string) error {
 	model := fs.String("model", "", "model to set before prompting")
 	mode := fs.String("mode", "", "session mode to set before prompting")
 	prompt := fs.String("prompt", "", "prompt text (required)")
-	linger := fs.Duration("linger", 0, "keep the session open this long after the prompt returns, recording any late frames")
+	linger := fs.Duration("linger", 0, "keep the session open this long after the prompt returns, recording any late frames; extends the run beyond --timeout (must be >= 0)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *prompt == "" {
 		return errors.New("--prompt is required")
+	}
+	if *linger < 0 {
+		// A negative linger would shrink the run deadline below --timeout and
+		// could cancel the prompt before it completes. The linger window only
+		// ever extends the run.
+		return errors.New("--linger must not be negative")
 	}
 
 	cfg, err := resolveRunConfig(fs, shared, "prompt")
