@@ -962,15 +962,14 @@ func (s *Service) handleQueuedMessageExecutionError(
 		return
 	}
 
-	// TODO: Implement dead letter queue for failed queued messages
-	// Currently, failed messages are lost. Consider:
-	// 1. Retry mechanism with exponential backoff
-	// 2. Persist failed messages to database for manual recovery
-	// 3. Notification to user about failed queue execution
-	s.logger.Warn("queued message execution failed - message is lost (no retry/dead letter queue)",
+	// Keep the only durable payload available for a later prompt boundary or
+	// explicit recovery. A generic dispatch failure is not evidence that the
+	// sender's report/prompt is safe to discard.
+	s.logger.Warn("queued message execution failed; preserving for recovery",
 		zap.String("session_id", callerSessionID),
 		zap.String("queue_id", queuedMsg.ID),
 		zap.Int("content_length", len(queuedMsg.Content)))
+	s.requeueMessage(ctx, queuedMsg, "queued-message-recoverable")
 }
 
 // claimQueuedMessageHandoff resolves direct/test reservations and claims the
