@@ -17,6 +17,9 @@ func HTTPSProviderOrigin(providerHost string) (string, error) {
 	if !strings.Contains(value, "://") {
 		value = ProtocolHTTPS + "://" + value
 	}
+	if !hasSafeRawAuthority(value) {
+		return "", fmt.Errorf("provider host must be a credential-free HTTPS URL")
+	}
 	parsed, err := url.Parse(value)
 	if err != nil || !strings.EqualFold(parsed.Scheme, ProtocolHTTPS) || parsed.Host == "" ||
 		parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
@@ -41,6 +44,9 @@ func CanonicalHTTPSCloneURL(raw string) string {
 	if !strings.Contains(value, "://") {
 		return scpStyleHTTPSCloneURL(value)
 	}
+	if !hasSafeRawAuthority(value) {
+		return ""
+	}
 	parsed, err := url.Parse(value)
 	if err != nil || !strings.EqualFold(parsed.Scheme, ProtocolSSH) ||
 		parsed.Hostname() == "" || parsed.Path == "" || parsed.Path == "/" {
@@ -60,6 +66,9 @@ func scpStyleHTTPSCloneURL(value string) string {
 	if !found || host == "" || strings.Contains(host, "/") {
 		return ""
 	}
+	if !isSafeRawAuthority(user + "@" + host) {
+		return ""
+	}
 	path = strings.TrimPrefix(path, "/")
 	if path == "" {
 		return ""
@@ -71,7 +80,11 @@ func scpStyleHTTPSCloneURL(value string) string {
 // and requires their origin to match the provider identity that authorized
 // credential use.
 func ValidateHTTPSCloneOrigin(cloneURL, providerHost string) error {
-	parsed, err := url.Parse(strings.TrimSpace(cloneURL))
+	value := strings.TrimSpace(cloneURL)
+	if !hasSafeRawAuthority(value) {
+		return fmt.Errorf("clone URL must be a credential-free HTTPS URL")
+	}
+	parsed, err := url.Parse(value)
 	if err != nil || !strings.EqualFold(parsed.Scheme, ProtocolHTTPS) || parsed.Host == "" ||
 		parsed.User != nil || parsed.Path == "" || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return fmt.Errorf("clone URL must be a credential-free HTTPS URL")
@@ -85,4 +98,28 @@ func ValidateHTTPSCloneOrigin(cloneURL, providerHost string) error {
 		return fmt.Errorf("clone URL origin %q does not match provider origin %q", gotOrigin, wantOrigin)
 	}
 	return nil
+}
+
+func hasSafeRawAuthority(value string) bool {
+	authority, found := rawAuthority(value)
+	return found && isSafeRawAuthority(authority)
+}
+
+func rawAuthority(value string) (string, bool) {
+	if schemeEnd := strings.Index(value, "://"); schemeEnd >= 0 {
+		value = value[schemeEnd+len("://"):]
+	}
+	if authorityEnd := strings.IndexAny(value, "/?#"); authorityEnd >= 0 {
+		value = value[:authorityEnd]
+	}
+	return value, value != ""
+}
+
+func isSafeRawAuthority(authority string) bool {
+	for i := 0; i < len(authority); i++ {
+		if authority[i] > 0x7f || authority[i] == '%' {
+			return false
+		}
+	}
+	return true
 }

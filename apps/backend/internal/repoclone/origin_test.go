@@ -16,6 +16,14 @@ func TestCanonicalHTTPSCloneURL(t *testing.T) {
 		{name: "ssh scheme", raw: "ssh://git@github.com/acme/widgets.git", want: "https://github.com/acme/widgets.git"},
 		{name: "ssh scheme with port", raw: "ssh://git@gitlab.example:2222/group/widgets.git", want: "https://gitlab.example/group/widgets.git"},
 		{name: "ssh scheme drops password", raw: "ssh://git:secret@github.com/acme/widgets.git", want: "https://github.com/acme/widgets.git"},
+		{name: "scp style rejects Unicode authority", raw: "git@gİthub.com:acme/widgets.git"},
+		{name: "ssh scheme rejects Unicode authority", raw: "ssh://git@gİthub.com/acme/widgets.git"},
+		{name: "scp style rejects encoded authority", raw: "git@g%C4%B0thub.com:acme/widgets.git"},
+		{name: "ssh scheme rejects encoded authority", raw: "ssh://git@g%C4%B0thub.com/acme/widgets.git"},
+		{name: "scp style rejects double encoded authority", raw: "git@g%25C4%25B0thub.com:acme/widgets.git"},
+		{name: "ssh scheme rejects double encoded authority", raw: "ssh://git@g%25C4%25B0thub.com/acme/widgets.git"},
+		{name: "scp style preserves Unicode path", raw: "git@github.com:acme/wídgets.git", want: "https://github.com/acme/wídgets.git"},
+		{name: "ssh scheme preserves Unicode path", raw: "ssh://git@github.com/acme/wídgets.git", want: "https://github.com/acme/wídgets.git"},
 		{name: "https passes through untouched", raw: "https://github.com/acme/widgets.git"},
 		{name: "file remote", raw: "file:///tmp/widgets.git"},
 		{name: "local path", raw: "/home/user/widgets"},
@@ -30,6 +38,22 @@ func TestCanonicalHTTPSCloneURL(t *testing.T) {
 			t.Parallel()
 			if got := CanonicalHTTPSCloneURL(test.raw); got != test.want {
 				t.Fatalf("CanonicalHTTPSCloneURL(%q) = %q, want %q", test.raw, got, test.want)
+			}
+		})
+	}
+}
+
+func TestHTTPSProviderOriginRejectsUnsafeAuthority(t *testing.T) {
+	t.Parallel()
+	for _, providerHost := range []string{
+		"https://gİthub.com",
+		"https://g%C4%B0thub.com",
+		"https://g%25C4%25B0thub.com",
+	} {
+		t.Run(providerHost, func(t *testing.T) {
+			t.Parallel()
+			if _, err := HTTPSProviderOrigin(providerHost); err == nil {
+				t.Fatalf("HTTPSProviderOrigin(%q) error = nil, want rejection", providerHost)
 			}
 		})
 	}
@@ -75,6 +99,24 @@ func TestValidateHTTPSCloneOrigin(t *testing.T) {
 			name:         "non HTTPS",
 			cloneURL:     "http://bitbucket.example.test/repo.git",
 			providerHost: "https://bitbucket.example.test",
+			wantErr:      true,
+		},
+		{
+			name:         "Unicode clone authority",
+			cloneURL:     "https://gİthub.com/acme/widgets.git",
+			providerHost: "https://github.com",
+			wantErr:      true,
+		},
+		{
+			name:         "encoded clone authority",
+			cloneURL:     "https://g%C4%B0thub.com/acme/widgets.git",
+			providerHost: "https://github.com",
+			wantErr:      true,
+		},
+		{
+			name:         "unsafe provider authority",
+			cloneURL:     "https://github.com/acme/widgets.git",
+			providerHost: "https://gİthub.com",
 			wantErr:      true,
 		},
 	}
