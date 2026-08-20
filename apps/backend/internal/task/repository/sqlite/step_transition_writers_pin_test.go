@@ -28,23 +28,31 @@ import (
 
 // registeredStepMutators is the closed set of functions in this package
 // known to mutate tasks.workflow_step_id, each already wired to
-// recordStepTransition, keyed by "ReceiverType.FuncName" (see funcIdentity)
-// rather than a bare function name — a bare name collides across distinct
-// receiver types with the same method name (see
-// TestFindWorkflowStepIDMutatorsCatchesEvasiveShapes shape (c)). A new
-// function containing a matching statement that is not in this set means
-// either: (a) it is a genuine new step-mutation path — wire it to
-// recordStepTransition and add it here; or (b) it is a false positive (e.g.
-// a table-rebuild migration copying existing rows verbatim) — narrow the
-// detection below rather than registering it.
+// recordStepTransition, keyed by "packageRelDir/ReceiverType.FuncName" (see
+// funcIdentity) rather than a bare "ReceiverType.FuncName" — a bare
+// receiver-qualified name still collides across distinct PACKAGES declaring
+// the same receiver type (this codebase declares a type literally named
+// Repository in 11 different backend packages; see Review round 2 Finding A
+// / TestFindWorkflowStepIDMutatorsQualifiesByPackage), and a fully bare name
+// collides across distinct receiver types with the same method name in one
+// package (see TestFindWorkflowStepIDMutatorsCatchesEvasiveShapes shape
+// (c)). packageRelDir is this package's path relative to the scan root
+// (findBackendSourceRoot's apps/backend/internal boundary) — always
+// "task/repository/sqlite" for entries in this file, since every writer
+// registered here lives in this package. A new function containing a
+// matching statement that is not in this set means either: (a) it is a
+// genuine new step-mutation path — wire it to recordStepTransition and add
+// it here; or (b) it is a false positive (e.g. a table-rebuild migration
+// copying existing rows verbatim) — narrow the detection below rather than
+// registering it.
 var registeredStepMutators = []string{
-	"Repository.insertTaskTx",
-	"Repository.updateTaskTx",
-	"Repository.UpdateTaskIfWorkflowStepHasCapacity",
-	"Repository.PromoteQueuedTaskIfWorkflowStepHasCapacity",
-	"Repository.RestoreTaskMessageRollbackIfSessionState",
-	"Repository.AddTaskToWorkflow",
-	"Repository.RemoveTaskFromWorkflow",
+	"task/repository/sqlite/Repository.insertTaskTx",
+	"task/repository/sqlite/Repository.updateTaskTx",
+	"task/repository/sqlite/Repository.UpdateTaskIfWorkflowStepHasCapacity",
+	"task/repository/sqlite/Repository.PromoteQueuedTaskIfWorkflowStepHasCapacity",
+	"task/repository/sqlite/Repository.RestoreTaskMessageRollbackIfSessionState",
+	"task/repository/sqlite/Repository.AddTaskToWorkflow",
+	"task/repository/sqlite/Repository.RemoveTaskFromWorkflow",
 }
 
 func TestStepTransitionWritersArePinned(t *testing.T) {
@@ -177,7 +185,12 @@ func findWorkflowStepIDMutators(t *testing.T, dir string) (map[string]bool, erro
 
 	found := make(map[string]bool)
 	fset := token.NewFileSet()
-	for _, dirPaths := range byDir {
+	for groupDir, dirPaths := range byDir {
+		relDir, relErr := filepath.Rel(dir, groupDir)
+		if relErr != nil {
+			return nil, fmt.Errorf("resolve package directory %q relative to scan root %q: %w", groupDir, dir, relErr)
+		}
+
 		files := make([]*ast.File, 0, len(dirPaths))
 		for _, path := range dirPaths {
 			file, err := parser.ParseFile(fset, path, nil, 0)
@@ -197,7 +210,7 @@ func findWorkflowStepIDMutators(t *testing.T, dir string) (map[string]bool, erro
 					return true
 				}
 				if functionMutatesWorkflowStepID(fn.Body, constants, formatSetters) {
-					found[funcIdentity(fn)] = true
+					found[funcIdentity(fn, relDir)] = true
 				}
 				return true
 			})
@@ -392,15 +405,27 @@ func calleeName(fun ast.Expr) string {
 	}
 }
 
-// funcIdentity qualifies fn's name with its receiver type ("Repository.
-// updateTaskTx"), or returns the bare name for a receiver-less function, so
-// two distinct types' same-named methods are never collapsed into one key.
-func funcIdentity(fn *ast.FuncDecl) string {
-	recv := receiverTypeName(fn)
-	if recv == "" {
-		return fn.Name.Name
+// funcIdentity qualifies fn's name with its receiver type and its
+// containing package's directory relative to the scan root
+// ("task/repository/sqlite/Repository.updateTaskTx"), or "relDir/FuncName"
+// for a receiver-less function, so two distinct types' same-named methods
+// are never collapsed into one key (within a package) AND two distinct
+// packages declaring the same receiver type name are never collapsed into
+// one key (across packages — see Review round 2 Finding A: this codebase
+// declares a type literally named Repository in 11 different backend
+// packages, so "Repository.updateTaskTx" alone is not a safe key once the
+// scan spans more than one package). relDir is "." for a file directly in
+// the scanned root, which yields an unprefixed identity — used by the
+// evasive-shapes fixtures that live directly under testdata/pinfixtures.
+func funcIdentity(fn *ast.FuncDecl, relDir string) string {
+	name := fn.Name.Name
+	if recv := receiverTypeName(fn); recv != "" {
+		name = recv + "." + name
 	}
-	return recv + "." + fn.Name.Name
+	if relDir == "" || relDir == "." {
+		return name
+	}
+	return filepath.ToSlash(relDir) + "/" + name
 }
 
 func receiverTypeName(fn *ast.FuncDecl) string {
@@ -440,7 +465,7 @@ func TestFindWorkflowStepIDMutatorsCatchesEvasiveShapes(t *testing.T) {
 		"FixtureRepo.sprintfInterpolatedStepMutator", // (b) fmt.Sprintf column interpolation
 		"RepoA.updateTaskTx",                         // (c) receiver-qualified identity
 		"RepoB.updateTaskTx",                         // (c) distinct from RepoA's, not collapsed
-		"NestedRepo.deeplyNestedStepMutator",         // (d, partial) recursion into a subdirectory
+		"nested/NestedRepo.deeplyNestedStepMutator",  // (d, partial) recursion into a subdirectory — package-qualified since it's one level below the scan root
 	}
 	for _, name := range want {
 		if !found[name] {
@@ -492,8 +517,64 @@ func Noop() {}
 	if err != nil {
 		t.Fatalf("scan synthetic sibling-package tree: %v", err)
 	}
-	if !found["Repository.mutateStep"] {
-		t.Fatalf("expected a writer in a sibling package under %s to be found; found=%v", root, found)
+	if !found["pkgwithwriter/Repository.mutateStep"] {
+		t.Fatalf("expected a writer in a sibling package under %s to be found, package-qualified; found=%v", root, found)
+	}
+}
+
+// TestFindWorkflowStepIDMutatorsQualifiesByPackage is the permanent
+// regression proof for Review round 2 Finding A: funcIdentity used to key
+// solely on "ReceiverType.FuncName" with no package component, so two
+// different backend packages declaring the same receiver type name — this
+// codebase declares a type literally named Repository in 11 different
+// packages — and the same method name collided into a single identity. A
+// genuine writer in one package could then silently "borrow" another
+// package's already-registered status: TestStepTransitionWritersArePinned
+// would stay green even though the second writer was never wired to
+// recordStepTransition. This builds a synthetic two-package tree where both
+// packages declare `type Repository struct{}` with an identical method name,
+// each mutating tasks.workflow_step_id via its own distinct SQL text, and
+// asserts the detector reports two distinct package-qualified identities,
+// not one collapsed entry.
+func TestFindWorkflowStepIDMutatorsQualifiesByPackage(t *testing.T) {
+	root := t.TempDir()
+	pkgA := filepath.Join(root, "pkga")
+	pkgB := filepath.Join(root, "pkgb")
+	if err := os.MkdirAll(pkgA, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", pkgA, err)
+	}
+	if err := os.MkdirAll(pkgB, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", pkgB, err)
+	}
+	writePinTestFixtureFile(t, filepath.Join(pkgA, "repo.go"), `package pkga
+
+type Repository struct{}
+
+func (r *Repository) updateTaskTx() string {
+	return "UPDATE tasks SET workflow_step_id = ?, updated_at = ? WHERE id = ?"
+}
+`)
+	writePinTestFixtureFile(t, filepath.Join(pkgB, "repo.go"), `package pkgb
+
+type Repository struct{}
+
+func (r *Repository) updateTaskTx() string {
+	return "UPDATE tasks SET workflow_step_id = ? WHERE id = ?"
+}
+`)
+
+	found, err := findWorkflowStepIDMutators(t, root)
+	if err != nil {
+		t.Fatalf("scan synthetic colliding-identity tree: %v", err)
+	}
+	if len(found) != 2 {
+		t.Fatalf("expected 2 distinct package-qualified identities from two colliding Repository.updateTaskTx pairs, got %d: %v", len(found), found)
+	}
+	if !found["pkga/Repository.updateTaskTx"] {
+		t.Errorf("expected pkga's writer to be found under its own package-qualified identity; found=%v", found)
+	}
+	if !found["pkgb/Repository.updateTaskTx"] {
+		t.Errorf("expected pkgb's writer to be found under its own package-qualified identity; found=%v", found)
 	}
 }
 
