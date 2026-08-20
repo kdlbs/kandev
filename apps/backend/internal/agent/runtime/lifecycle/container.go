@@ -53,6 +53,8 @@ type ContainerConfig struct {
 	ProfileInfo                    *AgentProfileInfo
 	InstanceID                     string
 	GitMetadataProjections         []*worktree.GitMetadataProjection
+	RequiresCloneGitMetadataPolicy bool
+	WorkspaceSourceRoots           []string // Canonical roots as visible inside the container.
 	McpServers                     []McpServerConfig
 	McpMode                        string
 	McpProviders                   []string
@@ -91,12 +93,17 @@ func buildContainerCreateInstanceRequest(
 	disableAskQuestion, assumeMcpSse, assumeMcpHttp, requiresProcessKill bool,
 	stripEnv []string,
 ) *agentctl.CreateInstanceRequest {
+	workspaceSourceRoots := config.WorkspaceSourceRoots
+	if len(workspaceSourceRoots) == 0 {
+		workspaceSourceRoots = []string{dockerWorkspacePath}
+	}
 	return &agentctl.CreateInstanceRequest{
-		ID:            config.InstanceID,
-		WorkspacePath: "/workspace",
-		AgentCommand:  "",
-		AgentType:     agentType,
-		Env:           config.Credentials,
+		ID:                   config.InstanceID,
+		WorkspacePath:        "/workspace",
+		WorkspaceSourceRoots: append([]string(nil), workspaceSourceRoots...),
+		AgentCommand:         "",
+		AgentType:            agentType,
+		Env:                  config.Credentials,
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			config.AutoApprovePermissions,
 			config.AutoApprovePermissionsOverride,
@@ -495,6 +502,9 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	if config.PrepareScript != "" {
 		env = append(env, "KANDEV_PREPARE_SCRIPT="+config.PrepareScript)
 	}
+	if config.RequiresCloneGitMetadataPolicy {
+		env = append(env, "KANDEV_REQUIRE_GIT_METADATA_ATTESTATION=1")
+	}
 
 	// We always launch agentctl as the container's main process and fan out the
 	// agent subprocess from there via the agentctl HTTP API. This frees user-built
@@ -524,6 +534,9 @@ if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then
 	  timeout -s TERM -k 1s ` + prepareTimeout + ` sh -c 'eval "$KANDEV_PREPARE_SCRIPT"'
   prep_rc=$?
   if [ "$prep_rc" -ne 0 ]; then
+    if [ "${KANDEV_REQUIRE_GIT_METADATA_ATTESTATION:-}" = "1" ]; then
+      exit "$prep_rc"
+    fi
     echo "[kandev-bootstrap] prepare script failed (exit $prep_rc); starting agentctl anyway so the host can connect and the user can debug via Executor Settings" >&2
   fi
 fi

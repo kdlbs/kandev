@@ -24,9 +24,10 @@ type MaterializeRepositoryRequest struct {
 
 // MaterializeRepositoryResponse reports the adopted workspace subdirectory.
 type MaterializeRepositoryResponse struct {
-	Destination string `json:"destination"`
-	Reused      bool   `json:"reused,omitempty"`
-	Error       string `json:"error,omitempty"`
+	Destination         string `json:"destination"`
+	Reused              bool   `json:"reused,omitempty"`
+	GitMetadataAttested bool   `json:"git_metadata_attested,omitempty"`
+	Error               string `json:"error,omitempty"`
 }
 
 // RemoveMaterializedRepositoryRequest identifies an owned checkout for

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/coder/acp-go-sdk"
@@ -18,12 +20,35 @@ import (
 
 const kandevMCPServerName = "kandev"
 
+func additionalDirectoriesForSession(cwd string, roots []string) []string {
+	directories := make([]string, 0, len(roots))
+	seen := make(map[string]struct{}, len(roots))
+	for _, root := range roots {
+		if root == "" || !filepath.IsAbs(root) || root == cwd {
+			continue
+		}
+		if _, exists := seen[root]; exists {
+			continue
+		}
+		seen[root] = struct{}{}
+		directories = append(directories, root)
+	}
+	return slices.Clip(directories)
+}
+
 // PublishesMCPAttachmentResults reports that this adapter emits attachment
 // results for the servers that survive its own capability filtering.
 func (a *Adapter) PublishesMCPAttachmentResults() bool { return true }
 
 // NewSession creates a new agent session.
 func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
+	return a.NewSessionWithAdditionalDirectories(ctx, mcpServers, nil)
+}
+
+// NewSessionWithAdditionalDirectories opens a session with the server-owned
+// source roots only when the connected provider explicitly advertised ACP
+// additionalDirectories support during initialize.
+func (a *Adapter) NewSessionWithAdditionalDirectories(ctx context.Context, mcpServers []types.McpServer, roots []string) (string, error) {
 	a.mu.Lock()
 	conn := a.acpConn
 	a.mu.Unlock()
@@ -33,18 +58,7 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	}
 	priorPromptTurn := a.currentPromptTurn()
 
-	// A fresh session invalidates any pending wakeup keyed to the prior
-	// session. Reset pendingWakeups and cancel the scheduler under one
-	// a.mu critical section so a concurrent handleWakeupEvent can't slip
-	// a stale entry between the two operations.
-	a.mu.Lock()
-	a.pendingWakeups = make(map[string]*pendingWakeup)
-	a.clearCodexSubagentCorrelationsLocked("")
-	a.clearPromptHandoffToolTrackingLocked()
-	clear(a.usageBySession)
-	a.wakeup.cancel()
-	a.mu.Unlock()
-	a.cancelAllAsyncTurnCompletes()
+	a.resetNewSessionState()
 
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.new")
 	defer span.End()
@@ -58,9 +72,14 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 		}
 		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
 	}
+	additionalDirectories := []string(nil)
+	if a.capabilities.SessionCapabilities.AdditionalDirectories != nil {
+		additionalDirectories = additionalDirectoriesForSession(a.cfg.WorkDir, roots)
+	}
 	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
-		Cwd:        a.cfg.WorkDir,
-		McpServers: toACPMcpServers(filteredServers),
+		Cwd:                   a.cfg.WorkDir,
+		McpServers:            toACPMcpServers(filteredServers),
+		AdditionalDirectories: additionalDirectories,
 	})
 	if err != nil {
 		for _, server := range filteredServers {
@@ -83,35 +102,10 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	}
 
 	sessionID := string(resp.SessionId)
-	if !a.syncNotifQueueThen(func() {
-		a.mu.Lock()
-		a.retainConsumedUsageBaselineLocked(sessionID)
-		a.mu.Unlock()
-	}) {
-		a.clearUsageTrackers()
-		barrierErr := context.Cause(a.lifetimeCtx)
-		if barrierErr == nil {
-			barrierErr = context.Canceled
-		}
-		return "", fmt.Errorf("failed to synchronize new session notifications: %w", barrierErr)
+	initialModels, err := a.adoptNewSession(resp, sessionID, priorPromptTurn)
+	if err != nil {
+		return "", err
 	}
-
-	a.mu.Lock()
-	a.sessionID = sessionID
-	a.configGeneration++
-	clear(a.contextSamples)
-	// Reset session-scoped model caches before computing the new session's
-	// state so a session without a model surface can't reuse the previous
-	// session's models / configOptions for validation in SetModel.
-	a.availableModels = nil
-	a.availableConfigOptions = nil
-	initialModels := initialSessionModelState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
-	if initialModels != nil {
-		a.availableModels = initialModels.AvailableModels
-	}
-	a.mu.Unlock()
-	a.invalidatePromptTurnOwnership(priorPromptTurn)
-	a.attachMgr.SetSessionID(sessionID)
 
 	span.SetAttributes(attribute.String("session_id", sessionID))
 	a.logger.Info("created new session", zap.String("session_id", sessionID))
@@ -139,6 +133,49 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	})
 
 	return sessionID, nil
+}
+
+// resetNewSessionState prevents a stale wakeup or usage record from crossing
+// the new-session boundary.
+func (a *Adapter) resetNewSessionState() {
+	a.mu.Lock()
+	a.pendingWakeups = make(map[string]*pendingWakeup)
+	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearPromptHandoffToolTrackingLocked()
+	clear(a.usageBySession)
+	a.wakeup.cancel()
+	a.mu.Unlock()
+	a.cancelAllAsyncTurnCompletes()
+}
+
+func (a *Adapter) adoptNewSession(resp acp.NewSessionResponse, sessionID string, priorPromptTurn *promptTurnState) (*sessionModelState, error) {
+	if !a.syncNotifQueueThen(func() {
+		a.mu.Lock()
+		a.retainConsumedUsageBaselineLocked(sessionID)
+		a.mu.Unlock()
+	}) {
+		a.clearUsageTrackers()
+		barrierErr := context.Cause(a.lifetimeCtx)
+		if barrierErr == nil {
+			barrierErr = context.Canceled
+		}
+		return nil, fmt.Errorf("failed to synchronize new session notifications: %w", barrierErr)
+	}
+
+	a.mu.Lock()
+	a.sessionID = sessionID
+	a.configGeneration++
+	clear(a.contextSamples)
+	a.availableModels = nil
+	a.availableConfigOptions = nil
+	initialModels := initialSessionModelState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
+	if initialModels != nil {
+		a.availableModels = initialModels.AvailableModels
+	}
+	a.mu.Unlock()
+	a.invalidatePromptTurnOwnership(priorPromptTurn)
+	a.attachMgr.SetSessionID(sessionID)
+	return initialModels, nil
 }
 
 // initialSessionModelState resolves the initial model state for a session.

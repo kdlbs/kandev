@@ -249,7 +249,7 @@ func (r *SpritesExecutor) preflightGitHubCredentialBroker(
 }
 
 func (r *SpritesExecutor) installRemoteGitMetadataPolicy(ctx context.Context, sprite *sprites.Sprite, req *ExecutorCreateRequest) error {
-	if len(req.GitMetadataProjections) == 0 {
+	if len(req.GitMetadataProjections) == 0 && !req.RequiresCloneGitMetadataPolicy {
 		return nil
 	}
 	output, err := sprite.CommandContext(ctx, "sh", "-c", remoteRegularGitMetadataProbeScript(spritesWorkspacePath)).Output()
@@ -520,7 +520,7 @@ func (r *SpritesExecutor) stepEnsureAgentInstance(
 }
 
 func shouldReplaceSpriteAgentInstance(req *ExecutorCreateRequest) bool {
-	return req != nil && (hasManagedGitHubBrokerEnv(req.Env) || len(req.GitMetadataProjections) > 0)
+	return req != nil && (hasManagedGitHubBrokerEnv(req.Env) || len(req.GitMetadataProjections) > 0 || req.RequiresCloneGitMetadataPolicy)
 }
 
 // stepApplyNetworkPolicy handles step 6: apply network policy from the executor profile.
@@ -560,7 +560,8 @@ func (r *SpritesExecutor) buildInstanceResult(
 		Client: agentctl.NewClient("127.0.0.1", localPort, r.logger,
 			agentctl.WithExecutionID(req.InstanceID),
 			agentctl.WithSessionID(req.SessionID)),
-		WorkspacePath: spritesWorkspacePath,
+		WorkspacePath:        spritesWorkspacePath,
+		WorkspaceSourceRoots: []string{spritesWorkspacePath},
 		Metadata: map[string]interface{}{
 			MetadataKeySpriteName:      spriteName,
 			MetadataKeySpriteState:     strings.TrimSpace(sprite.Status),

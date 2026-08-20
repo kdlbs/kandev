@@ -92,3 +92,12 @@ func TestToAgentExecutionCapturesDefensiveRuntimeEnvironment(t *testing.T) {
 	got["PATH"] = "/mutated"
 	require.Equal(t, "/tmp/kandev-shim:/usr/bin", execution.RuntimeEnvironment()["PATH"])
 }
+
+func TestToAgentExecutionUsesExecutorVisibleSourceRoots(t *testing.T) {
+	execution := (&ExecutorInstance{
+		InstanceID:           "execution",
+		WorkspaceSourceRoots: []string{"/workspace", "/workspace/frontend-main"},
+	}).ToAgentExecution(&ExecutorCreateRequest{WorkspaceSourceRoots: []string{"/host/private/source"}})
+	require.Equal(t, []string{"/workspace", "/workspace/frontend-main"}, execution.WorkspaceSourceRoots)
+	require.NotContains(t, execution.WorkspaceSourceRoots, "/host/private/source")
+}

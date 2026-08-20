@@ -61,19 +61,24 @@ func remoteFilesystemPolicyDescriptor(req *ExecutorCreateRequest) (*agents.Files
 // profile into the environment forwarded to a remote agentctl instance. The
 // remote resolver proves GitDir is the task checkout's non-symlink .git
 // directory before this function is called.
-func prepareRemoteRegularGitMetadataPolicy(req *ExecutorCreateRequest, metadata remoteRegularGitMetadata) error {
+func prepareRemoteRegularGitMetadataPolicy(req *ExecutorCreateRequest, metadata ...remoteRegularGitMetadata) error {
 	descriptor, err := remoteFilesystemPolicyDescriptor(req)
 	if err != nil {
 		return err
 	}
-	if !validRemoteRegularGitMetadata(metadata) {
+	if len(metadata) == 0 {
 		return errors.New("remote git metadata is invalid")
+	}
+	for _, item := range metadata {
+		if !validRemoteRegularGitMetadata(item) {
+			return errors.New("remote git metadata is invalid")
+		}
 	}
 	config, err := codexConfigFromEnvironment(req.Env, descriptor.ConfigEnvKey)
 	if err != nil {
 		return err
 	}
-	policy, err := descriptor.Renderer.Render(remoteRegularGitMetadataFilesystemPolicy(metadata))
+	policy, err := descriptor.Renderer.Render(remoteRegularGitMetadataFilesystemPolicy(metadata...))
 	if err != nil {
 		return err
 	}
@@ -100,18 +105,28 @@ func jsonMarshalFilesystemPolicy(config map[string]any) (string, error) {
 	return string(encoded), nil
 }
 
-func remoteRegularGitMetadataFilesystemPolicy(metadata remoteRegularGitMetadata) agents.FilesystemPolicy {
-	// A regular clone has one task-owned .git directory. Git writes index.lock
-	// and, for detached HEADs, HEAD.lock directly in that directory, so granting
-	// only descendants is insufficient. Unlike a linked worktree, this is not a
-	// shared common directory: it belongs solely to the remote task checkout.
-	return agents.FilesystemPolicy{
-		Name: codexGitMetadataPolicyName,
-		Rules: []agents.FilesystemPolicyRule{
-			{Path: ":minimal", Access: agents.FilesystemAccessRead},
-			{Path: metadata.GitDir, Access: agents.FilesystemAccessWrite},
-		},
+func remoteRegularGitMetadataFilesystemPolicy(metadata ...remoteRegularGitMetadata) agents.FilesystemPolicy {
+	// A regular clone owns its .git directory. Git writes index.lock and, for
+	// detached HEADs, HEAD.lock directly there, so granting only descendants is
+	// insufficient. Each entry is independently attested and task-owned.
+	rules := []agents.FilesystemPolicyRule{{Path: ":minimal", Access: agents.FilesystemAccessRead}}
+	seen := map[string]struct{}{":minimal": {}}
+	for _, item := range metadata {
+		if _, exists := seen[item.GitDir]; exists {
+			continue
+		}
+		seen[item.GitDir] = struct{}{}
+		rules = append(rules, agents.FilesystemPolicyRule{Path: item.GitDir, Access: agents.FilesystemAccessWrite})
 	}
+	return agents.FilesystemPolicy{Name: codexGitMetadataPolicyName, Rules: rules}
+}
+
+func remoteGitMetadataRuntimeEnv(req *ExecutorCreateRequest) (map[string]string, error) {
+	descriptor, err := remoteFilesystemPolicyDescriptor(req)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{descriptor.ConfigEnvKey: req.Env[descriptor.ConfigEnvKey]}, nil
 }
 
 func validRemoteRegularGitMetadata(metadata remoteRegularGitMetadata) bool {

@@ -389,6 +389,10 @@ type ExecutorCreateRequest struct {
 	PromptTurnID         string
 	WorkspacePath        string
 	WorkspaceSourceRoots []string
+	// RequiresCloneGitMetadataPolicy marks a mutable repository checkout that
+	// is created inside the executor. It deliberately carries no host paths:
+	// the clone executor must attest its canonical checkout before agent start.
+	RequiresCloneGitMetadataPolicy bool
 	// GitMetadataProjections are fresh, task-owned grants compiled by the
 	// executor; they replace legacy source-repository gitdir metadata.
 	GitMetadataProjections []*worktree.GitMetadataProjection
@@ -443,10 +447,11 @@ type ExecutorInstance struct {
 	StandalonePort       int    // Standalone
 
 	// Common fields
-	WorkspacePath   string
-	Metadata        map[string]interface{}
-	StopReason      string
-	AgentStopFailed bool
+	WorkspacePath        string
+	WorkspaceSourceRoots []string // Canonical executor-visible roots for agentctl workspace operations.
+	Metadata             map[string]interface{}
+	StopReason           string
+	AgentStopFailed      bool
 
 	// AuthToken is the agentctl auth token retrieved via handshake.
 	// Populated by Docker executor for encrypted storage in SecretStore.
@@ -475,6 +480,10 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	if workspacePath == "" {
 		workspacePath = req.WorkspacePath
 	}
+	workspaceSourceRoots := req.WorkspaceSourceRoots
+	if len(ri.WorkspaceSourceRoots) > 0 {
+		workspaceSourceRoots = ri.WorkspaceSourceRoots
+	}
 
 	var historyEnabled bool
 	var agentID string
@@ -498,7 +507,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		ContainerID:            ri.ContainerID,
 		ContainerIP:            ri.ContainerIP,
 		WorkspacePath:          workspacePath,
-		WorkspaceSourceRoots:   append([]string(nil), req.WorkspaceSourceRoots...),
+		WorkspaceSourceRoots:   append([]string(nil), workspaceSourceRoots...),
 		GitMetadataProjections: append([]*worktree.GitMetadataProjection(nil), req.GitMetadataProjections...),
 		RuntimeName:            ri.RuntimeName,
 		Status:                 v1.AgentStatusRunning,

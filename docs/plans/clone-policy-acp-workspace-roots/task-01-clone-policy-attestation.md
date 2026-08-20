@@ -1,7 +1,7 @@
 ---
 id: "01-clone-policy-attestation"
 title: "Clone policy attestation"
-status: pending
+status: complete
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -54,4 +54,4 @@ Summary, files changed, red/green test receipts, exact policy/error boundary, cl
 
 ## Results
 
-Pending.
+Implemented path-free clone-policy intent and executor-side attestation for Docker, SSH, and Sprites. Remote source roots and Git policy rules are generated from canonical executor paths; Docker, SSH, and Sprites reuse is bypassed when fresh clone-policy attestation is required. Multi-repository materialization now requires a server-side regular-checkout attestation before it receives a writable Git metadata rule. Focused/package Go tests, race verification, and backend lint pass; Docker/SSH E2E remains environment-gated in task 03.

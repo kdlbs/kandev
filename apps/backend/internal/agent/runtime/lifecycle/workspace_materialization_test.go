@@ -7,20 +7,23 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 )
 
 type workspaceMaterializerClientStub struct {
-	requests        []agentctl.MaterializeRepositoryRequest
-	removals        []agentctl.RemoveMaterializedRepositoryRequest
-	removalContexts []context.Context
-	rescans         []string
-	reconciles      int
-	failAt          int
-	rescanErr       error
-	reconcileErr    error
+	requests                   []agentctl.MaterializeRepositoryRequest
+	removals                   []agentctl.RemoveMaterializedRepositoryRequest
+	removalContexts            []context.Context
+	rescans                    []string
+	rescanRoots                [][]string
+	reconciles                 int
+	failAt                     int
+	rescanErr                  error
+	reconcileErr               error
+	omitGitMetadataAttestation bool
 }
 
 func (s *workspaceMaterializerClientStub) MaterializeRepository(_ context.Context, request agentctl.MaterializeRepositoryRequest) (*agentctl.MaterializeRepositoryResponse, error) {
@@ -28,7 +31,7 @@ func (s *workspaceMaterializerClientStub) MaterializeRepository(_ context.Contex
 	if s.failAt > 0 && len(s.requests) == s.failAt {
 		return nil, context.Canceled
 	}
-	return &agentctl.MaterializeRepositoryResponse{Destination: request.Destination, Reused: request.Destination == "reused"}, nil
+	return &agentctl.MaterializeRepositoryResponse{Destination: request.Destination, Reused: request.Destination == "reused", GitMetadataAttested: !s.omitGitMetadataAttestation}, nil
 }
 
 func (s *workspaceMaterializerClientStub) RemoveMaterializedRepository(ctx context.Context, request agentctl.RemoveMaterializedRepositoryRequest) error {
@@ -37,8 +40,11 @@ func (s *workspaceMaterializerClientStub) RemoveMaterializedRepository(ctx conte
 	return nil
 }
 
-func (s *workspaceMaterializerClientStub) RescanWorkspace(_ context.Context, workdir string, _ ...[]string) error {
+func (s *workspaceMaterializerClientStub) RescanWorkspace(_ context.Context, workdir string, sourceRoots ...[]string) error {
 	s.rescans = append(s.rescans, workdir)
+	if len(sourceRoots) > 0 {
+		s.rescanRoots = append(s.rescanRoots, append([]string(nil), sourceRoots[0]...))
+	}
 	return s.rescanErr
 }
 
@@ -91,6 +97,17 @@ func TestRemoteWorkspaceProjectionFromLaunch_KeepsAdditionalBranchOfPrimaryRepos
 	}
 }
 
+func TestRemoteWorkspaceSourceRootsUseCanonicalExecutorPaths(t *testing.T) {
+	got := remoteWorkspaceSourceRoots("/workspace", []WorkspaceRepositoryMaterialization{
+		{Destination: "frontend-main"},
+		{Destination: "api-feature-next"},
+	})
+	want := []string{"/workspace", "/workspace/frontend-main", "/workspace/api-feature-next"}
+	if !equalStrings(got, want) {
+		t.Fatalf("roots = %v, want %v", got, want)
+	}
+}
+
 func TestMaterializeWorkspaceRepositories_ReconcilesAllBeforeRescan(t *testing.T) {
 	client := &workspaceMaterializerClientStub{}
 	err := materializeWorkspaceRepositories(context.Background(), client, []WorkspaceRepositoryMaterialization{
@@ -102,6 +119,29 @@ func TestMaterializeWorkspaceRepositories_ReconcilesAllBeforeRescan(t *testing.T
 	}
 	if len(client.requests) != 2 || len(client.rescans) != 1 || client.rescans[0] != "" {
 		t.Fatalf("requests=%+v rescans=%+v; want two requests followed by one rescan", client.requests, client.rescans)
+	}
+}
+
+func TestMaterializeWorkspaceRepositoriesForwardsCanonicalSourceRoots(t *testing.T) {
+	client := &workspaceMaterializerClientStub{}
+	roots := []string{"/workspace", "/workspace/frontend-main"}
+	if err := materializeWorkspaceRepositories(context.Background(), client, []WorkspaceRepositoryMaterialization{{
+		RepositoryURL: "https://github.com/acme/frontend.git", Destination: "frontend-main", BaseBranch: "main",
+	}}, roots); err != nil {
+		t.Fatalf("materializeWorkspaceRepositories: %v", err)
+	}
+	if len(client.rescanRoots) != 1 || !equalStrings(client.rescanRoots[0], roots) {
+		t.Fatalf("rescan roots = %v, want %v", client.rescanRoots, roots)
+	}
+}
+
+func TestMaterializeWorkspaceRepositoriesRejectsMissingGitMetadataAttestation(t *testing.T) {
+	client := &workspaceMaterializerClientStub{omitGitMetadataAttestation: true}
+	err := materializeWorkspaceRepositories(context.Background(), client, []WorkspaceRepositoryMaterialization{{
+		RepositoryURL: "https://github.com/acme/frontend.git", Destination: "frontend-main", BaseBranch: "main",
+	}})
+	if err == nil || !strings.Contains(err.Error(), "attestation missing") {
+		t.Fatalf("materializeWorkspaceRepositories() error = %v, want missing attestation", err)
 	}
 }
 
@@ -139,7 +179,7 @@ func TestMaterializeRepositoriesForEnvironment_RescansEveryDistinctClient(t *tes
 		switch r.URL.Path {
 		case "/api/v1/workspace/materialize-repository":
 			materializations++
-			_, _ = w.Write([]byte(`{"destination":"added-main"}`))
+			_, _ = w.Write([]byte(`{"destination":"added-main","git_metadata_attested":true}`))
 		case "/api/v1/workspace/rescan":
 			rescans++
 			w.WriteHeader(http.StatusOK)
@@ -184,7 +224,7 @@ func TestMaterializeRepositoriesForEnvironment_DeduplicatesSharedAgentctlClient(
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/workspace/materialize-repository":
-			_, _ = w.Write([]byte(`{"destination":"added-main"}`))
+			_, _ = w.Write([]byte(`{"destination":"added-main","git_metadata_attested":true}`))
 		case "/api/v1/workspace/rescan":
 			rescans++
 			w.WriteHeader(http.StatusOK)
@@ -225,7 +265,7 @@ func TestMaterializeRepositoriesForEnvironment_RemovesCheckoutsBeforeReconciling
 		switch r.URL.Path {
 		case "/api/v1/workspace/materialize-repository":
 			events = append(events, "materialize")
-			_, _ = w.Write([]byte(`{"destination":"added-main"}`))
+			_, _ = w.Write([]byte(`{"destination":"added-main","git_metadata_attested":true}`))
 		case "/api/v1/workspace/rescan":
 			events = append(events, "rescan-first")
 			w.WriteHeader(http.StatusOK)

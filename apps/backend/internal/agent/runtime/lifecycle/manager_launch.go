@@ -751,7 +751,6 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 			Headers: srv.Headers,
 		})
 	}
-
 	metadata := buildLaunchMetadata(reqWithWorktree, mainRepoGitDir, worktreeID, worktreeBranch)
 	remoteContributions, err := collectRemoteContributions(reqWithWorktree)
 	if err != nil {
@@ -783,6 +782,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		PromptTurnID:                   reqWithWorktree.TurnID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
 		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
+		RequiresCloneGitMetadataPolicy: rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) > 0,
 		GitMetadataProjections:         gitMetadata,
 		Protocol:                       string(agentConfig.Runtime().Protocol),
 		Env:                            env,
@@ -1401,7 +1401,27 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	if rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) > 1 && execInstance != nil && execInstance.Client != nil {
 		projection, projectionErr := remoteWorkspaceProjectionFromLaunch(&reqWithWorktree)
 		if projectionErr == nil {
-			projectionErr = materializeWorkspaceRepositories(ctx, execInstance.Client, projection)
+			roots := remoteWorkspaceSourceRoots(execInstance.WorkspacePath, projection)
+			projectionErr = materializeWorkspaceRepositories(ctx, execInstance.Client, projection, roots)
+			if projectionErr == nil {
+				execInstance.WorkspaceSourceRoots = roots
+				metadata := make([]remoteRegularGitMetadata, 0, len(projection)+1)
+				for _, root := range roots {
+					metadata = append(metadata, remoteRegularGitMetadata{CheckoutPath: root, GitDir: root + "/.git"})
+				}
+				projectionErr = prepareRemoteRegularGitMetadataPolicy(execReq, metadata...)
+				if projectionErr == nil {
+					policyEnv, envErr := remoteGitMetadataRuntimeEnv(execReq)
+					if envErr != nil {
+						projectionErr = envErr
+					} else {
+						if execInstance.Metadata == nil {
+							execInstance.Metadata = make(map[string]interface{})
+						}
+						execInstance.Metadata["runtime_env"] = policyEnv
+					}
+				}
+			}
 		}
 		if projectionErr != nil {
 			_ = rt.StopInstance(context.WithoutCancel(ctx), execInstance, false)
