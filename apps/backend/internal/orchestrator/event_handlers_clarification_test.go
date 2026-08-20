@@ -930,6 +930,11 @@ func TestPauseForClarificationInput_ContinuesHardPauseAfterDetachFailure(t *test
 	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
 	svc.SetClarificationCanceller(&failingDetachClarificationCanceller{err: wantErr})
 	svc.turnService = &repoBackedTurnService{repo: repo}
+	if _, err := svc.messageQueue.QueueMessageWithMetadata(
+		ctx, "s1", "t1", "peer-during-detach-failure", "user-1", "user-1", false, nil, map[string]interface{}{},
+	); err != nil {
+		t.Fatalf("queue peer: %v", err)
+	}
 
 	detached, err := svc.PauseForClarificationInput(ctx, "s1")
 	if detached != 0 || !errors.Is(err, wantErr) {
@@ -944,6 +949,9 @@ func TestPauseForClarificationInput_ContinuesHardPauseAfterDetachFailure(t *test
 	}
 	if session.State != models.TaskSessionStateWaitingForInput {
 		t.Fatalf("expected session waiting for input after detach failure, got %q", session.State)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 1 {
+		t.Fatalf("detach failure drained queued peer message: count=%d, want 1", got)
 	}
 }
 

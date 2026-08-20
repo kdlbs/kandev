@@ -1974,7 +1974,11 @@ func buildHTTPServer(
 	// env var to the proxy's IPs/CIDRs; a directly-reachable backend with the
 	// var set can have X-Forwarded-For spoofed, which also defeats the
 	// ClientIP-keyed login rate limiter.
-	configureTrustedProxies(router, log)
+	// X-Forwarded-Host feeds the port-scoped cookie-name resolver; honor it
+	// only from the same trusted proxies that may rewrite it (an untrusted
+	// value is stripped with a warning, so the resolver falls back to Host).
+	trusted := configureTrustedProxies(router, log)
+	router.Use(authhttpmw.StripUntrustedForwardedHost(trusted, log))
 	router.Use(httpmw.RequestLogger(log, kandevName))
 	router.Use(httpmw.OtelTracing(kandevName))
 	router.Use(gin.Recovery())

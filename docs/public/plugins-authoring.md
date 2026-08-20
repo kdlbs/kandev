@@ -931,9 +931,13 @@ ACS in a `webhook`, validate the token yourself, then set the reserved
 `X-Kandev-Auth-Login` response header to a JSON object
 `{"provider","subject","email","display_name"}`. Kandev maps it to a user
 (link-by-email or just-in-time member provisioning), mints the session, and sets
-the `kandev_session` cookie itself; your plugin never handles the raw token,
-and any `Set-Cookie` you return is dropped. Requires authentication enabled;
-emitting the header without `capabilities.auth` returns 403.
+the session cookie itself (the host derives the name from the request host:
+`kandev_session` on default ports, `kandev_session_<port>` otherwise, unless
+`auth.cookieName` is explicitly configured, in which case that name is used
+verbatim and must be unique per cookie host); your
+plugin never handles the raw token, and any `Set-Cookie` you return is
+dropped. Requires authentication enabled; emitting the header without
+`capabilities.auth` returns 403.
 
 **You MUST only assert an `email` the IdP has verified as owned by `subject`.**
 Kandev auto-links that email to (or provisions) an account, so an unverified or

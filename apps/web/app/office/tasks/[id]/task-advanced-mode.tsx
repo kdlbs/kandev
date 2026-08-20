@@ -33,7 +33,7 @@ export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps
         <span className="text-xs font-mono text-muted-foreground">{task.identifier}</span>
         <span className="text-sm font-medium truncate">{task.title}</span>
         <span className="flex-1" />
-        <ExecutionIndicator status={task.status} />
+        <ExecutionIndicator status={task.rawStatus ?? task.status} />
         <div className="flex items-center gap-2">
           <Label htmlFor="advanced-toggle" className="text-xs text-muted-foreground cursor-pointer">
             {t("office:advanced")}

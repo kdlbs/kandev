@@ -167,7 +167,8 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		deferredLaunch = map[string]interface{}{
 			"intent": "start", "agent_profile_id": req.AgentProfileID, "executor_id": req.ExecutorID,
 			"executor_profile_id": req.ExecutorProfileID, "prompt": description,
-			"plan_mode": req.PlanMode, "attachments": req.Attachments,
+			"plan_mode":   req.PlanMode,
+			"attachments": req.Attachments,
 		}
 	}
 
@@ -184,7 +185,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Position:       req.Position,
 		Metadata:       req.Metadata,
 		DeferredLaunch: deferredLaunch,
-		PlanMode:       req.PlanMode && !req.StartAgent,
+		PlanMode:       req.PlanMode,
 		ParentID:       req.ParentID,
 	})
 	if err != nil {

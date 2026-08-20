@@ -942,7 +942,8 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		deferredLaunch = map[string]interface{}{
 			"intent": intent, "agent_profile_id": body.AgentProfileID, "executor_id": body.ExecutorID,
 			"executor_profile_id": body.ExecutorProfileID, "prompt": description,
-			"plan_mode": body.PlanMode, "attachments": body.Attachments,
+			"plan_mode":   body.PlanMode,
+			"attachments": body.Attachments,
 		}
 	}
 
@@ -960,7 +961,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Position:           body.Position,
 		Metadata:           metadata,
 		DeferredLaunch:     deferredLaunch,
-		PlanMode:           body.PlanMode && !body.StartAgent,
+		PlanMode:           body.PlanMode,
 		ParentID:           body.ParentID,
 		WorkspacePath:      body.WorkspacePath,
 		BlockedBy:          body.BlockedBy,

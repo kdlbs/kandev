@@ -69,7 +69,7 @@ function mapDecisionDTO(d: TaskDecisionDTO): TaskDecision {
   };
 }
 
-function mapOfficeTaskToTask(
+export function mapOfficeTaskToTask(
   raw: OfficeTask,
   supplement?: {
     repositories?: Task["repositories"];
@@ -93,6 +93,7 @@ function mapOfficeTaskToTask(
     title: raw.title,
     description: raw.description,
     status: raw.status as Task["status"],
+    rawStatus: raw.rawStatus ?? raw.status,
     priority: (raw.priority || "medium") as Task["priority"],
     labels: (raw.labels ?? []).map((l) =>
       typeof l === "string" ? { name: l, color: "#6b7280" } : l,

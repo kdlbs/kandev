@@ -3,8 +3,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -500,8 +498,9 @@ func prepareServiceSkillPackageMetadata(skill *models.Skill) {
 	if skill.ApprovalState == "" {
 		skill.ApprovalState = "approved"
 	}
-	sum := sha256.Sum256([]byte(skill.Content + "\x00" + skill.FileInventory + "\x00" + skill.SourceLocator))
-	skill.ContentHash = hex.EncodeToString(sum[:])
+	skill.ContentHash = models.SkillPackageContentHash(
+		skill.Content, skill.FileInventory, skill.SourceLocator,
+	)
 }
 
 // DeleteSkill deletes a skill from the DB.

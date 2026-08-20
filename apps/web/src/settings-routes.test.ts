@@ -23,6 +23,7 @@ import { SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS } from "@/lib/settings-discovery/ca
 import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 import { DEFAULT_SETTINGS_PATH } from "@/lib/settings/last-settings-page";
+import { scopedCookieName } from "@/lib/routing/route-bootstrap";
 import {
   buildSettingsInitialStateForRoute,
   renderSettingsRoute,
@@ -40,6 +41,7 @@ const TASK_BEHAVIOR_PATH = "/settings/preferences/task-behavior";
 describe("buildSettingsInitialStateForRoute", () => {
   beforeEach(() => {
     document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=; path=/; max-age=0`;
+    document.cookie = `${scopedCookieName(ACTIVE_WORKSPACE_COOKIE)}=; path=/; max-age=0`;
   });
 
   describe("workspace selection", () => {

@@ -2480,6 +2480,7 @@ const (
 	queueDrainSkipped queueDrainOutcome = iota
 	queueDrainDispatched
 	queueDrainPaused
+	queueDrainTaskAdmissionReadFailed
 )
 
 func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, sessionID string) bool {
@@ -2511,6 +2512,44 @@ func (s *Service) drainQueuedMessageForPromptableSessionOutcome(ctx context.Cont
 	return s.drainQueuedMessageForPromptableSessionLockedOutcome(ctx, sessionID)
 }
 
+// drainQueuedMessageForPromptableSessionWithTaskAdmission is the enqueue-side
+// drain. It rechecks WIP admission after taking the session guard and directly
+// before reserving the queue head, so a stale pre-enqueue task snapshot cannot
+// bypass a workflow capacity wait.
+func (s *Service) drainQueuedMessageForPromptableSessionWithTaskAdmission(
+	ctx context.Context,
+	taskID, sessionID string,
+) queueDrainOutcome {
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+	if s.isCancelInFlight(sessionID) {
+		return queueDrainSkipped
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to reload session before admission-gated drain",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return queueDrainSkipped
+	}
+	if session == nil {
+		return queueDrainSkipped
+	}
+	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
+		return queueDrainSkipped
+	}
+	// QueueUserPrompt can race a live clarification between its enqueue-side
+	// checks and this guarded drain. Re-read the clarification ownership while
+	// the guard is held so a parent question or human clarification still owns
+	// the turn when the queue head is reserved. Detached bundles are allowed by
+	// sessionHasLiveClarification and can therefore make progress here.
+	if s.sessionHasLiveClarification(ctx, sessionID) {
+		return queueDrainSkipped
+	}
+	return s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmission(ctx, taskID, sessionID)
+}
+
 // drainQueuedMessageForPromptableSessionLocked takes the next queued
 // message and dispatches it for execution. Callers must ensure the session
 // is ready for input first, AND must already hold sessionID's
@@ -2527,9 +2566,27 @@ func (s *Service) drainQueuedMessageForPromptableSessionLocked(ctx context.Conte
 }
 
 func (s *Service) drainQueuedMessageForPromptableSessionLockedOutcome(ctx context.Context, sessionID string) queueDrainOutcome {
+	return s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmission(ctx, "", sessionID)
+}
+
+func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmission(
+	ctx context.Context,
+	taskID, sessionID string,
+) queueDrainOutcome {
 	if s.messageQueue == nil || s.isCancelInFlight(sessionID) ||
 		s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
 		return queueDrainSkipped
+	}
+	if taskID != "" {
+		task, err := s.repo.GetTask(ctx, taskID)
+		if err != nil {
+			s.logger.Warn("failed to reload task before admission-gated queue reservation",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+			return queueDrainTaskAdmissionReadFailed
+		}
+		if task == nil || (!task.WIPAdmitted && task.QueuedForStepID != "") {
+			return queueDrainSkipped
+		}
 	}
 	queuedMsg, ok, autoRun := s.messageQueue.ReserveQueuedWithAutoRun(ctx, sessionID)
 	if !autoRun {

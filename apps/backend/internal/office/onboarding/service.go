@@ -102,6 +102,7 @@ type ConfigSyncer interface {
 type ApplyResult struct {
 	CreatedCount int
 	UpdatedCount int
+	Warnings     []string
 }
 
 // RunReason for a newly assigned task.
@@ -211,6 +212,7 @@ type CompleteResult struct {
 type ImportFromFSResult struct {
 	WorkspaceIDs  []string
 	ImportedCount int
+	Warnings      []string
 }
 
 // GetOnboardingState checks whether onboarding has been completed.
@@ -440,6 +442,7 @@ func (s *OnboardingService) importSingleWorkspace(
 			return "", false
 		}
 		result.ImportedCount += importResult.CreatedCount + importResult.UpdatedCount
+		result.Warnings = append(result.Warnings, importResult.Warnings...)
 	}
 	return wsID, true
 }

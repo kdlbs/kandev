@@ -424,7 +424,12 @@ export type AppState = KanbanSlice & {
   ) => void;
   setMessagesMetadata: (
     sessionId: string,
-    meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null },
+    meta: {
+      hasMore?: boolean;
+      isLoading?: boolean;
+      isLoadingMore?: boolean;
+      oldestCursor?: string | null;
+    },
   ) => void;
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
   setTaskSession: (session: TaskSession) => void;

@@ -88,7 +88,7 @@ test.describe("Sidebar office gating", () => {
     await newTask.click();
     await expect(kanbanDialog).toBeVisible();
     await expect(officeDialog).toHaveCount(0);
-    await testPage.keyboard.press("Escape");
+    await kanbanDialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(kanbanDialog).toHaveCount(0);
 
     // Office workspace active: the Office "New issue" dialog — and on a shared

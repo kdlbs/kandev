@@ -9,7 +9,7 @@ import { ApiError } from "@/lib/api/client";
 import { updateTask } from "@/lib/api/domains/office-extended-api";
 import type { Task, TaskStatus } from "@/app/office/tasks/[id]/types";
 import { StatusIcon } from "@/app/office/tasks/[id]/status-icon";
-import { normalizeTaskStatus } from "@/app/office/tasks/normalize-status";
+import { normalizeTaskStatus } from "@/lib/api/domains/office-task-normalize";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 

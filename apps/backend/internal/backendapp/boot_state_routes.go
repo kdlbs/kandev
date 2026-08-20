@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/httpcookie"
 	officedashboard "github.com/kandev/kandev/internal/office/dashboard"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -391,7 +392,10 @@ func (b bootStateBuilder) addOfficeRouteState(ctx context.Context, req *http.Req
 	state["office"] = b.officeState(ctx, activeID)
 }
 
-// officeWorkspaces resolves the office workspaces and the active workspace id from the request cookie.
+// officeWorkspaces resolves the office workspaces and the active workspace id
+// from the request cookies and user settings. Candidates, each validated
+// against the office workspace set: general cookie (when it names an office
+// workspace) → office cookie → settings → first office workspace.
 func (b bootStateBuilder) officeWorkspaces(ctx context.Context, req *http.Request) ([]taskdto.WorkspaceDTO, string, error) {
 	if b.p.taskSvc == nil {
 		return nil, "", nil
@@ -412,7 +416,16 @@ func (b bootStateBuilder) officeWorkspaces(ctx context.Context, req *http.Reques
 			officeItems = append(officeItems, item)
 		}
 	}
-	return items, resolveActiveOfficeWorkspaceID(officeItems, readActiveWorkspaceCookie(req)), nil
+	settingsWorkspaceID := ""
+	if settings, ok := b.userSettings(ctx); ok {
+		settingsWorkspaceID = settings.Settings.WorkspaceID
+	}
+	return items, resolveActiveOfficeWorkspaceID(
+		officeItems,
+		readActiveWorkspaceCookie(req),
+		readOfficeWorkspaceCookie(req),
+		settingsWorkspaceID,
+	), nil
 }
 
 // officeState assembles the office boot state (agents, projects, inbox, dashboard) for the active workspace.
@@ -778,11 +791,20 @@ func mapTaskCreateLastUsed(value usermodels.TaskCreateLastUsed) map[string]any {
 	}
 }
 
-// resolveActiveOfficeWorkspaceID returns the cookie workspace id when it is valid, otherwise the first workspace id.
-func resolveActiveOfficeWorkspaceID(workspaces []taskdto.WorkspaceDTO, cookieWorkspaceID string) string {
-	for _, workspace := range workspaces {
-		if workspace.ID == cookieWorkspaceID {
-			return workspace.ID
+// resolveActiveOfficeWorkspaceID returns the first candidate — general cookie,
+// office cookie, settings — that names a valid office workspace, otherwise the
+// first office workspace id.
+func resolveActiveOfficeWorkspaceID(
+	workspaces []taskdto.WorkspaceDTO,
+	generalCookieID string,
+	officeCookieID string,
+	settingsID string,
+) string {
+	for _, candidate := range []string{generalCookieID, officeCookieID, settingsID} {
+		for _, workspace := range workspaces {
+			if workspace.ID == candidate {
+				return workspace.ID
+			}
 		}
 	}
 	if len(workspaces) > 0 {
@@ -857,12 +879,50 @@ func tasksListGroupForRoute(queryValue, settingsValue string) string {
 	return usermodels.NormalizeTasksListGroup(settingsValue)
 }
 
-// readActiveWorkspaceCookie reads the active workspace id from the cookies.
+// readActiveWorkspaceCookie reads the active workspace id from the GENERAL
+// cookie family only: the port-scoped name first, then the legacy unprefixed
+// name as a read-only fallback (a pre-upgrade selection survives). The
+// office-family cookies are deliberately not consulted — generic boot paths
+// resolve settings/first when only an office cookie exists (parity with the
+// frontend generic reader). The suffix derives from the request host
+// (X-Forwarded-Host precedence), the same port the SPA derives from the API
+// base URL.
 func readActiveWorkspaceCookie(req *http.Request) string {
 	if req == nil {
 		return ""
 	}
-	for _, name := range []string{activeWorkspaceCookie, legacyOfficeWorkspaceCookie} {
+	// On a default-port host the scoped name IS the legacy name; reading the
+	// same cookie twice is a no-op, so only probe the legacy name when the
+	// port actually scopes it.
+	names := []string{httpcookie.ScopedName(req, activeWorkspaceCookie)}
+	if scoped := names[0]; scoped != activeWorkspaceCookie {
+		names = append(names, activeWorkspaceCookie)
+	}
+	for _, name := range names {
+		cookie, err := req.Cookie(name)
+		if err == nil {
+			if value := strings.TrimSpace(cookie.Value); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+// readOfficeWorkspaceCookie reads the active workspace id from the OFFICE
+// cookie family only: the port-scoped name first, then the legacy unprefixed
+// name as a read-only fallback. The general cookie is never consulted here.
+func readOfficeWorkspaceCookie(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+	// Same default-port dedupe as readActiveWorkspaceCookie: the scoped name
+	// equals the legacy name when the Host carries no (non-default) port.
+	names := []string{httpcookie.ScopedName(req, legacyOfficeWorkspaceCookie)}
+	if scoped := names[0]; scoped != legacyOfficeWorkspaceCookie {
+		names = append(names, legacyOfficeWorkspaceCookie)
+	}
+	for _, name := range names {
 		cookie, err := req.Cookie(name)
 		if err == nil {
 			if value := strings.TrimSpace(cookie.Value); value != "" {

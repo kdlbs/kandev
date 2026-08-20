@@ -60,7 +60,7 @@ vi.mock("@/hooks/use-lazy-load-messages", () => ({
   useLazyLoadMessages: () => ({
     loadMore: async () => 0,
     hasMore: false,
-    isLoading: false,
+    isLoadingMore: false,
   }),
 }));
 vi.mock("@/components/task/chat/messages/agent-status", () => ({

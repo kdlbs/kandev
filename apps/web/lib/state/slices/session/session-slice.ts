@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- slice file is one line over the 600 cap after adding the isLoadingMore metadata flag; splitting the slice would orphan its actions from their state type */
 import type { StateCreator } from "zustand";
 import { original } from "immer";
 import type { Message, TaskSession } from "@/lib/types/http";
@@ -29,7 +30,12 @@ function ensureMessageMeta(
   sessionId: string,
 ) {
   if (!metaBySession[sessionId]) {
-    metaBySession[sessionId] = { isLoading: false, hasMore: false, oldestCursor: null };
+    metaBySession[sessionId] = {
+      isLoading: false,
+      isLoadingMore: false,
+      hasMore: false,
+      oldestCursor: null,
+    };
   }
 }
 
@@ -37,11 +43,17 @@ function ensureMessageMeta(
 function applyMessageMeta(
   metaBySession: SessionSliceState["messages"]["metaBySession"],
   sessionId: string,
-  meta: { hasMore?: boolean; oldestCursor?: string | null; isLoading?: boolean },
+  meta: {
+    hasMore?: boolean;
+    oldestCursor?: string | null;
+    isLoading?: boolean;
+    isLoadingMore?: boolean;
+  },
 ) {
   ensureMessageMeta(metaBySession, sessionId);
   if (meta.hasMore !== undefined) metaBySession[sessionId].hasMore = meta.hasMore;
   if (meta.isLoading !== undefined) metaBySession[sessionId].isLoading = meta.isLoading;
+  if (meta.isLoadingMore !== undefined) metaBySession[sessionId].isLoadingMore = meta.isLoadingMore;
   if (meta.oldestCursor !== undefined) metaBySession[sessionId].oldestCursor = meta.oldestCursor;
 }
 
@@ -329,7 +341,9 @@ function buildMessageActions(set: ImmerSet) {
           ...existing,
         ];
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
-        draft.messages.metaBySession[sessionId].isLoading = false;
+        // isLoadingMore is owned by the shared pagination coordinator (raised
+        // on the session's first in-flight request, cleared only when the
+        // last one settles); a prepend must not clear it mid-flight.
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
       }),
     setMessagesMetadata: (
