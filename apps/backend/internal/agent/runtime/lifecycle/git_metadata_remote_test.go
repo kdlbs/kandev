@@ -27,7 +27,7 @@ func TestInstallAttestedCloneGitMetadataPolicyAttestsBeforeRendering(t *testing.
 			t.Fatalf("attestation path = %q", r.URL.Path)
 		}
 		called = true
-		_, _ = w.Write([]byte(`{"attested":true}`))
+		_, _ = w.Write([]byte(`{"attested":true,"checkouts":[{"checkout_path":"/executor/workspace","git_dir":"/executor/workspace/.git"},{"checkout_path":"/executor/workspace/second-main","git_dir":"/executor/workspace/second-main/.git"}]}`))
 	}))
 	defer server.Close()
 	parsed, err := url.Parse(server.URL)
@@ -98,6 +98,40 @@ func TestInstallAttestedCloneGitMetadataPolicyFailsClosed(t *testing.T) {
 	}
 	if instance.Metadata != nil {
 		t.Fatalf("failed attestation installed runtime metadata: %#v", instance.Metadata)
+	}
+}
+
+func TestInstallAttestedCloneGitMetadataPolicyRejectsForeignFinalCheckout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"attested":true,"checkouts":[{"checkout_path":"/executor/workspace","git_dir":"/executor/workspace/.git"},{"checkout_path":"/foreign/repository","git_dir":"/foreign/repository/.git"}]}`))
+	}))
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	req := &ExecutorCreateRequest{
+		GitMetadataRequirement: cloneGitMetadataRequirement(true),
+		AgentConfig:            agents.NewCodexACP(),
+		Env:                    map[string]string{"CODEX_CONFIG": `{}`},
+	}
+	instance := &ExecutorInstance{
+		Client:               agentctl.NewClient(parsed.Hostname(), port, log),
+		WorkspacePath:        "/executor/workspace",
+		WorkspaceSourceRoots: []string{"/executor/workspace", "/executor/workspace/second-main"},
+	}
+
+	err = installAttestedCloneGitMetadataPolicy(context.Background(), req, instance)
+	if err == nil || !strings.Contains(err.Error(), "start a new session") {
+		t.Fatalf("installAttestedCloneGitMetadataPolicy error = %v, want fail-closed recovery", err)
+	}
+	if instance.Metadata != nil || req.Env["CODEX_CONFIG"] != `{}` {
+		t.Fatalf("foreign checkout produced clone policy: metadata=%#v config=%s", instance.Metadata, req.Env["CODEX_CONFIG"])
 	}
 }
 

@@ -465,7 +465,12 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 	var sessionID string
 	var err error
 	if sessioner, ok := agentAdapter.(adapter.AdditionalDirectoriesSessioner); ok {
-		sessionID, err = sessioner.NewSessionWithAdditionalDirectories(ctx, mcpServers, s.procMgr.WorkspaceSourceRoots())
+		workspaceRoots, rootsErr := s.procMgr.ValidatedWorkspaceSourceRoots()
+		if rootsErr != nil {
+			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "git_metadata_projection_unsupported: workspace roots must be revalidated before starting a session", nil)
+			return resp
+		}
+		sessionID, err = sessioner.NewSessionWithAdditionalDirectories(ctx, mcpServers, workspaceRoots)
 	} else {
 		sessionID, err = agentAdapter.NewSession(ctx, mcpServers)
 	}

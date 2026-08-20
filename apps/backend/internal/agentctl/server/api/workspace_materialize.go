@@ -40,24 +40,36 @@ type MaterializeRepositoryResponse struct {
 	Error               string `json:"error,omitempty"`
 }
 
-// GitMetadataAttestationResponse never returns a filesystem path. The caller
-// learns only that agentctl validated its own canonical primary checkout.
+// GitMetadataAttestationResponse carries only agentctl-approved executor paths
+// over the authenticated lifecycle control channel. It is never surfaced in a
+// user-facing launch error.
 type GitMetadataAttestationResponse struct {
-	Attested bool   `json:"attested"`
-	Error    string `json:"error,omitempty"`
+	Attested  bool                     `json:"attested"`
+	Checkouts []GitMetadataAttestation `json:"checkouts,omitempty"`
+	Error     string                   `json:"error,omitempty"`
 }
 
-// handleWorkspaceGitMetadataAttestation validates the checkout that already
-// exists at agentctl's own workdir. Clone executors call this only after their
-// prepare phase and before ConfigureAgent/Start, so host paths can never be
-// substituted for the executor-side checkout.
+// GitMetadataAttestation is an executor-visible checkout/gitdir pair approved
+// by agentctl immediately before lifecycle renders a mutable clone policy.
+// It is returned only over the authenticated control channel, never copied to
+// a user-facing launch error.
+type GitMetadataAttestation struct {
+	CheckoutPath string `json:"checkout_path"`
+	GitDir       string `json:"git_dir"`
+}
+
+// handleWorkspaceGitMetadataAttestation batch-validates every task-owned
+// checkout that agentctl is currently authorized to expose. Clone executors
+// call this immediately before ConfigureAgent/Start, so lifecycle renders from
+// final executor-side proof rather than host paths or derived .git paths.
 func (s *Server) handleWorkspaceGitMetadataAttestation(c *gin.Context) {
-	if err := attestMaterializedGitMetadata(c.Request.Context(), s.procMgr.WorkDir()); err != nil {
+	checkouts, err := attestWorkspaceGitMetadata(c.Request.Context(), s.procMgr.WorkspaceSourceRoots())
+	if err != nil {
 		s.logger.Warn("workspace Git metadata attestation failed", zap.Error(err))
 		c.JSON(http.StatusUnprocessableEntity, GitMetadataAttestationResponse{Error: "workspace Git metadata validation failed"})
 		return
 	}
-	c.JSON(http.StatusOK, GitMetadataAttestationResponse{Attested: true})
+	c.JSON(http.StatusOK, GitMetadataAttestationResponse{Attested: true, Checkouts: checkouts})
 }
 
 // RemoveMaterializedRepositoryRequest identifies a previously materialized,
@@ -139,26 +151,49 @@ func (s *Server) handleWorkspaceMaterializeRepository(c *gin.Context) {
 // grant its .git directory to a mutable Codex session. It returns no path to
 // the caller, keeping executor filesystem details out of API errors.
 func attestMaterializedGitMetadata(ctx context.Context, destination string) error {
+	_, err := attestRegularGitMetadata(ctx, destination)
+	return err
+}
+
+// attestWorkspaceGitMetadata revalidates every agentctl-authorized source
+// root as an exact regular checkout. It intentionally uses the process
+// manager's canonical allowlist, never caller-supplied paths.
+func attestWorkspaceGitMetadata(ctx context.Context, roots []string) ([]GitMetadataAttestation, error) {
+	if len(roots) == 0 {
+		return nil, errors.New("workspace source roots are unavailable")
+	}
+	checkouts := make([]GitMetadataAttestation, 0, len(roots))
+	for _, root := range roots {
+		attestation, err := attestRegularGitMetadata(ctx, root)
+		if err != nil {
+			return nil, err
+		}
+		checkouts = append(checkouts, attestation)
+	}
+	return checkouts, nil
+}
+
+func attestRegularGitMetadata(ctx context.Context, destination string) (GitMetadataAttestation, error) {
 	resolved, err := filepath.EvalSymlinks(destination)
 	if err != nil || resolved != destination {
-		return errors.New("checkout path is not canonical")
+		return GitMetadataAttestation{}, errors.New("checkout path is not canonical")
 	}
 	gitDir := filepath.Join(destination, ".git")
 	for _, path := range []string{gitDir, filepath.Join(gitDir, "objects")} {
 		info, statErr := os.Lstat(path)
 		if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return errors.New("git directory is not a regular directory")
+			return GitMetadataAttestation{}, errors.New("git directory is not a regular directory")
 		}
 	}
 	head, err := os.Lstat(filepath.Join(gitDir, "HEAD"))
 	if err != nil || !head.Mode().IsRegular() || head.Mode()&os.ModeSymlink != 0 {
-		return errors.New("git HEAD is not a regular file")
+		return GitMetadataAttestation{}, errors.New("git HEAD is not a regular file")
 	}
 	actualGitDir, err := materializeGitOutput(ctx, "-C", destination, "rev-parse", "--absolute-git-dir")
 	if err != nil || filepath.Clean(strings.TrimSpace(actualGitDir)) != gitDir {
-		return errors.New("git checkout does not own its metadata")
+		return GitMetadataAttestation{}, errors.New("git checkout does not own its metadata")
 	}
-	return nil
+	return GitMetadataAttestation{CheckoutPath: destination, GitDir: gitDir}, nil
 }
 
 func (s *Server) handleWorkspaceRemoveMaterializedRepository(c *gin.Context) {
