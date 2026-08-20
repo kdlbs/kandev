@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	workflowadapters "github.com/kandev/kandev/internal/workflow/adapters"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/stepentry"
@@ -2516,6 +2517,12 @@ func (s *Service) launchAfterProfileSwitchOrWait(
 // above and for "already claimed" (AC-D3/AC-D4's at-most-once outcome,
 // handled by an earlier call, not a fresh failure to react to here). cause
 // is the underlying error string when failed is true, empty otherwise.
+//
+// For clear_decisions specifically, once claimed this tries the AC-B6
+// atomic path (dispatchClearDecisionsAtomic) before falling back to the
+// generic callback.Execute + CompleteStepEntryMarker sequence below, which
+// is correct but — for clear_decisions only — not atomic across a crash
+// between the two calls.
 func (s *Service) dispatchEngineOwnedOnEnterAction(
 	ctx context.Context, taskID string, step *wfmodels.WorkflowStep, action wfmodels.OnEnterAction, position int, entryID int64,
 ) (failed bool, cause string) {
@@ -2542,9 +2549,27 @@ func (s *Service) dispatchEngineOwnedOnEnterAction(
 	if !claimed {
 		// Already claimed by a concurrent or prior attempt, or already
 		// terminal — AC-D3/AC-D4's at-most-once guarantee for this
-		// step-entry. Not an error: this is the expected outcome on retry.
+		// step-entry. Most outcomes here (still in progress elsewhere,
+		// already done) are not errors — the expected outcome on retry.
+		// But if a prior attempt for this exact position already recorded
+		// a terminal failure, silently returning "not failed" would let
+		// dispatchOnEnterActions fall through to the next on_enter action
+		// as if clear_decisions had never failed — the same fall-through
+		// AC-C2's break exists to close for a fresh failure. Surface the
+		// stored failure so the caller aborts the remaining actions here
+		// too, instead of only on a failure it just witnessed itself.
+		if priorState, priorCause, found, stateErr := s.repo.GetStepEntryMarkerState(ctx, entryID, position); stateErr == nil && found && priorState == stepentry.MarkerFailed {
+			return true, priorCause
+		}
 		return false, ""
 	}
+
+	if action.Type == wfmodels.OnEnterClearDecisions {
+		if handled, atomicFailed, atomicCause := s.dispatchClearDecisionsAtomic(ctx, taskID, step, entryID, position); handled {
+			return atomicFailed, atomicCause
+		}
+	}
+
 	in := engine.ActionInput{
 		Trigger:     engine.TriggerOnEnter,
 		State:       engine.MachineState{TaskID: taskID, CurrentStepID: step.ID, WorkflowID: step.WorkflowID},
@@ -2565,6 +2590,42 @@ func (s *Service) dispatchEngineOwnedOnEnterAction(
 			zap.Int64("entry_id", entryID), zap.Int("position", position))
 	}
 	return state == stepentry.MarkerFailed, execCause
+}
+
+// dispatchClearDecisionsAtomic executes clear_decisions through
+// Repository.ClearStepDecisionsAndCompleteMarker (AC-B6) when it is safe to
+// do so: only when engineDecisions is confirmed to be
+// *workflowadapters.DecisionAdapter, the type SetEngineDecisionStore is
+// wired with at the one production construction site
+// (backendapp/main.go:1501, NewDecisionAdapter(repos.Workflow) —
+// repos.Workflow is always the real workflow repository, sharing s.repo's
+// writer *sqlx.DB per backendapp/storage.go). Test doubles
+// (fakeDecisionStore, failingDecisionStore in step_entry_dispatch_test.go)
+// are not that type — no test constructs a DecisionAdapter — so handled is
+// false for them and the caller falls back to the pre-existing, non-atomic
+// callback.Execute + CompleteStepEntryMarker sequence, preserving every
+// existing AC-C2/AC-D3/AC-D4 test's error-injection behavior unchanged.
+//
+// When handled is true, failed/cause report the outcome exactly like
+// dispatchEngineOwnedOnEnterAction's own return values. On error, the
+// transaction rolled back — neither the delete nor the marker update
+// committed, so the marker is left in_progress, which is precisely AC-B6's
+// invariant (in_progress proves the delete did not commit). No compensating
+// write is attempted; returning failed=true is enough to trigger AC-C2's
+// abort in dispatchOnEnterActions.
+func (s *Service) dispatchClearDecisionsAtomic(
+	ctx context.Context, taskID string, step *wfmodels.WorkflowStep, entryID int64, position int,
+) (handled, failed bool, cause string) {
+	if _, ok := s.engineDecisions.(*workflowadapters.DecisionAdapter); !ok {
+		return false, false, ""
+	}
+	if _, err := s.repo.ClearStepDecisionsAndCompleteMarker(ctx, taskID, step.ID, entryID, position, time.Now()); err != nil {
+		s.logger.Error("processOnEnter: atomic clear_decisions failed",
+			zap.Error(err), zap.String("task_id", taskID), zap.String("step_id", step.ID),
+			zap.Int64("entry_id", entryID), zap.Int("position", position))
+		return true, true, err.Error()
+	}
+	return true, false, ""
 }
 
 // engineOnEnterCallback returns the Phase 2 callback for an engine-owned
@@ -4173,6 +4234,12 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		return false
 	}
 
+	unlock, task, proceed := s.acquireTurnCompletionCriticalSection(ctx, taskID, session, task)
+	defer unlock()
+	if !proceed {
+		return false
+	}
+
 	if s.workflowEngine == nil {
 		return s.processOnTurnCompleteWithCause(ctx, task, session, cause)
 	}
@@ -4213,6 +4280,37 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		ctx = cancellationTransitionAttribution(ctx)
 	}
 	return s.applyEngineTransition(ctx, taskID, session, result, engine.TriggerOnTurnComplete, task.Description, true)
+}
+
+// acquireTurnCompletionCriticalSection serializes on_turn_complete
+// processing per session (see turnCompletionLocks' field comment for the
+// double-allocation/double-dispatch race this closes) and detects a
+// duplicate call that lost the race for the lock: if another caller already
+// moved the task off the step observedTask reflects while this one waited,
+// evaluating on_turn_complete against the task's new (fresh) step would
+// fire that step's own on_turn_complete — e.g. Review's on_turn_complete
+// sending the task back to Work — for a turn nobody actually completed
+// there. proceed is false when this call must stop and treat itself as
+// that redundant duplicate; the caller must still invoke unlock regardless
+// of proceed. session == nil callers (none exist today, but the type
+// allows it) skip locking entirely, matching pre-fix behavior.
+func (s *Service) acquireTurnCompletionCriticalSection(
+	ctx context.Context, taskID string, session *models.TaskSession, observedTask *models.Task,
+) (unlock func(), fresh *models.Task, proceed bool) {
+	if session == nil {
+		return func() {}, observedTask, true
+	}
+	unlock = s.acquireTurnCompletionLock(session.ID)
+	current, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		// Best-effort re-check: fall back to the already-validated snapshot
+		// rather than fail a call that succeeded its primary read.
+		return unlock, observedTask, true
+	}
+	if current.WorkflowStepID != observedTask.WorkflowStepID {
+		return unlock, current, false
+	}
+	return unlock, current, true
 }
 
 func (s *Service) prepareEngineTurnCompletion(
