@@ -218,14 +218,8 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 // container builder compiles the same plan again immediately before launch;
 // that final compilation closes the normal resolve-to-mount freshness window.
 func (r *DockerExecutor) PrepareGitMetadataProjection(_ context.Context, req *ExecutorCreateRequest) error {
-	if req != nil && req.RequiresCloneGitMetadataPolicy {
-		if err := validateRemoteGitMetadataRequest(req); err != nil {
-			return err
-		}
-		return prepareRemoteRegularGitMetadataPolicy(req, remoteRegularGitMetadata{
-			CheckoutPath: dockerWorkspacePath,
-			GitDir:       dockerWorkspacePath + "/.git",
-		})
+	if requiresCloneGitMetadataPolicy(req) {
+		return validateRemoteGitMetadataRequest(req)
 	}
 	_, err := gitMetadataMounts(req.GitMetadataProjections)
 	return err
@@ -251,7 +245,7 @@ func reportCreateInstanceProgress(req *ExecutorCreateRequest, errPtr *error) fun
 // container that's healthy enough to resume; otherwise (nil, false) and the
 // caller falls back to provisioning a fresh container.
 func (r *DockerExecutor) tryReconnect(ctx context.Context, dockerClient *docker.Client, req *ExecutorCreateRequest) (*ExecutorInstance, bool) {
-	if (req.PreviousExecutionID == "" && strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyContainerID)) == "") || req.RequiresCloneGitMetadataPolicy {
+	if (req.PreviousExecutionID == "" && strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyContainerID)) == "") || requiresCloneGitMetadataPolicy(req) {
 		return nil, false
 	}
 	reconnected, reconnectErr := r.reconnectToContainer(ctx, dockerClient, req)
@@ -296,7 +290,7 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 	if err != nil {
 		return ContainerConfig{}, err
 	}
-	if req.RequiresCloneGitMetadataPolicy {
+	if requiresCloneGitMetadataPolicy(req) {
 		prepareScript = cloneGitMetadataPrepareScript(prepareScript)
 	}
 	return ContainerConfig{
@@ -309,7 +303,7 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		ExecutorProfileID:              getMetadataString(req.Metadata, "executor_profile_id"),
 		InstanceID:                     req.InstanceID,
 		GitMetadataProjections:         req.GitMetadataProjections,
-		RequiresCloneGitMetadataPolicy: req.RequiresCloneGitMetadataPolicy,
+		RequiresCloneGitMetadataPolicy: requiresCloneGitMetadataPolicy(req),
 		WorkspaceSourceRoots:           []string{dockerWorkspacePath},
 		Credentials:                    req.Env,
 		AutoApprovePermissions:         req.AutoApprovePermissions,

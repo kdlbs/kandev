@@ -54,4 +54,4 @@ Summary, files changed, protocol and launch/session test receipts, unsupported-p
 
 ## Results
 
-Implemented lifecycle executor-root forwarding through agentctl to ACP `session/new`. The ACP adapter emits deduplicated absolute sibling directories only when the initialized provider advertises `additionalDirectories`; unsupported providers receive none. Clone-based Docker, SSH, and Sprites create and persist executor-visible roots rather than host sources. Focused/package Go tests and race verification pass.
+Implemented lifecycle executor-root forwarding through agentctl to ACP `session/new`. The ACP adapter emits lifecycle-authorized canonical sibling directories only when the initialized provider advertises `additionalDirectories`; malformed roots are rejected and an unsupported required sibling scope returns `git_metadata_projection_unsupported` before `session/new`. Clone-based Docker, SSH, and Sprites create and persist executor-visible roots rather than host sources. Focused/package Go tests and race verification pass.

@@ -20,11 +20,20 @@ import (
 
 const kandevMCPServerName = "kandev"
 
-func additionalDirectoriesForSession(cwd string, roots []string) []string {
+const gitMetadataProjectionUnsupported = "git_metadata_projection_unsupported"
+
+// additionalDirectoriesForSession converts the lifecycle-owned source-root
+// projection into ACP additionalDirectories. Rejecting, rather than skipping,
+// an invalid root makes a malformed server projection fail closed instead of
+// silently widening or narrowing the provider's visible filesystem scope.
+func additionalDirectoriesForSession(cwd string, roots []string) ([]string, error) {
 	directories := make([]string, 0, len(roots))
 	seen := make(map[string]struct{}, len(roots))
 	for _, root := range roots {
-		if root == "" || !filepath.IsAbs(root) || root == cwd {
+		if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
+			return nil, errors.New("invalid lifecycle workspace source root")
+		}
+		if root == cwd {
 			continue
 		}
 		if _, exists := seen[root]; exists {
@@ -33,7 +42,7 @@ func additionalDirectoriesForSession(cwd string, roots []string) []string {
 		seen[root] = struct{}{}
 		directories = append(directories, root)
 	}
-	return slices.Clip(directories)
+	return slices.Clip(directories), nil
 }
 
 // PublishesMCPAttachmentResults reports that this adapter emits attachment
@@ -72,9 +81,12 @@ func (a *Adapter) NewSessionWithAdditionalDirectories(ctx context.Context, mcpSe
 		}
 		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
 	}
-	additionalDirectories := []string(nil)
-	if a.capabilities.SessionCapabilities.AdditionalDirectories != nil {
-		additionalDirectories = additionalDirectoriesForSession(a.cfg.WorkDir, roots)
+	additionalDirectories, err := additionalDirectoriesForSession(a.cfg.WorkDir, roots)
+	if err != nil {
+		return "", fmt.Errorf("validate additional directories: %w", err)
+	}
+	if len(additionalDirectories) > 0 && a.capabilities.SessionCapabilities.AdditionalDirectories == nil {
+		return "", fmt.Errorf("%s: ACP provider does not support required additional workspace directories", gitMetadataProjectionUnsupported)
 	}
 	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:                   a.cfg.WorkDir,

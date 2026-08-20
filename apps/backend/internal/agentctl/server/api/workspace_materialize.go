@@ -40,6 +40,26 @@ type MaterializeRepositoryResponse struct {
 	Error               string `json:"error,omitempty"`
 }
 
+// GitMetadataAttestationResponse never returns a filesystem path. The caller
+// learns only that agentctl validated its own canonical primary checkout.
+type GitMetadataAttestationResponse struct {
+	Attested bool   `json:"attested"`
+	Error    string `json:"error,omitempty"`
+}
+
+// handleWorkspaceGitMetadataAttestation validates the checkout that already
+// exists at agentctl's own workdir. Clone executors call this only after their
+// prepare phase and before ConfigureAgent/Start, so host paths can never be
+// substituted for the executor-side checkout.
+func (s *Server) handleWorkspaceGitMetadataAttestation(c *gin.Context) {
+	if err := attestMaterializedGitMetadata(c.Request.Context(), s.procMgr.WorkDir()); err != nil {
+		s.logger.Warn("workspace Git metadata attestation failed", zap.Error(err))
+		c.JSON(http.StatusUnprocessableEntity, GitMetadataAttestationResponse{Error: "workspace Git metadata validation failed"})
+		return
+	}
+	c.JSON(http.StatusOK, GitMetadataAttestationResponse{Attested: true})
+}
+
 // RemoveMaterializedRepositoryRequest identifies a previously materialized,
 // credential-free checkout that may be removed during a failed batch rollback.
 type RemoveMaterializedRepositoryRequest struct {

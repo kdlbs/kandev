@@ -1,17 +1,105 @@
 package lifecycle
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/worktree"
 )
+
+func TestInstallAttestedCloneGitMetadataPolicyAttestsBeforeRendering(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/workspace/attest-git-metadata" {
+			t.Fatalf("attestation path = %q", r.URL.Path)
+		}
+		called = true
+		_, _ = w.Write([]byte(`{"attested":true}`))
+	}))
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	req := &ExecutorCreateRequest{
+		GitMetadataRequirement: cloneGitMetadataRequirement(true),
+		AgentConfig:            agents.NewCodexACP(),
+		Env:                    map[string]string{"CODEX_CONFIG": `{}`},
+	}
+	instance := &ExecutorInstance{
+		Client:               agentctl.NewClient(parsed.Hostname(), port, log),
+		WorkspacePath:        "/executor/workspace",
+		WorkspaceSourceRoots: []string{"/executor/workspace", "/executor/workspace/second-main"},
+	}
+
+	if err := installAttestedCloneGitMetadataPolicy(context.Background(), req, instance); err != nil {
+		t.Fatalf("installAttestedCloneGitMetadataPolicy: %v", err)
+	}
+	if !called {
+		t.Fatal("agentctl checkout attestation was not called")
+	}
+	if len(req.GitMetadataProjections) != 0 {
+		t.Fatalf("clone launch synthesized host projections: %#v", req.GitMetadataProjections)
+	}
+	policyEnv := instance.Metadata["runtime_env"].(map[string]string)
+	if strings.Contains(policyEnv["CODEX_CONFIG"], "/host/") {
+		t.Fatalf("rendered clone policy leaked host path: %s", policyEnv["CODEX_CONFIG"])
+	}
+	for _, gitDir := range []string{"/executor/workspace/.git", "/executor/workspace/second-main/.git"} {
+		if !strings.Contains(policyEnv["CODEX_CONFIG"], gitDir) {
+			t.Fatalf("rendered clone policy lacks attested git dir %q: %s", gitDir, policyEnv["CODEX_CONFIG"])
+		}
+	}
+}
+
+func TestInstallAttestedCloneGitMetadataPolicyFailsClosed(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"error":"workspace Git metadata validation failed"}`))
+	}))
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	req := &ExecutorCreateRequest{
+		GitMetadataRequirement: cloneGitMetadataRequirement(true),
+		AgentConfig:            agents.NewCodexACP(),
+		Env:                    map[string]string{"CODEX_CONFIG": `{}`},
+	}
+	instance := &ExecutorInstance{Client: agentctl.NewClient(parsed.Hostname(), port, log), WorkspacePath: "/executor/workspace"}
+
+	err = installAttestedCloneGitMetadataPolicy(context.Background(), req, instance)
+	if err == nil || !strings.Contains(err.Error(), "start a new session") {
+		t.Fatalf("installAttestedCloneGitMetadataPolicy error = %v, want fail-closed recovery", err)
+	}
+	if instance.Metadata != nil {
+		t.Fatalf("failed attestation installed runtime metadata: %#v", instance.Metadata)
+	}
+}
 
 func TestRemoteRegularGitMetadataPolicyOnlyWritesTaskGitDir(t *testing.T) {
 	req := &ExecutorCreateRequest{AgentConfig: agents.NewCodexACP()}
@@ -160,6 +248,15 @@ func TestRemoteRegularGitMetadataProbeRunsAgainstRealCheckout(t *testing.T) {
 	if metadata.GitDir != filepath.Join(workspace, ".git") || metadata.CurrentRef != "refs/heads/main" {
 		t.Fatalf("metadata = %+v, want task regular checkout", metadata)
 	}
+	if err := os.WriteFile(filepath.Join(workspace, "tracked"), []byte("updated\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runContainerGit(t, workspace, "add", "tracked")
+	runContainerGit(t, workspace, "commit", "-m", "attested clone mutation")
+	runContainerGit(t, workspace, "update-ref", "refs/heads/attested-lock-coverage", "HEAD")
+	if _, err := os.Stat(filepath.Join(workspace, ".git", "refs", "heads", "attested-lock-coverage")); err != nil {
+		t.Fatalf("attested clone ref update did not reach regular .git: %v", err)
+	}
 
 	if err := os.Mkdir(filepath.Join(workspace, ".codex"), 0o700); err != nil {
 		t.Fatal(err)
@@ -220,7 +317,7 @@ func TestSpriteReconnectReplacesChildWhenGitPolicyChanges(t *testing.T) {
 	if !shouldReplaceSpriteAgentInstance(&ExecutorCreateRequest{GitMetadataProjections: []*worktree.GitMetadataProjection{{}}}) {
 		t.Fatal("Git metadata projection must replace stale Sprite child")
 	}
-	if !shouldReplaceSpriteAgentInstance(&ExecutorCreateRequest{RequiresCloneGitMetadataPolicy: true}) {
+	if !shouldReplaceSpriteAgentInstance(&ExecutorCreateRequest{GitMetadataRequirement: GitMetadataRequirement{Mode: gitMetadataRequirementMutableClone}}) {
 		t.Fatal("clone Git metadata policy must replace stale Sprite child")
 	}
 }

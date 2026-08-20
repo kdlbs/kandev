@@ -874,7 +874,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		PromptTurnID:                   reqWithWorktree.TurnID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
 		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
-		RequiresCloneGitMetadataPolicy: rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) > 0,
+		GitMetadataRequirement:         cloneGitMetadataRequirement(rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) > 0),
 		GitMetadataProjections:         gitMetadata,
 		Protocol:                       string(agentConfig.Runtime().Protocol),
 		Env:                            env,
@@ -1520,22 +1520,6 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 			projectionErr = materializeWorkspaceRepositories(ctx, execInstance.Client, projection, roots)
 			if projectionErr == nil {
 				execInstance.WorkspaceSourceRoots = roots
-				metadata := make([]remoteRegularGitMetadata, 0, len(projection)+1)
-				for _, root := range roots {
-					metadata = append(metadata, remoteRegularGitMetadata{CheckoutPath: root, GitDir: root + "/.git"})
-				}
-				projectionErr = prepareRemoteRegularGitMetadataPolicy(execReq, metadata...)
-				if projectionErr == nil {
-					policyEnv, envErr := remoteGitMetadataRuntimeEnv(execReq)
-					if envErr != nil {
-						projectionErr = envErr
-					} else {
-						if execInstance.Metadata == nil {
-							execInstance.Metadata = make(map[string]interface{})
-						}
-						execInstance.Metadata["runtime_env"] = policyEnv
-					}
-				}
 			}
 		}
 		if projectionErr != nil {
@@ -1544,6 +1528,12 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 			m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
 			return nil, err
 		}
+	}
+	if policyErr := installAttestedCloneGitMetadataPolicy(ctx, execReq, execInstance); policyErr != nil {
+		_ = rt.StopInstance(context.WithoutCancel(ctx), execInstance, false)
+		err = fmt.Errorf("install clone Git metadata policy: %w", policyErr)
+		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
+		return nil, err
 	}
 
 	// Remote executors (Docker, Sprites) clone the workspace inside the
