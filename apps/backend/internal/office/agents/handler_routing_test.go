@@ -228,6 +228,39 @@ func TestGetAgent_IncludesModelFieldForExecutionProfileAgent(t *testing.T) {
 	}
 }
 
+// AC-13a: the shadow field on agentResponseBody must be a *string, not a
+// plain string. This is the regression the type choice guards against:
+// a legacy execution-profile row (role == "") with an EMPTY model value
+// must still emit the "model" key (present, empty string) — this only
+// passes because the shadow field's omitempty is checked against a nil
+// *pointer*, not the empty string it points to. A plain `string` field
+// with omitempty would silently drop this key when the value is "",
+// which is exactly the regression TestGetAgent_IncludesModelFieldForExecutionProfileAgent's
+// non-empty "gpt-5" fixture cannot catch.
+func TestGetAgent_IncludesEmptyModelKeyForExecutionProfileAgent(t *testing.T) {
+	svc, repo := newTestAgentService(t)
+	ctx := context.Background()
+	agent := &models.AgentInstance{
+		ID: "legacy-empty-model", WorkspaceID: "ws-1", Name: "Legacy No Model", Model: "",
+	}
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create legacy agent: %v", err)
+	}
+
+	rec := newGetRecorder(t, svc, "/api/v1/agents/"+agent.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	got := decodeAgentMap(t, rec.Body.Bytes())
+	v, ok := got["model"]
+	if !ok {
+		t.Fatalf("model key absent for execution-profile agent with empty model: %+v", got)
+	}
+	if v != "" {
+		t.Errorf("model = %v, want empty string", v)
+	}
+}
+
 // AC-13b: the omission also applies to the list endpoint.
 func TestListAgents_OmitsModelFieldForOfficeAgents(t *testing.T) {
 	svc, _ := newTestAgentService(t)

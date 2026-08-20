@@ -448,13 +448,17 @@ func aggregateBlock(skipped []SkippedCandidate) BlockReason {
 // which never carries a reason, is guaranteed to never report
 // TierSourceWakeReason — see AC-18b). role is the agent's role string;
 // an empty role, or a role absent from (or empty-valued in)
-// cfg.RoleTiers, simply never matches the map lookup and falls through
-// — no separate enum check is needed for that case. When cfg.DefaultTier
-// is itself empty, the function returns ("", "") rather than
-// (DefaultTier, TierSourceWorkspace): an empty source must never be
-// interpreted as "workspace" (AC-20c). This cannot happen in practice
-// (validateTier rejects an empty default_tier and the column default is
-// non-empty), but the fallthrough is pinned defensively anyway.
+// cfg.RoleTiers, simply never matches the map lookup and falls through.
+// A non-empty role outside the seven-value enum is explicitly gated by
+// agentRoleSet() (AC-34): role_tiers may persist a matching key for such
+// a role (AC-34b permits it on the read path), so the lookup itself
+// would otherwise match — the enum check exists specifically to stop
+// that from applying. When cfg.DefaultTier is itself empty, the function
+// returns ("", "") rather than (DefaultTier, TierSourceWorkspace): an
+// empty source must never be interpreted as "workspace" (AC-20c). This
+// cannot happen in practice (validateTier rejects an empty default_tier
+// and the column default is non-empty), but the fallthrough is pinned
+// defensively anyway.
 func effectiveTier(cfg *WorkspaceConfig, ov AgentOverrides, role string, reason string) (Tier, string) {
 	if reason != "" {
 		if t := wakeReasonTier(cfg, ov, reason); t != "" {
@@ -465,8 +469,10 @@ func effectiveTier(cfg *WorkspaceConfig, ov AgentOverrides, role string, reason 
 		return ov.Tier, TierSourceOverride
 	}
 	if role != "" {
-		if t, ok := cfg.RoleTiers[role]; ok && t != "" {
-			return t, TierSourceRole
+		if _, known := agentRoleSet()[role]; known {
+			if t, ok := cfg.RoleTiers[role]; ok && t != "" {
+				return t, TierSourceRole
+			}
 		}
 	}
 	if cfg.DefaultTier == "" {

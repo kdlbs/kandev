@@ -251,7 +251,7 @@ func TestRouting_PreviewComposesAgentRows(t *testing.T) {
 	fake.preview = []routing.PreviewItem{
 		{
 			AgentID: "a1", AgentName: "Alice",
-			TierSource: "inherit", EffectiveTier: "balanced",
+			TierSource: routing.TierSourceWorkspace, EffectiveTier: "balanced",
 			PrimaryProviderID: "claude-acp", PrimaryModel: "sonnet",
 			FallbackChain: []routing.PreviewProviderModel{
 				{ProviderID: "codex-acp", Model: "gpt-5", Tier: "balanced"},

@@ -574,11 +574,11 @@ func (p *Provider) previewForAgent(
 	ctx context.Context, workspaceID string,
 	agent models.AgentInstance, cfg *WorkspaceConfig,
 ) (PreviewItem, error) {
-	tierSource := tierSourceForAgent(agent, cfg)
 	res, err := p.resolver.Resolve(ctx, workspaceID, agent, ResolveOptions{})
 	if err != nil {
 		return PreviewItem{}, fmt.Errorf("routing: resolve %s: %w", agent.ID, err)
 	}
+	tierSource := previewTierSource(res, agent, cfg)
 	primaryProvider, primaryProfile, primaryModel := primaryProviderModel(res, cfg)
 	return PreviewItem{
 		AgentID:                   agent.ID,
@@ -629,6 +629,28 @@ func tierSourceForAgent(agent models.AgentInstance, cfg *WorkspaceConfig) string
 	}
 	_, source := effectiveTier(cfg, ov, string(agent.Role), "")
 	return source
+}
+
+// previewTierSource returns the source PreviewItem.TierSource must carry.
+// AC-20d requires preview and resolve to share one producer AND never
+// disagree — sharing the effectiveTier function alone is not enough,
+// because previewForAgent's cfg snapshot and Resolve's own internal
+// GetWorkspaceRouting read are two independent reads of the same row: a
+// workspace routing write landing between them would otherwise let
+// tierSourceForAgent(agent, cfg) answer from a config Resolve never saw.
+// res.TierSource is therefore the primary source — it is exactly what
+// Resolve computed against the config it actually used. The one
+// exception is Resolve's disabled-empty-config early return
+// (resolver.go, cfg == nil || (!cfg.Enabled && len(cfg.ProviderOrder) ==
+// 0)), which returns a Resolution that never calls effectiveTier and so
+// carries an empty TierSource; previewForAgent's own contract still
+// requires a non-blank preview row in that case, so it falls back to the
+// snapshot computation only then.
+func previewTierSource(res *Resolution, agent models.AgentInstance, cfg *WorkspaceConfig) string {
+	if res != nil && res.TierSource != "" {
+		return res.TierSource
+	}
+	return tierSourceForAgent(agent, cfg)
 }
 
 // effectivePreviewTier returns the tier the resolver consumed, falling

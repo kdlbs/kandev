@@ -150,6 +150,33 @@ func TestResolve_TierSource_WakeReasonBeatsOverrideAndRoleTier(t *testing.T) {
 	}
 }
 
+// AC-34: an agent whose role is outside the seven-value enum (a row
+// written by an older build or by hand) must never consult role_tiers,
+// even when the persisted map happens to hold a matching non-enum key
+// (AC-34b permits such a key to exist on the read path). Resolution
+// falls through to the workspace default exactly as if role_tiers were
+// empty for this agent.
+func TestResolve_TierSource_NonEnumRoleIgnoresMatchingRoleTiersKey(t *testing.T) {
+	cfg := twoProviderCfg()
+	cfg.RoleTiers = routing.RoleTierMap{"legacy-role": routing.TierFrontier}
+	repo := &fakeRepo{cfg: cfg}
+	r := newResolver(t, repo)
+
+	res, err := r.Resolve(context.Background(), wsID,
+		agentWithRole(t, settingsmodels.AgentRole("legacy-role"), routing.AgentOverrides{}),
+		routing.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if res.RequestedTier != cfg.DefaultTier {
+		t.Errorf("RequestedTier = %q, want workspace default %q (non-enum role must not match role_tiers)",
+			res.RequestedTier, cfg.DefaultTier)
+	}
+	if res.TierSource != routing.TierSourceWorkspace {
+		t.Errorf("TierSource = %q, want %q", res.TierSource, routing.TierSourceWorkspace)
+	}
+}
+
 // AC-12a: a disabled workspace with a non-empty provider order still
 // resolves the role tier — Enabled only gates automatic fallback, not
 // tier resolution. This is the branch that does NOT hit Resolve's
