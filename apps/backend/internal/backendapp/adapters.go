@@ -317,6 +317,7 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 			TaskRepositoryID:           r.TaskRepositoryID,
 			RepositoryID:               r.RepositoryID,
 			RepositoryPath:             r.RepositoryPath,
+			WorktreePath:               r.WorktreePath,
 			RepositoryURL:              r.RepositoryURL,
 			RepoName:                   r.RepoName,
 			BaseBranch:                 r.BaseBranch,
