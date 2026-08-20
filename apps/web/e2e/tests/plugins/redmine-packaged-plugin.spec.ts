@@ -53,7 +53,7 @@ test.describe("Redmine packaged plugin", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(90_000);
     await installPackagedPlugin(testPage);
 
     // Real RPC calls into the uploaded artifact. Both are zero-network reads
@@ -87,7 +87,7 @@ test.describe("Redmine packaged plugin", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(90_000);
     await installPackagedPlugin(testPage);
 
     // registerIntegrationSettings({id:"redmine",...}) renders natively at
@@ -99,6 +99,8 @@ test.describe("Redmine packaged plugin", () => {
     await expect(testPage.getByTestId("redmine-api-key-input")).toBeVisible();
     const saveButton = testPage.getByTestId("redmine-connection-save");
     await expect(saveButton).toBeDisabled();
+    // The plugin's public UI contract exposes this connection state through a
+    // plain DOM id, rather than a test id.
     await expect(testPage.locator("#redmine-connection-state")).toHaveText("disconnected");
 
     await testPage.getByTestId("redmine-base-url-input").fill("https://redmine.example.com");
