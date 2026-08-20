@@ -195,6 +195,79 @@ func TestCreateTaskSessionWithWorkspaceBindingConcurrentElectionHasOneOwner(t *t
 	}
 }
 
+func TestCreateTaskSessionWithWorkspaceBindingFailsClosedForAbandonedCreatingClaim(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-binding-abandoned")
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-binding-abandoned", WorkspaceID: "workspace-binding-abandoned", Title: "binding"}); err != nil {
+		t.Fatal(err)
+	}
+
+	environment := &models.TaskEnvironment{
+		ID:                       "environment-abandoned",
+		TaskID:                   "task-binding-abandoned",
+		ExecutorType:             string(models.ExecutorTypeLocal),
+		Status:                   models.TaskEnvironmentStatusCreating,
+		MaterializationSessionID: "missing-owner",
+	}
+	if err := repo.CreateTaskEnvironment(ctx, environment); err != nil {
+		t.Fatalf("create abandoned environment: %v", err)
+	}
+
+	err := repo.CreateTaskSessionWithWorkspaceBinding(ctx,
+		&models.TaskSession{ID: "session-retry", TaskID: "task-binding-abandoned"},
+		&models.TaskEnvironment{TaskID: "task-binding-abandoned", ExecutorType: string(models.ExecutorTypeLocal)})
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("bind after abandoned claim error = %v, want reuse unsafe", err)
+	}
+
+	got, err := repo.GetTaskEnvironment(ctx, environment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != models.TaskEnvironmentStatusFailed || got.MaterializationSessionID != "" {
+		t.Fatalf("abandoned environment = %+v, want failed without owner", got)
+	}
+	sessions, err := repo.ListTaskSessions(ctx, environment.TaskID)
+	if err != nil || len(sessions) != 0 {
+		t.Fatalf("sessions after failed recovery = %+v, %v", sessions, err)
+	}
+}
+
+func TestCreateTaskSessionWithWorkspaceBindingFailsClosedForTerminalCreatingOwner(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-binding-terminal-owner")
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-binding-terminal-owner", WorkspaceID: "workspace-binding-terminal-owner", Title: "binding"}); err != nil {
+		t.Fatal(err)
+	}
+
+	owner := &models.TaskSession{ID: "terminal-owner", TaskID: "task-binding-terminal-owner"}
+	if err := repo.CreateTaskSessionWithWorkspaceBinding(ctx, owner, &models.TaskEnvironment{
+		TaskID:       owner.TaskID,
+		ExecutorType: string(models.ExecutorTypeLocal),
+	}); err != nil {
+		t.Fatalf("create materialization owner: %v", err)
+	}
+	if err := repo.UpdateTaskSessionState(ctx, owner.ID, models.TaskSessionStateFailed, "launch failed"); err != nil {
+		t.Fatal(err)
+	}
+
+	err := repo.CreateTaskSessionWithWorkspaceBinding(ctx,
+		&models.TaskSession{ID: "session-after-terminal-owner", TaskID: owner.TaskID},
+		&models.TaskEnvironment{TaskID: owner.TaskID, ExecutorType: string(models.ExecutorTypeLocal)})
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("bind after terminal owner error = %v, want reuse unsafe", err)
+	}
+	environment, err := repo.GetTaskEnvironment(ctx, owner.TaskEnvironmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if environment.Status != models.TaskEnvironmentStatusFailed || environment.MaterializationSessionID != "" {
+		t.Fatalf("terminal-owner environment = %+v, want failed without owner", environment)
+	}
+}
+
 func TestUpdateTaskEnvironmentMissingReturnsSentinel(t *testing.T) {
 	repo := newRepoForHealTests(t)
 
