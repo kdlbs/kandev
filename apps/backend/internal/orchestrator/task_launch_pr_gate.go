@@ -12,7 +12,6 @@ import (
 
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
-	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 const (
@@ -156,24 +155,8 @@ func workflowHasValidTerminalFinalStep(
 	getter WorkflowStepGetter,
 	stepID string,
 ) bool {
-	if getter == nil || strings.TrimSpace(stepID) == "" {
-		return false
-	}
-	step, err := getter.GetStep(ctx, stepID)
-	if err != nil || step == nil {
-		return false
-	}
-	for range 1000 {
-		next, nextErr := getter.GetNextStepByPosition(ctx, step.WorkflowID, step.Position)
-		if nextErr != nil {
-			return false
-		}
-		if next == nil {
-			return wfmodels.IsTerminalStep(step, nil)
-		}
-		step = next
-	}
-	return false
+	finalStep, err := findFinalWorkflowStep(ctx, getter, stepID)
+	return err == nil && finalStep != nil
 }
 
 // shouldSkipTerminalPRAutoStart is the pre-session PR gate. Lookup failures

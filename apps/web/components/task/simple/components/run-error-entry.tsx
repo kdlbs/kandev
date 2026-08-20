@@ -147,7 +147,11 @@ export function RunErrorEntry({
       t("task:agent"),
   );
 
-  if (error.recoveryActions && error.recoveryActions.length > 0 && error.errorStamp) {
+  if (
+    error.failureCode &&
+    error.failureCode !== "managed_runtime_npm_resolution" &&
+    error.errorStamp
+  ) {
     return (
       <TypedRunLaunchErrorEntry
         taskId={taskId}

@@ -34,6 +34,7 @@ func TestExecutionToLaunchResponseHandlesNilExecution(t *testing.T) {
 	response := executionToLaunchResponse("task-1", nil)
 	if response == nil {
 		t.Fatal("expected a response")
+		return
 	}
 	if !response.Success {
 		t.Fatal("expected a successful no-op response")

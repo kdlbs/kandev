@@ -40,9 +40,12 @@ Carry the bounded launch-error contract into task-detail data and chat view mode
 ## Results
 Implemented the bounded task summary types, task-scoped error context, and the standalone recovery card.
 The card preserves exact task-repository identity and coalesces duplicate recovery requests.
+It also renders typed errors without actions, guards refreshes by summary
+revision, and shows pending state in duplicate task surfaces.
 
 Verification:
 
 - `cd apps/web && pnpm exec vitest run components/task/simple/components/task-launch-error-entry.test.tsx components/task/simple/task-chat.test.tsx lib/task-status-summary.test.ts lib/session-last-agent-error.test.ts`: 4 files and 50 tests passed.
 - `cd apps/web && pnpm run typecheck`: passed.
 - `cd apps/web && pnpm run lint`: passed.
+- PR fixup verification: focused tests passed in 3 files with 64 tests.

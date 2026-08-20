@@ -266,6 +266,25 @@ Implemented and verified on 2026-08-20.
 
 No public documentation update was required. The change affects internal task recovery behavior.
 
+## PR Fixup Remediation
+
+PR #2832 review and CI findings were addressed before delivery.
+
+- Recovery now reloads all task and session error sources and rejects an action
+  when its source is not the newest active error.
+- Workflow terminal-step traversal uses one shared helper.
+- Session metadata compare-and-clear propagates `RowsAffected` errors.
+- Windows treats the wildcard-bind `WSAEACCES` conflict as a port collision.
+- Typed launch errors remain visible when they have no recovery action.
+- Summary polling keeps the highest revision and duplicate recovery surfaces
+  show the same pending action.
+- `cd apps/backend && make lint`: passed with zero issues.
+- `cd apps/backend && go test ./internal/orchestrator/... ./internal/common/netutil/... ./internal/task/repository/sqlite/...`: 3,468 tests passed in 11 packages.
+- `cd apps/backend && go test -c -o /tmp/kandev-netutil-windows.test.exe ./internal/common/netutil`: passed.
+- `cd apps/web && pnpm run lint`: passed.
+- `cd apps/web && pnpm run typecheck`: passed.
+- Focused frontend fixup tests: 3 files and 64 tests passed.
+
 ## Implementation Waves And Parallel Candidates
 
 ```text

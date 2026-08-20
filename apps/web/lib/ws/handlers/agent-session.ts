@@ -559,7 +559,7 @@ function maybeNotifySessionFailure(store: StoreApi<AppState>, ctx: SessionFailur
       ? (payload.session_metadata as Record<string, unknown>)
       : null;
   const launchError = readLastAgentError(metadata);
-  const isLaunchFailure = Boolean(launchError?.recoveryActions?.length);
+  const isLaunchFailure = Boolean(launchError?.stamp && launchError.code);
   let message = t("task:sessionFailedUnexpectedly");
   if (isLaunchFailure) {
     message = t("task:launchFailedSeeDetails");

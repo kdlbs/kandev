@@ -5,7 +5,7 @@ import type { TaskRepository } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { RunError } from "@/app/office/tasks/[id]/types";
 import { hasMatchingSessionLaunchError } from "../chat-entries";
-import { isRecoverableTaskLaunchError, TaskLaunchErrorEntry } from "./task-launch-error-entry";
+import { isTypedTaskLaunchError, TaskLaunchErrorEntry } from "./task-launch-error-entry";
 
 type TaskChatLaunchErrorProps = {
   taskId: string;
@@ -24,7 +24,7 @@ export function TaskChatLaunchError({
 }: TaskChatLaunchErrorProps) {
   const error = useMemo(() => {
     const candidate = statusSummary?.active_error;
-    if (!isRecoverableTaskLaunchError(candidate)) return null;
+    if (!isTypedTaskLaunchError(candidate)) return null;
     if (hasMatchingSessionLaunchError(candidate.session_id, candidate.stamp, runErrors)) {
       return null;
     }

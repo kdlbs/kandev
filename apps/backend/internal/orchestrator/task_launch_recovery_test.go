@@ -117,6 +117,47 @@ func TestRecoverTaskLaunchRejectsStaleStampBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestRecoverTaskLaunchRejectsOlderSessionErrorWhenTaskErrorIsNewer(t *testing.T) {
+	repo := setupTestRepo(t)
+	const taskID = "task-newer-task-error"
+	const taskRepositoryID = "task-repo-newer-task-error"
+	seedTaskLaunchRecoveryFixture(t, repo, taskID, taskRepositoryID, models.RecoveryActionPickBaseBranch)
+
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID:        "session-older-error",
+		TaskID:    taskID,
+		State:     models.TaskSessionStateFailed,
+		StartedAt: now.Add(-time.Hour),
+		UpdatedAt: now.Add(-time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.SetSessionMetadataKey(context.Background(), "session-older-error", models.SessionMetaKeyLastAgentError, models.LastAgentError{
+		Message:          "older session launch error",
+		OccurredAt:       now.Add(-time.Hour),
+		Code:             models.LaunchErrorCategoryBaseBranchMissing,
+		RecoveryActions:  []string{models.RecoveryActionPickBaseBranch},
+		TaskRepositoryID: taskRepositoryID,
+		StampValue:       "older-session-stamp",
+	}); err != nil {
+		t.Fatalf("SetSessionMetadataKey: %v", err)
+	}
+
+	fake := &taskLaunchRecoveryServiceFake{branches: []taskservice.Branch{{Name: "main", Type: "remote"}}}
+	svc := recoveryFixtureService(t, repo, fake)
+	_, err := svc.RecoverTaskLaunch(context.Background(), &TaskLaunchRecoveryRequest{
+		TaskID: taskID, SessionID: "session-older-error", TaskRepositoryID: taskRepositoryID,
+		Action: models.RecoveryActionPickBaseBranch, BaseBranch: "main", ErrorStamp: "older-session-stamp",
+	})
+	if !errors.Is(err, ErrTaskLaunchRecoveryStale) {
+		t.Fatalf("RecoverTaskLaunch error = %v, want stale error", err)
+	}
+	if len(fake.updated) != 0 {
+		t.Fatalf("older session recovery updated repositories: %#v", fake.updated)
+	}
+}
+
 func TestRecoverTaskLaunchRejectsForeignTaskRepository(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedTaskLaunchRecoveryFixture(t, repo, "task-foreign-row", "task-repo-owned", models.RecoveryActionPickBaseBranch)

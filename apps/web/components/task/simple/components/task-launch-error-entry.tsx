@@ -26,10 +26,10 @@ type TaskLaunchErrorEntryProps = {
 
 const pendingRecoveryRequests = new Map<string, Promise<unknown>>();
 
-export function isRecoverableTaskLaunchError(
+export function isTypedTaskLaunchError(
   error: TaskStatusSummaryActiveError | null | undefined,
-): error is TaskStatusSummaryActiveError & { recovery_actions: TaskLaunchRecoveryAction[] } {
-  return Boolean(error?.stamp && error.recovery_actions && error.recovery_actions.length > 0);
+): error is TaskStatusSummaryActiveError & { category: string } {
+  return Boolean(error?.stamp && error.category);
 }
 
 function categoryTitle(category: string | undefined, t: (key: string) => string): string {
@@ -141,10 +141,13 @@ export function TaskLaunchErrorEntry({
     const requestKey = JSON.stringify({ taskId, stamp: error.stamp, action, baseBranch });
     const existingRequest = pendingRecoveryRequests.get(requestKey);
     if (existingRequest) {
+      setPendingAction(action);
       try {
         await existingRequest;
       } catch {
         // The request owner reports the recovery error to avoid duplicate toasts.
+      } finally {
+        setPendingAction(null);
       }
       return;
     }

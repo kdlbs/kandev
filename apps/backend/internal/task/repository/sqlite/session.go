@@ -1683,8 +1683,8 @@ func (r *Repository) RemoveSessionMetadataKeyIfStamp(
 	if err != nil {
 		return false, err
 	}
-	rows, _ := result.RowsAffected()
-	return rows > 0, nil
+	rows, err := result.RowsAffected()
+	return rows > 0, err
 }
 
 func setSessionMetadataKeyIfAbsentQuery(driver string) string {

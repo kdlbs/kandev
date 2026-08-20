@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/statussummary"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -96,6 +97,9 @@ func (s *Service) RecoverTaskLaunch(ctx context.Context, req *TaskLaunchRecovery
 	if err != nil {
 		return nil, err
 	}
+	if err := s.verifyCurrentTaskLaunchRecoverySource(ctx, source); err != nil {
+		return nil, err
+	}
 	if !containsRecoveryAction(source.recoveryActions(), req.Action) {
 		return nil, fmt.Errorf("recovery action %q is not available for the current error", req.Action)
 	}
@@ -178,6 +182,70 @@ func (s *Service) loadTaskLaunchRecoverySource(ctx context.Context, req *TaskLau
 	return source, nil
 }
 
+func (s *Service) verifyCurrentTaskLaunchRecoverySource(
+	ctx context.Context,
+	source *taskLaunchRecoverySource,
+) error {
+	current, err := s.loadAuthoritativeTaskLaunchRecoveryError(ctx, source.task.ID)
+	if err != nil {
+		return err
+	}
+	if current == nil || current.SessionID != source.sessionID() || current.Stamp != source.errorStamp {
+		return ErrTaskLaunchRecoveryStale
+	}
+	return nil
+}
+
+func (s *Service) loadAuthoritativeTaskLaunchRecoveryError(
+	ctx context.Context,
+	taskID string,
+) (*statussummary.ActiveErrorSummary, error) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, fmt.Errorf("task %q was not found", taskID)
+	}
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	input := statussummary.RebuildInput{Now: time.Now().UTC()}
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		lastError, found := models.LoadLastAgentError(session.Metadata)
+		if !found || lastError.IsDismissed() {
+			continue
+		}
+		input.Sessions = append(input.Sessions, statussummary.RebuildSession{
+			ID: session.ID,
+			ActiveError: &statussummary.ActiveErrorSummary{
+				SessionID:        session.ID,
+				TaskRepositoryID: lastError.TaskRepositoryID,
+				Stamp:            lastError.Stamp(),
+				OccurredAt:       lastError.OccurredAt,
+				Preview:          lastError.Message,
+				Category:         lastError.Code,
+				RecoveryActions:  lastError.RecoveryActions,
+			},
+		})
+	}
+	if launchError, found := models.LoadTaskLaunchError(task.Metadata); found {
+		input.TaskError = &statussummary.ActiveErrorSummary{
+			TaskRepositoryID: launchError.TaskRepositoryID,
+			Stamp:            launchError.Stamp(),
+			OccurredAt:       launchError.OccurredAt,
+			Preview:          launchError.Message,
+			Category:         launchError.Code,
+			RecoveryActions:  launchError.RecoveryActions,
+		}
+	}
+	return statussummary.BuildFromAuthoritative(input).ActiveError, nil
+}
+
 func (s *Service) loadSessionTaskLaunchRecoverySource(
 	ctx context.Context,
 	req *TaskLaunchRecoveryRequest,
@@ -248,6 +316,13 @@ func (source *taskLaunchRecoverySource) taskRepositoryID() string {
 		return source.sessionError.TaskRepositoryID
 	}
 	return source.taskError.TaskRepositoryID
+}
+
+func (source *taskLaunchRecoverySource) sessionID() string {
+	if source.sessionOwned && source.session != nil {
+		return source.session.ID
+	}
+	return ""
 }
 
 func (source *taskLaunchRecoverySource) recoveryActions() []string {
@@ -466,27 +541,14 @@ func (s *Service) findTerminalFinalWorkflowStep(ctx context.Context, task *model
 	if task == nil || strings.TrimSpace(task.WorkflowID) == "" || s.workflowStepGetter == nil {
 		return nil, nil
 	}
-	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	step, err := findFinalWorkflowStep(ctx, s.workflowStepGetter, task.WorkflowStepID)
 	if err != nil {
 		return nil, err
 	}
 	if step == nil || step.WorkflowID != task.WorkflowID {
 		return nil, nil
 	}
-	for range 1000 {
-		next, nextErr := s.workflowStepGetter.GetNextStepByPosition(ctx, task.WorkflowID, step.Position)
-		if nextErr != nil {
-			return nil, nextErr
-		}
-		if next == nil {
-			if wfmodels.IsTerminalStep(step, nil) {
-				return step, nil
-			}
-			return nil, nil
-		}
-		step = next
-	}
-	return nil, fmt.Errorf("workflow final step traversal exceeded limit")
+	return step, nil
 }
 
 func (s *Service) clearTaskLaunchRecoverySource(ctx context.Context, source *taskLaunchRecoverySource) error {

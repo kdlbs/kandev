@@ -58,5 +58,11 @@ Add a task-scoped WebSocket action for pre-session and session launch errors.
 - Added a recovery-only workflow move option for `FAILED` to `COMPLETED` and
   kept normal failed/cancelled move preservation intact.
 - Added session metadata compare-and-clear persistence coverage.
+- Added a final source reload that rejects an older task or session error
+  before any recovery mutation.
+- Reused one workflow terminal-step traversal helper for the PR gate and
+  recovery action.
 - Verification: `cd apps/backend && go test ./internal/orchestrator/... -race`
   passed (2,841 tests in 9 packages).
+- PR fixup verification: `cd apps/backend && go test ./internal/orchestrator/... ./internal/common/netutil/... ./internal/task/repository/sqlite/...`
+  passed (3,468 tests in 11 packages), and `make lint` reported zero issues.

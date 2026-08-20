@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { TaskLaunchErrorEntry } from "./task-launch-error-entry";
+import { TaskChatLaunchError } from "./task-chat-launch-error";
 import type { TaskRepository } from "@/lib/types/http";
 import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summary";
 
@@ -59,7 +60,27 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
+// eslint-disable-next-line max-lines-per-function -- shared recovery-entry fixtures keep these related flows together.
 describe("TaskLaunchErrorEntry", () => {
+  it("renders a typed summary error without recovery actions", () => {
+    render(
+      <TaskChatLaunchError
+        taskId={TASK_ID}
+        workspaceId="workspace-1"
+        statusSummary={{
+          revision: 1,
+          updated_at: "2026-08-19T10:00:00Z",
+          active_error: { ...error, recovery_actions: [] },
+        }}
+        runErrors={[]}
+      />,
+    );
+
+    expect(screen.getByTestId("task-launch-error-entry")).toBeTruthy();
+    expect(screen.getByText(error.preview)).toBeTruthy();
+    expect(screen.queryByTestId("task-launch-retry_default-button")).toBeNull();
+  });
+
   it("renders the bounded preview and sends the exact task recovery payload", async () => {
     render(
       <TaskLaunchErrorEntry
@@ -158,6 +179,10 @@ describe("TaskLaunchErrorEntry", () => {
     fireEvent.click(buttons[1]);
 
     await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(buttons[0].getAttribute("disabled")).not.toBeNull();
+      expect(buttons[1].getAttribute("disabled")).not.toBeNull();
+    });
     resolveRequest?.({ ok: true });
     await waitFor(() => expect(screen.queryAllByTestId("task-launch-error-entry")).toHaveLength(2));
   });
