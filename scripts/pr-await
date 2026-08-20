@@ -308,12 +308,17 @@ while :; do
   POLLS=$((POLLS + 1))
   ELAPSED=$((SECONDS - START_SEC))
 
+  # A spent deadline still buys one snapshot, but one for the whole iteration:
+  # granting the floor again to the second query would let --deadline-min 0 wait
+  # out two floor-length reads.
+  floor_start=''
   budget="$(remaining_budget)"
   if [[ "$budget" -le 0 ]]; then
     if [[ -n "$SUMMARY_JSON" ]]; then
       OUTCOME='deadline'
       break
     fi
+    floor_start=$SECONDS
     budget="$READ_FLOOR"
   fi
   [[ "$budget" -le "$READ_CAP" ]] || budget="$READ_CAP"
@@ -352,7 +357,14 @@ while :; do
       OUTCOME='deadline'
       break
     fi
-    budget="$READ_FLOOR"
+    if [[ -n "$floor_start" ]]; then
+      # Whatever the first read left of this iteration's single floor.
+      budget=$((READ_FLOOR - (SECONDS - floor_start)))
+      [[ "$budget" -gt 0 ]] || budget=1
+    else
+      floor_start=$SECONDS
+      budget="$READ_FLOOR"
+    fi
   fi
   [[ "$budget" -le "$READ_CAP" ]] || budget="$READ_CAP"
 
@@ -511,6 +523,11 @@ done
 
 WAITED=$((SECONDS - START_SEC))
 
+# A failed read can leave a partial, unparseable body behind, and that value
+# survives the `continue` that follows it. Normalize before the report rather
+# than letting `jq --argjson` abort under `set -e` with no output at all.
+jq -e . >/dev/null 2>&1 <<<"$MERGE_JSON" || MERGE_JSON='{}'
+
 if [[ -z "$SUMMARY_JSON" ]] || ! jq -e . >/dev/null 2>&1 <<<"$SUMMARY_JSON"; then
   emit_blocked 'blocked-access' \
 "BLOCKED: no usable pr-state snapshot was obtained; treat CI state as unknown."
@@ -563,7 +580,7 @@ esac
 if [[ "$FORMAT" == 'json' ]]; then
   jq -n \
     --argjson summary "$SUMMARY_JSON" \
-    --argjson merge "${MERGE_JSON:-{\}}" \
+    --argjson merge "$MERGE_JSON" \
     --arg outcome "$OUTCOME" \
     --arg mode "$MODE" \
     --argjson waited_sec "$WAITED" \

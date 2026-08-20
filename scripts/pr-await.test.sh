@@ -644,4 +644,38 @@ fi
 pass "a timed-out read terminates the whole process group, not just the shell"
 
 
+# --- a spent deadline grants one read floor, not one per query -------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+# pr-state SUCCEEDS but eats most of the floor; gh then stalls. A shared budget
+# leaves gh the remainder; a fresh grant hands it a whole second floor.
+cat > "$d/pr-state" <<'SLOWPS'
+#!/usr/bin/env bash
+sleep 3
+cat "$FAKE_DIR/seq/1.json"
+SLOWPS
+cat > "$d/gh" <<'SLOWGH'
+#!/usr/bin/env bash
+exec sleep 120
+SLOWGH
+chmod +x "$d/pr-state" "$d/gh"
+start=$SECONDS
+PR_AWAIT_READ_FLOOR=4 run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet >/dev/null 2>&1 || true
+elapsed=$((SECONDS - start))
+[[ "$elapsed" -lt 6 ]] || fail "a zero deadline granted a second read floor, took ${elapsed}s (budget was 4)"
+pass "a spent deadline grants a single read floor shared across both queries"
+
+# --- every --format json exit path emits parseable JSON --------------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+cat > "$d/gh" <<'GARBAGE'
+#!/usr/bin/env bash
+printf 'not json at all'
+GARBAGE
+chmod +x "$d/gh"
+out="$(PR_AWAIT_READ_FLOOR=2 run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet --format json 2>/dev/null)" || true
+jq -e . >/dev/null 2>&1 <<<"$out" || fail "a garbage merge-state read must still yield parseable JSON" "$out"
+pass "a garbage merge-state read still yields parseable JSON"
+
+
 printf '\nall tests passed\n'
