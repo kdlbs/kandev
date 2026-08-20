@@ -147,6 +147,17 @@ func TestGitMetadataProjectionPreservesNativeIndexLockAndCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	runGitMetadata(t, checkout, "add", "tracked.txt")
+	refLockPath := projection.CurrentRefPath + ".lock"
+	if err := os.WriteFile(refLockPath, []byte("held"), 0o600); err != nil {
+		t.Fatalf("hold current branch ref lock: %v", err)
+	}
+	output, err = exec.Command("git", "-C", checkout, "commit", "-m", "blocked by ref lock").CombinedOutput()
+	if err == nil || !strings.Contains(string(output), ".lock") {
+		t.Fatalf("git commit error=%v output=%s, want native ref lock conflict", err, output)
+	}
+	if err := os.Remove(refLockPath); err != nil {
+		t.Fatal(err)
+	}
 	runGitMetadata(t, checkout, "commit", "-m", "task change")
 	runGitMetadata(t, checkout, "fsck", "--strict")
 }
