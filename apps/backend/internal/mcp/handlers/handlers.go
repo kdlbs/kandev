@@ -2156,7 +2156,7 @@ func (h *Handlers) createCompletionIntent(
 		Handoff:          signal.Handoff,
 		Blockers:         signal.Blockers,
 		RequestedAt:      requestedAt,
-		EligibleAt:       requestedAt,
+		EligibleAt:       requestedAt.Add(models.CompletionIntentQuietGrace),
 	}
 	_, stored, err := store.CreateOrGetCompletionIntent(ctx, intent)
 	if err != nil {

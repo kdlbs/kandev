@@ -288,6 +288,8 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	assert.Equal(t, "step-1", intent.WorkflowStepID)
 	assert.Equal(t, "implementation finished", intent.Summary)
 	assert.Equal(t, models.CompletionIntentStatePending, intent.State)
+	assert.WithinDuration(t, intent.RequestedAt.Add(models.CompletionIntentQuietGrace), intent.EligibleAt, time.Microsecond,
+		"accepted completion intent must wait through the conservative quiet grace")
 
 	// Bus event published with the public payload shape (no handoff/blockers
 	// on the wire — those live in the bag only).

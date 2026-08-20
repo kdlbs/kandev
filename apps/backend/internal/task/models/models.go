@@ -610,6 +610,11 @@ type PendingStepCompletionSignal struct {
 // a later user message owns a successor intent rather than mutating history.
 type CompletionIntentState string
 
+// CompletionIntentQuietGrace is the conservative initial and re-armed delay
+// before a signal-gated turn can be recovered without a provider ready event.
+// It gives final output and tool activity an opportunity to arrive first.
+const CompletionIntentQuietGrace = 5 * time.Second
+
 const (
 	CompletionIntentStatePending    CompletionIntentState = "pending"
 	CompletionIntentStateSettling   CompletionIntentState = "settling"

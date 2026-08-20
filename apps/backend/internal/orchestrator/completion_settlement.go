@@ -22,6 +22,7 @@ const (
 type completionIntentReconciliationStore interface {
 	ListDueCompletionIntents(ctx context.Context, now time.Time, limit int) ([]*models.CompletionIntent, error)
 	GetCompletionIntentForTurn(ctx context.Context, sessionID, turnID string) (*models.CompletionIntent, error)
+	RearmCompletionIntent(ctx context.Context, id string, activityAt, eligibleAt time.Time) (bool, error)
 	TransitionCompletionIntent(ctx context.Context, id string, from, to models.CompletionIntentState, settledAt time.Time) (bool, error)
 }
 
@@ -208,4 +209,30 @@ func (s *Service) settleCompletionIntentForProviderTurn(ctx context.Context, ses
 		return
 	}
 	s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSettled, time.Now().UTC())
+}
+
+// rearmCompletionIntentForActivity moves a pending intent's quiet window
+// forward whenever its captured turn emits more foreground or tool activity.
+// It is deliberately best-effort: a failed activity touch must never block
+// the stream event that supplied the stronger evidence.
+func (s *Service) rearmCompletionIntentForActivity(ctx context.Context, sessionID string) {
+	if sessionID == "" || s.turnService == nil {
+		return
+	}
+	store, ok := s.repo.(completionIntentReconciliationStore)
+	if !ok {
+		return
+	}
+	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil || turn == nil {
+		return
+	}
+	intent, err := store.GetCompletionIntentForTurn(ctx, sessionID, turn.ID)
+	if err != nil || intent.State != models.CompletionIntentStatePending {
+		return
+	}
+	now := time.Now().UTC()
+	if _, err := store.RearmCompletionIntent(ctx, intent.ID, now, now.Add(models.CompletionIntentQuietGrace)); err != nil {
+		s.logger.Warn("failed to rearm completion intent after activity", zap.String("intent_id", intent.ID), zap.Error(err))
+	}
 }

@@ -69,6 +69,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	sessionID := payload.SessionID
 	eventType := payload.Data.Type
 	terminalCompleteStream := false
+	switch eventType {
+	case "message_streaming", "thinking_streaming", agentEventToolCall, agentEventToolUpdate:
+		s.rearmCompletionIntentForActivity(ctx, sessionID)
+	}
 
 	if eventType == agentEventComplete {
 		if marker, ok := s.terminalExecutionMarker(sessionID, payload.ExecutionID); ok {
