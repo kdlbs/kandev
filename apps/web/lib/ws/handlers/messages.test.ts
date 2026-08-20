@@ -10,6 +10,7 @@ const PROJECTION_EPOCH = "7";
 const SESSION_ID = "session-1";
 const QUESTION_ID = "question-1";
 const QUESTION_CONTENT = "Choose";
+const ADD_ACTION = "session.message.added";
 
 function pendingRevision(sequence: number) {
   return { epoch: PROJECTION_EPOCH, sequence };
@@ -156,10 +157,10 @@ describe("session message frame scheduler", () => {
     expect(updateMessage).toHaveBeenCalledTimes(1);
 
     handlers["session.message.updated"]!(makeUpdated("session-1", "message-2", "before-add"));
-    handlers["session.message.added"]!({
+    handlers[ADD_ACTION]!({
       id: "add-1",
       type: "notification",
-      action: "session.message.added",
+      action: ADD_ACTION,
       payload: makePayload("session-1", "message-3", "added"),
       timestamp: TEST_TIMESTAMP,
     });
@@ -198,15 +199,78 @@ describe("session message frame scheduler", () => {
   });
 });
 
+describe("session message prompt_index mapping", () => {
+  it("maps prompt_index from a session.message.added payload", () => {
+    const { store, addMessage } = makeStore();
+    const registration = createMessagesHandlerRegistration(store);
+
+    registration.handlers[ADD_ACTION]!({
+      id: "add-numbered",
+      type: "notification",
+      action: ADD_ACTION,
+      payload: makePayload("session-1", "message-1", "numbered prompt", {
+        author_type: "user",
+        prompt_index: 2,
+      }),
+      timestamp: TEST_TIMESTAMP,
+    });
+
+    expect(addMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "message-1", prompt_index: 2 }),
+    );
+    registration.dispose();
+  });
+
+  it("maps prompt_index from a session.message.updated payload", () => {
+    const { store, updateMessage } = makeStore();
+    const registration = createMessagesHandlerRegistration(store);
+
+    const payload = makePayload("session-1", "message-1", "edited", {
+      author_type: "user",
+      prompt_index: 5,
+    });
+    registration.handlers["session.message.updated"]!({
+      ...makeUpdated("session-1", "message-1", "edited"),
+      payload,
+    });
+    registration.scheduler.flush();
+
+    expect(updateMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: "message-1", prompt_index: 5 }),
+    );
+    registration.dispose();
+  });
+
+  it("leaves prompt_index undefined when the payload omits it (store merge preserves known ordinals)", () => {
+    const { store, addMessage } = makeStore();
+    const registration = createMessagesHandlerRegistration(store);
+
+    registration.handlers[ADD_ACTION]!({
+      id: "add-plain",
+      type: "notification",
+      action: ADD_ACTION,
+      payload: makePayload("session-1", "message-1", "plain prompt", {
+        author_type: "user",
+      }),
+      timestamp: TEST_TIMESTAMP,
+    });
+
+    expect(addMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "message-1", prompt_index: undefined }),
+    );
+    registration.dispose();
+  });
+});
+
 describe("session message pending-action projection", () => {
   it("applies the authoritative projection carried by a message event", () => {
     const { store, setTaskSessionPendingAction } = makeStore();
     const registration = createMessagesHandlerRegistration(store);
 
-    registration.handlers["session.message.added"]!({
+    registration.handlers[ADD_ACTION]!({
       id: "add-clarification",
       type: "notification",
-      action: "session.message.added",
+      action: ADD_ACTION,
       payload: {
         ...makePayload(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
         type: "clarification_request",
@@ -347,10 +411,10 @@ describe("late tool messages", () => {
     const { store, addMessage } = makeStore({}, true);
     const registration = createMessagesHandlerRegistration(store);
 
-    registration.handlers["session.message.added"]!({
+    registration.handlers[ADD_ACTION]!({
       id: "add-tool",
       type: "notification",
-      action: "session.message.added",
+      action: ADD_ACTION,
       payload: makePayload("session-1", "tool-1", "Terminal", {
         type: "tool_call",
         metadata: { tool_call_id: "call-1", status: "running" },

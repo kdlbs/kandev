@@ -63,8 +63,10 @@ func resolveTrustedProxies(raw string) (trusted []string, invalid []string) {
 // (SetTrustedProxies(nil)); an invalid entry logs a warning naming the bad
 // value(s). gin trusts all proxies out of the box, so without this call a
 // directly reachable backend would accept a spoofed X-Forwarded-For and
-// defeat the ClientIP-keyed login rate limiter.
-func configureTrustedProxies(router *gin.Engine, log *logger.Logger) {
+// defeat the ClientIP-keyed login rate limiter. It returns the effective
+// trusted list (nil when nothing is trusted) so callers can apply the same
+// trust decision to other forwarded headers.
+func configureTrustedProxies(router *gin.Engine, log *logger.Logger) []string {
 	trusted, invalid := resolveTrustedProxies(os.Getenv(trustedProxiesEnv))
 	if len(invalid) > 0 {
 		log.Warn(trustedProxiesWarningMsg, zap.Strings("invalid_entries", invalid))
@@ -73,4 +75,5 @@ func configureTrustedProxies(router *gin.Engine, log *logger.Logger) {
 	if err := router.SetTrustedProxies(trusted); err != nil {
 		log.Warn("failed to configure trusted proxies", zap.Error(err))
 	}
+	return trusted
 }

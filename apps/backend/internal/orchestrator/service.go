@@ -41,6 +41,7 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -579,6 +580,11 @@ type Service struct {
 	// onManualMoveLifecycleStart blocks the admitted manual-move lifecycle in
 	// package tests so feeder promotion ordering can be asserted.
 	onManualMoveLifecycleStart func()
+	// onQueuedMessageExecutionComplete is a package-test hook that fires after
+	// an asynchronous queued-message worker has released its dispatch
+	// reservation. It lets tests wait for the full worker lifecycle instead of
+	// observing only the prompt call.
+	onQueuedMessageExecutionComplete func()
 	// queuedMoveLifecycleLocks serializes source-exit work per task. The
 	// completion marker remains durable so a restart can safely resume work.
 	queuedMoveLifecycleLocks sync.Map
@@ -713,6 +719,13 @@ type Service struct {
 	// construct the service without one, and an install with no worktree
 	// manager simply keeps every run's checkout. Set via SetWorktreeManager.
 	worktreeReaper automationWorktreeReaper
+
+	// idleReaper is the periodic background loop that calls
+	// reclaimIdleSession on rows older than idleReaperMinIdle. Nil-safe:
+	// callers that don't need the reaper (most tests, ephemeral
+	// orchestrator instances) leave it nil and startIdleSessionReaper
+	// / stopIdleSessionReaper no-op. See idle_session_reaper.go.
+	idleReaper *idleSessionReaper
 
 	// unreclaimedWorkspaces holds the automation runs whose workspace removal
 	// was attempted and did not actually free the directory. Retention selects
@@ -849,6 +862,13 @@ type Service struct {
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.
 	resetInProgressSessions sync.Map
+	// sessionLifecycleLocks serializes context resets with every path that can
+	// resume a session from executors_running. The lock is intentionally shared
+	// by resetAgentContext and ensureSessionRunning so a lazy resume cannot read
+	// the old token while a workflow reset is clearing it.
+	// Entries are not deleted: deleting a lock can let a new caller create a
+	// second mutex while an existing waiter still owns the old one.
+	sessionLifecycleLocks sync.Map // map[sessionID]*sync.Mutex
 	// contextWindowGuards serializes live context usage writes and gives each
 	// session a generation boundary that reset_agent_context can invalidate.
 	contextWindowGuards sync.Map
@@ -1126,6 +1146,7 @@ func NewService(
 		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
+		idleReaper:                   newIdleSessionReaper(),
 	}
 	// Always publish queue-status after a task-scoped queue purge so the
 	// status-summary projector zeros queued_prompt_count. Unlike the
@@ -2145,6 +2166,20 @@ func (s *Service) setSessionResetInProgress(sessionID string, inProgress bool) {
 	s.resetInProgressSessions.Delete(sessionID)
 }
 
+// acquireSessionLifecycleLock serializes operations that change or consume a
+// session's persisted conversation identity. Keep the critical section around
+// the complete reset/resume operation, including the bounded runtime wait, so
+// no caller can launch with a token that a concurrent reset is invalidating.
+func (s *Service) acquireSessionLifecycleLock(sessionID string) func() {
+	if sessionID == "" {
+		return func() {}
+	}
+	value, _ := s.sessionLifecycleLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	lock.Lock()
+	return lock.Unlock
+}
+
 func (s *Service) isSessionResetInProgress(sessionID string) bool {
 	if sessionID == "" {
 		return false
@@ -2258,6 +2293,14 @@ func (s *Service) Start(ctx context.Context) error {
 	// services are ready. Only un-dispatched pending states are scheduled.
 	s.startDynamicPolicyRecovery(ctx)
 
+	// Start the idle-session reaper last. It depends on s.repo
+	// (already wired), s.agentManager (already wired), and the
+	// turnService-cleared reconciler so a turnService == nil error
+	// would already have aborted Start above. After this returns the
+	// background goroutine owns the reclaim tick; Service.Stop joins it
+	// before tearing down repo / agentManager.
+	s.startIdleSessionReaper(ctx)
+
 	s.logger.Info("orchestrator service started successfully")
 	return nil
 }
@@ -2277,6 +2320,7 @@ func (s *Service) Stop() error {
 
 	// Stop components in reverse order
 	var errs []error
+	s.stopIdleSessionReaper()
 	s.stopReservedPromptCallbacks()
 
 	if err := s.scheduler.Stop(); err != nil {
@@ -2713,6 +2757,15 @@ func canResumeRunning(running *models.ExecutorRunning) bool {
 }
 
 func isMissingBranchError(err error) bool {
+	// A checked-out-elsewhere error chain can still mention "couldn't find
+	// remote ref" inside its concatenated fetch+checkout stderr, so the
+	// substring match below would misclassify it as a missing branch and
+	// post PR-recovery guidance for a branch that is in fact present
+	// locally. The local preparer wraps worktree.ErrBranchCheckedOut for
+	// that case; honor the typed sentinel first.
+	if errors.Is(err, worktree.ErrBranchCheckedOut) {
+		return false
+	}
 	for current := err; current != nil; current = errors.Unwrap(current) {
 		if isMissingBranchMessage(current.Error()) {
 			return true
@@ -3121,7 +3174,69 @@ func (s *Service) QueueUserPrompt(
 		return fmt.Errorf("queue user prompt: %w", err)
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
+
+	// T2: enqueue-side fast-path drain. The user's WIP wait is a
+	// first-class contract (the dispatcher gates on
+	// ProcessOnTurnStart's Queued=true return value). Promoting a queued
+	// prompt to dispatch while the task is still in WIP-wait would
+	// bypass the admission path; the existing 4 drain triggers
+	// (agent.ready / agent.boot_ready / processOnEnter / promptTask
+	// tail) lack this guard too — T2 is defense-in-depth, matching the
+	// queueFull-bound pattern rather than introducing a new escape.
+	// Three SQL reads per enqueue (clarification guard, session, and task)
+	// is small and acceptable for the user-message volume; the load-path hot
+	// loop is already gated by the guarded clarification check and
+	// isCancelInFlight / isQueuedDispatchInFlight / isSteerInFlight
+	// in-flight checks (cheaper than the DB read).
+	s.tryFastPathDrainAfterEnqueue(ctx, taskID, sessionID)
 	return nil
+}
+
+// tryFastPathDrainAfterEnqueue is the T2 fast-path drain. After QueueUserPrompt
+// has admitted a user message into the session's queue, this method
+// decides whether the message is safe to dispatch right now. The
+// decision is gated by a sequence of cheap-to-expensive checks in
+// increasing cost order:
+//
+//  1. messageQueue is non-nil (cheap pointer check).
+//  2. isCancelInFlight / isQueuedDispatchInFlight / isSteerInFlight
+//     are false (in-memory atomic loads). These guard the next drain
+//     from racing an in-flight sibling. False negatives are safe: the
+//     next turn-end re-evaluates.
+//  3. drainQueuedMessageForPromptableSessionWithTaskAdmission reloads the
+//     task after acquiring the guard and immediately before reservation. A
+//     task waiting in the WIP admission queue (QueuedForStepID != "" &&
+//     !WIPAdmitted) remains parked.
+//
+// The first failure aborts the fast-path
+// drain silently. Failures leave the queued message in place for the
+// next turn-end drain — they never block user input.
+//
+// The guarded helper rechecks clarification ownership, session promptability,
+// and task admission immediately before reservation. The four pre-existing
+// drain triggers (agent.ready, agent.boot_ready, processOnEnter, promptTask
+// tail) also lack a WIP check — T2 is defense-in-depth that matches the
+// existing admission pattern at the queue boundary, rather than introducing a
+// different escape path inside the dispatch lifecycle.
+func (s *Service) tryFastPathDrainAfterEnqueue(ctx context.Context, taskID, sessionID string) {
+	if s.messageQueue == nil {
+		return
+	}
+	if s.isCancelInFlight(sessionID) || s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
+		return
+	}
+	const maxTaskAdmissionReadAttempts = 2
+	for attempt := 0; attempt < maxTaskAdmissionReadAttempts; attempt++ {
+		outcome := s.drainQueuedMessageForPromptableSessionWithTaskAdmission(ctx, taskID, sessionID)
+		if outcome != queueDrainTaskAdmissionReadFailed {
+			return
+		}
+		if attempt+1 == maxTaskAdmissionReadAttempts {
+			s.logger.Warn("queue fast-path deferred after repeated task admission reads failed",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID))
+			return
+		}
+	}
 }
 
 // GetEventBus returns the event bus

@@ -2,6 +2,11 @@ import { createRef } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, cleanup, fireEvent, screen } from "@testing-library/react";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import {
+  ClarificationEscapeGuardProvider,
+  type ClarificationEscapeGuardEntry,
+  type ClarificationEscapeGuardRegistry,
+} from "@/hooks/use-clarification-escape-guard";
 import { ClarificationInputOverlay } from "./clarification-input-overlay";
 
 vi.mock("@/lib/config", () => ({
@@ -116,6 +121,209 @@ describe("ClarificationInputOverlay — Escape key", () => {
     fireEvent.keyDown(scopeRef.current!, { key: "Escape" });
 
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+});
+
+function fakeEscape(target: EventTarget): KeyboardEvent {
+  return {
+    key: "Escape",
+    target,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+  } as unknown as KeyboardEvent;
+}
+
+function renderOverlayWithGuard(messages: Message[]) {
+  const scopeRef = createRef<HTMLDivElement>();
+  const outsideRef = createRef<HTMLButtonElement>();
+  const composerRef = createRef<HTMLInputElement>();
+  const onDismiss = vi.fn();
+  // A holder object, not a reassigned `let`, so TS doesn't narrow the read
+  // in getGuard() to the initializer's type across the closure boundary.
+  // ClarificationInputOverlay is the only registrant in this test tree, so a
+  // single-slot holder still faithfully mirrors what it registered.
+  const holder: { entry: ClarificationEscapeGuardEntry } = { entry: null };
+  const registry: ClarificationEscapeGuardRegistry = {
+    register: (_id, predicate) => {
+      holder.entry = { test: predicate };
+    },
+    unregister: () => {
+      holder.entry = null;
+    },
+  };
+  render(
+    <ClarificationEscapeGuardProvider value={registry}>
+      {/* Stands in for the Quick Chat tab bar / resize handles: rendered
+          inside the dialog but outside the clarification's shortcut scope. */}
+      <button ref={outsideRef} type="button">
+        outside
+      </button>
+      <div ref={scopeRef} tabIndex={-1}>
+        {/* Stands in for the message composer: an editable control inside
+            the shortcut scope, which is where focus ordinarily sits right
+            after sending the message that triggered the clarification. */}
+        <input ref={composerRef} />
+        <ClarificationInputOverlay
+          messages={messages}
+          onResolved={vi.fn()}
+          onDismiss={onDismiss}
+          shortcutScopeRef={scopeRef}
+        />
+      </div>
+    </ClarificationEscapeGuardProvider>,
+  );
+  return { scopeRef, outsideRef, composerRef, onDismiss, getGuard: () => holder.entry };
+}
+
+describe("ClarificationInputOverlay — Escape guard predicate (F1 regression)", () => {
+  it("handles Escape while focus is in the composer (editable, in-scope) -- the ordinary post-send state", () => {
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { composerRef, onDismiss, getGuard } = renderOverlayWithGuard(messages);
+
+    expect(getGuard()?.test(fakeEscape(composerRef.current!))).toBe(true);
+
+    fireEvent.keyDown(composerRef.current!, { key: "Escape" });
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not claim Escape when the target is outside the shortcut scope (e.g. the tab bar)", () => {
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { outsideRef, onDismiss, getGuard } = renderOverlayWithGuard(messages);
+
+    expect(getGuard()?.test(fakeEscape(outsideRef.current!))).toBe(false);
+
+    fireEvent.keyDown(outsideRef.current!, { key: "Escape" });
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("does not claim Escape while submitting", () => {
+    // Never resolves, so submitState stays "submitting" for the rest of the
+    // test instead of racing a real fetch's microtask resolution.
+    fetchMock.mockImplementationOnce(() => new Promise(() => {}));
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { composerRef, getGuard } = renderOverlayWithGuard(messages);
+
+    fireEvent.click(screen.getByTestId("clarification-option"));
+
+    expect(getGuard()?.test(fakeEscape(composerRef.current!))).toBe(false);
+  });
+
+  it("does not claim Escape held with a modifier", () => {
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { composerRef, getGuard } = renderOverlayWithGuard(messages);
+
+    const modified = { ...fakeEscape(composerRef.current!), metaKey: true } as KeyboardEvent;
+    expect(getGuard()?.test(modified)).toBe(false);
+  });
+});
+
+describe("ClarificationInputOverlay — Escape defaultPrevented guard (F3/F4 regression)", () => {
+  it("does not collapse the panel when another in-scope consumer already claimed the Escape", () => {
+    // Stands in for queued-ghost-message's own Escape handler (cancel edit)
+    // or tiptap-suggestion's mention/slash popup close: an in-scope listener
+    // between the target and window that claims the key first. Attached on
+    // scopeRef itself so it fires during the same bubble dispatch before
+    // CarouselKeyboardShortcuts's window listener ever sees the event.
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { onDismiss, scopeRef } = renderOverlay(messages);
+    scopeRef.current!.addEventListener("keydown", (e) => e.preventDefault());
+
+    fireEvent.keyDown(scopeRef.current!, { key: "Escape" });
+
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("still collapses the panel on a plain, unclaimed Escape (no regression from the defaultPrevented check)", () => {
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { onDismiss, scopeRef } = renderOverlay(messages);
+
+    fireEvent.keyDown(scopeRef.current!, { key: "Escape" });
+
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it("guard predicate returns false for an Escape whose defaultPrevented is already true", () => {
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { composerRef, getGuard } = renderOverlayWithGuard(messages);
+
+    const alreadyClaimed = {
+      ...fakeEscape(composerRef.current!),
+      defaultPrevented: true,
+    } as KeyboardEvent;
+
+    expect(getGuard()?.test(alreadyClaimed)).toBe(false);
+  });
+
+  it("does not arm the guard when the active message has no resolvable question meta (F4)", () => {
+    const badMessage: Message = {
+      id: "m-bad",
+      session_id: toSessionId("s1"),
+      task_id: toTaskId("t1"),
+      author_type: "agent",
+      content: "Q",
+      type: "clarification_request",
+      created_at: "2026-05-04T00:00:00Z",
+      metadata: { pending_id: "p1" },
+    };
+    const { composerRef, getGuard } = renderOverlayWithGuard([badMessage]);
+
+    expect(getGuard()?.test(fakeEscape(composerRef.current!))).toBe(false);
+  });
+});
+
+// Mirrors quick-chat-modal.tsx's onEscapeKeyDown, itself invoked from Radix's
+// DismissableLayer document-capture listener: runs the guard predicate BEFORE
+// any target/bubble-phase consumer sees the event, so armedEventRef.current
+// really does equal the dispatched event by the time consumers run -- the
+// arrangement the round-4-only defaultPrevented/marker test at line 217
+// cannot produce (no provider there, so the predicate never runs and
+// armedEventRef stays null for every real dispatch).
+function attachCaptureGuard(getGuard: () => ClarificationEscapeGuardEntry) {
+  const onCapture = (event: KeyboardEvent) => {
+    if (event.key !== "Escape") return;
+    if (getGuard()?.test(event)) event.preventDefault();
+  };
+  document.addEventListener("keydown", onCapture, true);
+  return () => document.removeEventListener("keydown", onCapture, true);
+}
+
+describe("ClarificationInputOverlay — Quick Chat capture-phase ordering (F6 regression)", () => {
+  it("does not collapse when a consumer claims Escape via stopPropagation, even though the capture-phase guard armed it first (Quick Chat ordering)", () => {
+    // Stands in for one of the F3-fixed consumers (tiptap-entity-reference-suggestion,
+    // token-usage-display, message-history-search): an in-scope bubble-phase
+    // listener between the target and window that calls stopPropagation() once
+    // it claims the key. Unlike the F3 test at line 217 (preventDefault only,
+    // no provider), this one runs the real predicate first via document
+    // capture, so armedEventRef.current === the dispatched event -- the exact
+    // condition under which the defaultPrevented/marker bail-out in
+    // CarouselKeyboardShortcuts.onKey is a no-op (armedEventRef.current !== e
+    // is false). Only the consumer's own stopPropagation() can still protect
+    // the panel here, which is what this test actually proves.
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { composerRef, scopeRef, onDismiss, getGuard } = renderOverlayWithGuard(messages);
+    const detachGuard = attachCaptureGuard(getGuard);
+    scopeRef.current!.addEventListener("keydown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
+    fireEvent.keyDown(composerRef.current!, { key: "Escape" });
+    detachGuard();
+
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("does collapse when the capture-phase guard arms the event and nothing downstream claims it (control case)", () => {
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { composerRef, onDismiss, getGuard } = renderOverlayWithGuard(messages);
+    const detachGuard = attachCaptureGuard(getGuard);
+
+    fireEvent.keyDown(composerRef.current!, { key: "Escape" });
+    detachGuard();
+
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 });

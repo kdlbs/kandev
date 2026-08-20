@@ -146,6 +146,14 @@ const (
 	// surfaces show the red interruption icon; the orchestrator removes the
 	// key when a session of the task next enters STARTING/RUNNING.
 	MetaKeyInterruptedAt = "interrupted_at"
+	// MetaKeyAutoStartFailed is set when a workflow step's auto_start_agent
+	// on_enter action fails to launch a run (kanban StartTask error, or an
+	// Office task queue-run error/unresolvable agent). Its presence makes the
+	// task DTO report `auto_start_failed: true` so the failure surfaces on
+	// the card instead of only in backend logs; the orchestrator removes the
+	// key when a session of the task next enters STARTING/RUNNING (mirrors
+	// MetaKeyInterruptedAt).
+	MetaKeyAutoStartFailed = "auto_start_failed"
 	// MetaKeyAgentTitlePending marks tasks created in prompt-first mode whose
 	// provisional title still needs the first eligible agent session to replace it.
 	MetaKeyAgentTitlePending = "agent_title_pending"
@@ -1141,6 +1149,12 @@ type Message struct {
 	RequestsInput bool                   `json:"requests_input"` // True if agent is requesting user input
 	CreatedAt     time.Time              `json:"created_at"`
 	UpdatedAt     time.Time              `json:"updated_at"` // Authoritative per-message change signal
+	// PromptIndex is the 1-based ordinal of the message among ALL user
+	// messages of its session, ordered by normalized-microsecond created_at
+	// ascending with ties broken by id ascending. Read-time derived: zero for
+	// non-user messages and for legacy 12-column reads, and serialized only
+	// when > 0 (json omitempty).
+	PromptIndex int `json:"prompt_index,omitempty"`
 }
 
 // ToAPI converts internal Message to API type.
@@ -1175,6 +1189,7 @@ func (m *Message) ToAPI() *v1.Message {
 		RequestsInput: m.RequestsInput,
 		CreatedAt:     m.CreatedAt,
 		UpdatedAt:     m.UpdatedAt,
+		PromptIndex:   m.PromptIndex,
 	}
 	if hasHidden {
 		result.RawContent = m.Content
@@ -1509,6 +1524,43 @@ type Repository struct {
 	CreatedAt              time.Time                 `json:"created_at"`
 	UpdatedAt              time.Time                 `json:"updated_at"`
 	DeletedAt              *time.Time                `json:"deleted_at,omitempty"`
+}
+
+// RepositorySet is a named, reusable group of workspace repositories that fills
+// the task-creation repository picker in one action.
+//
+// A set deliberately stores no branch. Branch choice belongs to a task and is
+// already modelled on TaskRepository; a branch cached here would go stale
+// against the repository's real refs.
+type RepositorySet struct {
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Items is the ordered membership. Slice order is authoritative on write:
+	// positions are assigned from it, and reads return items sorted by position.
+	Items     []RepositorySetItem `json:"repositories"`
+	CreatedAt time.Time           `json:"created_at"`
+	UpdatedAt time.Time           `json:"updated_at"`
+}
+
+// RepositorySetItem is one repository's membership in a set.
+type RepositorySetItem struct {
+	ID              string    `json:"id"`
+	RepositorySetID string    `json:"repository_set_id"`
+	RepositoryID    string    `json:"repository_id"`
+	Position        int       `json:"position"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// RepositoryIDs returns the set's membership in position order.
+func (s *RepositorySet) RepositoryIDs() []string {
+	ids := make([]string, 0, len(s.Items))
+	for _, item := range s.Items {
+		ids = append(ids, item.RepositoryID)
+	}
+	return ids
 }
 
 // ProviderRepositoryIdentity is the durable provider lookup key. New plugin
@@ -2163,21 +2215,22 @@ func (t *Task) ToAPI() *v1.Task {
 	}
 
 	result := &v1.Task{
-		ID:           t.ID,
-		WorkspaceID:  t.WorkspaceID,
-		WorkflowID:   t.WorkflowID,
-		Title:        t.Title,
-		Description:  t.Description,
-		State:        t.State,
-		Priority:     t.Priority,
-		Repositories: repositories,
-		CreatedAt:    t.CreatedAt,
-		UpdatedAt:    t.UpdatedAt,
-		Metadata:     t.Metadata,
-		Interrupted:  t.Metadata[MetaKeyInterruptedAt] != nil,
-		IsEphemeral:  t.IsEphemeral,
-		ParentID:     t.ParentID,
-		Autopilot:    t.Autopilot,
+		ID:              t.ID,
+		WorkspaceID:     t.WorkspaceID,
+		WorkflowID:      t.WorkflowID,
+		Title:           t.Title,
+		Description:     t.Description,
+		State:           t.State,
+		Priority:        t.Priority,
+		Repositories:    repositories,
+		CreatedAt:       t.CreatedAt,
+		UpdatedAt:       t.UpdatedAt,
+		Metadata:        t.Metadata,
+		Interrupted:     t.Metadata[MetaKeyInterruptedAt] != nil,
+		AutoStartFailed: t.Metadata[MetaKeyAutoStartFailed] != nil,
+		IsEphemeral:     t.IsEphemeral,
+		ParentID:        t.ParentID,
+		Autopilot:       t.Autopilot,
 	}
 	if t.Identifier != "" {
 		result.Identifier = t.Identifier

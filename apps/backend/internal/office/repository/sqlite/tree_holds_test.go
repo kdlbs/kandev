@@ -22,6 +22,7 @@ func newTreeHoldTestRepo(t *testing.T) *sqlite.Repository {
 			origin TEXT DEFAULT 'manual',
 			checkout_agent_id TEXT,
 			checkout_at DATETIME,
+			checkout_run_id TEXT,
 			archived_at DATETIME,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -127,14 +128,27 @@ func TestGetSubtreeCostSummary(t *testing.T) {
 		}
 	}
 
+	// A NULL tokens_out row (the "never measured" shape — see
+	// costContractVersion's v2→v3 doc comment in prompt_usage_cost.go) must
+	// be skipped by SUM exactly like a 0 would have been: the aggregate
+	// below must come out identical whether this row contributes NULL or 0.
+	_, err := repo.ExecRaw(ctx, `
+		INSERT INTO office_cost_events (
+			id, task_id, cost_subcents, tokens_in, tokens_cached_in, tokens_out, occurred_at, created_at
+		) VALUES (?, ?, 10, 100, 20, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, "cost-root-unmeasured-out", "root")
+	if err != nil {
+		t.Fatalf("insert unmeasured-out cost: %v", err)
+	}
+
 	summary, err := repo.GetSubtreeCostSummary(ctx, "root")
 	if err != nil {
 		t.Fatalf("GetSubtreeCostSummary: %v", err)
 	}
-	if summary.TaskCount != 3 || summary.CostSubcents != 30 {
-		t.Fatalf("summary = %+v, want 3 tasks and 30 subcents", summary)
+	if summary.TaskCount != 3 || summary.CostSubcents != 40 {
+		t.Fatalf("summary = %+v, want 3 distinct tasks (extra row is a 2nd event on root) and 40 subcents", summary)
 	}
-	if summary.TokensIn != 300 || summary.TokensCachedIn != 60 || summary.TokensOut != 15 {
-		t.Fatalf("unexpected token totals: %+v", summary)
+	if summary.TokensIn != 400 || summary.TokensCachedIn != 80 || summary.TokensOut != 15 {
+		t.Fatalf("unexpected token totals: %+v, want tokens_out=15 (SUM skips the NULL row, same as adding 0)", summary)
 	}
 }

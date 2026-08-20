@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,7 +20,10 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	officemodels "github.com/kandev/kandev/internal/office/models"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
@@ -102,6 +106,79 @@ func TestHealthRouteReturnsOK(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestSeedCostEventPreservesOutputTokenPresence(t *testing.T) {
+	taskRepo, sqlxDB := newTestRepo(t)
+	omittedTaskID := uuid.New().String()
+	zeroTaskID := uuid.New().String()
+	seedTask(t, sqlxDB, omittedTaskID)
+	seedTask(t, sqlxDB, zeroTaskID)
+
+	officeRepo, err := officesqlite.NewWithDB(sqlxDB, sqlxDB, logger.Default())
+	if err != nil {
+		t.Fatalf("new office repo: %v", err)
+	}
+	router := gin.New()
+	RegisterRoutes(router, taskRepo, officeRepo, nil, nil, nil, logger.Default())
+
+	post := func(body map[string]any) {
+		t.Helper()
+		requestBody := mustJSON(t, body)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/cost-events", bytes.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("seed cost event status=%d body=%s", res.Code, res.Body.String())
+		}
+	}
+
+	post(map[string]any{
+		"agent_profile_id": "agent-1",
+		"task_id":          omittedTaskID,
+		"tokens_in":        10,
+		"estimated":        true,
+	})
+	post(map[string]any{
+		"agent_profile_id": "agent-1",
+		"task_id":          zeroTaskID,
+		"tokens_in":        10,
+		"tokens_out":       0,
+		"estimated":        true,
+	})
+
+	events, err := officeRepo.ListCostEvents(t.Context(), "ws-1")
+	if err != nil {
+		t.Fatalf("list cost events: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("cost event count = %d, want 2", len(events))
+	}
+	byTask := make(map[string]*officemodels.CostEvent, len(events))
+	for _, event := range events {
+		byTask[event.TaskID] = event
+	}
+	omitted, ok := byTask[omittedTaskID]
+	if !ok {
+		t.Fatalf("missing cost event for task %s", omittedTaskID)
+	}
+	zero, ok := byTask[zeroTaskID]
+	if !ok {
+		t.Fatalf("missing cost event for task %s", zeroTaskID)
+	}
+	if got := omitted.TokensOut; got != nil {
+		t.Fatalf("omitted tokens_out = %v, want nil", *got)
+	}
+	if got := zero.TokensOut; got == nil || *got != 0 {
+		t.Fatalf("explicit zero tokens_out = %v, want non-nil 0", got)
+	}
+	for _, taskID := range []string{omittedTaskID, zeroTaskID} {
+		version := byTask[taskID].CostContractVersion
+		if version == nil || *version != officemodels.CostContractVersion {
+			t.Errorf("cost_contract_version for %s = %v, want %d", taskID, version, officemodels.CostContractVersion)
+		}
 	}
 }
 
@@ -439,6 +516,250 @@ func TestSeedMessageRejectsUnknownSession(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// seedMessageAndCollect seeds a session + a message through the harness routes
+// and returns the repo, the session id, the response message id, and any
+// message.added events published to the bus.
+func seedMessageAndCollect(t *testing.T, body map[string]interface{}) (*sqliterepo.Repository, string, string, []*bus.Event) {
+	t.Helper()
+	repo, sqlxDB := newTestRepo(t)
+	taskID := uuid.New().String()
+	seedTask(t, sqlxDB, taskID)
+	eb := bus.NewMemoryEventBus(logger.Default())
+	var published []*bus.Event
+	var mu sync.Mutex
+	if _, err := eb.Subscribe(events.MessageAdded, func(_ context.Context, e *bus.Event) error {
+		mu.Lock()
+		defer mu.Unlock()
+		published = append(published, e)
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	r := newRouter(t, repo, eb)
+
+	sessBody := mustJSON(t, map[string]interface{}{"task_id": taskID, "state": "RUNNING"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/task-sessions", bytes.NewReader(sessBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("session seed: expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var sessResp seedTaskSessionResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &sessResp)
+
+	body["session_id"] = sessResp.SessionID
+	msgBody := mustJSON(t, body)
+	w2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/_test/messages", bytes.NewReader(msgBody))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("message seed: expected 200, got %d body=%s", w2.Code, w2.Body.String())
+	}
+	var resp struct {
+		MessageID string `json:"message_id"`
+	}
+	_ = json.Unmarshal(w2.Body.Bytes(), &resp)
+	return repo, sessResp.SessionID, resp.MessageID, published
+}
+
+// TestSeedMessageUserAuthorPersistsPromptIndex verifies that a seeded user message is persisted with a derived prompt index.
+func TestSeedMessageUserAuthorPersistsPromptIndex(t *testing.T) {
+	repo, _, messageID, published := seedMessageAndCollect(t, map[string]interface{}{
+		"type":        "message",
+		"content":     "user prompt",
+		"author_type": "user",
+	})
+
+	indexed, err := repo.GetMessageWithPromptIndex(context.Background(), messageID)
+	if err != nil {
+		t.Fatalf("GetMessageWithPromptIndex: %v", err)
+	}
+	if indexed.AuthorType != models.MessageAuthorUser {
+		t.Fatalf("author type = %q, want user", indexed.AuthorType)
+	}
+	if indexed.PromptIndex != 1 {
+		t.Fatalf("prompt_index = %d, want 1", indexed.PromptIndex)
+	}
+	// The ordinal is read-time derived: the legacy hot path stays zero.
+	legacy, err := repo.GetMessage(context.Background(), messageID)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if legacy.PromptIndex != 0 {
+		t.Fatalf("legacy GetMessage prompt_index = %d, want 0", legacy.PromptIndex)
+	}
+
+	// The published WS event carries the ordinal and RFC3339Nano precision.
+	if len(published) != 1 {
+		t.Fatalf("published events = %d, want 1", len(published))
+	}
+	data, ok := published[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data = %T, want map", published[0].Data)
+	}
+	if got, ok := data["prompt_index"]; !ok || got != 1 {
+		t.Fatalf("event prompt_index = %#v, want 1", got)
+	}
+	if created, ok := data["created_at"].(string); !ok || !strings.Contains(created, ".") {
+		t.Fatalf("event created_at = %#v, want RFC3339Nano fractional precision", data["created_at"])
+	}
+}
+
+// TestSeedMessageDefaultsToAgentWithoutPromptIndex verifies that non-user seeded messages carry no prompt index.
+func TestSeedMessageDefaultsToAgentWithoutPromptIndex(t *testing.T) {
+	repo, _, messageID, published := seedMessageAndCollect(t, map[string]interface{}{
+		"type":    "message",
+		"content": "agent reply",
+	})
+
+	indexed, err := repo.GetMessageWithPromptIndex(context.Background(), messageID)
+	if err != nil {
+		t.Fatalf("GetMessageWithPromptIndex: %v", err)
+	}
+	if indexed.AuthorType != models.MessageAuthorAgent {
+		t.Fatalf("author type = %q, want agent default", indexed.AuthorType)
+	}
+	if indexed.PromptIndex != 0 {
+		t.Fatalf("agent prompt_index = %d, want 0", indexed.PromptIndex)
+	}
+	if len(published) != 1 {
+		t.Fatalf("published events = %d, want 1", len(published))
+	}
+	data, ok := published[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data = %T, want map", published[0].Data)
+	}
+	if _, ok := data["prompt_index"]; ok {
+		t.Fatalf("agent event carries prompt_index %v", data["prompt_index"])
+	}
+}
+
+// TestSeedMessageExplicitPastTimestampRejected verifies that explicit timestamps before the newest session message are rejected.
+func TestSeedMessageExplicitPastTimestampRejected(t *testing.T) {
+	repo, _, messageID, _ := seedMessageAndCollect(t, map[string]interface{}{
+		"type":        "message",
+		"content":     "first",
+		"author_type": "user",
+	})
+	// A second user seed with an explicit timestamp EARLIER than the newest
+	// user message is an invalid reordering: the explicit-import branch
+	// rejects it (the live branch would have advanced instead).
+	past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
+	second := mustJSON(t, map[string]interface{}{
+		"session_id":  seedSessionIDFromMessage(t, repo, messageID),
+		"type":        "message",
+		"content":     "second",
+		"author_type": "user",
+		"created_at":  past,
+	})
+	r := newRouter(t, repo, nil)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/messages", bytes.NewReader(second))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("explicit-past seed status = %d body=%s, want 500 (strictly-after-max rejection)", w.Code, w.Body.String())
+	}
+}
+
+// seedSessionIDFromMessage resolves the session id for a seeded message.
+func seedSessionIDFromMessage(t *testing.T, repo *sqliterepo.Repository, messageID string) string {
+	t.Helper()
+	msg, err := repo.GetMessage(context.Background(), messageID)
+	if err != nil {
+		t.Fatalf("GetMessage(%s): %v", messageID, err)
+	}
+	return msg.TaskSessionID
+}
+
+// TestSeedMessageExplicitCreatedAtPreserved verifies that an explicit future-ordered created_at is preserved on the persisted row.
+func TestSeedMessageExplicitCreatedAtPreserved(t *testing.T) {
+	explicit := time.Date(2026, 8, 19, 10, 0, 0, 123456000, time.UTC)
+	repo, _, messageID, published := seedMessageAndCollect(t, map[string]interface{}{
+		"type":        "message",
+		"content":     "deterministic prompt",
+		"author_type": "user",
+		"created_at":  explicit.Format(time.RFC3339Nano),
+	})
+
+	stored, err := repo.GetMessage(context.Background(), messageID)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if !stored.CreatedAt.Equal(explicit) {
+		t.Fatalf("stored created_at = %v, want explicit %v", stored.CreatedAt, explicit)
+	}
+	indexed, err := repo.GetMessageWithPromptIndex(context.Background(), messageID)
+	if err != nil {
+		t.Fatalf("GetMessageWithPromptIndex: %v", err)
+	}
+	if indexed.PromptIndex != 1 {
+		t.Fatalf("prompt_index = %d, want 1", indexed.PromptIndex)
+	}
+	// The WS event preserves the explicit timestamp with full fractional
+	// precision (RFC3339Nano), not second-truncated RFC3339.
+	if len(published) != 1 {
+		t.Fatalf("published events = %d, want 1", len(published))
+	}
+	data, ok := published[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data = %T, want map", published[0].Data)
+	}
+	created, ok := data["created_at"].(string)
+	if !ok {
+		t.Fatalf("event created_at = %#v, want string", data["created_at"])
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, created)
+	if err != nil {
+		t.Fatalf("event created_at %q not RFC3339Nano: %v", created, err)
+	}
+	if !parsed.Equal(explicit) {
+		t.Fatalf("event created_at = %v, want %v", parsed, explicit)
+	}
+}
+
+// TestSeedMessageUserOrdinalsIncrement verifies that consecutive seeded user messages receive strictly increasing ordinals.
+func TestSeedMessageUserOrdinalsIncrement(t *testing.T) {
+	repo, sessionID, _, _ := seedMessageAndCollect(t, map[string]interface{}{
+		"type":        "message",
+		"content":     "first",
+		"author_type": "user",
+	})
+	// Second user seed on the same session gets ordinal 2.
+	second := mustJSON(t, map[string]interface{}{
+		"session_id":  sessionID,
+		"type":        "message",
+		"content":     "second",
+		"author_type": "user",
+	})
+	r := newRouter(t, repo, nil)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/messages", bytes.NewReader(second))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("second seed: expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	msgs, err := repo.ListMessages(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %d, want 2", len(msgs))
+	}
+	for _, m := range msgs {
+		indexed, err := repo.GetMessageWithPromptIndex(context.Background(), m.ID)
+		if err != nil {
+			t.Fatalf("GetMessageWithPromptIndex(%s): %v", m.ID, err)
+		}
+		if indexed.AuthorType == models.MessageAuthorUser && indexed.PromptIndex < 1 {
+			t.Fatalf("user message %s prompt_index = %d, want >= 1", m.ID, indexed.PromptIndex)
+		}
 	}
 }
 

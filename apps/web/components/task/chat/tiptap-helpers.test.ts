@@ -338,28 +338,130 @@ describe("handleEditorPaste", () => {
     expect(onImagePaste).toHaveBeenCalledWith([], "unreadable-image");
     expect(preventDefault).toHaveBeenCalledOnce();
   });
+});
 
-  it("leaves rich HTML with visible text to the editor", () => {
+function htmlPasteEvent(html: string, plain: string, preventDefault = vi.fn()): ClipboardEvent {
+  return {
+    clipboardData: {
+      files: [],
+      items: [],
+      getData: (type: string) => (type === "text/html" ? html : plain),
+    },
+    preventDefault,
+  } as unknown as ClipboardEvent;
+}
+
+function runPaste(event: ClipboardEvent, pasteText: () => void, onImagePaste = vi.fn()): boolean {
+  return handleEditorPaste({ pasteText } as unknown as EditorView, event, {
+    current: onImagePaste,
+  });
+}
+
+describe("handleEditorPaste formatting", () => {
+  it("strips formatting from rich HTML with visible text instead of attaching it", () => {
+    const pasteText = vi.fn();
     const onImagePaste = vi.fn();
     const preventDefault = vi.fn();
-    const event = {
-      clipboardData: {
-        files: [],
-        items: [{ kind: "string", type: "text/html" }],
-        getData: (type: string) =>
-          type === "text/html"
-            ? '<p>Visible caption <img src="https://images.example.test/image.png"></p>'
-            : "Visible caption",
-      },
+    const event = htmlPasteEvent(
+      '<p>Visible caption <img src="https://images.example.test/image.png"></p>',
+      "Visible caption",
       preventDefault,
-    } as unknown as ClipboardEvent;
+    );
 
-    const handled = handleEditorPaste({} as EditorView, event, {
-      current: onImagePaste,
-    });
-
-    expect(handled).toBe(false);
+    expect(runPaste(event, pasteText, onImagePaste)).toBe(true);
     expect(onImagePaste).not.toHaveBeenCalled();
+    expect(pasteText).toHaveBeenCalledWith("Visible caption");
+    expect(preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it("extracts the href when the clipboard is a single formatted link", () => {
+    const pasteText = vi.fn();
+    const preventDefault = vi.fn();
+    const url = "https://example.com/boards/sprint/42?workitem=1234";
+    const event = htmlPasteEvent(
+      `<a href="${url}">Example Board Sprint 42</a>`,
+      "Example Board Sprint 42",
+      preventDefault,
+    );
+
+    expect(runPaste(event, pasteText)).toBe(true);
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(pasteText).toHaveBeenCalledWith(url);
+  });
+
+  it("extracts the href from case-insensitive HTML anchor tags", () => {
+    const pasteText = vi.fn();
+    const url = "https://example.com/boards/sprint/42?workitem=1234";
+    const event = htmlPasteEvent(
+      `<A HREF="${url}">Example Board Sprint 42</A>`,
+      "Example Board Sprint 42",
+    );
+
+    expect(runPaste(event, pasteText)).toBe(true);
+    expect(pasteText).toHaveBeenCalledWith(url);
+  });
+
+  it("falls back to plain text when a link is embedded in other content", () => {
+    const pasteText = vi.fn();
+    const event = htmlPasteEvent(
+      '<p>see <a href="https://example.com/x">the board</a> here</p>',
+      "see the board here",
+    );
+
+    expect(runPaste(event, pasteText)).toBe(true);
+    expect(pasteText).toHaveBeenCalledWith("see the board here");
+  });
+
+  it("strips formatting from external rich HTML, pasting only the plain text", () => {
+    const pasteText = vi.fn();
+    const event = htmlPasteEvent("<b>Bold</b> and <i>italic</i> text", "Bold and italic text");
+
+    expect(runPaste(event, pasteText)).toBe(true);
+    expect(pasteText).toHaveBeenCalledWith("Bold and italic text");
+  });
+
+  it("leaves internal editor copies marked with data-pm-slice to the default handler", () => {
+    const pasteText = vi.fn();
+    const preventDefault = vi.fn();
+    const event = htmlPasteEvent(
+      '<p data-pm-slice="1 1 []">reference</p>',
+      "reference",
+      preventDefault,
+    );
+
+    expect(runPaste(event, pasteText)).toBe(false);
+    expect(pasteText).not.toHaveBeenCalled();
     expect(preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("leaves plain-text-only pastes to the default handler", () => {
+    const pasteText = vi.fn();
+    const event = htmlPasteEvent("", "plain text only");
+
+    expect(runPaste(event, pasteText)).toBe(false);
+    expect(pasteText).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleEditorPaste paste order and ownership", () => {
+  it("strips external rich HTML even when its plain text contains a code fence", () => {
+    const pasteText = vi.fn();
+    const html = "<b>bold</b>\n```\ncode\n```";
+    const plain = "bold\n```\ncode\n```";
+    const event = htmlPasteEvent(html, plain);
+
+    expect(runPaste(event, pasteText)).toBe(true);
+    expect(pasteText).toHaveBeenCalledWith(plain);
+  });
+
+  it("still strips a link whose visible text merely mentions data-pm-slice", () => {
+    const pasteText = vi.fn();
+    const event = htmlPasteEvent(
+      '<a href="https://example.com/y">the data-pm-slice attribute</a>',
+      "the data-pm-slice attribute",
+    );
+
+    expect(runPaste(event, pasteText)).toBe(true);
+    expect(pasteText).toHaveBeenCalledWith("https://example.com/y");
   });
 });

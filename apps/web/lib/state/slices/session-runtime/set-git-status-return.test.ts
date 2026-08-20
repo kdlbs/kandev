@@ -70,6 +70,26 @@ describe("setGitStatus change reporting (single deep compare)", () => {
     expect(store.getState().setGitStatus(SESSION, status({ is_submodule: true }))).toBe(true);
   });
 
+  it("normalizes legacy composite file keys before storing the status", () => {
+    store.getState().setGitStatus(
+      SESSION,
+      status({
+        files: {
+          "frontend\u0000src/app.ts": { status: "modified", staged: false } as never,
+        },
+      }),
+    );
+
+    expect(store.getState().gitStatus.byEnvironmentId[SESSION]?.files).toEqual({
+      "frontend\u0000src/app.ts": {
+        path: "src/app.ts",
+        repository_name: "frontend",
+        status: "modified",
+        staged: false,
+      },
+    });
+  });
+
   it("returns false when the submodule marker is unchanged", () => {
     store.getState().setGitStatus(SESSION, status({ is_submodule: true }));
 

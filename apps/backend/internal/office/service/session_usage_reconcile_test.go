@@ -94,7 +94,9 @@ func TestPromptUsage_RollupReconcilesWithCostLedger(t *testing.T) {
 		ledgerRows++
 		wantIn += c.TokensIn
 		wantCachedIn += c.TokensCachedIn
-		wantOut += c.TokensOut
+		if c.TokensOut != nil {
+			wantOut += *c.TokensOut
+		}
 		wantCost += c.CostSubcents
 	}
 	if ledgerRows != len(usages) {

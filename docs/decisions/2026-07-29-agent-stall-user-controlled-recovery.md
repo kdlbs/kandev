@@ -1,6 +1,6 @@
 # ADR-2026-07-29-agent-stall-user-controlled-recovery: Keep Agent Stall Recovery User Controlled
 
-**Status:** accepted
+**Status:** superseded by 2026-08-18-never-started-agent-stall-terminal
 **Date:** 2026-07-29
 **Area:** backend, frontend, protocol
 

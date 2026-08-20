@@ -77,7 +77,11 @@ func (s *Service) dispatchCIAutomationPromptToIdleSession(
 		return ciAutomationDispatchResult{}, err
 	}
 	if replaced {
-		if !s.drainQueuedMessageForPromptableSession(ctx, session.ID) {
+		outcome := s.drainQueuedMessageForPromptableSessionOutcome(ctx, session.ID)
+		if outcome == queueDrainPaused {
+			return result, nil
+		}
+		if outcome != queueDrainDispatched {
 			return ciAutomationDispatchResult{}, fmt.Errorf("failed to dispatch replaced CI automation prompt")
 		}
 		return result, nil

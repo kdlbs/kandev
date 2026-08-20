@@ -22,7 +22,7 @@ export function renderPluginIntegrationSettings(integrationId: string, workspace
         title={registration.label}
         description={registration.description}
         icon={<Icon className="h-5 w-5" />}
-        action={Action ? <Action workspaceId={workspaceId} /> : undefined}
+        action={Action ? <Action workspaceId={workspaceId} surface="detail" /> : undefined}
       >
         <Component workspaceId={workspaceId} />
       </SettingsSection>

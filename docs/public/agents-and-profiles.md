@@ -342,7 +342,16 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
 - **Managed npm runtime cannot resolve its selected version:** Kandev checks the configured registry and retries the same version once after refreshing its exact `_npx` execution tree. If the retry fails, verify the service user's npm configuration and registry, then use **Settings > Agents** to prepare another trusted stable version. Do not start with `npm cache clean --force`.
 - **Environment value is absent:** confirm the secret still exists, the key is not reserved, and an executor/runtime variable is not already taking precedence.
 - **MCP server is absent:** confirm agent MCP support, valid JSON, transport mode, executor policy, and the session warning logs.
-- **MCP tools are missing from one agent session:** open the neutral plug button in that session's chat toolbar. **Delivered** means Kandev included the server in the agent launch but cannot yet observe a connection; **Connected** means the built-in server saw MCP initialize; **Active** means it served `tools/list`. A gray filtered/unavailable row explains an intentional omission, while red is reserved for an explicit sanitized error. Third-party profile servers normally remain Delivered because they connect directly to the agent and Kandev cannot inspect them. The report is scoped to that session and its current execution, so compare the affected agent's own toolbar rather than another agent on the task.
+- **MCP tools are missing from one agent session:** open **MCP servers** in that
+  session's chat toolbar. Select `kandev`, then find the tool in the scrollable
+  list. Select the tool to inspect its description, token estimate, and
+  arguments. Use **Back to tools**, then **Back to servers** on touch devices.
+  **Connected** means the built-in server completed MCP initialize. **Active**
+  means it served `tools/list`. A gray row explains an intentional omission.
+  Red identifies an explicit sanitized error. **Delivered, connection
+  unverified** applies to a profile server that connects directly to the agent.
+  Kandev cannot inspect that server's tools. Inspect the affected session
+  because each report belongs to one session and execution.
 - **Automation cannot select a profile:** passthrough agent profiles and Local executor profiles are intentionally omitted from the automation selectors.
 
 Related: [Executors](executors.md), [Automation and MCP](automation-and-mcp.md), and the contributor guide [Adding a new agent CLI](add-agent-cli.md).

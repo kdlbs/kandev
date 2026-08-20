@@ -61,6 +61,7 @@ func TestCostEvent_CreateAndList(t *testing.T) {
 
 	seedTasksTable(t, repo, "task-1", "ws-1")
 
+	tokensOut := int64(500)
 	event := &models.CostEvent{
 		SessionID:      "session-1",
 		TaskID:         "task-1",
@@ -68,7 +69,7 @@ func TestCostEvent_CreateAndList(t *testing.T) {
 		Model:          "claude-4-sonnet",
 		Provider:       "anthropic",
 		TokensIn:       1000,
-		TokensOut:      500,
+		TokensOut:      &tokensOut,
 		CostSubcents:   10,
 		OccurredAt:     time.Now().UTC(),
 	}
@@ -85,6 +86,49 @@ func TestCostEvent_CreateAndList(t *testing.T) {
 	}
 	if costs[0].CostSubcents != 10 {
 		t.Errorf("cost_subcents = %d, want 10", costs[0].CostSubcents)
+	}
+	if costs[0].TokensOut == nil || *costs[0].TokensOut != 500 {
+		t.Errorf("tokens_out = %v, want 500", costs[0].TokensOut)
+	}
+}
+
+// TestCostEvent_TokensOutNullRoundTrips confirms a NULL TokensOut (the
+// "never measured" shape — see costContractVersion's v2→v3 doc comment in
+// prompt_usage_cost.go) survives INSERT and SELECT as nil, not a silent 0.
+func TestCostEvent_TokensOutNullRoundTrips(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	seedTasksTable(t, repo, "task-null-out", "ws-null-out")
+
+	event := &models.CostEvent{
+		SessionID:      "session-null-out",
+		TaskID:         "task-null-out",
+		AgentProfileID: "cost-agent-null-out",
+		Model:          "opus",
+		Provider:       "anthropic",
+		TokensIn:       1000,
+		TokensOut:      nil,
+		CostSubcents:   767,
+		Estimated:      true,
+		OccurredAt:     time.Now().UTC(),
+	}
+	if err := repo.CreateCostEvent(ctx, event); err != nil {
+		t.Fatalf("create cost: %v", err)
+	}
+
+	costs, err := repo.ListCostEvents(ctx, "ws-null-out")
+	if err != nil {
+		t.Fatalf("list costs: %v", err)
+	}
+	if len(costs) != 1 {
+		t.Fatalf("cost count = %d, want 1", len(costs))
+	}
+	if costs[0].TokensOut != nil {
+		t.Errorf("tokens_out = %v, want nil (NULL round-trip)", *costs[0].TokensOut)
+	}
+	if costs[0].CostSubcents != 767 {
+		t.Errorf("cost_subcents = %d, want 767 (real money attached to an unmeasured tokens_out row)", costs[0].CostSubcents)
 	}
 }
 

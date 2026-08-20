@@ -31,6 +31,31 @@ func TestMapKanbanStateIncludesWIPAdmissionFields(t *testing.T) {
 	}
 }
 
+// TestMapKanbanTaskStateIncludesAutoStartFailed regression-tests Review round
+// 2's MAJOR finding: mapKanbanTaskState is a camelCase whitelist that omitted
+// auto_start_failed, so a task whose auto-start already failed rendered with
+// no badge until the WS path (now fixed separately) delivered an update — the
+// very first paint was wrong for a task that failed before this boot payload
+// was ever built.
+func TestMapKanbanTaskStateIncludesAutoStartFailed(t *testing.T) {
+	task := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:              "task-auto-start-failed",
+		WorkflowStepID:  "step-review",
+		AutoStartFailed: true,
+	})
+	if task["autoStartFailed"] != true {
+		t.Fatalf("kanban task autoStartFailed = %#v, want true", task["autoStartFailed"])
+	}
+
+	cleared := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:             "task-auto-start-ok",
+		WorkflowStepID: "step-review",
+	})
+	if cleared["autoStartFailed"] != false {
+		t.Fatalf("kanban task autoStartFailed = %#v, want false for a task without the marker", cleared["autoStartFailed"])
+	}
+}
+
 func TestMapUserSettingsStateIncludesAzureDevOpsBrowsePreferences(t *testing.T) {
 	preferences := json.RawMessage(`{"workspace-1":{"mode":"board","filters":{"projectId":"project-2"},"board":{"teamId":"team-2","boardId":"board-2","focusedColumnId":"done"}}}`)
 	state := mapUserSettingsState(userdto.UserSettingsResponse{

@@ -33,6 +33,8 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     setSessionFailureNotification: vi.fn(),
     setContextWindow: vi.fn(),
     clearContextWindow: vi.fn(),
+    queue: { bySessionId: {}, metaBySessionId: {} },
+    setQueueEntries: vi.fn(),
     clearLegacyGitStatusEntry: vi.fn(),
     bumpSessionCommitsRefetch: vi.fn(),
     bumpWorkspaceFilesRefresh: vi.fn(),
@@ -47,6 +49,63 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     getInitialState: vi.fn(),
   } as unknown as StoreApi<AppState>;
 }
+
+describe("message.queue.status_changed handler", () => {
+  it("stores the backend-owned Auto-run policy", () => {
+    const setQueueEntries = vi.fn();
+    const store = makeStore({ setQueueEntries });
+    const handler = registerTaskSessionHandlers(store)["message.queue.status_changed"]!;
+
+    handler({
+      id: "queue-status-1",
+      type: "notification",
+      action: "message.queue.status_changed",
+      payload: {
+        session_id: "s-1",
+        entries: [],
+        count: 0,
+        max: 10,
+        merge_enabled: true,
+        auto_run: false,
+      },
+    } as never);
+
+    expect(setQueueEntries).toHaveBeenCalledWith("s-1", [], {
+      count: 0,
+      max: 10,
+      mergeEnabled: true,
+      autoRun: false,
+    });
+  });
+
+  it("preserves a known OFF policy when an older publisher omits policy fields", () => {
+    const setQueueEntries = vi.fn();
+    const store = makeStore({
+      setQueueEntries,
+      queue: {
+        bySessionId: { "s-1": [] },
+        metaBySessionId: {
+          "s-1": { count: 1, max: 10, mergeEnabled: false, autoRun: false },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)["message.queue.status_changed"]!;
+
+    handler({
+      id: "queue-status-compat",
+      type: "notification",
+      action: "message.queue.status_changed",
+      payload: { session_id: "s-1", entries: [], count: 0, max: 10 },
+    } as never);
+
+    expect(setQueueEntries).toHaveBeenCalledWith("s-1", [], {
+      count: 0,
+      max: 10,
+      mergeEnabled: false,
+      autoRun: false,
+    });
+  });
+});
 
 const STATE_CHANGED_EVENT = "session.state_changed";
 const ACTIVITY_EVENT = "session.activity_changed";

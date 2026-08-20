@@ -635,7 +635,17 @@ func (sm *SessionManager) applyRuntimeSessionLayers(
 				zap.String("execution_id", execution.ID), zap.String("mode", runtimeMode), zap.Error(err))
 		}
 	}
-	sanitizedOptions := profileconfig.SanitizeConfigOptions(runtimeConfigOptions)
+	// Fail safe: when the current agent's option catalog is not yet known, we
+	// cannot verify which persisted options it supports, so replay nothing
+	// rather than sending a prior agent's keys (spec failure mode: unknown
+	// catalog must not send unverified options). This covers flat-model-list
+	// agents whose startup wait exits on the model list before any config
+	// options settle.
+	modelState := execution.GetModelState()
+	var sanitizedOptions map[string]string
+	if _, catalogKnown := capturedRuntimeConfigOptionCatalog(modelState); catalogKnown {
+		sanitizedOptions = sanitizeRuntimeConfigOptionsWithCatalog(runtimeConfigOptions, modelState)
+	}
 	for _, configID := range sortedConfigOptionKeys(sanitizedOptions) {
 		value := sanitizedOptions[configID]
 		if err := execution.agentctl.SetConfigOption(ctx, configID, value); err != nil {
@@ -669,7 +679,7 @@ func (sm *SessionManager) publishSettledConfigOptions(
 		return
 	}
 	baselineCandidate, live, ready := execution.SettleConfigOptions(finalConfigID, providerDefaultConfig)
-	if !ready || len(baselineCandidate.ConfigOptions) == 0 || live == nil {
+	if !ready || baselineCandidate == nil || live == nil {
 		return
 	}
 	sm.eventPublisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{
@@ -1021,16 +1031,16 @@ func (sm *SessionManager) waitForPromptDone(
 			return nil, ctx.Err()
 
 		case <-stallTicker.C:
-			execution.lastActivityAtMu.Lock()
-			elapsed := time.Since(execution.lastActivityAt)
-			lastActivity := execution.lastActivityAt
-			execution.lastActivityAtMu.Unlock()
+			lastActivity, agentEventSeen, activityEpoch := execution.promptActivitySnapshot()
+			elapsed := time.Since(lastActivity)
+			neverStarted := !agentEventSeen
 
 			if elapsed >= 5*time.Minute && !stallReported {
 				sm.logger.Warn("agent stall detected: no events received",
 					zap.String("execution_id", execution.ID),
 					zap.Duration("elapsed_since_last_event", elapsed),
-					zap.Time("last_activity", lastActivity))
+					zap.Time("last_activity", lastActivity),
+					zap.Bool("never_started", neverStarted))
 				if sm.eventPublisher != nil {
 					sm.eventPublisher.PublishAgentStalled(
 						ctx,
@@ -1038,6 +1048,8 @@ func (sm *SessionManager) waitForPromptDone(
 						promptGeneration,
 						lastActivity,
 						elapsed,
+						activityEpoch,
+						neverStarted,
 					)
 				}
 				stallReported = true
@@ -1144,6 +1156,7 @@ func (sm *SessionManager) markPromptDispatched(execution *AgentExecution, genera
 	if generation != 0 && execution.promptGeneration == generation &&
 		execution.promptCompletionGeneration != generation {
 		execution.dispatchedPromptGeneration = generation
+		execution.armPromptActivity()
 	}
 }
 
@@ -1286,6 +1299,10 @@ func (sm *SessionManager) dispatchSteerLocked(
 // activity-timestamp bump for a steer that actually dispatched. Kept off the
 // fallback path so a steer that degrades to an ordinary prompt is not recorded
 // twice.
+//
+// Deliberately does not touch agentEventSincePrompt: a steer is user input
+// injected into an already-running turn, not agent output, so it must not
+// mask a stalled agent as having produced something.
 func (sm *SessionManager) recordSteerActivity(execution *AgentExecution, prompt string) {
 	if sm.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
 		if err := sm.historyManager.AppendUserMessage(execution.SessionID, prompt); err != nil {
@@ -1484,9 +1501,6 @@ func (sm *SessionManager) preparePrompt(
 			sm.logger.Warn("failed to store user message to history", zap.Error(err))
 		}
 	}
-	execution.lastActivityAtMu.Lock()
-	execution.lastActivityAt = time.Now()
-	execution.lastActivityAtMu.Unlock()
 	return ctx, effectivePrompt, promptGeneration, nil
 }
 
@@ -1513,12 +1527,12 @@ func (sm *SessionManager) triggerPrompt(
 }
 
 func waitForPendingDispatchedPrompt(ctx context.Context, execution *AgentExecution) error {
-	if !execution.dispatchedPromptPending {
+	if !execution.dispatchedPromptPending.Load() {
 		return nil
 	}
 	select {
 	case <-execution.promptDoneCh:
-		execution.dispatchedPromptPending = false
+		execution.dispatchedPromptPending.Store(false)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -1533,7 +1547,7 @@ func (sm *SessionManager) finishAcceptedPrompt(
 	promptGeneration uint64,
 ) (*PromptResult, error) {
 	if dispatchOnly {
-		execution.dispatchedPromptPending = true
+		execution.dispatchedPromptPending.Store(true)
 	}
 	if onDispatched != nil {
 		onDispatched()

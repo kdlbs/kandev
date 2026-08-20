@@ -520,9 +520,9 @@ func TestPromptUsage_RecordsCostEvent(t *testing.T) {
 	// With no pricing lookup wired and no provider-reported cost, the row
 	// records 0 (Layer A miss + no Layer B), tagged cost_source=unpriced.
 	// Estimated tracks data.Usage.Estimated verbatim (unset here, so false)
-	// — it is a token-synthesis flag, distinct from cost_source, which is
+	// — it is a usage-authority flag, distinct from cost_source, which is
 	// what actually carries the "we could not resolve a price" signal. See
-	// costContractVersion's v1->v2 doc comment in prompt_usage_cost.go.
+	// costContractVersion's version history in prompt_usage_cost.go.
 	if costs[0].CostSubcents != 0 {
 		t.Fatalf("cost_subcents = %d, want 0 (no pricing lookup wired)", costs[0].CostSubcents)
 	}
@@ -780,38 +780,6 @@ func TestMovedToDone_WithoutExecutionPolicy_NormalCompletion(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected activity log entry with action 'task_status_changed' for task %s, got %+v", taskID, activity)
-	}
-}
-
-func TestHandleTaskStatusChanged_LogsActivity(t *testing.T) {
-	svc, eb := newTestServiceWithBus(t)
-	ctx := context.Background()
-
-	createTestAgent(t, svc, "ws-1", "worker-status")
-	taskID := createOfficeTask(t, svc, "ws-1", "worker-status")
-
-	statusEvt := bus.NewEvent(events.OfficeTaskStatusChanged, "test", map[string]interface{}{
-		"task_id":      taskID,
-		"new_status":   "in_progress",
-		"workspace_id": "ws-1",
-	})
-	if err := eb.Publish(ctx, events.OfficeTaskStatusChanged, statusEvt); err != nil {
-		t.Fatalf("publish office.task.status_changed: %v", err)
-	}
-
-	activity, err := svc.ListActivity(ctx, "ws-1", 50)
-	if err != nil {
-		t.Fatalf("list activity: %v", err)
-	}
-	found := false
-	for _, a := range activity {
-		if a.Action == "task_status_changed" && a.TargetID == taskID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected activity entry with action 'task_status_changed' for task %s, got %+v", taskID, activity)
 	}
 }
 

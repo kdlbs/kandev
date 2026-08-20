@@ -84,6 +84,14 @@ type mockWorkflowEnsurer struct {
 	defaultID string
 }
 
+type mockConfigSyncer struct {
+	result *ApplyResult
+}
+
+func (m *mockConfigSyncer) ApplyIncoming(_ context.Context, _ string) (*ApplyResult, error) {
+	return m.result, nil
+}
+
 func (m *mockWorkflowEnsurer) EnsureOfficeWorkflow(_ context.Context, _ string) (string, error) {
 	return m.officeID, nil
 }
@@ -572,6 +580,29 @@ func TestImportFromFS_SkipsAlreadyImported(t *testing.T) {
 	}
 	if result.WorkspaceIDs[0] != "beta" {
 		t.Errorf("expected imported workspace 'beta', got %q", result.WorkspaceIDs[0])
+	}
+}
+
+func TestImportFromFS_PropagatesSyncWarnings(t *testing.T) {
+	svc, _, _ := newTestOnboardingService(t)
+	svc.configSyncer = &mockConfigSyncer{result: &ApplyResult{
+		CreatedCount: 2,
+		UpdatedCount: 1,
+		Warnings:     []string{"agent \"bob\" reports_to \"grace\", which was not found"},
+	}}
+
+	result, err := svc.ImportFromFS(context.Background())
+	if err != nil {
+		t.Fatalf("import from fs: %v", err)
+	}
+	if result.ImportedCount != 3 {
+		t.Fatalf("imported count: got %d, want 3", result.ImportedCount)
+	}
+	if len(result.Warnings) != 1 {
+		t.Fatalf("warnings: got %d, want 1: %v", len(result.Warnings), result.Warnings)
+	}
+	if result.Warnings[0] != "agent \"bob\" reports_to \"grace\", which was not found" {
+		t.Errorf("warning: got %q", result.Warnings[0])
 	}
 }
 

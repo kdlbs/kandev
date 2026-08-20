@@ -323,6 +323,8 @@ type mockAgentManager struct {
 	repoForExecutionLookup interface {
 		GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
 	}
+	// Optional current ACP session lookup used by reset-token generation tests.
+	getACPSessionIDForSessionFunc func(string) (string, bool)
 
 	// CancelAgent tracking. cancelAgentCalls counts every invocation. If
 	// cancelAgentBlock is non-nil, CancelAgent blocks on it before returning;
@@ -343,8 +345,9 @@ type mockAgentManager struct {
 	// ErrCancelEscalated sentinels handled inside cancelAgentSilent).
 	cancelAgentErr error
 
-	currentPromptGeneration  atomic.Uint64
-	currentPromptExecutionID string
+	currentPromptGeneration    atomic.Uint64
+	currentPromptActivityEpoch atomic.Uint64
+	currentPromptExecutionID   string
 
 	// set_session_mode tracking (issue #1183). Records (sessionID, modeID) for
 	// every SetSessionModeBySessionID call. setSessionModeErr, when set, is
@@ -527,6 +530,15 @@ func (m *mockAgentManager) OwnsPromptGeneration(_ string, executionID string, ge
 	return executionID == m.currentPromptExecutionID && generation == m.currentPromptGeneration.Load()
 }
 
+func (m *mockAgentManager) OwnsPromptActivity(
+	_ string,
+	executionID string,
+	generation, activityEpoch uint64,
+) bool {
+	return m.OwnsPromptGeneration("", executionID, generation) &&
+		activityEpoch == m.currentPromptActivityEpoch.Load()
+}
+
 func (m *mockAgentManager) GetPromptGenerationForSession(_ context.Context, _ string) (uint64, error) {
 	return m.currentPromptGeneration.Load(), nil
 }
@@ -665,6 +677,14 @@ func (m *mockAgentManager) GetExecutionIDForSession(ctx context.Context, session
 	}
 	return "", fmt.Errorf("no execution found")
 }
+
+func (m *mockAgentManager) GetACPSessionIDForSession(sessionID string) (string, bool) {
+	if m.getACPSessionIDForSessionFunc == nil {
+		return "", false
+	}
+	return m.getACPSessionIDForSessionFunc(sessionID)
+}
+
 func (m *mockAgentManager) GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int, targetBranch string) (*client.GitLogResult, error) {
 	if m.getGitLogFunc != nil {
 		return m.getGitLogFunc(ctx, sessionID, baseCommit, limit, targetBranch)

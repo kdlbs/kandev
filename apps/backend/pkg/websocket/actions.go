@@ -27,6 +27,13 @@ const (
 	ActionRepositoryUpdate = "repository.update"
 	ActionRepositoryDelete = "repository.delete"
 
+	// Repository Set actions
+	ActionRepositorySetList   = "repository_set.list"
+	ActionRepositorySetCreate = "repository_set.create"
+	ActionRepositorySetGet    = "repository_set.get"
+	ActionRepositorySetUpdate = "repository_set.update"
+	ActionRepositorySetDelete = "repository_set.delete"
+
 	// Repository Script actions
 	ActionRepositoryScriptList   = "repository.script.list"
 	ActionRepositoryScriptCreate = "repository.script.create"
@@ -119,6 +126,7 @@ const (
 	ActionMessageQueueAppend        = "message.queue.append"
 	ActionMessageQueueDrain         = "message.queue.drain"          // Dispatch one queued entry now when the session is promptable
 	ActionMessageQueueSendNow       = "message.queue.send_now"       // Interrupt and replace the active turn with an exact queue selection
+	ActionMessageQueueAutoRunSet    = "message.queue.auto_run.set"   // Persist automatic queue processing and optionally dispatch the head
 	ActionMessageQueueRemove        = "message.queue.remove"         // Delete a single entry by id
 	ActionMessageQueueMerge         = "message.queue.merge"          // Fold an entry into the entry above it
 	ActionMessageQueueReorder       = "message.queue.reorder"        // Rewrite the visible pending order for a session
@@ -239,6 +247,9 @@ const (
 	ActionRepositoryCreated            = "repository.created"
 	ActionRepositoryUpdated            = "repository.updated"
 	ActionRepositoryDeleted            = "repository.deleted"
+	ActionRepositorySetCreated         = "repository_set.created"
+	ActionRepositorySetUpdated         = "repository_set.updated"
+	ActionRepositorySetDeleted         = "repository_set.deleted"
 	ActionRepositoryScriptCreated      = "repository.script.created"
 	ActionRepositoryScriptUpdated      = "repository.script.updated"
 	ActionRepositoryScriptDeleted      = "repository.script.deleted"
@@ -429,6 +440,7 @@ const (
 	ActionMCPUpdateWorkflow = "mcp.update_workflow"
 	ActionMCPDeleteWorkflow = "mcp.delete_workflow"
 	ActionMCPImportWorkflow = "mcp.import_workflow"
+	ActionMCPExportWorkflow = "mcp.export_workflow"
 
 	ActionMCPCreateWorkflowStep  = "mcp.create_workflow_step"
 	ActionMCPUpdateWorkflowStep  = "mcp.update_workflow_step"

@@ -336,6 +336,49 @@ func TestStartUserShellProcessExportsExecutorProfileEnv(t *testing.T) {
 	}
 }
 
+func TestStartUserShellProcessFailsClosedOnExecutorProfileSecretFailure(t *testing.T) {
+	log := testTerminalLogger(t)
+	manager := lifecycle.NewManager(
+		nil,
+		bus.NewMemoryEventBus(log),
+		nil,
+		nil,
+		nil,
+		nil,
+		lifecycle.ExecutorFallbackDeny,
+		t.TempDir(),
+		log,
+	)
+	manager.SetExecutorProfileReader(&stubExecutorProfileReader{
+		env: &taskmodels.TaskEnvironment{ID: "env-1", ExecutorProfileID: "prof-1"},
+		profile: &taskmodels.ExecutorProfile{
+			ID:      "prof-1",
+			EnvVars: []taskmodels.ProfileEnvVar{{Key: "TOKEN", SecretID: "deleted-secret"}},
+		},
+	})
+	handler := NewTerminalHandler(manager, nil, nil, log)
+	runner := process.NewInteractiveRunner(nil, log, 2*1024*1024)
+
+	execution := &lifecycle.AgentExecution{
+		ID:                "exec-1",
+		SessionID:         "session-1",
+		TaskEnvironmentID: "env-1",
+		WorkspacePath:     t.TempDir(),
+	}
+
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/terminal/environment/env-1?terminalId=term-1", nil)
+
+	processID, status, errMsg := handler.startUserShellProcess(c, execution, "env-1", "term-1", runner)
+	if processID != "" || status != http.StatusServiceUnavailable || errMsg != "executor profile environment unavailable" {
+		t.Fatalf("startUserShellProcess() = (%q, %d, %q), want service unavailable without a process", processID, status, errMsg)
+	}
+	if shells := runner.ListUserShells("env-1"); len(shells) != 0 {
+		t.Fatalf("secret failure started user shells: %#v", shells)
+	}
+}
+
 func TestStartUserShellProcessExportsEffectiveRuntimeEnv(t *testing.T) {
 	log := testTerminalLogger(t)
 	manager := lifecycle.NewManager(

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	promptcfg "github.com/kandev/kandev/config/prompts"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -168,6 +169,47 @@ func TestTaskControlDocs_OmittedFromRestrictedModes(t *testing.T) {
 			assert.NotContains(t, s.mcpServer.ListTools(), "stop_task_kandev")
 			assert.NotContains(t, context, "stop_task_kandev")
 			assert.NotContains(t, context, "delivery_mode")
+		})
+	}
+}
+
+func TestRichOutputDocs_MakeExplicitAndCSVUseDiscoverable(t *testing.T) {
+	inlineRecipe := `{"type":"chart","chart_type":"bar","title":"T","summary":"S","labels":["A","B"],"series":[{"label":"Count","values":[42,27]}]}`
+	csvRecipe := `{"type":"chart","chart_type":"line","title":"T","summary":"S","csv":{"path":"reports/latency.csv","x_column":"recorded_at","series":[{"column":"p95_ms","label":"p95 (ms)"}]}}`
+	metricsRecipe := `{"type":"metrics","items":[{"label":"Passed","value":"38"}]}`
+
+	for name, prompt := range map[string]string{
+		"task":   sysprompt.KandevContext(),
+		"office": sysprompt.OfficeContext(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var richOutputLine string
+			for _, line := range strings.Split(prompt, "\n") {
+				if strings.HasPrefix(line, "- show_rich_output_kandev:") {
+					richOutputLine = line
+					break
+				}
+			}
+			require.NotEmpty(t, richOutputLine)
+			assert.LessOrEqual(t, utf8.RuneCountInString(richOutputLine), 750)
+			for _, phrase := range []string{
+				"When user asks for chart/graph/plot/file preview/KPI/metrics with data: call now",
+				"Do not implement the display as ASCII/SVG/HTML or with another app",
+				"version=1,title,blocks (1-4)",
+				"x_column",
+				"workspace-relative",
+				"Label series with units",
+				"small text table: Markdown",
+				"Inline:",
+				"CSV line:",
+				"Metrics:",
+				"Kandev owns axes/legends/tooltips/layout",
+			} {
+				assert.Contains(t, richOutputLine, phrase)
+			}
+			assert.Equal(t, 1, strings.Count(richOutputLine, inlineRecipe))
+			assert.Equal(t, 1, strings.Count(richOutputLine, csvRecipe))
+			assert.Equal(t, 1, strings.Count(richOutputLine, metricsRecipe))
 		})
 	}
 }

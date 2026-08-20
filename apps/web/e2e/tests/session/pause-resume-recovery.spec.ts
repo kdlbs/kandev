@@ -105,7 +105,7 @@ test.describe("Pause → resume recovery", () => {
     ).toBeVisible({ timeout: 15_000 });
   });
 
-  test("a message queued during a running turn stays parked when the turn is paused", async ({
+  test("Cancel parks queued work with Auto-run OFF and the switch resumes it", async ({
     testPage,
     apiClient,
     seedData,
@@ -140,9 +140,12 @@ test.describe("Pause → resume recovery", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
 
-    // Explicit "Run next" resumes queue processing and delivers the parked input.
+    // Cancel projects the durable queue policy as OFF. Enabling Auto-run
+    // resumes queue processing and delivers the parked input.
     await testPage.getByTestId("queue-chip").click();
-    await testPage.getByTestId("queue-drain-next").click();
+    const autoRun = testPage.getByTestId("queue-auto-run");
+    await expect(autoRun).toHaveAttribute("data-state", "unchecked");
+    await autoRun.click();
     await expect(testPage.getByTestId("queue-chip")).not.toBeVisible({ timeout: 30_000 });
     await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });

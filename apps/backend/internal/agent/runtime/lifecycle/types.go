@@ -28,7 +28,11 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
-	ID                string
+	ID string
+	// RunID identifies the Office run that launched this execution. It is
+	// retained after runtime environment cleanup so delayed stop events can
+	// still be attributed to the correct run.
+	RunID             string
 	TaskID            string
 	SessionID         string
 	TaskEnvironmentID string // Env owning this execution; sessions in the same task share one env
@@ -203,7 +207,7 @@ type AgentExecution struct {
 	// response buffers active for an execution. Agentctl accepts prompt requests
 	// asynchronously, so its transport-level gate alone cannot provide this.
 	promptMu                sync.Mutex
-	dispatchedPromptPending bool
+	dispatchedPromptPending atomic.Bool
 
 	// Closed when the current SendPrompt returns, so CancelAgent can wait
 	// for the in-flight prompt to finish before the caller retries.
@@ -211,10 +215,20 @@ type AgentExecution struct {
 	promptFinishedMu sync.Mutex
 
 	// Last time an agent event was received (for stall detection)
-	lastActivityAt   time.Time
-	lastActivityAtMu sync.Mutex
-	activeTool       *activeTopLevelTool
-	activeToolMu     sync.RWMutex
+	lastActivityAt time.Time
+	// agentEventSincePrompt is armed (false) on each prompt dispatch and set
+	// true by the first genuine agent event (recordActivity/handleCompleteEvent)
+	// that follows. It lets the stall watchdog distinguish "the agent never
+	// produced a single frame for this prompt" from "it worked, then paused" —
+	// both cases otherwise bump the same lastActivityAt timestamp.
+	agentEventSincePrompt bool
+	// promptActivityEpoch changes when a prompt is armed or a genuine agent
+	// event arrives. Stall consumers use it to reject a snapshot that became
+	// stale while the event was crossing the bus.
+	promptActivityEpoch uint64
+	lastActivityAtMu    sync.Mutex
+	activeTool          *activeTopLevelTool
+	activeToolMu        sync.RWMutex
 
 	// Fires once on the first agent event to publish AgentRunning.
 	firstActivityOnce sync.Once
@@ -337,6 +351,34 @@ func (e *AgentExecution) promptGenerationSnapshot() uint64 {
 	e.promptLifecycleMu.Lock()
 	defer e.promptLifecycleMu.Unlock()
 	return e.promptGeneration
+}
+
+func (e *AgentExecution) armPromptActivity() {
+	e.lastActivityAtMu.Lock()
+	e.lastActivityAt = time.Now()
+	e.agentEventSincePrompt = false
+	e.promptActivityEpoch++
+	e.lastActivityAtMu.Unlock()
+}
+
+func (e *AgentExecution) markAgentActivity() {
+	e.lastActivityAtMu.Lock()
+	e.lastActivityAt = time.Now()
+	e.agentEventSincePrompt = true
+	e.promptActivityEpoch++
+	e.lastActivityAtMu.Unlock()
+}
+
+func (e *AgentExecution) promptActivitySnapshot() (time.Time, bool, uint64) {
+	e.lastActivityAtMu.Lock()
+	defer e.lastActivityAtMu.Unlock()
+	return e.lastActivityAt, e.agentEventSincePrompt, e.promptActivityEpoch
+}
+
+func (e *AgentExecution) promptActivityEpochSnapshot() uint64 {
+	e.lastActivityAtMu.Lock()
+	defer e.lastActivityAtMu.Unlock()
+	return e.promptActivityEpoch
 }
 
 // beginStartupAttempt starts a generation for a new ACP process. Generation
@@ -498,6 +540,9 @@ type CachedModelState struct {
 	ConfigOptions  []streams.ConfigOption
 	ConfigSource   string
 	ConfigID       string
+	// ConfigOptionsSettled is true after startup config application has a
+	// complete provider snapshot, including snapshots with no options.
+	ConfigOptionsSettled bool
 }
 
 type configSettlement struct {
@@ -579,8 +624,11 @@ func (ae *AgentExecution) SetModelStateApplyingSettlement(state *CachedModelStat
 	}
 	if settlement.configID == "" {
 		ae.pendingConfigSettlement = nil
+		state.ConfigOptionsSettled = true
 		if settlement.providerDefault != nil {
-			return cloneCachedModelState(settlement.providerDefault), true
+			settled := cloneCachedModelState(settlement.providerDefault)
+			settled.ConfigOptionsSettled = true
+			return settled, true
 		}
 		return state, true
 	}
@@ -589,12 +637,18 @@ func (ae *AgentExecution) SetModelStateApplyingSettlement(state *CachedModelStat
 		return state, false
 	}
 	ae.pendingConfigSettlement = nil
+	state.ConfigOptionsSettled = true
 	if settlement.providerDefault != nil {
-		return cloneCachedModelState(settlement.providerDefault), true
+		settled := cloneCachedModelState(settlement.providerDefault)
+		settled.ConfigOptionsSettled = true
+		return settled, true
 	}
 	if ae.providerDefaultModelState != nil {
-		return cloneCachedModelState(ae.providerDefaultModelState), true
+		settled := cloneCachedModelState(ae.providerDefaultModelState)
+		settled.ConfigOptionsSettled = true
+		return settled, true
 	}
+	response.ConfigOptionsSettled = true
 	return response, true
 }
 
@@ -625,11 +679,12 @@ func cloneCachedModelState(state *CachedModelState) *CachedModelState {
 		return nil
 	}
 	cloned := &CachedModelState{
-		CurrentModelID: state.CurrentModelID,
-		Models:         append([]streams.SessionModelInfo(nil), state.Models...),
-		ConfigOptions:  append([]streams.ConfigOption(nil), state.ConfigOptions...),
-		ConfigSource:   state.ConfigSource,
-		ConfigID:       state.ConfigID,
+		CurrentModelID:       state.CurrentModelID,
+		Models:               append([]streams.SessionModelInfo(nil), state.Models...),
+		ConfigOptions:        append([]streams.ConfigOption(nil), state.ConfigOptions...),
+		ConfigSource:         state.ConfigSource,
+		ConfigID:             state.ConfigID,
+		ConfigOptionsSettled: state.ConfigOptionsSettled,
 	}
 	for i := range cloned.ConfigOptions {
 		cloned.ConfigOptions[i].Options = append(

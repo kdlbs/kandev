@@ -2,8 +2,6 @@ package skills
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
@@ -153,8 +151,9 @@ func prepareSkillPackageMetadata(skill *models.Skill) {
 	if skill.ApprovalState == "" {
 		skill.ApprovalState = "approved"
 	}
-	sum := sha256.Sum256([]byte(skill.Content + "\x00" + skill.FileInventory + "\x00" + skill.SourceLocator))
-	skill.ContentHash = hex.EncodeToString(sum[:])
+	skill.ContentHash = models.SkillPackageContentHash(
+		skill.Content, skill.FileInventory, skill.SourceLocator,
+	)
 }
 
 // ValidateSkillUpdate validates a skill update for slug uniqueness.

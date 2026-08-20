@@ -91,7 +91,7 @@ A self-hoster setting `KANDEV_FEATURES_OFFICE=true` in their k8s manifest beats 
 - A `features` slice in the Zustand store mirrors the response.
 - The root layout (`apps/web/app/layout.tsx`) SSR-fetches the flags once per request and seeds `StateProvider` initialState, so the first paint reflects the deployment's flags. No flash of feature UI.
 - `useFeature(name)` reads a single flag.
-- Page-level gating uses Next.js `notFound()` from a server-side layout (e.g. `apps/web/app/office/layout.tsx`); nav entries use `useFeature` and render `null` when off.
+- Page-level gating reads the flag from the store and renders an unavailable screen (e.g. `OfficeRoutes` in `apps/web/src/office-routes.tsx` renders `OfficeUnavailable` when `features.office` is off); nav entries use `useFeature` and render `null` when off.
 
 ### Launchers
 
@@ -174,6 +174,6 @@ Same pattern — pick the section that matches the knob's purpose (`mocks`, `deb
 - `apps/web/app/layout.tsx` — SSR-fetch + StateProvider seeding
 - `apps/web/lib/state/slices/features/` — Zustand slice
 - `apps/web/hooks/domains/features/use-feature.ts` — client hook
-- `apps/web/app/office/layout.tsx` — page-level `notFound()` gating
+- `apps/web/src/office-routes.tsx` — office flag gating (renders `OfficeUnavailable` when off)
 - `apps/backend/internal/launcher/dev.go` — sets only the `KANDEV_DEBUG_DEV_MODE` selector
 - `apps/web/e2e/fixtures/backend.ts` — sets only the `KANDEV_E2E_MOCK` selector + per-host paths

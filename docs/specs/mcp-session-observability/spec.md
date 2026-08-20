@@ -1,6 +1,7 @@
 ---
 status: approved
 created: 2026-07-30
+updated: 2026-08-18
 owner: Kandev
 ---
 
@@ -8,6 +9,14 @@ owner: Kandev
 
 Decision:
 [ADR-2026-07-30-session-owned-mcp-observability](../../decisions/2026-07-30-session-owned-mcp-observability.md)
+
+Tool definition decision:
+[ADR-2026-08-18-session-mcp-tool-definition-details](../../decisions/2026-08-18-session-mcp-tool-definition-details.md)
+
+Implementation plans:
+
+- [Session MCP attachment observability](../../plans/mcp-session-observability/plan.md)
+- [MCP server explorer](../../plans/mcp-server-explorer/plan.md)
 
 ## Why
 
@@ -27,15 +36,15 @@ server, that server observes no request.
 Kandev reports the strongest evidence it has for each MCP server without
 turning absence into failure:
 
-| Evidence | Meaning |
-|---|---|
-| Configured | The server exists in the selected profile or is Kandev's built-in task server. |
-| Filtered | Kandev deliberately omitted the server because the agent, executor policy, transport, or passthrough strategy could not expose it. |
-| Delivered | The server was included in ACP `session/new`, `session/load`, or `session/reset`, or was materialized into a passthrough CLI's effective config. |
-| Connected | Kandev's in-session MCP endpoint observed that client connection initialize successfully. |
-| Tools loaded | Kandev's in-session endpoint served `tools/list` successfully to that connection. |
-| Used | Kandev's in-session endpoint observed at least one tool call on that connection. |
-| Failed | Kandev received an explicit server-specific attachment error. |
+| Evidence     | Meaning                                                                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Configured   | The server exists in the selected profile or is Kandev's built-in task server.                                                                   |
+| Filtered     | Kandev deliberately omitted the server because the agent, executor policy, transport, or passthrough strategy could not expose it.               |
+| Delivered    | The server was included in ACP `session/new`, `session/load`, or `session/reset`, or was materialized into a passthrough CLI's effective config. |
+| Connected    | Kandev's in-session MCP endpoint observed that client connection initialize successfully.                                                        |
+| Tools loaded | Kandev's in-session endpoint served `tools/list` successfully to that connection.                                                                |
+| Used         | Kandev's in-session endpoint observed at least one tool call on that connection.                                                                 |
+| Failed       | Kandev received an explicit server-specific attachment error.                                                                                    |
 
 ACP does not standardize a response that lists connected MCP servers, and
 third-party profile MCP servers normally connect directly to the agent. Those
@@ -97,24 +106,91 @@ stable reason code plus a bounded sanitized summary.
 Raw ACP JSONL logging remains a development-only diagnostic and is not enabled
 by this feature.
 
+## Kandev tool catalog
+
+After Kandev serves `tools/list`, the current attachment report includes a
+safe catalog for the built-in `kandev` server. Each entry contains the tool
+name, description, input schema, and token estimate from that response.
+
+The catalog has these limits:
+
+- it contains at most 128 tools, sorted by name.
+- each description contains at most 1,024 UTF-8 bytes.
+- each stored input schema contains at most 64 KiB.
+- all stored input schemas contain at most 512 KiB in one catalog.
+- `tool_count` remains the total count from `tools/list`.
+- a truncation marker tells the UI when the total count exceeds the stored
+  catalog.
+- a schema truncation marker tells the UI when one input schema is unavailable.
+- superseded attempts keep the total count but do not keep catalog entries.
+
+The catalog excludes output schemas, annotations, `_meta`, invocation
+arguments, results, prompts, credentials, and endpoint configuration.
+Descriptions and schemas render as plain text or structured data, never HTML.
+
+Kandev calculates each token estimate from the compact JSON for the complete
+MCP tool definition. The estimate uses `o200k_base` and the method identifier
+`o200k_base:mcp-tool-json-v1`. It excludes the enclosing response and any
+provider-specific wrapper.
+
+The UI labels this value as `~N tokens`. It explains that the selected agent
+can use a different tokenizer or tool-loading format. Kandev does not show a
+character-based fallback when tokenization is unavailable.
+
+Kandev does not collect a catalog for a third-party profile server. Those
+servers connect directly to the agent, so Kandev cannot observe their
+`tools/list` result. The UI explains this limit and continues to show the safe
+status metadata that Kandev owns.
+
 ## User experience
 
-The MCP toolbar icon remains neutral by default. It does not become a row of
-colored indicators.
+The MCP toolbar icon remains one compact neutral control. The tooltip and
+explorer use status colors for individual servers.
 
 On precise-pointer desktop:
 
-- hover or keyboard focus opens a compact MCP status popover;
-- clicking the trigger pins the popover so diagnostic actions can be used;
-- each server row shows its own status color and plain-language label.
+- hover or keyboard focus shows the current server names and status colors.
+- the tooltip includes the green Kandev row when Kandev is Active.
+- clicking the trigger opens a wide MCP server dialog.
+- the left pane lists servers for the active Kandev session.
+- the right pane gives most of its height to the selected server's tool list.
+- server metadata appears in a compact summary with optional connection details.
+- selecting `kandev` shows a scrollable list of enabled tool names and token
+  estimates after `tools/list` succeeds.
+- selecting a tool opens a focused tool page with its description and input
+  schema.
+- a visible Back control returns to the same tool-list position and focus.
+- selecting a third-party server explains why its tool catalog is unavailable.
+- the dialog has one close control.
 
 On touch and coarse-pointer devices:
 
-- tapping a minimum 44px toolbar target opens an inset, safe-area-aware bottom
-  drawer;
-- the drawer uses the same server rows, evidence checklist, and actions as the
-  desktop popover;
+- tapping a minimum 44px toolbar target opens a safe-area-aware drawer.
+- phones use a full-height drawer with one internal scroll area.
+- tablets use a bounded drawer with the same server and tool data.
+- the first view lists servers, and a server tap opens its tool list.
+- a tool tap opens its focused tool page.
+- Back returns from tool to tools, then from tools to servers.
 - no capability is hidden behind hover.
+
+The dialog and drawer select `kandev` first when it is present. Otherwise, they
+select the first server. If live status removes the selected server, the
+surface selects the same deterministic fallback.
+
+Before Kandev observes `tools/list`, its detail view explains that the catalog
+is not loaded. If the stored catalog is truncated, the list states how many
+tools are shown and the total tool count.
+
+The explorer header and server summary do not scroll. The active page body is
+the only vertical scroll owner. The tool list and tool page use the available
+height without increasing the dialog beyond the viewport.
+
+The tool page presents common object properties as argument rows. Each row can
+show its name, type, requirement state, and description. The page also provides
+a plain JSON view for nested or composed JSON Schema structures.
+
+If a schema exceeds a storage limit, the tool page states that the schema is
+too large to show. The page still shows the description and token estimate.
 
 The list uses these display states:
 
@@ -203,11 +279,36 @@ capabilities are not treated as connection evidence.
   Test endpoint and copy diagnostics, **THEN** the test runs from the session's
   executor, its result is distinguished from agent attachment, and the copied
   report contains no secrets or raw agent output.
-- **GIVEN** a precise-pointer user, **WHEN** they hover or focus the neutral MCP
-  trigger, **THEN** a compact status list appears and can be pinned by click.
-- **GIVEN** a phone or coarse-pointer user, **WHEN** they tap the MCP trigger,
-  **THEN** the same status and diagnostic actions appear in a bottom drawer
-  without horizontal overflow.
+- **GIVEN** an Active Kandev server, **WHEN** a precise-pointer user hovers or
+  focuses the MCP trigger, **THEN** the tooltip shows a green Kandev row and its
+  Active status.
+- **GIVEN** a precise-pointer user, **WHEN** they click the MCP trigger,
+  **THEN** a wide dialog lists the active session's MCP servers.
+- **GIVEN** Kandev served `tools/list` for the current attempt, **WHEN** the user
+  selects `kandev`, **THEN** the detail pane lists enabled tool names and token
+  estimates in a scrollable list.
+- **GIVEN** a loaded Kandev tool, **WHEN** the user selects that tool, **THEN**
+  a focused page shows its description and input schema.
+- **GIVEN** a user returns from a tool page, **WHEN** the tool list appears,
+  **THEN** the list restores its prior scroll position and focus.
+- **GIVEN** a loaded Kandev tool, **WHEN** the explorer shows its token size,
+  **THEN** the value uses the recorded estimate method and has an estimate label.
+- **GIVEN** the shared dialog adds a close control, **WHEN** the explorer opens,
+  **THEN** only one close control is visible and available to assistive technology.
+- **GIVEN** the tool list exceeds the available height, **WHEN** the user
+  scrolls, **THEN** the list scrolls inside the explorer and the header remains
+  visible.
+- **GIVEN** Kandev has not served `tools/list` for the current attempt, **WHEN**
+  the user selects `kandev`, **THEN** the detail pane says that the tool catalog
+  is not loaded.
+- **GIVEN** a third-party server is present, **WHEN** the user selects it,
+  **THEN** the detail pane shows safe status metadata and explains that tool
+  details are unavailable.
+- **GIVEN** a catalog exceeds the storage limit, **WHEN** the user opens the
+  Kandev detail pane, **THEN** the UI shows the stored entries and the full tool
+  count with a truncation notice.
+- **GIVEN** a phone user, **WHEN** they select a server and a tool, **THEN** a
+  full-height drawer provides Back navigation and no horizontal overflow.
 - **GIVEN** Auggie or another ACP agent is under investigation, **WHEN** a
   developer runs the sentinel MCP probe, **THEN** the JSONL and summary
   distinguish advertised capability, configuration delivery, initialize,
@@ -219,6 +320,12 @@ capabilities are not treated as connection evidence.
   server status.
 - Claiming automatic connection status for direct third-party MCP servers that
   Kandev cannot observe.
+- Connecting to or proxying third-party MCP servers to collect their tool
+  catalogs.
+- Persisting third-party tool names or descriptions.
+- Showing MCP output schemas, invocation arguments, or tool results in the
+  explorer.
+- Claiming that a tool estimate is an exact provider or billing token count.
 - Enabling raw ACP frame logs or persistent raw stderr in release mode.
 - Persisting prompts, tool arguments, credentials, header values, environment
   values, or full endpoint URLs in attachment diagnostics.

@@ -433,6 +433,97 @@ workflows:
 	assert.Equal(t, "Done", steps[1].Name)
 }
 
+func TestHandleExportWorkflow_ReturnsPortableWorkflow(t *testing.T) {
+	h, provider, repo := setupImportHandlers(t)
+	ctx := context.Background()
+	provider.workflows = append(provider.workflows, &taskmodels.Workflow{
+		ID: "wf-export", WorkspaceID: "ws-source", Name: "Portable Board",
+		Description: "A portable workflow", Prompt: "Keep the board moving",
+	})
+	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID: "step-todo", WorkflowID: "wf-export", Name: "Todo", Position: 0,
+		Color: "#3b82f6", IsStartStep: true, ShowInCommandPanel: true,
+	}))
+	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID: "step-done", WorkflowID: "wf-export", Name: "Done", Position: 1,
+		Color: "#22c55e",
+	}))
+
+	resp, err := h.handleExportWorkflow(ctx, makeWSMessage(t, ws.ActionMCPExportWorkflow, map[string]string{
+		"workflow_id": "wf-export",
+	}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var exported wfmodels.WorkflowExport
+	require.NoError(t, json.Unmarshal(resp.Payload, &exported))
+	assert.Equal(t, wfmodels.ExportVersion, exported.Version)
+	assert.Equal(t, wfmodels.ExportType, exported.Type)
+	require.Len(t, exported.Workflows, 1)
+	assert.Equal(t, "Portable Board", exported.Workflows[0].Name)
+	assert.Equal(t, "A portable workflow", exported.Workflows[0].Description)
+	require.Len(t, exported.Workflows[0].Steps, 2)
+	assert.Equal(t, "Todo", exported.Workflows[0].Steps[0].Name)
+	assert.Equal(t, "Done", exported.Workflows[0].Steps[1].Name)
+	assert.NotContains(t, string(resp.Payload), "wf-export")
+	assert.NotContains(t, string(resp.Payload), "step-todo")
+}
+
+func TestHandleExportWorkflow_ResultCanBeImportedUnchanged(t *testing.T) {
+	h, provider, repo := setupImportHandlers(t)
+	ctx := context.Background()
+	provider.workflows = append(provider.workflows, &taskmodels.Workflow{
+		ID: "wf-round-trip", WorkspaceID: "ws-source", Name: "Round Trip",
+	})
+	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID: "step-round-trip", WorkflowID: "wf-round-trip", Name: "Review", Position: 0,
+		Color: "purple", IsStartStep: true,
+	}))
+
+	exportResp, err := h.handleExportWorkflow(ctx, makeWSMessage(t, ws.ActionMCPExportWorkflow, map[string]string{
+		"workflow_id": "wf-round-trip",
+	}))
+	require.NoError(t, err)
+
+	importResp, err := h.handleImportWorkflow(ctx, makeWSMessage(t, ws.ActionMCPImportWorkflow, map[string]string{
+		"workspace_id": "ws-target",
+		"document":     string(exportResp.Payload),
+	}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, importResp.Type)
+
+	var result workflowsvc.ImportResult
+	require.NoError(t, json.Unmarshal(importResp.Payload, &result))
+	assert.Equal(t, []string{"Round Trip"}, result.Created)
+	assert.Empty(t, result.Skipped)
+	require.Len(t, provider.workflows, 2)
+	imported := provider.workflows[1]
+	assert.Equal(t, "ws-target", imported.WorkspaceID)
+	steps, err := repo.ListStepsByWorkflow(ctx, imported.ID)
+	require.NoError(t, err)
+	require.Len(t, steps, 1)
+	assert.Equal(t, "Review", steps[0].Name)
+}
+
+func TestHandleExportWorkflow_UnknownWorkflowReturnsGenericError(t *testing.T) {
+	h, _, _ := setupImportHandlers(t)
+
+	resp, err := h.handleExportWorkflow(context.Background(), makeWSMessage(t, ws.ActionMCPExportWorkflow, map[string]string{
+		"workflow_id": "missing-workflow",
+	}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	assert.NotContains(t, string(resp.Payload), "workflows")
+}
+
+func TestHandleExportWorkflow_MissingWorkflowID(t *testing.T) {
+	h := &Handlers{}
+
+	resp, err := h.handleExportWorkflow(context.Background(), makeWSMessage(t, ws.ActionMCPExportWorkflow, map[string]string{}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
 func TestHandleImportWorkflow_SkipsDuplicateName(t *testing.T) {
 	h, provider, _ := setupImportHandlers(t)
 	provider.workflows = append(provider.workflows, &taskmodels.Workflow{

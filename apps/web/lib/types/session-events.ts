@@ -27,6 +27,9 @@ export type MessageAddedPayload = {
   requests_input?: boolean;
   created_at: string;
   updated_at?: string;
+  /** 1-based ordinal among ALL user messages of the session; present only on
+   * user messages from an indexed server payload. */
+  prompt_index?: number;
   /** Authoritative per-session input projection after this semantic message mutation. */
   pending_action?: TaskPendingAction | null;
   /** Logical clock shared with REST session snapshots. */
@@ -193,6 +196,7 @@ export type QueueStatusChangedPayload = {
   count?: number;
   max?: number;
   merge_enabled?: boolean;
+  auto_run?: boolean;
 };
 
 export type AvailableCommandPayload = {

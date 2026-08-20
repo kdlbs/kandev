@@ -705,6 +705,32 @@ func TestPublishSettledConfigOptionsAppliesToDelayedModelState(t *testing.T) {
 	}
 }
 
+func TestPublishSettledConfigOptionsAllowsEmptyProviderSnapshot(t *testing.T) {
+	log := newSessionTestLogger()
+	eventBus := &MockEventBusWithTracking{}
+	publisher := NewEventPublisher(eventBus, log)
+	sm := NewSessionManager(log, nil)
+	sm.SetDependencies(publisher, nil, nil, nil)
+	execution := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "session-1"}
+	execution.SetModelState(&CachedModelState{
+		CurrentModelID: "claude-opus-4-8",
+		Models:         []streams.SessionModelInfo{{ModelID: "claude-opus-4-8", Name: "Claude Opus 4.8"}},
+	})
+
+	sm.publishSettledConfigOptions(execution, "acp-session-1", "", nil)
+
+	settled := eventBus.getStreamEvents()
+	if len(settled) != 1 {
+		t.Fatalf("settled event count = %d, want one empty-config snapshot", len(settled))
+	}
+	if !settledConfigEventData(settled[0].Data.Data) {
+		t.Fatal("empty-config snapshot must carry the settlement marker")
+	}
+	if len(settled[0].Data.ConfigOptions) != 0 {
+		t.Fatalf("settled config options = %#v, want empty", settled[0].Data.ConfigOptions)
+	}
+}
+
 func TestConfigBaselineRetainsProviderDefaultsWhenProfileOverrideSettles(t *testing.T) {
 	log := newSessionTestLogger()
 	eventBus := &MockEventBusWithTracking{}
@@ -2103,6 +2129,138 @@ func TestWaitForPromptDone_PublishesSingleStall(t *testing.T) {
 			t.Fatalf("waitForPromptDone error = %v, want context canceled", err)
 		}
 	})
+}
+
+func TestMarkPromptDispatchedArmsActivityAfterDispatch(t *testing.T) {
+	store := NewExecutionStore()
+	execution := &AgentExecution{
+		ID:                         "test-exec",
+		SessionID:                  "test-session",
+		promptGeneration:           3,
+		agentEventSincePrompt:      true,
+		promptActivityEpoch:        2,
+		promptCompletionGeneration: 0,
+	}
+	if err := store.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+	sm.executionStore = store
+
+	sm.markPromptDispatched(execution, 3)
+
+	_, agentEventSeen, epoch := execution.promptActivitySnapshot()
+	if agentEventSeen {
+		t.Fatal("prompt dispatch left the previous activity marker armed")
+	}
+	if epoch != 3 {
+		t.Fatalf("activity epoch = %d, want 3 after dispatch", epoch)
+	}
+}
+
+// TestWaitForPromptDone_StallPayloadDiscriminatesNeverStarted verifies that
+// agentEventSincePrompt (armed false on dispatch, set true only by a genuine
+// agent event) is threaded into the published stall payload's NeverStarted
+// field: dispatch-only silence reports NeverStarted true, and the same
+// execution reports NeverStarted false once a real agent event has recorded
+// activity for the current prompt.
+func TestWaitForPromptDone_StallPayloadDiscriminatesNeverStarted(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		eventBus := &MockEventBusWithTracking{}
+		sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+		sm.eventPublisher = NewEventPublisher(eventBus, newSessionTestLogger())
+		execution := &AgentExecution{
+			ID:           "test-exec",
+			TaskID:       "test-task",
+			SessionID:    "test-session",
+			promptDoneCh: make(chan PromptCompletionSignal, 1),
+		}
+		// Mirrors sendPrompt's dispatch bump: activity timestamp moves, but the
+		// discriminator is armed false because no agent event has arrived yet.
+		execution.lastActivityAt = time.Now()
+		execution.agentEventSincePrompt = false
+
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		waitResult := make(chan error, 1)
+		go func() {
+			_, err := sm.waitForPromptDone(ctx, execution, 7)
+			waitResult <- err
+		}()
+
+		time.Sleep(5 * time.Minute)
+		synctest.Wait()
+
+		payload := lastStalledPayload(t, eventBus)
+		if !payload.NeverStarted {
+			t.Fatalf("NeverStarted = false, want true for dispatch-only silence")
+		}
+
+		cancel()
+		if err := <-waitResult; !errors.Is(err, context.Canceled) {
+			t.Fatalf("waitForPromptDone error = %v, want context canceled", err)
+		}
+	})
+}
+
+func TestWaitForPromptDone_StallPayloadReportsRunningAfterAgentEvent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		eventBus := &MockEventBusWithTracking{}
+		sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+		sm.eventPublisher = NewEventPublisher(eventBus, newSessionTestLogger())
+		execution := &AgentExecution{
+			ID:           "test-exec",
+			TaskID:       "test-task",
+			SessionID:    "test-session",
+			promptDoneCh: make(chan PromptCompletionSignal, 1),
+			Status:       v1.AgentStatusRunning,
+		}
+		execution.lastActivityAt = time.Now()
+		execution.agentEventSincePrompt = false
+
+		mgr := &Manager{eventPublisher: sm.eventPublisher}
+		mgr.recordActivity(execution, agentctl.AgentEvent{Type: "message_chunk"})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		waitResult := make(chan error, 1)
+		go func() {
+			_, err := sm.waitForPromptDone(ctx, execution, 7)
+			waitResult <- err
+		}()
+
+		time.Sleep(5 * time.Minute)
+		synctest.Wait()
+
+		payload := lastStalledPayload(t, eventBus)
+		if payload.NeverStarted {
+			t.Fatalf("NeverStarted = true, want false once a genuine agent event recorded activity")
+		}
+
+		cancel()
+		if err := <-waitResult; !errors.Is(err, context.Canceled) {
+			t.Fatalf("waitForPromptDone error = %v, want context canceled", err)
+		}
+	})
+}
+
+func lastStalledPayload(t *testing.T, eventBus *MockEventBusWithTracking) AgentStalledPayload {
+	t.Helper()
+	eventBus.mu.Lock()
+	defer eventBus.mu.Unlock()
+	for i := len(eventBus.PublishedEvents) - 1; i >= 0; i-- {
+		te := eventBus.PublishedEvents[i]
+		if te.Subject != "agent.stalled" {
+			continue
+		}
+		payload, ok := te.Event.Data.(AgentStalledPayload)
+		if !ok {
+			t.Fatalf("agent.stalled event data = %#v, want AgentStalledPayload", te.Event.Data)
+		}
+		return payload
+	}
+	t.Fatalf("no agent.stalled event published")
+	return AgentStalledPayload{}
 }
 
 func countPublishedEvents(eventBus *MockEventBusWithTracking, subject string) int {

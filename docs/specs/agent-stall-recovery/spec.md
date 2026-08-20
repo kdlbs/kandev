@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-07-29
-updated: 2026-08-08
+updated: 2026-08-18
 owner: Kandev
 ---
 
@@ -13,10 +13,12 @@ Decisions:
 - [ADR-2026-08-02-agent-terminal-diagnostics-over-stderr](../../decisions/2026-08-02-agent-terminal-diagnostics-over-stderr.md)
 - [ADR-2026-08-07-allowlisted-provider-action-links](../../decisions/2026-08-07-allowlisted-provider-action-links.md)
 - [ADR-2026-08-08-provider-neutral-agent-error-recovery](../../decisions/2026-08-08-provider-neutral-agent-error-recovery.md)
+- [ADR-2026-08-18-never-started-agent-stall-terminal](../../decisions/2026-08-18-never-started-agent-stall-terminal.md)
 
 Implementation plans:
 
 - [Agent stall recovery](../../plans/agent-stall-recovery/plan.md)
+- [Lost turn-completion cancel recovery](../../plans/lost-turn-completion-cancel-recovery/plan.md)
 - [OpenCode terminal error surfacing](../../plans/opencode-terminal-error-surfacing/plan.md)
 - [OpenCode actionable error links](../../plans/opencode-actionable-error-links/plan.md)
 
@@ -47,8 +49,10 @@ mere inactivity so a failed turn is not presented as healthy work.
 - The notice remains visible and actionable while the affected prompt's
   `turn_id` is the active turn in a `RUNNING` session, including after a page
   reload. It is hidden when that turn settles or a later turn becomes active.
-- Detection alone does not change task state, session state, prompt admission,
-  or process liveness.
+- Detection after genuine agent activity does not change task state, session
+  state, prompt admission, or process liveness. A current five-minute snapshot
+  with no genuine event since prompt dispatch is a launch failure and moves the
+  session and task to `FAILED`.
 - The backend logs the first stall detected for a prompt generation and does
   not emit another notice or log entry on every watchdog check.
 
@@ -134,6 +138,9 @@ sanitized diagnostic message for the collapsed technical-details surface.
   makes the session input-ready.
 - If the agent does not acknowledge cancellation, the existing bounded
   cancel-escalation path releases the prompt and reconciles the session.
+- Cancel escalation clears every prompt-admission barrier for the cancelled
+  turn, including a pending dispatch-only completion. A later prompt can
+  dispatch without a backend restart.
 - If notice-message persistence fails, the failure is logged without changing
   or terminating the running session.
 - If OpenCode does not support error-only stderr emission, changes its log
@@ -175,9 +182,16 @@ sanitized diagnostic message for the collapsed technical-details surface.
 - **GIVEN** a stall notice is visible, **WHEN** the user activates
   **Cancel turn**, **THEN** the existing cancellation path settles the turn and
   the session becomes available for new input without a backend restart.
+- **GIVEN** a dispatch-only prompt never reports completion and cancellation
+  escalates, **WHEN** the user sends a later prompt, **THEN** Kandev dispatches
+  it without a backend restart.
 - **GIVEN** a stall notice is visible on a phone viewport, **WHEN** the user taps
   **Cancel turn**, **THEN** the same cancellation outcome is reachable through
   an inline, content-width touch target of at least 44px.
+- **GIVEN** a prompt has produced no genuine agent event since dispatch,
+  **WHEN** the current five-minute watchdog snapshot is handled, **THEN** Kandev
+  persists a terminal error, moves the session and task to `FAILED`, and does
+  not render a running-only cancel action.
 - **GIVEN** a quiet but legitimate long-running turn, **WHEN** the inactivity
   threshold passes and the user does not cancel, **THEN** Kandev leaves the
   turn and process running.
@@ -214,8 +228,8 @@ sanitized diagnostic message for the collapsed technical-details surface.
 
 ## Out of scope
 
-- Automatically timing out, failing, cancelling, or killing a turn based only
-  on inactivity.
+- Automatically timing out, cancelling, or killing a turn based only on
+  inactivity.
 - Making the inactivity threshold user-configurable.
 - Reading, tailing, or exposing an agent vendor's private log files.
 - Treating arbitrary stderr text as trusted terminal evidence.

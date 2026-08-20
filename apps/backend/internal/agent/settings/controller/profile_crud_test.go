@@ -503,3 +503,108 @@ func TestUpdateProfile_MixedEnabledAndFallbackPersistsBoth(t *testing.T) {
 			stored.FallbackModel, stored.AutoFallback)
 	}
 }
+
+// TestUpdateProfile_ModelOnlyLeavesNameUnchanged is the regression guard for
+// the MCP update_agent_profile silent-rename bug: a model-only patch (the
+// shape the MCP tool sends, since it omits name unless explicitly asked for
+// one) must not derive and overwrite the profile's name from the model ID.
+func TestUpdateProfile_ModelOnlyLeavesNameUnchanged(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{
+		id:          "test-agent",
+		name:        "test-agent",
+		displayName: "Test Agent",
+		enabled:     true,
+	}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	ctrl.repo = st
+
+	profile, err := ctrl.CreateProfile(context.Background(), CreateProfileRequest{
+		AgentID: "agent-1",
+		Name:    "Product Manager",
+		Model:   "opus",
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+
+	model := "sonnet"
+	updated, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{
+		ID:    profile.ID,
+		Model: &model,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProfile: %v", err)
+	}
+	if updated.Name != "Product Manager" {
+		t.Fatalf("response name = %q, want unchanged %q", updated.Name, "Product Manager")
+	}
+	if updated.Model != model {
+		t.Fatalf("response model = %q, want %q", updated.Model, model)
+	}
+	stored, err := st.GetAgentProfile(context.Background(), profile.ID)
+	if err != nil {
+		t.Fatalf("GetAgentProfile: %v", err)
+	}
+	if stored.Name != "Product Manager" {
+		t.Fatalf("stored name = %q, want unchanged %q", stored.Name, "Product Manager")
+	}
+	if stored.AgentDisplayName != "Test Agent" {
+		t.Fatalf("stored agent_display_name = %q, want unchanged %q", stored.AgentDisplayName, "Test Agent")
+	}
+	if stored.Model != model {
+		t.Fatalf("stored model = %q, want %q", stored.Model, model)
+	}
+}
+
+// TestUpdateProfile_NameOnlyLeavesModelUnchanged pins the other half of the
+// acceptance criteria: a name-only patch must not touch the stored model.
+func TestUpdateProfile_NameOnlyLeavesModelUnchanged(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{
+		id:          "test-agent",
+		name:        "test-agent",
+		displayName: "Test Agent",
+		enabled:     true,
+	}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	ctrl.repo = st
+
+	profile, err := ctrl.CreateProfile(context.Background(), CreateProfileRequest{
+		AgentID: "agent-1",
+		Name:    "Product Manager",
+		Model:   "opus",
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+
+	newName := "Renamed"
+	updated, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{
+		ID:   profile.ID,
+		Name: &newName,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProfile: %v", err)
+	}
+	if updated.Name != newName {
+		t.Fatalf("response name = %q, want %q", updated.Name, newName)
+	}
+	if updated.Model != "opus" {
+		t.Fatalf("response model = %q, want unchanged %q", updated.Model, "opus")
+	}
+	stored, err := st.GetAgentProfile(context.Background(), profile.ID)
+	if err != nil {
+		t.Fatalf("GetAgentProfile: %v", err)
+	}
+	if stored.Name != newName {
+		t.Fatalf("stored name = %q, want %q", stored.Name, newName)
+	}
+	if stored.Model != "opus" {
+		t.Fatalf("stored model = %q, want unchanged %q", stored.Model, "opus")
+	}
+}

@@ -77,6 +77,14 @@ type ClarificationInputPauser interface {
 	PauseForClarificationInput(ctx context.Context, sessionID string) (int, error)
 }
 
+type clarificationInputPauserWithOptions interface {
+	PauseForClarificationInputWithOptions(
+		ctx context.Context,
+		sessionID string,
+		options orchestrator.ClarificationPauseOptions,
+	) (int, error)
+}
+
 // MessageCreator creates messages for clarification requests.
 type MessageCreator interface {
 	CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []clarification.Question, clarificationContext string) ([]string, error)
@@ -403,6 +411,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPUpdateWorkflow, h.handleUpdateWorkflow)
 		d.RegisterFunc(ws.ActionMCPDeleteWorkflow, h.handleDeleteWorkflow)
 		d.RegisterFunc(ws.ActionMCPImportWorkflow, h.handleImportWorkflow)
+		d.RegisterFunc(ws.ActionMCPExportWorkflow, h.handleExportWorkflow)
 		d.RegisterFunc(ws.ActionMCPCreateWorkflowStep, h.handleCreateWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPUpdateWorkflowStep, h.handleUpdateWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPDeleteWorkflowStep, h.handleDeleteWorkflowStep)
@@ -3400,10 +3409,12 @@ func (h *Handlers) publishQueueStatusEvent(ctx context.Context, sessionID string
 		events.MessageQueueStatusChanged,
 		"mcp-handlers",
 		map[string]interface{}{
-			"session_id": sessionID,
-			"entries":    status.Entries,
-			"count":      status.Count,
-			"max":        status.Max,
+			"session_id":    sessionID,
+			"entries":       status.Entries,
+			"count":         status.Count,
+			"max":           status.Max,
+			"auto_run":      status.AutoRun,
+			"merge_enabled": status.MergeEnabled,
 		},
 	))
 }

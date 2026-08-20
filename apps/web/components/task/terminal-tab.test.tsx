@@ -71,14 +71,30 @@ vi.mock("@kandev/ui/context-menu", () => ({
   }: {
     children: React.ReactNode;
     [key: string]: unknown;
-  }) => <div {...props}>{children}</div>,
+  }) => (
+    <div tabIndex={-1} {...props}>
+      {children}
+    </div>
+  ),
   ContextMenuContent: ({
     children,
     onCloseAutoFocus,
   }: {
     children: React.ReactNode;
     onCloseAutoFocus?: (event: { preventDefault: () => void }) => void;
-  }) => <div onClick={() => onCloseAutoFocus?.({ preventDefault: vi.fn() })}>{children}</div>,
+  }) => (
+    <div
+      onClick={() => {
+        const preventDefault = vi.fn();
+        onCloseAutoFocus?.({ preventDefault });
+        if (!preventDefault.mock.calls.length) {
+          document.querySelector<HTMLElement>('[data-testid="terminal-tab-shell-1"]')?.focus();
+        }
+      }}
+    >
+      {children}
+    </div>
+  ),
   ContextMenuItem: ({
     children,
     onClick,
@@ -134,7 +150,7 @@ describe("TerminalTab", () => {
     });
   });
 
-  it("asks for localized confirmation before closing an idle terminal", () => {
+  it("asks for localized confirmation before closing an idle terminal", async () => {
     render(<TerminalTab {...makeProps()} />);
 
     fireEvent.click(screen.getByRole("button", { name: CLOSE_TERMINAL_BUTTON_NAME }));
@@ -145,13 +161,15 @@ describe("TerminalTab", () => {
 
     fireEvent.click(screen.getByRole("button", { name: CONFIRM_CLOSE_BUTTON_NAME }));
 
-    expect(mockDestroyUserShell).toHaveBeenCalledWith("env-1", "shell-1", "task-1");
-    expect(mockClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(mockDestroyUserShell).toHaveBeenCalledWith("env-1", "shell-1", "task-1");
+      expect(mockClose).toHaveBeenCalledTimes(1);
+    });
     expect(screen.queryByRole("status", { name: "Closing terminal" })).toBeNull();
     expect(screen.getByTestId("terminal-tab-shell-1").getAttribute("aria-busy")).toBeNull();
   });
 
-  it("routes context-menu terminate through the same localized confirmation", () => {
+  it("routes context-menu terminate through the same localized confirmation", async () => {
     render(<TerminalTab {...makeProps()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Terminate" }));
@@ -165,8 +183,20 @@ describe("TerminalTab", () => {
 
     expect(screen.queryByRole("dialog", { name: "Close terminal?" })).toBeNull();
     expect(screen.queryByRole("status", { name: "Closing terminal" })).toBeNull();
-    expect(mockClose).toHaveBeenCalledTimes(1);
-    expect(mockDestroyUserShell).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(mockClose).toHaveBeenCalledTimes(1);
+      expect(mockDestroyUserShell).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("focuses the inline rename input after the context menu closes", async () => {
+    render(<TerminalTab {...makeProps()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Rename/ }));
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByTestId("terminal-tab-rename-input"));
+    });
   });
 
   it("keeps the panel dismissed and reports an error if destroy fails", async () => {
@@ -176,7 +206,7 @@ describe("TerminalTab", () => {
     fireEvent.click(screen.getByRole("button", { name: CLOSE_TERMINAL_BUTTON_NAME }));
     fireEvent.click(screen.getByRole("button", { name: CONFIRM_CLOSE_BUTTON_NAME }));
 
-    expect(mockClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mockClose).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("status", { name: "Closing terminal" })).toBeNull();
 
     await waitFor(() => {
@@ -185,14 +215,18 @@ describe("TerminalTab", () => {
     expect(mockToastError).toHaveBeenCalledWith("Failed to close terminal");
   });
 
-  it("ignores a second confirmed terminate while close is in progress", () => {
+  it("ignores a second confirmed terminate while close is in progress", async () => {
     render(<TerminalTab {...makeProps()} />);
 
     fireEvent.click(screen.getByRole("button", { name: CLOSE_TERMINAL_BUTTON_NAME }));
     fireEvent.click(screen.getByRole("button", { name: CONFIRM_CLOSE_BUTTON_NAME }));
+
+    await waitFor(() => expect(mockDestroyUserShell).toHaveBeenCalledTimes(1));
+
     fireEvent.click(screen.getByRole("button", { name: "Terminate" }));
     fireEvent.click(screen.getByRole("button", { name: CONFIRM_CLOSE_BUTTON_NAME }));
 
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
     expect(mockDestroyUserShell).toHaveBeenCalledTimes(1);
     expect(mockDestroyUserShell).toHaveBeenCalledWith("env-1", "shell-1", "task-1");
   });

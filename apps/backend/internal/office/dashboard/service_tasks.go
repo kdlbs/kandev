@@ -476,6 +476,7 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 	}
 
 	commentID := s.maybeCreateStatusComment(ctx, req)
+	s.logTaskStatusChangeActivity(ctx, req)
 	s.publishTaskStatusChanged(ctx, req)
 	s.runReactivityForStatus(ctx, req, commentID, preStatus)
 	s.maybeSupersedeOnRework(ctx, req.TaskID, preStatus, dbState)
@@ -495,6 +496,38 @@ func (s *DashboardService) UpdateTaskStatusAsAgent(
 		Comment:      update.Comment,
 		ActorAgentID: update.ActorAgentID,
 	})
+}
+
+// logTaskStatusChangeActivity records the task_status_changed activity row
+// synchronously, in-process, before the OfficeTaskStatusChanged event is
+// published. This used to be an async event-bus subscriber
+// (office/service.Service.handleTaskStatusChanged); under a NATS-backed
+// bus, that subscriber and the WS broadcast subscriber that triggers the
+// frontend's task-detail refetch raced independently, so a browser GET
+// could land before the activity row existed and see stale Started/
+// Completed sidebar values with nothing left to trigger a corrective
+// refetch. Writing the row here, ahead of publishTaskStatusChanged,
+// makes the row durable before the event (and therefore the broadcast)
+// can ever fire, regardless of bus implementation. Best-effort: mirrors
+// logBlockerActivity's activity==nil guard.
+func (s *DashboardService) logTaskStatusChangeActivity(ctx context.Context, req TaskStatusUpdateRequest) {
+	if s.activity == nil {
+		return
+	}
+	wsID, _ := s.repo.GetTaskWorkspaceID(ctx, req.TaskID)
+	actorType := "system"
+	actorID := "office-scheduler"
+	if req.ActorAgentID != "" {
+		actorType = activityActorTypeAgent
+		actorID = req.ActorAgentID
+	}
+	runID := ""
+	if s.runResolver != nil {
+		runID = s.runResolver.ResolveRunForTask(ctx, req.TaskID)
+	}
+	s.activity.LogActivityWithRun(ctx, wsID, actorType, actorID,
+		"task_status_changed", "task", req.TaskID,
+		fmt.Sprintf(`{"new_status":%q}`, req.NewStatus), runID, "")
 }
 
 // applyApprovalGate redirects a "done" transition to in_review when

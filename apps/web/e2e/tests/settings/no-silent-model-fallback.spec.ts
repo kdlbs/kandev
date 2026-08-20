@@ -25,9 +25,18 @@ test.describe("executor-authoritative model selection", () => {
         .getByRole("option", { name: profile.name, exact: false });
       await expect(option).toBeVisible();
       await expect(option).toBeEnabled();
-      await expect(dialog).toContainText(
-        `The host probe did not advertise ${UNADVERTISED_MODEL}. The selected executor will decide the model at launch.`,
-      );
+      const warning = option.getByTestId("agent-profile-model-probe-warning");
+      await expect(warning).toBeVisible();
+      const warningText = `The host probe did not advertise ${UNADVERTISED_MODEL}. The selected executor will decide the model at launch.`;
+      await expect(dialog).not.toContainText(warningText);
+      await warning.hover();
+      await expect(
+        testPage
+          .locator('[data-slot="tooltip-content"]:not([data-state="closed"])')
+          .filter({ hasText: warningText }),
+      ).toBeVisible();
+      await option.click();
+      await expect(selector.locator("button")).toHaveCount(0);
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true).catch(() => {});
     }

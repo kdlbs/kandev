@@ -4,13 +4,13 @@ import { use, useState, useEffect, useRef, useCallback, useMemo, Suspense } from
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
+import { useLatestOnly } from "@/hooks/use-latest-only";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
 import {
   getTask,
   listActivityForTarget,
   listComments,
   type TaskCommentResponse,
-  type TaskDecisionDTO,
 } from "@/lib/api/domains/office-api";
 import { listTaskSessions } from "@/lib/api/domains/session-api";
 import {
@@ -21,19 +21,13 @@ import { OfficeSimplePane } from "@/components/task/simple/OfficeSimplePane";
 import { TaskAdvancedMode } from "./task-advanced-mode";
 import { IssueDetailSkeleton } from "./task-detail-skeleton";
 import { TaskBody, resolveTaskBodyMode, type TaskBodyMode } from "@/components/task/TaskBody";
-import type {
-  Task,
-  TaskComment,
-  TaskActivityEntry,
-  TaskDecision,
-  TaskSession,
-  TimelineEvent,
-} from "./types";
-import type { ActivityEntry, OfficeTask } from "@/lib/state/slices/office/types";
+import type { Task, TaskComment, TaskActivityEntry, TaskSession, TimelineEvent } from "./types";
+import type { ActivityEntry } from "@/lib/state/slices/office/types";
 import type { TaskSession as ApiTaskSession } from "@/lib/types/http";
 import { useSessionLiveSyncSubscriptions } from "./use-session-live-sync";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { mapOfficeTaskToTask } from "./map-office-task";
 
 type IssueDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -43,65 +37,6 @@ type IssueDetailPageProps = {
 // (keep the initial fetch) from an explicit server-side null (metadata was
 // cleared and must not be resurrected).
 const SESSION_METADATA_ABSENT = "\u0000absent\u0000";
-
-function mapDecisionDTO(d: TaskDecisionDTO): TaskDecision {
-  return {
-    id: d.id,
-    taskId: d.task_id,
-    deciderType: d.decider_type,
-    deciderId: d.decider_id,
-    deciderName: d.decider_name ?? "",
-    role: d.role,
-    decision: d.decision,
-    comment: d.comment ?? "",
-    createdAt: d.created_at,
-  };
-}
-
-function mapOfficeTaskToTask(raw: OfficeTask): Task {
-  // The server DTO includes reviewers/approvers/decisions even though the
-  // strongly-typed OfficeTask only declares the cross-cutting fields. We
-  // read those extra props off the raw object.
-  const extra = raw as OfficeTask & {
-    reviewers?: string[];
-    approvers?: string[];
-    decisions?: TaskDecisionDTO[];
-    blockedBy?: string[];
-  };
-  return {
-    id: raw.id,
-    workspaceId: raw.workspaceId,
-    identifier: raw.identifier,
-    title: raw.title,
-    description: raw.description,
-    status: raw.status as Task["status"],
-    priority: (raw.priority || "medium") as Task["priority"],
-    labels: (raw.labels ?? []).map((l) =>
-      typeof l === "string" ? { name: l, color: "#6b7280" } : l,
-    ),
-    assigneeAgentProfileId: raw.assigneeAgentProfileId,
-    parentId: raw.parentId,
-    projectId: raw.projectId,
-    blockedBy: extra.blockedBy ?? [],
-    blocking: [],
-    children: (raw.children ?? []).map((child) => ({
-      id: child.id,
-      identifier: child.identifier,
-      title: child.title,
-      status: child.status as Task["status"],
-      blockedBy: child.blockedBy ?? [],
-      createdAt: child.createdAt,
-    })),
-    reviewers: extra.reviewers ?? [],
-    approvers: extra.approvers ?? [],
-    decisions: (extra.decisions ?? []).map(mapDecisionDTO),
-    createdBy: "",
-    createdAt: raw.createdAt,
-    updatedAt: raw.updatedAt,
-    executionPolicy: raw.executionPolicy,
-    executionState: raw.executionState,
-  };
-}
 
 function mapCommentResponse(c: TaskCommentResponse): TaskComment {
   return {
@@ -315,9 +250,19 @@ function useTaskOptimisticHelpers(
   // (priority / project / parent / blockers / participants / assignee).
   // The optimistic patch we applied locally gets reconciled with server
   // state.
+  //
+  // A WS-driven trigger can fire again before a prior GET resolves (two
+  // status changes in quick succession, ordinary network jitter). Without
+  // a guard, a slower earlier response can land after a faster later one
+  // and overwrite fresher task state with stale data. useLatestOnly
+  // discards a response once a newer refetchTask call has started,
+  // regardless of arrival order.
+  const { begin, isCurrent } = useLatestOnly();
   const refetchTask = useCallback(async () => {
+    const token = begin();
     try {
       const res = await getTask(id);
+      if (!isCurrent(token)) return;
       if (res.task) {
         setTask(mapOfficeTaskToTask(res.task));
         if (res.timeline) setTimeline(res.timeline);
@@ -325,7 +270,7 @@ function useTaskOptimisticHelpers(
     } catch {
       /* swallow — next user action will retry */
     }
-  }, [id, setTask, setTimeline]);
+  }, [id, setTask, setTimeline, begin, isCurrent]);
   useOfficeRefetch(`task:${id}`, () => {
     void refetchTask();
   });

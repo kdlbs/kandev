@@ -11,6 +11,7 @@ import (
 // AgentEventPayload is the payload for agent lifecycle events (started, stopped, ready, completed, failed).
 type AgentEventPayload struct {
 	AgentExecutionID   string                 `json:"agent_execution_id"`
+	RunID              string                 `json:"run_id,omitempty"`
 	TaskID             string                 `json:"task_id"`
 	SessionID          string                 `json:"session_id,omitempty"`
 	AgentID            string                 `json:"agent_id,omitempty"`
@@ -29,19 +30,23 @@ type AgentEventPayload struct {
 }
 
 // AgentStalledPayload describes a prompt that has stopped receiving agent events.
-// It is advisory only; the lifecycle remains running until the provider completes
-// or the user cancels the turn.
+// The activity epoch lets the consumer reject a stale watchdog snapshot. A
+// never-started prompt is terminal only when its snapshot remains current.
 type AgentStalledPayload struct {
 	AgentExecutionID string        `json:"agent_execution_id"`
 	TaskID           string        `json:"task_id"`
 	SessionID        string        `json:"session_id"`
 	PromptGeneration uint64        `json:"prompt_generation"`
+	ActivityEpoch    uint64        `json:"activity_epoch,omitempty"`
 	LastActivityAt   time.Time     `json:"last_activity_at"`
 	StalledFor       time.Duration `json:"stalled_for"`
 	ToolCallID       string        `json:"tool_call_id,omitempty"`
 	ToolName         string        `json:"tool_name,omitempty"`
 	ToolTitle        string        `json:"tool_title,omitempty"`
 	ToolStatus       string        `json:"tool_status,omitempty"`
+	// NeverStarted is true when the agent has not emitted a single event since
+	// this prompt was dispatched — a terminal failure, not a mid-work pause.
+	NeverStarted bool `json:"never_started"`
 }
 
 // AgentctlEventPayload is the payload for agentctl lifecycle events (starting, ready, error).
@@ -546,6 +551,9 @@ type SessionModelsEventPayload struct {
 	CurrentModelID string                     `json:"current_model_id"`
 	Models         []streams.SessionModelInfo `json:"models"`
 	ConfigOptions  []streams.ConfigOption     `json:"config_options,omitempty"`
+	// ConfigOptionsSettled distinguishes a complete empty provider snapshot
+	// from the transient empty state sent before startup settles.
+	ConfigOptionsSettled bool `json:"config_options_settled,omitempty"`
 	// ConfigBaseline is the persisted ID/value projection used by clients to
 	// compare the current ConfigOptions without duplicating provider metadata.
 	ConfigBaseline map[string]string `json:"config_baseline,omitempty"`
@@ -588,9 +596,10 @@ func (p SessionModelSelectionWarningEventPayload) GetSessionID() string {
 // SessionModelsSnapshot is the persisted provider-derived state needed to
 // hydrate the task model selector before live session events reconnect.
 type SessionModelsSnapshot struct {
-	CurrentModelID string                     `json:"current_model_id"`
-	Models         []streams.SessionModelInfo `json:"models"`
-	ConfigOptions  []streams.ConfigOption     `json:"config_options,omitempty"`
+	CurrentModelID       string                     `json:"current_model_id"`
+	Models               []streams.SessionModelInfo `json:"models"`
+	ConfigOptions        []streams.ConfigOption     `json:"config_options,omitempty"`
+	ConfigOptionsSettled bool                       `json:"config_options_settled,omitempty"`
 }
 
 // LoadSessionModelsSnapshot decodes typed and JSON-rehydrated metadata values.
@@ -599,7 +608,7 @@ func LoadSessionModelsSnapshot(raw any) (SessionModelsSnapshot, bool) {
 		return SessionModelsSnapshot{}, false
 	}
 	if snapshot, ok := raw.(SessionModelsSnapshot); ok {
-		return snapshot, snapshot.CurrentModelID != "" || len(snapshot.Models) > 0 || len(snapshot.ConfigOptions) > 0
+		return snapshot, snapshot.CurrentModelID != "" || len(snapshot.Models) > 0 || len(snapshot.ConfigOptions) > 0 || snapshot.ConfigOptionsSettled
 	}
 	data, err := json.Marshal(raw)
 	if err != nil {
@@ -609,7 +618,7 @@ func LoadSessionModelsSnapshot(raw any) (SessionModelsSnapshot, bool) {
 	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return SessionModelsSnapshot{}, false
 	}
-	return snapshot, snapshot.CurrentModelID != "" || len(snapshot.Models) > 0 || len(snapshot.ConfigOptions) > 0
+	return snapshot, snapshot.CurrentModelID != "" || len(snapshot.Models) > 0 || len(snapshot.ConfigOptions) > 0 || snapshot.ConfigOptionsSettled
 }
 
 // LoadMCPAttachmentHistory decodes typed and JSON-rehydrated MCP attachment
@@ -686,6 +695,9 @@ func (p SessionTodosEventPayload) GetSessionID() string {
 // AgentID is the lifecycle execution.ID (UUID); AgentType is the CLI engine
 // slug (claude-acp, codex-acp, ...). The office cost subscriber derives the
 // provider name from AgentType — AgentID is kept for legacy consumers.
+// AgentProfileID is the stable profile recorded on the task session. It is
+// copied at publish time so asynchronous cost consumers do not use a mutable
+// workflow runner projection for attribution.
 //
 // TurnID is captured on the lifecycle completion frame before AgentReady can
 // admit a successor prompt and is forwarded by the orchestrator. The
@@ -694,15 +706,16 @@ func (p SessionTodosEventPayload) GetSessionID() string {
 // Both are empty when unavailable (e.g. no active turn), never a synthesized
 // placeholder.
 type SessionPromptUsageEventPayload struct {
-	TaskID       string               `json:"task_id"`
-	SessionID    string               `json:"session_id"`
-	AgentID      string               `json:"agent_id"`
-	AgentType    string               `json:"agent_type,omitempty"`
-	Model        string               `json:"model,omitempty"`
-	Usage        *streams.PromptUsage `json:"usage"`
-	Timestamp    string               `json:"timestamp"`
-	TurnID       string               `json:"turn_id,omitempty"`
-	UsageEventID string               `json:"usage_event_id,omitempty"`
+	TaskID         string               `json:"task_id"`
+	SessionID      string               `json:"session_id"`
+	AgentID        string               `json:"agent_id"`
+	AgentProfileID string               `json:"agent_profile_id,omitempty"`
+	AgentType      string               `json:"agent_type,omitempty"`
+	Model          string               `json:"model,omitempty"`
+	Usage          *streams.PromptUsage `json:"usage"`
+	Timestamp      string               `json:"timestamp"`
+	TurnID         string               `json:"turn_id,omitempty"`
+	UsageEventID   string               `json:"usage_event_id,omitempty"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

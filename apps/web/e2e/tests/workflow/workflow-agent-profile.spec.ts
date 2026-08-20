@@ -258,8 +258,8 @@ test.describe("Workflow agent profile", () => {
       await expect(testPage.getByText("Agent set by workflow")).toBeVisible({ timeout: 10_000 });
       await expect(startButton).toBeEnabled({ timeout: 10_000 });
 
-      // Cancel (Escape) and re-open.
-      await testPage.keyboard.press("Escape");
+      // Cancel and re-open.
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
       await expect(dialog).toBeHidden({ timeout: 10_000 });
 
       await kanban.createTaskButton.first().click();

@@ -165,7 +165,6 @@ function usePanelMessageHandler(panelState: ChatPanelState) {
     prompts,
   });
 }
-
 /** Builds the composer's submit handler, tracking in-flight sends and
  *  routing errors to a toast. */
 export function useSubmitHandler(
@@ -400,12 +399,6 @@ function useChatInputDerived(
   return { planActions, executor, placeholder };
 }
 
-/** Whether the user can manually drain the queued-message backlog right now
- *  (no pending clarification, and the session is idle/waiting for input). */
-function canManuallyDrainQueue(pendingClarification: unknown, sessionState: string | null) {
-  return !pendingClarification && (sessionState === "WAITING_FOR_INPUT" || sessionState === "IDLE");
-}
-
 /**
  * The chat composer: input box, submit/cancel handling, plan-mode toggle,
  * clarification banner, and the {@link ChatStatusBar} above it.
@@ -438,7 +431,6 @@ export function ChatInputArea({
   const statusRowTaskId = resolveStatusRowTaskId(taskId, statusTaskId);
   const composerWorkspaceId = useComposerWorkspaceId(resolvedSessionId, taskId);
   const sessionState = panelState.session?.state ?? null;
-  const canDrainQueue = canManuallyDrainQueue(panelState.pendingClarification, sessionState);
   const { planActions, executor, placeholder } = useChatInputDerived(
     panelState,
     chatInputRef,
@@ -477,7 +469,6 @@ export function ChatInputArea({
       />
       <QueueAffordance
         sessionId={resolvedSessionId}
-        canDrain={canDrainQueue}
         renderStatusBar={(queueChip) => (
           <ChatStatusBar
             todoItems={panelState.todoItems}

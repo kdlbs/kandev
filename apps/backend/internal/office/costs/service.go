@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
 
 	"go.uber.org/zap"
@@ -61,30 +62,36 @@ func NewCostService(
 
 // RecordCostEvent stores a cost event with caller-provided cost subcents.
 // Cost computation now lives in the subscriber (Layer A / B lookup); this
-// helper is the manual-entry / test-harness path that records a row
-// verbatim. Token counts are stored as int64.
+// manual-entry helper records a row verbatim. TokensOut is a pointer so the
+// caller must state whether the output count was observed: nil stores NULL,
+// while a non-nil zero stores a measured zero. CostContractVersion uses the same
+// models.CostContractVersion the prompt-usage subscriber uses, so a
+// manually-recorded row is never mistaken for a legacy pre-contract one.
 func (s *CostService) RecordCostEvent(
 	ctx context.Context,
 	sessionID, taskID, agentInstanceID, projectID string,
 	model, provider string,
-	tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
+	tokensIn, tokensCachedIn int64,
+	tokensOut *int64,
+	costSubcents int64,
 	estimated bool,
 ) (*CostEvent, error) {
+	contractVersion := models.CostContractVersion
 	event := &CostEvent{
-		SessionID:      sessionID,
-		TaskID:         taskID,
-		AgentProfileID: agentInstanceID,
-		ProjectID:      projectID,
-		Model:          model,
-		Provider:       provider,
-		TokensIn:       tokensIn,
-		TokensCachedIn: tokensCachedIn,
-		TokensOut:      tokensOut,
-		CostSubcents:   costSubcents,
-		Estimated:      estimated,
-		OccurredAt:     time.Now().UTC(),
+		SessionID:           sessionID,
+		TaskID:              taskID,
+		AgentProfileID:      agentInstanceID,
+		ProjectID:           projectID,
+		Model:               model,
+		Provider:            provider,
+		TokensIn:            tokensIn,
+		TokensCachedIn:      tokensCachedIn,
+		TokensOut:           tokensOut,
+		CostSubcents:        costSubcents,
+		Estimated:           estimated,
+		CostContractVersion: &contractVersion,
+		OccurredAt:          time.Now().UTC(),
 	}
-
 	if err := s.repo.CreateCostEvent(ctx, event); err != nil {
 		return nil, err
 	}

@@ -201,6 +201,11 @@ type WorkflowRepository interface {
 type MessageRepository interface {
 	CreateMessage(ctx context.Context, message *models.Message) error
 	GetMessage(ctx context.Context, id string) (*models.Message, error)
+	// GetMessageWithPromptIndex retrieves a message by ID with its computed
+	// prompt_index (1-based ordinal among the session's user messages).
+	// Used by the idempotent WS replay/response path and user update-event
+	// publication; hot-path reads stay on GetMessage.
+	GetMessageWithPromptIndex(ctx context.Context, id string) (*models.Message, error)
 	GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error)
 	GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error)
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*models.Message, error)
@@ -398,6 +403,27 @@ type RepositoryEntityRepository interface {
 	// single-process race; it is not a substitute for a database-level
 	// uniqueness constraint against writers outside this process.
 	GetRepositoryByLocalPath(ctx context.Context, workspaceID, localPath string) (*models.Repository, error)
+}
+
+// RepositorySetRepository stores named, reusable groups of workspace
+// repositories. Membership order is authoritative: writes assign contiguous
+// positions from the supplied order, and reads return items in that order with
+// soft-deleted and out-of-workspace repositories excluded.
+type RepositorySetRepository interface {
+	CreateRepositorySet(ctx context.Context, set *models.RepositorySet) error
+	GetRepositorySet(ctx context.Context, id string) (*models.RepositorySet, error)
+	// GetRepositorySetByName compares the name case-insensitively and returns
+	// nil, nil when it is unused, leaving the conflict decision to the caller.
+	GetRepositorySetByName(ctx context.Context, workspaceID, name string) (*models.RepositorySet, error)
+	ListRepositorySets(ctx context.Context, workspaceID string) ([]*models.RepositorySet, error)
+	// ListRepositorySetIDsByRepository reports which sets hold a repository, so a
+	// caller can publish their new shape after a deletion prunes membership.
+	ListRepositorySetIDsByRepository(ctx context.Context, repositoryID string) ([]string, error)
+	// UpdateRepositorySet writes the set's fields and, when repositoryIDs is
+	// non-nil, replaces its whole membership in the same transaction so the two
+	// cannot land apart. A nil repositoryIDs leaves membership untouched.
+	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryIDs *[]string) error
+	DeleteRepositorySet(ctx context.Context, id string) (bool, error)
 }
 
 // RepositorySecretBindingRepository stores normalized repository environment

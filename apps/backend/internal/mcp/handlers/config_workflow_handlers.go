@@ -82,6 +82,23 @@ func (h *Handlers) handleDeleteWorkflow(ctx context.Context, msg *ws.Message) (*
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
 }
 
+func (h *Handlers) handleExportWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	workflowID, err := unmarshalStringField(msg.Payload, "workflow_id")
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if workflowID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
+	}
+
+	export, err := h.workflowSvc.ExportWorkflow(ctx, workflowID)
+	if err != nil {
+		h.logger.Error("failed to export workflow", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to export workflow", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, export)
+}
+
 // handleImportWorkflow imports one or more workflows into a workspace from a
 // portable document. The document is the same YAML/JSON envelope produced by
 // the export endpoint; YAML parsing accepts JSON too, matching the HTTP

@@ -237,6 +237,27 @@ func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.Execut
 	return scanExecutorRunningRows(rows)
 }
 
+// ListExecutorsRunningIdle returns rows that can be candidates for periodic
+// stale-runtime recovery. Filtering in SQL avoids rescanning preserved stopped
+// rows and recent executions on every reaper tick.
+func (r *Repository) ListExecutorsRunningIdle(ctx context.Context, cutoff time.Time) ([]*models.ExecutorRunning, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
+			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
+			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
+			created_at, updated_at
+		FROM executors_running
+		WHERE status <> ? AND updated_at <= ?
+		ORDER BY updated_at DESC
+	`), models.ExecutorRunningStatusStopped, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanExecutorRunningRows(rows)
+}
+
 func (r *Repository) ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error) {
 	if taskID == "" {
 		return nil, fmt.Errorf("task_id is required")
@@ -484,6 +505,83 @@ func (r *Repository) RepairExecutorRunningDead(ctx context.Context, sessionID st
 		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
 	}
 	return nil
+}
+
+// RepairExecutorRunningDeadIfCurrent is the compare-and-set variant used by
+// concurrent cleanup. The row must still belong to expectedExecID and, when
+// supplied, must have the same UpdatedAt value observed by the caller.
+func (r *Repository) RepairExecutorRunningDeadIfCurrent(
+	ctx context.Context,
+	sessionID, expectedExecID string,
+	expectedUpdatedAt time.Time,
+) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	now := time.Now().UTC()
+	query := `
+		UPDATE executors_running
+		   SET status = ?, local_pid = 0, last_seen_at = ?, updated_at = ?
+		 WHERE session_id = ? AND agent_execution_id = ?
+	`
+	args := []interface{}{
+		models.ExecutorRunningStatusStopped, now, now, sessionID, expectedExecID,
+	}
+	if !expectedUpdatedAt.IsZero() {
+		query += " AND updated_at = ?\n"
+		args = append(args, expectedUpdatedAt)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		return nil
+	}
+	exists, err := r.HasExecutorRunningRow(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
+	}
+	return models.ErrExecutionRotated
+}
+
+// DeleteExecutorRunningIfCurrent deletes a row only when its execution
+// identity and observed timestamp still match. It prevents cleanup of a row
+// that a successor launch has already replaced.
+func (r *Repository) DeleteExecutorRunningIfCurrent(
+	ctx context.Context,
+	sessionID, expectedExecID string,
+	expectedUpdatedAt time.Time,
+) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	query := `DELETE FROM executors_running WHERE session_id = ? AND agent_execution_id = ?`
+	args := []interface{}{sessionID, expectedExecID}
+	if !expectedUpdatedAt.IsZero() {
+		query += " AND updated_at = ?\n"
+		args = append(args, expectedUpdatedAt)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		return nil
+	}
+	exists, err := r.HasExecutorRunningRow(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
+	}
+	return models.ErrExecutionRotated
 }
 
 // UpdateExecutorRunningStatus narrowly updates the status column.

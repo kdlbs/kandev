@@ -143,6 +143,7 @@ YAML, the database, or Settings.
 |---|---|---|---|
 | `auth.jwtSecret` | `KANDEV_AUTH_JWTSECRET` | generated value | Accepted and validated compatibility configuration; the current main HTTP product path does not use it as an authentication boundary. |
 | `auth.tokenDuration` | `KANDEV_AUTH_TOKENDURATION` | `3600` | Must be positive, but is not consumed by the current main HTTP product path. |
+| `auth.cookieName` | `KANDEV_AUTH_COOKIE_NAME` | empty | Session cookie base name. Empty (default) means the effective name is derived from the request host: `kandev_session` on a default-port host, `kandev_session_<port>` on a ported host. This isolates multiple instances on one host (see [authentication](authentication.md#multiple-instances-on-one-host)). A non-empty value is used verbatim (never port-suffixed) and disables automatic isolation, so it must be unique per cookie host. Precedence: environment over config file over default. |
 | `office.jwtSigningKey` | `KANDEV_OFFICE_JWTSIGNINGKEY` | random per start | HMAC key for Office agent-runtime JWTs. Set a stable secret when Office tasks must survive restarts. |
 | `features.office` | `KANDEV_FEATURES_OFFICE` | `false` in production | Experimental Office UI, routes, services, and automation. |
 | `features.auth` | `KANDEV_FEATURES_AUTH` | `false` in production | Opt-in authentication and per-user workspaces. The first visitor after enabling completes setup and becomes the admin. |

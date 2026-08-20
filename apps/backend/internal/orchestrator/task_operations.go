@@ -17,7 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
-	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -409,6 +409,9 @@ func (s *Service) StartCreatedSession(
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
 ) (*executor.TaskExecution, error) {
+	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
+	defer releaseLifecycleLock()
+
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
 
@@ -1867,6 +1870,8 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	s.logger.Debug("resuming task session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
+	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
+	defer releaseLifecycleLock()
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -2179,6 +2184,9 @@ func (s *Service) advanceTaskWorkflowStep(ctx context.Context, task *models.Task
 // After lazy recovery, a session may be in WAITING_FOR_INPUT with no agent process;
 // this function detects that case and triggers a resume.
 func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, session *models.TaskSession) error {
+	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
+	defer releaseLifecycleLock()
+
 	isOfficeTask, err := s.lookupOfficeTask(ctx, session.TaskID)
 	if err != nil {
 		return fmt.Errorf("failed to determine office task status: %w", err)
@@ -3660,13 +3668,27 @@ func (s *Service) captureArchiveDiff(ctx context.Context, sessionID, baseCommit 
 		return
 	}
 
-	if err := s.repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
+	snapshot := &models.GitSnapshot{
 		SessionID:    sessionID,
 		SnapshotType: models.SnapshotTypeArchive,
 		HeadCommit:   diffResult.HeadCommit,
 		BaseCommit:   diffResult.BaseCommit,
 		Files:        diffResult.Files,
-	}); err != nil {
+	}
+	status, statusErr := s.agentManager.GetGitStatusFresh(ctx, sessionID)
+	if statusErr != nil {
+		s.logger.Warn("failed to capture git status metadata for archive",
+			zap.String("session_id", sessionID),
+			zap.Error(statusErr))
+	} else if status != nil && status.Success {
+		snapshot.Branch = status.Branch
+		snapshot.RemoteBranch = status.RemoteBranch
+		snapshot.Ahead = status.Ahead
+		snapshot.Behind = status.Behind
+		snapshot.Metadata = archiveGitStatusMetadata(status, diffResult.Files)
+	}
+
+	if err := s.repo.CreateGitSnapshot(ctx, snapshot); err != nil {
 		s.logger.Warn("failed to save archive snapshot",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
@@ -3677,6 +3699,29 @@ func (s *Service) captureArchiveDiff(ctx context.Context, sessionID, baseCommit 
 		zap.String("session_id", sessionID),
 		zap.String("head_commit", diffResult.HeadCommit),
 		zap.Int("total_commits", diffResult.TotalCommits))
+}
+
+func archiveGitStatusMetadata(status *client.GitStatusResult, files map[string]interface{}) map[string]interface{} {
+	if status == nil {
+		return nil
+	}
+	return map[string]interface{}{
+		"timestamp": status.Timestamp,
+		// The archive's files map is a cumulative diff, while these status
+		// lists describe the working tree at capture time. Keep an explicit
+		// count for summary consumers so they do not add two different views.
+		"changed_files":      len(files),
+		"modified":           status.Modified,
+		"added":              status.Added,
+		"deleted":            status.Deleted,
+		"untracked":          status.Untracked,
+		"renamed":            status.Renamed,
+		"remote_ahead":       status.RemoteAhead,
+		"remote_behind":      status.RemoteBehind,
+		"remote_head_commit": status.RemoteHeadCommit,
+		"branch_additions":   status.BranchAdditions,
+		"branch_deletions":   status.BranchDeletions,
+	}
 }
 
 // parseCommitTime parses a commit timestamp from git log output.
@@ -4903,7 +4948,55 @@ func (s *Service) DrainQueuedMessage(ctx context.Context, sessionID string) (boo
 	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
 		return false, err
 	}
+	if s.sessionHasPendingClarification(ctx, sessionID) {
+		return false, ErrSessionNotPromptable
+	}
+	if s.messageQueue == nil {
+		return false, errors.New("message queue is not configured")
+	}
+	if err := s.messageQueue.SetAutoRun(ctx, sessionID, true); err != nil {
+		return false, fmt.Errorf("resume queue Auto-run: %w", err)
+	}
 	return s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID), nil
+}
+
+// SetQueueAutoRun persists the queue policy and, when enabling an eligible
+// session, immediately attempts the FIFO head. It never cancels an active turn
+// and treats busy, clarification, and lifecycle guards as a successful armed
+// policy with no immediate dispatch.
+func (s *Service) SetQueueAutoRun(ctx context.Context, sessionID string, enabled bool) (bool, bool, error) {
+	if sessionID == "" {
+		return false, false, errors.New("session_id is required")
+	}
+	if s.messageQueue == nil {
+		return false, false, errors.New("message queue is not configured")
+	}
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
+	if err := s.messageQueue.SetAutoRun(ctx, sessionID, enabled); err != nil {
+		return false, false, fmt.Errorf("set queue Auto-run: %w", err)
+	}
+	if !enabled || s.isCancelInFlight(sessionID) || s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
+		return s.messageQueue.GetStatus(ctx, sessionID).AutoRun, false, nil
+	}
+	if s.sessionHasPendingClarification(ctx, sessionID) {
+		return s.messageQueue.GetStatus(ctx, sessionID).AutoRun, false, nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return s.messageQueue.GetStatus(ctx, sessionID).AutoRun, false, fmt.Errorf("load session for queue Auto-run: %w", err)
+	}
+	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
+		if isSessionBusyError(err) {
+			return s.messageQueue.GetStatus(ctx, sessionID).AutoRun, false, nil
+		}
+		return s.messageQueue.GetStatus(ctx, sessionID).AutoRun, false, err
+	}
+	dispatched := s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID)
+	return s.messageQueue.GetStatus(ctx, sessionID).AutoRun, dispatched, nil
 }
 
 // cancelInFlightGuard is a per-session mutex serializing cancel/interrupt/
@@ -6015,6 +6108,16 @@ func (s *Service) finishCancelledAgentTurn(ctx context.Context, sessionID string
 		}
 	} else if _, err := s.reconcileCancelledTurnOwned(ctx, "", sessionID, nil, false, prepared.capturedTurnID); err != nil {
 		return fmt.Errorf("reconcile cancelled turn: %w", err)
+	}
+	if s.messageQueue != nil {
+		paused, err := s.messageQueue.PauseAutoRunIfPending(ctx, sessionID)
+		if err != nil {
+			s.logger.Warn("failed to pause queued messages after cancel",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		} else if paused {
+			s.publishQueueStatusEvent(ctx, sessionID)
+		}
 	}
 
 	s.recordCancelledAgentMessage(ctx, session, sessionID, prepared.cancelTurnID)

@@ -198,6 +198,7 @@ func createTestServiceWithSessionsRepo(
 		Sessions:          wrapSessions(repo),
 		GitSnapshots:      repo,
 		RepoEntities:      repo,
+		RepositorySets:    repo,
 		RepositoryCleanup: repo,
 		Executors:         repo,
 		Environments:      repo,

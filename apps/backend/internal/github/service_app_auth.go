@@ -420,6 +420,19 @@ func (s *Service) ResolveGitHubCredential(
 	return broker.Resolve(ctx, request)
 }
 
+func (s *Service) ReissueGitHubCredentialLease(
+	ctx context.Context,
+	request CredentialLeaseReissueRequest,
+) (*CredentialLease, error) {
+	s.mu.Lock()
+	broker := s.credentialBroker
+	s.mu.Unlock()
+	if broker == nil {
+		return nil, ErrGitHubNotConfigured
+	}
+	return broker.Reissue(ctx, request)
+}
+
 type WorkspaceAutomationStatus struct {
 	*WorkspaceConnection
 	Actor               *AuthPrincipal               `json:"actor,omitempty"`

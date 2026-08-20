@@ -66,6 +66,7 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 		execution_state TEXT DEFAULT '',
 		checkout_agent_id TEXT,
 		checkout_at DATETIME,
+		checkout_run_id TEXT,
 		archived_at DATETIME,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -95,6 +96,17 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 		position INTEGER NOT NULL DEFAULT 0
 	)`); err != nil {
 		t.Fatalf("create workflow_step_participants: %v", err)
+	}
+	// Stub of task_sessions, mirroring the columns GetSessionAgentProfileID
+	// (RunnerProjection's fallback source, see prompt_usage_cost.go) reads.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS task_sessions (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		agent_profile_id TEXT,
+		started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		t.Fatalf("create task_sessions: %v", err)
 	}
 
 	initSharedAgentProfilesSchema(t, db)
@@ -249,6 +261,18 @@ func setTestTaskAssignee(t *testing.T, svc *service.Service, taskID, agentID str
 			COALESCE((SELECT workflow_step_id FROM tasks WHERE id = ?), ''),
 			?, 'runner', ?, 0, 0
 		)`, taskID, taskID, taskID, taskID, agentID)
+}
+
+// insertTestTaskSession inserts a minimal task_sessions row so tests can
+// exercise the session-level agent_profile_id fallback in buildCostEvent
+// (prompt_usage_cost.go) — distinct from setTestTaskAssignee's
+// workflow_step_participants runner row.
+func insertTestTaskSession(t *testing.T, svc *service.Service, sessionID, taskID, agentProfileID string) {
+	t.Helper()
+	svc.ExecSQL(t,
+		`INSERT INTO task_sessions (id, task_id, agent_profile_id, started_at, updated_at)
+		 VALUES (?, ?, ?, datetime('now'), datetime('now'))`,
+		sessionID, taskID, agentProfileID)
 }
 
 // newTestServiceWithConfig returns a service backed by in-memory SQLite with a

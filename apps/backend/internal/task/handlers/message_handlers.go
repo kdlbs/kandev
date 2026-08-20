@@ -290,6 +290,7 @@ type wsAddMessageRequest struct {
 	EntityReferences  []v1.EntityReference   `json:"entity_references,omitempty"`
 }
 
+// wsAddMessage handles an incoming add-message WebSocket action, persisting the user message and dispatching the turn and orchestrator flow.
 func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsAddMessageRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -312,7 +313,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// before checking the live session state or running turn-start hooks so a
 	// retry is a read, not a second prompt.
 	if req.ClientMessageID != "" {
-		existing, err := h.service.GetMessage(ctx, req.ClientMessageID)
+		existing, err := h.service.GetMessageWithPromptIndex(ctx, req.ClientMessageID)
 		switch {
 		case err == nil && existing != nil:
 			// The turn-start hook may switch the task's primary session before
@@ -507,9 +508,10 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to encode response", nil)
 	}
 
-	// Auto-forward message as prompt to running agent if orchestrator is available.
-	// This runs async so the WS request can respond immediately.
-	// Use context.WithoutCancel so the prompt continues even if the WebSocket client disconnects.
+	// Auto-forward every accepted message as a prompt to the running agent when
+	// an orchestrator is available. This runs async so the WS request can
+	// respond immediately. Plan mode changes the execution prompt and agent
+	// behavior; it does not make message.add a record-only operation.
 	if h.orchestrator != nil && !turnStartResult.Queued {
 		h.dispatchPromptAsync(ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer)
 	}

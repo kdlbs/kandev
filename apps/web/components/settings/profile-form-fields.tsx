@@ -320,6 +320,7 @@ function CapabilitiesRowContent({
   isLoading,
   onRefresh,
   error,
+  modelConfig,
   configOptions,
   configStatus,
   configError,
@@ -350,6 +351,8 @@ function CapabilitiesRowContent({
             onChange={onChange}
             ariaLabel={t("settings:startModelAria")}
             goneModelLabel={t("settings:startModelUnavailable")}
+            configOptionsLoading={configIsLoading}
+            keepOpenOnModelChange={modelConfig.supports_dynamic_models}
           />
         </div>
         {hasModes && (

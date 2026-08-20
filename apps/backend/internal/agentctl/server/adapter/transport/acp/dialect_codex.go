@@ -3,6 +3,8 @@ package acp
 import (
 	"path"
 	"strings"
+
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 const (
@@ -26,7 +28,73 @@ const (
 // operations through the same envelope, so only spawnAgent and the matching
 // "started" activity are creation signals.
 func newCodexACPDialect() acpDialect {
-	return acpDialect{subagentFrame: parseCodexSubagentFrame}
+	return acpDialect{
+		subagentFrame:        parseCodexSubagentFrame,
+		normalizePromptUsage: normalizeCodexPromptUsage,
+		mcpToolCall:          parseCodexMCPToolCall,
+		mcpToolResult:        normalizeCodexMCPToolResult,
+	}
+}
+
+// normalizeCodexPromptUsage marks codex-acp's typed usage frame as
+// estimated. codex-acp 1.4.0 does emit a typed usage block on the prompt
+// response, but its three response-construction sites (normal end_turn,
+// cancelled, terminal failure) all hardcode it to
+// sessionState.lastTokenUsage — the LAST model request of the turn, not a
+// per-turn total (sessionState.totalTokenUsage is tracked internally but
+// never crosses the ACP boundary). A turn making N requests reports only
+// request N's counts: verified against codex's own rollout log on both a
+// 22-request turn (recorded 410 output tokens vs a true 8813) and a
+// 4-request turn (recorded 9 vs a true 219). Estimated is the existing
+// signal for "not an authoritative per-turn frame" (streams.PromptUsage's
+// doc comment), so this keeps the row honest until codex-acp emits a
+// genuine per-turn total upstream.
+func normalizeCodexPromptUsage(
+	usage *streams.PromptUsage,
+	_ map[string]any,
+) *streams.PromptUsage {
+	if usage != nil {
+		usage.Estimated = true
+	}
+	return usage
+}
+
+// parseCodexMCPToolCall recognizes Codex's observed MCP-over-ACP envelope.
+// Codex reports these as the broad ACP "execute" kind and puts the actual MCP
+// identity and arguments in rawInput. Require the explicit implementation
+// marker plus the complete envelope so ordinary execute tools remain shells.
+func parseCodexMCPToolCall(meta map[string]any, rawInput any) (mcpToolCallFrame, bool) {
+	isMCP, _ := meta["is_mcp_tool_call"].(bool)
+	if !isMCP {
+		return mcpToolCallFrame{}, false
+	}
+	input, ok := rawInput.(map[string]any)
+	if !ok {
+		return mcpToolCallFrame{}, false
+	}
+	server, _ := input["server"].(string)
+	tool, _ := input["tool"].(string)
+	arguments, ok := input["arguments"].(map[string]any)
+	server = strings.TrimSpace(server)
+	tool = strings.TrimSpace(tool)
+	if server == "" || tool == "" || !ok {
+		return mcpToolCallFrame{}, false
+	}
+	return mcpToolCallFrame{name: server + "/" + tool, arguments: arguments}, true
+}
+
+// normalizeCodexMCPToolResult removes Codex's transport-only
+// {error, result} wrapper while retaining the standard MCP CallToolResult.
+func normalizeCodexMCPToolResult(rawOutput any) (any, bool) {
+	output, ok := rawOutput.(map[string]any)
+	if !ok {
+		return rawOutput, rawOutput != nil
+	}
+	result, exists := output["result"]
+	if !exists {
+		return rawOutput, true
+	}
+	return result, true
 }
 
 // codexSystemErrorMeta reports the explicit thread-status marker emitted by
