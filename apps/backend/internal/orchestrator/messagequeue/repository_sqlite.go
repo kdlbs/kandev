@@ -936,6 +936,13 @@ func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*
 		return nil, fmt.Errorf("reserve head: %w", err)
 	}
 	if msg.IsDurableLifecycle() {
+		if deliveryID, _ := msg.Metadata[MetadataDeliveryID].(string); deliveryID != "" && msg.IsReservedInFlight() {
+			// A peer-delivery receipt was already handed to an executor before a
+			// crash. Its acceptance is externally observable, so automatically
+			// replaying this ambiguous row could duplicate the prompt. Keep the
+			// payload/receipt for explicit recovery instead of guessing.
+			return nil, nil
+		}
 		// Keep the row for crash recovery but stop reporting it as pending.
 		// Strip a marker persisted by an interrupted prior process from the
 		// returned copy so a failed retry becomes visible again.

@@ -1073,6 +1073,13 @@ func TestHandleMessageTask_WaitingReceiptIsDeliveredOnce(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, messagequeue.DeliveryDelivered, receipt.State)
 	assert.Equal(t, session.ID, receipt.TargetSessionID)
+	// Model a backend restart after the accepted-prompt callback committed the
+	// receipt but before the MCP handler returned. The expired-lease scanner
+	// must not reclaim or redeliver this accepted prompt.
+	processed, err := orch.queue.ProcessDueDeliveries(ctx, time.Now().UTC().Add(2*time.Minute), "restarted-worker")
+	require.NoError(t, err)
+	assert.Equal(t, 0, processed)
+	require.Len(t, orch.promptCalls, 1)
 }
 
 func TestHandleMessageTask_CreatedReceiptStartsOnce(t *testing.T) {

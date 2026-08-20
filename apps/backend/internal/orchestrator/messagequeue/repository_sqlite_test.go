@@ -195,6 +195,35 @@ func TestSQLiteRepository_ReserveHeadMarksLifecycleRowInFlight(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_ReservedPeerDeliveryIsNotReplayedAfterRestart(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+	msg := &QueuedMessage{
+		SessionID: "s1", TaskID: "t1", Content: "accepted peer report", QueuedBy: QueuedByAgent,
+		Metadata: map[string]interface{}{MetadataLifecycleDurable: true, MetadataDeliveryID: "delivery-1"},
+	}
+	if err := repo.Insert(ctx, msg, 0); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	reserved, err := repo.ReserveHead(ctx, "s1")
+	if err != nil || reserved == nil {
+		t.Fatalf("first reserve = (%+v, %v), want row", reserved, err)
+	}
+	// A process dying after the external prompt acceptance but before its
+	// acknowledgement must retain the evidence without replaying the prompt.
+	replayed, err := repo.ReserveHead(ctx, "s1")
+	if err != nil || replayed != nil {
+		t.Fatalf("restart reserve = (%+v, %v), want nil", replayed, err)
+	}
+	entries, err := repo.ListBySession(ctx, "s1")
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("retained entries = (%+v, %v), want one", entries, err)
+	}
+	if entries[0].Metadata[MetadataDeliveryID] != "delivery-1" {
+		t.Fatalf("retained delivery = %v", entries[0].Metadata)
+	}
+}
+
 func TestSQLiteRepository_ReserveHeadUsesStoredMetadataGuard(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()

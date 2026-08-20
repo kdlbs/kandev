@@ -104,6 +104,37 @@ func TestProcessDueDeliveriesRetainsFullQueueReceiptAndPromotesItOnce(t *testing
 	assert.Equal(t, DeliveryDelivered, stored.State)
 }
 
+func TestAcceptedQueuedDeliveryDoesNotReplayAfterRestart(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	service := NewService(repo, 1, logger.Default())
+	ledger := repo.(DeliveryLedger)
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn",
+		IdempotencyKey: "accepted-restart-v1", TargetTaskID: "target-task", TargetSessionID: "target-session",
+		Content: "accepted exactly once", State: DeliveryPendingCapacity, NextAttemptAt: now,
+	})
+	require.NoError(t, err)
+	processed, err := service.ProcessDueDeliveries(ctx, now, "worker-a")
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+	reserved, ok := service.ReserveQueued(ctx, "target-session")
+	require.True(t, ok)
+	// This is the synchronous accepted-prompt callback's transaction. A crash
+	// after it commits but before the caller returns must not resurrect either
+	// the FIFO row or its receipt on a restarted worker.
+	require.NoError(t, service.AcknowledgeQueued(ctx, "target-session", reserved.ID))
+	restarted := NewService(repo, 1, logger.Default())
+	processed, err = restarted.ProcessDueDeliveries(ctx, now.Add(time.Hour), "worker-restarted")
+	require.NoError(t, err)
+	require.Equal(t, 0, processed)
+	stored, err := ledger.GetDelivery(ctx, delivery.ID)
+	require.NoError(t, err)
+	require.Equal(t, DeliveryDelivered, stored.State)
+	assert.Equal(t, 0, restarted.GetStatus(ctx, "target-session").Count)
+}
+
 func TestProcessDueDeliveriesReusesExistingQueueEntryAfterAcknowledgementFailure(t *testing.T) {
 	baseRepo := newTestSQLiteRepo(t)
 	ledger := baseRepo.(DeliveryLedger)
