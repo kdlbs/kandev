@@ -94,6 +94,11 @@ func TestListRelatedTasks_ToolSchemaExposesVerbose(t *testing.T) {
 	required, _ := parsed["required"].([]interface{})
 	assert.NotContains(t, required, "verbose")
 	assert.Contains(t, tool.Tool.Description, "verbose=true")
+	assert.Contains(t, tool.Tool.Description, "relation-scoped by default")
+	assert.Contains(t, tool.Tool.Description, "authorized Office Coordinator")
+	assert.Contains(t, tool.Tool.Description, "workspace-task-tree-read")
+	assert.Contains(t, tool.Tool.Description, "does not grant document keys or descriptions")
+	assert.NotContains(t, tool.Tool.Description, "may inspect another task in the same workspace")
 }
 
 func TestListRelatedTasks_AttestsProfileScopeAndCallerIdentity(t *testing.T) {

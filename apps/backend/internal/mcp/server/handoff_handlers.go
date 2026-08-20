@@ -17,7 +17,7 @@ import (
 func (s *Server) registerRelatedTasksTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_related_tasks_kandev",
-			mcp.WithDescription(`List a task's parent, children, siblings, blockers, and blocked tasks. Entries include identity, state, and linked pull requests; Office entries also include document keys. Descriptions are omitted unless verbose=true. task_id defaults to the current task and may inspect another task in the same workspace.`),
+			mcp.WithDescription(`List a task's parent, children, siblings, blockers, and blocked tasks. Entries include identity, state, and linked pull requests. Access is relation-scoped by default; an authorized Office Coordinator with workspace-task-tree-read can inspect compact relation trees for unrelated tasks in its workspace. The Coordinator scope does not grant document keys or descriptions. Descriptions are omitted unless verbose=true, and verbose remains document-read scoped. task_id defaults to the current task.`),
 			mcp.WithString("task_id", mcp.Description("Defaults to the current task.")),
 			mcp.WithBoolean("verbose", mcp.Description(
 				"Include each related task's full description. Defaults to false, which returns the compact projection.")),
