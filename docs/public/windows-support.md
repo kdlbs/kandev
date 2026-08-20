@@ -202,6 +202,16 @@ winget install ezwinports.make
 
 The repository bootstrap script is Bash/package-manager oriented and does not provision a native Windows toolchain automatically. Use Git Bash or another compatible shell for Unix-oriented root recipes, install the pinned tools manually, and follow the contributor guide. `make dev` builds a `winjob.exe` helper so `Ctrl+C` can close a native development process tree.
 
+### CGO link failure with a non-ASCII toolchain path
+
+The `kandev` binary and the backend tests build with CGO and SQLite FTS5. If the MinGW/GCC toolchain resolves to a path with non-ASCII characters (most commonly an accented Windows username, which puts the toolchain under `C:\Users\<name>\`), a UTF-8 locale in Git Bash makes GCC mis-decode its own install path when it hands it to `ld`. The link then fails with `cannot find crt2.o`, `crtbegin.o`, and `-lm`, even though the files exist.
+
+The CGO Make targets (`build-kandev`, `build-agentctl`, the `-tags fts5` test targets, and `deadcode`) set `LC_ALL=C` automatically when they run under Git Bash/MSYS on Windows. This prevents the CGO link error in `make build` and `make dev`. Use `make test-windows` for the supported Windows-clean test suite. The complete `make test-backend` suite still contains tests with Unix-only fixtures. `LC_ALL=C` (rather than `LANG=C`) is used so the fix still applies when the shell already exports `LC_ALL` or `LC_CTYPE` as a UTF-8 locale, which would otherwise override `LANG`. The prefix is empty on Unix and native `cmd`/PowerShell`; on Git Bash/MSYS it is always applied, which is a harmless no-op on an ASCII toolchain path and the actual fix on a non-ASCII one.
+
+When invoking `go build`/`go test` directly, prefix the command with `LC_ALL=C` (for example `LC_ALL=C go build -tags fts5 ./cmd/kandev`). To remove the cause entirely, install the toolchain at an ASCII path outside `C:\Users\<name>` and point `CC`/`CXX` at it. Do not force the C locale globally (for example `export LC_ALL=C`) in your shell profile; that disables the UTF-8 locale for all of Git Bash.
+
+A third option removes the cause at the OS level. Enable Windows' **Beta: Use Unicode UTF-8 for worldwide language support** (Region control panel, **Administrative** tab, **Change system locale**, then reboot). This sets the system ANSI code page to UTF-8, so GCC and `ld` agree on the path encoding and the accented toolchain path links directly under a UTF-8 locale, with no `LC_ALL=C` prefix and no toolchain relocation. It is a **beta**, system-wide setting: it requires a reboot and can change how other non-UTF-8 applications interpret text, so treat it as opt-in.
+
 Backend Windows CI runs `go build ./...`, `go vet ./...`, and focused race tests for Windows-sensitive process, agent-launcher, instance-port, and websocket-tunnel packages. It does not run every backend package or the full product E2E suite. The repository's broader Windows-clean target adds web and CLI unit tests:
 
 ```powershell

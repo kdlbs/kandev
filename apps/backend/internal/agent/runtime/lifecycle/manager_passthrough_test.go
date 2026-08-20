@@ -462,7 +462,10 @@ func TestPassthroughOpenCodeInjectsConfigEnv(t *testing.T) {
 		t.Fatalf("opencode config not written: %v", err)
 	}
 	// OPENCODE_CONFIG must be merged into the passthrough environment.
-	env := mgr.buildPassthroughEnv(context.Background(), execution, nil)
+	env, err := mgr.buildPassthroughEnv(context.Background(), execution, nil)
+	if err != nil {
+		t.Fatalf("buildPassthroughEnv: %v", err)
+	}
 	if env["OPENCODE_CONFIG"] != files[0] {
 		t.Fatalf("OPENCODE_CONFIG = %q, want %q", env["OPENCODE_CONFIG"], files[0])
 	}
@@ -536,8 +539,12 @@ func TestPassthroughPiWritesProjectFile(t *testing.T) {
 	mgr, execution, profile := newPassthroughMCPTestManager(t, "pi-acp")
 	piPath := filepath.Join(execution.WorkspacePath, ".pi", "mcp.json")
 
-	if _, _, _, _, err := mgr.passthroughAgentCommand(context.Background(), execution, profile); err != nil {
+	_, _, _, cmd, err := mgr.passthroughAgentCommand(context.Background(), execution, profile)
+	if err != nil {
 		t.Fatalf("passthroughAgentCommand returned error: %v", err)
+	}
+	if got, want := cmd.Args(), []string{"pi", "--model", "default"}; !slices.Equal(got, want) {
+		t.Fatalf("passthrough command = %v, want %v", got, want)
 	}
 
 	data, err := os.ReadFile(piPath)
@@ -1100,12 +1107,15 @@ func TestBuildPassthroughEnv_MergesProfileEnvVars(t *testing.T) {
 		},
 	}
 
-	env := mgr.buildPassthroughEnv(context.Background(), &AgentExecution{
+	env, err := mgr.buildPassthroughEnv(context.Background(), &AgentExecution{
 		TaskID:               "task-1",
 		SessionID:            "session-1",
 		AgentProfileID:       "profile-1",
 		OfficeAgentProfileID: "office-cto",
 	}, nil)
+	if err != nil {
+		t.Fatalf("buildPassthroughEnv: %v", err)
+	}
 
 	if env["PLAIN"] != "plain-value" {
 		t.Fatalf("profile env var missing: %+v", env)
@@ -1136,7 +1146,10 @@ func TestBuildPassthroughEnvIncludesEffectiveRuntimeEnv(t *testing.T) {
 		"PATH":                                "/tmp/kandev-shim:/usr/bin",
 	})
 
-	env := mgr.buildPassthroughEnv(context.Background(), execution, nil)
+	env, err := mgr.buildPassthroughEnv(context.Background(), execution, nil)
+	if err != nil {
+		t.Fatalf("buildPassthroughEnv: %v", err)
+	}
 	for key, want := range map[string]string{
 		"KANDEV_GITHUB_CREDENTIAL_BROKER_URL": "http://127.0.0.1:9876",
 		"GIT_CONFIG_COUNT":                    "1",

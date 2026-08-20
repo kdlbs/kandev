@@ -620,7 +620,7 @@ func TestUpdateClarificationMessageForQuestionStoresAnswer(t *testing.T) {
 		Metadata: map[string]interface{}{"pending_id": "pend-c", "question_id": "q-1"},
 	})
 
-	if err := svc.UpdateClarificationMessageForQuestion(ctx, "sess-msg", "pend-c", "msg-clarify", "q-1", "answered", "option-b"); err != nil {
+	if err := svc.UpdateClarificationMessageForQuestion(ctx, "sess-msg", "pend-c", "q-1", "answered", "option-b"); err != nil {
 		t.Fatalf("UpdateClarificationMessageForQuestion: %v", err)
 	}
 	stored, err := repo.GetMessage(ctx, "msg-clarify")
@@ -637,52 +637,8 @@ func TestUpdateClarificationMessageForQuestionStoresAnswer(t *testing.T) {
 		t.Fatalf("published %v, want exactly one %s", types, events.MessageUpdated)
 	}
 
-	if err := svc.UpdateClarificationMessageForQuestion(ctx, "sess-msg", "pend-c", "msg-does-not-exist", "q-1", "answered", nil); err == nil {
-		t.Fatal("an unknown message id must fail")
-	}
-
-	if err := svc.UpdateClarificationMessageForQuestion(ctx, "sess-msg", "pend-wrong", "msg-clarify", "q-1", "answered", nil); err == nil {
-		t.Fatal("a pending_id that does not match the message's own metadata must fail")
-	}
-}
-
-// TestUpdateClarificationMessageForQuestion_MultipleEmptyQuestionID proves
-// R9a: a bundle where multiple messages share the same (empty) question_id
-// must have every message individually reachable by its own messageID, not
-// collapsed onto one row by a (pending_id, question_id) lookup. Before this
-// fix, rejecting such a bundle only ever updated the earliest message.
-func TestUpdateClarificationMessageForQuestion_MultipleEmptyQuestionID(t *testing.T) {
-	svc, _, repo := newMessageTestService(t)
-	ctx := context.Background()
-	seedMessage(t, repo, &models.Message{
-		ID: "msg-empty-1", Content: "Reject me too?",
-		Metadata: map[string]interface{}{"pending_id": "pend-empty", "question_id": ""},
-	})
-	seedMessage(t, repo, &models.Message{
-		ID: "msg-empty-2", Content: "Reject me too?",
-		Metadata: map[string]interface{}{"pending_id": "pend-empty", "question_id": ""},
-	})
-
-	if err := svc.UpdateClarificationMessageForQuestion(ctx, "sess-msg", "pend-empty", "msg-empty-1", "", "rejected", nil); err != nil {
-		t.Fatalf("update msg-empty-1: %v", err)
-	}
-	if err := svc.UpdateClarificationMessageForQuestion(ctx, "sess-msg", "pend-empty", "msg-empty-2", "", "rejected", nil); err != nil {
-		t.Fatalf("update msg-empty-2: %v", err)
-	}
-
-	m1, err := repo.GetMessage(ctx, "msg-empty-1")
-	if err != nil {
-		t.Fatalf("get msg-empty-1: %v", err)
-	}
-	m2, err := repo.GetMessage(ctx, "msg-empty-2")
-	if err != nil {
-		t.Fatalf("get msg-empty-2: %v", err)
-	}
-	if m1.Metadata["status"] != "rejected" {
-		t.Errorf("msg-empty-1 status = %v, want rejected", m1.Metadata["status"])
-	}
-	if m2.Metadata["status"] != "rejected" {
-		t.Errorf("msg-empty-2 status = %v, want rejected", m2.Metadata["status"])
+	if err := svc.UpdateClarificationMessageForQuestion(ctx, "sess-msg", "pend-c", "q-missing", "answered", nil); err == nil {
+		t.Fatal("an unknown question id must fail")
 	}
 }
 
@@ -694,7 +650,7 @@ func TestUpdateClarificationMessageForQuestionKeepsAnswerWhenNil(t *testing.T) {
 		Metadata: map[string]interface{}{"pending_id": "pend-n", "question_id": "q-n", "response": "prior"},
 	})
 
-	if err := svc.UpdateClarificationMessageForQuestion(ctx, "sess-msg", "pend-n", "msg-clarify-nil", "q-n", "rejected", nil); err != nil {
+	if err := svc.UpdateClarificationMessageForQuestion(ctx, "sess-msg", "pend-n", "q-n", "rejected", nil); err != nil {
 		t.Fatalf("UpdateClarificationMessageForQuestion: %v", err)
 	}
 	stored, err := repo.GetMessage(ctx, "msg-clarify-nil")

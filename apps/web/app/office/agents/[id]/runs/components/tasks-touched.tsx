@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { getTask } from "@/lib/api/domains/office-extended-api";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import { StatusIcon } from "@/app/office/tasks/status-icon";
-import { normalizeTaskStatus } from "@/app/office/tasks/normalize-status";
+import { normalizeTaskStatus } from "@/lib/api/domains/office-task-normalize";
 import { PRIORITY_LABEL_KEYS, STATUS_LABEL_KEYS } from "@/app/office/lib/label-keys";
 import { useTranslation } from "react-i18next";
 

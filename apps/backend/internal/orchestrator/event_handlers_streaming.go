@@ -143,6 +143,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "session_model_fallback":
 		s.handleSessionModelFallbackEvent(ctx, payload)
 
+	case streams.EventTypeSessionModelSelectionWarning:
+		s.handleSessionModelSelectionWarningEvent(ctx, payload)
+
 	case streams.EventTypeMCPAttachment:
 		s.handleSessionMCPAttachmentEvent(ctx, payload)
 
@@ -1006,6 +1009,14 @@ func (s *Service) updateTaskSessionStateWithHook(
 	if onChanged != nil {
 		onChanged()
 	}
+	if isTerminalSessionState(nextState) {
+		if err := s.expireTerminalClarificationWaiters(ctx, sessionID); err != nil {
+			s.logger.Error("failed to expire clarification on terminal session; response claims remain quarantined",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
 	// Work has resumed: a session entering STARTING/RUNNING clears the
 	// startup interruption marker and republishes the task so open clients
 	// drop the red interruption icon. No-op when the marker is absent.
@@ -1146,6 +1157,14 @@ func (s *Service) transitionTaskSessionState(
 	}
 	if onChanged != nil {
 		onChanged()
+	}
+	if isTerminalSessionState(nextState) {
+		if err := s.expireTerminalClarificationWaiters(ctx, sessionID); err != nil {
+			s.logger.Error("failed to expire clarification on strict terminal transition; response claims remain quarantined",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 	}
 	s.publishTaskSessionStateChanged(
 		ctx,
@@ -1853,6 +1872,80 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 	s.writeTaskReviewState(ctx, taskID, sessionID)
 }
 
+// Child terminal receipts use the task's parent relationship and durable
+// clarification projection to decide whether a session can collapse to
+// COMPLETED. Root-task sibling sessions keep the original WAITING affordance.
+// setSessionWaitingForInputIfRequested is the terminal-receipt variant
+// of setSessionWaitingForInput. It only applies to subtasks (task.ParentID
+// non-empty) because the symptom it guards — "child WAITING_FOR_INPUT
+// after the agent's last turn had no active clarification" — only
+// arises for child tasks whose task or workflow step is terminal, not to
+// surface a UI prompt. Sibling sessions on a root task keep the original
+// affordance so a finishing session on a multi-session task still flips to
+// WAITING_FOR_INPUT.
+//
+// When a terminal task has no input request, collapse the session to
+// COMPLETED so the child row does not leak in a stuck active state. A clean
+// turn on a non-terminal child is not enough evidence for that collapse, so
+// it remains WAITING_FOR_INPUT.
+func (s *Service) setSessionWaitingForInputIfRequested(
+	ctx context.Context,
+	taskID, sessionID string,
+	preloadedSession ...*models.TaskSession,
+) {
+	task, taskErr := s.repo.GetTask(ctx, taskID)
+	if taskErr != nil || task == nil {
+		// A task lookup failure is not evidence that a child reached a terminal
+		// state. Preserve the promptable session instead of leaving it RUNNING.
+		s.logger.Warn("failed to load task before terminal receipt; preserving WAITING state",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(taskErr))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID, preloadedSession...)
+		return
+	}
+	if task.ParentID == "" {
+		s.setSessionWaitingForInput(ctx, taskID, sessionID, preloadedSession...)
+		return
+	}
+	activeClarifications, err := s.repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
+	if err != nil {
+		// A transient reader error is not evidence that the child completed.
+		// Preserve the promptable state and avoid leaving the session RUNNING.
+		s.logger.Warn("failed to read active clarifications; preserving WAITING state",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID, preloadedSession...)
+		return
+	}
+	taskTerminal := models.IsTerminalTaskState(task.State) || s.workflowStepIsTerminal(ctx, task.WorkflowStepID)
+	if len(activeClarifications) == 0 && taskTerminal {
+		s.logger.Debug("subtask terminal: skipping WAITING write; collapsing session to COMPLETED",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateCompleted, "", false)
+		// The child has no further use for the provider-runtime reservation.
+		// reclaimIdleSession is fail-closed (only proceeds when there is no
+		// live agent and no active turn) and best-effort: a reclaim failure
+		// logs and returns without affecting the terminal collapse.
+		if err := s.reclaimIdleSession(ctx, sessionID); err != nil {
+			s.logger.Warn("subtask terminal: reclaim failed; row preserved",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return
+	}
+	if len(activeClarifications) == 0 {
+		s.logger.Debug("subtask turn completed before terminal task state; preserving WAITING state",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("task_state", string(task.State)))
+	}
+	s.setSessionWaitingForInput(ctx, taskID, sessionID, preloadedSession...)
+}
+
 // taskArchived reports whether a task row has been archived. Runtime-state
 // writes (IN_PROGRESS on session start, REVIEW on turn completion/cancel/
 // startup reconciliation) must never resurrect an archived task's state —
@@ -2317,18 +2410,52 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 		zap.String("task_id", payload.TaskID),
 		zap.String("session_id", payload.SessionID),
 		zap.String("prev_state", sessionStateString(session)))
-	s.setSessionWaitingForInput(ctx, payload.TaskID, payload.SessionID, session)
+	// Terminal-receipt path. Only flip the session to WAITING_FOR_INPUT
+	// when the most recent agent-authored message actually asked the
+	// user for input. Sibling sessions (root task, ParentID empty) keep
+	// the original affordance so a finishing session on a multi-session
+	// task still flips to WAITING — only subtasks (ParentID non-empty)
+	// get the guard.
+	s.setSessionWaitingForInputIfRequested(ctx, payload.TaskID, payload.SessionID, session)
 }
 
 func (s *Service) detachClarificationWaiters(ctx context.Context, sessionID string) {
 	if s.clarificationCanceller == nil || sessionID == "" {
 		return
 	}
-	if n := s.clarificationCanceller.DetachSessionAndNotify(ctx, sessionID); n > 0 {
+	n, err := s.clarificationCanceller.DetachSessionAndNotify(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to detach pending clarifications on turn complete",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if n > 0 {
 		s.logger.Info("detached pending clarifications on turn complete",
 			zap.String("session_id", sessionID),
 			zap.Int("count", n))
 	}
+}
+
+func (s *Service) expireClarificationWaiters(ctx context.Context, sessionID string) error {
+	if s.clarificationCanceller == nil || sessionID == "" {
+		return nil
+	}
+	n, err := s.clarificationCanceller.ExpireSessionAndNotify(ctx, sessionID)
+	if n > 0 {
+		s.logger.Info("expired pending clarifications on terminal session",
+			zap.String("session_id", sessionID),
+			zap.Int("count", n))
+	}
+	return err
+}
+
+const terminalClarificationExpiryTimeout = 10 * time.Second
+
+func (s *Service) expireTerminalClarificationWaiters(ctx context.Context, sessionID string) error {
+	expireCtx, cancel := context.WithTimeout(ctx, terminalClarificationExpiryTimeout)
+	defer cancel()
+	return s.expireClarificationWaiters(expireCtx, sessionID)
 }
 
 // sessionStateString renders a session's state for logging, returning "" when
@@ -2520,6 +2647,8 @@ func usageEventIDFor(sessionID, executionID string, promptGeneration uint64) str
 // case — CurrentModelID only travels on session_models frames) we fall back
 // to the session's AgentProfileSnapshot, populated at session creation and
 // refreshed by persistSessionModel on ACP model updates.
+// AgentProfileID always comes from the persistent task session. It must not
+// be resolved from the mutable workflow runner projection after publication.
 //
 // turnID is resolved by the caller (handleCompleteStreamEvent), not here:
 // the terminal-execution snapshot and the live active-turn lookup are both
@@ -2539,16 +2668,21 @@ func (s *Service) publishPromptUsage(
 	}
 
 	model, agentType := resolvePromptUsageLabels(payload, session)
+	agentProfileID := ""
+	if session != nil {
+		agentProfileID = session.AgentProfileID
+	}
 
 	eventPayload := lifecycle.SessionPromptUsageEventPayload{
-		TaskID:    payload.TaskID,
-		SessionID: sessionID,
-		AgentID:   payload.AgentID,
-		AgentType: agentType,
-		Model:     model,
-		Usage:     payload.Data.Usage,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		TurnID:    turnID,
+		TaskID:         payload.TaskID,
+		SessionID:      sessionID,
+		AgentID:        payload.AgentID,
+		AgentProfileID: agentProfileID,
+		AgentType:      agentType,
+		Model:          model,
+		Usage:          payload.Data.Usage,
+		Timestamp:      time.Now().UTC().Format(time.RFC3339),
+		TurnID:         turnID,
 		UsageEventID: usageEventIDFor(
 			sessionID, payload.ExecutionID, payload.Data.PromptGeneration,
 		),
@@ -2630,22 +2764,19 @@ func (s *Service) persistPromptMetadataOnTurn(
 	turn *models.Turn,
 ) {
 	model, agentType := resolvePromptUsageLabels(payload, session)
-	metadata := turn.Metadata
-	if metadata == nil {
-		metadata = make(map[string]interface{})
+	updates := map[string]interface{}{
+		"prompt_usage": promptUsageMetadata(payload.Data.Usage),
 	}
-	metadata["prompt_usage"] = promptUsageMetadata(payload.Data.Usage)
 	if model != "" {
-		metadata[sessionModelConfigKey] = model
+		updates[sessionModelConfigKey] = model
 	}
 	if agentType != "" {
-		metadata["agent_type"] = agentType
+		updates["agent_type"] = agentType
 	}
 	if payload.AgentID != "" {
-		metadata["agent_id"] = payload.AgentID
+		updates["agent_id"] = payload.AgentID
 	}
-	turn.Metadata = metadata
-	if err := s.turnService.UpdateTurn(ctx, turn); err != nil {
+	if err := s.turnService.PatchTurnMetadata(ctx, turn.TaskSessionID, turn.ID, updates); err != nil {
 		s.logger.Warn("failed to persist prompt usage metadata on turn",
 			zap.String("turn_id", turn.ID),
 			zap.String("session_id", payload.SessionID),
@@ -2660,6 +2791,7 @@ func promptUsageMetadata(usage *streams.PromptUsage) map[string]interface{} {
 	return map[string]interface{}{
 		"input_tokens":                    usage.InputTokens,
 		"output_tokens":                   usage.OutputTokens,
+		"output_tokens_present":           usage.OutputTokensPresent,
 		"cached_read_tokens":              usage.CachedReadTokens,
 		"cached_write_tokens":             usage.CachedWriteTokens,
 		"thought_tokens":                  usage.ThoughtTokens,
@@ -2882,19 +3014,21 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 			zap.Error(err))
 		return
 	}
-	s.persistSessionModelAndRuntimeConfig(
-		ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.SessionModels, payload.Data.ConfigOptions,
+	settled := configOptionsSettled(payload.Data.Data)
+	s.persistSessionModelAndRuntimeConfigWithSettlement(
+		ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.SessionModels, payload.Data.ConfigOptions, settled,
 	)
 
 	eventPayload := lifecycle.SessionModelsEventPayload{
-		TaskID:         payload.TaskID,
-		SessionID:      sessionID,
-		AgentID:        payload.AgentID,
-		CurrentModelID: payload.Data.CurrentModelID,
-		Models:         payload.Data.SessionModels,
-		ConfigOptions:  payload.Data.ConfigOptions,
-		ConfigBaseline: configBaseline,
-		Timestamp:      time.Now().UTC().Format(time.RFC3339),
+		TaskID:               payload.TaskID,
+		SessionID:            sessionID,
+		AgentID:              payload.AgentID,
+		CurrentModelID:       payload.Data.CurrentModelID,
+		Models:               payload.Data.SessionModels,
+		ConfigOptions:        payload.Data.ConfigOptions,
+		ConfigOptionsSettled: settled,
+		ConfigBaseline:       configBaseline,
+		Timestamp:            time.Now().UTC().Format(time.RFC3339),
 	}
 	s.logger.Info("publishing session_models event to WS",
 		zap.String("session_id", sessionID),
@@ -2934,6 +3068,177 @@ func (s *Service) handleSessionModelFallbackEvent(ctx context.Context, payload *
 		zap.String("fallback_model", eventPayload.FallbackModel))
 	subject := events.BuildSessionModelFallbackSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelFallbackUpdated, "orchestrator", eventPayload))
+}
+
+// handleSessionModelSelectionWarningEvent persists one structured status
+// message for an executor-authoritative model decision and publishes the same
+// data to live WebSocket subscribers. Persistence is best-effort and never
+// blocks the task launch.
+func (s *Service) handleSessionModelSelectionWarningEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	warning, sessionID, ok := s.modelSelectionWarningEvent(ctx, payload)
+	if !ok {
+		return
+	}
+	var releaseClaim func()
+	if s.messageCreator != nil {
+		var claimed bool
+		releaseClaim, claimed = s.claimModelSelectionWarning(ctx, sessionID, warning.DecisionID)
+		if !claimed {
+			return
+		}
+	}
+	if err := s.persistModelSelectionWarningMessage(ctx, payload.TaskID, sessionID, warning); err != nil {
+		releaseClaim()
+	}
+	s.publishModelSelectionWarning(ctx, payload.TaskID, sessionID, warning)
+}
+
+func (s *Service) modelSelectionWarningEvent(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) (streams.ModelSelectionWarning, string, bool) {
+	if payload == nil || payload.Data == nil || payload.Data.ModelSelectionWarning == nil {
+		return streams.ModelSelectionWarning{}, "", false
+	}
+	sessionID := payload.SessionID
+	if sessionID == "" && payload.TaskID != "" && s.repo != nil {
+		if sess, err := s.repo.GetActiveTaskSessionByTaskID(ctx, payload.TaskID); err == nil && sess != nil {
+			sessionID = sess.ID
+		}
+	}
+	if sessionID == "" {
+		return streams.ModelSelectionWarning{}, "", false
+	}
+	return *payload.Data.ModelSelectionWarning, sessionID, true
+}
+
+func (s *Service) claimModelSelectionWarning(ctx context.Context, sessionID, decisionID string) (func(), bool) {
+	if s.repo == nil || decisionID == "" {
+		return func() {}, true
+	}
+	// A decision ID is created by lifecycle and is stable across event replay.
+	// Use the structured metadata key as an atomic claim so two deliveries cannot
+	// create duplicate status messages after a reconnect or restart.
+	claimCtx := context.WithoutCancel(ctx)
+	key := "model_selection_warning:" + decisionID
+	if claimer, ok := s.repo.(failedSessionMetadataClaimer); ok {
+		return s.claimModelSelectionWarningWithState(claimCtx, sessionID, key, claimer)
+	}
+	claimed, err := s.repo.SetSessionMetadataKeyIfAbsent(claimCtx, sessionID, key, true)
+	if err != nil {
+		s.logger.Warn("failed to claim model selection warning persistence",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return func() {}, false
+	}
+	return func() {}, claimed
+}
+
+func (s *Service) claimModelSelectionWarningWithState(
+	ctx context.Context,
+	sessionID, key string,
+	claimer failedSessionMetadataClaimer,
+) (func(), bool) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		s.logger.Warn("failed to load session for model selection warning claim",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return func() {}, false
+	}
+	claimed, err := claimer.SetSessionMetadataKeyIfAbsentIfState(ctx, sessionID, key, true, session.State)
+	if err != nil {
+		s.logger.Warn("failed to claim model selection warning persistence",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return func() {}, false
+	}
+	if !claimed {
+		return func() {}, false
+	}
+	return func() {
+		s.releaseModelSelectionWarningClaim(ctx, sessionID, key, session.State)
+	}, true
+}
+
+func (s *Service) releaseModelSelectionWarningClaim(
+	ctx context.Context,
+	sessionID, key string,
+	expectedState models.TaskSessionState,
+) {
+	releaser, ok := s.repo.(failedSessionMetadataClaimReleaser)
+	if !ok {
+		s.logger.Warn("session repository cannot release model selection warning claim",
+			zap.String("session_id", sessionID))
+		return
+	}
+	if _, err := releaser.RemoveSessionMetadataKeyIfState(ctx, sessionID, key, expectedState); err != nil {
+		s.logger.Warn("failed to release model selection warning claim",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
+func modelSelectionWarningMetadata(warning streams.ModelSelectionWarning) map[string]interface{} {
+	metadata := map[string]interface{}{
+		"variant":             "warning",
+		"kind":                warning.Kind,
+		"reason":              warning.Reason,
+		"requested_model":     warning.RequestedModel,
+		"effective_model":     warning.EffectiveModel,
+		"agent_id":            warning.AgentID,
+		"executor_type":       warning.ExecutorType,
+		"executor_profile_id": warning.ExecutorProfileID,
+		"decision_id":         warning.DecisionID,
+		"remediation":         []string{"executor_credentials", "copied_agent_configuration", "agent_version"},
+	}
+	if warning.FallbackModel != "" {
+		metadata["fallback_model"] = warning.FallbackModel
+	}
+	return metadata
+}
+
+func (s *Service) persistModelSelectionWarningMessage(
+	ctx context.Context,
+	taskID, sessionID string,
+	warning streams.ModelSelectionWarning,
+) error {
+	if s.messageCreator == nil {
+		return nil
+	}
+	if err := s.messageCreator.CreateSessionMessage(
+		ctx,
+		taskID,
+		"The executor could not use the saved model selection.",
+		sessionID,
+		string(v1.MessageTypeStatus),
+		s.getActiveTurnID(sessionID),
+		modelSelectionWarningMetadata(warning),
+		false,
+	); err != nil {
+		s.logger.Warn("failed to persist model selection warning",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (s *Service) publishModelSelectionWarning(
+	ctx context.Context,
+	taskID, sessionID string,
+	warning streams.ModelSelectionWarning,
+) {
+	if s.eventBus == nil {
+		return
+	}
+	eventPayload := lifecycle.SessionModelSelectionWarningEventPayload{
+		TaskID:    taskID,
+		SessionID: sessionID,
+		AgentID:   warning.AgentID,
+		Warning:   warning,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	subject := events.BuildSessionModelSelectionWarningSubject(sessionID)
+	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(
+		events.SessionModelSelectionWarningUpdated, "orchestrator", eventPayload,
+	))
 }
 
 func workflowSessionConfigFailures(raw any) []string {
@@ -3211,6 +3516,18 @@ func (s *Service) persistSessionModelAndRuntimeConfig(
 	availableModels []streams.SessionModelInfo,
 	options []streams.ConfigOption,
 ) {
+	s.persistSessionModelAndRuntimeConfigWithSettlement(
+		ctx, sessionID, model, mode, availableModels, options, false,
+	)
+}
+
+func (s *Service) persistSessionModelAndRuntimeConfigWithSettlement(
+	ctx context.Context,
+	sessionID, model, mode string,
+	availableModels []streams.SessionModelInfo,
+	options []streams.ConfigOption,
+	configOptionsSettled bool,
+) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to load session for session model persistence",
@@ -3225,14 +3542,17 @@ func (s *Service) persistSessionModelAndRuntimeConfig(
 		s.persistSessionModelOnSession(ctx, sessionID, session, model)
 	}
 	s.persistSessionRuntimeConfigOnSession(ctx, sessionID, session, model, mode, options)
-	s.persistSessionModelsSnapshot(ctx, sessionID, model, availableModels, options)
+	s.persistSessionModelsSnapshot(ctx, sessionID, session, model, availableModels, options, configOptionsSettled)
 }
 
 func (s *Service) persistSessionModelsSnapshot(
 	ctx context.Context,
-	sessionID, currentModelID string,
+	sessionID string,
+	session *models.TaskSession,
+	currentModelID string,
 	availableModels []streams.SessionModelInfo,
 	options []streams.ConfigOption,
+	configOptionsSettled bool,
 ) {
 	modelsForBoot := make([]streams.SessionModelInfo, 0, len(availableModels))
 	for _, model := range availableModels {
@@ -3244,9 +3564,13 @@ func (s *Service) persistSessionModelsSnapshot(
 		})
 	}
 	snapshot := lifecycle.SessionModelsSnapshot{
-		CurrentModelID: currentModelID,
-		Models:         modelsForBoot,
-		ConfigOptions:  options,
+		CurrentModelID:       currentModelID,
+		Models:               modelsForBoot,
+		ConfigOptions:        options,
+		ConfigOptionsSettled: configOptionsSettled,
+	}
+	if previous, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState]); ok {
+		snapshot.ConfigOptionsSettled = snapshot.ConfigOptionsSettled || previous.ConfigOptionsSettled
 	}
 	writeCtx := context.WithoutCancel(ctx)
 	if err := s.repo.SetSessionMetadataKey(

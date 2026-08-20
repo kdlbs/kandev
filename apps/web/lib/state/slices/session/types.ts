@@ -1,5 +1,7 @@
 import type {
   Message,
+  TaskPendingAction,
+  TaskPendingActionRevision,
   TaskSession,
   Turn,
   TaskPlan,
@@ -13,7 +15,10 @@ export type MessagesState = {
   metaBySession: Record<
     string,
     {
+      /** Initial/refetch loading (never touched by older-page merges). */
       isLoading: boolean;
+      /** Older-page request in flight (set by the shared pagination coordinator). */
+      isLoadingMore: boolean;
       hasMore: boolean;
       oldestCursor: string | null;
     }
@@ -23,6 +28,30 @@ export type MessagesState = {
 export type TurnsState = {
   bySession: Record<string, Turn[]>;
   activeBySession: Record<string, string | null>; // sessionId -> active turnId
+  /**
+   * Sessions whose FULL persisted turn history has entered the store (SSR
+   * hydration or a complete REST fetch). Distinct from `bySession` presence:
+   * WS `session.turn.*` events seed individual live turns without the history,
+   * so `bySession[sessionId]` being non-empty is NOT proof the history is
+   * loaded. The debug metadata dialog and turn-derived UI resolve turns only
+   * when this marker is set.
+   */
+  loadedBySession: Record<string, boolean>;
+  /**
+   * Per-session generation counter bumped by authoritative active-marker
+   * clears (source adoption). A REST hydration started before the bump must
+   * not resurrect the marker from a stale snapshot.
+   */
+  reconcileEpochBySession: Record<string, number>;
+  /**
+   * Per-session settled-boundary timestamp (RFC3339, compared with nanosecond
+   * precision). Set by authoritative boundaries (source adoption,
+   * settled-session clears). Any turn that STARTED at or before the boundary
+   * must never become active again — a delayed WS `session.turn.started`, a
+   * stale hydration, or a force-merged snapshot naming it are all rejected.
+   * Turns started after the boundary (genuine resumes) are unaffected.
+   */
+  settledBoundaryBySession: Record<string, string>;
 };
 
 export type TaskSessionsState = {
@@ -139,6 +168,8 @@ export type QueuedMessage = {
 export type QueueMeta = {
   count: number;
   max: number;
+  /** Backend-owned queue motion policy. Missing server state defaults to on. */
+  autoRun: boolean;
   /** Mirrors the server's message queue merge_enabled setting; hides the
    * "Merge with above" affordance without a separate settings fetch. */
   mergeEnabled: boolean;
@@ -149,6 +180,7 @@ export type QueueStatus = {
   count: number;
   max: number;
   merge_enabled: boolean;
+  auto_run?: boolean;
 };
 
 export type QueueState = {
@@ -201,19 +233,48 @@ export type SessionSliceActions = {
   ) => void;
   setMessagesMetadata: (
     sessionId: string,
-    meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null },
+    meta: {
+      hasMore?: boolean;
+      isLoading?: boolean;
+      isLoadingMore?: boolean;
+      oldestCursor?: string | null;
+    },
   ) => void;
+  /** Sets the session's message-loading flag. */
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
+  /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
+  /** Merges a complete REST snapshot and reconciles its marker atomically. */
+  mergeTurnsSnapshot: (sessionId: string, turns: Turn[], hydrationEpoch: number) => void;
   completeTurn: (
     sessionId: string,
     turnId: string,
     completedAt: string,
-    metadata?: Record<string, unknown>,
+    metadata?: Record<string, unknown> | null,
+    /** updated_at from the event payload; guards stale re-deliveries. */
+    updatedAt?: string,
   ) => void;
+  /** Marks a turn as the session's active turn (or null to clear it). */
   setActiveTurn: (sessionId: string, turnId: string | null) => void;
-  /** Source adoption is an authoritative idle boundary for the listed sessions. */
-  reconcileWorkspaceSourcesAdopted: (sessionIds: string[]) => void;
+  /**
+   * Establishes (or clears) the active-turn marker after a full REST
+   * hydration, applying the same settled-session rule as
+   * reconcileActiveTurnForIdleSession and rejecting hydrations that started
+   * before an authoritative clear (epoch mismatch).
+   */
+  reconcileActiveTurnAfterHydration: (sessionId: string, hydrationEpoch: number) => void;
+  /** Records that the session's full persisted turn history is in the store. */
+  markTurnsLoaded: (sessionId: string) => void;
+  /**
+   * Source adoption is an authoritative idle boundary for the listed
+   * sessions. `boundaryTimestamp` MUST be server-issued (the WS envelope
+   * timestamp) so the boundary stays on the backend clock — a client-clock
+   * fallback would retire legitimate turns when the browser clock runs
+   * ahead of the backend. Absent a server timestamp, only the marker clear
+   * and epoch bump apply; the server-published adoption event records the
+   * boundary on arrival.
+   */
+  reconcileWorkspaceSourcesAdopted: (sessionIds: string[], boundaryTimestamp?: string) => void;
   setTaskSession: (session: TaskSession) => void;
   /**
    * Narrowly updates only a session's Slack-style read cursor
@@ -224,6 +285,11 @@ export type SessionSliceActions = {
    * the session isn't in the store (never creates a bare session record).
    */
   updateSessionReadCursor: (sessionId: string, lastReadMessageId: string) => void;
+  setTaskSessionPendingAction: (
+    sessionId: string,
+    pendingAction: TaskPendingAction | null,
+    revision?: TaskPendingActionRevision,
+  ) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;

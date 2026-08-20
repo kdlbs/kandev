@@ -127,6 +127,17 @@ func handleE2EReset(
 		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM runtime_flag_overrides`); err != nil {
 			log.Warn("e2e reset: runtime flag override cleanup failed", zap.Error(err))
 		}
+		// Repository sets outlive the tasks a reset removes, so a set seeded by
+		// one spec would still be offered in the next spec's create dialog. The
+		// items cascade from the set row.
+		for _, q := range []string{
+			`DELETE FROM repository_set_items WHERE repository_set_id IN (SELECT id FROM repository_sets WHERE workspace_id = ?)`,
+			`DELETE FROM repository_sets WHERE workspace_id = ?`,
+		} {
+			if _, err := repo.DB().ExecContext(ctx, q, workspaceID); err != nil {
+				log.Warn("e2e reset: repository set cleanup failed", zap.String("sql", q), zap.Error(err))
+			}
+		}
 		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM github_workspace_settings WHERE workspace_id = ?`, workspaceID); err != nil {
 			log.Warn("e2e reset: GitHub workspace settings cleanup failed", zap.Error(err))
 		}

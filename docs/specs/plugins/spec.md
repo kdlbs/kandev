@@ -225,8 +225,9 @@ against an external IdP (OIDC/SAML): its webhook (the callback / SAML ACS)
 validates the token, then asserts the identity to kandev via the reserved
 `X-Kandev-Auth-Login` response header (`{provider, subject, email,
 display_name}`). The host maps it to a user (link-by-email or just-in-time
-member provisioning), mints the session, and sets the `kandev_session` cookie
-itself — the plugin never receives the raw token. Requires auth enabled; new
+member provisioning), mints the session, and sets the session cookie (name
+derived from the request host) itself — the plugin never receives the raw
+token. Requires auth enabled; new
 users are members, and the host never creates an admin nor auto-links to an
 existing admin account. The plugin **must** only assert IdP-verified emails (an
 unverified email claim is an account-takeover vector the host cannot detect).
@@ -671,8 +672,10 @@ Mattermost-webapp model), not iframes. The full contract lives in
   `registerComponent(slot, C)` (including `app-status-bar-left` and
   `app-status-bar-right`), and `registerWsHandler(action, fn)`. Integration-settings
   contributions appear in the native global integrations index, workspace settings
-  navigation, and global/workspace settings routes. IDs are URL-safe, unique among
-  active plugins, and cannot shadow host integrations; unload revokes the contribution.
+  navigation, and global/workspace settings routes. An optional integration action
+  receives the routed workspace and a `surface` value for the detail header or index
+  card. IDs are URL-safe, unique among active plugins, and cannot shadow host
+  integrations; unload revokes the contribution.
   Status-slot components receive the exact `AppStatusBarSlotProps` contract in
   `PLUGIN-API.md`: current path/context plus placement and presentation. The host
   renders one responsive presentation at once — 24 px bar on tablet/desktop or

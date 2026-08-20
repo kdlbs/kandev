@@ -233,11 +233,12 @@ func buildTaskDTOsWithSessionInfo(
 		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
 	}
 	if summaryErr == nil && pendingErr == nil {
-		statusSummaries, err = svc.HydrateMissingTaskStatusSummaries(
+		reconciledSummaries, reconcileErr := svc.ReconcileTaskStatusSummaries(
 			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
 		)
-		if err != nil {
-			log.Warn("failed to repair missing task status summaries", zap.Error(err))
+		statusSummaries = reconciledSummaries
+		if reconcileErr != nil {
+			log.Warn("failed to reconcile task status summaries", zap.Error(reconcileErr))
 		}
 	}
 	// Stamp the authoritative per-task queued prompt count onto every summary.
@@ -286,7 +287,7 @@ func buildTaskDTOsWithSessionInfo(
 		taskDTO.TaskPendingAction = dto.TaskPendingActionPtr(sessions, pendingActionsBySession)
 		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
 		dto.EnrichTaskDependencies(&taskDTO, dependencyProjection(dependencyViews[task.ID]), task)
-		taskDTO.StatusSummary = statusSummaries[task.ID]
+		dto.EnrichTaskStatusSummary(&taskDTO, task.ID, statusSummaries)
 		if taskDTO.StatusSummary != nil {
 			switch {
 			case queuedErr != nil:
@@ -375,19 +376,73 @@ func pendingActionsForInputCapableSessions(
 	return svc.GetPendingActionsForSessions(ctx, sessionIDs)
 }
 
+func isInputCapableSession(session *models.TaskSession) bool {
+	return session != nil && (session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateWaitingForInput)
+}
+
+func taskPendingActionPtr(sessions []*models.TaskSession, actions map[string]models.TaskPendingAction) *string {
+	var clarification bool
+	for _, session := range sessions {
+		if !isInputCapableSession(session) {
+			continue
+		}
+		switch actions[session.ID] {
+		case models.TaskPendingActionPermission:
+			value := string(models.TaskPendingActionPermission)
+			return &value
+		case models.TaskPendingActionClarification:
+			clarification = true
+		}
+	}
+	if clarification {
+		value := string(models.TaskPendingActionClarification)
+		return &value
+	}
+	return nil
+}
+
+func pendingActionPtr(
+	sessionID *string,
+	pendingActionsBySession map[string]models.TaskPendingAction,
+) *string {
+	if sessionID == nil {
+		return nil
+	}
+	action, ok := pendingActionsBySession[*sessionID]
+	if !ok {
+		return nil
+	}
+	value := string(action)
+	return &value
+}
+
+func pendingActionRevisionPtr(
+	sessionID string,
+	revisionsBySession map[string]models.PendingActionRevision,
+) *models.PendingActionRevision {
+	revision, ok := revisionsBySession[sessionID]
+	if !ok {
+		return nil
+	}
+	return &revision
+}
+
 func (h *TaskHandlers) taskSessionDTO(ctx context.Context, session *models.TaskSession) dto.TaskSessionDTO {
 	result := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&result, h.cancellationPending)
-	if !dto.IsInputCapableSession(session) {
-		return result
-	}
-	actions, err := h.service.GetPendingActionsForSessions(ctx, []string{session.ID})
+	actions, revisions, err := h.service.GetPendingActionProjectionsForSessions(
+		ctx,
+		[]string{session.ID},
+	)
 	if err != nil {
 		h.logger.Warn("get task session pending action failed",
 			zap.String("session_id", session.ID), zap.Error(err))
 		return result
 	}
-	result.PendingAction = dto.PendingActionPtr(&session.ID, actions)
+	if isInputCapableSession(session) {
+		result.PendingAction = pendingActionPtr(&session.ID, actions)
+	}
+	result.PendingActionRevision = pendingActionRevisionPtr(session.ID, revisions)
 	return result
 }
 
@@ -417,24 +472,15 @@ func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task sessions not found")
 		return
 	}
-	pendingActionsBySession, pendingErr := pendingActionsForInputCapableSessions(
-		ctx,
-		h.service,
-		map[string][]*models.TaskSession{c.Param("id"): sessions},
-	)
-	if pendingErr != nil {
-		h.logger.Warn("get task session pending actions failed", zap.Error(pendingErr))
-		pendingActionsBySession = map[string]models.TaskPendingAction{}
+	sessionDTOs, projectionErr := h.taskSessionSummariesWithPendingActions(ctx, sessions)
+	if projectionErr != nil {
+		h.logger.Error("get task session pending actions failed", zap.Error(projectionErr))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load task session pending actions"})
+		return
 	}
-	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
-	ids := make([]string, 0, len(sessions))
-	for _, session := range sessions {
-		summary := dto.FromTaskSessionSummary(session)
-		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
-		dto.EnrichCancellationPendingSummary(&summary, h.cancellationPending)
-		summary.PendingAction = dto.PendingActionPtr(&session.ID, pendingActionsBySession)
-		sessionDTOs = append(sessionDTOs, summary)
-		ids = append(ids, session.ID)
+	ids := make([]string, 0, len(sessionDTOs))
+	for _, summary := range sessionDTOs {
+		ids = append(ids, summary.ID)
 	}
 	// Resolve the per-session tool_call counts so the frontend can render
 	// the "ran N commands" segment without fetching every session's full
@@ -723,7 +769,8 @@ type httpCreateTaskRequest struct {
 	ProjectID          string `json:"project_id,omitempty"`
 	// ExternalID is a caller-supplied identity used for create-idempotency
 	// (docs/specs/tasks/external-id-idempotency/spec.md).
-	ExternalID string `json:"external_id,omitempty"`
+	ExternalID string   `json:"external_id,omitempty"`
+	Labels     []string `json:"labels,omitempty"`
 	// Office task-handoffs phase 5 — workspace policy. Optional; same
 	// shape as the MCP create_task_kandev fields.
 	WorkspaceMode         string `json:"workspace_mode,omitempty"`
@@ -756,6 +803,30 @@ var allowedAttachmentTypes = map[string]struct{}{
 	"image":    {},
 	"audio":    {},
 	"resource": {},
+}
+
+func encodeTaskLabels(labels []string) (string, error) {
+	normalized := make([]string, 0, len(labels))
+	seen := make(map[string]struct{}, len(labels))
+	for _, label := range labels {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			continue
+		}
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		normalized = append(normalized, label)
+	}
+	if len(normalized) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 func validateAttachments(items []v1.MessageAttachment) error {
@@ -812,6 +883,12 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
+	labels, err := encodeTaskLabels(body.Labels)
+	if err != nil {
+		h.logger.Error("failed to encode task labels", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode task labels"})
+		return
+	}
 	if err := validateAttachments(body.Attachments); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -865,7 +942,8 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		deferredLaunch = map[string]interface{}{
 			"intent": intent, "agent_profile_id": body.AgentProfileID, "executor_id": body.ExecutorID,
 			"executor_profile_id": body.ExecutorProfileID, "prompt": description,
-			"plan_mode": body.PlanMode, "attachments": body.Attachments,
+			"plan_mode":   body.PlanMode,
+			"attachments": body.Attachments,
 		}
 	}
 
@@ -883,12 +961,13 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Position:           body.Position,
 		Metadata:           metadata,
 		DeferredLaunch:     deferredLaunch,
-		PlanMode:           body.PlanMode && !body.StartAgent,
+		PlanMode:           body.PlanMode,
 		ParentID:           body.ParentID,
 		WorkspacePath:      body.WorkspacePath,
 		BlockedBy:          body.BlockedBy,
 		StartWhenUnblocked: body.StartWhenUnblocked,
 		ProjectID:          body.ProjectID,
+		Labels:             labels,
 		ExternalID:         body.ExternalID,
 	})
 	if err != nil {

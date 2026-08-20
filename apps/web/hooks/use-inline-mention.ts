@@ -6,6 +6,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { getFileName } from "@/lib/utils/file-path";
 import type { RichTextInputHandle } from "@/components/task/chat/rich-text-input";
+import { t } from "@/lib/i18n";
 
 export type TaskMentionData = {
   taskId: string;
@@ -109,7 +110,7 @@ function makeFileItem(
     id: filePath,
     kind: "file",
     label: filePath,
-    description: "File",
+    description: t("task:file"),
     onSelect: (input, value, triggerStart, onChange) => {
       const cursorPos = input.getSelectionStart();
       onChange(value.substring(0, triggerStart) + value.substring(cursorPos));
@@ -126,8 +127,8 @@ function makePlanItem(onPlanSelect: () => void): MentionItem {
   return {
     id: "__plan__",
     kind: "plan",
-    label: "Plan",
-    description: "Include the plan as context",
+    label: t("task:plan"),
+    description: t("task:includeThePlanAsContext"),
     onSelect: (input, value, triggerStart, onChange) => {
       const cursorPos = input.getSelectionStart();
       onChange(value.substring(0, triggerStart) + value.substring(cursorPos));
@@ -276,6 +277,7 @@ type MentionKeyboardParams = {
   setSelectedIndex: (v: number | ((prev: number) => number)) => void;
   handleSelect: (item: MentionItem) => void;
   closeMenu: () => void;
+  restoreFocus: () => void;
 };
 
 function useMentionKeyboard({
@@ -285,6 +287,7 @@ function useMentionKeyboard({
   setSelectedIndex,
   handleSelect,
   closeMenu,
+  restoreFocus,
 }: MentionKeyboardParams) {
   return useCallback(
     (event: React.KeyboardEvent) => {
@@ -308,11 +311,13 @@ function useMentionKeyboard({
           break;
         case "Escape":
           event.preventDefault();
+          event.stopPropagation();
           closeMenu();
+          restoreFocus();
           break;
       }
     },
-    [isOpen, filteredItems, selectedIndex, setSelectedIndex, handleSelect, closeMenu],
+    [isOpen, filteredItems, selectedIndex, setSelectedIndex, handleSelect, closeMenu, restoreFocus],
   );
 }
 
@@ -432,6 +437,10 @@ export function useInlineMention({
     clearMentionState(setIsOpen, setTriggerStart, setQuery);
   }, [invalidateMentionChange]);
 
+  const restoreFocus = useCallback(() => {
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [inputRef]);
+
   const handleSelect = useCallback(
     (item: MentionItem) => {
       const input = inputRef.current;
@@ -449,6 +458,7 @@ export function useInlineMention({
     setSelectedIndex,
     handleSelect,
     closeMenu,
+    restoreFocus,
   });
 
   return {

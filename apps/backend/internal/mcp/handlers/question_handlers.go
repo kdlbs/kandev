@@ -236,12 +236,13 @@ type answerQuestionRequest struct {
 // answerQuestionResponse is answer_question_kandev's response shape (N3,
 // N4). Response is the N3a-normalized JSON produced by
 // clarification.SerializeResponse, embedded raw so its own never-omitted,
-// never-null guarantees survive this envelope.
+// never-null guarantees survive this envelope. No "resume" key, matching the
+// REST envelope (R10-R12): the winner's delivery/resume path is internal to
+// the resolver and not surfaced to callers.
 type answerQuestionResponse struct {
 	Claimed  bool            `json:"claimed"`
 	Status   string          `json:"status"`
 	Response json.RawMessage `json:"response"`
-	Resume   string          `json:"resume"`
 }
 
 // handleAnswerQuestion backs answer_question_kandev. It delegates entirely
@@ -260,8 +261,6 @@ func (h *Handlers) handleAnswerQuestion(ctx context.Context, msg *ws.Message) (*
 		Answers:      req.Answers,
 		Rejected:     req.Rejected,
 		RejectReason: req.RejectReason,
-		Source:       models.ClarificationResolutionSourceMCP,
-		ResolvedBy:   resolvedByFromContext(ctx),
 	})
 	switch {
 	case err == nil:
@@ -286,7 +285,6 @@ func (h *Handlers) answerQuestionSuccessResponse(msg *ws.Message, claimed bool, 
 		Claimed:  claimed,
 		Status:   res.Status,
 		Response: json.RawMessage(serialized),
-		Resume:   res.Resume,
 	})
 }
 

@@ -11,8 +11,8 @@ type ClarificationRequestMessageProps = {
 };
 
 /**
- * Displays a resolved clarification request in the chat history.
- * Pending clarifications are shown in the input area instead.
+ * Displays a resolved or superseded clarification request in the chat history.
+ * The active pending clarification is shown in the input area instead.
  */
 export function ClarificationRequestMessage({ comment }: ClarificationRequestMessageProps) {
   const { t } = useTranslation();

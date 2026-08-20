@@ -1,6 +1,48 @@
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("Mobile general settings", () => {
+  test("keeps the device chart-motion setting contained and persistent", async ({ testPage }) => {
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await testPage.addInitScript(() => {
+      if (window.localStorage.getItem("kandev.settings.richOutputAnimations") === null) {
+        window.localStorage.setItem("kandev.settings.richOutputAnimations", "true");
+      }
+    });
+    await testPage.goto("/settings/preferences/appearance");
+
+    const card = testPage.getByTestId("rich-output-motion-settings-card");
+    const row = testPage.getByTestId("rich-output-motion-toggle-row");
+    const toggle = card.getByRole("switch", { name: "Animate rich-output charts" });
+    await card.scrollIntoViewIfNeeded();
+    await expect(toggle).toBeChecked();
+    const [cardBox, rowBox, toggleBox] = await Promise.all([
+      card.boundingBox(),
+      row.boundingBox(),
+      toggle.boundingBox(),
+    ]);
+    expect(cardBox).not.toBeNull();
+    expect(rowBox).not.toBeNull();
+    expect(toggleBox).not.toBeNull();
+    expect(cardBox!.x).toBeGreaterThanOrEqual(0);
+    expect(cardBox!.x + cardBox!.width).toBeLessThanOrEqual(390);
+    expect(rowBox!.width).toBeLessThanOrEqual(cardBox!.width);
+    expect(toggleBox!.width).toBeGreaterThanOrEqual(44);
+    expect(toggleBox!.height).toBeGreaterThanOrEqual(44);
+
+    await toggle.tap();
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .tap();
+    await expect(testPage.getByTestId("settings-floating-save")).not.toBeVisible();
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
+      await testPage.evaluate(() => document.documentElement.clientWidth),
+    );
+
+    await testPage.reload();
+    await expect(toggle).not.toBeChecked();
+  });
+
   test("keeps host sleep inhibition reachable and contained on a phone viewport", async ({
     testPage,
     apiClient,
@@ -227,7 +269,9 @@ test.describe("Mobile general settings", () => {
     await index.getByRole("link", { name: "Appearance" }).click();
 
     await expect(testPage).toHaveURL(/\/settings\/preferences\/appearance$/);
-    await expect(testPage.getByRole("heading", { name: "Appearance", exact: true })).toBeVisible();
+    await expect(
+      testPage.getByRole("heading", { level: 2, name: "Appearance", exact: true }),
+    ).toBeVisible();
 
     // The topbar home crumb leaves the settings surface entirely.
     await testPage.getByTestId("topbar-phone-home").click();

@@ -15,7 +15,7 @@ import {
 } from "@kandev/ui/alert-dialog";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Card, CardContent } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { IconMailForward, IconUserPlus, IconUsers } from "@tabler/icons-react";
@@ -24,6 +24,9 @@ import { ApiError } from "@/lib/api/client";
 import { listUsers, updateUser, type AuthUser } from "@/lib/api/domains/auth-api";
 import { CreateUserDialog } from "./create-user-dialog";
 import { InviteDialog } from "./invite-dialog";
+import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import { SettingsErrorText } from "@/components/settings/settings-typography";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 type PendingAction = { user: AuthUser; next: { role?: string; status?: string }; label: string };
 
@@ -267,36 +270,36 @@ export function UsersTable() {
 
   return (
     <Card data-testid="users-table-card">
-      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-        <CardTitle className="text-base flex items-center gap-2">
-          <IconUsers className="h-4 w-4" /> {t("system:usersTitle")}
-        </CardTitle>
-        <div className="flex gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            className="cursor-pointer"
-            onClick={() => setInviteOpen(true)}
-            data-testid="users-table-invite"
-          >
-            <IconMailForward className="h-3.5 w-3.5" /> {t("system:usersInviteLink")}
-          </Button>
-          <Button
-            size="sm"
-            className="cursor-pointer"
-            onClick={() => setCreateOpen(true)}
-            data-testid="users-table-create"
-          >
-            <IconUserPlus className="h-3.5 w-3.5" /> {t("system:usersAddUser")}
-          </Button>
-        </div>
-      </CardHeader>
+      <SettingsCardHeader
+        title={
+          <span className="flex items-center gap-2">
+            <IconUsers className="h-4 w-4" /> {t("system:usersTitle")}
+          </span>
+        }
+        actions={
+          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
+            <Button
+              size="sm"
+              variant="outline"
+              className={settingsActionClassName("cursor-pointer")}
+              onClick={() => setInviteOpen(true)}
+              data-testid="users-table-invite"
+            >
+              <IconMailForward className="h-3.5 w-3.5" /> {t("system:usersInviteLink")}
+            </Button>
+            <Button
+              size="sm"
+              className={settingsActionClassName("cursor-pointer")}
+              onClick={() => setCreateOpen(true)}
+              data-testid="users-table-create"
+            >
+              <IconUserPlus className="h-3.5 w-3.5" /> {t("system:usersAddUser")}
+            </Button>
+          </div>
+        }
+      />
       <CardContent className="space-y-4">
-        {error && (
-          <p className="text-xs text-destructive" data-testid="users-table-error">
-            {error}
-          </p>
-        )}
+        {error && <SettingsErrorText data-testid="users-table-error">{error}</SettingsErrorText>}
         {!loaded && isLoading && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Spinner className="size-4" /> {t("system:usersLoading")}

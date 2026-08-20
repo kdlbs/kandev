@@ -91,6 +91,7 @@ import {
 } from "@/lib/routing/path";
 import {
   mapWorkspaceItem,
+  promoteLegacyWorkspaceSelection,
   readActiveWorkspaceCookie,
   resolveSettingsActiveWorkspaceId,
 } from "@/lib/routing/route-bootstrap";
@@ -573,6 +574,7 @@ export function buildSettingsInitialStateForRoute({
   userSettingsResponse,
 }: SettingsInitialStateData): HydrationState {
   const workspaceItems = workspaces.map(mapWorkspaceItem);
+  promoteLegacyWorkspaceSelection(workspaceItems);
   const activeWorkspaceId = resolveSettingsActiveWorkspaceId(
     workspaceItems,
     readActiveWorkspaceCookie(),

@@ -9,12 +9,17 @@
  * manual, and it cannot see copy that never becomes a text node or that is
  * interpolated into a translated frame. This closes the gap mechanically.
  *
- * SCOPE: only the paths in `i18nGuardFiles`, exactly like the eslint rule. A
- * file is judged whole once its directory is migrated, and never before. That is
- * the same ratchet the rest of this system uses — it can only tighten, and it
- * never asks anyone to migrate a line they did not write. The repo-wide half of
- * the contract is `check-new-code-i18n.mjs`, which runs this same detector over
- * added and changed lines everywhere.
+ * SCOPE: the WHOLE `apps/web` source tree, by exclusion rather than by
+ * allowlist. This used to default to `i18nGuardFiles` — the eslint rule's
+ * allowlist — which left 1141 of 2564 source files judged by neither gate, and
+ * non-JSX positions are exactly what eslint structurally cannot see. Since this
+ * check has no lint-rule cost (it runs as one script, not per-PR-file), there is
+ * no reason to scope it: an exclusion list covers new directories automatically,
+ * so the hole cannot silently reopen the next time someone adds one.
+ *
+ * The eslint half of the contract is still `i18nGuardFiles`, and
+ * `check-new-code-i18n.mjs` runs this same detector over added and changed lines
+ * everywhere.
  *
  * Silence a finding with `// i18n-exempt: <reason>` on the enclosing statement.
  * A reason is required, because every shape here has a legitimate form worth
@@ -26,21 +31,13 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { i18nGuardFiles, noLiteralStringOptions } from "../eslint.i18n.options.mjs";
+import { noLiteralStringOptions } from "../eslint.i18n.options.mjs";
 import { findNonJsxCopy } from "./lib/nonjsx-copy.mjs";
+import { collectScannedFiles } from "./lib/nonjsx-scope.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const patterns = process.argv.slice(2).filter((arg) => !arg.startsWith("--"));
-const globs = patterns.length ? patterns : i18nGuardFiles;
-
-const files = new Set();
-for (const glob of globs) {
-  for (const match of fs.globSync(glob, { cwd: ROOT })) {
-    if (!/\.tsx?$/.test(match)) continue;
-    if (/\.(test|spec|d)\.tsx?$/.test(match)) continue;
-    files.add(match);
-  }
-}
+const files = collectScannedFiles(fs, ROOT, patterns);
 
 const excludes = noLiteralStringOptions.words?.exclude ?? [];
 const problems = [];
@@ -63,10 +60,12 @@ if (unexplained.length) {
 if (problems.length) {
   console.error(
     `\n✖ ${problems.length} hardcoded user-facing string(s) in a position lint cannot see.\n\n` +
-      `  These sit on paths already listed in i18nGuardFiles, so the copy around\n` +
-      `  them is translated and these are regressions. Route each through t(), or\n` +
-      `  mark it \`// i18n-exempt: <reason>\` if it is a persisted value, an\n` +
-      `  agent-facing prompt, or a wire value. See docs/i18n.md.\n`,
+      `  \`i18next/no-literal-string\` is jsx-only, so it cannot reach these —\n` +
+      `  config tables, helper returns, parameter defaults, and toast/setter\n` +
+      `  arguments. Route each through t(), or mark it\n` +
+      `  \`// i18n-exempt: <reason>\` if it is a persisted value, an agent-facing\n` +
+      `  prompt, a wire value, or a diagnostic the user never sees.\n` +
+      `  See docs/i18n.md.\n`,
   );
   for (const { file, line, kind, context, value } of problems) {
     const where = context ? `${kind} ${context}` : kind;
@@ -75,6 +74,11 @@ if (problems.length) {
   console.error("");
 }
 
-if (problems.length || unexplained.length) process.exit(1);
+if (problems.length || unexplained.length) {
+  // Report the scope on the failure path too. A shrinking scope and a clean run
+  // look identical otherwise, and this check's whole value is the denominator.
+  console.error(`  (${files.size} file(s) scanned)\n`);
+  process.exit(1);
+}
 
 console.log(`✓ no non-JSX copy — ${files.size} guarded file(s) checked.`);

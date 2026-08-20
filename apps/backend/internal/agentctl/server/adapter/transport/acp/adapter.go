@@ -227,11 +227,18 @@ type Adapter struct {
 	availableModels []modelInfo
 
 	// usageBySession tracks the latest and previously consumed cumulative
-	// `usage_update` samples. codex-acp emits no per-turn usage frame, so the
-	// prompt-complete handler uses nonnegative context-occupancy growth as an
-	// estimated input count and derives true deltas from cumulative USD cost.
-	// claude-acp / opencode-acp report a real `result.usage` so this
-	// cache contributes only their provider-reported cost delta.
+	// `usage_update` samples. codex-acp DOES emit a typed per-turn usage
+	// frame on the prompt response, but it is scoped to the LAST model
+	// request of the turn, not the whole turn (see
+	// normalizeCodexPromptUsage in dialect_codex.go) — so this cache
+	// mainly contributes the provider-reported cost delta for adapters
+	// like claude-acp / opencode-acp that report a real `result.usage`.
+	// For an adapter with no typed usage frame at all, the prompt-complete
+	// handler falls back to nonnegative context-occupancy growth as an
+	// estimated input count (fallbackUsageForNilTypedUsage in
+	// adapter_prompt.go). It attaches when context occupancy grew
+	// (delta > 0) OR a provider-reported cost sample is present —
+	// either condition alone is enough.
 	usageBySession map[string]*usageTracker
 
 	// Available auth methods captured from the ACP initialize response.
@@ -531,6 +538,49 @@ func (a *Adapter) GetSessionID() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.sessionID
+}
+
+// GetSessionModelState returns the latest session model snapshot while holding
+// the adapter lock. The snapshot is used in the synchronous session response;
+// the normal session_models stream event remains the long-lived cache update.
+func (a *Adapter) GetSessionModelState() *streams.SessionModelState {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if len(a.availableModels) == 0 && len(a.availableConfigOptions) == 0 {
+		return nil
+	}
+	return &streams.SessionModelState{
+		CurrentModelID: currentModelFromConfig(a.availableConfigOptions),
+		Models:         cloneSessionModels(convertSessionModels(a.availableModels)),
+		ConfigOptions:  cloneConfigOptions(a.availableConfigOptions),
+	}
+}
+
+func cloneSessionModels(models []streams.SessionModelInfo) []streams.SessionModelInfo {
+	if len(models) == 0 {
+		return nil
+	}
+	cloned := append([]streams.SessionModelInfo(nil), models...)
+	for i, model := range cloned {
+		if model.Meta != nil {
+			cloned[i].Meta = make(map[string]any, len(model.Meta))
+			for key, value := range model.Meta {
+				cloned[i].Meta[key] = value
+			}
+		}
+	}
+	return cloned
+}
+
+func cloneConfigOptions(options []streams.ConfigOption) []streams.ConfigOption {
+	if len(options) == 0 {
+		return nil
+	}
+	cloned := append([]streams.ConfigOption(nil), options...)
+	for i, option := range cloned {
+		cloned[i].Options = append([]streams.ConfigOptionValue(nil), option.Options...)
+	}
+	return cloned
 }
 
 // GetOperationID returns the current operation/turn ID.

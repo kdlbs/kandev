@@ -1,6 +1,6 @@
-# Kandev CI base image — split into two tags.
+# Kandev CI base image — split into three tags.
 #
-# Two stages published as separate tags on the same GHCR repo:
+# Three stages published as separate tags on the same GHCR repo:
 #
 #   - `runtime` (~700 MB): Playwright + Node + pnpm + Docker CLI. Used by the
 #     `e2e` shards and `e2e-report` — they consume pre-built backend artifacts
@@ -11,6 +11,9 @@
 #     the `build` job (compiles backend + web), `backend-tests`, and
 #     `frontend-tests`. These all need the Go toolchain.
 #
+#   - `desktop`: runtime + Tauri Linux dependencies + Rust. Used by the
+#     desktop smoke job, so hosted-runner package mirrors are not in its setup.
+#
 # Pinned versions (keep in sync with apps/backend/go.mod, apps/web/package.json,
 # and the matching workflow inputs):
 #   - Playwright base : v1.61.1-noble  (matches @playwright/test ^1.61.1)
@@ -20,6 +23,7 @@
 #   - golangci-lint   : v2.9.0         (matches v2.9 floating pin)
 #   - go-licenses     : v1.6.0
 #   - Docker CLI      : 27.3.1
+#   - Rust            : 1.97.1         (pinned for reproducible desktop CI)
 
 # =============================================================================
 # Stage 1: runtime — Playwright + Node + pnpm + Docker CLI (no Go)
@@ -105,3 +109,43 @@ RUN set -eux; \
     go version | grep -F 'go1.26.0'; \
     golangci-lint --version | grep -F '2.9.0'; \
     go version -m "$(which go-licenses)" | grep -F 'v1.6.0'
+
+# =============================================================================
+# Stage 3: desktop — runtime + Tauri Linux dependencies + Rust
+# =============================================================================
+FROM runtime AS desktop
+
+ARG RUST_VERSION=1.97.1
+
+ENV CARGO_HOME=/root/.cargo \
+    RUSTUP_HOME=/root/.rustup \
+    PATH=/pnpm:/root/.cargo/bin:$PATH
+
+# Keep hosted-runner package mirrors out of the desktop smoke job. This stage
+# also contains the compiler and rpm tooling used by the Tauri bundle step.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        pkg-config \
+        libglib2.0-dev \
+        libwebkit2gtk-4.1-dev \
+        libgtk-3-dev \
+        libayatana-appindicator3-dev \
+        librsvg2-dev \
+        patchelf \
+        rpm \
+        xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --default-toolchain none --profile minimal \
+    && rustup toolchain install "${RUST_VERSION}" --profile minimal \
+    && rustup default "${RUST_VERSION}"
+
+# --- Desktop smoke checks --------------------------------------------------
+RUN set -eux; \
+    rustc --version | grep -F "${RUST_VERSION}"; \
+    cargo --version; \
+    pkg-config --exists webkit2gtk-4.1; \
+    command -v patchelf; \
+    command -v xvfb-run

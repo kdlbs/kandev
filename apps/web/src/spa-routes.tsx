@@ -37,7 +37,11 @@ import {
 } from "@/components/plugins/plugin-error-boundary";
 import { PluginPageFrame } from "@/components/plugins/plugin-page";
 import { safeDecodePathSegment } from "@/lib/routing/path";
-import { mapWorkspaceItem, readActiveWorkspaceCookie } from "@/lib/routing/route-bootstrap";
+import {
+  mapWorkspaceItem,
+  promoteLegacyWorkspaceSelection,
+  readActiveWorkspaceCookie,
+} from "@/lib/routing/route-bootstrap";
 import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import { KanbanRoute } from "./kanban-route";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
@@ -485,6 +489,7 @@ function useRouteData({
 
   useEffect(() => {
     if (bootstrappedRef.current) return;
+    promoteLegacyWorkspaceSelection(store.getState().workspaces.items);
     if (skipBootstrap) return;
     bootstrappedRef.current = true;
     let cancelled = false;
@@ -502,6 +507,11 @@ function useRouteData({
       const cookieWorkspaceId = readActiveWorkspaceCookie();
       const workspaceItems =
         workspacesResponse?.workspaces.map(mapWorkspaceItem) ?? store.getState().workspaces.items;
+      // One-time migration: a ported instance that has no scoped cookie yet
+      // (fresh upgrade) falls back to the legacy name on every boot; once the
+      // boot validates a legacy value, copy it into the scoped cookie so
+      // later boots are decoupled (legacy name itself stays untouched).
+      promoteLegacyWorkspaceSelection(workspaceItems);
       const workspaceId =
         workspaceItems.length > 0
           ? resolveActiveId(

@@ -2,6 +2,8 @@ import type { QueueStatus, QueuedMessage } from "@/lib/state/slices/session/type
 import type { EntityReference } from "@/lib/types/entity-reference";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
+// i18n-exempt: precondition diagnostic for a programmer error; callers branch
+// on the error type, never render this message.
 const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
 
 /** Error thrown when the queue would exceed its per-session cap. */
@@ -56,6 +58,9 @@ const QUEUE_SEND_NOW_ERROR_CODES: ReadonlySet<QueueSendNowErrorCode> = new Set([
 ]);
 
 /** Error returned when Send Now cannot safely claim its click-time selection. */
+// i18n-exempt: transport/API diagnostic. Callers branch on the error code and
+// render translated copy; this text only ever appears in a console or as an
+// interpolated English diagnostic (see docs/i18n.md on interpolated values).
 export class QueueSendNowError extends Error {
   readonly code: QueueSendNowErrorCode;
 
@@ -70,6 +75,9 @@ export class QueueSendNowError extends Error {
  * visible pending queue (an entry was drained, removed, merged, or newly
  * queued since the client's snapshot). The reorder was rejected atomically;
  * callers refetch the authoritative queue. */
+// i18n-exempt: transport/API diagnostic. Callers branch on the error code and
+// render translated copy; this text only ever appears in a console or as an
+// interpolated English diagnostic (see docs/i18n.md on interpolated values).
 export class QueueReorderError extends Error {
   readonly code = "queue_changed" as const;
 
@@ -202,6 +210,21 @@ export async function sendQueuedNow(
   } catch (err) {
     rethrowQueueError(err);
   }
+}
+
+/** Persist the per-session queue Auto-run policy and start the queue when enabling it. */
+export async function setQueueAutoRun(
+  sessionId: string,
+  enabled: boolean,
+): Promise<{ session_id: string; auto_run: boolean; dispatched: boolean }> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  return client.request<{ session_id: string; auto_run: boolean; dispatched: boolean }>(
+    "message.queue.auto_run.set",
+    { session_id: sessionId, enabled },
+  );
 }
 
 /** Fetch the full queue snapshot (entries + capacity). */

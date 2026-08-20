@@ -328,11 +328,11 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <ExecutorIcon className="h-5 w-5 text-muted-foreground" />
-            <h2 className="text-2xl font-bold">{executor.name}</h2>
+            <h2 className="min-w-0 break-words text-2xl font-bold">{executor.name}</h2>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
             {t(executorDescriptionKey(executor.type))}
@@ -342,7 +342,7 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
           variant="outline"
           size="sm"
           onClick={() => router.push(EXECUTORS_ROUTE)}
-          className="cursor-pointer"
+          className="min-h-11 w-full cursor-pointer text-sm md:min-h-7 md:w-auto md:text-xs"
         >
           {t("executors:backToExecutors")}
         </Button>

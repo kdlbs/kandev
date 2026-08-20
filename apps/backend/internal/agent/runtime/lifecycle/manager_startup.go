@@ -84,7 +84,21 @@ func (m *Manager) routePassthrough(ctx context.Context, execution *AgentExecutio
 // StartAgentProcess configures and starts the agent subprocess for an execution.
 // This must be called after Launch() to actually start the agent (e.g., auggie, codex).
 // The command is built internally based on the execution's agent profile.
-func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (retErr error) {
+func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found", executionID)
+	}
+	if execution.SessionID == "" {
+		return m.startAgentProcess(ctx, executionID)
+	}
+	_, err := m.doCoalescedExecution(ctx, execution.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+		return nil, m.startAgentProcess(sharedCtx, executionID)
+	})
+	return err
+}
+
+func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (retErr error) {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
@@ -123,6 +137,7 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (re
 	if isPassthrough {
 		return m.startPassthroughExecution(operationCtx, execution, profileInfo)
 	}
+	execution.beginStartupAttempt()
 
 	if execution.agentctl == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
@@ -181,7 +196,7 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (re
 			zap.String("command", bootCommand))
 	}
 
-	return m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription)
+	return m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription, approvalPolicy)
 }
 
 func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, execution *AgentExecution) error {
@@ -318,9 +333,13 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 	}
 
 	if profileInfo != nil {
-		m.mergeAgentProfileEnvFromInfo(ctx, profileInfo, env)
+		if err := m.mergeAgentProfileEnvFromInfo(ctx, profileInfo, env); err != nil {
+			return nil, fmt.Errorf("resolve agent profile environment: %w", err)
+		}
 	} else {
-		m.mergeAgentProfileEnv(ctx, executionProfileID(req), env)
+		if err := m.mergeAgentProfileEnv(ctx, executionProfileID(req), env); err != nil {
+			return nil, fmt.Errorf("resolve agent profile environment: %w", err)
+		}
 	}
 
 	// Add standard variables for recovery after backend restart

@@ -24,6 +24,7 @@ func TestConfigContext_ContainsAllTools(t *testing.T) {
 		"create_workflow_kandev",
 		"update_workflow_kandev",
 		"delete_workflow_kandev",
+		"export_workflow_kandev",
 		"list_workflow_steps_kandev",
 		"create_workflow_step_kandev",
 		"update_workflow_step_kandev",
@@ -117,6 +118,17 @@ func TestFormatKandevContext_OmitsStepCompleteToolByDefault(t *testing.T) {
 	assert.NotContains(t, result, "{step_complete_section}")
 }
 
+func TestKandevContext_PrefersNativeSubagentsForOrdinaryDelegation(t *testing.T) {
+	context := FormatKandevContext("task-abc", "session-xyz", false)
+
+	assert.Contains(t, context, "DELEGATION POLICY")
+	assert.Contains(t, context, "native subagent mechanism")
+	assert.Contains(t, context, "only when the user has explicitly authorized delegation")
+	assert.Contains(t, context, "user explicitly wants a persistent Kandev task or subtask")
+	assert.Contains(t, context, "user explicitly wants another Kandev session/tab")
+	assert.Contains(t, context, "do not silently create a Kandev task or session")
+}
+
 func TestFormatKandevContext_TitleToolFollowsCapability(t *testing.T) {
 	withoutTitle := FormatKandevContextWithOptions("task-abc", "session-xyz", KandevContextOptions{})
 	assert.NotContains(t, withoutTitle, "set_task_title_kandev")
@@ -169,6 +181,10 @@ func TestFormatKandevContext_CoordinatorTaskControlsFollowCapability(t *testing.
 	taskMode := FormatKandevContext("task-abc", "session-xyz", false)
 	assert.Contains(t, taskMode, `delivery_mode="interrupt"`)
 	assert.Contains(t, taskMode, "stop_task_kandev")
+	// A parent that stops a wedged child then tries to message it hits a
+	// terminal session. The injected block, not trial and error, has to be
+	// where it learns which tool restarts the task.
+	assert.Contains(t, taskMode, "spawn_session_kandev to put the task back to work")
 
 	for _, mode := range []string{"office", "config"} {
 		t.Run(mode, func(t *testing.T) {
@@ -564,7 +580,7 @@ func TestContexts_DocumentCurrentAskUserQuestionSchema(t *testing.T) {
 		"KandevContext": KandevContext(),
 	} {
 		assert.Contains(t, ctx, "questions", "%s should mention the questions array param", name)
-		assert.Contains(t, ctx, "1-4 question objects", "%s should document the 1-4 question limit", name)
+		assert.Contains(t, ctx, "1-4", "%s should document the question limit", name)
 		assert.NotContains(t, ctx, "Required params: prompt (string), options", "%s leaks the legacy ask_user_question schema", name)
 		assert.NotContains(t, ctx, "Required: prompt, options", "%s leaks the legacy ask_user_question schema", name)
 	}

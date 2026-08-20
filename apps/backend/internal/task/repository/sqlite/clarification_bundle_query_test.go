@@ -156,31 +156,6 @@ func TestListUnresolvedClarificationBundles_AbsentStatusCountsAsPending(t *testi
 	}
 }
 
-// TestListUnresolvedClarificationBundles_ExcludesResolvedBundle covers D4a
-// conjunct 1: a resolution row excludes the bundle even if a message's
-// status metadata was never fully applied (the R5 half-applied state).
-func TestListUnresolvedClarificationBundles_ExcludesResolvedBundle(t *testing.T) {
-	repo := newRepoForSessionTests(t)
-	ctx := context.Background()
-	seedBundleTask(t, repo, "task-B3", "")
-	seedBundleSession(t, repo, "sess-B3", "task-B3")
-	seedBundleTurn(t, repo, "turn-B3", "sess-B3", "task-B3")
-	insertClarificationMessage(t, repo, "msg-B3", "sess-B3", "task-B3", "turn-B3", "pending-B3", "q1", "pending", 0, time.Now().UTC())
-
-	res := newTestClarificationResolution("pending-B3", "sess-B3", "task-B3")
-	if _, _, err := repo.InsertClarificationResolution(ctx, res); err != nil {
-		t.Fatalf("claim resolution: %v", err)
-	}
-
-	page, err := repo.ListUnresolvedClarificationBundles(ctx, unscopedOpts(50))
-	if err != nil {
-		t.Fatalf("ListUnresolvedClarificationBundles: %v", err)
-	}
-	if len(page.Bundles) != 0 {
-		t.Fatalf("bundles = %+v, want none (resolution row excludes it)", page.Bundles)
-	}
-}
-
 // TestListUnresolvedClarificationBundles_ExcludesAllTerminalLegacyBundle
 // covers D4a conjunct 2: a pre-upgrade bundle with no resolution row but
 // every message terminal must not resurface (M3/D4a).

@@ -38,3 +38,10 @@ func TestAgentEventPayloadCarriesProviderErrorAndAgentID(t *testing.T) {
 		t.Fatalf("provider error = %+v", payload.ProviderError)
 	}
 }
+
+func TestAgentEventPayloadCarriesRunID(t *testing.T) {
+	payload := newAgentEventPayload(&AgentExecution{ID: "exec-1", RunID: "run-1"})
+	if payload.RunID != "run-1" {
+		t.Fatalf("run ID = %q, want run-1", payload.RunID)
+	}
+}

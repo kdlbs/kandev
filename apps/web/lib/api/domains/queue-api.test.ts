@@ -20,6 +20,7 @@ import {
   sendQueuedNow,
   updateQueuedMessage,
 } from "./queue-api";
+import * as queueApi from "./queue-api";
 
 const reference: EntityReference = {
   version: 1,
@@ -308,6 +309,33 @@ describe("sendQueuedNow", () => {
     await expect(sendQueuedNow({ session_id: "session-1", scope: "all" })).rejects.toBeInstanceOf(
       QueueSendNowError,
     );
+  });
+});
+
+describe("setQueueAutoRun", () => {
+  it("sets the per-session queue policy through its exact WebSocket action", async () => {
+    const request = vi.fn().mockResolvedValue({
+      session_id: "session-1",
+      auto_run: false,
+      dispatched: false,
+    });
+    getWebSocketClientMock.mockReturnValue({ request });
+    const setQueueAutoRun = (
+      queueApi as typeof queueApi & {
+        setQueueAutoRun?: (
+          sessionId: string,
+          enabled: boolean,
+        ) => Promise<{ session_id: string; auto_run: boolean; dispatched: boolean }>;
+      }
+    ).setQueueAutoRun;
+
+    expect(setQueueAutoRun).toBeTypeOf("function");
+    await setQueueAutoRun!("session-1", false);
+
+    expect(request).toHaveBeenCalledWith("message.queue.auto_run.set", {
+      session_id: "session-1",
+      enabled: false,
+    });
   });
 });
 

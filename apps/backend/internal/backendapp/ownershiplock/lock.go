@@ -14,10 +14,15 @@ var ErrConflict = errors.New("runtime state is already owned")
 // ConflictError identifies the target that prevented startup.
 type ConflictError struct {
 	Target Target
+	Owner  *OwnerRecord
 }
 
 func (e *ConflictError) Error() string {
-	return fmt.Sprintf("%s target %q is already owned by another backend", e.Target.Kind, e.Target.ResourcePath)
+	message := fmt.Sprintf("%s target %q is already owned by another backend", e.Target.Kind, e.Target.ResourcePath)
+	if e.Owner != nil {
+		message += " (" + e.Owner.String() + ")"
+	}
+	return message
 }
 
 func (e *ConflictError) Unwrap() error { return ErrConflict }
@@ -55,10 +60,11 @@ func Acquire(targets []Target) (*Owner, error) {
 			_ = file.Close()
 			_ = owner.Close()
 			if errors.Is(err, ErrConflict) {
-				return nil, &ConflictError{Target: target}
+				return nil, &ConflictError{Target: target, Owner: readOwner(target.LockPath)}
 			}
 			return nil, fmt.Errorf("acquire %s ownership lock %q: %w", target.Kind, target.LockPath, err)
 		}
+		_ = writeOwnerFn(file)
 		owner.held = append(owner.held, heldLock{target: target, file: file})
 	}
 	return owner, nil
@@ -68,7 +74,7 @@ func openLockFile(path string) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	return os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	return openLockFilePlatform(path)
 }
 
 // Close releases every held OS lock in reverse acquisition order. The first

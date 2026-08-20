@@ -11,12 +11,8 @@ import { ChatInputPluginActions } from "./chat-input-plugin-actions";
 import { ContextPopover } from "./context-popover";
 import { ImplementPlanButton } from "./implement-plan-button";
 import { ResetContextButton } from "./reset-context-button";
-import {
-  AttachFilesButton,
-  McpIndicator,
-  PlanToggleButton,
-  SubmitButton,
-} from "./chat-input-toolbar-primitives";
+import { AttachFilesButton, PlanToggleButton, SubmitButton } from "./chat-input-toolbar-primitives";
+import { McpIndicator } from "./mcp-explorer/mcp-indicator";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { SHORTCUTS } from "@/lib/keyboard/constants";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";

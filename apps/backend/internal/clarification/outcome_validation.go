@@ -7,21 +7,17 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 // Outcome is the caller-supplied resolution ResolveBundle is asked to
-// record: either an answers submission, a rejection, or a cancel. Exactly
-// one of Cancel, Rejected, or a non-empty Answers submission applies; N8a
-// additionally forbids combining Rejected with a non-empty Answers.
+// record: either an answers submission or a rejection. Exactly one of
+// Rejected or a non-empty Answers submission applies; N8a additionally
+// forbids combining Rejected with a non-empty Answers. A cancel (A9) does
+// not go through ResolveBundle at all, so it has no representation here.
 type Outcome struct {
 	Answers      []Answer
 	Rejected     bool
 	RejectReason string
-	Cancel       bool   // X5: skip step-3 validation, resolve status=cancelled
-	Source       string // web | mcp (M10); ResolveBundle does not validate this
-	ResolvedBy   string // caller's user ID; "" for an unscoped caller
 }
 
 // answerTextRuneCap is N8b's shared limit on both an answer's custom_text
@@ -131,21 +127,10 @@ func validateSelectedOptions(i int, a Answer, q Question) error {
 }
 
 // buildOutcomeResponse computes the resolution's status and its M6/N3a
-// response payload from a validated outcome. Cancel bypasses N3a
-// normalization entirely: its payload is the fixed M6 "cancelled" shape,
-// never derived from caller input (X5).
+// response payload from a validated outcome.
 func buildOutcomeResponse(pendingID string, questions []Question, o Outcome, now time.Time) (string, *Response) {
-	if o.Cancel {
-		return taskmodels.ClarificationResolutionStatusCancelled, &Response{
-			PendingID:    pendingID,
-			Answers:      []Answer{},
-			Rejected:     true,
-			RejectReason: "cancelled",
-			RespondedAt:  now,
-		}
-	}
 	if o.Rejected {
-		return taskmodels.ClarificationResolutionStatusRejected, &Response{
+		return string(StatusRejected), &Response{
 			PendingID:    pendingID,
 			Answers:      []Answer{},
 			Rejected:     true,
@@ -153,7 +138,7 @@ func buildOutcomeResponse(pendingID string, questions []Question, o Outcome, now
 			RespondedAt:  now,
 		}
 	}
-	return taskmodels.ClarificationResolutionStatusAnswered, normalizeAnswered(pendingID, questions, o.Answers, now)
+	return string(StatusAnswered), normalizeAnswered(pendingID, questions, o.Answers, now)
 }
 
 // normalizeAnswered builds the N3a-normalized Response for an answered

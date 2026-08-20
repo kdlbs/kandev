@@ -448,15 +448,13 @@ export function useResolvedModelConfig(
       if (result.kind === "error") {
         setStatus("failed");
         setError(result.error);
-        setResolvedOptions(stableInitialConfigOptions);
+        setResolvedOptions([]);
         if (requestKey) setSettledRequestKey(requestKey);
       } else {
         const response = result.response;
         setStatus(response.status);
         setError(response.error ?? null);
-        setResolvedOptions(
-          response.status === "ok" ? (response.config_options ?? []) : stableInitialConfigOptions,
-        );
+        setResolvedOptions(response.status === "ok" ? (response.config_options ?? []) : []);
         if (response.status === "ok" && requestKey) {
           setResolvedRequestKey(requestKey);
         }

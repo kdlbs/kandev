@@ -15,6 +15,7 @@ import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
 import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
+import { SettingsPageHeader } from "@/components/settings/settings-typography";
 import { useTranslation } from "react-i18next";
 import { useDraftedIntegrationEnabled } from "@/components/integrations/use-drafted-integration-enabled";
 import { useHideDisabledIntegrationsInNav } from "@/hooks/domains/integrations/use-hide-disabled-integrations-in-nav";
@@ -27,6 +28,7 @@ import { LinearEnabledControl } from "@/components/linear/linear-enabled-control
 import { SentryEnabledControl } from "@/components/sentry/sentry-enabled-control";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
 import { usePluginRegistry } from "@/lib/plugins/registry";
+import { PluginErrorBoundary } from "@/components/plugins/plugin-error-boundary";
 
 type IntegrationSlug = "azure-devops" | "github" | "gitlab" | "jira" | "linear" | "sentry";
 
@@ -134,10 +136,17 @@ export function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProp
 
   return (
     <div className="space-y-6">
-      <WorkspaceSectionHeader
-        tab="integrations"
-        description={t("settings:connectKandevToThirdPartyServices")}
-      />
+      {workspaceId ? (
+        <WorkspaceSectionHeader
+          tab="integrations"
+          description={t("settings:connectKandevToThirdPartyServices")}
+        />
+      ) : (
+        <SettingsPageHeader
+          title={t("common:integrations")}
+          description={t("settings:connectKandevToThirdPartyServices")}
+        />
+      )}
       <Separator />
       <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {INTEGRATIONS.map(({ slug, label, descriptionKey, Icon }) => {
@@ -169,7 +178,7 @@ export function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProp
             </Card>
           );
         })}
-        {pluginIntegrations.map(({ pluginId, id, label, description, icon }) => {
+        {pluginIntegrations.map(({ pluginId, id, label, description, icon, action: Action }) => {
           const href = `${rootHref}/${id}`;
           const Icon = resolvePluginIcon(icon);
           return (
@@ -179,13 +188,22 @@ export function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProp
               className="h-full w-full transition-colors hover:border-primary/40"
             >
               <CardContent className="space-y-2">
-                <Link
-                  href={href}
-                  className="flex min-w-0 items-center gap-2 text-base font-semibold hover:underline cursor-pointer"
-                >
-                  <Icon className="h-5 w-5 shrink-0" />
-                  <span className="truncate">{label}</span>
-                </Link>
+                <div className="flex items-center justify-between gap-2">
+                  <Link
+                    href={href}
+                    className="flex min-w-0 items-center gap-2 text-base font-semibold hover:underline cursor-pointer"
+                  >
+                    <Icon className="h-5 w-5 shrink-0" />
+                    <span className="truncate">{label}</span>
+                  </Link>
+                  <div className="shrink-0">
+                    {Action ? (
+                      <PluginErrorBoundary context={`integration card action "${pluginId}:${id}"`}>
+                        <Action workspaceId={workspaceId} surface="index" />
+                      </PluginErrorBoundary>
+                    ) : null}
+                  </div>
+                </div>
                 <Link href={href} className="text-sm text-muted-foreground cursor-pointer">
                   {description}
                 </Link>

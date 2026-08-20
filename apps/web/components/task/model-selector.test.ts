@@ -202,6 +202,7 @@ function makeSession(overrides: Partial<TaskSession> = {}): TaskSession {
 }
 
 const flatModelId = "claude-opus-4-8";
+const noAgents: Agent[] = [];
 
 function flatModelEntries(): SessionModelEntry[] {
   return [
@@ -211,8 +212,6 @@ function flatModelEntries(): SessionModelEntry[] {
 }
 
 describe("hasCompleteDynamicConfig", () => {
-  const noAgents: Agent[] = [];
-
   it("treats a required model key as satisfied by a flat ACP model list", () => {
     const session = makeSession({
       metadata: { runtime_config: { config_options: { model: flatModelId } } },
@@ -280,10 +279,186 @@ describe("hasCompleteDynamicConfig", () => {
 
     expect(hydrated).toBe(false);
   });
+});
 
-  it("is hydrated when there are no required config keys", () => {
-    expect(hasCompleteDynamicConfig(makeSession(), undefined, noAgents)).toBe(true);
+describe("legacy agent config hydration", () => {
+  it("treats an unadvertised agent config value as satisfied once ACP options have settled", () => {
+    const session = makeSession({
+      metadata: {
+        runtime_config: {
+          // i18n-exempt: persisted legacy agent configuration value
+          config_options: { agent: "default", model: flatModelId, verbosity: "terse" },
+        },
+      },
+      agent_profile_snapshot: { agent_id: "claude" },
+    });
+    expect(requiredConfigKeys(session, noAgents)).toEqual(["agent", "model", "verbosity"]);
+
+    const settledOption: ConfigOptionEntry = {
+      type: "select",
+      id: "verbosity",
+      name: "Verbosity",
+      currentValue: "terse",
+      options: [{ value: "terse", name: "Terse" }],
+    };
+    const hydrated = hasCompleteDynamicConfig(
+      session,
+      {
+        currentModelId: flatModelId,
+        models: flatModelEntries(),
+        configOptions: [settledOption],
+        configOptionsSettled: true,
+      } as Parameters<typeof hasCompleteDynamicConfig>[1],
+      noAgents,
+    );
+
+    expect(hydrated).toBe(true);
   });
+
+  it("treats a settled empty ACP option snapshot as hydrated for legacy agent data", () => {
+    const session = makeSession({
+      metadata: {
+        runtime_config: { config_options: { agent: "default", model: flatModelId } },
+      },
+      agent_profile_snapshot: { agent_id: "claude" },
+    });
+
+    const hydrated = hasCompleteDynamicConfig(
+      session,
+      {
+        currentModelId: flatModelId,
+        models: flatModelEntries(),
+        configOptions: [],
+        configOptionsSettled: true,
+      } as Parameters<typeof hasCompleteDynamicConfig>[1],
+      noAgents,
+    );
+
+    expect(hydrated).toBe(true);
+  });
+
+  it("keeps an unadvertised provider-defined agent option required", () => {
+    const session = makeSession({
+      metadata: {
+        runtime_config: { config_options: { agent: "build", model: flatModelId } },
+      },
+      agent_profile_snapshot: { agent_id: "claude" },
+    });
+
+    const hydrated = hasCompleteDynamicConfig(
+      session,
+      {
+        currentModelId: flatModelId,
+        models: flatModelEntries(),
+        configOptions: [],
+        configOptionsSettled: true,
+      } as Parameters<typeof hasCompleteDynamicConfig>[1],
+      noAgents,
+    );
+
+    expect(hydrated).toBe(false);
+  });
+
+  it("does not mark an agent key satisfied while ACP config options are still empty", () => {
+    const session = makeSession({
+      metadata: {
+        runtime_config: { config_options: { agent: "default", model: flatModelId } },
+      },
+      agent_profile_snapshot: { agent_id: "claude" },
+    });
+
+    const hydrated = hasCompleteDynamicConfig(
+      session,
+      {
+        currentModelId: flatModelId,
+        models: flatModelEntries(),
+        configOptions: [],
+        configOptionsSettled: false,
+      } as Parameters<typeof hasCompleteDynamicConfig>[1],
+      noAgents,
+    );
+
+    expect(hydrated).toBe(false);
+  });
+});
+
+const modelConfigOption: ConfigOptionEntry = {
+  type: "select",
+  id: "model",
+  name: "Model",
+  currentValue: providerModelId,
+  category: "model",
+  options: [{ value: providerModelId, name: providerModelName }],
+};
+
+function selectOption(id: string, currentValue: string): ConfigOptionEntry {
+  return {
+    type: "select",
+    id,
+    name: id,
+    currentValue,
+    options: [{ value: currentValue, name: currentValue }],
+  };
+}
+
+function catalogEntry(configOptions: ConfigOptionEntry[], settled: boolean) {
+  return {
+    currentModelId: providerModelId,
+    models: [],
+    configOptions,
+    configOptionsSettled: settled,
+  } as Parameters<typeof hasCompleteDynamicConfig>[1];
+}
+
+describe("cross-agent persisted config reconciliation", () => {
+  it("hydrates when persisted-only keys are unadvertised and the catalog is settled", () => {
+    const session = makeSession({
+      metadata: {
+        runtime_config: {
+          // effort/thinking were written by a prior agent that no longer runs.
+          config_options: {
+            model: providerModelId,
+            reasoning: "high",
+            fast: "on",
+            effort: "x",
+            thinking: "y",
+          },
+        },
+      },
+    });
+    const advertised = [
+      modelConfigOption,
+      selectOption("reasoning", "high"),
+      selectOption("fast", "on"),
+    ];
+
+    expect(hasCompleteDynamicConfig(session, catalogEntry(advertised, true), noAgents)).toBe(true);
+  });
+
+  it("keeps a profile-snapshot key required even when the agent has not advertised it", () => {
+    const session = makeSession({
+      metadata: { runtime_config: { config_options: { model: providerModelId } } },
+      agent_profile_snapshot: { config_options: { verbosity: "terse" } },
+    });
+
+    expect(
+      hasCompleteDynamicConfig(session, catalogEntry([modelConfigOption], true), noAgents),
+    ).toBe(false);
+  });
+
+  it("still requires persisted-only unadvertised keys while the catalog is unsettled", () => {
+    const session = makeSession({
+      metadata: { runtime_config: { config_options: { model: providerModelId, effort: "x" } } },
+    });
+
+    expect(
+      hasCompleteDynamicConfig(session, catalogEntry([modelConfigOption], false), noAgents),
+    ).toBe(false);
+  });
+});
+
+it("is hydrated when there are no required config keys", () => {
+  expect(hasCompleteDynamicConfig(makeSession(), undefined, noAgents)).toBe(true);
 });
 
 describe("buildModelOptions (gone current model)", () => {

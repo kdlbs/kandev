@@ -106,25 +106,62 @@ type TaskStatusChangedData struct {
 // can attribute the run without a task lookup. It stays empty for the
 // task-bound path that already uses TaskID. Today no caller emits
 // taskless lifecycle events; the field is reserved for PR 2 of
-// office-heartbeat-rework.
+// office-heartbeat-rework. Note that AgentID carries the underlying agent
+// TYPE (e.g. "claude-acp"), not an office agent identity — it is unrelated
+// to AgentProfileID below despite the similar name.
+//
+// AgentProfileID is the office agent instance's own identity
+// (lifecycle.AgentEventPayload's "agent_profile_id", sourced from
+// AgentExecution.officeProfileID()) and is always populated on the
+// task-bound path. runs.agent_profile_id is keyed on this same identity, so
+// callers that need to resolve the specific run a lifecycle event belongs
+// to — as opposed to "some claimed run on this task" — must match on this
+// field, not AgentID (Review round 4, BLOCKING FINDING 2).
 type AgentLifecycleData struct {
-	TaskID        string                 `json:"task_id"`
-	AgentID       string                 `json:"agent_id"`
-	SessionID     string                 `json:"session_id"`
-	ErrorMessage  string                 `json:"error_message"`
-	ProviderError *streams.ProviderError `json:"provider_error,omitempty"`
+	TaskID         string                 `json:"task_id"`
+	RunID          string                 `json:"run_id"`
+	AgentID        string                 `json:"agent_id"`
+	AgentProfileID string                 `json:"agent_profile_id"`
+	SessionID      string                 `json:"session_id"`
+	ErrorMessage   string                 `json:"error_message"`
+	ProviderError  *streams.ProviderError `json:"provider_error,omitempty"`
+}
+
+// resolveLifecycleRun resolves the exact claimed run named by a lifecycle
+// event. The task-and-agent fallback keeps compatibility with older events
+// that predate run_id, while every current Office launch carries the exact
+// identity and avoids predecessor/successor races.
+func (s *Service) resolveLifecycleRun(ctx context.Context, data AgentLifecycleData) (*models.Run, error) {
+	if data.RunID != "" {
+		run, err := s.repo.GetClaimedRunByID(ctx, data.RunID)
+		if err != nil {
+			return nil, err
+		}
+		if data.AgentProfileID != "" && run.AgentProfileID != data.AgentProfileID {
+			return nil, sql.ErrNoRows
+		}
+		if data.TaskID != "" && taskIDFromRunPayload(run.Payload) != data.TaskID {
+			return nil, sql.ErrNoRows
+		}
+		return run, nil
+	}
+	if data.TaskID != "" {
+		return s.repo.GetClaimedRunByTaskAndAgent(ctx, data.TaskID, data.AgentProfileID)
+	}
+	return s.repo.GetClaimedTasklessRunForAgent(ctx, data.AgentID)
 }
 
 type PromptUsageData struct {
-	TaskID       string      `json:"task_id"`
-	SessionID    string      `json:"session_id"`
-	AgentID      string      `json:"agent_id"`
-	AgentType    string      `json:"agent_type"`
-	Model        string      `json:"model"`
-	Provider     string      `json:"provider"`
-	Usage        UsageTokens `json:"usage"`
-	TurnID       string      `json:"turn_id,omitempty"`
-	UsageEventID string      `json:"usage_event_id,omitempty"`
+	TaskID         string      `json:"task_id"`
+	SessionID      string      `json:"session_id"`
+	AgentID        string      `json:"agent_id"`
+	AgentProfileID string      `json:"agent_profile_id,omitempty"`
+	AgentType      string      `json:"agent_type"`
+	Model          string      `json:"model"`
+	Provider       string      `json:"provider"`
+	Usage          UsageTokens `json:"usage"`
+	TurnID         string      `json:"turn_id,omitempty"`
+	UsageEventID   string      `json:"usage_event_id,omitempty"`
 }
 
 // UsageTokens mirrors streams.PromptUsage on the wire. All counts are int64
@@ -134,11 +171,17 @@ type PromptUsageData struct {
 // ProviderReportedCostPresent is true (including an explicit zero), the
 // subscriber uses it directly and skips the models.dev lookup. The legacy
 // positive-value check remains in the resolver for older events. Estimated is
-// true when the adapter synthesised tokens (codex-acp cumulative-delta
-// inference).
+// true when the token counts are not authoritative for a complete turn: the
+// adapter synthesised them (codex-acp cumulative-delta inference), or the
+// provider returned a frame that covers only part of the turn.
+// OutputTokensPresent distinguishes an observed zero from a missing
+// output-token sample. The pointer is nil only for legacy events that
+// predate this field, so the subscriber can apply the old inference rule to
+// those events without overriding an explicit false from a new event.
 type UsageTokens struct {
 	InputTokens                  int64 `json:"input_tokens"`
 	OutputTokens                 int64 `json:"output_tokens"`
+	OutputTokensPresent          *bool `json:"output_tokens_present,omitempty"`
 	CachedReadTokens             int64 `json:"cached_read_tokens"`
 	CachedWriteTokens            int64 `json:"cached_write_tokens"`
 	ThoughtTokens                int64 `json:"thought_tokens,omitempty"`
@@ -301,9 +344,9 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	if data.TaskID == "" {
 		return s.handleTasklessAgentCompleted(ctx, data)
 	}
-	run, err := s.repo.GetClaimedRunByTaskID(ctx, data.TaskID)
+	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		return err
@@ -314,7 +357,20 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		"session_id": data.SessionID,
 	})
 	s.markRoutingSuccess(ctx, run)
-	return s.FinishRun(ctx, run.ID)
+	// resolveLifecycleRun prefers the immutable run ID from the event and
+	// falls back to task plus agent only for legacy events. Releasing here
+	// (rather than unconditionally inside transitionRunTerminal) is safe —
+	// see transitionRunTerminal's doc comment.
+	//
+	// Finish before releasing: if FinishRun's DB update fails, the checkout
+	// must stay held so ReapStaleCheckouts (not a same-agent race) is what
+	// eventually reclaims it, instead of releasing a lock for a run that
+	// never actually reached a terminal state.
+	if err := s.FinishRun(ctx, run.ID); err != nil {
+		return err
+	}
+	s.releaseTaskCheckoutForRun(ctx, run)
+	return nil
 }
 
 // markRoutingSuccess delegates to the routing dispatcher (when wired)
@@ -347,10 +403,10 @@ func (s *Service) markRoutingSuccess(ctx context.Context, run *models.Run) {
 func (s *Service) handleTasklessAgentCompleted(
 	ctx context.Context, data *AgentLifecycleData,
 ) error {
-	if data == nil || data.AgentID == "" {
+	if data == nil || (data.AgentID == "" && data.RunID == "") {
 		return nil
 	}
-	run, err := s.repo.GetClaimedTasklessRunForAgent(ctx, data.AgentID)
+	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
@@ -362,7 +418,18 @@ func (s *Service) handleTasklessAgentCompleted(
 		"session_id": data.SessionID,
 	})
 	s.refreshContinuationSummary(ctx, run, data.AgentID)
-	return s.FinishRun(ctx, run.ID)
+	// run came from GetClaimedTasklessRunForAgent: it is the run that
+	// actually launched. Taskless runs typically carry no task_id, so this
+	// is a no-op in the common case, but call it for the same reason as
+	// handleAgentCompleted — see transitionRunTerminal's doc comment.
+	//
+	// Finish before releasing, same as handleAgentCompleted: a failed
+	// FinishRun must not still give up the checkout.
+	if err := s.FinishRun(ctx, run.ID); err != nil {
+		return err
+	}
+	s.releaseTaskCheckoutForRun(ctx, run)
+	return nil
 }
 
 // refreshContinuationSummary rebuilds the continuation summary for the
@@ -449,9 +516,9 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	if err != nil || data.TaskID == "" {
 		return nil
 	}
-	run, err := s.repo.GetClaimedRunByTaskID(ctx, data.TaskID)
+	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		return err
@@ -529,7 +596,7 @@ func (s *Service) tryPostStartFallback(
 // update. Cost resolution follows the two-layer order from
 // docs/specs/office/costs.md, and CostSource on the row records which
 // layer actually produced the dollar amount (see resolveCostForUsage in
-// prompt_usage_cost.go — distinct from Estimated, a token-synthesis flag):
+// prompt_usage_cost.go — distinct from Estimated, a usage-authority flag):
 //
 //  1. Provider-reported cost (Layer A) — claude-acp emits exact USD per
 //     turn on usage_update.cost.amount; the adapter forwards this as
@@ -544,7 +611,7 @@ func (s *Service) tryPostStartFallback(
 //     data.Usage.Estimated verbatim on this path, not hardcoded true.
 //
 // buildCostEvent (prompt_usage_cost.go) also records the cache read/write
-// split (NULL when Usage.Estimated — see its doc comment) and turn_id /
+// split when the usage frame reports cache data, and turn_id /
 // usage_event_id threaded from the publish site. The ledger insert and the
 // task_sessions rollup increment (tokens_in / tokens_cached_in / tokens_out /
 // cost_subcents) are written atomically by recordCostEventAndRollup — see its
@@ -569,9 +636,28 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 		return nil
 	}
 
+	sessionAgentProfileID := data.AgentProfileID
+	if sessionAgentProfileID == "" {
+		id, lookupErr := s.repo.GetSessionAgentProfileID(ctx, data.TaskID, data.SessionID)
+		if lookupErr != nil {
+			// Best-effort attribution fallback: log and continue with an
+			// unattributed row rather than dropping the cost event over a
+			// failed lookup, which would reproduce the exact symptom this
+			// fallback exists to fix.
+			s.logger.Warn("session agent profile lookup failed",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.Error(lookupErr))
+		} else {
+			sessionAgentProfileID = id
+		}
+	}
+
 	resolution := s.resolveCostForUsage(ctx, *data)
 	provider := resolveProvider(*data)
-	costEvent := buildCostEvent(*data, fields, s.projectIDForTask(ctx, data.TaskID), provider, resolution)
+	costEvent := buildCostEvent(
+		*data, fields, s.projectIDForTask(ctx, data.TaskID), provider, resolution, sessionAgentProfileID,
+	)
 
 	if err := s.recordCostEventAndRollup(
 		ctx, costEvent, data.SessionID,
@@ -588,7 +674,7 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 
 	if fields.WorkspaceID != "" {
 		if err := s.CheckBudget(
-			ctx, fields.WorkspaceID, fields.AssigneeAgentProfileID, costEvent.ProjectID,
+			ctx, fields.WorkspaceID, costEvent.AgentProfileID, costEvent.ProjectID,
 		); err != nil {
 			s.logger.Warn("post-event budget check failed",
 				zap.String("task_id", data.TaskID), zap.Error(err))

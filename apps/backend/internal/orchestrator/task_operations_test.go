@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -685,6 +686,91 @@ func TestPromptTask_ExecutionNotFoundRevertsStateAndBroadcasts(t *testing.T) {
 	}
 }
 
+func TestAcceptedReservedPromptFailureDoesNotStartFreshExecution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	session.AgentProfileID = "profile1"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	var launchCalls atomic.Int32
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalls.Add(1)
+			return nil, errors.New("unexpected fresh launch")
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Task", State: v1.TaskStateInProgress}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	_, err = svc.finishPromptDispatchFailure(
+		ctx,
+		"task1",
+		"session1",
+		"answer",
+		false,
+		true,
+		nil,
+		promptClaimRollback{
+			previousSessionState: models.TaskSessionStateWaitingForInput,
+			turnID:               "turn-reserved",
+			createdTurn:          true,
+			reservedTurn: &models.Turn{
+				ID: "turn-reserved", TaskID: "task1", TaskSessionID: "session1",
+			},
+		},
+		promptTaskOptions{},
+		fmt.Errorf("accepted transport failure: %w", executor.ErrExecutionNotFound),
+		nil,
+		true,
+		nil,
+	)
+	require.ErrorIs(t, err, executor.ErrExecutionNotFound)
+	require.Zero(t, launchCalls.Load(), "accepted prompt must not start duplicate execution")
+}
+
+func TestAcceptedOrdinaryPromptFailureDoesNotStartFreshExecution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	session.AgentProfileID = "profile1"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	var launchCalls atomic.Int32
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalls.Add(1)
+			return nil, errors.New("unexpected fresh launch")
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Task", State: v1.TaskStateInProgress}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	_, err = svc.finishPromptDispatchFailure(
+		ctx,
+		"task1",
+		"session1",
+		"answer",
+		false,
+		true,
+		nil,
+		promptClaimRollback{previousSessionState: models.TaskSessionStateWaitingForInput},
+		promptTaskOptions{},
+		fmt.Errorf("accepted transport failure: %w", executor.ErrExecutionNotFound),
+		nil,
+		true,
+		nil,
+	)
+	require.ErrorIs(t, err, executor.ErrExecutionNotFound)
+	require.Zero(t, launchCalls.Load(), "accepted ordinary prompt must not start duplicate execution")
+}
+
 func TestPromptTask_PlanModeInjectsPrefix(t *testing.T) {
 	repo := setupTestRepo(t)
 	taskRepo := newMockTaskRepo()
@@ -1165,11 +1251,14 @@ func TestUserCancelCompletion_SilentCancelDoesNotTrigger(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-silent-cancel", "session-silent-cancel", "step1")
 	svc := createEngineService(t, repo, cancelCompletionStepGetter(true, false), &mockAgentManager{})
+	_, err := svc.messageQueue.QueueMessage(ctx, "session-silent-cancel", "task-silent-cancel", "stay armed", "", messagequeue.QueuedByUser, false, nil)
+	require.NoError(t, err)
 
 	require.NoError(t, svc.cancelAgentSilent(ctx, "task-silent-cancel", "session-silent-cancel"))
 	task, err := repo.GetTask(ctx, "task-silent-cancel")
 	require.NoError(t, err)
 	assert.Equal(t, "step1", task.WorkflowStepID)
+	assert.True(t, svc.messageQueue.GetStatus(ctx, "session-silent-cancel").AutoRun)
 }
 
 func TestCancelAgent_AllowsAcknowledgementStreamToDrain(t *testing.T) {
@@ -1868,6 +1957,7 @@ func TestCancelAgent_LeavesQueuedMessageParked(t *testing.T) {
 
 			status := svc.messageQueue.GetStatus(ctx, "session1")
 			require.Equal(t, 1, status.Count)
+			require.False(t, status.AutoRun, "explicit cancel with a backlog must pause Auto-run")
 			require.Len(t, status.Entries, 1)
 			require.Equal(t, queued.ID, status.Entries[0].ID, "cancel must leave the same queued entry parked")
 		})
@@ -1920,6 +2010,9 @@ func TestCancelAgent_QueuedMessageRunsAfterExplicitDrain(t *testing.T) {
 	status := svc.messageQueue.GetStatus(ctx, "session1")
 	if status.Count != 0 {
 		t.Fatalf("expected explicit drain to remove the queued prompt, count=%d entries=%+v", status.Count, status.Entries)
+	}
+	if !status.AutoRun {
+		t.Fatal("expected explicit drain to resume Auto-run")
 	}
 }
 
@@ -2968,7 +3061,7 @@ func TestQueueAndInterruptForPeerMessage_RacesClarificationTimeoutRecovery(t *te
 		snapshotTaken:   make(chan struct{}),
 	}
 	svc.turnService = turnSync
-	_, err := turnSync.StartTurn(ctx, "session1")
+	clarificationTurn, err := turnSync.StartTurn(ctx, "session1")
 	require.NoError(t, err)
 
 	// Clarification-timeout recovery claims the guard first and blocks
@@ -2977,7 +3070,7 @@ func TestQueueAndInterruptForPeerMessage_RacesClarificationTimeoutRecovery(t *te
 	var recovered bool
 	go func() {
 		recovered = svc.retryClarificationAfterCancel(ctx, clarificationAnsweredData{
-			TaskID: "task1", SessionID: "session1",
+			TaskID: "task1", SessionID: "session1", ClarificationTurnID: clarificationTurn.ID,
 		}, "the clarification answer", fmt.Errorf("wrap: %w", ErrAgentPromptInProgress))
 		close(recoveryDone)
 	}()
@@ -3088,13 +3181,13 @@ func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
 		snapshotTaken:   make(chan struct{}),
 	}
 	svc.turnService = turnSync
-	_, err := turnSync.StartTurn(ctx, "session1")
+	clarificationTurn, err := turnSync.StartTurn(ctx, "session1")
 	require.NoError(t, err)
 
 	recoveryDone := make(chan bool, 1)
 	go func() {
 		recoveryDone <- svc.retryClarificationAfterCancel(ctx, clarificationAnsweredData{
-			TaskID: "task1", SessionID: "session1",
+			TaskID: "task1", SessionID: "session1", ClarificationTurnID: clarificationTurn.ID,
 		}, "clarification answer", fmt.Errorf("wrap: %w", ErrAgentPromptInProgress))
 	}()
 	<-retryAccepted

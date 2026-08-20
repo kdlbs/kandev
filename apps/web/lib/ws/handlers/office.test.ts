@@ -13,6 +13,7 @@ function makeStore(activeWorkspaceId: string | null) {
   const upsertProviderHealth = vi.fn();
   const appendRunAttempt = vi.fn();
   const setWorkspaceRouting = vi.fn();
+  const patchTaskInStore = vi.fn();
   let state = {
     workspaces: { items: [], activeId: activeWorkspaceId },
     office: { tasks: { items: [] } },
@@ -21,6 +22,7 @@ function makeStore(activeWorkspaceId: string | null) {
     upsertProviderHealth,
     appendRunAttempt,
     setWorkspaceRouting,
+    patchTaskInStore,
   } as unknown as AppState;
   const subs: Array<(s: AppState) => void> = [];
   const store: StoreApi<AppState> = {
@@ -47,6 +49,7 @@ function makeStore(activeWorkspaceId: string | null) {
     upsertProviderHealth,
     appendRunAttempt,
     setWorkspaceRouting,
+    patchTaskInStore,
   };
 }
 
@@ -128,6 +131,65 @@ describe("office WS handler — workspace filter", () => {
     } as Parameters<typeof handler>[0]);
 
     expect(setOfficeRefetchTrigger).not.toHaveBeenCalled();
+  });
+});
+
+describe("office WS handler — task field updates delegate to patchTaskInStore", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("maps the producer state field on office.task.updated", () => {
+    const { store, patchTaskInStore } = makeStore(ACTIVE_WS);
+    const handlers = registerOfficeHandlers(store);
+    const handler = handlers["office.task.updated"]!;
+
+    handler({
+      type: "notification",
+      action: "office.task.updated",
+      payload: { workspace_id: ACTIVE_WS, task_id: "t-1", state: "SCHEDULING" },
+    } as Parameters<typeof handler>[0]);
+
+    expect(patchTaskInStore).toHaveBeenCalledWith(
+      "t-1",
+      expect.objectContaining({ status: "SCHEDULING" }),
+    );
+  });
+
+  it("refreshes tasks for a producer task.moved payload without a status", () => {
+    const { store, patchTaskInStore, setOfficeRefetchTrigger } = makeStore(ACTIVE_WS);
+    const handlers = registerOfficeHandlers(store);
+    const handler = handlers["office.task.moved"]!;
+
+    handler({
+      type: "notification",
+      action: "office.task.moved",
+      payload: {
+        workspace_id: ACTIVE_WS,
+        task_id: "t-1",
+        from_step_id: "step-todo",
+        to_step_id: "step-review",
+        session_id: "session-1",
+      },
+    } as Parameters<typeof handler>[0]);
+
+    expect(patchTaskInStore).not.toHaveBeenCalled();
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("tasks");
+    expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("dashboard");
+  });
+
+  it("passes the raw new_status through on office.task.status_changed", () => {
+    const { store, patchTaskInStore } = makeStore(ACTIVE_WS);
+    const handlers = registerOfficeHandlers(store);
+    const handler = handlers["office.task.status_changed"]!;
+
+    handler({
+      type: "notification",
+      action: "office.task.status_changed",
+      payload: { workspace_id: ACTIVE_WS, task_id: "t-1", new_status: "CREATED" },
+    } as Parameters<typeof handler>[0]);
+
+    expect(patchTaskInStore).toHaveBeenCalledWith("t-1", { status: "CREATED" });
   });
 });
 

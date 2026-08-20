@@ -141,6 +141,9 @@ func TestExecuteSendNowClaimRestorePreservesRecordedSources(t *testing.T) {
 	messageCreator := &mockMessageCreator{}
 	svc.messageCreator = messageCreator
 	svc.activeTurns.Store("session-1", "turn-1")
+	if err := svc.messageQueue.SetAutoRun(ctx, "session-1", false); err != nil {
+		t.Fatalf("pause Auto-run: %v", err)
+	}
 
 	if _, err := svc.messageQueue.QueueMessageWithMetadata(ctx, "session-1", "task-1", "first", "", messagequeue.QueuedByUser, false, nil, nil); err != nil {
 		t.Fatalf("seed ordinary replacement source: %v", err)
@@ -156,6 +159,9 @@ func TestExecuteSendNowClaimRestorePreservesRecordedSources(t *testing.T) {
 	claimed, err := svc.messageQueue.ClaimSendNow(ctx, "session-1", []messagequeue.QueuedMessage{sources[0], sources[1]})
 	if err != nil {
 		t.Fatalf("claim replacement sources: %v", err)
+	}
+	if !svc.messageQueue.GetStatus(ctx, "session-1").AutoRun {
+		t.Fatal("accepted Send Now claim did not resume Auto-run")
 	}
 
 	// Production dispatch registers the handoff before starting the worker;
@@ -173,6 +179,35 @@ func TestExecuteSendNowClaimRestorePreservesRecordedSources(t *testing.T) {
 		if recorded, _ := entry.Metadata[metaKeyUserMessageRecorded].(bool); !recorded {
 			t.Fatalf("restored source %q lost user_message_recorded marker: %#v", entry.ID, entry.Metadata)
 		}
+	}
+	if !svc.messageQueue.GetStatus(ctx, "session-1").AutoRun {
+		t.Fatal("restoring accepted Send Now claim reverted Auto-run")
+	}
+}
+
+func TestSendQueuedNowMissingEntryPreservesAutoRunOff(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "session-1", "task-1", "pending", "", messagequeue.QueuedByUser, false, nil,
+	); err != nil {
+		t.Fatalf("queue message: %v", err)
+	}
+	if err := svc.messageQueue.SetAutoRun(ctx, "session-1", false); err != nil {
+		t.Fatalf("pause Auto-run: %v", err)
+	}
+
+	if _, err := svc.SendQueuedNow(ctx, "session-1", QueueSendNowScopeEntry, "missing"); !errors.Is(err, ErrSendNowEntryNotFound) {
+		t.Fatalf("SendQueuedNow error = %v, want %v", err, ErrSendNowEntryNotFound)
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.AutoRun {
+		t.Fatal("rejected Send Now selection resumed Auto-run")
+	}
+	if status.Count != 1 {
+		t.Fatalf("rejected Send Now changed queue count to %d", status.Count)
 	}
 }
 

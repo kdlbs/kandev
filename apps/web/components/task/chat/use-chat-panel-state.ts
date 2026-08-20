@@ -38,6 +38,7 @@ import type {
 import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 import type { BuiltInPreset } from "@/lib/state/layout-manager/presets";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
+import { clarificationTurnIdForSession } from "@/lib/utils/pending-clarification";
 
 const EMPTY_CONTEXT_FILES: ContextFile[] = [];
 const PLAN_CONTEXT_PATH = "plan:context";
@@ -339,7 +340,7 @@ type ChatContextItemsOptions = {
   unpinFile: (sid: string, path: string) => void;
   comments: CommentsState;
   taskId: string | null;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   onOpenFileAtLine?: (filePath: string) => void;
 };
 
@@ -433,10 +434,19 @@ function useSessionData(
     isInitialMessagesLoading,
     hasMore: hasOlderMessages,
   } = useSessionMessages(resolvedSessionId);
+  const turns = useAppStore((state) =>
+    resolvedSessionId ? state.turns.bySession[resolvedSessionId] : undefined,
+  );
+  const currentTurnId = useMemo(
+    () => clarificationTurnIdForSession(session?.state, turns),
+    [session?.state, turns],
+  );
   const lastAgentError = useMemo(() => readLastAgentError(session?.metadata), [session?.metadata]);
   const processed = useProcessedMessages(messages, taskId, resolvedSessionId, taskDescription, {
     hasOlderMessages,
     lastAgentError,
+    currentTurnId,
+    pendingAction: session?.pending_action,
   });
   const { sessionModel, activeModel } = useSessionModel(
     resolvedSessionId,
@@ -500,7 +510,7 @@ function deriveQueueAwareSessionInput(
 export type UseChatPanelStateOptions = {
   sessionId: string | null;
   taskId?: string | null;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   onOpenFileAtLine?: (filePath: string) => void;
 };
 

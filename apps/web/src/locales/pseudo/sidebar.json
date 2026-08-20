@@ -73,6 +73,7 @@
   "queuedPromptCount_other": "{{count}} qũēũēď ƥŕōḿƥţś",
   "wipQueuePosition": "Ƥōśĩţĩōń {{position}} ōƒ {{total}} ĩń {{step}} qũēũē",
   "quickChat": "Qũĩćķ Ćĥàţ",
+  "quickChatUnseen": "Qũĩćķ Ćĥàţ, ńēŵ ŕēśƥōńśē",
   "quickTerminal": "Qũĩćķ ţēŕḿĩńàĺ",
   "quickChatTerminals": "Ţēŕḿĩńàĺś",
   "quickChatNewAgent": "Ńēŵ Àĝēńţ",
@@ -110,5 +111,10 @@
   "work": "Ŵōŕķ",
   "workspaceFallback": "Ŵōŕķśƥàćē",
   "taskPreferences": "Śĩďēƀàŕ ţàśķ ƥŕēƒēŕēńćēś",
-  "views": "Śĩďēƀàŕ vĩēŵś"
+  "views": "Śĩďēƀàŕ vĩēŵś",
+  "failedToLoadArchivedTasks": "Ƒàĩĺēď ţō ĺōàď àŕćĥĩvēď ţàśķś",
+  "failedToSyncSidebarTaskPrefs": "Ƒàĩĺēď ţō śŷńć śĩďēƀàŕ ţàśķ ƥŕēƒś",
+  "failedToSyncSidebarViews": "Ƒàĩĺēď ţō śŷńć śĩďēƀàŕ vĩēŵś",
+  "newViewNumbered": "Ńēŵ vĩēŵ {{suffix}}",
+  "untitledView": "Ũńţĩţĺēď vĩēŵ"
 }

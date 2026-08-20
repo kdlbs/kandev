@@ -126,7 +126,7 @@ For predictable top-level creation, pass `repository_url`, `repository_id`, or `
 | Created but not started     | Starts the session with the message.      |
 | Failed or cancelled         | Returns an error.                         |
 
-The default delivery mode is queued. Each session accepts 10 queued messages by default. An admin can change the install-wide limit under **Settings > Task Behavior > Message Queue**; `0` means unlimited. The saved value applies immediately to new admissions without removing messages already waiting. `KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence, locks only the capacity field, and requires a restart when changed; zero or a negative value means unlimited. Only one queued message drains per agent turn. When the cap is reached, the sender receives a structured `queue_full` error and should retry after space becomes available.
+The default delivery mode is queued. Each session accepts 10 queued messages by default. An admin can change the install-wide limit under **Settings > Task Behavior > Message Queue**; `0` means unlimited. The saved value applies immediately to new admissions without removing messages already waiting. `KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence, locks only the capacity field, and requires a restart when changed; zero or a negative value means unlimited. With **Auto-run** ON, one queued message runs per agent turn. When the cap is reached, the sender receives a structured `queue_full` error and should retry after space becomes available.
 
 **Automatically merge consecutive messages** is enabled by default on the same settings card. After capacity admission succeeds, a new message may fold into the immediately preceding pending entry when both have the same strict source and compatible task, model, mode, metadata, attachments, and references. Otherwise it remains a separate FIFO entry. The earlier entry survives, so a successful admission may return an older queue-entry ID. The switch affects only later admissions and never sweeps rows already waiting. It is independent from **Enable queued message merging**, which controls the manual **Merge with above** action.
 
@@ -134,10 +134,10 @@ In the task workbench, expand the queue chip to manage pending messages. Every v
 
 Use the queue controls according to the outcome you want:
 
-- **Run next** dispatches the promptable FIFO head without interrupting an active turn. It is available when the session can accept a prompt.
-- **Send Now** sends directly when the session is promptable; when an agent turn is active, it waits for the backend to acknowledge cancellation and then replaces that captured turn with either the selected row or the click-time snapshot of every visible row. Bulk Send Now joins non-empty bodies with a blank line, keeps attachments in FIFO order, and deduplicates references. It creates a replacement turn but does not apply normal Cancel side effects: it does not record a cancellation message, complete the cancelled workflow step, or move the task to review. New rows added after the click remain queued.
+- **Auto-run** is ON by default. ON runs eligible messages one at a time in FIFO order. OFF lets the current response finish, then holds every later message. The per-session setting survives an empty queue, reload, and backend restart. Turning it ON starts the head immediately when the session is promptable; clarification, workflow transitions, cancellation, and other lifecycle guards can defer delivery without changing the displayed ON state.
+- Every row's **Send Now** targets that message. It sends directly when the session is promptable; when an agent turn is active, it waits for backend cancellation acknowledgement and replaces that captured turn. A successful Send Now turns Auto-run ON, runs the selected row first, then continues the preserved remainder as separate FIFO turns. It does not record ordinary Cancel side effects, complete the cancelled workflow step, or move the task to review.
 - **Clear all** removes every visible pending row without sending a prompt.
-- **Cancel** in the chat toolbar stops the active turn as a user cancellation. It may record the cancellation, complete an eligible workflow step, and move the task to review; it does not send queued content.
+- **Cancel** in the chat toolbar stops the active turn immediately as a user cancellation. It may record the cancellation, complete an eligible workflow step, and move the task to review. It does not send queued content; when pending rows remain, Auto-run becomes OFF so they stay parked.
 
 Choose the control by intent:
 
@@ -159,9 +159,12 @@ After at least one accepted stop, Kandev attempts to move a regular, unarchived,
 
 Stopping preserves the task record, worktrees, environments, commits, descendants, and existing queued messages. It sends no prompt, creates no replacement turn, and does not create a durable pause: a later user or workflow action can start the task again.
 
+A cancelled session is terminal, so `message_task_kandev` cannot restart the child through it. To put a stopped child back to work, call `spawn_session_kandev` with the new prompt: it creates a fresh session on the same task and workspace, preserving the worktree and history.
+
 Additional messaging boundaries:
 
 - A task cannot message its own primary session through the default route, and a session cannot message itself.
+- The default route targets the primary session, falling back to the newest session that can still take a message when the primary is cancelled or failed. A session named by `session_id` is never redirected.
 - Normal targeted messages can cross workspaces when the sender has the exact task ID. Session spawning cannot.
 - Sender metadata and content become part of the target conversation. Do not send secrets.
 - Use bounded requests with the repository, branch, expected result, and reply target instead of treating messages as shared memory.

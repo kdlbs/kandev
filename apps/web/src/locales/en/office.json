@@ -34,6 +34,7 @@
   "agentAutoPaused": "Agent auto-paused",
   "agentAwaitingApproval": "Agent awaiting approval",
   "agentConfigurationUpdated": "Agent configuration updated",
+  "agentCeoReportsToError": "A CEO agent must not have a manager.",
   "agentCount_one": "{{count}} agent",
   "agentCount_other": "{{count}} agents",
   "agentCreated": "Agent created",
@@ -47,6 +48,9 @@
   "agentRecentTasks": "Recent tasks",
   "agentRunActivity": "Run activity",
   "agentRunFailed": "Agent run failed",
+  "agentReportsToCycleError": "The reporting structure cannot contain a cycle.",
+  "agentReportsToInvalidError": "Select an agent from this workspace.",
+  "agentReportsToSelfError": "An agent cannot report to itself.",
   "agents": "Agents",
   "agentSections": "Agent sections",
   "agentsEnabled": "Agents Enabled",
@@ -238,7 +242,6 @@
   "dockerImageWithExample": "Docker image (e.g. node:20-slim)",
   "duration": "Duration",
   "editable": "Editable",
-  "editOrgChartFromTheAgents": "Edit org chart from the agents list.",
   "editRoutine": "Edit routine",
   "effectiveActionsThisAgentCanRequest": "Effective actions this agent can request during Office runs.",
   "eGCodeReview": "e.g. code-review",
@@ -894,5 +897,10 @@
   "writeTheDatabaseStateToOn": "Write the database state to on-disk YAML files.",
   "yourModel": "your model",
   "zoomIn": "Zoom in",
-  "zoomOut": "Zoom out"
+  "zoomOut": "Zoom out",
+  "failedToLoadAgentRoute": "Failed to load agent route",
+  "failedToLoadProviderHealth": "Failed to load provider health",
+  "failedToLoadRouteAttempts": "Failed to load route attempts",
+  "failedToLoadRoutingConfig": "Failed to load routing config",
+  "failedToLoadRoutingPreview": "Failed to load routing preview"
 }

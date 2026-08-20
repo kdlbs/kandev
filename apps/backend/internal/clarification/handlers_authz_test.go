@@ -40,7 +40,7 @@ func setupAuthzHandler(t *testing.T, msgs map[string][]*taskmodels.Message, auth
 	repo := &stubMessageStore{messages: msgs}
 	eventBus := &stubEventBus{}
 	messageCreator := &stubMessageCreator{}
-	resolver := NewResolver(store, newStubResolutionStore(), repo, messageCreator, authorizer, eventBus, logger.Default())
+	resolver := NewResolver(store, repo, messageCreator, authorizer, eventBus, eventBus, logger.Default())
 	h := NewHandlers(store, nil, messageCreator, repo, eventBus, resolver, logger.Default())
 	return h, store
 }

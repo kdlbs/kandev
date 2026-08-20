@@ -1,6 +1,6 @@
 # ADR-2026-08-12-validated-managed-runtime-version-selection: Validate and Persist Managed Runtime Version Selection
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-16)
 **Date:** 2026-08-12
 **Area:** backend, frontend, protocol
 **Supersedes:**
@@ -45,6 +45,12 @@ continue to resolve their own runtime. When no selection record exists, Kandev
 retains the legacy unversioned host behavior until the first candidate is
 successfully activated.
 
+The managed package and exact-version override belong only to an agent's ACP
+command surfaces. They do not replace `PassthroughConfig.PassthroughCmd`, an
+interactive authentication helper, or either surface's install recipe. Agents
+such as Pi can therefore use an ACP adapter package for structured execution
+and a separately distributed native CLI for terminal passthrough.
+
 The selection is install-wide and per built-in agent. A saved selection applies
 only while its stored package identity matches the agent's current trusted
 package metadata; a package change starts with no selection and requires fresh
@@ -85,3 +91,6 @@ capabilities.
   transactional selection without reimplementing package storage.
 - Applying the host selection to remote executors was rejected because each
   remote runtime has separate platform, cache, credentials, and ownership.
+- Reusing the managed ACP package for terminal passthrough was rejected because
+  an ACP JSON-RPC stdio adapter is not an interactive PTY application, and some
+  integrations distribute those surfaces as different packages and binaries.

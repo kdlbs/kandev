@@ -10,6 +10,7 @@ import { PluginRepoLink } from "./plugin-repo-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
 import { PluginErrorDiagnostic } from "./plugin-error-diagnostic";
 import type { MarketplaceEntry, PluginRecord } from "@/lib/types/plugins";
+import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 
 type PluginRowProps = {
   plugin: PluginRecord;
@@ -106,7 +107,7 @@ export function PluginRow({
         {plugin.categories.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {plugin.categories.map((category) => (
-              <Badge key={category} variant="secondary" className="text-[11px]">
+              <Badge key={category} variant="secondary" className={SETTINGS_TYPOGRAPHY.meta}>
                 {category}
               </Badge>
             ))}
@@ -142,7 +143,7 @@ function PluginRowIdentity({ plugin, needsSetup }: { plugin: PluginRecord; needs
           <Badge
             data-testid={`plugin-setup-required-${plugin.id}`}
             variant="outline"
-            className="border-primary/40 bg-primary/10 text-primary text-[11px]"
+            className={"border-primary/40 bg-primary/10 text-primary " + SETTINGS_TYPOGRAPHY.meta}
           >
             {t("plugins:setupRequired")}
           </Badge>
@@ -151,7 +152,10 @@ function PluginRowIdentity({ plugin, needsSetup }: { plugin: PluginRecord; needs
           <Badge
             data-testid="plugin-unsigned-badge"
             variant="outline"
-            className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[11px]"
+            className={
+              "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 " +
+              SETTINGS_TYPOGRAPHY.meta
+            }
           >
             {t("plugins:unsigned")}
           </Badge>
@@ -193,7 +197,7 @@ function PluginAutoUpdateRow({
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span>{t("plugins:autoUpdate")}</span>
         {isOverridden && (
-          <Badge variant="outline" className="text-[11px]">
+          <Badge variant="outline" className={SETTINGS_TYPOGRAPHY.meta}>
             {t("plugins:override")}
           </Badge>
         )}

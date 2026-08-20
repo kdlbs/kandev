@@ -18,6 +18,7 @@ type memoryRepository struct {
 	nextPosition map[string]int64            // sessionID -> monotonic counter
 	pendingMoves map[string]*PendingMove
 	generation   map[string]int64
+	autoRun      map[string]bool
 }
 
 // NewMemoryRepository returns an in-memory Repository. Suitable for tests.
@@ -27,6 +28,7 @@ func NewMemoryRepository() Repository {
 		nextPosition: make(map[string]int64),
 		pendingMoves: make(map[string]*PendingMove),
 		generation:   make(map[string]int64),
+		autoRun:      make(map[string]bool),
 	}
 }
 
@@ -137,6 +139,101 @@ func (r *memoryRepository) insertLocked(msg *QueuedMessage, maxPerSession int) e
 	clone := *msg
 	r.entries[msg.SessionID] = append(list, &clone)
 	return nil
+}
+
+// RequeuePreservingFIFO inserts the entry at a position strictly lower than
+// the current session head, so a superseded entry beats any new entry that
+// arrives after the supersede was issued. Without this hook, the requeue
+// landed at MAX+1 and a busy session starved the original message
+// indefinitely — every turn-end drained the head, the superseded entry
+// fell to the tail, and the next incoming message outranked it again.
+//
+// Decision under r.mu (caller must already hold it):
+//   - existing entry with same (session_id, queued_by, coalesce_key)
+//     → replace in place; preserve the existing entry's position and ID
+//   - empty queue                → position = 1, fresh ID
+//   - non-empty queue, no match  → position before the current head
+//
+// When MIN-1 is not positive, existing positions are shifted up before the
+// insert. This keeps positions positive for TransferSession and future queue
+// mutations while preserving the current order.
+func (r *memoryRepository) RequeuePreservingFIFO(_ context.Context, msg *QueuedMessage) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	list := r.entries[msg.SessionID]
+	coalesceKey := metadataString(msg.Metadata, MetadataCoalesceKey)
+	// Coalesce-replace: only when caller supplied a coalesce key. This
+	// matches the original RequeueMessage's branching (coalesceKey != ""
+	// takes the coalesce-replace path; empty coalesceKey takes the
+	// tail-append path). A bare requeue of a message with no coalesce
+	// key must NOT collapse onto an unrelated same-sender entry.
+	if coalesceKey != "" {
+		for _, existing := range list {
+			if existing.QueuedBy != msg.QueuedBy {
+				continue
+			}
+			if metadataString(existing.Metadata, MetadataCoalesceKey) != coalesceKey {
+				continue
+			}
+			// Coalesce hit: replace in place. The retry keeps the existing
+			// entry's position, which by construction is the most head-of-
+			// queue position for this coalesce key — supersede→requeue of
+			// the same content stays FIFO at the same slot.
+			existing.TaskID = msg.TaskID
+			existing.Content = msg.Content
+			existing.Model = msg.Model
+			existing.PlanMode = msg.PlanMode
+			existing.Attachments = msg.Attachments
+			existing.Metadata = msg.Metadata
+			if msg.QueuedAt.IsZero() {
+				existing.QueuedAt = time.Now().UTC()
+			} else {
+				existing.QueuedAt = msg.QueuedAt
+			}
+			msg.ID = existing.ID
+			msg.Position = existing.Position
+			return nil
+		}
+	}
+	if msg.ID == "" {
+		msg.ID = uuid.New().String()
+	}
+	if msg.QueuedAt.IsZero() {
+		msg.QueuedAt = time.Now().UTC()
+	}
+	msg.Position = r.nextRequeuePositionLocked(msg.SessionID, list)
+	clone := *msg
+	newList := make([]*QueuedMessage, 0, len(list)+1)
+	newList = append(newList, &clone)
+	newList = append(newList, list...)
+	r.entries[msg.SessionID] = newList
+	return nil
+}
+
+func (r *memoryRepository) nextRequeuePositionLocked(sessionID string, list []*QueuedMessage) int64 {
+	if len(list) == 0 {
+		r.nextPosition[sessionID] = 1
+		return 1
+	}
+	minPos := list[0].Position
+	for _, entry := range list[1:] {
+		if entry.Position < minPos {
+			minPos = entry.Position
+		}
+	}
+	position := minPos - 1
+	if position <= 0 {
+		shift := 1 - position
+		for _, entry := range list {
+			entry.Position += shift
+		}
+		position = 1
+		r.nextPosition[sessionID] += shift
+	}
+	if position > r.nextPosition[sessionID] {
+		r.nextPosition[sessionID] = position
+	}
+	return position
 }
 
 // AppendOrInsertTail must hold the lock for the entire check-then-insert path
@@ -284,9 +381,13 @@ func (r *memoryRepository) TakeHead(_ context.Context, sessionID string) (*Queue
 func (r *memoryRepository) ReserveHead(_ context.Context, sessionID string) (*QueuedMessage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.reserveHeadLocked(sessionID), nil
+}
+
+func (r *memoryRepository) reserveHeadLocked(sessionID string) *QueuedMessage {
 	list := r.entries[sessionID]
 	if len(list) == 0 {
-		return nil, nil
+		return nil
 	}
 	head := list[0]
 	out := *head
@@ -297,14 +398,58 @@ func (r *memoryRepository) ReserveHead(_ context.Context, sessionID string) (*Qu
 		out.Metadata = clearReservedMetadata(head.Metadata)
 		out.reservedLifecycleDelivery = true
 		head.Metadata = markReservedMetadata(out.Metadata)
-		return &out, nil
+		return &out
 	}
 	r.entries[sessionID] = list[1:]
 	if len(r.entries[sessionID]) == 0 {
 		delete(r.entries, sessionID)
 		delete(r.nextPosition, sessionID)
 	}
-	return &out, nil
+	return &out
+}
+
+// GetAutoRun returns true when no explicit policy exists.
+func (r *memoryRepository) GetAutoRun(_ context.Context, sessionID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.autoRunLocked(sessionID), nil
+}
+
+func (r *memoryRepository) autoRunLocked(sessionID string) bool {
+	enabled, exists := r.autoRun[sessionID]
+	return !exists || enabled
+}
+
+// SetAutoRun persists the per-session automatic-drain policy.
+func (r *memoryRepository) SetAutoRun(_ context.Context, sessionID string, enabled bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.autoRun[sessionID] = enabled
+	return nil
+}
+
+// PauseAutoRunIfPending persists OFF only while visible work remains.
+func (r *memoryRepository) PauseAutoRunIfPending(_ context.Context, sessionID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, msg := range r.entries[sessionID] {
+		if msg.IsReservedInFlight() {
+			continue
+		}
+		r.autoRun[sessionID] = false
+		return true, nil
+	}
+	return false, nil
+}
+
+// ReserveHeadIfAutoRun atomically checks policy and reserves the FIFO head.
+func (r *memoryRepository) ReserveHeadIfAutoRun(_ context.Context, sessionID string) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.autoRunLocked(sessionID) {
+		return nil, false, nil
+	}
+	return r.reserveHeadLocked(sessionID), true, nil
 }
 
 // AcknowledgeByID removes a reserved durable entry after executor acceptance.
@@ -411,6 +556,7 @@ func (r *memoryRepository) ClaimSendNow(_ context.Context, sessionID string, exp
 	} else {
 		r.entries[sessionID] = remaining
 	}
+	r.autoRun[sessionID] = true
 	return &SendNowClaim{Sources: sources, Dispatch: *envelope, SourceGenerations: generations}, nil
 }
 
@@ -650,6 +796,7 @@ func (r *memoryRepository) MergeIntoAbove(_ context.Context, sessionID, sourceID
 	target.Content = content
 	target.Attachments = attachments
 	target.Metadata = metadata
+	target.QueuedAt = latestQueuedAt(target.QueuedAt, source.QueuedAt)
 	r.entries[sessionID] = append(list[:sourceIndex], list[sourceIndex+1:]...)
 	if len(r.entries[sessionID]) == 0 {
 		delete(r.entries, sessionID)
@@ -694,6 +841,7 @@ func (r *memoryRepository) AutoMergeIntoAbove(_ context.Context, sessionID, sour
 	target.Content = values.content
 	target.Attachments = values.attachments
 	target.Metadata = values.metadata
+	target.QueuedAt = values.queuedAt
 	r.entries[sessionID] = append(list[:sourceIndex], list[sourceIndex+1:]...)
 	return cloneQueuedMessage(target), true, nil
 }
@@ -722,6 +870,7 @@ func (r *memoryRepository) AutoMergeCandidateIntoAbove(_ context.Context, candid
 	target.Content = values.content
 	target.Attachments = values.attachments
 	target.Metadata = values.metadata
+	target.QueuedAt = values.queuedAt
 	return cloneQueuedMessage(target), true, nil
 }
 
@@ -826,6 +975,10 @@ func (r *memoryRepository) DeleteAllBySession(_ context.Context, sessionID strin
 func (r *memoryRepository) TransferSession(_ context.Context, oldSessionID, newSessionID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if oldSessionID == newSessionID {
+		return nil
+	}
+	destinationAutoRun := r.autoRunLocked(oldSessionID) && r.autoRunLocked(newSessionID)
 	if list, ok := r.entries[oldSessionID]; ok {
 		// Mirror the SQLite repo: shift transferred positions past the
 		// destination's max so source entries always sort *after* anything
@@ -858,6 +1011,8 @@ func (r *memoryRepository) TransferSession(_ context.Context, oldSessionID, newS
 		r.pendingMoves[newSessionID] = move
 		delete(r.pendingMoves, oldSessionID)
 	}
+	r.autoRun[newSessionID] = destinationAutoRun
+	delete(r.autoRun, oldSessionID)
 	return nil
 }
 

@@ -6,6 +6,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import type { Task } from "@/components/kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
+import { t } from "@/lib/i18n";
 
 export type MoveTaskError = {
   message: string;
@@ -83,7 +84,7 @@ export function useDragAndDrop({ visibleTasks, onMoveError }: DragAndDropOptions
         });
       } catch (error) {
         store.getState().hydrate({ kanban: { ...store.getState().kanban, tasks: originalTasks } });
-        const message = error instanceof Error ? error.message : "Failed to move task";
+        const message = error instanceof Error ? error.message : t("task:failedToMoveTask");
         onMoveErrorRef.current?.({
           message,
           taskId: task.id,

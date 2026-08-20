@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
@@ -759,6 +760,11 @@ func (m *mockRepository) CreateMessage(ctx context.Context, message *models.Mess
 func (m *mockRepository) GetMessage(ctx context.Context, id string) (*models.Message, error) {
 	return nil, nil
 }
+
+// GetMessageWithPromptIndex returns the message for id with its derived prompt index, mirroring the repository contract.
+func (m *mockRepository) GetMessageWithPromptIndex(ctx context.Context, id string) (*models.Message, error) {
+	return nil, nil
+}
 func (m *mockRepository) GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error) {
 	return nil, nil
 }
@@ -800,7 +806,15 @@ func (m *mockRepository) GetActiveTurnBySessionID(ctx context.Context, sessionID
 	return nil, nil
 }
 func (m *mockRepository) UpdateTurn(ctx context.Context, turn *models.Turn) error { return nil }
-func (m *mockRepository) CompleteTurn(ctx context.Context, id string) error       { return nil }
+func (m *mockRepository) PatchTurnMetadata(
+	context.Context,
+	string,
+	string,
+	map[string]interface{},
+) (bool, time.Time, error) {
+	return false, time.Time{}, nil
+}
+func (m *mockRepository) CompleteTurn(ctx context.Context, id string) error { return nil }
 func (m *mockRepository) CompletePendingToolCallsForTurn(ctx context.Context, turnID string) (int64, error) {
 	return 0, nil
 }

@@ -1093,8 +1093,9 @@ func TestBootRouteDataTaskDetailIncludesPersistedSessionModels(t *testing.T) {
 		Metadata: map[string]interface{}{
 			models.SessionMetaKeyACPConfigBaseline: map[string]string{"effort": "medium"},
 			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
-				CurrentModelID: "gpt-5.6-sol",
-				Models:         []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"}},
+				CurrentModelID:       "gpt-5.6-sol",
+				Models:               []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"}},
+				ConfigOptionsSettled: true,
 				ConfigOptions: []streams.ConfigOption{{
 					Type: "select", ID: "effort", Name: "Reasoning effort",
 					Description: "Provider option help", CurrentValue: "high",
@@ -1130,7 +1131,8 @@ func TestBootRouteDataTaskDetailIncludesPersistedSessionModels(t *testing.T) {
 							CurrentValue string                      `json:"currentValue"`
 							Options      []streams.ConfigOptionValue `json:"options"`
 						} `json:"configOptions"`
-						ConfigBaseline map[string]string `json:"configBaseline"`
+						ConfigOptionsSettled bool              `json:"configOptionsSettled"`
+						ConfigBaseline       map[string]string `json:"configBaseline"`
 					} `json:"bySessionId"`
 				} `json:"sessionModels"`
 			} `json:"initialState"`
@@ -1151,6 +1153,9 @@ func TestBootRouteDataTaskDetailIncludesPersistedSessionModels(t *testing.T) {
 	}
 	if got.ConfigBaseline["effort"] != "medium" {
 		t.Fatalf("boot config baseline = %#v, want effort=medium", got.ConfigBaseline)
+	}
+	if !got.ConfigOptionsSettled {
+		t.Fatal("boot config settlement marker = false, want true")
 	}
 }
 
@@ -1975,6 +1980,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 			Sessions:         taskRepo,
 			GitSnapshots:     taskRepo,
 			RepoEntities:     taskRepo,
+			RepositorySets:   taskRepo,
 			Executors:        taskRepo,
 			Environments:     taskRepo,
 			TaskEnvironments: taskRepo,
@@ -2030,9 +2036,25 @@ func TestResolveActiveOfficeWorkspaceIDPrefersCookie(t *testing.T) {
 		{ID: "ws-b", OfficeWorkflowID: "office-b"},
 	}
 
-	got := resolveActiveOfficeWorkspaceID(workspaces, "ws-b")
-	if got != "ws-b" {
-		t.Fatalf("expected cookie workspace to win, got %q", got)
+	// General cookie wins when it names an office workspace.
+	if got := resolveActiveOfficeWorkspaceID(workspaces, "ws-b", "ws-a", ""); got != "ws-b" {
+		t.Fatalf("expected general cookie workspace to win, got %q", got)
+	}
+	// Office cookie wins over settings when the general cookie misses.
+	if got := resolveActiveOfficeWorkspaceID(workspaces, "ws-missing", "ws-a", "ws-b"); got != "ws-a" {
+		t.Fatalf("expected office cookie workspace to win, got %q", got)
+	}
+	// Settings wins when both cookies miss.
+	if got := resolveActiveOfficeWorkspaceID(workspaces, "", "", "ws-b"); got != "ws-b" {
+		t.Fatalf("expected settings workspace to win, got %q", got)
+	}
+	// A kanban general cookie (not in the office set) falls through.
+	if got := resolveActiveOfficeWorkspaceID(workspaces, "ws-kanban", "ws-a", "ws-b"); got != "ws-a" {
+		t.Fatalf("expected kanban general cookie to fall through to the office cookie, got %q", got)
+	}
+	// No candidate matches: first office workspace.
+	if got := resolveActiveOfficeWorkspaceID(workspaces, "", "", ""); got != "ws-a" {
+		t.Fatalf("expected first office workspace, got %q", got)
 	}
 }
 

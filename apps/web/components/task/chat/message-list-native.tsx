@@ -82,6 +82,8 @@ type NativeMessageListScrollParams = {
   enabled: boolean;
   dividerBeforeItemKey?: string | null;
   anchoredBarHeight?: number;
+  /** Initial/refetch loading: the sentinel's hard block. */
+  messagesLoading: boolean;
   hasMore: boolean;
   isLoadingMore: boolean;
   loadMore: () => Promise<number>;
@@ -109,6 +111,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     enabled,
     dividerBeforeItemKey,
     anchoredBarHeight,
+    messagesLoading,
     hasMore,
     isLoadingMore,
     loadMore,
@@ -126,6 +129,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     sessionId,
     enabled,
     hasUnreadDivider: Boolean(dividerBeforeItemKey),
+    messagesLoading,
     hasMore,
     isLoadingMore,
     loadMore,
@@ -158,7 +162,7 @@ type MessageRowProps = {
   childrenByParentToolCallId: Map<string, Message[]>;
   taskId?: string;
   worktreePath?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   isLastGroup: boolean;
   activeTurnId: string | null;
   streamingMessageId: string | null;
@@ -219,7 +223,7 @@ type NativeMessageListBodyProps = {
   messagesLoading: boolean;
   sessionState?: TaskSessionState;
   worktreePath?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   hasMore: boolean;
   isLoadingMore: boolean;
   isInitialLoading: boolean;
@@ -433,6 +437,7 @@ function NativeMessageListBody({
  * via {@link useNativeScrollManagement}.
  */
 export const NativeMessageList = memo(
+  // eslint-disable-next-line max-lines-per-function -- native transcript composition owns scrolling.
   forwardRef<MessageListHandle, MessageListProps>(function NativeMessageList(
     {
       items,
@@ -465,7 +470,7 @@ export const NativeMessageList = memo(
       isWorking,
       sessionState,
     });
-    const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
+    const { loadMore, hasMore, isLoadingMore } = useLazyLoadMessages(sessionId);
     const { activeTurnId } = useSessionTurn(sessionId);
     const effectiveActiveTurnId = getEffectiveActiveTurnId(activeTurnId, isWorking);
     const streamingMessageId = getStreamingAgentMessageId(messages);
@@ -481,6 +486,7 @@ export const NativeMessageList = memo(
       enabled: autoScrollEnabled,
       dividerBeforeItemKey,
       anchoredBarHeight,
+      messagesLoading,
       hasMore,
       isLoadingMore,
       loadMore,

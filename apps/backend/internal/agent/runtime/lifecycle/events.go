@@ -34,13 +34,18 @@ func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string
 	p.publishAgentEventPayload(ctx, eventType, newAgentEventPayload(execution))
 }
 
-// PublishAgentStalled publishes one advisory inactivity signal for a prompt.
+// PublishAgentStalled publishes one inactivity signal for a prompt.
+// neverStarted reports whether the agent has emitted zero events since this
+// prompt was dispatched, and activityEpoch lets the consumer revalidate that
+// classification before applying a terminal transition.
 func (p *EventPublisher) PublishAgentStalled(
 	ctx context.Context,
 	execution *AgentExecution,
 	promptGeneration uint64,
 	lastActivityAt time.Time,
 	stalledFor time.Duration,
+	activityEpoch uint64,
+	neverStarted bool,
 ) {
 	if p.eventBus == nil {
 		return
@@ -50,8 +55,10 @@ func (p *EventPublisher) PublishAgentStalled(
 		TaskID:           execution.TaskID,
 		SessionID:        execution.SessionID,
 		PromptGeneration: promptGeneration,
+		ActivityEpoch:    activityEpoch,
 		LastActivityAt:   lastActivityAt,
 		StalledFor:       stalledFor,
+		NeverStarted:     neverStarted,
 	}
 	if tool := execution.activeToolSnapshot(); tool != nil {
 		payload.ToolCallID = tool.ToolCallID
@@ -90,6 +97,7 @@ func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType
 func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
 	return AgentEventPayload{
 		AgentExecutionID:   execution.ID,
+		RunID:              execution.RunID,
 		TaskID:             execution.TaskID,
 		SessionID:          execution.SessionID,
 		AgentID:            execution.AgentID,
@@ -100,6 +108,8 @@ func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
 		StartedAt:          execution.StartedAt,
 		FinishedAt:         execution.FinishedAt,
 		ErrorMessage:       execution.ErrorMessage,
+		FailureCode:        execution.FailureCode,
+		FailureDetails:     execution.FailureDetails,
 		ProviderError:      execution.ProviderError,
 		ExitCode:           execution.ExitCode,
 		PromptGeneration:   execution.promptGeneration,
@@ -127,6 +137,8 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 		TaskEnvironmentID: execution.TaskEnvironmentID,
 		AgentExecutionID:  execution.ID,
 		ErrorMessage:      errMsg,
+		FailureCode:       execution.FailureCode,
+		FailureDetails:    execution.FailureDetails,
 		WorktreeID:        worktreeID,
 		WorktreePath:      execution.WorkspacePath,
 		WorktreeBranch:    worktreeBranch,
@@ -203,6 +215,7 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		AuthMethods:             event.AuthMethods,
 		CurrentModelID:          event.CurrentModelID,
 		FallbackModel:           event.FallbackModel,
+		ModelSelectionWarning:   event.ModelSelectionWarning,
 		SessionModels:           event.SessionModels,
 		ConfigOptions:           event.ConfigOptions,
 		ConfigBaselineCandidate: event.ConfigBaselineCandidate,

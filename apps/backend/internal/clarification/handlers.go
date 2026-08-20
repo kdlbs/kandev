@@ -7,11 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	wsmsg "github.com/kandev/kandev/pkg/websocket"
@@ -24,15 +24,27 @@ import (
 const (
 	metaQuestionKey   = "question"
 	metaQuestionIDKey = "question_id"
+	metaStatusKey     = "status"
+	metaSessionIDKey  = "session_id"
+	metaTaskIDKey     = "task_id"
+	metaPendingIDKey  = "pending_id"
+	metaRejectedKey   = "rejected"
+
+	clarificationPersistenceTimeout = 30 * time.Second
 )
 
-// messageStore is the minimal task repository interface required by clarification handlers.
-type messageStore interface {
+// handlerMessageStore is the task repository surface used by HTTP handlers
+// and the Resolver.
+type handlerMessageStore interface {
 	GetTaskSession(ctx context.Context, id string) (*taskmodels.TaskSession, error)
-	FindMessageByPendingID(ctx context.Context, pendingID string) (*taskmodels.Message, error)
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*taskmodels.Message, error)
-	FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error)
-	UpdateMessage(ctx context.Context, message *taskmodels.Message) error
+}
+
+// cancellationMessageStore is the task repository surface used by session cancellation.
+type cancellationMessageStore interface {
+	FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error)
+	DetachActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error)
+	ExpireActiveClarificationBundle(ctx context.Context, sessionID, pendingID string) ([]*taskmodels.Message, error)
 }
 
 // Broadcaster interface for sending WebSocket notifications
@@ -48,11 +60,32 @@ type MessageCreator interface {
 	// scrolls to the bottom of the group. Returns the created message IDs in the
 	// same order as the input questions.
 	CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []Question, clarificationContext string) ([]string, error)
-	// UpdateClarificationMessage updates one clarification message's status
-	// (and stores the matching answer if any). messageID identifies the
-	// exact message row — required because a bundle can contain multiple
-	// messages sharing the same (possibly empty) question_id (R9a).
-	UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, messageID, questionID, status string, answer *Answer) error
+	// UpdateClarificationMessage updates the per-question clarification message's
+	// status (and stores the matching answer if any) for a (pending_id, question_id)
+	// pair within the session. Used only by cancel (A9), which never goes through
+	// the claim.
+	UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, questionID, status string, answer *Answer) error
+	// CompleteActiveClarificationBundle atomically transitions a bundle only
+	// when it still belongs to the session's current durable turn (P1's single
+	// claim mechanism).
+	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*taskmodels.Message, bool, error)
+	// FinalizeClarificationResponseDelivery clears the durable recovery intent
+	// after the response reaches a live waiter or detached-resume boundary.
+	FinalizeClarificationResponseDelivery(
+		ctx context.Context,
+		pendingID, terminalStatus string,
+		claimedMessages []*taskmodels.Message,
+	) ([]*taskmodels.Message, bool, error)
+	// RestoreActiveClarificationBundle reopens a claimed bundle when detached
+	// resume acceptance fails and returns the committed pending rows for publication.
+	RestoreActiveClarificationBundle(
+		ctx context.Context,
+		pendingID, terminalStatus string,
+		claimedMessages []*taskmodels.Message,
+	) ([]*taskmodels.Message, bool, error)
+	// PublishClarificationBundleUpdates exposes committed terminal or restored-pending rows.
+	// Restored rows synchronously converge the durable task summary before publication.
+	PublishClarificationBundleUpdates(ctx context.Context, messages []*taskmodels.Message) error
 }
 
 // EventBus interface for publishing events.
@@ -60,19 +93,50 @@ type EventBus interface {
 	Publish(ctx context.Context, topic string, event *bus.Event) error
 }
 
-// Handlers provides HTTP handlers for clarification requests.
+// DetachedClarificationResume contains the durable context required to resume
+// a session after its original clarification waiter has gone away.
+type DetachedClarificationResume struct {
+	TaskID              string
+	SessionID           string
+	PendingID           string
+	ClarificationTurnID string
+	ClaimedMessageIDs   []string
+	Question            string
+	AnswerText          string
+	Rejected            bool
+	RejectReason        string
+}
+
+// DetachedClarificationResumer acknowledges whether the orchestrator accepted
+// a detached answer before the handler exposes the bundle as terminal.
+type DetachedClarificationResumer interface {
+	ResumeDetachedClarification(ctx context.Context, request DetachedClarificationResume) error
+}
+
+// Handlers provides HTTP handlers for clarification requests. It stays thin:
+// identity/authorization, validation, claiming, and delivery all live on
+// Resolver, which is shared with the answer_question_kandev /
+// list_pending_questions_kandev MCP tools (R3).
 type Handlers struct {
 	store          *Store
 	hub            Broadcaster
 	messageCreator MessageCreator
-	repo           messageStore
+	repo           handlerMessageStore
 	eventBus       EventBus
 	resolver       *Resolver
 	logger         *logger.Logger
 }
 
 // NewHandlers creates new clarification handlers.
-func NewHandlers(store *Store, hub Broadcaster, messageCreator MessageCreator, repo messageStore, eventBus EventBus, resolver *Resolver, log *logger.Logger) *Handlers {
+func NewHandlers(
+	store *Store,
+	hub Broadcaster,
+	messageCreator MessageCreator,
+	repo handlerMessageStore,
+	eventBus EventBus,
+	resolver *Resolver,
+	log *logger.Logger,
+) *Handlers {
 	return &Handlers{
 		store:          store,
 		hub:            hub,
@@ -85,7 +149,16 @@ func NewHandlers(store *Store, hub Broadcaster, messageCreator MessageCreator, r
 }
 
 // RegisterRoutes registers clarification HTTP routes.
-func RegisterRoutes(router *gin.Engine, store *Store, hub Broadcaster, messageCreator MessageCreator, repo messageStore, eventBus EventBus, resolver *Resolver, log *logger.Logger) {
+func RegisterRoutes(
+	router *gin.Engine,
+	store *Store,
+	hub Broadcaster,
+	messageCreator MessageCreator,
+	repo handlerMessageStore,
+	eventBus EventBus,
+	resolver *Resolver,
+	log *logger.Logger,
+) {
 	h := NewHandlers(store, hub, messageCreator, repo, eventBus, resolver, log)
 	api := router.Group("/api/v1/clarification")
 	api.POST("/request", h.httpCreateRequest)
@@ -273,40 +346,22 @@ type RespondBody struct {
 
 func (h *Handlers) httpRespond(c *gin.Context) {
 	pendingID := c.Param("id")
-
 	var body RespondBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload: " + err.Error()})
 		return
 	}
 
-	res, claimed, err := h.resolver.ResolveBundle(c.Request.Context(), pendingID, Outcome{
-		Answers:      body.Answers,
-		Rejected:     body.Rejected,
-		RejectReason: body.RejectReason,
-		Source:       taskmodels.ClarificationResolutionSourceWeb,
-		ResolvedBy:   resolvedByFromContext(c.Request.Context()),
-	})
+	res, claimed, err := h.resolver.ResolveBundle(c.Request.Context(), pendingID, Outcome(body))
 	h.writeResolutionResult(c, pendingID, res, claimed, err)
 }
 
-func (h *Handlers) httpCancelRequest(c *gin.Context) {
-	pendingID := c.Param("id")
-
-	res, claimed, err := h.resolver.ResolveBundle(c.Request.Context(), pendingID, Outcome{
-		Cancel:     true,
-		Source:     taskmodels.ClarificationResolutionSourceWeb,
-		ResolvedBy: resolvedByFromContext(c.Request.Context()),
-	})
-	h.writeResolutionResult(c, pendingID, res, claimed, err)
-}
-
-// writeResolutionResult maps a ResolveBundle outcome to R10's REST envelope,
-// shared by httpRespond and httpCancelRequest. ErrBundleNotFound (A3, A5),
-// a validation error (N6-N8b — cancel never produces one, X5), and a
-// partialApplicationError (R5) each map to their own status code; every
-// other error is an unexpected 500. A win or a loss both report the same
-// 200 envelope, distinguished only by "claimed" (R2, R10, R11).
+// writeResolutionResult maps a ResolveBundle outcome to R10/R11's REST
+// envelope. ErrBundleNotFound (A3, A5) maps to 404, a validation error
+// (N6-N8b) maps to 400, IsNotActiveError (R2's no-winner branch) maps to
+// 409, and every other error is an unexpected 500. A win and a loss both
+// report the same 200 envelope, distinguished only by "claimed" (R2, R10,
+// R11) — there is no "resume" key in this envelope.
 func (h *Handlers) writeResolutionResult(c *gin.Context, pendingID string, res *Resolution, claimed bool, err error) {
 	switch {
 	case err == nil:
@@ -322,16 +377,13 @@ func (h *Handlers) writeResolutionResult(c *gin.Context, pendingID string, res *
 			"claimed":  claimed,
 			"status":   res.Status,
 			"response": json.RawMessage(serialized),
-			"resume":   res.Resume,
 		})
 	case errors.Is(err, ErrBundleNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "clarification request not found"})
 	case IsValidationError(err):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-	case IsPartialApplicationError(err):
-		h.logger.Error("clarification bundle partially applied",
-			zap.String("pending_id", pendingID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	case IsNotActiveError(err):
+		c.JSON(http.StatusConflict, gin.H{"error": "clarification request is no longer active"})
 	default:
 		h.logger.Error("failed to resolve clarification bundle",
 			zap.String("pending_id", pendingID), zap.Error(err))
@@ -339,17 +391,76 @@ func (h *Handlers) writeResolutionResult(c *gin.Context, pendingID string, res *
 	}
 }
 
-// resolvedByFromContext returns the caller's user ID for the resolutions
-// row's diagnostic-only resolved_by column, or "" for an unscoped caller —
-// no identity in context, or the synthetic single-user identity auth-disabled
-// mode injects (internal/auth/authn; see apps/backend/AGENTS.md's per-user
-// scoping notes).
-func resolvedByFromContext(ctx context.Context) string {
-	identity, ok := authn.IdentityFromContext(ctx)
-	if !ok || identity.Synthetic || identity.UserID == "" {
-		return ""
+// httpCancelRequest implements A9: cancel does not go through
+// Resolver.ResolveBundle or the durable claim at all. It authorizes via
+// AuthorizeBundleAccess (M5 identity resolution + AuthorizeTaskAccess) and,
+// on success, runs today's cancel unchanged — store lookup, per-question
+// UpdateClarificationMessage, then publishCancelledEvent.
+func (h *Handlers) httpCancelRequest(c *gin.Context) {
+	pendingID := c.Param("id")
+
+	if _, _, err := h.resolver.AuthorizeBundleAccess(c.Request.Context(), pendingID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "clarification request not found"})
+		return
 	}
-	return identity.UserID
+
+	req, ok := h.store.GetRequest(pendingID)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "clarification request not found"})
+		return
+	}
+
+	cancelled := h.store.CancelRequest(pendingID)
+	if !cancelled {
+		c.JSON(http.StatusConflict, gin.H{"error": "clarification request is no longer active"})
+		return
+	}
+
+	if h.messageCreator != nil {
+		ctx := c.Request.Context()
+		for _, q := range req.Questions {
+			if err := h.messageCreator.UpdateClarificationMessage(
+				ctx, req.SessionID, pendingID, q.ID, string(StatusCancelled), nil,
+			); err != nil {
+				h.logger.Error("failed to update clarification message on cancel",
+					zap.String("pending_id", pendingID),
+					zap.String("question_id", q.ID),
+					zap.Error(err))
+			}
+		}
+	}
+
+	h.publishCancelledEvent(c, pendingID, req)
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func (h *Handlers) publishCancelledEvent(c *gin.Context, pendingID string, req *Request) {
+	if h.eventBus == nil || req == nil {
+		return
+	}
+	prompt := ""
+	if len(req.Questions) > 0 {
+		prompt = req.Questions[0].Prompt
+	}
+	eventData := map[string]any{
+		"session_id":    req.SessionID,
+		"task_id":       req.TaskID,
+		"pending_id":    pendingID,
+		"question":      prompt,
+		"answer_text":   "The pending clarification question was cancelled by the operator.",
+		"rejected":      true,
+		"reject_reason": "cancelled",
+	}
+	if err := h.eventBus.Publish(c.Request.Context(), events.ClarificationCancelled, bus.NewEvent(
+		events.ClarificationCancelled,
+		"clarification-handlers",
+		eventData,
+	)); err != nil {
+		h.logger.Error("failed to publish clarification cancelled event",
+			zap.String("pending_id", pendingID),
+			zap.String("session_id", req.SessionID),
+			zap.Error(err))
+	}
 }
 
 func stringFromMetadata(meta map[string]any, key string) string {
@@ -362,93 +473,20 @@ func stringFromMetadata(meta map[string]any, key string) string {
 	return ""
 }
 
-func questionIndexFromMetadata(meta map[string]any) int {
-	if meta == nil {
-		return 0
-	}
-	switch v := meta["question_index"].(type) {
-	case int:
-		return v
-	case int64:
-		return int(v)
-	case float64:
-		return int(v)
-	}
-	return 0
+func clarificationPersistenceContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	// Each durability phase gets an independent bounded window so caller
+	// cancellation cannot interrupt an accepted write or its compensation. A
+	// failed detached response can sequence claim, resume, and restore phases,
+	// so its worst-case response latency may span three of these windows.
+	return context.WithTimeout(context.WithoutCancel(ctx), clarificationPersistenceTimeout)
 }
 
-func formatQuestionSummary(questions []Question) string {
-	if len(questions) == 0 {
-		return ""
+func clarificationPersistenceContextPreservingDeadline(ctx context.Context) (context.Context, context.CancelFunc) {
+	detached := context.WithoutCancel(ctx)
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < clarificationPersistenceTimeout {
+		return context.WithDeadline(detached, deadline)
 	}
-	if len(questions) == 1 {
-		return questions[0].Prompt
-	}
-	parts := make([]string, 0, len(questions))
-	for i, q := range questions {
-		parts = append(parts, fmt.Sprintf("Q%d: %s", i+1, q.Prompt))
-	}
-	return strings.Join(parts, "\n")
-}
-
-// buildAnswerSummary constructs a human-readable summary of the user's response
-// across every question in the bundle. Used in the orchestrator resume prompt
-// and for chat history rendering.
-func buildAnswerSummary(questions []Question, answers []Answer, rejected bool, rejectReason string) string {
-	if rejected {
-		if rejectReason != "" {
-			return fmt.Sprintf("User declined to answer. Reason: %s", rejectReason)
-		}
-		return "User declined to answer."
-	}
-	if len(answers) == 0 {
-		return "User provided no specific answer."
-	}
-	if len(questions) <= 1 && len(answers) == 1 {
-		return formatSingleAnswer(answers[0])
-	}
-
-	answersByID := make(map[string]Answer, len(answers))
-	for _, a := range answers {
-		answersByID[a.QuestionID] = a
-	}
-
-	parts := make([]string, 0, len(answers))
-	for i, q := range questions {
-		ans, ok := answersByID[q.ID]
-		if !ok {
-			continue
-		}
-		parts = append(parts, fmt.Sprintf("A%d: %s", i+1, formatAnswerBody(ans)))
-	}
-	if len(parts) == 0 {
-		// No matches by id — fall back to positional formatting so we still
-		// surface the answers rather than silently dropping them.
-		for i, a := range answers {
-			parts = append(parts, fmt.Sprintf("A%d: %s", i+1, formatAnswerBody(a)))
-		}
-	}
-	return strings.Join(parts, "\n")
-}
-
-func formatSingleAnswer(a Answer) string {
-	if a.CustomText != "" {
-		return fmt.Sprintf("User answered: %s", a.CustomText)
-	}
-	if len(a.SelectedOptions) > 0 {
-		return fmt.Sprintf("User selected: %v", a.SelectedOptions)
-	}
-	return "User provided no specific answer."
-}
-
-func formatAnswerBody(a Answer) string {
-	if a.CustomText != "" {
-		return a.CustomText
-	}
-	if len(a.SelectedOptions) > 0 {
-		return fmt.Sprintf("%v", a.SelectedOptions)
-	}
-	return "(no answer)"
+	return context.WithTimeout(detached, clarificationPersistenceTimeout)
 }
 
 func generateOptionID(questionIndex, optionIndex int) string {

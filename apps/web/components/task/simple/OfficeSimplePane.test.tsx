@@ -31,7 +31,9 @@ vi.mock("@kandev/ui/tooltip", () => ({
 }));
 
 vi.mock("@/app/office/components/execution-indicator", () => ({
-  ExecutionIndicator: () => <div data-testid="execution-indicator" />,
+  ExecutionIndicator: ({ status }: { status: string }) => (
+    <div data-testid="execution-indicator">{status}</div>
+  ),
 }));
 
 vi.mock("./components/topbar-working-indicator", () => ({
@@ -174,5 +176,29 @@ describe("OfficeSimplePane comment composer", () => {
     renderPane({ ...baseTask, status: "cancelled" }, [completedSession]);
 
     expect(screen.getByTestId(CHAT_READONLY_TEST_ID).textContent).toBe(CHAT_READONLY);
+  });
+});
+
+describe("OfficeSimplePane ExecutionIndicator wiring", () => {
+  // Regression: the detail page's store-seeded task must feed ExecutionIndicator
+  // the raw backend status, not the normalized canonical one, so it still tells
+  // SCHEDULING (live) apart from WAITING_FOR_INPUT (not live) — the same
+  // distinction task-row.tsx already preserves for the board/list views.
+  it("prefers rawStatus over status so a SCHEDULING task still shows Live", () => {
+    renderPane({ ...baseTask, status: "todo", rawStatus: "SCHEDULING" }, []);
+
+    expect(screen.getByTestId("execution-indicator").textContent).toBe("SCHEDULING");
+  });
+
+  it("prefers rawStatus over status so a WAITING_FOR_INPUT task does not falsely show Live", () => {
+    renderPane({ ...baseTask, status: "in_progress", rawStatus: "WAITING_FOR_INPUT" }, []);
+
+    expect(screen.getByTestId("execution-indicator").textContent).toBe("WAITING_FOR_INPUT");
+  });
+
+  it("falls back to status when rawStatus is absent", () => {
+    renderPane({ ...baseTask, status: "in_progress" }, []);
+
+    expect(screen.getByTestId("execution-indicator").textContent).toBe("in_progress");
   });
 });

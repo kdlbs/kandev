@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import {
   ContextMenu,
@@ -10,13 +10,12 @@ import {
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
 import { useAppStore } from "@/components/state-provider";
-import { destroyUserShell, renameUserShell } from "@/lib/api/domains/user-shell-api";
-import { shouldConfirmTerminalClose } from "@/lib/terminal/terminal-busy-registry";
-import { CloseTerminalConfirmDialog } from "./close-terminal-confirm-dialog";
+import { renameUserShell } from "@/lib/api/domains/user-shell-api";
+import { useTerminalDestroy } from "@/hooks/domains/session/use-terminal-destroy";
+import { CloseTerminalConfirmPopover } from "./close-terminal-confirm-popover";
 import { TabRenameInput } from "./tab-rename-input";
 import { markTerminalPanelTerminateClose } from "./dockview-layout-setup";
 import { useTranslation } from "react-i18next";
-import { t } from "@/lib/i18n";
 
 /**
  * Custom dockview tab for terminal panels.
@@ -55,14 +54,20 @@ function extractParams(props: IDockviewPanelHeaderProps): StampedParams {
 function pickDisplayName(
   shell: { kind?: string; customName?: string | null; label?: string } | null,
   fallback: string,
+  ordinaryLabel: string,
 ): string {
   if (shell?.customName && shell.customName !== "") return shell.customName;
-  if (shell?.kind === "ordinary") return t("task:panelTerminal");
+  if (shell?.kind === "ordinary") return ordinaryLabel;
   if (shell?.label) return shell.label;
   return fallback;
 }
 
-function useTerminalTabState(stampedEnv: string | undefined, terminalId: string, apiTitle: string) {
+function useTerminalTabState(
+  stampedEnv: string | undefined,
+  terminalId: string,
+  apiTitle: string,
+  ordinaryLabel: string,
+) {
   const shell = useAppStore((s) => {
     if (!stampedEnv) return null;
     const list = s.userShells.byEnvironmentId[stampedEnv] ?? [];
@@ -76,7 +81,7 @@ function useTerminalTabState(stampedEnv: string | undefined, terminalId: string,
   const isOrdinary = shell?.kind === "ordinary";
   const seq = shell?.seq;
   const showBadge = isOrdinary && ordinaryCount > 1 && typeof seq === "number";
-  const displayName = pickDisplayName(shell, apiTitle);
+  const displayName = pickDisplayName(shell, apiTitle, ordinaryLabel);
   const closable = shell?.closable ?? true;
   return { shell, isOrdinary, seq, showBadge, displayName, closable };
 }
@@ -85,7 +90,6 @@ function useTerminalTabClose({
   terminalId,
   taskID,
   stampedEnv,
-  shell,
   closable,
   panelId,
   closePanel,
@@ -93,49 +97,47 @@ function useTerminalTabClose({
   terminalId: string;
   taskID: string | null;
   stampedEnv: string | undefined;
-  shell: { kind?: string } | null;
   closable: boolean;
   panelId: string;
   closePanel: () => void;
 }) {
   const removeUserShellStore = useAppStore((s) => s.removeUserShell);
   const [confirmClose, setConfirmClose] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
+  const closeAnchorRef = useRef<HTMLElement>(null);
+
+  const handleDestroyed = useCallback(() => {
+    if (stampedEnv) {
+      removeUserShellStore(stampedEnv, terminalId);
+    }
+    markTerminalPanelTerminateClose(panelId);
+    closePanel();
+  }, [stampedEnv, terminalId, removeUserShellStore, panelId, closePanel]);
+  const { destroyTerminal } = useTerminalDestroy({
+    environmentId: stampedEnv,
+    taskId: taskID,
+    onDestroyed: handleDestroyed,
+  });
 
   const destroyAndClosePanel = useCallback(async () => {
-    if (isClosing) return;
     if (!stampedEnv) {
       closePanel();
-      return;
+      return true;
     }
-    setIsClosing(true);
-    try {
-      await destroyUserShell(stampedEnv, terminalId, taskID ?? undefined);
-      removeUserShellStore(stampedEnv, terminalId);
-      markTerminalPanelTerminateClose(panelId);
-      setConfirmClose(false);
-      closePanel();
-    } catch (error) {
-      setIsClosing(false);
-      console.error("close terminal:", error);
-    }
-  }, [isClosing, stampedEnv, terminalId, taskID, removeUserShellStore, panelId, closePanel]);
+    return destroyTerminal(terminalId);
+  }, [stampedEnv, terminalId, destroyTerminal, closePanel]);
 
   const handleCloseTab = useCallback(() => {
-    if (isClosing) return;
     if (!closable) return;
-    if (
-      shouldConfirmTerminalClose(terminalId, {
-        kind: shell?.kind,
-      })
-    ) {
-      setConfirmClose(true);
-      return;
-    }
-    void destroyAndClosePanel();
-  }, [isClosing, closable, terminalId, shell, destroyAndClosePanel]);
+    setConfirmClose(true);
+  }, [closable]);
 
-  return { confirmClose, setConfirmClose, isClosing, handleCloseTab, destroyAndClosePanel };
+  return {
+    confirmClose,
+    setConfirmClose,
+    closeAnchorRef,
+    handleCloseTab,
+    destroyAndClosePanel,
+  };
 }
 
 export function TerminalTab(props: IDockviewPanelHeaderProps) {
@@ -147,6 +149,7 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
     stampedEnv,
     terminalId,
     props.api.title ?? t("common:terminal"),
+    t("task:panelTerminal"),
   );
 
   // DockviewDefaultTab reads the title from `api.title` directly and
@@ -157,12 +160,11 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
   }, [props.api, displayName]);
 
   const [isRenaming, setIsRenaming] = useState(false);
-  const { confirmClose, setConfirmClose, isClosing, handleCloseTab, destroyAndClosePanel } =
+  const { confirmClose, setConfirmClose, closeAnchorRef, handleCloseTab, destroyAndClosePanel } =
     useTerminalTabClose({
       terminalId,
       taskID,
       stampedEnv,
-      shell,
       closable,
       panelId: props.api.id,
       closePanel: () => props.api.close(),
@@ -202,29 +204,24 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
               seq={seq}
               displayName={displayName}
               closable={closable}
-              isClosing={isClosing}
               terminalId={terminalId}
+              closeLabel={t("task:close2", { label: displayName })}
+              closeAnchorRef={closeAnchorRef}
               onCloseTab={handleCloseTab}
             />
           )}
         </ContextMenuTrigger>
         <TerminalTabMenu
-          terminalId={terminalId}
-          taskID={taskID}
-          environmentId={stampedEnv ?? null}
           canMutate={isOrdinary}
-          isClosing={isClosing}
           onStartRename={() => setIsRenaming(true)}
           onClosePanel={() => props.api.close()}
-          onTerminatePanel={() => {
-            markTerminalPanelTerminateClose(props.api.id);
-            props.api.close();
-          }}
+          onTerminatePanel={handleCloseTab}
         />
       </ContextMenu>
-      <CloseTerminalConfirmDialog
+      <CloseTerminalConfirmPopover
         open={confirmClose}
         terminalName={displayName}
+        anchorRef={closeAnchorRef}
         onOpenChange={(open) => {
           if (!open) setConfirmClose(false);
         }}
@@ -271,8 +268,9 @@ function TerminalTabBody({
   showBadge,
   seq,
   closable,
-  isClosing,
   terminalId,
+  closeLabel,
+  closeAnchorRef,
   onCloseTab,
   // `displayName` is computed in the parent but consumed via the
   // api.setTitle effect — drop it here so it doesn't leak into the
@@ -284,20 +282,46 @@ function TerminalTabBody({
   seq: number | undefined;
   displayName: string;
   closable: boolean;
-  isClosing: boolean;
   onCloseTab: () => void;
   terminalId: string;
+  closeLabel: string;
+  closeAnchorRef: RefObject<HTMLElement | null>;
 }) {
   void _displayName;
   const tabContentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!closable || isClosing) return;
+    if (!closable) return;
     const closeAction = tabContentRef.current?.querySelector(".dv-default-tab-action");
-    if (!closeAction) return;
+    if (!(closeAction instanceof HTMLElement)) return;
+    closeAnchorRef.current = closeAction;
     closeAction.setAttribute("data-testid", `terminal-tab-close-${terminalId}`);
-    return () => closeAction.removeAttribute("data-testid");
-  }, [closable, isClosing, terminalId, props.api.id]);
+    closeAction.setAttribute("aria-label", closeLabel);
+
+    const needsKeyboardShim = closeAction.tagName !== "BUTTON";
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      event.stopPropagation();
+      onCloseTab();
+    };
+    if (needsKeyboardShim) {
+      closeAction.setAttribute("role", "button");
+      closeAction.setAttribute("tabindex", "0");
+      closeAction.addEventListener("keydown", handleKeyDown);
+    }
+
+    return () => {
+      if (closeAnchorRef.current === closeAction) closeAnchorRef.current = null;
+      closeAction.removeAttribute("data-testid");
+      closeAction.removeAttribute("aria-label");
+      if (needsKeyboardShim) {
+        closeAction.removeAttribute("role");
+        closeAction.removeAttribute("tabindex");
+        closeAction.removeEventListener("keydown", handleKeyDown);
+      }
+    };
+  }, [closable, terminalId, props.api.id, closeLabel, closeAnchorRef, onCloseTab]);
 
   return (
     <div ref={tabContentRef} className="flex h-full items-center">
@@ -311,76 +335,44 @@ function TerminalTabBody({
       )}
       <DockviewDefaultTab
         {...props}
-        hideClose={!closable || isClosing}
-        closeActionOverride={closable && !isClosing ? onCloseTab : undefined}
+        hideClose={!closable}
+        closeActionOverride={closable ? onCloseTab : undefined}
       />
-      {closable && isClosing && <TerminalTabClosingSpinner terminalId={terminalId} />}
     </div>
   );
 }
 
-function TerminalTabClosingSpinner({ terminalId }: { terminalId: string }) {
-  const { t } = useTranslation();
-  return (
-    <span
-      aria-label={t("task:closingTerminal")}
-      data-testid={`terminal-tab-closing-${terminalId}`}
-      className="dv-default-tab-action inline-flex h-4 w-4 shrink-0 items-center justify-center"
-    >
-      <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
-    </span>
-  );
-}
-
 function TerminalTabMenu({
-  terminalId,
-  taskID,
-  environmentId,
   canMutate,
-  isClosing,
   onStartRename,
   onClosePanel,
   onTerminatePanel,
 }: {
-  terminalId: string;
-  taskID: string | null;
-  environmentId: string | null;
   canMutate: boolean;
-  isClosing: boolean;
   onStartRename: () => void;
   onClosePanel: () => void;
   onTerminatePanel: () => void;
 }) {
   const { t } = useTranslation();
-  const removeUserShellStore = useAppStore((s) => s.removeUserShell);
+  const requestTerminateAfterCloseRef = useRef(false);
 
-  const handleTerminate = useCallback(async () => {
-    if (isClosing) return;
-    if (!environmentId) return;
+  const handleTerminate = useCallback(() => {
     if (!canMutate) {
       onClosePanel();
       return;
     }
-    try {
-      await destroyUserShell(environmentId, terminalId, taskID ?? undefined);
-      removeUserShellStore(environmentId, terminalId);
-      onTerminatePanel();
-    } catch (error) {
-      console.error("terminate terminal:", error);
-    }
-  }, [
-    canMutate,
-    isClosing,
-    environmentId,
-    terminalId,
-    taskID,
-    removeUserShellStore,
-    onClosePanel,
-    onTerminatePanel,
-  ]);
+    requestTerminateAfterCloseRef.current = true;
+  }, [canMutate, onClosePanel]);
 
   return (
-    <ContextMenuContent>
+    <ContextMenuContent
+      onCloseAutoFocus={(event) => {
+        if (!requestTerminateAfterCloseRef.current) return;
+        requestTerminateAfterCloseRef.current = false;
+        event.preventDefault();
+        onTerminatePanel();
+      }}
+    >
       {canMutate && (
         <>
           <ContextMenuItem onClick={onStartRename}>{t("task:rename2")}</ContextMenuItem>
@@ -389,7 +381,6 @@ function TerminalTabMenu({
       )}
       <ContextMenuItem
         onClick={handleTerminate}
-        disabled={isClosing}
         className="text-destructive focus:text-destructive"
       >
         {t("task:terminate")}

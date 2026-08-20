@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { injectLatency } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 /**
@@ -131,6 +132,16 @@ test.describe("Agent profile — ACP-first", () => {
     });
 
     try {
+      await testPage.route("**/api/v1/agent-models/mock-agent/resolve", async (route) => {
+        const request = route.request().postDataJSON() as { model?: string };
+        if (request.model === "mock-smart") {
+          await injectLatency(
+            750,
+            "keeps the profile model-option loading state visible during resolution",
+          );
+        }
+        await route.fallback();
+      });
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
       const selector = testPage.getByRole("button", { name: "Profile start model settings" });
       await expect(selector).toBeVisible({ timeout: 15_000 });
@@ -158,9 +169,18 @@ test.describe("Agent profile — ACP-first", () => {
       // exposes Max while mock-fast exposes Medium, so this also proves the
       // profile selector does not keep the previous model's option list.
       await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+      await expect(testPage.getByTestId("model-config-options-loading")).toBeVisible();
+      const selectedModelRow = testPage.getByTestId("model-config-selected-row");
+      await expect(selectedModelRow.locator("svg.tabler-icon-loader")).toBeVisible();
+      await expect(selectedModelRow.locator("svg.tabler-icon-check.absolute")).toHaveCount(0);
+      await expect(testPage.getByTestId("config-option-trigger-effort")).toHaveCount(0);
+      await expect(selector).toHaveAttribute("aria-expanded", "true");
       await expect(testPage.getByTestId("model-config-resolution-loading")).toBeHidden({
         timeout: 15_000,
       });
+      await expect(testPage.getByTestId("model-config-options-loading")).toHaveCount(0);
+      await expect(selectedModelRow.locator("svg.tabler-icon-loader")).toHaveCount(0);
+      await expect(selectedModelRow.locator("svg.tabler-icon-check.absolute")).toBeVisible();
       await expect(selector).toContainText("Mock Smart", { timeout: 10_000 });
       await expect(testPage.getByTestId("config-option-trigger-effort")).toBeVisible();
       await testPage.getByTestId("config-option-trigger-effort").click();

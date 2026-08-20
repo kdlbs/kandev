@@ -28,6 +28,51 @@ async function seedNotificationProvider(
 }
 
 test.describe("Settings manual save", () => {
+  test("persists rich-output chart motion on this device only after Save", async ({ testPage }) => {
+    await testPage.addInitScript(() => {
+      if (window.localStorage.getItem("kandev.settings.richOutputAnimations") === null) {
+        window.localStorage.setItem("kandev.settings.richOutputAnimations", "true");
+      }
+    });
+    let userSettingsPatches = 0;
+    testPage.on("request", (request) => {
+      if (
+        request.method() === "PATCH" &&
+        new URL(request.url()).pathname === "/api/v1/user/settings"
+      ) {
+        userSettingsPatches += 1;
+      }
+    });
+    await testPage.goto(APPEARANCE_PATH);
+
+    const toggle = testPage.getByRole("switch", { name: "Animate rich-output charts" });
+    await expect(toggle).toBeChecked();
+    const toggleBox = await toggle.boundingBox();
+    expect(toggleBox?.width).toBeGreaterThanOrEqual(44);
+    expect(toggleBox?.height).toBeGreaterThanOrEqual(44);
+
+    await toggle.click();
+    await expect(toggle).not.toBeChecked();
+    expect(
+      await testPage.evaluate(() =>
+        JSON.parse(window.localStorage.getItem("kandev.settings.richOutputAnimations") ?? "null"),
+      ),
+    ).toBe(true);
+
+    const floatingSave = testPage.getByTestId("settings-floating-save");
+    await floatingSave.getByRole("button", { name: "Save changes" }).click();
+    await expect(floatingSave).not.toBeVisible();
+    expect(userSettingsPatches).toBe(0);
+    expect(
+      await testPage.evaluate(() =>
+        JSON.parse(window.localStorage.getItem("kandev.settings.richOutputAnimations") ?? "null"),
+      ),
+    ).toBe(false);
+
+    await testPage.reload();
+    await expect(toggle).not.toBeChecked();
+  });
+
   test("keeps Appearance changes local and guards dirty navigation", async ({
     testPage,
     apiClient,
@@ -41,7 +86,7 @@ test.describe("Settings manual save", () => {
       await apiClient.saveUserSettings({ app_status_bar_enabled: true });
       await testPage.goto(APPEARANCE_PATH);
       await expect(
-        testPage.getByRole("heading", { name: "Appearance", exact: true }),
+        testPage.getByRole("heading", { level: 2, name: "Appearance", exact: true }),
       ).toBeVisible();
 
       const layout = testPage.getByTestId("changes-panel-layout-select");

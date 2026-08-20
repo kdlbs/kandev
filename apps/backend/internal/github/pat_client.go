@@ -221,7 +221,7 @@ func (c *PATClient) FindPRByBranch(ctx context.Context, owner, repo, branch stri
 	if err != nil {
 		return nil, fmt.Errorf("find PR by branch %q: %w", branch, err)
 	}
-	status := statuses[graphqlBranchKey(owner, repo, branch)]
+	status := statuses.Statuses[graphqlBranchKey(owner, repo, branch)]
 	if status == nil {
 		return nil, nil
 	}
@@ -728,17 +728,36 @@ func (c *PATClient) RequestReviewers(ctx context.Context, owner, repo string, nu
 	return c.post(ctx, endpoint, jsonBody)
 }
 
-func (c *PATClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
-	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, number)
-	payload := map[string]string{}
+func (c *PATClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error) {
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge-async", owner, repo, number)
+	payload := map[string]string{"merge_action": "default"}
 	if mergeMethod != "" {
 		payload["merge_method"] = mergeMethod
 	}
 	jsonBody, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("marshal merge payload: %w", err)
+		return "", fmt.Errorf("marshal merge payload: %w", err)
 	}
-	return c.put(ctx, endpoint, jsonBody)
+	var response mergeAsyncResponse
+	if err := c.putJSON(ctx, endpoint, jsonBody, &response); err != nil {
+		var apiErr *GitHubAPIError
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusConflict ||
+			json.Unmarshal([]byte(apiErr.Body), &response) != nil || response.UUID == "" {
+			return "", err
+		}
+	}
+	for response.Status == "pending" {
+		if response.UUID == "" {
+			return "", fmt.Errorf("GitHub merge response is pending without a UUID")
+		}
+		if err := c.get(ctx, endpoint+"/"+response.UUID, &response); err != nil {
+			return "", err
+		}
+	}
+	if response.Status == mergeStatusFailed {
+		return "", fmt.Errorf("GitHub rejected merge: %s", response.Message)
+	}
+	return normalizeMergeOutcome(response.Status)
 }
 
 func (c *PATClient) CreateGist(ctx context.Context, in CreateGistInput) (*GistResponse, error) {
@@ -848,8 +867,18 @@ func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) erro
 // postJSON sends a POST and decodes the response body into result.
 // 2xx with no body returns nil; 4xx/5xx returns a *GitHubAPIError.
 func (c *PATClient) postJSON(ctx context.Context, endpoint string, body []byte, result interface{}) error {
+	return c.requestJSON(ctx, http.MethodPost, endpoint, body, result)
+}
+
+func (c *PATClient) requestJSON(
+	ctx context.Context,
+	method string,
+	endpoint string,
+	body []byte,
+	result interface{},
+) error {
 	u := githubAPIBase + endpoint
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -858,7 +887,7 @@ func (c *PATClient) postJSON(ctx context.Context, endpoint string, body []byte, 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("request POST %s: %w", endpoint, err)
+		return fmt.Errorf("request %s %s: %w", method, endpoint, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	c.recordRateHeaders(resp, endpoint)
@@ -900,27 +929,11 @@ func (c *PATClient) delete(ctx context.Context, endpoint string) error {
 }
 
 func (c *PATClient) put(ctx context.Context, endpoint string, body []byte) error {
-	u := githubAPIBase + endpoint
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	c.setGitHubHeaders(req)
-	req.Header.Set("Content-Type", "application/json")
+	return c.putJSON(ctx, endpoint, body, nil)
+}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("request PUT %s: %w", endpoint, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	c.recordRateHeaders(resp, endpoint)
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
-		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
-	}
-	return nil
+func (c *PATClient) putJSON(ctx context.Context, endpoint string, body []byte, result interface{}) error {
+	return c.requestJSON(ctx, http.MethodPut, endpoint, body, result)
 }
 
 func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}) error {

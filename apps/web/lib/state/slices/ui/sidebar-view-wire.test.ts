@@ -10,7 +10,7 @@ const view: SidebarView = {
     { id: "c2", dimension: "state", op: "in", value: ["review", "in_progress"] },
     { id: "c3", dimension: "titleMatch", op: "matches", value: "fix " },
   ],
-  sort: { key: "updatedAt", direction: "desc" },
+  sort: { key: "lastActivityAt", direction: "desc" },
   group: "workflow",
   collapsedGroups: ["backlog", "review"],
 };

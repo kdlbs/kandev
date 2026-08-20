@@ -316,72 +316,126 @@ func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *A
 // so the in-memory and persistent state are gone in the same operation.
 //
 // Resume-safety invariant (#1597 resume-safety invariant): a row that still holds
-// a resume_token is REPAIRED in place (status=stopped, local_pid cleared) rather
-// than deleted, so a session stays resumable even if a subsequent relaunch fails.
-// On the happy path the relaunch UPSERTs a fresh row over the repaired one, so
-// repairing costs nothing; on the failure path it preserves the only handle to a
-// resumable conversation. Rows with no resume_token are deleted as before.
+// a resume_token, or still claims a running execution, is REPAIRED in place
+// (status=stopped, local_pid cleared) rather than deleted. This keeps a
+// non-terminal session visible while a stale runtime is being replaced and
+// preserves resumable conversations if a subsequent relaunch fails. On the
+// happy path the relaunch UPSERTs a fresh row over the repaired one, so
+// repairing costs nothing. Rows that are already stopped and have no token are
+// deleted as before.
 //
-// Deliberate deviation from models.RowMustBePreserved, which also preserves
-// tokenless rows backing a non-terminal session: this path gates on the token
-// alone because the token IS the resumable agent state. A row without one means
-// the agent never established (or never reported) an ACP session — there is no
-// agent-side context a preserved row could resume, and Kandev's own chat
-// history lives in the task tables, untouched by this delete. Preserving a
-// tokenless row here would keep only incidental metadata that the relaunch
-// upsert rebuilds anyway, at the cost of wiring session-state reads into the
-// lifecycle tier. Orchestrator-side reconciliation, which already knows session
-// state, applies the full invariant via pruneOrRepairExecutorRow.
+// This remains a narrower rule than models.RowMustBePreserved because the
+// lifecycle tier does not own task-session state. The running status is the
+// local signal that a non-terminal session may still need the row; the
+// orchestrator applies the full task-state invariant during reconciliation.
 //
 // Best-effort: a failure here is logged but doesn't propagate.
-func (m *Manager) deleteExecutorRunning(ctx context.Context, sessionID string) {
+func (m *Manager) deleteExecutorRunning(ctx context.Context, sessionID string, expectedExecutionIDs ...string) {
 	if m.runningWriter == nil {
 		return
 	}
-
-	// Inspect the row first so we never delete one we couldn't read (fail-safe:
-	// an unreadable row might hold a resume_token).
-	if reader, ok := m.runningWriter.(executorRunningReader); ok {
-		existing, err := reader.GetExecutorRunningBySessionID(ctx, sessionID)
-		switch {
-		case err == nil && existing != nil && existing.ResumeToken != "":
-			if repairErr := m.runningWriter.RepairExecutorRunningDead(ctx, sessionID); repairErr != nil &&
-				!errors.Is(repairErr, models.ErrExecutorRunningNotFound) {
-				m.logger.Warn("failed to repair resumable executors_running row on cleanup; leaving row intact",
-					zap.String("session_id", sessionID),
-					zap.Error(repairErr))
-			} else {
-				m.logger.Info("repaired resumable executors_running row instead of deleting (resume-safety invariant)",
-					zap.String("session_id", sessionID))
-			}
-			return
-		case errors.Is(err, models.ErrExecutorRunningNotFound):
-			m.logger.Debug("delete executors_running on cleanup: row not found",
-				zap.String("session_id", sessionID))
-			return
-		case err != nil:
-			m.logger.Warn("skipping executors_running delete: prior-row read failed, refusing to risk deleting a resumable row",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			return
-		}
-	} else {
-		m.logger.Warn("delete executors_running on cleanup: writer does not support reading; resume-safety check skipped",
-			zap.String("session_id", sessionID))
+	expectedExecutionID := ""
+	if len(expectedExecutionIDs) > 0 {
+		expectedExecutionID = expectedExecutionIDs[0]
 	}
 
-	if err := m.runningWriter.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
+	if m.skipExecutorRunningCleanup(ctx, sessionID, expectedExecutionID) {
+		return
+	}
+
+	deleteErr := m.deleteExecutorRunningRow(ctx, sessionID, expectedExecutionID)
+	if deleteErr != nil {
 		// "not found" is expected for sessions that were never launched; everything
 		// else is a real I/O failure (write timeout, locked DB) and should surface.
-		if errors.Is(err, models.ErrExecutorRunningNotFound) {
+		if errors.Is(deleteErr, models.ErrExecutorRunningNotFound) {
 			m.logger.Debug("delete executors_running on cleanup: row not found",
 				zap.String("session_id", sessionID))
 		} else {
 			m.logger.Warn("delete executors_running on cleanup",
 				zap.String("session_id", sessionID),
-				zap.Error(err))
+				zap.Error(deleteErr))
 		}
 	}
+}
+
+// skipExecutorRunningCleanup inspects the row before deletion. It returns true
+// when cleanup must stop because the row is rotated, resumable, missing, or
+// unreadable. A writer without a reader keeps the historical best-effort path.
+func (m *Manager) skipExecutorRunningCleanup(ctx context.Context, sessionID, expectedExecutionID string) bool {
+	reader, ok := m.runningWriter.(executorRunningReader)
+	if !ok {
+		m.logger.Warn("delete executors_running on cleanup: writer does not support reading; resume-safety check skipped",
+			zap.String("session_id", sessionID))
+		return false
+	}
+	existing, err := reader.GetExecutorRunningBySessionID(ctx, sessionID)
+	if expectedExecutionID != "" && existing != nil && existing.AgentExecutionID != expectedExecutionID {
+		m.logger.Info("skipping executors_running cleanup for rotated execution",
+			zap.String("session_id", sessionID),
+			zap.String("expected_execution_id", expectedExecutionID),
+			zap.String("current_execution_id", existing.AgentExecutionID))
+		return true
+	}
+	if err == nil && existing != nil &&
+		(existing.ResumeToken != "" || existing.Status == models.ExecutorRunningStatusRunning) {
+		return m.repairExecutorRunningAfterCleanup(ctx, sessionID, expectedExecutionID, existing.UpdatedAt)
+	}
+	if errors.Is(err, models.ErrExecutorRunningNotFound) {
+		m.logger.Debug("delete executors_running on cleanup: row not found",
+			zap.String("session_id", sessionID))
+		return true
+	}
+	if err != nil {
+		m.logger.Warn("skipping executors_running delete: prior-row read failed, refusing to risk deleting a resumable row",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return true
+	}
+	return false
+}
+
+func (m *Manager) repairExecutorRunningAfterCleanup(
+	ctx context.Context,
+	sessionID, expectedExecutionID string,
+	expectedUpdatedAt time.Time,
+) bool {
+	var repairErr error
+	if casWriter, ok := m.runningWriter.(executorRunningCASWriter); ok && expectedExecutionID != "" {
+		repairErr = casWriter.RepairExecutorRunningDeadIfCurrent(
+			ctx, sessionID, expectedExecutionID, expectedUpdatedAt,
+		)
+	} else {
+		repairErr = m.runningWriter.RepairExecutorRunningDead(ctx, sessionID)
+	}
+	if repairErr == nil || errors.Is(repairErr, models.ErrExecutorRunningNotFound) {
+		m.logger.Info("repaired resumable executors_running row instead of deleting (resume-safety invariant)",
+			zap.String("session_id", sessionID))
+		return true
+	}
+	if errors.Is(repairErr, models.ErrExecutionRotated) {
+		m.logger.Info("skipping executors_running repair for rotated execution",
+			zap.String("session_id", sessionID),
+			zap.String("expected_execution_id", expectedExecutionID))
+		return true
+	}
+	m.logger.Warn("failed to repair resumable executors_running row on cleanup; leaving row intact",
+		zap.String("session_id", sessionID),
+		zap.Error(repairErr))
+	return true
+}
+
+func (m *Manager) deleteExecutorRunningRow(ctx context.Context, sessionID, expectedExecutionID string) error {
+	casWriter, hasCAS := m.runningWriter.(executorRunningCASWriter)
+	if !hasCAS || expectedExecutionID == "" {
+		return m.runningWriter.DeleteExecutorRunningBySessionID(ctx, sessionID)
+	}
+	var expectedUpdatedAt time.Time
+	if reader, ok := m.runningWriter.(executorRunningReader); ok {
+		if current, readErr := reader.GetExecutorRunningBySessionID(ctx, sessionID); readErr == nil && current != nil {
+			expectedUpdatedAt = current.UpdatedAt
+		}
+	}
+	return casWriter.DeleteExecutorRunningIfCurrent(ctx, sessionID, expectedExecutionID, expectedUpdatedAt)
 }
 
 // executorRunningReader is the optional read-side of the writer used to fetch
@@ -390,4 +444,17 @@ func (m *Manager) deleteExecutorRunning(ctx context.Context, sessionID string) {
 // fresh state (acceptable for first-time inserts).
 type executorRunningReader interface {
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+}
+
+type executorRunningCASWriter interface {
+	RepairExecutorRunningDeadIfCurrent(
+		ctx context.Context,
+		sessionID, expectedExecutionID string,
+		expectedUpdatedAt time.Time,
+	) error
+	DeleteExecutorRunningIfCurrent(
+		ctx context.Context,
+		sessionID, expectedExecutionID string,
+		expectedUpdatedAt time.Time,
+	) error
 }

@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Message } from "@/lib/types/http";
 
 const mockListTaskSessionMessages = vi.fn();
+const mockListSessionTurns = vi.fn();
 const mockWebSocketClient = {
   getSessionSubscriptionReadiness: vi.fn(),
   request: vi.fn(),
@@ -14,20 +15,37 @@ const mockState = {
   messages: {
     bySession: { "sess-1": [] as Message[] },
     metaBySession: {
-      "sess-1": { hasMore: false, oldestCursor: null, isLoading: false },
+      "sess-1": { hasMore: false, oldestCursor: null, isLoading: false, isLoadingMore: false },
     },
   },
   taskSessions: { items: { "sess-1": { state: "RUNNING" } } },
-  turns: { activeBySession: { "sess-1": null } },
+  turns: {
+    bySession: { "sess-1": [] as unknown[] },
+    activeBySession: { "sess-1": null },
+    loadedBySession: {} as Record<string, boolean>,
+    reconcileEpochBySession: {} as Record<string, number>,
+    settledBoundaryBySession: {} as Record<string, string>,
+  },
   connection: { status: "connected" },
   mergeMessages: vi.fn(),
   setMessagesLoading: vi.fn(),
   setMessages: vi.fn(),
   prependMessages: vi.fn(),
+  addTurn: vi.fn(),
+  mergeTurnsSnapshot: vi.fn(),
+  markTurnsLoaded: vi.fn((sessionId: string) => {
+    mockState.turns.loadedBySession[sessionId] = true;
+  }),
+  setActiveTurn: vi.fn(),
+  reconcileActiveTurnAfterHydration: vi.fn(),
 };
 
 vi.mock("@/lib/api", () => ({
   listTaskSessionMessages: (...args: unknown[]) => mockListTaskSessionMessages(...args),
+}));
+
+vi.mock("@/lib/api/domains/session-api", () => ({
+  listSessionTurns: (...args: unknown[]) => mockListSessionTurns(...args),
 }));
 
 vi.mock("@/lib/ws/connection", () => ({
@@ -44,6 +62,7 @@ import { taskId, sessionId } from "@/lib/types/ids";
 beforeEach(() => {
   vi.clearAllMocks();
   mockListTaskSessionMessages.mockResolvedValue({ messages: [], has_more: false });
+  mockListSessionTurns.mockResolvedValue({ turns: [], total: 0 });
   mockWebSocketClient.request.mockResolvedValue({ messages: [], has_more: false });
   mockWebSocketClient.subscribeSession.mockReturnValue(vi.fn());
   mockState.messages.bySession["sess-1"] = [];
@@ -51,10 +70,20 @@ beforeEach(() => {
     hasMore: false,
     oldestCursor: null,
     isLoading: false,
+    isLoadingMore: false,
   };
   mockState.connection.status = "connected";
   mockState.taskSessions.items["sess-1"] = { state: "RUNNING" };
+  mockState.turns.bySession["sess-1"] = [];
   mockState.turns.activeBySession["sess-1"] = null;
+  mockState.turns.loadedBySession = {};
+  mockState.mergeTurnsSnapshot.mockImplementation(
+    (_sessionId: string, turns: unknown[], hydrationEpoch: number) => {
+      turns.forEach((turn) => mockState.addTurn(turn));
+      mockState.reconcileActiveTurnAfterHydration("sess-1", hydrationEpoch);
+      mockState.markTurnsLoaded("sess-1");
+    },
+  );
 });
 
 afterEach(() => {
@@ -88,7 +117,8 @@ function makeMessage(overrides: Partial<Message>): Message {
   } as Message;
 }
 
-/** Stateful store mock — prependMessages actually updates the stored messages. */
+/** Stateful store mock — prependMessages actually updates the stored messages
+ * and the shared coordinator's setMessagesMetadata tracks isLoadingMore. */
 function makeStore(options: {
   messages?: Message[];
   hasMore?: boolean;
@@ -99,6 +129,7 @@ function makeStore(options: {
     hasMore: options.hasMore ?? false,
     oldestCursor: options.oldestCursor ?? null,
     isLoading: false,
+    isLoadingMore: false,
   };
   const prependMessages = vi.fn(
     (
@@ -107,9 +138,12 @@ function makeStore(options: {
       newMeta: { hasMore: boolean; oldestCursor: string | null },
     ) => {
       messages = [...newMsgs, ...messages];
-      meta = { ...meta, ...newMeta };
+      meta = { ...meta, ...newMeta, isLoadingMore: false };
     },
   );
+  const setMessagesMetadata = vi.fn((_sessionId: string, patch: { isLoadingMore?: boolean }) => {
+    meta = { ...meta, ...patch };
+  });
   return {
     getState: () => ({
       messages: {
@@ -117,8 +151,10 @@ function makeStore(options: {
         metaBySession: { "sess-1": meta },
       },
       prependMessages,
+      setMessagesMetadata,
     }),
     _prependMessages: prependMessages,
+    _setMessagesMetadata: setMessagesMetadata,
   };
 }
 
@@ -348,7 +384,7 @@ describe("runBackfillRound", () => {
     expect(result).toBe("stop");
   });
 
-  it("does not prepend messages when cleanup occurs during the fetch", async () => {
+  it("stops the round when cleanup occurs during the fetch, without a second request", async () => {
     const request = deferred<{ messages: Message[]; has_more: boolean }>();
     mockListTaskSessionMessages.mockReturnValueOnce(request.promise);
     const store = makeStore({ messages: [], hasMore: true, oldestCursor: "msg-1" });
@@ -360,7 +396,10 @@ describe("runBackfillRound", () => {
     request.resolve({ messages: [makeMessage({ id: "old-1" })], has_more: true });
 
     await expect(round).resolves.toBe("stop");
-    expect(store._prependMessages).not.toHaveBeenCalled();
+    // The round stops and the coordinator settles its loading flag; no second
+    // page is requested after deactivation.
+    expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(1);
+    expect(store._setMessagesMetadata).toHaveBeenCalledWith("sess-1", { isLoadingMore: false });
   });
 });
 
@@ -430,6 +469,40 @@ describe("autoBackfillUntilUserMessage", () => {
     expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(MAX_AUTO_BACKFILL_PAGES);
   });
 
+  it("derives the page budget from the first-request-wins page size (message budget)", async () => {
+    // A concurrent panel request wins the shared cursor with limit 20 before
+    // the backfill's round-1 request starts, so that round joins the
+    // effective 20-row page. The 1000-message budget then permits the
+    // remaining rounds at 100 rows each — the same maximum message depth a
+    // 100-row winner would reach.
+    let calls = 0;
+    mockListTaskSessionMessages.mockImplementation(() => {
+      calls++;
+      return Promise.resolve({
+        messages: [makeMessage({ id: `tool-${calls}`, type: "tool_call", author_type: "agent" })],
+        has_more: true,
+      });
+    });
+    const store = makeStore({ messages: [], hasMore: true, oldestCursor: "cursor-0" });
+    const { requestOlderMessages } = await import("./older-message-pagination");
+    // Synchronously start the panel request; the backfill's round-1 request
+    // for the same cursor joins it (first-request-wins limit 20).
+    const seed = requestOlderMessages({
+      sessionId: "sess-1",
+      cursor: "cursor-0",
+      limit: 20,
+      store: store as never,
+    });
+
+    await autoBackfillUntilUserMessage("sess-1", store as never);
+    await seed;
+
+    // 1 seed request + 1 joined round (20 rows) + 9 × 100-row rounds + 1
+    // final 100-row round (budget 1000 − 20 = 980; 9 full rounds, then one
+    // more overshoot) = 11 total requests (1 seed + 10 backfill fetches).
+    expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(11);
+  });
+
   it("stops after round 1 once a user message is prepended", async () => {
     mockListTaskSessionMessages.mockResolvedValue({
       messages: [makeMessage({ id: "u1", type: "message", author_type: "user" })],
@@ -462,6 +535,7 @@ describe("session subscription hydration ordering", () => {
     const { unmount } = renderHook(() => useSessionMessages("sess-1"));
 
     expect(mockWebSocketClient.request).not.toHaveBeenCalled();
+    expect(mockListSessionTurns).not.toHaveBeenCalled();
 
     await act(async () => {
       readiness.resolve();
@@ -495,5 +569,102 @@ describe("session subscription hydration ordering", () => {
 
     expect(mockWebSocketClient.request).not.toHaveBeenCalled();
     expect(mockState.setMessagesLoading).toHaveBeenLastCalledWith("sess-1", false);
+  });
+});
+
+describe("turn loading for sessions without hydrated turns", () => {
+  it("fetches and merges turns when the session has none in the store", async () => {
+    const readiness = deferred<void>();
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: readiness.promise,
+      unsubscribe: vi.fn(),
+    });
+    mockListSessionTurns.mockResolvedValue({
+      turns: [
+        {
+          id: "turn-1",
+          session_id: "sess-1",
+          task_id: "task-1",
+          started_at: "2026-08-10T10:00:00Z",
+          completed_at: "2026-08-10T10:05:00Z",
+          metadata: { runtime_config_snapshot: { model: "deepseek/deepseek-v4-flash" } },
+          created_at: "2026-08-10T10:00:00Z",
+          updated_at: "2026-08-10T10:05:00Z",
+        },
+      ],
+      total: 1,
+    });
+    mockState.turns.bySession["sess-1"] = [];
+
+    const { unmount } = renderHook(() => useSessionMessages("sess-1"));
+
+    await act(async () => {
+      readiness.resolve();
+      await readiness.promise;
+    });
+    // Flush the chained message/turn fetch microtasks.
+    await act(async () => {});
+
+    expect(mockListSessionTurns).toHaveBeenCalledWith("sess-1", expect.anything());
+    expect(mockState.addTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "turn-1",
+        metadata: { runtime_config_snapshot: { model: "deepseek/deepseek-v4-flash" } },
+      }),
+    );
+    expect(mockState.markTurnsLoaded).toHaveBeenCalledWith("sess-1");
+    unmount();
+  });
+
+  it("still fetches the full history when WS-seeded turns exist but no marker", async () => {
+    // WS `session.turn.*` events seed individual live turns without the full
+    // history; array presence must NOT suppress the REST hydration, or older
+    // messages keep resolving to `turn = null` (the reported regression).
+    const readiness = deferred<void>();
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: readiness.promise,
+      unsubscribe: vi.fn(),
+    });
+    mockState.turns.bySession["sess-1"] = [{ id: "turn-live" }];
+    mockListSessionTurns.mockResolvedValue({ turns: [], total: 0 });
+
+    const { unmount } = renderHook(() => useSessionMessages("sess-1"));
+
+    await act(async () => {
+      readiness.resolve();
+      await readiness.promise;
+    });
+    await act(async () => {});
+
+    // The REST hydration must run despite the partial live turn (the loaded
+    // marker is the gate, not array presence). At least one full fetch is
+    // required; the exact count is environment-dependent (multiple message
+    // fetch paths race at mount), and single-flight semantics are pinned in
+    // use-session-turns-hydration.test.ts.
+    expect(mockListSessionTurns).toHaveBeenCalled();
+    unmount();
+  });
+
+  it("refreshes the turn snapshot for the current subscription generation", async () => {
+    const readiness = deferred<void>();
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: readiness.promise,
+      unsubscribe: vi.fn(),
+    });
+    mockState.turns.loadedBySession["sess-1"] = true;
+
+    const { unmount } = renderHook(() => useSessionMessages("sess-1"));
+
+    await act(async () => {
+      readiness.resolve();
+      await readiness.promise;
+    });
+    await act(async () => {});
+
+    expect(mockListSessionTurns).toHaveBeenCalledWith("sess-1", expect.anything());
+    unmount();
   });
 });

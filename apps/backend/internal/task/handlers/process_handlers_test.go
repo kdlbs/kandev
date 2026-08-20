@@ -33,6 +33,17 @@ type mockRepository struct {
 	executors     map[string]*models.Executor
 }
 
+func (m *mockRepository) DeleteTurnIfUnreferenced(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
+func (m *mockRepository) ReconcileUnpublishedPromptTurns(context.Context) (int, error) {
+	return 0, nil
+}
+func (m *mockRepository) ListTurnsPendingStartEvent(context.Context) ([]*models.Turn, error) {
+	return nil, nil
+}
+
 func (m *mockRepository) CreateWorkspace(ctx context.Context, workspace *models.Workspace) error {
 	return nil
 }
@@ -98,6 +109,9 @@ func (m *mockRepository) CountOpenWatcherCreatedTasks(_ context.Context, _, _ st
 }
 func (m *mockRepository) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error {
 	return nil
+}
+func (m *mockRepository) SetTaskMetadataKeyIfPresent(context.Context, string, string, interface{}) (bool, error) {
+	return false, nil
 }
 func (m *mockRepository) UpdateTaskStateIfSessionState(
 	_ context.Context, _, _ string, _ models.TaskSessionState, _ v1.TaskState,
@@ -209,6 +223,11 @@ func (m *mockRepository) CreateMessage(ctx context.Context, message *models.Mess
 func (m *mockRepository) GetMessage(ctx context.Context, id string) (*models.Message, error) {
 	return nil, nil
 }
+
+// GetMessageWithPromptIndex returns the message for id with its derived prompt index, mirroring the repository contract.
+func (m *mockRepository) GetMessageWithPromptIndex(ctx context.Context, id string) (*models.Message, error) {
+	return nil, nil
+}
 func (m *mockRepository) GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error) {
 	return nil, nil
 }
@@ -224,11 +243,35 @@ func (m *mockRepository) FindMessagesByPendingID(ctx context.Context, pendingID 
 func (m *mockRepository) FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error) {
 	return nil, nil
 }
-func (m *mockRepository) FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
+func (m *mockRepository) FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	return nil, nil
 }
 func (m *mockRepository) GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error) {
 	return make(map[string]models.TaskPendingAction), nil
+}
+func (m *mockRepository) CompleteActiveClarificationBundle(
+	context.Context,
+	string,
+	string,
+	map[string]interface{},
+) ([]*models.Message, bool, error) {
+	return nil, false, nil
+}
+func (m *mockRepository) FinalizeClarificationResponseDelivery(
+	context.Context,
+	string,
+	string,
+	[]*models.Message,
+) ([]*models.Message, bool, error) {
+	return nil, false, nil
+}
+func (m *mockRepository) RestoreActiveClarificationBundle(
+	context.Context,
+	string,
+	string,
+	[]*models.Message,
+) ([]*models.Message, bool, error) {
+	return nil, false, nil
 }
 func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	return nil
@@ -265,6 +308,30 @@ func (m *mockRepository) GetActiveTurnBySessionID(ctx context.Context, sessionID
 }
 func (m *mockRepository) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 	return nil
+}
+func (m *mockRepository) PatchTurnMetadata(
+	context.Context,
+	string,
+	string,
+	map[string]interface{},
+) (bool, time.Time, error) {
+	return false, time.Time{}, nil
+}
+func (m *mockRepository) UpdateActiveTurnMetadata(
+	context.Context,
+	string,
+	string,
+	map[string]interface{},
+	[]string,
+) (bool, map[string]interface{}, time.Time, error) {
+	return false, nil, time.Time{}, nil
+}
+func (m *mockRepository) ClearTurnPromptDispatchMetadata(
+	context.Context,
+	string,
+	string,
+) (bool, map[string]interface{}, time.Time, error) {
+	return false, nil, time.Time{}, nil
 }
 func (m *mockRepository) CompleteTurn(ctx context.Context, id string) error {
 	return nil

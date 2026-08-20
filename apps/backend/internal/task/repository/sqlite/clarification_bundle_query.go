@@ -78,9 +78,9 @@ func clarificationBundleWhereClause(opts models.ListClarificationBundlesOptions)
 	return "AND " + strings.Join(conditions, " AND "), args
 }
 
-// clarificationBundleQuery assembles the bundle-grouping subquery (D4a both
-// conjuncts via has_pending and the NOT EXISTS resolution check) joined to
-// its visibility-checked task row.
+// clarificationBundleQuery assembles the bundle-grouping subquery (D4a's
+// surviving conjunct: has_pending, message-status based) joined to its
+// visibility-checked task row.
 //
 // It also excludes any message carrying the autopilot parent-question
 // marker (models.MetaKeyParentQuestion, "parent_question.go"). That
@@ -114,7 +114,6 @@ func clarificationBundleQuery(drv, whereExtra string) string {
 		) b
 		JOIN tasks t ON t.id = b.task_id
 		WHERE b.has_pending = 1
-		  AND NOT EXISTS (SELECT 1 FROM clarification_resolutions cr WHERE cr.pending_id = b.pending_id)
 		  %[4]s
 		ORDER BY b.created_at ASC, b.pending_id ASC
 		LIMIT ?

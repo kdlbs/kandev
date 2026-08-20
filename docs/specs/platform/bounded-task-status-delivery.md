@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-08-01
-updated: 2026-08-15
+updated: 2026-08-17
 owner: kandev
 ---
 
@@ -52,6 +52,7 @@ The initial contract is:
 | Field                                          | Meaning                                                             | Bound                                |
 | ---------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------ |
 | `revision`, `updated_at`                       | Monotonic task-local version and projection time                    | Constant                             |
+| `last_activity_at`                             | Latest durable task, user-prompt, or turn milestone                 | Constant                             |
 | `primary_session`                              | Primary session ID and lifecycle state                              | One session                          |
 | `foreground_activity`, `active_subagent_count` | Existing task-level busy aggregate                                  | Constant                             |
 | `pending_action`                               | `permission`, `clarification`, or absent                            | Constant                             |
@@ -73,16 +74,30 @@ remain during migration, but switchers use the summary when present.
 - Pending permission outranks pending clarification for the row's primary
   state icon. Both outrank generating/background activity, which outranks
   coarse lifecycle state. This is the existing task-row precedence.
-- A session's `pending_action` clears only when the specific request that armed
-  it resolves — a `message.updated` on that same permission/clarification
+- A clarification contributes to `pending_action` only while its bundle is pending in the session's
+  current authoritative `task_session_turns` record. An empty, unattempted
+  `prompt_dispatch_pending` reservation does not advance this boundary. A message-backed reservation or
+  one marked `prompt_dispatch_attempted` is authoritative because dispatch may have occurred. Within
+  that turn, unrelated rows do not clear the request. A newer authoritative turn supersedes older
+  pending clarification rows without requiring transcript history to be rewritten; deleting newer-turn
+  messages cannot move this boundary backward.
+- Within the same current turn, a session's `pending_action` clears only when the specific request that
+  armed it resolves: a `message.updated` on that same permission/clarification
   request row (matched by type and `pending_id`) reaching a terminal,
   non-`pending` status, or that row's deletion. An unrelated message on the
   same session (a tool call, script execution, or any other row that merely
   carries its own terminal status metadata) must not clear a different
   session's armed `pending_action`, and must not clear the current session's
-  `pending_action` unless it is that same request row. Otherwise a session that
+  same-turn `pending_action` unless it is that same request row. Otherwise a session that
   is busy streaming ordinary tool activity right after a permission/
   clarification request clears the affordance before the user ever answers it.
+- Pending-sensitive source events refresh from the bounded repository projection instead of trusting
+  event order as state. Boot and task-list hydration reconcile the pending field of existing persisted
+  summaries as well as creating missing summaries. Repairs preserve unrelated fields and advance the
+  monotonic revision only when pending semantics change.
+- When no persisted summary row exists, the first source event rehydrates configured authoritative
+  session, Git, and pull-request observations before deriving the new row. The event therefore updates
+  one keyed observation without discarding unchanged siblings from other keys.
 - `active_error` is independent of the primary state icon. It represents the
   newest relevant recoverable agent error and clears after an authoritative
   dismissal or a newer agent response according to the existing error rules.
@@ -91,13 +106,24 @@ remain during migration, but switchers use the summary when present.
   session event.
 - Git totals aggregate the latest observation for every repository in the
   task. A multi-repository update must not expose a partial replacement that
-  forgets unchanged repositories.
+  forgets unchanged repositories. On projector restart, configured keyed Git
+  observations are rehydrated even when the persisted aggregate is absent.
 - Pull-request state aggregates open PRs before terminal PRs and chooses the
   most attention-worthy current status. Full PR details remain owned by the
-  GitHub domain and are loaded only by surfaces that need them.
+  GitHub domain and are loaded only by surfaces that need them. On projector
+  restart or compare-and-set rebase, configured keyed pull-request observations
+  are rehydrated even when the persisted aggregate is absent.
 - A semantic no-op does not increment `revision` or emit an update.
 - Clients ignore a summary delta whose revision is not newer than the stored
   revision.
+- `last_activity_at` is separate from projection freshness. Task creation,
+  persisted task mutations, user-authored prompts, and turn start or completion
+  advance it by source time. Focus, subscriptions, Git or pull-request polling,
+  queue bookkeeping, summary repair, and streamed chunks do not advance it.
+- Missing and older summaries rebuild `last_activity_at` in one batch from
+  task, user-message, and turn records. Live and rebuilt values use a monotonic
+  maximum, so replay and repair cannot move activity backward. See
+  [ADR-2026-08-17-separate-task-activity-from-summary-freshness](../../decisions/2026-08-17-separate-task-activity-from-summary-freshness.md).
 
 ## API and event surface
 
@@ -237,6 +263,9 @@ intermediate replacement.
   changes its Git tree, or receives a PR update, **WHEN** its summary revision
   arrives, **THEN** desktop and mobile rows update without a session
   subscription.
+- **GIVEN** an idle task receives Git or pull-request summary changes, **WHEN**
+  its replacement summary arrives, **THEN** `updated_at` can advance while
+  `last_activity_at` remains unchanged.
 - **GIVEN** a recoverable error is dismissed or followed by a newer agent
   response, **WHEN** the projector processes that occurrence, **THEN** the
   independent error indicator clears on both task switchers.
@@ -247,6 +276,14 @@ intermediate replacement.
   to the newer error, **WHEN** the projector restarts and the newer session is
   deleted, **THEN** the retained session's error becomes the task's
   `active_error` instead of leaving the summary empty.
+- **GIVEN** keyed Git observations committed before their aggregate summary,
+  **WHEN** the projector restarts with a nil persisted Git aggregate and later
+  receives one repository event, **THEN** it rehydrates every repository before
+  rebuilding totals so unchanged siblings remain included.
+- **GIVEN** authoritative session, Git, or pull-request observations exist but no
+  task summary row has been persisted, **WHEN** the projector receives its first
+  source event, **THEN** it rehydrates every configured source before creating
+  the row so unchanged siblings remain included.
 - **GIVEN** two sessions in one task have recoverable errors, **WHEN** both
   sessions are deleted concurrently while retained-error repair is in flight,
   **THEN** the final task summary contains no error for either deleted session.
@@ -256,6 +293,12 @@ intermediate replacement.
   unrelated message, **THEN** `pending_action` for the session remains
   `permission` (the affordance does not flash and disappear before the user
   answers it).
+- **GIVEN** a detached clarification row is pending in an older turn and the current turn has no
+  pending input, **WHEN** a summary is projected or hydrated, **THEN** the session and task omit
+  `pending_action` and later turn completion cannot re-arm it.
+- **GIVEN** an existing persisted summary advertises clarification but the bounded current-turn query
+  returns no pending action, **WHEN** a task-list or boot payload is built, **THEN** the persisted and
+  returned summary advance to a newer revision with the clarification removed.
 - **GIVEN** notification traffic saturates its queue, **WHEN** the selected
   session sends `message.add`, **THEN** the correlated response is delivered
   first or the connection closes for deterministic reconciliation.

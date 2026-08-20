@@ -24,6 +24,7 @@ const DEFAULT_DESKTOP_PORT: u16 = 38430;
 const DESKTOP_PORT_ENV: &str = "KANDEV_DESKTOP_PORT";
 const DESKTOP_HEALTH_TOKEN_ENV: &str = "KANDEV_DESKTOP_HEALTH_TOKEN";
 const DESKTOP_NATIVE_NOTIFICATIONS_ENV: &str = "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS";
+const LAUNCHER_PARENT_PID_ENV: &str = "KANDEV_LAUNCHER_PARENT_PID";
 const DESKTOP_HEALTH_TOKEN_HEADER: &str = "x-kandev-desktop-health-token";
 const STARTUP_OUTPUT_LIMIT: usize = 12 * 1024;
 const HEALTH_READY_SETTLE: Duration = Duration::from_millis(100);
@@ -269,6 +270,7 @@ fn launch_and_wait(app: &AppHandle, state: &BackendState) -> Result<String, Stri
         OsString::from(DESKTOP_HEALTH_TOKEN_ENV),
         OsString::from(&health_token),
     );
+    add_launcher_parent_pid(&mut inherited_env);
     let spec = build_backend_command(
         &runtime_dir,
         port,
@@ -286,6 +288,13 @@ fn launch_and_wait(app: &AppHandle, state: &BackendState) -> Result<String, Stri
     }
     wait_for_backend(port, state, HEALTH_TIMEOUT, &health_token)?;
     Ok(format!("http://{LOOPBACK_HOST}:{port}/"))
+}
+
+fn add_launcher_parent_pid(env: &mut BTreeMap<OsString, OsString>) {
+    env.insert(
+        OsString::from(LAUNCHER_PARENT_PID_ENV),
+        OsString::from(std::process::id().to_string()),
+    );
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -742,6 +751,10 @@ mod tests {
             OsString::from(DESKTOP_HEALTH_TOKEN_ENV),
             OsString::from("health-token"),
         );
+        inherited.insert(
+            OsString::from(LAUNCHER_PARENT_PID_ENV),
+            OsString::from("12345"),
+        );
         inherited.insert(OsString::from("PATH"), OsString::from("/existing/bin"));
 
         let spec = build_backend_command(
@@ -781,9 +794,25 @@ mod tests {
             Some(&OsString::from("health-token"))
         );
         assert_eq!(
+            spec.env.get(OsStr::new(LAUNCHER_PARENT_PID_ENV)),
+            Some(&OsString::from("12345"))
+        );
+        assert_eq!(
             spec.env
                 .get(OsStr::new("KANDEV_DESKTOP_NATIVE_NOTIFICATIONS")),
             Some(&OsString::from("true"))
+        );
+    }
+
+    #[test]
+    fn launcher_parent_environment_uses_shell_pid() {
+        let mut inherited = BTreeMap::new();
+
+        add_launcher_parent_pid(&mut inherited);
+
+        assert_eq!(
+            inherited.get(OsStr::new(LAUNCHER_PARENT_PID_ENV)),
+            Some(&OsString::from(std::process::id().to_string()))
         );
     }
 
@@ -818,6 +847,36 @@ mod tests {
             Some(&OsString::from("true"))
         );
         assert!(!env.contains_key(OsStr::new("kandev_desktop_native_notifications")));
+    }
+
+    #[test]
+    fn desktop_environment_overrides_inherited_server_host_with_loopback() {
+        // Desktop launches must keep the embedded backend on the loopback host.
+        let mut inherited = BTreeMap::new();
+        inherited.insert(
+            OsString::from("KANDEV_SERVER_HOST"),
+            OsString::from("10.0.0.42"),
+        );
+
+        let env = desktop_environment(Path::new("/opt/kandev"), inherited, None);
+
+        assert_eq!(
+            env.get(OsStr::new("KANDEV_SERVER_HOST")),
+            Some(&OsString::from(LOOPBACK_HOST)),
+            "desktop_environment must force the loopback server host",
+        );
+    }
+
+    #[test]
+    fn desktop_environment_falls_back_to_loopback_when_server_host_unset() {
+        // The default production path: no inherited KANDEV_SERVER_HOST,
+        // desktop_environment must inject the loopback default.
+        let env = desktop_environment(Path::new("/opt/kandev"), BTreeMap::new(), None);
+
+        assert_eq!(
+            env.get(OsStr::new("KANDEV_SERVER_HOST")),
+            Some(&OsString::from(LOOPBACK_HOST))
+        );
     }
 
     #[test]

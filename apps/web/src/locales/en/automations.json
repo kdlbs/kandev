@@ -220,5 +220,15 @@
   "frequencyEveryWeek": "every week",
   "frequencyCustom": "a custom schedule",
   "scheduleUnparseable": "That's not a schedule we can read. Try a 5-field cron like 0 9 * * 1-5.",
-  "scheduleAtSeparator": "at"
+  "scheduleAtSeparator": "at",
+  "failedToLoadAutomationActivity": "Failed to load automation activity",
+  "failedToLoadAutomations": "Failed to load automations",
+  "failedToLoadRuns": "Failed to load runs",
+  "failedToLoadThisAutomation": "Failed to load this automation",
+  "nextFiringConcurrencyPaused": "Paused - a run is still open (max {{max}} at a time)",
+  "nextFiringNoSchedule": "No schedule - only runs when you trigger it",
+  "nextFiringScheduleOff": "Schedule trigger is switched off",
+  "nextFiringSwitchedOff": "Switched off - it will not fire",
+  "runNoReportRecorded": "No report recorded.",
+  "runStillRunningNoReport": "Still running - no report yet."
 }

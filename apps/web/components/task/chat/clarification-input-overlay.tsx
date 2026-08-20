@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { IconX, IconMessageQuestion, IconInfoCircle, IconCheck } from "@tabler/icons-react";
-import { cn } from "@/lib/utils";
+import { IconMessageQuestion, IconInfoCircle } from "@tabler/icons-react";
 import ReactMarkdown from "react-markdown";
 import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 import type {
@@ -12,8 +11,7 @@ import type {
   ClarificationQuestion,
 } from "@/lib/types/http";
 import { useClarificationGroup } from "@/hooks/domains/session/use-clarification-group";
-import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
-import { SHORTCUTS } from "@/lib/keyboard/constants";
+import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 import {
   CLARIFICATION_CUSTOM_TEXT_MAX_RUNES,
   ClarificationCarouselNav,
@@ -22,6 +20,7 @@ import {
   ClarificationStepper,
   countRunes,
 } from "./clarification-overlay-parts";
+import { ClarificationHeaderActions } from "./clarification-overlay-header";
 import { useTranslation } from "react-i18next";
 
 type ClarificationInputOverlayProps = {
@@ -29,6 +28,13 @@ type ClarificationInputOverlayProps = {
   onResolved: () => void;
   shortcutScopeRef: RefObject<HTMLElement | null>;
   keyboardShortcutsEnabled?: boolean;
+  // Called when the user presses Escape. Unlike Skip, this must not answer or
+  // reject the bundle — it only dismisses the UI (e.g. collapses the panel).
+  // The question stays pending and the agent stays blocked.
+  onDismiss: () => void;
+  // Called by the expanded header's collapse control.
+  onCollapse?: () => void;
+  collapseContentId?: string;
 };
 
 type SingleQuestionMeta = {
@@ -74,6 +80,19 @@ function isQuestionAnsweredAt(
   if (!message) return false;
   const questionId = readSingleQuestionMeta(message)?.questionId;
   return questionId ? Boolean(answers[questionId]) : false;
+}
+
+function computeAllAnswered(
+  sortedMessages: Message[],
+  answers: Record<string, ClarificationAnswer>,
+): boolean {
+  return (
+    sortedMessages.length > 0 &&
+    sortedMessages.every((m) => {
+      const id = readSingleQuestionMeta(m)?.questionId;
+      return id ? Boolean(answers[id]) : false;
+    })
+  );
 }
 
 type CardProps = {
@@ -179,9 +198,49 @@ function useResolveCallback(
   }, [submitState, onResolved]);
 }
 
+// Tells an ancestor dialog (Quick Chat) whether this widget will actually act
+// on a given Escape keydown, so the dialog never swallows an Escape that
+// nothing here is going to handle. Mirrors CarouselKeyboardShortcuts's own
+// gate exactly (enabled, in-scope target, no modifier, not already claimed)
+// instead of a separately-derived approximation that could drift out of sync
+// with it.
+//
+// Also records which exact event object this predicate armed. Radix's
+// DismissableLayer intercepts Escape on `document` in the capture phase --
+// before CarouselKeyboardShortcuts's own bubble-phase `window` listener runs
+// -- and the dialog calls event.preventDefault() itself right after this
+// predicate returns true. By the time the window listener sees the event,
+// e.defaultPrevented is therefore already true for every Escape this
+// predicate armed, indistinguishable by flag alone from an unrelated in-scope
+// consumer (cancelling a queued-message edit, closing an @-mention popup)
+// having already claimed it first. The recorded event reference lets the
+// window listener tell those two cases apart: the same object means it was
+// this predicate's own doing.
+function useEscapeGuardRegistration(
+  handledHere: boolean,
+  shortcutScopeRef: RefObject<HTMLElement | null>,
+) {
+  const armedEventRef = useRef<KeyboardEvent | null>(null);
+  const testEscapeGuard = useCallback(
+    (event: KeyboardEvent) => {
+      const armed =
+        handledHere &&
+        isWithinScope(event.target, shortcutScopeRef) &&
+        !shouldIgnoreEscape(event) &&
+        !event.defaultPrevented;
+      if (armed) armedEventRef.current = event;
+      return armed;
+    },
+    [handledHere, shortcutScopeRef],
+  );
+  useClarificationEscapeGuard(testEscapeGuard);
+  return armedEventRef;
+}
+
 type CarouselShortcutArgs = {
   enabled: boolean;
   scopeRef: RefObject<HTMLElement | null>;
+  armedEventRef: RefObject<KeyboardEvent | null>;
   meta: SingleQuestionMeta;
   activeIndex: number;
   total: number;
@@ -189,7 +248,7 @@ type CarouselShortcutArgs = {
   onPick: (index: number) => void;
   onPrev: () => void;
   onNext: () => void;
-  onSkip: () => void;
+  onDismiss: () => void;
   onSubmit: () => void;
 };
 
@@ -209,6 +268,21 @@ function shouldIgnoreShortcut(e: KeyboardEvent): boolean {
   return e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
 }
 
+// Escape does not insert a character, so unlike the other shortcuts it must
+// still collapse the panel while focus is in the composer or another
+// editable control -- the ordinary state right after sending the message
+// that triggered the clarification. Only an actual modifier combo blocks it.
+function shouldIgnoreEscape(e: KeyboardEvent): boolean {
+  return e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
+}
+
+function isWithinScope(
+  target: EventTarget | null,
+  scopeRef: RefObject<HTMLElement | null>,
+): boolean {
+  return target instanceof Node && Boolean(scopeRef.current?.contains(target));
+}
+
 // tryHandleMetaEnter returns true when the event was Cmd/Ctrl+Enter, so the
 // caller can short-circuit. When focus is inside the custom-text input it
 // returns true *without* invoking onSubmit — the input's own keydown handler
@@ -223,21 +297,29 @@ function tryHandleMetaEnter(e: KeyboardEvent, canSubmit: boolean, onSubmit: () =
 }
 
 function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
-  const { enabled, scopeRef } = args;
+  const { enabled, scopeRef, armedEventRef } = args;
   const optionsCount = args.meta.question.options.length;
   const isLast = args.activeIndex === args.total - 1;
-  const { canSubmit, onPick, onPrev, onNext, onSkip, onSubmit } = args;
+  const { canSubmit, onPick, onPrev, onNext, onDismiss, onSubmit } = args;
   useEffect(() => {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.target instanceof Node) || !scopeRef.current?.contains(e.target)) return;
+      if (!isWithinScope(e.target, scopeRef)) return;
       if (tryHandleMetaEnter(e, canSubmit, onSubmit)) return;
-      if (shouldIgnoreShortcut(e)) return;
       if (e.key === "Escape") {
+        if (shouldIgnoreEscape(e)) return;
+        // Bail if some other in-scope consumer (cancelling a queued-message
+        // edit, closing an @-mention/slash-command popup) already claimed
+        // this Escape -- but not if the only thing that claimed it was our
+        // own paired guard predicate (see useEscapeGuardRegistration), which
+        // always runs first and always sets e.defaultPrevented for events it
+        // arms.
+        if (e.defaultPrevented && armedEventRef.current !== e) return;
         e.preventDefault();
-        onSkip();
+        onDismiss();
         return;
       }
+      if (shouldIgnoreShortcut(e)) return;
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         onPrev();
@@ -260,13 +342,14 @@ function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
   }, [
     enabled,
     scopeRef,
+    armedEventRef,
     optionsCount,
     isLast,
     canSubmit,
     onPick,
     onPrev,
     onNext,
-    onSkip,
+    onDismiss,
     onSubmit,
   ]);
   return null;
@@ -274,6 +357,7 @@ function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
 
 type CarouselBodyProps = {
   sortedMessages: Message[];
+  meta: SingleQuestionMeta | null;
   group: ReturnType<typeof useClarificationGroup>;
   activeIndex: number;
   setActiveIndex: (idx: number) => void;
@@ -282,8 +366,10 @@ type CarouselBodyProps = {
   allAnswered: boolean;
   isSubmitting: boolean;
   shortcutScopeRef: RefObject<HTMLElement | null>;
+  armedEventRef: RefObject<KeyboardEvent | null>;
   keyboardShortcutsEnabled: boolean;
   onSubmit: () => void;
+  onDismiss: () => void;
 };
 
 type QuestionHandlerCtx = {
@@ -384,6 +470,7 @@ function buildQuestionHandlers(ctx: QuestionHandlerCtx): QuestionHandlers {
 
 function ClarificationCarouselBody({
   sortedMessages,
+  meta,
   group,
   activeIndex,
   setActiveIndex,
@@ -392,12 +479,12 @@ function ClarificationCarouselBody({
   allAnswered,
   isSubmitting,
   shortcutScopeRef,
+  armedEventRef,
   keyboardShortcutsEnabled,
   onSubmit,
+  onDismiss,
 }: CarouselBodyProps) {
   const total = sortedMessages.length;
-  const activeMessage = sortedMessages[Math.min(activeIndex, total - 1)] ?? null;
-  const meta = activeMessage ? readSingleQuestionMeta(activeMessage) : null;
   const showAgentDisconnectedAtTop = sortedMessages.some(
     (m) => (m.metadata as ClarificationRequestMetadata | undefined)?.agent_disconnected === true,
   );
@@ -450,6 +537,7 @@ function ClarificationCarouselBody({
       <CarouselKeyboardShortcuts
         enabled={keyboardShortcutsEnabled && !isSubmitting}
         scopeRef={shortcutScopeRef}
+        armedEventRef={armedEventRef}
         meta={meta}
         activeIndex={activeIndex}
         total={total}
@@ -457,77 +545,10 @@ function ClarificationCarouselBody({
         onPick={(idx) => onSelectOption(meta.question.options[idx].option_id)}
         onPrev={() => setActiveIndex(Math.max(0, activeIndex - 1))}
         onNext={() => setActiveIndex(Math.min(total - 1, activeIndex + 1))}
-        onSkip={() => void group.skipAll("User skipped")}
+        onDismiss={onDismiss}
         onSubmit={onSubmit}
       />
     </>
-  );
-}
-
-function ClarificationHeaderActions({
-  total,
-  allAnswered,
-  isSubmitting,
-  onSubmit,
-  onSkip,
-}: {
-  total: number;
-  allAnswered: boolean;
-  isSubmitting: boolean;
-  onSubmit: () => void;
-  onSkip: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex items-center gap-2">
-      {total > 1 && (
-        <KeyboardShortcutTooltip
-          shortcut={SHORTCUTS.SUBMIT}
-          description={t("task:submitAnswers")}
-          enabled={!isSubmitting}
-        >
-          <span
-            className="inline-flex"
-            data-testid="clarification-submit-shortcut"
-            tabIndex={!allAnswered && !isSubmitting ? 0 : undefined}
-          >
-            <button
-              type="button"
-              onClick={onSubmit}
-              disabled={!allAnswered || isSubmitting}
-              data-testid="clarification-submit"
-              className={cn(
-                "inline-flex items-center gap-1 text-xs px-3 py-1 rounded font-medium transition-colors",
-                allAnswered && !isSubmitting
-                  ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
-                  : "bg-muted text-muted-foreground cursor-not-allowed",
-              )}
-            >
-              {isSubmitting ? t("task:submitting") : t("task:submit")}
-              <IconCheck className="h-3 w-3" />
-            </button>
-          </span>
-        </KeyboardShortcutTooltip>
-      )}
-      <KeyboardShortcutTooltip
-        shortcut={SHORTCUTS.CANCEL}
-        description={t("task:skipAllQuestions")}
-        enabled={!isSubmitting}
-      >
-        <span className="inline-flex" data-testid="clarification-skip-shortcut">
-          <button
-            type="button"
-            onClick={onSkip}
-            disabled={isSubmitting}
-            className="text-muted-foreground hover:text-foreground cursor-pointer disabled:opacity-50"
-            data-testid="clarification-skip"
-            aria-label={t("task:skipAllQuestions")}
-          >
-            <IconX className="h-4 w-4" />
-          </button>
-        </span>
-      </KeyboardShortcutTooltip>
-    </div>
   );
 }
 
@@ -536,18 +557,24 @@ export function ClarificationInputOverlay({
   onResolved,
   shortcutScopeRef,
   keyboardShortcutsEnabled = true,
+  onDismiss,
+  onCollapse,
+  collapseContentId,
 }: ClarificationInputOverlayProps) {
   const sortedMessages = useMemo(
     () => sortMessagesByQuestionIndex(resolveQuestionMessages(messages)),
     [messages],
   );
   const group = useClarificationGroup(sortedMessages);
+  const isSubmitting = group.submitState === "submitting";
   const [customDrafts, setCustomDrafts] = useState<Record<string, string>>({});
   const [rawActiveIndex, setActiveIndex] = useState(0);
   // Clamp the active index to the current bundle size so late-arriving
   // messages or shrunk bundles never put us out of range.
   const total = sortedMessages.length;
   const activeIndex = total === 0 ? 0 : Math.min(rawActiveIndex, total - 1);
+  const activeMessage = sortedMessages[activeIndex] ?? null;
+  const meta = activeMessage ? readSingleQuestionMeta(activeMessage) : null;
   const sharedContext = readSharedContext(sortedMessages[0]);
 
   useResolveCallback(group.submitState, onResolved);
@@ -556,23 +583,30 @@ export function ClarificationInputOverlay({
   // memoised by the hook — depend on the function only so this useCallback
   // doesn't churn on every keystroke (via the live-record path).
   const submitCollected = group.submitCollected;
-  const allAnswered =
-    sortedMessages.length > 0 &&
-    sortedMessages.every((m) => {
-      const id = readSingleQuestionMeta(m)?.questionId;
-      return id ? Boolean(group.answers[id]) : false;
-    });
+  const allAnswered = computeAllAnswered(sortedMessages, group.answers);
   const handleSubmit = useCallback(() => {
     if (allAnswered) void submitCollected();
   }, [allAnswered, submitCollected]);
 
+  // Gated on the same resolved `meta` that decides whether
+  // ClarificationCarouselBody (and CarouselKeyboardShortcuts within it) mount
+  // at all, not a looser proxy like sortedMessages.length > 0 -- otherwise the
+  // guard could tell the dialog "handledHere" for a state where the widget
+  // that would actually handle Escape never mounted in the first place.
+  const armedEventRef = useEscapeGuardRegistration(
+    keyboardShortcutsEnabled && !isSubmitting && meta !== null,
+    shortcutScopeRef,
+  );
+
   if (sortedMessages.length === 0) return null;
-  const isSubmitting = group.submitState === "submitting";
 
   return (
     <div className="relative" data-testid="clarification-overlay">
-      <div className="flex items-center justify-between gap-3 px-4 pt-2 pb-1">
-        <div className="flex items-center gap-3 min-w-0">
+      <div
+        className="flex min-h-11 items-center justify-between gap-3 px-4"
+        data-testid="clarification-overlay-header"
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <IconMessageQuestion className="h-4 w-4 text-blue-500 flex-shrink-0" />
           {total > 1 && (
             <ClarificationStepper
@@ -586,7 +620,7 @@ export function ClarificationInputOverlay({
           {total > 1 && (
             <span
               data-testid="clarification-group-progress"
-              className="text-xs text-muted-foreground"
+              className="min-w-0 truncate text-xs text-muted-foreground"
             >
               {group.answeredCount} of {group.total} answered
             </span>
@@ -598,6 +632,8 @@ export function ClarificationInputOverlay({
           isSubmitting={isSubmitting}
           onSubmit={handleSubmit}
           onSkip={() => void group.skipAll("User skipped")}
+          onCollapse={onCollapse}
+          collapseContentId={collapseContentId}
         />
       </div>
       {sharedContext && (
@@ -610,6 +646,7 @@ export function ClarificationInputOverlay({
       )}
       <ClarificationCarouselBody
         sortedMessages={sortedMessages}
+        meta={meta}
         group={group}
         activeIndex={activeIndex}
         setActiveIndex={setActiveIndex}
@@ -618,8 +655,10 @@ export function ClarificationInputOverlay({
         allAnswered={allAnswered}
         isSubmitting={isSubmitting}
         shortcutScopeRef={shortcutScopeRef}
+        armedEventRef={armedEventRef}
         keyboardShortcutsEnabled={keyboardShortcutsEnabled}
         onSubmit={handleSubmit}
+        onDismiss={onDismiss}
       />
     </div>
   );

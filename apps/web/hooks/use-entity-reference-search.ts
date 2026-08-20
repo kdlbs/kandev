@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { searchEntityReferences } from "@/lib/api/domains/mentions-api";
 import type { EntityReferenceSearchGroup } from "@/lib/types/entity-reference";
+import { t } from "@/lib/i18n";
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -31,10 +32,9 @@ const EMPTY_STATE: EntityReferenceSearchState = {
   error: null,
 };
 
-const RETRYABLE_SEARCH_ERROR: EntityReferenceSearchError = {
-  message: "Reference search failed. Try again.",
-  retryable: true,
-};
+// Catalog key, resolved where the error is surfaced: a module-scope `t()` here
+// would pin the message to the boot locale.
+const RETRYABLE_SEARCH_ERROR_KEY = "task:referenceSearchFailedRetry";
 
 export function useEntityReferenceSearch({
   workspaceId,
@@ -70,7 +70,11 @@ export function useEntityReferenceSearch({
         },
         () => {
           if (generationRef.current !== generation || controller.signal.aborted) return;
-          setState({ groups: [], isSearching: false, error: RETRYABLE_SEARCH_ERROR });
+          setState({
+            groups: [],
+            isSearching: false,
+            error: { message: t(RETRYABLE_SEARCH_ERROR_KEY), retryable: true },
+          });
         },
       );
     }, SEARCH_DEBOUNCE_MS);

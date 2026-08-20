@@ -50,9 +50,11 @@ func pgBackendPID(t *testing.T, db *sqlx.DB) int {
 }
 
 // waitForWaitingLocks polls pg_locks for the expected number of NOT-granted
-// transactionid waits owned by the given backend PID, scoping the barrier to
-// this test's worker. The poller must be the held transaction's connection
-// (each test handle has a single connection busy inside its lock tx).
+// waits owned by the given backend PID, scoping the barrier to this test's
+// worker. PostgreSQL can expose the first row-lock waiter as a transactionid
+// wait and a later queued waiter as a tuple wait, so both must satisfy the
+// barrier. The poller must be the held transaction's connection (each test
+// handle has a single connection busy inside its lock tx).
 func waitForWaitingLocks(t *testing.T, poller interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, backendPID, want int, what string) {
@@ -62,7 +64,7 @@ func waitForWaitingLocks(t *testing.T, poller interface {
 		var waiting int
 		if err := poller.QueryRowContext(context.Background(), `
 			SELECT count(*) FROM pg_locks
-			WHERE NOT granted AND locktype = 'transactionid' AND pid = $1
+			WHERE NOT granted AND pid = $1
 		`, backendPID).Scan(&waiting); err != nil {
 			t.Fatalf("query pg_locks: %v", err)
 		}
@@ -756,9 +758,17 @@ func TestPostgresRepository_MergeDrainOrdering_DrainWins(t *testing.T) {
 func TestPostgresRepository_MergeDrainOrdering_MergeWins(t *testing.T) {
 	repo := newTestPostgresRepo(t)
 	ctx := context.Background()
+	targetAt := time.Date(2026, 8, 18, 10, 0, 0, 0, time.UTC)
+	sourceAt := targetAt.Add(time.Minute)
 
 	target := insertTestEntry(t, repo, "s1", "t1", "first", "user", nil, nil)
 	source := insertTestEntry(t, repo, "s1", "t1", "second", "user", nil, nil)
+	sqlRepo := repo.(*sqliteRepository)
+	for id, queuedAt := range map[string]time.Time{target.ID: targetAt, source.ID: sourceAt} {
+		if _, err := sqlRepo.db.ExecContext(ctx, sqlRepo.db.Rebind(`UPDATE queued_messages SET queued_at = ? WHERE id = ?`), queuedAt, id); err != nil {
+			t.Fatalf("set queued_at for %s: %v", id, err)
+		}
+	}
 
 	merged, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "user")
 	if err != nil {
@@ -773,6 +783,9 @@ func TestPostgresRepository_MergeDrainOrdering_MergeWins(t *testing.T) {
 	}
 	if drained.Content != "first\n\nsecond" {
 		t.Errorf("drained content = %q, want combined content", drained.Content)
+	}
+	if !merged.QueuedAt.Equal(sourceAt) || !drained.QueuedAt.Equal(sourceAt) {
+		t.Errorf("merged queued_at = %s, drained queued_at = %s, want %s", merged.QueuedAt, drained.QueuedAt, sourceAt)
 	}
 }
 

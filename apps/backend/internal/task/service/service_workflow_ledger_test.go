@@ -211,6 +211,64 @@ func TestPullNextTaskOnVacatePromotesFeederTaskWithWIPPull(t *testing.T) {
 	}
 }
 
+func TestService_MoveTaskFeederPullRecordsManualLedgerBeforeWIPPull(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-c": {ID: "step-c", WorkflowID: "wf-source", Name: "C", Position: 2},
+		"step-a": {ID: "step-a", WorkflowID: "wf-source", Name: "A", Position: 0},
+		"step-b": {
+			ID: "step-b", WorkflowID: "wf-source", Name: "B", Position: 1,
+			WIPLimit: 1, PullFromStepID: "step-a",
+		},
+	}})
+	createMoveTask(t, ctx, repo, "task-ledger-causal-move", "wf-source", "step-c", nil)
+
+	if _, err := svc.MoveTask(ctx, "task-ledger-causal-move", "wf-source", "step-a", 0); err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
+
+	triggers := ledgerTriggersForTask(t, repo, "task-ledger-causal-move")
+	want := []string{
+		string(steptelemetry.TriggerTaskCreated),
+		string(steptelemetry.TriggerManualMove),
+		string(steptelemetry.TriggerWIPPull),
+	}
+	if len(triggers) != len(want) {
+		t.Fatalf("ledger triggers = %v, want %v", triggers, want)
+	}
+	for index := range want {
+		if triggers[index] != want[index] {
+			t.Fatalf("ledger triggers = %v, want %v", triggers, want)
+		}
+	}
+}
+
+func ledgerTriggersForTask(t *testing.T, repo *sqliterepo.Repository, taskID string) []string {
+	t.Helper()
+	rows, err := repo.DB().QueryContext(context.Background(), `
+		SELECT trigger FROM task_step_transitions WHERE task_id = ? ORDER BY id ASC
+	`, taskID)
+	if err != nil {
+		t.Fatalf("query ledger triggers for %s: %v", taskID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var triggers []string
+	for rows.Next() {
+		var trigger string
+		if err := rows.Scan(&trigger); err != nil {
+			t.Fatalf("scan ledger trigger: %v", err)
+		}
+		triggers = append(triggers, trigger)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate ledger triggers: %v", err)
+	}
+	return triggers
+}
+
 func lastLedgerAttribution(t *testing.T, repo *sqliterepo.Repository, taskID string) (trigger, actorKind string, actorID, sessionID *string) {
 	t.Helper()
 	row := repo.DB().QueryRowContext(context.Background(), `

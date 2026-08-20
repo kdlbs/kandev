@@ -21,12 +21,6 @@ func (r *Repository) CreateMessage(ctx context.Context, message *models.Message)
 	if message.ID == "" {
 		message.ID = uuid.New().String()
 	}
-	if message.CreatedAt.IsZero() {
-		message.CreatedAt = time.Now().UTC()
-	}
-	if message.UpdatedAt.IsZero() {
-		message.UpdatedAt = message.CreatedAt
-	}
 	if message.AuthorType == "" {
 		message.AuthorType = models.MessageAuthorUser
 	}
@@ -50,12 +44,65 @@ func (r *Repository) CreateMessage(ctx context.Context, message *models.Message)
 		metadataJSON = string(metadataBytes)
 	}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO task_session_messages (id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt, message.UpdatedAt)
+	if message.AuthorType == models.MessageAuthorUser {
+		// User messages get their prompt-ordering timestamp and ordinal from
+		// the atomic per-session create boundary (see
+		// createUserMessageWithBoundary). Agent/tool messages stay on the hot
+		// path below.
+		return r.createUserMessageWithBoundary(ctx, message, requestsInput, messageType, metadataJSON)
+	}
 
+	if message.CreatedAt.IsZero() {
+		message.CreatedAt = time.Now().UTC()
+	}
+	if message.UpdatedAt.IsZero() {
+		message.UpdatedAt = message.CreatedAt
+	}
+	return r.insertMessageWithSessionLock(ctx, message, requestsInput, messageType, metadataJSON)
+}
+
+func (r *Repository) insertMessageRow(
+	ctx context.Context,
+	execer taskSessionExecutor,
+	message *models.Message,
+	requestsInput int,
+	messageType, metadataJSON string,
+) error {
+	_, err := execer.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO task_session_messages (id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at, prompt_seq)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt, message.UpdatedAt, message.PromptIndex)
 	return err
+}
+
+// insertMessageWithSessionLock serializes message insertion with rollback of
+// the message's turn on PostgreSQL. SQLite's writer pool is configured with a
+// single connection in db.OpenSQLite, which provides equivalent serialization.
+// If SQLite ever allows concurrent writers, add the equivalent session lock.
+func (r *Repository) insertMessageWithSessionLock(
+	ctx context.Context,
+	message *models.Message,
+	requestsInput int,
+	messageType, metadataJSON string,
+) error {
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		return r.insertMessageRow(ctx, r.db, message, requestsInput, messageType, metadataJSON)
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin message creation: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), message.TaskSessionID); err != nil {
+		return err
+	}
+	if err := r.insertMessageRow(ctx, tx, message, requestsInput, messageType, metadataJSON); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit message creation: %w", err)
+	}
+	return nil
 }
 
 // GetMessage retrieves a message by ID
@@ -130,13 +177,51 @@ func (r *Repository) ListMessagesPaginated(ctx context.Context, sessionID string
 	if err != nil {
 		return nil, false, err
 	}
-	query, args := buildListMessagesQuery(sessionID, opts, cursor, sortDir, limit)
+	// The outer cursor bound is the cursor row's normalized-microsecond key,
+	// derived through the same SQL expression the per-row key uses — never a
+	// driver-parsed Go time.Time (mattn/go-sqlite3 serializes time.Time as
+	// RFC3339Nano, which mis-compares lexicographically against the
+	// space-separated per-row expression and silently shifts page boundaries).
+	var cursorKey string
+	if cursor != nil {
+		cursorKey, err = r.messageCursorKey(ctx, cursor.ID)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	query, args := buildListMessagesQuery(r.ro.DriverName(), sessionID, opts, cursor, cursorKey, sortDir, limit)
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, false, err
 	}
 	defer func() { _ = rows.Close() }()
-	return scanMessageRows(rows, limit)
+	return scanPromptIndexedMessageRows(rows, limit)
+}
+
+// messageCursorKey returns the normalized-microsecond ordering key of the
+// cursor row, derived through the same SQL expression the per-row key uses.
+// On SQLite the expression yields the key text directly; on PostgreSQL the
+// stored timestamp is scanned and formatted to the exact key bytes (the
+// stored value is UTC by convention, and a naive timestamp carries no offset
+// whose parsing could diverge from the per-row expression).
+func (r *Repository) messageCursorKey(ctx context.Context, id string) (string, error) {
+	drv := r.ro.DriverName()
+	query := fmt.Sprintf(
+		"SELECT %s FROM task_session_messages WHERE id = ?",
+		dialect.NormalizedMicrosecond(drv, "created_at"),
+	)
+	if dialect.IsPostgres(drv) {
+		var ts time.Time
+		if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), id).Scan(&ts); err != nil {
+			return "", err
+		}
+		return formatPromptKey(ts), nil
+	}
+	var key string
+	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), id).Scan(&key); err != nil {
+		return "", err
+	}
+	return key, nil
 }
 
 // ListMessagesForPlugin returns messages matching the plugin Host data API
@@ -232,25 +317,79 @@ func (r *Repository) resolveMessageCursor(ctx context.Context, sessionID string,
 	return nil, nil
 }
 
-func buildListMessagesQuery(sessionID string, opts models.ListMessagesOptions, cursor *models.Message, sortDir string, limit int) (string, []interface{}) {
+// buildListMessagesQuery assembles the paginated message list query and bound arguments, ordering rows by the normalized-microsecond key with cursor and limit bounds.
+func buildListMessagesQuery(driverName, sessionID string, opts models.ListMessagesOptions, cursor *models.Message, cursorKey string, sortDir string, limit int) (string, []interface{}) {
+	nm := dialect.NormalizedMicrosecond(driverName, "created_at")
+	// The cursor bound is the normalized key literal `YYYY-MM-DD HH:MM:SS.ffffff`
+	// (space separator, zero-padded 6-digit fraction, no `Z`, UTC). PostgreSQL
+	// casts it to `timestamp` so it compares against its native per-row key;
+	// SQLite compares the text key directly.
+	bound := "?"
+	if dialect.IsPostgres(driverName) {
+		bound = "CAST(? AS timestamp)"
+	}
+	// prompt_index is the durable per-session ordinal persisted at creation
+	// (prompt_seq), so it is a plain column: absolute rather than
+	// page-relative by construction, no window pass needed. The cursor
+	// predicate, ORDER BY, and LIMIT (limit+1) use the same normalized key as
+	// the rest of the package, so every page is contiguous in ordinal order
+	// and the sentinel `promptNumber === 1` stop can never skip a
+	// higher-ordinal prompt sharing a microsecond.
 	query := `
-		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
-		FROM task_session_messages WHERE task_session_id = ?`
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at,
+		       CASE WHEN author_type = 'user' THEN prompt_seq ELSE 0 END AS prompt_index
+		FROM task_session_messages
+		WHERE task_session_id = ?`
 	args := []interface{}{sessionID}
 	if cursor != nil {
 		if opts.Before != "" {
-			query += " AND (created_at < ? OR (created_at = ? AND id < ?))"
+			query += fmt.Sprintf(" AND (%s < %s OR (%s = %s AND id < ?))", nm, bound, nm, bound)
 		} else if opts.After != "" {
-			query += " AND (created_at > ? OR (created_at = ? AND id > ?))"
+			query += fmt.Sprintf(" AND (%s > %s OR (%s = %s AND id > ?))", nm, bound, nm, bound)
 		}
-		args = append(args, cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
+		args = append(args, cursorKey, cursorKey, cursor.ID)
 	}
-	query += fmt.Sprintf(" ORDER BY created_at %s, id %s", sortDir, sortDir)
+	query += fmt.Sprintf(" ORDER BY %s %s, id %s", nm, sortDir, sortDir)
 	if limit > 0 {
 		query += sqlLimitClause
 		args = append(args, limit+1)
 	}
 	return query, args
+}
+
+// scanPromptIndexedMessageRows scans the 13-column indexed message projection
+// (the 12 legacy columns plus the computed prompt_index), returning the
+// page-truncated slice and whether more rows remain, like scanMessageRows.
+func scanPromptIndexedMessageRows(rows interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+}, limit int) ([]*models.Message, bool, error) {
+	var result []*models.Message
+	for rows.Next() {
+		message := &models.Message{}
+		var requestsInput int
+		var messageType string
+		var metadataJSON string
+		if err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt, &message.PromptIndex); err != nil {
+			return nil, false, err
+		}
+		message.RequestsInput = requestsInput == 1
+		message.Type = models.MessageType(messageType)
+		if metadataJSON != "" && metadataJSON != "{}" {
+			if err := json.Unmarshal([]byte(metadataJSON), &message.Metadata); err != nil {
+				return nil, false, fmt.Errorf("failed to deserialize message metadata: %w", err)
+			}
+		}
+		result = append(result, message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	if limit > 0 && len(result) > limit {
+		return result[:limit], true, nil
+	}
+	return result, false, nil
 }
 
 func scanMessageRows(rows interface {
@@ -425,28 +564,34 @@ func (r *Repository) FindMessagesByPendingID(ctx context.Context, pendingID stri
 	return result, err
 }
 
-// FindPendingClarificationMessagesBySessionID returns every clarification_request
-// message for the session that is still pending per spec D4a's membership test
-// (both conjuncts, spec G1): its metadata.status is not one of the four terminal
-// clarification.Status values, including an absent or unrecognized status (spec
-// G5), AND its pending_id has no clarification_resolutions row (spec G1/G4). The
-// caller — the orchestrator's workflow guard, and the canceller as a fallback
-// when the in-memory store entry has already been drained by a racing timeout
-// path — must never treat a resolved bundle as still pending on the strength of
-// stale message metadata.
-func (r *Repository) FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
+// FindActiveClarificationMessagesBySessionID returns pending clarification rows
+// owned by the session's newest durable turn. Older pending rows remain history.
+// The canceller still drains live legacy waiters before this lookup. Persisted
+// rows without their schema-required turn are malformed and need explicit data
+// cleanup; they never become current input authority.
+func (r *Repository) FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	drv := r.ro.DriverName()
-	statusExpr := dialect.JSONExtract(drv, "metadata", "status")
-	pendingIDExpr := dialect.JSONExtract(drv, "metadata", "pending_id")
 	query := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
-		FROM task_session_messages
-		WHERE task_session_id = ? AND type = 'clarification_request'
-		  AND (%[1]s IS NULL OR %[1]s NOT IN (%[2]s))
-		  AND NOT EXISTS (SELECT 1 FROM clarification_resolutions cr WHERE cr.pending_id = %[3]s)
-		ORDER BY created_at ASC
-	`, statusExpr, clarificationTerminalStatusesSQL, pendingIDExpr)
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), sessionID)
+		WITH current_turn AS (
+			SELECT turn_row.id
+			FROM task_session_turns turn_row
+			WHERE turn_row.task_session_id = ?
+			  AND %s
+			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+			LIMIT 1
+		)
+		SELECT m.id, m.task_session_id, m.task_id, m.turn_id, m.author_type, m.author_id,
+		       m.content, m.requests_input, m.type, m.metadata, m.created_at, m.updated_at
+		FROM task_session_messages m
+		JOIN current_turn current ON current.id = m.turn_id
+		WHERE m.task_session_id = ?
+		  AND m.type = 'clarification_request'
+		  AND COALESCE(%s, '') IN ('', 'pending')
+		ORDER BY m.created_at ASC, m.id ASC
+	`, turnAuthorityPredicate(drv, "turn_row"), dialect.JSONExtract(drv, "m.metadata", "status"))
+	// First sessionID selects current-turn authority; second scopes messages so
+	// a malformed cross-session turn reference cannot leak another session's row.
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), sessionID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -463,12 +608,9 @@ func (r *Repository) GetPendingActionsBySessionIDs(ctx context.Context, sessionI
 		return result, nil
 	}
 	placeholders := make([]string, len(sessionIDs))
-	args := make([]interface{}, 0, len(sessionIDs)*2)
+	args := make([]interface{}, 0, len(sessionIDs))
 	for i, id := range sessionIDs {
 		placeholders[i] = "?"
-		args = append(args, id)
-	}
-	for _, id := range sessionIDs {
 		args = append(args, id)
 	}
 	query := pendingActionsBySessionQuery(r.ro.DriverName(), placeholders)
@@ -482,6 +624,9 @@ func (r *Repository) GetPendingActionsBySessionIDs(ctx context.Context, sessionI
 		if err := rows.Scan(&sessionID, &action); err != nil {
 			return nil, err
 		}
+		// Clarification is the explicit per-session priority when malformed or
+		// transitional history contains both pending action kinds. Enforce it
+		// here so correctness never depends on UNION ALL row order.
 		if action == string(models.TaskPendingActionClarification) {
 			result[sessionID] = models.TaskPendingActionClarification
 			continue
@@ -499,31 +644,36 @@ func (r *Repository) GetPendingActionsBySessionIDs(ctx context.Context, sessionI
 func pendingActionsBySessionQuery(driverName string, placeholders []string) string {
 	placeholderList := strings.Join(placeholders, ",")
 	statusExpr := dialect.JSONExtract(driverName, "m.metadata", "status")
-	latestOrderExpr := pendingActionMessageOrder(driverName, "")
 	permissionOrderExpr := pendingActionMessageOrder(driverName, "m")
+	// Durable turns are authoritative. A message without a matching turn is
+	// malformed under the schema foreign key and must not reactivate old input.
+	// Terminal sessions quarantine pending history even when best-effort expiry
+	// persistence failed. Both message CTEs inherit the requested-session
+	// boundary through their task_session_id and turn_id joins to current_turn.
 	return fmt.Sprintf(`
-		WITH latest_message AS (
-			SELECT task_session_id, turn_id
+		WITH current_turn AS (
+			SELECT task_session_id, id AS turn_id
 			FROM (
 				SELECT task_session_id,
-				       turn_id,
+				       id,
 				       ROW_NUMBER() OVER (
 				         PARTITION BY task_session_id
-				         ORDER BY created_at DESC, %s DESC
+				         ORDER BY started_at DESC, created_at DESC, id DESC
 				       ) AS rn
-				FROM task_session_messages
-				WHERE task_session_id IN (%s)
+				FROM task_session_turns turn_row
+				WHERE turn_row.task_session_id IN (%s)
+				  AND %s
+				  AND %s
 			) ranked
 			WHERE rn = 1
 		),
 		pending_clarifications AS (
 			SELECT DISTINCT m.task_session_id, 'clarification' AS action
 			FROM task_session_messages m
-			JOIN latest_message latest
-			  ON latest.task_session_id = m.task_session_id
-			 AND latest.turn_id = m.turn_id
-			WHERE m.task_session_id IN (%s)
-			  AND m.type = 'clarification_request'
+			JOIN current_turn current
+			  ON current.task_session_id = m.task_session_id
+			 AND current.turn_id = m.turn_id
+			WHERE m.type = 'clarification_request'
 			  AND COALESCE(%s, '') IN ('', 'pending')
 		),
 		latest_permissions AS (
@@ -534,9 +684,9 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 			         ORDER BY m.created_at DESC, %s DESC
 			       ) AS rn
 			FROM task_session_messages m
-			JOIN latest_message latest
-			  ON latest.task_session_id = m.task_session_id
-			 AND latest.turn_id = m.turn_id
+			JOIN current_turn current
+			  ON current.task_session_id = m.task_session_id
+			 AND current.turn_id = m.turn_id
 			WHERE m.type = 'permission_request'
 		)
 		SELECT task_session_id, action
@@ -545,7 +695,8 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 		SELECT task_session_id, 'permission' AS action
 		FROM latest_permissions
 		WHERE rn = 1 AND status IN ('', 'pending')
-	`, latestOrderExpr, placeholderList, placeholderList, statusExpr, statusExpr, permissionOrderExpr)
+	`, placeholderList, turnAuthorityPredicate(driverName, "turn_row"),
+		nonTerminalSessionPredicate("turn_row"), statusExpr, statusExpr, permissionOrderExpr)
 }
 
 func pendingActionMessageOrder(driverName string, qualifier string) string {

@@ -187,6 +187,161 @@ Task tools use normal client discovery. When `step_complete_kandev` is required 
 
 `create_task_kandev` advertises `prompt` for instructions delivered to a newly started agent. Older callers may still send `description` when `prompt` is absent, but sending both is an error; the compatibility name is intentionally omitted from the advertised schema.
 
+### Native rich output
+
+Task and Office agents can call `show_rich_output_kandev` when a workspace file,
+trend, comparison, or small metric group is materially clearer as a native
+presentation than as prose. The injected agent context requires this tool when
+the user explicitly asks for a chart, graph, plot, or file preview and suitable
+data is available. Prefer plain text or Markdown for ordinary answers. Small
+row-and-column comparisons should remain Markdown tables; native tables would
+duplicate that capability while adding another layout and accessibility
+contract.
+
+Version 1 accepts a title, an optional description, and one to four ordered
+blocks:
+
+- `file` references a task-workspace-relative path. It can include an optional
+  repository discriminator, title, caption, and MIME type. Kandev never accepts
+  absolute paths, traversal, URLs, data URIs, or inline file bytes.
+- `chart` renders a line or bar chart and includes a plain-text summary for
+  nonvisual interpretation. Data can be supplied in either of two ways:
+  - Inline `labels` plus 1 to 4 `series`, with one finite numeric or `null`
+    value per label.
+  - A `csv` descriptor with a workspace-relative `.csv` `path`, optional
+    `repo`, exact `x_column`, and 1 to 4 numeric `series` column mappings.
+    Kandev reads 1 to 100 rows in file order. Empty numeric cells become gaps.
+- `metrics` renders 1 to 6 plain-text label/value pairs with optional details.
+
+Kandev renders visible x/y values and automatically shortens ISO date/time
+labels, large numbers, and long categories on the axes. Tooltips retain the
+original x label and full values. Give every series a clear label and include
+its unit when useful, for example `p95 (ms)`. A one-series chart displays that
+label as an informational legend; a multi-series chart renders local keyboard-
+and touch-operable legend filters. Those filters change only the current view,
+not the persisted result or agent context.
+
+The complete tool input is limited to 64 KiB. Titles are limited to 120
+characters and the optional presentation description to 500 characters.
+Unknown fields and unsupported versions are rejected. Agents cannot choose
+HTML, Markdown, JavaScript, CSS, colors, animation, component names, or layout;
+Kandev owns those details so results remain consistent, accessible, and
+responsive.
+
+```json
+{
+  "version": 1,
+  "title": "Build health",
+  "description": "Latest local verification",
+  "blocks": [
+    {
+      "type": "metrics",
+      "items": [
+        { "label": "Passed", "value": "38" },
+        { "label": "Duration", "value": "12.4s", "detail": "Warm cache" }
+      ]
+    },
+    {
+      "type": "chart",
+      "chart_type": "line",
+      "title": "Runtime by run",
+      "summary": "Runtime fell across the last five runs.",
+      "labels": ["1", "2", "3", "4", "5"],
+      "series": [
+        { "label": "Runtime (s)", "values": [18.2, 16.4, 15.1, 13.8, 12.4] }
+      ]
+    },
+    {
+      "type": "file",
+      "path": "reports/build.json",
+      "title": "Raw report",
+      "mime_type": "application/json"
+    }
+  ]
+}
+```
+
+Use a CSV-backed line chart for a time series already present in the workspace:
+
+```json
+{
+  "version": 1,
+  "title": "API latency",
+  "blocks": [
+    {
+      "type": "chart",
+      "chart_type": "line",
+      "title": "p50 and p95 latency",
+      "summary": "Tail latency fell across the recorded samples.",
+      "csv": {
+        "path": "reports/latency.csv",
+        "x_column": "recorded_at",
+        "series": [
+          { "column": "p50_ms", "label": "p50 (ms)" },
+          { "column": "p95_ms", "label": "p95 (ms)" }
+        ]
+      }
+    }
+  ]
+}
+```
+
+The source file might contain:
+
+```csv
+recorded_at,p50_ms,p95_ms
+2026-08-13T10:00:00Z,18.2,29.4
+2026-08-14T10:00:00Z,16.4,25.1
+```
+
+Use the same CSV form for a categorical bar comparison:
+
+```json
+{
+  "version": 1,
+  "title": "Traffic mix",
+  "blocks": [
+    {
+      "type": "chart",
+      "chart_type": "bar",
+      "title": "Requests by route",
+      "summary": "The API route carries most request volume.",
+      "csv": {
+        "path": "reports/routes.csv",
+        "x_column": "route",
+        "series": [{ "column": "requests", "label": "Requests" }]
+      }
+    }
+  ]
+}
+```
+
+CSV files must be UTF-8 text with one unique header row, no more than 256 KiB,
+and 1 to 100 data rows. Named columns must exist exactly. X values must be
+non-empty and at most 120 characters. Selected numeric cells must be finite
+numbers or empty; malformed rows and invalid values reject the tool call with
+the source row and column when available.
+
+A completed presentation persists with the conversation and replays after a
+reload. For a CSV chart, Kandev resolves selected columns during the tool call
+and persists only bounded labels plus numeric or `null` values. It never stores
+the raw CSV and never re-reads it during replay, so later edits or workspace
+cleanup do not change the accepted chart.
+
+File-preview bytes do not persist: Kandev fetches a referenced file only after
+the user selects **Preview**, and **Open file** uses the existing desktop or
+mobile file viewer. If the task workspace later disappears, the presentation
+remains while that file block reports that its preview is unavailable.
+
+This is a Kandev-native MCP tool, not a portable MCP rich-content standard or an
+MCP App. Portable MCP content uses protocol-level content and resource types that
+multiple compatible hosts can interpret, usually with less host-specific visual
+control. MCP Apps let a server supply an interactive `ui://` application that a
+supporting host runs in a sandbox; that enables richer interaction but introduces
+a larger trust, permissions, lifecycle, and compatibility surface. Neither path
+is implemented by this tool, and other MCP clients should not be expected to
+render its payload as Kandev does.
+
 ### Task dependencies over MCP
 
 `create_task_kandev` accepts `blocked_by`, a list of task IDs the new task must
@@ -219,6 +374,18 @@ records nothing and the task starts or does not start purely per `start_agent`.
 Only success resolves a link. A predecessor that fails or is cancelled leaves
 its dependents blocked with a reason naming it, and Kandev does not retry it or
 drop the link on its own.
+
+Starting a chain step by any other means consumes its recorded start, so the
+gate cannot fire a second session on a task that is already running. A start
+that fails keeps the intent, and preparing a workspace without launching an
+agent does not consume it.
+
+While a step is still waiting, `update_task_kandev` accepts
+`deferred_launch_prompt` to replace the prompt it will launch with. Use it when
+the brief written at creation time has gone stale. The rest of the recorded
+launch (agent profile, executor) is preserved. Once the task has started the
+update is rejected, because nothing would read the new prompt; send the new
+context with `message_task_kandev` instead.
 
 ### Autopilot tasks and MCP profiles
 
@@ -274,12 +441,12 @@ Every create response from both the MCP tool result and the REST response body a
 <details>
 <summary>Reading the four outcomes</summary>
 
-| `deduplicated` | `creation_complete` | Meaning |
-| --- | --- | --- |
-| `false` | `true` | This call created the task. |
-| `true` | `true` | An earlier, finished create already holds this identity; that task is returned unchanged, with no new task, agent, or side effect of any kind. |
-| `true` | `false` | An earlier create for this identity had not finished when observed and may still be running, or may have crashed. The task is returned as-is; nothing about it is started, modified, or assumed finished. |
-| `false` | `true`, and `external_id` absent from the response | This call finished creating a task, but another actor released or reused the identity in the narrow window before settlement. The task exists and is otherwise normal; it simply is not holding that identity anymore. |
+| `deduplicated` | `creation_complete`                                | Meaning                                                                                                                                                                                                                |
+| -------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `false`        | `true`                                             | This call created the task.                                                                                                                                                                                            |
+| `true`         | `true`                                             | An earlier, finished create already holds this identity; that task is returned unchanged, with no new task, agent, or side effect of any kind.                                                                         |
+| `true`         | `false`                                            | An earlier create for this identity had not finished when observed and may still be running, or may have crashed. The task is returned as-is; nothing about it is started, modified, or assumed finished.              |
+| `false`        | `true`, and `external_id` absent from the response | This call finished creating a task, but another actor released or reused the identity in the narrow window before settlement. The task exists and is otherwise normal; it simply is not holding that identity anymore. |
 
 </details>
 
@@ -325,12 +492,12 @@ Task-mode review automation tools follow the providers attached to the task's
 repositories. Kandev computes their union when the session launches or
 resumes:
 
-| Attached providers | Discoverable tools |
-| ------------------ | ------------------ |
-| GitHub only        | `get_task_pr_automation_kandev`, `update_task_pr_automation_kandev` |
-| GitLab only        | `get_task_mr_automation_kandev`, `update_task_mr_automation_kandev` |
-| GitHub and GitLab   | Both provider-specific pairs |
-| None or unsupported | Neither pair |
+| Attached providers  | Discoverable tools                                                  |
+| ------------------- | ------------------------------------------------------------------- |
+| GitHub only         | `get_task_pr_automation_kandev`, `update_task_pr_automation_kandev` |
+| GitLab only         | `get_task_mr_automation_kandev`, `update_task_mr_automation_kandev` |
+| GitHub and GitLab   | Both provider-specific pairs                                        |
+| None or unsupported | Neither pair                                                        |
 
 Adding a repository source successfully to an idle task can update the live
 session's task MCP tool list after materialization. If live refresh is
@@ -341,6 +508,8 @@ authoritative for every call. The existing automation request and response
 payloads are unchanged.
 
 `spawn_session_kandev` creates a named sibling session on the current task by default and can target another task in the same workspace. `message_task_kandev` can address a task's primary session or an explicit session ID: a running agent receives queued input, an idle/created session can be started, and a failed or cancelled session rejects the message.
+
+Without `session_id` the message goes to the task's primary session. If that primary is cancelled or failed, Kandev falls back to the newest session on the task that can still take a message, so a task with a live session stays reachable after its primary was stopped. A session named explicitly by `session_id` is never redirected. When every session is terminal the call fails and names `spawn_session_kandev`, which is the way to give the task a new session.
 
 A same-task message requires the sibling's session ID. Normal messages can cross workspaces when the sender knows the full task ID. Delivery to a running session is queued by default. When a direct child must abandon its current approach and receive replacement work now, its parent should use `message_task_kandev` with `delivery_mode: "interrupt"`; another sender receives a hard error rather than a silent downgrade, and a request that cannot dispatch safely remains queued.
 
@@ -428,11 +597,45 @@ An agent profile can add `stdio`, `http`, `sse`, or `streamable_http` servers wh
 
 Stdio normally starts per session and cannot be shared. Network servers can be shared or per-session. The executor's MCP policy can deny transports/server names, rewrite URLs, or inject environment. See [Agents and profiles](agents-and-profiles.md) for configuration, secret handling, and failure behavior.
 
-### Diagnose one running session
+### Inspect one running session
 
-Use the neutral plug button beside the chat composer to inspect the current session's MCP attachment report. It distinguishes configuration delivered to the agent from a connection observed by Kandev: the built-in task server becomes **Connected** after MCP initialize and **Active** after it serves `tools/list`. A third-party profile server usually remains **Delivered · connection unverified** because it connects directly to the agent rather than through Kandev. Missing observation is not a failure; red appears only for an explicit sanitized error.
+Open the **MCP servers** explorer with the button beside the chat composer. The
+explorer shows attachment status for the current session and execution. On
+desktop, it opens a wide dialog. On touch devices, it opens a full-height
+drawer.
 
-On desktop, hover or focus the button for the compact status list. On touch devices, tap its 44px target to open the same list in a bottom drawer. The report is per Kandev session and execution, so simultaneous agents in one task never share a status row. It stores only bounded, sanitized attachment facts: no MCP headers, environment values, tool arguments/results, raw ACP frames, or agent output.
+The explorer has server, tool-list, and tool-detail levels. On desktop, the
+server list stays visible beside the active level. On touch devices, select a
+server to open its tool list. Select **Back to servers** to return.
+
+Select `kandev` after Kandev serves `tools/list`. The tool list is sorted and
+scrolls independently from the explorer header. Each row shows the tool name
+and an estimated token value. Select a tool to open its description and
+arguments. Select **Back to tools** to return to the same list position.
+
+The tool page shows common object properties as argument rows. It also shows
+plain JSON for nested or composed schemas. A tool without an input schema shows
+**No arguments**. A schema that exceeds a storage limit shows **Schema too
+large to display**.
+
+Kandev stores at most 64 KiB for one input schema and 512 KiB for all schemas
+in one catalog. It stores at most 128 tools and 1,024 UTF-8 bytes for each
+description. Notices identify truncated catalogs or schemas.
+
+The `~N tokens` value uses `o200k_base` on the complete compact MCP tool JSON.
+It is an estimate, not a provider context count or billing count. The agent can
+use a different tokenizer or tool-loading format.
+
+A profile server can show **Delivered, connection unverified**. That server
+connects directly to the agent, so Kandev cannot inspect its `tools/list`
+result, descriptions, schemas, or token estimates. The explorer still shows
+safe status metadata. The built-in Kandev server becomes **Connected** after
+MCP initialize. It becomes **Active** after it serves `tools/list`. Missing
+observation is not a failure. Red appears only for an explicit sanitized error.
+
+The report is per Kandev session and execution. It stores only bounded,
+sanitized attachment facts. It does not store MCP headers, environment values,
+tool arguments or results, raw ACP frames, or agent output.
 
 </details>
 
@@ -451,14 +654,16 @@ http://127.0.0.1:<backend-port>/mcp
 
 SSE compatibility uses `/mcp/sse` with messages sent to `/mcp/message`. A reverse proxy must support long-lived streaming connections.
 
-External MCP exposes 33 tools in these groups:
+External MCP exposes 36 tools in these groups:
 
-- workspace/workflow configuration: list workspaces, workflows, repositories, and workflow steps; create, update, delete, or import workflows; create, update, delete, or reorder steps;
+- workspace/workflow configuration: list workspaces, workflows, repositories, and workflow steps; create, update, delete, import, or export workflows; create, update, delete, or reorder steps;
 - agents and profiles: list/update agents; create/delete profiles; list/update profiles; get/update profile MCP configuration;
 - executors: list executors and profiles; create, update, or delete executor profiles;
 - tasks: list, create, move, delete, archive, or update task state; list a task's sessions; and read task conversation.
 
-The settings page's static **Available tools** preview currently counts 30 and omits `list_repositories_kandev`, `import_workflow_kandev`, and `get_task_conversation_kandev`. Treat the client's live `tools/list` response from the endpoint, not that preview, as authoritative.
+`export_workflow_kandev` takes `workflow_id` and returns one version 1 `kandev_workflow` JSON document. It omits instance IDs and timestamps. Pass its JSON text unchanged as `document` to `import_workflow_kandev` when it is within the existing 1 MiB import limit.
+
+The settings page's static **Available tools** preview currently counts 30 and omits `list_repositories_kandev`, `import_workflow_kandev`, `export_workflow_kandev`, and `get_task_conversation_kandev`. Treat the client's live `tools/list` response from the endpoint, not that preview, as authoritative.
 
 In external mode, `create_task_kandev` has no current task and does not accept the `parent_id: "self"` shorthand. Its registered top-level contract asks for a repository ID, repository URL (including a supported GitHub pull request or GitLab merge request URL), or local path; workspace and workflow resolve automatically only when unambiguous. The current handler can nevertheless accept an omitted repository and create repo-less work, which is a contract/implementation mismatch rather than a supported equivalent of the regular UI's **None** option. Supply an explicit repository locator for portable clients. A resolvable agent profile is required even with `start_agent: false`; otherwise `start_agent` defaults to true. To create a subtask, pass the full ID of an existing parent.
 

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Card, CardContent } from "@kandev/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,13 @@ import { ApiError } from "@/lib/api/client";
 import { listTokens, mintToken, revokeToken, type ApiToken } from "@/lib/api/domains/auth-api";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { formatDateTime } from "@/lib/i18n/formats";
+import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import {
+  SettingsErrorText,
+  SettingsFieldDescription,
+  SettingsFieldLabel,
+} from "@/components/settings/settings-typography";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 function useTokensList() {
   const { t } = useTranslation();
@@ -112,9 +119,7 @@ function MintTokenForm({
         <DialogDescription>{t("account:createApiTokenDescription")}</DialogDescription>
       </DialogHeader>
       <div className="flex flex-col gap-1">
-        <label htmlFor="api-tokens-name" className="text-xs text-muted-foreground">
-          {t("account:name")}
-        </label>
+        <SettingsFieldLabel htmlFor="api-tokens-name">{t("account:name")}</SettingsFieldLabel>
         <Input
           id="api-tokens-name"
           data-testid="api-tokens-name"
@@ -122,11 +127,7 @@ function MintTokenForm({
           onChange={(e) => setName(e.target.value)}
         />
       </div>
-      {error && (
-        <p className="text-xs text-destructive" data-testid="api-tokens-mint-error">
-          {error}
-        </p>
-      )}
+      {error && <SettingsErrorText data-testid="api-tokens-mint-error">{error}</SettingsErrorText>}
       <DialogFooter>
         <Button variant="outline" className="cursor-pointer" onClick={onCancel}>
           {t("account:cancel")}
@@ -228,26 +229,26 @@ export function ApiTokens() {
 
   return (
     <Card data-testid="api-tokens-card">
-      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-        <CardTitle className="text-base flex items-center gap-2">
-          <IconKey className="h-4 w-4" /> {t("account:apiTokens")}
-        </CardTitle>
-        <Button
-          size="sm"
-          className="cursor-pointer"
-          onClick={() => setMintOpen(true)}
-          data-testid="api-tokens-create"
-        >
-          {t("account:newToken")}
-        </Button>
-      </CardHeader>
+      <SettingsCardHeader
+        title={
+          <span className="flex items-center gap-2">
+            <IconKey className="h-4 w-4" /> {t("account:apiTokens")}
+          </span>
+        }
+        actions={
+          <Button
+            size="sm"
+            className={settingsActionClassName("cursor-pointer")}
+            onClick={() => setMintOpen(true)}
+            data-testid="api-tokens-create"
+          >
+            {t("account:newToken")}
+          </Button>
+        }
+      />
       <CardContent className="space-y-3">
-        <p className="text-xs text-muted-foreground">{t("account:apiTokensBlurb")}</p>
-        {error && (
-          <p className="text-xs text-destructive" data-testid="api-tokens-error">
-            {error}
-          </p>
-        )}
+        <SettingsFieldDescription>{t("account:apiTokensBlurb")}</SettingsFieldDescription>
+        {error && <SettingsErrorText data-testid="api-tokens-error">{error}</SettingsErrorText>}
         {!loaded && !error && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Spinner className="size-4" /> {t("account:loadingTokens")}
@@ -266,7 +267,7 @@ export function ApiTokens() {
             <TableBody>
               {tokens.map((token) => (
                 <TableRow key={token.id} data-testid="api-tokens-row">
-                  <TableCell className="text-xs">{token.name}</TableCell>
+                  <TableCell className="text-sm">{token.name}</TableCell>
                   <TableCell className="text-xs">{formatDateTime(token.created_at)}</TableCell>
                   <TableCell className="text-xs">
                     {token.last_used_at ? formatDateTime(token.last_used_at) : t("account:never")}

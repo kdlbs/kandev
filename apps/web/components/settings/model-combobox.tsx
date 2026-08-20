@@ -15,6 +15,7 @@ import {
   CommandList,
 } from "@kandev/ui/command";
 import type { ModelEntry } from "@/lib/types/http";
+import { settingsControlClassName } from "@/components/settings/settings-control";
 
 type ModelComboboxProps = {
   value: string;
@@ -94,7 +95,7 @@ export function ModelCombobox({
           role="combobox"
           aria-expanded={open}
           disabled={disabled}
-          className="w-full justify-between font-normal cursor-pointer"
+          className={settingsControlClassName("w-full justify-between font-normal cursor-pointer")}
           data-testid="profile-model-combobox-trigger"
         >
           <TriggerLabel

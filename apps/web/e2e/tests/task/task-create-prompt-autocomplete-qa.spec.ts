@@ -77,8 +77,38 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     // The @query text is preserved (Esc just closes the menu, doesn't undo typing).
     await expect(textarea).toHaveValue("@qa-es");
 
-    // Dialog should still be open — Escape went to the menu, not the dialog.
-    await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
+    // The open state must persist after the close animation window.
+    await expect(testPage.getByTestId("create-task-dialog")).toHaveAttribute("data-state", "open");
+    await expect(textarea).toBeFocused();
+
+    await textarea.pressSequentially(" continued");
+    await expect(textarea).toHaveValue("@qa-es continued");
+    await expect(testPage.getByText(MENU_TITLE)).toHaveCount(0);
+  });
+
+  test("Escape keeps Create Task open without an autocomplete menu", async ({
+    testPage,
+    prCapture,
+  }) => {
+    test.setTimeout(60_000);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.createTaskButton.first().click();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    const textarea = testPage.getByTestId("task-description-input");
+    await expect(dialog).toHaveAttribute("data-state", "open");
+    await textarea.fill("Keep this draft");
+    await expect(testPage.getByText(MENU_TITLE)).toHaveCount(0);
+
+    await textarea.press("Escape");
+
+    await expect(dialog).toHaveAttribute("data-state", "open");
+    await expect(textarea).toHaveValue("Keep this draft");
+    await prCapture.screenshot("create-task-dialog-after-escape-desktop", {
+      caption: "Create Task stays open with the draft after Escape on desktop.",
+    });
   });
 
   test("ArrowDown + Enter selects the second prompt", async ({ testPage, apiClient }) => {

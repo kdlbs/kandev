@@ -11,6 +11,7 @@ export function renderPluginIntegrationSettings(integrationId: string, workspace
   const registration = pluginRegistry.getIntegrationSetting(integrationId);
   if (!registration) return null;
   const Component = registration.Component;
+  const Action = registration.action;
   const Icon = resolvePluginIcon(registration.icon);
   return (
     <PluginErrorBoundary
@@ -21,6 +22,7 @@ export function renderPluginIntegrationSettings(integrationId: string, workspace
         title={registration.label}
         description={registration.description}
         icon={<Icon className="h-5 w-5" />}
+        action={Action ? <Action workspaceId={workspaceId} surface="detail" /> : undefined}
       >
         <Component workspaceId={workspaceId} />
       </SettingsSection>

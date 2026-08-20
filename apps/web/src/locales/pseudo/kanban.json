@@ -100,5 +100,10 @@
   "workflowStepFallback": "ŵōŕķƒĺōŵ śţēƥ {{stepId}}",
   "columns": "Ćōĺũḿńś",
   "columnsForWorkflow": "Ćōĺũḿńś ƒōŕ {{name}}",
-  "needsReassignment": "Ńēēďś Ŕēàśśĩĝńḿēńţ"
+  "needsReassignment": "Ńēēďś Ŕēàśśĩĝńḿēńţ",
+  "noTasksYet": "Ńō ţàśķś ŷēţ",
+  "noWorkflowsAvailableYet": "Ńō ŵōŕķƒĺōŵś àvàĩĺàƀĺē ŷēţ.",
+  "pullToRefreshPull": "Ƥũĺĺ ţō ŕēƒŕēśĥ",
+  "pullToRefreshRefreshing": "Ŕēƒŕēśĥĩńĝ ţàśķś",
+  "pullToRefreshRelease": "Ŕēĺēàśē ţō ŕēƒŕēśĥ"
 }

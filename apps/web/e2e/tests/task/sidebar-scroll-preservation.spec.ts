@@ -399,7 +399,7 @@ test.describe("sidebar scrolling", () => {
       const targetTask = created[0];
       await testPage.goto("/settings/general/appearance");
       await expect(
-        testPage.getByRole("heading", { name: "Appearance", exact: true }),
+        testPage.getByRole("heading", { level: 2, name: "Appearance", exact: true }),
       ).toBeVisible();
 
       await testPage.getByTestId("changes-panel-layout-select").click();

@@ -17,7 +17,10 @@ export function buildTaskSwitcherProps(args: {
   stepsByWorkflowId: TaskSwitcherComponentProps["stepsByWorkflowId"];
   highlightedTaskId: string | null;
   highlightedSelectedTaskId: string | null;
-  effectiveView: { collapsedGroups: TaskSwitcherComponentProps["collapsedGroupKeys"] };
+  effectiveView: {
+    collapsedGroups: TaskSwitcherComponentProps["collapsedGroupKeys"];
+    sort: { key: string };
+  };
   handleToggleGroup: TaskSwitcherComponentProps["onToggleGroup"];
   collapsedSubtaskParents: TaskSwitcherComponentProps["collapsedSubtaskParentIds"];
   toggleSubtaskCollapsed: TaskSwitcherComponentProps["onToggleSubtasks"];
@@ -43,6 +46,7 @@ export function buildTaskSwitcherProps(args: {
     activeTaskId: args.highlightedTaskId,
     selectedTaskId: args.highlightedSelectedTaskId,
     collapsedGroupKeys: args.effectiveView.collapsedGroups,
+    showActivityTime: args.effectiveView.sort.key === "lastActivityAt",
     onToggleGroup: args.handleToggleGroup,
     collapsedSubtaskParentIds: args.collapsedSubtaskParents,
     onToggleSubtasks: args.toggleSubtaskCollapsed,

@@ -96,7 +96,7 @@ test.describe("Manual proceed to next workflow step", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
   });
 
-  test("preserves selected model across context reset", async ({
+  test("preserves session settings across context reset", async ({
     testPage,
     apiClient,
     seedData,
@@ -104,13 +104,22 @@ test.describe("Manual proceed to next workflow step", () => {
     const { agents } = await apiClient.listAgents();
     const agent = agents.find((item) => item.name === "mock-agent");
     if (!agent) {
-      throw new Error("E2E mock agent is required for model-reset coverage");
+      throw new Error("E2E mock agent is required for runtime-config reset coverage");
     }
-    const smartProfile = await apiClient.createAgentProfile(agent.id, "Reset Model Profile", {
-      model: "mock-smart",
-    });
+    const runtimeProfile = await apiClient.createAgentProfile(
+      agent.id,
+      "Reset Runtime Config Profile",
+      {
+        model: "mock-fast",
+        mode: "default",
+        config_options: { effort: "medium" },
+      },
+    );
 
-    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Reset Model Workflow");
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Reset Runtime Config Workflow",
+    );
     const startStep = await apiClient.createWorkflowStep(workflow.id, "Start", 0);
     const resetStep = await apiClient.createWorkflowStep(workflow.id, "Reset", 1);
 
@@ -125,10 +134,10 @@ test.describe("Manual proceed to next workflow step", () => {
       },
     });
 
-    const task = await apiClient.createTask(seedData.workspaceId, "Reset Model Task", {
+    const task = await apiClient.createTask(seedData.workspaceId, "Reset Runtime Config Task", {
       workflow_id: workflow.id,
       workflow_step_id: startStep.id,
-      agent_profile_id: smartProfile.id,
+      agent_profile_id: runtimeProfile.id,
       repository_ids: [seedData.repositoryId],
     });
 
@@ -138,19 +147,38 @@ test.describe("Manual proceed to next workflow step", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
 
     const modelTrigger = testPage.getByRole("button", { name: "Session model settings" });
-    await expect(modelTrigger).toContainText("Mock Smart", { timeout: 15_000 });
+    const modeTrigger = testPage.getByTestId("session-mode-selector");
+    await expect(modelTrigger).toHaveText("Mock Fast", { timeout: 15_000 });
+    await expect(modeTrigger).toHaveText("Default", { timeout: 15_000 });
+
+    // Change the live session after launch. These values intentionally differ
+    // from the profile defaults so reset coverage exercises the live caches.
+    await modelTrigger.click();
+    await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+    await expect(modelTrigger).toContainText("Mock Smart", { timeout: 5_000 });
+    await modelTrigger.click();
+    await testPage.getByTestId("config-option-trigger-effort").click();
+    await testPage.getByRole("button", { name: "Max", exact: true }).click();
+    await expect(modelTrigger).toHaveText("Mock Smart / Max", { timeout: 5_000 });
+    await testPage.keyboard.press("Escape");
+
+    await modeTrigger.click();
+    await testPage.getByRole("menuitem", { name: /^Plan Mock/ }).click();
+    await expect(modeTrigger).toHaveText("Plan Mock", { timeout: 5_000 });
 
     await session.proceedNextStepButton().click();
     await expect(session.stepperStep("Reset")).toHaveAttribute("aria-current", "step", {
       timeout: 15_000,
     });
     await session.waitForChatIdle({ timeout: 30_000 });
-    await expect(modelTrigger).toContainText("Mock Smart", { timeout: 15_000 });
+    await expect(modelTrigger).toHaveText("Mock Smart / Max", { timeout: 15_000 });
+    await expect(modeTrigger).toHaveText("Plan Mock", { timeout: 15_000 });
 
     await testPage.reload();
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
-    await expect(modelTrigger).toContainText("Mock Smart", { timeout: 15_000 });
+    await expect(modelTrigger).toHaveText("Mock Smart / Max", { timeout: 15_000 });
+    await expect(modeTrigger).toHaveText("Plan Mock", { timeout: 15_000 });
   });
 
   test("shows next step auto-start prompt when its message-added notification is missed", async ({

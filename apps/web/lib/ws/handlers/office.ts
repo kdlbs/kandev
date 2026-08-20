@@ -1,6 +1,12 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
+import type {
+  OfficeTask,
+  OfficeTaskStatus,
+  ProviderHealth,
+  RouteAttempt,
+} from "@/lib/state/slices/office/types";
 
 /**
  * Registers WS handlers for office domain events.
@@ -27,17 +33,11 @@ export function registerOfficeHandlers(store: StoreApi<AppState>): WsHandlers {
     return !wsId || wsId === activeId;
   };
 
+  // Delegates to the store's own patchTaskInStore action rather than
+  // writing office.tasks.items directly, so a raw wire status (e.g.
+  // "SCHEDULING") gets the same normalization as API-sourced task loads.
   const updateTaskStatus = (taskId: string, fields: Record<string, unknown>) => {
-    store.setState((state) => ({
-      ...state,
-      office: {
-        ...state.office,
-        tasks: {
-          ...state.office.tasks,
-          items: state.office.tasks.items.map((i) => (i.id === taskId ? { ...i, ...fields } : i)),
-        },
-      },
-    }));
+    store.getState().patchTaskInStore(taskId, fields as Partial<OfficeTask>);
   };
 
   return {
@@ -256,8 +256,8 @@ function buildRoutingHandlers(
   };
 }
 
-type ProviderHealthPayload = import("@/lib/state/slices/office/types").ProviderHealth;
-type RouteAttemptPayload = import("@/lib/state/slices/office/types").RouteAttempt;
+type ProviderHealthPayload = ProviderHealth;
+type RouteAttemptPayload = RouteAttempt;
 
 function extractProviderHealth(p: Record<string, unknown>): ProviderHealthPayload | null {
   if (typeof p.provider_id !== "string" || typeof p.scope !== "string") return null;
@@ -281,6 +281,7 @@ function normalizeIssueFields(p: Record<string, unknown>): Record<string, unknow
   const out: Record<string, unknown> = {};
   if (p.title != null) out.title = p.title;
   if (p.description != null) out.description = p.description;
+  if (p.state != null) out.status = p.state;
   if (p.status != null) out.status = p.status;
   if (p.new_status != null) out.status = p.new_status;
   if (p.priority != null) out.priority = p.priority;
@@ -288,6 +289,3 @@ function normalizeIssueFields(p: Record<string, unknown>): Record<string, unknow
   if (p.assignee_agent_profile_id != null) out.assigneeAgentProfileId = p.assignee_agent_profile_id;
   return out;
 }
-
-// Re-import the type for the status field cast
-type OfficeTaskStatus = import("@/lib/state/slices/office/types").OfficeTaskStatus;

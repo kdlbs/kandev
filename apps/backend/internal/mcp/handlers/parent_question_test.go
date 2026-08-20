@@ -5,12 +5,27 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
 )
+
+type parentQuestionPausePolicyRecorder struct {
+	recordingClarificationInputPauser
+	options []orchestrator.ClarificationPauseOptions
+}
+
+func (p *parentQuestionPausePolicyRecorder) PauseForClarificationInputWithOptions(
+	_ context.Context,
+	_ string,
+	options orchestrator.ClarificationPauseOptions,
+) (int, error) {
+	p.options = append(p.options, options)
+	return p.count, p.err
+}
 
 func seedParentQuestionScenario(t *testing.T, svc *service.Service, repo seedRepo) (*models.Task, *models.Task, *models.TaskSession, *models.TaskSession) {
 	t.Helper()
@@ -110,6 +125,44 @@ func TestHandleAskParentQuestion_PersistsRoutesAndPauses(t *testing.T) {
 	require.Equal(t, questionID, status.Entries[0].Metadata[models.MetaKeyParentQuestionID])
 	require.Contains(t, status.Entries[0].Content, questionID)
 	require.Contains(t, status.Entries[0].Content, "Which database should I use?")
+}
+
+func TestHandleAskParentQuestion_HoldsUnrelatedChildQueue(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parent, child, _, childSession := seedParentQuestionScenario(t, svc, repo)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	pauser := &parentQuestionPausePolicyRecorder{}
+	h.inputPauser = pauser
+	_, err := orch.queue.QueueMessageWithMetadata(
+		context.Background(), childSession.ID, child.ID, "unrelated child prompt", "", "user-1", false, nil, nil,
+	)
+	require.NoError(t, err)
+
+	resp, err := h.handleAskParentQuestion(context.Background(), parentQuestionMessage(t, child.ID, childSession.ID))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	require.Len(t, pauser.options, 1)
+	require.False(t, pauser.options[0].DrainQueuedMessages)
+	require.Len(t, orch.queue.GetStatus(context.Background(), childSession.ID).Entries, 1)
+
+	childAfter, err := repo.GetTaskSession(context.Background(), childSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, childAfter.State)
+	questionID := responseField(t, resp, "question_id")
+	question, err := svc.GetMessage(context.Background(), questionID)
+	require.NoError(t, err)
+	require.Equal(t, models.MessageTypeClarificationRequest, question.Type)
+	require.Equal(t, "pending", question.Metadata[models.MetaKeyParentQuestionStatus])
+	_ = parent
+}
+
+func responseField(t *testing.T, response *ws.Message, field string) string {
+	t.Helper()
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	value, ok := payload[field].(string)
+	require.True(t, ok)
+	return value
 }
 
 func TestHandleMessageTask_AnswersParentQuestionIdempotently(t *testing.T) {

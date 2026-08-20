@@ -172,7 +172,7 @@ func TestRuntimeHandler_PostCommentUsesRuntimeToken(t *testing.T) {
 		t.Fatalf("comments = %d, want 1", len(h.comments.comments))
 	}
 	comment := h.comments.comments[0]
-	if comment.TaskID != "task-1" || comment.AuthorID != "agent-1" || comment.AuthorType != "agent" {
+	if comment.TaskID != "task-1" || comment.AuthorID != "agent-1" || comment.AuthorType != "agent" || comment.Source != "agent" {
 		t.Fatalf("comment identity = %#v", comment)
 	}
 	assertActionRunEvent(t, h.runEvents, "post_comment", "task", "task-1")
@@ -355,6 +355,23 @@ func TestRuntimeHandler_CreateTaskUsesRuntimeToken(t *testing.T) {
 	if resp.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusCreated, resp.Body.String())
 	}
+}
+
+func TestRuntimeHandler_CreateTaskRequiresProjectWhenWorkspaceHasProjects(t *testing.T) {
+	h := newRuntimeHandlerHarness(t, Capabilities{CanCreateTasks: true})
+	h.projects.projects = []*models.Project{{ID: "project-1", WorkspaceID: "ws-1"}}
+
+	resp := h.request(t, http.MethodPost, "/runtime/tasks", map[string]interface{}{
+		"title": "Runtime task",
+	})
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusBadRequest, resp.Body.String())
+	}
+	if h.tasks.calls != 0 {
+		t.Fatalf("task creator called without a project selection: %d", h.tasks.calls)
+	}
+	assertDeniedRunEvent(t, h.runEvents, "create_task", "task", "")
 }
 
 func TestRuntimeHandler_CreateTaskWithParentRequiresSubtaskCapability(t *testing.T) {

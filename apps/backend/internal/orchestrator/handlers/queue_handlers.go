@@ -71,6 +71,12 @@ type QueueDrainer interface {
 	DrainQueuedMessage(ctx context.Context, sessionID string) (bool, error)
 }
 
+// QueueAutoRunController persists queue policy and may immediately dispatch
+// one FIFO head when enabling an eligible session.
+type QueueAutoRunController interface {
+	SetQueueAutoRun(ctx context.Context, sessionID string, enabled bool) (autoRun bool, dispatched bool, err error)
+}
+
 // QueueSendNowDispatcher is implemented by the orchestrator service. It is
 // kept separate from QueueDrainer so queue-focused handlers can retain their
 // small test doubles while the new action gets the replacement-turn contract.
@@ -108,6 +114,7 @@ type queueEntryTaker interface {
 type QueueHandlers struct {
 	queueService        QueueService
 	queueDrainer        QueueDrainer
+	queueAutoRun        QueueAutoRunController
 	queueDispatcher     QueueSendNowDispatcher
 	accessAuthorizer    QueueAccessAuthorizer
 	sessionTaskResolver SessionTaskResolver
@@ -151,6 +158,9 @@ func NewQueueHandlers(
 	if dispatcher, ok := queueDrainer.(QueueSendNowDispatcher); ok {
 		handlers.queueDispatcher = dispatcher
 	}
+	if controller, ok := queueDrainer.(QueueAutoRunController); ok {
+		handlers.queueAutoRun = controller
+	}
 	return handlers
 }
 
@@ -163,6 +173,7 @@ func (h *QueueHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMessageQueueAppend, h.wsAppendToQueue)
 	d.RegisterFunc(ws.ActionMessageQueueDrain, h.wsDrainQueue)
 	d.RegisterFunc(ws.ActionMessageQueueSendNow, h.wsSendNow)
+	d.RegisterFunc(ws.ActionMessageQueueAutoRunSet, h.wsSetAutoRun)
 	d.RegisterFunc(ws.ActionMessageQueueRemove, h.wsRemoveEntry)
 	d.RegisterFunc(ws.ActionMessageQueueMerge, h.wsMergeIntoAbove)
 	d.RegisterFunc(ws.ActionMessageQueueReorder, h.wsReorder)
@@ -253,7 +264,7 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue message", nil)
 	}
 
-	h.publishStatus(ctx, req.SessionID)
+	h.publishStatus(ctx, req.SessionID, queued)
 	return ws.NewResponse(msg.ID, msg.Action, queued)
 }
 
@@ -353,6 +364,44 @@ func (h *QueueHandlers) wsDrainQueue(ctx context.Context, msg *ws.Message) (*ws.
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		fieldSessionID: req.SessionID,
 		"drained":      drained,
+	})
+}
+
+type wsSetAutoRunRequest struct {
+	SessionID string `json:"session_id"`
+	Enabled   *bool  `json:"enabled"`
+}
+
+// wsSetAutoRun persists automatic queue processing and optionally starts the
+// promptable FIFO head when enabling it.
+func (h *QueueHandlers) wsSetAutoRun(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsSetAutoRunRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if req.Enabled == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "enabled is required", nil)
+	}
+	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
+		return denied, nil
+	}
+	if h.queueAutoRun == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queue Auto-run is unavailable", nil)
+	}
+	autoRun, dispatched, err := h.queueAutoRun.SetQueueAutoRun(ctx, req.SessionID, *req.Enabled)
+	if err != nil {
+		h.logger.Error("failed to set queue Auto-run", zap.String(fieldSessionID, req.SessionID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set queue Auto-run", nil)
+	}
+
+	h.publishStatus(ctx, req.SessionID)
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		fieldSessionID: req.SessionID,
+		"auto_run":     autoRun,
+		"dispatched":   dispatched,
 	})
 }
 
@@ -954,7 +1003,7 @@ func queueAccessDeniedResponse(msg *ws.Message) *ws.Message {
 
 // publishStatus emits the latest QueueStatus on the event bus so the frontend
 // updates its store after every mutation.
-func (h *QueueHandlers) publishStatus(ctx context.Context, sessionID string) {
+func (h *QueueHandlers) publishStatus(ctx context.Context, sessionID string, admitted ...*messagequeue.QueuedMessage) {
 	if h.eventBus == nil {
 		return
 	}
@@ -964,7 +1013,12 @@ func (h *QueueHandlers) publishStatus(ctx context.Context, sessionID string) {
 		"entries":       status.Entries,
 		"count":         status.Count,
 		fieldMax:        status.Max,
+		"auto_run":      status.AutoRun,
 		"merge_enabled": status.MergeEnabled,
+	}
+	if len(admitted) > 0 && admitted[0] != nil && admitted[0].QueuedBy != "" && !messagequeue.IsReservedQueuedBy(admitted[0].QueuedBy) {
+		eventData["queued_by"] = admitted[0].QueuedBy
+		eventData["queued_at"] = admitted[0].QueuedAt
 	}
 	if h.sessionTaskResolver != nil {
 		if taskID, err := h.sessionTaskResolver(ctx, sessionID); err != nil {

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
@@ -654,7 +655,7 @@ func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.Session
 		seen[cmd.Name] = struct{}{}
 		ac := streams.AvailableCommand{
 			Name:        cmd.Name,
-			Description: cmd.Description,
+			Description: acpcompat.NormalizeCommandDescription(a.agentID, cmd.Description),
 		}
 		if cmd.Input != nil && cmd.Input.Unstructured != nil {
 			ac.InputHint = cmd.Input.Unstructured.Hint

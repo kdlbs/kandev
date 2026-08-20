@@ -115,6 +115,7 @@ type MockClient struct {
 	submittedReviews  []submittedReview
 	requestedReviews  []requestedReviewers
 	mergedPRs         []mergedPR
+	mergeOutcomes     map[prKey]MergeOutcome
 	mergeMethods      map[repoKey]RepoMergeMethods
 	repositoryDetails map[repoKey]*GitHubRepository
 	gists             map[string]mockGist
@@ -126,6 +127,10 @@ type MockClient struct {
 	// assert that branch-detection probes are throttled. Atomic because
 	// FindPRByBranch otherwise only takes a read lock.
 	findPRByBranchCalls atomic.Int64
+
+	// getRepositoryCalls counts GetRepository invocations so tests can assert
+	// that fork-parent resolution is cached rather than re-fetched per watch.
+	getRepositoryCalls atomic.Int64
 
 	// probeEntered/probeRelease let a test gate FindPRByBranch: when set, each
 	// invocation signals on probeEntered and then blocks until probeRelease is
@@ -163,6 +168,7 @@ func NewMockClient() *MockClient {
 		prCommitsFailures: make(map[prKey]int),
 		commitDetails:     make(map[commitDetailKey]PRCommitDetail),
 		mergeMethods:      make(map[repoKey]RepoMergeMethods),
+		mergeOutcomes:     make(map[prKey]MergeOutcome),
 		repositoryDetails: make(map[repoKey]*GitHubRepository),
 		gists:             make(map[string]mockGist),
 		repoFiles:         make(map[repoKey][]repoFileEntry),
@@ -233,8 +239,20 @@ func (m *MockClient) FindPRByHead(ctx context.Context, owner, repo, headOwner, h
 
 // FindPRByBranchCallCount returns how many times FindPRByBranch has been
 // called. Used by tests asserting detection-probe throttling.
+//
+// This also counts FindPRByHead: the mock implements it by delegating to
+// FindPRByBranch (it reuses the same branch index), so a fork-parent probe
+// increments this counter too. Tests asserting on fork-parent lookups are
+// reading it through that delegation — do not split the counters without
+// re-reading every assertion that uses it.
 func (m *MockClient) FindPRByBranchCallCount() int {
 	return int(m.findPRByBranchCalls.Load())
+}
+
+// GetRepositoryCallCount returns how many times GetRepository has been called.
+// Used by tests asserting that fork-parent resolution is cached.
+func (m *MockClient) GetRepositoryCallCount() int {
+	return int(m.getRepositoryCalls.Load())
 }
 
 // GateFindPRByBranch installs a gate around FindPRByBranch: each invocation
@@ -428,6 +446,7 @@ func (m *MockClient) HasRepositoryAccess(_ context.Context, owner, repo string) 
 // lightweight repo-search fixture remains separate so existing autocomplete
 // tests do not accidentally grant write access.
 func (m *MockClient) GetRepository(_ context.Context, owner, repo string) (*GitHubRepository, error) {
+	m.getRepositoryCalls.Add(1)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.reposUnavailable {
@@ -731,19 +750,32 @@ func (m *MockClient) SetRepoMergeMethods(owner, repo string, methods RepoMergeMe
 	m.mergeMethods[repoKey{owner, repo}] = methods
 }
 
-func (m *MockClient) MergePR(_ context.Context, owner, repo string, number int, mergeMethod string) error {
+func (m *MockClient) MergePR(_ context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.mergedPRs = append(m.mergedPRs, mergedPR{
 		Owner: owner, Repo: repo, Number: number, MergeMethod: mergeMethod,
 	})
+	outcome := m.mergeOutcomes[prKey{owner, repo, number}]
+	if outcome == "" {
+		outcome = MergeOutcomeMerged
+	}
+	if outcome == MergeOutcomeQueued {
+		return outcome, nil
+	}
 	now := time.Now().UTC()
 	if pr, ok := m.prs[prKey{owner, repo, number}]; ok {
 		pr.State = "merged"
 		pr.MergedAt = &now
 		pr.Mergeable = false
 	}
-	return nil
+	return outcome, nil
+}
+
+func (m *MockClient) SetMergeOutcome(owner, repo string, number int, outcome MergeOutcome) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mergeOutcomes[prKey{owner, repo, number}] = outcome
 }
 
 func (m *MockClient) CreateGist(_ context.Context, in CreateGistInput) (*GistResponse, error) {
@@ -1017,12 +1049,14 @@ func (m *MockClient) Reset() {
 	m.submittedReviews = nil
 	m.requestedReviews = nil
 	m.mergedPRs = nil
+	m.mergeOutcomes = make(map[prKey]MergeOutcome)
 	m.mergeMethods = make(map[repoKey]RepoMergeMethods)
 	m.gists = make(map[string]mockGist)
 	m.deletedGists = nil
 	m.nextGistID = 0
 	m.repoFiles = make(map[repoKey][]repoFileEntry)
 	m.findPRByBranchCalls.Store(0)
+	m.getRepositoryCalls.Store(0)
 	m.probeEntered = nil
 	m.probeRelease = nil
 }

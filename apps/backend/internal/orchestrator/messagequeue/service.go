@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
@@ -195,6 +196,7 @@ func (s *Service) queueMessageWithMetadataAdmission(ctx context.Context, session
 					PlanMode:    planMode,
 					Attachments: attachments,
 					Metadata:    copyMessageMetadata(metadata, 0),
+					QueuedAt:    time.Now().UTC(),
 					QueuedBy:    userID,
 				}
 				merged, didMerge, mergeErr := s.repo.AutoMergeCandidateIntoAbove(admittedCtx, candidate)
@@ -424,6 +426,24 @@ func (s *Service) RequeueMessage(ctx context.Context, msg *QueuedMessage, queued
 	return queued, false, err
 }
 
+// RequeueAtHead re-enqueues a user message at a position strictly lower
+// than the session's current head. It is the FIFO-preserving requeue
+// that Service.requeueMessage invokes when an entry was superseded by a
+// newer dispatch before it could be claimed. See Repository
+// .RequeuePreservingFIFO for the position arithmetic and position rebasing.
+//
+// This method is the bug fix entry point — caller code that wants
+// user-message retry should call this instead of RequeueMessage so
+// the original message beats any new arrival on a busy session.
+func (s *Service) RequeueAtHead(ctx context.Context, msg *QueuedMessage) error {
+	if msg == nil {
+		return errors.New("queued message is nil")
+	}
+	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		return s.repo.RequeuePreservingFIFO(admittedCtx, msg)
+	})
+}
+
 // QueueLifecycleMessageWithCoalesceKey accepts a lifecycle entry only while
 // its task remains active. accepted is false for a normal archive/delete win.
 func (s *Service) QueueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, bool, error) {
@@ -515,21 +535,49 @@ func lifecycleGenerationFromMetadata(metadata map[string]interface{}) (int64, bo
 // ReserveQueued atomically takes an ordinary head entry or reserves a durable
 // lifecycle head entry. The admission lock keeps drains from observing an
 // insert before its automatic-merge finalization completes. A reserved
-// lifecycle row survives until acknowledged.
+// lifecycle row survives until acknowledged. Auto-run OFF leaves the head in
+// place and reports no reserved entry.
 func (s *Service) ReserveQueued(ctx context.Context, sessionID string) (*QueuedMessage, bool) {
+	msg, exists, _ := s.ReserveQueuedWithAutoRun(ctx, sessionID)
+	return msg, exists
+}
+
+// ReserveQueuedWithAutoRun also reports the policy decision. Nil/false/true
+// means enabled but empty (or a logged storage error); nil/false/false means
+// Auto-run is OFF.
+func (s *Service) ReserveQueuedWithAutoRun(ctx context.Context, sessionID string) (*QueuedMessage, bool, bool) {
 	var msg *QueuedMessage
+	autoRun := true
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		var err error
-		msg, err = s.repo.ReserveHead(admittedCtx, sessionID)
+		msg, autoRun, err = s.repo.ReserveHeadIfAutoRun(admittedCtx, sessionID)
 		return err
 	})
 	if err != nil {
 		s.logger.Error("reserve head failed",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return nil, false
+		return nil, false, true
 	}
-	return msg, msg != nil
+	return msg, msg != nil, autoRun
+}
+
+// SetAutoRun persists automatic-drain policy through the queue admission gate.
+func (s *Service) SetAutoRun(ctx context.Context, sessionID string, enabled bool) error {
+	return s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.repo.SetAutoRun(admittedCtx, sessionID, enabled)
+	})
+}
+
+// PauseAutoRunIfPending atomically parks a visible backlog, if one exists.
+func (s *Service) PauseAutoRunIfPending(ctx context.Context, sessionID string) (bool, error) {
+	var paused bool
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		paused, err = s.repo.PauseAutoRunIfPending(admittedCtx, sessionID)
+		return err
+	})
+	return paused, err
 }
 
 // AcknowledgeQueued removes a server-reserved entry after prompt acceptance.
@@ -624,6 +672,34 @@ func (s *Service) TakeQueued(ctx context.Context, sessionID string) (*QueuedMess
 		return nil, false
 	}
 	s.logger.Info("message dequeued",
+		zap.String("session_id", sessionID),
+		zap.String("entry_id", msg.ID))
+	return msg, true
+}
+
+// TakeQueuedIfAutoRun atomically checks the session policy and removes the
+// FIFO head only while Auto-run is enabled. The admission gate serializes the
+// policy read with every queue mutation made through this service.
+func (s *Service) TakeQueuedIfAutoRun(ctx context.Context, sessionID string) (*QueuedMessage, bool) {
+	var msg *QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		autoRun, err := s.repo.GetAutoRun(admittedCtx, sessionID)
+		if err != nil || !autoRun {
+			return err
+		}
+		msg, err = s.repo.TakeHead(admittedCtx, sessionID)
+		return err
+	})
+	if err != nil {
+		s.logger.Error("take Auto-run head failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil, false
+	}
+	if msg == nil {
+		return nil, false
+	}
+	s.logger.Info("Auto-run message dequeued",
 		zap.String("session_id", sessionID),
 		zap.String("entry_id", msg.ID))
 	return msg, true
@@ -834,12 +910,20 @@ func (s *Service) CancelAll(ctx context.Context, sessionID string) (int, error) 
 func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus {
 	maxPerSession := s.MaxPerSession()
 	mergeEnabled := s.MergeEnabled()
+	autoRun, autoRunErr := s.repo.GetAutoRun(ctx, sessionID)
+	if autoRunErr != nil {
+		s.logger.Error("get queue auto-run failed",
+			zap.String("session_id", sessionID),
+			zap.Error(autoRunErr))
+		// Preserve pre-policy behavior if status storage is temporarily unreadable.
+		autoRun = true
+	}
 	entries, err := s.repo.ListBySession(ctx, sessionID)
 	if err != nil {
 		s.logger.Error("list queued failed",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return &QueueStatus{Entries: []QueuedMessage{}, Count: 0, Max: maxPerSession, MergeEnabled: mergeEnabled}
+		return &QueueStatus{Entries: []QueuedMessage{}, Count: 0, Max: maxPerSession, AutoRun: autoRun, MergeEnabled: mergeEnabled}
 	}
 	pending := make([]QueuedMessage, 0, len(entries))
 	for _, entry := range entries {
@@ -854,6 +938,7 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 		Entries:      pending,
 		Count:        len(pending),
 		Max:          maxPerSession,
+		AutoRun:      autoRun,
 		MergeEnabled: mergeEnabled,
 	}
 }

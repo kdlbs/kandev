@@ -440,7 +440,7 @@ exit 8
 // loudly instead of letting the parent shell's GitLab host/token variables
 // silently re-arm GitLab host-trust test failures.
 func TestMainScrubsAmbientGitLabEnvironment(t *testing.T) {
-	for _, name := range []string{gitLabHostEnv, legacyGitLabHostEnv, gitLabTokenEnv} {
+	for _, name := range ambientGitLabEnvVars {
 		if _, ok := os.LookupEnv(name); ok {
 			t.Fatalf("%s is set during tests; TestMain must clear it", name)
 		}

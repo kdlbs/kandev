@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	"github.com/kandev/kandev/internal/mcp/tooltokens"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	mcpsrv "github.com/mark3labs/mcp-go/server"
@@ -45,6 +46,69 @@ func TestMCPAttachmentObserverEmitsSafeConnectionEvidence(t *testing.T) {
 	if first.OccurredAt.IsZero() || time.Since(first.OccurredAt) > time.Second {
 		t.Fatalf("timestamp = %v", first.OccurredAt)
 	}
+}
+
+func TestMCPAttachmentObserverPublishesToolSummaries(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	events := make(chan streams.MCPAttachmentEvidence, 4)
+	s.SetAttachmentReporter(func(evidence streams.MCPAttachmentEvidence) { events <- evidence })
+	s.SetAttachmentAttempt(streams.MCPAttachmentAttempt{AttemptID: "attempt-1"})
+
+	s.registerMCPConnection("connection-1")
+	<-events
+	tool := mcplib.Tool{
+		Name:           "create_task_kandev",
+		Description:    "Create a task",
+		RawInputSchema: []byte(`{"type":"object","properties":{"secret":{"type":"string"}}}`),
+		Meta:           &mcplib.Meta{AdditionalFields: map[string]any{"private_note": "must not persist"}},
+	}
+	s.observeMCPToolsList("connection-1", []mcplib.Tool{tool})
+
+	evidence := <-events
+	if evidence.Kind != streams.MCPAttachmentEvidenceToolsListObserved || evidence.ToolCount != 1 {
+		t.Fatalf("evidence = %+v, want tools-list count", evidence)
+	}
+	if len(evidence.Tools) != 1 || evidence.Tools[0].Name != "create_task_kandev" || evidence.Tools[0].Description != "Create a task" {
+		t.Fatalf("tool summaries = %+v, want name and description", evidence.Tools)
+	}
+	encoded, err := json.Marshal(evidence)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"input_schema":{"type":"object","properties":{"secret":{"type":"string"}}}`)
+	assert.Contains(t, string(encoded), `"tool_token_estimator":"o200k_base:mcp-tool-json-v1"`)
+	assert.NotContains(t, string(encoded), "must not persist")
+	definition, err := json.Marshal(tool)
+	require.NoError(t, err)
+	wantTokens, err := tooltokens.EstimateToolJSON(definition)
+	require.NoError(t, err)
+	assert.Equal(t, wantTokens, evidence.Tools[0].EstimatedTokens)
+}
+
+func TestMCPAttachmentObserverPublishesStructuredInputSchema(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	events := make(chan streams.MCPAttachmentEvidence, 4)
+	s.SetAttachmentReporter(func(evidence streams.MCPAttachmentEvidence) { events <- evidence })
+	s.SetAttachmentAttempt(streams.MCPAttachmentAttempt{AttemptID: "attempt-1"})
+	s.registerMCPConnection("connection-1")
+	<-events
+
+	s.observeMCPToolsList("connection-1", []mcplib.Tool{{
+		Name: "structured",
+		InputSchema: mcplib.ToolInputSchema{
+			Type:       "object",
+			Properties: map[string]any{"title": map[string]any{"type": "string"}},
+			Required:   []string{"title"},
+		},
+	}})
+	evidence := <-events
+	require.Len(t, evidence.Tools, 1)
+	assert.JSONEq(t, `{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}`, string(evidence.Tools[0].InputSchema))
+	assert.Positive(t, evidence.Tools[0].EstimatedTokens)
 }
 
 func TestMCPAttachmentObserverKeepsConnectionAttemptAcrossRollover(t *testing.T) {
@@ -471,6 +535,7 @@ func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "update_workflow_kandev")
 	assert.Contains(t, tools, "delete_workflow_kandev")
 	assert.Contains(t, tools, "import_workflow_kandev")
+	assert.Contains(t, tools, "export_workflow_kandev")
 	assert.Contains(t, tools, "list_workflow_steps_kandev")
 	assert.Contains(t, tools, "create_workflow_step_kandev")
 	assert.Contains(t, tools, "update_workflow_step_kandev")
@@ -644,7 +709,7 @@ drained:
 	// as in TestServerModeTask_ToolCount and
 	// TestRegisterTools_LoggedCountMatchesRegisteredTools (list_task_sessions_test.go),
 	// which pin the per-mode registration rather than this SetProviders rebuild.
-	require.Len(t, tools, 35, "final registry should contain the complete GitLab-only task tool set")
+	require.Len(t, tools, 36, "final registry should contain the complete GitLab-only task tool set")
 	assert.Contains(t, tools, "get_task_mr_automation_kandev")
 	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
 }
@@ -813,7 +878,7 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	// 1 add_workspace_sources + 1 update_repository_base_branch +
 	// 1 step_complete (ADR 0015) + 1 interaction + 4 plan + 3 walkthrough +
 	// 1 publish_review_findings + 1 related-tasks + 1 diagnostic bundle
-	// + 2 task-dependency (add/remove) = 37.
+	// + 2 task-dependency (add/remove) + 1 rich-output = 38.
 	// Task-document tools (list/get/write) are office-only.
 	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
@@ -823,7 +888,8 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Contains(t, tools, "list_task_sessions_kandev", "session discovery must be registered in task mode")
 	assert.Contains(t, tools, "add_task_dependency_kandev", "dependency edges must be manageable in task mode")
 	assert.Contains(t, tools, "remove_task_dependency_kandev")
-	assert.Equal(t, 37, len(tools))
+	assert.Contains(t, tools, "show_rich_output_kandev", "native rich output must be registered in task mode")
+	assert.Equal(t, 38, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskOnlyAndDiscoverable(t *testing.T) {
@@ -856,9 +922,9 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
-	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 interaction = 33
+	// 13 workflow (incl. list_repositories + import_workflow + export_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 interaction = 34
 	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev requires a live task session; must NOT register in config mode")
-	assert.Equal(t, 33, len(tools))
+	assert.Equal(t, 34, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
@@ -893,6 +959,7 @@ func TestServerModeOffice_RegistersCorrectTools(t *testing.T) {
 
 	// Office mode should have interaction tools
 	assert.Contains(t, tools, "ask_user_question_kandev")
+	assert.Contains(t, tools, "show_rich_output_kandev")
 
 	// delegate_task_kandev was removed from ModeOffice when the
 	// agentctl CLI started covering task creation/delegation via
@@ -929,10 +996,10 @@ func TestServerModeOffice_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOffice)
 	tools := getRegisteredToolNames(s)
-	// 4 plan + 1 interaction + 1 related-tasks + 3 task-documents = 9
+	// 4 plan + 1 interaction + 1 related-tasks + 3 task-documents + 1 rich-output = 10
 	// (delegate_task_kandev retired in favour of `agentctl kandev task create …`).
 	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev is kanban-task-only; office mode advances tasks via its own approval surface")
-	assert.Equal(t, 9, len(tools))
+	assert.Equal(t, 10, len(tools))
 }
 
 func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
@@ -949,8 +1016,8 @@ func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
 	// delegate_task_kandev was retired from ModeOffice (now lives in
 	// the agentctl CLI as `agentctl kandev task create --parent …`).
 	assert.NotContains(t, tools, "delegate_task_kandev")
-	// 4 plan + 1 related-tasks + 3 task-documents = 8 (no ask_user_question, no delegate)
-	assert.Equal(t, 8, len(tools))
+	// 4 plan + 1 related-tasks + 3 task-documents + 1 rich-output = 9 (no ask_user_question, no delegate)
+	assert.Equal(t, 9, len(tools))
 }
 
 func TestServerModeConstants(t *testing.T) {
@@ -975,6 +1042,7 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "list_workspaces_kandev")
 	assert.Contains(t, tools, "list_repositories_kandev")
 	assert.Contains(t, tools, "create_workflow_kandev")
+	assert.Contains(t, tools, "export_workflow_kandev")
 	assert.Contains(t, tools, "list_agents_kandev")
 	assert.Contains(t, tools, "get_mcp_config_kandev")
 	assert.Contains(t, tools, "list_executors_kandev")
@@ -983,12 +1051,16 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 	// External mode includes create_task_kandev so external agents can spawn tasks
 	assert.Contains(t, tools, "create_task_kandev")
 	createTask := s.mcpServer.ListTools()["create_task_kandev"]
-	assert.Contains(t, createTask.Tool.Description, "outranks an explicit agent_profile_id")
-	assert.Contains(t, createTask.Tool.Description, "current_task")
-	assert.Contains(t, createTask.Tool.Description, "workspace_default")
-	assert.Contains(t, createTask.Tool.Description, "workflow profiles first")
-	assert.Contains(t, createTask.Tool.Description, "no creating session")
-	assert.Contains(t, createTask.Tool.Description, "parent task profile")
+	assert.Contains(t, createTask.Tool.Description, "external client")
+	assert.Contains(t, createTask.Tool.Description, "native subagent mechanism")
+	assert.Contains(t, createTask.Tool.Description, "external_id")
+	agentProfile := toolInputProperties(t, s, "create_task_kandev")["agent_profile_id"].(map[string]interface{})
+	agentProfileDescription := agentProfile["description"].(string)
+	assert.Contains(t, agentProfileDescription, "current_task")
+	assert.Contains(t, agentProfileDescription, "workspace_default")
+	assert.Contains(t, agentProfileDescription, "workflow profiles")
+	assert.Contains(t, agentProfileDescription, "parent task profile")
+	assert.Contains(t, agentProfileDescription, "External mode never copies creator-session runtime values")
 
 	// External mode does NOT include session-scoped tools
 	assert.NotContains(t, tools, "ask_user_question_kandev")
@@ -1017,9 +1089,9 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 create_task + 2 task-dependency + 2 question-answering (list_pending_questions + answer_question) = 37.
+	// 13 workflow (incl. list_repositories + import_workflow + export_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 create_task + 2 task-dependency + 2 question-answering (list_pending_questions + answer_question) = 38.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 37, len(tools))
+	assert.Equal(t, 38, len(tools))
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 

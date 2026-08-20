@@ -11,8 +11,9 @@ import (
 
 // inMemorySecretStore implements secrets.SecretStore for testing.
 type inMemorySecretStore struct {
-	store map[string]*secrets.SecretWithValue
-	err   error
+	store     map[string]*secrets.SecretWithValue
+	err       error
+	revealErr error
 }
 
 var _ secrets.SecretStore = (*inMemorySecretStore)(nil)
@@ -45,6 +46,9 @@ func (s *inMemorySecretStore) Get(_ context.Context, id string) (*secrets.Secret
 
 // Reveal returns the plaintext value for the given ID, or an error when absent.
 func (s *inMemorySecretStore) Reveal(_ context.Context, id string) (string, error) {
+	if s.revealErr != nil {
+		return "", s.revealErr
+	}
 	if sw, ok := s.store[id]; ok {
 		return sw.Value, nil
 	}

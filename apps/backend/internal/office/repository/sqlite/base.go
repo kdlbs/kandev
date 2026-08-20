@@ -266,9 +266,9 @@ func (r *Repository) createAgentRuntimeTable() error {
 
 func (r *Repository) createCostTables() error {
 	// cost_subcents stores hundredths of a cent (int64). UI divides by
-	// 10000 when rendering dollars. The estimated flag is set when
-	// token counts were synthesised (e.g. cumulative-delta inference for
-	// codex-acp) rather than reported directly by the agent.
+	// 10000 when rendering dollars. The estimated flag is set when token
+	// counts are not authoritative for a complete turn, such as adapter
+	// synthesis or a provider frame that covers only part of a turn.
 	//
 	// tokens_cached_read / tokens_cached_write / turn_id / usage_event_id /
 	// cost_source / rate_*_per_million / pricing_catalog_version /
@@ -276,8 +276,8 @@ func (r *Repository) createCostTables() error {
 	// is what makes a fresh row's un-set columns NULL rather than 0, matching
 	// the ALTER-based migration in migrateCostEventContract (which the same
 	// columns must stay byte-identical to — see base_migrations.go). NULL
-	// means "not recorded" (legacy row, or an adapter with no per-turn usage
-	// frame); 0 would silently claim zero cache activity. See
+	// means "not recorded" (legacy row, or an adapter that did not report
+	// cache data); 0 would silently claim zero cache activity. See
 	// docs/specs/office/costs.md.
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_cost_events (

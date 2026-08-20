@@ -706,7 +706,7 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 	// any step. This keeps imports atomic with respect to validation failures.
 	steps := make([]*models.WorkflowStep, 0, len(pw.Steps))
 	for _, sp := range pw.Steps {
-		step := s.stepFromPortable("pending-workflow", sp, posToID)
+		step := s.stepFromPortable("pending-workflow", sp, posToID, "")
 		if err := models.ValidateWorkflowStep(step); err != nil {
 			return nil, fmt.Errorf("validate step %q: %w", sp.Name, err)
 		}
@@ -721,7 +721,7 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 	needsUpdate := false
 	// Match workflow-level agent profile if present.
 	if pw.AgentProfile != nil && s.matchProfile != nil {
-		if profileID := s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode); profileID != "" {
+		if profileID := s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode, ""); profileID != "" {
 			wf.AgentProfileID = profileID
 			needsUpdate = true
 		}
@@ -747,8 +747,19 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 
 // stepFromPortable builds a WorkflowStep from its portable form, remapping
 // position-based references to the step IDs in posToID and matching the
-// step-level agent profile when a matcher is wired.
-func (s *Service) stepFromPortable(workflowID string, sp models.StepPortable, posToID map[int]string) *models.WorkflowStep {
+// step-level agent profile when a matcher is wired. existingProfileID is the
+// profile already bound to this step (by name) before sync, or "" for a step
+// with no prior binding (including at import time) - it lets the matcher
+// preserve a disabled-but-still-matching binding instead of treating
+// disablement as a rebind.
+func (s *Service) stepFromPortable(workflowID string, sp models.StepPortable, posToID map[int]string, existingProfileID string) *models.WorkflowStep {
+	return s.stepFromPortableWithMatcher(workflowID, sp, posToID, s.matchProfile, existingProfileID)
+}
+
+// stepFromPortableWithMatcher lets workflow sync use a matcher that preserves
+// profile IDs embedded in existing review actions while imports use the normal
+// matcher directly.
+func (s *Service) stepFromPortableWithMatcher(workflowID string, sp models.StepPortable, posToID map[int]string, matchProfile models.AgentProfileMatcher, existingProfileID string) *models.WorkflowStep {
 	step := &models.WorkflowStep{
 		ID:                         posToID[sp.Position],
 		WorkflowID:                 workflowID,
@@ -756,7 +767,7 @@ func (s *Service) stepFromPortable(workflowID string, sp models.StepPortable, po
 		Position:                   sp.Position,
 		Color:                      sp.Color,
 		Prompt:                     sp.Prompt,
-		Events:                     models.ConvertReviewProfileToID(models.ConvertPositionToStepID(sp.Events, posToID), s.matchProfile),
+		Events:                     models.ConvertReviewProfileToID(models.ConvertPositionToStepID(sp.Events, posToID), matchProfile),
 		IsStartStep:                sp.IsStartStep,
 		ShowInCommandPanel:         sp.ShowInCommandPanel,
 		AllowManualMove:            sp.AllowManualMove,
@@ -766,8 +777,8 @@ func (s *Service) stepFromPortable(workflowID string, sp models.StepPortable, po
 		WIPLimit:                   sp.WIPLimit,
 		PullFromStepID:             sp.PullFromStepID(posToID),
 	}
-	if sp.AgentProfile != nil && s.matchProfile != nil {
-		step.AgentProfileID = s.matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode)
+	if sp.AgentProfile != nil && matchProfile != nil {
+		step.AgentProfileID = matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode, existingProfileID)
 	}
 	return step
 }

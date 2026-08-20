@@ -74,6 +74,11 @@ type TaskRepository interface {
 	// by metadata key (not integration name) so this layer stays agnostic of
 	// which integrations exist.
 	CountOpenWatcherCreatedTasks(ctx context.Context, metadataKey, watchID string) (int, error)
+	// SetTaskMetadataKeyIfPresent rewrites one metadata key only while that
+	// key is still present, reporting whether the write landed. The CAS
+	// counterpart to an atomic remove: an editor must never re-create a key a
+	// concurrent claim just consumed.
+	SetTaskMetadataKeyIfPresent(ctx context.Context, taskID, key string, value interface{}) (bool, error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
 	// UpdateTaskStateIfSessionState atomically transitions task state only while
 	// the named session remains in expectedSessionState and the task is not
@@ -153,6 +158,12 @@ type TaskStatusSummaryRepository interface {
 	DeleteTaskStatusSummary(ctx context.Context, taskID string) error
 }
 
+// TaskActivityRepository reconstructs the bounded task activity timestamp
+// from authoritative task, prompt, and turn rows.
+type TaskActivityRepository interface {
+	LoadTaskLastActivity(ctx context.Context, taskIDs []string) (map[string]time.Time, error)
+}
+
 // TaskRepoRepository handles the task↔repository junction table (models.TaskRepository rows).
 // Named TaskRepoRepository to reduce reader confusion with the TaskRepository sub-interface above.
 type TaskRepoRepository interface {
@@ -190,13 +201,21 @@ type WorkflowRepository interface {
 type MessageRepository interface {
 	CreateMessage(ctx context.Context, message *models.Message) error
 	GetMessage(ctx context.Context, id string) (*models.Message, error)
+	// GetMessageWithPromptIndex retrieves a message by ID with its computed
+	// prompt_index (1-based ordinal among the session's user messages).
+	// Used by the idempotent WS replay/response path and user update-event
+	// publication; hot-path reads stay on GetMessage.
+	GetMessageWithPromptIndex(ctx context.Context, id string) (*models.Message, error)
 	GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error)
 	GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error)
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*models.Message, error)
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error)
 	FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error)
-	FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
+	FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
 	GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error)
+	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*models.Message, bool, error)
+	FinalizeClarificationResponseDelivery(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
+	RestoreActiveClarificationBundle(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
 	UpdateMessage(ctx context.Context, message *models.Message) error
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error)
@@ -223,6 +242,17 @@ type AttachmentRepository interface {
 // TurnRepository handles conversation turn persistence.
 type TurnRepository interface {
 	CreateTurn(ctx context.Context, turn *models.Turn) error
+	DeleteTurnIfUnreferenced(ctx context.Context, sessionID, turnID string) (bool, error)
+	// ReconcileUnpublishedPromptTurns repairs or accepts durable prompt
+	// reservations and response-delivery claims before startup admits new work.
+	// Accepted reservations retain a durable start-event outbox marker for the
+	// service to replay before it clears recovery metadata.
+	// Every production turn store must provide this recovery boundary; callers
+	// fail rather than skip it.
+	ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error)
+	// ListTurnsPendingStartEvent returns accepted reservations whose durable
+	// start-event outbox marker still needs replay before startup admits work.
+	ListTurnsPendingStartEvent(ctx context.Context) ([]*models.Turn, error)
 	// CreateTurnWithStepStamp creates turn atomically with the
 	// workflow-step-at-start stamp: it reads the task's current step and
 	// inserts the turn row in the same transaction, taking the same lock
@@ -235,6 +265,29 @@ type TurnRepository interface {
 	GetTurn(ctx context.Context, id string) (*models.Turn, error)
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 	UpdateTurn(ctx context.Context, turn *models.Turn) error
+	// PatchTurnMetadata merges fields into an active or completed turn while
+	// preserving unrelated metadata under the session's turn-write authority.
+	PatchTurnMetadata(
+		ctx context.Context,
+		sessionID, turnID string,
+		updates map[string]interface{},
+	) (bool, time.Time, error)
+	// UpdateActiveTurnMetadata merges updates and removes named keys only while
+	// the turn is active and belongs to sessionID. Implementations serialize
+	// this authority change with other current-turn decisions for the session.
+	UpdateActiveTurnMetadata(
+		ctx context.Context,
+		sessionID, turnID string,
+		updates map[string]interface{},
+		removeKeys []string,
+	) (bool, map[string]interface{}, time.Time, error)
+	// ClearTurnPromptDispatchMetadata removes reservation-only metadata from
+	// an active or completed turn after its start event has been accepted by
+	// the event bus. It preserves unrelated concurrent metadata.
+	ClearTurnPromptDispatchMetadata(
+		ctx context.Context,
+		sessionID, turnID string,
+	) (bool, map[string]interface{}, time.Time, error)
 	CompleteTurn(ctx context.Context, id string) error
 	AbandonTurn(ctx context.Context, id string) error
 	CompletePendingToolCallsForTurn(ctx context.Context, turnID string) (int64, error)
@@ -350,6 +403,27 @@ type RepositoryEntityRepository interface {
 	// single-process race; it is not a substitute for a database-level
 	// uniqueness constraint against writers outside this process.
 	GetRepositoryByLocalPath(ctx context.Context, workspaceID, localPath string) (*models.Repository, error)
+}
+
+// RepositorySetRepository stores named, reusable groups of workspace
+// repositories. Membership order is authoritative: writes assign contiguous
+// positions from the supplied order, and reads return items in that order with
+// soft-deleted and out-of-workspace repositories excluded.
+type RepositorySetRepository interface {
+	CreateRepositorySet(ctx context.Context, set *models.RepositorySet) error
+	GetRepositorySet(ctx context.Context, id string) (*models.RepositorySet, error)
+	// GetRepositorySetByName compares the name case-insensitively and returns
+	// nil, nil when it is unused, leaving the conflict decision to the caller.
+	GetRepositorySetByName(ctx context.Context, workspaceID, name string) (*models.RepositorySet, error)
+	ListRepositorySets(ctx context.Context, workspaceID string) ([]*models.RepositorySet, error)
+	// ListRepositorySetIDsByRepository reports which sets hold a repository, so a
+	// caller can publish their new shape after a deletion prunes membership.
+	ListRepositorySetIDsByRepository(ctx context.Context, repositoryID string) ([]string, error)
+	// UpdateRepositorySet writes the set's fields and, when repositoryIDs is
+	// non-nil, replaces its whole membership in the same transaction so the two
+	// cannot land apart. A nil repositoryIDs leaves membership untouched.
+	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryIDs *[]string) error
+	DeleteRepositorySet(ctx context.Context, id string) (bool, error)
 }
 
 // RepositorySecretBindingRepository stores normalized repository environment

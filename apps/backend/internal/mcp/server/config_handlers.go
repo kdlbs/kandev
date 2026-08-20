@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -67,6 +68,17 @@ func (s *Server) registerConfigWorkflowTools() {
 			mcp.WithString(documentArg, mcp.Required(), mcp.Description("The portable workflow document as a YAML or JSON string (a kandev_workflow export envelope). Includes the workflows and their steps.")),
 		),
 		s.wrapHandler("import_workflow_kandev", s.importWorkflowHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("export_workflow_kandev",
+			mcp.WithDescription("Export one workflow as a portable version 1 kandev_workflow JSON document. The result contains one workflow and its steps without instance IDs or timestamps. Pass the JSON text unchanged as document to import_workflow_kandev (the import document limit is 1 MiB)."),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID to export")),
+		),
+		s.wrapHandler("export_workflow_kandev", s.exportWorkflowHandler()),
 	)
 	s.registerConfigWorkflowStepTools()
 }
@@ -284,6 +296,10 @@ func (s *Server) registerConfigTaskTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("delete_task_kandev",
 			mcp.WithDescription("Delete a task permanently."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithIdempotentHintAnnotation(false),
+			mcp.WithOpenWorldHintAnnotation(false),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete")),
 		),
 		s.wrapHandler("delete_task_kandev", s.deleteTaskHandler()),
@@ -291,6 +307,10 @@ func (s *Server) registerConfigTaskTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("archive_task_kandev",
 			mcp.WithDescription("Archive a task."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to archive")),
 		),
 		s.wrapHandler("archive_task_kandev", s.archiveTaskHandler()),
@@ -384,6 +404,20 @@ func (s *Server) importWorkflowHandler() server.ToolHandlerFunc {
 			documentArg:    document,
 		}
 		return s.forwardToBackend(ctx, ws.ActionMCPImportWorkflow, payload)
+	}
+}
+
+func (s *Server) exportWorkflowHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workflowID, err := req.RequireString("workflow_id")
+		if err != nil {
+			return mcp.NewToolResultError("workflow_id is required"), nil
+		}
+		workflowID = strings.TrimSpace(workflowID)
+		if workflowID == "" {
+			return mcp.NewToolResultError("workflow_id is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPExportWorkflow, map[string]string{"workflow_id": workflowID})
 	}
 }
 

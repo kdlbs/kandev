@@ -32,6 +32,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** Builds a user Message with default test fields, merged with the given overrides. */
 function userMessage(overrides: Partial<Message>): Message {
   return {
     id: "msg-1",
@@ -45,6 +46,7 @@ function userMessage(overrides: Partial<Message>): Message {
   };
 }
 
+/** Builds a non-builtin CustomPrompt named after the given name. */
 function customPrompt(name: string): CustomPrompt {
   return {
     id: `prompt-${name}`,
@@ -56,6 +58,7 @@ function customPrompt(name: string): CustomPrompt {
   };
 }
 
+/** Builds a Jira issue EntityReference with default fields, merged with the given overrides. */
 function issueReference(overrides: Partial<EntityReference> = {}): EntityReference {
   return {
     version: 1,
@@ -71,7 +74,9 @@ function issueReference(overrides: Partial<EntityReference> = {}): EntityReferen
   };
 }
 
+/** Returns a StateProvider wrapper seeding the given kanban tasks and saved prompts. */
 function wrapper(tasks: Array<{ id: string; title: string }> = [], prompts: CustomPrompt[] = []) {
+  /** Renders children inside a StateProvider preloaded with the wrapper's tasks and prompts. */
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
       <StateProvider
@@ -85,7 +90,7 @@ function wrapper(tasks: Array<{ id: string; title: string }> = [], prompts: Cust
               id: t.id,
               title: t.title,
               workflow_step_id: "",
-              priority: 0,
+              priority: "medium",
               parent_id: undefined,
             })),
           } as unknown as never,
@@ -245,6 +250,7 @@ describe("ChatMessage entity references", () => {
   });
 });
 
+/** Renders a user ChatMessage wrapped with the given sender tasks and message metadata. */
 function renderWithSender(
   tasks: Array<{ id: string; title: string }>,
   metadata: Partial<Message["metadata"] & object>,
@@ -257,6 +263,7 @@ function renderWithSender(
   );
 }
 
+/** Renders an agent ChatMessage seeded with the given session and optional turn metadata. */
 function renderAgentMessageWithSession(
   session: Partial<TaskSession>,
   metadata = {},
@@ -282,6 +289,7 @@ function renderAgentMessageWithSession(
           created_at: MESSAGE_TIMESTAMP,
           updated_at: MESSAGE_TIMESTAMP,
         };
+  /** Renders children inside a StateProvider seeded with the test session and its turns. */
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <StateProvider
       initialState={{
@@ -289,6 +297,9 @@ function renderAgentMessageWithSession(
         turns: {
           bySession: { "sess-1": turn ? [turn] : [] },
           activeBySession: { "sess-1": turn?.id ?? null },
+          loadedBySession: {},
+          reconcileEpochBySession: {},
+          settledBoundaryBySession: {},
         },
       }}
     >

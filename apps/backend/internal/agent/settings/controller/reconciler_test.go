@@ -532,6 +532,80 @@ func TestProfileReconciler_KeepsGoneFallbackModel(t *testing.T) {
 	}
 }
 
+func TestProfileReconciler_PreservesUserModifiedCustomRouteOutsideAgentCatalog(t *testing.T) {
+	st := newFakeStore()
+	dbAgent := &models.Agent{Name: "opencode-acp"}
+	_ = st.CreateAgent(context.Background(), dbAgent)
+	existing := &models.AgentProfile{
+		AgentID:      dbAgent.ID,
+		Name:         "Custom route",
+		Model:        "custom-provider/model",
+		Mode:         "custom-mode",
+		UserModified: true,
+	}
+	_ = st.CreateAgentProfile(context.Background(), existing)
+	st.created = nil
+
+	ag := &mockInferenceAgent{id: "opencode-acp", displayName: "OpenCode", enabled: true}
+	caps := &fakeCapReader{caps: map[string]hostutility.AgentCapabilities{
+		"opencode-acp": {
+			AgentType:      "opencode-acp",
+			Models:         []hostutility.Model{{ID: "catalog-model", Name: "Catalog"}},
+			CurrentModelID: "catalog-model",
+			Modes:          []hostutility.Mode{{ID: "agent", Name: "Agent"}},
+			CurrentModeID:  "agent",
+			Status:         hostutility.StatusOK,
+		},
+	}}
+
+	r := newReconciler(t, st, caps, ag)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.updated) != 0 {
+		t.Fatalf("user-modified custom route was rewritten: %+v", st.updated)
+	}
+	if existing.Model != "custom-provider/model" || existing.Mode != "custom-mode" {
+		t.Fatalf("custom route changed to model=%q mode=%q", existing.Model, existing.Mode)
+	}
+}
+
+func TestProfileReconciler_LeavesUserModifiedEmptyRouteUnchanged(t *testing.T) {
+	st := newFakeStore()
+	dbAgent := &models.Agent{Name: "claude-acp"}
+	_ = st.CreateAgent(context.Background(), dbAgent)
+	existing := &models.AgentProfile{
+		AgentID:      dbAgent.ID,
+		Name:         "Use provider default",
+		UserModified: true,
+	}
+	_ = st.CreateAgentProfile(context.Background(), existing)
+	st.created = nil
+
+	ag := &mockInferenceAgent{id: "claude-acp", displayName: "Claude", enabled: true}
+	caps := &fakeCapReader{caps: map[string]hostutility.AgentCapabilities{
+		"claude-acp": {
+			AgentType:      "claude-acp",
+			Models:         []hostutility.Model{{ID: "claude-sonnet", Name: "Sonnet"}},
+			CurrentModelID: "claude-sonnet",
+			Modes:          []hostutility.Mode{{ID: "default", Name: "Default"}},
+			CurrentModeID:  "default",
+			Status:         hostutility.StatusOK,
+		},
+	}}
+
+	r := newReconciler(t, st, caps, ag)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.updated) != 0 {
+		t.Fatalf("user-modified empty route was rewritten: %+v", st.updated)
+	}
+	if existing.Model != "" || existing.Mode != "" {
+		t.Fatalf("empty route changed to model=%q mode=%q", existing.Model, existing.Mode)
+	}
+}
+
 func TestProfileReconciler_PreservesOfficeAgentName(t *testing.T) {
 	profile := &models.AgentProfile{
 		Name:             "Researcher",
@@ -596,6 +670,49 @@ func TestProfileReconciler_HealsStaleCodexModeAfterBridgeSwap(t *testing.T) {
 	}
 	if updated.Mode != "agent" {
 		t.Errorf("healed mode = %q, want agent", updated.Mode)
+	}
+}
+
+func TestProfileReconciler_HealsStaleCodexModeForUserModifiedProfile(t *testing.T) {
+	st := newFakeStore()
+	dbAgent := &models.Agent{Name: "codex-acp"}
+	_ = st.CreateAgent(context.Background(), dbAgent)
+	existing := &models.AgentProfile{
+		AgentID:      dbAgent.ID,
+		Name:         "Codex",
+		Model:        "gpt-5.6-sol",
+		Mode:         "auto",
+		UserModified: true,
+	}
+	_ = st.CreateAgentProfile(context.Background(), existing)
+	st.created = nil
+
+	ag := &mockInferenceAgent{id: "codex-acp", displayName: "Codex", enabled: true}
+	caps := &fakeCapReader{
+		caps: map[string]hostutility.AgentCapabilities{
+			"codex-acp": {
+				AgentType:      "codex-acp",
+				Status:         hostutility.StatusOK,
+				Models:         []hostutility.Model{{ID: "gpt-5.6-sol", Name: "GPT 5.6 Sol"}},
+				CurrentModelID: "gpt-5.6-sol",
+				Modes: []hostutility.Mode{
+					{ID: "read-only", Name: "Read Only"},
+					{ID: "agent", Name: "Agent"},
+					{ID: "agent-full-access", Name: "Agent Full Access"},
+				},
+				CurrentModeID: "agent",
+			},
+		},
+	}
+	r := newReconciler(t, st, caps, ag)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.updated) != 1 {
+		t.Fatalf("expected 1 updated profile, got %d", len(st.updated))
+	}
+	if got := st.updated[0].Mode; got != "agent" {
+		t.Fatalf("healed mode = %q, want agent", got)
 	}
 }
 

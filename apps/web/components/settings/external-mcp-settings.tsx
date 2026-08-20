@@ -153,7 +153,7 @@ function ToolsPreview() {
                 <li key={tool.name} className="flex gap-2 text-xs">
                   <code className="font-mono text-foreground shrink-0">{tool.name}</code>
                   <span className="text-muted-foreground">
-                    &mdash; {t(tool.descriptionKey, tool.descriptionValues)}
+                    : {t(tool.descriptionKey, tool.descriptionValues)}
                   </span>
                 </li>
               ))}

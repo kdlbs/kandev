@@ -155,7 +155,7 @@ export function buildTaskFromKanban(kanbanTask: KanbanState["tasks"][number]): T
     state: kanbanTask.state ?? "CREATED",
     workspace_id: toWorkspaceId(""),
     workflow_id: toWorkflowId(""),
-    priority: 0,
+    priority: kanbanTask.priority ?? "medium",
     repositories: [],
     created_at: "",
     updated_at: kanbanTask.updatedAt ?? "",

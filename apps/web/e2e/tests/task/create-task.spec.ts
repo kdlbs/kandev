@@ -222,7 +222,7 @@ test.describe("Task creation", () => {
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
       await expect(dialog.getByTestId("workflow-selector-trigger")).toContainText("Dev");
-      await testPage.keyboard.press("Escape");
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
       await expect(dialog).not.toBeVisible();
 
       await testPage.getByTestId("sidebar-workspace-trigger").click();
@@ -242,7 +242,7 @@ test.describe("Task creation", () => {
       await kanban.createTaskButton.first().click();
       await expect(dialog).toBeVisible();
       await expect(dialog.getByTestId("workflow-selector-trigger")).toContainText("Support");
-      await testPage.keyboard.press("Escape");
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
       await expect(dialog).not.toBeVisible();
 
       // Reload workspace A again to prove the two memories do not overwrite

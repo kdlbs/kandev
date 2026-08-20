@@ -6,6 +6,7 @@ import type { TFunction } from "i18next";
 import { IconCheck, IconChevronDown, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
+import { settingsControlClassName } from "@/components/settings/settings-control";
 import { Button } from "@kandev/ui/button";
 import {
   Command,
@@ -18,6 +19,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import { Separator } from "@kandev/ui/separator";
+import { Spinner } from "@kandev/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 
 export type ModelSelectorOption = {
@@ -185,10 +187,12 @@ function triggerDetails(
 function ModelRow({
   model,
   selected,
+  loading,
   onSelect,
 }: {
   model: ModelSelectorOption;
   selected: boolean;
+  loading: boolean;
   onSelect: (value: string) => void;
 }) {
   const item = (
@@ -197,6 +201,7 @@ function ModelRow({
       keywords={[model.name, model.description ?? "", model.id]}
       onSelect={() => !model.disabled && onSelect(model.id)}
       disabled={model.disabled}
+      data-testid={selected ? "model-config-selected-row" : undefined}
       className={cn("relative pr-7", model.disabled && "opacity-40 cursor-not-allowed")}
     >
       <div className="flex min-w-0 flex-1 items-center">
@@ -212,16 +217,17 @@ function ModelRow({
           <span className="shrink-0 text-xs text-muted-foreground">{model.usageMultiplier}</span>
         )}
       </div>
-      <IconCheck
-        className={cn("absolute right-2 h-4 w-4", selected ? "opacity-100" : "opacity-0")}
-      />
+      {selected && loading ? (
+        <Spinner aria-hidden="true" className="absolute right-2" />
+      ) : (
+        <IconCheck
+          className={cn("absolute right-2 h-4 w-4", selected ? "opacity-100" : "opacity-0")}
+        />
+      )}
     </CommandItem>
   );
   // cmdk's CommandItem swallows pointer events with no native tooltip slot;
-  // wrap disabled items in a Tooltip trigger so the gone-reason shows. The
-  // CommandItem is disabled (unfocusable), so the wrapper itself must be
-  // focusable and carry an accessible name for keyboard users to reach the
-  // reason.
+  // keep disabled items in a focusable wrapper so their gone reason is reachable.
   if (model.disabled && model.disabledReason) {
     return (
       <Tooltip>
@@ -357,6 +363,7 @@ type ModelConfigSelectorContentProps = {
   onConfigSelect: (configId: string) => void;
   onConfigBack: () => void;
   onConfigChange?: (configId: string, value: string) => void;
+  configOptionsLoading: boolean;
 };
 
 function ModelConfigSelectorContent({
@@ -368,6 +375,7 @@ function ModelConfigSelectorContent({
   onConfigSelect,
   onConfigBack,
   onConfigChange,
+  configOptionsLoading,
 }: ModelConfigSelectorContentProps) {
   const { t } = useTranslation();
   const pendingFocusConfigId = useRef<string | null>(null);
@@ -411,30 +419,46 @@ function ModelConfigSelectorContent({
                 key={model.id}
                 model={model}
                 selected={model.id === currentModelValue}
+                loading={configOptionsLoading}
                 onSelect={onModelSelect}
               />
             ))}
           </CommandGroup>
         </CommandList>
       </Command>
-      {extraConfigOptions.length > 0 && (
+      {configOptionsLoading ? (
         <>
           <Separator />
-          <ScrollArea className="max-h-40 pr-2">
-            <div className="space-y-1">
-              {extraConfigOptions.map((option) => (
-                <ConfigOptionTrigger
-                  key={option.id}
-                  option={option}
-                  onSelect={() => onConfigSelect(option.id)}
-                  triggerRef={(element) => {
-                    triggerRefs.current[option.id] = element;
-                  }}
-                />
-              ))}
-            </div>
-          </ScrollArea>
+          <div
+            className="flex min-h-9 items-center gap-2 px-2 text-xs text-muted-foreground"
+            data-testid="model-config-options-loading"
+            role="status"
+            aria-label={t("agents:resolvingModelOptions")}
+          >
+            <Spinner aria-hidden="true" className="h-3.5 w-3.5" />
+            <span aria-hidden="true">{t("agents:resolvingModelOptions")}</span>
+          </div>
         </>
+      ) : (
+        extraConfigOptions.length > 0 && (
+          <>
+            <Separator />
+            <ScrollArea className="max-h-40 pr-2">
+              <div className="space-y-1">
+                {extraConfigOptions.map((option) => (
+                  <ConfigOptionTrigger
+                    key={option.id}
+                    option={option}
+                    onSelect={() => onConfigSelect(option.id)}
+                    triggerRef={(element) => {
+                      triggerRefs.current[option.id] = element;
+                    }}
+                  />
+                ))}
+              </div>
+            </ScrollArea>
+          </>
+        )
       )}
     </>
   );
@@ -456,6 +480,11 @@ export type ModelConfigSelectorProps = {
   configBaseline?: Record<string, string>;
   /** Optional suffix appended to the trigger's model label (e.g. "(fallback)"). */
   currentModelSuffix?: string;
+
+  /** Keeps the picker open while a caller resolves model-dependent options. */
+  configOptionsLoading?: boolean;
+  /** Keeps the picker open after model selection, even without existing options. */
+  keepOpenOnModelChange?: boolean;
 
   /** Optional title tooltip on the trigger (e.g. explains a live-only note). */
   triggerTitle?: string;
@@ -482,7 +511,7 @@ function ModelConfigSelectorTrigger({
   const compact = variant === "compact";
   const baseClassName = compact
     ? "h-7 max-w-[min(18rem,70vw)] cursor-pointer gap-1 px-2 text-xs hover:bg-muted/40"
-    : "w-full justify-between font-normal cursor-pointer";
+    : settingsControlClassName("w-full justify-between font-normal cursor-pointer");
   const trigger = (
     <PopoverTrigger asChild>
       <Button
@@ -541,6 +570,8 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   triggerSummary = "all",
   configBaseline,
   currentModelSuffix,
+  configOptionsLoading = false,
+  keepOpenOnModelChange = false,
 }: ModelConfigSelectorProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -570,7 +601,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   const onModelSelect = (value: string) => {
     if (!value) return;
     onModelChange(value);
-    if (!hasExtraConfigOptions) {
+    if (!keepOpenOnModelChange && !hasExtraConfigOptions && !configOptionsLoading) {
       setOpen(false);
     }
   };
@@ -608,6 +639,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
           onConfigSelect={setActiveConfigId}
           onConfigBack={() => setActiveConfigId(null)}
           onConfigChange={onConfigChange}
+          configOptionsLoading={configOptionsLoading}
         />
       </PopoverContent>
     </Popover>

@@ -40,104 +40,67 @@ func TestSessionHasPendingClarification(t *testing.T) {
 	}
 }
 
-// TestSessionHasPendingClarification_G5_AbsentOrUnrecognizedStatusDefers proves
-// the guard's status predicate widened to D3's effective-pending form (spec
-// G5): a clarification_request message with no metadata.status key, and one
-// with an unrecognized status value, both still count as pending and defer
-// turn-complete.
-func TestSessionHasPendingClarification_G5_AbsentOrUnrecognizedStatusDefers(t *testing.T) {
-	cases := []struct {
-		name     string
-		metadata map[string]interface{}
-	}{
-		{"absent status key", map[string]interface{}{"pending_id": "pending-absent"}},
-		{"unrecognized status value", map[string]interface{}{"pending_id": "pending-unrecognized", "status": "bogus"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
-			repo := setupTestRepo(t)
-			seedSession(t, repo, "t1", "s1", "step1")
-			svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+func TestSessionHasPendingClarificationIgnoresOlderDurableTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-current-turn", "session-current-turn", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	base := time.Date(2026, time.August, 14, 16, 0, 0, 0, time.UTC)
+	requireNoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID: "turn-old", TaskSessionID: "session-current-turn", TaskID: "task-current-turn",
+		StartedAt: base, CreatedAt: base,
+	}))
+	requireNoError(t, repo.CreateMessage(ctx, &models.Message{
+		ID: "clarification-old", TaskSessionID: "session-current-turn", TaskID: "task-current-turn",
+		TurnID: "turn-old", AuthorType: models.MessageAuthorAgent,
+		Type: models.MessageTypeClarificationRequest, Content: "old", CreatedAt: base,
+		Metadata: map[string]any{"pending_id": "pending-old", "status": "pending"},
+	}))
+	requireNoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID: "turn-new", TaskSessionID: "session-current-turn", TaskID: "task-current-turn",
+		StartedAt: base.Add(time.Minute), CreatedAt: base.Add(time.Minute),
+	}))
 
-			now := time.Now().UTC()
-			requireNoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "turn-1", TaskSessionID: "s1", TaskID: "t1", StartedAt: now}))
-			requireNoError(t, repo.CreateMessage(ctx, &models.Message{
-				ID: "clarify-1", TaskSessionID: "s1", TaskID: "t1", TurnID: "turn-1",
-				AuthorType: models.MessageAuthorAgent, Type: "clarification_request",
-				Content: "Q?", CreatedAt: now, Metadata: tc.metadata,
-			}))
-
-			if !svc.sessionHasPendingClarification(ctx, "s1") {
-				t.Fatal("expected the widened predicate to still count this message as pending")
-			}
-		})
+	if svc.sessionHasPendingClarification(ctx, "session-current-turn") {
+		t.Fatal("older-turn clarification blocked turn completion")
 	}
 }
 
-// TestSessionHasPendingClarification_D4a_TerminalStatusesDoNotDeferWithoutResolutionRow
-// is the D4a regression the spec calls out as most important: a bundle whose
-// messages are all terminal (answered/rejected/cancelled/expired) but has no
-// clarification_resolutions row — the pre-upgrade legacy state — must not
-// block turn-complete. Without D4a conjunct 2, a message with a recognized
-// terminal status still correctly excludes itself; this proves G5's widening
-// did not accidentally start counting terminal statuses as pending too.
-func TestSessionHasPendingClarification_D4a_TerminalStatusesDoNotDeferWithoutResolutionRow(t *testing.T) {
+func TestSessionHasPendingClarificationFailsClosedOnRepositoryError(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-error", "session-error", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if !svc.sessionHasPendingClarification(ctx, "session-error") {
+		t.Fatal("repository error opened the workflow barrier")
+	}
+}
+
+func TestSessionHasLiveClarificationIgnoresDetachedBundle(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedSession(t, repo, "t1", "s1", "step1")
+	seedSession(t, repo, "task-detached", "session-detached", "step1")
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-
 	now := time.Now().UTC()
-	requireNoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "turn-1", TaskSessionID: "s1", TaskID: "t1", StartedAt: now}))
-	for i, status := range []string{"answered", "rejected", "cancelled", "expired"} {
-		requireNoError(t, repo.CreateMessage(ctx, &models.Message{
-			ID: "clarify-" + status, TaskSessionID: "s1", TaskID: "t1", TurnID: "turn-1",
-			AuthorType: models.MessageAuthorAgent, Type: "clarification_request",
-			Content: "Q?", CreatedAt: now.Add(time.Duration(i) * time.Second),
-			Metadata: map[string]interface{}{"pending_id": "pending-" + status, "status": status},
-		}))
+	requireNoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID: "turn-detached", TaskSessionID: "session-detached", TaskID: "task-detached",
+		StartedAt: now, CreatedAt: now,
+	}))
+	requireNoError(t, repo.CreateMessage(ctx, &models.Message{
+		ID: "clarification-detached", TaskSessionID: "session-detached", TaskID: "task-detached",
+		TurnID: "turn-detached", AuthorType: models.MessageAuthorAgent,
+		Type: models.MessageTypeClarificationRequest, Content: "old question", CreatedAt: now,
+		Metadata: map[string]any{
+			"pending_id": "pending-detached", "status": "pending", "agent_disconnected": true,
+		},
+	}))
+
+	if !svc.sessionHasPendingClarification(ctx, "session-detached") {
+		t.Fatal("detached clarification must remain a pending answer barrier")
 	}
-
-	if svc.sessionHasPendingClarification(ctx, "s1") {
-		t.Fatal("all-terminal legacy bundle with no resolution row must not block turn-complete")
-	}
-}
-
-// TestTurnCompleteBlockedByUserInput_G1_ClaimedBundleDoesNotDefer proves the
-// D4a conjunct-1 exclusion (spec G1/G2): once a clarification_resolutions row
-// exists for a bundle, turnCompleteBlockedByUserInput no longer defers, even
-// though the bundle's own message metadata still reads "pending" (the R5
-// partial-application / claim-then-crash state). Without this exclusion the
-// session would wedge forever, since re-answering (R2) and cancelling (X1)
-// are both no-ops against an already-resolved bundle.
-func TestTurnCompleteBlockedByUserInput_G1_ClaimedBundleDoesNotDefer(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedSession(t, repo, "t1", "s1", "step1")
-	seedPendingClarificationMessage(t, repo, "t1", "s1")
-	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-
-	claimed, _, err := repo.InsertClarificationResolution(ctx, &models.ClarificationResolution{
-		PendingID:  "pending-s1",
-		SessionID:  "s1",
-		TaskID:     "t1",
-		Status:     models.ClarificationResolutionStatusAnswered,
-		Response:   `{"pending_id":"pending-s1","answers":[],"rejected":false,"reject_reason":""}`,
-		Resume:     "resumed",
-		ResolvedBy: "user-1",
-		Source:     models.ClarificationResolutionSourceWeb,
-		ResolvedAt: time.Now().UTC(),
-	})
-	requireNoError(t, err)
-	if !claimed {
-		t.Fatal("InsertClarificationResolution did not claim the bundle")
-	}
-
-	session, err := repo.GetTaskSession(ctx, "s1")
-	requireNoError(t, err)
-	if svc.turnCompleteBlockedByUserInput(ctx, "t1", "s1", session) {
-		t.Fatal("a resolved bundle must not block turn-complete despite stale pending message metadata")
+	if svc.sessionHasLiveClarification(ctx, "session-detached") {
+		t.Fatal("detached-only clarification must not block a successor queue drain")
 	}
 }
 

@@ -15,6 +15,7 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 		Git:                 deriveGitSummary(state),
 		PullRequest:         derivePullRequestSummary(state),
 		QueuedPromptCount:   state.queuedCount,
+		LastActivityAt:      cloneTimePtr(state.lastActivityAt),
 	}
 }
 

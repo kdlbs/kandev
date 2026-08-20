@@ -486,10 +486,14 @@ func TestCancelRequest_AfterRespond_DoesNotCloseCancelCh(t *testing.T) {
 // (CancelRequest fully completes, then Respond is called) is phantom-green:
 // CancelRequest deletes the map entry from s.pending before Respond's own
 // lookup runs, so a purely sequential call always short-circuits on the
-// pre-existing ErrNotFound path and never reaches the new
-// `select { case <-pending.CancelCh: return ErrAlreadyCancelled }` guard this
-// test is named for. Confirmed by mutation testing: deleting that guard
-// entirely left the sequential test passing.
+// pre-existing ErrNotFound path and never reaches the
+// `select { case <-pending.CancelCh: return ErrNotFound }` guard this test
+// is named for. Confirmed by mutation testing: deleting that guard entirely
+// left the sequential test passing. The guard deliberately reuses
+// ErrNotFound rather than a distinct sentinel: to the resolver, "cancel
+// closed CancelCh first" and "no entry at all" both mean the durable claim
+// has no live in-memory waiter left, so both must fall back to the same
+// detached-delivery path.
 //
 // This version forces the real interleaving instead: two goroutines actually
 // racing at the Store level. Respond's own map lookup must complete (finding
@@ -521,7 +525,7 @@ func TestRespond_AfterCancelRequest_ReturnsError(t *testing.T) {
 	<-parked // Respond found the live entry; it is parked just before acquiring pending.mu.
 
 	if !s.CancelRequest(id) {
-		t.Fatal("expected CancelRequest to report the entry existed")
+		t.Fatal("expected CancelRequest to report the entry existed and was still unresolved")
 	}
 	close(release) // Let Respond proceed to pending.mu, now that CancelCh is closed.
 
@@ -529,8 +533,8 @@ func TestRespond_AfterCancelRequest_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Respond to report an error once a concurrent CancelRequest closed CancelCh first -- silently succeeding would be reported as a delivered answer nobody is waiting for")
 	}
-	if !errors.Is(err, ErrAlreadyCancelled) {
-		t.Fatalf("expected ErrAlreadyCancelled, got %v", err)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 
 	select {

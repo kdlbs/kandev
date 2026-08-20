@@ -2,10 +2,55 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
+import { activeSessionId, seedSecondaryClarificationTask } from "../../helpers/clarification";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Mobile sidebar task actions", () => {
+  test("opens the secondary session that owns clarification from the phone drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const target = await seedSecondaryClarificationTask(
+      apiClient,
+      seedData,
+      "Mobile secondary clarification owner",
+    );
+    const source = await apiClient.createTask(seedData.workspaceId, "Mobile pending owner source", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    await testPage.goto(`/t/${source.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await testPage.getByTestId("mobile-session-menu").tap();
+    const drawer = testPage.getByRole("dialog", { name: "Tasks" });
+    const targetRow = drawer.getByTestId("sidebar-task-item").filter({ hasText: target.title });
+    await expect(targetRow).toBeVisible();
+    await expect(targetRow.getByTestId("task-state-waiting-for-input")).toBeVisible();
+    await targetRow.tap();
+
+    await expect(drawer).toBeHidden();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${target.id}$`));
+    await expect.poll(() => activeSessionId(testPage)).toBe(target.clarificationSessionId);
+    await expect(session.clarificationOverlay()).toBeVisible();
+    await expect(session.clarificationOverlay()).toContainText(
+      "Which database should we use for this project?",
+    );
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate(
+            () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+          ),
+        { message: "pending clarification task should not overflow the phone viewport" },
+      )
+      .toBe(true);
+  });
+
   test("switches to the selected task and its chat from the phone task drawer", async ({
     testPage,
     apiClient,

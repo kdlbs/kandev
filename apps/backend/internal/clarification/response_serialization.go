@@ -15,9 +15,9 @@ type serializedAnswer struct {
 
 // serializedResponse mirrors Response but declares no `omitempty`: every key
 // is always present (M6a, N3a rule 4). This is a dedicated wire shape for the
-// resolutions row's `response` column only — clarification.Response's own
-// struct tags (`types.go:44-52`) are unchanged, since they are
-// ask_user_question_kandev's frozen tool-result shape (M6a, *Out of scope*).
+// durable answer record only — clarification.Response's own struct tags
+// (`types.go:44-52`) are unchanged, since they are ask_user_question_kandev's
+// frozen tool-result shape (M6a, *Out of scope*).
 type serializedResponse struct {
 	PendingID    string             `json:"pending_id"`
 	Answers      []serializedAnswer `json:"answers"`
@@ -27,8 +27,8 @@ type serializedResponse struct {
 }
 
 // SerializeResponse produces the M6a/N3a-compliant JSON encoding of resp: the
-// value stored in a clarification_resolutions row's `response` column and
-// replayed verbatim to losers (R2, N4). `answers`, `selected_options` and
+// durable answer value that gets replayed verbatim to losers (R2, N4).
+// `answers`, `selected_options` and
 // `reject_reason` are always emitted — as `[]` or `""` when empty, never
 // omitted or `null` — independently of clarification.Response's own
 // `omitempty` tags, which marshalling the struct directly would honor.

@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	messageCreateMaxRetries = 5
-	messageCreateRetryDelay = 50 * time.Millisecond
+	messageCreateMaxRetries    = 5
+	messageCreateRetryDelay    = 50 * time.Millisecond
+	clarificationPendingStatus = "pending"
 )
 
 // CreateMessage creates a new message on an agent session
@@ -85,7 +86,11 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 		Type:          messageType,
 		Metadata:      req.Metadata,
 		RequestsInput: req.RequestsInput,
-		CreatedAt:     time.Now().UTC(),
+		// CreatedAt deliberately left zero: the repository assigns it inside
+		// the atomic per-session create boundary, which treats a zero
+		// timestamp as a LIVE create (advancing a colliding or backward key
+		// by one tick). Pre-populating it here would misclassify the message
+		// as an explicit import and reject same-microsecond creates.
 	}
 
 	if err := s.messages.CreateMessage(ctx, message); err != nil {
@@ -109,13 +114,14 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 // after the database commit, so retrying must not create a second user turn.
 // The handler performs the fast preflight before session-state side effects;
 // this method also closes the concurrent two-request race at the repository
-// primary-key boundary.
+// primary-key boundary. Replay reads go through GetMessageWithPromptIndex so
+// the returned row carries its stable prompt ordinal.
 func (s *Service) CreateMessageIdempotent(ctx context.Context, id string, req *CreateMessageRequest) (*models.Message, error) {
 	if id == "" {
 		return nil, errors.New("message id is required for idempotent creation")
 	}
 
-	existing, err := s.messages.GetMessage(ctx, id)
+	existing, err := s.messages.GetMessageWithPromptIndex(ctx, id)
 	if err == nil && existing != nil {
 		return existing, nil
 	}
@@ -130,7 +136,7 @@ func (s *Service) CreateMessageIdempotent(ctx context.Context, id string, req *C
 
 	// Another request may have won the insert while this request was building
 	// its turn. Read the committed row and treat that duplicate as success.
-	existing, lookupErr := s.messages.GetMessage(ctx, id)
+	existing, lookupErr := s.messages.GetMessageWithPromptIndex(ctx, id)
 	if lookupErr == nil && existing != nil {
 		return existing, nil
 	}
@@ -267,7 +273,8 @@ func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessag
 		Type:          messageType,
 		Metadata:      req.Metadata,
 		RequestsInput: req.RequestsInput,
-		CreatedAt:     time.Now().UTC(),
+		// CreatedAt deliberately left zero: the repository's atomic per-session
+		// create boundary assigns it (live creates advance a colliding key).
 	}, nil
 }
 
@@ -307,6 +314,22 @@ func (s *Service) GetMessage(ctx context.Context, id string) (*models.Message, e
 	// Scope like ListMessages: the shell-output route reaches a message by ID,
 	// so without this a caller holding someone else's (session_id, message_id)
 	// pair could read their command output.
+	if message.TaskSessionID != "" {
+		if err := s.AuthorizeSessionAccess(ctx, message.TaskSessionID); err != nil {
+			return nil, err
+		}
+	}
+	return message, nil
+}
+
+// GetMessageWithPromptIndex retrieves a message by ID with its computed
+// prompt ordinal, scoped like GetMessage. Used by the idempotent WS
+// replay/response path so a retried prompt answers with its stable index.
+func (s *Service) GetMessageWithPromptIndex(ctx context.Context, id string) (*models.Message, error) {
+	message, err := s.messages.GetMessageWithPromptIndex(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	if message.TaskSessionID != "" {
 		if err := s.AuthorizeSessionAccess(ctx, message.TaskSessionID); err != nil {
 			return nil, err
@@ -386,8 +409,24 @@ func (s *Service) UpdateMessage(ctx context.Context, message *models.Message) er
 		return err
 	}
 
-	// Publish message.updated event for real-time streaming
-	s.publishMessageEvent(ctx, events.MessageUpdated, message)
+	// User rows carry the stable prompt ordinal in message.updated events:
+	// re-read the affected row through GetMessageWithPromptIndex before
+	// publishing. Agent messages and streaming agent content/thinking updates
+	// stay on the hot 12-column loaded model and never carry the field.
+	published := message
+	if message.AuthorType == models.MessageAuthorUser {
+		if indexed, err := s.messages.GetMessageWithPromptIndex(ctx, message.ID); err == nil {
+			published = indexed
+		} else {
+			s.logger.Warn("failed to re-read indexed message for update event",
+				zap.String("message_id", message.ID),
+				zap.Error(err))
+		}
+	}
+
+	// Publish message.updated event for real-time streaming. Delivery is best
+	// effort after the durable write succeeded (see publishMessageEvent).
+	_ = s.publishMessageEvent(ctx, events.MessageUpdated, published)
 
 	return nil
 }
@@ -708,20 +747,11 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 	return nil
 }
 
-// UpdateClarificationMessageForQuestion updates a single clarification
-// message, identified by its own messageID, with the new status and the
-// answer payload. Used by both single- and multi-question clarification
-// bundles since each question lives in its own chat message.
-//
-// The lookup key is messageID, not (pending_id, question_id): a bundle can
-// legitimately contain multiple messages sharing the same empty question_id
-// (an L16 bundle), and a compound-key lookup collapses them all onto the
-// same earliest row, so a rejection loop over such a bundle would silently
-// re-update only the first message and leave the rest "pending" forever
-// (R9a). pendingID/questionID are still verified against the fetched
-// message's own metadata as a defensive ownership check, and kept for
-// logging.
-func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, sessionID, pendingID, messageID, questionID, status string, answer interface{}) error {
+// UpdateClarificationMessageForQuestion updates a single clarification message
+// (identified by pending_id + question_id) with the new status and the answer
+// payload. Used by both single- and multi-question clarification bundles since
+// each question lives in its own chat message.
+func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, sessionID, pendingID, questionID, status string, answer interface{}) error {
 	const maxRetries = 5
 	const retryDelay = 100 * time.Millisecond
 
@@ -729,7 +759,7 @@ func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, ses
 	var err error
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		message, err = s.messages.GetMessage(ctx, messageID)
+		message, err = s.messages.FindMessageByPendingIDAndQuestion(ctx, sessionID, pendingID, questionID)
 		if err == nil {
 			break
 		}
@@ -742,7 +772,6 @@ func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, ses
 			s.logger.Debug("clarification message not found, retrying",
 				zap.String("session_id", sessionID),
 				zap.String("pending_id", pendingID),
-				zap.String("message_id", messageID),
 				zap.String("question_id", questionID),
 				zap.Int("attempt", attempt+1),
 				zap.Int("max_retries", maxRetries))
@@ -754,18 +783,10 @@ func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, ses
 		s.logger.Warn("clarification message not found for update after retries",
 			zap.String("session_id", sessionID),
 			zap.String("pending_id", pendingID),
-			zap.String("message_id", messageID),
 			zap.String("question_id", questionID),
 			zap.Int("retries", maxRetries),
 			zap.Error(err))
 		return err
-	}
-
-	if message.TaskSessionID != sessionID {
-		return fmt.Errorf("clarification message %q belongs to session %q, not %q", messageID, message.TaskSessionID, sessionID)
-	}
-	if pid, _ := message.Metadata["pending_id"].(string); pid != pendingID {
-		return fmt.Errorf("clarification message %q belongs to pending_id %q, not %q", messageID, pid, pendingID)
 	}
 
 	if message.Metadata == nil {
@@ -793,5 +814,87 @@ func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, ses
 		zap.String("question_id", questionID),
 		zap.String("status", status))
 
+	return nil
+}
+
+// CompleteActiveClarificationBundle atomically transitions a current-turn
+// bundle. The caller publishes the returned messages only after response
+// delivery succeeds, so a failed detached resume can be restored for retry.
+func (s *Service) CompleteActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, status string,
+	responses map[string]interface{},
+) ([]*models.Message, bool, error) {
+	return s.messages.CompleteActiveClarificationBundle(ctx, pendingID, status, responses)
+}
+
+// FinalizeClarificationResponseDelivery retires the durable recovery intent
+// after the claimed response reaches its live or detached handoff boundary.
+func (s *Service) FinalizeClarificationResponseDelivery(
+	ctx context.Context,
+	pendingID, terminalStatus string,
+	claimedMessages []*models.Message,
+) ([]*models.Message, bool, error) {
+	return s.messages.FinalizeClarificationResponseDelivery(
+		ctx,
+		pendingID,
+		terminalStatus,
+		claimedMessages,
+	)
+}
+
+// RestoreActiveClarificationBundle reopens a terminal bundle after detached
+// resume acceptance fails and returns the committed pending rows for publication.
+func (s *Service) RestoreActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, terminalStatus string,
+	claimedMessages []*models.Message,
+) ([]*models.Message, bool, error) {
+	return s.messages.RestoreActiveClarificationBundle(
+		ctx,
+		pendingID,
+		terminalStatus,
+		claimedMessages,
+	)
+}
+
+// PublishClarificationBundleUpdates exposes committed rows to ordinary bus
+// subscribers. A restored pending bundle first drives the live summary
+// projector synchronously. Projection failure is returned to the caller, but
+// does not make the durably restored bundle unsafe to retry; later events and
+// reads repair that cache. Committed rows are still published on failure so
+// clients do not retain the terminal snapshot.
+func (s *Service) PublishClarificationBundleUpdates(ctx context.Context, messages []*models.Message) error {
+	var resultErr error
+	if restored := firstRestoredClarification(messages); restored != nil {
+		if s.statusSummaryProjector == nil {
+			resultErr = errors.New("task status summary projector is unavailable")
+		} else if err := s.statusSummaryProjector.HandleEvent(
+			ctx,
+			newMessageEvent(events.MessageUpdated, restored),
+		); err != nil {
+			resultErr = fmt.Errorf("converge clarification status summary: %w", err)
+		}
+	}
+	for _, message := range messages {
+		if message == nil {
+			continue
+		}
+		if err := s.publishMessageEvent(ctx, events.MessageUpdated, message); err != nil && resultErr == nil {
+			resultErr = fmt.Errorf("publish clarification message update: %w", err)
+		}
+	}
+	return resultErr
+}
+
+func firstRestoredClarification(messages []*models.Message) *models.Message {
+	for _, message := range messages {
+		if message == nil || message.Type != models.MessageTypeClarificationRequest {
+			continue
+		}
+		if status, _ := message.Metadata["status"].(string); status == clarificationPendingStatus {
+			return message
+		}
+	}
 	return nil
 }

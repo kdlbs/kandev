@@ -107,6 +107,17 @@ const (
 	// after queue promotion. It prevents duplicate task.queue_promoted events
 	// from repeating on_enter or auto-start behavior.
 	MetaKeyQueuePromotionPending = "queue_promotion_pending"
+	// MetaKeyManualMoveLifecyclePending identifies an admitted manual move whose
+	// task.moved lifecycle must finish before feeder reconciliation. Its value
+	// records the source step so stale deliveries cannot run the wrong exit.
+	MetaKeyManualMoveLifecyclePending = "manual_move_lifecycle_pending"
+	// MetaKeyManualMoveLifecycleCompleted records that the admitted manual move
+	// lifecycle finished. It remains as an idempotency marker until the next
+	// step-changing move replaces it.
+	MetaKeyManualMoveLifecycleCompleted = "manual_move_lifecycle_completed"
+	// MetaKeyAppliedDeferredMoves stores deferred move IDs that have already
+	// been applied, preventing a stale queue rollback from replaying one.
+	MetaKeyAppliedDeferredMoves = "applied_deferred_moves"
 	// DeferredLaunchStartWhenUnblockedKey marks a deferred launch intent as
 	// belonging to a task dependency chain rather than to WIP overflow. The
 	// record itself is identical; the flag lets dependency resolution recognise
@@ -262,6 +273,48 @@ const TurnMetaKeyRuntimeConfigSnapshot = "runtime_config_snapshot"
 // was in when the turn started. Absent when the task held no step.
 const TurnMetaKeyWorkflowStepIDAtStart = "workflow_step_id_at_start"
 
+// TurnMetaKeyPromptDispatchPending marks a successor created before agentctl
+// acknowledges its prompt. Empty marked turns are not current-turn authority
+// unless dispatch ambiguity was recorded; publication clears the marker, while
+// a referencing message also proves ambiguous acceptance after a crash.
+const TurnMetaKeyPromptDispatchPending = "prompt_dispatch_pending"
+
+const (
+	TurnMetaKeyPromptDispatchAttempted               = "prompt_dispatch_attempted"
+	TurnMetaKeyPromptDispatchClarificationPendingID  = "prompt_dispatch_clarification_pending_id"
+	TurnMetaKeyPromptDispatchClarificationTurnID     = "prompt_dispatch_clarification_turn_id"
+	TurnMetaKeyPromptDispatchClarificationMessageIDs = "prompt_dispatch_clarification_message_ids"
+	// TurnMetaKeyPromptDispatchStartEventPending is a durable outbox marker.
+	// Startup recovery sets it after accepting an ambiguous reservation and
+	// clears it only after the task service replays the public turn events.
+	TurnMetaKeyPromptDispatchStartEventPending = "prompt_dispatch_start_event_pending"
+)
+
+var promptDispatchMetadataKeys = [...]string{
+	TurnMetaKeyPromptDispatchPending,
+	TurnMetaKeyPromptDispatchAttempted,
+	TurnMetaKeyPromptDispatchClarificationPendingID,
+	TurnMetaKeyPromptDispatchClarificationTurnID,
+	TurnMetaKeyPromptDispatchClarificationMessageIDs,
+	TurnMetaKeyPromptDispatchStartEventPending,
+}
+
+// ClearPromptDispatchMetadata removes every reservation-only field after live
+// publication or successful startup event replay.
+func ClearPromptDispatchMetadata(metadata map[string]interface{}) {
+	for _, key := range promptDispatchMetadataKeys {
+		delete(metadata, key)
+	}
+}
+
+// PromptDispatchRecovery identifies the exact clarification claim that an
+// unpublished successor reservation must restore after a backend restart.
+type PromptDispatchRecovery struct {
+	PendingID  string
+	TurnID     string
+	MessageIDs []string
+}
+
 // SessionRuntimeConfig is persisted as provider state or explicit overrides.
 // On resume, explicit values take precedence over the latest provider snapshot
 // so delayed provider events cannot replace user intent.
@@ -313,7 +366,7 @@ func LoadEffectiveSessionRuntimeConfig(session *TaskSession) (SessionRuntimeConf
 	if overrides, ok := LoadSessionRuntimeConfigOverrides(session.Metadata); ok {
 		mergeSessionRuntimeConfig(&effective, overrides)
 	}
-	effective.ConfigOptions = cleanRuntimeConfigOptions(effective.ConfigOptions)
+	effective.ConfigOptions = cleanRuntimeConfigOptions(effective.ConfigOptions, session)
 	return effective, !effective.IsZero()
 }
 
@@ -350,17 +403,33 @@ func mergeSessionRuntimeConfig(target *SessionRuntimeConfig, source SessionRunti
 	}
 }
 
-func cleanRuntimeConfigOptions(options map[string]string) map[string]string {
+func cleanRuntimeConfigOptions(options map[string]string, session *TaskSession) map[string]string {
 	if len(options) == 0 {
 		return nil
 	}
 	cleaned := maps.Clone(options)
+	// Model and mode are carried as top-level fields. Other keys are provider-defined.
 	delete(cleaned, "model")
 	delete(cleaned, "mode")
+	if isLegacyAgentIdentity(session, cleaned["agent"]) {
+		delete(cleaned, "agent")
+	}
 	if len(cleaned) == 0 {
 		return nil
 	}
 	return cleaned
+}
+
+func isLegacyAgentIdentity(session *TaskSession, value string) bool {
+	if session == nil || value == "" || session.AgentProfileSnapshot == nil {
+		return false
+	}
+	for _, key := range []string{"agent_id", "agent_name"} {
+		if StringFromAny(session.AgentProfileSnapshot[key]) == value {
+			return true
+		}
+	}
+	return false
 }
 
 // SessionOriginalEffectiveConfiguration is the immutable configuration a task
@@ -461,6 +530,8 @@ type LastAgentError struct {
 	OccurredAt       time.Time  `json:"occurred_at"`
 	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
 	RemediationURL   string     `json:"remediation_url,omitempty"`
+	Code             string     `json:"code,omitempty"`
+	Details          string     `json:"details,omitempty"`
 	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
 }
 
@@ -1043,6 +1114,14 @@ const (
 // on user input.
 type TaskPendingAction string
 
+// PendingActionRevision is a logical clock shared by REST and WebSocket
+// pending-action projections. Epoch is a durable, monotonically allocated
+// backend generation; Sequence orders snapshots within that generation.
+type PendingActionRevision struct {
+	Epoch    string `json:"epoch"`
+	Sequence uint64 `json:"sequence"`
+}
+
 const (
 	TaskPendingActionClarification TaskPendingAction = "clarification"
 	TaskPendingActionPermission    TaskPendingAction = "permission"
@@ -1062,6 +1141,12 @@ type Message struct {
 	RequestsInput bool                   `json:"requests_input"` // True if agent is requesting user input
 	CreatedAt     time.Time              `json:"created_at"`
 	UpdatedAt     time.Time              `json:"updated_at"` // Authoritative per-message change signal
+	// PromptIndex is the 1-based ordinal of the message among ALL user
+	// messages of its session, ordered by normalized-microsecond created_at
+	// ascending with ties broken by id ascending. Read-time derived: zero for
+	// non-user messages and for legacy 12-column reads, and serialized only
+	// when > 0 (json omitempty).
+	PromptIndex int `json:"prompt_index,omitempty"`
 }
 
 // ToAPI converts internal Message to API type.
@@ -1096,6 +1181,7 @@ func (m *Message) ToAPI() *v1.Message {
 		RequestsInput: m.RequestsInput,
 		CreatedAt:     m.CreatedAt,
 		UpdatedAt:     m.UpdatedAt,
+		PromptIndex:   m.PromptIndex,
 	}
 	if hasHidden {
 		result.RawContent = m.Content
@@ -1383,6 +1469,43 @@ type Repository struct {
 	CreatedAt              time.Time                 `json:"created_at"`
 	UpdatedAt              time.Time                 `json:"updated_at"`
 	DeletedAt              *time.Time                `json:"deleted_at,omitempty"`
+}
+
+// RepositorySet is a named, reusable group of workspace repositories that fills
+// the task-creation repository picker in one action.
+//
+// A set deliberately stores no branch. Branch choice belongs to a task and is
+// already modelled on TaskRepository; a branch cached here would go stale
+// against the repository's real refs.
+type RepositorySet struct {
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Items is the ordered membership. Slice order is authoritative on write:
+	// positions are assigned from it, and reads return items sorted by position.
+	Items     []RepositorySetItem `json:"repositories"`
+	CreatedAt time.Time           `json:"created_at"`
+	UpdatedAt time.Time           `json:"updated_at"`
+}
+
+// RepositorySetItem is one repository's membership in a set.
+type RepositorySetItem struct {
+	ID              string    `json:"id"`
+	RepositorySetID string    `json:"repository_set_id"`
+	RepositoryID    string    `json:"repository_id"`
+	Position        int       `json:"position"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// RepositoryIDs returns the set's membership in position order.
+func (s *RepositorySet) RepositoryIDs() []string {
+	ids := make([]string, 0, len(s.Items))
+	for _, item := range s.Items {
+		ids = append(ids, item.RepositoryID)
+	}
+	return ids
 }
 
 // ProviderRepositoryIdentity is the durable provider lookup key. New plugin

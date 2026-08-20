@@ -223,6 +223,17 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 // required validation, workflow/step resolution, and office identifier
 // assignment, producing the in-memory task CreateTask is about to insert.
 func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskRequest, externalID string) (*models.Task, error) {
+	// Subtasks created without an explicit project inherit the parent's, so
+	// office cost events (which copy tasks.project_id verbatim) attribute to
+	// the same project as the rest of the tree instead of leaking. Runs first
+	// so every isOfficeRequest check below — including prepareAutoTitle's —
+	// classifies office-ness from the same, final req.ProjectID: an inherited
+	// project must reach the same auto_title rejection an explicit one does,
+	// not silently create an office task carrying agent_title_pending.
+	if err := s.inheritParentProject(ctx, req); err != nil {
+		return nil, err
+	}
+
 	if err := prepareAutoTitle(req); err != nil {
 		return nil, err
 	}
@@ -442,6 +453,13 @@ func (s *Service) pullTasksFromNewFeederWork(ctx context.Context, workflowID, fe
 	}
 }
 
+// ReconcileFeederPulls wakes steps that pull from feederStepID. The
+// orchestrator calls this after an admitted manual move's lifecycle barrier
+// completes so selection and promotion rules stay owned by this service.
+func (s *Service) ReconcileFeederPulls(ctx context.Context, workflowID, feederStepID string) {
+	s.pullTasksFromNewFeederWork(ctx, workflowID, feederStepID)
+}
+
 func (s *Service) createTaskWithCapacity(ctx context.Context, task *models.Task) error {
 	if task.IsEphemeral || task.WorkflowStepID == "" {
 		return s.tasks.CreateTask(ctx, task)
@@ -525,6 +543,37 @@ func (s *Service) inheritParentRepositories(ctx context.Context, req *CreateTask
 	if len(inherited) > 0 {
 		req.Repositories = inherited
 	}
+	return nil
+}
+
+// inheritParentProject fills req.ProjectID from the parent task when a
+// subtask is created without an explicit project. Office cost events copy
+// tasks.project_id verbatim (see office/service/event_subscribers.go
+// projectIDForTask) with no ancestry walk or fallback, so a subtask left
+// projectless never rolls up to its tree's budget even though its parent
+// has one.
+//
+// CreateTask authorizes only req.WorkspaceID, never the parent, and the MCP
+// create-task path deliberately allows an explicit req.WorkspaceID that
+// differs from the parent's (TestHandleCreateTask_SubtaskHonorsExplicitWorkspaceAndWorkflow) —
+// so a workspace mismatch cannot be rejected outright without breaking that
+// flow. Inheritance is skipped instead: a caller authorized only for
+// workspace A that passes a parent from workspace B gets a projectless
+// subtask in A, never B's project silently attributed to A. This mirrors
+// the pre-fix behavior for every subtask (blank project) rather than
+// introducing a new failure mode.
+func (s *Service) inheritParentProject(ctx context.Context, req *CreateTaskRequest) error {
+	if req.ParentID == "" || req.ProjectID != "" {
+		return nil
+	}
+	parent, err := s.tasks.GetTask(ctx, req.ParentID)
+	if err != nil {
+		return fmt.Errorf("get parent task for project inheritance: %w", err)
+	}
+	if parent.WorkspaceID != req.WorkspaceID {
+		return nil
+	}
+	req.ProjectID = parent.ProjectID
 	return nil
 }
 
@@ -2028,12 +2077,26 @@ func (s *Service) finalizeCancelledSessions(ctx context.Context, taskID string, 
 	// not also suppress the event publish below — event-driven clients
 	// need session.state_changed regardless of whether the archiving
 	// caller is still connected.
-	// Deliberately left unbounded (no timeout) here: publishSessionsCancelled
-	// gives each session in cancelledSessions its own independent 10s
-	// deadline around its Publish call, so one slow synchronous subscriber
-	// can no longer consume a shared batch-wide budget and starve the
-	// events for sessions later in the loop.
+	// Deliberately left unbounded at the batch level: clarification expiry and
+	// publishSessionsCancelled give each session their own independent timeout,
+	// so one slow write or synchronous subscriber cannot starve later sessions.
 	detachedCtx := context.WithoutCancel(ctx)
+	if s.clarificationCanceller != nil {
+		for _, session := range cancelledSessions {
+			if session == nil || session.ID == "" {
+				continue
+			}
+			expireCtx, cancelExpire := context.WithTimeout(detachedCtx, taskPublicationTimeout)
+			_, err := s.clarificationCanceller.ExpireSessionAndNotify(expireCtx, session.ID)
+			cancelExpire()
+			if err != nil {
+				s.logger.Error("failed to expire clarification after archive cancellation; response claims remain quarantined",
+					zap.String("task_id", taskID),
+					zap.String("session_id", session.ID),
+					zap.Error(err))
+			}
+		}
+	}
 	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledSessions, models.SessionArchiveCancelReason)
 }
 

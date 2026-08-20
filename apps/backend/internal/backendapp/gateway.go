@@ -32,6 +32,7 @@ import (
 	terminalrepo "github.com/kandev/kandev/internal/terminal/repository"
 	terminalservice "github.com/kandev/kandev/internal/terminal/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -279,12 +280,42 @@ func provideGateway(
 	go gateway.Hub.Run(ctx)
 	gateways.RegisterTaskNotifications(ctx, eventBus, gateway.Hub, log)
 	if taskRepo != nil && eventBus != nil {
+		var loadPullRequests statussummary.PullRequestLoader
+		if githubSvc != nil {
+			reader := &githubTaskStatusSummaryPRReader{gh: githubSvc}
+			loadPullRequests = func(ctx context.Context, taskID string) ([]statussummary.PullRequestInput, error) {
+				byTask, err := reader.ListTaskStatusSummaryPullRequests(ctx, []string{taskID})
+				if err != nil {
+					return nil, err
+				}
+				return byTask[taskID], nil
+			}
+		}
+		activityProvider, countQueuedPrompts := taskStatusRuntimeProviders(orchestratorSvc)
 		projector := statussummary.NewProjector(statussummary.ProjectorConfig{
 			Store:    taskRepo,
 			EventBus: eventBus,
+			LoadTaskActivity: func(ctx context.Context, taskID string) (*time.Time, error) {
+				byTask, err := taskRepo.LoadTaskLastActivity(ctx, []string{taskID})
+				if err != nil {
+					return nil, err
+				}
+				activityAt, ok := byTask[taskID]
+				if !ok {
+					return nil, nil
+				}
+				return &activityAt, nil
+			},
+			LoadSessionObservations: func(ctx context.Context, taskID string) (statussummary.SessionObservationSnapshot, error) {
+				return loadTaskSessionObservations(ctx, taskRepo, activityProvider, taskID)
+			},
+			LoadPendingActions: func(ctx context.Context, taskID string) (map[string]string, error) {
+				return loadTaskPendingActions(ctx, taskRepo, taskID)
+			},
 			LoadGitObservations: func(ctx context.Context, taskID string) ([]statussummary.GitObservation, error) {
 				return loadTaskGitObservations(ctx, taskRepo, taskID)
 			},
+			LoadPullRequests: loadPullRequests,
 			ResolveWorkspace: func(ctx context.Context, taskID string) (string, error) {
 				task, err := taskRepo.GetTask(ctx, taskID)
 				if err != nil {
@@ -295,11 +326,10 @@ func provideGateway(
 				}
 				return task.WorkspaceID, nil
 			},
-			CountQueuedPrompts: func(ctx context.Context, taskID string) (int, error) {
-				return orchestratorSvc.GetMessageQueue().CountPendingByTask(ctx, taskID)
-			},
-			Logger: log,
+			CountQueuedPrompts: countQueuedPrompts,
+			Logger:             log,
 		})
+		taskSvc.SetTaskStatusSummaryEventProjector(projector)
 		if err := projector.Start(ctx); err != nil {
 			log.Error("failed to start task status summary projector", zap.Error(err))
 		}
@@ -399,6 +429,102 @@ func provideGateway(
 	}
 
 	return gateway, notificationSvc, notificationCtrl, terminalSvc, nil
+}
+
+type taskStatusActivityProvider interface {
+	ForegroundActivity(sessionID string) v1.ForegroundActivity
+	ActiveSubagentCount(sessionID string) int
+}
+
+func taskStatusRuntimeProviders(
+	orchestratorSvc *orchestrator.Service,
+) (taskStatusActivityProvider, func(context.Context, string) (int, error)) {
+	if orchestratorSvc == nil {
+		return nil, nil
+	}
+	queue := orchestratorSvc.GetMessageQueue()
+	if queue == nil {
+		return orchestratorSvc, nil
+	}
+	return orchestratorSvc, queue.CountPendingByTask
+}
+
+func loadTaskSessionObservations(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	activityProvider taskStatusActivityProvider,
+	taskID string,
+) (statussummary.SessionObservationSnapshot, error) {
+	sessions, err := taskRepo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return statussummary.SessionObservationSnapshot{}, err
+	}
+	snapshot := statussummary.SessionObservationSnapshot{
+		Sessions:         make([]statussummary.RebuildSession, 0, len(sessions)),
+		ActivityObserved: activityProvider != nil,
+		ErrorsObserved:   true,
+	}
+	for _, session := range sessions {
+		if session == nil || session.ID == "" {
+			continue
+		}
+		input := statussummary.RebuildSession{
+			ID:        session.ID,
+			State:     string(session.State),
+			IsPrimary: session.IsPrimary,
+		}
+		if activityProvider != nil {
+			activity := activityProvider.ForegroundActivity(session.ID)
+			if session.State == models.TaskSessionStateRunning || activity == v1.ForegroundActivityBackground {
+				input.ForegroundActivity = string(activity)
+			}
+			input.ActiveSubagentCount = maxNonNegative(activityProvider.ActiveSubagentCount(session.ID))
+		}
+		if lastError, ok := models.LoadLastAgentError(session.Metadata); ok && !lastError.IsDismissed() {
+			input.ActiveError = &statussummary.ActiveErrorSummary{
+				SessionID:  session.ID,
+				Stamp:      lastError.Stamp(),
+				OccurredAt: lastError.OccurredAt,
+				Preview:    lastError.Message,
+			}
+		}
+		snapshot.Sessions = append(snapshot.Sessions, input)
+	}
+	return snapshot, nil
+}
+
+func loadTaskPendingActions(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	taskID string,
+) (map[string]string, error) {
+	sessions, err := taskRepo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	// Session state and pending actions are separate snapshots. A concurrent
+	// transition can briefly omit an owner; the next lifecycle/message event
+	// rebuilds the summary from fresh snapshots.
+	sessionIDs := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if session == nil || (session.State != models.TaskSessionStateRunning &&
+			session.State != models.TaskSessionStateWaitingForInput) {
+			continue
+		}
+		sessionIDs = append(sessionIDs, session.ID)
+	}
+	if len(sessionIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	actions, err := taskRepo.GetPendingActionsBySessionIDs(ctx, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string, len(actions))
+	for sessionID, action := range actions {
+		result[sessionID] = string(action)
+	}
+	return result, nil
 }
 
 func loadTaskGitObservations(

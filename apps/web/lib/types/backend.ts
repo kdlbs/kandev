@@ -19,6 +19,7 @@ import type {
   AvailableAgent,
   ForegroundActivity,
   TaskPendingAction,
+  TaskPriority,
   TaskSessionState,
   StepEvents,
   TaskState,
@@ -80,7 +81,7 @@ export type TaskEventPayload = {
   title: string;
   description?: string;
   state?: TaskState;
-  priority?: number;
+  priority?: TaskPriority;
   wip_admitted?: boolean;
   queued_for_step_id?: string | null;
   queued_at?: string | null;
@@ -204,6 +205,20 @@ export type WorkspacePayload = {
   default_environment_id?: string | null;
   default_agent_profile_id?: string | null;
   default_config_agent_profile_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+/**
+ * A `repository_set.*` event. `repositories` is absent on the delete event, whose
+ * payload only has to identify the set and its workspace.
+ */
+export type RepositorySetPayload = {
+  id: string;
+  workspace_id: string;
+  name?: string;
+  description?: string;
+  repositories?: Array<{ repository_id: string; position: number }>;
   created_at?: string;
   updated_at?: string;
 };
@@ -383,6 +398,9 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "workspace.created": BackendMessage<"workspace.created", WorkspacePayload>;
     "workspace.updated": BackendMessage<"workspace.updated", WorkspacePayload>;
     "workspace.deleted": BackendMessage<"workspace.deleted", WorkspacePayload>;
+    "repository_set.created": BackendMessage<"repository_set.created", RepositorySetPayload>;
+    "repository_set.updated": BackendMessage<"repository_set.updated", RepositorySetPayload>;
+    "repository_set.deleted": BackendMessage<"repository_set.deleted", RepositorySetPayload>;
     "workflow.created": BackendMessage<"workflow.created", WorkflowPayload>;
     "workflow.updated": BackendMessage<"workflow.updated", WorkflowPayload>;
     "workflow.deleted": BackendMessage<"workflow.deleted", WorkflowPayload>;

@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/clarification"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
@@ -298,23 +299,47 @@ func TestRegisterHandlers_ClarificationQuestionToolsOnlyWhenBothDepsSet(t *testi
 
 // --- answer_question_kandev: delegation to ResolveBundle ---
 
-// svcMessageUpdater adapts service.Service.UpdateClarificationMessageForQuestion
-// to clarificationMessageUpdater (unexported in package clarification),
-// mirroring backendapp's messageCreatorAdapter for tests, including its
-// COR-001 nil-forwarding fix: a nil *clarification.Answer must reach the
-// service as an untyped nil, not boxed into its interface{} parameter.
-type svcMessageUpdater struct{ svc *service.Service }
+// svcMessageUpdater adapts service.Service to clarification.MessageCreator for
+// tests, mirroring backendapp's messageCreatorAdapter. It embeds *service.Service
+// to inherit CompleteActiveClarificationBundle, FinalizeClarificationResponseDelivery,
+// RestoreActiveClarificationBundle, and PublishClarificationBundleUpdates directly,
+// and only overrides UpdateClarificationMessage (name/signature mismatch with
+// UpdateClarificationMessageForQuestion, including its COR-001 nil-forwarding fix:
+// a nil *clarification.Answer must reach the service as an untyped nil, not boxed
+// into its interface{} parameter) and CreateClarificationRequestMessages (unused
+// by these tests, which seed bundles directly via repo).
+type svcMessageUpdater struct{ *service.Service }
 
-func (s *svcMessageUpdater) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, messageID, questionID, status string, answer *clarification.Answer) error {
+func (s *svcMessageUpdater) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, questionID, status string, answer *clarification.Answer) error {
 	if answer == nil {
-		return s.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, messageID, questionID, status, nil)
+		return s.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, nil)
 	}
-	return s.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, messageID, questionID, status, answer)
+	return s.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, answer)
+}
+
+func (s *svcMessageUpdater) CreateClarificationRequestMessages(context.Context, string, string, string, []clarification.Question, string) ([]string, error) {
+	return nil, errors.New("svcMessageUpdater: CreateClarificationRequestMessages not implemented for tests")
+}
+
+// stubDetachedResumer is a no-op EventBus + DetachedClarificationResumer test
+// double, mirroring clarification package's own stubEventBus (used by
+// handlers_authz_test.go). Without it, ResolveBundle's detached-fallback path
+// (exercised whenever these tests answer a bundle with no live in-session
+// waiter registered) fails closed with "detached clarification resumer
+// unavailable", since production wires that interface to
+// orchestrator.Service.ResumeDetachedClarification, not available here.
+type stubDetachedResumer struct{}
+
+func (stubDetachedResumer) Publish(context.Context, string, *bus.Event) error { return nil }
+
+func (stubDetachedResumer) ResumeDetachedClarification(context.Context, clarification.DetachedClarificationResume) error {
+	return nil
 }
 
 func newTestResolver(t *testing.T, store *clarification.Store, repo *sqliterepo.Repository, svc *service.Service) *clarification.Resolver {
 	t.Helper()
-	return clarification.NewResolver(store, repo, repo, &svcMessageUpdater{svc: svc}, svc, nil, testLogger(t))
+	resumer := stubDetachedResumer{}
+	return clarification.NewResolver(store, repo, &svcMessageUpdater{Service: svc}, svc, resumer, resumer, testLogger(t))
 }
 
 // seedBundle creates a task/session/turn and a two-question clarification
@@ -394,8 +419,7 @@ func TestHandleAnswerQuestion_Answers_ClaimsAndReturnsNormalizedResponse(t *test
 	var body answerQuestionResponse
 	require.NoError(t, json.Unmarshal(resp.Payload, &body))
 	require.True(t, body.Claimed)
-	require.Equal(t, models.ClarificationResolutionStatusAnswered, body.Status)
-	require.NotEmpty(t, body.Resume)
+	require.Equal(t, string(clarification.StatusAnswered), body.Status)
 
 	var respPayload map[string]interface{}
 	require.NoError(t, json.Unmarshal(body.Response, &respPayload))
@@ -438,17 +462,24 @@ func TestHandleAnswerQuestion_M6_StrayRejectReasonDiscardedOnAnsweredPath(t *tes
 	var body answerQuestionResponse
 	require.NoError(t, json.Unmarshal(resp.Payload, &body))
 	require.True(t, body.Claimed)
-	require.Equal(t, models.ClarificationResolutionStatusAnswered, body.Status)
+	require.Equal(t, string(clarification.StatusAnswered), body.Status)
 
 	var respPayload map[string]interface{}
 	require.NoError(t, json.Unmarshal(body.Response, &respPayload))
 	require.Equal(t, "", respPayload["reject_reason"])
 
-	row, err := repo.GetClarificationResolution(ctx, "pending-m6-1")
+	// Durable storage never persists reject_reason at all (R2b: reconstruction
+	// always returns ""), so the in-memory response check above is the whole
+	// contract; there is no separate resolution row to cross-check.
+	msgs, err := repo.FindMessagesByPendingID(ctx, "pending-m6-1")
 	require.NoError(t, err)
-	var stored map[string]interface{}
-	require.NoError(t, json.Unmarshal([]byte(row.Response), &stored))
-	require.Equal(t, "", stored["reject_reason"])
+	require.NotEmpty(t, msgs)
+	for _, m := range msgs {
+		response, ok := m.Metadata["response"].(map[string]interface{})
+		require.True(t, ok)
+		_, hasRejectReason := response["reject_reason"]
+		require.False(t, hasRejectReason)
+	}
 }
 
 func TestHandleAnswerQuestion_SecondCaller_ClaimedFalseSameOutcome(t *testing.T) {
@@ -486,50 +517,6 @@ func TestHandleAnswerQuestion_SecondCaller_ClaimedFalseSameOutcome(t *testing.T)
 	require.JSONEq(t, string(firstBody.Response), string(secondBody.Response))
 }
 
-// failingMessageUpdater wraps a real message updater but injects a failure
-// for one question, letting tests trigger the R5/R5a partial-application
-// path (a winning claim whose per-question message update fails partway)
-// without corrupting the database, mirroring sessionDeletingResolutionStore's
-// approach for M8a above.
-type failingMessageUpdater struct {
-	inner   *svcMessageUpdater
-	failOnQ string
-}
-
-func (f *failingMessageUpdater) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, messageID, questionID, status string, answer *clarification.Answer) error {
-	if questionID == f.failOnQ {
-		return errors.New("simulated message update failure")
-	}
-	return f.inner.UpdateClarificationMessage(ctx, sessionID, pendingID, messageID, questionID, status, answer)
-}
-
-// TestHandleAnswerQuestion_PartialApplicationFailure_InternalError proves the
-// MCP mapping mirrors the REST one (handlers.go writeResolutionResult /
-// clarification.IsPartialApplicationError): a winning claim whose per-question
-// message update fails partway (R5/R5a) is already claimed durably, so
-// answer_question_kandev cannot report not-found or validation -- it must
-// surface ws.ErrorCodeInternalError.
-func TestHandleAnswerQuestion_PartialApplicationFailure_InternalError(t *testing.T) {
-	svc, repo := newTestTaskService(t)
-	ctx := context.Background()
-	seedBundle(t, ctx, svc, repo, "pending-partial-1")
-
-	store := clarification.NewStore(time.Minute)
-	updater := &failingMessageUpdater{inner: &svcMessageUpdater{svc: svc}, failOnQ: "q2"}
-	resolver := clarification.NewResolver(store, repo, repo, updater, svc, nil, testLogger(t))
-	h := &Handlers{taskSvc: svc, clarificationResolver: resolver, clarificationBundles: repo, logger: testLogger(t)}
-
-	resp, err := h.handleAnswerQuestion(ctx, makeWSMessage(t, ws.ActionMCPAnswerQuestion, map[string]interface{}{
-		"pending_id": "pending-partial-1",
-		"answers": []map[string]interface{}{
-			{"question_id": "q1", "selected_options": []string{"opt-a"}},
-			{"question_id": "q2", "selected_options": []string{"opt-c"}},
-		},
-	}))
-	require.NoError(t, err)
-	assertWSError(t, resp, ws.ErrorCodeInternalError)
-}
-
 func TestHandleAnswerQuestion_Rejected(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
@@ -548,7 +535,7 @@ func TestHandleAnswerQuestion_Rejected(t *testing.T) {
 	var body answerQuestionResponse
 	require.NoError(t, json.Unmarshal(resp.Payload, &body))
 	require.True(t, body.Claimed)
-	require.Equal(t, models.ClarificationResolutionStatusRejected, body.Status)
+	require.Equal(t, string(clarification.StatusRejected), body.Status)
 
 	// COR-001 regression: resolver.go's applyMessageUpdates leaves a nil
 	// *clarification.Answer for a rejected outcome, forwarded unchanged
@@ -583,57 +570,6 @@ func TestHandleAnswerQuestion_UnknownPendingID_NotFound(t *testing.T) {
 	var ep ws.ErrorPayload
 	require.NoError(t, json.Unmarshal(resp.Payload, &ep))
 	require.Equal(t, "clarification request not found", ep.Message)
-}
-
-// sessionDeletingResolutionStore wraps a real repository and deletes the
-// bundle's task_sessions row immediately before delegating the claim insert,
-// simulating M8a's race against the real database: the session vanishes
-// after resolveIdentity has already read the bundle's durable messages but
-// before InsertClarificationResolution attempts its session_id foreign key.
-type sessionDeletingResolutionStore struct {
-	repo      *sqliterepo.Repository
-	sessionID string
-}
-
-func (s *sessionDeletingResolutionStore) InsertClarificationResolution(ctx context.Context, res *models.ClarificationResolution) (bool, *models.ClarificationResolution, error) {
-	if err := s.repo.DeleteTaskSession(ctx, s.sessionID); err != nil {
-		return false, nil, err
-	}
-	return s.repo.InsertClarificationResolution(ctx, res)
-}
-
-func (s *sessionDeletingResolutionStore) UpdateClarificationResolutionResume(ctx context.Context, pendingID, resume string) error {
-	return s.repo.UpdateClarificationResolutionResume(ctx, pendingID, resume)
-}
-
-// TestHandleAnswerQuestion_M8a_SessionDeletedBetweenIdentityAndClaim_NotFound
-// proves M8a against the real database, not an injected error: when the
-// bundle's task_sessions row is deleted after identity resolution has
-// already read its durable messages but before the claim's
-// InsertClarificationResolution runs, the insert's session_id foreign key
-// genuinely fails (a real SQLite FK violation), and ResolveBundle maps that
-// failure to the same 404 as any other not-found bundle.
-func TestHandleAnswerQuestion_M8a_SessionDeletedBetweenIdentityAndClaim_NotFound(t *testing.T) {
-	svc, repo := newTestTaskService(t)
-	ctx := context.Background()
-	_, sessionID := seedBundle(t, ctx, svc, repo, "pending-m8a-1")
-
-	store := clarification.NewStore(time.Minute)
-	resolver := clarification.NewResolver(store, &sessionDeletingResolutionStore{repo: repo, sessionID: sessionID}, repo, &svcMessageUpdater{svc: svc}, svc, nil, testLogger(t))
-	h := &Handlers{taskSvc: svc, clarificationResolver: resolver, clarificationBundles: repo, logger: testLogger(t)}
-
-	resp, err := h.handleAnswerQuestion(ctx, makeWSMessage(t, ws.ActionMCPAnswerQuestion, map[string]interface{}{
-		"pending_id": "pending-m8a-1",
-		"rejected":   true,
-	}))
-	require.NoError(t, err)
-	assertWSError(t, resp, ws.ErrorCodeNotFound)
-
-	// M8a: the failed claim must leave no clarification_resolutions row
-	// behind, so a subsequent retry (once the session exists again) can
-	// still win rather than finding a phantom claim.
-	_, err = repo.GetClarificationResolution(ctx, "pending-m8a-1")
-	require.ErrorIs(t, err, sqliterepo.ErrClarificationResolutionNotFound)
 }
 
 func TestHandleAnswerQuestion_MissingPendingID_ValidationError(t *testing.T) {
