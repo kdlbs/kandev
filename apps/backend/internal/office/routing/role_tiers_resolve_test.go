@@ -177,6 +177,34 @@ func TestResolve_TierSource_NonEnumRoleIgnoresMatchingRoleTiersKey(t *testing.T)
 	}
 }
 
+// AC-6: an agent whose role is the empty string must never consult
+// role_tiers at all, regardless of the map's contents. This is the
+// strongest form of the guard: role_tiers holds an entry keyed by the
+// empty string (unreachable via the write path, since AC-8 restricts
+// keys to the seven-value enum, but a resolver read-path lookup does not
+// itself know that) to prove the `role != ""` gate in effectiveTier, not
+// merely the absence of an empty key in a realistic fixture.
+func TestResolve_TierSource_EmptyRoleNeverConsultsRoleTiers(t *testing.T) {
+	cfg := twoProviderCfg()
+	cfg.RoleTiers = routing.RoleTierMap{"": routing.TierFrontier}
+	repo := &fakeRepo{cfg: cfg}
+	r := newResolver(t, repo)
+
+	res, err := r.Resolve(context.Background(), wsID,
+		agentWithRole(t, settingsmodels.AgentRole(""), routing.AgentOverrides{}),
+		routing.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if res.RequestedTier != cfg.DefaultTier {
+		t.Errorf("RequestedTier = %q, want workspace default %q (empty role must not match role_tiers)",
+			res.RequestedTier, cfg.DefaultTier)
+	}
+	if res.TierSource != routing.TierSourceWorkspace {
+		t.Errorf("TierSource = %q, want %q", res.TierSource, routing.TierSourceWorkspace)
+	}
+}
+
 // AC-12a: a disabled workspace with a non-empty provider order still
 // resolves the role tier — Enabled only gates automatic fallback, not
 // tier resolution. This is the branch that does NOT hit Resolve's
