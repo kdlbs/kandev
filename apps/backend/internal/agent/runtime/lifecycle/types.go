@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/ports"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -38,23 +39,24 @@ type AgentExecution struct {
 	AgentProfileID string
 	// OfficeAgentProfileID is the stable Office identity. Empty for non-Office
 	// launches, where AgentProfileID owns both identity and execution config.
-	OfficeAgentProfileID string
-	AgentID              string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
-	ContainerID          string
-	ContainerIP          string               // IP address of the container for agentctl communication
-	WorkspacePath        string               // Path to the workspace (worktree or repository path)
-	WorkspaceSourceRoots []string             // Canonical durable source roots permitted by agentctl file operations
-	ACPSessionID         string               // ACP session ID to resume, if available
-	AgentCommand         string               // Command to start the agent subprocess
-	ContinueCommand      string               // Command for follow-up prompts (one-shot agents like Amp)
-	AgentArgs            []string             // Structured argv for AgentCommand
-	ContinueArgs         []string             // Structured argv for ContinueCommand
-	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
-	Status               v1.AgentStatus
-	StartedAt            time.Time
-	FinishedAt           *time.Time
-	ExitCode             *int
-	ErrorMessage         string
+	OfficeAgentProfileID   string
+	AgentID                string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
+	ContainerID            string
+	ContainerIP            string                            // IP address of the container for agentctl communication
+	WorkspacePath          string                            // Path to the workspace (worktree or repository path)
+	WorkspaceSourceRoots   []string                          // Canonical durable source roots permitted by agentctl file operations
+	GitMetadataProjections []*worktree.GitMetadataProjection // Active task-owned Git metadata policy.
+	ACPSessionID           string                            // ACP session ID to resume, if available
+	AgentCommand           string                            // Command to start the agent subprocess
+	ContinueCommand        string                            // Command for follow-up prompts (one-shot agents like Amp)
+	AgentArgs              []string                          // Structured argv for AgentCommand
+	ContinueArgs           []string                          // Structured argv for ContinueCommand
+	RuntimeName            agentruntime.Runtime              // Name of the runtime used (e.g., "docker", "standalone")
+	Status                 v1.AgentStatus
+	StartedAt              time.Time
+	FinishedAt             *time.Time
+	ExitCode               *int
+	ErrorMessage           string
 	// FailureCode and FailureDetails carry a bounded, structured startup
 	// diagnostic to the orchestrator. They remain separate from the generic
 	// error message so user-facing recovery can choose a stable presentation.
