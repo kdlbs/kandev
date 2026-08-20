@@ -21,11 +21,14 @@ type E2EStoreWindow = Window & {
 
 /**
  * Marks an existing agent profile option as capability-not-ready by mutating
- * the client store directly, mirroring how a WS `agent.profile.updated` event
- * would land once a real host-utility probe reports the agent's CLI missing.
- * The e2e mock agent (KANDEV_MOCK_AGENT=only) never enters the host-utility
- * cache, so `capability_status` is always undefined for it in this suite —
- * this is the only way to exercise the "not ready" branch end to end.
+ * the client store directly, mirroring the effect of a real
+ * `agent.available.updated` broadcast reporting the agent's CLI missing (that
+ * event refreshes `capability_status` on both `agentProfiles.items` and
+ * `settingsAgents.items` — see agents.ts `refreshProfileCapabilities` /
+ * `refreshSettingsAgentsCapabilities`). The e2e mock agent
+ * (KANDEV_MOCK_AGENT=only) never enters the host-utility cache, so
+ * `capability_status` is always undefined for it in this suite — this is the
+ * only way to exercise the "not ready" branch end to end.
  */
 async function markProfileCapabilityNotInstalled(testPage: Page, profileId: string) {
   await testPage.evaluate((id) => {

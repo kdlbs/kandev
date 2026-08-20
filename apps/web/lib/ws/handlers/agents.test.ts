@@ -18,7 +18,10 @@ const NOTIFICATION_TYPE = "notification";
 const PROFILE_CREATED = "agent.profile.created";
 const PROFILE_UPDATED = "agent.profile.updated";
 const PROFILE_DELETED = "agent.profile.deleted";
+const AVAILABLE_UPDATED = "agent.available.updated";
 const AGENT_NAME = "claude-acp";
+const NOT_INSTALLED = "not_installed";
+const AGENT_NOT_INSTALLED_ERROR = "agent not installed";
 
 /** Builds a WS notification message fixture with the given action, payload, and timestamp. */
 function message(action: string, payload: unknown, timestamp = TIMESTAMP) {
@@ -88,6 +91,32 @@ function handlersFor(store: ReturnType<typeof makeStore>) {
     string,
     (event: ReturnType<typeof message>) => void
   >;
+}
+
+/** Builds a settingsAgents Agent fixture, overridable per test. */
+function settingsAgentPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "agent-1",
+    name: AGENT_NAME,
+    supports_mcp: false,
+    profiles: [],
+    created_at: TIMESTAMP,
+    updated_at: TIMESTAMP,
+    ...overrides,
+  };
+}
+
+/** Builds an AvailableAgent payload reporting the agent as not installed. */
+function notInstalledAvailableAgentPayload(error = AGENT_NOT_INSTALLED_ERROR) {
+  return availableAgentPayload({
+    model_config: {
+      default_model: "default",
+      available_models: [],
+      supports_dynamic_models: false,
+      status: NOT_INSTALLED,
+      error,
+    },
+  });
 }
 
 describe("agent update job websocket handlers", () => {
@@ -197,22 +226,16 @@ describe("agent profile events", () => {
       ...state,
       settingsAgents: {
         items: [
-          {
-            id: "agent-1",
-            name: AGENT_NAME,
-            supports_mcp: false,
-            profiles: [],
-            capability_status: "not_installed",
-            capability_error: "agent not installed",
-            created_at: TIMESTAMP,
-            updated_at: TIMESTAMP,
-          },
+          settingsAgentPayload({
+            capability_status: NOT_INSTALLED,
+            capability_error: AGENT_NOT_INSTALLED_ERROR,
+          }),
         ],
       },
     }));
 
     handlers[PROFILE_CREATED](message(PROFILE_CREATED, { profile: profilePayload() }, TIMESTAMP));
-    expect(store.getState().agentProfiles.items[0]?.capability_status).toBe("not_installed");
+    expect(store.getState().agentProfiles.items[0]?.capability_status).toBe(NOT_INSTALLED);
 
     const updatedAt = "2026-07-26T14:00:00Z";
     handlers[PROFILE_UPDATED](
@@ -225,8 +248,8 @@ describe("agent profile events", () => {
 
     const updated = store.getState().agentProfiles.items[0];
     expect(updated?.model).toBe("mock-slow");
-    expect(updated?.capability_status).toBe("not_installed");
-    expect(updated?.capability_error).toBe("agent not installed");
+    expect(updated?.capability_status).toBe(NOT_INSTALLED);
+    expect(updated?.capability_error).toBe(AGENT_NOT_INSTALLED_ERROR);
   });
 
   it("ignores office-scoped delete events", () => {
@@ -254,16 +277,14 @@ describe("agent.available.updated capability refresh", () => {
             agent_id: "agent-1",
             agent_name: AGENT_NAME,
             cli_passthrough: false,
-            capability_status: "not_installed",
-            capability_error: "agent not installed",
+            capability_status: NOT_INSTALLED,
+            capability_error: AGENT_NOT_INSTALLED_ERROR,
           },
         ],
       },
     }));
 
-    handlers["agent.available.updated"](
-      message("agent.available.updated", { agents: [availableAgentPayload()] }),
-    );
+    handlers[AVAILABLE_UPDATED](message(AVAILABLE_UPDATED, { agents: [availableAgentPayload()] }));
 
     const updated = store.getState().agentProfiles.items[0];
     expect(updated?.capability_status).toBe("ok");
@@ -289,8 +310,8 @@ describe("agent.available.updated capability refresh", () => {
       },
     }));
 
-    handlers["agent.available.updated"](
-      message("agent.available.updated", {
+    handlers[AVAILABLE_UPDATED](
+      message(AVAILABLE_UPDATED, {
         agents: [
           availableAgentPayload({
             model_config: {
@@ -308,6 +329,107 @@ describe("agent.available.updated capability refresh", () => {
     const updated = store.getState().agentProfiles.items[0];
     expect(updated?.capability_status).toBeUndefined();
     expect(updated?.capability_error).toBeUndefined();
+  });
+});
+
+/** Seeds settingsAgents with a single unhealthy AGENT_NAME entry. */
+function seedUnhealthySettingsAgent(store: ReturnType<typeof makeStore>) {
+  store.setState((state) => ({
+    ...state,
+    settingsAgents: {
+      items: [
+        settingsAgentPayload({
+          capability_status: NOT_INSTALLED,
+          capability_error: AGENT_NOT_INSTALLED_ERROR,
+        }),
+      ],
+    },
+  }));
+}
+
+describe("agent.available.updated keeps settingsAgents in sync so later profile events don't revert capability", () => {
+  it("install then edit: a profile made healthy by available.updated stays healthy after a profile.updated event", () => {
+    const store = makeStore();
+    const handlers = handlersFor(store);
+    seedUnhealthySettingsAgent(store);
+
+    // The profile already exists (created while the agent was unhealthy).
+    handlers[PROFILE_CREATED](message(PROFILE_CREATED, { profile: profilePayload() }, TIMESTAMP));
+    expect(store.getState().agentProfiles.items[0]?.capability_status).toBe(NOT_INSTALLED);
+
+    // The agent was just installed: a fresh available.updated snapshot
+    // reports it healthy.
+    handlers[AVAILABLE_UPDATED](message(AVAILABLE_UPDATED, { agents: [availableAgentPayload()] }));
+
+    // The user edits the profile in Settings; the backend broadcasts the
+    // update. Before the fix, handleProfileUpdated rebuilt the option from
+    // the still-stale settingsAgents entry and reverted it to unhealthy.
+    const updatedAt = "2026-07-26T15:00:00Z";
+    handlers[PROFILE_UPDATED](
+      message(
+        PROFILE_UPDATED,
+        { profile: profilePayload({ model: "mock-slow", updated_at: updatedAt }) },
+        updatedAt,
+      ),
+    );
+
+    const updated = store.getState().agentProfiles.items[0];
+    expect(updated?.capability_status).toBe("ok");
+    expect(updated?.capability_error).toBeUndefined();
+  });
+
+  it("break then edit: a profile made unhealthy by available.updated stays unhealthy after a profile.updated event", () => {
+    const store = makeStore();
+    const handlers = handlersFor(store);
+    store.setState((state) => ({
+      ...state,
+      settingsAgents: { items: [settingsAgentPayload()] },
+    }));
+
+    // The profile already exists (created while the agent was healthy).
+    handlers[PROFILE_CREATED](message(PROFILE_CREATED, { profile: profilePayload() }, TIMESTAMP));
+    expect(store.getState().agentProfiles.items[0]?.capability_status).toBeUndefined();
+
+    // The agent breaks after boot (uninstalled/deauthed): available.updated
+    // reports it not_installed.
+    handlers[AVAILABLE_UPDATED](
+      message(AVAILABLE_UPDATED, {
+        agents: [notInstalledAvailableAgentPayload("agent CLI not found")],
+      }),
+    );
+
+    // Any subsequent profile edit must not resurrect it into Handoff. Before
+    // the fix, this rebuilt the option from the still-stale (healthy)
+    // settingsAgents entry and re-listed the uninstalled provider.
+    const updatedAt = "2026-07-26T15:00:00Z";
+    handlers[PROFILE_UPDATED](
+      message(
+        PROFILE_UPDATED,
+        { profile: profilePayload({ model: "mock-slow", updated_at: updatedAt }) },
+        updatedAt,
+      ),
+    );
+
+    const updated = store.getState().agentProfiles.items[0];
+    expect(updated?.capability_status).toBe(NOT_INSTALLED);
+    expect(updated?.capability_error).toBe("agent CLI not found");
+  });
+
+  it("does not touch settingsAgents entries for agents the snapshot has no match for", () => {
+    const store = makeStore();
+    const handlers = handlersFor(store);
+    store.setState((state) => ({
+      ...state,
+      settingsAgents: {
+        items: [
+          settingsAgentPayload({ id: "agent-other", name: "other-agent", capability_status: "ok" }),
+        ],
+      },
+    }));
+
+    handlers[AVAILABLE_UPDATED](message(AVAILABLE_UPDATED, { agents: [availableAgentPayload()] }));
+
+    expect(store.getState().settingsAgents.items[0]?.capability_status).toBe("ok");
   });
 });
 

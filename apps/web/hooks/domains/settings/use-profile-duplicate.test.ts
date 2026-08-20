@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import { create, type StoreApi } from "zustand";
+import { immer } from "zustand/middleware/immer";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
+import { createSettingsSlice } from "@/lib/state/slices/settings/settings-slice";
+import type { SettingsSlice } from "@/lib/state/slices/settings/types";
+import type { AppState } from "@/lib/state/store";
+import { registerAgentsHandlers } from "@/lib/ws/handlers/agents";
 import { applyProfileDuplicated } from "./use-profile-duplicate";
 
 vi.mock("@/app/actions/agents", () => ({ duplicateAgentProfileAction: vi.fn() }));
@@ -205,5 +211,83 @@ describe("applyProfileDuplicated", () => {
     expect(ids).toContain("p-orphan");
     expect(ids).toContain("p2");
     expect(ids.filter((id) => id === "p2")).toHaveLength(1);
+  });
+});
+
+describe("applyProfileDuplicated capability_status sync", () => {
+  it("picks up a fresh agent.available.updated capability instead of reverting to the stale settingsAgents value", () => {
+    // Regression for the desync where agent.available.updated only refreshed
+    // agentProfiles options: settingsAgents stayed on its stale boot-time
+    // capability_status, so duplicating any profile rebuilt every option from
+    // that stale value and clobbered the refresh (both directions).
+    const store = create<SettingsSlice>()(
+      immer((set, get, api) => createSettingsSlice(set, get, api)),
+    ) as unknown as StoreApi<AppState>;
+    const handlers = registerAgentsHandlers(store) as unknown as Record<
+      string,
+      (event: {
+        id: string;
+        type: string;
+        action: string;
+        timestamp: string;
+        payload: unknown;
+      }) => void
+    >;
+    const source = profile("p1", "a1", "Default");
+    store.setState((state) => ({
+      ...state,
+      settingsAgents: {
+        items: [
+          {
+            id: "a1",
+            name: "a1",
+            supports_mcp: false,
+            profiles: [source],
+            capability_status: "not_installed",
+            capability_error: "agent not installed",
+            created_at: "",
+            updated_at: "",
+          } as unknown as Agent,
+        ],
+      },
+    }));
+
+    // The agent gets installed: available.updated reports it healthy.
+    handlers["agent.available.updated"]({
+      id: "m1",
+      type: "notification",
+      action: "agent.available.updated",
+      timestamp: "2026-08-11T21:00:00Z",
+      payload: {
+        agents: [
+          {
+            name: "a1",
+            display_name: "a1",
+            supports_mcp: false,
+            installation_paths: [],
+            available: true,
+            capabilities: {
+              supports_session_resume: false,
+              supports_shell: false,
+              supports_workspace_only: false,
+            },
+            model_config: {
+              default_model: "default",
+              available_models: [],
+              supports_dynamic_models: false,
+              status: "ok",
+            },
+            updated_at: "2026-08-11T21:00:00Z",
+          },
+        ],
+      },
+    });
+
+    const copy = profile("p2", "a1", COPY_NAME);
+    const next = applyProfileDuplicated(store.getState(), agent("a1"), copy);
+
+    const rebuilt = next.agentProfiles.items.find((o) => o.id === "p1");
+    expect(rebuilt?.capability_status).toBe("ok");
+    expect(rebuilt?.capability_error).toBeUndefined();
   });
 });
