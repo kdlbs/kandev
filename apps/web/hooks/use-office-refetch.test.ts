@@ -102,6 +102,31 @@ describe("useOfficeRefetch", () => {
     expect(onDashboardRefetch).toHaveBeenCalledTimes(1);
   });
 
+  // Regression test: a prefix subscriber watches several sub-keys under one
+  // triggerType (e.g. "comments" matches "comments:task-A" and
+  // "comments:task-B"). A single scalar "last seen" value would let a bump
+  // on one sub-key mask a later bump on a sibling sub-key whenever the
+  // sibling's counter is lower than the max already observed. Per-key
+  // tracking must let each sub-key's bump fire independently.
+  it("still fires for a sub-key bump after a higher-numbered sibling sub-key already fired", () => {
+    const onRefetch = vi.fn();
+    const { rerender } = renderHook(() => useOfficeRefetch("comments", onRefetch));
+
+    // task-B races ahead first, bumped three times.
+    bump("comments:task-B");
+    bump("comments:task-B");
+    bump("comments:task-B");
+    rerender();
+    expect(onRefetch).toHaveBeenCalledTimes(1);
+
+    // task-A's first bump (counter 1) is lower than task-B's counter (3), so
+    // a scalar "max seen" comparison would swallow it.
+    bump("comments:task-A");
+    rerender();
+
+    expect(onRefetch).toHaveBeenCalledTimes(2);
+  });
+
   it("uses the latest callback without re-firing when only the callback changes", () => {
     const first = vi.fn();
     const second = vi.fn();

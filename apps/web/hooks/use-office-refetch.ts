@@ -27,20 +27,22 @@ export function useOfficeRefetch(triggerType: string, onRefetch: () => void) {
     callbackRef.current = onRefetch;
   });
 
-  // Tracks the highest matching counter we've already acted on, so a bump
-  // triggers exactly one refetch rather than re-firing on every render.
-  const lastSeenRef = useRef(REFETCH_TRIGGER_INIT);
+  // Tracks the highest counter we've already acted on, per matching key, so
+  // a bump triggers exactly one refetch rather than re-firing on every
+  // render. A single scalar here would let a bump on one sub-key (e.g.
+  // "comments:task-B") mask a later bump on a sibling sub-key ("comments:
+  // task-A") whenever the sibling's counter happened to be lower.
+  const lastSeenRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
-    let maxSeen = REFETCH_TRIGGER_INIT;
+    let fire = false;
     for (const [type, seq] of Object.entries(triggers)) {
-      if (type === triggerType || type.startsWith(triggerType + ":")) {
-        if (seq > maxSeen) maxSeen = seq;
+      if (type !== triggerType && !type.startsWith(triggerType + ":")) continue;
+      if (seq > (lastSeenRef.current[type] ?? REFETCH_TRIGGER_INIT)) {
+        lastSeenRef.current[type] = seq;
+        fire = true;
       }
     }
-    if (maxSeen > lastSeenRef.current) {
-      lastSeenRef.current = maxSeen;
-      callbackRef.current();
-    }
+    if (fire) callbackRef.current();
   }, [triggers, triggerType]);
 }
