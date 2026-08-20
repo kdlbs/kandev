@@ -50,4 +50,34 @@ describe("startHTTPGitFixture", () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("supports shallow clones over HTTP", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-http-git-"));
+    let fixture: Awaited<ReturnType<typeof startHTTPGitFixture>> | undefined;
+
+    try {
+      let port = 0;
+      fixture = await startHTTPGitFixture(root, "shallow", {
+        bridgeGateway: "127.0.0.1",
+        onListening: (_server, listeningPort) => {
+          port = listeningPort;
+        },
+      });
+
+      const clone = path.join(root, "clone");
+      await execFileAsync("git", [
+        "clone",
+        "--depth=1",
+        `http://127.0.0.1:${port}/fixture/shallow.git`,
+        clone,
+      ]);
+
+      expect(fs.readFileSync(path.join(clone, "remote-source.txt"), "utf8")).toBe(
+        "shallow fixture\n",
+      );
+    } finally {
+      await fixture?.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

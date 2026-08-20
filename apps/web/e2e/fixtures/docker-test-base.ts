@@ -23,6 +23,8 @@ export type DockerSeedData = {
   agentProfileId: string;
   /** Executor profile of type local_docker, pre-built for the e2e image. */
   dockerExecutorProfileId: string;
+  /** Git transport rewrite needed by custom Docker profiles in this fixture. */
+  gitConfigEnvVars: Array<{ key: string; value: string }>;
 };
 
 /**
@@ -142,6 +144,7 @@ export const dockerTest = backendFixture.extend<
           repositoryId: repo.id,
           agentProfileId,
           dockerExecutorProfileId: dockerProfile.id,
+          gitConfigEnvVars: gitFixture.gitConfigEnvVars,
         });
       } finally {
         await gitFixture.close();

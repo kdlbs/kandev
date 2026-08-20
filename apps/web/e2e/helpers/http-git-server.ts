@@ -1,5 +1,5 @@
-import { execFileSync, spawnSync } from "node:child_process";
-import { createServer, type Server } from "node:http";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -99,9 +99,11 @@ export async function startHTTPGitFixture(
 }
 
 function createStaticGitServer(root: string): Server {
-  return createServer((request, response) => {
+  return createServer(async (request, response) => {
     const pathname = decodeURIComponent(new URL(request.url ?? "/", "http://fixture").pathname);
     const relative = pathname.replace(/^\/+/, "");
+    if (await serveSmartGitRequest(root, relative, request, response)) return;
+
     const file = path.resolve(root, relative);
     if (file !== root && !file.startsWith(`${root}${path.sep}`)) {
       response.writeHead(400).end();
@@ -116,6 +118,83 @@ function createStaticGitServer(root: string): Server {
     } catch {
       response.writeHead(404).end();
     }
+  });
+}
+
+/**
+ * Serve Git's smart upload-pack protocol as well as static files. Docker's
+ * historical prepare script uses a shallow clone, which needs upload-pack's
+ * capability negotiation and cannot use dumb HTTP's info/refs transport.
+ */
+async function serveSmartGitRequest(
+  root: string,
+  relative: string,
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<boolean> {
+  const requestURL = new URL(request.url ?? "/", "http://fixture");
+  const repo = smartGitRepository(root, relative);
+  if (!repo) return false;
+
+  if (
+    request.method === "GET" &&
+    relative.endsWith("/info/refs") &&
+    requestURL.searchParams.get("service") === "git-upload-pack"
+  ) {
+    response.writeHead(200, {
+      "content-type": "application/x-git-upload-pack-advertisement",
+      "cache-control": "no-cache",
+    });
+    response.write("001e# service=git-upload-pack\n0000");
+    await pipeGitUploadPack(response, repo, ["--stateless-rpc", "--advertise-refs"]);
+    return true;
+  }
+
+  if (request.method === "POST" && relative.endsWith("/git-upload-pack")) {
+    response.writeHead(200, {
+      "content-type": "application/x-git-upload-pack-result",
+      "cache-control": "no-cache",
+    });
+    await pipeGitUploadPack(response, repo, ["--stateless-rpc"], request);
+    return true;
+  }
+  return false;
+}
+
+function smartGitRepository(root: string, relative: string): string | undefined {
+  let suffix = "";
+  if (relative.endsWith("/info/refs")) suffix = "/info/refs";
+  if (relative.endsWith("/git-upload-pack")) suffix = "/git-upload-pack";
+  if (!relative.startsWith("fixture/") || suffix === "") return undefined;
+
+  const repo = path.resolve(root, relative.slice(0, -suffix.length));
+  if (repo === root || !repo.startsWith(`${root}${path.sep}`) || !repo.endsWith(".git")) {
+    return undefined;
+  }
+  return repo;
+}
+
+function pipeGitUploadPack(
+  response: ServerResponse,
+  repo: string,
+  args: string[],
+  request?: IncomingMessage,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const git = spawn("git", ["upload-pack", ...args, repo]);
+    git.once("error", reject);
+    git.stderr.on("data", () => undefined);
+    git.stdout.pipe(response, { end: false });
+    if (request) request.pipe(git.stdin);
+    else git.stdin.end();
+    git.once("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`git upload-pack exited with ${code}`));
+        return;
+      }
+      response.end();
+      resolve();
+    });
   });
 }
 
