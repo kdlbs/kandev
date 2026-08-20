@@ -356,7 +356,16 @@ function ensureSiblingPanels(
   const created: string[] = [];
   for (const sid of currentSessionIds) {
     if (sid === effectiveSessionId) continue;
-    if (isDebug() && !api.getPanel(`session:${sid}`)) created.push(sid);
+    const existingPanel = api.getPanel(`session:${sid}`);
+    if (existingPanel) {
+      createdSet.add(sid);
+      continue;
+    }
+    // The created set records sessions that this mounted layout already
+    // materialized. If one is now missing, the user closed that panel; keep it
+    // hidden until they explicitly reopen it from the add-panel menu.
+    if (createdSet.has(sid)) continue;
+    if (isDebug()) created.push(sid);
     ensureSessionPanel(api, sid, siblingAnchor, true, createdSet);
   }
   return created;
