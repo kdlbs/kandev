@@ -30,7 +30,7 @@ Capacity does not reject the accepted delivery. A worker crash releases its leas
 
 ## Persistence guarantees
 
-Receipts, retry state, and retained recoverable payload survive backend restart. A reservation without executor acceptance may expire and be reclaimed, including a CREATED session whose runtime launched but whose first prompt was not yet accepted. Interrupt scheduling is likewise not acceptance: its FIFO row stays queued until the executor callback. An `ambiguous` receipt instead retains the payload and acceptance uncertainty for authorized inspection; `retry_message_delivery_kandev` rejects it rather than risk a duplicate prompt. The source turn is never required to remain active.
+Receipts, retry state, and retained recoverable payload survive backend restart. A reservation without executor acceptance may expire and be reclaimed, including a CREATED session whose runtime launched but whose first prompt was not yet accepted. At executor acceptance, Kandev first persists a non-replayable acceptance-uncertain marker; only then may it attempt the delivered acknowledgement. Interrupt scheduling is likewise not acceptance: its FIFO row stays queued until the executor callback. An `ambiguous` receipt instead retains the payload and acceptance uncertainty for authorized inspection; `retry_message_delivery_kandev` rejects it rather than risk a duplicate prompt. The source turn is never required to remain active.
 
 ## Scenarios
 

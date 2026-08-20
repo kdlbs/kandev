@@ -20,6 +20,7 @@ type DeliveryLedger interface {
 	CreateOrGetDelivery(ctx context.Context, delivery Delivery) (*Delivery, bool, error)
 	GetDeliveryBySourceKey(ctx context.Context, senderSessionID, sourceTurnID, idempotencyKey string) (*Delivery, error)
 	ReserveDeliveryForDirectDispatch(ctx context.Context, deliveryID, leaseOwner string, leaseDuration time.Duration) (*Delivery, bool, error)
+	MarkDirectDeliveryAcceptanceUncertain(ctx context.Context, deliveryID, leaseOwner string) (*Delivery, error)
 	AcknowledgeDirectDelivery(ctx context.Context, deliveryID, leaseOwner string, deliveredAt time.Time) (*Delivery, error)
 	MarkDirectDeliveryAmbiguous(ctx context.Context, deliveryID, leaseOwner, lastError string) (*Delivery, error)
 	GetDelivery(ctx context.Context, deliveryID string) (*Delivery, error)
@@ -242,8 +243,38 @@ func (r *sqliteRepository) ReserveDeliveryForDirectDispatch(ctx context.Context,
 	return stored, affected == 1, err
 }
 
-// AcknowledgeDirectDelivery is the direct-dispatch counterpart to FIFO
-// acknowledgement. It can only finish the exact handler reservation.
+// MarkDirectDeliveryAcceptanceUncertain is the durable acceptance boundary for
+// direct prompts. It must commit before any terminal acknowledgement write:
+// after agentctl accepts a prompt, a restart must never reclaim this receipt as
+// a pre-acceptance reservation even if every later terminal write fails.
+func (r *sqliteRepository) MarkDirectDeliveryAcceptanceUncertain(ctx context.Context, deliveryID, leaseOwner string) (*Delivery, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE message_deliveries
+		SET state = ?, last_error = ?, lease_expires_at = NULL, updated_at = ?
+		WHERE id = ? AND state = ? AND lease_owner = ?
+	`), DeliveryAmbiguous, "accepted_prompt_terminalization_pending", now, deliveryID, DeliveryReserved, leaseOwner)
+	if err != nil {
+		return nil, fmt.Errorf("record direct delivery acceptance uncertainty: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 1 {
+		adminmetrics.RecordMessageDeliveryOutcome(string(DeliveryAmbiguous), 1)
+		return r.GetDelivery(ctx, deliveryID)
+	}
+	stored, err := r.GetDelivery(ctx, deliveryID)
+	if err != nil || stored == nil || (stored.State != DeliveryAmbiguous && stored.State != DeliveryDelivered) {
+		return nil, ErrDeliveryLeaseLost
+	}
+	return stored, nil
+}
+
+// AcknowledgeDirectDelivery confirms an accepted direct prompt. The durable
+// acceptance-uncertain marker is deliberately an allowed source state so a
+// failed confirmation remains non-replayable rather than returning to a lease.
 func (r *sqliteRepository) AcknowledgeDirectDelivery(ctx context.Context, deliveryID, leaseOwner string, deliveredAt time.Time) (*Delivery, error) {
 	if deliveredAt.IsZero() {
 		deliveredAt = time.Now().UTC()
@@ -251,8 +282,11 @@ func (r *sqliteRepository) AcknowledgeDirectDelivery(ctx context.Context, delive
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE message_deliveries
 		SET state = ?, delivered_at = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
-		WHERE id = ? AND state = ? AND lease_owner = ?
-	`), DeliveryDelivered, deliveredAt, deliveredAt, deliveryID, DeliveryReserved, leaseOwner)
+		WHERE id = ? AND (
+			(state = ? AND lease_owner = ?)
+			OR (state = ? AND lease_owner = ?)
+		)
+	`), DeliveryDelivered, deliveredAt, deliveredAt, deliveryID, DeliveryReserved, leaseOwner, DeliveryAmbiguous, leaseOwner)
 	if err != nil {
 		return nil, fmt.Errorf("acknowledge direct delivery: %w", err)
 	}

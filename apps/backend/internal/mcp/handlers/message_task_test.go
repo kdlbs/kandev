@@ -80,6 +80,15 @@ func (failingDirectDeliveryAcknowledgementRepository) AcknowledgeDirectDelivery(
 	return nil, errors.New("injected direct delivery acknowledgement failure")
 }
 
+// The old best-effort ambiguous transition fails too. The acceptance marker
+// added for this boundary is intentionally not overridden: tests prove it is
+// established before either terminal write is attempted.
+func (failingDirectDeliveryAcknowledgementRepository) MarkDirectDeliveryAmbiguous(
+	context.Context, string, string, string,
+) (*messagequeue.Delivery, error) {
+	return nil, errors.New("injected direct delivery ambiguity transition failure")
+}
+
 func (r *failingQueueSnapshotRepository) ListBySession(
 	ctx context.Context,
 	sessionID string,
@@ -1140,7 +1149,7 @@ func TestHandleMessageTask_WaitingReceiptIsDeliveredOnce(t *testing.T) {
 	require.Len(t, orch.promptCalls, 1)
 }
 
-func TestHandleMessageTask_WaitingReceiptAcknowledgementFailureIsAmbiguous(t *testing.T) {
+func TestHandleMessageTask_WaitingReceiptDoubleTerminalWriteFailureIsAmbiguous(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newTestTaskService(t)
 	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
@@ -1165,6 +1174,7 @@ func TestHandleMessageTask_WaitingReceiptAcknowledgementFailureIsAmbiguous(t *te
 	stored, err := ledger.GetDelivery(ctx, payload["delivery_id"].(string))
 	require.NoError(t, err)
 	assert.Equal(t, messagequeue.DeliveryAmbiguous, stored.State)
+	assert.Equal(t, "accepted_prompt_terminalization_pending", stored.LastError)
 	processed, err := orch.queue.ProcessDueDeliveries(ctx, time.Now().UTC().Add(2*time.Minute), "restart-worker")
 	require.NoError(t, err)
 	assert.Zero(t, processed, "an ambiguous accepted direct prompt must not replay")
@@ -1232,7 +1242,7 @@ func TestHandleMessageTask_CreatedReceiptBeforeAcceptanceRemainsReclaimable(t *t
 	assert.Equal(t, 1, orch.queue.GetStatus(ctx, session.ID).Count)
 }
 
-func TestHandleMessageTask_CreatedReceiptAcknowledgementFailureIsAmbiguous(t *testing.T) {
+func TestHandleMessageTask_CreatedReceiptDoubleTerminalWriteFailureIsAmbiguous(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newTestTaskService(t)
 	sender, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
@@ -1250,6 +1260,10 @@ func TestHandleMessageTask_CreatedReceiptAcknowledgementFailureIsAmbiguous(t *te
 	require.NoError(t, json.Unmarshal(response.Payload, &payload))
 	assert.Equal(t, "started", payload["status"])
 	assert.Equal(t, string(messagequeue.DeliveryAmbiguous), payload["delivery_status"])
+	stored, err := ledger.GetDelivery(ctx, payload["delivery_id"].(string))
+	require.NoError(t, err)
+	assert.Equal(t, messagequeue.DeliveryAmbiguous, stored.State)
+	assert.Equal(t, "accepted_prompt_terminalization_pending", stored.LastError)
 
 	processed, err := orch.queue.ProcessDueDeliveries(ctx, time.Now().UTC().Add(2*time.Minute), "restart-worker")
 	require.NoError(t, err)

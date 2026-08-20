@@ -139,6 +139,17 @@ func (s *Service) AcknowledgeDirectDelivery(ctx context.Context, deliveryID, lea
 	return ledger.AcknowledgeDirectDelivery(ctx, deliveryID, leaseOwner, time.Now().UTC())
 }
 
+// MarkDirectDeliveryAcceptanceUncertain persists agentctl acceptance before a
+// later delivered acknowledgement. Its ambiguous state is intentionally not
+// eligible for worker replay.
+func (s *Service) MarkDirectDeliveryAcceptanceUncertain(ctx context.Context, deliveryID, leaseOwner string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	return ledger.MarkDirectDeliveryAcceptanceUncertain(ctx, deliveryID, leaseOwner)
+}
+
 func (s *Service) MarkDirectDeliveryAmbiguous(ctx context.Context, deliveryID, leaseOwner, lastError string) (*Delivery, error) {
 	ledger, ok := s.repo.(DeliveryLedger)
 	if !ok {

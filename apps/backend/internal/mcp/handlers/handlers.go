@@ -2580,7 +2580,7 @@ func (h *Handlers) finalizeDirectTaskMessageDelivery(ctx context.Context, delive
 		return current, nil
 	}
 	if result.status != taskMessageStatusQueued {
-		return queue.AcknowledgeDirectDelivery(ctx, delivery.ID, leaseOwner)
+		return h.confirmAcceptedDirectTaskMessageDelivery(ctx, delivery.ID, leaseOwner)
 	}
 	queueEntryID := result.queuedEntryID
 	if queueEntryID == "" {
@@ -3785,15 +3785,34 @@ func (h *Handlers) directDeliveryAcceptedCallback(ctx context.Context) func() er
 	callbackCtx := context.WithoutCancel(ctx)
 	return func() error {
 		dispatch.markAccepted()
-		_, err := h.sessionLauncher.GetMessageQueue().AcknowledgeDirectDelivery(callbackCtx, dispatch.deliveryID, dispatch.leaseOwner)
-		if err == nil {
-			return nil
-		}
-		_, ambiguousErr := h.sessionLauncher.GetMessageQueue().MarkDirectDeliveryAmbiguous(
-			callbackCtx, dispatch.deliveryID, dispatch.leaseOwner, "accepted_prompt_acknowledgement_failed",
-		)
-		return errors.Join(err, ambiguousErr)
+		_, err := h.confirmAcceptedDirectTaskMessageDelivery(callbackCtx, dispatch.deliveryID, dispatch.leaseOwner)
+		return err
 	}
+}
+
+// confirmAcceptedDirectTaskMessageDelivery writes the non-replayable marker
+// before attempting the delivered transition. A delivered acknowledgement can
+// fail safely after that point: the persisted ambiguous receipt is the durable
+// callback outcome and the worker will never reclaim it.
+func (h *Handlers) confirmAcceptedDirectTaskMessageDelivery(ctx context.Context, deliveryID, leaseOwner string) (*messagequeue.Delivery, error) {
+	queue := h.sessionLauncher.GetMessageQueue()
+	if _, err := queue.MarkDirectDeliveryAcceptanceUncertain(ctx, deliveryID, leaseOwner); err != nil {
+		return nil, err
+	}
+	delivery, err := queue.AcknowledgeDirectDelivery(ctx, deliveryID, leaseOwner)
+	if err == nil {
+		return delivery, nil
+	}
+	// The marker already committed, so this is an inspectable ambiguous outcome
+	// rather than a failed dispatch or a reason to replay the accepted prompt.
+	stored, loadErr := queue.GetDeliveryReceipt(ctx, deliveryID)
+	if loadErr != nil {
+		return nil, errors.Join(err, loadErr)
+	}
+	if stored != nil && stored.State == messagequeue.DeliveryAmbiguous {
+		return stored, nil
+	}
+	return nil, err
 }
 
 func directDeliveryDispatchFromContext(ctx context.Context) *taskMessageDirectDeliveryDispatch {

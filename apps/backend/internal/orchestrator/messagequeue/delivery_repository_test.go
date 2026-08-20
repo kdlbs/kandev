@@ -156,6 +156,32 @@ func TestDeliveryLedgerDirectReservationRecoversAfterRestartLeaseExpiry(t *testi
 	assert.Equal(t, DeliveryQueued, queued.State)
 }
 
+func TestDeliveryLedgerAcceptedDirectReservationIsNeverReclaimed(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ledger := repo.(DeliveryLedger)
+	ctx := context.Background()
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "accepted-source-turn",
+		IdempotencyKey: "accepted-v1", TargetTaskID: "target-task", TargetSessionID: "target-session",
+		Content: "accepted direct prompt", State: DeliveryPendingCapacity,
+	})
+	require.NoError(t, err)
+	_, claimed, err := ledger.ReserveDeliveryForDirectDispatch(ctx, delivery.ID, "mcp-direct", time.Millisecond)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	uncertain, err := ledger.MarkDirectDeliveryAcceptanceUncertain(ctx, delivery.ID, "mcp-direct")
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryAmbiguous, uncertain.State)
+
+	claimedRows, err := ledger.ClaimDueDeliveries(ctx, time.Now().UTC().Add(time.Hour), "restart-worker", time.Minute, 1)
+	require.NoError(t, err)
+	assert.Empty(t, claimedRows, "agentctl acceptance must survive a worker restart without replay")
+
+	delivered, err := ledger.AcknowledgeDirectDelivery(ctx, delivery.ID, "mcp-direct", time.Now().UTC())
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryDelivered, delivered.State)
+}
+
 func TestPurgeTaskCancelsUndeliveredDeliveryReceipts(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ledger := repo.(DeliveryLedger)
@@ -254,6 +280,9 @@ func TestDeliveryLedgerPostgreSQLParity(t *testing.T) {
 	_, claimedDirect, err := ledger.ReserveDeliveryForDirectDispatch(ctx, direct.ID, "mcp-direct", time.Minute)
 	require.NoError(t, err)
 	require.True(t, claimedDirect)
+	uncertainDirect, err := ledger.MarkDirectDeliveryAcceptanceUncertain(ctx, direct.ID, "mcp-direct")
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryAmbiguous, uncertainDirect.State)
 	directDelivered, err := ledger.AcknowledgeDirectDelivery(ctx, direct.ID, "mcp-direct", now.Add(3*time.Minute))
 	require.NoError(t, err)
 	assert.Equal(t, DeliveryDelivered, directDelivered.State)
