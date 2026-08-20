@@ -9,6 +9,24 @@ export type ScriptPlaceholder = {
 };
 
 /**
+ * Keeps a language-level completion registration from serving another editor's
+ * model. Monaco registers providers by language, so every editor must reject
+ * completion requests that do not belong to its mounted model.
+ */
+export function scopeCompletionProviderToModel(
+  provider: languages.CompletionItemProvider,
+  model: editor.ITextModel,
+): languages.CompletionItemProvider {
+  return {
+    ...provider,
+    provideCompletionItems(candidateModel, position, context, token) {
+      if (candidateModel !== model) return { suggestions: [] };
+      return provider.provideCompletionItems(candidateModel, position, context, token);
+    },
+  };
+}
+
+/**
  * Creates a Monaco CompletionItemProvider that suggests {{placeholder}} values.
  * Triggers on `{` and filters by executor type.
  */

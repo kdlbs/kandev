@@ -1735,6 +1735,11 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
 }
 
 /* Monaco Editor - Peek view / references widget overrides */
+.settings-prompt-editor .monaco-editor .suggest-widget {
+  /* Keep completion rows above the mobile settings save bar. */
+  z-index: 50;
+}
+
 .monaco-editor .peekview-widget .head {
   box-sizing: border-box;
 }
