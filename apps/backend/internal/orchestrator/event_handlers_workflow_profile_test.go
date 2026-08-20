@@ -20,6 +20,54 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
+func TestCreateNewSessionForStep_TerminalPrimaryReusesCanonicalEnvironment(t *testing.T) {
+	for _, state := range []models.TaskSessionState{
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "task-terminal-reentry", "session-terminal-reentry", "step-one")
+			current, err := repo.GetTaskSession(ctx, "session-terminal-reentry")
+			if err != nil {
+				t.Fatal(err)
+			}
+			current.State = state
+			current.AgentProfileID = "profile-old"
+			current.ExecutorID = models.ExecutorIDWorktree
+			current.TaskEnvironmentID = "environment-terminal-reentry"
+			if err := repo.UpdateTaskSession(ctx, current); err != nil {
+				t.Fatal(err)
+			}
+			environment := &models.TaskEnvironment{ID: current.TaskEnvironmentID, TaskID: current.TaskID, ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady}
+			if err := repo.CreateTaskEnvironment(ctx, environment); err != nil {
+				t.Fatal(err)
+			}
+			seedExecutorRunning(t, repo, current.ID, current.TaskID, "sibling-execution")
+			taskRepo := newMockTaskRepo()
+			taskRepo.tasks[current.TaskID] = &v1.Task{ID: current.TaskID, WorkspaceID: "ws1", Title: "Test Task"}
+			svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{repoForExecutionLookup: repo})
+
+			created, err := svc.createNewSessionForStep(ctx, current.TaskID, current, "profile-new")
+			if err != nil {
+				t.Fatalf("createNewSessionForStep: %v", err)
+			}
+			if created.TaskEnvironmentID != environment.ID {
+				t.Fatalf("environment = %q, want %q", created.TaskEnvironmentID, environment.ID)
+			}
+			if created.AgentExecutionID != "" {
+				t.Fatalf("new session adopted sibling execution %q", created.AgentExecutionID)
+			}
+			got, err := repo.GetTaskEnvironment(ctx, environment.ID)
+			if err != nil || got.Status != models.TaskEnvironmentStatusReady {
+				t.Fatalf("canonical environment = %+v, %v", got, err)
+			}
+		})
+	}
+}
+
 func seedAutopilotTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string, sessionState models.TaskSessionState) {
 	t.Helper()
 	ctx := context.Background()
