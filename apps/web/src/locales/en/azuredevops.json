@@ -160,7 +160,7 @@
   "previousPullRequestPage": "Previous pull request page",
   "project": "Project",
   "prompt": "Prompt",
-  "promptPlaceholdersHint": "Type {{open}} to see available placeholders. <3>{{url}}</3> and <6>{{title}}</6> are substituted when the action runs.",
+  "promptPlaceholdersHint": "Type {{open}} to see available placeholders. <4>{{url}}</4> and <6>{{title}}</6> are substituted when the action runs.",
   "pullRequestAny": "any",
   "pullRequestFeedback": "Pull request feedback",
   "pullRequestFilter": "Pull-request filter",

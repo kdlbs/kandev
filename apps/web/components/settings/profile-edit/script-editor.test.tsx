@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
   }> = [];
   const mountedModels = new Map<string, editor.ITextModel>();
   const pendingMounts: Array<() => void> = [];
+  const editorOptions: Array<{ ariaLabel?: string }> = [];
   const monaco = {
     editor: { defineTheme: vi.fn() },
     languages: {
@@ -23,7 +24,7 @@ const mocks = vi.hoisted(() => {
       ),
     },
   };
-  return { monaco, registrations, mountedModels, pendingMounts, deferMount: false };
+  return { monaco, registrations, mountedModels, pendingMounts, editorOptions, deferMount: false };
 });
 
 const MENTION_EDITOR_VALUE = "mention-editor";
@@ -34,6 +35,7 @@ vi.mock("@/lib/routing/client-dynamic", () => ({
       value,
       beforeMount,
       onMount,
+      options,
     }: {
       value: string;
       beforeMount?: (monaco: typeof mocks.monaco) => void;
@@ -41,7 +43,9 @@ vi.mock("@/lib/routing/client-dynamic", () => ({
         editor: { getModel: () => editor.ITextModel },
         monaco: typeof mocks.monaco,
       ) => void;
+      options?: { ariaLabel?: string };
     }) {
+      mocks.editorOptions.push(options ?? {});
       useEffect(() => {
         const model = {
           getLineContent: () => (value === MENTION_EDITOR_VALUE ? "@" : "{{"),
@@ -78,8 +82,15 @@ describe("ScriptEditor completion ownership", () => {
     mocks.registrations.length = 0;
     mocks.mountedModels.clear();
     mocks.pendingMounts.length = 0;
+    mocks.editorOptions.length = 0;
     mocks.deferMount = false;
     vi.clearAllMocks();
+  });
+
+  it("passes the accessible name to Monaco", () => {
+    render(<ScriptEditor value="" onChange={() => undefined} ariaLabel="Prompt editor" />);
+
+    expect(mocks.editorOptions.at(-1)?.ariaLabel).toBe("Prompt editor");
   });
 
   it("keeps completion providers scoped to the Monaco model that mounted them", async () => {

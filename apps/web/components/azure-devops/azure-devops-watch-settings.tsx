@@ -480,14 +480,17 @@ function WatchEditor({
           />
         </div>
       </div>
-      <SettingsPromptEditor
-        value={current.prompt}
-        onChange={(value) => set("prompt", value)}
-        placeholders={placeholders}
-        promptReferences
-        ariaLabel={t("azuredevops:prompt")}
-        testId={`azure-${kind}-watch-prompt-editor`}
-      />
+      <div className="space-y-1.5">
+        <Label>{t("azuredevops:prompt")}</Label>
+        <SettingsPromptEditor
+          value={current.prompt}
+          onChange={(value) => set("prompt", value)}
+          placeholders={placeholders}
+          promptReferences
+          ariaLabel={t("azuredevops:prompt")}
+          testId={`azure-${kind}-watch-prompt-editor`}
+        />
+      </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label>{t("azuredevops:cleanupPolicy")}</Label>

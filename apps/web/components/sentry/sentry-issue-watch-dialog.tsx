@@ -121,11 +121,6 @@ function PromptField({ value, onChange }: { value: string; onChange: (v: string)
         <Label>{t("sentry:taskPrompt")}</Label>
         <PlaceholdersHelp placeholders={placeholders} />
       </div>
-      <p className="text-xs text-muted-foreground">
-        {/* The `{{` token is passed as a value so it never reaches the catalog,
-            where i18next would interpolate it away. */}
-        {t("sentry:promptFieldHelp", { token: "{{" })}
-      </p>
       <SettingsPromptEditor
         value={value}
         onChange={onChange}

@@ -66,9 +66,9 @@ export function SettingsPromptEditor({
   const { prompts, loaded, loading } = useCustomPrompts({ enabled: promptReferences });
   const excludedIds = useMemo(() => new Set(excludedPromptIds), [excludedPromptIds]);
   const mentionPrompts = useMemo(() => {
-    if (!promptReferences || !loaded || loading) return [];
+    if (!loaded || loading) return [];
     return prompts.filter((prompt) => !excludedIds.has(prompt.id));
-  }, [excludedIds, loaded, loading, promptReferences, prompts]);
+  }, [excludedIds, loaded, loading, prompts]);
   const hint = completionHint(t, placeholders.length > 0, promptReferences);
 
   return (

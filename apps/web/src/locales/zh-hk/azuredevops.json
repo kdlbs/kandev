@@ -160,7 +160,7 @@
   "previousPullRequestPage": "上一頁拉取要求",
   "project": "項目",
   "prompt": "提示詞",
-  "promptPlaceholdersHint": "輸入 {{open}} 可查看可用佔位符。執行操作時會替換 <3>{{url}}</3> 和 <6>{{title}}</6>。",
+  "promptPlaceholdersHint": "輸入 {{open}} 可查看可用佔位符。執行操作時會替換 <4>{{url}}</4> 和 <6>{{title}}</6>。",
   "pullRequestAny": "任意",
   "pullRequestFeedback": "拉取要求反饋",
   "pullRequestFilter": "拉取要求篩選條件",

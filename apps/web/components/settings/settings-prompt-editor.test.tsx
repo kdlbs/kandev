@@ -71,6 +71,7 @@ describe("SettingsPromptEditor", () => {
     expect(props.height).toBe("20px");
     expect(props.ariaLabel).toBe("Prompt editor");
     expect(props.testId).toBe("prompt-editor-editor");
+    expect(document.body.textContent).toContain("settings:promptEditorBothHint");
     expect(container.firstElementChild?.getAttribute("data-settings-dirty")).toBe("true");
     expect(container.firstElementChild?.getAttribute("data-settings-dirty-level")).toBe(
       "container",
@@ -109,5 +110,11 @@ describe("SettingsPromptEditor", () => {
     expect(props.mentionPrompts).toBeUndefined();
     expect(document.body.textContent).toContain("settings:promptEditorPlaceholderHint");
     expect(mocks.useCustomPrompts).toHaveBeenLastCalledWith({ enabled: false });
+  });
+
+  it("shows saved-prompt guidance when placeholders are not available", () => {
+    render(<SettingsPromptEditor value="Review @" onChange={() => undefined} promptReferences />);
+
+    expect(document.body.textContent).toContain("settings:promptEditorPromptReferenceHint");
   });
 });

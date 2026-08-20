@@ -63,6 +63,8 @@ type ScriptEditorProps = {
    * Saved custom prompts to suggest as `@name` mentions. Registered
    * alongside the placeholder/custom completion provider (independent
    * trigger character, so both can be active at once).
+   * Callers should preserve the array identity when its contents are unchanged
+   * to avoid unnecessary provider re-registration.
    */
   mentionPrompts?: PromptReference[];
   readOnly?: boolean;
@@ -176,7 +178,7 @@ export function ScriptEditor({
   }, []);
 
   return (
-    <div data-testid={testId} aria-label={ariaLabel} className="h-full w-full">
+    <div data-testid={testId} className="h-full w-full">
       <MonacoEditor
         height={height}
         language={language}
@@ -186,6 +188,7 @@ export function ScriptEditor({
         onMount={handleMount}
         theme="kandev-dark"
         options={{
+          ariaLabel,
           minimap: { enabled: false },
           lineNumbers,
           wordWrap: "on",
