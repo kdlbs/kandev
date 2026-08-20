@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -180,7 +181,10 @@ func TestRebindWorkspaceForSessionReadinessTimeoutRollsBack(t *testing.T) {
 	execution.Status = v1.AgentStatusReady
 	execution.WorkspacePath = "/old-workspace"
 	execution.ACPSessionID = "acp-existing"
-	if err := mgr.RebindWorkspaceForSession(context.Background(), execution.SessionID, "/new-workspace", []string{"/attached"}); err == nil {
+	oldProjection := &worktree.GitMetadataProjection{CheckoutPath: "/old-workspace", Hash: "old"}
+	newProjection := &worktree.GitMetadataProjection{CheckoutPath: "/new-workspace", Hash: "new"}
+	execution.GitMetadataProjections = []*worktree.GitMetadataProjection{oldProjection}
+	if err := mgr.RebindWorkspaceWithGitMetadata(context.Background(), execution.SessionID, "/new-workspace", []*worktree.GitMetadataProjection{newProjection}, []string{"/attached"}); err == nil {
 		t.Fatal("RebindWorkspaceForSession unexpectedly succeeded")
 	}
 	if got := server.reboundPaths(); !sameStrings(got, []string{"/new-workspace", "/old-workspace"}) {
@@ -188,6 +192,9 @@ func TestRebindWorkspaceForSessionReadinessTimeoutRollsBack(t *testing.T) {
 	}
 	if execution.WorkspacePath != "/old-workspace" || !sameStrings(execution.WorkspaceSourceRoots, []string{"/old"}) {
 		t.Fatalf("execution after rollback = path %q roots %v, want old workspace and roots", execution.WorkspacePath, execution.WorkspaceSourceRoots)
+	}
+	if len(execution.GitMetadataProjections) != 1 || execution.GitMetadataProjections[0] != oldProjection {
+		t.Fatalf("projections after rollback = %#v, want old projection", execution.GitMetadataProjections)
 	}
 	if loads := server.loads(); len(loads) != 1 || loads[0] != "acp-existing" {
 		t.Fatalf("rollback loaded ACP sessions = %v, want [acp-existing]", loads)
