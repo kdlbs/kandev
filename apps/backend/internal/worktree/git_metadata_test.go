@@ -82,6 +82,66 @@ func TestGitMetadataProjectionPreservesNativeIndexLockAndCommit(t *testing.T) {
 	runGitMetadata(t, checkout, "fsck", "--strict")
 }
 
+// TestGitMetadataProjectionRepairsReadOnlyExternalIndexLock reproduces the
+// task-sandbox symptom: the checkout itself is writable, but Git cannot create
+// index.lock in the linked worktree metadata. Reapplying the generated owned
+// metadata grant restores ordinary add/commit without changing source or
+// sibling metadata.
+func TestGitMetadataProjectionRepairsReadOnlyExternalIndexLock(t *testing.T) {
+	repo := initGitMetadataRepository(t)
+	checkout := filepath.Join(t.TempDir(), "task-checkout")
+	runGitMetadata(t, repo, "worktree", "add", "-b", "task-branch", checkout)
+	projection, err := ResolveGitMetadata(checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "tracked.txt"), []byte("changed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	gitDirInfo, err := os.Stat(projection.GitDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(projection.GitDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(projection.GitDir, gitDirInfo.Mode().Perm()) })
+	output, err := exec.Command("git", "-C", checkout, "add", "tracked.txt").CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "index.lock") {
+		t.Fatalf("git add error=%v output=%s, want read-only index.lock failure", err, output)
+	}
+
+	if err := os.Chmod(projection.GitDir, gitDirInfo.Mode().Perm()); err != nil {
+		t.Fatal(err)
+	}
+	runGitMetadata(t, checkout, "add", "tracked.txt")
+	runGitMetadata(t, checkout, "commit", "-m", "task change")
+	runGitMetadata(t, checkout, "fsck", "--strict")
+}
+
+func TestGitMetadataProjectionIncludesCurrentRefAndReflogLockDirectories(t *testing.T) {
+	repo := initGitMetadataRepository(t)
+	checkout := filepath.Join(t.TempDir(), "task-checkout")
+	runGitMetadata(t, repo, "worktree", "add", "-b", "task-branch", checkout)
+
+	projection, err := ResolveGitMetadata(checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lockDirectory := range []string{
+		filepath.Dir(projection.CurrentRefPath),
+		filepath.Dir(projection.ReflogPath),
+	} {
+		if !containsGitMetadataPath(projection.WritablePaths, lockDirectory) {
+			t.Fatalf("WritablePaths = %#v, missing native lock directory %q", projection.WritablePaths, lockDirectory)
+		}
+		if lockDirectory == projection.CommonDir || lockDirectory == projection.WorktreesDir {
+			t.Fatalf("lock directory must not broaden common metadata access: %q", lockDirectory)
+		}
+	}
+}
+
 func TestGitMetadataProjectionSupportsMultipleTaskRepositories(t *testing.T) {
 	repoA := initGitMetadataRepository(t)
 	repoB := initGitMetadataRepository(t)

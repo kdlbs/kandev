@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -276,6 +277,23 @@ func TestManagerStopAllAgentsPassesBackendShutdownReason(t *testing.T) {
 	}
 	if mock.stopReason != StopReasonBackendShutdown {
 		t.Fatalf("StopInstance reason = %q, want %q", mock.stopReason, StopReasonBackendShutdown)
+	}
+}
+
+func TestRemoveExecutionRevokesGitMetadataProjection(t *testing.T) {
+	mgr := &Manager{executionStore: NewExecutionStore(), logger: newTestRegistryLogger()}
+	execution := &AgentExecution{
+		ID:                     "exec-1",
+		SessionID:              "session-1",
+		GitMetadataProjections: []*worktree.GitMetadataProjection{{CheckoutPath: "/task-checkout"}},
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr.RemoveExecution(execution.ID)
+	if execution.GitMetadataProjections != nil {
+		t.Fatalf("GitMetadataProjections after removal = %#v, want revoked", execution.GitMetadataProjections)
 	}
 }
 func (m *mockStopTracker) RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error) {
