@@ -19,6 +19,13 @@ type GuardStateDTO struct {
 	Error string `json:"error,omitempty"`
 }
 
+// QuorumResponseDTO is the AC-24b diagnostic response body for
+// GET /tasks/:id/quorum.
+type QuorumResponseDTO struct {
+	Guards              []GuardStateDTO `json:"guards"`
+	ReevaluationBlocked bool            `json:"reevaluation_blocked"`
+}
+
 // guardStateDTOsFromSnapshot projects an AC-57d snapshot's Guards into the
 // AC-24b/AC-64 wire shape, preserving order (AC-57d/AC-61/AC-17). Always
 // returns a non-nil slice so callers marshal an empty list, never null.
