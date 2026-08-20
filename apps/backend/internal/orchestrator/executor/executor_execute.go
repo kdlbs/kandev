@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -1692,7 +1693,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		// when the persisted generic repository has no provider identity or
 		// origin URL (as in workspace-source and E2E fixtures).
 		if cloneURL == "" && execConfig.ExecutorType == string(models.ExecutorTypeLocalDocker) {
-			cloneURL = strings.TrimSpace(repoInfo.RepositoryPath)
+			cloneURL = dockerLocalCloneSource(repoInfo.RepositoryPath)
 		}
 		if cloneURL == "" {
 			return metadata, ErrNoCloneURL
@@ -1707,6 +1708,22 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 	}
 
 	return metadata, nil
+}
+
+// dockerLocalCloneSource returns a host directory suitable for Docker's
+// read-only bind mount. A repository path can also be a remote URL while a
+// workspace-source attachment is in progress; treating that as a local source
+// makes Docker reject the launch before the intended clone error can surface.
+func dockerLocalCloneSource(repositoryPath string) string {
+	source := strings.TrimSpace(repositoryPath)
+	if source == "" {
+		return ""
+	}
+	info, err := os.Stat(source)
+	if err != nil || !info.IsDir() {
+		return ""
+	}
+	return source
 }
 
 // startAgentOnExistingWorkspace handles the case where LaunchPreparedSession is called on a session
