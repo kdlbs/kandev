@@ -57,6 +57,14 @@ func (r *StandaloneExecutor) PrepareGitMetadataProjection(_ context.Context, req
 	return prepareCodexGitMetadataPolicy(req)
 }
 
+// PrepareGitMetadataProjectionRebind installs the replacement profile while
+// the existing child is stopped. Unlike container mounts, the host policy is
+// part of agentctl's process configuration and can therefore be replaced
+// before the child restarts.
+func (r *StandaloneExecutor) PrepareGitMetadataProjectionRebind(_ context.Context, req *ExecutorCreateRequest) error {
+	return prepareCodexGitMetadataPolicy(req)
+}
+
 // SubprocessAdmission returns the admission snapshot from the host agentctl
 // control server for backend diagnostics.
 func (r *StandaloneExecutor) SubprocessAdmission(ctx context.Context) (subproc.Snapshot, error) {

@@ -33,7 +33,12 @@ type GitMetadataProjection struct {
 	CurrentRefPath string
 	ReflogPath     string
 	WritablePaths  []string
-	Hash           string
+	// TrustedCommonDir is derived from the server-owned repository record when
+	// this is a task materialization. It is not a grant itself; revalidation
+	// uses it to reject a checkout whose .git pointer is swapped to another
+	// otherwise-valid repository relationship.
+	TrustedCommonDir string
+	Hash             string
 }
 
 // ResolveGitMetadata validates checkout Git metadata and returns a narrow
@@ -61,6 +66,33 @@ func ResolveGitMetadata(checkoutPath string) (*GitMetadataProjection, error) {
 	return resolveLinkedGitMetadata(checkout, gitEntry)
 }
 
+// ResolveGitMetadataForRepository binds a task checkout to its server-owned
+// source repository. A linked-worktree pointer is evidence only: it must lead
+// to the same common Git directory as the durable repository record, not just
+// to any syntactically valid worktree administration directory.
+func ResolveGitMetadataForRepository(checkoutPath, repositoryPath string) (*GitMetadataProjection, error) {
+	projection, err := ResolveGitMetadata(checkoutPath)
+	if err != nil {
+		return nil, err
+	}
+	repository, err := ResolveGitMetadata(repositoryPath)
+	if err != nil {
+		return nil, invalidGitMetadata(errors.New("trusted repository metadata is invalid"))
+	}
+	if projection.CommonDir != repository.CommonDir {
+		return nil, invalidGitMetadata(errors.New("checkout common directory does not match trusted repository"))
+	}
+	// A distinct task checkout must be a linked worktree in the trusted
+	// repository. A regular .git directory from a separately cloned repository
+	// would otherwise have no shared locking or cleanup relationship.
+	if projection.CheckoutPath != repository.CheckoutPath && projection.GitDir == projection.CommonDir {
+		return nil, invalidGitMetadata(errors.New("task checkout is not a trusted linked worktree"))
+	}
+	projection.TrustedCommonDir = repository.CommonDir
+	projection.Hash = projectionHash(projection)
+	return projection, nil
+}
+
 // Revalidate detects replacement or redirection of any metadata used by this
 // projection immediately before a policy or mount is installed.
 func (p *GitMetadataProjection) Revalidate() error {
@@ -70,6 +102,13 @@ func (p *GitMetadataProjection) Revalidate() error {
 	current, err := ResolveGitMetadata(p.CheckoutPath)
 	if err != nil {
 		return err
+	}
+	if p.TrustedCommonDir != "" {
+		if current.CommonDir != p.TrustedCommonDir {
+			return invalidGitMetadata(errors.New("checkout common directory changed after resolution"))
+		}
+		current.TrustedCommonDir = p.TrustedCommonDir
+		current.Hash = projectionHash(current)
 	}
 	if current.Hash != p.Hash {
 		return invalidGitMetadata(errors.New("projection changed after resolution"))
@@ -314,7 +353,7 @@ func uniqueGitMetadataPaths(paths []string) []string {
 }
 
 func projectionHash(p *GitMetadataProjection) string {
-	parts := append([]string{fmt.Sprintf("v%d", p.Version), p.CheckoutPath, p.GitDir, p.CommonDir, p.CurrentRef}, p.WritablePaths...)
+	parts := append([]string{fmt.Sprintf("v%d", p.Version), p.CheckoutPath, p.GitDir, p.CommonDir, p.TrustedCommonDir, p.CurrentRef}, p.WritablePaths...)
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(sum[:])
 }

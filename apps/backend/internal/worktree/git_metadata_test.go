@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -52,6 +53,74 @@ func TestResolveGitMetadataRejectsForgedLinkedWorktreePointer(t *testing.T) {
 	}
 	if _, err := ResolveGitMetadata(checkout); err == nil {
 		t.Fatal("ResolveGitMetadata accepted forged reciprocal pointer")
+	}
+}
+
+func TestResolveGitMetadataRejectsSymlinkedGitEntry(t *testing.T) {
+	repo := initGitMetadataRepository(t)
+	checkout := filepath.Join(t.TempDir(), "task-checkout")
+	runGitMetadata(t, repo, "worktree", "add", "-b", "task-branch", checkout)
+	gitEntry := filepath.Join(checkout, ".git")
+	if err := os.Remove(gitEntry); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "forged-git"), gitEntry); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if _, err := ResolveGitMetadata(checkout); !errors.Is(err, ErrGitMetadataProjectionInvalid) {
+		t.Fatalf("ResolveGitMetadata error = %v, want symlink rejection", err)
+	}
+}
+
+func TestResolveGitMetadataRejectsTraversalCurrentBranchRef(t *testing.T) {
+	repo := initGitMetadataRepository(t)
+	checkout := filepath.Join(t.TempDir(), "task-checkout")
+	runGitMetadata(t, repo, "worktree", "add", "-b", "task-branch", checkout)
+	gitDir := runGitMetadata(t, checkout, "rev-parse", "--path-format=absolute", "--git-dir")
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/../../config\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveGitMetadata(checkout); !errors.Is(err, ErrGitMetadataProjectionInvalid) {
+		t.Fatalf("ResolveGitMetadata error = %v, want ref traversal rejection", err)
+	}
+}
+
+func TestResolveGitMetadataForRepositoryRejectsDifferentValidCommonDirectory(t *testing.T) {
+	repositoryA := initGitMetadataRepository(t)
+	repositoryB := initGitMetadataRepository(t)
+	checkout := filepath.Join(t.TempDir(), "task-checkout")
+	runGitMetadata(t, repositoryB, "worktree", "add", "-b", "task-branch", checkout)
+
+	if _, err := ResolveGitMetadataForRepository(checkout, repositoryA); !errors.Is(err, ErrGitMetadataProjectionInvalid) {
+		t.Fatalf("ResolveGitMetadataForRepository error = %v, want trusted repository rejection", err)
+	}
+}
+
+func TestGitMetadataProjectionRevalidateRejectsCommonDirectorySwap(t *testing.T) {
+	repositoryA := initGitMetadataRepository(t)
+	repositoryB := initGitMetadataRepository(t)
+	checkout := filepath.Join(t.TempDir(), "task-checkout")
+	runGitMetadata(t, repositoryA, "worktree", "add", "-b", "task-branch", checkout)
+	projection, err := ResolveGitMetadataForRepository(checkout, repositoryA)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gitPointer := filepath.Join(checkout, ".git")
+	replacement := filepath.Join(t.TempDir(), "replacement")
+	runGitMetadata(t, repositoryB, "worktree", "add", "-b", "replacement", replacement)
+	replacementGitDir := runGitMetadata(t, replacement, "rev-parse", "--path-format=absolute", "--git-dir")
+	if err := os.WriteFile(filepath.Join(replacementGitDir, "gitdir"), []byte(gitPointer+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gitPointer, []byte("gitdir: "+replacementGitDir+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.ReadFile(gitPointer); err != nil {
+		t.Fatal(err)
+	}
+	if err := projection.Revalidate(); !errors.Is(err, ErrGitMetadataProjectionInvalid) {
+		t.Fatalf("Revalidate error = %v, want common-directory swap rejection", err)
 	}
 }
 

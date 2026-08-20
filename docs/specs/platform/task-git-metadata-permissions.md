@@ -27,14 +27,14 @@ Standalone and ACP agents receive the server-authored additional directories and
 | Executor | Git metadata enforcement |
 |---|---|
 | Standalone Codex ACP | A server-authored `CODEX_CONFIG` profile reads common metadata, denies the shared worktrees parent, and reopens only validated writable dependencies. |
-| Local Docker | A deterministic layered mount plan provides the same projection and masks sibling worktree administration. |
+| Local Docker | A deterministic layered mount plan provides the same projection and masks sibling worktree administration. An in-place repository attachment fails closed until the container can be recreated with a replacement mount set. |
 | SSH / Sprites Codex ACP | After the remote prepare step, a regular, non-symlinked task checkout is revalidated on that host. The server sends a `CODEX_CONFIG` profile that writes only that checkout's `.git` directory. A linked remote checkout, multi-repository request, incompatible legacy sandbox setting, or stale SSH child fails before an agent process is used. The recovery path is local Docker or standalone Codex, or a new single-repository remote session. |
 | Remote Docker | Unsupported until the executor can resolve and attest a remote policy; it fails closed before `CreateInstance` and directs mutable work to local Docker, SSH, or Sprites with Codex. |
 | Other agents or repository-less workspaces | Agents without an enforceable profile fail closed for mutable repositories. Repository-less and read-only workspaces need no projection. |
 
 ## Attachment and cleanup
 
-An attached repository is usable only after the complete replacement projection is installed and attested. At the existing idle rebind boundary, lifecycle may restart an agent child or recreate a container; failure restores the previous workspace and projection together.
+An attached repository is usable only after the complete replacement projection is installed and attested. The current host-Codex implementation replaces that profile at the idle rebind boundary. A mount-based or remote runtime that cannot atomically replace its policy rejects the attachment refresh before stopping or rebinding the child with `git_metadata_projection_unsupported` and directs the user to start a new session; it must never retain a stale mount/profile. A future container recreation path may satisfy the same contract.
 
 On stop and terminal cleanup, executor policy artifacts and mounts are revoked before task-owned worktrees are removed. Cleanup never changes ownership, permissions, or contents of source checkouts, common Git metadata, object stores, refs, or sibling worktree administration.
 

@@ -171,7 +171,7 @@ func (m *workspaceSourceMaterializer) materializeHostWorkspaceSources(ctx contex
 	var projections []*worktree.GitMetadataProjection
 	if workspaceSourceBatchHasRepository(batch) {
 		var projectionErr error
-		projections, projectionErr = m.taskGitMetadataProjections(ctx, taskID, state.environment.ExecutorType, materialization.oldPath, materializedWorktreePaths(branchMaterializations))
+		projections, projectionErr = m.taskGitMetadataProjections(ctx, taskID, state, materialization.oldPath, branchMaterializations)
 		if projectionErr != nil {
 			return nil, projectionErr
 		}
@@ -358,18 +358,8 @@ func workspaceSourceBatchHasRepository(batch *models.WorkspaceSourceBatch) bool 
 	return false
 }
 
-func materializedWorktreePaths(materializations []*branchMaterialization) []string {
-	paths := make([]string, 0, len(materializations))
-	for _, materialization := range materializations {
-		if materialization != nil && materialization.worktree != nil && materialization.worktree.Path != "" {
-			paths = append(paths, materialization.worktree.Path)
-		}
-	}
-	return paths
-}
-
-func (m *workspaceSourceMaterializer) taskGitMetadataProjections(ctx context.Context, taskID, executorType, primaryPath string, newPaths []string) ([]*worktree.GitMetadataProjection, error) {
-	if executorType != string(models.ExecutorTypeWorktree) {
+func (m *workspaceSourceMaterializer) taskGitMetadataProjections(ctx context.Context, taskID string, state *workspaceSourceMaterializationState, primaryPath string, newWorktrees []*branchMaterialization) ([]*worktree.GitMetadataProjection, error) {
+	if state == nil || state.environment == nil || state.environment.ExecutorType != string(models.ExecutorTypeWorktree) {
 		return nil, nil
 	}
 	worktrees, err := m.worktreeMgr.GetAllByTaskID(ctx, taskID)
@@ -378,8 +368,14 @@ func (m *workspaceSourceMaterializer) taskGitMetadataProjections(ctx context.Con
 	}
 	projections := make([]*worktree.GitMetadataProjection, 0, len(worktrees)+1)
 	seen := make(map[string]struct{}, len(worktrees)+1)
+	worktreeRepositories := taskWorktreeRepositoryPaths(worktrees, state, newWorktrees)
+	primaryRepositoryPath := taskPrimaryRepositoryPath(state)
 	appendProjection := func(path string) error {
-		projection, err := worktree.ResolveGitMetadata(path)
+		repositoryPath := taskCheckoutRepositoryPath(path, primaryPath, primaryRepositoryPath, worktreeRepositories)
+		if repositoryPath == "" {
+			return fmt.Errorf("resolve task Git metadata projection: task checkout has no trusted repository record")
+		}
+		projection, err := worktree.ResolveGitMetadataForRepository(path, repositoryPath)
 		if err != nil {
 			return fmt.Errorf("resolve task Git metadata projection: %w", err)
 		}
@@ -390,33 +386,82 @@ func (m *workspaceSourceMaterializer) taskGitMetadataProjections(ctx context.Con
 		projections = append(projections, projection)
 		return nil
 	}
+	checkoutPaths, err := taskGitMetadataCheckoutPaths(primaryPath, worktrees, newWorktrees)
+	if err != nil {
+		return nil, err
+	}
+	for _, path := range checkoutPaths {
+		if err := appendProjection(path); err != nil {
+			return nil, err
+		}
+	}
+	return projections, nil
+}
+
+func taskGitMetadataCheckoutPaths(primaryPath string, worktrees []*worktree.Worktree, materializations []*branchMaterialization) ([]string, error) {
+	paths := make([]string, 0, len(worktrees)+len(materializations)+1)
 	// The primary checkout predates task_environment_repos on older task
 	// environments. Its environment-owned workspace path remains the durable
 	// authority until the task is promoted to a non-Git root, at which point
 	// the recorded worktree entries below are authoritative.
 	if primaryPath != "" {
 		if _, err := os.Lstat(filepath.Join(primaryPath, ".git")); err == nil {
-			if err := appendProjection(primaryPath); err != nil {
-				return nil, err
-			}
+			paths = append(paths, primaryPath)
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("inspect task primary Git metadata: %w", err)
 		}
 	}
 	for _, wt := range worktrees {
-		if wt == nil {
+		if wt != nil && wt.Path != "" {
+			paths = append(paths, wt.Path)
+		}
+	}
+	for _, materialization := range materializations {
+		if materialization != nil && materialization.worktree != nil && materialization.worktree.Path != "" {
+			paths = append(paths, materialization.worktree.Path)
+		}
+	}
+	return paths, nil
+}
+
+func taskWorktreeRepositoryPaths(worktrees []*worktree.Worktree, state *workspaceSourceMaterializationState, materializations []*branchMaterialization) map[string]string {
+	paths := make(map[string]string, len(worktrees)+len(materializations))
+	for _, wt := range worktrees {
+		if wt != nil && wt.Path != "" && wt.RepositoryPath != "" {
+			paths[wt.Path] = wt.RepositoryPath
+		}
+	}
+	for _, materialization := range materializations {
+		if materialization == nil || materialization.worktree == nil || materialization.worktree.Path == "" || state == nil {
 			continue
 		}
-		if err := appendProjection(wt.Path); err != nil {
-			return nil, err
+		repository := state.entities[materialization.repositoryID]
+		if repository != nil && repository.LocalPath != "" {
+			paths[materialization.worktree.Path] = repository.LocalPath
 		}
 	}
-	for _, path := range newPaths {
-		if err := appendProjection(path); err != nil {
-			return nil, err
-		}
+	return paths
+}
+
+func taskPrimaryRepositoryPath(state *workspaceSourceMaterializationState) string {
+	if state == nil || len(state.repositories) == 0 {
+		return ""
 	}
-	return projections, nil
+	repository := state.entities[state.repositories[0].RepositoryID]
+	if repository == nil {
+		return ""
+	}
+	return repository.LocalPath
+}
+
+func taskCheckoutRepositoryPath(path, primaryPath, primaryRepositoryPath string, worktreeRepositories map[string]string) string {
+	if repositoryPath := worktreeRepositories[path]; repositoryPath != "" {
+		return repositoryPath
+	}
+	if path == primaryPath {
+		return primaryRepositoryPath
+	}
+	return ""
 }
 
 func canonicalWorkspaceSourceRoots(state *workspaceSourceMaterializationState, batch *models.WorkspaceSourceBatch, includeBatch bool) ([]string, error) {

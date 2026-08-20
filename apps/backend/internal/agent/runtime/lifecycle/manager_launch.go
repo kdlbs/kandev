@@ -137,7 +137,7 @@ func isTrustedExecutorConfigKey(k string) bool { return trustedExecutorConfigKey
 // values the caller passed in req.Metadata. Other keys (per-task settings
 // like setup_script, base_branch, repo_setup_script, etc.) keep the caller's
 // value when present.
-func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktreeBranch string) map[string]interface{} {
+func buildLaunchMetadata(req *LaunchRequest, _ string, worktreeID, worktreeBranch string) map[string]interface{} {
 	metadata := make(map[string]interface{})
 	for k, v := range req.Metadata {
 		metadata[k] = v
@@ -154,9 +154,9 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 			metadata[k] = v
 		}
 	}
-	if mainRepoGitDir != "" {
-		metadata[MetadataKeyMainRepoGitDir] = mainRepoGitDir
-	}
+	// MainRepoGitDir was a legacy single-repository Docker grant. It remains
+	// accepted by the preparation compatibility DTO, but must never cross the
+	// launch boundary: every executor receives only GitMetadataProjections.
 	if worktreeID != "" {
 		metadata[MetadataKeyWorktreeID] = worktreeID
 	}
