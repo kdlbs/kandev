@@ -80,4 +80,28 @@ describe("startHTTPGitFixture", () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("returns not found for a missing smart HTTP repository", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-http-git-"));
+    let fixture: Awaited<ReturnType<typeof startHTTPGitFixture>> | undefined;
+
+    try {
+      let port = 0;
+      fixture = await startHTTPGitFixture(root, "existing", {
+        bridgeGateway: "127.0.0.1",
+        onListening: (_server, listeningPort) => {
+          port = listeningPort;
+        },
+      });
+
+      const response = await fetch(
+        `http://127.0.0.1:${port}/fixture/missing.git/info/refs?service=git-upload-pack`,
+      );
+
+      expect(response.status).toBe(404);
+    } finally {
+      await fixture?.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
