@@ -482,6 +482,16 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       expectedEnvironmentId: before!.id,
       message: "Waiting for second Docker session to reuse the task environment",
     });
+    // Binding the row is not enough: a sibling must establish its own
+    // agentctl instance inside the retained container and complete a prompt.
+    // This catches a missing durable Docker control handle, which otherwise
+    // surfaces only after the session has already claimed the environment.
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      launched.session_id,
+      "Waiting for sibling Docker session to run in the retained container",
+    );
 
     const after = await apiClient.getTaskEnvironment(task.id);
     expect(after?.id).toBe(before!.id);

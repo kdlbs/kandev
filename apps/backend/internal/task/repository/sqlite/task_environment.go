@@ -48,14 +48,14 @@ func (r *Repository) CreateTaskEnvironment(ctx context.Context, env *models.Task
 			id, task_id, executor_type, executor_id, executor_profile_id,
 			control_port, status, materialization_session_id,
 			workspace_path,
-			container_id, sandbox_id, task_dir_name,
+			container_id, container_bootstrap_nonce_secret_id, sandbox_id, task_dir_name,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		env.ID, env.TaskID, env.ExecutorType, env.ExecutorID, env.ExecutorProfileID,
 		env.ControlPort, string(env.Status), env.MaterializationSessionID,
 		env.WorkspacePath,
-		env.ContainerID, env.SandboxID, env.TaskDirName,
+		env.ContainerID, env.ContainerBootstrapNonceSecretID, env.SandboxID, env.TaskDirName,
 		env.CreatedAt, env.UpdatedAt,
 	); err != nil {
 		return err
@@ -80,14 +80,14 @@ func (r *Repository) GetTaskEnvironment(ctx context.Context, id string) (*models
 		SELECT id, task_id, executor_type, executor_id, executor_profile_id,
 			control_port, status, materialization_session_id,
 			workspace_path,
-			container_id, sandbox_id, COALESCE(task_dir_name, ''),
+			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), sandbox_id, COALESCE(task_dir_name, ''),
 			created_at, updated_at
 		FROM task_environments WHERE id = ?
 	`), id).Scan(
 		&env.ID, &env.TaskID, &env.ExecutorType, &env.ExecutorID, &env.ExecutorProfileID,
 		&env.ControlPort, &status, &env.MaterializationSessionID,
 		&env.WorkspacePath,
-		&env.ContainerID, &env.SandboxID, &env.TaskDirName,
+		&env.ContainerID, &env.ContainerBootstrapNonceSecretID, &env.SandboxID, &env.TaskDirName,
 		&env.CreatedAt, &env.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -116,14 +116,14 @@ func (r *Repository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID stri
 		SELECT id, task_id, executor_type, executor_id, executor_profile_id,
 			control_port, status, materialization_session_id,
 			workspace_path,
-			container_id, sandbox_id, COALESCE(task_dir_name, ''),
+			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), sandbox_id, COALESCE(task_dir_name, ''),
 			created_at, updated_at
 		FROM task_environments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1
 	`), taskID).Scan(
 		&env.ID, &env.TaskID, &env.ExecutorType, &env.ExecutorID, &env.ExecutorProfileID,
 		&env.ControlPort, &status, &env.MaterializationSessionID,
 		&env.WorkspacePath,
-		&env.ContainerID, &env.SandboxID, &env.TaskDirName,
+		&env.ContainerID, &env.ContainerBootstrapNonceSecretID, &env.SandboxID, &env.TaskDirName,
 		&env.CreatedAt, &env.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -158,14 +158,14 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 			executor_type = ?, executor_id = ?, executor_profile_id = ?,
 			control_port = ?, status = ?, materialization_session_id = ?,
 			workspace_path = ?,
-			container_id = ?, sandbox_id = ?, task_dir_name = ?,
+			container_id = ?, container_bootstrap_nonce_secret_id = ?, sandbox_id = ?, task_dir_name = ?,
 			updated_at = ?
 		WHERE id = ?
 	`),
 		env.ExecutorType, env.ExecutorID, env.ExecutorProfileID,
 		env.ControlPort, string(env.Status), env.MaterializationSessionID,
 		env.WorkspacePath,
-		env.ContainerID, env.SandboxID, env.TaskDirName,
+		env.ContainerID, env.ContainerBootstrapNonceSecretID, env.SandboxID, env.TaskDirName,
 		env.UpdatedAt,
 		env.ID,
 	)

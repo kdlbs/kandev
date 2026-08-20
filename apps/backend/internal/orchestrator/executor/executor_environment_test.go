@@ -144,9 +144,10 @@ func TestEnvironmentReposForLaunch_PersistsRemoteWorkspaceIdentity(t *testing.T)
 
 func TestReuseExistingEnvironment_ContainerReuse(t *testing.T) {
 	e := newEnvTestExecutor(t)
-	req := &LaunchAgentRequest{TaskID: "task-1"}
+	req := &LaunchAgentRequest{TaskID: "task-1", WorkspaceReuseRequired: true}
 	env := &models.TaskEnvironment{
-		ContainerID: "container-abc",
+		ContainerID:                     "container-abc",
+		ContainerBootstrapNonceSecretID: "bootstrap-secret-abc",
 	}
 
 	e.reuseExistingEnvironment(context.Background(), req, env)
@@ -156,6 +157,45 @@ func TestReuseExistingEnvironment_ContainerReuse(t *testing.T) {
 	}
 	if req.Metadata["container_id"] != "container-abc" {
 		t.Errorf("expected metadata container_id=container-abc, got %v", req.Metadata["container_id"])
+	}
+	if req.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] != "bootstrap-secret-abc" {
+		t.Errorf("expected canonical bootstrap nonce reference, got %v", req.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret])
+	}
+}
+
+func TestPersistTaskEnvironment_DockerBootstrapNonceBecomesEnvironmentHandle(t *testing.T) {
+	repo := newMockRepository()
+	env := &models.TaskEnvironment{
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeLocalDocker),
+		Status:       models.TaskEnvironmentStatusCreating,
+	}
+	repo.taskEnvironments[env.ID] = env
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{ID: "session-1", TaskID: "task-1", TaskEnvironmentID: env.ID}
+
+	e.persistTaskEnvironment(context.Background(), "task-1", session, env,
+		&LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeLocalDocker)},
+		&LaunchAgentResponse{ContainerID: "container-1", Metadata: map[string]interface{}{
+			lifecycle.MetadataKeyBootstrapNonceSecret: "bootstrap-secret-1",
+		}},
+		executorConfig{ExecutorID: "docker"})
+
+	persisted := repo.taskEnvironments[env.ID]
+	if persisted.ContainerID != "container-1" {
+		t.Fatalf("ContainerID = %q, want container-1", persisted.ContainerID)
+	}
+	if persisted.ContainerBootstrapNonceSecretID != "bootstrap-secret-1" {
+		t.Fatalf("ContainerBootstrapNonceSecretID = %q, want bootstrap-secret-1", persisted.ContainerBootstrapNonceSecretID)
+	}
+	attach := &LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeLocalDocker), WorkspaceReuseRequired: true}
+	e.reuseExistingEnvironment(context.Background(), attach, persisted)
+	if attach.PreviousExecutionID != "" {
+		t.Fatalf("PreviousExecutionID = %q, want empty for sibling attach", attach.PreviousExecutionID)
+	}
+	if got := attach.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret]; got != "bootstrap-secret-1" {
+		t.Fatalf("bootstrap nonce reference = %v, want canonical environment handle", got)
 	}
 }
 
@@ -269,7 +309,7 @@ func TestReuseExistingEnvironment_RuntimeMetadata_FallsBackToMatchingContainer(t
 	}
 }
 
-func TestBuildResumeRequest_ReusesTaskEnvironmentRuntimeMetadata(t *testing.T) {
+func TestBuildResumeRequest_ReusesDockerEnvironmentHandleWithoutSiblingRuntime(t *testing.T) {
 	repo := newMockRepository()
 	agentManager := &mockAgentManager{}
 	exec := newTestExecutor(t, agentManager, repo)
@@ -296,11 +336,12 @@ func TestBuildResumeRequest_ReusesTaskEnvironmentRuntimeMetadata(t *testing.T) {
 		Resumable: true,
 	}
 	repo.taskEnvironments["env-1"] = &models.TaskEnvironment{
-		ID:           "env-1",
-		TaskID:       "task-1",
-		ExecutorType: string(models.ExecutorTypeLocalDocker),
-		ContainerID:  "container-old",
-		Status:       models.TaskEnvironmentStatusReady,
+		ID:                              "env-1",
+		TaskID:                          "task-1",
+		ExecutorType:                    string(models.ExecutorTypeLocalDocker),
+		ContainerID:                     "container-old",
+		ContainerBootstrapNonceSecretID: "bootstrap-secret",
+		Status:                          models.TaskEnvironmentStatusReady,
 	}
 	repo.sessions["session-old"] = &models.TaskSession{
 		ID:                "session-old",
@@ -332,14 +373,17 @@ func TestBuildResumeRequest_ReusesTaskEnvironmentRuntimeMetadata(t *testing.T) {
 	if req.TaskEnvironmentID != "env-1" {
 		t.Fatalf("TaskEnvironmentID = %q, want env-1", req.TaskEnvironmentID)
 	}
-	if req.PreviousExecutionID != "exec-old" {
-		t.Fatalf("PreviousExecutionID = %q, want latest environment execution exec-old", req.PreviousExecutionID)
+	if req.PreviousExecutionID != "" {
+		t.Fatalf("PreviousExecutionID = %q, want empty for sibling session", req.PreviousExecutionID)
 	}
 	if req.Metadata[lifecycle.MetadataKeyContainerID] != "container-old" {
 		t.Fatalf("container metadata = %v, want container-old", req.Metadata[lifecycle.MetadataKeyContainerID])
 	}
-	if req.Metadata[lifecycle.MetadataKeyAuthTokenSecret] != "secret-token" {
-		t.Fatalf("auth token secret missing: %v", req.Metadata)
+	if _, found := req.Metadata[lifecycle.MetadataKeyAuthTokenSecret]; found {
+		t.Fatalf("sibling auth token leaked into attach request: %v", req.Metadata)
+	}
+	if req.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] != "bootstrap-secret" {
+		t.Fatalf("bootstrap nonce reference = %v, want canonical environment handle", req.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret])
 	}
 	if _, ok := req.Metadata["task_description"]; ok {
 		t.Fatalf("launch-only metadata should be filtered out: %v", req.Metadata)
@@ -636,6 +680,22 @@ func TestApplyRepositoryConfig_PropagatesRepositoryID(t *testing.T) {
 
 	if req.RepositoryID != "repo-abc" {
 		t.Errorf("req.RepositoryID = %q, want %q", req.RepositoryID, "repo-abc")
+	}
+}
+
+func TestApplyRepositoryConfig_ReuseRequiredDoesNotRequireCloneURL(t *testing.T) {
+	e := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	req := &LaunchAgentRequest{TaskID: "task-1", WorkspaceReuseRequired: true}
+	task := &v1.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "Some task"}
+	info := &repoInfo{
+		RepositoryID:   "repo-abc",
+		RepositoryPath: "/repos/myrepo",
+		Repository:     &models.Repository{ID: "repo-abc", Name: "myrepo"},
+	}
+	execCfg := executorConfig{ExecutorID: "docker", ExecutorType: string(models.ExecutorTypeLocalDocker)}
+
+	if _, err := e.applyRepositoryConfig(req, task, info, execCfg, nil); err != nil {
+		t.Fatalf("reuse attach rejected an unavailable clone URL: %v", err)
 	}
 }
 

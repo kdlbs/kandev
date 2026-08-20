@@ -1082,7 +1082,8 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}
 	assignLaunchTaskEnvironmentID(session, existingEnv)
 
-	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, primaryRepo, allRepos)
+	workspaceReuseRequired := existingEnv != nil && existingEnv.MaterializationSessionID != session.ID
+	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, primaryRepo, allRepos, workspaceReuseRequired)
 	if err != nil {
 		return nil, err
 	}
@@ -1099,7 +1100,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusFailed {
 		return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
 	}
-	req.WorkspaceReuseRequired = existingEnv != nil && existingEnv.MaterializationSessionID != session.ID
+	req.WorkspaceReuseRequired = workspaceReuseRequired
 	req.OfficeAgentProfileID = opts.OfficeAgentProfileID
 	req.TurnID = opts.TurnID
 	if req.OfficeAgentProfileID == "" && session.AgentProfileID != "" {
@@ -1455,7 +1456,7 @@ func assignLaunchTaskEnvironmentID(session *models.TaskSession, existingEnv *mod
 // applying executor config, repository/worktree settings, and remote docker URL as needed.
 // allRepos carries every repository for the task in Position order; for single-repo
 // or repo-less tasks it has length <=1 and the legacy single-repo path runs unchanged.
-func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, executorID, prompt string, repoInfo *repoInfo, allRepos []*repoInfo) (*LaunchAgentRequest, executorConfig, error) {
+func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, executorID, prompt string, repoInfo *repoInfo, allRepos []*repoInfo, workspaceReuseRequired bool) (*LaunchAgentRequest, executorConfig, error) {
 	metadata := cloneMetadata(task.Metadata)
 	if session.ExecutorProfileID != "" {
 		if metadata == nil {
@@ -1465,18 +1466,19 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	}
 	sessionID := session.ID
 	req := &LaunchAgentRequest{
-		TaskID:            task.ID,
-		WorkspaceID:       task.WorkspaceID,
-		TaskTitle:         task.Title,
-		AgentProfileID:    agentProfileID,
-		TaskDescription:   prompt,
-		Priority:          task.Priority,
-		SessionID:         sessionID,
-		TaskEnvironmentID: session.TaskEnvironmentID,
-		IsEphemeral:       task.IsEphemeral,
-		IsPassthrough:     session.IsPassthrough,
-		WorkspacePath:     session.WorkspacePath,
-		McpProviders:      deriveMCPProviders(allRepos),
+		TaskID:                 task.ID,
+		WorkspaceID:            task.WorkspaceID,
+		TaskTitle:              task.Title,
+		AgentProfileID:         agentProfileID,
+		TaskDescription:        prompt,
+		Priority:               task.Priority,
+		SessionID:              sessionID,
+		TaskEnvironmentID:      session.TaskEnvironmentID,
+		IsEphemeral:            task.IsEphemeral,
+		IsPassthrough:          session.IsPassthrough,
+		WorkspacePath:          session.WorkspacePath,
+		WorkspaceReuseRequired: workspaceReuseRequired,
+		McpProviders:           deriveMCPProviders(allRepos),
 	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
@@ -1683,7 +1685,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 	}
 
 	// Remote executors need a clone URL since the remote host has no access to the local filesystem.
-	if e.capabilities != nil && e.capabilities.RequiresCloneURL(execConfig.ExecutorType) && repoInfo.Repository != nil {
+	if !req.WorkspaceReuseRequired && e.capabilities != nil && e.capabilities.RequiresCloneURL(execConfig.ExecutorType) && repoInfo.Repository != nil {
 		cloneURL := repositoryCloneURL(repoInfo.Repository)
 		if cloneURL == "" {
 			return metadata, ErrNoCloneURL
@@ -2022,6 +2024,9 @@ func (e *Executor) persistTaskEnvironment(
 		if resp.ContainerID != "" {
 			existingEnv.ContainerID = resp.ContainerID
 		}
+		if bootstrapSecretID := extractContainerBootstrapNonceSecretID(resp.Metadata); bootstrapSecretID != "" {
+			existingEnv.ContainerBootstrapNonceSecretID = bootstrapSecretID
+		}
 		if sandboxID := extractSandboxID(resp.Metadata); sandboxID != "" {
 			existingEnv.SandboxID = sandboxID
 		}
@@ -2054,11 +2059,12 @@ func (e *Executor) persistTaskEnvironment(
 		ExecutorProfileID: session.ExecutorProfileID,
 		// AgentExecutionID is intentionally not set here — see executors_running
 		// for the active execution per session.
-		Status:        models.TaskEnvironmentStatusReady,
-		WorkspacePath: workspacePath,
-		ContainerID:   resp.ContainerID,
-		TaskDirName:   req.TaskDirName,
-		SandboxID:     extractSandboxID(resp.Metadata),
+		Status:                          models.TaskEnvironmentStatusReady,
+		WorkspacePath:                   workspacePath,
+		ContainerID:                     resp.ContainerID,
+		ContainerBootstrapNonceSecretID: extractContainerBootstrapNonceSecretID(resp.Metadata),
+		TaskDirName:                     req.TaskDirName,
+		SandboxID:                       extractSandboxID(resp.Metadata),
 	}
 	// Embed per-repo rows in the same create transaction. Single-repo
 	// launches produce one row so the worktree identity is always recorded.

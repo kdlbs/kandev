@@ -188,6 +188,7 @@ func (r *Repository) runMigrations() error {
 	// Must run BEFORE migrateTaskEnvironmentsRemoveAgentExecutionID, which copies task_dir_name into the recreated table.
 	r.migrate.Apply("task_environments.task_dir_name", `ALTER TABLE task_environments ADD COLUMN task_dir_name TEXT DEFAULT ''`)
 	r.migrate.Apply("task_environments.materialization_session_id", `ALTER TABLE task_environments ADD COLUMN materialization_session_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_environments.container_bootstrap_nonce_secret_id", `ALTER TABLE task_environments ADD COLUMN container_bootstrap_nonce_secret_id TEXT DEFAULT ''`)
 	if err := r.migrateTaskEnvironmentsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
@@ -987,6 +988,7 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 			worktree_branch TEXT DEFAULT '',
 			workspace_path TEXT DEFAULT '',
 			container_id TEXT DEFAULT '',
+			container_bootstrap_nonce_secret_id TEXT DEFAULT '',
 			sandbox_id TEXT DEFAULT '',
 			task_dir_name TEXT DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
@@ -996,7 +998,7 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 		`INSERT INTO task_environments_new SELECT
 			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
 			control_port, status, '', worktree_id, worktree_path, worktree_branch,
-			workspace_path, container_id, sandbox_id,
+			workspace_path, container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), sandbox_id,
 			COALESCE(task_dir_name, ''), created_at, updated_at
 		FROM task_environments`,
 		`DROP TABLE task_environments`,
