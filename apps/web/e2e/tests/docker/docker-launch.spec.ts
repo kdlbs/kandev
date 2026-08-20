@@ -104,7 +104,7 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       config: { image_tag: E2E_IMAGE_TAG },
       prepare_script: "sleep 20",
       cleanup_script: "",
-      env_vars: [],
+      env_vars: seedData.gitConfigEnvVars,
     });
     const persistedProfile = await apiClient.getExecutorProfile(dockerExec!.id, profile.id);
     expect(persistedProfile.prepare_script).toBe("sleep 20");
@@ -547,7 +547,7 @@ git remote set-url origin "$(git remote get-url origin | sed 's|https://[^@]*@gi
       config: { image_tag: E2E_IMAGE_TAG },
       prepare_script: staleScript,
       cleanup_script: "",
-      env_vars: [],
+      env_vars: seedData.gitConfigEnvVars,
     });
 
     try {
