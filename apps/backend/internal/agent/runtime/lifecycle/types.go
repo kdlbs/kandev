@@ -748,8 +748,12 @@ func (ae *AgentExecution) EndSessionSpan() {
 // the top level. When LaunchRequest.Repositories is set, each entry produces
 // one prepared worktree under the shared TaskDirName.
 type RepoLaunchSpec struct {
-	RepositoryID            string
-	RepositoryPath          string
+	RepositoryID   string
+	RepositoryPath string
+	// WorktreePath is the durable task-environment checkout path used only
+	// when resuming an existing worktree. It must not be reconstructed from
+	// mutable repository display or branch metadata.
+	WorktreePath            string
 	RepositoryURL           string // Clone URL for remote executors that need to clone
 	RepoName                string // Repository name used as subdirectory inside TaskDirName
 	BaseBranch              string

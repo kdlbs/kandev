@@ -282,6 +282,7 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 		specs = append(specs, lifecycle.RepoLaunchSpec{
 			RepositoryID:            r.RepositoryID,
 			RepositoryPath:          r.RepositoryPath,
+			WorktreePath:            r.WorktreePath,
 			RepositoryURL:           r.RepositoryURL,
 			RepoName:                r.RepoName,
 			BaseBranch:              r.BaseBranch,
