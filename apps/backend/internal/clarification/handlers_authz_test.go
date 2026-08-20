@@ -240,6 +240,26 @@ func TestHttpCancelRequest_AuthorizationDenied_404(t *testing.T) {
 	}
 }
 
+// TestHttpRespond_L16Bundle_RejectionReturns400NotUpstream500 proves L16 end
+// to end at the REST boundary: a rejection against a bundle with a missing
+// question_id must be rejected pre-claim with a named 400, never reach
+// CompleteActiveClarificationBundle, and never surface upstream's 500 (R4a).
+// stubMessageCreator's zero-valued CompleteActiveClarificationBundle would
+// return completeClaimed=false with no error if it were ever called, so a
+// bug that let this outcome reach the claim would show up as an unexpected
+// 200/409 here rather than accidentally passing.
+func TestHttpRespond_L16Bundle_RejectionReturns400NotUpstream500(t *testing.T) {
+	msgs := map[string][]*taskmodels.Message{
+		"pending-l16": {clarificationMessage("m1", "pending-l16", "", 0, "First?", "opt1")},
+	}
+	h, _ := setupAuthzHandler(t, msgs, &stubAuthorizer{})
+
+	rec := runRespond(t, h, "pending-l16", RespondBody{Rejected: true})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a rejection against an L16 bundle, got %d (body=%s)", rec.Code, rec.Body.String())
+	}
+}
+
 // TestHttpGetRequest_UnscopedCaller_Authorized proves the auth-disabled
 // compatibility path: a permissive authorizer (the production stand-in for
 // no identity / a synthetic identity, per CLAUDE.md's per-user scoping

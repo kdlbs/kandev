@@ -44,10 +44,13 @@ func IsValidationError(err error) bool {
 	return errors.As(err, &ve)
 }
 
-// validateOutcome applies N6, N6a, N7, N8, N8a and N8b against questions,
-// the bundle's D2/L5-ordered question list. Callers SHALL NOT call this for
-// a cancel outcome (X5 skips step 3 entirely).
+// validateOutcome applies L16, N6, N6a, N7, N8, N8a and N8b against
+// questions, the bundle's D2/L5-ordered question list. Callers SHALL NOT
+// call this for a cancel outcome (X5 skips step 3 entirely).
 func validateOutcome(questions []Question, o Outcome) error {
+	if err := validateNoMissingQuestionID(questions); err != nil {
+		return err
+	}
 	if o.Rejected {
 		return validateRejection(o)
 	}
@@ -58,6 +61,22 @@ func validateOutcome(questions []Question, o Outcome) error {
 		return newValidationError("reason exceeds %d characters", answerTextRuneCap)
 	}
 	return validateAnswers(questions, o.Answers)
+}
+
+// validateNoMissingQuestionID applies L16 ahead of both the answer and the
+// rejection branch: a bundle in which any message carries an empty or
+// absent question_id cannot be resolved by any outcome, because upstream's
+// completeClaimedClarificationMessages aborts its transaction on the first
+// such message it meets. Checking this before dispatching to either branch
+// is what makes the rejection path name the condition pre-claim instead of
+// surfacing that abort as a 500 (R4a).
+func validateNoMissingQuestionID(questions []Question) error {
+	for _, q := range questions {
+		if q.ID == "" {
+			return newValidationError("bundle contains a message with a missing question_id")
+		}
+	}
+	return nil
 }
 
 func validateRejection(o Outcome) error {

@@ -201,21 +201,23 @@ func TestValidateOutcome_N3aRule3_CustomTextOverCapWithTrailingWhitespaceRejecte
 	}
 }
 
-// TestValidateOutcome_N6a_L16BundleUnanswerableExceptByRejection proves L16:
-// a bundle whose sole question carries an empty question_id can never pass
-// answers validation, whatever the caller submits, and can only be
-// rejected.
-func TestValidateOutcome_N6a_L16BundleUnanswerableExceptByRejection(t *testing.T) {
+// TestValidateOutcome_L16_BundleUnanswerableByAnyOutcome proves L16: a
+// bundle whose sole question carries an empty question_id cannot be
+// resolved by ANY outcome -- not by an answer, and not by a rejection.
+// Upstream's completeClaimedClarificationMessages aborts its transaction on
+// the first such message it meets, so every path here must fail validation
+// pre-claim rather than let a rejection through to that 500.
+func TestValidateOutcome_L16_BundleUnanswerableByAnyOutcome(t *testing.T) {
 	l16 := []Question{{ID: ""}}
 
-	if err := validateOutcome(l16, Outcome{Answers: []Answer{{QuestionID: ""}}}); err == nil {
-		t.Fatalf("expected empty question_id to fail N6 condition 2")
+	if err := validateOutcome(l16, Outcome{Answers: []Answer{{QuestionID: ""}}}); err == nil || !IsValidationError(err) {
+		t.Fatalf("expected a validation error for an answer with an empty question_id, got %v", err)
 	}
-	if err := validateOutcome(l16, Outcome{Answers: []Answer{{QuestionID: "anything"}}}); err == nil {
-		t.Fatalf("expected unknown question_id to fail N6 condition 3")
+	if err := validateOutcome(l16, Outcome{Answers: []Answer{{QuestionID: "anything"}}}); err == nil || !IsValidationError(err) {
+		t.Fatalf("expected a validation error for an answer naming an unknown question_id, got %v", err)
 	}
-	if err := validateOutcome(l16, Outcome{Rejected: true}); err != nil {
-		t.Fatalf("expected rejection to be accepted, got %v", err)
+	if err := validateOutcome(l16, Outcome{Rejected: true}); err == nil || !IsValidationError(err) {
+		t.Fatalf("expected L16 to reject a rejection outcome too, got %v", err)
 	}
 }
 
