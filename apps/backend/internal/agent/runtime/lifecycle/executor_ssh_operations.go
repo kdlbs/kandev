@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -818,6 +819,13 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 	// than a GitHub broker lease. Preserve that credential-free routing shape
 	// for the remote agentctl process as well.
 	copyIndexedGitConfig(req.Env, env)
+	if policyAgent, ok := req.AgentConfig.(agents.FilesystemPolicyAgent); ok {
+		if descriptor, supported := policyAgent.FilesystemPolicyDescriptor(); supported && descriptor != nil && descriptor.ConfigEnvKey != "" {
+			if value := req.Env[descriptor.ConfigEnvKey]; value != "" {
+				env[descriptor.ConfigEnvKey] = value
+			}
+		}
+	}
 
 	for _, key := range req.ApprovedSecretEnvKeys {
 		if !posixSSHEnvIdentifier.MatchString(key) {
