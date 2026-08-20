@@ -1418,22 +1418,21 @@ func (r *Repository) updateSessionMetadataJSON(
 }
 
 // SetSessionMetadataKey atomically sets a single key in the session's metadata
-// using SQLite's json_set. Unlike UpdateSessionMetadata (which does a full
-// replacement), this preserves all other metadata keys.
+// using the active database dialect. Unlike UpdateSessionMetadata (which does
+// a full replacement), this preserves all other metadata keys.
 func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
 	valueJSON, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("failed to serialize metadata value: %w", err)
 	}
-	now := time.Now().UTC()
-	path := "$." + key
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)), updated_at = ? WHERE id = ?
-	`), path, string(valueJSON), now, sessionID)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(metadataKeyUpdateQuery("task_sessions", r.db.DriverName())), metadataKeyUpdateArgs(r.db.DriverName(), key, string(valueJSON), r.nowUTC(), sessionID)...)
 	if err != nil {
 		return err
 	}
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
 	if rows == 0 {
 		return fmt.Errorf("agent session not found: %s", sessionID)
 	}

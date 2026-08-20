@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { TaskLaunchErrorEntry } from "./task-launch-error-entry";
+import { isTypedTaskLaunchError, TaskLaunchErrorEntry } from "./task-launch-error-entry";
 import { TaskChatLaunchError } from "./task-chat-launch-error";
 import type { TaskRepository } from "@/lib/types/http";
 import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summary";
@@ -62,6 +62,32 @@ afterEach(() => cleanup());
 
 // eslint-disable-next-line max-lines-per-function -- shared recovery-entry fixtures keep these related flows together.
 describe("TaskLaunchErrorEntry", () => {
+  it.each(["provider_auth_required", "model_capacity"])(
+    "does not classify ordinary failure code %s as a launch error",
+    (category) => {
+      expect(
+        isTypedTaskLaunchError({
+          ...error,
+          category,
+        }),
+      ).toBe(false);
+    },
+  );
+
+  it.each([
+    "base_branch_missing",
+    "default_branch_unresolved",
+    "pr_already_closed",
+    "generic_launch_failure",
+  ])("classifies launch category %s as a typed launch error", (category) => {
+    expect(
+      isTypedTaskLaunchError({
+        ...error,
+        category,
+      }),
+    ).toBe(true);
+  });
+
   it("renders a typed summary error without recovery actions", () => {
     render(
       <TaskChatLaunchError

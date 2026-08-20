@@ -1,21 +1,13 @@
 "use client";
 
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import { fetchTask } from "@/lib/api";
+import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useToast } from "@/components/toast-provider";
 import { t } from "@/lib/i18n";
 import { getSessionStorage, setSessionStorage } from "@/lib/local-storage";
 import type { TaskRepository } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
-import { pickFreshestStatusSummary } from "@/lib/task-status-summary";
+import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
+import { isTypedTaskLaunchError } from "./simple/components/task-launch-error-entry";
 
 // i18n-exempt: persisted browser storage key, not user-facing copy.
 const LAUNCH_ERROR_TOASTS_KEY = "kandev.task-launch-error-toasts";
@@ -38,15 +30,11 @@ export function TaskLaunchErrorProvider({
 }) {
   const { toast } = useToast();
   const shownToastStampsRef = useRef(new Set<string>());
-  const [fetchedSummary, setFetchedSummary] = useState<TaskStatusSummary | null | undefined>(
-    value.statusSummary,
-  );
-  const fetchedSummaryRef = useRef<TaskStatusSummary | null | undefined>(value.statusSummary);
-  const fetchedSummaryTaskIdRef = useRef(value.taskId);
+  const statusSummary = useTaskStatusSummary(value.taskId, value.statusSummary);
 
   useEffect(() => {
-    const activeError = fetchedSummary?.active_error;
-    if (!activeError?.stamp) return;
+    const activeError = statusSummary?.active_error;
+    if (!isTypedTaskLaunchError(activeError)) return;
 
     const localStamp = `${value.taskId}:${activeError.stamp}`;
     if (shownToastStampsRef.current.has(localStamp)) return;
@@ -66,52 +54,14 @@ export function TaskLaunchErrorProvider({
       description: t("task:launchFailedSeeDetails"),
       variant: "error",
     });
-  }, [fetchedSummary?.active_error?.stamp, toast, value.taskId]);
+  }, [
+    statusSummary?.active_error?.category,
+    statusSummary?.active_error?.stamp,
+    toast,
+    value.taskId,
+  ]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const updateFetchedSummary = (next: TaskStatusSummary | null | undefined) => {
-      const freshest = pickFreshestStatusSummary(next, fetchedSummaryRef.current);
-      if (freshest === fetchedSummaryRef.current) return freshest;
-      fetchedSummaryRef.current = freshest;
-      setFetchedSummary(freshest);
-      return freshest;
-    };
-    const refresh = async () => {
-      try {
-        const task = await fetchTask(value.taskId, { cache: "no-store" });
-        if (cancelled) return;
-        const candidate = task.status_summary;
-        const freshest = updateFetchedSummary(candidate);
-        if (candidate && freshest === candidate && freshest.active_error) {
-          window.clearInterval(pollID);
-        }
-      } catch {
-        // Hydrated task data remains the fallback when the refresh is unavailable.
-      }
-    };
-
-    if (fetchedSummaryTaskIdRef.current !== value.taskId) {
-      fetchedSummaryTaskIdRef.current = value.taskId;
-      fetchedSummaryRef.current = value.statusSummary;
-      setFetchedSummary(value.statusSummary);
-    } else {
-      updateFetchedSummary(value.statusSummary);
-    }
-    const pollID = window.setInterval(() => void refresh(), 1_000);
-    void refresh();
-    const stopID = window.setTimeout(() => window.clearInterval(pollID), 30_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(pollID);
-      window.clearTimeout(stopID);
-    };
-  }, [value.statusSummary, value.taskId]);
-
-  const contextValue = useMemo(
-    () => ({ ...value, statusSummary: fetchedSummary }),
-    [fetchedSummary, value],
-  );
+  const contextValue = useMemo(() => ({ ...value, statusSummary }), [statusSummary, value]);
   return (
     <TaskLaunchErrorContext.Provider value={contextValue}>
       {children}

@@ -62,6 +62,8 @@ type taskLaunchRecoveryRepository interface {
 	ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error)
 	GetRepository(context.Context, string) (*models.Repository, error)
 	UpdateRepositoryDefaultBranch(context.Context, string, string, string) error
+	SetSessionMetadataKeyIfStamp(context.Context, string, string, string, interface{}) (bool, error)
+	SetTaskMetadataKeyIfStamp(context.Context, string, string, string, interface{}) (bool, error)
 	RemoveSessionMetadataKeyIfStamp(context.Context, string, string, string) (bool, error)
 }
 
@@ -448,7 +450,7 @@ func (s *Service) validateSelectedRecoveryBranch(ctx context.Context, repository
 	}
 	for _, candidate := range branches {
 		candidateType := strings.TrimSpace(candidate.Type)
-		if (strings.EqualFold(candidateType, "remote") || strings.EqualFold(candidateType, "local")) && normalizeTaskPRBranch(candidate.Name) == wanted {
+		if strings.EqualFold(candidateType, "remote") && normalizeTaskPRBranch(candidate.Name) == wanted {
 			return nil
 		}
 	}
@@ -463,29 +465,17 @@ func (s *Service) recordUnresolvedDefaultBranch(ctx context.Context, source *tas
 	}
 	stamp := models.StableLaunchErrorStamp("default_branch_unresolved", taskRepositoryID, source.errorStamp)
 	if source.sessionOwned {
-		value := models.LastAgentError{
-			Message:          message,
-			OccurredAt:       time.Now().UTC(),
-			Code:             models.LaunchErrorCategoryDefaultBranchUnresolved,
-			Details:          details,
-			RecoveryActions:  []string{models.RecoveryActionPickBaseBranch},
-			TaskRepositoryID: taskRepositoryID,
-			StampValue:       stamp,
-		}
-		if err := s.repo.SetSessionMetadataKey(ctx, source.session.ID, models.SessionMetaKeyLastAgentError, value); err != nil {
-			return err
-		}
-		if s.eventBus != nil {
-			if err := s.publishTaskSessionErrorEvent(ctx, source.task.ID, source.session.ID, true, &value); err != nil {
-				s.logger.Warn("failed to publish unresolved-default session error",
-					zap.String("task_id", source.task.ID),
-					zap.String("session_id", source.session.ID),
-					zap.Error(err))
-			}
-		}
-		return fmt.Errorf("%w: choose a base branch", worktree.ErrRemoteDefaultUnresolved)
+		return s.recordSessionUnresolvedDefault(ctx, source, taskRepositoryID, details, stamp, message)
 	}
-	if err := s.repo.SetTaskMetadataKey(ctx, source.task.ID, models.MetaKeyLastLaunchError, models.TaskLaunchError{
+	return s.recordTaskUnresolvedDefault(ctx, source, taskRepositoryID, details, stamp, message)
+}
+
+func (s *Service) recordSessionUnresolvedDefault(
+	ctx context.Context,
+	source *taskLaunchRecoverySource,
+	taskRepositoryID, details, stamp, message string,
+) error {
+	value := models.LastAgentError{
 		Message:          message,
 		OccurredAt:       time.Now().UTC(),
 		Code:             models.LaunchErrorCategoryDefaultBranchUnresolved,
@@ -493,8 +483,57 @@ func (s *Service) recordUnresolvedDefaultBranch(ctx context.Context, source *tas
 		RecoveryActions:  []string{models.RecoveryActionPickBaseBranch},
 		TaskRepositoryID: taskRepositoryID,
 		StampValue:       stamp,
-	}); err != nil {
+	}
+	stored, err := s.taskLaunchRecoveryRepo.SetSessionMetadataKeyIfStamp(
+		ctx,
+		source.session.ID,
+		models.SessionMetaKeyLastAgentError,
+		source.errorStamp,
+		value,
+	)
+	if err != nil {
 		return err
+	}
+	if !stored {
+		return ErrTaskLaunchRecoveryStale
+	}
+	if s.eventBus != nil {
+		if err := s.publishTaskSessionErrorEvent(ctx, source.task.ID, source.session.ID, true, &value); err != nil {
+			s.logger.Warn("failed to publish unresolved-default session error",
+				zap.String("task_id", source.task.ID),
+				zap.String("session_id", source.session.ID),
+				zap.Error(err))
+		}
+	}
+	return fmt.Errorf("%w: choose a base branch", worktree.ErrRemoteDefaultUnresolved)
+}
+
+func (s *Service) recordTaskUnresolvedDefault(
+	ctx context.Context,
+	source *taskLaunchRecoverySource,
+	taskRepositoryID, details, stamp, message string,
+) error {
+	value := models.TaskLaunchError{
+		Message:          message,
+		OccurredAt:       time.Now().UTC(),
+		Code:             models.LaunchErrorCategoryDefaultBranchUnresolved,
+		Details:          details,
+		RecoveryActions:  []string{models.RecoveryActionPickBaseBranch},
+		TaskRepositoryID: taskRepositoryID,
+		StampValue:       stamp,
+	}
+	stored, err := s.taskLaunchRecoveryRepo.SetTaskMetadataKeyIfStamp(
+		ctx,
+		source.task.ID,
+		models.MetaKeyLastLaunchError,
+		source.errorStamp,
+		value,
+	)
+	if err != nil {
+		return err
+	}
+	if !stored {
+		return ErrTaskLaunchRecoveryStale
 	}
 	s.publishTaskLaunchErrorUpdate(ctx, source.task.ID)
 	return fmt.Errorf("%w: choose a base branch", worktree.ErrRemoteDefaultUnresolved)

@@ -201,8 +201,7 @@ func (s *Service) shouldSkipTerminalPRAutoStart(
 		TaskRepositoryID: taskPRLaunchErrorRepositoryID(matches),
 		StampValue:       taskPRLaunchErrorStamp(matches),
 	}
-	s.persistTaskLaunchError(ctx, task.ID, errorValue)
-	return true
+	return s.persistTaskLaunchError(ctx, task.ID, errorValue)
 }
 
 // resolveLaunchFailureReviewEligibility is deliberately narrow. It is used by
@@ -257,31 +256,31 @@ func (s *Service) persistTaskLaunchError(
 	ctx context.Context,
 	taskID string,
 	errorValue models.TaskLaunchError,
-) {
-	setter, ok := s.repo.(taskMetadataKeySetter)
+) bool {
+	persister, ok := s.repo.(taskLaunchErrorPersister)
 	if !ok {
 		s.logger.Warn("task repository cannot persist PR auto-start error",
 			zap.String("task_id", taskID))
-		return
+		return false
 	}
-	currentTask, err := s.repo.GetTask(ctx, taskID)
+	stored, noOp, err := persister.SetTaskMetadataKeyIfDifferentStamp(
+		ctx, taskID, models.MetaKeyLastLaunchError, errorValue.Stamp(), errorValue,
+	)
 	if err != nil {
-		s.logger.Warn("failed to reload task before persisting PR auto-start error",
-			zap.String("task_id", taskID), zap.Error(err))
-		return
-	}
-	if currentTask != nil {
-		if current, found := models.LoadTaskLaunchError(currentTask.Metadata); found &&
-			current.MatchesStamp(errorValue.Stamp()) {
-			return
-		}
-	}
-	if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyLastLaunchError, errorValue); err != nil {
 		s.logger.Warn("failed to persist PR auto-start error",
 			zap.String("task_id", taskID), zap.Error(err))
-		return
+		return false
 	}
-	s.publishTaskLaunchErrorUpdate(ctx, taskID)
+	if stored {
+		s.publishTaskLaunchErrorUpdate(ctx, taskID)
+	}
+	return stored || noOp
+}
+
+type taskLaunchErrorPersister interface {
+	SetTaskMetadataKeyIfDifferentStamp(
+		context.Context, string, string, string, interface{},
+	) (stored bool, noOp bool, err error)
 }
 
 func (s *Service) publishTaskLaunchErrorUpdate(ctx context.Context, taskID string) {

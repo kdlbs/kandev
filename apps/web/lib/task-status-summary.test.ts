@@ -69,6 +69,18 @@ describe("selectTaskStatusSummary", () => {
     expect(selectTaskStatusSummary(detail, [summary(3), live])).toBe(live);
   });
 
+  it("lets a newer live reading clear an older detail error", () => {
+    const detail = summary(5);
+    detail.active_error = {
+      stamp: "launch-error-5",
+      occurred_at: "2026-08-20T10:00:00Z",
+      preview: "launch failed",
+    };
+    const live = summary(6);
+    live.active_error = null;
+    expect(selectTaskStatusSummary(detail, [live])).toBe(live);
+  });
+
   it("keeps a task-owned active error visible without a session key", () => {
     const taskOwned = summary(2);
     taskOwned.active_error = {

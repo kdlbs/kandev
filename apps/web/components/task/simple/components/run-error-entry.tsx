@@ -18,7 +18,7 @@ import { RemediationLink } from "@/components/task/remediation-link";
 import type { RunError } from "@/app/office/tasks/[id]/types";
 import type { TaskRepository } from "@/lib/types/http";
 import { ManagedRuntimeNpmRunError } from "./managed-runtime-npm-run-error";
-import { TaskLaunchErrorEntry } from "./task-launch-error-entry";
+import { isLaunchErrorCategory, TaskLaunchErrorEntry } from "./task-launch-error-entry";
 import { useTranslation } from "react-i18next";
 
 type RunErrorEntryProps = {
@@ -147,11 +147,7 @@ export function RunErrorEntry({
       t("task:agent"),
   );
 
-  if (
-    error.failureCode &&
-    error.failureCode !== "managed_runtime_npm_resolution" &&
-    error.errorStamp
-  ) {
+  if (isLaunchErrorCategory(error.failureCode) && error.errorStamp) {
     return (
       <TypedRunLaunchErrorEntry
         taskId={taskId}

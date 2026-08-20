@@ -58,9 +58,7 @@ import type {
   TimelineEvent,
 } from "@/app/office/tasks/[id]/types";
 import { toast } from "@/lib/toast/sonner";
-import { useAppStore } from "@/components/state-provider";
-import { selectTaskStatusSummary } from "@/lib/task-status-summary";
-import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
+import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 
 const COMMENTABLE_DONE_SESSION_STATES = new Set<TaskSession["state"]>([
   "CREATED",
@@ -82,26 +80,13 @@ type OfficeSimplePaneProps = {
 };
 
 function useChatTaskWithLiveStatusSummary(task: Task): Task {
-  const liveStatusSummary = useAppStore((state) => {
-    const candidates: Array<TaskStatusSummary | null | undefined> = [];
-    const addCandidate = (candidate: { id: string; statusSummary?: TaskStatusSummary | null }) => {
-      if (candidate.id === task.id) candidates.push(candidate.statusSummary);
-    };
-    state.kanban.tasks.forEach(addCandidate);
-    Object.values(state.kanbanMulti.snapshots).forEach((snapshot) =>
-      snapshot.tasks.forEach(addCandidate),
-    );
-    Object.values(state.sidebarArchivedTasks.itemsByWorkspaceId).forEach((items) =>
-      items.forEach(addCandidate),
-    );
-    return selectTaskStatusSummary(undefined, candidates);
-  });
+  const statusSummary = useTaskStatusSummary(task.id, task.statusSummary);
   return useMemo(
     () => ({
       ...task,
-      statusSummary: selectTaskStatusSummary(task.statusSummary, [liveStatusSummary]),
+      statusSummary,
     }),
-    [liveStatusSummary, task],
+    [statusSummary, task],
   );
 }
 

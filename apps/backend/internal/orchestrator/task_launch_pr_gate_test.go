@@ -1,12 +1,25 @@
 package orchestrator
 
 import (
+	"context"
+	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
+
+type failTaskLaunchErrorPersistRepo struct {
+	repoStore
+	err error
+}
+
+func (r *failTaskLaunchErrorPersistRepo) SetTaskMetadataKeyIfDifferentStamp(context.Context, string, string, string, interface{}) (bool, bool, error) {
+	return false, false, r.err
+}
 
 func TestSelectRelevantTaskPRsUsesExactTaskRepositoryIdentity(t *testing.T) {
 	taskRepo := &models.TaskRepository{
@@ -192,6 +205,91 @@ func TestShouldSkipTerminalPRAutoStartPersistsAndClearsStampedError(t *testing.T
 	}
 	if _, found := models.LoadTaskLaunchError(cleared.Metadata); found {
 		t.Fatal("current stamped launch error was not cleared")
+	}
+}
+
+func TestShouldSkipTerminalPRAutoStartFailsOpenWhenErrorPersistenceFails(t *testing.T) {
+	ctx := t.Context()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-pr-gate-persist-failure", "session-pr-gate-persist-failure", "review")
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-pr-gate-persist-failure", WorkspaceID: "ws1", Name: "repo", SourceType: "local",
+	}); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-pr-gate-persist-failure", TaskID: "task-pr-gate-persist-failure",
+		RepositoryID: "repo-pr-gate-persist-failure", CheckoutBranch: "feature/current",
+		Metadata: map[string]interface{}{"pr_number": float64(42)},
+	}); err != nil {
+		t.Fatalf("create task repository: %v", err)
+	}
+	steps := newMockStepGetter()
+	steps.steps["review"] = &wfmodels.WorkflowStep{ID: "review", WorkflowID: "wf1", Position: 1, Name: "Review"}
+	steps.steps["done"] = &wfmodels.WorkflowStep{ID: "done", WorkflowID: "wf1", Position: 2, Name: "Done"}
+	svc := createTestService(repo, steps, newMockTaskRepo())
+	svc.repo = &failTaskLaunchErrorPersistRepo{repoStore: repo, err: errors.New("metadata unavailable")}
+	svc.SetGitHubService(&mockGitHubService{taskPRs: []*github.TaskPR{
+		{TaskID: "task-pr-gate-persist-failure", RepositoryID: "repo-pr-gate-persist-failure", PRNumber: 42, State: githubPRStateMerged},
+	}})
+
+	task, err := repo.GetTask(ctx, "task-pr-gate-persist-failure")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if svc.shouldSkipTerminalPRAutoStart(ctx, task) {
+		t.Fatal("PR gate suppressed launch after durable error persistence failed")
+	}
+}
+
+func TestPersistTaskLaunchErrorConcurrentSameStampPreservesOneOccurrence(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-pr-gate-concurrent", "session-pr-gate-concurrent", "review")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ctx := context.Background()
+	first := models.TaskLaunchError{
+		Message: "terminal PR", OccurredAt: time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC),
+		Code: models.LaunchErrorCategoryPRAlreadyClosed, StampValue: "same-pr-stamp",
+	}
+	second := models.TaskLaunchError{
+		Message: "terminal PR", OccurredAt: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC),
+		Code: models.LaunchErrorCategoryPRAlreadyClosed, StampValue: "same-pr-stamp",
+	}
+	start := make(chan struct{})
+	results := make(chan bool, 2)
+	var wg sync.WaitGroup
+	for _, value := range []models.TaskLaunchError{first, second} {
+		value := value
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results <- svc.persistTaskLaunchError(ctx, "task-pr-gate-concurrent", value)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	var storedCount int
+	for stored := range results {
+		if stored {
+			storedCount++
+		}
+	}
+	if storedCount != 2 {
+		t.Fatalf("successful persistence calls = %d, want store plus confirmed no-op", storedCount)
+	}
+
+	task, err := repo.GetTask(ctx, "task-pr-gate-concurrent")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	launchError, ok := models.LoadTaskLaunchError(task.Metadata)
+	if !ok || launchError.Stamp() != "same-pr-stamp" {
+		t.Fatalf("stored launch error = %#v, want same-pr-stamp", launchError)
+	}
+	if !launchError.OccurredAt.Equal(first.OccurredAt) && !launchError.OccurredAt.Equal(second.OccurredAt) {
+		t.Fatalf("stored occurrence = %s, want one of the concurrent first occurrences", launchError.OccurredAt)
 	}
 }
 

@@ -26,10 +26,21 @@ type TaskLaunchErrorEntryProps = {
 
 const pendingRecoveryRequests = new Map<string, Promise<unknown>>();
 
+const TASK_LAUNCH_ERROR_CATEGORIES = new Set([
+  "base_branch_missing",
+  "default_branch_unresolved",
+  "pr_already_closed",
+  "generic_launch_failure",
+]);
+
+export function isLaunchErrorCategory(category: string | undefined): boolean {
+  return Boolean(category && TASK_LAUNCH_ERROR_CATEGORIES.has(category));
+}
+
 export function isTypedTaskLaunchError(
   error: TaskStatusSummaryActiveError | null | undefined,
 ): error is TaskStatusSummaryActiveError & { category: string } {
-  return Boolean(error?.stamp && error.category);
+  return Boolean(error?.stamp && isLaunchErrorCategory(error.category));
 }
 
 function categoryTitle(category: string | undefined, t: (key: string) => string): string {

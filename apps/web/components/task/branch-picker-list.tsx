@@ -11,6 +11,7 @@ type BranchPickerListProps = {
   isLoadingBranches: boolean;
   currentBase: string;
   onSelect: (name: string) => void;
+  remoteOnly?: boolean;
   testIdPrefix?: string;
 };
 
@@ -20,6 +21,7 @@ export function BranchPickerList({
   isLoadingBranches,
   currentBase,
   onSelect,
+  remoteOnly = false,
   testIdPrefix = "base-branch-picker",
 }: BranchPickerListProps) {
   const { t } = useTranslation();
@@ -27,11 +29,12 @@ export function BranchPickerList({
   const uniqueByName = useMemo(() => {
     const seen = new Set<string>();
     return branches.filter((branch) => {
+      if (remoteOnly && branch.type !== "remote") return false;
       if (seen.has(branch.name)) return false;
       seen.add(branch.name);
       return true;
     });
-  }, [branches]);
+  }, [branches, remoteOnly]);
   const filtered = useMemo(() => {
     const query = filter.trim().toLowerCase();
     return query

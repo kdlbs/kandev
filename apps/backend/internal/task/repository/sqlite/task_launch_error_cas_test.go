@@ -3,7 +3,63 @@ package sqlite
 import (
 	"context"
 	"testing"
+	"time"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
+
+func TestSetTaskMetadataKeyIfStampAndDifferentStampAreAtomic(t *testing.T) {
+	repo := newRepoForMetadataCASTests(t)
+	seedMetadataCASTask(t, repo, map[string]interface{}{
+		"last_launch_error": models.TaskLaunchError{
+			Message:    "old error",
+			OccurredAt: time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC),
+			StampValue: "old-stamp",
+		},
+		"other_key": "keep me",
+	})
+	ctx := context.Background()
+
+	stored, err := repo.SetTaskMetadataKeyIfStamp(ctx, casTaskID, models.MetaKeyLastLaunchError, "old-stamp", models.TaskLaunchError{
+		Message:    "new error",
+		OccurredAt: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC),
+		StampValue: "new-stamp",
+	})
+	if err != nil {
+		t.Fatalf("stamped task write: %v", err)
+	}
+	if !stored {
+		t.Fatal("current task error was not replaced")
+	}
+
+	var noOp bool
+	stored, noOp, err = repo.SetTaskMetadataKeyIfDifferentStamp(ctx, casTaskID, models.MetaKeyLastLaunchError, "new-stamp", models.TaskLaunchError{
+		Message:    "duplicate error",
+		OccurredAt: time.Date(2026, 8, 20, 11, 0, 0, 0, time.UTC),
+		StampValue: "new-stamp",
+	})
+	if err != nil {
+		t.Fatalf("same-stamp task write: %v", err)
+	}
+	if stored {
+		t.Fatal("same-stamp task write changed the first occurrence")
+	}
+	if !noOp {
+		t.Fatal("same-stamp task write did not report a confirmed no-op")
+	}
+
+	task, err := repo.GetTask(ctx, casTaskID)
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	launchError, ok := models.LoadTaskLaunchError(task.Metadata)
+	if !ok || launchError.Stamp() != "new-stamp" || !launchError.OccurredAt.Equal(time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)) {
+		t.Fatalf("task error = %#v, want first new-stamp occurrence", launchError)
+	}
+	if task.Metadata["other_key"] != "keep me" {
+		t.Fatalf("other task metadata = %#v, want preserved value", task.Metadata["other_key"])
+	}
+}
 
 func TestRemoveTaskMetadataKeyIfStampDoesNotEraseNewerError(t *testing.T) {
 	repo := newRepoForMetadataCASTests(t)

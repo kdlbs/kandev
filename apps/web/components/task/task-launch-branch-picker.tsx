@@ -62,6 +62,7 @@ export function TaskLaunchBranchPicker({
               isLoadingBranches={isLoadingBranches}
               currentBase={currentBase}
               onSelect={(branch) => void handleSelect(branch)}
+              remoteOnly
               testIdPrefix="task-launch-branch-picker"
             />
           </div>
@@ -84,6 +85,7 @@ export function TaskLaunchBranchPicker({
           isLoadingBranches={isLoadingBranches}
           currentBase={currentBase}
           onSelect={(branch) => void handleSelect(branch)}
+          remoteOnly
           testIdPrefix="task-launch-branch-picker"
         />
       </PopoverContent>

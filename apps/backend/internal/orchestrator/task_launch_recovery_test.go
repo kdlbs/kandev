@@ -53,6 +53,18 @@ func (f taskLaunchRecoveryWorktreeFake) ResolveRemoteDefaultBranch(context.Conte
 	return f.branch, f.err
 }
 
+type blockingTaskLaunchRecoveryWorktree struct {
+	started chan<- struct{}
+	release <-chan struct{}
+	err     error
+}
+
+func (f blockingTaskLaunchRecoveryWorktree) ResolveRemoteDefaultBranch(context.Context, string) (string, error) {
+	f.started <- struct{}{}
+	<-f.release
+	return "", f.err
+}
+
 func seedTaskLaunchRecoveryFixture(t *testing.T, repo *sqliterepo.Repository, taskID, taskRepositoryID string, action string) {
 	t.Helper()
 	ctx := context.Background()
@@ -196,14 +208,14 @@ func TestRecoverTaskLaunchPickBranchValidatesBeforeWriting(t *testing.T) {
 	}
 }
 
-func TestValidateSelectedRecoveryBranchAcceptsLocalBranch(t *testing.T) {
+func TestValidateSelectedRecoveryBranchRejectsLocalOnlyBranch(t *testing.T) {
 	repo := setupTestRepo(t)
 	fake := &taskLaunchRecoveryServiceFake{branches: []taskservice.Branch{{Name: "main", Type: "local"}}}
 	svc := recoveryFixtureService(t, repo, fake)
 
 	err := svc.validateSelectedRecoveryBranch(context.Background(), &models.Repository{ID: "repo-recovery", LocalPath: t.TempDir()}, "main")
-	if err != nil {
-		t.Fatalf("validateSelectedRecoveryBranch(local): %v", err)
+	if !errors.Is(err, worktree.ErrInvalidBaseBranch) {
+		t.Fatalf("validateSelectedRecoveryBranch(local) = %v, want ErrInvalidBaseBranch", err)
 	}
 }
 
@@ -236,6 +248,55 @@ func TestRecoverTaskLaunchRecordsUnresolvedDefaultAndDoesNotLaunch(t *testing.T)
 	}
 	if launchError.Details == "" || strings.Contains(launchError.Details, "abcdefghijklmnopqrstuvwxyz") {
 		t.Fatalf("task launch details were not sanitized: %q", launchError.Details)
+	}
+}
+
+func TestRecoverTaskLaunchDoesNotOverwriteFailureDuringBlockedDefaultResolution(t *testing.T) {
+	repo := setupTestRepo(t)
+	const taskID = "task-default-unresolved-stale"
+	const taskRepositoryID = "task-repo-default-unresolved-stale"
+	seedTaskLaunchRecoveryFixture(t, repo, taskID, taskRepositoryID, models.RecoveryActionRetryDefault)
+	fake := &taskLaunchRecoveryServiceFake{}
+	svc := recoveryFixtureService(t, repo, fake)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	svc.taskLaunchRecoveryWorktree = blockingTaskLaunchRecoveryWorktree{
+		started: started,
+		release: release,
+		err:     worktree.ErrRemoteDefaultUnresolved,
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := svc.RecoverTaskLaunch(context.Background(), &TaskLaunchRecoveryRequest{
+			TaskID: taskID, TaskRepositoryID: taskRepositoryID,
+			Action: models.RecoveryActionRetryDefault, ErrorStamp: "recovery-stamp",
+		})
+		result <- err
+	}()
+	<-started
+	if err := repo.SetTaskMetadataKey(context.Background(), taskID, models.MetaKeyLastLaunchError, models.TaskLaunchError{
+		Message:          "new provider failure",
+		OccurredAt:       time.Now().UTC(),
+		Code:             models.LaunchErrorCategoryGenericLaunchFailure,
+		RecoveryActions:  []string{models.RecoveryActionRetryDefault},
+		TaskRepositoryID: taskRepositoryID,
+		StampValue:       "newer-failure-stamp",
+	}); err != nil {
+		t.Fatalf("store newer failure: %v", err)
+	}
+	close(release)
+
+	if err := <-result; !errors.Is(err, ErrTaskLaunchRecoveryStale) {
+		t.Fatalf("blocked recovery error = %v, want stale error", err)
+	}
+	task, err := repo.GetTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("load task after stale recovery: %v", err)
+	}
+	launchError, ok := models.LoadTaskLaunchError(task.Metadata)
+	if !ok || launchError.Stamp() != "newer-failure-stamp" {
+		t.Fatalf("task launch error = %#v, want newer failure", launchError)
 	}
 }
 

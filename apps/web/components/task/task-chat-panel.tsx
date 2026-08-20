@@ -39,7 +39,7 @@ import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
 import { useTranslation } from "react-i18next";
 import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
-import { selectTaskStatusSummary } from "@/lib/task-status-summary";
+import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 
 /**
  * Cap on how many extra pages the last-prompt background lookup will fetch
@@ -359,28 +359,10 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const isArchived = useIsTaskArchived();
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
   const launchErrorContext = useTaskLaunchErrorContext();
-  const launchStatusSummary = useAppStore((state) => {
-    if (!launchErrorContext) return null;
-    if (launchErrorContext.statusSummary?.active_error) {
-      return launchErrorContext.statusSummary;
-    }
-    const liveSummaries = [
-      ...state.kanban.tasks
-        .filter((item) => item.id === launchErrorContext.taskId)
-        .map((item) => item.statusSummary),
-      ...Object.values(state.kanbanMulti.snapshots).flatMap((snapshot) =>
-        snapshot.tasks
-          .filter((item) => item.id === launchErrorContext.taskId)
-          .map((item) => item.statusSummary),
-      ),
-      ...Object.values(state.sidebarArchivedTasks.itemsByWorkspaceId).flatMap((tasks) =>
-        tasks
-          .filter((item) => item.id === launchErrorContext.taskId)
-          .map((item) => item.statusSummary),
-      ),
-    ];
-    return selectTaskStatusSummary(launchErrorContext.statusSummary, liveSummaries);
-  });
+  const launchStatusSummary = useTaskStatusSummary(
+    launchErrorContext?.taskId,
+    launchErrorContext?.statusSummary,
+  );
 
   useSettingsData(true);
   const panelState = useChatPanelState({
