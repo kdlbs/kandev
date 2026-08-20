@@ -591,6 +591,31 @@ func TestListUnresolvedClarificationBundles_ExcludesEmptyQuestionID(t *testing.T
 	}
 }
 
+// TestListUnresolvedClarificationBundles_ExcludesUnrecognizedStatus covers
+// D4/L2a: has_pending must match claimActiveClarificationBundle's own claim
+// predicate (COALESCE(status,”) IN (”,'pending')) exactly, not a negative
+// terminal-exclusion list. A status value outside both the pending set and
+// the four known terminal values (a corrupted or future-version row) is
+// NOT in (”, 'pending'), so the claim predicate can never match it — a
+// query that lists it anyway (because it merely isn't in the terminal list)
+// would surface a bundle that can be listed but can never be answered.
+func TestListUnresolvedClarificationBundles_ExcludesUnrecognizedStatus(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedBundleTask(t, repo, "task-B9", "")
+	seedBundleSession(t, repo, "sess-B9", "task-B9")
+	seedBundleTurn(t, repo, "turn-B9", "sess-B9", "task-B9")
+	insertClarificationMessage(t, repo, "msg-B9", "sess-B9", "task-B9", "turn-B9", "pending-B9", "q1", "unrecognized-status", 0, time.Now().UTC())
+
+	page, err := repo.ListUnresolvedClarificationBundles(ctx, unscopedOpts(50))
+	if err != nil {
+		t.Fatalf("ListUnresolvedClarificationBundles: %v", err)
+	}
+	if len(page.Bundles) != 0 {
+		t.Fatalf("bundles = %+v, want none (unrecognized status value cannot be claimed, so must not be listed)", page.Bundles)
+	}
+}
+
 // TestListUnresolvedClarificationBundles_IncludesNestedOnlyQuestionID proves
 // the L16 exclusion predicate mirrors questionIDFromMetadata's fallback
 // order rather than checking only the flat metadata.question_id key: a

@@ -10,12 +10,6 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// clarificationTerminalStatuses mirrors clarification.Status's four terminal
-// values (clarification/types.go:69-75, spec D3). Duplicated as literals
-// rather than imported so the repository layer does not take on a
-// dependency edge on the clarification feature package.
-const clarificationTerminalStatusesSQL = `'answered', 'rejected', 'cancelled', 'expired'`
-
 // ListUnresolvedClarificationBundles returns the page of pending clarification
 // bundles matching opts, per spec D4a (both conjuncts), L1a-L7a's visibility
 // predicate, L8's created_since filter, and L9/D6's cursor pagination. Every
@@ -82,11 +76,16 @@ func clarificationBundleWhereClause(opts models.ListClarificationBundlesOptions)
 // its visibility-checked task row. Per spec D4/L2a, a bundle is pending only
 // when all three conjuncts hold: at least one message has status in (”,
 // 'pending') (has_pending), the message's turn is the session's current turn,
-// and the owning session is not terminal. The latter two conjuncts are built
-// from the same helpers claimActiveClarificationBundle already uses
+// and the owning session is not terminal. All three conjuncts mirror
+// claimActiveClarificationBundle's own claim predicate exactly — has_pending
+// is the same COALESCE(status, ”) IN (”, 'pending') test, not an
+// independently-derived "not a known terminal value" negation, and the
+// latter two reuse claimActiveClarificationBundle's own helpers
 // (turnAuthorityPredicate, nonTerminalSessionPredicate) rather than
-// hand-written, per L2a, so a future change to activeness cannot leave this
-// tool behind.
+// hand-written — per L2a, so a future change to activeness cannot leave this
+// tool behind, and so a status value outside both sets (a corrupted or
+// future-version row) cannot be listed as claimable when it can never
+// actually be claimed.
 //
 // It also excludes any message carrying the autopilot parent-question
 // marker (models.MetaKeyParentQuestion, "parent_question.go"). That
@@ -133,23 +132,23 @@ func clarificationBundleQuery(drv, whereExtra string) string {
 				m.task_session_id AS session_id,
 				COALESCE(NULLIF(MIN(m.task_id), ''), MIN(ts.task_id)) AS task_id,
 				MIN(m.created_at) AS created_at,
-				MAX(CASE WHEN %[2]s IS NULL OR %[2]s NOT IN (%[3]s) THEN 1 ELSE 0 END) AS has_pending,
-				MAX(CASE WHEN %[8]s = '' THEN 1 ELSE 0 END) AS has_missing_question_id
+				MAX(CASE WHEN COALESCE(%[2]s, '') IN ('', 'pending') THEN 1 ELSE 0 END) AS has_pending,
+				MAX(CASE WHEN %[7]s = '' THEN 1 ELSE 0 END) AS has_missing_question_id
 			FROM task_session_messages m
 			JOIN task_sessions ts ON ts.id = m.task_session_id
 			WHERE m.type = 'clarification_request'
+			  AND %[4]s
 			  AND %[5]s
 			  AND %[6]s
-			  AND %[7]s
 			GROUP BY %[1]s, m.task_session_id
 		) b
 		JOIN tasks t ON t.id = b.task_id
 		WHERE b.has_pending = 1
 		  AND b.has_missing_question_id = 0
-		  %[4]s
+		  %[3]s
 		ORDER BY b.created_at ASC, b.pending_id ASC
 		LIMIT ?
-	`, pendingIDExpr, statusExpr, clarificationTerminalStatusesSQL, whereExtra, notParentQuestion, nonTerminalSession, currentTurn, questionIDExpr)
+	`, pendingIDExpr, statusExpr, whereExtra, notParentQuestion, nonTerminalSession, currentTurn, questionIDExpr)
 }
 
 // scanClarificationBundleRows scans the bundle rows. The created_at column
@@ -180,11 +179,11 @@ func scanClarificationBundleRows(rows *sql.Rows, isPostgres bool) ([]models.Clar
 	return bundles, nil
 }
 
-// visibilityPredicate builds the L1c/L1d disjunction (per the plan's
-// corrected numbering, not the spec's defective L1c prose — see
-// docs/plans/external-question-answering/plan.md, "BUILD MUST READ FIRST").
-// For an unscoped caller the predicate is satisfied unconditionally, so no
-// clause is added at all.
+// visibilityPredicate builds the L1c/L1d three-way disjunction (spec
+// docs/specs/external-question-answering/spec.md, "L1c"/"L1d"): the task's
+// workspace_id is empty, names no existing workspace row, or is in the L1a
+// visible set. For an unscoped caller the predicate is satisfied
+// unconditionally, so no clause is added at all.
 func visibilityPredicate(opts models.ListClarificationBundlesOptions, args *[]interface{}) []string {
 	if opts.Unscoped {
 		return nil
