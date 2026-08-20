@@ -247,7 +247,11 @@ func mergeCodexConfig(base, overlay map[string]any) {
 			existing = make(map[string]any)
 			base[key] = existing
 		}
-		for name, profile := range value.(map[string]any) {
+		permissions, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		for name, profile := range permissions {
 			existing[name] = profile
 		}
 	}
