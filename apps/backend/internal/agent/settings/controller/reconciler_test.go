@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -338,6 +339,12 @@ func (f *fakeStore) GetAgentProfile(_ context.Context, id string) (*models.Agent
 		}
 	}
 	return nil, sql.ErrNoRows
+}
+
+// GetAgentProfileTx is not exercised by this package's tests; it exists only
+// to satisfy store.Repository.
+func (f *fakeStore) GetAgentProfileTx(_ context.Context, _ *sqlx.Tx, _ string) (*models.AgentProfile, bool, error) {
+	return nil, false, errors.New("GetAgentProfileTx not implemented")
 }
 
 func (f *fakeStore) GetAgentProfileIncludingDeleted(ctx context.Context, id string) (*models.AgentProfile, error) {

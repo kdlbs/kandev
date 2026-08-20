@@ -5,6 +5,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/kandev/kandev/internal/agent/settings/models"
 )
 
@@ -59,6 +61,14 @@ type Repository interface {
 	// automations) pointing at removed profiles. ErrAgentProfileDeleted is
 	// only used by callers of ProfileResolver, which wraps this method.
 	GetAgentProfileIncludingDeleted(ctx context.Context, id string) (*models.AgentProfile, error)
+	// GetAgentProfileTx is GetAgentProfile's transaction-accepting counterpart:
+	// the automations YAML export (AC-29) opens one read transaction spanning
+	// several stores and passes it through here rather than letting this
+	// method open its own, so the profile read observes the same snapshot as
+	// every other read in the export. A missing row is reported as
+	// found=false rather than an error - AC-19's partial-resolution rule
+	// decides what that means, not this method.
+	GetAgentProfileTx(ctx context.Context, tx *sqlx.Tx, id string) (*models.AgentProfile, bool, error)
 	ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error)
 	// HasDeletedAgentProfiles reports whether the agent has any soft-deleted
 	// profile rows. Seeding paths use this to distinguish a fresh agent that
