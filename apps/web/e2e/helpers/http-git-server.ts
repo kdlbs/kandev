@@ -39,6 +39,11 @@ export async function startHTTPGitFixture(
   const checkout = path.join(root, `${name}-checkout`);
   fs.mkdirSync(checkout, { recursive: true });
   execFileSync("git", ["init", "--bare", "-b", "main", remoteDir]);
+  // The fixture is served as static (dumb) HTTP. Keep its advertised refs in
+  // sync when E2E tests push additional commits before launching a task.
+  const postUpdateHook = path.join(remoteDir, "hooks", "post-update");
+  fs.writeFileSync(postUpdateHook, "#!/bin/sh\nexec git update-server-info\n");
+  fs.chmodSync(postUpdateHook, 0o755);
   execFileSync("git", ["init", "-b", "main"], { cwd: checkout });
   fs.writeFileSync(path.join(checkout, "remote-source.txt"), `${name} fixture\n`);
   execFileSync("git", ["add", "."], { cwd: checkout });
