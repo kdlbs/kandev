@@ -281,7 +281,7 @@ func (r *sqliteRepository) AcknowledgeDirectDelivery(ctx context.Context, delive
 	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE message_deliveries
-		SET state = ?, delivered_at = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+		SET state = ?, last_error = '', delivered_at = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
 		WHERE id = ? AND (
 			(state = ? AND lease_owner = ?)
 			OR (state = ? AND lease_owner = ?)

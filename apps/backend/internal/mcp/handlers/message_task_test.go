@@ -1339,6 +1339,40 @@ func TestMessageDeliveryRecoveryIsScopedToRecordedSourceSession(t *testing.T) {
 	assert.Equal(t, ws.MessageTypeError, resp.Type, "a task ID alone cannot inspect another recorded session's receipt")
 }
 
+func TestGetMessageDeliveryDeliveredReceiptClearsAcceptanceUncertainty(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	orch.queue = messagequeue.NewService(queueRepo, 1, testLogger(t))
+	ledger := queueRepo.(messagequeue.DeliveryLedger)
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, messagequeue.Delivery{
+		SenderTaskID: sender.ID, SenderSessionID: "sender-sess-1", SourceTurnID: "projection-source-turn",
+		IdempotencyKey: "projection-v1", TargetTaskID: target.ID, TargetSessionID: session.ID,
+		Content: "accepted prompt", State: messagequeue.DeliveryPendingCapacity,
+	})
+	require.NoError(t, err)
+	_, claimed, err := ledger.ReserveDeliveryForDirectDispatch(ctx, delivery.ID, "mcp-direct", time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	_, err = ledger.MarkDirectDeliveryAcceptanceUncertain(ctx, delivery.ID, "mcp-direct")
+	require.NoError(t, err)
+	_, err = ledger.AcknowledgeDirectDelivery(ctx, delivery.ID, "mcp-direct", time.Now().UTC())
+	require.NoError(t, err)
+
+	response, err := h.handleGetMessageDelivery(ctx, makeWSMessage(t, ws.ActionMCPGetMessageDelivery, map[string]interface{}{
+		"delivery_id": delivery.ID, "sender_task_id": sender.ID, "sender_session_id": "sender-sess-1",
+	}))
+	require.NoError(t, err)
+	var status map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &status))
+	assert.Equal(t, "delivered", status["delivery_status"])
+	assert.Empty(t, status["last_error"])
+}
+
 func TestHandleMessageTask_RejectedBusyTargetDoesNotPersistDeliveryReceipt(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newTestTaskService(t)

@@ -180,6 +180,7 @@ func TestDeliveryLedgerAcceptedDirectReservationIsNeverReclaimed(t *testing.T) {
 	delivered, err := ledger.AcknowledgeDirectDelivery(ctx, delivery.ID, "mcp-direct", time.Now().UTC())
 	require.NoError(t, err)
 	assert.Equal(t, DeliveryDelivered, delivered.State)
+	assert.Empty(t, delivered.LastError, "delivered status must not retain an acceptance-uncertain diagnostic")
 }
 
 func TestPurgeTaskCancelsUndeliveredDeliveryReceipts(t *testing.T) {
@@ -286,6 +287,7 @@ func TestDeliveryLedgerPostgreSQLParity(t *testing.T) {
 	directDelivered, err := ledger.AcknowledgeDirectDelivery(ctx, direct.ID, "mcp-direct", now.Add(3*time.Minute))
 	require.NoError(t, err)
 	assert.Equal(t, DeliveryDelivered, directDelivered.State)
+	assert.Empty(t, directDelivered.LastError, "PostgreSQL delivered projection must clear acceptance uncertainty")
 
 	// PostgreSQL must use the same transaction for FIFO removal and receipt
 	// terminalization. This also covers the direct-interrupt metadata fallback:
