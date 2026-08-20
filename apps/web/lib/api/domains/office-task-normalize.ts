@@ -1,14 +1,15 @@
-import type { OfficeTaskStatus } from "@/lib/state/slices/office/types";
+import type { OfficeTask, OfficeTaskStatus } from "@/lib/state/slices/office/types";
+
+/** The task shape received before the Office status contract is applied. */
+export type OfficeTaskWire = Omit<OfficeTask, "status" | "rawStatus" | "children"> & {
+  status: string;
+  rawStatus?: string | null;
+  children?: OfficeTaskWire[];
+};
 
 /**
- * Normalises a task status string from any source (backend uppercase enum
- * like "REVIEW", lowercase office canonical "in_review", or local
- * detail-page TaskStatus) into the canonical OfficeTaskStatus union.
- *
- * Backend `task.state` uses the core task enum (TODO, REVIEW, IN_PROGRESS,
- * COMPLETED, …) while office's display layer wants the lowercase
- * Linear-style names (todo, in_review, done, …). This function bridges
- * them so every status display can look itself up in a single map.
+ * Normalises a task status from any backend or local source into the
+ * canonical OfficeTaskStatus union.
  */
 const STATUS_MAP: Record<string, OfficeTaskStatus> = {
   todo: "todo",
@@ -32,10 +33,18 @@ export function normalizeTaskStatus(status: string | undefined | null): OfficeTa
   return STATUS_MAP[status.toLowerCase()] ?? "backlog";
 }
 
-// Inverse of STATUS_MAP — maps the canonical office status to the set of
-// backend `task.state` enum values that normalise to it. Used when sending
-// status filters to the backend's filtered-task-list endpoint, which
-// matches against raw task.state strings via SQL `IN (...)`.
+/** Converts a wire task into the canonical Office store shape. */
+export function normalizeOfficeTask(task: OfficeTaskWire): OfficeTask {
+  const rawStatus = task.rawStatus ?? task.status;
+  return {
+    ...task,
+    status: normalizeTaskStatus(rawStatus),
+    rawStatus,
+    children: task.children?.map(normalizeOfficeTask),
+  };
+}
+
+// Inverse of STATUS_MAP. It expands canonical values for backend SQL filters.
 const CANONICAL_TO_BACKEND: Record<OfficeTaskStatus, string[]> = {
   backlog: ["BACKLOG"],
   todo: ["TODO", "CREATED", "SCHEDULING"],
@@ -48,6 +57,6 @@ const CANONICAL_TO_BACKEND: Record<OfficeTaskStatus, string[]> = {
 
 export function canonicalStatusesToBackend(statuses: OfficeTaskStatus[]): string[] {
   const out: string[] = [];
-  for (const s of statuses) out.push(...(CANONICAL_TO_BACKEND[s] ?? []));
+  for (const status of statuses) out.push(...(CANONICAL_TO_BACKEND[status] ?? []));
   return out;
 }

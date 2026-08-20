@@ -584,8 +584,12 @@ func TestOfficeSetup_ProjectThenTaskUsesReturnedProjectAndWorkspace(t *testing.T
 // --- Comment Tests ---
 
 func TestCommentAdd_PostsComment(t *testing.T) {
-	srv, captured := setupMockServer(t, 201, `{"ok":true}`)
-	setEnvVars(t, srv)
+	captured := setupMockTransport(t, http.StatusCreated, `{"ok":true}`)
+	t.Setenv("KANDEV_API_URL", "http://kandev.test")
+	t.Setenv("KANDEV_API_KEY", "signed-office-run-token")
+	t.Setenv("KANDEV_RUN_ID", "run-456")
+	t.Setenv("KANDEV_TASK_ID", "task-abc")
+	t.Setenv("KANDEV_AGENT_ID", "agent-789")
 
 	code := runKandevCLI([]string{
 		"comment", "add", "--body", "This is a test comment",
@@ -596,19 +600,25 @@ func TestCommentAdd_PostsComment(t *testing.T) {
 	if captured.Method != "POST" {
 		t.Errorf("expected POST, got %s", captured.Method)
 	}
-	if captured.Path != "/api/v1/office/tasks/task-abc/comments" {
+	if captured.Path != "/api/v1/office/runtime/comments" {
 		t.Errorf("unexpected path: %s", captured.Path)
 	}
+	assertRunIDHeader(t, captured, "run-456")
 
-	var body map[string]string
+	var body map[string]any
 	if err := json.Unmarshal([]byte(captured.Body), &body); err != nil {
 		t.Fatalf("unmarshal body: %v", err)
 	}
 	if body["body"] != "This is a test comment" {
-		t.Errorf("unexpected body: %s", body["body"])
+		t.Errorf("unexpected body: %v", body["body"])
 	}
-	if body["author_id"] != "agent-789" {
-		t.Errorf("expected author_id=agent-789, got %s", body["author_id"])
+	if body["task_id"] != "task-abc" {
+		t.Errorf("expected task_id=task-abc, got %v", body["task_id"])
+	}
+	for _, key := range []string{"author_type", "author_id", "source"} {
+		if _, ok := body[key]; ok {
+			t.Errorf("runtime comment payload must not contain %q: %#v", key, body)
+		}
 	}
 }
 

@@ -58,7 +58,7 @@ function mapDecisionDTO(d: TaskDecisionDTO): TaskDecision {
   };
 }
 
-function mapOfficeTaskToTask(raw: OfficeTask): Task {
+export function mapOfficeTaskToTask(raw: OfficeTask): Task {
   // The server DTO includes reviewers/approvers/decisions even though the
   // strongly-typed OfficeTask only declares the cross-cutting fields. We
   // read those extra props off the raw object.
@@ -75,6 +75,7 @@ function mapOfficeTaskToTask(raw: OfficeTask): Task {
     title: raw.title,
     description: raw.description,
     status: raw.status as Task["status"],
+    rawStatus: raw.rawStatus ?? raw.status,
     priority: (raw.priority || "medium") as Task["priority"],
     labels: (raw.labels ?? []).map((l) =>
       typeof l === "string" ? { name: l, color: "#6b7280" } : l,

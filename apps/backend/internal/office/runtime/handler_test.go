@@ -172,7 +172,7 @@ func TestRuntimeHandler_PostCommentUsesRuntimeToken(t *testing.T) {
 		t.Fatalf("comments = %d, want 1", len(h.comments.comments))
 	}
 	comment := h.comments.comments[0]
-	if comment.TaskID != "task-1" || comment.AuthorID != "agent-1" || comment.AuthorType != "agent" {
+	if comment.TaskID != "task-1" || comment.AuthorID != "agent-1" || comment.AuthorType != "agent" || comment.Source != "agent" {
 		t.Fatalf("comment identity = %#v", comment)
 	}
 	assertActionRunEvent(t, h.runEvents, "post_comment", "task", "task-1")
