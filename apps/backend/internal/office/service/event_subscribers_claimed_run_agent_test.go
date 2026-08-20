@@ -112,19 +112,16 @@ func TestSchedulerTick_AgentCompletedForNonLatestClaimReleasesTheCompletingAgent
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	var runA, runB *models.Run
+	byID := make(map[string]models.Run, len(runs))
 	for _, r := range runs {
-		switch r.ID {
-		case "run-claimed-a":
-			runA = r
-		case "run-claimed-b":
-			runB = r
-		}
+		byID[r.ID] = *r
 	}
-	if runA == nil {
+	runA, okA := byID["run-claimed-a"]
+	if !okA {
 		t.Fatalf("expected run-claimed-a to still exist, got: %v", runs)
 	}
-	if runB == nil {
+	runB, okB := byID["run-claimed-b"]
+	if !okB {
 		t.Fatalf("expected run-claimed-b to still exist, got: %v", runs)
 	}
 	if runB.Status != service.RunStatusFinished {

@@ -230,13 +230,15 @@ func TestSchedulerTick_StaleContendedRunDoesNotStealADifferentAgentsLiveCheckout
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	var staleRun *models.Run
+	var staleRun models.Run
+	found := false
 	for _, r := range runs {
 		if r.ID == "run-stale-contended" {
-			staleRun = r
+			staleRun = *r
+			found = true
 		}
 	}
-	if staleRun == nil {
+	if !found {
 		t.Fatalf("run-stale-contended not found among runs: %v", runs)
 	}
 	if staleRun.Status != service.RunStatusCancelled {
