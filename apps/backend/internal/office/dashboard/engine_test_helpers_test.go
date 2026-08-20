@@ -3,6 +3,8 @@ package dashboard_test
 import (
 	"context"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	officeenginedispatcher "github.com/kandev/kandev/internal/office/engine_dispatcher"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -116,4 +118,149 @@ func (noopTransitionStore) IsOperationApplied(
 
 func (noopTransitionStore) MarkOperationApplied(_ context.Context, _ string) error {
 	return nil
+}
+
+// dashboardTransitionStore is a real (non-noop) engine.TransitionStore
+// backed by the same "tasks" table newTestDeps seeds. Unlike
+// noopTransitionStore, ApplyTransitionIfAtStep here genuinely performs the
+// AC-46/48 compare-and-swap against the tasks.workflow_step_id column, so a
+// test using this store can observe a guarded transition actually moving a
+// task off its current step through the same column the rest of the office
+// tier (GetTaskWorkflowStepID, the quorum badge, task detail rendering)
+// reads. Exists to unlock the AC-63/10 re-evaluation subpath that
+// fakeSessionResolver/noopTransitionStore deliberately never reach.
+type dashboardTransitionStore struct {
+	db         *sqlx.DB
+	workflowID string
+	steps      map[string]engine.StepSpec
+	applied    map[string]bool
+}
+
+func newDashboardTransitionStore(db *sqlx.DB) *dashboardTransitionStore {
+	return &dashboardTransitionStore{
+		db:         db,
+		workflowID: "wf-test",
+		steps:      map[string]engine.StepSpec{},
+		applied:    map[string]bool{},
+	}
+}
+
+func (s *dashboardTransitionStore) LoadState(
+	ctx context.Context, taskID, sessionID string,
+) (engine.MachineState, error) {
+	var stepID string
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT workflow_step_id FROM tasks WHERE id = ?`, taskID,
+	).Scan(&stepID); err != nil {
+		return engine.MachineState{}, err
+	}
+	return engine.MachineState{
+		TaskID: taskID, SessionID: sessionID,
+		WorkflowID: s.workflowID, CurrentStepID: stepID,
+	}, nil
+}
+
+func (s *dashboardTransitionStore) LoadStep(
+	_ context.Context, _, stepID string,
+) (engine.StepSpec, error) {
+	return s.steps[stepID], nil
+}
+
+func (s *dashboardTransitionStore) LoadNextStep(
+	_ context.Context, _ string, _ int,
+) (engine.StepSpec, error) {
+	return engine.StepSpec{}, nil
+}
+
+func (s *dashboardTransitionStore) LoadPreviousStep(
+	_ context.Context, _ string, _ int,
+) (engine.StepSpec, error) {
+	return engine.StepSpec{}, nil
+}
+
+func (s *dashboardTransitionStore) ApplyTransition(
+	ctx context.Context, taskID, _, _, toStepID string, _ engine.Trigger,
+) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE tasks SET workflow_step_id = ? WHERE id = ?`, toStepID, taskID)
+	return err
+}
+
+// ApplyTransitionIfAtStep is the genuine CAS this store exists to provide:
+// the UPDATE only lands when the task is still at expectedStepID, mirroring
+// the production repository's guard against a concurrent mover.
+func (s *dashboardTransitionStore) ApplyTransitionIfAtStep(
+	ctx context.Context, taskID, _, expectedStepID, toStepID string, _ engine.Trigger,
+) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE tasks SET workflow_step_id = ? WHERE id = ? AND workflow_step_id = ?`,
+		toStepID, taskID, expectedStepID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+func (s *dashboardTransitionStore) PersistData(
+	_ context.Context, _ string, _ map[string]any,
+) error {
+	return nil
+}
+
+func (s *dashboardTransitionStore) IsOperationApplied(
+	_ context.Context, op string,
+) (bool, error) {
+	return s.applied[op], nil
+}
+
+func (s *dashboardTransitionStore) MarkOperationApplied(_ context.Context, op string) error {
+	s.applied[op] = true
+	return nil
+}
+
+// singleTaskSessionResolver reports an active session for exactly one
+// configured task id and "no session" for every other task, letting a test
+// drive RecordParticipantDecision's re-evaluation subpath for that one task
+// without disturbing every other dashboard test's session-less assumption.
+type singleTaskSessionResolver struct {
+	taskID  string
+	session *taskmodels.TaskSession
+}
+
+func (r singleTaskSessionResolver) GetActiveTaskSessionByTaskID(
+	_ context.Context, taskID string,
+) (*taskmodels.TaskSession, error) {
+	if taskID == r.taskID {
+		return r.session, nil
+	}
+	return nil, taskmodels.ErrTaskSessionNotFound
+}
+
+func (r singleTaskSessionResolver) GetTaskSessionByTaskID(
+	ctx context.Context, taskID string,
+) (*taskmodels.TaskSession, error) {
+	return r.GetActiveTaskSessionByTaskID(ctx, taskID)
+}
+
+// newTestEngineDispatcherWithReevaluation is like newTestEngineDispatcher but
+// wires a real TransitionStore and a session resolver that reports an
+// active session for taskID, unlocking the AC-13-17/AC-65 re-evaluation
+// subpath — the AC-63/10 "human veto actually unsticks a reviewer-guarded
+// step" path newTestEngineDispatcher's noop/no-session combination cannot
+// reach.
+func newTestEngineDispatcherWithReevaluation(
+	wfRepo *workflowrepo.Repository, log *logger.Logger,
+	store *dashboardTransitionStore, taskID string, session *taskmodels.TaskSession,
+) *officeenginedispatcher.Dispatcher {
+	eng := engine.New(
+		store,
+		noopCallbackRegistry{},
+		engine.WithParticipantStore(workflowadapters.NewParticipantAdapter(wfRepo)),
+		engine.WithDecisionStore(workflowadapters.NewDecisionAdapter(wfRepo)),
+	)
+	return officeenginedispatcher.New(eng, singleTaskSessionResolver{taskID: taskID, session: session}, log)
 }

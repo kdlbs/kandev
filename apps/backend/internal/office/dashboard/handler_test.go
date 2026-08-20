@@ -93,6 +93,12 @@ type testDeps struct {
 	svc    *dashboard.DashboardService
 	router *gin.Engine
 	agents *stubAgentReader
+	// wfRepo is the same workflow repository newTestDeps wires via
+	// svc.SetDecisionStore, exposed so tests that need to build their own
+	// engine (e.g. the AC-63/10 re-evaluation test) reuse the identical
+	// participant/decision adapters rather than opening a second, divergent
+	// repository instance against the same tables.
+	wfRepo *workflowrepo.Repository
 }
 
 func newTestDeps(t *testing.T) *testDeps {
@@ -234,7 +240,7 @@ func newTestDeps(t *testing.T) *testDeps {
 	group := router.Group("/api/v1/office")
 	dashboard.RegisterRoutes(group, svc, repo, nil, log)
 
-	return &testDeps{db: db, repo: repo, svc: svc, router: router, agents: agentSvc}
+	return &testDeps{db: db, repo: repo, svc: svc, router: router, agents: agentSvc, wfRepo: wfRepo}
 }
 
 // stubAgentReader returns nil/nil by default; tests that need agent
