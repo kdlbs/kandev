@@ -574,6 +574,10 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		return err
 	}
 
+	if err := r.allocateStepEntryIfPending(ctx, tx, task.ID, task.UpdatedAt); err != nil {
+		return err
+	}
+
 	return syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID)
 }
 

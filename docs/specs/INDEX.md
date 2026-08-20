@@ -78,6 +78,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [rich-task-title-previews](tasks/rich-task-title-previews.md) | building |
 | [active clarification lifecycle](clarification-active-lifecycle/spec.md) | approved |
 | [model-unification](tasks/model-unification.md) | draft |
+| [workflow-on-enter-action-dispatch](workflow-on-enter-action-dispatch/spec.md) | draft |
 | [run-scheduling](tasks/run-scheduling.md) | building |
 | [without-repositories](tasks/without-repositories.md) | draft |
 | [attach-workspace-sources](tasks/attach-workspace-sources.md) | building |
