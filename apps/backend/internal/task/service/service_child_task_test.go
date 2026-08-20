@@ -52,6 +52,37 @@ func TestCreateChildTask_HappyPath_InheritsWorkflow(t *testing.T) {
 	}
 }
 
+// Regression: CreateChildTask must keep inheriting the parent's project so
+// office cost events (which copy tasks.project_id verbatim) attribute to the
+// same project as the rest of the task tree.
+func TestCreateChildTask_InheritsParentProject(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+
+	parentResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		Title:       "Parent",
+		ProjectID:   "proj-1",
+	})
+	parent := parentResult.Task
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	childID, err := svc.CreateChildTask(ctx, parent, ChildTaskSpec{Title: "Child"})
+	if err != nil {
+		t.Fatalf("CreateChildTask: %v", err)
+	}
+
+	got, err := repo.GetTask(ctx, childID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.ProjectID != "proj-1" {
+		t.Errorf("project_id = %q, want inherited proj-1", got.ProjectID)
+	}
+}
+
 func TestCreateChildTask_OverridesWorkflow(t *testing.T) {
 	svc, repo := setupOfficeTest(t)
 	ctx := context.Background()
@@ -137,6 +168,83 @@ func TestCreateTask_Subtask_InheritsParentRepositories(t *testing.T) {
 	// CheckoutBranch is dropped: two worktrees can't share a working branch.
 	if childRepos[0].CheckoutBranch != "" {
 		t.Errorf("checkout_branch = %q, want empty (dropped on inherit)", childRepos[0].CheckoutBranch)
+	}
+}
+
+// TestCreateTask_Subtask_InheritsParentProject covers the generic create
+// path (mirrors MCP create_task_kandev / REST create with parent_id set): a
+// subtask created with a parent but no explicit project_id must inherit the
+// parent's project and, since that earns it office recognition, an
+// identifier — otherwise its office cost events leak (no project_id to roll
+// up to).
+func TestCreateTask_Subtask_InheritsParentProject(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+
+	parentResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		Title:       "Parent",
+		ProjectID:   "proj-1",
+	})
+	parent := parentResult.Task
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	childResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		Title:       "Child",
+		ParentID:    parent.ID,
+		Origin:      models.TaskOriginAgentCreated,
+	})
+	child := childResult.Task
+	if err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+
+	got, err := repo.GetTask(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.ProjectID != "proj-1" {
+		t.Errorf("project_id = %q, want inherited proj-1", got.ProjectID)
+	}
+	if got.Identifier == "" {
+		t.Error("expected identifier once the task is recognized as an office task")
+	}
+}
+
+func TestCreateTask_Subtask_ExplicitProjectNotOverridden(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+
+	parentResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		Title:       "Parent",
+		ProjectID:   "proj-1",
+	})
+	parent := parentResult.Task
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	childResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		Title:       "Child",
+		ParentID:    parent.ID,
+		ProjectID:   "proj-2",
+	})
+	child := childResult.Task
+	if err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+
+	got, err := repo.GetTask(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.ProjectID != "proj-2" {
+		t.Errorf("project_id = %q, want explicit proj-2 kept", got.ProjectID)
 	}
 }
 

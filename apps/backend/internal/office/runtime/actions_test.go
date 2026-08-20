@@ -433,6 +433,97 @@ func TestActionsCreateTaskDeniesParentProjectMismatchBeforePersistence(t *testin
 	}
 }
 
+func TestActionsCreateTaskRootDefaultsToRunTaskProject(t *testing.T) {
+	creator := &recordingTaskCreator{taskID: "created-task", taskScopes: map[string]taskScope{
+		"task-1": {WorkspaceID: "ws-1", ProjectID: "project-1"},
+	}}
+	projects := &recordingProjectManager{projects: []*models.Project{
+		{ID: "project-1", WorkspaceID: "ws-1"},
+	}}
+	actions := NewActions(ActionDependencies{Tasks: creator, Projects: projects})
+	runCtx := RunContext{
+		AgentID: "agent-1", WorkspaceID: "ws-1", TaskID: "task-1",
+		Capabilities: Capabilities{CanCreateTasks: true},
+	}
+
+	taskID, err := actions.CreateTask(context.Background(), runCtx, CreateTaskInput{Title: "Root task"})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if taskID != "created-task" || len(creator.calls) != 1 {
+		t.Fatalf("task id/calls = %q/%d", taskID, len(creator.calls))
+	}
+	if creator.calls[0].ProjectID != "project-1" {
+		t.Fatalf("project_id = %q, want defaulted from run task's project", creator.calls[0].ProjectID)
+	}
+}
+
+func TestActionsCreateTaskSubtaskMaySupplyProjectWhenParentHasNone(t *testing.T) {
+	creator := &recordingTaskCreator{taskID: "child-1", taskScopes: map[string]taskScope{
+		"parent-1": {WorkspaceID: "ws-1"},
+	}}
+	projects := &recordingProjectManager{projects: []*models.Project{
+		{ID: "project-1", WorkspaceID: "ws-1"},
+	}}
+	actions := NewActions(ActionDependencies{Tasks: creator, Projects: projects})
+	runCtx := RunContext{
+		AgentID: "agent-1", WorkspaceID: "ws-1",
+		Capabilities: Capabilities{
+			CanCreateSubtasks: true,
+			AllowedTaskIDs:    []string{"parent-1"},
+		},
+	}
+
+	taskID, err := actions.CreateTask(context.Background(), runCtx, CreateTaskInput{
+		Title: "child", ParentTaskID: "parent-1", ProjectID: "project-1",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if taskID != "child-1" || len(creator.calls) != 1 {
+		t.Fatalf("task id/calls = %q/%d", taskID, len(creator.calls))
+	}
+}
+
+func TestActionsCreateTaskRootErrorsWhenProjectUnresolvedAndWorkspaceHasProjects(t *testing.T) {
+	creator := &recordingTaskCreator{taskID: "created-task"}
+	projects := &recordingProjectManager{projects: []*models.Project{
+		{ID: "project-1", WorkspaceID: "ws-1"},
+		{ID: "project-2", WorkspaceID: "ws-1"},
+	}}
+	actions := NewActions(ActionDependencies{Tasks: creator, Projects: projects})
+	runCtx := RunContext{
+		AgentID: "agent-1", WorkspaceID: "ws-1",
+		Capabilities: Capabilities{CanCreateTasks: true},
+	}
+
+	_, err := actions.CreateTask(context.Background(), runCtx, CreateTaskInput{Title: "Root task"})
+	if !errors.Is(err, ErrProjectRequired) {
+		t.Fatalf("error = %v, want ErrProjectRequired", err)
+	}
+	if len(creator.calls) != 0 {
+		t.Fatalf("creator called for unresolvable project: %#v", creator.calls)
+	}
+}
+
+func TestActionsCreateTaskRootAllowsEmptyProjectWhenWorkspaceHasNone(t *testing.T) {
+	creator := &recordingTaskCreator{taskID: "created-task"}
+	projects := &recordingProjectManager{}
+	actions := NewActions(ActionDependencies{Tasks: creator, Projects: projects})
+	runCtx := RunContext{
+		AgentID: "agent-1", WorkspaceID: "ws-1",
+		Capabilities: Capabilities{CanCreateTasks: true},
+	}
+
+	taskID, err := actions.CreateTask(context.Background(), runCtx, CreateTaskInput{Title: "Root task"})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if taskID != "created-task" || len(creator.calls) != 1 || creator.calls[0].ProjectID != "" {
+		t.Fatalf("task id/calls = %q/%#v, want empty project_id preserved", taskID, creator.calls)
+	}
+}
+
 func TestActionsCreateTaskDeniesMissingCapabilityBeforePersistence(t *testing.T) {
 	creator := &recordingTaskCreator{}
 	actions := NewActions(ActionDependencies{Tasks: creator})

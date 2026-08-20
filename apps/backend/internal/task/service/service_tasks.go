@@ -241,6 +241,15 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 		return nil, err
 	}
 
+	// Subtasks created without an explicit project inherit the parent's, so
+	// office cost events (which copy tasks.project_id verbatim) attribute to
+	// the same project as the rest of the tree instead of leaking. Runs before
+	// isOfficeRequest below so an inherited project also earns the office
+	// identifier and workflow resolution.
+	if err := s.inheritParentProject(ctx, req); err != nil {
+		return nil, err
+	}
+
 	// For office tasks, resolve workflow from workspace
 	if isOfficeRequest(req) && req.WorkflowID == "" {
 		if err := s.resolveOfficeWorkflow(ctx, req); err != nil {
@@ -532,6 +541,24 @@ func (s *Service) inheritParentRepositories(ctx context.Context, req *CreateTask
 	if len(inherited) > 0 {
 		req.Repositories = inherited
 	}
+	return nil
+}
+
+// inheritParentProject fills req.ProjectID from the parent task when a
+// subtask is created without an explicit project. Office cost events copy
+// tasks.project_id verbatim (see office/service/event_subscribers.go
+// projectIDForTask) with no ancestry walk or fallback, so a subtask left
+// projectless never rolls up to its tree's budget even though its parent
+// has one.
+func (s *Service) inheritParentProject(ctx context.Context, req *CreateTaskRequest) error {
+	if req.ParentID == "" || req.ProjectID != "" {
+		return nil
+	}
+	parent, err := s.tasks.GetTask(ctx, req.ParentID)
+	if err != nil {
+		return fmt.Errorf("get parent task for project inheritance: %w", err)
+	}
+	req.ProjectID = parent.ProjectID
 	return nil
 }
 
