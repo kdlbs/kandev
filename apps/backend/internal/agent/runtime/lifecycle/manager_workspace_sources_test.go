@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/worktree"
@@ -182,6 +183,9 @@ func TestRebindWorkspaceForSessionReadinessTimeoutRollsBack(t *testing.T) {
 	execution.Status = v1.AgentStatusReady
 	execution.WorkspacePath = "/old-workspace"
 	execution.ACPSessionID = "acp-existing"
+	execution.RuntimeName = executor.NameStandalone
+	mgr.executorRegistry = NewExecutorRegistry(newTestRegistryLogger())
+	mgr.executorRegistry.Register(&gitMetadataAttestingExecutor{MockExecutor: MockExecutor{name: executor.NameStandalone}})
 	oldProjection := newLinkedGitMetadataProjection(t)
 	newProjection := newLinkedGitMetadataProjection(t)
 	execution.GitMetadataProjections = []*worktree.GitMetadataProjection{oldProjection}
@@ -222,6 +226,19 @@ func TestRebindWorkspaceWithGitMetadataRejectsInvalidReplacementBeforeStopping(t
 	}
 	if len(execution.GitMetadataProjections) != 1 || execution.GitMetadataProjections[0] != oldProjection {
 		t.Fatalf("projections after rejected replacement = %#v, want old projection", execution.GitMetadataProjections)
+	}
+}
+
+func TestRebindWorkspaceWithGitMetadataFailsClosedWithoutRefreshCapability(t *testing.T) {
+	mgr := &Manager{executionStore: NewExecutionStore()}
+	execution := &AgentExecution{ID: "execution", SessionID: "session", Status: v1.AgentStatusReady, ACPSessionID: "acp", RuntimeName: executor.NameStandalone}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+
+	err := mgr.RebindWorkspaceWithGitMetadata(context.Background(), execution.SessionID, "/new-workspace", []*worktree.GitMetadataProjection{newLinkedGitMetadataProjection(t)}, []string{"/attached"})
+	if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) {
+		t.Fatalf("RebindWorkspaceWithGitMetadata error = %v, want %q", err, gitMetadataProjectionUnsupported)
 	}
 }
 
