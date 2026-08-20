@@ -110,12 +110,13 @@ func TestTaskEnvironment_PersistsDockerBootstrapNonceReference(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := &models.TaskEnvironment{
-		ID:                              "env-docker-bootstrap",
-		TaskID:                          "task-docker-bootstrap",
-		ExecutorType:                    string(models.ExecutorTypeLocalDocker),
-		Status:                          models.TaskEnvironmentStatusReady,
-		ContainerID:                     "container-1",
-		ContainerBootstrapNonceSecretID: "bootstrap-secret-1",
+		ID:                                "env-docker-bootstrap",
+		TaskID:                            "task-docker-bootstrap",
+		ExecutorType:                      string(models.ExecutorTypeLocalDocker),
+		Status:                            models.TaskEnvironmentStatusReady,
+		ContainerID:                       "container-1",
+		ContainerBootstrapNonceSecretID:   "bootstrap-secret-1",
+		ContainerControlAuthTokenSecretID: "container-control-secret-1",
 	}
 	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
@@ -128,8 +129,12 @@ func TestTaskEnvironment_PersistsDockerBootstrapNonceReference(t *testing.T) {
 	if got.ContainerBootstrapNonceSecretID != "bootstrap-secret-1" {
 		t.Fatalf("bootstrap nonce secret = %q, want bootstrap-secret-1", got.ContainerBootstrapNonceSecretID)
 	}
+	if got.ContainerControlAuthTokenSecretID != "container-control-secret-1" {
+		t.Fatalf("container control secret = %q, want container-control-secret-1", got.ContainerControlAuthTokenSecretID)
+	}
 
 	got.ContainerBootstrapNonceSecretID = "bootstrap-secret-2"
+	got.ContainerControlAuthTokenSecretID = "container-control-secret-2"
 	if err := repo.UpdateTaskEnvironment(ctx, got); err != nil {
 		t.Fatalf("UpdateTaskEnvironment: %v", err)
 	}
@@ -139,6 +144,9 @@ func TestTaskEnvironment_PersistsDockerBootstrapNonceReference(t *testing.T) {
 	}
 	if got.ContainerBootstrapNonceSecretID != "bootstrap-secret-2" {
 		t.Fatalf("updated bootstrap nonce secret = %q, want bootstrap-secret-2", got.ContainerBootstrapNonceSecretID)
+	}
+	if got.ContainerControlAuthTokenSecretID != "container-control-secret-2" {
+		t.Fatalf("updated container control secret = %q, want container-control-secret-2", got.ContainerControlAuthTokenSecretID)
 	}
 }
 

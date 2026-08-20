@@ -113,6 +113,9 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 		if env.ContainerBootstrapNonceSecretID != "" {
 			metadata[lifecycle.MetadataKeyBootstrapNonceSecret] = env.ContainerBootstrapNonceSecretID
 		}
+		if env.ContainerControlAuthTokenSecretID != "" {
+			metadata[lifecycle.MetadataKeyContainerControlAuthSecret] = env.ContainerControlAuthTokenSecretID
+		}
 		if env.SandboxID != "" {
 			metadata["sprite_name"] = env.SandboxID
 		}
@@ -142,6 +145,14 @@ func extractContainerBootstrapNonceSecretID(metadata map[string]interface{}) str
 		return ""
 	}
 	secretID, _ := metadata[lifecycle.MetadataKeyBootstrapNonceSecret].(string)
+	return secretID
+}
+
+func extractContainerControlAuthTokenSecretID(metadata map[string]interface{}) string {
+	if metadata == nil {
+		return ""
+	}
+	secretID, _ := metadata[lifecycle.MetadataKeyContainerControlAuthSecret].(string)
 	return secretID
 }
 

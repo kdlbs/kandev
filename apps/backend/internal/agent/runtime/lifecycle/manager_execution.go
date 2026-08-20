@@ -941,11 +941,15 @@ const (
 	// It lets the backend re-handshake after a container restart starts a new
 	// agentctl process with a fresh auth token.
 	MetadataKeyBootstrapNonceSecret = "env_secret_id_AGENTCTL_BOOTSTRAP_NONCE"
+	// MetadataKeyContainerControlAuthSecret stores the encrypted agentctl
+	// control token owned by a Docker task environment, not an agent session.
+	MetadataKeyContainerControlAuthSecret = "env_secret_id_CONTAINER_AGENTCTL_CONTROL_TOKEN"
 )
 
 func (m *Manager) persistRuntimeSecrets(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
 	m.persistAuthToken(ctx, instance, execution)
 	m.persistBootstrapNonce(ctx, instance, execution)
+	m.persistContainerControlAuthToken(ctx, instance, execution)
 }
 
 // persistAuthToken stores the agentctl handshake auth token in SecretStore
@@ -956,6 +960,13 @@ func (m *Manager) persistAuthToken(ctx context.Context, instance *ExecutorInstan
 
 func (m *Manager) persistBootstrapNonce(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
 	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyBootstrapNonceSecret, "agentctl-bootstrap", instance.BootstrapNonce)
+}
+
+func (m *Manager) persistContainerControlAuthToken(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
+	if instance == nil || instance.ContainerID == "" {
+		return
+	}
+	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyContainerControlAuthSecret, "agentctl-container-control", instance.AuthToken)
 }
 
 func (m *Manager) persistRuntimeSecret(
@@ -1007,6 +1018,13 @@ func (m *Manager) revealRuntimeSecret(ctx context.Context, metadata map[string]i
 		return ""
 	}
 	return value
+}
+
+func (m *Manager) revealContainerControlAuthToken(ctx context.Context, metadata map[string]interface{}) string {
+	if token := m.revealRuntimeSecret(ctx, metadata, MetadataKeyContainerControlAuthSecret); token != "" {
+		return token
+	}
+	return m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret)
 }
 
 // truncateID safely truncates an ID string to maxLen characters.

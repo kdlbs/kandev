@@ -231,6 +231,7 @@ func TestPersistRuntimeSecrets(t *testing.T) {
 
 	instance := &ExecutorInstance{
 		InstanceID:     "exec-123456789012",
+		ContainerID:    "container-123",
 		AuthToken:      "agentctl-token",
 		BootstrapNonce: "bootstrap-nonce",
 	}
@@ -248,11 +249,21 @@ func TestPersistRuntimeSecrets(t *testing.T) {
 	if !ok || nonceSecretID == "" {
 		t.Fatalf("expected bootstrap nonce secret ID, got %v", rawNonce)
 	}
+	rawControl, _ := execution.metadataValue(MetadataKeyContainerControlAuthSecret)
+	controlSecretID, ok := rawControl.(string)
+	if !ok || controlSecretID == "" {
+		t.Fatalf("expected container control secret ID, got %v", rawControl)
+	}
 
 	if got := m.revealRuntimeSecret(context.Background(), execution.MetadataSnapshot(), MetadataKeyAuthTokenSecret); got != "agentctl-token" {
 		t.Fatalf("revealed auth token = %q, want agentctl-token", got)
 	}
 	if got := m.revealRuntimeSecret(context.Background(), execution.MetadataSnapshot(), MetadataKeyBootstrapNonceSecret); got != "bootstrap-nonce" {
 		t.Fatalf("revealed bootstrap nonce = %q, want bootstrap-nonce", got)
+	}
+	store.store[authSecretID].Value = "session-auth-token"
+	store.store[controlSecretID].Value = "environment-control-token"
+	if got := m.revealContainerControlAuthToken(context.Background(), execution.MetadataSnapshot()); got != "environment-control-token" {
+		t.Fatalf("revealed container control token = %q, want environment-control-token", got)
 	}
 }

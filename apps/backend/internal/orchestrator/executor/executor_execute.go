@@ -2027,6 +2027,9 @@ func (e *Executor) persistTaskEnvironment(
 		if bootstrapSecretID := extractContainerBootstrapNonceSecretID(resp.Metadata); bootstrapSecretID != "" {
 			existingEnv.ContainerBootstrapNonceSecretID = bootstrapSecretID
 		}
+		if controlSecretID := extractContainerControlAuthTokenSecretID(resp.Metadata); controlSecretID != "" {
+			existingEnv.ContainerControlAuthTokenSecretID = controlSecretID
+		}
 		if sandboxID := extractSandboxID(resp.Metadata); sandboxID != "" {
 			existingEnv.SandboxID = sandboxID
 		}
@@ -2059,12 +2062,13 @@ func (e *Executor) persistTaskEnvironment(
 		ExecutorProfileID: session.ExecutorProfileID,
 		// AgentExecutionID is intentionally not set here — see executors_running
 		// for the active execution per session.
-		Status:                          models.TaskEnvironmentStatusReady,
-		WorkspacePath:                   workspacePath,
-		ContainerID:                     resp.ContainerID,
-		ContainerBootstrapNonceSecretID: extractContainerBootstrapNonceSecretID(resp.Metadata),
-		TaskDirName:                     req.TaskDirName,
-		SandboxID:                       extractSandboxID(resp.Metadata),
+		Status:                            models.TaskEnvironmentStatusReady,
+		WorkspacePath:                     workspacePath,
+		ContainerID:                       resp.ContainerID,
+		ContainerBootstrapNonceSecretID:   extractContainerBootstrapNonceSecretID(resp.Metadata),
+		ContainerControlAuthTokenSecretID: extractContainerControlAuthTokenSecretID(resp.Metadata),
+		TaskDirName:                       req.TaskDirName,
+		SandboxID:                         extractSandboxID(resp.Metadata),
 	}
 	// Embed per-repo rows in the same create transaction. Single-repo
 	// launches produce one row so the worktree identity is always recorded.
