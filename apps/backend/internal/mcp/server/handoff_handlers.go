@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -79,20 +80,36 @@ func (s *Server) listRelatedTasksHandler() server.ToolHandlerFunc {
 		if taskID == "" {
 			return mcp.NewToolResultError("task_id is required (no current task context)"), nil
 		}
-		payload := map[string]string{
-			"task_id":        taskID,
-			"caller_task_id": s.taskID,
+		payload := map[string]interface{}{
+			"task_id":            taskID,
+			"caller_task_id":     s.taskID,
+			"caller_session_id":  s.sessionID,
+			"mcp_surface":        string(s.Profile().Surface),
+			"verbose":            req.GetBool("verbose", false),
+			"related_read_scope": s.relatedReadScope(),
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListRelatedTasks, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		// The backend authorizes and constructs the compact projection. Keep this
+		// defensive response shaping for older backends during rolling upgrades;
+		// it is not an authorization boundary.
 		if !req.GetBool("verbose", false) {
 			stripRelatedTaskDescriptions(result)
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+func (s *Server) relatedReadScope() string {
+	profileContext := s.Profile()
+	if profileContext.Surface == mcpprofile.SurfaceOfficeTask &&
+		profileContext.HasCapability(mcpprofile.CapabilityWorkspaceTaskTreeRead) {
+		return "workspace-task-tree"
+	}
+	return "relation"
 }
 
 // relatedTaskGroups are the explicit keys of the ActionMCPListRelatedTasks

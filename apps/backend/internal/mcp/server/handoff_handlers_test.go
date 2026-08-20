@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -93,4 +94,36 @@ func TestListRelatedTasks_ToolSchemaExposesVerbose(t *testing.T) {
 	required, _ := parsed["required"].([]interface{})
 	assert.NotContains(t, required, "verbose")
 	assert.Contains(t, tool.Tool.Description, "verbose=true")
+}
+
+func TestListRelatedTasks_AttestsProfileScopeAndCallerIdentity(t *testing.T) {
+	backend := &testBackend{response: relatedTasksResponse("")}
+	profile := mcpprofile.New(mcpprofile.SurfaceOfficeTask, []mcpprofile.Capability{
+		mcpprofile.CapabilityWorkspaceTaskTreeRead,
+	}, nil)
+	s := NewWithProfile(backend, "session-A", "task-A", 10005, newTestLogger(t), "", false, profile)
+
+	result := callTool(t, s, "list_related_tasks_kandev", map[string]interface{}{
+		"task_id": "task-B", "verbose": true,
+	})
+	require.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-B", payload["task_id"])
+	assert.Equal(t, "task-A", payload["caller_task_id"])
+	assert.Equal(t, "session-A", payload["caller_session_id"])
+	assert.Equal(t, "office-task", payload["mcp_surface"])
+	assert.Equal(t, "workspace-task-tree", payload["related_read_scope"])
+	assert.Equal(t, true, payload["verbose"])
+
+	props := toolInputProperties(t, s, "list_related_tasks_kandev")
+	assert.NotContains(t, props, "related_read_scope")
+}
+
+func TestRelatedReadScopeRequiresOfficeSurface(t *testing.T) {
+	profile := mcpprofile.New(mcpprofile.SurfaceKanbanTask, []mcpprofile.Capability{
+		mcpprofile.CapabilityWorkspaceTaskTreeRead,
+	}, nil)
+	s := NewWithProfile(&testBackend{}, "session", "task", 10005, newTestLogger(t), "", false, profile)
+	assert.Equal(t, "relation", s.relatedReadScope())
 }
