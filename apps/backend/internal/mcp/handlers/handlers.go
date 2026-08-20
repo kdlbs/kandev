@@ -1878,10 +1878,16 @@ func (h *Handlers) handleAddWorkspaceSources(ctx context.Context, msg *ws.Messag
 	if target == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target task not found", nil)
 	}
-	if req.TaskID != req.CallerTaskID && !canDirectParentAccess(caller, target) {
+	isChildTarget := req.TaskID != req.CallerTaskID
+	if isChildTarget && !canDirectParentAccess(caller, target) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "only a task's direct parent in the same workspace can attach its sources", nil)
 	}
-	result, err := h.taskSvc.AttachWorkspaceSources(ctx, service.AttachWorkspaceSourcesRequest{TaskID: req.TaskID, Sources: sources})
+	attachReq := service.AttachWorkspaceSourcesRequest{TaskID: req.TaskID, Sources: sources}
+	if isChildTarget {
+		attachReq.ExpectedParentID = caller.ID
+		attachReq.ExpectedParentWorkspaceID = caller.WorkspaceID
+	}
+	result, err := h.taskSvc.AttachWorkspaceSources(ctx, attachReq)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, classifyWorkspaceSourceError(err), "Failed to attach workspace sources: "+err.Error(), nil)
 	}
@@ -1933,6 +1939,8 @@ func parseWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSourceInpu
 
 func classifyWorkspaceSourceError(err error) string {
 	switch {
+	case errors.Is(err, taskrepository.ErrTaskParentMismatch):
+		return ws.ErrorCodeForbidden
 	case errors.Is(err, service.ErrInvalidWorkspaceSource):
 		return ws.ErrorCodeValidation
 	case errors.Is(err, taskrepo.ErrTaskNotFound), errors.Is(err, taskrepository.ErrRepositoryNotFound), errors.Is(err, service.ErrTaskRepositoryNotFound):

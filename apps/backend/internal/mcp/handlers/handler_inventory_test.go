@@ -280,6 +280,31 @@ func TestHandleAddWorkspaceSourcesActiveChildRejectsExactRetryBeforeSideEffects(
 	assertWorkspaceSourceStateUnchanged(t, ctx, repo, child.ID, events, materializer, refresher, 1, 1)
 }
 
+func TestHandleAddWorkspaceSourcesRejectsChildReparentedBeforeDurableCommit(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, parent, child, eventBus := newWorkspaceSourceAuthorizationFixtureWithReparentingStore(t)
+	events := observeWorkspaceSourceEvents(t, eventBus)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "parent-session", TaskID: parent.ID}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "child-session", TaskID: child.ID}))
+	materializer := &workspaceSourceMaterializerRecorder{}
+	refresher := &workspaceSourceProviderRefresherRecorder{}
+	svc.SetWorkspaceSourceMaterializer(materializer)
+	svc.SetWorkspaceSourceProviderRefresher(refresher)
+	h := &Handlers{taskSvc: svc, sessionRepo: repo, logger: testLogger(t).WithFields()}
+
+	response, err := h.handleAddWorkspaceSources(ctx, makeWSMessage(t, ws.ActionMCPAddWorkspaceSources, map[string]interface{}{
+		"task_id": child.ID, "caller_task_id": parent.ID, "caller_session_id": "parent-session",
+		"sources": []interface{}{map[string]interface{}{"kind": "folder", "local_path": t.TempDir(), "display_name": "docs"}},
+	}))
+	require.NoError(t, err)
+	assertWSError(t, response, ws.ErrorCodeForbidden)
+	assertWorkspaceSourceStateUnchanged(t, ctx, repo, child.ID, events, materializer, refresher, 1, 0)
+
+	session, err := repo.GetTaskSession(ctx, "child-session")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCreated, session.State)
+}
+
 type workspaceSourceMaterializerRecorder struct{ called bool }
 
 func (m *workspaceSourceMaterializerRecorder) MaterializeWorkspaceSources(context.Context, string, *models.WorkspaceSourceBatch) (*service.WorkspaceSourceMaterializationResult, error) {
@@ -338,6 +363,42 @@ func newWorkspaceSourceAuthorizationFixtureWithEventBus(t *testing.T) (*service.
 	parent := createWorkspaceSourceAuthorizationTask(t, svc, "workspace-sources", "Parent", "")
 	child := createWorkspaceSourceAuthorizationTask(t, svc, "workspace-sources", "Child", parent.ID)
 	return svc, repo, parent, child, eventBus
+}
+
+func newWorkspaceSourceAuthorizationFixtureWithReparentingStore(t *testing.T) (*service.Service, *sqliterepo.Repository, *models.Task, *models.Task, *bus.MemoryEventBus) {
+	t.Helper()
+	_, repo, eventBus := newTestTaskServiceWithEventBus(t)
+	ctx := context.Background()
+	store := &reparentingWorkspaceSourceStore{TaskWorkspaceFolderRepository: repo}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo, WorkspaceFolders: store, Workflows: repo,
+		Messages: repo, Turns: repo, Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, Reviews: repo,
+	}, eventBus, testLogger(t), service.RepositoryDiscoveryConfig{})
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace-sources", Name: "Workspace sources"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "workflow-sources", WorkspaceID: "workspace-sources", Name: "Workflow"}))
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{ID: "repository-sources", WorkspaceID: "workspace-sources", Name: "app", DefaultBranch: "main"}))
+	parent := createWorkspaceSourceAuthorizationTask(t, svc, "workspace-sources", "Parent", "")
+	child := createWorkspaceSourceAuthorizationTask(t, svc, "workspace-sources", "Child", parent.ID)
+	store.beforeCreate = func(context.Context) error {
+		_, err := repo.DB().ExecContext(ctx, "UPDATE tasks SET parent_id = '' WHERE id = ?", child.ID)
+		return err
+	}
+	return svc, repo, parent, child, eventBus
+}
+
+type reparentingWorkspaceSourceStore struct {
+	taskrepository.TaskWorkspaceFolderRepository
+	beforeCreate func(context.Context) error
+}
+
+func (s *reparentingWorkspaceSourceStore) CreateWorkspaceSourceBatch(ctx context.Context, batch *models.WorkspaceSourceBatch) error {
+	if s.beforeCreate != nil {
+		if err := s.beforeCreate(ctx); err != nil {
+			return err
+		}
+	}
+	return s.TaskWorkspaceFolderRepository.CreateWorkspaceSourceBatch(ctx, batch)
 }
 
 func createWorkspaceSourceAuthorizationTask(t *testing.T, svc *service.Service, workspaceID, title, parentID string) *models.Task {

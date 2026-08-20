@@ -13,7 +13,7 @@ unrelated tasks grant one another source access.
 
 ## Decision
 
-Task-bound MCP may attach workspace sources to the calling task or to its direct child, provided both tasks belong to the same non-empty workspace. The MCP server injects its bound caller task and session IDs; these provenance fields are not callable tool arguments. The backend verifies that the session belongs to the caller task and authorizes the relationship before invoking the existing owner-scoped attachment service.
+Task-bound MCP may attach workspace sources to the calling task or to its direct child, provided both tasks belong to the same non-empty workspace. The MCP server injects its bound caller task and session IDs; these provenance fields are not callable tool arguments. The backend verifies that the session belongs to the caller task, then carries the direct-parent and workspace predicates into the source-batch transaction. A target reparented before that transaction commits is rejected before any source, repository, folder, session, or event mutation becomes durable.
 
 Exact normalized retries are no-ops after the idle check. They return the authoritative projection without rematerializing sources, refreshing providers, or publishing update events.
 

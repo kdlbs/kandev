@@ -33,8 +33,10 @@ type WorkspaceSourceInput struct {
 }
 
 type AttachWorkspaceSourcesRequest struct {
-	TaskID  string
-	Sources []WorkspaceSourceInput
+	TaskID                    string
+	Sources                   []WorkspaceSourceInput
+	ExpectedParentID          string
+	ExpectedParentWorkspaceID string
 }
 
 // AttachWorkspaceSourcesResult is the authoritative post-materialization
@@ -97,6 +99,9 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 	if task == nil {
 		return nil, fmt.Errorf("%w: %s", taskrepository.ErrTaskNotFound, req.TaskID)
 	}
+	if req.ExpectedParentID != "" && (task.ParentID != req.ExpectedParentID || task.WorkspaceID != req.ExpectedParentWorkspaceID) {
+		return nil, fmt.Errorf("%w: %s", taskrepository.ErrTaskParentMismatch, task.ID)
+	}
 	if err := s.workspaceSourcesIdle(ctx, task.ID); err != nil {
 		return nil, err
 	}
@@ -129,6 +134,8 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 	if err != nil {
 		return nil, err
 	}
+	batch.ExpectedParentID = req.ExpectedParentID
+	batch.ExpectedParentWorkspaceID = req.ExpectedParentWorkspaceID
 	if len(batch.Sources) == 0 && len(batch.RepositoryUpdates) == 0 {
 		cleanupCreated(context.WithoutCancel(ctx))
 		return s.hydrateWorkspaceSourceResult(ctx, task, store)

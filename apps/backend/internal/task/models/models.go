@@ -1035,9 +1035,11 @@ type TaskWorkspaceFolder struct {
 // attachment operation, so a later materialization failure can compensate
 // without touching pre-existing sources.
 type WorkspaceSourceBatch struct {
-	TaskID            string                            `json:"task_id"`
-	Sources           []WorkspaceSource                 `json:"sources,omitempty"`
-	RepositoryUpdates []WorkspaceSourceRepositoryUpdate `json:"repository_updates,omitempty"`
+	TaskID                    string                            `json:"task_id"`
+	Sources                   []WorkspaceSource                 `json:"sources,omitempty"`
+	RepositoryUpdates         []WorkspaceSourceRepositoryUpdate `json:"repository_updates,omitempty"`
+	ExpectedParentID          string                            `json:"-"`
+	ExpectedParentWorkspaceID string                            `json:"-"`
 }
 
 // WorkspaceSourceRepositoryUpdate records a legacy association branch derived

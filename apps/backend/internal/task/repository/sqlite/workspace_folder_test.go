@@ -2,10 +2,12 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 func TestTaskWorkspaceFoldersSchemaPersistsCanonicalFolders(t *testing.T) {
@@ -118,6 +120,37 @@ func TestCreateWorkspaceSourceBatchAllocatesMixedPositionsAndCompensates(t *test
 	}
 	if len(repos) != 1 || repos[0].ID != "task-repository-existing" {
 		t.Fatalf("repositories after compensation = %#v, want only existing source", repos)
+	}
+}
+
+func TestCreateWorkspaceSourceBatchRejectsStaleParentAuthorizationBeforeWrites(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-parent-guard")
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-parent-guard", WorkspaceID: "workspace-parent-guard", ParentID: "current-parent", Title: "Child", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("seed child task: %v", err)
+	}
+
+	batch := &models.WorkspaceSourceBatch{
+		TaskID:                    "task-parent-guard",
+		ExpectedParentID:          "stale-parent",
+		ExpectedParentWorkspaceID: "workspace-parent-guard",
+		Sources: []models.WorkspaceSource{{Folder: &models.TaskWorkspaceFolder{
+			LocalPath: "/canonical/docs", DisplayName: "docs",
+		}}},
+	}
+	err := repo.CreateWorkspaceSourceBatch(ctx, batch)
+	if !errors.Is(err, repoerrors.ErrTaskParentMismatch) {
+		t.Fatalf("CreateWorkspaceSourceBatch error = %v, want stale parent authorization", err)
+	}
+	folders, err := repo.ListTaskWorkspaceFolders(ctx, batch.TaskID)
+	if err != nil {
+		t.Fatalf("list folders: %v", err)
+	}
+	if len(folders) != 0 {
+		t.Fatalf("folders = %#v, want no durable writes", folders)
 	}
 }
 
