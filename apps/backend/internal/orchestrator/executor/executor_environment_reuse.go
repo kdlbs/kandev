@@ -90,6 +90,12 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 	if env.TaskDirName != "" && req.UseWorktree {
 		req.TaskDirName = env.TaskDirName
 	}
+	// SSH uses the remote task directory as an environment-scoped attachment
+	// handle. It is distinct from the per-session agentctl directory and must
+	// therefore be forwarded for a sibling session without adopting its runtime.
+	if req.ExecutorType == string(models.ExecutorTypeSSH) && env.WorkspacePath != "" {
+		ensureLaunchMetadata(req)[lifecycle.MetadataKeySSHRemoteTaskDir] = env.WorkspacePath
+	}
 
 	if req.UseWorktree {
 		e.reuseExistingRepositoryWorktrees(ctx, req, env)

@@ -455,6 +455,29 @@ func TestReuseExistingEnvironment_EmptyEnvFieldsDoNothing(t *testing.T) {
 	}
 }
 
+func TestReuseExistingEnvironment_ReuseRequiredSSHUsesCanonicalRemoteTaskDir(t *testing.T) {
+	e := newEnvTestExecutor(t)
+	req := &LaunchAgentRequest{
+		TaskID:                 "task-1",
+		ExecutorType:           string(models.ExecutorTypeSSH),
+		WorkspaceReuseRequired: true,
+	}
+	env := &models.TaskEnvironment{
+		ID:            "environment-1",
+		ExecutorType:  string(models.ExecutorTypeSSH),
+		WorkspacePath: "/home/kandev/.kandev/tasks/task-1",
+	}
+
+	e.reuseExistingEnvironment(context.Background(), req, env)
+
+	if got := req.Metadata[lifecycle.MetadataKeySSHRemoteTaskDir]; got != env.WorkspacePath {
+		t.Fatalf("remote task directory = %v, want %q", got, env.WorkspacePath)
+	}
+	if req.PreviousExecutionID != "" {
+		t.Fatalf("PreviousExecutionID = %q, want empty for attach-only reuse", req.PreviousExecutionID)
+	}
+}
+
 // TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys pins the guard
 // that prevents a SECOND session on the same task from inheriting the FIRST
 // session's session-scoped runtime resources — agentctl PID/port, remote
