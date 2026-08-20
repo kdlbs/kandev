@@ -188,6 +188,40 @@ func TestCloneExecutorGitMetadataPreflightMatrix(t *testing.T) {
 	}
 }
 
+func TestRemoteGitMetadataCapabilityFailuresAreRecoverableAndSanitized(t *testing.T) {
+	projection := newLinkedGitMetadataProjection(t)
+	tests := []struct {
+		name    string
+		runtime ExecutorBackend
+		request *ExecutorCreateRequest
+		want    string
+	}{
+		{
+			name:    "remote Docker",
+			runtime: &RemoteDockerExecutor{},
+			request: &ExecutorCreateRequest{GitMetadataProjections: []*worktree.GitMetadataProjection{projection}, AgentConfig: agents.NewCodexACP()},
+			want:    "choose local Docker, SSH, or Sprites",
+		},
+		{
+			name:    "remote multi repository",
+			runtime: &SSHExecutor{},
+			request: &ExecutorCreateRequest{GitMetadataProjections: []*worktree.GitMetadataProjection{projection, projection}, AgentConfig: agents.NewCodexACP()},
+			want:    "start a single-repository session",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := createLaunchInstance(context.Background(), tc.runtime, tc.request)
+			if err == nil || !strings.Contains(err.Error(), gitMetadataProjectionUnsupported) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("createLaunchInstance() error = %v, want %q with recovery", err, tc.want)
+			}
+			if strings.Contains(err.Error(), projection.CheckoutPath) {
+				t.Fatalf("capability error leaked checkout path: %v", err)
+			}
+		})
+	}
+}
+
 func newLinkedGitMetadataProjection(t *testing.T) *worktree.GitMetadataProjection {
 	t.Helper()
 	repo := filepath.Join(t.TempDir(), "source")
