@@ -14,7 +14,6 @@ import {
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { Textarea } from "@kandev/ui/textarea";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
@@ -40,6 +39,9 @@ import {
 } from "./watch-form";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
+import { gitlabIssueWatchPlaceholders } from "./issue-watch-placeholders";
+import { gitlabReviewWatchPlaceholders } from "./review-watch-placeholders";
 
 type Watch = ReviewWatch | IssueWatch;
 type CreateRequest = CreateReviewWatchRequest | CreateIssueWatchRequest;
@@ -221,6 +223,10 @@ function AutomationFields({ kind, form, setForm }: FormFieldsProps) {
   const { t } = useTranslation();
   const stepDefaultLabel = t("common:useStepDefaultOption");
   const data = useDialogData(form.workspaceId, form.workflowId);
+  const placeholders = useMemo(
+    () => (kind === "review" ? gitlabReviewWatchPlaceholders(t) : gitlabIssueWatchPlaceholders(t)),
+    [kind, t],
+  );
   return (
     <div className="space-y-4">
       <SectionTitle>{t("gitlab:taskAutomation")}</SectionTitle>
@@ -285,11 +291,18 @@ function AutomationFields({ kind, form, setForm }: FormFieldsProps) {
       <div className="space-y-1.5">
         <Label htmlFor={`${kind}-watch-prompt`}>{t("gitlab:taskPrompt")}</Label>
         <p className="text-xs text-muted-foreground">{t("gitlab:promptSentToTheSelectedAgent")}</p>
-        <Textarea
-          id={`${kind}-watch-prompt`}
+        <SettingsPromptEditor
           value={form.prompt}
-          onChange={(event) => setForm((current) => ({ ...current, prompt: event.target.value }))}
-          rows={5}
+          onChange={(value) => setForm((current) => ({ ...current, prompt: value }))}
+          placeholders={placeholders}
+          promptReferences
+          ariaLabel={t("gitlab:taskPrompt")}
+          testId={`${kind}-watch-prompt-editor`}
+          help={
+            <p className="text-xs text-muted-foreground">
+              {t("gitlab:promptSentToTheSelectedAgent")}
+            </p>
+          }
         />
       </div>
     </div>

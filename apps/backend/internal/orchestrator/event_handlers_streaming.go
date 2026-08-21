@@ -1190,6 +1190,11 @@ func (s *Service) transitionTaskSessionState(
 	}
 	if onChanged != nil {
 		onChanged()
+		// The hook may persist state-specific metadata after the state CAS. Read
+		// the row again so the state event carries that metadata to projections.
+		// Without this refresh, the event publishes the pre-hook snapshot and a
+		// typed launch error can be durable but invisible in the task summary.
+		refreshed = s.refreshTaskSessionOr(ctx, sessionID, refreshed)
 	}
 	if isTerminalSessionState(nextState) {
 		if err := s.expireTerminalClarificationWaiters(ctx, sessionID); err != nil {

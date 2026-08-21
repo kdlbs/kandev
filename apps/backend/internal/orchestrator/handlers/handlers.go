@@ -38,6 +38,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionSessionLaunch, h.wsLaunchSession)
 	d.RegisterFunc(ws.ActionSessionEnsure, h.wsEnsureSession)
 	d.RegisterFunc(ws.ActionSessionRecover, h.wsRecoverSession)
+	d.RegisterFunc(ws.ActionTaskLaunchRecover, h.wsRecoverTaskLaunch)
 	d.RegisterFunc(ws.ActionSessionResetContext, h.wsResetContext)
 	d.RegisterFunc(ws.ActionSessionStop, h.wsStopSession)
 	d.RegisterFunc(ws.ActionSessionDelete, h.wsDeleteSession)
@@ -281,6 +282,42 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to recover session: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+// wsRecoverTaskLaunch applies one task-scoped launch recovery action. The
+// service authorizes task_id before it reads the task, session, repository, or
+// workflow rows named by the request.
+func (h *Handlers) wsRecoverTaskLaunch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req orchestrator.TaskLaunchRecoveryRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if req.Action == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "action is required", nil)
+	}
+	if req.ErrorStamp == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "error_stamp is required", nil)
+	}
+	if req.Action != "mark_review_done" && req.TaskRepositoryID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_repository_id is required for branch recovery", nil)
+	}
+	if req.Action == "pick_base_branch" && req.BaseBranch == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "base_branch is required for branch selection", nil)
+	}
+
+	response, err := h.service.RecoverTaskLaunch(ctx, &req)
+	if err != nil {
+		h.logger.Error("failed to recover task launch",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.SessionID),
+			zap.String("action", req.Action),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
 type wsStopTaskRequest struct {

@@ -1472,22 +1472,21 @@ func (r *Repository) updateSessionMetadataJSON(
 }
 
 // SetSessionMetadataKey atomically sets a single key in the session's metadata
-// using SQLite's json_set. Unlike UpdateSessionMetadata (which does a full
-// replacement), this preserves all other metadata keys.
+// using the active database dialect. Unlike UpdateSessionMetadata (which does
+// a full replacement), this preserves all other metadata keys.
 func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
 	valueJSON, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("failed to serialize metadata value: %w", err)
 	}
-	now := time.Now().UTC()
-	path := "$." + key
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)), updated_at = ? WHERE id = ?
-	`), path, string(valueJSON), now, sessionID)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(metadataKeyUpdateQuery("task_sessions", r.db.DriverName())), metadataKeyUpdateArgs(r.db.DriverName(), key, string(valueJSON), r.nowUTC(), sessionID)...)
 	if err != nil {
 		return err
 	}
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
 	if rows == 0 {
 		return fmt.Errorf("agent session not found: %s", sessionID)
 	}
@@ -1697,6 +1696,48 @@ func (r *Repository) RemoveSessionMetadataKeyIfState(
 	}
 	rows, _ := result.RowsAffected()
 	return rows > 0, nil
+}
+
+// RemoveSessionMetadataKeyIfStamp removes a metadata object only when its
+// nested stamp still equals expectedStamp. The comparison and key removal are
+// one statement so a successful recovery cannot erase a newer session error.
+func (r *Repository) RemoveSessionMetadataKeyIfStamp(
+	ctx context.Context,
+	sessionID, key, expectedStamp string,
+) (bool, error) {
+	if strings.TrimSpace(expectedStamp) == "" {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	driver := r.db.DriverName()
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(driver) {
+		query = `
+			UPDATE task_sessions
+			SET metadata = (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END #- ARRAY[?]::text[])::text,
+				updated_at = ?
+			WHERE id = ?
+				AND jsonb_extract_path_text(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ?, 'stamp') = ?
+		`
+		args = []interface{}{key, now, sessionID, key, expectedStamp}
+	} else {
+		path := "$" + "." + key
+		query = `
+			UPDATE task_sessions
+			SET metadata = json_remove(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?),
+				updated_at = ?
+			WHERE id = ?
+				AND json_extract(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = ?
+		`
+		args = []interface{}{path, now, sessionID, path + ".stamp", expectedStamp}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
 }
 
 func setSessionMetadataKeyIfAbsentQuery(driver string) string {

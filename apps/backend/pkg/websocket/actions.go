@@ -84,6 +84,7 @@ const (
 
 	ActionTaskSessionList   = "task.session.list"
 	ActionTaskSessionStatus = "task.session.status"
+	ActionTaskLaunchRecover = "task.launch.recover"
 
 	// Unified session launch
 	ActionSessionLaunch       = "session.launch"

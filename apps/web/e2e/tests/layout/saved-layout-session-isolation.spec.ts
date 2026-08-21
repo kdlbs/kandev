@@ -313,7 +313,10 @@ test.describe("saved Dockview layouts", () => {
     await expect(testPage.getByText("parent session")).toBeVisible({ timeout: 30_000 });
 
     const sidebar = testPage.getByTestId("app-sidebar");
-    await sidebar.getByRole("button", { name: /Shared environment layout child/ }).click();
+    // Not getByRole("button", {name}): the row's title now also renders its
+    // own nested button (the keyboard-operable title-preview trigger) with
+    // the same accessible name, so a name-based query is ambiguous.
+    await sidebar.locator(`[data-task-row-id="${child.id}"]`).click();
     await expect(testPage).toHaveURL(new RegExp(`/t/${child.id}(?:\\?|$)`), { timeout: 10_000 });
 
     await expect

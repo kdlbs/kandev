@@ -2,19 +2,7 @@ import { restoreSeedRepositoryOrigin, test, expect } from "../../fixtures/test-b
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("PR watcher missing branch", () => {
-  /**
-   * When a task is created from a PR watcher and the PR's head branch has
-   * already been deleted (merged PR), clicking the task should show a
-   * user-friendly error in the chat with options to archive or delete.
-   *
-   * Setup:
-   *   - Create task with checkout_branch pointing to a non-existent branch
-   *     (simulates what the PR watcher creates when a PR is found)
-   *   - Associate a mock PR with the task
-   *   - Navigate to the task — frontend auto-prepares the session
-   *   - Environment preparation fails because the branch doesn't exist
-   *   - Assert the guidance message appears in chat
-   */
+  /** A deleted PR branch must use the typed launch-error surface. */
   test("shows one focused recovery panel when PR branch is deleted", async ({
     testPage,
     apiClient,
@@ -30,12 +18,12 @@ test.describe("PR watcher missing branch", () => {
 
     const prBranch = "feature/already-merged-and-deleted";
 
-    // Mock the PR that was already merged (branch deleted on remote)
+    // Mock an open PR whose head branch was deleted on the remote.
     await apiClient.mockGitHubAddPRs([
       {
         number: 999,
-        title: "Already merged feature",
-        state: "closed",
+        title: "Open feature with deleted branch",
+        state: "open",
         head_branch: prBranch,
         base_branch: "main",
         author_login: "test-user",
@@ -48,7 +36,7 @@ test.describe("PR watcher missing branch", () => {
     // no longer exists on remote (PR was merged, branch deleted).
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
-      "PR #999: Already merged feature",
+      "PR #999: Open feature with deleted branch",
       seedData.agentProfileId,
       {
         workflow_id: seedData.workflowId,
@@ -78,52 +66,39 @@ test.describe("PR watcher missing branch", () => {
       repo: "testrepo",
       pr_number: 999,
       pr_url: "https://github.com/testorg/testrepo/pull/999",
-      pr_title: "Already merged feature",
+      pr_title: "Open feature with deleted branch",
       head_branch: prBranch,
       base_branch: "main",
       author_login: "test-user",
-      state: "closed",
+      state: "open",
     });
+
+    await expect
+      .poll(
+        async () => {
+          const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+          return tasks.find((candidate) => candidate.id === task.id)?.status_summary?.active_error
+            ?.category;
+        },
+        { timeout: 60_000, message: "waiting for the durable PR launch-error projection" },
+      )
+      .toBe("base_branch_missing");
 
     // --- Navigate to the task session view ---
     await testPage.goto(`/t/${task.id}`);
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
+    await session.waitForLoad();
 
-    // --- Assert the primary recovery message appears once in chat ---
+    // --- Assert the bounded launch-error card appears once in chat ---
     const chat = session.activeChat();
-    const recovery = chat.getByTestId("missing-branch-recovery");
+    const recovery = chat.getByTestId("task-launch-error-entry");
     await expect(recovery).toHaveCount(1, { timeout: 30_000 });
-    await expect(
-      recovery.getByRole("heading", { name: "Branch is no longer available" }),
-    ).toBeVisible();
-    await expect(recovery).toContainText("***");
+    await expect(recovery).toContainText("The selected base branch is not available.");
     await expect(recovery).not.toContainText(prBranch);
-    await expect(recovery).toContainText("merged or deleted");
-
-    // The actionable recovery panel replaces the generic failed-agent banner.
-    await expect(
-      chat.getByRole("status", { name: /Session failed|Environment setup failed/i }),
-    ).toHaveCount(0);
-
-    // Diagnostics stay secondary until the user explicitly expands them.
-    const technicalDetails = recovery.locator("details");
-    const technicalOutput = technicalDetails.locator("pre");
-    await expect(technicalDetails).not.toHaveAttribute("open");
-    await expect(technicalOutput).not.toBeVisible();
-    await recovery.getByText("Technical details", { exact: true }).click();
-    await expect(technicalDetails).toHaveAttribute("open", "");
-    await expect(technicalOutput).toBeVisible();
-    await expect(technicalOutput).toContainText("couldn't find remote ref pull/999/head");
-
-    // Verify the action buttons are present
-    await expect(recovery.getByTestId("missing-branch-archive-button")).toBeVisible({
-      timeout: 5_000,
-    });
-    await expect(recovery.getByTestId("missing-branch-delete-button")).toBeVisible({
-      timeout: 5_000,
-    });
+    await expect(recovery.getByTestId("task-launch-archive-button")).toHaveCount(0);
+    await expect(recovery.getByTestId("task-launch-delete-button")).toHaveCount(0);
 
     await testPage.screenshot({
       path: testInfo.outputPath("missing-pr-branch-desktop.png"),
@@ -135,14 +110,6 @@ test.describe("PR watcher missing branch", () => {
     const failedSession = sessions.find((s) => s.state === "FAILED");
     expect(failedSession).toBeTruthy();
 
-    // Verify the guidance message metadata via API
-    const { messages } = await apiClient.listSessionMessages(failedSession!.id);
-    const guidanceMsg = messages.find(
-      (m: Record<string, unknown>) =>
-        (m.metadata as Record<string, unknown>)?.failure_kind === "missing_pr_branch",
-    );
-    expect(guidanceMsg).toBeTruthy();
-    expect((guidanceMsg as Record<string, unknown>).content).toContain("***");
-    expect((guidanceMsg as Record<string, unknown>).content).not.toContain(prBranch);
+    expect(failedSession!.metadata?.last_agent_error).toBeTruthy();
   });
 });

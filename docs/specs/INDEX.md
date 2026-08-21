@@ -74,6 +74,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [interrupted-task-indicator](tasks/interrupted-task-indicator.md) | complete |
 | [labels](tasks/labels.md) | shipped |
 | [title-length-limit](tasks/title-length-limit.md) | complete |
+| [rich-task-title-previews](tasks/rich-task-title-previews.md) | building |
 | [active clarification lifecycle](clarification-active-lifecycle/spec.md) | approved |
 | [model-unification](tasks/model-unification.md) | draft |
 | [run-scheduling](tasks/run-scheduling.md) | building |
@@ -221,6 +222,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [message-queue-send-now](ui/message-queue-send-now.md) | shipped |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
 | [settings-discovery](ui/settings-discovery.md) | shipped |
+| [settings-prompt-editor](ui/settings-prompt-editor.md) | shipped |
 | [settings-typography](settings-typography/spec.md) | draft |
 | [executor-settings-card-spacing](ui/executor-settings-card-spacing.md) | shipped |
 | [quick-chat-elevation](ui/quick-chat-elevation.md) | building |
@@ -308,6 +310,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [board-step-visibility-filter](board-step-visibility-filter/spec.md) | draft |
 | [shutdown-turn-failure-suppression](shutdown-turn-failure-suppression/spec.md) | draft |
 | [executor-profile-env-precedence](executor-profile-env-precedence/spec.md) | building |
+| [task-launch-failure-recovery](task-launch-failure-recovery/spec.md) | draft |
 
 ---
 

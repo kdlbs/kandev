@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- this file is the canonical Office entity contract. */
 // --- Office entity types ---
 //
 // Per ADR 0005 Wave E the canonical `AgentProfile`, `AgentRole`, `AgentStatus`,

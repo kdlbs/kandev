@@ -1,4 +1,6 @@
 import type { OfficeTaskPriority, OfficeTaskStatus, TaskLabel } from "./types";
+import type { TaskRepository } from "@/lib/types/http";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 export type OfficeTask = {
   id: string;
@@ -29,4 +31,6 @@ export type OfficeTask = {
   // UI renders a "System" badge for these when the dev toggle reveals
   // them.
   isSystem?: boolean;
+  statusSummary?: TaskStatusSummary | null;
+  repositories?: TaskRepository[];
 };

@@ -991,6 +991,9 @@ esac
 	if !strings.Contains(err.Error(), "not found locally or on remote") {
 		t.Fatalf("unexpected error message: %v", err)
 	}
+	if !errors.Is(err, ErrInvalidBaseBranch) {
+		t.Fatalf("error = %v, want ErrInvalidBaseBranch", err)
+	}
 }
 
 func TestFetchBranchToLocal_MissingRemoteRefReturnsError(t *testing.T) {
@@ -1032,6 +1035,9 @@ esac
 	}
 	if !strings.Contains(err.Error(), "couldn't find remote ref") {
 		t.Fatalf("expected error to contain git output, got: %v", err)
+	}
+	if !errors.Is(err, ErrInvalidBaseBranch) {
+		t.Fatalf("error = %v, want ErrInvalidBaseBranch", err)
 	}
 }
 

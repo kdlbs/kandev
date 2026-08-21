@@ -777,9 +777,9 @@ func TestPostgresClearRecoveredAgentErrors(t *testing.T) {
 			t.Fatalf("CreateTaskSession %s: %v", sessionID, err)
 		}
 	}
-	// Seeded with plain SQL on purpose: SetSessionMetadataKey is SQLite-only
-	// (json_set/json()), so using it here would fail on the seed rather than
-	// exercise the migration under test.
+	// Seeded with plain SQL on purpose so this migration fixture keeps its exact
+	// metadata shape. SetSessionMetadataKey's dialect-aware JSON update is
+	// covered by the dedicated PostgreSQL launch-error test.
 	lastAgentError := `{"last_agent_error":{"message":"agent crashed","occurred_at":"` +
 		occurredAt.Format(time.RFC3339Nano) + `"}}`
 	for _, sessionID := range []string{"pg-recovered", "pg-current"} {
