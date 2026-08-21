@@ -744,5 +744,7 @@
   "secretNameTooLong": "Name must be at most 100 bytes.",
   "keyValueAddItem": "Add Item",
   "keyValueKeyPlaceholder": "Key",
-  "keyValueValuePlaceholder": "Value"
+  "keyValueValuePlaceholder": "Value",
+  "externalMcpToolListPendingAgentPermissions": "List live command and tool permission requests for a task, including safe action details and the agent's exact choices.",
+  "externalMcpToolResolveAgentPermission": "Resolve one live permission request by selecting an exact option returned by the list tool."
 }

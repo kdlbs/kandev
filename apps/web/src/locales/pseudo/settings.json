@@ -744,5 +744,7 @@
   "secretNameTooLong": "Ńàḿē ḿũśţ ƀē àţ ḿōśţ 100 ƀŷţēś.",
   "keyValueAddItem": "Àďď Ĩţēḿ",
   "keyValueKeyPlaceholder": "Ķēŷ",
-  "keyValueValuePlaceholder": "Vàĺũē"
+  "keyValueValuePlaceholder": "Vàĺũē",
+  "externalMcpToolListPendingAgentPermissions": "Ĺĩśţ ĺĩvē ćōḿḿàńď àńď ţōōĺ ƥēŕḿĩśśĩōń ŕēǫũēśţś ƒōŕ à ţàśķ, ĩńćĺũďĩńĝ śàƒē àćţĩōń ďēţàĩĺś àńď ţĥē àĝēńţ'ś ēxàćţ ćĥōĩćēś.",
+  "externalMcpToolResolveAgentPermission": "Ŕēśōĺvē ōńē ĺĩvē ƥēŕḿĩśśĩōń ŕēǫũēśţ ƀŷ śēĺēćţĩńĝ àń ēxàćţ ōƥţĩōń ŕēţũŕńēď ƀŷ ţĥē ĺĩśţ ţōōĺ."
 }

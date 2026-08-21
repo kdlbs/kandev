@@ -138,6 +138,14 @@ export const EXTERNAL_MCP_TOOL_GROUPS: ExternalMcpToolGroup[] = [
         name: "list_task_sessions_kandev",
         descriptionKey: "settings:externalMcpToolListTaskSessions",
       },
+      {
+        name: "list_pending_agent_permissions_kandev",
+        descriptionKey: "settings:externalMcpToolListPendingAgentPermissions",
+      },
+      {
+        name: "resolve_agent_permission_kandev",
+        descriptionKey: "settings:externalMcpToolResolveAgentPermission",
+      },
       { name: "move_task_kandev", descriptionKey: "settings:externalMcpToolMoveTask" },
       { name: "delete_task_kandev", descriptionKey: "settings:externalMcpToolDeleteTask" },
       { name: "archive_task_kandev", descriptionKey: "settings:externalMcpToolArchiveTask" },

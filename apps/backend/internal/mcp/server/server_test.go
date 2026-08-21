@@ -1089,9 +1089,9 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// 13 workflow (incl. list_repositories + import_workflow + export_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 create_task + 2 task-dependency + 2 question-answering (list_pending_questions + answer_question) = 38.
+	// 13 workflow (incl. list_repositories + import_workflow + export_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 create_task + 2 task-dependency + 2 question-answering (list_pending_questions + answer_question) + 2 agent permission (list_pending_agent_permissions + resolve_agent_permission) = 40.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 38, len(tools))
+	assert.Equal(t, 40, len(tools))
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 
