@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -908,6 +909,7 @@ func TestTaskModelToDTO_MapsFields(t *testing.T) {
 		Description: "details",
 		State:       v1.TaskStateInProgress,
 		Priority:    "high",
+		Labels:      `["bug","plugin"]`,
 		Origin:      "agent_created",
 		CreatedAt:   created,
 		UpdatedAt:   created,
@@ -936,6 +938,16 @@ func TestTaskModelToDTO_MapsFields(t *testing.T) {
 	}
 	if dto.Metadata["k"] != "v" {
 		t.Errorf("Metadata = %+v, want k=v", dto.Metadata)
+	}
+	if got, want := dto.Labels, []string{"bug", "plugin"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Labels = %#v, want %#v", got, want)
+	}
+}
+
+func TestTaskModelToDTO_MalformedLabelsFallbackToEmpty(t *testing.T) {
+	dto := taskModelToDTO(&taskmodels.Task{ID: "task-1", Labels: `not-json`})
+	if len(dto.Labels) != 0 {
+		t.Errorf("Labels = %#v, want empty fallback for malformed stored JSON", dto.Labels)
 	}
 }
 

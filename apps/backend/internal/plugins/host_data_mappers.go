@@ -128,6 +128,7 @@ func taskModelToDTO(t *taskmodels.Task) pluginsdk.Task {
 		IsEphemeral:  t.IsEphemeral,
 		Repositories: repos,
 		Metadata:     t.Metadata,
+		Labels:       taskmodels.DecodeTaskLabels(t.Labels),
 	}
 }
 

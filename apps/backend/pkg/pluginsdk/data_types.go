@@ -110,6 +110,7 @@ type Task struct {
 	IsEphemeral  bool
 	Repositories []TaskRepository
 	Metadata     map[string]any
+	Labels       []string
 }
 
 func (t Task) toProto() (*pluginv1.Task, error) {
@@ -142,6 +143,7 @@ func (t Task) toProto() (*pluginv1.Task, error) {
 		IsEphemeral:  t.IsEphemeral,
 		Repositories: repos,
 		Metadata:     metadata,
+		Labels:       t.Labels,
 	}, nil
 }
 
@@ -178,6 +180,7 @@ func taskFromProto(p *pluginv1.Task) (Task, error) {
 		IsEphemeral:  p.GetIsEphemeral(),
 		Repositories: repos,
 		Metadata:     metadata,
+		Labels:       p.GetLabels(),
 	}, nil
 }
 
@@ -881,6 +884,8 @@ type CreateTaskInput struct {
 	// mirroring the REST/MCP create_task start_agent flag. Best-effort: a
 	// launch failure does not fail task creation.
 	StartAgent   bool
+	Priority     string
+	Labels       []string
 	Repositories []PluginTaskRepository
 	Launch       *PluginTaskLaunchOptions
 	Metadata     map[string]any
@@ -899,6 +904,8 @@ func (in CreateTaskInput) toProto() (*pluginv1.CreateTaskRequest, error) {
 		Description:    in.Description,
 		ParentId:       in.ParentID,
 		StartAgent:     in.StartAgent,
+		Priority:       in.Priority,
+		Labels:         in.Labels,
 		Repositories:   pluginTaskRepositoriesToProto(in.Repositories),
 		Launch:         in.Launch.toProto(),
 		Metadata:       metadata,
@@ -921,6 +928,8 @@ func createTaskInputFromProto(p *pluginv1.CreateTaskRequest) (CreateTaskInput, e
 		Description:    p.GetDescription(),
 		ParentID:       p.ParentId,
 		StartAgent:     p.GetStartAgent(),
+		Priority:       p.GetPriority(),
+		Labels:         p.GetLabels(),
 		Repositories:   pluginTaskRepositoriesFromProto(p.GetRepositories()),
 		Launch:         pluginTaskLaunchOptionsFromProto(p.GetLaunch()),
 		Metadata:       metadata,
@@ -1033,15 +1042,16 @@ func pluginTaskLaunchOptionsFromProto(p *pluginv1.PluginTaskLaunchOptions) *Plug
 
 // UpdateTaskInput is the Go-native mirror of
 // kandev.plugin.v1.UpdateTaskRequest. Every field except ID is optional: a nil
-// pointer leaves that field untouched, a non-nil pointer overwrites it. The
-// conservative field surface (title/description/state/workflow_step_id) is the
-// documented plugin-writable mask.
+// pointer leaves that field untouched, a non-nil pointer overwrites it. Labels
+// use *[]string so nil means unchanged and a non-nil empty slice clears them.
 type UpdateTaskInput struct {
 	ID             string
 	Title          *string
 	Description    *string
 	State          *string
 	WorkflowStepID *string
+	Priority       *string
+	Labels         *[]string
 }
 
 func (in UpdateTaskInput) toProto() *pluginv1.UpdateTaskRequest {
@@ -1051,6 +1061,8 @@ func (in UpdateTaskInput) toProto() *pluginv1.UpdateTaskRequest {
 		Description:    in.Description,
 		State:          in.State,
 		WorkflowStepId: in.WorkflowStepID,
+		Priority:       in.Priority,
+		Labels:         taskLabelsToProto(in.Labels),
 	}
 }
 
@@ -1064,7 +1076,27 @@ func updateTaskInputFromProto(p *pluginv1.UpdateTaskRequest) UpdateTaskInput {
 		Description:    p.Description,
 		State:          p.State,
 		WorkflowStepID: p.WorkflowStepId,
+		Priority:       p.Priority,
+		Labels:         taskLabelsFromProto(p.Labels),
 	}
+}
+
+func taskLabelsToProto(labels *[]string) *pluginv1.TaskLabels {
+	if labels == nil {
+		return nil
+	}
+	return &pluginv1.TaskLabels{Values: *labels}
+}
+
+func taskLabelsFromProto(labels *pluginv1.TaskLabels) *[]string {
+	if labels == nil {
+		return nil
+	}
+	values := labels.GetValues()
+	if values == nil {
+		values = []string{}
+	}
+	return &values
 }
 
 // MessageDispatch is the Go-native mirror of

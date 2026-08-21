@@ -109,6 +109,9 @@ type UpdateTaskRequest struct {
 	// leaves the relationship untouched; a pointer to "" clears it (un-nests
 	// back to a root task); a non-empty value nests it under that parent.
 	ParentID *string `json:"parent_id,omitempty"`
+	// Labels uses canonical JSON-array storage. nil leaves labels unchanged;
+	// a pointer to "[]" clears every label.
+	Labels *string `json:"labels,omitempty"`
 }
 
 // CreateWorkflowRequest contains the data for creating a new workflow
