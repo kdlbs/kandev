@@ -1,10 +1,11 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionStatus } from "@/lib/types/connection";
 import type { TaskWalkthrough } from "@/lib/types/http";
 import { StateProvider, useAppStore } from "@/components/state-provider";
 import { deleteTaskWalkthrough, getTaskWalkthrough } from "@/lib/api/domains/walkthrough-api";
 import { getOpenWalkthroughTaskId, setOpenWalkthroughTaskId } from "@/lib/walkthrough-open-state";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { WalkthroughOverlay } from "./walkthrough-overlay";
 
 vi.mock("@/lib/api/domains/walkthrough-api", () => ({
@@ -20,8 +21,32 @@ vi.mock("@/components/diff/walkthrough-floating-window", () => ({
   WalkthroughFloatingWindow: () => <div data-testid="walkthrough-floating" />,
 }));
 
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: vi.fn(),
+}));
+
 const TASK_ID = "task-1";
 const SECOND_TASK_ID = "task-2";
+const LAUNCHER_TEST_ID = "walkthrough-launcher";
+const FLOATING_TEST_ID = "walkthrough-floating";
+const DISCARD_BUTTON_TEST_ID = "walkthrough-discard";
+const DISCARD_CONFIRMATION_TEST_ID = "walkthrough-discard-confirmation";
+const ALERT_DIALOG_ROLE = "alertdialog";
+const CANCEL_BUTTON_NAME = "Cancel";
+const DISCARD_BUTTON_NAME = "Discard walkthrough";
+
+function responsive(isFinePointer: boolean): ReturnType<typeof useResponsiveBreakpoint> {
+  return {
+    breakpoint: isFinePointer ? "desktop" : "mobile",
+    isMobile: !isFinePointer,
+    isTablet: false,
+    isDesktop: isFinePointer,
+    isCompactDesktop: false,
+    isFullDesktop: isFinePointer,
+    isFinePointer,
+    usesDesktopWorkbench: isFinePointer,
+  };
+}
 
 function walkthrough(): TaskWalkthrough {
   return {
@@ -69,12 +94,17 @@ function renderOverlay({ followActiveTask = false } = {}) {
   );
 }
 
+function resetOverlayMocks() {
+  vi.mocked(getTaskWalkthrough).mockReset();
+  vi.mocked(deleteTaskWalkthrough).mockReset();
+  vi.mocked(useResponsiveBreakpoint).mockReturnValue(responsive(true));
+  setOpenWalkthroughTaskId(null);
+}
+
+afterEach(cleanup);
+
 describe("WalkthroughOverlay", () => {
-  beforeEach(() => {
-    vi.mocked(getTaskWalkthrough).mockReset();
-    vi.mocked(deleteTaskWalkthrough).mockReset();
-    setOpenWalkthroughTaskId(null);
-  });
+  beforeEach(resetOverlayMocks);
 
   it("waits for websocket connection before backfilling the launcher", async () => {
     vi.mocked(getTaskWalkthrough).mockResolvedValue(walkthrough());
@@ -86,7 +116,7 @@ describe("WalkthroughOverlay", () => {
 
     act(() => setConnectionStatus?.("connected"));
 
-    expect(await screen.findByTestId("walkthrough-launcher")).toBeTruthy();
+    expect(await screen.findByTestId(LAUNCHER_TEST_ID)).toBeTruthy();
     expect(getTaskWalkthrough).toHaveBeenCalledWith(TASK_ID);
   });
 
@@ -95,12 +125,12 @@ describe("WalkthroughOverlay", () => {
     renderOverlay();
     await waitFor(() => expect(setConnectionStatus).toBeTruthy());
     act(() => setConnectionStatus?.("connected"));
-    const launcher = await screen.findByTestId("walkthrough-launcher");
+    const launcher = await screen.findByTestId(LAUNCHER_TEST_ID);
 
     fireEvent.click(launcher);
 
     await waitFor(() => expect(getOpenWalkthroughTaskId()).toBe(TASK_ID));
-    expect(screen.getByTestId("walkthrough-floating")).toBeTruthy();
+    expect(screen.getByTestId(FLOATING_TEST_ID)).toBeTruthy();
     expect(launcher.className).not.toContain("bg-accent");
     const count = within(launcher).getByText("1/1");
     expect(count.className).toContain("text-foreground");
@@ -117,11 +147,90 @@ describe("WalkthroughOverlay", () => {
     const view = renderOverlay({ followActiveTask: true });
 
     act(() => setConnectionStatus?.("connected"));
-    fireEvent.click(await within(view.container).findByTestId("walkthrough-launcher"));
+    fireEvent.click(await within(view.container).findByTestId(LAUNCHER_TEST_ID));
     await waitFor(() => expect(getOpenWalkthroughTaskId()).toBe(TASK_ID));
 
     act(() => setActiveTask?.(SECOND_TASK_ID));
 
     await waitFor(() => expect(getOpenWalkthroughTaskId()).toBeNull());
+  });
+});
+
+describe("WalkthroughOverlay discard confirmation", () => {
+  beforeEach(resetOverlayMocks);
+
+  it("confirms fine-pointer discard in an anchored non-modal shell", async () => {
+    vi.mocked(getTaskWalkthrough).mockResolvedValue(walkthrough());
+    renderOverlay();
+    act(() => setConnectionStatus?.("connected"));
+
+    const launcher = await screen.findByTestId(LAUNCHER_TEST_ID);
+    fireEvent.click(screen.getByTestId(DISCARD_BUTTON_TEST_ID));
+
+    const confirmation = await screen.findByTestId(DISCARD_CONFIRMATION_TEST_ID);
+    expect(confirmation.getAttribute("role")).toBe("dialog");
+    expect(screen.queryByRole(ALERT_DIALOG_ROLE)).toBeNull();
+    expect(launcher).toBeTruthy();
+  });
+
+  it("cancels discard without closing the walkthrough", async () => {
+    vi.mocked(getTaskWalkthrough).mockResolvedValue(walkthrough());
+    renderOverlay();
+    act(() => setConnectionStatus?.("connected"));
+
+    const launcher = await screen.findByTestId(LAUNCHER_TEST_ID);
+    fireEvent.click(launcher);
+    await waitFor(() => expect(screen.getByTestId(FLOATING_TEST_ID)).toBeTruthy());
+    fireEvent.click(screen.getByTestId(DISCARD_BUTTON_TEST_ID));
+    fireEvent.click(
+      within(screen.getByTestId(DISCARD_CONFIRMATION_TEST_ID)).getByRole("button", {
+        name: CANCEL_BUTTON_NAME,
+      }),
+    );
+
+    await waitFor(() => expect(screen.queryByTestId(DISCARD_CONFIRMATION_TEST_ID)).toBeNull());
+    expect(screen.getByTestId(FLOATING_TEST_ID)).toBeTruthy();
+    expect(getOpenWalkthroughTaskId()).toBe(TASK_ID);
+  });
+
+  it("closes the local shell before discarding once", async () => {
+    vi.mocked(getTaskWalkthrough).mockResolvedValue(walkthrough());
+    let shellClosedBeforeDelete = false;
+    vi.mocked(deleteTaskWalkthrough).mockImplementation(async () => {
+      shellClosedBeforeDelete = screen.queryByTestId(DISCARD_CONFIRMATION_TEST_ID) === null;
+    });
+    renderOverlay();
+    act(() => setConnectionStatus?.("connected"));
+
+    await screen.findByTestId(LAUNCHER_TEST_ID);
+    fireEvent.click(screen.getByTestId(DISCARD_BUTTON_TEST_ID));
+    fireEvent.click(
+      within(screen.getByTestId(DISCARD_CONFIRMATION_TEST_ID)).getByRole("button", {
+        name: DISCARD_BUTTON_NAME,
+      }),
+    );
+
+    await waitFor(() => expect(deleteTaskWalkthrough).toHaveBeenCalledTimes(1));
+    expect(shellClosedBeforeDelete).toBe(true);
+    expect(screen.queryByTestId(DISCARD_CONFIRMATION_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(LAUNCHER_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(FLOATING_TEST_ID)).toBeNull();
+  });
+
+  it("morphs coarse-pointer discard into local touch actions", async () => {
+    vi.mocked(useResponsiveBreakpoint).mockReturnValue(responsive(false));
+    vi.mocked(getTaskWalkthrough).mockResolvedValue(walkthrough());
+    renderOverlay();
+    act(() => setConnectionStatus?.("connected"));
+
+    await screen.findByTestId(LAUNCHER_TEST_ID);
+    fireEvent.click(screen.getByTestId(DISCARD_BUTTON_TEST_ID));
+
+    const confirmation = await screen.findByTestId(DISCARD_CONFIRMATION_TEST_ID);
+    expect(confirmation.getAttribute("role")).toBe("group");
+    expect(screen.queryByRole(ALERT_DIALOG_ROLE)).toBeNull();
+    expect(
+      within(confirmation).getByRole("button", { name: DISCARD_BUTTON_NAME }).className,
+    ).toContain("h-11");
   });
 });
