@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
 }));
 
+let finePointer = true;
+
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mocks.toast }),
 }));
@@ -25,6 +27,9 @@ vi.mock("@/hooks/domains/azure-devops/use-azure-devops-projects", () => ({
     error: null,
     refresh: vi.fn(),
   }),
+}));
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({ isFinePointer: finePointer }),
 }));
 vi.mock("@/lib/api/domains/azure-devops-api", () => ({
   deleteAzureDevOpsConfig: mocks.deleteConfig,
@@ -62,9 +67,10 @@ vi.mock("@/components/azure-devops/azure-devops-default-queries", () => ({
 import { AzureDevOpsConnectionSection, AzureDevOpsIntegrationPage } from "./azure-devops-settings";
 
 const OLD_ORGANIZATION_URL = "https://dev.azure.com/old-org";
+const WORKSPACE_ID = "workspace-a";
 
 const config: AzureDevOpsConfig = {
-  workspaceId: "workspace-a",
+  workspaceId: WORKSPACE_ID,
   organizationUrl: OLD_ORGANIZATION_URL,
   defaultProjectId: "project-old",
   defaultProjectName: "Old project",
@@ -77,6 +83,7 @@ const config: AzureDevOpsConfig = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  finePointer = true;
   mocks.getConfig.mockResolvedValue(config);
   mocks.setConfig.mockResolvedValue({
     ...config,
@@ -86,13 +93,16 @@ beforeEach(() => {
   });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("AzureDevOpsConnectionSection", () => {
   it("links to the organization PAT page and explains the required read scopes", async () => {
     render(
       <SettingsSaveProvider>
-        <AzureDevOpsConnectionSection workspaceId="workspace-a" />
+        <AzureDevOpsConnectionSection workspaceId={WORKSPACE_ID} />
       </SettingsSaveProvider>,
     );
 
@@ -123,7 +133,7 @@ describe("AzureDevOpsConnectionSection", () => {
   it("does not create a token link from a non-Azure organization URL", async () => {
     render(
       <SettingsSaveProvider>
-        <AzureDevOpsConnectionSection workspaceId="workspace-a" />
+        <AzureDevOpsConnectionSection workspaceId={WORKSPACE_ID} />
       </SettingsSaveProvider>,
     );
 
@@ -144,7 +154,7 @@ describe("AzureDevOpsConnectionSection", () => {
   it("removes trailing slashes before saving an organization URL", async () => {
     render(
       <SettingsSaveProvider>
-        <AzureDevOpsConnectionSection workspaceId="workspace-a" />
+        <AzureDevOpsConnectionSection workspaceId={WORKSPACE_ID} />
       </SettingsSaveProvider>,
     );
     const organization = await screen.findByTestId("azure-devops-organization");
@@ -156,7 +166,7 @@ describe("AzureDevOpsConnectionSection", () => {
     fireEvent.click(screen.getByTestId("azure-devops-save-button"));
 
     await waitFor(() => expect(mocks.setConfig).toHaveBeenCalledTimes(1));
-    expect(mocks.setConfig).toHaveBeenCalledWith("workspace-a", {
+    expect(mocks.setConfig).toHaveBeenCalledWith(WORKSPACE_ID, {
       organizationUrl: OLD_ORGANIZATION_URL,
       defaultProjectId: "project-old",
       defaultProjectName: "Old project",
@@ -168,7 +178,7 @@ describe("AzureDevOpsConnectionSection", () => {
   it("omits a project selected for the previous organization", async () => {
     render(
       <SettingsSaveProvider>
-        <AzureDevOpsConnectionSection workspaceId="workspace-a" />
+        <AzureDevOpsConnectionSection workspaceId={WORKSPACE_ID} />
       </SettingsSaveProvider>,
     );
     const organization = await screen.findByTestId("azure-devops-organization");
@@ -181,7 +191,7 @@ describe("AzureDevOpsConnectionSection", () => {
     fireEvent.click(screen.getByTestId("azure-devops-save-button"));
 
     await waitFor(() => expect(mocks.setConfig).toHaveBeenCalledTimes(1));
-    expect(mocks.setConfig).toHaveBeenCalledWith("workspace-a", {
+    expect(mocks.setConfig).toHaveBeenCalledWith(WORKSPACE_ID, {
       organizationUrl: "https://dev.azure.com/new-org",
       defaultProjectId: undefined,
       defaultProjectName: undefined,
@@ -191,12 +201,67 @@ describe("AzureDevOpsConnectionSection", () => {
   });
 });
 
+describe("AzureDevOpsConnectionSection removal", () => {
+  it("uses local fine-pointer confirmation and calls removal once after confirmation", async () => {
+    const nativeConfirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", nativeConfirm);
+    render(
+      <SettingsSaveProvider>
+        <AzureDevOpsConnectionSection workspaceId={WORKSPACE_ID} />
+      </SettingsSaveProvider>,
+    );
+
+    const removeButton = await screen.findByTestId("azure-devops-delete-button");
+    fireEvent.click(removeButton);
+
+    expect(nativeConfirm).not.toHaveBeenCalled();
+    const popover = screen.getByTestId("azure-devops-remove-confirm-popover");
+    expect(mocks.deleteConfig).not.toHaveBeenCalled();
+    fireEvent.click(within(popover).getByRole("button", { name: "Cancel" }));
+    expect(mocks.deleteConfig).not.toHaveBeenCalled();
+
+    fireEvent.click(removeButton);
+    fireEvent.click(
+      within(screen.getByTestId("azure-devops-remove-confirm-popover")).getByTestId(
+        "azure-devops-remove-confirm",
+      ),
+    );
+    await waitFor(() => expect(mocks.deleteConfig).toHaveBeenCalledTimes(1));
+    expect(mocks.deleteConfig).toHaveBeenCalledWith(WORKSPACE_ID);
+  });
+
+  it("morphs removal into touch-sized inline confirmation on coarse pointers", async () => {
+    finePointer = false;
+    render(
+      <SettingsSaveProvider>
+        <AzureDevOpsConnectionSection workspaceId={WORKSPACE_ID} />
+      </SettingsSaveProvider>,
+    );
+
+    const removeButton = await screen.findByTestId("azure-devops-delete-button");
+    fireEvent.click(removeButton);
+    const inline = screen.getByTestId("azure-devops-remove-inline-confirmation");
+    expect(screen.queryByTestId("azure-devops-remove-confirm-popover")).toBeNull();
+    expect(within(inline).getByTestId("azure-devops-remove-confirm").className).toContain("h-11");
+
+    fireEvent.click(within(inline).getByRole("button", { name: "Cancel" }));
+    expect(mocks.deleteConfig).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("azure-devops-delete-button"));
+    fireEvent.click(
+      within(screen.getByTestId("azure-devops-remove-inline-confirmation")).getByTestId(
+        "azure-devops-remove-confirm",
+      ),
+    );
+    await waitFor(() => expect(mocks.deleteConfig).toHaveBeenCalledTimes(1));
+  });
+});
+
 describe("AzureDevOpsIntegrationPage", () => {
   it("matches GitHub's analogous section order and includes default queries", async () => {
     render(
       <StateProvider>
         <SettingsSaveProvider>
-          <AzureDevOpsIntegrationPage workspaceId="workspace-a" />
+          <AzureDevOpsIntegrationPage workspaceId={WORKSPACE_ID} />
         </SettingsSaveProvider>
       </StateProvider>,
     );
