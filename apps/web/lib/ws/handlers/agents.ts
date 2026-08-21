@@ -3,6 +3,7 @@ import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import {
   compareTimestamps,
+  isStaleAvailableAgentsSnapshot,
   refreshProfileCapabilities,
   refreshSettingsAgentsCapabilities,
   toAgentProfileOption,
@@ -197,23 +198,26 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "agent.available.updated": (message) => {
       const agents = message.payload.agents ?? [];
-      store.setState((state) => ({
-        ...state,
-        availableAgents: {
-          items: agents,
-          tools: message.payload.tools ?? state.availableAgents.tools,
-          loaded: true,
-          loading: false,
-        },
-        agentProfiles: {
-          ...state.agentProfiles,
-          items: refreshProfileCapabilities(state.agentProfiles.items, agents),
-        },
-        settingsAgents: {
-          ...state.settingsAgents,
-          items: refreshSettingsAgentsCapabilities(state.settingsAgents.items, agents),
-        },
-      }));
+      store.setState((state) => {
+        if (isStaleAvailableAgentsSnapshot(state.availableAgents.items, agents)) return state;
+        return {
+          ...state,
+          availableAgents: {
+            items: agents,
+            tools: message.payload.tools ?? state.availableAgents.tools,
+            loaded: true,
+            loading: false,
+          },
+          agentProfiles: {
+            ...state.agentProfiles,
+            items: refreshProfileCapabilities(state.agentProfiles.items, agents),
+          },
+          settingsAgents: {
+            ...state.settingsAgents,
+            items: refreshSettingsAgentsCapabilities(state.settingsAgents.items, agents),
+          },
+        };
+      });
     },
     "agent.install.started": (message) => {
       // Payload is the full job snapshot (queued → running transitions both emit this).

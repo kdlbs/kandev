@@ -18,7 +18,10 @@ import { useAppStore } from "@/components/state-provider";
 import { isHealthyAgentProfile } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
-import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
+import {
+  isAgentConfiguredOnExecutor,
+  shouldFilterHandoffByHostHealth,
+} from "@/lib/agent-executor-compat";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import { useTranslation } from "react-i18next";
@@ -46,9 +49,10 @@ export function useHandoffProfiles(taskId: string, enabled = true): HandoffProfi
   const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
 
   return useMemo(() => {
+    const filterByHostHealth = shouldFilterHandoffByHostHealth(executorProfile);
     return agentProfiles
       .filter(isSelectableAgentProfile)
-      .filter((profile) => isHealthyAgentProfile(profile))
+      .filter((profile) => !filterByHostHealth || isHealthyAgentProfile(profile))
       .map((profile) => {
         const { label, agentName } = profileDisplayLabel(profile);
         let disabled = false;

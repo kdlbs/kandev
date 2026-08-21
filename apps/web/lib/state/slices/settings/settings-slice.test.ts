@@ -8,6 +8,7 @@ import type { AvailableAgent, CapabilityStatus } from "@/lib/types/http-agents";
 
 const AGENT_NAME = "claude-acp";
 const TIMESTAMP = "2026-07-26T10:00:00Z";
+const NEWER_TIMESTAMP = "2026-07-26T11:00:00Z";
 
 function makeStore() {
   return create<SettingsSlice>()(immer((set, get, store) => createSettingsSlice(set, get, store)));
@@ -59,7 +60,7 @@ describe("settings update jobs", () => {
     };
 
     actions.setAgentUpdateJobs([
-      updateJob({ job_id: "older", started_at: "2026-07-26T10:00:00Z" }),
+      updateJob({ job_id: "older", started_at: TIMESTAMP }),
       updateJob({ job_id: "newer", started_at: "2026-07-26T10:01:00Z" }),
     ]);
 
@@ -105,7 +106,7 @@ describe("settings update jobs", () => {
       updateJob({
         job_id: "original",
         status: "failed",
-        started_at: "2026-07-26T10:00:00Z",
+        started_at: TIMESTAMP,
       }),
     );
 
@@ -231,6 +232,31 @@ function seedSingleAgentProfile(
 }
 
 describe("setAvailableAgents capability propagation", () => {
+  it("does not let an older HTTP snapshot clobber a newer capability snapshot", () => {
+    const store = makeStore();
+    const actions = store.getState();
+    seedSingleAgentProfile(store, "not_installed");
+
+    actions.setAvailableAgents([
+      notInstalledAvailableAgent({
+        available: true,
+        model_config: {
+          default_model: "default",
+          available_models: [],
+          supports_dynamic_models: false,
+          status: "ok",
+        },
+        updated_at: NEWER_TIMESTAMP,
+      }),
+    ]);
+    actions.setAvailableAgentsLoading(true);
+    actions.setAvailableAgents([notInstalledAvailableAgent({ updated_at: TIMESTAMP })]);
+
+    expect(store.getState().availableAgents.items[0]?.model_config.status).toBe("ok");
+    expect(store.getState().agentProfiles.items[0]?.capability_status).toBe("ok");
+    expect(store.getState().availableAgents.loading).toBe(false);
+  });
+
   it("flips a profile and its settingsAgents entry from probing to the settled status a poll snapshot reports", () => {
     const store = makeStore();
     const actions = store.getState();

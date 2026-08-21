@@ -62,10 +62,11 @@ async function createProfiles(
   const profileA = await apiClient.createAgentProfile(agentId, "Handoff Filter Profile A", {
     model: "mock-fast",
   });
-  const profileB = await apiClient.createAgentProfile(agentId, "Handoff Filter Profile B", {
+  const profileBAgentId = agents[1]?.id ?? agentId;
+  const profileB = await apiClient.createAgentProfile(profileBAgentId, "Handoff Filter Profile B", {
     model: "mock-slow",
   });
-  return { profileA, profileB };
+  return { profileA, profileB, profilesShareAgent: profileBAgentId === agentId };
 }
 
 test.describe("Session handoff filters unhealthy profiles", () => {
@@ -76,7 +77,7 @@ test.describe("Session handoff filters unhealthy profiles", () => {
   }) => {
     test.setTimeout(90_000);
 
-    const { profileA, profileB } = await createProfiles(apiClient);
+    const { profileA, profileB, profilesShareAgent } = await createProfiles(apiClient);
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -116,11 +117,29 @@ test.describe("Session handoff filters unhealthy profiles", () => {
     await expect(session.handoffProfileItem(profileB.id)).toBeVisible({ timeout: 5_000 });
     await testPage.keyboard.press("Escape");
 
-    await markProfileCapabilityNotInstalled(testPage, profileB.id);
+    // A real agent.available.updated event changes every profile for the
+    // agent. Use separate agents for the mixed-health assertion when the
+    // fixture provides them. The single-agent mock must mark both profiles
+    // unhealthy instead of creating an impossible mixed state.
+    if (profilesShareAgent) {
+      await markProfileCapabilityNotInstalled(testPage, profileA.id);
+      await markProfileCapabilityNotInstalled(testPage, profileB.id);
+    } else {
+      await markProfileCapabilityNotInstalled(testPage, profileB.id);
+    }
 
     await session.sessionTabBySessionId(session1Id).click({ button: "right" });
     await session.handoffSubmenu().hover();
-    await expect(session.handoffProfileItem(profileA.id)).toBeVisible({ timeout: 5_000 });
+    if (profilesShareAgent) {
+      await expect(session.handoffProfileItem(profileA.id)).not.toBeVisible();
+      await expect(
+        testPage.getByText(
+          "No agent profiles are ready. Install or reconnect an agent CLI in Settings → Agents.",
+        ),
+      ).toBeVisible();
+    } else {
+      await expect(session.handoffProfileItem(profileA.id)).toBeVisible({ timeout: 5_000 });
+    }
     await expect(session.handoffProfileItem(profileB.id)).not.toBeVisible();
   });
 });

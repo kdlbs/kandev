@@ -20,7 +20,17 @@ const PROFILE_B: AgentProfileOption = {
 };
 
 let mockProfiles: AgentProfileOption[] = [PROFILE_A, PROFILE_B];
-let mockExecutorProfile: ExecutorProfile | null = null;
+const LOCAL_EXECUTOR_PROFILE: ExecutorProfile = {
+  id: "exec-profile-1",
+  name: "Default",
+  executor_id: "executor-1",
+  executor_type: "local_pc",
+  prepare_script: "",
+  cleanup_script: "",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+};
+let mockExecutorProfile: ExecutorProfile | null = LOCAL_EXECUTOR_PROFILE;
 let mockAuthLoaded = true;
 let mockAuthSpecs: Record<string, unknown> = {};
 const mockUseTaskExecutorProfile = vi.fn(
@@ -44,6 +54,8 @@ vi.mock("@/hooks/domains/settings/use-remote-auth-specs", () => ({
 }));
 
 vi.mock("@/lib/agent-executor-compat", () => ({
+  shouldFilterHandoffByHostHealth: (executor: ExecutorProfile | null) =>
+    Boolean(executor && ["local", "local_pc", "worktree"].includes(executor.executor_type ?? "")),
   isAgentConfiguredOnExecutor: (
     profile: AgentProfileOption,
     _executor: ExecutorProfile,
@@ -56,7 +68,7 @@ import { useHandoffProfiles, useHasSelectableAgentProfiles } from "./handoff-pro
 describe("useHandoffProfiles", () => {
   afterEach(() => {
     mockProfiles = [PROFILE_A, PROFILE_B];
-    mockExecutorProfile = null;
+    mockExecutorProfile = LOCAL_EXECUTOR_PROFILE;
     mockAuthLoaded = true;
     mockAuthSpecs = {};
     mockUseTaskExecutorProfile.mockClear();
@@ -77,19 +89,19 @@ describe("useHandoffProfiles", () => {
   });
 
   it("marks incompatible profiles disabled when executor profile is known", () => {
-    mockExecutorProfile = {
-      id: "exec-profile-1",
-      name: "Default",
-      executor_id: "executor-1",
-      executor_type: "local_pc",
-      prepare_script: "",
-      cleanup_script: "",
-      created_at: "2026-01-01T00:00:00Z",
-      updated_at: "2026-01-01T00:00:00Z",
-    };
+    mockExecutorProfile = LOCAL_EXECUTOR_PROFILE;
     const { result } = renderHook(() => useHandoffProfiles("task-1"));
     expect(result.current.find((p) => p.id === "profile-a")?.disabled).toBe(false);
     expect(result.current.find((p) => p.id === "profile-b")?.disabled).toBe(true);
+  });
+
+  it("keeps unhealthy profiles visible for an executor that runs agents off-host", () => {
+    mockExecutorProfile = { ...LOCAL_EXECUTOR_PROFILE, executor_type: "local_docker" };
+    mockProfiles = [PROFILE_A, { ...PROFILE_B, capability_status: "not_installed" }];
+
+    const { result } = renderHook(() => useHandoffProfiles("task-1"));
+
+    expect(result.current.map((p) => p.id)).toEqual(["profile-a", "profile-b"]);
   });
 
   it("returns empty list when no profiles configured", () => {

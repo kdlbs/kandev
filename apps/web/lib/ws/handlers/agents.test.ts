@@ -14,6 +14,7 @@ function makeStore() {
 }
 
 const TIMESTAMP = "2026-07-26T10:00:00Z";
+const NEWER_TIMESTAMP = "2026-07-26T11:00:00Z";
 const NOTIFICATION_TYPE = "notification";
 const PROFILE_CREATED = "agent.profile.created";
 const PROFILE_UPDATED = "agent.profile.updated";
@@ -129,7 +130,7 @@ describe("agent update job websocket handlers", () => {
       status: "updating",
       current_version: "1.0.0",
       target_version: "1.1.0",
-      started_at: "2026-07-26T10:00:00Z",
+      started_at: TIMESTAMP,
     };
 
     handlers["agent.update.started"](message("agent.update.started", snapshot));
@@ -176,7 +177,7 @@ describe("agent profile events", () => {
   it("does not let a delayed profile event overwrite newer stored state", () => {
     const store = makeStore();
     const handlers = handlersFor(store);
-    const newer = profilePayload({ model: "new-model", updated_at: "2026-07-26T11:00:00Z" });
+    const newer = profilePayload({ model: "new-model", updated_at: NEWER_TIMESTAMP });
     handlers[PROFILE_CREATED](message(PROFILE_CREATED, { profile: newer }, "2026-07-26T11:05:00Z"));
     // A delayed older event (e.g. a replayed duplicate response) must not
     // regress the newer revision.
@@ -191,9 +192,7 @@ describe("agent profile events", () => {
     const store = makeStore();
     const handlers = handlersFor(store);
 
-    handlers[PROFILE_CREATED](
-      message(PROFILE_CREATED, { profile: profilePayload() }, "2026-07-26T10:00:00Z"),
-    );
+    handlers[PROFILE_CREATED](message(PROFILE_CREATED, { profile: profilePayload() }, TIMESTAMP));
     expect(store.getState().agentProfiles.items).toHaveLength(1);
 
     handlers[PROFILE_DELETED](
@@ -202,9 +201,7 @@ describe("agent profile events", () => {
     expect(store.getState().agentProfiles.items).toHaveLength(0);
 
     // A create event produced BEFORE the deletion is stale: no resurrection.
-    handlers[PROFILE_CREATED](
-      message(PROFILE_CREATED, { profile: profilePayload() }, "2026-07-26T11:00:00Z"),
-    );
+    handlers[PROFILE_CREATED](message(PROFILE_CREATED, { profile: profilePayload() }, TIMESTAMP));
     expect(store.getState().agentProfiles.items).toHaveLength(0);
 
     // A genuinely newer create (after the deletion) wins and clears the
@@ -263,6 +260,34 @@ describe("agent profile events", () => {
 });
 
 describe("agent.available.updated capability refresh", () => {
+  it("does not let an older websocket snapshot clobber a newer capability snapshot", () => {
+    const store = makeStore();
+    const handlers = handlersFor(store);
+
+    handlers[AVAILABLE_UPDATED](
+      message(AVAILABLE_UPDATED, {
+        agents: [
+          availableAgentPayload({
+            model_config: {
+              default_model: "default",
+              available_models: [],
+              supports_dynamic_models: false,
+              status: "ok",
+            },
+            updated_at: NEWER_TIMESTAMP,
+          }),
+        ],
+      }),
+    );
+    handlers[AVAILABLE_UPDATED](
+      message(AVAILABLE_UPDATED, {
+        agents: [notInstalledAvailableAgentPayload()],
+      }),
+    );
+
+    expect(store.getState().availableAgents.items[0]?.model_config.status).toBe("ok");
+  });
+
   it("refreshes capability_status on matching profiles when agent.available.updated reports the agent is ready", () => {
     const store = makeStore();
     const handlers = handlersFor(store);
@@ -440,7 +465,7 @@ describe("agent profile event ordering", () => {
     const current = profilePayload({
       id: "p-stale",
       model: "new-model",
-      updated_at: "2026-07-26T11:00:00Z",
+      updated_at: NEWER_TIMESTAMP,
     });
     handlers[PROFILE_CREATED](
       message(PROFILE_CREATED, { profile: current }, "2026-07-26T11:05:00Z"),

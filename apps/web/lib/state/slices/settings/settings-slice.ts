@@ -4,6 +4,7 @@ import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revis
 import {
   refreshProfileCapabilities,
   refreshSettingsAgentsCapabilities,
+  isStaleAvailableAgentsSnapshot,
   type SettingsSlice,
   type SettingsSliceState,
 } from "./types";
@@ -212,6 +213,13 @@ function createCoreActions(
       }),
     setAvailableAgents: (agents, tools) =>
       set((draft) => {
+        if (isStaleAvailableAgentsSnapshot(draft.availableAgents.items, agents)) {
+          // The request completed, even though its data is stale. Keep the
+          // newer snapshot but do not leave the polling indicator stuck.
+          draft.availableAgents.loading = false;
+          draft.availableAgents.loaded = true;
+          return;
+        }
         draft.availableAgents.items = agents;
         if (tools) draft.availableAgents.tools = tools;
         draft.availableAgents.loading = false;

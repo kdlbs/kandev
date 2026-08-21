@@ -803,7 +803,7 @@
   "noAgentProfileConfiguredFor": "Não há nenhum perfil de agente configurado para <2>“{{name}}”</2>. Configure as credenciais em Definições → Executores.",
   "noAgentProfilesConfigured": "Nenhum perfil de agente configurado",
   "noAgentProfilesConfiguredAddOne": "Nenhum perfil de agente configurado. Adicione um primeiro em Definições → Agentes.",
-  "noAgentProfilesReadyForHandoff": "Nenhum perfil de agente está pronto. Instale ou reconecte um CLI de agente em Definições → Agentes.",
+  "noAgentProfilesReadyForHandoff": "Nenhum perfil de agente está pronto. Instale ou volte a ligar a CLI do agente em Definições → Agentes.",
   "noAgentRunning": "nenhum agente em execução",
   "noAgentsFound": "Nenhum agente encontrado.",
   "noAgentsFound2": "Nenhum agente encontrado",

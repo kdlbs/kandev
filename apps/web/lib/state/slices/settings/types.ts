@@ -96,6 +96,33 @@ export function compareTimestamps(a: string | undefined, b: string | undefined):
   return aMs - bMs;
 }
 
+function latestAvailableAgentRevision(agents: AvailableAgent[]): string | undefined {
+  return agents.reduce<string | undefined>(
+    (latest, agent) =>
+      compareTimestamps(agent.updated_at, latest) > 0 ? agent.updated_at : latest,
+    undefined,
+  );
+}
+
+/**
+ * Returns true when an available-agent snapshot is older than the one already
+ * in the store. HTTP polling and WebSocket broadcasts can complete in either
+ * order, so an older response must not replace a newer capability state.
+ * Empty snapshots are treated as stale when a timestamped snapshot is already
+ * present. This protects the store from an error fallback clearing good data.
+ */
+export function isStaleAvailableAgentsSnapshot(
+  current: AvailableAgent[],
+  incoming: AvailableAgent[],
+): boolean {
+  if (current.length === 0) return false;
+  const currentRevision = latestAvailableAgentRevision(current);
+  const incomingRevision = latestAvailableAgentRevision(incoming);
+  if (currentRevision && !incomingRevision) return true;
+  if (!currentRevision || !incomingRevision) return false;
+  return compareTimestamps(incomingRevision, currentRevision) < 0;
+}
+
 /**
  * Merge two option lists by ID, keeping the NEWER revision per id (missing or
  * equal updatedAt defers to the rebuilt option). A newer WebSocket-delivered
@@ -139,10 +166,13 @@ export function toProfileCapability(agent: AvailableAgent): {
   capability_status?: CapabilityStatus;
   capability_error?: string;
 } {
+  if (agent.available === false) {
+    return {
+      capability_status: "not_installed",
+      capability_error: agent.model_config.error,
+    };
+  }
   if (agent.model_config.status === "not_configured") {
-    if (agent.available === false) {
-      return { capability_status: "not_installed", capability_error: undefined };
-    }
     return { capability_status: undefined, capability_error: undefined };
   }
   return {
