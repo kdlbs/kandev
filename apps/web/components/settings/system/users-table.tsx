@@ -87,6 +87,7 @@ type UserRowProps = {
   user: AuthUser;
   isLastActiveAdmin: boolean;
   isFinePointer: boolean;
+  isMutating: boolean;
   pending: PendingAction | null;
   onToggleRole: (user: AuthUser) => void;
   onToggleStatus: (user: AuthUser) => void;
@@ -158,6 +159,7 @@ function UserActionRegion({
   user,
   isLastActiveAdmin,
   isFinePointer,
+  isMutating,
   pending,
   onToggleRole,
   onToggleStatus,
@@ -198,6 +200,7 @@ function UserActionRegion({
         statusAnchorRef={statusAnchorRef}
         onToggleRole={onToggleRole}
         onToggleStatus={onToggleStatus}
+        isMutating={isMutating}
       />
       {isFinePointer && action ? (
         <UserConfirmPopover
@@ -215,6 +218,7 @@ function UserActionButtons({
   user,
   isLastActiveAdmin,
   isFinePointer,
+  isMutating,
   roleAnchorRef,
   statusAnchorRef,
   onToggleRole,
@@ -223,6 +227,7 @@ function UserActionButtons({
   user: AuthUser;
   isLastActiveAdmin: boolean;
   isFinePointer: boolean;
+  isMutating: boolean;
   roleAnchorRef: RefObject<HTMLButtonElement | null>;
   statusAnchorRef: RefObject<HTMLButtonElement | null>;
   onToggleRole: (user: AuthUser) => void;
@@ -245,7 +250,7 @@ function UserActionButtons({
         variant="ghost"
         className={roleButtonClassName}
         onClick={() => onToggleRole(user)}
-        disabled={isLastActiveAdmin}
+        disabled={isLastActiveAdmin || isMutating}
         data-testid="users-table-toggle-role"
       >
         {/* Two whole-word variants get their own keys rather than
@@ -259,7 +264,7 @@ function UserActionButtons({
         variant="ghost"
         className={statusButtonClassName}
         onClick={() => onToggleStatus(user)}
-        disabled={isLastActiveAdmin}
+        disabled={isLastActiveAdmin || isMutating}
         data-testid="users-table-toggle-status"
       >
         {user.status === "disabled" ? t("system:usersEnable") : t("system:usersDisable")}
@@ -327,6 +332,7 @@ function UsersTableList({
   onToggleRole,
   onToggleStatus,
   pending,
+  isMutating,
   onCancel,
   onConfirm,
 }: {
@@ -334,11 +340,12 @@ function UsersTableList({
   onToggleRole: (u: AuthUser) => void;
   onToggleStatus: (u: AuthUser) => void;
   pending: PendingAction | null;
+  isMutating: boolean;
   onCancel: () => void;
   onConfirm: (action: PendingAction) => void;
 }) {
   const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   // Mirrors the backend last-admin guard (ensureAnotherAdmin): an active
   // admin cannot be demoted or disabled when no other active admin exists,
   // so those toggles are greyed out on that row.
@@ -348,6 +355,7 @@ function UsersTableList({
     user,
     isLastActiveAdmin: user.role === "admin" && user.status === "active" && activeAdminCount === 1,
     isFinePointer,
+    isMutating,
     pending,
     onToggleRole,
     onToggleStatus,
@@ -355,7 +363,7 @@ function UsersTableList({
     onConfirm,
   });
 
-  if (!isFinePointer) {
+  if (isMobile) {
     return (
       <div className="space-y-3" data-testid="users-table-mobile-list">
         {users.map((user) => (
@@ -391,6 +399,7 @@ export function UsersTable() {
   const [createOpen, setCreateOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [pending, setPending] = useState<PendingAction | null>(null);
+  const [activeMutation, setActiveMutation] = useState<PendingAction | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -398,6 +407,8 @@ export function UsersTable() {
   }, [pending, users]);
 
   const onConfirm = async (action: PendingAction) => {
+    if (activeMutation) return;
+    setActiveMutation(action);
     try {
       await updateUser(action.user.id, action.next);
       await reload();
@@ -408,7 +419,8 @@ export function UsersTable() {
         description: err instanceof ApiError ? err.message : t("system:usersLastAdminGuard"),
       });
     } finally {
-      setPending(null);
+      setPending((current) => (current === action ? null : current));
+      setActiveMutation((current) => (current === action ? null : current));
     }
   };
 
@@ -455,6 +467,7 @@ export function UsersTable() {
             onToggleRole={(u) => setPending(roleTogglePending(u, t))}
             onToggleStatus={(u) => setPending(statusTogglePending(u, t))}
             pending={pending}
+            isMutating={activeMutation !== null}
             onCancel={() => setPending(null)}
             onConfirm={(action) => void onConfirm(action)}
           />

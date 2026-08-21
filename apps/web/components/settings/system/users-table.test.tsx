@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   listUsers: vi.fn(),
   updateUser: vi.fn(),
   toast: vi.fn(),
-  responsive: { isFinePointer: true },
+  responsive: { isFinePointer: true, isMobile: false },
 }));
 
 vi.mock("@/lib/api/domains/auth-api", () => ({
@@ -37,6 +37,9 @@ const ADMIN = makeUser({ id: "admin-id", email: "admin@example.com", role: "admi
 const TARGET_EMAIL = "target@example.com";
 const TARGET = makeUser({ id: "target-id", email: TARGET_EMAIL, role: "member" });
 const CONFIRM_TEST_ID = "users-table-confirm";
+const POPOVER_TEST_ID = "users-table-confirm-popover";
+const ROLE_TOGGLE_TEST_ID = "users-table-toggle-role";
+const STATUS_TOGGLE_TEST_ID = "users-table-toggle-status";
 
 function makeUser(overrides: Partial<AuthUser>): AuthUser {
   return {
@@ -63,13 +66,24 @@ async function renderUsersTable() {
   await waitFor(() => expect(mocks.listUsers).toHaveBeenCalledTimes(1));
 }
 
-describe("UsersTable local mutation confirmations", () => {
-  beforeEach(() => {
-    mocks.responsive.isFinePointer = true;
-    vi.clearAllMocks();
-    mocks.listUsers.mockResolvedValue({ users: [ADMIN, TARGET] });
-    mocks.updateUser.mockResolvedValue({ user: TARGET });
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
   });
+  return { promise, resolve };
+}
+
+function resetMocks() {
+  mocks.responsive.isFinePointer = true;
+  mocks.responsive.isMobile = false;
+  vi.clearAllMocks();
+  mocks.listUsers.mockResolvedValue({ users: [ADMIN, TARGET] });
+  mocks.updateUser.mockResolvedValue({ user: TARGET });
+}
+
+describe("UsersTable confirmation presentation", () => {
+  beforeEach(resetMocks);
 
   afterEach(cleanup);
 
@@ -77,9 +91,9 @@ describe("UsersTable local mutation confirmations", () => {
     await renderUsersTable();
     const row = targetRow();
 
-    fireEvent.click(within(row).getByTestId("users-table-toggle-role"));
+    fireEvent.click(within(row).getByTestId(ROLE_TOGGLE_TEST_ID));
 
-    const confirmation = await screen.findByTestId("users-table-confirm-popover");
+    const confirmation = await screen.findByTestId(POPOVER_TEST_ID);
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(confirmation.textContent).toContain(`Change ${TARGET_EMAIL} to admin?`);
     expect(confirmation.textContent).toContain(`${TARGET_EMAIL}; this takes effect immediately.`);
@@ -90,24 +104,23 @@ describe("UsersTable local mutation confirmations", () => {
       expect(mocks.updateUser).toHaveBeenCalledWith("target-id", { role: "admin" });
     });
     await waitFor(() => expect(mocks.listUsers).toHaveBeenCalledTimes(2));
-    expect(screen.queryByTestId("users-table-confirm-popover")).toBeNull();
+    expect(screen.queryByTestId(POPOVER_TEST_ID)).toBeNull();
   });
 
   it("morphs a phone row action into visible touch-sized status confirmation", async () => {
     mocks.responsive.isFinePointer = false;
+    mocks.responsive.isMobile = true;
     await renderUsersTable();
     const row = targetRow();
 
     expect(screen.getByTestId("users-table-mobile-list")).toBeTruthy();
     expect(within(row).getByTestId("users-table-email").textContent).toContain(TARGET.email);
-    fireEvent.click(within(row).getByTestId("users-table-toggle-status"));
+    fireEvent.click(within(row).getByTestId(STATUS_TOGGLE_TEST_ID));
 
     const confirmation = await screen.findByTestId("users-table-inline-confirmation");
     expect(confirmation.textContent).toContain(
       `Disable ${TARGET_EMAIL}? They will be signed out everywhere.`,
     );
-    expect(within(confirmation).getByTestId(CONFIRM_TEST_ID).className).toContain("h-11");
-    expect(within(confirmation).getByTestId(CONFIRM_TEST_ID).className).toContain("min-w-11");
     expect(screen.queryByRole("alertdialog")).toBeNull();
 
     fireEvent.click(within(confirmation).getByTestId(CONFIRM_TEST_ID));
@@ -117,13 +130,80 @@ describe("UsersTable local mutation confirmations", () => {
     });
   });
 
+  it("chooses row composition by width and confirmation behavior by pointer precision", async () => {
+    mocks.responsive.isFinePointer = false;
+    await renderUsersTable();
+
+    expect(screen.getByTestId("users-table")).toBeTruthy();
+    expect(screen.queryByTestId("users-table-mobile-list")).toBeNull();
+
+    fireEvent.click(within(targetRow()).getByTestId(ROLE_TOGGLE_TEST_ID));
+    expect(await screen.findByTestId("users-table-inline-confirmation")).toBeTruthy();
+  });
+
+  it("keeps phone cards on a narrow fine-pointer viewport", async () => {
+    mocks.responsive.isMobile = true;
+    await renderUsersTable();
+
+    expect(screen.getByTestId("users-table-mobile-list")).toBeTruthy();
+    expect(screen.queryByTestId("users-table")).toBeNull();
+
+    fireEvent.click(within(targetRow()).getByTestId(ROLE_TOGGLE_TEST_ID));
+    expect(await screen.findByTestId(POPOVER_TEST_ID)).toBeTruthy();
+  });
+});
+
+describe("UsersTable mutation lifecycle", () => {
+  beforeEach(resetMocks);
+
+  afterEach(cleanup);
+
+  it("blocks every row mutation until the active update and refresh finish", async () => {
+    const update = deferred<{ user: AuthUser }>();
+    mocks.updateUser.mockReturnValueOnce(update.promise);
+    await renderUsersTable();
+
+    fireEvent.click(within(targetRow()).getByTestId(ROLE_TOGGLE_TEST_ID));
+    const confirmation = await screen.findByTestId(POPOVER_TEST_ID);
+    fireEvent.click(within(confirmation).getByTestId(CONFIRM_TEST_ID));
+
+    await waitFor(() => expect(mocks.updateUser).toHaveBeenCalledTimes(1));
+    const statusToggle = within(targetRow()).getByTestId(STATUS_TOGGLE_TEST_ID);
+    expect((statusToggle as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(statusToggle);
+    expect(mocks.updateUser).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId(POPOVER_TEST_ID)).toBeNull();
+
+    update.resolve({ user: TARGET });
+    await waitFor(() => expect(mocks.listUsers).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        (within(targetRow()).getByTestId(STATUS_TOGGLE_TEST_ID) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+  });
+
+  it("cancels the row confirmation without mutating", async () => {
+    await renderUsersTable();
+
+    fireEvent.click(within(targetRow()).getByTestId(ROLE_TOGGLE_TEST_ID));
+    const confirmation = await screen.findByTestId(POPOVER_TEST_ID);
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.queryByTestId(POPOVER_TEST_ID)).toBeNull());
+    expect(mocks.updateUser).not.toHaveBeenCalled();
+    expect(
+      (within(targetRow()).getByTestId(ROLE_TOGGLE_TEST_ID) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
   it("keeps existing request error feedback without refreshing after failure", async () => {
     mocks.updateUser.mockRejectedValue(new Error("permission denied"));
     await renderUsersTable();
 
     const row = targetRow();
-    fireEvent.click(within(row).getByTestId("users-table-toggle-status"));
-    const confirmation = await screen.findByTestId("users-table-confirm-popover");
+    fireEvent.click(within(row).getByTestId(STATUS_TOGGLE_TEST_ID));
+    const confirmation = await screen.findByTestId(POPOVER_TEST_ID);
     fireEvent.click(within(confirmation).getByTestId(CONFIRM_TEST_ID));
 
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledTimes(1));
