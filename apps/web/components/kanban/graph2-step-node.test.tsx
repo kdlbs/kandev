@@ -6,7 +6,6 @@ import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { ForegroundActivity, TaskPendingAction } from "@/lib/types/http";
 import { Graph2StepNode } from "./graph2-step-node";
-import { TooltipProvider } from "@kandev/ui/tooltip";
 
 // The node renders inside the SPA router; stub it so the component mounts.
 vi.mock("@/lib/routing/client-router", () => ({
