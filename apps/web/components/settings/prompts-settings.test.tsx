@@ -44,7 +44,9 @@ const promptContent = "Review this change";
 const promptRowTestId = "prompt-list-item";
 const promptDeleteButtonTestId = "prompt-delete-button";
 const promptDeletePopoverTestId = "prompt-delete-confirm-popover";
+const promptDeleteInlineTestId = "prompt-delete-inline-confirmation";
 const promptDeleteConfirmTestId = "prompt-delete-confirm";
+const deleteFailureMessage = "delete failed";
 const touchConfirmHeightClass = "h-11";
 const touchConfirmWidthClass = "min-w-11";
 
@@ -111,7 +113,7 @@ describe("PromptsSettings deletion confirmation", () => {
     const row = screen.getByTestId(promptRowTestId);
     fireEvent.click(within(row).getByTestId(promptDeleteButtonTestId));
 
-    const inline = screen.getByTestId("prompt-delete-inline-confirmation");
+    const inline = screen.getByTestId(promptDeleteInlineTestId);
     expect(screen.queryByTestId(promptDeletePopoverTestId)).toBeNull();
     expect(within(inline).getByTestId(promptDeleteConfirmTestId).className).toContain(
       touchConfirmHeightClass,
@@ -121,6 +123,43 @@ describe("PromptsSettings deletion confirmation", () => {
     );
   });
 
+  it("disables inline deletion while a prompt update is saving", async () => {
+    mocks.finePointer = false;
+    mocks.updatePrompt.mockReturnValue(new Promise<CustomPrompt>(() => undefined));
+    renderPromptSettings();
+
+    const row = screen.getByTestId(promptRowTestId);
+    fireEvent.click(within(row).getByTestId("prompt-edit-button"));
+    fireEvent.change(within(row).getByTestId("prompt-content-input"), {
+      target: { value: "Save this draft" },
+    });
+    fireEvent.click(within(row).getByTestId(promptDeleteButtonTestId));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledTimes(1));
+    const confirm = within(screen.getByTestId(promptDeleteInlineTestId)).getByTestId(
+      promptDeleteConfirmTestId,
+    );
+    expect(confirm.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(confirm);
+    expect(mocks.deletePrompt).not.toHaveBeenCalled();
+  });
+
+  it("restores focus to the coarse-pointer delete button after Escape", async () => {
+    mocks.finePointer = false;
+    renderPromptSettings();
+
+    const row = screen.getByTestId(promptRowTestId);
+    fireEvent.click(within(row).getByTestId(promptDeleteButtonTestId));
+    fireEvent.keyDown(screen.getByTestId(promptDeleteInlineTestId), { key: "Escape" });
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(row).getByTestId(promptDeleteButtonTestId)),
+    );
+  });
+});
+
+describe("PromptsSettings deletion requests", () => {
   it("closes before dispatching one delete request", async () => {
     const deleteDeferred = new Promise<void>(() => undefined);
     mocks.deletePrompt.mockReturnValue(deleteDeferred);
@@ -137,8 +176,25 @@ describe("PromptsSettings deletion confirmation", () => {
     expect(mocks.deletePrompt).toHaveBeenCalledWith("prompt-1", { cache: "no-store" });
   });
 
+  it("closes before dispatching one delete request on coarse pointers", async () => {
+    mocks.finePointer = false;
+    const deleteDeferred = new Promise<void>(() => undefined);
+    mocks.deletePrompt.mockReturnValue(deleteDeferred);
+    renderPromptSettings();
+
+    const row = screen.getByTestId(promptRowTestId);
+    fireEvent.click(within(row).getByTestId(promptDeleteButtonTestId));
+    fireEvent.click(
+      within(screen.getByTestId(promptDeleteInlineTestId)).getByTestId(promptDeleteConfirmTestId),
+    );
+
+    expect(screen.queryByTestId(promptDeleteInlineTestId)).toBeNull();
+    await waitFor(() => expect(mocks.deletePrompt).toHaveBeenCalledTimes(1));
+    expect(mocks.deletePrompt).toHaveBeenCalledWith("prompt-1", { cache: "no-store" });
+  });
+
   it("keeps the prompt and reports localized failure feedback when deletion fails", async () => {
-    mocks.deletePrompt.mockRejectedValue(new Error("delete failed"));
+    mocks.deletePrompt.mockRejectedValue(new Error(deleteFailureMessage));
     renderPromptSettings();
 
     const row = screen.getByTestId(promptRowTestId);
@@ -150,7 +206,27 @@ describe("PromptsSettings deletion confirmation", () => {
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledTimes(1));
     expect(mocks.toast).toHaveBeenCalledWith({
       title: "Couldn't delete prompt",
-      description: "delete failed",
+      description: deleteFailureMessage,
+      variant: "error",
+    });
+    expect(screen.getByTestId(promptRowTestId)).toBeTruthy();
+  });
+
+  it("keeps the prompt and reports failure feedback on coarse pointers", async () => {
+    mocks.finePointer = false;
+    mocks.deletePrompt.mockRejectedValue(new Error(deleteFailureMessage));
+    renderPromptSettings();
+
+    const row = screen.getByTestId(promptRowTestId);
+    fireEvent.click(within(row).getByTestId(promptDeleteButtonTestId));
+    fireEvent.click(
+      within(screen.getByTestId(promptDeleteInlineTestId)).getByTestId(promptDeleteConfirmTestId),
+    );
+
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledTimes(1));
+    expect(mocks.toast).toHaveBeenCalledWith({
+      title: "Couldn't delete prompt",
+      description: deleteFailureMessage,
       variant: "error",
     });
     expect(screen.getByTestId(promptRowTestId)).toBeTruthy();

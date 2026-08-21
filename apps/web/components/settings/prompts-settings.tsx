@@ -33,6 +33,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : t("common:requestFailed");
 }
 
+function getPromptPreview(content: string) {
+  return content.split(/\r?\n/)[0] ?? "";
+}
+
 async function runPromptSave(
   action: () => Promise<unknown>,
   reportError: (error: unknown) => void,
@@ -115,6 +119,7 @@ type PromptRowActionsProps = {
   deleteAnchorRef: React.RefObject<HTMLButtonElement | null>;
   onStartEditing: (prompt: CustomPrompt) => void;
   onOpenDelete: (prompt: CustomPrompt) => void;
+  onDeleteClose: () => void;
   onDeleteCancel: () => void;
   onDeleteConfirm: () => void;
   isBusy: boolean;
@@ -128,6 +133,7 @@ function PromptRowActions({
   deleteAnchorRef,
   onStartEditing,
   onOpenDelete,
+  onDeleteClose,
   onDeleteCancel,
   onDeleteConfirm,
   isBusy,
@@ -171,7 +177,8 @@ function PromptRowActions({
           open={isDeleteTarget}
           isFinePointer={isFinePointer}
           anchorRef={deleteAnchorRef}
-          onOpenChange={onDeleteCancel}
+          isBusy={isBusy}
+          onClose={onDeleteClose}
           onCancel={onDeleteCancel}
           onConfirm={onDeleteConfirm}
         />
@@ -198,9 +205,6 @@ function PromptListItem({
 }: PromptListItemProps) {
   const { t } = useTranslation();
   const deleteAnchorRef = useRef<HTMLButtonElement | null>(null);
-  const getPromptPreview = (content: string) => {
-    return content.split(/\r?\n/)[0] ?? "";
-  };
   const nameIsDirty = isEditing && formState.name !== prompt.name;
   const contentIsDirty = isEditing && formState.content !== prompt.content;
 
@@ -227,6 +231,7 @@ function PromptListItem({
           deleteAnchorRef={deleteAnchorRef}
           onStartEditing={onStartEditing}
           onOpenDelete={onOpenDelete}
+          onDeleteClose={onDeleteCancel}
           onDeleteCancel={onDeleteCancel}
           onDeleteConfirm={onDeleteConfirm}
           isBusy={isBusy}
@@ -241,7 +246,8 @@ function PromptListItem({
           open={isDeleteTarget}
           isFinePointer={isFinePointer}
           anchorRef={deleteAnchorRef}
-          onOpenChange={onDeleteCancel}
+          isBusy={isBusy}
+          onClose={onDeleteCancel}
           onCancel={onDeleteCancel}
           onConfirm={onDeleteConfirm}
         />
@@ -489,8 +495,8 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     setDeleteTarget(null);
   };
   const confirmDelete = () => {
-    if (!deleteTarget) return;
-    deleteRequest.run(deleteTarget.id).catch(toastError(t("settings:promptDeleteFailed")));
+    if (!deleteTarget || isBusy) return;
+    return deleteRequest.run(deleteTarget.id).catch(toastError(t("settings:promptDeleteFailed")));
   };
 
   return {

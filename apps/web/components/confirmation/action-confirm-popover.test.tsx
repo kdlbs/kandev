@@ -6,7 +6,13 @@ import { ActionConfirmPopover } from "./action-confirm-popover";
 
 const deleteTitle = "Delete item?";
 
-function Harness({ onConfirm = vi.fn() }: { onConfirm?: () => void | Promise<void> }) {
+function Harness({
+  onConfirm = vi.fn(),
+  confirmDisabled = false,
+}: {
+  onConfirm?: () => void | Promise<void>;
+  confirmDisabled?: boolean;
+}) {
   const [open, setOpen] = useState(true);
   const [showAnchor, setShowAnchor] = useState(true);
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -27,6 +33,7 @@ function Harness({ onConfirm = vi.fn() }: { onConfirm?: () => void | Promise<voi
         description="This cannot be undone."
         cancelLabel="Cancel"
         confirmLabel="Delete"
+        confirmDisabled={confirmDisabled}
         onOpenChange={setOpen}
         onConfirm={onConfirm}
       />
@@ -76,6 +83,20 @@ describe("ActionConfirmPopover", () => {
 
     await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1));
     expect(shellClosed).toBe(true);
+  });
+
+  it("keeps a disabled confirmation inert", () => {
+    const onConfirm = vi.fn();
+    render(<Harness onConfirm={onConfirm} confirmDisabled />);
+
+    const confirm = within(screen.getByRole("dialog", { name: deleteTitle })).getByRole("button", {
+      name: "Delete",
+    });
+    expect(confirm.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(confirm);
+
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: deleteTitle })).toBeTruthy();
   });
 
   it("handles a rejected callback without an unhandled rejection", async () => {
