@@ -77,7 +77,14 @@ func ProjectPermissionAction(actionType, title string, details map[string]any) P
 		projected.Path, projected.Redacted = mergeSanitized(projected.Redacted, field("path", "file_path"))
 	case "network":
 		destination := field("destination", "url", "host")
-		stripped := stripURLCredentials(destination)
+		stripped, ok := stripURLCredentials(destination)
+		if !ok {
+			// Could not confidently strip embedded credentials — fail closed
+			// rather than risk leaking them across the permission boundary.
+			projected.Destination = ""
+			projected.Redacted = true
+			break
+		}
 		projected.Redacted = projected.Redacted || stripped != destination
 		projected.Destination, projected.Redacted = mergeSanitized(projected.Redacted, stripped)
 	case "mcp_tool":
@@ -167,7 +174,16 @@ func firstString(values map[string]any, keys ...string) string {
 	return ""
 }
 
-func stripURLCredentials(value string) string {
+// stripURLCredentials removes embedded userinfo (plus query/fragment, which
+// may also carry tokens) from a URL-shaped destination. It reports ok=false
+// whenever it cannot confidently produce a safe result — a genuine
+// url.Parse error, or a value whose shape looks like it embeds userinfo
+// (user:pass@host) but that the parser couldn't resolve a host for — so the
+// caller fails closed (redacts/omits the whole destination) instead of
+// passing a possibly credential-bearing string through untouched. A value
+// with no credential shape at all (no scheme, no userinfo) is safe as-is
+// and reports ok=true unchanged.
+func stripURLCredentials(value string) (string, bool) {
 	schemeless := !strings.Contains(value, "://")
 	if schemeless {
 		authority := value
@@ -185,21 +201,21 @@ func stripURLCredentials(value string) string {
 	}
 	parsed, err := url.Parse(parseValue)
 	if err != nil {
-		return value
+		return "", false
 	}
 	if schemeless {
 		if parsed.Host == "" {
-			return value
+			return "", false
 		}
 	} else if parsed.Scheme == "" || parsed.Host == "" {
-		return value
+		return value, true
 	}
 	parsed.User = nil
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	stripped := parsed.String()
 	if schemeless {
-		return strings.TrimPrefix(stripped, "//")
+		return strings.TrimPrefix(stripped, "//"), true
 	}
-	return stripped
+	return stripped, true
 }

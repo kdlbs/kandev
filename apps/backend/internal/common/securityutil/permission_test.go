@@ -59,6 +59,50 @@ func TestProjectPermissionActionRedactsSchemelessURLCredentials(t *testing.T) {
 	}
 }
 
+func TestProjectPermissionActionFailsClosedOnMalformedAbsoluteURL(t *testing.T) {
+	const canary = "s3cr3t-canary-pass"
+	// A space in the host is rejected by net/url.Parse ("invalid character
+	// in host name"), so stripURLCredentials cannot confirm it stripped the
+	// embedded userinfo. Before the fail-open fix, this returned the raw
+	// value — including the credential — unchanged.
+	projection := ProjectPermissionAction("network", "Connect", map[string]any{
+		"destination": "https://user:" + canary + "@ex ample.com/",
+	})
+
+	encoded, err := json.Marshal(projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), canary) {
+		t.Fatalf("projection leaked credential from an unparseable absolute URL: %s", encoded)
+	}
+	if projection.Destination != "" || !projection.Redacted {
+		t.Fatalf("unparseable absolute URL should fail closed: %+v", projection)
+	}
+}
+
+func TestProjectPermissionActionFailsClosedOnSchemelessCredentialWithNoHost(t *testing.T) {
+	const canary = "s3cr3t-canary-pass"
+	// Looks credential-shaped (userinfo containing ':' before '@') but there
+	// is nothing after '@' for net/url to resolve as a host. Before the
+	// fail-open fix, this returned the raw value — including the credential
+	// — unchanged.
+	projection := ProjectPermissionAction("network", "Connect", map[string]any{
+		"destination": "user:" + canary + "@",
+	})
+
+	encoded, err := json.Marshal(projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), canary) {
+		t.Fatalf("projection leaked credential from a hostless schemeless value: %s", encoded)
+	}
+	if projection.Destination != "" || !projection.Redacted {
+		t.Fatalf("hostless schemeless credential shape should fail closed: %+v", projection)
+	}
+}
+
 func TestProjectPermissionActionDropsMCPArguments(t *testing.T) {
 	projection := ProjectPermissionAction("mcp_tool", "Call tool", map[string]any{
 		"server":    "github",
