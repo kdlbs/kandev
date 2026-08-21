@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/url"
@@ -1041,6 +1042,32 @@ func (a pluginsHostUtilityAdapter) ExecuteProfilePrompt(ctx context.Context, pro
 type pluginsUtilityAgentAdapter struct {
 	svc     *utilityservice.Service
 	userSvc *userservice.Service
+}
+
+type pluginAgentProfileStore interface {
+	GetAgentProfile(ctx context.Context, id string) (*agentsettingsmodels.AgentProfile, error)
+}
+
+// pluginsAgentProfileAdapter keeps agent-settings storage errors at the
+// backend boundary. The plugins package only receives the narrow execution
+// eligibility record and its typed missing-profile sentinel.
+type pluginsAgentProfileAdapter struct {
+	store pluginAgentProfileStore
+}
+
+func (a pluginsAgentProfileAdapter) GetProfileByID(ctx context.Context, id string) (*plugins.AgentProfile, error) {
+	profile, err := a.store.GetAgentProfile(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) || profile == nil {
+		return nil, plugins.ErrAgentProfileNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &plugins.AgentProfile{
+		Enabled:        profile.Enabled,
+		CLIPassthrough: profile.CLIPassthrough,
+		WorkspaceID:    profile.WorkspaceID,
+	}, nil
 }
 
 func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string) (*plugins.UtilityAgent, error) {

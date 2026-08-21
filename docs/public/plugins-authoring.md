@@ -504,7 +504,7 @@ subscription vocabulary and wildcard rules are in the
 | Repositories   | Repositories().List                              | api_read: repositories                                                      | List by workspace id                                                                                                                                                                        |
 | Messages       | Messages().List                                  | api_read: messages                                                          | Historical user/agent content; Kandev system blocks are stripped                                                                                                                            |
 | Message send   | Messages().Send                                  | api_write: messages                                                         | Sends a prompt to a task session and records plugin:<id> author                                                                                                                             |
-| Utility agent  | InvokeUtilityAgent(ctx, prompt)                  | agent_invoke: true plus config_schema.utility_agent (format: utility-agent) | One-shot completion using the selected utility-agent ID; Kandev resolves that utility's enabled profile, permissions, and launch settings. Missing or stale bindings are FailedPrecondition |
+| Agent invocation | InvokeUtilityAgent(ctx, prompt)                | agent_invoke: true plus config_schema.agent_profile (format: agent-profile), or legacy utility_agent | One-shot completion using the selected eligible direct profile. `agent_profile` wins when both selectors exist; missing or stale bindings are FailedPrecondition |
 
 The Go signatures, filters, DTOs, and pagination types live in
 apps/backend/pkg/pluginsdk/host.go and data_types.go. api_write task/message
@@ -652,8 +652,8 @@ type Host interface {
 	Messages() MessageReader
 
 	// InvokeUtilityAgent runs a one-shot completion using this plugin's
-	// selected utility agent (capability agent_invoke). No API key of your
-	// own; FailedPrecondition when no valid enabled agent is selected.
+	// selected direct agent profile or legacy utility agent (agent_invoke).
+	// No API key of your own; FailedPrecondition for an invalid selection.
 	InvokeUtilityAgent(ctx context.Context, prompt string) (string, error)
 }
 ```
@@ -712,9 +712,9 @@ conversation content (capability `api_read:messages`). Filter by `SessionIDs`,
 never sees raw system prompts.
 
 `host.InvokeUtilityAgent(ctx, prompt)` runs a one-shot, non-interactive LLM
-completion using the utility agent selected for this plugin in **Settings >
-Plugins > `<plugin>`** (capability `agent_invoke`), and returns its text. Declare
-the selector in `manifest.yaml`:
+completion using the direct agent profile selected for this plugin in
+**Settings > Plugins > `<plugin>`** (capability `agent_invoke`), and returns its
+text. Declare the selector in `manifest.yaml`:
 
 ```yaml
 capabilities:
@@ -723,23 +723,26 @@ capabilities:
 config_schema:
   type: object
   properties:
-    utility_agent:
+    agent_profile:
       type: string
-      format: utility-agent
-      title: Utility Agent
-      description: Agent used for this plugin's LLM calls
-  required: ["utility_agent"]
+      format: agent-profile
+      title: Agent profile
+      description: Agent profile used for this plugin's LLM calls
+  required: ["agent_profile"]
 ```
 
-The picker displays configured built-in and custom agent names but stores the
-selected agent's stable ID. Omit `utility_agent` from `required` only when the
-plugin supports operating without LLM delegation; optional selectors include a
-**Not set** choice. The plugin needs no provider API key because it delegates to
-a kandev-configured agent. A missing, deleted, or disabled selection returns
-gRPC `FailedPrecondition`, so handle that as "ask the operator to configure
-one" rather than a transient failure. This is the LLM step behind, e.g., a
-"summarize yesterday" plugin: read the conversation with `host.Messages()`,
-then summarize it with `host.InvokeUtilityAgent(...)`.
+The picker displays enabled global non-CLI profiles and stores the selected
+profile's stable ID. Omit `agent_profile` from `required` only when the plugin
+supports operating without LLM delegation; optional selectors include a
+**Not set** choice. The plugin needs no provider API key because it delegates
+to a kandev-configured agent. A missing, deleted, disabled, CLI-passthrough, or
+workspace-scoped selection returns gRPC `FailedPrecondition`, so handle that as
+"ask the operator to configure one" rather than a transient failure.
+
+Existing plugins may continue to declare `utility_agent` with
+`format: utility-agent`; Kandev resolves that utility agent's effective
+profile. Do not declare both unless the direct profile is intentionally the
+preferred route: `agent_profile` takes precedence whenever it is declared.
 
 **Capability gating.** Every Host RPC except `GetConfig` and `EmitEvent` is
 checked against your manifest's `capabilities` before the handler runs:

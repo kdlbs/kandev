@@ -1,4 +1,4 @@
-# 0048 — Plugins invoke a plugin-selected utility agent
+# 0048 — Plugins invoke a selected direct profile or utility agent
 
 - Status: accepted
 - Date: 2026-07-21
@@ -28,14 +28,16 @@ streaming, stateful, and requires an executor + workspace + worktree.
 Add a capability-gated `Host.InvokeUtilityAgent`, backed by each plugin's
 configuration and the existing host-utility tier.
 
-1. **Plugin config: `utility_agent`.** Plugins declaring `agent_invoke` declare
-   a `config_schema` field named `utility_agent`, with `type: string` and
-   `format: utility-agent`. Settings > Plugins renders it as a picker of the
-   existing built-in and custom utility agents. The picker displays the name
-   but stores the selected utility agent's stable ID, scoped to the plugin. The
-   plugin does not select an execution profile directly; after
-   ADR-2026-08-08-utility-agent-profile-execution, the selected utility agent
-   resolves its own effective profile.
+1. **Plugin config: direct profile first.** Plugins declaring `agent_invoke`
+   can declare an `agent_profile` field with `type: string` and
+   `format: agent-profile`. Settings > Plugins renders enabled, global,
+   non-CLI profiles and stores the selected stable ID. A missing, deleted,
+   disabled, CLI-passthrough, or workspace-scoped profile is a
+   `FailedPrecondition`. When an `agent_profile` field is declared, it is the
+   direct execution selection and takes precedence over `utility_agent`.
+   Existing plugins may continue declaring `utility_agent` with
+   `format: utility-agent`; that legacy selector resolves the utility agent's
+   effective profile as before.
 
 2. **New capability `agent_invoke`.** A boolean `Capabilities.AgentInvoke`,
    enforced exactly like `state`/`secrets`: `Host.InvokeUtilityAgent` returns
@@ -50,21 +52,21 @@ configuration and the existing host-utility tier.
    or `max_tokens` is an added proto field, no SDK signature change).
 
 4. **Reuse the host-utility tier (ADR 0002).** The kandev-side handler:
-   gate `agent_invoke` → read the calling plugin's `utility_agent` config →
-   resolve its ID through the established utility-agent configuration → resolve
-   that utility agent's effective profile → call the narrow profile-aware
-   utility runner and return the text. `utilityRunner` is a thin
+   gate `agent_invoke` → read the calling plugin's direct profile when declared
+   (otherwise resolve the legacy utility agent) → validate direct-profile
+   eligibility → call the narrow profile-aware utility runner and return the
+   text. `utilityRunner` is a thin
    `pluginsHostUtilityAdapter` over `hostutility.Manager` wired in `backendapp`,
    so `internal/plugins` never imports the agent runtime (the same
    cycle-avoidance as the Slack assistant's adapter and ADR 0043's data
    sources). No task, session, workspace, or worktree is involved.
 
-5. **Typed "not configured" failure.** If no utility agent is selected — or the
-   selected utility agent has since been deleted or disabled — the handler returns gRPC
-   `FailedPrecondition` (`no utility agent configured` /
-   `configured utility agent "<id>" not found`), never a silent empty
-   completion. A stale selection is treated as "unconfigured", not an internal
-   error.
+5. **Typed "not configured" failure.** An absent direct selection, or a
+   deleted/ineligible direct profile, returns gRPC `FailedPrecondition`
+   (`no agent profile configured` / `configured agent profile "<id>" not
+   found`). Legacy utility-agent failures retain their existing messages.
+   Capability denial is evaluated before either lookup; runner failures remain
+   operational errors rather than configuration failures.
 
 ## Consequences
 
@@ -72,8 +74,8 @@ configuration and the existing host-utility tier.
   `host.InvokeUtilityAgent(ctx, prompt)` — no API key, no provider wiring. This
   is what unblocks the "My Daily Standup" plugin's summarization step.
 - The operator stays in control: nothing runs until each plugin selects a
-  configured utility agent, including the effective profile's cost, availability,
-  launcher, and permission characteristics.
+  configured direct profile or utility agent, including the effective
+  profile's cost, availability, launcher, and permission characteristics.
 - We reused the sessionless inference path instead of building an agent loop;
   the only net-new machinery is a plugin config picker and one gated RPC handler.
 - The `InvokeUtilityAgentRequest`/`Response` proto is a public contract, extended

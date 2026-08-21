@@ -469,20 +469,19 @@ service Host {
 - `EmitEvent(event_name, payload)` publishes `plugin.<plugin_id>.<event_name>` on the
   internal event bus for delivery to subscribers (replaces the old
   `POST /api/plugins/{plugin_id}/events/emit` HTTP endpoint).
-- `InvokeUtilityAgent(prompt)` runs a one-shot, non-interactive completion using
-  the utility agent selected in the plugin's `utility_agent` config field and
-  returns its text. Plugins declaring `capabilities.agent_invoke: true` must
-  declare that field in `config_schema` with `type: string` and
-  `format: utility-agent`; Settings > Plugins then renders a picker containing
-  the configured built-in and custom utility agents. The picker displays the
-  agent name and persists its stable ID. It reuses kandev's
-  sessionless host-utility inference tier (ADR 0002) — no task, session, or
-  workspace — so a plugin can delegate a lightweight LLM step without holding a
-  provider API key. Returns gRPC `FailedPrecondition` when no utility agent is
-  configured, selected agent was deleted, or it is disabled. See
-  [ADR 0048](../../decisions/0048-plugin-host-utility-agent-invoke.md). The plugin does not select
-  an execution profile directly; the selected utility agent resolves its effective profile and
-  complete launch/permission policy according to
+- `InvokeUtilityAgent(prompt)` runs a one-shot, non-interactive completion and
+  returns its text. Plugins can declare `agent_profile` in `config_schema` with
+  `type: string` and `format: agent-profile`; Settings > Plugins then renders
+  enabled, global, non-CLI profiles and persists the selected stable ID. A
+  non-empty direct selection runs that profile through the sessionless
+  host-utility inference tier (ADR 0002), with no task, session, or workspace.
+  It returns gRPC `FailedPrecondition` when the direct selection is missing,
+  deleted, disabled, CLI-passthrough, or workspace-scoped. Existing plugins can
+  keep the legacy `utility_agent` selector (`format: utility-agent`), which
+  resolves the selected utility agent's effective profile. The direct value
+  wins only when it is non-empty; an upgraded plugin therefore retains a saved
+  legacy selection until an operator chooses a direct profile. See
+  [ADR 0048](../../decisions/0048-plugin-host-utility-agent-invoke.md) and
   [Profile-backed Utility Agents](../agents/utility-agent-profiles.md).
 
 Every Host RPC is capability-gated: `GetState`/`SetState`/`DeleteState`/`ListState`

@@ -111,11 +111,12 @@ type Host interface {
 	// prompt to a task session.
 	Messages() MessageReader
 
-	// InvokeUtilityAgent runs a one-shot, non-interactive completion using
-	// the operator-configured "utility agent" (Settings > System) and returns
-	// its text. Requires the `agent_invoke` capability. Returns a gRPC
-	// FailedPrecondition error when no utility agent is configured, so a
-	// plugin needs no API key of its own.
+	// InvokeUtilityAgent runs a one-shot, non-interactive completion using the
+	// plugin's configured `agent_profile` (format `agent-profile`) or legacy
+	// `utility_agent` (format `utility-agent`) selection and returns its text.
+	// `agent_profile` takes precedence when both are declared. Requires the
+	// `agent_invoke` capability and returns gRPC FailedPrecondition for a
+	// missing, disabled, CLI-passthrough, or workspace-scoped selection.
 	InvokeUtilityAgent(ctx context.Context, prompt string) (string, error)
 }
 
