@@ -4,6 +4,12 @@ import type { RunEvent } from "@/lib/api/domains/office-extended-api";
 import type { RunEventAppendedPayload } from "@/lib/types/backend";
 import { useRunLiveSync } from "./use-run-live-sync";
 
+const api = vi.hoisted(() => ({
+  getRunDetail: vi.fn(),
+}));
+
+vi.mock("@/lib/api/domains/office-runs-api", () => api);
+
 const clients = vi.hoisted(() => ({
   active: { subscribeRun: vi.fn() },
 }));
@@ -118,5 +124,21 @@ describe("useRunLiveSync", () => {
     rerender({ ...initialProps, initialEvents: [started] });
 
     expect(result.current.events).toEqual([started]);
+  });
+
+  it("reloads the final output summary after a terminal event", async () => {
+    api.getRunDetail.mockResolvedValue({ output_summary: "final answer" });
+    const { result } = renderHook(() =>
+      useRunLiveSync("run-1", [], "claimed", { agentId: "agent-1" }),
+    );
+
+    act(() => {
+      handlers.listener!({ run_id: "run-1", event: runEvent(1, "complete") });
+    });
+
+    await vi.waitFor(() => {
+      expect(api.getRunDetail).toHaveBeenCalledWith("agent-1", "run-1");
+      expect(result.current.outputSummary).toBe("final answer");
+    });
   });
 });

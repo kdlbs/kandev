@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -114,6 +115,7 @@ type AgentLifecycleData struct {
 	AgentID        string                 `json:"agent_id"`
 	AgentProfileID string                 `json:"agent_profile_id"`
 	SessionID      string                 `json:"session_id"`
+	TurnID         string                 `json:"turn_id,omitempty"`
 	ErrorMessage   string                 `json:"error_message"`
 	ProviderError  *streams.ProviderError `json:"provider_error,omitempty"`
 }
@@ -347,6 +349,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		"session_id": data.SessionID,
 	})
 	s.markRoutingSuccess(ctx, run)
+	s.recordRunOutputSummary(ctx, run, *data)
 	// resolveLifecycleRun prefers the immutable run ID from the event and
 	// falls back to task plus agent only for legacy events. Releasing here
 	// (rather than unconditionally inside transitionRunTerminal) is safe —
@@ -408,6 +411,7 @@ func (s *Service) handleTasklessAgentCompleted(
 		"session_id": data.SessionID,
 	})
 	s.refreshContinuationSummary(ctx, run, data.AgentID)
+	s.recordRunOutputSummary(ctx, run, *data)
 	// run came from GetClaimedTasklessRunForAgent: it is the run that
 	// actually launched. Taskless runs typically carry no task_id, so this
 	// is a no-op in the common case, but call it for the same reason as
@@ -499,6 +503,70 @@ func extractRoutineID(snapshot string) string {
 		return ""
 	}
 	return p.RoutineID
+}
+
+// recordRunOutputSummary persists the agent's final message as the run's
+// output_summary. Best-effort — same contract as refreshContinuationSummary
+// above: any failure is logged at warn and never fails the completion
+// event, since the run must still reach a terminal state either way.
+//
+// The lookup uses the exact turn when a completion event carries one.
+// Legacy events use messages created at or after run.ClaimedAt because Office
+// task-bound sessions are reused across runs. A nil ClaimedAt falls back to
+// the zero time, matching the old unscoped behavior.
+//
+// failure_reason is deliberately left "" on this write.
+// UpdateRunOutputSummary is output_summary's only writer, so this never
+// clobbers a value nothing else sets today; giving failure_reason real
+// semantics (skipped / checkout-contended / failed) is card b5cf0858's
+// territory, not this one's.
+func (s *Service) recordRunOutputSummary(ctx context.Context, run *models.Run, data AgentLifecycleData) {
+	if s.repo == nil || run == nil {
+		return
+	}
+	summary, err := s.lookupFinalAgentMessage(ctx, run, data)
+	if err != nil {
+		s.logger.Warn("run output summary: final agent message lookup failed",
+			zap.String("run_id", run.ID), zap.Error(err))
+		return
+	}
+	if summary == "" {
+		return
+	}
+	if updateErr := s.repo.UpdateRunOutputSummary(ctx, run.ID, summary, ""); updateErr != nil {
+		s.logger.Warn("run output summary: update failed",
+			zap.String("run_id", run.ID), zap.Error(updateErr))
+	}
+}
+
+func (s *Service) lookupFinalAgentMessage(
+	ctx context.Context, run *models.Run, data AgentLifecycleData,
+) (string, error) {
+	if data.TurnID != "" && s.taskWorkspace != nil {
+		message, err := s.taskWorkspace.GetLastAgentMessageForTurn(ctx, data.TurnID)
+		if err != nil {
+			return "", err
+		}
+		return truncateRunOutputSummary(message), nil
+	}
+	if data.SessionID == "" {
+		return "", nil
+	}
+	var since time.Time
+	if run.ClaimedAt != nil {
+		since = *run.ClaimedAt
+	}
+	return s.repo.GetFinalAgentMessage(ctx, data.SessionID, since)
+}
+
+const maxRunOutputSummaryChars = 500
+
+func truncateRunOutputSummary(content string) string {
+	runes := []rune(content)
+	if len(runes) <= maxRunOutputSummaryChars {
+		return content
+	}
+	return string(runes[:maxRunOutputSummaryChars])
 }
 
 func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error {

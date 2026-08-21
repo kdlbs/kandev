@@ -772,6 +772,7 @@
   "stepTaskTemplate": "Task template",
   "stepXOfYTitle": "Step {{number}} of {{total}}; {{title}}",
   "structuredResult": "Structured result",
+  "outputSummary": "Output summary",
   "subIssueOfParent": "Sub-issue of {{parent}}",
   "subscriptionQuota": "Subscription Quota",
   "succeeded": "Succeeded",
