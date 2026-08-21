@@ -38,17 +38,17 @@ Provide either "answers" (one entry per question in the bundle) or "rejected": t
 			mcp.WithArray("answers",
 				mcp.Description(`One entry per question in the bundle, in any order.`),
 				mcp.Items(map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"question_id": map[string]any{"type": "string", "description": "The question's question_id, from list_pending_questions_kandev."},
+					typeKey: objType,
+					propsKey: map[string]any{
+						"question_id": map[string]any{typeKey: stringType, descriptionArg: "The question's question_id, from list_pending_questions_kandev."},
 						"selected_options": map[string]any{
-							"type":        "array",
-							"description": "Option IDs chosen for this question (single-choice questions take at most one).",
-							"items":       map[string]any{"type": "string"},
+							typeKey:        "array",
+							descriptionArg: "Option IDs chosen for this question (single-choice questions take at most one).",
+							"items":        map[string]any{typeKey: stringType},
 						},
-						"custom_text": map[string]any{"type": "string", "description": "Free-text answer for this question."},
+						"custom_text": map[string]any{typeKey: stringType, descriptionArg: "Free-text answer for this question."},
 					},
-					"required": []string{"question_id"},
+					reqKey: []string{"question_id"},
 				}),
 			),
 			mcp.WithBoolean("rejected", mcp.Description("Reject the whole bundle instead of answering it.")),

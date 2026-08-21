@@ -40,6 +40,11 @@ const (
 	messageArg           = "message"
 	autopilotArg         = "autopilot"
 	contextParagraphsArg = "context_paragraphs"
+	objType              = "object"
+	propsKey             = "properties"
+	reqKey               = "required"
+	typeKey              = "type"
+	stringType           = "string"
 )
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {

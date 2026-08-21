@@ -1729,12 +1729,6 @@ func buildWalkthroughStepSchemaItem() map[string]any {
 // to keep the registration body short and to deduplicate the JSON-schema
 // keyword strings (linter goconst rules).
 func buildQuestionSchemaItem() map[string]any {
-	const typeKey = "type"
-	const propsKey = "properties"
-	const reqKey = "required"
-	const objType = "object"
-	const stringType = "string"
-
 	str := func(desc string) map[string]any {
 		return map[string]any{typeKey: stringType, descriptionArg: desc}
 	}

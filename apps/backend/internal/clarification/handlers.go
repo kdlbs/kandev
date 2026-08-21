@@ -31,6 +31,8 @@ const (
 	metaRejectedKey   = "rejected"
 
 	clarificationPersistenceTimeout = 30 * time.Second
+
+	errClarificationRequestNotFound = "clarification request not found"
 )
 
 // handlerMessageStore is the task repository surface used by HTTP handlers
@@ -300,13 +302,13 @@ func (h *Handlers) httpGetRequest(c *gin.Context) {
 	// A2/A3/A7/A8: authorize against the bundle's durable task_id before the
 	// in-memory read, so a foreign or nonexistent pending_id is the same 404.
 	if _, _, err := h.resolver.AuthorizeBundleAccess(c.Request.Context(), pendingID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "clarification request not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": errClarificationRequestNotFound})
 		return
 	}
 
 	req, ok := h.store.GetRequest(pendingID)
 	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "clarification request not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": errClarificationRequestNotFound})
 		return
 	}
 
@@ -320,7 +322,7 @@ func (h *Handlers) httpWaitForResponse(c *gin.Context) {
 	// pending_id with no durable messages is now 404 rather than the 504 a
 	// missing in-memory entry produces below.
 	if _, _, err := h.resolver.AuthorizeBundleAccess(c.Request.Context(), pendingID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "clarification request not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": errClarificationRequestNotFound})
 		return
 	}
 
@@ -379,7 +381,7 @@ func (h *Handlers) writeResolutionResult(c *gin.Context, pendingID string, res *
 			"response": json.RawMessage(serialized),
 		})
 	case errors.Is(err, ErrBundleNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "clarification request not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": errClarificationRequestNotFound})
 	case IsValidationError(err):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case IsNotActiveError(err):
@@ -400,13 +402,13 @@ func (h *Handlers) httpCancelRequest(c *gin.Context) {
 	pendingID := c.Param("id")
 
 	if _, _, err := h.resolver.AuthorizeBundleAccess(c.Request.Context(), pendingID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "clarification request not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": errClarificationRequestNotFound})
 		return
 	}
 
 	req, ok := h.store.GetRequest(pendingID)
 	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "clarification request not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": errClarificationRequestNotFound})
 		return
 	}
 
