@@ -11,6 +11,15 @@ import {
 } from "@kandev/ui/alert-dialog";
 import { Trans, useTranslation } from "react-i18next";
 
+export function DeleteFileDescription({ name }: { name: string }) {
+  return (
+    <Trans i18nKey="task:deleteFileConfirm" values={{ name }}>
+      This will permanently delete <span className="font-semibold">{name}</span>. This action cannot
+      be undone.
+    </Trans>
+  );
+}
+
 export function DeleteFolderDescription({ name, fileCount }: { name: string; fileCount: number }) {
   if (fileCount > 0) {
     return (

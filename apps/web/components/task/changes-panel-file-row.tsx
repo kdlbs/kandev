@@ -70,6 +70,7 @@ export function FileRow({
   treeMode,
   indentPx,
 }: FileRowProps) {
+  const { isFinePointer } = useResponsiveBreakpoint();
   const { folder, file: name } = splitPath(file.path);
   const showFolder = !treeMode && folder;
 
@@ -139,18 +140,30 @@ export function FileRow({
         </button>
       </div>
       <div className="grid items-center shrink-0 [&>*]:col-start-1 [&>*]:row-start-1">
-        <div className="flex items-center gap-2 justify-end transition-opacity group-hover:opacity-0 pointer-events-none">
-          <LineStat added={file.plus} removed={file.minus} />
-          <FileStatusIcon status={file.status} oldPath={file.oldPath} />
-        </div>
+        <FileRowStats file={file} isFinePointer={isFinePointer} />
         <FileRowActions
           path={file.path}
           repo={file.repositoryName}
+          isFinePointer={isFinePointer}
           onDiscard={onDiscard}
           onEditFile={onEditFile}
         />
       </div>
     </li>
+  );
+}
+
+function FileRowStats({ file, isFinePointer }: { file: ChangedFile; isFinePointer: boolean }) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 justify-end transition-opacity pointer-events-none",
+        isFinePointer ? "group-hover:opacity-0" : "opacity-0",
+      )}
+    >
+      <LineStat added={file.plus} removed={file.minus} />
+      <FileStatusIcon status={file.status} oldPath={file.oldPath} />
+    </div>
   );
 }
 
@@ -251,16 +264,17 @@ function StageButton({
 function FileRowActions({
   path,
   repo,
+  isFinePointer,
   onDiscard,
   onEditFile,
 }: {
   path: string;
   repo?: string;
+  isFinePointer: boolean;
   onDiscard: (path: string, repo?: string, anchor?: HTMLElement) => void;
   onEditFile: (path: string, repo?: string) => void;
 }) {
   const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
   return (
     <div
       data-testid="file-row-hover-actions"

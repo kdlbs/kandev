@@ -29,7 +29,11 @@ import {
   canOpenNodeInEditor,
   useFileTreeEditorActions,
 } from "./file-tree-editor-menu";
-import { DeleteConfirmDialog, DeleteFolderDescription } from "./file-delete-confirmation";
+import {
+  DeleteConfirmDialog,
+  DeleteFileDescription,
+  DeleteFolderDescription,
+} from "./file-delete-confirmation";
 
 type GitFileStatus = FileInfo["status"] | undefined;
 
@@ -405,8 +409,10 @@ export function FileContextMenu({
           : t("task:delete2", { name: node.name }),
         label: isBulk ? t("task:deleteItemsLabel", { count: selectedCount }) : t("task:delete"),
         cancelLabel: t("common:cancel"),
-        description: (
+        description: node.is_dir ? (
           <DeleteFolderDescription name={node.name} fileCount={countFilesInTree(node)} />
+        ) : (
+          <DeleteFileDescription name={node.name} />
         ),
         onDelete: handleDelete,
         onCancel: () => setDeleteConfirmationOpen(false),

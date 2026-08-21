@@ -18,29 +18,44 @@ async function setupMobileFileTask(
     path.join(backend.tmpDir, "repos", "e2e-repo"),
     makeGitEnv(backend.tmpDir),
   );
-  git.createFile(filePath, "mobile delete confirmation\n");
-  git.stageAll();
-  git.commit(`add mobile delete fixture ${suffix}`);
+  const originalSha = git.getCurrentSha();
+  const restoreRepository = () => git.exec(`git reset --hard ${originalSha}`);
 
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    `Mobile file confirmations ${suffix}`,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-  await testPage.goto(`/t/${task.id}`);
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
-  await session.waitForChatIdle({ timeout: 45_000 });
-  return { session, filePath };
+  try {
+    git.createFile(filePath, "mobile delete confirmation\n");
+    git.stageAll();
+    git.commit(`add mobile delete fixture ${suffix}`);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile file confirmations",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+    return { session, filePath, restoreRepository };
+  } catch (error) {
+    restoreRepository();
+    throw error;
+  }
 }
 
+let restoreRepository: (() => void) | undefined;
+
 test.describe("Mobile file confirmations", () => {
+  test.afterEach(() => {
+    restoreRepository?.();
+    restoreRepository = undefined;
+  });
+
   test("confirms one file deletion inline without horizontal overflow", async ({
     testPage,
     apiClient,
@@ -49,7 +64,9 @@ test.describe("Mobile file confirmations", () => {
     prCapture,
   }) => {
     test.setTimeout(90_000);
-    const { session, filePath } = await setupMobileFileTask(testPage, apiClient, seedData, backend);
+    const fixture = await setupMobileFileTask(testPage, apiClient, seedData, backend);
+    const { session, filePath } = fixture;
+    restoreRepository = fixture.restoreRepository;
 
     expect(await testPage.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(true);
     await testPage.getByRole("button", { name: "Files" }).tap();
