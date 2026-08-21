@@ -24,9 +24,10 @@ function ChangesPanelDialogsSection({
     <>
       <DiscardDialog
         open={dialogs.showDiscardDialog}
-        onOpenChange={dialogs.setShowDiscardDialog}
+        onOpenChange={dialogs.handleDiscardOpenChange}
         fileToDiscard={dialogs.fileToDiscard}
         filesToDiscard={dialogs.filesToDiscard}
+        anchorRef={dialogs.discardAnchorRef}
         onConfirm={dialogs.handleDiscardConfirm}
       />
       <AmendDialog
