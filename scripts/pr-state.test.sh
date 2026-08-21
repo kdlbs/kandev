@@ -1515,8 +1515,8 @@ test_anchored_prefix_strip_cannot_loop() {
   # so sub() is both the terminating and the semantically correct operator.
   # The hazard is a pattern that can match the empty string. A trailing optional
   # group is the realistic shape of that: gsub("...(?:x)?"; ...) matches nothing
-  # at every position. A pattern ending in a required atom, such as
-  # gsub("^[[:space:]]+|[[:space:]]+$"; ...), is fine and must not be flagged.
+  # at every position. This source guard is conservative. It flags any gsub
+  # pattern that contains `?`, including safe patterns that contain required atoms.
   local offenders
   offenders="$(grep -n 'gsub("[^"]*?";' "$SCRIPT" || true)"
   if [ -n "$offenders" ]; then
@@ -1524,10 +1524,35 @@ test_anchored_prefix_strip_cannot_loop() {
     fail "a gsub pattern ending in an optional group can match empty and loops on jq 1.6; use sub()"
   fi
 
-  # The filter must terminate quickly whatever jq is installed.
-  local start elapsed
+  # The filter must terminate quickly whatever jq is installed. Use a background
+  # watchdog because macOS does not provide the GNU `timeout` command by default.
+  local start elapsed tmp timeout_file jq_pid watchdog_pid jq_status
+  make_tmp_dir tmp
+  timeout_file="$tmp/jq-timeout"
   start=$(date +%s)
-  if ! jq -n '"- **blocked** on review" | sub("^[[:space:]]*(?:(?:[-*+]\\s+)|(?:[0-9]+\\.\\s+))?(?:\\*\\*|__|_|\\*)?"; "")' >/dev/null 2>&1; then
+  jq -n '"- **blocked** on review" | sub("^[[:space:]]*(?:(?:[-*+]\\s+)|(?:[0-9]+\\.\\s+))?(?:\\*\\*|__|_|\\*)?"; "")' >/dev/null 2>&1 &
+  jq_pid=$!
+  (
+    sleep 5
+    if kill -0 "$jq_pid" 2>/dev/null; then
+      : >"$timeout_file"
+      kill "$jq_pid" 2>/dev/null || true
+    fi
+  ) &
+  watchdog_pid=$!
+
+  if wait "$jq_pid"; then
+    jq_status=0
+  else
+    jq_status=$?
+  fi
+  kill "$watchdog_pid" 2>/dev/null || true
+  wait "$watchdog_pid" 2>/dev/null || true
+
+  if [ -e "$timeout_file" ]; then
+    fail "the prefix strip terminates promptly (timed out after 5s)"
+  fi
+  if [ "$jq_status" -ne 0 ]; then
     fail "the prefix strip evaluates successfully"
   fi
   elapsed=$(( $(date +%s) - start ))
