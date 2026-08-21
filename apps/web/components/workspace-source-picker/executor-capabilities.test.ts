@@ -25,6 +25,8 @@ describe("getWorkspaceSourceCapabilities", () => {
     "remote_docker",
     "ssh",
     "sprites",
+    "remote_vps",
+    "k8s",
   ] as const)("marks executor capabilities as known once resolved for %s", (executorType) => {
     expect(getWorkspaceSourceCapabilities(executorType).executorCapabilitiesKnown).toBe(true);
   });
@@ -38,6 +40,13 @@ describe("getWorkspaceSourceCapabilities", () => {
       });
     },
   );
+
+  it("keeps an unrecognized executor type unresolved", () => {
+    expect(getWorkspaceSourceCapabilities("future_executor")).toMatchObject({
+      canAddFolders: false,
+      executorCapabilitiesKnown: false,
+    });
+  });
 
   it.each(["local", "local_pc"] as const)(
     "uses the live checkout and does not offer a checkout branch for %s",

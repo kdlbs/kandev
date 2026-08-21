@@ -314,6 +314,26 @@ describe("useAllWorkflowSnapshots — snapshot mapping", () => {
     );
   });
 
+  it("clears a cached executor binding when the response explicitly clears the primary session", async () => {
+    seedCachedTask({ primarySessionId: "session-1", ...WORKTREE_EXECUTOR_FIELDS });
+    mockFetchWorkflowSnapshot.mockResolvedValueOnce({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [
+        {
+          id: "task-1",
+          workflow_step_id: "step-1",
+          title: "Task",
+          primary_session_id: null,
+        },
+      ],
+    });
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0].primaryExecutorType).toBeUndefined();
+  });
+
   it("adopts a fresh primary executor binding when the response includes one", async () => {
     seedCachedTask({});
     mockFetchWorkflowSnapshot.mockResolvedValueOnce({

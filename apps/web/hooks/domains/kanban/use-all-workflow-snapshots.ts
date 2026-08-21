@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { fetchWorkflowSnapshot } from "@/lib/api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { copyPrimaryExecutorFields, toKanbanTask } from "@/lib/kanban/map-task";
+import { toKanbanTask } from "@/lib/kanban/map-task";
 import type { KanbanState, WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import type { Task } from "@/lib/types/http";
 import type { StoreApi } from "zustand";
@@ -45,20 +45,59 @@ function hasNewerLiveAutoStartFailed(
   return existing.autoStartFailed !== fetchStart.autoStartFailed;
 }
 
-function hasNewerLiveExecutor(existing: KanbanTask, fetchStart: KanbanTask | undefined): boolean {
-  if (!fetchStart) return true;
+function hasExecutorBinding(task: KanbanTask): boolean {
   return (
-    existing.primaryExecutorId !== fetchStart.primaryExecutorId ||
-    existing.primaryExecutorType !== fetchStart.primaryExecutorType ||
-    existing.primaryExecutorName !== fetchStart.primaryExecutorName ||
-    existing.isRemoteExecutor !== fetchStart.isRemoteExecutor
+    task.primaryExecutorId !== undefined ||
+    task.primaryExecutorType !== undefined ||
+    task.primaryExecutorName !== undefined ||
+    task.isRemoteExecutor === true
   );
+}
+
+function hasNewerLiveExecutorBinding(
+  existing: KanbanTask,
+  fetchStart: KanbanTask | undefined,
+): boolean {
+  if (!fetchStart) return hasExecutorBinding(existing);
+  return (
+    (existing.primaryExecutorId ?? undefined) !== (fetchStart.primaryExecutorId ?? undefined) ||
+    (existing.primaryExecutorType ?? undefined) !== (fetchStart.primaryExecutorType ?? undefined) ||
+    (existing.primaryExecutorName ?? undefined) !== (fetchStart.primaryExecutorName ?? undefined) ||
+    (existing.isRemoteExecutor ?? false) !== (fetchStart.isRemoteExecutor ?? false)
+  );
+}
+
+function preserveOmittedExecutorBinding(
+  mapped: KanbanTask,
+  existing: KanbanTask,
+  fetchStart: KanbanTask | undefined,
+  source: Task,
+): void {
+  // The executor binding comes from an omittable primary-session JOIN. Only
+  // preserve fields when the cached task changed after this request started;
+  // otherwise, an authoritative current snapshot can clear stale fields.
+  if (source.primary_session_id === null || !hasNewerLiveExecutorBinding(existing, fetchStart)) {
+    return;
+  }
+  if (source.primary_executor_id === undefined) {
+    mapped.primaryExecutorId = existing.primaryExecutorId;
+  }
+  if (source.primary_executor_type === undefined) {
+    mapped.primaryExecutorType = existing.primaryExecutorType;
+  }
+  if (source.primary_executor_name === undefined) {
+    mapped.primaryExecutorName = existing.primaryExecutorName;
+  }
+  if (source.is_remote_executor === undefined) {
+    mapped.isRemoteExecutor = existing.isRemoteExecutor;
+  }
 }
 
 function mergeFetchedTask(
   mapped: KanbanTask,
   existing: KanbanTask,
   fetchStart: KanbanTask | undefined,
+  source: Task,
   statusSummaryInvalidated: boolean,
 ): KanbanTask {
   // Production snapshot payloads can be surfaced through read-only objects.
@@ -100,12 +139,7 @@ function mergeFetchedTask(
   if (merged.autoStartFailed === undefined || hasNewerLiveAutoStartFailed(existing, fetchStart)) {
     merged.autoStartFailed = existing.autoStartFailed;
   }
-  // An omitted executor bundle in a current full snapshot represents a
-  // legitimate detach. Only copy live fields when a live update changed the
-  // executor after this request began, or when the task appeared in flight.
-  if (hasNewerLiveExecutor(existing, fetchStart)) {
-    copyPrimaryExecutorFields(merged, existing);
-  }
+  preserveOmittedExecutorBinding(merged, existing, fetchStart, source);
   return merged;
 }
 
@@ -132,6 +166,7 @@ function mergeSnapshotTasks(
             mapped,
             existing,
             fetchStartById.get(mapped.id),
+            task,
             task.status_summary_invalidated === true,
           )
         : mapped;
