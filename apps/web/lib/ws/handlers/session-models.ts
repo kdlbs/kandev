@@ -108,6 +108,12 @@ function shouldHydrateSessionModelsPayload(
   return payload.config_options_settled === true || (matchesPersisted && !unsettledStartup);
 }
 
+function shouldUsePersistedRuntimeConfig(hydrated: boolean, unsettledStartup: boolean): boolean {
+  // A store can outlive the backend session after a restart. Keep persisted
+  // runtime values authoritative until the resumed startup payload settles.
+  return !hydrated || unsettledStartup;
+}
+
 // During an agentctl relaunch (ready -> starting -> ready) the backend can emit
 // a transient session.models_updated with no models, no current model, and no
 // config options before the fresh agent reports its real capabilities. Since
@@ -299,13 +305,22 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
       const sessionId = payload.session_id;
       const state = store.getState();
       const hydrated = hydratedSessions(store);
-      const persisted = hydrated.has(sessionId) ? {} : persistedRuntimeConfig(state, sessionId);
-      const matchesPersisted = payloadMatchesPersistedRuntime(payload, persisted);
       const unsettledStartup = isUnsettledStartupModelsPayload(state, sessionId, payload);
+      const usePersistedRuntime = shouldUsePersistedRuntimeConfig(
+        hydrated.has(sessionId),
+        unsettledStartup,
+      );
+      const persisted = usePersistedRuntime ? persistedRuntimeConfig(state, sessionId) : {};
+      const matchesPersisted = payloadMatchesPersistedRuntime(payload, persisted);
       if (shouldHydrateSessionModelsPayload(payload, matchesPersisted, unsettledStartup)) {
         hydrated.add(sessionId);
       }
-      const pendingRuntime = hydrated.has(sessionId) ? {} : persisted;
+      const pendingRuntime = shouldUsePersistedRuntimeConfig(
+        hydrated.has(sessionId),
+        unsettledStartup,
+      )
+        ? persisted
+        : {};
       const resolved = resolveModelsUpdatedState(state, sessionId, payload, pendingRuntime);
       debugModelsUpdate(state, sessionId, payload, resolved);
       if (resolved.isEmpty && resolved.populated) {

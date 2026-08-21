@@ -92,6 +92,7 @@ No new mobile Playwright case is required. The shared handler unit test and the 
 - Mobile selector E2E: `cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-model-selector.spec.ts -- --grep "model"` passed with 1 test.
 - PR evidence capture passed for both desktop session tabs and the existing mobile selector; the manifest maps both fresh PNGs and both images were inspected and compressed.
 - PR fixup remediation: a settled startup payload now releases hydration even when it differs from persisted runtime data; the added regression passed, backend focused tests passed, web lint passed with zero warnings, typecheck passed, and the production desktop resume E2E passed.
+- PR review follow-up: persisted runtime configuration remains authoritative for an unsettled `STARTING` payload even when the store already marked the session hydrated after an earlier settled payload. The same-store restart regression passed, the affected frontend suite passed with 31 tests, changed-file ESLint passed with zero warnings, typecheck passed, the production desktop resume E2E passed with 1 test, and the existing mobile model-selector E2E passed with 1 test. The restart history assertion now checks each session's expected model label rather than only comparing the two labels.
 
 ## Implementation Waves And Parallel Candidates
 

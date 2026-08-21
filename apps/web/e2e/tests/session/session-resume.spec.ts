@@ -590,7 +590,8 @@ test.describe("Session resume (multi-session)", () => {
     for (const sample of completeSamples) {
       const first = sample.find((entry) => entry.id === firstSessionId);
       const secondEntry = sample.find((entry) => entry.id === secondSessionId);
-      expect(first?.text).not.toBe(secondEntry?.text);
+      expect(first?.text).toContain("Mock Smart");
+      expect(secondEntry?.text).toContain("Mock Fast");
     }
   });
 });

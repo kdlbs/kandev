@@ -152,6 +152,40 @@ it("keeps persisted model state until a settled startup payload arrives", () => 
   );
 });
 
+it("restores persisted runtime after a hydrated session restarts", () => {
+  const store = makeStore({
+    contextWindow: {
+      bySessionId: {
+        "session-1": {
+          size: 100,
+          used: 40,
+          remaining: 60,
+          efficiency: 60,
+          compactionCount: 0,
+        },
+      },
+    },
+    taskSessions: {
+      items: {
+        "session-1": makeTaskSession({ runtime_config: { model: providerModelId } }),
+      },
+    },
+  });
+  const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+  handler(makeMessage(makeStartupPayload(providerModelId, providerModelId, true, "high")));
+  expectPersistedModel(store);
+
+  store.getState().taskSessions.items["session-1"].state = "STARTING";
+  handler(makeMessage(makeStartupPayload(lunaModelId, lunaModelId, false, "low")));
+  expectPersistedModel(store);
+  expect(store.getState().clearContextWindow).not.toHaveBeenCalled();
+  expect(store.getState().contextWindow.bySessionId["session-1"]).toBeDefined();
+
+  handler(makeMessage(makeStartupPayload(providerModelId, providerModelId, true, "high")));
+  expectPersistedModel(store);
+});
+
 it("hydrates from a settled startup payload when the model differs from persisted runtime", () => {
   const store = makeStore({
     taskSessions: {
