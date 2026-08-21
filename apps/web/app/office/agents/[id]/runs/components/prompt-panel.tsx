@@ -7,7 +7,7 @@ import type { RunDetail } from "@/lib/api/domains/office-extended-api";
 import { useTranslation } from "react-i18next";
 
 type Props = {
-  run: Pick<RunDetail, "assembled_prompt" | "summary_injected" | "result_json">;
+  run: Pick<RunDetail, "assembled_prompt" | "summary_injected" | "result_json" | "output_summary">;
 };
 
 /**
@@ -25,8 +25,9 @@ export function PromptPanel({ run }: Props) {
   const assembled = run.assembled_prompt ?? "";
   const summary = run.summary_injected ?? "";
   const result = run.result_json ?? "";
+  const output = run.output_summary ?? "";
   const hasResult = result !== "" && result !== "{}";
-  const hasAny = assembled !== "" || summary !== "" || hasResult;
+  const hasAny = assembled !== "" || summary !== "" || hasResult || output !== "";
   if (!hasAny) return null;
 
   return (
@@ -58,6 +59,14 @@ export function PromptPanel({ run }: Props) {
             label={t("office:structuredResult")}
             content={formatJSONIfPossible(result)}
             testid="prompt-result-json"
+          />
+        )}
+        {output !== "" && (
+          <PromptSection
+            label={t("office:outputSummary")}
+            content={output}
+            testid="prompt-output-summary"
+            defaultOpen
           />
         )}
       </div>

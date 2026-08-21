@@ -772,6 +772,7 @@
   "stepTaskTemplate": "任务模板",
   "stepXOfYTitle": "步骤 {{number}} / {{total}}；{{title}}",
   "structuredResult": "结构化结果",
+  "outputSummary": "输出摘要",
   "subIssueOfParent": "{{parent}} 的子议题",
   "subscriptionQuota": "订阅配额",
   "succeeded": "成功",

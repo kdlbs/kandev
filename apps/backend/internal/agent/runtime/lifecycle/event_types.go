@@ -14,6 +14,7 @@ type AgentEventPayload struct {
 	RunID              string                 `json:"run_id,omitempty"`
 	TaskID             string                 `json:"task_id"`
 	SessionID          string                 `json:"session_id,omitempty"`
+	TurnID             string                 `json:"turn_id,omitempty"`
 	AgentID            string                 `json:"agent_id,omitempty"`
 	AgentProfileID     string                 `json:"agent_profile_id"`
 	ExecutionProfileID string                 `json:"execution_profile_id,omitempty"`

@@ -34,6 +34,15 @@ func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string
 	p.publishAgentEventPayload(ctx, eventType, newAgentEventPayload(execution))
 }
 
+// publishAgentEventWithTurnID publishes a lifecycle event with a turn captured
+// by the completion handler. It avoids reading prompt state while that handler
+// still holds the prompt lifecycle lock.
+func (p *EventPublisher) publishAgentEventWithTurnID(
+	ctx context.Context, eventType string, execution *AgentExecution, turnID string,
+) {
+	p.publishAgentEventPayload(ctx, eventType, newAgentEventPayloadWithTurnID(execution, turnID))
+}
+
 // PublishAgentStalled publishes one inactivity signal for a prompt.
 // neverStarted reports whether the agent has emitted zero events since this
 // prompt was dispatched, and activityEpoch lets the consumer revalidate that
@@ -95,11 +104,16 @@ func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType
 }
 
 func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
+	return newAgentEventPayloadWithTurnID(execution, execution.promptTurnIDSnapshot())
+}
+
+func newAgentEventPayloadWithTurnID(execution *AgentExecution, turnID string) AgentEventPayload {
 	return AgentEventPayload{
 		AgentExecutionID:   execution.ID,
 		RunID:              execution.RunID,
 		TaskID:             execution.TaskID,
 		SessionID:          execution.SessionID,
+		TurnID:             turnID,
 		AgentID:            execution.AgentID,
 		AgentProfileID:     execution.officeProfileID(),
 		ExecutionProfileID: execution.AgentProfileID,

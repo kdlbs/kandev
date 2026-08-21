@@ -772,6 +772,7 @@
   "stepTaskTemplate": "Modelo de tarefa",
   "stepXOfYTitle": "Passo {{number}} de {{total}}; {{title}}",
   "structuredResult": "Resultado estruturado",
+  "outputSummary": "Resumo da saída",
   "subIssueOfParent": "Subissue de {{parent}}",
   "subscriptionQuota": "Quota da subscrição",
   "succeeded": "Bem-sucedidas",

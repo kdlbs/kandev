@@ -772,6 +772,7 @@
   "stepTaskTemplate": "任務模板",
   "stepXOfYTitle": "步驟 {{number}} / {{total}}；{{title}}",
   "structuredResult": "結構化結果",
+  "outputSummary": "輸出摘要",
   "subIssueOfParent": "{{parent}} 的子議題",
   "subscriptionQuota": "訂閲配額",
   "succeeded": "成功",

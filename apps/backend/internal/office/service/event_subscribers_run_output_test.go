@@ -384,3 +384,66 @@ func TestHandleAgentCompleted_SecondRunOnReusedSessionStaysEmpty(t *testing.T) {
 		t.Errorf("run 2 output_summary = %q, want empty (must not inherit run 1's message from the reused session)", got2.OutputSummary)
 	}
 }
+
+func TestHandleAgentCompleted_DoesNotClearExistingSummaryWithoutMessage(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	createTestAgent(t, svc, "ws-1", "worker-1")
+	taskID := createOfficeTask(t, svc, "ws-1", "worker-1")
+	if err := svc.QueueRun(ctx, "worker-1", service.RunReasonTaskAssigned,
+		`{"task_id":"`+taskID+`"}`, "run-output-preserve"); err != nil {
+		t.Fatalf("queue run: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim run: %v (run=%v)", err, run)
+	}
+	svc.ExecSQL(t, `UPDATE runs SET output_summary = 'previous projection' WHERE id = ?`, run.ID)
+
+	completed := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
+		"task_id":          taskID,
+		"session_id":       "sess-empty",
+		"agent_profile_id": "worker-1",
+	})
+	if err := eb.Publish(ctx, events.AgentCompleted, completed); err != nil {
+		t.Fatalf("publish completed: %v", err)
+	}
+
+	got := findRunByID(t, svc, "ws-1", run.ID)
+	if got.OutputSummary != "previous projection" {
+		t.Fatalf("output_summary = %q, want existing projection preserved", got.OutputSummary)
+	}
+}
+
+func TestHandleAgentCompleted_UsesTurnScopedMessageForSharedSession(t *testing.T) {
+	stub := &stubTaskWorkspace{lastMsgByTurn: map[string]string{
+		"turn-2": "second run answer",
+	}}
+	svc, eb := newTestServiceWithTaskWorkspace(t, stub)
+	ctx := context.Background()
+	createTestAgent(t, svc, "ws-1", "worker-1")
+	taskID := createOfficeTask(t, svc, "ws-1", "worker-1")
+	if err := svc.QueueRun(ctx, "worker-1", service.RunReasonTaskAssigned,
+		`{"task_id":"`+taskID+`"}`, "run-output-turn"); err != nil {
+		t.Fatalf("queue run: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim run: %v (run=%v)", err, run)
+	}
+
+	completed := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
+		"task_id":          taskID,
+		"session_id":       "sess-shared",
+		"turn_id":          "turn-2",
+		"agent_profile_id": "worker-1",
+	})
+	if err := eb.Publish(ctx, events.AgentCompleted, completed); err != nil {
+		t.Fatalf("publish completed: %v", err)
+	}
+
+	got := findRunByID(t, svc, "ws-1", run.ID)
+	if got.OutputSummary != "second run answer" {
+		t.Fatalf("output_summary = %q, want turn-scoped message", got.OutputSummary)
+	}
+}
