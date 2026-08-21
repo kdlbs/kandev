@@ -207,6 +207,16 @@ and mobile E2E passed 14/14 and 4/4. Updater, workflow-contract,
 action-pinning, and `zizmor` checks passed. Public-doc tests passed 61/61 and
 the validator accepted 41 pages. `git diff --check` passed.
 
+### Review remediation
+
+The review pass corrected existing-PR selection and App-token propagation in
+the weekly workflow, parsed GitHub output flags before catalogue selection,
+preserved structural `use_default` intent, omitted failed lookup timestamps,
+and retried failed page-local status refreshes. Remediation verification passed
+2,615 backend tests, 22 focused web tests, full web lint/typecheck/i18n, 7 pin
+updater tests, 8 workflow-contract tests, 9 action-pinning tests, `zizmor`,
+and desktop/mobile E2E at 14/14 and 4/4.
+
 ---
 
 ## Implementation Waves And Parallel Candidates

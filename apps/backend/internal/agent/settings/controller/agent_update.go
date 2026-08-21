@@ -97,7 +97,7 @@ func (c *Controller) previewAgentUpdate(
 		return nil, err
 	}
 	operation, err := managedruntime.ClassifyEffectiveOperation(
-		active, effective, current, target, defaultVersion,
+		useDefault, active, effective, current, target, defaultVersion,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdateTargetInvalid, err)

@@ -68,6 +68,8 @@ jobs:
 
       - name: Commit and push one grouped change
         if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           git config user.name "kandev-runtime-updater[bot]"
@@ -92,8 +94,8 @@ jobs:
 
           The catalogue is validated before this PR is created. This workflow does not install or activate a runtime.
           EOF
-          open_prs="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BOT_BRANCH" --base main --state open --json number --jq 'length')"
-          if [[ "$open_prs" == "0" ]]; then
+          open_pr_number="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BOT_BRANCH" --base main --state open --json number --jq '.[0].number // ""')"
+          if [[ -z "$open_pr_number" ]]; then
             gh pr create \
               --repo "$GITHUB_REPOSITORY" \
               --base main \
@@ -101,9 +103,8 @@ jobs:
               --title "chore: update managed runtime pins" \
               --body-file /tmp/managed-runtime-pin-pr-body.md
           else
-            gh pr edit \
+            gh pr edit "$open_pr_number" \
               --repo "$GITHUB_REPOSITORY" \
-              --head "$BOT_BRANCH" \
               --title "chore: update managed runtime pins" \
               --body-file /tmp/managed-runtime-pin-pr-body.md
           fi

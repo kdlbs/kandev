@@ -119,10 +119,36 @@ function outputChanged(outputPath, changed) {
   return fs.appendFile(outputPath, `changed=${changed ? "true" : "false"}\n`);
 }
 
+export function parseArguments(argv) {
+  let cataloguePath = DEFAULT_CATALOGUE_PATH;
+  let outputPath = "";
+  let positionalPathSeen = false;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--github-output") {
+      outputPath = argv[index + 1] ?? "";
+      if (!outputPath || outputPath.startsWith("--")) {
+        throw new Error("--github-output requires a path");
+      }
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--")) {
+      throw new Error(`unknown option: ${argument}`);
+    }
+    if (positionalPathSeen) {
+      throw new Error("only one catalogue path is supported");
+    }
+    cataloguePath = argument;
+    positionalPathSeen = true;
+  }
+
+  return { cataloguePath, outputPath };
+}
+
 async function main(argv = process.argv.slice(2)) {
-  const cataloguePath = argv[0] || DEFAULT_CATALOGUE_PATH;
-  const outputIndex = argv.indexOf("--github-output");
-  const outputPath = outputIndex >= 0 ? argv[outputIndex + 1] : "";
+  const { cataloguePath, outputPath } = parseArguments(argv);
   const result = await updateCatalogue({ cataloguePath });
   await outputChanged(outputPath, result.changed);
   process.stdout.write(result.changed ? "Managed runtime pins changed.\n" : "Managed runtime pins are current.\n");

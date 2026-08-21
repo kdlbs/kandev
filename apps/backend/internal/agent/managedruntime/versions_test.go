@@ -95,6 +95,7 @@ func TestClassifyOperation(t *testing.T) {
 func TestClassifyEffectiveOperation(t *testing.T) {
 	tests := []struct {
 		name       string
+		useDefault bool
 		active     string
 		effective  string
 		current    string
@@ -104,6 +105,7 @@ func TestClassifyEffectiveOperation(t *testing.T) {
 	}{
 		{
 			name:       "return to default",
+			useDefault: true,
 			active:     "1.18.5",
 			effective:  "1.18.5",
 			current:    "1.18.5",
@@ -128,10 +130,19 @@ func TestClassifyEffectiveOperation(t *testing.T) {
 			defaultVer: "1.18.18",
 			want:       OperationUpdate,
 		},
+		{
+			name:       "numeric default remains an active selection",
+			active:     "1.18.5",
+			effective:  "1.18.5",
+			current:    "1.18.5",
+			target:     "1.18.18",
+			defaultVer: "1.18.18",
+			want:       OperationUpdate,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ClassifyEffectiveOperation(tt.active, tt.effective, tt.current, tt.target, tt.defaultVer)
+			got, err := ClassifyEffectiveOperation(tt.useDefault, tt.active, tt.effective, tt.current, tt.target, tt.defaultVer)
 			if err != nil {
 				t.Fatalf("ClassifyEffectiveOperation: %v", err)
 			}

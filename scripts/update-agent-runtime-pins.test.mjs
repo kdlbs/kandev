@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  DEFAULT_CATALOGUE_PATH,
   parseStableVersion,
+  parseArguments,
   updatePins,
   formatCatalogue,
 } from "./update-agent-runtime-pins.mjs";
@@ -55,6 +57,13 @@ test("rejects an invalid current catalogue pin", () => {
 test("accepts build metadata but not prerelease syntax", () => {
   assert.equal(parseStableVersion("1.2.3+build.7"), "1.2.3+build.7");
   assert.throws(() => parseStableVersion("1.2.3-rc.1"), /stable SemVer/i);
+});
+
+test("parses the workflow output flag before the default catalogue path", () => {
+  assert.deepEqual(parseArguments(["--github-output", "/tmp/github-output"]), {
+    cataloguePath: DEFAULT_CATALOGUE_PATH,
+    outputPath: "/tmp/github-output",
+  });
 });
 
 test("formats the catalogue as one complete atomic-write payload", () => {

@@ -219,10 +219,11 @@ func (c *Controller) runtimeUpdateStatusEntry(
 	c.runtimeUpdateStatusMu.Unlock()
 
 	latest, err := c.resolveRuntimeUpdateLatest(ctx, packageName)
-	entry := runtimeUpdateStatusCacheEntry{checkedAt: now}
+	entry := runtimeUpdateStatusCacheEntry{}
 	if err == nil {
 		entry.latest = latest
 		entry.ok = true
+		entry.checkedAt = now
 		entry.expiresAt = now.Add(runtimeUpdateStatusSuccessTTL)
 	} else {
 		entry.expiresAt = now.Add(runtimeUpdateStatusFailureTTL)

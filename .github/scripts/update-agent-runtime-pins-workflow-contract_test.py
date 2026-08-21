@@ -38,6 +38,12 @@ class ManagedRuntimePinWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("--auto", self.workflow)
         self.assertIn("at most one", self.workflow)
 
+    def test_workflow_refreshes_existing_pr_by_number_and_authenticates_push(self) -> None:
+        self.assertIn('open_pr_number="$(gh pr list', self.workflow)
+        self.assertIn('gh pr edit "$open_pr_number"', self.workflow)
+        self.assertNotIn('gh pr edit \\\n              --repo "$GITHUB_REPOSITORY" \\\n              --head "$BOT_BRANCH"', self.workflow)
+        self.assertIn("GH_TOKEN: ${{ steps.app-token.outputs.token }}", self.workflow)
+
     def test_workflow_validates_before_any_commit_or_push(self) -> None:
         update_pos = self.workflow.index("node scripts/update-agent-runtime-pins.mjs")
         commit_pos = self.workflow.index("git commit")

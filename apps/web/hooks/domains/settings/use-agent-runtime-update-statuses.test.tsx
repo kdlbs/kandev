@@ -82,7 +82,8 @@ describe("useAgentRuntimeUpdateStatuses", () => {
           },
         ],
       })
-      .mockRejectedValueOnce(new Error("offline"));
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ statuses: [] });
     const { result, rerender } = renderHook(({ jobs }) => useAgentRuntimeUpdateStatuses(jobs), {
       initialProps: { jobs: {} as Record<string, AgentUpdateJob> },
     });
@@ -91,5 +92,8 @@ describe("useAgentRuntimeUpdateStatuses", () => {
     rerender({ jobs: { "claude-acp": job({ job_id: "job-2" }) } });
     await waitFor(() => expect(listAgentUpdateStatusesMock).toHaveBeenCalledTimes(2));
     expect(result.current.statusByAgent["claude-acp"]?.check_state).toBe("update_available");
+
+    rerender({ jobs: { "claude-acp": job({ job_id: "job-2" }) } });
+    await waitFor(() => expect(listAgentUpdateStatusesMock).toHaveBeenCalledTimes(3));
   });
 });

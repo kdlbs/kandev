@@ -75,7 +75,7 @@ func TestListAgentUpdateStatusesComparesLatestAndCachesFailures(t *testing.T) {
 	byPackage := make(map[string]dto.AgentUpdateStatusDTO, len(statuses.Statuses))
 	for _, status := range statuses.Statuses {
 		byPackage[status.Package] = status
-		if status.CheckedAt == nil {
+		if status.Package != "@google/gemini-cli" && status.CheckedAt == nil {
 			t.Fatalf("%s has no checked_at", status.Package)
 		}
 	}
@@ -93,6 +93,9 @@ func TestListAgentUpdateStatusesComparesLatestAndCachesFailures(t *testing.T) {
 	}
 	if got := byPackage["@google/gemini-cli"].CheckState; got != dto.AgentUpdateCheckStateUnknown {
 		t.Fatalf("gemini state = %q, want unknown", got)
+	}
+	if status := byPackage["@google/gemini-cli"]; status.CheckedAt != nil || status.LatestVersion != "" {
+		t.Fatalf("gemini failure metadata = latest %q, checked_at %v; want both omitted", status.LatestVersion, status.CheckedAt)
 	}
 
 	if _, err := controller.ListAgentUpdateStatuses(context.Background()); err != nil {

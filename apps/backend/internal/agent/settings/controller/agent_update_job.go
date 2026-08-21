@@ -237,7 +237,7 @@ func (s *AgentUpdateJobStore) run(
 		effectiveVersion = activeVersion
 	}
 	operation, err := managedruntime.ClassifyEffectiveOperation(
-		activeVersion, effectiveVersion, currentVersion, target, defaultVersion,
+		job.UseDefault, activeVersion, effectiveVersion, currentVersion, target, defaultVersion,
 	)
 	if err != nil {
 		s.finishFailed(job, ctx, fmt.Errorf("classify runtime operation: %w", err), ref)

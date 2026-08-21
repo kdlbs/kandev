@@ -217,6 +217,7 @@ func ClassifyOperation(active, current, target string) (Operation, error) {
 // effective version because choosing the shipped default removes that
 // selection only after the candidate has been validated.
 func ClassifyEffectiveOperation(
+	useDefault bool,
 	active string,
 	effective string,
 	current string,
@@ -227,7 +228,7 @@ func ClassifyEffectiveOperation(
 	if err != nil {
 		return "", err
 	}
-	if active != "" && defaultVersion != "" {
+	if useDefault && active != "" && defaultVersion != "" {
 		if _, err := ParseStableVersion(defaultVersion); err != nil {
 			return "", err
 		}
