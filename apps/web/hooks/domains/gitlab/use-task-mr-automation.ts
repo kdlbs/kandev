@@ -174,6 +174,33 @@ function applyMRAutomationPatchOptimistically(
   return { ...previous, ...taskLevel, mr_options: mrOptions };
 }
 
+type UpdateResponseCommitContext = {
+  automation: AppState["taskMRAutomation"];
+  updateRequestRef: Record<string, number>;
+  taskId: string;
+  requestId: number;
+  externalGenAtStart: number;
+  response: TaskMRAutomationOptions;
+};
+
+function shouldCommitUpdateResponse({
+  automation,
+  updateRequestRef,
+  taskId,
+  requestId,
+  externalGenAtStart,
+  response,
+}: UpdateResponseCommitContext): boolean {
+  const currentRevision = automation.byTaskId[taskId]?.automation_revision ?? 0;
+  const responseRevision = response.automation_revision ?? 0;
+  const isLatestRequest = updateRequestRef[taskId] === requestId;
+  const isNewerRevision = responseRevision > currentRevision;
+  return (
+    (automation.externalGeneration[taskId] ?? 0) === externalGenAtStart &&
+    (isLatestRequest || isNewerRevision)
+  );
+}
+
 async function performUpdate(
   ctx: MRAutomationRequestContext,
   patch: TaskMRAutomationPatch,
@@ -200,14 +227,18 @@ async function performUpdate(
   try {
     const response = await updateTaskMRAutomation(taskId, patch, { cache: "no-store" });
     const automation = storeApi.getState().taskMRAutomation;
+    // Request-start order is not server revision order. The helper allows an
+    // older request through only when its server revision is strictly newer;
+    // the store then applies its monotonic revision guard.
     if (
-      isCurrentAndUnchangedExternally(
+      shouldCommitUpdateResponse({
         automation,
-        updateRequestRef.current,
+        updateRequestRef: updateRequestRef.current,
         taskId,
         requestId,
         externalGenAtStart,
-      )
+        response,
+      })
     ) {
       setOptions(taskId, response);
     }

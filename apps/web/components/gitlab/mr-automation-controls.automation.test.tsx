@@ -220,6 +220,23 @@ describe("MRAutomationControls — Automation section (AC1)", () => {
     expect(screen.getByTestId("mr-auto-merge-help")).toBeTruthy();
   });
 
+  it("renders switches off when options have no entry for this MR", () => {
+    hookMocks.options = makeOptions({
+      mr_options: [
+        makeMROptions({
+          mr_iid: 99,
+          auto_fix_enabled: true,
+          auto_merge_enabled: true,
+        }),
+      ],
+    });
+    renderControls();
+    expect(screen.getByLabelText(AUTO_FIX_LABEL).getAttribute("data-state")).toBe("unchecked");
+    expect(screen.getByLabelText(AUTO_MERGE_LABEL).getAttribute("data-state")).toBe("unchecked");
+    expect(screen.queryByTestId("mr-auto-fix-round-help")).toBeNull();
+    expect(screen.queryByTestId("mr-auto-merge-help")).toBeNull();
+  });
+
   it("disables both automation switches while loading", () => {
     hookMocks.loading = true;
     hookMocks.options = null;

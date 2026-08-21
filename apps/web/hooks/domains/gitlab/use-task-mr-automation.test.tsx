@@ -303,6 +303,43 @@ describe("useTaskMRAutomationOptions races", () => {
   });
 });
 
+describe("useTaskMRAutomationOptions revision ordering", () => {
+  it("commits a higher-revision response even when its request started before a lower-revision response", async () => {
+    api.getTaskMRAutomation.mockResolvedValue(baseOptions({ automation_revision: 1 }));
+    const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"), { wrapper });
+    await waitFor(() => expect(result.current.options).not.toBeNull());
+
+    const olderRequest = deferred<TaskMRAutomationOptions>();
+    const newerRequest = deferred<TaskMRAutomationOptions>();
+    api.updateTaskMRAutomation
+      .mockImplementationOnce(() => olderRequest.promise)
+      .mockImplementationOnce(() => newerRequest.promise);
+
+    act(() => {
+      void result.current.update({ auto_fix_prompt_override: "older request" });
+      void result.current.update({ auto_fix_prompt_override: "newer request" });
+    });
+
+    await act(async () => {
+      newerRequest.resolve(
+        baseOptions({ automation_revision: 2, auto_fix_prompt_override: "revision two" }),
+      );
+    });
+    expect(result.current.options?.automation_revision).toBe(2);
+
+    // The first request can commit later when the database transaction that
+    // owns it receives the next revision. Request-start order is not server
+    // revision order, so the higher revision must still win.
+    await act(async () => {
+      olderRequest.resolve(
+        baseOptions({ automation_revision: 3, auto_fix_prompt_override: "revision three" }),
+      );
+    });
+    expect(result.current.options?.automation_revision).toBe(3);
+    expect(result.current.options?.auto_fix_prompt_override).toBe("revision three");
+  });
+});
+
 describe("useTaskMRAutomationOptions task switching", () => {
   it("keeps each task's options in its own store slot — a stale response for one task cannot leak into another", async () => {
     const taskA = deferred<TaskMRAutomationOptions>();

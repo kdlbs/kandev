@@ -1146,7 +1146,7 @@ func (s *Server) registerMRAutomationTools() {
 			mcp.WithNumber("mr_iid", mcp.Description("IID of the linked MR to target")),
 			mcp.WithBoolean("auto_fix_enabled", mcp.Description("Enable or disable auto-fix when the linked MR's pipeline fails")),
 			mcp.WithBoolean("auto_merge_enabled", mcp.Description("Enable or disable auto-merge when the linked MR is ready")),
-			mcp.WithString("auto_fix_prompt_override", mcp.Description("Custom prompt for auto-fix (empty string clears the override)")),
+			mcp.WithString("auto_fix_prompt_override", mcp.Description("Task-level custom prompt for auto-fix; valid without linked MRs and not scoped by MR identity (empty string clears the override)")),
 			mcp.WithBoolean("prompt_on_review_requested", mcp.Description("Prompt this task's agent when a review is requested for the authenticated user")),
 			mcp.WithBoolean("prompt_on_merged", mcp.Description("Prompt this task's agent once when the linked MR becomes merged")),
 			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked MR becomes closed without merge")),

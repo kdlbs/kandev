@@ -119,7 +119,7 @@ workflows are not usable end to end.
   reviewer username. See "Automation (lifecycle, auto-fix, auto-merge)" below.
 - `Auto-fix CI and address comments` sends or queues an agent prompt when a
   linked MR's pipeline has a new or changed failing job, or a new or changed
-  unresolved discussion note, capped at 10 accepted rounds per task.
+  unresolved discussion note, capped at 10 accepted rounds per linked MR.
   `Auto-merge when ready` merges a linked MR only when it is open, not a
   draft, its pipeline succeeded, it has zero unresolved discussions, and
   GitLab's own merge-readiness verdict agrees.
@@ -281,12 +281,16 @@ validated against any supplied value.
 ### MR automation (lifecycle, auto-fix, auto-merge)
 
 - `GET /tasks/:taskID/mr-automation` returns the task's `TaskMRAutomationOptions`:
-  the three lifecycle booleans, `review_reviewer_username`, `auto_fix_enabled`,
-  `auto_merge_enabled`, `auto_fix_prompt_override` (`null` when unset),
-  `auto_fix_max_rounds` (`10`), `effective_auto_fix_prompt`,
-  `using_default_prompt`, `updated_at`, and `mr_states` (one
-  `TaskMRLifecycleState` per linked MR, carrying both the lifecycle dedupe
-  fields and the auto-fix/auto-merge checkpoint fields).
+  `automation_revision`, the three lifecycle booleans,
+  `review_reviewer_username`, `auto_fix_enabled`, `auto_merge_enabled`,
+  `auto_fix_prompt_override` (`null` when unset), `auto_fix_max_rounds` (`10`),
+  `effective_auto_fix_prompt`, `using_default_prompt`, `updated_at`,
+  `mr_options` (one row of the five switches per linked MR), and `mr_states`
+  (one `TaskMRLifecycleState` per linked MR, carrying both the lifecycle dedupe
+  fields and the auto-fix/auto-merge checkpoint fields). The top-level switch
+  booleans are compatibility aggregates: they are true only when at least one
+  MR is linked and every linked MR has the switch enabled. Clients that need
+  one MR's exact value must read its `mr_options` row.
 - `PATCH /tasks/:taskID/mr-automation` accepts a partial body with any of the
   same fields (excluding `auto_fix_max_rounds`, `effective_auto_fix_prompt`,
   `using_default_prompt`, `updated_at`, and `mr_states`, which are
@@ -294,7 +298,11 @@ validated against any supplied value.
   field`; `auto_fix_enabled`/`auto_merge_enabled`/the three lifecycle booleans
   reject an explicit `null` (they are switches, not clearable values);
   `auto_fix_prompt_override: null` or `""` restores the built-in `mr-auto-fix`
-  prompt.
+  prompt. To target one linked MR, clients pass the complete
+  `repository_id`, `project_path`, and `mr_iid` selector tuple. If all three
+  selectors are omitted, the switch patch fans out to every linked MR. A
+  partial selector tuple or an unlinked MR returns `400` without a write.
+  The prompt override remains task-level and does not use these selectors.
 - Current-task MCP exposes `get_task_mr_automation_kandev` and
   `update_task_mr_automation_kandev` with the same shape, scoped to the
   connected task.

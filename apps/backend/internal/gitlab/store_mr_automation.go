@@ -507,15 +507,27 @@ func applyMRSwitchPatchTx(
 }
 
 func ensureTaskMRLinkTx(ctx context.Context, tx *sqlx.Tx, taskID string, id MRIdentity) error {
-	var linked int
-	err := tx.GetContext(ctx, &linked, `
-		SELECT 1 FROM gitlab_task_mrs
-		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?
-		LIMIT 1`, taskID, id.RepositoryID, id.ProjectPath, id.MRIID)
-	if errors.Is(err, sql.ErrNoRows) {
+	// A plain SELECT is not enough here. PostgreSQL's READ COMMITTED isolation
+	// allows an unlink to delete the association after the read and before the
+	// options INSERT, which leaves an orphan row that can re-arm on relink.
+	// The no-op UPDATE takes a write lock on the association row and is portable
+	// across PostgreSQL and SQLite. The unlink transaction must wait until this
+	// transaction commits, then removes the association and its options.
+	result, err := tx.ExecContext(ctx, `
+		UPDATE gitlab_task_mrs SET updated_at = updated_at
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		taskID, id.RepositoryID, id.ProjectPath, id.MRIID)
+	if err != nil {
+		return err
+	}
+	linked, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if linked == 0 {
 		return fmt.Errorf("%w: project_path=%s mr_iid=%d", ErrTaskMRNotLinked, id.ProjectPath, id.MRIID)
 	}
-	return err
+	return nil
 }
 
 // mrAutomationSwitchPatchFields flattens a switch patch into the "was this

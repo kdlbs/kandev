@@ -318,16 +318,30 @@ test.describe("GitLab MR automation — multi-MR independence (AC1-AC3, AC26)", 
     // AC3: same independence for the three Review follow-up switches — MR A only.
     await controlsA.getByTestId("mr-review-follow-up-trigger").click();
     await controlsA.getByRole("switch", { name: "Your review is requested" }).click();
+    await controlsA.getByRole("switch", { name: "MR merged" }).click();
+    await controlsA.getByRole("switch", { name: "MR closed without merging" }).click();
     await expect
       .poll(async () => {
         const options = await apiClient.getTaskMRAutomationOptions(taskId);
-        return options.mr_options?.find((o) => o.mr_iid === iidA)?.prompt_on_review_requested;
+        const option = options.mr_options?.find((o) => o.mr_iid === iidA);
+        return {
+          prompt_on_review_requested: option?.prompt_on_review_requested,
+          prompt_on_merged: option?.prompt_on_merged,
+          prompt_on_closed: option?.prompt_on_closed,
+        };
       })
-      .toBe(true);
+      .toEqual({
+        prompt_on_review_requested: true,
+        prompt_on_merged: true,
+        prompt_on_closed: true,
+      });
     const afterReviewOptions = await apiClient.getTaskMRAutomationOptions(taskId);
-    expect(
-      afterReviewOptions.mr_options?.find((o) => o.mr_iid === iidB)?.prompt_on_review_requested,
-    ).toBe(false);
+    const optionB = afterReviewOptions.mr_options?.find((o) => o.mr_iid === iidB);
+    expect(optionB).toMatchObject({
+      prompt_on_review_requested: false,
+      prompt_on_merged: false,
+      prompt_on_closed: false,
+    });
 
     // AC1 (reload): !A stays on, !B stays off after a fresh mount.
     await testPage.reload();
@@ -346,10 +360,25 @@ test.describe("GitLab MR automation — multi-MR independence (AC1-AC3, AC26)", 
       reloadedControlsA.getByRole("switch", { name: "Auto-merge when ready" }),
     ).toBeChecked();
     await expect(
+      reloadedControlsA.getByRole("switch", { name: "Your review is requested" }),
+    ).toBeChecked();
+    await expect(reloadedControlsA.getByRole("switch", { name: "MR merged" })).toBeChecked();
+    await expect(
+      reloadedControlsA.getByRole("switch", { name: "MR closed without merging" }),
+    ).toBeChecked();
+    await expect(
       reloadedControlsB.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).not.toBeChecked();
     await expect(
       reloadedControlsB.getByRole("switch", { name: "Auto-merge when ready" }),
+    ).not.toBeChecked();
+    await reloadedControlsB.getByTestId("mr-review-follow-up-trigger").click();
+    await expect(
+      reloadedControlsB.getByRole("switch", { name: "Your review is requested" }),
+    ).not.toBeChecked();
+    await expect(reloadedControlsB.getByRole("switch", { name: "MR merged" })).not.toBeChecked();
+    await expect(
+      reloadedControlsB.getByRole("switch", { name: "MR closed without merging" }),
     ).not.toBeChecked();
   });
 });
