@@ -277,6 +277,14 @@ func TestCostBreakdowns(t *testing.T) {
 // and must never be consulted for attribution; only the task's current
 // project_id is authoritative. This is the regression for the "assigning a
 // finished task to a project doesn't move its cost" report.
+//
+// It also covers the project-budget reads (GetCostForProject,
+// GetCostForProjectSince), which switched from the snapshot filter to the
+// same live tasks.project_id join in the same change. The seeded event's
+// snapshot project_id is left empty (never set on the event below) so these
+// assertions actually discriminate the live join from the old snapshot
+// filter: a snapshot-based implementation would return 0 in both the
+// "before" and "after" case, since the snapshot column never changes.
 func TestGetCostsByProject_FollowsLiveReassignment(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
@@ -286,6 +294,8 @@ func TestGetCostsByProject_FollowsLiveReassignment(t *testing.T) {
 		(id, workspace_id, name, created_at, updated_at)
 		VALUES ('proj-reassign', 'ws-reassign', 'Kandev',
 		        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+
+	windowStart := time.Now().UTC().Add(-time.Hour)
 
 	// Recorded while the task had no project assigned, so the snapshot
 	// column (office_cost_events.project_id) is empty on this row.
@@ -306,6 +316,23 @@ func TestGetCostsByProject_FollowsLiveReassignment(t *testing.T) {
 		t.Fatalf("before assignment: got %+v, want one unassigned row of 2013", byProject)
 	}
 
+	budgetTotal, err := repo.GetCostForProject(ctx, "proj-reassign")
+	if err != nil {
+		t.Fatalf("budget total (before assignment): %v", err)
+	}
+	if budgetTotal != 0 {
+		t.Errorf("budget total (before assignment) = %d, want 0 (task not yet assigned to the project)",
+			budgetTotal)
+	}
+	budgetSince, err := repo.GetCostForProjectSince(ctx, "proj-reassign", windowStart)
+	if err != nil {
+		t.Fatalf("budget since (before assignment): %v", err)
+	}
+	if budgetSince != 0 {
+		t.Errorf("budget since (before assignment) = %d, want 0 (task not yet assigned to the project)",
+			budgetSince)
+	}
+
 	// The user assigns the (already-finished) task to the project. No new
 	// cost event is recorded.
 	mustExec(t, repo, `UPDATE tasks SET project_id = 'proj-reassign' WHERE id = 'task-reassign'`)
@@ -324,6 +351,23 @@ func TestGetCostsByProject_FollowsLiveReassignment(t *testing.T) {
 	if byProject[0].TotalSubcents != 2013 {
 		t.Errorf("after assignment: total = %d, want 2013 (unchanged, just re-attributed)",
 			byProject[0].TotalSubcents)
+	}
+
+	budgetTotal, err = repo.GetCostForProject(ctx, "proj-reassign")
+	if err != nil {
+		t.Fatalf("budget total (after assignment): %v", err)
+	}
+	if budgetTotal != 2013 {
+		t.Errorf("budget total (after assignment) = %d, want 2013 (budget must count the reassigned event)",
+			budgetTotal)
+	}
+	budgetSince, err = repo.GetCostForProjectSince(ctx, "proj-reassign", windowStart)
+	if err != nil {
+		t.Fatalf("budget since (after assignment): %v", err)
+	}
+	if budgetSince != 2013 {
+		t.Errorf("budget since (after assignment) = %d, want 2013 (budget must count the reassigned event)",
+			budgetSince)
 	}
 }
 
