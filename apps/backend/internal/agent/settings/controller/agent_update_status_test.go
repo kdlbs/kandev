@@ -159,6 +159,40 @@ func TestListAgentUpdateStatusesInvalidatesOnePackage(t *testing.T) {
 	}
 }
 
+func TestListAgentUpdateStatusesInitializesCacheForBareController(t *testing.T) {
+	controller := newTestController(map[string]agents.Agent{
+		"claude-acp": agents.NewClaudeACP(),
+	})
+
+	statuses, err := controller.ListAgentUpdateStatuses(context.Background())
+	if err != nil {
+		t.Fatalf("ListAgentUpdateStatuses: %v", err)
+	}
+	if len(statuses.Statuses) != 1 || statuses.Statuses[0].CheckState != dto.AgentUpdateCheckStateUnknown {
+		t.Fatalf("statuses = %#v, want one unknown status", statuses.Statuses)
+	}
+}
+
+func TestListAgentUpdateStatusesBoundsRegistryLookupByContext(t *testing.T) {
+	controller := newTestController(map[string]agents.Agent{
+		"claude-acp": agents.NewClaudeACP(),
+	})
+	controller.SetRuntimeUpdateStatusResolver(func(ctx context.Context, _ string) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	statuses, err := controller.ListAgentUpdateStatuses(ctx)
+	if err != nil {
+		t.Fatalf("ListAgentUpdateStatuses: %v", err)
+	}
+	if len(statuses.Statuses) != 1 || statuses.Statuses[0].CheckState != dto.AgentUpdateCheckStateUnknown {
+		t.Fatalf("statuses = %#v, want one unknown status", statuses.Statuses)
+	}
+}
+
 func TestListAgentUpdateStatusesBoundsConcurrentLookups(t *testing.T) {
 	controller := newTestController(map[string]agents.Agent{
 		"claude-acp":   agents.NewClaudeACP(),

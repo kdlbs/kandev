@@ -88,7 +88,7 @@ test.describe("managed agent runtime updates", () => {
         default_version: "0.64.0",
         active_version: "0.63.0",
         effective_version: "0.63.0",
-        latest_version: "0.64.0",
+        latest_version: "0.63.0",
         checked_at: "2026-07-26T12:01:00.000Z",
         check_state: "up_to_date",
       },

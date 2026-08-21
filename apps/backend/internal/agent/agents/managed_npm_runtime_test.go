@@ -66,6 +66,25 @@ func TestManagedNPMRuntimeExecutionCacheKeyMatchesNPM(t *testing.T) {
 	}
 }
 
+func TestManagedNPMRuntimeDefaultVersionOrPinned(t *testing.T) {
+	tests := []struct {
+		name string
+		spec ManagedNPMRuntimeSpec
+		want string
+	}{
+		{name: "explicit default", spec: ManagedNPMRuntimeSpec{Package: "@scope/managed", DefaultVersion: "1.2.3"}, want: "1.2.3"},
+		{name: "built-in catalogue fallback", spec: ManagedNPMRuntimeSpec{Package: "opencode-ai"}, want: "1.18.18"},
+		{name: "custom package without default", spec: ManagedNPMRuntimeSpec{Package: "@scope/managed"}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.spec.DefaultVersionOrPinned(); got != tt.want {
+				t.Fatalf("DefaultVersionOrPinned() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestManagedNPMRuntimeBuildsExactVersionCommandsAndCacheKey(t *testing.T) {
 	spec := ManagedNPMRuntimeSpec{
 		Package: "opencode-ai",

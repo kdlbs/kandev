@@ -65,5 +65,5 @@ commands now use `package@default_version`; explicit validated selections use
 preparation/recovery remain online-preferred.
 
 Verification: `go test ./internal/agent/agents ./internal/agent/registry
-./internal/agent/runtime/lifecycle -count=1` passed as part of the final
-2,614-test scoped backend run.
+./internal/agent/runtime/lifecycle -count=1` passed as part of the current
+2,646-test post-remediation scoped backend run.

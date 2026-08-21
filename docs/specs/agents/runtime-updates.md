@@ -111,7 +111,10 @@ Kandev distinguishes six version values:
 - `target_version` is the stable version selected by the operator.
 
 The backend derives the operation from `effective_version` and
-`current_version`:
+`current_version`. When an active operator selection exists and the operator
+chooses `default_version`, `use_default` takes precedence over version
+comparison. Without that reset condition, the backend classifies the request as
+`update`, `rollback`, `repair`, or `up_to_date`:
 
 | Condition | Operation | Approval |
 | --- | --- | --- |

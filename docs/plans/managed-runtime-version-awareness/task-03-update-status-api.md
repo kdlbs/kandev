@@ -65,6 +65,6 @@ packages, and does not create update jobs. Successful checks cache for six
 hours, failures for fifteen minutes, and successful activation/default reset
 invalidates the affected package.
 
-Verification: controller and handler tests passed in the final 2,614-test
-scoped backend run, including cache TTL, invalidation, partial failure, and
-read-only endpoint coverage.
+Verification: controller and handler tests passed in the post-remediation
+2,646-test scoped backend run, including cache TTL, invalidation, bounded
+lookups, partial failure, and read-only endpoint coverage.

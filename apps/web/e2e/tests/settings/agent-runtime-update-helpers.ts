@@ -153,7 +153,6 @@ function previewForRequest(
       ...previewResponse,
       target_version: defaultVersion,
       operation: "use_default",
-      effective_version: defaultVersion,
     };
   }
   if (!requestedTarget) return previewResponse;

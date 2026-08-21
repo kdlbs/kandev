@@ -16,7 +16,8 @@ vi.mock("@kandev/ui/tooltip", () => ({
 }));
 
 vi.mock("@kandev/ui/dialog", () => ({
-  Dialog: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  Dialog: ({ children, open }: { children?: ReactNode; open?: boolean }) =>
+    open ? <>{children}</> : null,
   DialogContent: ({ children, ...props }: { children?: ReactNode } & Record<string, unknown>) => (
     <div {...props}>{children}</div>
   ),
@@ -27,7 +28,8 @@ vi.mock("@kandev/ui/dialog", () => ({
 }));
 
 vi.mock("@kandev/ui/drawer", () => ({
-  Drawer: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  Drawer: ({ children, open }: { children?: ReactNode; open?: boolean }) =>
+    open ? <>{children}</> : null,
   DrawerContent: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   DrawerDescription: ({ children }: { children?: ReactNode }) => <p>{children}</p>,
   DrawerFooter: ({ children }: { children?: ReactNode }) => <footer>{children}</footer>,
@@ -135,6 +137,37 @@ describe("AgentRuntimeUpdateControl", () => {
         name: "Latest version for Claude Code is unavailable. The update control remains usable.",
       }),
     ).toBeTruthy();
+    fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
+    await waitFor(() => expect(onPreview).toHaveBeenCalledWith(AGENT_NAME, undefined));
+    expect(
+      screen.getByRole("option", { name: `Use Kandev default (${ACTIVE_VERSION})` }),
+    ).toBeTruthy();
+  });
+
+  it("offers the default action when the active version is unknown", async () => {
+    const onPreview = vi.fn().mockResolvedValue(preview({ active_version: undefined }));
+    render(
+      <AgentRuntimeUpdateControl
+        agentName={AGENT_NAME}
+        displayName="Claude Code"
+        runtimeUpdate={{
+          supported: true,
+          package: PACKAGE_NAME,
+          default_version: ACTIVE_VERSION,
+          effective_version: ACTIVE_VERSION,
+        }}
+        runtimeUpdateStatus={{
+          agent_name: AGENT_NAME,
+          package: PACKAGE_NAME,
+          default_version: ACTIVE_VERSION,
+          effective_version: ACTIVE_VERSION,
+          check_state: "unknown",
+        }}
+        onPreview={onPreview}
+        onUpdate={vi.fn().mockResolvedValue(queuedJob())}
+      />,
+    );
+
     fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
     await waitFor(() => expect(onPreview).toHaveBeenCalledWith(AGENT_NAME, undefined));
     expect(

@@ -16,6 +16,7 @@ const (
 	runtimeUpdateStatusSuccessTTL    = 6 * time.Hour
 	runtimeUpdateStatusFailureTTL    = 15 * time.Minute
 	runtimeUpdateStatusMaxConcurrent = 5
+	runtimeUpdateStatusLookupTimeout = 10 * time.Second
 )
 
 // RuntimeUpdateStatusResolver is the latest-version lookup seam used by the
@@ -161,13 +162,7 @@ func (c *Controller) runtimeUpdateStatusTargets(ctx context.Context) ([]runtimeU
 		if packageName == "" {
 			continue
 		}
-		defaultVersion := strings.TrimSpace(spec.DefaultVersion)
-		if defaultVersion == "" {
-			packageSpec := spec.PackageSpec("")
-			if strings.HasPrefix(packageSpec, packageName+"@") {
-				defaultVersion = strings.TrimPrefix(packageSpec, packageName+"@")
-			}
-		}
+		defaultVersion := strings.TrimSpace(spec.DefaultVersionOrPinned())
 		if _, err := managedruntime.ParseStableVersion(defaultVersion); err != nil {
 			// Custom test/extension agents are not part of the built-in managed
 			// catalogue and must not create an unverifiable status item.
@@ -218,7 +213,9 @@ func (c *Controller) runtimeUpdateStatusEntry(
 	}
 	c.runtimeUpdateStatusMu.Unlock()
 
-	latest, err := c.resolveRuntimeUpdateLatest(ctx, packageName)
+	lookupCtx, cancel := context.WithTimeout(ctx, runtimeUpdateStatusLookupTimeout)
+	defer cancel()
+	latest, err := c.resolveRuntimeUpdateLatest(lookupCtx, packageName)
 	entry := runtimeUpdateStatusCacheEntry{}
 	if err == nil {
 		entry.latest = latest
@@ -229,6 +226,9 @@ func (c *Controller) runtimeUpdateStatusEntry(
 		entry.expiresAt = now.Add(runtimeUpdateStatusFailureTTL)
 	}
 	c.runtimeUpdateStatusMu.Lock()
+	if c.runtimeUpdateStatusCache == nil {
+		c.runtimeUpdateStatusCache = make(map[string]runtimeUpdateStatusCacheEntry)
+	}
 	c.runtimeUpdateStatusCache[packageName] = entry
 	c.runtimeUpdateStatusMu.Unlock()
 	return entry

@@ -81,7 +81,7 @@ async function approveRuntimeUpdate({
   setActiveJobID: (value: string | null) => void;
 }) {
   const targetVersion = selectedUseDefault
-    ? preview?.default_version || ""
+    ? preview?.default_version || preview?.target_version || ""
     : selectedTarget || preview?.target_version || "";
   if (!targetVersion) return;
   setStarting(true);
@@ -98,36 +98,6 @@ async function approveRuntimeUpdate({
   }
 }
 
-type PreviewLoader = (targetVersion?: string, useDefault?: boolean) => Promise<void>;
-
-function createTargetSelector(
-  loadPreview: PreviewLoader,
-  setActiveJobID: (value: string | null) => void,
-  setSelectedTarget: (value: string) => void,
-  setSelectedUseDefault: (value: boolean) => void,
-) {
-  return (targetVersion: string) => {
-    setActiveJobID(null);
-    setSelectedTarget(targetVersion);
-    setSelectedUseDefault(false);
-    void loadPreview(targetVersion);
-  };
-}
-
-function createDefaultSelector(
-  loadPreview: PreviewLoader,
-  setActiveJobID: (value: string | null) => void,
-  setSelectedTarget: (value: string) => void,
-  setSelectedUseDefault: (value: boolean) => void,
-) {
-  return () => {
-    setActiveJobID(null);
-    setSelectedTarget(DEFAULT_RUNTIME_TARGET);
-    setSelectedUseDefault(true);
-    void loadPreview(undefined, true);
-  };
-}
-
 function handleDialogOpenChange(
   nextOpen: boolean,
   setOpen: (value: boolean) => void,
@@ -135,6 +105,32 @@ function handleDialogOpenChange(
 ) {
   setOpen(nextOpen);
   if (!nextOpen) reset();
+}
+
+type PreviewLoader = (targetVersion?: string, useDefault?: boolean) => Promise<void>;
+
+function useRuntimeTargetSelectors(
+  loadPreview: PreviewLoader,
+  setActiveJobID: (value: string | null) => void,
+  setSelectedTarget: (value: string) => void,
+  setSelectedUseDefault: (value: boolean) => void,
+) {
+  const selectTarget = useCallback(
+    (targetVersion: string) => {
+      setActiveJobID(null);
+      setSelectedTarget(targetVersion);
+      setSelectedUseDefault(false);
+      void loadPreview(targetVersion);
+    },
+    [loadPreview],
+  );
+  const selectDefault = useCallback(() => {
+    setActiveJobID(null);
+    setSelectedTarget(DEFAULT_RUNTIME_TARGET);
+    setSelectedUseDefault(true);
+    void loadPreview(undefined, true);
+  }, [loadPreview]);
+  return { selectTarget, selectDefault };
 }
 
 export function useAgentUpdateDialogState({
@@ -193,14 +189,11 @@ export function useAgentUpdateDialogState({
     [agentName, onPreview],
   );
 
-  const selectTarget = useCallback(
-    createTargetSelector(loadPreview, setActiveJobID, setSelectedTarget, setSelectedUseDefault),
-    [loadPreview],
-  );
-
-  const selectDefault = useCallback(
-    createDefaultSelector(loadPreview, setActiveJobID, setSelectedTarget, setSelectedUseDefault),
-    [loadPreview],
+  const { selectTarget, selectDefault } = useRuntimeTargetSelectors(
+    loadPreview,
+    setActiveJobID,
+    setSelectedTarget,
+    setSelectedUseDefault,
   );
 
   useEffect(() => {

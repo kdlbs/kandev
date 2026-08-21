@@ -20,8 +20,7 @@ jobs:
     name: Open managed runtime pin PR
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
     env:
       BOT_BRANCH: automation/update-managed-runtime-pins
 

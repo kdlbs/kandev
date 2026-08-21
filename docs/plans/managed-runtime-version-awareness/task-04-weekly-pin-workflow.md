@@ -62,7 +62,7 @@ missing, malformed, and prerelease values before its atomic write, and the
 weekly/manual workflow uses a pinned GitHub App token, a stable bot branch, one
 grouped PR, and no auto-merge or `GITHUB_TOKEN` fallback.
 
-Verification: updater tests passed 6/6; workflow contract tests passed 7/7;
+Verification: updater tests passed 7/7; workflow contract tests passed 8/8;
 action-pinning tests passed 9/9 and the linter accepted all 19 workflow files;
 `zizmor .github/workflows/update-agent-runtime-pins.yml` reported no findings.
 Local checks caused no external workflow or PR side effects.

@@ -23,8 +23,10 @@ class ManagedRuntimePinWorkflowContractTest(unittest.TestCase):
 
     def test_workflow_uses_least_privilege_and_dedicated_app_token(self) -> None:
         self.assertIn("permissions:\n  contents: read", self.workflow)
-        self.assertIn("contents: write", self.workflow)
-        self.assertIn("pull-requests: write", self.workflow)
+        self.assertIn("permission-contents: write", self.workflow)
+        self.assertIn("permission-pull-requests: write", self.workflow)
+        self.assertNotIn("permissions:\n      contents: write", self.workflow)
+        self.assertNotIn("permissions:\n      pull-requests: write", self.workflow)
         self.assertIn("MANAGED_RUNTIME_PIN_APP_PRIVATE_KEY", self.workflow)
         self.assertIn("MANAGED_RUNTIME_PIN_APP_CLIENT_ID", self.workflow)
         self.assertNotIn("secrets.GITHUB_TOKEN", self.workflow)

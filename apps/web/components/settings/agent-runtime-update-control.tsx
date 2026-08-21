@@ -189,7 +189,7 @@ function RuntimeVersionSelector({
           disabled={Boolean(job && ACTIVE_UPDATE_STATUSES.has(job.status)) || starting || loading}
           data-testid={`agent-update-version-${agentName}`}
         >
-          {activeVersion && preview.default_version && (
+          {preview.default_version && (
             <option value={DEFAULT_RUNTIME_TARGET}>
               {t("agents:useKandevDefaultVersion", { version: preview.default_version })}
             </option>
@@ -202,12 +202,15 @@ function RuntimeVersionSelector({
               .filter(Boolean)
               .join(", ");
             const markerLabel = markers ? t("agents:runtimeVersionMarkerGroup", { markers }) : "";
-            return (
-              <option key={version.version} value={version.version}>
-                {t("agents:runtimeVersionOption", {
+            const optionLabel = markers
+              ? t("agents:runtimeVersionOption", {
                   version: version.version,
                   markers: markerLabel,
-                })}
+                })
+              : version.version;
+            return (
+              <option key={version.version} value={version.version}>
+                {optionLabel}
               </option>
             );
           })}

@@ -192,19 +192,19 @@ func (s *AgentUpdateJobStore) run(
 	defer cancel()
 	s.setStatus(job, dto.AgentUpdateJobStatusResolving)
 
-	target, exactTarget, err := s.resolveTarget(ctx, spec.Package, requestedTarget)
+	var (
+		target      string
+		exactTarget bool
+		err         error
+	)
 	if job.UseDefault {
-		target = spec.DefaultVersion
-		if target == "" {
-			packageSpec := spec.PackageSpec("")
-			if strings.HasPrefix(packageSpec, spec.Package+"@") {
-				target = strings.TrimPrefix(packageSpec, spec.Package+"@")
-			}
-		}
+		target = spec.DefaultVersionOrPinned()
 		if _, parseErr := managedruntime.ParseStableVersion(target); parseErr != nil {
 			err = fmt.Errorf("resolve default version: %w", parseErr)
 		}
 		exactTarget = true
+	} else {
+		target, exactTarget, err = s.resolveTarget(ctx, spec.Package, requestedTarget)
 	}
 	if err != nil {
 		s.finishFailed(job, ctx, fmt.Errorf("resolve target version: %w", err), ref)
@@ -228,10 +228,7 @@ func (s *AgentUpdateJobStore) run(
 			activeVersion = selection.Version
 		}
 	}
-	defaultVersion := spec.DefaultVersion
-	if defaultVersion == "" && job.UseDefault {
-		defaultVersion = target
-	}
+	defaultVersion := spec.DefaultVersionOrPinned()
 	effectiveVersion := defaultVersion
 	if activeVersion != "" {
 		effectiveVersion = activeVersion

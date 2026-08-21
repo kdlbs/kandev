@@ -67,8 +67,8 @@ active, and effective versions. Structural `use_default` previews and jobs
 validate and probe the exact default before deleting the stored selection;
 failed candidates retain the previous selection.
 
-Verification: the final command `go test ./internal/agent/agents
+Verification: the post-remediation command `go test ./internal/agent/agents
 ./internal/agent/registry ./internal/agent/runtime/lifecycle
 ./internal/agent/managedruntime ./internal/agent/hostutility
 ./internal/agent/settings/controller ./internal/agent/settings/handlers -count=1`
-passed 2,614 tests.
+passed 2,646 tests.

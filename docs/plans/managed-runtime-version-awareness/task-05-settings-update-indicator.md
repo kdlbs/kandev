@@ -66,6 +66,6 @@ between the desktop dialog and mobile drawer. Accessible labels include the
 effective/latest versions, all new copy is localized in five catalogues, and
 the 44 px mobile trigger remains intact.
 
-Verification: focused frontend unit tests passed 22/22; full web lint passed;
+Verification: focused frontend unit tests passed 49/49; full web lint passed;
 `pnpm run typecheck` passed; `pnpm run i18n:check` passed with pseudo and all
 four translated catalogues complete.

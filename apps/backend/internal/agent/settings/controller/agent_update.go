@@ -204,7 +204,7 @@ func (c *Controller) runtimeVersions(
 	agentName string,
 	spec agents.ManagedNPMRuntimeSpec,
 ) (active, effective, defaultVersion string, err error) {
-	defaultVersion = managedRuntimeDefaultVersion(spec)
+	defaultVersion = spec.DefaultVersionOrPinned()
 	active, err = c.activeRuntimeVersion(ctx, agentName, spec.Package)
 	if err != nil {
 		return "", "", defaultVersion, err
@@ -214,17 +214,6 @@ func (c *Controller) runtimeVersions(
 		effective = active
 	}
 	return active, effective, defaultVersion, nil
-}
-
-func managedRuntimeDefaultVersion(spec agents.ManagedNPMRuntimeSpec) string {
-	if spec.DefaultVersion != "" {
-		return spec.DefaultVersion
-	}
-	packageSpec := spec.PackageSpec("")
-	if strings.HasPrefix(packageSpec, spec.Package+"@") {
-		return strings.TrimPrefix(packageSpec, spec.Package+"@")
-	}
-	return ""
 }
 
 // RuntimeUpdater is the external-process and host-probe boundary used by
@@ -553,7 +542,7 @@ func (c *Controller) enqueueAgentUpdate(
 		return nil, ErrRuntimeUpdateUnsupported
 	}
 	if useDefault {
-		targetVersion = managedRuntimeDefaultVersion(spec)
+		targetVersion = spec.DefaultVersionOrPinned()
 	}
 	targetVersion = strings.TrimSpace(targetVersion)
 	if targetVersion == "" {
@@ -630,7 +619,7 @@ func (c *Controller) alreadyActiveHealthyUpdate(
 		return nil
 	}
 	now := time.Now().UTC()
-	defaultVersion := managedRuntimeDefaultVersion(spec)
+	defaultVersion := spec.DefaultVersionOrPinned()
 	return &dto.AgentUpdateJobDTO{
 		AgentName:        agentName,
 		Status:           dto.AgentUpdateJobStatusSucceeded,

@@ -82,6 +82,7 @@ type recoveryRuntimeUpdater struct {
 	mu            sync.Mutex
 	metadata      RuntimeVersionMetadata
 	metadataCalls int
+	resolveErr    error
 	current       hostutility.AgentCapabilities
 	currentFound  bool
 	probeCaps     hostutility.AgentCapabilities
@@ -101,7 +102,7 @@ func (u *recoveryRuntimeUpdater) CurrentCapabilities(string) (hostutility.AgentC
 }
 
 func (u *recoveryRuntimeUpdater) ResolveTarget(context.Context, string) (string, error) {
-	return u.metadata.Latest, nil
+	return u.metadata.Latest, u.resolveErr
 }
 
 func (u *recoveryRuntimeUpdater) ResolveVersions(context.Context, string) (RuntimeVersionMetadata, error) {
@@ -209,6 +210,7 @@ func TestAgentUpdateExactCandidatePersistsBeforePublishing(t *testing.T) {
 		current:      hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.3"},
 		currentFound: true,
 		probeCaps:    hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.2"},
+		resolveErr:   errors.New("registry unavailable"),
 	}
 	updater.events = &events
 	store, completed := newRecoveryStore(updater, selectionStore)

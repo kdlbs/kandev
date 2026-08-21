@@ -2,6 +2,7 @@ package agents
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
@@ -13,6 +14,21 @@ type ManagedNPMRuntimeSpec struct {
 	Package        string
 	DefaultVersion string
 	ACPArgs        []string
+}
+
+// DefaultVersionOrPinned returns the reviewed default version, including the
+// catalogue fallback for specs that do not embed one. Custom specs without an
+// explicit default remain empty rather than treating the bare package name as
+// a version.
+func (s ManagedNPMRuntimeSpec) DefaultVersionOrPinned() string {
+	if s.DefaultVersion != "" {
+		return s.DefaultVersion
+	}
+	packageSpec := s.PackageSpec("")
+	if strings.HasPrefix(packageSpec, s.Package+"@") {
+		return strings.TrimPrefix(packageSpec, s.Package+"@")
+	}
+	return ""
 }
 
 func newManagedNPMRuntimeSpec(packageName string, acpArgs ...string) ManagedNPMRuntimeSpec {
