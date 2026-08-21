@@ -33,12 +33,16 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function renderField(profiles: AgentProfileOption[], value = "") {
+function renderField(
+  profiles: AgentProfileOption[],
+  value = "",
+  fieldOverride: Partial<PluginConfigField> = {},
+) {
   const onChange = vi.fn<(name: string, value: string | boolean) => void>();
   render(
     <StateProvider initialState={{ agentProfiles: { items: profiles, version: 0 } }}>
       <PluginConfigForm
-        fields={[field]}
+        fields={[{ ...field, ...fieldOverride }]}
         values={{ [AGENT_PROFILE_FIELD]: value }}
         initialValues={{ [AGENT_PROFILE_FIELD]: value }}
         disabled={false}
@@ -73,5 +77,15 @@ describe("PluginConfigForm agent profile field", () => {
     renderField([], "deleted-profile");
 
     expect(screen.getByText("Unavailable: deleted-profile")).not.toBeNull();
+  });
+
+  it("hides the Not set option for required fields", () => {
+    renderField([profile({ id: "eligible", label: ELIGIBLE_PROFILE_LABEL })], "", {
+      required: true,
+    });
+
+    fireEvent.click(screen.getByRole("combobox"));
+
+    expect(screen.queryByRole("option", { name: /not set/i })).toBeNull();
   });
 });
