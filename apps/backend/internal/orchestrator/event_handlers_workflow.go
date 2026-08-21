@@ -3868,24 +3868,31 @@ func (s *Service) buildMachineState(ctx context.Context, task *models.Task, sess
 
 // assembleMachineState creates an engine.MachineState from pre-loaded models.
 // Shared by Service.buildMachineState and workflowStore.LoadState to avoid duplication.
+// assembleMachineState accepts a nil session for the AC-62/F38 case of a
+// task with zero task_sessions rows (sessionID == ""): CurrentStepID is
+// always derived from the task row, never the session, so SessionID and
+// SessionState are left at their zero values and no workflow_data is
+// available in that case.
 func assembleMachineState(task *models.Task, session *models.TaskSession, isPassthrough bool) engine.MachineState {
 	currentStepID := task.WorkflowStepID
-	var data map[string]any
-	if session.Metadata != nil {
-		if wd, ok := session.Metadata["workflow_data"].(map[string]any); ok {
-			data = wd
-		}
-	}
-	return engine.MachineState{
+	state := engine.MachineState{
 		TaskID:          task.ID,
-		SessionID:       session.ID,
 		WorkflowID:      task.WorkflowID,
 		CurrentStepID:   currentStepID,
-		SessionState:    string(session.State),
 		TaskDescription: task.Description,
 		IsPassthrough:   isPassthrough,
-		Data:            data,
 	}
+	if session == nil {
+		return state
+	}
+	state.SessionID = session.ID
+	state.SessionState = string(session.State)
+	if session.Metadata != nil {
+		if wd, ok := session.Metadata["workflow_data"].(map[string]any); ok {
+			state.Data = wd
+		}
+	}
+	return state
 }
 
 // processOnTurnCompleteViaEngine uses the workflow engine to evaluate on_turn_complete
@@ -4050,12 +4057,94 @@ func (s *Service) allowEngineSignalCompletion(
 	return true
 }
 
+// applyGuardedTransitionLifecycle is the service-owned lifecycle bridge for
+// quorum re-evaluation. The engine still selects the target and owns the CAS,
+// but credential checks, on_exit, history, signal cleanup, terminal handling,
+// session/profile state, and on_enter stay in the orchestrator path.
+func (s *Service) applyGuardedTransitionLifecycle(
+	ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger,
+) (bool, error) {
+	if s.workflowStore == nil {
+		return false, errors.New("workflow store is not initialized")
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return false, fmt.Errorf("load task for guarded transition lifecycle: %w", err)
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, fmt.Errorf("load session for guarded transition lifecycle: %w", err)
+	}
+
+	casAttempted := false
+	casApplied := false
+	lifecycleApplied := s.applyEngineTransitionWithCommit(
+		ctx,
+		taskID,
+		session,
+		engine.HandleResult{Transitioned: true, FromStepID: fromStepID, ToStepID: toStepID},
+		trigger,
+		task.Description,
+		true,
+		func(commitCtx context.Context) (bool, error) {
+			casAttempted = true
+			transitionCtx := commitCtx
+			if !steptelemetry.HasTrigger(transitionCtx) {
+				transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
+			}
+			committedTask, oldWorkflowID, applied, commitErr := s.workflowStore.applyTransitionIfAtStepRaw(
+				transitionCtx, taskID, fromStepID, toStepID,
+			)
+			if commitErr != nil {
+				return false, commitErr
+			}
+			if !applied {
+				return false, nil
+			}
+			casApplied = true
+			// The raw CAS commit intentionally has no side effects. The shared
+			// lifecycle helper performs session state and on_enter work below.
+			s.publishTaskUpdated(ctx, committedTask, oldWorkflowID)
+			s.workflowStore.pullNextTaskOnVacate(ctx, fromStepID, taskID)
+			return true, nil
+		},
+	)
+	if lifecycleApplied || casApplied {
+		return true, nil
+	}
+	if casAttempted {
+		// A false CAS is an expected concurrent re-evaluation outcome.
+		return false, nil
+	}
+	return false, errors.New("guarded transition lifecycle did not apply")
+}
+
 // applyEngineTransition applies an engine-evaluated transition: on_exit, DB transition,
 // data patches, and optionally on_enter processing. Returns true if the transition was applied.
 func (s *Service) applyEngineTransition(
 	ctx context.Context, taskID string, session *models.TaskSession,
 	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
 	triggerOnEnter bool,
+) bool {
+	return s.applyEngineTransitionWithCommit(ctx, taskID, session, result, trigger, taskDescription, triggerOnEnter,
+		func(commitCtx context.Context) (bool, error) {
+			if err := s.workflowStore.ApplyTransition(commitCtx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger); err != nil {
+				return false, err
+			}
+			return true, nil
+		})
+}
+
+// applyEngineTransitionWithCommit applies the shared lifecycle around a
+// transition commit. The default path commits through ApplyTransition. The
+// quorum decision path supplies a CAS commit so lifecycle hooks cannot be
+// bypassed by the engine's guarded-transition re-evaluation.
+//
+//nolint:cyclop,funlen // this coordinates independent transition lifecycle stages.
+func (s *Service) applyEngineTransitionWithCommit(
+	ctx context.Context, taskID string, session *models.TaskSession,
+	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
+	triggerOnEnter bool, commit func(context.Context) (bool, error),
 ) bool {
 	// Validate the target step exists BEFORE persisting the transition.
 	// This prevents the task from being moved to an invalid step_id
@@ -4102,12 +4191,16 @@ func (s *Service) applyEngineTransition(
 		s.processOnExit(ctx, taskID, session, fromStep)
 	}
 
-	if err := s.workflowStore.ApplyTransition(ctx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger); err != nil {
+	applied, err := commit(ctx)
+	if err != nil {
 		s.logger.Error("failed to apply engine transition",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.Error(err))
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return false
+	}
+	if !applied {
 		return false
 	}
 

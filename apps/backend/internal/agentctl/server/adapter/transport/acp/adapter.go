@@ -177,6 +177,13 @@ type Adapter struct {
 	// Tool call tracking for result normalization
 	// Maps toolCallId -> NormalizedPayload so we can update with results
 	activeToolCalls map[string]*streams.NormalizedPayload
+	// cursorTaskMetaBySession stores Cursor's non-standard `cursor/task`
+	// metadata until the matching subagent tool_call appears, keyed by session
+	// then wire tool-call ID. An entry is drained either when its tool_call
+	// arrives (applyPendingCursorTaskMetaLocked) or when the session is cleared
+	// on turn end / reset (clearCursorTaskMetaLocked), so it never outlives the
+	// turn that produced it.
+	cursorTaskMetaBySession map[string]map[string]cursorTaskMeta
 	// toolCallParents preserves nested tool lineage while a handed-off
 	// predecessor continues streaming beside its human successor.
 	toolCallParents map[string]string
@@ -375,6 +382,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		updatesCh:                 make(chan AgentEvent, 100),
 		notifQueue:                make(chan notifWork, notifQueueCapacity),
 		activeToolCalls:           make(map[string]*streams.NormalizedPayload),
+		cursorTaskMetaBySession:   make(map[string]map[string]cursorTaskMeta),
 		toolCallParents:           make(map[string]string),
 		handoffProtectedToolCalls: make(map[string]struct{}),
 		activeMonitors:            make(map[string]map[string]string),
@@ -437,6 +445,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		acpclient.WithWorkspaceRoot(a.cfg.WorkDir),
 		acpclient.WithUpdateHandler(a.enqueueACPUpdate),
 		acpclient.WithPermissionHandler(a.handlePermissionRequest),
+		acpclient.WithCursorTaskHandler(a.handleCursorTask),
 	)
 
 	// Create ACP SDK connection. Raise the inbound notification queue cap
@@ -683,6 +692,7 @@ func (a *Adapter) Close() error {
 	a.updateSendWg.Wait()
 	a.mu.Lock()
 	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearCursorTaskMetaLocked("")
 	a.clearPromptHandoffToolTrackingLocked()
 	clear(a.usageBySession)
 	a.mu.Unlock()

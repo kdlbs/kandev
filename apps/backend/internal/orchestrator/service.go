@@ -1623,9 +1623,16 @@ func (s *Service) initWorkflowEngine() {
 		return
 	}
 	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved, s.publishTaskQueuePromoted, s.publishTaskStateChanged, s.stepHistoryRecorder)
+	store.setGuardedTransitionLifecycle(s.applyGuardedTransitionLifecycle)
 	callbacks := buildWorkflowCallbacks(s)
 	s.workflowStore = store
-	s.workflowEngine = engine.New(store, callbacks, s.engineOptions...)
+	// AC-24/24a: the engine's own structured "guard did not fire" log needs
+	// the service's logger. Passed here (rather than folded into
+	// s.engineOptions via a Set* method) because s.logger is a stable
+	// constructor-time field already in scope, unlike the optional
+	// dependencies those methods wire in after Service creation.
+	options := append([]engine.Option{engine.WithLogger(s.logger)}, s.engineOptions...)
+	s.workflowEngine = engine.New(store, callbacks, options...)
 }
 
 // SetEngineRunQueue wires the engine's RunQueueAdapter dependency. Used

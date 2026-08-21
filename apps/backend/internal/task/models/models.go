@@ -219,6 +219,10 @@ const (
 	SessionOriginTaskInitial             = "task_initial"
 	SessionMetaKeyContextWindow          = "context_window"
 	SessionMetaKeyContextCompactionCount = "context_compaction_count"
+	// SessionMetaKeyRecoveryResolvedAt stores the server timestamp of the
+	// latest successful agent boot. Recovery cards compare this timestamp with
+	// their own creation time, so the result survives transcript write failures.
+	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
 )
 
 // SessionMetaKeySessionMode records the agent's last-known session permission

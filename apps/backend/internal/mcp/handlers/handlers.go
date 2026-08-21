@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -245,6 +246,10 @@ type Handlers struct {
 	// MCP tools introduced in office task handoffs phase 2.
 	handoffSvc *service.HandoffService
 
+	// Office dashboard service (optional, set via SetDashboardService).
+	// Wires the record_step_decision_kandev MCP tool.
+	dashboardSvc *dashboard.DashboardService
+
 	// Optional PR lister (set via SetTaskPRLister) used to enrich
 	// task-listing responses with associated pull requests.
 	taskPRLister TaskPRLister
@@ -439,6 +444,9 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPListTaskDocuments, h.handleListTaskDocuments)
 		d.RegisterFunc(ws.ActionMCPGetTaskDocument, h.handleGetTaskDocument)
 		d.RegisterFunc(ws.ActionMCPWriteTaskDocument, h.handleWriteTaskDocument)
+	}
+	if h.dashboardSvc != nil {
+		d.RegisterFunc(ws.ActionMCPRecordStepDecision, h.handleRecordStepDecision)
 	}
 	if h.taskSvc != nil {
 		d.RegisterFunc(ws.ActionMCPMoveTask, h.handleMoveTask)
