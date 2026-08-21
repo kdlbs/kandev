@@ -39,7 +39,7 @@ func TestTaskProtoRoundTrip(t *testing.T) {
 		State:          "in_progress",
 		Priority:       "high",
 		Labels:         []string{"bug", "plugin"},
-		WorkflowStepID: "in_progress",
+		WorkflowStepID: "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f",
 		CreatedBy:      "user-1",
 		CreatedAt:      "2026-07-15T12:00:00Z",
 		UpdatedAt:      "2026-07-15T12:05:00Z",
@@ -58,7 +58,7 @@ func TestTaskProtoRoundTrip(t *testing.T) {
 	proto, err := task.toProto()
 	require.NoError(t, err)
 	require.Equal(t, "task-1", proto.GetId())
-	require.Equal(t, "in_progress", proto.GetWorkflowStepId())
+	require.Equal(t, "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f", proto.GetWorkflowStepId())
 	require.Equal(t, "2026-07-15T12:01:00Z", proto.GetStartedAt())
 	require.Nil(t, proto.CompletedAt)
 	require.Equal(t, "feature/fix", proto.GetRepositories()[0].GetCheckoutBranch())

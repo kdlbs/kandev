@@ -2385,10 +2385,10 @@ type Task struct {
 	Repositories []*TaskRepository      `protobuf:"bytes,16,rep,name=repositories,proto3" json:"repositories,omitempty"`
 	Metadata     *structpb.Struct       `protobuf:"bytes,17,opt,name=metadata,proto3" json:"metadata,omitempty"` // free-form; plugin-tolerant
 	Labels       []string               `protobuf:"bytes,18,rep,name=labels,proto3" json:"labels,omitempty"`
-	// Readable step identifier (e.g. "in_progress", "backlog"), distinct from a
-	// UUID. Plugin reconcile loops match on this field when placing inbound
-	// tasks, so it travels with the task on every read. The host keeps it
-	// current as the task moves between steps.
+	// Opaque workflow-step identifier recording the task's current placement.
+	// Matches the opaque id stored on the internal task model; plugins use it
+	// verbatim for equality checks and reconciliation. Use ListWorkflowSteps
+	// to resolve a step to a display name; no name resolution happens here.
 	WorkflowStepId string `protobuf:"bytes,19,opt,name=workflow_step_id,json=workflowStepId,proto3" json:"workflow_step_id,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
