@@ -282,6 +282,54 @@ func TestExportAutomationsDocument_TriggerBadConfig_EmitsRenderedWarning(t *test
 	}
 }
 
+// AC-10: two automations whose stored trigger config JSON differs only in
+// whitespace must export identical config YAML, end to end through the real
+// service and store (not just the buildTriggerConfigNode helper in
+// isolation).
+
+func TestExportAutomationsDocument_AC10_WhitespaceOnlyConfigDifferenceProducesIdenticalOutput(t *testing.T) {
+	svc, wsLookup := exportServiceTestFixture(t)
+	wsLookup.exists["ws-1"] = true
+	createExportTestAutomation(t, svc, &CreateAutomationRequest{
+		WorkspaceID: "ws-1",
+		Name:        "Compact",
+		Triggers: []CreateTriggerSpec{
+			{Type: TriggerTypeScheduled, Config: []byte(`{"cron_expression":"0 9 * * *","timezone":"Asia/Singapore"}`), Enabled: true},
+		},
+	})
+	createExportTestAutomation(t, svc, &CreateAutomationRequest{
+		WorkspaceID: "ws-1",
+		Name:        "Spaced",
+		Triggers: []CreateTriggerSpec{
+			{Type: TriggerTypeScheduled, Config: []byte(`{"cron_expression": "0 9 * * *", "timezone": "Asia/Singapore"}`), Enabled: true},
+		},
+	})
+
+	body, err := svc.ExportAutomationsDocument(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("ExportAutomationsDocument: %v", err)
+	}
+	var doc exportDocument
+	if err := yaml.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if len(doc.Automations) != 2 {
+		t.Fatalf("got %d automations, want 2", len(doc.Automations))
+	}
+	// Name-ascending order (AC-8): "Compact" before "Spaced".
+	compactConfig, err := yaml.Marshal(doc.Automations[0].Triggers[0].Config)
+	if err != nil {
+		t.Fatalf("yaml.Marshal(compact config): %v", err)
+	}
+	spacedConfig, err := yaml.Marshal(doc.Automations[1].Triggers[0].Config)
+	if err != nil {
+		t.Fatalf("yaml.Marshal(spaced config): %v", err)
+	}
+	if string(compactConfig) != string(spacedConfig) {
+		t.Errorf("exported config differs by stored whitespace alone:\ncompact: %q\nspaced:  %q", compactConfig, spacedConfig)
+	}
+}
+
 // AC-8: triggers within an automation are ordered by type ascending,
 // tiebroken by id ascending — tested directly since trigger ids are
 // service-generated and not caller-controllable through CreateAutomation.

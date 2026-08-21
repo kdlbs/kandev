@@ -108,6 +108,41 @@ func TestBuildTriggerConfigNode_InvalidUTF8TakesPrecedenceOverInvalidJSON(t *tes
 	}
 }
 
+// AC-10: two stored configs that differ only in JSON whitespace must produce
+// identical config YAML. The live store contains both a compact and a
+// space-separated serialization of the same scheduled trigger config.
+func TestBuildTriggerConfigNode_AC10_WhitespaceInsensitive(t *testing.T) {
+	compact := json.RawMessage(`{"cron_expression":"0 9 * * *","timezone":"Asia/Singapore"}`)
+	spaced := json.RawMessage(`{"cron_expression": "0 9 * * *", "timezone": "Asia/Singapore"}`)
+
+	compactNode, warning, err := buildTriggerConfigNode(compact)
+	if err != nil {
+		t.Fatalf("buildTriggerConfigNode(compact): %v", err)
+	}
+	if warning != "" {
+		t.Fatalf("warning = %q, want none", warning)
+	}
+	spacedNode, warning, err := buildTriggerConfigNode(spaced)
+	if err != nil {
+		t.Fatalf("buildTriggerConfigNode(spaced): %v", err)
+	}
+	if warning != "" {
+		t.Fatalf("warning = %q, want none", warning)
+	}
+
+	compactOut, err := yaml.Marshal(compactNode)
+	if err != nil {
+		t.Fatalf("yaml.Marshal(compactNode): %v", err)
+	}
+	spacedOut, err := yaml.Marshal(spacedNode)
+	if err != nil {
+		t.Fatalf("yaml.Marshal(spacedNode): %v", err)
+	}
+	if string(compactOut) != string(spacedOut) {
+		t.Errorf("config YAML differs by input whitespace alone:\ncompact: %q\nspaced:  %q", compactOut, spacedOut)
+	}
+}
+
 func TestNewTriggerConfigWarning_EscapesTypeAndScopesDedupToTrigger(t *testing.T) {
 	a := &Automation{ID: "auto-1", Name: "Daily Sync"}
 	trigger := AutomationTrigger{ID: "trig-1", Type: TriggerType("weird\ntype")}

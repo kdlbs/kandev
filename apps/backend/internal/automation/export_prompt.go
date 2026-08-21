@@ -65,7 +65,7 @@ func buildPromptNode(prompt string) (node *yaml.Node, warning string, err error)
 	}
 
 	if defaultNode.Value != prompt {
-		requoted := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Style: yaml.DoubleQuotedStyle, Value: prompt}
+		requoted := &yaml.Node{Kind: yaml.ScalarNode, Tag: yamlStrTag, Style: yaml.DoubleQuotedStyle, Value: prompt}
 		reprobed, err := probeScalarEmission(requoted)
 		if err != nil {
 			return nil, "", err

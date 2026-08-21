@@ -10,6 +10,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// yamlStrTag is the explicit YAML 1.1 string tag, used wherever a scalar must
+// stay a string on emission rather than retyping to bool/int/etc. (AC-23).
+const yamlStrTag = "!!str"
+
 // decodeJSONWithNumbers decodes JSON bytes into Go values using json.Number for
 // numeric literals rather than float64, so AC-41's byte-for-byte numeric fidelity
 // (e.g. 18446744073709551616, which overflows both int64 and uint64, or 1e400, which
@@ -49,7 +53,7 @@ func jsonToYAMLNode(v any) (*yaml.Node, error) {
 	case []any:
 		return jsonArrayToYAMLNode(val)
 	case string:
-		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: val}, nil
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: yamlStrTag, Value: val}, nil
 	case json.Number:
 		return &yaml.Node{Kind: yaml.ScalarNode, Value: val.String()}, nil
 	case bool:
@@ -75,7 +79,7 @@ func jsonObjectToYAMLNode(obj map[string]any) (*yaml.Node, error) {
 			return nil, err
 		}
 		node.Content = append(node.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: k},
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: yamlStrTag, Value: k},
 			valueNode,
 		)
 	}
