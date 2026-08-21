@@ -650,6 +650,8 @@ func (r *Repository) FindParticipantID(
 // rather than surfacing an error to the caller.
 const decisionActiveDeciderIndexName = "uniq_workflow_step_decisions_active_decider"
 
+const decisionLockNamespace = "workflow-step-decision:"
+
 // sqliteDecisionActiveDeciderViolationMessage is the substring go-sqlite3
 // puts in a UNIQUE-constraint error for this index's column list.
 const sqliteDecisionActiveDeciderViolationMessage = "UNIQUE constraint failed: workflow_step_decisions.task_id, " +
@@ -730,6 +732,18 @@ func (r *Repository) recordStepDecisionTx(ctx context.Context, d *models.Workflo
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// PostgreSQL's partial unique index detects two concurrent inserts, but
+	// retrying after the loser is rejected still leaves a thundering herd of
+	// retries when several callers record the same decider at once. Serialize
+	// the supersede-and-insert sequence by identity before reading or writing.
+	// SQLite's single-writer lock already provides this serialization.
+	if dialect.IsPostgres(r.db.DriverName()) {
+		lockKey := strings.Join([]string{decisionLockNamespace, d.TaskID, d.StepID, d.DeciderID, d.Role}, "|")
+		if _, err := tx.ExecContext(ctx, r.db.Rebind("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"), lockKey); err != nil {
+			return fmt.Errorf("lock active decision identity: %w", err)
+		}
+	}
 
 	if d.DeciderID != "" && d.Role != "" {
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`
