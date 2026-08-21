@@ -283,9 +283,9 @@ plugin leaks a stale registration.
   switches). `PluginTaskPanel` (`components/task/`) resolves the registration behind a
   `PluginErrorBoundary`; `mobileEnabled: true` also renders it via the phone bottom nav
   (`session-mobile-bottom-nav.tsx`) with `presentation: "mobile"`.
-- **Kanban card contributions:** `registerTaskMenuAction({ group: "edit", ... })` turns the flat
-  `Edit` item into an `Edit` submenu (`kanban-card-edit-submenu.tsx`);
-  `registerComponent("task-card-indicators", ...)` renders beside `PRTaskIcon` via `<PluginSlot/>`; `task-card-tags` renders in its own row below the badges (for contributions too wide for the title-row indicators spot, e.g. tag chips).
+- **Task contributions:** `registerTaskMenuAction({ group: "edit", ... })` adds card-only actions to
+  the `Edit` submenu. Group `"primary"` adds flat actions to card and desktop/mobile task-row menus.
+  Card indicator/tag slots stay card-specific; `task-row-metadata` is generic for sidebar and `/tasks` rows.
 - **Sidebar workspace actions:** `registerComponent("sidebar-workspace-actions", ...)` renders after Quick Terminal/Quick Chat in the desktop sidebar's New Task row and in the shared phone navigation sheet, forwarding `SidebarWorkspaceActionsSlotProps` with `presentation: "desktop" | "mobile"`; mobile plugin controls own a 44px touch target and accessible name.
 - **`host.storage`:** authenticated per-user key/value storage (`lib/plugins/host-api.ts`), backed by
   `/api/plugins/{id}/user-state/...` (`docs/decisions/2026-08-01-per-user-plugin-storage.md`).

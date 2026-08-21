@@ -88,3 +88,49 @@ test("mobile navigation reaches the Message Queue section with touch-safe shared
     String(expected),
   );
 });
+
+test("mobile configuration lock keeps the source and accessible controls consistent", async ({
+  testPage,
+}) => {
+  await testPage.route(`**${MESSAGE_QUEUE_SETTINGS_PATH}`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        settings: {
+          max_per_session: baseline?.max_per_session ?? 10,
+          merge_enabled: true,
+          auto_merge_enabled: true,
+        },
+        effective: {
+          max_per_session: 44,
+          source: "configuration",
+          locked: true,
+          merge_enabled: true,
+          auto_merge_enabled: true,
+        },
+      }),
+    });
+  });
+
+  const mobile = new MobileKanbanPage(testPage);
+  await mobile.goto();
+  await mobile.mobileMenuButton.click();
+  await testPage
+    .getByTestId("mobile-home-menu-card")
+    .getByRole("link", { name: "Settings" })
+    .click();
+  await testPage
+    .getByTestId("settings-index")
+    .getByRole("link", { name: /^Task Behavior/ })
+    .click();
+
+  const input = testPage.getByLabel("Maximum messages per session");
+  await expect(input).toBeDisabled();
+  await expect(testPage.getByTestId("message-queue-source")).toHaveText("Configuration");
+  await expect(testPage.getByText(/Managed by configuration/)).toBeVisible();
+  await expect(testPage.getByText(/KANDEV_QUEUE_MAX_PER_SESSION/)).toHaveCount(0);
+  const inputBox = await input.boundingBox();
+  expect(inputBox).not.toBeNull();
+  expect(inputBox!.height).toBeGreaterThanOrEqual(44);
+});

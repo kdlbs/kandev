@@ -2,18 +2,14 @@
 
 import { memo } from "react";
 import {
-  IconAlertCircle,
   IconChevronDown,
   IconCircleCheck,
   IconCircleDashed,
   IconDots,
   IconMessageQuestion,
   IconProgressCheck,
-  IconPinFilled,
   IconShieldQuestion,
 } from "@tabler/icons-react";
-import { IssueTaskIcon } from "@/components/github/issue-task-icon";
-import { TaskContributionIcons } from "./task-contribution-icons";
 import { cn } from "@/lib/utils";
 import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
 import { TaskItemStatsRow } from "./task-item-stats-row";
@@ -28,13 +24,13 @@ import {
 } from "@/lib/ui/state-icons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
+import { TaskRowMetadata } from "./task-row-plugin-slots";
 import { classifyTask } from "./task-classify";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
-import { TaskAutopilotIcon } from "@/components/task/task-autopilot-icon";
 import { TaskTitleHoverCard } from "@/components/task/task-title-hover-card";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
-import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
+import { TaskItemLeadingBadges } from "./task-item-leading-badges";
 
 type DiffStats = {
   additions: number;
@@ -74,6 +70,8 @@ type TaskItemProps = {
   menuOpen?: boolean;
   isDeleting?: boolean;
   taskId?: string;
+  /** Drives the `task-row-metadata` plugin slot's `workflowStepId`. */
+  workflowStepId?: string | null;
   primarySessionId?: string | null;
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;
@@ -334,6 +332,7 @@ function TaskItemContent({
   title,
   autopilot,
   taskId,
+  workflowStepId,
   isRemoteExecutor,
   remoteExecutorType,
   remoteExecutorName,
@@ -353,6 +352,7 @@ function TaskItemContent({
   title: string;
   autopilot?: boolean;
   taskId?: string;
+  workflowStepId?: string | null;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string;
   remoteExecutorName?: string;
@@ -374,17 +374,14 @@ function TaskItemContent({
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
         <TaskItemTitle taskId={taskId} title={title} />
-        {autopilot && <TaskAutopilotIcon />}
-        {isPinned && (
-          <IconPinFilled
-            data-testid="task-pinned-icon"
-            className="h-3 w-3 shrink-0 text-muted-foreground/60"
-          />
-        )}
-        <TaskContributionIcons taskId={taskId} prInfo={prInfo} />
-        {taskId ? <RegisteredChangeRequestTaskIcon taskId={taskId} /> : null}
-        {issueInfo && <IssueTaskIcon issueInfo={issueInfo} />}
-        {agentErrorMessage && <TaskAgentErrorIcon message={agentErrorMessage} />}
+        <TaskItemLeadingBadges
+          autopilot={autopilot}
+          isPinned={isPinned}
+          taskId={taskId}
+          prInfo={prInfo}
+          issueInfo={issueInfo}
+          agentErrorMessage={agentErrorMessage}
+        />
         {isRemoteExecutor && (
           <RemoteCloudTooltip
             taskId={taskId ?? ""}
@@ -405,6 +402,13 @@ function TaskItemContent({
           {repositories.join(" · ")}
         </span>
       )}
+      {taskId && (
+        <TaskRowMetadata
+          taskId={taskId}
+          workflowStepId={workflowStepId ?? null}
+          surface="sidebar"
+        />
+      )}
       <TaskItemStatsRow
         updatedAt={showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt}
         prInfo={prInfo}
@@ -413,26 +417,6 @@ function TaskItemContent({
         wipQueue={wipQueue}
       />
     </div>
-  );
-}
-
-function TaskAgentErrorIcon({ message }: { message: string }) {
-  const { t } = useTranslation();
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          data-testid="task-agent-error-icon"
-          className="inline-flex shrink-0 cursor-help text-destructive"
-          aria-label={t("task:taskHasAnAgentError")}
-        >
-          <IconAlertCircle className="h-3.5 w-3.5" aria-hidden="true" />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="right" className="max-w-[320px] whitespace-pre-wrap break-words">
-        {message}
-      </TooltipContent>
-    </Tooltip>
   );
 }
 
@@ -461,6 +445,7 @@ export const TaskItem = memo(function TaskItem({
   menuOpen = false,
   isDeleting,
   taskId,
+  workflowStepId,
   primarySessionId,
   hasPendingClarification,
   hasPendingPermission,
@@ -512,6 +497,7 @@ export const TaskItem = memo(function TaskItem({
         title={title}
         autopilot={autopilot}
         taskId={taskId}
+        workflowStepId={workflowStepId}
         isRemoteExecutor={isRemoteExecutor}
         remoteExecutorType={remoteExecutorType}
         remoteExecutorName={remoteExecutorName}

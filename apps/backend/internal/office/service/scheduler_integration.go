@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -23,19 +21,20 @@ const DefaultTickInterval = 5 * time.Second
 // if no agent lifecycle event returned it to a terminal queue state.
 const staleClaimedRunAge = 30 * time.Minute
 
-// TickIntervalFromEnv reads KANDEV_OFFICE_SCHEDULER_TICK_MS and returns the
-// corresponding duration. Falls back to DefaultTickInterval when the variable
-// is unset or invalid.
+// TickIntervalFromConfig converts the resolved typed millisecond setting into
+// the office scheduler duration. Invalid values retain the safe default.
+func TickIntervalFromConfig(milliseconds int) time.Duration {
+	if milliseconds <= 0 {
+		return DefaultTickInterval
+	}
+	return time.Duration(milliseconds) * time.Millisecond
+}
+
+// TickIntervalFromEnv remains as a compatibility helper for package callers.
+// Backend startup resolves the setting through common/config and passes the
+// result to NewSchedulerIntegration.
 func TickIntervalFromEnv() time.Duration {
-	raw := os.Getenv("KANDEV_OFFICE_SCHEDULER_TICK_MS")
-	if raw == "" {
-		return DefaultTickInterval
-	}
-	ms, err := strconv.Atoi(raw)
-	if err != nil || ms <= 0 {
-		return DefaultTickInterval
-	}
-	return time.Duration(ms) * time.Millisecond
+	return DefaultTickInterval
 }
 
 // SchedulerIntegration runs the run processing tick loop.

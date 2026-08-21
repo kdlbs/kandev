@@ -7,6 +7,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/system/queuesettings"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
@@ -43,6 +44,61 @@ func TestResolveQueueMaxPerSessionPrecedence(t *testing.T) {
 				t.Fatalf("max = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestResolveQueueMaxPerSessionUsesYAMLConfigurationBeforePersistedSetting(t *testing.T) {
+	pool := newMessageQueueSettingsTestPool(t)
+	raw, err := systemsettings.NewStore(pool)
+	if err != nil {
+		t.Fatalf("new system settings store: %v", err)
+	}
+	if err := queuesettings.NewStore(raw).Save(context.Background(), queuesettings.Settings{
+		MaxPerSession: 6, MergeEnabled: true, AutoMergeEnabled: true,
+	}); err != nil {
+		t.Fatalf("save setting: %v", err)
+	}
+
+	cfg := &commonconfig.Config{
+		MessageQueue: commonconfig.MessageQueueConfig{MaxPerSession: 14},
+		Source: commonconfig.ConfigSource{Values: map[string]commonconfig.SettingSource{
+			"messageQueue.maxPerSession": commonconfig.SourceConfiguration,
+		}},
+	}
+	t.Setenv(queuesettings.EnvironmentVariable, "")
+	startup := queueConfiguration(cfg)
+	resolution := resolveQueueSettings(pool, testLogger(t), startup)
+	if resolution.Effective.MaxPerSession != 14 ||
+		resolution.Effective.Source != queuesettings.SourceConfiguration ||
+		!resolution.Effective.Locked {
+		t.Fatalf("resolution = %+v, want locked YAML configuration value", resolution.Effective)
+	}
+}
+
+func TestResolveQueueMaxPerSessionYAMLZeroLocksUnlimitedCapacity(t *testing.T) {
+	pool := newMessageQueueSettingsTestPool(t)
+	raw, err := systemsettings.NewStore(pool)
+	if err != nil {
+		t.Fatalf("new system settings store: %v", err)
+	}
+	if err := queuesettings.NewStore(raw).Save(context.Background(), queuesettings.Settings{
+		MaxPerSession: 6, MergeEnabled: true, AutoMergeEnabled: true,
+	}); err != nil {
+		t.Fatalf("save setting: %v", err)
+	}
+
+	cfg := &commonconfig.Config{
+		MessageQueue: commonconfig.MessageQueueConfig{MaxPerSession: 0},
+		Source: commonconfig.ConfigSource{Values: map[string]commonconfig.SettingSource{
+			"messageQueue.maxPerSession": commonconfig.SourceConfiguration,
+		}},
+	}
+	t.Setenv(queuesettings.EnvironmentVariable, "")
+	resolution := resolveQueueSettings(pool, testLogger(t), queueConfiguration(cfg))
+	if resolution.Effective.MaxPerSession != 0 ||
+		resolution.Effective.Source != queuesettings.SourceConfiguration ||
+		!resolution.Effective.Locked {
+		t.Fatalf("resolution = %+v, want locked YAML unlimited value", resolution.Effective)
 	}
 }
 

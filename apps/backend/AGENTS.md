@@ -216,6 +216,7 @@ Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream update
 - **Dependency direction:** Shared admission limits used by task models and orchestrator/messagequeue belong in a neutral internal package; task/models must not import the higher-level orchestrator/messagequeue package.
 - Production Git commands must use `subproc.NewGitCommand` with a classified `subproc.RunGit*` helper, or hold a classified admission slot across streaming `Start`/`Wait`. Do not construct raw Git commands outside `internal/common/subproc`; choose `interactive`, `lifecycle`, or `background`.
 - **Cross-tier shared code belongs in `internal/common/`.** agentctl ships as a standalone binary uploaded into containers, so neither it nor the backend may own code the other imports — put shared logic in a neutral `internal/common/*` package instead of importing across the boundary or forking a copy (`ptyexec` is the worked example; `subproc`, `gitref`, `securityutil` are older ones). Duplicating to "avoid the dependency" is how the two PTY copies drifted.
+- **Startup configuration ownership:** `internal/common/config/catalog.go` and `source.go` own the stable operator catalog, discovery, precedence, provenance, and typed values; managed agentctl children receive a private subset contract. Do not reparse stable env in executors or copy YAML into public child environments.
 - **Pure computation that only matters on Windows should not carry `//go:build windows`.** One CI job runs on Windows and it tests a package allowlist, so tagged code is easily unverified — loginpty's copy of the Win32 quoting was compiled by no job at all. Keep platform API calls behind the tag, leave string/path helpers untagged, and add packages needing native coverage to the `test-windows` job in `.github/workflows/backend-tests.yml`.
 - **Event-bus wildcard parity:** New NATS wildcard subscriptions must verify equivalent `MemoryEventBus` semantics in `go test ./internal/events/bus`.
 - **Repository provider identity:** Provider-backed repositories are keyed by workspace, provider, normalized `provider_host` origin, full owner/namespace, and name. Persist `provider_host` when importing or resolving a remote; do not infer self-managed GitLab rows from owner/name alone. Legacy rows with an empty host have unknown identity and must fail closed for provider write/link operations.
@@ -282,8 +283,6 @@ Prefer stable error codes for new output so the frontend translates it. See `doc
 Enforced by `apps/backend/.golangci.yml` (errors on new code only):
 - Functions: ≤80 lines, ≤50 statements · Cyclomatic complexity: ≤15 · Cognitive complexity: ≤30
 - Nesting depth: ≤5 · Naked returns only in functions ≤30 lines · No duplicated blocks (≥150 tokens) · Repeated strings → constants (≥3 occurrences) · Revive's 800-effective-line file limit also applies to test files; put new tests in a new file instead of appending to an already-large test file.
-
-When you hit a limit, extract a helper function. Prefer composition over growing a single function.
 
 When a PR fixup touches backend code, run the CI-style changed-file linter locally from `apps/backend` with the PR base SHA before pushing, because CI enforces changed-file complexity thresholds:
 

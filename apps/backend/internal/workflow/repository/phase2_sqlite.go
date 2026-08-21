@@ -650,8 +650,6 @@ func (r *Repository) FindParticipantID(
 // rather than surfacing an error to the caller.
 const decisionActiveDeciderIndexName = "uniq_workflow_step_decisions_active_decider"
 
-const decisionLockNamespace = "workflow-step-decision:"
-
 // sqliteDecisionActiveDeciderViolationMessage is the substring go-sqlite3
 // puts in a UNIQUE-constraint error for this index's column list.
 const sqliteDecisionActiveDeciderViolationMessage = "UNIQUE constraint failed: workflow_step_decisions.task_id, " +
@@ -733,15 +731,21 @@ func (r *Repository) recordStepDecisionTx(ctx context.Context, d *models.Workflo
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// PostgreSQL's partial unique index detects two concurrent inserts, but
-	// retrying after the loser is rejected still leaves a thundering herd of
-	// retries when several callers record the same decider at once. Serialize
-	// the supersede-and-insert sequence by identity before reading or writing.
-	// SQLite's single-writer lock already provides this serialization.
+	// PostgreSQL's READ COMMITTED isolation does not serialize the initial
+	// supersede UPDATE when no active row exists yet. Lock the identity before
+	// that UPDATE so concurrent writers observe the prior commit instead of
+	// racing into the partial unique index. SQLite's single-writer lock already
+	// provides this serialization.
+	lockIdentity := d.ParticipantID
+	if d.DeciderID != "" && d.Role != "" {
+		lockIdentity = d.DeciderID + "\x1f" + d.Role
+	}
 	if dialect.IsPostgres(r.db.DriverName()) {
-		lockKey := strings.Join([]string{decisionLockNamespace, d.TaskID, d.StepID, d.DeciderID, d.Role}, "|")
-		if _, err := tx.ExecContext(ctx, r.db.Rebind("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"), lockKey); err != nil {
-			return fmt.Errorf("lock active decision identity: %w", err)
+		lockKey := "workflow-step-decision:" + d.TaskID + "\x1f" + d.StepID + "\x1f" + lockIdentity
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`
+			SELECT pg_advisory_xact_lock(hashtextextended(?, 0))
+		`), lockKey); err != nil {
+			return fmt.Errorf("lock step decision identity: %w", err)
 		}
 	}
 

@@ -59,6 +59,7 @@ type Wiring struct {
 	OrchestratorShutdown func()
 	RestoreQuiesce       func() error
 	MessageQueue         queuesettings.Target
+	MessageQueueConfig   queuesettings.Configuration
 	TaskSessions         sleepinhibition.SessionReader
 }
 
@@ -125,6 +126,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		if wiring.MessageQueue != nil {
 			queueSettingsSvc = queuesettings.NewService(
 				queuesettings.NewStore(settingsStore), wiring.MessageQueue, nil, log,
+				wiring.MessageQueueConfig,
 			)
 		}
 		if wiring.TaskSessions != nil {
