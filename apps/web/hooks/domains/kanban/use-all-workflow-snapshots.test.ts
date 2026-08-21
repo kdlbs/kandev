@@ -298,20 +298,106 @@ describe("useAllWorkflowSnapshots — snapshot mapping", () => {
     await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
     expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0].autopilot).toBe(false);
   });
+});
 
-  it("preserves a cached primary executor binding when a fresh snapshot omits it", async () => {
-    seedCachedTask(WORKTREE_EXECUTOR_FIELDS);
+describe("useAllWorkflowSnapshots — executor binding merge", () => {
+  beforeEach(() => {
+    resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
+  });
+
+  it("preserves a newer live executor binding when a delayed snapshot omits it", async () => {
+    seedCachedTask({});
+    let resolveSnapshot: (value: { steps: unknown[]; tasks: unknown[] }) => void = () => {};
+    mockFetchWorkflowSnapshot.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalled());
+
+    // A task.updated event adds the executor while the snapshot is in flight.
+    mockState.kanbanMulti.snapshots = {
+      "wf-A": {
+        workflowId: "wf-A",
+        workflowName: "A",
+        isPlaceholder: true,
+        steps: [],
+        tasks: [{ id: "task-1", workflowStepId: "step-1", ...WORKTREE_EXECUTOR_FIELDS }],
+      },
+    };
+    resolveSnapshot({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [{ id: "task-1", workflow_step_id: "step-1", title: "Task" }],
+    });
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0]).toMatchObject(
+      WORKTREE_EXECUTOR_FIELDS,
+    );
+  });
+
+  it("clears a cached executor when a current snapshot omits the primary session", async () => {
+    seedCachedTask({ primarySessionId: "session-1", ...WORKTREE_EXECUTOR_FIELDS });
     mockFetchWorkflowSnapshot.mockResolvedValueOnce({
       steps: [{ id: "step-1", name: "Review", position: 1 }],
+      // The backend omits primary_session_id and primary_executor_* when the
+      // task has no primary session because those DTO fields use omitempty.
       tasks: [{ id: "task-1", workflow_step_id: "step-1", title: "Task" }],
     });
 
     renderHook(() => useAllWorkflowSnapshots("ws-A"));
 
     await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0].primaryExecutorType).toBeUndefined();
+  });
+
+  it("preserves each omitted executor field from a newer live binding independently", async () => {
+    seedCachedTask({});
+    let resolveSnapshot: (value: { steps: unknown[]; tasks: unknown[] }) => void = () => {};
+    mockFetchWorkflowSnapshot.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalled());
+
+    mockState.kanbanMulti.snapshots = {
+      "wf-A": {
+        workflowId: "wf-A",
+        workflowName: "A",
+        isPlaceholder: true,
+        steps: [],
+        tasks: [{ id: "task-1", workflowStepId: "step-1", ...WORKTREE_EXECUTOR_FIELDS }],
+      },
+    };
+    resolveSnapshot({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [
+        {
+          id: "task-1",
+          workflow_step_id: "step-1",
+          title: "Task",
+          primary_executor_type: "worktree",
+        },
+      ],
+    });
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
     expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0]).toMatchObject(
       WORKTREE_EXECUTOR_FIELDS,
     );
+  });
+});
+
+describe("useAllWorkflowSnapshots — executor binding mapping", () => {
+  beforeEach(() => {
+    resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
   });
 
   it("clears a cached executor binding when the response explicitly clears the primary session", async () => {
