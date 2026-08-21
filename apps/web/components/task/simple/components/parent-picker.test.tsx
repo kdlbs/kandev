@@ -93,7 +93,7 @@ function Wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("ParentPicker", () => {
-  it("uses canonical detach after confirming No parent", async () => {
+  it("uses a local confirmation after selecting No parent", async () => {
     render(
       <Wrapper>
         <ParentPicker task={task} />
@@ -104,10 +104,11 @@ describe("ParentPicker", () => {
 
     fireEvent.click(screen.getByTestId("parent-picker-trigger"));
     fireEvent.click(await screen.findByText("No parent"));
-    const dialog = await screen.findByRole("alertdialog", { name: "Detach task from parent?" });
-    expect(dialog.textContent).toContain("shares its parent's workspace");
+    const confirmation = await screen.findByRole("dialog", { name: "Detach task from parent?" });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(confirmation.textContent).toContain("shares its parent's workspace");
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Detach" }));
+      fireEvent.click(screen.getByTestId("detach-task-confirm"));
     });
 
     expect(detachTaskMock).toHaveBeenCalledWith(task.id);

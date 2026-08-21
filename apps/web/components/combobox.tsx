@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useState, type Ref } from "react";
 import { IconCheck, IconChevronDown, IconLoader2 } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
@@ -61,6 +61,8 @@ interface ComboboxProps {
   headerAction?: React.ReactNode;
   /** When true, swap the trigger chevron for a spinner to indicate loading. */
   loading?: boolean;
+  /** Ref for consumers that anchor a local confirmation to this trigger. */
+  triggerRef?: Ref<HTMLButtonElement>;
 }
 
 function TriggerLabel({
@@ -161,14 +163,12 @@ export const Combobox = memo(function Combobox({
   filter,
   headerAction,
   loading = false,
+  triggerRef,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
   const portalContainer = useTaskCreateDialogPopoverContainer();
-  // Track the highlighted item. Defaults to the selected value so the current
-  // selection is highlighted when the popover opens (not the first item).
+  // Keep the selected value highlighted when the popover opens, not the first item.
   const [highlighted, setHighlighted] = useState("");
-
-  const selectedOption = options.find((option) => option.value === value);
 
   return (
     <Popover
@@ -180,6 +180,7 @@ export const Combobox = memo(function Combobox({
     >
       <PopoverTrigger asChild>
         <Button
+          ref={triggerRef}
           variant="ghost"
           role="combobox"
           aria-label={ariaLabel}
@@ -190,7 +191,7 @@ export const Combobox = memo(function Combobox({
         >
           <div className="flex min-w-0 flex-1 items-center">
             <TriggerLabel
-              selectedOption={selectedOption}
+              selectedOption={options.find((option) => option.value === value)}
               plainTrigger={plainTrigger}
               placeholder={placeholder}
             />
