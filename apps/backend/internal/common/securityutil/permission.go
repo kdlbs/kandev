@@ -11,6 +11,15 @@ const maxPermissionPresentationBytes = 4096
 
 const permissionRedactionMask = "[redacted]"
 
+// Display categories ProjectPermissionAction's switch understands.
+const (
+	permissionTypeCommand   = "command"
+	permissionTypeFileWrite = "file_write"
+	permissionTypeFileRead  = "file_read"
+	permissionTypeNetwork   = "network"
+	permissionTypeMCPTool   = "mcp_tool"
+)
+
 var permissionRedactions = []*regexp.Regexp{
 	regexp.MustCompile(`sk-[A-Za-z0-9_-]{12,}`),
 	regexp.MustCompile(`github_pat_[A-Za-z0-9_]{20,}`),
@@ -70,12 +79,12 @@ func ProjectPermissionAction(actionType, title string, details map[string]any) P
 	}
 
 	switch projected.Type {
-	case "command":
+	case permissionTypeCommand:
 		projected.Command, projected.Redacted = mergeSanitized(projected.Redacted, field("command"))
 		projected.CWD, projected.Redacted = mergeSanitized(projected.Redacted, field("cwd", "workdir", "work_dir"))
-	case "file_write", "file_read":
+	case permissionTypeFileWrite, permissionTypeFileRead:
 		projected.Path, projected.Redacted = mergeSanitized(projected.Redacted, field("path", "file_path"))
-	case "network":
+	case permissionTypeNetwork:
 		destination := field("destination", "url", "host")
 		stripped, ok := stripURLCredentials(destination)
 		if !ok {
@@ -87,7 +96,7 @@ func ProjectPermissionAction(actionType, title string, details map[string]any) P
 		}
 		projected.Redacted = projected.Redacted || stripped != destination
 		projected.Destination, projected.Redacted = mergeSanitized(projected.Redacted, stripped)
-	case "mcp_tool":
+	case permissionTypeMCPTool:
 		projected.Server, projected.Redacted = mergeSanitized(projected.Redacted, field("server", "server_name"))
 		projected.Tool, projected.Redacted = mergeSanitized(projected.Redacted, field("tool", "tool_name", "name"))
 	}
@@ -127,10 +136,25 @@ func PermissionActionDetailsForEvent(action PermissionActionProjection) map[stri
 	return details
 }
 
+// normalizePermissionActionType maps a permission action type onto the fixed
+// set of display categories ProjectPermissionAction's switch understands. It
+// accepts both the internal display names (used by non-ACP sources) and the
+// raw ACP ToolKind values agentctl forwards unchanged from the agent
+// (acp.RequestPermissionRequest.ToolCall.Kind — "execute", "edit", "read",
+// "fetch", ...). Without this mapping every ACP-sourced request normalized to
+// "other" and the switch below never populated command/cwd/path/destination.
 func normalizePermissionActionType(actionType string) string {
 	switch actionType {
-	case "command", "file_write", "file_read", "network", "mcp_tool":
+	case permissionTypeCommand, permissionTypeFileWrite, permissionTypeFileRead, permissionTypeNetwork, permissionTypeMCPTool:
 		return actionType
+	case "execute":
+		return permissionTypeCommand
+	case "edit":
+		return permissionTypeFileWrite
+	case "read":
+		return permissionTypeFileRead
+	case "fetch":
+		return permissionTypeNetwork
 	default:
 		return "other"
 	}

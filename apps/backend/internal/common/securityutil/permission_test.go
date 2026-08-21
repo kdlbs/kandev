@@ -59,6 +59,41 @@ func TestProjectPermissionActionRedactsSchemelessURLCredentials(t *testing.T) {
 	}
 }
 
+func TestProjectPermissionActionMapsRealACPToolKinds(t *testing.T) {
+	// These are the raw acp.ToolKind wire values agentctl forwards unchanged
+	// as ActionType (see forwardPermissionRequest in
+	// internal/agentctl/server/acp/client.go) — not the internal display
+	// names ("command", "file_write", ...) this package also accepts.
+	cases := []struct {
+		acpKind    string
+		wantType   string
+		detailKey  string
+		wantDetail string
+	}{
+		{acpKind: "execute", wantType: "command", detailKey: "command", wantDetail: "ls -la"},
+		{acpKind: "edit", wantType: "file_write", detailKey: "path", wantDetail: "/workspace/file.go"},
+		{acpKind: "read", wantType: "file_read", detailKey: "path", wantDetail: "/workspace/file.go"},
+		{acpKind: "fetch", wantType: "network", detailKey: "destination", wantDetail: "example.com"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.acpKind, func(t *testing.T) {
+			projection := ProjectPermissionAction(tc.acpKind, "Approve action", map[string]any{
+				tc.detailKey: tc.wantDetail,
+			})
+			if projection.Type != tc.wantType {
+				t.Fatalf("acp kind %q: got Type %q, want %q", tc.acpKind, projection.Type, tc.wantType)
+			}
+			encoded, err := json.Marshal(projection)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(encoded), tc.wantDetail) {
+				t.Fatalf("acp kind %q: projection dropped its display detail: %s", tc.acpKind, encoded)
+			}
+		})
+	}
+}
+
 func TestProjectPermissionActionFailsClosedOnMalformedAbsoluteURL(t *testing.T) {
 	const canary = "s3cr3t-canary-pass"
 	// A space in the host is rejected by net/url.Parse ("invalid character
