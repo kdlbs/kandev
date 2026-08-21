@@ -583,6 +583,7 @@ summarize_state_json() {
         | select(successful_check)
         | {name, workflow, status, conclusion, run_id, job_id, details_url, target_url}
       ],
+      check_count: ([effective_checks[]] | length),
       passed_check_count: ([effective_checks[] | select(successful_check)] | length),
       unresolved_review_thread_count,
       filtered_review_thread_count,

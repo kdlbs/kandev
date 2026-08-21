@@ -902,5 +902,6 @@
   "failedToLoadProviderHealth": "Failed to load provider health",
   "failedToLoadRouteAttempts": "Failed to load route attempts",
   "failedToLoadRoutingConfig": "Failed to load routing config",
-  "failedToLoadRoutingPreview": "Failed to load routing preview"
+  "failedToLoadRoutingPreview": "Failed to load routing preview",
+  "failedToLoadTaskQuorum": "Failed to load task quorum"
 }

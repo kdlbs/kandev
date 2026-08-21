@@ -347,6 +347,7 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 			zap.String("session_state", string(session.State)))
 		return
 	}
+	recoveryResolvedAt := s.markRecoveryResolved(ctx, data.SessionID, session)
 
 	// Idempotent: if the session is already WAITING_FOR_INPUT (e.g. revived
 	// from a previously launched session and the boot signal arrived faster
@@ -354,6 +355,18 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	// fall through to the drain below: an orphaned queued message would
 	// otherwise sit forever.
 	if session.State == models.TaskSessionStateWaitingForInput {
+		if recoveryResolvedAt != nil {
+			s.publishTaskSessionStateChanged(
+				ctx,
+				data.TaskID,
+				data.SessionID,
+				session.State,
+				session.State,
+				session.ErrorMessage,
+				recoveryResolvedAt,
+				session,
+			)
+		}
 		s.logger.Debug("agent.boot_ready: session already WAITING_FOR_INPUT, skipping flip",
 			zap.String("session_id", data.SessionID))
 	} else {
@@ -1792,6 +1805,31 @@ func (s *Service) clearRecoveredAgentError(ctx context.Context, taskID string, s
 			zap.String("session_id", session.ID),
 			zap.Error(err))
 	}
+}
+
+// markRecoveryResolved persists the successful boot timestamp on the session.
+// The boot transcript is useful observability, but its writes are best effort.
+// Session metadata is the authoritative recovery result used by the frontend
+// after a reload when the transcript row is missing or incomplete.
+func (s *Service) markRecoveryResolved(ctx context.Context, sessionID string, session *models.TaskSession) *time.Time {
+	resolvedAt := time.Now().UTC()
+	resolvedAtValue := resolvedAt.Format(time.RFC3339Nano)
+	if err := s.repo.SetSessionMetadataKey(
+		ctx,
+		sessionID,
+		models.SessionMetaKeyRecoveryResolvedAt,
+		resolvedAtValue,
+	); err != nil {
+		s.logger.Warn("failed to persist recovery resolution",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil
+	}
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	session.Metadata[models.SessionMetaKeyRecoveryResolvedAt] = resolvedAtValue
+	return &resolvedAt
 }
 
 // providerRemediationURL returns the adapter-validated remediation URL from the

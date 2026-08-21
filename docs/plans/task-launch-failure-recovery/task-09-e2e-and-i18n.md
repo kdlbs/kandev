@@ -1,40 +1,50 @@
 ---
 id: "09-e2e-and-i18n"
-title: "E2E coverage and i18n propagation"
-status: pending
-wave: 6
-depends_on: ["08-frontend-failure-surface-and-recovery"]
+title: "Localized recovery E2E"
+status: done
+wave: 7
+depends_on: ["11-responsive-launch-error-surface"]
 plan: "plan.md"
 spec: "../../specs/task-launch-failure-recovery/spec.md"
 ---
 
-# Task 09: E2E coverage and i18n propagation
+# Task 09: Localized recovery E2E
 
-Prove the user-visible flows end to end and complete translations in all five locales.
+Prove the desktop and phone outcomes against fresh production assets.
+Complete all five locale catalogs.
 
 - **Acceptance:**
-  1. `apps/web/e2e/tests/task/launch-failure-recovery.spec.ts` covers: (a) auto-start of a task linked
-     to a merged PR is gated — no `FAILED`, `pr_already_closed` reason with "Mark review done"
-     visible; (b) a base-branch-missing launch shows the `base_branch_missing` reason with the three
-     recovery actions, and invoking `retry_default`/`pick_base_branch` relaunches AND self-heals the
-     task base (assert the recovered branch persists on the task after a reload, e.g. the changes-panel
-     "Compare against" shows the resolved branch); (c) the launch toast shows the pointer copy, not the
-     raw error. Follow the recovery-button pattern in
-     `apps/web/e2e/tests/session/transient-retry.spec.ts` and causal `watchWs` waits.
-  2. New copy exists in `en`, `pt-pt`, `zh-cn`; `zh-hk`/`zh-tw` generated via `pnpm run i18n:zh-hant`.
-  3. `pnpm run i18n:check` passes (key parity, placeholders, no em-dash).
+  1. The desktop spec proves the pre-session gate, reload persistence, terminal move, and zero session launch.
+  2. It proves exact-row branch recovery, relaunch, persisted self-heal, and pointer-toast copy.
+  3. The old PR missing-branch spec expects the typed card, not a warning message or archive/delete actions.
+  4. The mobile spec proves the same branch outcome through `MobilePickerSheet`.
+  5. The mobile test checks 44px targets, viewport containment, picker scroll, and no document overflow.
+  6. Tests use stable test IDs, UI assertions, causal WS waits, and disposable seeded state.
+  7. New copy exists in all five locale catalogs.
+  8. Traditional Chinese catalogs come from `pnpm run i18n:zh-hant`.
+  9. `pnpm run i18n:check` passes.
 
 - **Verification:**
-  `cd apps && pnpm install --frozen-lockfile` then
-  `cd apps/web && pnpm run i18n:check && pnpm e2e:raw -- launch-failure-recovery`
+  `cd apps && pnpm install --frozen-lockfile && cd web && pnpm run i18n:check && pnpm e2e:run tests/pr/pr-watcher-missing-branch.spec.ts tests/task/launch-failure-recovery.spec.ts && pnpm e2e:run --project mobile-chrome tests/task/mobile-launch-failure-recovery.spec.ts`
 
 - **Files likely touched:**
   `apps/web/e2e/tests/task/launch-failure-recovery.spec.ts`,
+  `apps/web/e2e/tests/task/mobile-launch-failure-recovery.spec.ts`,
+  `apps/web/e2e/tests/pr/pr-watcher-missing-branch.spec.ts`,
   `apps/web/src/locales/{en,pt-pt,zh-cn,zh-hk,zh-tw}/task.json`.
 
-- **Dependencies:** Task 08.
+- **Dependencies:** Task 11.
 - **Parallelism:** sequential.
-- **Inputs:** plan "E2E Tests"; spec "Scenarios"; i18n rules in root `AGENTS.md`.
+- **Inputs:** plan "E2E Tests", spec scenarios, `/e2e`, `/mobile-parity`, and root i18n rules.
 
 ## Results
-Pending.
+Implemented desktop and mobile recovery coverage and updated the deleted-branch watcher cases.
+All new task copy is present in the five locale catalogs.
+
+Verification:
+
+- `cd apps/web && pnpm run i18n:check`: passed. The catalogs contain 7,159 referenced keys and complete translations.
+- `cd apps/web && pnpm e2e:run --host --no-build tests/task/launch-failure-recovery.spec.ts`: 2 tests passed.
+- `cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-launch-failure-recovery.spec.ts`: 1 test passed.
+- Desktop and mobile PR watcher specs: 1 test passed in each project.
+- Desktop and mobile recovery screenshots were captured and inspected. The picker closes after selection, and no recovery failure toast remains.

@@ -159,32 +159,45 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	// Surface per-repo worktree results from the prepare step so the orchestrator
 	// can persist N TaskEnvironmentRepo / TaskSessionWorktree rows when multi-repo.
 	var worktrees []executor.RepoWorktreeResult
+	var requestedBaseBranch, baseBranch, baseBranchFallbackWarning string
+	if execution.PrepareResult != nil {
+		requestedBaseBranch = execution.PrepareResult.RequestedBaseBranch
+		baseBranch = execution.PrepareResult.BaseBranch
+		baseBranchFallbackWarning = execution.PrepareResult.BaseBranchFallbackWarning
+	}
 	if execution.PrepareResult != nil && len(execution.PrepareResult.Worktrees) > 0 {
 		worktrees = make([]executor.RepoWorktreeResult, 0, len(execution.PrepareResult.Worktrees))
 		for _, w := range execution.PrepareResult.Worktrees {
 			worktrees = append(worktrees, executor.RepoWorktreeResult{
-				RepositoryID:   w.RepositoryID,
-				BranchSlug:     w.BranchSlug,
-				WorktreeID:     w.WorktreeID,
-				WorktreeBranch: w.WorktreeBranch,
-				WorktreePath:   w.WorktreePath,
-				MainRepoGitDir: w.MainRepoGitDir,
-				ErrorMessage:   w.ErrorMessage,
+				TaskRepositoryID:          w.TaskRepositoryID,
+				RepositoryID:              w.RepositoryID,
+				BranchSlug:                w.BranchSlug,
+				WorktreeID:                w.WorktreeID,
+				WorktreeBranch:            w.WorktreeBranch,
+				WorktreePath:              w.WorktreePath,
+				MainRepoGitDir:            w.MainRepoGitDir,
+				RequestedBaseBranch:       w.RequestedBaseBranch,
+				BaseBranch:                w.BaseBranch,
+				BaseBranchFallbackWarning: w.BaseBranchFallbackWarning,
+				ErrorMessage:              w.ErrorMessage,
 			})
 		}
 	}
 
 	return &executor.LaunchAgentResponse{
-		AgentExecutionID: execution.ID,
-		ContainerID:      execution.ContainerID,
-		Status:           execution.Status,
-		WorktreeID:       worktreeID,
-		WorktreePath:     worktreePath,
-		WorktreeBranch:   worktreeBranch,
-		WorkspacePath:    execution.WorkspacePath,
-		Metadata:         metadata,
-		PrepareResult:    execution.PrepareResult,
-		Worktrees:        worktrees,
+		AgentExecutionID:          execution.ID,
+		ContainerID:               execution.ContainerID,
+		Status:                    execution.Status,
+		WorktreeID:                worktreeID,
+		WorktreePath:              worktreePath,
+		WorktreeBranch:            worktreeBranch,
+		RequestedBaseBranch:       requestedBaseBranch,
+		BaseBranch:                baseBranch,
+		BaseBranchFallbackWarning: baseBranchFallbackWarning,
+		WorkspacePath:             execution.WorkspacePath,
+		Metadata:                  metadata,
+		PrepareResult:             execution.PrepareResult,
+		Worktrees:                 worktrees,
 	}, nil
 }
 
@@ -224,6 +237,7 @@ func buildLifecycleLaunchRequest(
 		UseWorktree:                   req.UseWorktree,
 		WorktreeID:                    req.WorktreeID,
 		RepositoryID:                  req.RepositoryID,
+		TaskRepositoryID:              req.TaskRepositoryID,
 		RepositoryPath:                req.RepositoryPath,
 		BaseBranch:                    req.BaseBranch,
 		DefaultBranch:                 req.DefaultBranch,
@@ -281,6 +295,7 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 	specs := make([]lifecycle.RepoLaunchSpec, 0, len(repos))
 	for _, r := range repos {
 		specs = append(specs, lifecycle.RepoLaunchSpec{
+			TaskRepositoryID:        r.TaskRepositoryID,
 			RepositoryID:            r.RepositoryID,
 			RepositoryPath:          r.RepositoryPath,
 			RepositoryURL:           r.RepositoryURL,

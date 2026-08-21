@@ -1,63 +1,52 @@
 ---
 id: "10-task-base-self-heal"
-title: "Self-heal task_repositories.base_branch after fallback recovery"
-status: pending
-wave: 3
-depends_on: ["03-worktree-live-default-fallback"]
+title: "Carry task-repository launch identity"
+status: done
+wave: 2
+depends_on: ["01-failure-taxonomy-contracts"]
 plan: "plan.md"
 spec: "../../specs/task-launch-failure-recovery/spec.md"
 ---
 
-# Task 10: Self-heal task base_branch after fallback recovery
+# Task 10: Carry task-repository launch identity
 
-When a per-repo worktree recovers on a fallback / live-default branch because the task's recorded
-`task_repositories.base_branch` no longer exists, persist the resolved branch back to that row so the
-task self-heals permanently (Policy B). Reuse the existing `Service.UpdateRepositoryBaseBranch`, which
-already validates row ownership and fans out the session-base reset, `task.updated` publish, and live
-agentctl push.
+Carry exact task-repository identity through launch preparation.
+Use that identity for failure targeting and fallback self-heal.
 
 ## Design constraint
 
-The worktree `Manager` is task-agnostic (keyed by `RepositoryPath`; no `TaskRepository.ID`, no task
-service). The self-heal write therefore lives at the launch/prepare layer, not in the worktree
-package. The resolved branch already surfaces there via `Worktree.BaseBranch` and
-`BaseBranchFallbackWarning` (see `env_preparer_worktree.go` `completeCreateWorktreeStep`), and that
-layer knows the `TaskRepository.ID` for each repo it materializes.
-
-The lifecycle tier must not import `internal/task/service` directly. Add a narrow interface (mirror the
-existing `AgentBaseBranchPusher` / `BaseBranchProvider` seam) satisfied by `*service.Service`.
+The worktree manager remains task-agnostic.
+The orchestrator owns task writes after lifecycle returns the exact row identity and resolved branch.
 
 - **Acceptance:**
-  1. A new `BaseBranchSelfHealer` interface exposes a single method, e.g.
-     `SelfHealTaskRepositoryBase(ctx, taskID, taskRepositoryID, resolvedBranch string) error`, satisfied
-     by `*task/service.Service` delegating to `UpdateRepositoryBaseBranch`. It is wired into the
-     lifecycle `Manager` at the composition root via a `Set…` setter (mirroring `AgentBaseBranchPusher`).
-  2. At the per-repo launch/prepare seam (where `TaskRepository.ID` and the created `Worktree` are both
-     in scope), when `wt.BaseBranchFallbackWarning != ""` AND `strings.TrimSpace(wt.BaseBranch) != ""`
-     AND `wt.BaseBranch` differs from the recorded `task_repositories.base_branch`, call the
-     self-healer with that row's IDs and `wt.BaseBranch`.
-  3. No call is made when the requested base still existed (no fallback warning) or when the resolved
-     branch equals the recorded base (guard before calling — `UpdateRepositoryBaseBranch` rejects an
-     unchanged/empty value).
-  4. Best-effort: a self-healer error is logged at warn and does NOT roll back or fail the launch
-     (same contract as `applyBaseBranchSideEffects`). When the self-healer is nil (not wired), the
-     path is a silent no-op.
-  5. Multi-repo: the check runs per materialized repo row; only recovered rows are written.
+  1. `TaskRepositoryID` flows through every request and result type listed in `plan.md`.
+  2. Fresh launch, resume, single-repository synthesis, reuse, and multi-repository mapping preserve it.
+  3. Same-repository multi-branch results keep distinct task-repository IDs.
+  4. A failed per-repository result identifies the exact row without branch-string correlation.
+  5. The orchestrator calls `UpdateRepositoryBaseBranch` only after fallback and a changed branch.
+  6. No write occurs for an existing base, empty resolved base, or unchanged base.
+  7. A write error logs a warning and does not fail the launch.
+  8. Only the recovered row changes in multi-repository and multi-branch tasks.
+  9. Lifecycle and worktree packages add no task-service dependency or setter.
 
 - **Verification:**
-  `cd apps/backend && go build ./... && go test ./internal/agent/runtime/lifecycle/... ./internal/task/service/... -race`
+  `cd apps/backend && go test ./internal/orchestrator/executor/... ./internal/agent/runtime/lifecycle/... ./internal/task/service/... -race`
 
 - **Files likely touched:**
-  `apps/backend/internal/agent/runtime/lifecycle/` (the per-repo prepare/launch path that reads
-  `wt.BaseBranchFallbackWarning`, e.g. `env_preparer_worktree.go` + the manager wiring),
-  a new small interface + setter alongside `AgentBaseBranchPusher`,
-  the composition root that wires `*service.Service` into the lifecycle manager,
-  and the corresponding `*_test.go` with a fake self-healer.
+  `apps/backend/internal/orchestrator/executor/executor.go`,
+  `apps/backend/internal/orchestrator/executor/executor_resume.go`,
+  `apps/backend/internal/orchestrator/executor/executor_execute.go`,
+  `apps/backend/internal/agent/runtime/lifecycle/types.go`,
+  `apps/backend/internal/agent/runtime/lifecycle/env_preparer.go`,
+  `apps/backend/internal/agent/runtime/lifecycle/env_preparer_worktree.go`,
+  owning mapping and multi-repository tests.
 
-- **Dependencies:** Task 03 (relies on the resolved-branch surfacing).
-- **Parallelism:** sequential (shares files with the lifecycle prepare path).
-- **Inputs:** spec "Task base-branch self-heal", plan "Task base-branch self-heal (Policy B)";
-  reuse `Service.UpdateRepositoryBaseBranch` (`service_branch_update.go`).
+- **Dependencies:** Task 01.
+- **Parallelism:** sequential.
+- **Inputs:** spec "Session-owned launch error" and "Persistence guarantees".
+  Reuse `Service.UpdateRepositoryBaseBranch` from `service_branch_update.go`.
 
 ## Results
-Pending.
+- Threaded exact `TaskRepositoryID` through executor, lifecycle, adapter, resume, reuse, synthesis, and multi-repository worktree result paths.
+- Added fallback result fields and an optional orchestrator-owned task-service seam that updates only changed, identified fallback rows; write failures are warnings.
+- Verification: `go test ./internal/orchestrator/executor/... ./internal/agent/runtime/lifecycle/... ./internal/task/service/... -race` passed.

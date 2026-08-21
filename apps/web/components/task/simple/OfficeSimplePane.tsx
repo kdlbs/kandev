@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import {
@@ -58,6 +58,7 @@ import type {
   TimelineEvent,
 } from "@/app/office/tasks/[id]/types";
 import { toast } from "@/lib/toast/sonner";
+import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 
 const COMMENTABLE_DONE_SESSION_STATES = new Set<TaskSession["state"]>([
   "CREATED",
@@ -77,6 +78,17 @@ type OfficeSimplePaneProps = {
   onToggleAdvanced?: () => void;
   onCommentsChanged?: () => void;
 };
+
+function useChatTaskWithLiveStatusSummary(task: Task): Task {
+  const statusSummary = useTaskStatusSummary(task.id, task.statusSummary);
+  return useMemo(
+    () => ({
+      ...task,
+      statusSummary,
+    }),
+    [statusSummary, task],
+  );
+}
 
 function sessionSortTime(session: TaskSession): number {
   const value = session.updatedAt ?? session.completedAt ?? session.startedAt ?? "";
@@ -469,6 +481,7 @@ export function OfficeSimplePane({
   const [subIssueOpen, setSubIssueOpen] = useState(false);
   const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
   const { treePreview, activeHold, refreshTreePreview } = useTaskTreePreview(task.id);
+  const chatTask = useChatTaskWithLiveStatusSummary(task);
 
   return (
     <ActiveSessionRefProvider>
@@ -525,7 +538,7 @@ export function OfficeSimplePane({
           <TaskDocuments taskId={task.id} />
           <TaskContextSection taskId={task.id} revisionKey={task.updatedAt} />
           <ChatActivityTabs
-            task={task}
+            task={chatTask}
             comments={comments}
             timeline={timeline}
             activity={activity}

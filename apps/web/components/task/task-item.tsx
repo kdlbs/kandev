@@ -6,7 +6,6 @@ import {
   IconChevronDown,
   IconCircleCheck,
   IconCircleDashed,
-  IconDots,
   IconMessageQuestion,
   IconProgressCheck,
   IconPinFilled,
@@ -32,9 +31,11 @@ import { classifyTask } from "./task-classify";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
 import { TaskAutopilotIcon } from "@/components/task/task-autopilot-icon";
+import { TaskTitleHoverCard } from "@/components/task/task-title-hover-card";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
 import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
+import { TaskMenuButton } from "./task-item-menu-button";
 
 type DiffStats = {
   additions: number;
@@ -316,6 +317,21 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
   );
 }
 
+function TaskItemTitle({ taskId, title }: { taskId?: string; title: string }) {
+  // w-full: ScrollOnOverflow's root is inline-block, so once it sits inside
+  // the title-preview trigger's <button> (task-title-hover-card.tsx) rather
+  // than being the flex row's direct child, shrink-to-fit sizing lets it grow
+  // past the button's flex-shrunk width instead of clipping to it — losing
+  // the overflow the hover-scroll marquee depends on.
+  const content = <ScrollOnOverflow className="min-w-0 w-full">{title}</ScrollOnOverflow>;
+  if (!taskId) return content;
+  return (
+    <TaskTitleHoverCard taskId={taskId} title={title} side="right" align="start">
+      {content}
+    </TaskTitleHoverCard>
+  );
+}
+
 function TaskItemContent({
   title,
   autopilot,
@@ -361,7 +377,7 @@ function TaskItemContent({
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
-        <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
+        <TaskItemTitle taskId={taskId} title={title} />
         {autopilot && <TaskAutopilotIcon />}
         {isPinned && (
           <IconPinFilled
@@ -605,58 +621,5 @@ function SubtaskToggle({
       <IconChevronDown className={cn("h-3 w-3 transition-transform", collapsed && "-rotate-90")} />
       <span>{count}</span>
     </button>
-  );
-}
-
-function TaskMenuButton({
-  visible,
-  expanded,
-  rowFocus = false,
-}: {
-  visible: boolean;
-  expanded: boolean;
-  rowFocus?: boolean;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div
-      className={cn(
-        "mobile-task-actions self-center shrink-0 flex items-center transition-opacity duration-100",
-        !visible && "[@media(hover:none)]:hidden",
-        visible
-          ? "opacity-100"
-          : cn(
-              "opacity-0 pointer-events-none [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-hover:pointer-events-auto",
-              rowFocus
-                ? "group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
-                : "focus-within:opacity-100 focus-within:pointer-events-auto",
-            ),
-      )}
-    >
-      <button
-        type="button"
-        className={cn(
-          "mobile-task-actions-button flex size-6 items-center justify-center rounded-md cursor-pointer touch-manipulation",
-          "text-muted-foreground hover:text-foreground hover:bg-foreground/10",
-          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-colors",
-        )}
-        onClick={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-          e.currentTarget.dispatchEvent(
-            new MouseEvent("contextmenu", {
-              bubbles: true,
-              clientX: e.clientX,
-              clientY: e.clientY,
-            }),
-          );
-        }}
-        aria-label={t("task:taskActions")}
-        aria-haspopup="menu"
-        aria-expanded={expanded}
-      >
-        <IconDots className="h-4 w-4" />
-      </button>
-    </div>
   );
 }

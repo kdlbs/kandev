@@ -1,42 +1,55 @@
 ---
 id: "08-frontend-failure-surface-and-recovery"
-title: "Frontend failure surface and recovery actions"
-status: pending
+title: "Frontend launch-error data"
+status: done
 wave: 5
-depends_on: ["06-recovery-actions-ws", "07-status-summary-projection"]
+depends_on: ["07-status-summary-projection"]
 plan: "plan.md"
 spec: "../../specs/task-launch-failure-recovery/spec.md"
 ---
 
-# Task 08: Frontend failure surface and recovery actions
+# Task 08: Frontend launch-error data
 
-Render the typed failure reason persistently on the task and replace the raw-error toast with a
-pointer, wiring the recovery buttons to the new WS actions.
+Carry the bounded launch-error contract into task-detail data and chat view models.
 
 - **Acceptance:**
-  1. `apps/web/lib/types/task-status-summary.ts` `active_error` includes
-     `category: string` and `recovery_actions: string[]`.
-  2. `apps/web/components/task/simple/components/run-error-entry.tsx` renders a localized headline per
-     `category` with the `message` as detail, and maps `recovery_actions` to buttons that call the
-     existing `session.recover` WS action with `retry_default` / `pick_base_branch` /
-     `mark_review_done`. `pick_base_branch` reuses the existing native branch picker to supply
-     `base_branch`.
-  3. The task-launch failure toast shows `task:launchFailedSeeDetails` ("Couldn't start the task, see
-     the task for details"), not the raw git error.
-  4. All new copy goes through `t()` (no literals); typecheck and lint pass.
+  1. Frontend status, office-task, `LastAgentError`, and `RunError` types carry the bounded fields.
+  2. Task-detail mapping preserves `status_summary`.
+  3. A tested selector chooses the newest summary from detail data and live task caches.
+  4. Session metadata parsing keeps exact row identity, action order, and explicit error stamp.
+  5. A chat helper suppresses a summary error when a matching failed-session error exists.
+  6. Task-owned errors with no session remain eligible for standalone rendering.
 
 - **Verification:**
-  `cd apps && pnpm install --frozen-lockfile && pnpm --filter @kandev/web test -- components/task/simple/components/run-error-entry.test.tsx` then
-  `cd apps/web && pnpm run typecheck`
+  `cd apps && pnpm install --frozen-lockfile && pnpm --filter @kandev/web test -- lib/session-last-agent-error.test.ts lib/task-status-summary.test.ts components/task/simple/chat-entries.test.ts && cd web && pnpm run typecheck`
 
 - **Files likely touched:**
   `apps/web/lib/types/task-status-summary.ts`,
-  `apps/web/components/task/simple/components/run-error-entry.tsx` (+ its `.test.tsx`),
-  the task-launch toast call site.
+  `apps/web/lib/session-last-agent-error.ts`,
+  `apps/web/lib/task-status-summary.ts`,
+  `apps/web/lib/state/slices/office/types.ts`,
+  `apps/web/app/office/tasks/[id]/types.ts`,
+  `apps/web/app/office/tasks/[id]/page.tsx`,
+  `apps/web/components/task/simple/chat-entries.ts`,
+  focused tests beside those files.
 
-- **Dependencies:** Task 06, Task 07.
+- **Dependencies:** Task 07.
 - **Parallelism:** sequential.
-- **Inputs:** plan "Frontend"; spec "Scenarios".
+- **Inputs:** spec "Bounded task projection" and plan "Types and live summary selection".
 
 ## Results
-Pending.
+Implemented the bounded task summary types, task-scoped error context, and the standalone recovery card.
+The card preserves exact task-repository identity and coalesces duplicate recovery requests.
+It also renders typed errors without actions, guards refreshes by summary
+revision, and shows pending state in duplicate task surfaces.
+
+Verification:
+
+- `cd apps/web && pnpm exec vitest run components/task/simple/components/task-launch-error-entry.test.tsx components/task/simple/task-chat.test.tsx lib/task-status-summary.test.ts lib/session-last-agent-error.test.ts`: 4 files and 50 tests passed.
+- `cd apps/web && pnpm run typecheck`: passed.
+- `cd apps/web && pnpm run lint`: passed.
+- PR fixup verification: focused tests passed in 3 files with 64 tests.
+
+Second PR fixup hardening requires equal session error stamps before suppressing
+a summary card and keeps non-typed status errors on the normal responsive
+layout path.

@@ -1,38 +1,45 @@
 ---
 id: "04-launch-failure-classification"
-title: "Classify and persist typed launch-failure reason"
-status: pending
-wave: 2
-depends_on: ["01-failure-taxonomy-contracts"]
+title: "Persist typed launch-failure reason"
+status: done
+wave: 3
+depends_on: ["01-failure-taxonomy-contracts", "10-task-base-self-heal"]
 plan: "plan.md"
 spec: "../../specs/task-launch-failure-recovery/spec.md"
 ---
 
-# Task 04: Classify and persist typed launch-failure reason
+# Task 04: Persist typed launch-failure reason
 
-Turn a raw launch error into a persisted, typed `LastAgentError` (category + message + recovery
-actions) on the session, so the reason survives reload and can be projected to the UI.
+Persist the typed session error with an exact row target.
 
 - **Acceptance:**
-  1. `transitionLaunchFailure` (`internal/orchestrator/executor/executor_execute.go:1269-1293`)
-     classifies `launchErr`: `errors.Is(err, worktree.ErrInvalidBaseBranch)` →
-     `base_branch_missing` with actions `["retry_default","pick_base_branch","mark_review_done"]`;
-     otherwise `generic_launch_failure` with no auto actions.
-  2. It persists the typed `LastAgentError` (sanitized `message`, `code`=category,
-     `recovery_actions`) into `task_sessions.metadata` under `SessionMetaKeyLastAgentError`, in
-     addition to the existing `ErrorMessage`.
-  3. The existing session→FAILED and task→FAILED transitions are unchanged.
+  1. `transitionLaunchFailure` maps `ErrInvalidBaseBranch` to `base_branch_missing`.
+  2. The record carries `TaskRepositoryID` from the lifecycle failure result.
+  3. Repository actions are absent when that identity is empty or ambiguous.
+  4. A narrow eligibility resolver controls whether the record includes `mark_review_done`.
+  5. Eligibility requires a valid terminal step and terminal relevant PR state.
+  6. Resolver absence or error omits that action and does not block error persistence.
+  7. The existing session and task failed-state transitions stay unchanged.
 
 - **Verification:**
   `cd apps/backend && go test ./internal/orchestrator/executor/... -race`
 
 - **Files likely touched:**
   `apps/backend/internal/orchestrator/executor/executor_execute.go`,
-  `apps/backend/internal/orchestrator/executor/executor_execute_test.go`.
+  `apps/backend/internal/orchestrator/executor/executor_execute_test.go`,
+  the narrow review-completion eligibility resolver and composition wiring.
 
-- **Dependencies:** Task 01 (taxonomy constants + `RecoveryActions` field).
+- **Dependencies:** Task 01 and Task 10.
 - **Parallelism:** sequential.
-- **Inputs:** plan "Launch-failure classification + persistence"; spec "Data model".
+- **Inputs:** spec "Session-owned launch error" and "Failure modes".
 
 ## Results
-Pending.
+- Added typed launch-failure classification for missing base branches, unresolved
+  defaults, and generic startup failures.
+- Persisted the bounded `LastAgentError` with the exact task-repository ID when
+  lifecycle identity is unambiguous, and omitted repository actions otherwise.
+- Added a narrow review-completion eligibility resolver. Resolver errors and
+  missing wiring fail open without blocking error persistence.
+- Preserved the existing failed-session transition and callback behavior.
+- Verification: `cd apps/backend && go test ./internal/orchestrator/executor/... -race`
+  passed with 445 tests.

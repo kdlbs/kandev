@@ -88,19 +88,46 @@ func derivePendingAction(state *projectionState) string {
 }
 
 func deriveActiveError(state *projectionState) *ActiveErrorSummary {
-	if !state.errorsObserved && state.current != nil && state.current.ActiveError != nil {
-		copy := *state.current.ActiveError
-		return &copy
-	}
 	var active *ActiveErrorSummary
+	if !state.errorsObserved && state.current != nil && state.current.ActiveError != nil &&
+		(!state.taskErrorObserved || state.current.ActiveError.SessionID != "") {
+		copy := *state.current.ActiveError
+		active = &copy
+	}
 	for _, candidate := range state.errors {
-		if candidate == nil || (active != nil && !candidate.OccurredAt.After(active.OccurredAt)) {
+		if candidate == nil || !newerActiveError(candidate, active) {
 			continue
 		}
 		copy := *candidate
 		active = &copy
 	}
+	if state.taskError != nil && newerActiveError(state.taskError, active) {
+		copy := *state.taskError
+		active = &copy
+	}
 	return active
+}
+
+func newerActiveError(candidate, current *ActiveErrorSummary) bool {
+	if candidate == nil {
+		return false
+	}
+	if current == nil {
+		return true
+	}
+	if candidate.OccurredAt.After(current.OccurredAt) {
+		return true
+	}
+	if !candidate.OccurredAt.Equal(current.OccurredAt) {
+		return false
+	}
+	if candidate.Stamp != current.Stamp {
+		return candidate.Stamp > current.Stamp
+	}
+	if candidate.SessionID != current.SessionID {
+		return candidate.SessionID > current.SessionID
+	}
+	return candidate.TaskRepositoryID > current.TaskRepositoryID
 }
 
 func deriveGitSummary(state *projectionState) *GitSummary {

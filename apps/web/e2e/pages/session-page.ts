@@ -1089,8 +1089,8 @@ export class SessionPage {
     return this.page.getByTestId("walkthrough-discard");
   }
 
-  walkthroughDiscardDialog(): Locator {
-    return this.page.getByRole("alertdialog", { name: "Discard walkthrough?" });
+  walkthroughDiscardConfirmation(): Locator {
+    return this.page.locator('[data-testid="walkthrough-discard-confirmation"]:visible');
   }
 
   walkthroughFloating(): Locator {

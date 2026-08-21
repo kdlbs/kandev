@@ -17,6 +17,7 @@ import { TaskPRShortcut } from "@/components/task/task-pr-shortcut";
 import { useEmbeddedVscodeSupport } from "@/components/task/task-page-editor-capability";
 import { VcsDialogsProvider } from "@/components/vcs/vcs-dialogs";
 import { PortForwardingVisibilityProvider } from "@/components/task/port-forwarding-visibility-provider";
+import { TaskLaunchErrorProvider } from "@/components/task/task-launch-error-context";
 import {
   buildDebugEntries,
   buildArchivedValue,
@@ -281,6 +282,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
   const { effectiveSessionId, task, merged, sessionPanel, archivedValue, isMobile, ensureSession } =
     props;
   const { taskProps, debugEntries, topBarProps, layoutProps } = useTaskPageDerivedProps(props);
+  if (!task) return null;
 
   return (
     <TooltipProvider>
@@ -317,7 +319,16 @@ export function TaskPageInner(props: TaskPageInnerProps) {
               />
             )}
             <TaskArchivedProvider value={archivedValue}>
-              <TaskLayout {...layoutProps} />
+              <TaskLaunchErrorProvider
+                value={{
+                  taskId: task.id,
+                  workspaceId: task.workspace_id,
+                  statusSummary: task.status_summary,
+                  repositories: task.repositories,
+                }}
+              >
+                <TaskLayout {...layoutProps} />
+              </TaskLaunchErrorProvider>
             </TaskArchivedProvider>
           </div>
         </VcsDialogsProvider>

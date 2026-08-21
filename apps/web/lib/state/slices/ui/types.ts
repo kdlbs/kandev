@@ -173,6 +173,8 @@ export type SessionFailureNotification = {
   sessionId: string;
   taskId: string;
   message: string;
+  /** Typed launch failures point users to the persistent task card. */
+  isLaunchFailure?: boolean;
 };
 
 export type TaskDeletedNotification = {

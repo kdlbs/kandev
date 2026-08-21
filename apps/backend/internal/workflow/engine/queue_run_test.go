@@ -90,6 +90,10 @@ func (f fakeParticipants) WorkflowStepIDForTask(_ context.Context, taskID string
 	return f.taskStepID, f.err
 }
 
+func (f fakeParticipants) ListTaskParticipants(_ context.Context, _ string) ([]ParticipantInfo, error) {
+	return f.list, f.err
+}
+
 // fakeCEO returns a fixed agent profile id (or empty / err).
 type fakeCEO struct {
 	id  string

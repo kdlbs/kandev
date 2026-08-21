@@ -1582,6 +1582,9 @@ func registerMCPAndDebugRoutes(
 	if p.services.GitLab != nil {
 		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
 	}
+	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
+		mcpHandlers.SetDashboardService(p.services.OfficeSvcs.Dashboard)
+	}
 
 	// Reuse the cross-task handoff service constructed in registerRoutes —
 	// the same instance backs the MCP path and the HTTP Kanban path so

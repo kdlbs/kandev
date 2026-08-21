@@ -54,6 +54,17 @@ type SessionObservationSnapshot struct {
 // observations for one task.
 type SessionObservationLoader func(context.Context, string) (SessionObservationSnapshot, error)
 
+// TaskLaunchErrorObservation reports whether the task-owned launch-error key
+// was observed. A malformed key is not authoritative, so callers can retain
+// the last valid summary while an absent key explicitly clears the projection.
+type TaskLaunchErrorObservation struct {
+	Error    *ActiveErrorSummary
+	Observed bool
+}
+
+// TaskLaunchErrorLoader reads the bounded task-owned pre-session error source.
+type TaskLaunchErrorLoader func(context.Context, string) (TaskLaunchErrorObservation, error)
+
 // TaskActivityLoader rehydrates the durable maximum activity timestamp for a
 // task when a projector starts with a legacy or incomplete summary row.
 type TaskActivityLoader func(context.Context, string) (*time.Time, error)
@@ -82,6 +93,7 @@ type ProjectorConfig struct {
 	LoadGitObservations     GitObservationLoader
 	LoadPendingActions      PendingActionLoader
 	LoadSessionObservations SessionObservationLoader
+	LoadTaskLaunchError     TaskLaunchErrorLoader
 	LoadTaskActivity        TaskActivityLoader
 	LoadPullRequests        PullRequestLoader
 	// CountQueuedPrompts returns the number of prompts currently en-queued for
@@ -104,6 +116,7 @@ type Projector struct {
 	loadGitObservations     GitObservationLoader
 	loadPendingActions      PendingActionLoader
 	loadSessionObservations SessionObservationLoader
+	loadTaskLaunchError     TaskLaunchErrorLoader
 	loadTaskActivity        TaskActivityLoader
 	loadPullRequests        PullRequestLoader
 	countQueuedPrompts      func(context.Context, string) (int, error)
@@ -123,18 +136,20 @@ type taskProjectionLock struct {
 }
 
 type projectionState struct {
-	workspaceID      string
-	revision         uint64
-	current          *TaskStatusSummary
-	queuedCount      int
-	lastActivityAt   *time.Time
-	sessions         map[string]sessionObservation
-	pending          map[string]string
-	pendingRequests  map[string]pendingRequestIdentity
-	taskPending      string
-	pendingObserved  bool
-	activityObserved bool
-	errors           map[string]*ActiveErrorSummary
+	workspaceID       string
+	revision          uint64
+	current           *TaskStatusSummary
+	queuedCount       int
+	lastActivityAt    *time.Time
+	sessions          map[string]sessionObservation
+	pending           map[string]string
+	pendingRequests   map[string]pendingRequestIdentity
+	taskPending       string
+	pendingObserved   bool
+	activityObserved  bool
+	errors            map[string]*ActiveErrorSummary
+	taskError         *ActiveErrorSummary
+	taskErrorObserved bool
 	// clearedErrorStamps records, per session, the stamp of the last error this
 	// projection cleared, so a durable breadcrumb replayed on a later session
 	// event cannot re-arm an error affordance the agent already recovered from.
@@ -191,6 +206,7 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		loadGitObservations:     cfg.LoadGitObservations,
 		loadPendingActions:      cfg.LoadPendingActions,
 		loadSessionObservations: cfg.LoadSessionObservations,
+		loadTaskLaunchError:     cfg.LoadTaskLaunchError,
 		loadTaskActivity:        cfg.LoadTaskActivity,
 		loadPullRequests:        cfg.LoadPullRequests,
 		countQueuedPrompts:      cfg.CountQueuedPrompts,
@@ -314,6 +330,13 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		}
 		return fmt.Errorf("task status summary %q has no workspace", taskID)
 	}
+	taskErrorChanged := false
+	if p.loadTaskLaunchError != nil && isTaskErrorRefreshEvent(event.Type) {
+		taskErrorChanged, err = p.refreshTaskLaunchError(ctx, taskID, state)
+		if err != nil {
+			return err
+		}
+	}
 
 	if event.Type == events.MessageQueueStatusChanged {
 		activityChanged := applyTaskActivityEventLocked(state, event.Type, data)
@@ -325,7 +348,7 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 				return refreshErr
 			}
 		}
-		return p.applyQueueStatusEvent(ctx, state, taskID, pendingChanged || activityChanged, event.Type, data)
+		return p.applyQueueStatusEvent(ctx, state, taskID, pendingChanged || activityChanged || taskErrorChanged, event.Type, data)
 	}
 
 	refreshPending := p.loadPendingActions != nil &&
@@ -335,11 +358,11 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		if refreshErr != nil {
 			return refreshErr
 		}
-		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged
+		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged
 		return p.persistPendingRefreshLocked(ctx, taskID, state, changed, event.Type, data)
 	}
 
-	changed := p.applySourceEventLocked(state, event.Type, data)
+	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged
 	if !changed {
 		return nil
 	}

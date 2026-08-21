@@ -1,26 +1,29 @@
 ---
 id: "05-pr-review-autostart-gating"
-title: "Gate PR-review auto-start when the PR is merged or closed"
-status: pending
-wave: 3
+title: "Gate terminal PR auto-start"
+status: done
+wave: 2
 depends_on: ["01-failure-taxonomy-contracts"]
 plan: "plan.md"
 spec: "../../specs/task-launch-failure-recovery/spec.md"
 ---
 
-# Task 05: Gate PR-review auto-start when the PR is merged or closed
+# Task 05: Gate terminal PR auto-start
 
-Skip an `on_enter` auto-start launch for a task whose linked GitHub PR is already `merged`/`closed`,
-and attach an informational `pr_already_closed` reason instead of failing.
+Skip auto-start only when all relevant PR rows are terminal.
+Persist the result on the task because no session exists.
 
 - **Acceptance:**
-  1. `autoStartTaskForLoadedStep` (`internal/orchestrator/event_handlers_workflow.go:1060-1123`):
-     before launching, look up the task's linked PR rows (github store, keyed by `task_id`). If any
-     linked PR `state` is `merged` or `closed`, skip `StartTask`, write a `pr_already_closed` reason
-     with `["mark_review_done"]`, and do NOT mark the task `FAILED`.
-  2. When the PR is `open`, launch proceeds unchanged.
-  3. Fail open: no linked PR row, or a lookup error, proceeds to the normal launch path (absence is
-     not treated as "closed"). Manual (user-triggered) launches are not affected.
+  1. A positive task-repository PR number matches exact `(repository_id, pr_number)` identity.
+  2. The fallback trims one documented Git ref prefix and compares branches case-sensitively.
+  3. The gate skips launch only when at least one relevant PR exists and all are merged or closed.
+  4. Open, empty, unknown, absent, and lookup-error states launch normally.
+  5. A terminal sibling PR cannot gate an open current branch.
+  6. The gate writes `tasks.metadata["last_launch_error"]` with a stable stamp from relevant PR identity and state.
+  7. It offers `mark_review_done` only when the workflow has a valid terminal final step.
+  8. Replaying the same gate is a semantic no-op. A later successful launch clears the task record.
+  9. Manual launches remain outside the gate.
+  10. Set and clear use atomic metadata-key writes. A clear with a stale stamp does not erase a newer error.
 
 - **Verification:**
   `cd apps/backend && go test ./internal/orchestrator/... -race`
@@ -28,12 +31,21 @@ and attach an informational `pr_already_closed` reason instead of failing.
 - **Files likely touched:**
   `apps/backend/internal/orchestrator/event_handlers_workflow.go`,
   `apps/backend/internal/orchestrator/event_handlers_workflow_test.go`,
-  a narrow github-store read interface if one is needed on the orchestrator.
+  the narrow GitHub reader and task metadata writer seams used by the orchestrator,
+  key-scoped repository or service methods with focused concurrency tests.
 
 - **Dependencies:** Task 01 (`pr_already_closed` category + `mark_review_done` action).
 - **Parallelism:** sequential.
-- **Inputs:** plan "PR-review auto-start gating"; spec "State machine"; `github_task_prs` columns from
-  `internal/github/models.go` `TaskPR`.
+- **Inputs:** spec "Relevant PR selection" and "Launch transitions".
 
 ## Results
-Pending.
+- Added exact task-repository and PR identity matching, including positive PR
+  number metadata and normalized branch fallback.
+- Added fail-open terminal-state gating for deferred workflow, loaded-step, and
+  GitHub review auto-start paths.
+- Persisted a bounded task-owned error with a stable state-sensitive stamp and
+  conditional `mark_review_done` action.
+- Added compare-and-clear semantics and cleared the task-owned error after a
+  later successful launch.
+- Verification: focused PR-gate and persistence tests passed, including the
+  SQLite compare-and-clear integration test.

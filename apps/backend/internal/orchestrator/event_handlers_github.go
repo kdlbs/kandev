@@ -526,6 +526,9 @@ func (s *Service) shouldAutoStartStep(ctx context.Context, stepID string) bool {
 func (s *Service) autoStartReviewTask(
 	ctx context.Context, evt *github.NewReviewPREvent, task *models.Task,
 ) {
+	if s.shouldSkipTerminalPRAutoStart(ctx, task) {
+		return
+	}
 	// Compete for the one-shot auto-start token set at task creation.
 	// The promotion that ran inside CreateTask may have already triggered
 	// autoStartTaskForStep (Path A) asynchronously; only the first claimer
