@@ -45,6 +45,13 @@ type Store struct {
 	// production.
 	onCancelSessionEntered func(pendingID string)
 
+	// onCancelRequestEntered, if non-nil, is invoked inside CancelRequest
+	// after the initial pending lookup and before pending.mu is acquired.
+	// Tests use it to force a specific interleaving against a concurrent
+	// CancelRequest/CancelSession on the same entry; always nil in
+	// production.
+	onCancelRequestEntered func(pendingID string)
+
 	// onRespondLoaded coordinates cancellation-after-lookup tests. It is always
 	// nil in production.
 	onRespondLoaded func(pendingID string)
@@ -385,19 +392,33 @@ func clarificationDeliveryConfirmationResult(pending *PendingClarification) erro
 // report a spurious cancellation for an answer that was actually delivered.
 // Gating on pending.resolved under the same pending.mu Respond uses is what
 // makes the two mutually exclusive.
+//
+// Gating additionally on pending.cancelled (set here, under the same lock,
+// before the close) makes CancelRequest idempotent against a concurrent
+// second close of the same entry -- two overlapping /:id/cancel requests, or
+// a request racing CancelSession -- which would otherwise both observe
+// resolved=false and both call close(pending.CancelCh), panicking with
+// "close of closed channel" and taking down the backend process.
 func (s *Store) CancelRequest(pendingID string) bool {
 	s.mu.RLock()
 	pending, ok := s.pending[pendingID]
+	hook := s.onCancelRequestEntered
 	s.mu.RUnlock()
+
+	if hook != nil {
+		hook(pendingID)
+	}
+
 	if !ok {
 		return false
 	}
 
 	pending.mu.Lock()
-	if pending.resolved {
+	if pending.resolved || pending.cancelled {
 		pending.mu.Unlock()
 		return false
 	}
+	pending.cancelled = true
 	close(pending.CancelCh)
 	pending.mu.Unlock()
 
@@ -422,7 +443,9 @@ func (s *Store) ListPending() []*Request {
 // It closes the CancelCh to unblock any WaitForResponse callers and removes entries.
 // Returns the list of cancelled pending IDs. Same race protection as
 // CancelRequest: CancelCh is only closed for an entry that is still
-// unresolved, checked under that entry's own pending.mu.
+// unresolved and not already cancelled, checked and set under that entry's
+// own pending.mu -- guarding against a concurrent CancelRequest (or a second
+// CancelSession call) closing the same channel twice and panicking.
 func (s *Store) CancelSession(sessionID string) []string {
 	s.mu.Lock()
 	var toCancel []*PendingClarification
@@ -442,7 +465,8 @@ func (s *Store) CancelSession(sessionID string) []string {
 			hook(cancelled[i])
 		}
 		pending.mu.Lock()
-		if !pending.resolved {
+		if !pending.resolved && !pending.cancelled {
+			pending.cancelled = true
 			close(pending.CancelCh)
 		}
 		pending.mu.Unlock()

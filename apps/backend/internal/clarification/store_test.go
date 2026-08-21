@@ -3,6 +3,7 @@ package clarification
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -621,5 +622,140 @@ func TestCancelSession_ConcurrentWithRespond_DoesNotCloseCancelChOnceDelivered(t
 	case <-pending.done:
 	default:
 		t.Fatal("expected done to remain closed (set by Respond)")
+	}
+}
+
+// TestCancelRequest_ConcurrentWithCancelRequest_DoesNotDoubleCloseCancelCh
+// covers the double-close race PR review flagged in CancelRequest itself:
+// before this fix, CancelRequest only checked pending.resolved before
+// closing CancelCh, not pending.cancelled. Two overlapping CancelRequest
+// calls for the same pendingID (e.g. a retried client request racing itself)
+// would both observe resolved=false and both call close(pending.CancelCh),
+// panicking with "close of closed channel" and taking down the process.
+//
+// Uses the onCancelRequestEntered hook to force the actual race: both
+// goroutines must complete their initial (unlocked) pending lookup before
+// either acquires pending.mu, so both see a live, uncancelled entry and both
+// attempt the guarded section for real -- a purely sequential call would let
+// the first CancelRequest delete the map entry before the second's lookup
+// runs, short-circuiting on the "not found" path without ever reaching the
+// cancelled-guard this test exists to cover.
+func TestCancelRequest_ConcurrentWithCancelRequest_DoesNotDoubleCloseCancelCh(t *testing.T) {
+	s := NewStore(time.Second)
+	id, _ := s.CreateRequest(&Request{
+		SessionID: "s1",
+		Questions: []Question{{ID: "q1", Prompt: "p?", Options: []Option{{ID: "o1", Label: "A"}}}},
+	})
+	pending := s.pending[id]
+
+	var (
+		mu      sync.Mutex
+		parked  int
+		release = make(chan struct{})
+	)
+	allParked := make(chan struct{})
+	s.onCancelRequestEntered = func(string) {
+		mu.Lock()
+		parked++
+		n := parked
+		mu.Unlock()
+		if n == 2 {
+			close(allParked)
+		}
+		<-release
+	}
+
+	results := make(chan bool, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			results <- s.CancelRequest(id)
+		}()
+	}
+	<-allParked // Both goroutines found the live entry; both parked before pending.mu.
+	close(release)
+
+	// The double close, if the guard were missing, panics inside CancelRequest
+	// itself -- the assertion below on trueCount only runs if the process
+	// survived, but the race detector and the panic both fire before that.
+	first, second := <-results, <-results
+	trueCount := 0
+	if first {
+		trueCount++
+	}
+	if second {
+		trueCount++
+	}
+	if trueCount != 1 {
+		t.Fatalf("expected exactly one of the two concurrent CancelRequest calls to report success, got %d", trueCount)
+	}
+
+	select {
+	case <-pending.CancelCh:
+	default:
+		t.Fatal("expected CancelCh to be closed by the winning CancelRequest")
+	}
+}
+
+// TestCancelSession_ConcurrentWithCancelRequest_DoesNotDoubleCloseCancelCh
+// covers the sibling shape of the same race across CancelRequest and
+// CancelSession: a client cancelling one specific request while the owning
+// session is independently torn down (e.g. task cancellation) races the
+// per-entry CancelRequest guard against CancelSession's per-entry loop. Both
+// paths must agree on pending.cancelled under the same pending.mu, or both
+// can observe resolved=false, cancelled=false and both close(pending.CancelCh).
+func TestCancelSession_ConcurrentWithCancelRequest_DoesNotDoubleCloseCancelCh(t *testing.T) {
+	s := NewStore(time.Second)
+	id, _ := s.CreateRequest(&Request{
+		SessionID: "s1",
+		Questions: []Question{{ID: "q1", Prompt: "p?", Options: []Option{{ID: "o1", Label: "A"}}}},
+	})
+	pending := s.pending[id]
+
+	cancelReqParked := make(chan struct{})
+	cancelReqRelease := make(chan struct{})
+	s.onCancelRequestEntered = func(string) {
+		close(cancelReqParked)
+		<-cancelReqRelease
+	}
+
+	cancelSessParked := make(chan struct{})
+	cancelSessRelease := make(chan struct{})
+	s.onCancelSessionEntered = func(string) {
+		close(cancelSessParked)
+		<-cancelSessRelease
+	}
+
+	cancelReqResult := make(chan bool, 1)
+	go func() {
+		cancelReqResult <- s.CancelRequest(id)
+	}()
+	<-cancelReqParked // CancelRequest found the live entry; parked before pending.mu.
+
+	cancelSessResult := make(chan []string, 1)
+	go func() {
+		cancelSessResult <- s.CancelSession("s1")
+	}()
+	<-cancelSessParked // CancelSession removed the entry from s.pending; parked before pending.mu.
+
+	close(cancelReqRelease)
+	close(cancelSessRelease)
+
+	// Neither call's return value proves who "won": CancelSession reports
+	// every id that was still in s.pending at its own lock-acquisition time
+	// unconditionally, independent of whether its pending.mu section actually
+	// closed the channel, so both goroutines completing here (rather than one
+	// panicking on a double close(pending.CancelCh)) is the property under
+	// test -- the race detector and any panic would already have failed the
+	// test before reaching these assertions.
+	<-cancelReqResult
+	sessCancelled := <-cancelSessResult
+	if len(sessCancelled) != 1 || sessCancelled[0] != id {
+		t.Fatalf("expected CancelSession to report the entry, got %v", sessCancelled)
+	}
+
+	select {
+	case <-pending.CancelCh:
+	default:
+		t.Fatal("expected CancelCh to be closed by whichever of CancelRequest/CancelSession won the race")
 	}
 }
