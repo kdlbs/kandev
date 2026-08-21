@@ -400,7 +400,10 @@ test.describe("saved Dockview layouts", () => {
       .toContain(`session:${taskB.sessionId}`);
     expect(await dockviewPanelIds(testPage)).not.toContain(`session:${taskA.sessionId}`);
 
-    await testPage.getByTestId("layout-preset-trigger").click();
+    const presetTrigger = testPage.getByTestId("layout-preset-trigger");
+    if ((await presetTrigger.getAttribute("aria-expanded")) !== "true") {
+      await presetTrigger.click();
+    }
     await testPage.getByRole("menuitem", { name: "Simple", exact: true }).click();
 
     await expect
@@ -415,6 +418,36 @@ test.describe("saved Dockview layouts", () => {
     await expect(testPage).toHaveURL((url) => url.pathname.includes(taskB.task.id));
     await expect(testPage.getByText("target task current")).toBeVisible();
     await expect(testPage.getByText("source task only")).not.toBeVisible();
+
+    if ((await presetTrigger.getAttribute("aria-expanded")) !== "true") {
+      await presetTrigger.click();
+    }
+    await testPage
+      .locator('[data-testid="layout-saved-delete"][data-layout-id="layout-simple-stale-session"]')
+      .click();
+    const confirmation = testPage.getByTestId("layout-saved-delete-confirm-popover");
+    await expect(confirmation).toBeVisible();
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await confirmation.getByRole("button", { name: "Cancel" }).click();
+    expect((await apiClient.getUserSettings()).settings.saved_layouts).toHaveLength(2);
+
+    if ((await presetTrigger.getAttribute("aria-expanded")) !== "true") {
+      await presetTrigger.click();
+    }
+    await testPage
+      .locator('[data-testid="layout-saved-delete"][data-layout-id="layout-simple-stale-session"]')
+      .click();
+    const secondConfirmation = testPage.getByTestId("layout-saved-delete-confirm-popover");
+    await expect(secondConfirmation).toBeVisible();
+    await testPage
+      .locator('[data-testid="layout-saved-delete-confirm-popover"]')
+      .getByTestId("layout-saved-delete-confirm")
+      .click();
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.saved_layouts)
+      .toHaveLength(1);
+    expect(await dockviewPanelIds(testPage)).toContain(`session:${taskB.sessionId}`);
+    expect(await dockviewPanelIds(testPage)).not.toContain(`session:${taskA.sessionId}`);
   });
 
   test("preserves Agent selection while Files owns global focus", async ({
