@@ -192,6 +192,24 @@ func TestCreateTaskInputRichProtoRoundTrip(t *testing.T) {
 	require.Equal(t, input, back)
 }
 
+func TestCreateTaskInputProtoRoundTripPreservesPriorityAndLabels(t *testing.T) {
+	input := CreateTaskInput{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "plugin task",
+		Priority:    "critical",
+		Labels:      []string{"security", "urgent"},
+	}
+	proto, err := input.toProto()
+	require.NoError(t, err)
+	require.Equal(t, "critical", proto.GetPriority())
+	require.Equal(t, []string{"security", "urgent"}, proto.GetLabels())
+
+	back, err := createTaskInputFromProto(proto)
+	require.NoError(t, err)
+	require.Equal(t, input, back)
+}
+
 func TestUpdateTaskInputProtoRoundTripPreservesLabelsPresence(t *testing.T) {
 	priority := "low"
 	labels := []string{}
