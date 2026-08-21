@@ -198,29 +198,14 @@ func firstString(values map[string]any, keys ...string) string {
 	return ""
 }
 
-// stripURLCredentials removes embedded userinfo (plus query/fragment, which
-// may also carry tokens) from a URL-shaped destination. It reports ok=false
-// whenever it cannot confidently produce a safe result — a genuine
-// url.Parse error, or a value whose shape looks like it embeds userinfo
-// (user:pass@host) but that the parser couldn't resolve a host for — so the
-// caller fails closed (redacts/omits the whole destination) instead of
-// passing a possibly credential-bearing string through untouched. A value
-// with no credential shape at all (no scheme, no userinfo) is safe as-is
-// and reports ok=true unchanged.
+// stripURLCredentials removes embedded userinfo, query, and fragment data
+// from a network destination. It treats values without a scheme as network
+// path references so query credentials cannot pass through unchanged. It
+// reports ok=false when parsing cannot produce a host, so callers fail closed.
 func stripURLCredentials(value string) (string, bool) {
 	schemeless := !strings.Contains(value, "://")
-	if schemeless {
-		authority := value
-		if slash := strings.IndexByte(authority, '/'); slash >= 0 {
-			authority = authority[:slash]
-		}
-		userinfo, _, hasHost := strings.Cut(authority, "@")
-		if !hasHost || !strings.Contains(userinfo, ":") {
-			schemeless = false
-		}
-	}
 	parseValue := value
-	if schemeless {
+	if schemeless && !strings.HasPrefix(parseValue, "//") {
 		parseValue = "//" + value
 	}
 	parsed, err := url.Parse(parseValue)
@@ -232,7 +217,7 @@ func stripURLCredentials(value string) (string, bool) {
 			return "", false
 		}
 	} else if parsed.Scheme == "" || parsed.Host == "" {
-		return value, true
+		return "", false
 	}
 	parsed.User = nil
 	parsed.RawQuery = ""

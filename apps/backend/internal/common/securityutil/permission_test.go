@@ -59,6 +59,24 @@ func TestProjectPermissionActionRedactsSchemelessURLCredentials(t *testing.T) {
 	}
 }
 
+func TestProjectPermissionActionStripsSchemelessURLQueryAndFragment(t *testing.T) {
+	const canary = "s3cr3t-query-canary"
+	projection := ProjectPermissionAction("network", "Connect", map[string]any{
+		"destination": "example.com/private/path?X-Amz-Signature=" + canary + "#fragment",
+	})
+
+	encoded, err := json.Marshal(projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), canary) {
+		t.Fatalf("projection leaked schemeless URL query credentials: %s", encoded)
+	}
+	if projection.Destination != "example.com/private/path" || !projection.Redacted {
+		t.Fatalf("unexpected schemeless URL projection: %+v", projection)
+	}
+}
+
 func TestProjectPermissionActionMapsRealACPToolKinds(t *testing.T) {
 	// These are the raw acp.ToolKind wire values agentctl forwards unchanged
 	// as ActionType (see forwardPermissionRequest in

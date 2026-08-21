@@ -43,7 +43,7 @@ Provide either "answers" (one entry per question in the bundle) or "rejected": t
 						"question_id": map[string]any{typeKey: stringType, descriptionArg: "The question's question_id, from list_pending_questions_kandev."},
 						"selected_options": map[string]any{
 							typeKey:        "array",
-							descriptionArg: "Option IDs chosen for this question (single-choice questions take at most one).",
+							descriptionArg: "Zero or more option IDs returned for this question.",
 							"items":        map[string]any{typeKey: stringType},
 						},
 						"custom_text": map[string]any{typeKey: stringType, descriptionArg: "Free-text answer for this question."},

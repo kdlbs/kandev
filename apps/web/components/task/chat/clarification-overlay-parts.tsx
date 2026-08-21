@@ -357,7 +357,7 @@ export function ClarificationCustomInput({
         textareaRef.current?.focus({ preventScroll: true });
       }}
       className={cn(
-        "mt-2.5 flex min-h-11 items-center gap-2 px-3 py-2 rounded-lg border transition-colors",
+        "mt-2.5 flex min-h-11 flex-wrap items-center gap-2 px-3 py-2 rounded-lg border transition-colors",
         active
           ? "bg-blue-500/15 border-blue-500/50 text-foreground"
           : "border-dashed border-border/70 bg-muted/30",
@@ -382,7 +382,7 @@ export function ClarificationCustomInput({
         // server would accept.
         maxLength={CLARIFICATION_CUSTOM_TEXT_MAX_RUNES * 2}
         style={{ maxHeight: MAX_CUSTOM_INPUT_HEIGHT }}
-        className="flex-1 min-h-0 resize-none overflow-y-auto border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 dark:bg-transparent placeholder:text-muted-foreground/60"
+        className="min-w-0 flex-1 min-h-0 resize-none overflow-y-auto border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 dark:bg-transparent placeholder:text-muted-foreground/60"
         onKeyDown={buildCustomInputKeyDown({
           isFinePointer,
           trimmed,
@@ -399,7 +399,11 @@ export function ClarificationCustomInput({
         onSubmit={onSubmit}
       />
       {active && <IconCheck className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />}
-      {showCounter && <ClarificationRuneCounter runeCount={runeCount} overLimit={overLimit} />}
+      {showCounter && (
+        <div className="w-full">
+          <ClarificationRuneCounter runeCount={runeCount} overLimit={overLimit} />
+        </div>
+      )}
     </div>
   );
 }

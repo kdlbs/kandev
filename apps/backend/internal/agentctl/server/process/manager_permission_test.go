@@ -283,6 +283,32 @@ func TestPermissionNotificationDoesNotExposeSecretsOrEnvironment(t *testing.T) {
 	}
 }
 
+func TestPermissionSnapshotMarksPresentationRedaction(t *testing.T) {
+	const secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
+	m := &Manager{logger: newTestLogger(t)}
+	pending := &PendingPermission{
+		Request: &adapter.PermissionRequest{
+			Title:      "Run command with token=" + secret,
+			ActionType: "command",
+			ActionDetails: map[string]any{
+				"description": "Run command",
+				"raw_input":   map[string]any{"command": "echo safe"},
+			},
+			Options: []adapter.PermissionOption{
+				{OptionID: "allow-once", Name: "Allow with token=" + secret, Kind: streams.PermissionOptionKindAllowOnce},
+			},
+		},
+	}
+
+	snapshot := m.permissionSnapshot(pending)
+	if !snapshot.Action.Redacted {
+		t.Fatal("presentation redaction should set action.redacted")
+	}
+	if snapshot.Title == pending.Request.Title || snapshot.Options[0].Name == pending.Request.Options[0].Name {
+		t.Fatalf("snapshot retained unsanitized presentation text: %+v", snapshot)
+	}
+}
+
 // TestPermissionRequestResolveVersusContextCancelIsExactlyOnce exercises the
 // two terminal paths that used to bypass each other: ResolvePermission and the
 // handlePermissionRequest goroutine's own ctx.Done() branch. Before

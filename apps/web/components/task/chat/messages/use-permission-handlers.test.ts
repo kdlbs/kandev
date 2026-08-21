@@ -143,6 +143,79 @@ describe("request identity", () => {
       "This permission request is no longer available.",
     );
   });
+
+  it("resets unavailable state when a replacement generation arrives", async () => {
+    const first = makePermissionMessage();
+    requestMock.mockRejectedValueOnce(new Error("permission_not_found"));
+    const rendered = renderHook(
+      ({ message }: { message: Message }) =>
+        usePermissionResponseHandlers({
+          permissionMetadata: message.metadata as unknown as PermissionRequestMetadata,
+          permissionMessage: message,
+        }),
+      { initialProps: { message: first } },
+    );
+
+    await act(async () => {
+      rendered.result.current.handleApprove();
+    });
+    await waitFor(() => expect(rendered.result.current.isUnavailable).toBe(true));
+
+    const replacement = makePermissionMessage();
+    const replacementMetadata = replacement.metadata as unknown as PermissionRequestMetadata;
+    replacementMetadata.request_id = "req-2";
+    replacementMetadata.pending_id = "pend-2";
+    rendered.rerender({ message: replacement });
+
+    await waitFor(() => expect(rendered.result.current.isUnavailable).toBe(false));
+    await act(async () => {
+      rendered.result.current.handleApprove();
+    });
+
+    expect(requestMock).toHaveBeenCalledTimes(2);
+    expect(requestMock.mock.calls[1][1]).toMatchObject({
+      request_id: "req-2",
+      pending_id: "pend-2",
+    });
+  });
+
+  it("ignores a stale response failure after a replacement generation arrives", async () => {
+    const first = makePermissionMessage();
+    let rejectFirst!: (reason?: unknown) => void;
+    requestMock.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectFirst = reject;
+        }),
+    );
+    const rendered = renderHook(
+      ({ message }: { message: Message }) =>
+        usePermissionResponseHandlers({
+          permissionMetadata: message.metadata as unknown as PermissionRequestMetadata,
+          permissionMessage: message,
+        }),
+      { initialProps: { message: first } },
+    );
+
+    await act(async () => {
+      rendered.result.current.handleApprove();
+    });
+    await waitFor(() => expect(rejectFirst).toBeTypeOf("function"));
+
+    const replacement = makePermissionMessage();
+    const replacementMetadata = replacement.metadata as unknown as PermissionRequestMetadata;
+    replacementMetadata.request_id = "req-2";
+    replacementMetadata.pending_id = "pend-2";
+    rendered.rerender({ message: replacement });
+    await waitFor(() => expect(rendered.result.current.isUnavailable).toBe(false));
+
+    await act(async () => {
+      rejectFirst(new Error("permission_not_found"));
+    });
+
+    expect(rendered.result.current.isUnavailable).toBe(false);
+    expect(mocks.toastWarning).not.toHaveBeenCalled();
+  });
 });
 
 describe("handleAllowAlways", () => {

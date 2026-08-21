@@ -1095,6 +1095,22 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 
+func TestExternalAnswerQuestionSchemaDoesNotRestrictOptionCardinality(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+	s := New(backend, "", "", 0, log, "", true, ModeExternal)
+
+	answers := toolInputProperties(t, s, "answer_question_kandev")["answers"].(map[string]interface{})
+	answerItem := answers["items"].(map[string]interface{})
+	answerProperties := answerItem["properties"].(map[string]interface{})
+	selectedOptions := answerProperties["selected_options"].(map[string]interface{})
+	description := selectedOptions["description"].(string)
+
+	assert.Contains(t, description, "Zero or more option IDs")
+	assert.NotContains(t, description, "single-choice")
+}
+
 func TestNewExternal_Constructs(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)

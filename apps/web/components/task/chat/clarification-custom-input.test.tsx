@@ -351,6 +351,17 @@ describe("ClarificationCustomInput rune limit", () => {
     expect(counter.textContent).not.toContain("{{");
   });
 
+  it("places the limit counter on a full-width row for narrow layouts", () => {
+    const { getByTestId } = render(
+      <ClarificationCustomInput {...makeProps({ draft: overLimitDraft })} />,
+    );
+    expect(getByTestId(ROW_TESTID).className).toContain("flex-wrap");
+    expect(getByTestId(INPUT_TESTID).className).toContain("min-w-0");
+    expect(getByTestId("clarification-input-rune-counter").parentElement?.className).toContain(
+      "w-full",
+    );
+  });
+
   it("does not show a counter for a short draft far from the limit", () => {
     const { queryByTestId } = render(
       <ClarificationCustomInput {...makeProps({ draft: "short answer" })} />,

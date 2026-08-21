@@ -2558,7 +2558,7 @@ func (m *Manager) permissionSessionID(pending *PendingPermission) string {
 }
 
 func (m *Manager) permissionSnapshot(pending *PendingPermission) streams.PendingAgentPermission {
-	title, _ := securityutil.SanitizePermissionText(pending.Request.Title)
+	title, titleRedacted := securityutil.SanitizePermissionText(pending.Request.Title)
 	action := securityutil.ProjectPermissionAction(
 		pending.Request.ActionType,
 		pending.Request.Title,
@@ -2566,13 +2566,15 @@ func (m *Manager) permissionSnapshot(pending *PendingPermission) streams.Pending
 	)
 	options := make([]streams.PermissionChoice, 0, len(pending.Request.Options))
 	for _, option := range pending.Request.Options {
-		name, _ := securityutil.SanitizePermissionText(option.Name)
+		name, nameRedacted := securityutil.SanitizePermissionText(option.Name)
+		action.Redacted = action.Redacted || nameRedacted
 		options = append(options, streams.PermissionChoice{
 			OptionID: option.OptionID,
 			Name:     name,
 			Kind:     option.Kind,
 		})
 	}
+	action.Redacted = action.Redacted || titleRedacted
 	taskID := ""
 	if m.cfg != nil {
 		taskID = m.cfg.TaskID
