@@ -203,14 +203,20 @@ func (s *Service) CompleteOAuthFlow(ctx context.Context, code, state string) (*J
 	if !ok || time.Since(st.CreatedAt) > mcpStateTTL {
 		return nil, errors.New("invalid or expired OAuth state")
 	}
+	// Bind the completing user to the workspace the flow was started for, so a
+	// leaked state cannot persist a victim's tokens into someone else's workspace.
+	if err := s.authorizeWorkspaceAccess(ctx, st.WorkspaceID); err != nil {
+		return nil, fmt.Errorf("authorize workspace: %w", err)
+	}
 	tok, err := exchangeMCPCode(st.ClientID, code, st.RedirectURI, st.CodeVerifier)
 	if err != nil {
 		return nil, fmt.Errorf("token exchange: %w", err)
 	}
+	// cloudId is required for every MCP tool call; a workspace saved without it
+	// looks connected but fails on every request, so fail the flow loudly here.
 	cloudID, err := resolveCloudIDViaMCP(tok.AccessToken, st.SiteURL)
 	if err != nil {
-		// Don't block the flow — we'll resolve cloudId lazily on first API call.
-		cloudID = ""
+		return nil, fmt.Errorf("resolve Atlassian cloud ID for %q: %w", st.SiteURL, err)
 	}
 	expiresAt := time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second)
 	cfg := &JiraConfig{

@@ -225,6 +225,11 @@ func (c *MCPClient) ensureSession(ctx context.Context) error {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		// Surface a 401 as APIError so tryRefreshOn401 can refresh + retry;
+		// a plain error here would strand an expired token unrefreshed.
+		if resp.StatusCode == 401 {
+			return &APIError{StatusCode: 401, Message: "MCP initialize unauthorized: " + string(raw)}
+		}
 		return fmt.Errorf("MCP initialize failed (%d): %s", resp.StatusCode, string(raw))
 	}
 	c.sessionID = resp.Header.Get("Mcp-Session-Id")
