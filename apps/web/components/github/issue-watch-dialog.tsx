@@ -22,10 +22,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
-import {
-  ScriptEditor,
-  computeEditorHeight,
-} from "@/components/settings/profile-edit/script-editor";
+import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import {
   issueWatchPlaceholders,
   DEFAULT_ISSUE_WATCH_PROMPT,
@@ -332,21 +329,21 @@ function IssueAutomationFields({
           <Label>{t("github:taskPrompt")}</Label>
           <PlaceholdersHelp />
         </div>
-        <p className="text-xs text-muted-foreground">
-          {/* `{{` is passed as a value so it never reaches the catalog, where
-              i18next would read it as an interpolation opener. */}
-          {t("github:issueWatchPromptHelp", { token: "{{" })}
-        </p>
-        <div className="rounded-md border border-border overflow-hidden">
-          <ScriptEditor
-            value={form.prompt}
-            onChange={(v) => setForm((prev) => ({ ...prev, prompt: v }))}
-            language="markdown"
-            height={computeEditorHeight(form.prompt)}
-            lineNumbers="off"
-            placeholders={placeholders}
-          />
-        </div>
+        <SettingsPromptEditor
+          value={form.prompt}
+          onChange={(v) => setForm((prev) => ({ ...prev, prompt: v }))}
+          placeholders={placeholders}
+          promptReferences
+          ariaLabel={t("github:taskPrompt")}
+          testId="github-issue-watch-prompt-editor"
+          help={
+            <p className="text-xs text-muted-foreground">
+              {/* `{{` is passed as a value so it never reaches the catalog, where
+                  i18next would read it as an interpolation opener. */}
+              {t("github:issueWatchPromptHelp", { token: "{{" })}
+            </p>
+          }
+        />
       </div>
     </>
   );

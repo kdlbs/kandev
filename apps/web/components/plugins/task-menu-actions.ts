@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
 import type { PluginTaskMenuContext } from "@/lib/plugins/types";
-import type { KanbanCardMenuEntry } from "./kanban-card-menu-items";
+import type { KanbanCardMenuEntry } from "../kanban-card-menu-items";
 type PluginTaskMenuAction = ReturnType<typeof pluginRegistry.getTaskMenuActions>[number];
 
 /**

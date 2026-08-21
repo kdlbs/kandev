@@ -138,7 +138,9 @@ export interface IntegrationSettingsRegistration {
  * as `slotProps`), "task-card-tags" (its own row on every kanban card,
  * rendered below the badges row — for contributions too wide for the cramped
  * title-row `task-card-indicators` spot, e.g. a row of tag chips — receives
- * `TaskCardTagsSlotProps` as `slotProps`), and "sidebar-workspace-actions"
+ * `TaskCardTagsSlotProps` as `slotProps`), "task-row-metadata" (compact,
+ * read-only secondary metadata on sidebar and `/tasks` rows — receives
+ * `TaskRowMetadataSlotProps` as `slotProps`), and "sidebar-workspace-actions"
  * (icon-button cluster in the sidebar's New Task row, after the built-in
  * Quick Terminal and Quick Chat actions, with the same action group exposed
  * through mobile navigation — receives `SidebarWorkspaceActionsSlotProps`
@@ -166,6 +168,14 @@ export type TaskCardTagsSlotProps = {
   taskId: string;
   workspaceId: string | null;
   workflowStepId: string | null;
+};
+
+/** Context passed to compact, plugin-agnostic task-row metadata contributions. */
+export type TaskRowMetadataSlotProps = {
+  taskId: string;
+  workspaceId: string | null;
+  workflowStepId: string | null;
+  surface: "sidebar" | "task-list";
 };
 
 /** Context the host forwards to every `sidebar-workspace-actions` component. */
