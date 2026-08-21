@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -26,11 +27,48 @@ func setMRSwitches(
 	t *testing.T, store *Store, taskID string, id MRIdentity, patch TaskMRAutomationSwitchPatch,
 ) *TaskMRAutomationOptionsForMR {
 	t.Helper()
+	mrs, err := store.ListTaskMRsByTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("list linked MRs: %v", err)
+	}
+	linked := false
+	for _, mr := range mrs {
+		if (MRIdentity{RepositoryID: mr.RepositoryID, ProjectPath: mr.ProjectPath, MRIID: mr.MRIID}) == id {
+			linked = true
+			break
+		}
+	}
+	if !linked {
+		if err := store.UpsertTaskMR(context.Background(), newTestMR(taskID, id.RepositoryID, id.ProjectPath, id.MRIID)); err != nil {
+			t.Fatalf("link MR for switch write: %v", err)
+		}
+	}
 	got, err := store.UpdateTaskMRAutomationOptionsForMR(context.Background(), taskID, id, patch)
 	if err != nil {
 		t.Fatalf("UpdateTaskMRAutomationOptionsForMR(%s, %+v): %v", taskID, id, err)
 	}
 	return got
+}
+
+func TestStore_UpdateTaskMRAutomationOptionsForMR_RejectsUnlinkedMR(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
+	id := mrIdentity("group/not-linked", 99)
+
+	_, err := store.UpdateTaskMRAutomationOptionsForMR(
+		ctx, "task-1", id, TaskMRAutomationSwitchPatch{AutoMergeEnabled: boolPtr(true)},
+	)
+	if !errors.Is(err, ErrTaskMRNotLinked) {
+		t.Fatalf("expected ErrTaskMRNotLinked, got %v", err)
+	}
+	options, err := store.ListTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list options: %v", err)
+	}
+	if len(options) != 0 {
+		t.Fatalf("unlinked write created automation options: %+v", options)
+	}
 }
 
 // TestStore_UpdateTaskMRAutomationOptionsForMR_AutoMergeRoundTrip closes a
@@ -118,6 +156,7 @@ func TestStore_UpdateTaskMRAutomationOptions_PromptOverrideRoundTrip(t *testing.
 	if updated.AutoFixPromptOverride == nil || *updated.AutoFixPromptOverride != "custom prompt text" {
 		t.Fatalf("AutoFixPromptOverride = %v immediately after patch, want \"custom prompt text\"", updated.AutoFixPromptOverride)
 	}
+	firstRevision := updated.AutomationRevision
 	got, err := store.GetTaskMRAutomationOptions(ctx, "task-1")
 	if err != nil {
 		t.Fatalf("GetTaskMRAutomationOptions: %v", err)
@@ -135,6 +174,9 @@ func TestStore_UpdateTaskMRAutomationOptions_PromptOverrideRoundTrip(t *testing.
 	}
 	if updated.AutoFixPromptOverride != nil {
 		t.Fatalf("AutoFixPromptOverride = %v immediately after clearing, want nil", updated.AutoFixPromptOverride)
+	}
+	if updated.AutomationRevision <= firstRevision {
+		t.Fatalf("automation revision = %d after update, want > %d", updated.AutomationRevision, firstRevision)
 	}
 	got, err = store.GetTaskMRAutomationOptions(ctx, "task-1")
 	if err != nil {
@@ -795,6 +837,9 @@ func TestStore_DeleteTaskMRForWorkspace_DropsPerMRAutomationOptions(t *testing.T
 	); err != nil {
 		t.Fatalf("enable auto-merge: %v", err)
 	}
+	if err := store.SetTaskMRObservedState(ctx, "task-1", "", "group/a", 1, "merged"); err != nil {
+		t.Fatalf("seed lifecycle state: %v", err)
+	}
 
 	if err := store.DeleteTaskMRForWorkspace(ctx, "ws-1", mr.ID); err != nil {
 		t.Fatalf("DeleteTaskMRForWorkspace: %v", err)
@@ -806,6 +851,13 @@ func TestStore_DeleteTaskMRForWorkspace_DropsPerMRAutomationOptions(t *testing.T
 	}
 	if len(stored) != 0 {
 		t.Fatalf("unlink left automation rows behind: %+v", stored)
+	}
+	state, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
+	if err != nil {
+		t.Fatalf("get lifecycle state: %v", err)
+	}
+	if state != nil {
+		t.Fatalf("unlink left lifecycle state behind: %+v", state)
 	}
 
 	// Re-linking the same MR must start from all-off, not resurrect the
@@ -872,6 +924,11 @@ func TestStore_UpdateTaskMRAutomationOptionsForMRs_IsAllOrNothing(t *testing.T) 
 
 	first := MRIdentity{RepositoryID: "", ProjectPath: "group/a", MRIID: 1}
 	second := MRIdentity{RepositoryID: "", ProjectPath: "group/b", MRIID: 2}
+	for _, id := range []MRIdentity{first, second} {
+		if err := store.UpsertTaskMR(ctx, newTestMR("task-1", id.RepositoryID, id.ProjectPath, id.MRIID)); err != nil {
+			t.Fatalf("link MR %s: %v", id.ProjectPath, err)
+		}
+	}
 	if _, err := store.db.Exec(`
 		CREATE TRIGGER fail_second_mr BEFORE UPDATE ON gitlab_task_mr_automation_options
 		WHEN NEW.project_path = 'group/b'

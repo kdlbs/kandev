@@ -437,6 +437,7 @@ export type TaskMRAutomationOptionsForMR = {
  */
 export type TaskMRAutomationOptions = {
   task_id: string;
+  automation_revision?: number;
   auto_fix_enabled: boolean;
   auto_merge_enabled: boolean;
   auto_fix_prompt_override?: string | null;

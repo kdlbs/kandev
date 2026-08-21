@@ -1027,6 +1027,21 @@ func TestUpdateTaskMRAutomationToolRejectsIdentityAloneWithNoSwitch(t *testing.T
 	assert.Empty(t, backend.lastAction, "identity-only calls must not reach the backend")
 }
 
+func TestUpdateTaskMRAutomationToolRejectsFractionalMRIID(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "update_task_mr_automation_kandev", map[string]interface{}{
+		"repository_id":      "",
+		"project_path":       "group/project",
+		"mr_iid":             float64(7.5),
+		"auto_merge_enabled": true,
+	})
+
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction, "invalid MR IID must not reach the backend")
+}
+
 func TestTaskMRAutomationToolsDoNotExposeLifecyclePromptOverrides(t *testing.T) {
 	backend := &testBackend{}
 	s := newTaskModeServer(t, backend, "task-current")

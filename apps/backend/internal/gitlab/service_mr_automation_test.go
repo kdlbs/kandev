@@ -292,6 +292,37 @@ func TestUpdateTaskMRAutomationOptions_FansOutWhenNoMRIsNamed(t *testing.T) {
 	}
 }
 
+// TestUpdateTaskMRAutomationOptions_RollsBackMixedPatch keeps the task-level
+// prompt override and per-MR switch write in one transaction. A failed switch
+// write must not leave the prompt override committed while returning an error.
+func TestUpdateTaskMRAutomationOptions_RollsBackMixedPatch(t *testing.T) {
+	svc, store := newMRAutomationServiceFixture(t, "alice")
+	ctx := context.Background()
+	if err := store.UpsertTaskMR(ctx, newTestMR("task-1", "", "group/a", 1)); err != nil {
+		t.Fatalf("upsert MR: %v", err)
+	}
+	if _, err := store.db.Exec(`
+		CREATE TRIGGER fail_mr_switch BEFORE UPDATE ON gitlab_task_mr_automation_options
+		BEGIN SELECT RAISE(ABORT, 'injected failure'); END`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	_, err := svc.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		AutoFixPromptOverride: stringPtr("must rollback"),
+		AutoMergeEnabled:      boolPtr(true),
+	})
+	if err == nil {
+		t.Fatal("expected mixed patch to fail")
+	}
+	options, err := store.GetTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("get task options: %v", err)
+	}
+	if options.AutoFixPromptOverride != nil {
+		t.Fatalf("failed mixed patch persisted prompt override: %+v", options)
+	}
+}
+
 // TestUpdateTaskMRAutomationOptions_RejectsUnlinkedOrPartialIdentity keeps a
 // caller mistake from silently creating an orphan automation row, or from
 // being reinterpreted as a fan-out over every MR.

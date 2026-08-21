@@ -37,6 +37,7 @@ type MRIdentity struct {
 // gitlab_task_mr_automation_options.
 type TaskMRAutomationOptions struct {
 	TaskID                  string    `json:"task_id" db:"task_id"`
+	AutomationRevision      int64     `json:"-" db:"automation_revision"`
 	AutoFixEnabled          bool      `json:"-" db:"auto_fix_enabled"`
 	AutoMergeEnabled        bool      `json:"-" db:"auto_merge_enabled"`
 	AutoFixPromptOverride   *string   `json:"auto_fix_prompt_override,omitempty" db:"auto_fix_prompt_override"`
@@ -170,6 +171,7 @@ func (p TaskMRAutomationPatch) MRIdentity() MRIdentity {
 // the per-MR source of truth.
 type TaskMRAutomationResponse struct {
 	TaskID                  string                  `json:"task_id"`
+	AutomationRevision      int64                   `json:"automation_revision"`
 	AutoFixEnabled          bool                    `json:"auto_fix_enabled"`
 	AutoMergeEnabled        bool                    `json:"auto_merge_enabled"`
 	AutoFixPromptOverride   *string                 `json:"auto_fix_prompt_override"`

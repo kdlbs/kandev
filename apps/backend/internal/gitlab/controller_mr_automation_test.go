@@ -425,6 +425,7 @@ func TestControllerPatchTaskMRAutomation_RejectsBadMRIdentity(t *testing.T) {
 	for name, body := range map[string]string{
 		"unlinked MR":      `{"repository_id":"","project_path":"group/nope","mr_iid":9,"auto_fix_enabled":true}`,
 		"partial identity": `{"project_path":"group/a","auto_fix_enabled":true}`,
+		"null identity":    `{"repository_id":null,"project_path":null,"mr_iid":null,"auto_fix_enabled":true}`,
 		"identity only":    `{"repository_id":"","project_path":"group/a","mr_iid":1}`,
 	} {
 		req := httptest.NewRequest(http.MethodPatch, "/api/v1/gitlab/tasks/task-1/mr-automation", strings.NewReader(body))

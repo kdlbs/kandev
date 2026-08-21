@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -372,7 +373,7 @@ func (s *Server) getTaskMRAutomationHandler() server.ToolHandlerFunc {
 // so presence in args — not non-emptiness — is what marks it as sent;
 // copyOptionalStringArg's "empty means absent" rule would silently turn a
 // complete-but-empty identity into a partial one and get it rejected.
-func copyMRIdentityArgs(payload, args map[string]interface{}) {
+func copyMRIdentityArgs(payload, args map[string]interface{}) error {
 	for _, key := range []string{"repository_id", "project_path"} {
 		if value, ok := args[key]; ok {
 			if s, ok := value.(string); ok {
@@ -381,8 +382,16 @@ func copyMRIdentityArgs(payload, args map[string]interface{}) {
 		}
 	}
 	if value, ok := args["mr_iid"].(float64); ok {
+		if !isValidMRIID(value) {
+			return fmt.Errorf("mr_iid must be a positive integer")
+		}
 		payload["mr_iid"] = int(value)
 	}
+	return nil
+}
+
+func isValidMRIID(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value > 0 && math.Trunc(value) == value
 }
 
 func (s *Server) updateTaskMRAutomationHandler() server.ToolHandlerFunc {
@@ -392,7 +401,9 @@ func (s *Server) updateTaskMRAutomationHandler() server.ToolHandlerFunc {
 		if hasLifecyclePromptOverrideArgument(args) {
 			return mcp.NewToolResultError("lifecycle prompt overrides are not supported"), nil
 		}
-		copyMRIdentityArgs(payload, args)
+		if err := copyMRIdentityArgs(payload, args); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 		fieldCount := 0
 		for _, key := range []string{
 			"auto_fix_enabled", "auto_merge_enabled",

@@ -4,7 +4,7 @@
 // launched backend. Seeds a workspace/workflow/repo and a task with two
 // linked GitLab MRs so the multi-MR dropdown independence UI can be
 // exercised by hand.
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { ApiClient } from "./helpers/api-client";
@@ -30,17 +30,25 @@ async function main() {
   const repoDir = path.join(REPO_ROOT, "e2e-repo");
   fs.mkdirSync(REPO_ROOT, { recursive: true });
   if (!fs.existsSync(remoteDir)) {
-    execSync(`git init --bare -b main "${remoteDir}"`);
+    execFileSync("git", ["init", "--bare", "-b", "main", remoteDir]);
     fs.mkdirSync(repoDir, { recursive: true });
-    execSync("git init -b main", { cwd: repoDir });
-    execSync(
-      'git -c user.name="Demo" -c user.email="demo@test.local" commit --allow-empty -m "init"',
-      {
-        cwd: repoDir,
-      },
+    execFileSync("git", ["init", "-b", "main"], { cwd: repoDir });
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=Demo",
+        "-c",
+        "user.email=demo@test.local",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "init",
+      ],
+      { cwd: repoDir },
     );
-    execSync(`git remote add origin "file://${remoteDir}"`, { cwd: repoDir });
-    execSync("git push origin main", { cwd: repoDir });
+    execFileSync("git", ["remote", "add", "origin", `file://${remoteDir}`], { cwd: repoDir });
+    execFileSync("git", ["push", "origin", "main"], { cwd: repoDir });
   }
   const repo = await apiClient.createRepository(workspace.id, repoDir);
 

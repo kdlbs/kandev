@@ -215,6 +215,10 @@ function taskMRAutomationActions(set: ImmerSet) {
       options: GitLabSliceState["taskMRAutomation"]["byTaskId"][string],
     ) =>
       set((draft) => {
+        const existing = draft.taskMRAutomation.byTaskId[taskId];
+        if (existing && (options.automation_revision ?? 0) < (existing.automation_revision ?? 0)) {
+          return;
+        }
         draft.taskMRAutomation.byTaskId[taskId] = options;
       }),
     setTaskMRAutomationLoading: (taskId: string, loading: boolean) =>

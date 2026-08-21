@@ -394,6 +394,13 @@ func (s *Store) DeleteTaskMRForWorkspace(ctx context.Context, workspaceID, assoc
 	); err != nil {
 		return fmt.Errorf("delete task MR refresh watch: %w", err)
 	}
+	if _, err = tx.ExecContext(ctx, `
+		DELETE FROM gitlab_task_mr_state
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		association.TaskID, association.RepositoryID, association.ProjectPath, association.MRIID,
+	); err != nil {
+		return fmt.Errorf("delete task MR lifecycle state: %w", err)
+	}
 	// Drop this MR's automation switches with the association. Leaving the row
 	// behind means re-linking the same MR later — by hand, or through
 	// push-detection auto-link — silently re-arms whatever was configured

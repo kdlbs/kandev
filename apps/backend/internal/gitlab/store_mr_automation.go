@@ -21,6 +21,7 @@ const createMRAutomationTablesSQL = `
 		prompt_on_merged BOOLEAN NOT NULL DEFAULT 0,
 		prompt_on_closed BOOLEAN NOT NULL DEFAULT 0,
 		review_reviewer_username TEXT NOT NULL DEFAULT '',
+		automation_revision INTEGER NOT NULL DEFAULT 0,
 		mr_scope_migrated_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
@@ -97,6 +98,7 @@ func (s *Store) migrateMRAutomationAutomationColumns() error {
 		{"auto_fix_enabled", sqlBooleanDefaultFalse},
 		{"auto_merge_enabled", sqlBooleanDefaultFalse},
 		{"auto_fix_prompt_override", "TEXT"},
+		{"automation_revision", sqlIntegerDefaultZero},
 		// Guards the one-time fan-out of the legacy task-wide switches onto
 		// per-MR rows — see migrateTaskMROptionsToMRScope.
 		{"mr_scope_migrated_at", "DATETIME"},
@@ -223,7 +225,7 @@ type execContext interface {
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 }
 
-const mrAutomationOptionsSelectCols = `task_id, auto_fix_enabled, auto_merge_enabled, auto_fix_prompt_override,
+const mrAutomationOptionsSelectCols = `task_id, automation_revision, auto_fix_enabled, auto_merge_enabled, auto_fix_prompt_override,
 	prompt_on_review_requested, prompt_on_merged, prompt_on_closed,
 	review_reviewer_username, created_at, updated_at`
 
@@ -278,19 +280,56 @@ func (s *Store) UpdateTaskMRAutomationOptions(
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := updateTaskMRAutomationOptionsTx(ctx, tx, taskID, patch, reviewerUsername); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetTaskMRAutomationOptions(ctx, taskID)
+}
 
+// UpdateTaskMRAutomationOptionsWithMRs applies task-level fields and one
+// per-MR switch patch in the same transaction. A mixed PATCH must either
+// commit both kinds of settings or leave neither behind.
+func (s *Store) UpdateTaskMRAutomationOptionsWithMRs(
+	ctx context.Context, taskID string, patch TaskMRAutomationPatch, reviewerUsername *string,
+	ids []MRIdentity, switches TaskMRAutomationSwitchPatch,
+) (*TaskMRAutomationOptions, error) {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := updateTaskMRAutomationOptionsTx(ctx, tx, taskID, patch, reviewerUsername); err != nil {
+		return nil, err
+	}
+	if err := applyMRSwitchPatchBatchTx(ctx, tx, taskID, ids, switches); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetTaskMRAutomationOptions(ctx, taskID)
+}
+
+// updateTaskMRAutomationOptionsTx applies the task-level half of an
+// automation patch in its caller's transaction.
+func updateTaskMRAutomationOptionsTx(
+	ctx context.Context, tx *sqlx.Tx, taskID string, patch TaskMRAutomationPatch, reviewerUsername *string,
+) error {
 	now := time.Now().UTC()
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO gitlab_task_mr_options (task_id, created_at, updated_at)
 		VALUES (?, ?, ?)
 		ON CONFLICT(task_id) DO NOTHING`, taskID, now, now); err != nil {
-		return nil, err
+		return err
 	}
 	var previous TaskMRAutomationOptions
 	if err := tx.GetContext(ctx, &previous,
 		`SELECT `+mrAutomationOptionsSelectCols+`
 		 FROM gitlab_task_mr_options WHERE task_id = ?`, taskID); err != nil {
-		return nil, err
+		return err
 	}
 
 	promptSet := patch.AutoFixPromptOverride != nil
@@ -304,10 +343,11 @@ func (s *Store) UpdateTaskMRAutomationOptions(
 		UPDATE gitlab_task_mr_options SET
 			auto_fix_prompt_override = CASE WHEN ? THEN ? ELSE auto_fix_prompt_override END,
 			review_reviewer_username = CASE WHEN ? THEN ? ELSE review_reviewer_username END,
+			automation_revision = automation_revision + 1,
 			updated_at = ?
 		WHERE task_id = ?`,
 		promptSet, promptValue, reviewerSet, reviewerValue, now, taskID); err != nil {
-		return nil, err
+		return err
 	}
 	// A changed connected GitLab account invalidates every linked MR's
 	// review-request baseline, not just one MR's: a baseline recorded against
@@ -315,13 +355,10 @@ func (s *Store) UpdateTaskMRAutomationOptions(
 	// the next prompt evaluated against the new one.
 	if reviewerSet && previous.ReviewReviewerUsername != reviewerValue {
 		if err := resetReviewBaselinesForTask(ctx, tx, taskID); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return s.GetTaskMRAutomationOptions(ctx, taskID)
+	return nil
 }
 
 const mrAutomationSwitchSelectCols = `task_id, repository_id, project_path, mr_iid,
@@ -399,7 +436,20 @@ func (s *Store) UpdateTaskMRAutomationOptionsForMRs(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := applyMRSwitchPatchBatchTx(ctx, tx, taskID, ids, patch); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
+// applyMRSwitchPatchBatchTx applies a switch patch to every identity inside
+// an existing transaction so task-level and per-MR changes can commit together.
+func applyMRSwitchPatchBatchTx(
+	ctx context.Context, tx *sqlx.Tx, taskID string, ids []MRIdentity, patch TaskMRAutomationSwitchPatch,
+) error {
+	if !patch.HasAny() {
+		return nil
+	}
 	now := time.Now().UTC()
 	fields := mrAutomationSwitchFields(patch)
 	for _, id := range ids {
@@ -407,7 +457,7 @@ func (s *Store) UpdateTaskMRAutomationOptionsForMRs(
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // applyMRSwitchPatchTx upserts one MR's switch row, applies the patch, and
@@ -419,6 +469,9 @@ func applyMRSwitchPatchTx(
 	ctx context.Context, tx *sqlx.Tx, taskID string, id MRIdentity,
 	now time.Time, fields mrAutomationSwitchPatchFields,
 ) error {
+	if err := ensureTaskMRLinkTx(ctx, tx, taskID, id); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO gitlab_task_mr_automation_options (
 			task_id, repository_id, project_path, mr_iid, created_at, updated_at
@@ -451,6 +504,18 @@ func applyMRSwitchPatchTx(
 		return err
 	}
 	return applyMRAutomationOptionResets(ctx, tx, taskID, id, now, previous, fields)
+}
+
+func ensureTaskMRLinkTx(ctx context.Context, tx *sqlx.Tx, taskID string, id MRIdentity) error {
+	var linked int
+	err := tx.GetContext(ctx, &linked, `
+		SELECT 1 FROM gitlab_task_mrs
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?
+		LIMIT 1`, taskID, id.RepositoryID, id.ProjectPath, id.MRIID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: project_path=%s mr_iid=%d", ErrTaskMRNotLinked, id.ProjectPath, id.MRIID)
+	}
+	return err
 }
 
 // mrAutomationSwitchPatchFields flattens a switch patch into the "was this
@@ -888,7 +953,9 @@ func (s *Store) RecordTaskMRFixAttempt(ctx context.Context, attempt TaskMRFixAtt
 }
 
 // RefreshTaskMRFixCheckpoint updates the current feedback checkpoint
-// without recording a new prompt dispatch (the empty-delta path — AC7).
+// without recording a new prompt dispatch (the empty-delta path — AC7). It
+// is called only at the start of a fresh auto-fix cycle, so replacing a
+// conflicting row intentionally clears its stale enqueue/session markers.
 // Mirrors GitHub's RefreshTaskCIFixCheckpoint.
 func (s *Store) RefreshTaskMRFixCheckpoint(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, signature, checkpointJSON string) error {
 	ctx = context.WithoutCancel(ctx)

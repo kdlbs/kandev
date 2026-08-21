@@ -171,17 +171,25 @@ describe("useTaskMRAutomationOptions optimistic updates", () => {
 
   it("reverts the optimistic update and surfaces an error on failure (AC27)", async () => {
     api.getTaskMRAutomation.mockResolvedValue(baseOptions());
-    api.updateTaskMRAutomation.mockRejectedValue(new Error(NETWORK_DOWN_ERROR));
+    const update = deferred<TaskMRAutomationOptions>();
+    api.updateTaskMRAutomation.mockImplementation(() => update.promise);
     const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"), { wrapper });
     await waitFor(() => expect(result.current.options).not.toBeNull());
 
+    let pending: Promise<unknown>;
+    act(() => {
+      pending = result.current.update({ prompt_on_closed: true });
+    });
+    await waitFor(() =>
+      expect(result.current.options?.mr_options?.[0]?.prompt_on_closed).toBe(true),
+    );
+
     await act(async () => {
-      await expect(result.current.update({ prompt_on_closed: true })).rejects.toThrow(
-        NETWORK_DOWN_ERROR,
-      );
+      update.reject(new Error(NETWORK_DOWN_ERROR));
+      await expect(pending!).rejects.toThrow(NETWORK_DOWN_ERROR);
     });
 
-    expect(result.current.options?.prompt_on_closed).toBe(false);
+    expect(result.current.options?.mr_options?.[0]?.prompt_on_closed).toBe(false);
     expect(result.current.error).toBe(NETWORK_DOWN_ERROR);
     expect(result.current.saving).toBe(false);
   });

@@ -174,6 +174,7 @@ func (s *Service) taskMRAutomationResponseFromOptions(
 	aggregate := aggregateMRAutomationOptions(mrOptions)
 	return &TaskMRAutomationResponse{
 		TaskID:                  opts.TaskID,
+		AutomationRevision:      opts.AutomationRevision,
 		AutoFixEnabled:          aggregate.AutoFixEnabled,
 		AutoMergeEnabled:        aggregate.AutoMergeEnabled,
 		AutoFixPromptOverride:   opts.AutoFixPromptOverride,
@@ -280,16 +281,14 @@ func (s *Service) UpdateTaskMRAutomationOptions(ctx context.Context, taskID stri
 	if err != nil {
 		return nil, err
 	}
-	opts, err := store.UpdateTaskMRAutomationOptions(ctx, taskID, patch, reviewerUsername)
+	// One transaction covering the task-level fields and every target: a
+	// failure must not leave the reviewer or prompt override committed while
+	// the per-MR switches roll back.
+	opts, err := store.UpdateTaskMRAutomationOptionsWithMRs(
+		ctx, taskID, patch, reviewerUsername, targets, patch.SwitchPatch(),
+	)
 	if err != nil {
 		return nil, err
-	}
-	// One transaction for every target: a partially-applied fan-out would arm
-	// auto-merge on some MRs while reporting failure to the caller.
-	if switches := patch.SwitchPatch(); switches.HasAny() {
-		if err := store.UpdateTaskMRAutomationOptionsForMRs(ctx, taskID, targets, switches); err != nil {
-			return nil, err
-		}
 	}
 	mrOptions, err := s.taskMRAutomationOptionsList(ctx, taskID)
 	if err != nil {
