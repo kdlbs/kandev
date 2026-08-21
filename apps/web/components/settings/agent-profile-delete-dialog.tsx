@@ -37,39 +37,6 @@ const DELETE_PROFILE_TITLE_KEY = "agents:deleteAgentProfileTitle";
 const DELETE_PROFILE_DESCRIPTION_KEY = "agents:deleteAgentProfileDescription";
 const CANCEL_LABEL_KEY = "common:cancel";
 
-type AgentProfileDeleteConfirmDialogProps = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
-};
-
-export function AgentProfileDeleteConfirmDialog({
-  open,
-  onOpenChange,
-  onConfirm,
-}: AgentProfileDeleteConfirmDialogProps) {
-  const { t } = useTranslation();
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t(DELETE_PROFILE_TITLE_KEY)}</AlertDialogTitle>
-          <AlertDialogDescription>{t(DELETE_PROFILE_DESCRIPTION_KEY)}</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t(CANCEL_LABEL_KEY)}</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={onConfirm}
-            className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
-          >
-            {t("agents:delete")}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
 type AgentProfileDeleteConfirmationProps = {
   open: boolean;
   isFinePointer: boolean;

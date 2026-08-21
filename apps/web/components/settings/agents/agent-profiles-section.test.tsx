@@ -19,6 +19,7 @@ function profile(id: string, name: string): AgentProfile {
 
 const ALPHA_PROFILE_NAME = "Alpha";
 const PROFILE_ROW_SELECTOR = '[data-testid="agent-profile-row"]';
+const PROFILE_ACTIONS_MENU_SELECTOR = '[data-testid="profile-actions-menu-p-1"]';
 
 const AGENT = {
   id: "agent-1",
@@ -196,6 +197,27 @@ describe("ProfileRow deletion", () => {
     expect(
       row.querySelector('[data-testid="agent-profile-delete-inline-confirmation"]'),
     ).toBeNull();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(row.querySelector(PROFILE_ACTIONS_MENU_SELECTOR)),
+    );
+  });
+
+  it("restores focus to the row action after deletion fails", async () => {
+    mocks.deleteAgentProfileAction.mockResolvedValue({ status: "error", message: "Delete failed" });
+    renderRows();
+
+    const row = screen.getByLabelText(ALPHA_PROFILE_NAME).closest(PROFILE_ROW_SELECTOR);
+    if (!row) throw new Error(`no row for ${ALPHA_PROFILE_NAME}`);
+    if (!row.querySelector(PROFILE_ACTIONS_MENU_SELECTOR)) {
+      throw new Error("no profile actions trigger");
+    }
+    fireEvent.click(row.querySelector('[data-testid="delete-profile-p-1"]')!);
+    fireEvent.click(row.querySelector('[data-testid="agent-profile-delete-confirm"]')!);
+
+    await waitFor(() => expect(mocks.deleteAgentProfileAction).toHaveBeenCalledWith("p-1"));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(row.querySelector(PROFILE_ACTIONS_MENU_SELECTOR)),
+    );
   });
 });
 
@@ -255,7 +277,7 @@ describe("ProfileRow responsive actions", () => {
     expect(deleteButton?.textContent).toBe("");
     expect(duplicate?.getAttribute("data-size")).toBe("icon");
     expect(deleteButton?.getAttribute("data-size")).toBe("icon");
-    expect(row.querySelector('[data-testid="profile-actions-menu-p-1"]')).toBeNull();
+    expect(row.querySelector(PROFILE_ACTIONS_MENU_SELECTOR)).toBeNull();
 
     fireEvent.focus(duplicate!);
     await waitFor(() => expect(screen.getByRole("tooltip", { name: "Duplicate" })).toBeTruthy());
@@ -269,7 +291,7 @@ describe("ProfileRow responsive actions", () => {
     const row = screen.getByLabelText(ALPHA_PROFILE_NAME).closest(PROFILE_ROW_SELECTOR);
     if (!row) throw new Error(`no row for ${ALPHA_PROFILE_NAME}`);
     expect(row.querySelector('[data-testid="profile-actions-inline-p-1"]')).toBeNull();
-    expect(row.querySelector('[data-testid="profile-actions-menu-p-1"]')).not.toBeNull();
+    expect(row.querySelector(PROFILE_ACTIONS_MENU_SELECTOR)).not.toBeNull();
     expect(row.querySelector('[data-testid="duplicate-profile-p-1"]')).not.toBeNull();
     expect(row.querySelector('[data-testid="delete-profile-p-1"]')).not.toBeNull();
   });

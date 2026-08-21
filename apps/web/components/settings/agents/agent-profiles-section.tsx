@@ -196,7 +196,7 @@ function ProfileRowDeleteConfirmation({
     />
   );
   return placement === "inline" ? (
-    <div className="basis-full min-w-0">{confirmation}</div>
+    <div className="relative z-10 basis-full min-w-0">{confirmation}</div>
   ) : (
     confirmation
   );
@@ -215,7 +215,6 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
   const href = profileHref(agent.name, profile.id);
-  const onDuplicate = () => void handleDuplicate(agent, profile);
   const closeDeleteConfirmation = () => {
     setConfirmOpen(false);
     queueMicrotask(() => deleteAnchorRef.current?.focus());
@@ -253,6 +252,7 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
       description: result.message,
       variant: "error",
     });
+    closeDeleteConfirmation();
   };
   const confirmationProps = {
     open: confirmOpen,
@@ -262,7 +262,6 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
     onCancel: closeDeleteConfirmation,
     onConfirm: () => void handleDelete(),
   };
-
   return (
     <Card
       // Same surface treatment as the workspace section tiles.
@@ -296,14 +295,14 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
               <ProfileRowInlineActions
                 profile={profile}
                 deleteAnchorRef={deleteAnchorRef}
-                onDuplicate={onDuplicate}
+                onDuplicate={() => void handleDuplicate(agent, profile)}
                 onConfirmDelete={() => setConfirmOpen(true)}
               />
             ) : (
               <ProfileRowActions
                 profile={profile}
                 deleteAnchorRef={deleteAnchorRef}
-                onDuplicate={onDuplicate}
+                onDuplicate={() => void handleDuplicate(agent, profile)}
                 onConfirmDelete={() => setConfirmOpen(true)}
               />
             ))}
