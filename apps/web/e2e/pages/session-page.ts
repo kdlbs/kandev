@@ -1794,7 +1794,7 @@ export class SessionPage {
   }
 
   revertConfirmPopoverOk(): Locator {
-    return this.page.getByTestId("plan-revision-restore-confirm");
+    return this.revertConfirmPopover().getByTestId("plan-revision-restore-confirm");
   }
 
   revertConfirmPopoverCancel(): Locator {

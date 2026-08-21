@@ -10,12 +10,14 @@ import type { TaskPlanRevision } from "@/lib/types/http";
 import { formatPreciseTime } from "@/lib/utils";
 import { AgentLogo } from "@/components/agent-logo";
 import { useAppStore } from "@/components/state-provider";
-import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
-import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { PlanRevisionPreviewDialog } from "./task-plan-preview-dialog";
 import { PlanRevisionDiffDialog } from "./task-plan-diff-dialog";
 import { RevertConfirmDialog } from "./task-plan-revert-confirm-dialog";
+import {
+  RevisionInlineConfirmation,
+  RevisionRestoreAction,
+} from "./task-plan-revision-restore-actions";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
@@ -542,108 +544,5 @@ function RevisionRowBody({
         </div>
       )}
     </button>
-  );
-}
-
-function RevisionRestoreAction({
-  revision,
-  isCurrent,
-  isSaving,
-  rowConfirmTarget,
-  isFinePointer,
-  onRevertRequest,
-  onRevertCancel,
-  onRevert,
-}: Omit<RevisionRowProps, "agentName" | "onRowClick">) {
-  const { t } = useTranslation();
-  const restoreButtonRef = useRef<HTMLButtonElement>(null);
-  const isConfirming = rowConfirmTarget?.id === revision.id;
-  const version = revision.revision_number;
-  const restoreLabel = t("task:restoreVersion", { version });
-
-  if (isCurrent) return null;
-
-  return (
-    <>
-      {(!isConfirming || isFinePointer) && (
-        <Button
-          ref={restoreButtonRef}
-          size="sm"
-          variant="ghost"
-          disabled={isSaving}
-          className="h-7 px-2 text-xs cursor-pointer shrink-0 gap-1"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRevertRequest(revision);
-          }}
-          data-testid="plan-revision-revert-button"
-        >
-          <IconRestore className="h-3.5 w-3.5" />
-          {t("task:restore")}
-        </Button>
-      )}
-      {isFinePointer && (
-        <ActionConfirmPopover
-          open={isConfirming}
-          disabled={isSaving}
-          anchorRef={restoreButtonRef}
-          title={t("task:restoreToVersionConfirm", { version })}
-          description={t("task:restoreToVersionDescription", { version })}
-          cancelLabel={t("common:cancel")}
-          confirmLabel={restoreLabel}
-          confirmAriaLabel={restoreLabel}
-          confirmTestId="plan-revision-restore-confirm"
-          testId="plan-revision-restore-confirm-popover"
-          onOpenChange={(nextOpen) => {
-            if (!nextOpen) onRevertCancel();
-          }}
-          onCancel={onRevertCancel}
-          onConfirm={() => onRevert(revision)}
-        />
-      )}
-    </>
-  );
-}
-
-function RevisionInlineConfirmation({
-  revision,
-  isCurrent,
-  isSaving,
-  isFinePointer,
-  rowConfirmTarget,
-  onRevertCancel,
-  onRevert,
-}: Pick<
-  RevisionRowProps,
-  | "revision"
-  | "isCurrent"
-  | "isSaving"
-  | "isFinePointer"
-  | "rowConfirmTarget"
-  | "onRevertCancel"
-  | "onRevert"
->) {
-  const { t } = useTranslation();
-  if (isCurrent || isFinePointer || rowConfirmTarget?.id !== revision.id) return null;
-
-  const version = revision.revision_number;
-  const restoreLabel = t("task:restoreVersion", { version });
-  return (
-    <div className="mt-2 min-w-0">
-      <InlineConfirmActions
-        density="touch"
-        disabled={isSaving}
-        testId="plan-revision-restore-inline-confirmation"
-        ariaLabel={t("task:restoreToVersionConfirm", { version })}
-        description={t("task:restoreToVersionDescription", { version })}
-        cancelLabel={t("common:cancel")}
-        confirmLabel={restoreLabel}
-        confirmAriaLabel={restoreLabel}
-        confirmTestId="plan-revision-restore-confirm"
-        onCancel={onRevertCancel}
-        onClose={onRevertCancel}
-        onConfirm={() => onRevert(revision)}
-      />
-    </div>
   );
 }
