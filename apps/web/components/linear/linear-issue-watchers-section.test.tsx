@@ -1,16 +1,20 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { LinearIssueWatch } from "@/lib/types/linear";
 import { LinearIssueWatchTable } from "./linear-issue-watch-table";
 
-const responsive = vi.hoisted(() => ({ isFinePointer: true }));
+const responsive = vi.hoisted(() => ({
+  isFinePointer: true,
+  usesDesktopWorkbench: true,
+}));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => responsive,
 }));
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: unknown) => unknown) => selector({ workspaces: { items: [] } }),
+  useAppStore: (selector: (state: unknown) => unknown) =>
+    selector({ workspaces: { items: [{ id: "ws-1", name: "Workspace One" }] } }),
 }));
 
 function watch(overrides: Partial<LinearIssueWatch> = {}): LinearIssueWatch {
@@ -35,6 +39,7 @@ function watch(overrides: Partial<LinearIssueWatch> = {}): LinearIssueWatch {
 afterEach(() => {
   cleanup();
   responsive.isFinePointer = true;
+  responsive.usesDesktopWorkbench = true;
   Object.defineProperty(window, "confirm", { configurable: true, value: undefined });
 });
 
@@ -73,6 +78,28 @@ describe("LinearIssueWatchTable delete confirmation", () => {
     expect(onDelete).not.toHaveBeenCalled();
   });
 
+  it("preserves workspace identity in install-wide mobile cards", () => {
+    responsive.usesDesktopWorkbench = false;
+    render(
+      <TooltipProvider>
+        <LinearIssueWatchTable
+          watches={[watch()]}
+          dirtyIds={new Set()}
+          showWorkspace
+          onEdit={vi.fn()}
+          onDelete={vi.fn()}
+          onTrigger={vi.fn()}
+          onReset={vi.fn()}
+          onToggleEnabled={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(
+      within(screen.getByTestId("linear-watch-mobile-row-linear-1")).getByText("Workspace One"),
+    ).toBeTruthy();
+  });
+
   it("uses touch-sized inline actions for coarse pointers", async () => {
     responsive.isFinePointer = false;
     const onDelete = vi.fn();
@@ -99,6 +126,6 @@ describe("LinearIssueWatchTable delete confirmation", () => {
     expect(screen.getByRole("button", { name: "Cancel" }).className).toContain("h-11");
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(onDelete).toHaveBeenCalledWith("linear-1"));
-    expect(confirmation).toBeTruthy();
+    await waitFor(() => expect(confirmation.isConnected).toBe(false));
   });
 });

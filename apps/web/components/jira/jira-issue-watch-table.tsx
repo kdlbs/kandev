@@ -139,6 +139,8 @@ function WatchActions({
 function MobileWatchCard({
   watch,
   isDirty,
+  showWorkspace,
+  workspaceName,
   onEdit,
   onToggleEnabled,
   onTrigger,
@@ -147,6 +149,8 @@ function MobileWatchCard({
 }: {
   watch: JiraIssueWatch;
   isDirty: boolean;
+  showWorkspace?: boolean;
+  workspaceName: (id: string) => string;
   onEdit: (watch: JiraIssueWatch) => void;
   onToggleEnabled: (watch: JiraIssueWatch) => void;
   onTrigger: (id: string) => void;
@@ -154,6 +158,7 @@ function MobileWatchCard({
   onDelete: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const workspaceLabel = showWorkspace ? workspaceName(watch.workspaceId) : null;
   return (
     <div
       className="min-w-0 space-y-3 border-b px-1 py-4 last:border-b-0"
@@ -165,6 +170,14 @@ function MobileWatchCard({
         className="block w-full min-w-0 text-left cursor-pointer"
         onClick={() => onEdit(watch)}
       >
+        {workspaceLabel && (
+          <span
+            className="mb-1 block truncate text-xs text-muted-foreground"
+            title={workspaceLabel}
+          >
+            {workspaceLabel}
+          </span>
+        )}
         <span className="block truncate font-mono text-sm" title={watch.jql}>
           {watch.jql}
         </span>
@@ -303,6 +316,8 @@ export function JiraIssueWatchTable({
             key={watch.id}
             watch={watch}
             isDirty={dirtyIds.has(watch.id)}
+            showWorkspace={showWorkspace}
+            workspaceName={workspaceName}
             onEdit={onEdit}
             onToggleEnabled={onToggleEnabled}
             onTrigger={onTrigger}

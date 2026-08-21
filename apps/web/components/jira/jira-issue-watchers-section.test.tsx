@@ -4,13 +4,17 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { JiraIssueWatch } from "@/lib/types/jira";
 import { JiraIssueWatchTable } from "./jira-issue-watch-table";
 
-const responsive = vi.hoisted(() => ({ isFinePointer: true }));
+const responsive = vi.hoisted(() => ({
+  isFinePointer: true,
+  usesDesktopWorkbench: true,
+}));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => responsive,
 }));
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: unknown) => unknown) => selector({ workspaces: { items: [] } }),
+  useAppStore: (selector: (state: unknown) => unknown) =>
+    selector({ workspaces: { items: [{ id: "ws-1", name: "Workspace One" }] } }),
 }));
 
 function watch(overrides: Partial<JiraIssueWatch> = {}): JiraIssueWatch {
@@ -52,6 +56,7 @@ function renderTable(onDelete = vi.fn()) {
 afterEach(() => {
   cleanup();
   responsive.isFinePointer = true;
+  responsive.usesDesktopWorkbench = true;
   Object.defineProperty(window, "confirm", { configurable: true, value: undefined });
 });
 
@@ -89,6 +94,15 @@ describe("JiraIssueWatchTable delete confirmation", () => {
     await waitFor(() => expect(onDelete).toHaveBeenCalledWith("jira-1"));
   });
 
+  it("preserves workspace identity in install-wide mobile cards", () => {
+    responsive.usesDesktopWorkbench = false;
+    renderTable();
+
+    expect(
+      within(screen.getByTestId("jira-watch-mobile-row-jira-1")).getByText("Workspace One"),
+    ).toBeTruthy();
+  });
+
   it("keeps coarse-pointer confirmation inline with 44px actions", async () => {
     responsive.isFinePointer = false;
     const onDelete = vi.fn();
@@ -105,5 +119,7 @@ describe("JiraIssueWatchTable delete confirmation", () => {
     expect(within(confirmation).getByRole("button", { name: "Delete" }).className).toContain(
       "min-w-11",
     );
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(onDelete).toHaveBeenCalledWith("jira-1"));
   });
 });

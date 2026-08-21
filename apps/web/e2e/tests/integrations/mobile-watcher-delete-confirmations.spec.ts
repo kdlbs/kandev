@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { seedLinearWatcher } from "./watcher-delete-confirmation-flow";
 
 test.describe("watcher delete confirmations (mobile)", () => {
@@ -15,9 +16,12 @@ test.describe("watcher delete confirmations (mobile)", () => {
       void dialog.dismiss();
     });
 
+    const watchesLoaded = waitForHttp(testPage, "GET", /^\/api\/v1\/linear\/watches\/issue$/);
     await testPage.goto("/settings/integrations/linear");
+    await watchesLoaded;
     const row = testPage.getByTestId(`linear-watch-mobile-row-${watch.id}`);
-    await expect(row).toBeVisible({ timeout: 30_000 });
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("E2E Workspace");
     const trigger = row.getByTestId(`linear-watch-delete-${watch.id}`);
     await expect(trigger).toHaveCSS("height", "44px");
 
