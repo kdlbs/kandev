@@ -240,21 +240,32 @@ func (c *Controller) httpGitHubAppWebhook(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, result)
 }
 
-func (c *Controller) httpResolveCredentialLease(ctx *gin.Context) {
-	var request struct {
-		Lease            string `json:"lease"`
-		TaskID           string `json:"task_id"`
-		SessionID        string `json:"session_id"`
-		RepositoryID     string `json:"repository_id"`
-		Owner            string `json:"owner"`
-		Repo             string `json:"repo"`
-		Host             string `json:"host"`
-		Path             string `json:"path"`
-		ProviderID       string `json:"provider_id"`
-		ParentProviderID string `json:"parent_provider_id"`
-	}
+type credentialBrokerHTTPRequest struct {
+	Lease            string `json:"lease"`
+	Capability       string `json:"capability"`
+	TaskID           string `json:"task_id"`
+	SessionID        string `json:"session_id"`
+	RepositoryID     string `json:"repository_id"`
+	Owner            string `json:"owner"`
+	Repo             string `json:"repo"`
+	Host             string `json:"host"`
+	Path             string `json:"path"`
+	ProviderID       string `json:"provider_id"`
+	ParentProviderID string `json:"parent_provider_id"`
+}
+
+func decodeCredentialBrokerHTTPRequest(ctx *gin.Context) (credentialBrokerHTTPRequest, bool) {
+	var request credentialBrokerHTTPRequest
 	if err := ctx.ShouldBindJSON(&request); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"code": "github_invalid_request", "error": "invalid payload"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"code": credentialBrokerInvalidRequestCode(ctx), "error": "invalid payload"})
+		return credentialBrokerHTTPRequest{}, false
+	}
+	return request, true
+}
+
+func (c *Controller) httpResolveCredentialLease(ctx *gin.Context) {
+	request, ok := decodeCredentialBrokerHTTPRequest(ctx)
+	if !ok {
 		return
 	}
 	credential, err := c.service.ResolveGitHubCredential(ctx.Request.Context(), BrokerCredentialRequest{
@@ -270,6 +281,25 @@ func (c *Controller) httpResolveCredentialLease(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, credential)
 }
 
+func (c *Controller) httpReissueCredentialLease(ctx *gin.Context) {
+	request, ok := decodeCredentialBrokerHTTPRequest(ctx)
+	if !ok {
+		return
+	}
+	lease, err := c.service.ReissueGitHubCredentialLease(ctx.Request.Context(), CredentialLeaseReissueRequest{
+		Capability: request.Capability, TaskID: request.TaskID, SessionID: request.SessionID,
+		RepositoryID: request.RepositoryID, Owner: request.Owner, Repo: request.Repo,
+		Host: request.Host, Path: request.Path, ProviderID: request.ProviderID,
+		ParentProviderID: request.ParentProviderID,
+	})
+	if err != nil {
+		writeGitHubAuthError(ctx, err)
+		return
+	}
+	ctx.Header("Cache-Control", "no-store")
+	ctx.JSON(http.StatusOK, lease)
+}
+
 func (c *Controller) httpCredentialBrokerReady(ctx *gin.Context) {
 	if c == nil || c.service == nil || !c.service.CredentialBrokerReady() {
 		ctx.Status(http.StatusServiceUnavailable)
@@ -281,6 +311,9 @@ func (c *Controller) httpCredentialBrokerReady(ctx *gin.Context) {
 
 func writeGitHubAuthError(ctx *gin.Context, err error) {
 	status, code := githubAuthErrorResponse(err)
+	if isGenericCredentialBrokerPath(ctx) {
+		code = genericCredentialBrokerErrorCode(err)
+	}
 	message := strings.TrimSpace(err.Error())
 	payload := gin.H{"code": code, "error": message}
 	var importError *AppRegistrationImportError
@@ -293,6 +326,34 @@ func writeGitHubAuthError(ctx *gin.Context, err error) {
 		}
 	}
 	ctx.JSON(status, payload)
+}
+
+func isGenericCredentialBrokerPath(ctx *gin.Context) bool {
+	return ctx != nil && strings.HasPrefix(ctx.Request.URL.Path, "/api/v1/git/credentials/")
+}
+
+func credentialBrokerInvalidRequestCode(ctx *gin.Context) string {
+	if isGenericCredentialBrokerPath(ctx) {
+		return "git_credential_invalid_request"
+	}
+	return "github_invalid_request"
+}
+
+func genericCredentialBrokerErrorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrCredentialLeaseInvalid):
+		return "git_credential_lease_invalid"
+	case errors.Is(err, ErrCredentialLeaseExpired):
+		return "git_credential_lease_expired"
+	case errors.Is(err, ErrCredentialLeaseRevoked):
+		return "git_credential_lease_revoked"
+	case errors.Is(err, ErrCredentialReissueCapabilityInvalid), errors.Is(err, ErrCredentialReissueCapabilityExpired):
+		return "git_credential_reissue_denied"
+	case errors.Is(err, ErrCredentialScopeDenied):
+		return "git_credential_denied"
+	default:
+		return "git_credential_internal_error"
+	}
 }
 
 func githubAuthErrorCode(err error) string {
@@ -325,8 +386,15 @@ func githubAuthErrorResponse(err error) (int, string) {
 		status, code = http.StatusBadRequest, "github_invalid_callback"
 	case errors.Is(err, ErrInvalidWebhookSignature):
 		status, code = http.StatusUnauthorized, "github_invalid_webhook_signature"
-	case errors.Is(err, ErrCredentialLeaseInvalid), errors.Is(err, ErrCredentialLeaseExpired),
-		errors.Is(err, ErrCredentialLeaseRevoked), errors.Is(err, ErrCredentialScopeDenied):
+	case errors.Is(err, ErrCredentialLeaseInvalid):
+		status, code = http.StatusUnauthorized, "github_credential_lease_invalid"
+	case errors.Is(err, ErrCredentialLeaseExpired):
+		status, code = http.StatusUnauthorized, "github_credential_lease_expired"
+	case errors.Is(err, ErrCredentialLeaseRevoked):
+		status, code = http.StatusUnauthorized, "github_credential_lease_revoked"
+	case errors.Is(err, ErrCredentialReissueCapabilityInvalid), errors.Is(err, ErrCredentialReissueCapabilityExpired):
+		status, code = http.StatusUnauthorized, "github_credential_reissue_denied"
+	case errors.Is(err, ErrCredentialScopeDenied):
 		status, code = http.StatusUnauthorized, "github_credential_denied"
 	case errors.Is(err, ErrInvalidToken):
 		status, code = http.StatusBadRequest, "github_invalid_token"

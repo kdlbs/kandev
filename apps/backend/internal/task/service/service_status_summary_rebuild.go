@@ -240,10 +240,7 @@ func (s *Service) reconcileExistingSummary(
 	activityObserved bool,
 ) (*statussummary.TaskStatusSummary, error) {
 	for attempt := 0; attempt < maxSummaryReconcileAttempts && current != nil; attempt++ {
-		activityNeedsRepair := activityObserved &&
-			(authoritativeActivity.After(time.Time{}) &&
-				(current.LastActivityAt == nil || authoritativeActivity.After(*current.LastActivityAt)))
-		if current.PendingAction == pendingAction && !activityNeedsRepair {
+		if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved) {
 			return current, nil
 		}
 		if err := prepareSummaryReconcileAttempt(ctx, attempt, current.Revision); err != nil {
@@ -271,35 +268,61 @@ func (s *Service) reconcileExistingSummary(
 			s.publishReconciledSummary(ctx, task, next)
 			return &next, nil
 		}
-		rows, err := s.statusSummaries.LoadTaskStatusSummaries(ctx, []string{task.ID})
+		current, pendingAction, err = s.reloadSummaryReconcileState(ctx, task.ID)
 		if err != nil {
-			return nil, fmt.Errorf("reload after compare-and-set rejection: %w", err)
+			return nil, err
 		}
-		current = rows[task.ID]
 		if current == nil {
 			return nil, nil
 		}
-		if s.sessions == nil {
-			return nil, errors.New("reload sessions: session repository unavailable")
-		}
-		refreshedSessions, err := s.sessions.ListTaskSessions(ctx, task.ID)
-		if err != nil {
-			return nil, fmt.Errorf("reload sessions: %w", err)
-		}
-		pendingBySession, err := s.GetPendingActionsForSessions(ctx, taskSessionIDs(refreshedSessions))
-		if err != nil {
-			return nil, fmt.Errorf("reload pending actions: %w", err)
-		}
-		pendingAction = pendingActionForTask(refreshedSessions, pendingBySession)
 	}
-	activityNeedsRepair := activityObserved &&
-		(authoritativeActivity.After(time.Time{}) &&
-			(current != nil && (current.LastActivityAt == nil || authoritativeActivity.After(*current.LastActivityAt))))
-	if current != nil && current.PendingAction == pendingAction && !activityNeedsRepair {
+	if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved) {
 		return current, nil
 	}
 	s.logSummaryReconcileExhaustion(task.ID, current)
 	return nil, errors.New("exhausted compare-and-set retries")
+}
+
+func summaryNeedsReconcile(
+	current *statussummary.TaskStatusSummary,
+	pendingAction string,
+	authoritativeActivity time.Time,
+	activityObserved bool,
+) bool {
+	if current == nil {
+		return false
+	}
+	if current.PendingAction != pendingAction {
+		return true
+	}
+	return activityObserved && authoritativeActivity.After(time.Time{}) &&
+		(current.LastActivityAt == nil || authoritativeActivity.After(*current.LastActivityAt))
+}
+
+func (s *Service) reloadSummaryReconcileState(
+	ctx context.Context,
+	taskID string,
+) (*statussummary.TaskStatusSummary, string, error) {
+	rows, err := s.statusSummaries.LoadTaskStatusSummaries(ctx, []string{taskID})
+	if err != nil {
+		return nil, "", fmt.Errorf("reload after compare-and-set rejection: %w", err)
+	}
+	current := rows[taskID]
+	if current == nil {
+		return nil, "", nil
+	}
+	if s.sessions == nil {
+		return nil, "", errors.New("reload sessions: session repository unavailable")
+	}
+	refreshedSessions, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, "", fmt.Errorf("reload sessions: %w", err)
+	}
+	pendingBySession, err := s.GetPendingActionsForSessions(ctx, taskSessionIDs(refreshedSessions))
+	if err != nil {
+		return nil, "", fmt.Errorf("reload pending actions: %w", err)
+	}
+	return current, pendingActionForTask(refreshedSessions, pendingBySession), nil
 }
 
 func maxSummaryActivity(current *time.Time, candidate time.Time) *time.Time {
@@ -589,6 +612,9 @@ func gitSummaryFromSnapshot(snapshot *models.GitSnapshot) statussummary.GitSumma
 func changedFilesFromSnapshot(snapshot *models.GitSnapshot) int {
 	if snapshot == nil {
 		return 0
+	}
+	if _, ok := snapshot.Metadata["changed_files"]; ok {
+		return nonNegative(snapshot.Metadata, "changed_files")
 	}
 	count := 0
 	for _, key := range []string{"modified", "added", "deleted", "untracked", "renamed"} {

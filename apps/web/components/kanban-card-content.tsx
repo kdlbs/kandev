@@ -316,16 +316,26 @@ export function renderTaskStatusIcon(
   const showPermissionIcon = shouldUsePermissionTaskIcon(hasPendingPermission);
   const needsMe = showQuestionIcon || showPermissionIcon;
   const showInterrupted = !!task.interrupted;
+  const showAutoStartFailed = !!task.autoStartFailed;
   const hasActivity =
     task.foregroundActivity === "generating" || task.foregroundActivity === "background";
-  if (!showRunningSpinner && !needsMe && !hasActivity && !showInterrupted) {
+  if (!showRunningSpinner && !needsMe && !hasActivity && !showInterrupted && !showAutoStartFailed) {
     return null;
   }
   // A "needs me" prompt (pending clarification / permission) must not be masked
   // by the launch-spinner short-circuit — a mid-turn prompt can coincide with a
   // coarse running state. Live foreground activity still wins, handled inside
-  // getTaskStateIcon.
-  if (showRunningSpinner && !needsMe && task.foregroundActivity !== "background") {
+  // getTaskStateIcon. A failed auto-start must not be masked either: startTask
+  // sets the task to SCHEDULING before the launch, so a launch failure before
+  // session creation leaves a session-less SCHEDULING/IN_PROGRESS task, which
+  // reads as showRunningSpinner=true — the exact shape the failure marker exists
+  // to surface.
+  if (
+    showRunningSpinner &&
+    !needsMe &&
+    !showAutoStartFailed &&
+    task.foregroundActivity !== "background"
+  ) {
     return <IconLoader2 className="h-4 w-4 text-blue-500 animate-spin" />;
   }
   return getTaskStateIcon(task.state, "h-4 w-4", {
@@ -333,6 +343,7 @@ export function renderTaskStatusIcon(
     foregroundActivity: task.foregroundActivity,
     hasPendingPermission,
     interrupted: showInterrupted,
+    autoStartFailed: showAutoStartFailed,
   });
 }
 

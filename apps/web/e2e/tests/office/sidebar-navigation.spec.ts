@@ -63,9 +63,9 @@ test.describe("Sidebar navigation", () => {
     // link asserted above; both are intentional entry points to /office/tasks.
     await testPage.getByRole("link", { name: /Tasks In Progress/i }).click();
     // Scope the heading assertion to the page content (`<main>` in the office
-    // layout). The unified AppSidebar's collapsible "Tasks" section header also
-    // exposes the accessible text "Tasks", so an unscoped role=heading/text
-    // match could be ambiguous against the global rail.
+    // shell's page content). The unified AppSidebar's collapsible "Tasks"
+    // section header also exposes the accessible text "Tasks", so an unscoped
+    // role=heading/text match could be ambiguous against the global rail.
     await expect(
       testPage.locator("main").getByRole("heading", { name: /Tasks/i }).first(),
     ).toBeVisible({

@@ -58,6 +58,11 @@ func (e *Executor) EnsureSessionForAgentWithCreation(
 	if agentProfileID == "" {
 		return nil, false, ErrNoAgentProfileID
 	}
+	if err := e.PreflightManagedGitCredentials(
+		ctx, task.WorkspaceID, task.ID, executorID, executorProfileID,
+	); err != nil {
+		return nil, false, err
+	}
 
 	existing, err := e.repo.GetTaskSessionByTaskAndAgent(ctx, task.ID, agentInstanceID)
 	if err != nil {

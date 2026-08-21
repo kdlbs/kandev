@@ -10,6 +10,12 @@ import {
 
 type KanbanTask = KanbanState["tasks"][number];
 
+// Split out so the snapshot->task mapper (already at the complexity limit
+// from its long list of `??` fallbacks) doesn't need to absorb one more.
+function resolveAutoStartFailed(task: WorkflowSnapshot["tasks"][number]): boolean {
+  return task.auto_start_failed ?? false;
+}
+
 export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
   // Handle empty snapshot (ephemeral tasks have no workflow)
   if (!snapshot.workflow) {
@@ -38,6 +44,16 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         autopilot: task.autopilot ?? false,
         position: task.position ?? 0,
         state: task.state,
+        // Preserve WIP admission and queue metadata during HTTP snapshot
+        // refreshes. The Go boot mapper, WebSocket handler, and canonical
+        // task mapper already carry these fields. This path must keep the
+        // same values so queue classification and ordering stay consistent
+        // after a workflow switch or reconnect.
+        priority: task.priority,
+        createdAt: task.created_at,
+        wipAdmitted: task.wip_admitted,
+        queuedForStepId: task.queued_for_step_id,
+        queuedAt: task.queued_at,
         repositoryId: primary?.repository_id ?? undefined,
         repositories: task.repositories?.map((r) => ({
           id: r.id,
@@ -51,6 +67,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         primarySessionPendingAction: pickPendingAction(task.primary_session_pending_action),
         taskPendingAction: pickPendingAction(task.task_pending_action),
         foregroundActivity: task.foreground_activity ?? undefined,
+        autoStartFailed: resolveAutoStartFailed(task),
         activeSubagentCount: task.active_subagent_count ?? undefined,
         sessionCount: task.session_count ?? undefined,
         reviewStatus: task.review_status ?? undefined,
@@ -113,6 +130,7 @@ export function taskToState(
             metaBySession: {
               [resolvedSessionId]: {
                 isLoading: false,
+                isLoadingMore: false,
                 hasMore: messages.hasMore ?? false,
                 oldestCursor: messages.oldestCursor ?? messages.items[0]?.id ?? null,
               },

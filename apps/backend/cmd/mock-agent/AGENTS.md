@@ -62,10 +62,10 @@ The acp-go-sdk has no `WithStartMeta`/`WithUpdateMeta`. To reproduce claude-agen
 
 ## Rebuild before running e2e (easy to miss)
 
-The web e2e suite runs the **prebuilt host binary** `apps/backend/bin/mock-agent` (resolved via `PATH`); the `containers` project additionally uses `bin/mock-agent-linux-amd64`. `global-setup.ts` only checks the binary **exists**, not that it's current — so a stale binary silently runs the OLD behavior and your new scenario/edit won't take effect. After changing anything under `cmd/mock-agent`:
+The web e2e suite runs the **prebuilt host binary** `apps/backend/bin/mock-agent` (resolved via `PATH`). The `containers` project also uses `bin/mock-agent-linux-amd64`. `global-setup.ts` checks that each required artifact exists and is newer than the backend source tree. After changing anything under `cmd/mock-agent`:
 
 ```bash
-make -C apps/backend build-mock-agent          # host binary (default suite)
+make -C apps/backend build                     # host backend and mock agent
 make -C apps/backend build-mock-agent-linux    # only for the `containers` project
 ```
 

@@ -818,13 +818,6 @@ func (m *Manager) initializeCreatedExecution(
 	// observe a half-initialised resume intent.
 	applyResumeIntent(execution, preparation.request)
 
-	// Cache only agent-profile values for the best-effort configure fallback.
-	// The effective runtime snapshot (including repository secrets) is already
-	// captured by ToAgentExecution and must not be mislabeled as profile data.
-	if preparation.profileInfo != nil && len(preparation.profileInfo.EnvVars) > 0 {
-		m.cacheResolvedProfileEnv(execution, m.resolveAgentProfileEnvVars(ctx, preparation.profileInfo.EnvVars))
-	}
-
 	if info.ACPSessionID != "" {
 		execution.ACPSessionID = info.ACPSessionID
 	}

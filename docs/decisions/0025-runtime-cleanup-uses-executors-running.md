@@ -1,8 +1,16 @@
 # 0025: Runtime Cleanup Uses `executors_running`
 
-**Status:** accepted (amended 2026-07-06 — see "Update")
+**Status:** accepted (amended 2026-08-20 — see "Update")
 **Date:** 2026-06-22
 **Area:** backend
+
+## Update (2026-08-20, #2836 idle-session-reaper)
+
+The event path remains primary. Startup reconciliation and a bounded periodic
+reaper now provide recovery when an event is lost while Kandev is running. The
+reaper selects old, non-stopped rows and delegates to the same fail-closed
+reclaim primitive. Execution identity and row timestamps are checked before
+cleanup and repair, so a successor launch cannot be stopped by stale work.
 
 ## Update (2026-07-06, #1597 executor-row-desync)
 
@@ -10,16 +18,13 @@ This decision **stays**: `executors_running` remains the authoritative durable
 runtime inventory. It was made *trustworthy* rather than reverted. Three
 clarifications now hold:
 
-- **Events are the primary producer; startup reconciliation heals what events
-  cannot.** Every lifecycle transition writes the row (launch, boot-ready,
-  turn-complete, cancel, process-exit/crash, stop), populating a host-local
-  liveness handle (`executors_running.local_pid`) for local/standalone rows. A
-  startup pass repairs rows whose process is confirmed dead and prunes only
-  terminal ones — a backend restart is exactly the moment events could not
-  have fired. A periodic in-run polling pass was prototyped and deliberately
-  not merged: it defended against failure modes (OOM kill, dropped event)
-  that have not been observed, and polling never updates a row the moment an
-  event could.
+- **Events are the primary producer; reconciliation heals what events cannot.**
+  Every lifecycle transition writes the row (launch, boot-ready, turn-complete,
+  cancel, process-exit/crash, stop), populating a host-local liveness handle
+  (`executors_running.local_pid`) for local/standalone rows. Startup
+  reconciliation repairs rows after a backend restart. The periodic reaper
+  covers lost events during normal uptime and uses the same guarded reclaim
+  policy; neither recovery path replaces event-driven updates.
 - **`local_pid` is a NEW column, deliberately not the existing `pid`.**
   `executors_running.pid` holds the agentctl PID *on the remote host* for SSH
   rows; overloading it with a host-local pid would silently change that

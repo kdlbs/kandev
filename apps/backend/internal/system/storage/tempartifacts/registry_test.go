@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/proclive"
 	"github.com/kandev/kandev/internal/system/storage"
 )
 
@@ -116,7 +117,7 @@ func TestRegistryReconcilesPreviousRunsAndDeadOwners(t *testing.T) {
 		t.Fatalf("create current-run artifact: %v", err)
 	}
 	deadPID := int64(os.Getpid()) + 1_000_000
-	alive, known := processAlive(deadPID)
+	alive, known := proclive.Alive(deadPID)
 	canCheckDead := known && !alive
 	if canCheckDead {
 		store.artifacts[filepath.Join(root, "kandev-host-utility-dead")] = storage.TemporaryArtifact{

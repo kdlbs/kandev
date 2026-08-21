@@ -50,8 +50,9 @@ without losing content.
   Space/Enter plus the arrow keys moves the row, matching the platform's
   sortable-list convention.
 - Reordering changes nothing else: merge, edit, Remove, Send Now, FIFO
-  auto-drain, and capacity semantics are unchanged. Send Now **all** and
-  FIFO drain dispatch in the current (reordered) order.
+  Auto-run, and capacity semantics are unchanged. When Auto-run next takes an
+  entry, it uses the new FIFO head. Protocol-level Send Now **all** and FIFO
+  drain dispatch in the current reordered order.
 
 ## API Surface
 
@@ -189,8 +190,8 @@ transaction uncommitted and the previous order intact.
   shows the localized "failed to reorder" toast.
 - **GIVEN** a queue containing user, agent, workflow, and system rows, **WHEN**
   the user drags any of them, **THEN** the row moves to the dropped position.
-- **GIVEN** a reordered queue and the user clicks Send Now **all**, **THEN**
-  the bulk prompt concatenates the bodies in the reordered FIFO order.
+- **GIVEN** a reordered queue and a protocol client invokes Send Now **all**,
+  **THEN** the bulk prompt concatenates the bodies in reordered FIFO order.
 - **GIVEN** a phone viewport with queued messages, **WHEN** the user opens
   the queue panel, **THEN** every row shows an always-visible touch-sized
   handle attached flush to the box's left edge and painted behind the row
@@ -207,4 +208,5 @@ transaction uncommitted and the previous order intact.
   reordering is covered by the sortable keyboard sensor).
 - Reordering hidden reserved in-flight rows.
 - Cross-session or cross-task reordering.
-- Changing merge, edit, Remove, Send Now, FIFO drain, or capacity semantics.
+- Changing merge, edit, Remove, Send Now, Auto-run, FIFO drain, or capacity
+  semantics.

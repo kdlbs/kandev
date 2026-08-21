@@ -128,6 +128,7 @@ func TestSteerTask_OrderRuleQueuesBehindPending(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.config.ClaudeMidTurnSteering = true
+	svc.messageQueue.SetMergeEnabled(false)
 	eventBus := &recordingEventBus{}
 	svc.eventBus = eventBus
 
@@ -141,6 +142,9 @@ func TestSteerTask_OrderRuleQueuesBehindPending(t *testing.T) {
 
 	if _, err := svc.messageQueue.QueueMessage(ctx, sessionID, taskID, "queued first", "", "", false, nil); err != nil {
 		t.Fatalf("seed queued message: %v", err)
+	}
+	if err := svc.messageQueue.SetAutoRun(ctx, sessionID, false); err != nil {
+		t.Fatalf("pause queue auto-run: %v", err)
 	}
 
 	result, err := svc.SteerTask(ctx, taskID, sessionID, "steer second", "", false, nil)
@@ -171,6 +175,12 @@ func TestSteerTask_OrderRuleQueuesBehindPending(t *testing.T) {
 	}
 	if eventData["count"] != 2 {
 		t.Fatalf("queue status event count = %v, want 2", eventData["count"])
+	}
+	if eventData["auto_run"] != false {
+		t.Fatalf("queue status event auto_run = %v, want false", eventData["auto_run"])
+	}
+	if eventData["merge_enabled"] != false {
+		t.Fatalf("queue status event merge_enabled = %v, want false", eventData["merge_enabled"])
 	}
 	if _, inFlight := svc.steerInFlight.Load(sessionID); inFlight {
 		t.Fatal("declined steer left an in-flight slot claimed")

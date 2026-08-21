@@ -484,6 +484,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 
 	execution := &AgentExecution{
 		ID:                   ri.InstanceID,
+		RunID:                req.Env["KANDEV_RUN_ID"],
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
 		TaskEnvironmentID:    req.TaskEnvironmentID,

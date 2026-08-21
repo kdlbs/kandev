@@ -31,6 +31,25 @@ type Repository interface {
 	// SQLite implementations make that check and queue mutation one transaction.
 	InsertOrReplaceLifecycleByCoalesceKey(ctx context.Context, msg *QueuedMessage, coalesceKey string, maxPerSession int, allowInsert bool) (*QueuedMessage, bool, error)
 
+	// RequeuePreservingFIFO re-enqueues an entry, preserving both FIFO order
+	// across the supersede→requeue cycle AND coalesce-replace semantics on
+	// the original retry. Used by Service.requeueMessage when a queued
+	// dispatch was superseded by a newer dispatch before it could be
+	// claimed — without this hook the requeue landed at MAX+1 (tail) and a
+	// busy session could starve the original message indefinitely.
+	//
+	// Decision under the lock:
+	//   - existing entry with same (session_id, queued_by, coalesce_key)
+	//     → replace in place (preserves position; coalesce semantics
+	//       expected by lifecycle / CI-feedback retries)
+	//   - empty queue                → msg.Position = 1, msg.ID assigned
+	//   - non-empty queue, no match  → insert before the current head
+	//
+	// If the head position is already 1, implementations shift the existing
+	// positions up before inserting. Queue positions stay positive so session
+	// transfer and later queue mutations keep their ordering invariants.
+	RequeuePreservingFIFO(ctx context.Context, msg *QueuedMessage) error
+
 	// LifecycleGeneration returns the current archive/delete generation for a
 	// task. Lifecycle insertion verifies this generation atomically.
 	LifecycleGeneration(ctx context.Context, taskID string) (int64, error)
@@ -60,6 +79,23 @@ type Repository interface {
 	// atomically deleted, matching TakeHead. Durable lifecycle entries remain
 	// stored until AcknowledgeByID is called after executor acceptance.
 	ReserveHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
+
+	// GetAutoRun returns the durable per-session automatic-drain policy. Missing
+	// state defaults to true so existing sessions retain their current behavior.
+	GetAutoRun(ctx context.Context, sessionID string) (bool, error)
+
+	// SetAutoRun persists the per-session automatic-drain policy independently
+	// of queue contents.
+	SetAutoRun(ctx context.Context, sessionID string, enabled bool) error
+
+	// PauseAutoRunIfPending atomically persists OFF only when at least one
+	// visible pending entry remains. Reserved lifecycle rows do not count.
+	PauseAutoRunIfPending(ctx context.Context, sessionID string) (bool, error)
+
+	// ReserveHeadIfAutoRun reads the policy and reserves the FIFO head in one
+	// per-session transaction. The returned bool is false only when Auto-run is
+	// OFF; nil with true means the enabled queue is empty.
+	ReserveHeadIfAutoRun(ctx context.Context, sessionID string) (*QueuedMessage, bool, error)
 
 	// AcknowledgeByID is an internal dispatch operation that removes a reserved
 	// entry regardless of its server-owned queued_by identity.

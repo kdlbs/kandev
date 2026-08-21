@@ -40,12 +40,46 @@ export function useRunLiveSync(
 ): { events: RunEvent[]; status: Status } {
   const [events, setEvents] = useState<RunEvent[]>(initialEvents);
   const [status, setStatus] = useState<Status>(initialStatus);
+  // Live-event dedup only: seqs of events already appended over the WS (plus
+  // the seqs of the mount-time snapshot, so a reconnect replay of a
+  // snapshot-covered event cannot double-insert). Never reset to a snapshot:
+  // doing so erases live events on a fresh-but-unchanged rerender.
   const seenSeqsRef = useRef<Set<number>>(new Set(initialEvents.map((e) => e.seq)));
+  // Last incoming snapshot, tracked separately from the live dedup set. The
+  // sync decision compares against this, so live-added seqs can never make
+  // an unchanged snapshot look like a content change.
+  const lastSnapshotRef = useRef<{ runId: string; seqs: Set<number> }>({
+    runId,
+    seqs: new Set(initialEvents.map((e) => e.seq)),
+  });
 
   useEffect(() => {
-    seenSeqsRef.current = new Set(initialEvents.map((e) => e.seq));
+    const nextSeqs = new Set(initialEvents.map((e) => e.seq));
+    const prev = lastSnapshotRef.current;
+    if (
+      prev.runId === runId &&
+      prev.seqs.size === nextSeqs.size &&
+      [...nextSeqs].every((seq) => prev.seqs.has(seq))
+    ) {
+      // Same run, same event set as the last incoming snapshot. Skip the state
+      // write so an unstable `initialEvents` reference (a fresh array literal
+      // on every render) cannot feed an endless render->effect cycle, and so a
+      // stale snapshot cannot clobber events appended live over the WS.
+      return;
+    }
+    lastSnapshotRef.current = { runId, seqs: nextSeqs };
+    if (prev.runId === runId) {
+      // Fresh snapshot for the same run: merge it with live-added events and
+      // fold its seqs into the dedup set so reconnect replays cannot duplicate.
+      for (const seq of nextSeqs) seenSeqsRef.current.add(seq);
+      setEvents((current) => mergeRunEvents(current, initialEvents));
+      return;
+    } else {
+      // Different run: restart dedup from the new snapshot; seqs are per-run.
+      seenSeqsRef.current = new Set(nextSeqs);
+    }
     setEvents(initialEvents);
-  }, [initialEvents]);
+  }, [initialEvents, runId]);
 
   useEffect(() => {
     setStatus(initialStatus);
@@ -96,4 +130,14 @@ function mergeRunEvent(prev: RunEvent[], evt: RunEvent): RunEvent[] {
   }
   next.splice(lo, 0, evt);
   return next;
+}
+
+function mergeRunEvents(current: RunEvent[], snapshot: RunEvent[]): RunEvent[] {
+  if (current.length === 0) return snapshot;
+  if (snapshot.length === 0) return current;
+
+  const bySeq = new Map<number, RunEvent>();
+  for (const event of current) bySeq.set(event.seq, event);
+  for (const event of snapshot) bySeq.set(event.seq, event);
+  return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
 }

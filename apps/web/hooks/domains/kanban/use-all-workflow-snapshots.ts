@@ -37,6 +37,14 @@ function hasNewerLiveStatusSummary(
   return existingRevision > (fetchStart.statusSummary?.revision ?? -1);
 }
 
+function hasNewerLiveAutoStartFailed(
+  existing: KanbanTask,
+  fetchStart: KanbanTask | undefined,
+): boolean {
+  if (!fetchStart) return true;
+  return existing.autoStartFailed !== fetchStart.autoStartFailed;
+}
+
 function mergeFetchedTask(
   mapped: KanbanTask,
   existing: KanbanTask,
@@ -73,6 +81,11 @@ function mergeFetchedTask(
   // Autopilot is immutable after creation. Keep the cached value when
   // an older or partial snapshot does not include the field.
   mapped.autopilot = mapped.autopilot ?? existing.autopilot;
+  // A task.updated event can set or clear this marker while the snapshot is
+  // in flight. Preserve that newer live value instead of rolling it back.
+  if (mapped.autoStartFailed === undefined || hasNewerLiveAutoStartFailed(existing, fetchStart)) {
+    mapped.autoStartFailed = existing.autoStartFailed;
+  }
   return mapped;
 }
 

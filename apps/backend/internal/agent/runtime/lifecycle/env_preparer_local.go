@@ -87,7 +87,14 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 	if req.WorkspacePath == "" && req.RepositoryPath == "" {
 		completeStepError(&step, "no workspace or repository path provided")
 		steps = append(steps, step)
-		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: step.Error, Duration: time.Since(start)}, fmt.Errorf("no workspace path")
+		prepErr := fmt.Errorf("no workspace path")
+		return &EnvPrepareResult{
+			Success:      false,
+			Steps:        steps,
+			ErrorMessage: step.Error,
+			Duration:     time.Since(start),
+			Error:        prepErr,
+		}, prepErr
 	}
 	completeStepSuccess(&step)
 	steps = append(steps, step)
@@ -124,7 +131,14 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 				completeStepError(&step, errMsg)
 				steps = append(steps, step)
 				reportProgress(onProgress, step, stepIdx, totalSteps)
-				return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: errMsg, Duration: time.Since(start)}, fmt.Errorf("checkout branch: %w", err)
+				prepErr := fmt.Errorf("checkout branch: %w", err)
+				return &EnvPrepareResult{
+					Success:      false,
+					Steps:        steps,
+					ErrorMessage: errMsg,
+					Duration:     time.Since(start),
+					Error:        prepErr,
+				}, prepErr
 			}
 			step.Output = output
 			completeStepSuccess(&step)

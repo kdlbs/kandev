@@ -168,11 +168,13 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	oldNewSupervisor := newSupervisorFn
 	oldLaunchBackend := launchBackendFn
 	oldAttachSignals := attachSignalsFn
+	oldStartParentWatch := startParentWatchFn
 	oldWaitForHealth := waitForHealthFn
 	t.Cleanup(func() {
 		newSupervisorFn = oldNewSupervisor
 		launchBackendFn = oldLaunchBackend
 		attachSignalsFn = oldAttachSignals
+		startParentWatchFn = oldStartParentWatch
 		waitForHealthFn = oldWaitForHealth
 	})
 
@@ -201,6 +203,10 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	attachSignalsFn = func(_ *processSupervisor) {
 		events = append(events, "attach-signals")
 	}
+	startParentWatchFn = func(_ *processSupervisor) *parentWatchdog {
+		events = append(events, "start-parent-watch")
+		return newParentWatchdog(0, nil, nil)
+	}
 	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, expectedToken string, _ func()) error {
 		waitedHealthToken = expectedToken
 		events = append(events, "wait-health")
@@ -222,7 +228,7 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("runManagedApp() = %d, want 0", code)
 	}
-	want := []string{"new-supervisor", "attach-signals", "launch-backend", "wait-health"}
+	want := []string{"new-supervisor", "attach-signals", "start-parent-watch", "launch-backend", "wait-health"}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %v, want %v", events, want)
 	}

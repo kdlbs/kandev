@@ -12,6 +12,7 @@ import (
 var managedGitCredentialBrokerEnvKeys = []string{
 	githubauth.CredentialBrokerURLEnv,
 	githubauth.CredentialLeaseEnv,
+	githubauth.CredentialReissueCapabilityEnv,
 	githubauth.CredentialTaskIDEnv,
 	githubauth.CredentialSessionIDEnv,
 	githubauth.CredentialRepositoryEnv,

@@ -688,7 +688,7 @@ function handleCancellationPendingMessage(
 }
 
 /** Writes a message.queue.status_changed broadcast into the queue slice,
- * defaulting count/max/mergeEnabled when the backend omits them. */
+ * preserving known policy values when an older publisher omits them. */
 function handleQueueStatusChangedMessage(
   store: StoreApi<AppState>,
   payload: QueueStatusChangedPayload,
@@ -700,8 +700,16 @@ function handleQueueStatusChangedMessage(
   const entries = payload.entries ?? [];
   const count = typeof payload.count === "number" ? payload.count : entries.length;
   const max = typeof payload.max === "number" ? payload.max : 0;
-  const mergeEnabled = typeof payload.merge_enabled === "boolean" ? payload.merge_enabled : true;
-  store.getState().setQueueEntries(payload.session_id, entries, { count, max, mergeEnabled });
+  const previousMeta = store.getState().queue.metaBySessionId[payload.session_id];
+  const mergeEnabled =
+    typeof payload.merge_enabled === "boolean"
+      ? payload.merge_enabled
+      : (previousMeta?.mergeEnabled ?? true);
+  const autoRun =
+    typeof payload.auto_run === "boolean" ? payload.auto_run : (previousMeta?.autoRun ?? true);
+  store
+    .getState()
+    .setQueueEntries(payload.session_id, entries, { count, max, mergeEnabled, autoRun });
 }
 
 /** Registers the task-session WebSocket handlers (state, messages, workspace sources, queue). */

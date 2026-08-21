@@ -100,3 +100,108 @@
   font-style: normal;
   font-display: swap;
 }
+
+/* Powerline separators and Nerd Font icons, as carried by text copied from a
+   styled terminal prompt (Oh-My-Posh, Starship), live in the Unicode Private
+   Use Area. PUA codepoints have no script or language association, so the
+   platform's font-matching cannot resolve them the way it resolves CJK or
+   emoji. They render as notdef boxes unless a covering font is named
+   explicitly.
+
+   Separate local and bundled faces preserve per-character fallback. The first
+   installed source wins for the local face. If it lacks one PUA glyph, the
+   browser can continue to the bundled family instead of being trapped in one
+   `src` list. `unicode-range` confines both faces to the PUA, so every other
+   character still uses the UI typeface. Families mirror the presets in
+   `lib/terminal/terminal-font.ts`.
+
+   Every entry is a full font name or a PostScript name. `local()` does not
+   match a family name alone. The aliases below come from the regular faces in
+   Nerd Fonts v3.5.0; both names are listed where the full and PostScript
+   forms differ. Powerlevel10k ships MesloLGS with full name "MesloLGS NF
+   Regular" and PostScript name "MesloLGS-NF-Regular", so both distribution
+   aliases are listed too. Only patched faces are listed because an unrelated
+   local PUA glyph could otherwise preempt the intended bundled glyph. */
+@font-face {
+  font-family: "NerdFontLocalGlyphs";
+  src:
+    local("Symbols Nerd Font"), local("SymbolsNF"), local("MesloLGS Nerd Font Regular"),
+    local("MesloLGSNF-Regular"), local("MesloLGS NF Regular"), local("MesloLGS-NF-Regular"),
+    local("MesloLGM Nerd Font Regular"), local("MesloLGMNF-Regular"),
+    local("MesloLGL Nerd Font Regular"), local("MesloLGLNF-Regular"),
+    local("CaskaydiaCove NF Regular"), local("CaskaydiaCoveNF-Regular"),
+    local("CaskaydiaMono NF Regular"), local("CaskaydiaMonoNF-Regular"),
+    local("JetBrainsMono NF Regular"), local("JetBrainsMonoNF-Regular"),
+    local("FiraCode Nerd Font Reg"), local("FiraCodeNF-Reg"), local("Hack Nerd Font Regular"),
+    local("HackNF-Regular"), local("Iosevka NF"), local("IosevkaNF"), local("IosevkaTerm NF"),
+    local("IosevkaTermNF"), local("SauceCodePro NF"), local("SauceCodeProNF"),
+    local("UbuntuMono Nerd Font"), local("UbuntuMonoNF"), local("RobotoMono Nerd Font"),
+    local("RobotoMonoNF"), local("DejaVuSansM Nerd Font"), local("DejaVuSansMNF"),
+    local("3270 Nerd Font"), local("3270NF"), local("Agave Nerd Font Regular"),
+    local("AgaveNF-Regular"), local("AnonymicePro Nerd Font"), local("AnonymiceProNF"),
+    local("Arimo Nerd Font Regular"), local("ArimoNF-Regular"),
+    local("AurulentSansM Nerd Font Regular"), local("AurulentSansMNF-Regular"),
+    local("BigBlueTerm437 Nerd Font"), local("BigBlueTerm437NF"), local("BitstromWera Nerd Font"),
+    local("BitstromWeraNF"), local("BlexMono Nerd Font"), local("BlexMonoNF"),
+    local("CodeNewRoman Nerd Font"), local("CodeNewRomanNF"), local("ComicShannsMono Nerd Font"),
+    local("ComicShannsMonoNF"), local("CommitMono Nerd Font"), local("CommitMonoNF"),
+    local("Cousine Nerd Font Regular"), local("CousineNF-Regular"),
+    local("D2KodingLigature Nerd Font"), local("D2KodingLigatureNF"),
+    local("DaddyTimeMono Nerd Font"), local("DaddyTimeMonoNF"), local("DroidSansM Nerd Font"),
+    local("DroidSansMNF"), local("EnvyCodeR Nerd Font"), local("EnvyCodeRNF"),
+    local("FantasqueSansM Nerd Font Regular"), local("FantasqueSansMNF-Regular"),
+    local("FiraMono Nerd Font Regular"), local("FiraMonoNF-Regular"), local("GeistMono NF"),
+    local("GeistMonoNF"), local("GoMono Nerd Font"), local("GoMonoNF"),
+    local("GohuFont 11 Nerd Font"), local("GohuFont11NF"), local("GohuFont 14 Nerd Font"),
+    local("GohuFont14NF"), local("GohuFont uni11 Nerd Font"), local("GohuFontUni11NF"),
+    local("GohuFont uni14 Nerd Font"), local("GohuFontUni14NF"), local("Hasklug Nerd Font"),
+    local("HasklugNF"), local("HeavyData Nerd Font"), local("HeavyDataNF"),
+    local("Hurmit Nerd Font"), local("HurmitNF"), local("iMWritingMono Nerd Font"),
+    local("IMWritingMonoNF"), local("Inconsolata Nerd Font Regular"),
+    local("InconsolataNF-Regular"), local("InconsolataGo Nerd Font"), local("InconsolataGoNF"),
+    local("Inconsolata LGC Nerd Font"), local("InconsolataLGCNF"), local("IntoneMono NF"),
+    local("IntoneMonoNF"), local("Lekton Nerd Font"), local("LektonNF"),
+    local("LiterationMono Nerd Font"), local("LiterationMonoNF"), local("Lilex Nerd Font Regular"),
+    local("LilexNF-Regular"), local("MartianMono NF"), local("MartianMonoNF"),
+    local("MonaspiceAr NF"), local("MonaspiceArNF"), local("MonaspiceKr NF"),
+    local("MonaspiceKrNF"), local("MonaspiceNe NF"), local("MonaspiceNeNF"),
+    local("MonaspiceRn NF"), local("MonaspiceRnNF"), local("MonaspiceXe NF"),
+    local("MonaspiceXeNF"), local("Monofur Nerd Font"), local("MonofurNF"),
+    local("Monoid Nerd Font Regular"), local("MonoidNF-Regular"),
+    local("Mononoki Nerd Font Regular"), local("MononokiNF-Regular"), local("M+1 Nerd Font"),
+    local("M+1NF"), local("M+2 Nerd Font"), local("M+2NF"), local("M+1Code Nerd Font"),
+    local("M+1CodeNF"), local("M+CodeLat50 Nerd Font"), local("M+CodeLat50NF"),
+    local("M+CodeLat60 Nerd Font"), local("M+CodeLat60NF"), local("NotoMono NF"),
+    local("NotoMonoNF"), local("OpenDyslexicM Nerd Font"), local("OpenDyslexicMNF"),
+    local("Overpass Nerd Font Reg"), local("OverpassNF-Reg"), local("OverpassM Nerd Font Reg"),
+    local("OverpassMNF-Reg"), local("ProFont IIx Nerd Font"), local("ProFontIIxNF"),
+    local("ProFontWindows Nerd Font"), local("ProFontWindowsNF"), local("ProggyClean Nerd Font"),
+    local("ProggyCleanNF"), local("ProggyClean CE Nerd Font"), local("ProggyCleanCENF"),
+    local("ProggyCleanSZ Nerd Font"), local("ProggyCleanSZNF"), local("RecMonoCasual Nerd Font"),
+    local("RecMonoCasualNF"), local("RecMonoDuotone Nerd Font"), local("RecMonoDuotoneNF"),
+    local("RecMonoLinear Nerd Font"), local("RecMonoLinearNF"), local("RecMonoSmCasual Nerd Font"),
+    local("RecMonoSmCasualNF"), local("ShureTechMono Nerd Font"), local("ShureTechMonoNF"),
+    local("SpaceMono Nerd Font"), local("SpaceMonoNF"), local("Terminess Nerd Font"),
+    local("TerminessNF"), local("Tinos Nerd Font"), local("TinosNF"), local("UbuntuSans NF"),
+    local("UbuntuSansNF"), local("UbuntuSansMono NF"), local("UbuntuSansMonoNF"),
+    local("VictorMono NF Regular"), local("VictorMonoNF-Regular"), local("ZedMono NF"),
+    local("ZedMonoNF");
+  unicode-range: U+E000-F8FF, U+F0000-FFFFD, U+100000-10FFFD;
+  /* Powerline separators fill a full terminal cell, so their ink is ~1.99x
+     the cap height of the proportional UI face at the same font size.
+     Measured: 133 vs 67 at 100px. Scale them to roughly 1em so they read as
+     inline glyphs rather than oversized blocks. Applies only to this face,
+     which serves the Private Use Area alone. */
+  size-adjust: 75%;
+}
+
+@font-face {
+  font-family: "NerdFontBundledGlyphs";
+  src: url("/fonts/nerd-symbols/nerd-symbols-subset-bca747e8.woff2") format("woff2");
+  /* Match the subset's actual cmap. A broad PUA range would download the file
+     for unsupported glyphs and still render a notdef box. */
+  unicode-range:
+    U+E0A0-E0A3, U+E0B0-E0C8, U+E0CA, U+E0CC-E0D2, U+E0D4, U+E5FA-E6B7, U+E700-E8EF, U+F400-F533;
+  size-adjust: 75%;
+  font-display: swap;
+}

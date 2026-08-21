@@ -150,7 +150,7 @@ type InFlightMessageRequest = {
 };
 
 const EMPTY_MESSAGES: Message[] = [];
-const EMPTY_META = { isLoading: false, hasMore: false, oldestCursor: null };
+const EMPTY_META = { isLoading: false, isLoadingMore: false, hasMore: false, oldestCursor: null };
 const inFlightMessageRequests = new Map<string, InFlightMessageRequest>();
 
 /** Debug-only summary of a fetch response (no-op unless debug logging is on). */

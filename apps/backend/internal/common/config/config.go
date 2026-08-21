@@ -51,7 +51,8 @@ type Config struct {
 // used by managed remote executors. It is independent of GitHub App setup so
 // PAT and named gh CLI workspaces can use remote executors.
 type GitHubCredentialBrokerConfig struct {
-	PublicBaseURL string `mapstructure:"publicBaseUrl" json:"-"`
+	PublicBaseURL     string `mapstructure:"publicBaseUrl" json:"-"`
+	ReissueSigningKey string `mapstructure:"reissueSigningKey" json:"-"`
 }
 
 func (c GitHubCredentialBrokerConfig) validate() error {
@@ -340,8 +341,12 @@ type AuthConfig struct {
 	// is extended whenever it is used with less than TTL-24h remaining.
 	SessionTTLHours int `mapstructure:"sessionTTLHours"`
 
-	// CookieName is the session cookie name. Only override for unusual
-	// reverse-proxy setups that need distinct cookie names per instance.
+	// CookieName is the session cookie base name. Empty (the default) means
+	// the service uses the "kandev_session" base and port-scopes it from the
+	// request host, isolating instances on one host (see
+	// auth.Service.CookieNameForRequest). Only override for unusual
+	// reverse-proxy setups that need a fixed cookie name; a custom value is
+	// used verbatim (never port-suffixed) and disables automatic isolation.
 	CookieName string `mapstructure:"cookieName"`
 }
 
@@ -537,11 +542,15 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("agent.standaloneHost", "localhost")
 	v.SetDefault("agent.standalonePort", ports.AgentCtl)
 
-	// Auth defaults
+	// Auth defaults. auth.cookieName defaults to empty on purpose: the auth
+	// service keeps the "kandev_session" base fallback internally and
+	// port-scopes it from the request host, so an empty default must not be
+	// seeded with a concrete name or the suffixing would never fire in
+	// production. A non-empty configured value is used verbatim.
 	v.SetDefault("auth.jwtSecret", "")
 	v.SetDefault("auth.tokenDuration", 3600)  // 1 hour
 	v.SetDefault("auth.sessionTTLHours", 720) // 30 days, sliding
-	v.SetDefault("auth.cookieName", "kandev_session")
+	v.SetDefault("auth.cookieName", "")
 
 	// Office defaults
 	v.SetDefault("office.jwtSigningKey", "")
@@ -658,9 +667,16 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("events.namespace", "KANDEV_EVENTS_NAMESPACE")
 	_ = v.BindEnv("debug.devMode", "KANDEV_DEBUG_DEV_MODE")
 	_ = v.BindEnv("debug.pprofEnabled", "KANDEV_DEBUG_PPROF_ENABLED")
+	// camelCase key, so AutomaticEnv would expose the undocumented
+	// KANDEV_AUTH_COOKIENAME; the canonical override is KANDEV_AUTH_COOKIE_NAME.
+	_ = v.BindEnv("auth.cookieName", "KANDEV_AUTH_COOKIE_NAME")
 	_ = v.BindEnv(
 		"githubCredentialBroker.publicBaseUrl",
 		"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL",
+	)
+	_ = v.BindEnv(
+		"githubCredentialBroker.reissueSigningKey",
+		"KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY",
 	)
 
 	// Configure config file

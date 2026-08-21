@@ -69,6 +69,10 @@ type NormalizedPayload struct {
 	// gates on ACP `_meta.claudeCode.toolName` — set by the claude-agent-acp
 	// wrapper, not by model tool output. IsActiveMonitor classifies on this.
 	monitor *MonitorPayload
+	// mcpTool is trusted adapter provenance for a recognized MCP execution.
+	// It stays internal because persistence should contain the canonical tool
+	// name, input, and result rather than transport-specific metadata.
+	mcpTool bool
 }
 
 // --- Getters for NormalizedPayload ---
@@ -85,6 +89,7 @@ func (p *NormalizedPayload) SubagentTask() *SubagentTaskPayload { return p.subag
 func (p *NormalizedPayload) ShowPlan() *ShowPlanPayload         { return p.showPlan }
 func (p *NormalizedPayload) ManageTodos() *ManageTodosPayload   { return p.manageTodos }
 func (p *NormalizedPayload) Misc() *MiscPayload                 { return p.misc }
+func (p *NormalizedPayload) IsMCPTool() bool                    { return p != nil && p.mcpTool }
 
 // Snapshot returns a detached copy of the normalized payload. A snapshot owns
 // every pointer, slice, and JSON-compatible value reachable from the payload so
@@ -108,6 +113,7 @@ func (p *NormalizedPayload) Snapshot() *NormalizedPayload {
 		misc:           cloneMiscPayload(p.misc),
 		backgroundWork: cloneBackgroundWorkPayload(p.backgroundWork),
 		monitor:        cloneMonitorPayload(p.monitor),
+		mcpTool:        p.mcpTool,
 	}
 }
 
@@ -614,6 +620,13 @@ func NewGeneric(name string, input any) *NormalizedPayload {
 			Input: input,
 		},
 	}
+}
+
+// NewMCPTool creates a generic payload with trusted MCP transport provenance.
+func NewMCPTool(name string, input any) *NormalizedPayload {
+	payload := NewGeneric(name, input)
+	payload.mcpTool = true
+	return payload
 }
 
 // NewSubagentTask creates a NormalizedPayload for subagent (Task) tool calls.

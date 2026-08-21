@@ -183,8 +183,10 @@ type proxyAuthGatewayResponse struct {
 
 // proxyAuthGateway issues requests against the full production chain: CORS,
 // auth middleware, gateway routes (requireConnectionAuth + port proxy), a
-// token-enforcing fake agentctl, and the fake app.
-func proxyAuthGateway(t *testing.T, handler http.Handler) func(method, path string, headers map[string]string) proxyAuthGatewayResponse {
+// token-enforcing fake agentctl, and the fake app. It returns the request
+// closure plus the fixture server URL so callers can derive the port-scoped
+// session cookie name for its Host.
+func proxyAuthGateway(t *testing.T, handler http.Handler) (func(method, path string, headers map[string]string) proxyAuthGatewayResponse, string) {
 	t.Helper()
 	srv := httptest.NewUnstartedServer(handler)
 	srv.Config.SetKeepAlivesEnabled(false)
@@ -219,7 +221,23 @@ func proxyAuthGateway(t *testing.T, handler http.Handler) func(method, path stri
 			t.Fatalf("read body for %s: %v", path, err)
 		}
 		return proxyAuthGatewayResponse{status: resp.StatusCode, body: string(body), headers: resp.Header}
+	}, srv.URL
+}
+
+// scopedSessionCookieHeader builds the Cookie header for the gateway fixture's
+// Host (127.0.0.1:<random port>): the session cookie must carry the
+// port-scoped name the auth middleware derives from that request Host.
+func scopedSessionCookieHeader(t *testing.T, srvURL, sessionToken string) map[string]string {
+	t.Helper()
+	u, err := url.Parse(srvURL)
+	if err != nil {
+		t.Fatalf("parse server URL: %v", err)
 	}
+	port := u.Port()
+	if port == "" {
+		t.Fatal("fixture server URL has no port")
+	}
+	return map[string]string{"Cookie": "kandev_session_" + port + "=" + sessionToken}
 }
 
 var manifestLinkPattern = regexp.MustCompile(`href="([^"]*manifest\.webmanifest[^"]*)"`)
@@ -274,8 +292,8 @@ func TestPortProxyServesCredentiallessSubresourcesAfterDocumentAuth(t *testing.T
 	gateway.SetPortProxy(manager)
 	gateway.SetupRoutes(router)
 
-	request := proxyAuthGateway(t, router)
-	cookieHeader := map[string]string{"Cookie": svc.CookieName() + "=" + sessionToken}
+	request, srvURL := proxyAuthGateway(t, router)
+	cookieHeader := scopedSessionCookieHeader(t, srvURL, sessionToken)
 
 	// 1. The document request authenticates with the session cookie.
 	doc := request(http.MethodGet, "/port-proxy/sess-auth/5173/", cookieHeader)
@@ -552,9 +570,9 @@ func TestPortProxyDecompressesAndRewritesCompressedHTML(t *testing.T) {
 	gateway.SetPortProxy(manager)
 	gateway.SetupRoutes(router)
 
-	request := proxyAuthGateway(t, router)
+	request, srvURL := proxyAuthGateway(t, router)
 	headers := map[string]string{
-		"Cookie":          svc.CookieName() + "=" + sessionToken,
+		"Cookie":          scopedSessionCookieHeader(t, srvURL, sessionToken)["Cookie"],
 		"Accept-Encoding": "gzip",
 	}
 	doc := request(http.MethodGet, "/port-proxy/sess-gz/5173/", headers)
@@ -616,8 +634,8 @@ func TestPortProxyRewritesNestedCSSWithPublicBase(t *testing.T) {
 	gateway.SetPortProxy(manager)
 	gateway.SetupRoutes(router)
 
-	request := proxyAuthGateway(t, router)
-	headers := map[string]string{"Cookie": svc.CookieName() + "=" + sessionToken}
+	request, srvURL := proxyAuthGateway(t, router)
+	headers := map[string]string{"Cookie": scopedSessionCookieHeader(t, srvURL, sessionToken)["Cookie"]}
 	doc := request(http.MethodGet, "/port-proxy/sess-css/5173/css/main.css", headers)
 	if doc.status != http.StatusOK {
 		t.Fatalf("css status = %d, want %d (body=%s)", doc.status, http.StatusOK, doc.body)

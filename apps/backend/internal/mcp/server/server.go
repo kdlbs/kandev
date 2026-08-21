@@ -18,6 +18,7 @@ import (
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/mcp/toolschema"
+	"github.com/kandev/kandev/internal/mcp/tooltokens"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -235,7 +236,7 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceInitializeObserved, 0, "")
 	})
 	hooks.AddAfterListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest, result *mcp.ListToolsResult) {
-		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceToolsListObserved, len(result.Tools), "")
+		s.observeMCPToolsList(mcpConnectionID(ctx), result.Tools)
 	})
 	hooks.AddBeforeListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest) {
 		s.syncPluginTools(ctx)
@@ -291,6 +292,52 @@ func (s *Server) SetAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
 }
 
 func (s *Server) observeMCPConnection(connectionID string, kind streams.MCPAttachmentEvidenceKind, toolCount int, summary string) {
+	s.observeMCPConnectionWithTools(connectionID, kind, toolCount, summary, nil)
+}
+
+func (s *Server) observeMCPToolsList(connectionID string, tools []mcp.Tool) {
+	summaries := make([]streams.MCPToolSummary, 0, len(tools))
+	for _, tool := range tools {
+		summaries = append(summaries, summarizeMCPTool(tool))
+	}
+	s.observeMCPConnectionWithTools(connectionID, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", summaries)
+}
+
+func summarizeMCPTool(tool mcp.Tool) streams.MCPToolSummary {
+	summary := streams.MCPToolSummary{
+		Name:        tool.Name,
+		Description: tool.Description,
+		InputSchema: mcpToolInputSchema(tool),
+	}
+	definition, err := json.Marshal(tool)
+	if err != nil {
+		return summary
+	}
+	summary.EstimatedTokens, _ = tooltokens.EstimateToolJSON(definition)
+	return summary
+}
+
+func mcpToolInputSchema(tool mcp.Tool) json.RawMessage {
+	if tool.RawInputSchema != nil {
+		if !json.Valid(tool.RawInputSchema) {
+			return nil
+		}
+		return append(json.RawMessage(nil), tool.RawInputSchema...)
+	}
+	schema, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		return nil
+	}
+	return schema
+}
+
+func (s *Server) observeMCPConnectionWithTools(
+	connectionID string,
+	kind streams.MCPAttachmentEvidenceKind,
+	toolCount int,
+	summary string,
+	tools []streams.MCPToolSummary,
+) {
 	s.attachmentMu.RLock()
 	attempt, ok := s.attachmentAttempts[connectionID]
 	reporter := s.attachmentReporter
@@ -298,7 +345,7 @@ func (s *Server) observeMCPConnection(connectionID string, kind streams.MCPAttac
 	if !ok || reporter == nil || attempt.AttemptID == "" {
 		return
 	}
-	s.reportMCPConnection(reporter, attempt, connectionID, kind, toolCount, summary)
+	s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, tools)
 }
 
 func (s *Server) registerMCPConnection(connectionID string) {
@@ -335,16 +382,45 @@ func (s *Server) reportMCPConnection(
 	toolCount int,
 	summary string,
 ) {
+	s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, nil)
+}
+
+func (s *Server) reportMCPConnectionWithTools(
+	reporter func(streams.MCPAttachmentEvidence),
+	attempt streams.MCPAttachmentAttempt,
+	connectionID string,
+	kind streams.MCPAttachmentEvidenceKind,
+	toolCount int,
+	summary string,
+	tools []streams.MCPToolSummary,
+) {
+	if kind == streams.MCPAttachmentEvidenceToolsListObserved {
+		// Bound summaries at the publication boundary before the callback can
+		// expose evidence to the agent update stream. Apply repeats the bound as
+		// a defense for any other evidence producer.
+		tools, _ = streams.NormalizeMCPToolCatalog(tools, toolCount)
+	}
 	reporter(streams.MCPAttachmentEvidence{
-		AttemptID:    attempt.AttemptID,
-		ServerName:   "kandev",
-		Kind:         kind,
-		OccurredAt:   time.Now().UTC(),
-		Source:       streams.MCPServerSourceKandev,
-		ConnectionID: opaqueMCPConnectionID(connectionID),
-		ToolCount:    toolCount,
-		Summary:      streams.SanitizeMCPErrorSummary(summary),
+		AttemptID:          attempt.AttemptID,
+		ServerName:         "kandev",
+		Kind:               kind,
+		OccurredAt:         time.Now().UTC(),
+		Source:             streams.MCPServerSourceKandev,
+		ConnectionID:       opaqueMCPConnectionID(connectionID),
+		ToolCount:          toolCount,
+		Tools:              tools,
+		ToolTokenEstimator: toolTokenEstimator(tools),
+		Summary:            streams.SanitizeMCPErrorSummary(summary),
 	})
+}
+
+func toolTokenEstimator(tools []streams.MCPToolSummary) string {
+	for _, tool := range tools {
+		if tool.EstimatedTokens > 0 {
+			return tooltokens.Estimator
+		}
+	}
+	return ""
 }
 
 func mcpConnectionID(ctx context.Context) string {
@@ -833,6 +909,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "user-question", enabled: capabilityEnabled(mcpprofile.CapabilityUserQuestion), register: func(s *Server) { s.registerInteractionTools() }},
 		{name: "parent-question", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityParentQuestion)), register: func(s *Server) { s.registerParentQuestionTool() }},
 		{name: "plan", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerPlanTools() }},
+		{name: "rich-output", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRichOutputTool() }},
 		{name: "walkthrough", enabled: kanban, register: func(s *Server) { s.registerWalkthroughTools() }},
 		{name: "review", enabled: kanban, register: func(s *Server) { s.registerReviewTools() }},
 		{name: "related-tasks", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRelatedTasksTool() }},

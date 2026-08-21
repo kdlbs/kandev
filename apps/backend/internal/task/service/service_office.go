@@ -8,6 +8,7 @@ import (
 
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // BlockerRepository provides access to task blocker persistence.
@@ -36,6 +37,13 @@ type CommentRepository interface {
 	ListTaskComments(ctx context.Context, taskID string) ([]*orchmodels.TaskComment, error)
 }
 
+// TaskStateActivityLogger records a durable status transition before the task
+// state event is published. Optional callers can use this seam to keep
+// read-model activity and WebSocket notifications ordered.
+type TaskStateActivityLogger interface {
+	LogTaskStateChange(ctx context.Context, task *models.Task, oldState v1.TaskState)
+}
+
 // SetBlockerRepository wires the blocker repository for office integration.
 func (s *Service) SetBlockerRepository(repo BlockerRepository) {
 	s.blockers = repo
@@ -44,6 +52,12 @@ func (s *Service) SetBlockerRepository(repo BlockerRepository) {
 // SetCommentRepository wires the comment repository for office integration.
 func (s *Service) SetCommentRepository(repo CommentRepository) {
 	s.comments = repo
+}
+
+// SetTaskStateActivityLogger wires the optional durable activity writer used
+// before task.state_changed notifications are published.
+func (s *Service) SetTaskStateActivityLogger(logger TaskStateActivityLogger) {
+	s.taskStateActivity = logger
 }
 
 // GetLastAgentMessage returns the content of the most recent agent message

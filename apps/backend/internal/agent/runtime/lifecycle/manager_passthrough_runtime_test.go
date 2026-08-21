@@ -64,10 +64,12 @@ func TestBuildPassthroughEnvInjectsRequiredCredentialsAndMCPEnv(t *testing.T) {
 	execution.setRuntimeEnvironment(map[string]string{
 		"ANTHROPIC_BASE_URL": "https://proxy.internal",
 		"HTTPS_PROXY":        "http://proxy:3128",
+		"PROFILE_ONLY":       "profile-value",
 	})
 	setPassthroughMCPEnv(execution, map[string]string{"OPENCODE_CONFIG": "/tmp/opencode.json"})
 
-	env := mgr.buildPassthroughEnv(context.Background(), execution, []string{"ANTHROPIC_API_KEY", "MISSING_KEY"})
+	env, err := mgr.buildPassthroughEnv(context.Background(), execution, []string{"ANTHROPIC_API_KEY", "MISSING_KEY"})
+	require.NoError(t, err)
 
 	require.Equal(t, "https://proxy.internal", env["ANTHROPIC_BASE_URL"],
 		"Agent.Runtime().Env must reach the passthrough subprocess")
@@ -85,6 +87,23 @@ func TestBuildPassthroughEnvInjectsRequiredCredentialsAndMCPEnv(t *testing.T) {
 
 	require.Contains(t, creds.requested, "ANTHROPIC_API_KEY")
 	require.Contains(t, creds.requested, "MISSING_KEY")
+}
+
+func TestBuildPassthroughEnvUsesRuntimeSnapshotWhenProfileSecretIsUnavailable(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.profileResolver = &mockPassthroughProfileResolver{
+		envVars: []settingsmodels.ProfileEnvVar{{Key: "PROFILE_ONLY", SecretID: "deleted-secret"}},
+	}
+	execution := &AgentExecution{
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+	}
+	execution.setRuntimeEnvironment(map[string]string{"PROFILE_ONLY": "captured-value"})
+
+	env, err := mgr.buildPassthroughEnv(context.Background(), execution, nil)
+	require.NoError(t, err)
+	require.Equal(t, "captured-value", env["PROFILE_ONLY"])
 }
 
 func TestMarkPassthroughRunningPublishesOnceAndGuards(t *testing.T) {

@@ -408,7 +408,7 @@ func (h *Handler) respondRuntimeError(
 	targetID string,
 	err error,
 ) {
-	if errors.Is(err, errTaskTitleRequired) {
+	if errors.Is(err, errTaskTitleRequired) || errors.Is(err, ErrProjectRequired) {
 		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
