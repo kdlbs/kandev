@@ -739,7 +739,7 @@ func (r *Repository) recordStepDecisionTx(ctx context.Context, d *models.Workflo
 	// the supersede-and-insert sequence by identity before reading or writing.
 	// SQLite's single-writer lock already provides this serialization.
 	if dialect.IsPostgres(r.db.DriverName()) {
-		lockKey := decisionLockNamespace + d.TaskID + "\x00" + d.StepID + "\x00" + d.DeciderID + "\x00" + d.Role
+		lockKey := strings.Join([]string{decisionLockNamespace, d.TaskID, d.StepID, d.DeciderID, d.Role}, "|")
 		if _, err := tx.ExecContext(ctx, r.db.Rebind("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"), lockKey); err != nil {
 			return fmt.Errorf("lock active decision identity: %w", err)
 		}
