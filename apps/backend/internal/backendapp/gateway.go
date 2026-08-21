@@ -118,6 +118,7 @@ func provideGateway(
 	gitlabSvc *gitlab.Service,
 	referenceValidator entityrefs.SubmissionValidator,
 	dataDir string,
+	lspMaxConnections ...int,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, *terminalservice.Service, error) {
 	gateway, err := gateways.Provide(log)
 	if err != nil {
@@ -142,7 +143,7 @@ func provideGateway(
 	scriptSvc := &scriptServiceAdapter{taskSvc: taskSvc}
 	if lifecycleMgr != nil {
 		gateway.SetLifecycleManager(lifecycleMgr, userSvc, scriptSvc)
-		gateway.SetLSPHandler(lifecycleMgr, userSvc)
+		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspMaxConnections...)
 		gateway.SetVscodeProxy(lifecycleMgr)
 		gateway.SetPortProxy(lifecycleMgr)
 		gateway.SetPortTunnel(lifecycleMgr)
@@ -308,6 +309,9 @@ func provideGateway(
 			},
 			LoadSessionObservations: func(ctx context.Context, taskID string) (statussummary.SessionObservationSnapshot, error) {
 				return loadTaskSessionObservations(ctx, taskRepo, activityProvider, taskID)
+			},
+			LoadTaskLaunchError: func(ctx context.Context, taskID string) (statussummary.TaskLaunchErrorObservation, error) {
+				return loadTaskLaunchErrorObservation(ctx, taskRepo, taskID)
 			},
 			LoadPendingActions: func(ctx context.Context, taskID string) (map[string]string, error) {
 				return loadTaskPendingActions(ctx, taskRepo, taskID)
@@ -482,15 +486,50 @@ func loadTaskSessionObservations(
 		}
 		if lastError, ok := models.LoadLastAgentError(session.Metadata); ok && !lastError.IsDismissed() {
 			input.ActiveError = &statussummary.ActiveErrorSummary{
-				SessionID:  session.ID,
-				Stamp:      lastError.Stamp(),
-				OccurredAt: lastError.OccurredAt,
-				Preview:    lastError.Message,
+				SessionID:        session.ID,
+				TaskRepositoryID: lastError.TaskRepositoryID,
+				Stamp:            lastError.Stamp(),
+				OccurredAt:       lastError.OccurredAt,
+				Preview:          lastError.Message,
+				Category:         lastError.Code,
+				RecoveryActions:  lastError.RecoveryActions,
 			}
 		}
 		snapshot.Sessions = append(snapshot.Sessions, input)
 	}
 	return snapshot, nil
+}
+
+func loadTaskLaunchErrorObservation(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	taskID string,
+) (statussummary.TaskLaunchErrorObservation, error) {
+	task, err := taskRepo.GetTask(ctx, taskID)
+	if err != nil {
+		return statussummary.TaskLaunchErrorObservation{}, err
+	}
+	if task == nil {
+		return statussummary.TaskLaunchErrorObservation{}, fmt.Errorf("task %q not found", taskID)
+	}
+	if _, present := task.Metadata[models.MetaKeyLastLaunchError]; !present {
+		return statussummary.TaskLaunchErrorObservation{Observed: true}, nil
+	}
+	errorValue, ok := models.LoadTaskLaunchError(task.Metadata)
+	if !ok {
+		return statussummary.TaskLaunchErrorObservation{}, nil
+	}
+	return statussummary.TaskLaunchErrorObservation{
+		Observed: true,
+		Error: &statussummary.ActiveErrorSummary{
+			TaskRepositoryID: errorValue.TaskRepositoryID,
+			Stamp:            errorValue.Stamp(),
+			OccurredAt:       errorValue.OccurredAt,
+			Preview:          errorValue.Message,
+			Category:         errorValue.Code,
+			RecoveryActions:  errorValue.RecoveryActions,
+		},
+	}, nil
 }
 
 func loadTaskPendingActions(

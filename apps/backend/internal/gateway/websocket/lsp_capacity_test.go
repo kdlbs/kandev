@@ -23,3 +23,10 @@ func TestLSPCapacityLimiterFallsBackToDefaultForInvalidEnv(t *testing.T) {
 		t.Fatalf("max = %d, want %d", limiter.max, defaultLSPMaxConnections)
 	}
 }
+
+func TestNewLSPHandlerUsesTypedCapacity(t *testing.T) {
+	handler := NewLSPHandler(nil, nil, testLogger(), 21)
+	if handler.capacity.max != 21 {
+		t.Fatalf("LSP capacity = %d, want 21", handler.capacity.max)
+	}
+}

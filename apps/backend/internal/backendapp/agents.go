@@ -2,7 +2,9 @@ package backendapp
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -90,7 +92,7 @@ func provideLifecycleManager(
 	}
 	credsMgr.AddProvider(credentials.NewEnvProvider("KANDEV_"))
 	credsMgr.AddProvider(credentials.NewAugmentSessionProvider())
-	if credsFile := os.Getenv("KANDEV_CREDENTIALS_FILE"); credsFile != "" {
+	if credsFile := credentialFilePath(cfg); credsFile != "" {
 		credsMgr.AddProvider(credentials.NewFileProvider(credsFile))
 	}
 
@@ -122,6 +124,9 @@ func provideLifecycleManager(
 	preparerRegistry.Register(models.ExecutorTypeSSH, lifecycle.NewSSHPreparer(log))
 	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
 	lifecycleMgr.SetSecretStore(secretStore)
+	if err := lifecycleMgr.SetAgentctlStartupConfig(cfg.ManagedAgentctlStartupConfig()); err != nil {
+		return nil, fmt.Errorf("configure managed agentctl startup: %w", err)
+	}
 	// Record the standalone agentctl control-server PID (populated by
 	// provideAgentctlLauncher, which runs before this) so local/standalone
 	// executor rows carry a real host-local liveness handle.
@@ -147,4 +152,11 @@ func provideLifecycleManager(
 		zap.Int("runtimes", len(executorRegistry.List())),
 		zap.Int("agent_types", len(agentRegistry.List())))
 	return lifecycleMgr, nil
+}
+
+func credentialFilePath(cfg *config.Config) string {
+	if cfg != nil {
+		return strings.TrimSpace(cfg.Credentials.File)
+	}
+	return strings.TrimSpace(os.Getenv("KANDEV_CREDENTIALS_FILE"))
 }

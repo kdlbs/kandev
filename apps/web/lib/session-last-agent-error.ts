@@ -1,4 +1,8 @@
 import { getLocalStorage, setLocalStorage } from "@/lib/local-storage";
+import {
+  normalizeTaskLaunchRecoveryActions,
+  type TaskLaunchRecoveryAction,
+} from "@/lib/types/task-launch-error";
 
 export type LastAgentError = {
   message: string;
@@ -8,6 +12,9 @@ export type LastAgentError = {
   remediationUrl?: string;
   code?: string;
   details?: string;
+  recoveryActions?: TaskLaunchRecoveryAction[];
+  taskRepositoryId?: string;
+  stamp?: string;
   dismissedAt?: string;
 };
 
@@ -53,13 +60,37 @@ export function readLastAgentError(metadata: Record<string, unknown> | null | un
   if (!message) return null;
   const dismissedAt = readFirstOptionalString(record, ["dismissed_at", "dismissedAt"]);
   if (dismissedAt) return null;
-  return {
-    message,
-    occurredAt: readFirstOptionalString(record, ["occurred_at", "occurredAt"]),
-    agentExecutionId: readFirstOptionalString(record, ["agent_execution_id", "agentExecutionId"]),
-    remediationUrl: readFirstOptionalString(record, ["remediation_url", "remediationUrl"]),
-    ...readStructuredFailureMetadata(record),
-  } satisfies LastAgentError;
+  return { message, ...readOptionalAgentErrorFields(record) };
+}
+
+function readOptionalAgentErrorFields(
+  record: Record<string, unknown>,
+): Omit<LastAgentError, "message"> {
+  const result: Omit<LastAgentError, "message"> = {};
+  const occurredAt = readFirstOptionalString(record, ["occurred_at", "occurredAt"]);
+  const agentExecutionId = readFirstOptionalString(record, [
+    "agent_execution_id",
+    "agentExecutionId",
+  ]);
+  const remediationUrl = readFirstOptionalString(record, ["remediation_url", "remediationUrl"]);
+  const recoveryActions = normalizeTaskLaunchRecoveryActions(
+    record.recovery_actions ?? record.recoveryActions,
+  );
+  const taskRepositoryId = readFirstOptionalString(record, [
+    "task_repository_id",
+    "taskRepositoryId",
+  ]);
+  const stamp = readFirstOptionalString(record, ["stamp"]);
+  const structured = readStructuredFailureMetadata(record);
+  if (occurredAt) result.occurredAt = occurredAt;
+  if (agentExecutionId) result.agentExecutionId = agentExecutionId;
+  if (remediationUrl) result.remediationUrl = remediationUrl;
+  if (recoveryActions.length > 0) result.recoveryActions = recoveryActions;
+  if (taskRepositoryId) result.taskRepositoryId = taskRepositoryId;
+  if (stamp) result.stamp = stamp;
+  if (structured.code) result.code = structured.code;
+  if (structured.details) result.details = structured.details;
+  return result;
 }
 
 function readStructuredFailureMetadata(record: Record<string, unknown>) {
@@ -89,7 +120,7 @@ function readFirstOptionalString(record: Record<string, unknown>, keys: string[]
  * `last_agent_error` metadata.
  */
 export function lastAgentErrorStamp(error: LastAgentError) {
-  return `${error.occurredAt ?? ""}:${error.message}`;
+  return error.stamp ?? `${error.occurredAt ?? ""}:${error.message}`;
 }
 
 function readOptionalString(value: unknown) {

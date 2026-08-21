@@ -1,6 +1,16 @@
 "use client";
 
-import { use, useState, useEffect, useRef, useCallback, useMemo, Suspense } from "react";
+import {
+  use,
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+  Suspense,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
@@ -12,6 +22,7 @@ import {
   listComments,
   type TaskCommentResponse,
 } from "@/lib/api/domains/office-api";
+import { fetchTask } from "@/lib/api/domains/kanban-api";
 import { listTaskSessions } from "@/lib/api/domains/session-api";
 import {
   liveSessionMetadataFromStore,
@@ -261,10 +272,10 @@ function useTaskOptimisticHelpers(
   const refetchTask = useCallback(async () => {
     const token = begin();
     try {
-      const res = await getTask(id);
+      const [res, genericTask] = await Promise.all([getTask(id), fetchTask(id).catch(() => null)]);
       if (!isCurrent(token)) return;
       if (res.task) {
-        setTask(mapOfficeTaskToTask(res.task));
+        setTask(mapOfficeTaskToTask(res.task, genericTask ?? undefined));
         if (res.timeline) setTimeline(res.timeline);
       }
     } catch {
@@ -292,18 +303,43 @@ function useTaskOptimisticHelpers(
   return { applyTaskPatch, restoreTask };
 }
 
+function useTaskDetailRefetch(
+  setTask: Dispatch<SetStateAction<Task | null>>,
+  setTimeline: Dispatch<SetStateAction<TimelineEvent[]>>,
+) {
+  return useCallback(
+    (updated: Task, updatedTimeline: TimelineEvent[]) => {
+      setTask((previous) =>
+        previous
+          ? {
+              ...updated,
+              // Office's live refetch endpoint does not carry the generic
+              // status summary or repository rows. Preserve the supplement
+              // loaded by the initial detail request until the next full load.
+              statusSummary: updated.statusSummary ?? previous.statusSummary,
+              repositories: updated.repositories ?? previous.repositories,
+            }
+          : updated,
+      );
+      setTimeline(updatedTimeline);
+    },
+    [setTask, setTimeline],
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Primary data hook
 // ---------------------------------------------------------------------------
 
+// Snapshot storeIssues in a ref so the load effect can seed `task` from the
+// store without re-running on every store update. Re-running the GET
+// on store changes would race with in-flight optimistic mutations (the WS-
+// driven refetch in useTaskOptimisticHelpers handles canonical refresh after
+// a property mutation commits).
+// `errorKey` remains a catalog key so locale changes do not re-issue the load.
 function useIssueData(id: string) {
   const storeIssues = useAppStore((s) => s.office.tasks.items);
   const setTaskSessionsForTask = useAppStore((s) => s.setTaskSessionsForTask);
-  // Snapshot storeIssues in a ref so the load effect can seed `task` from
-  // the store without re-running on every store update. Re-running the GET
-  // on store changes would race with in-flight optimistic mutations (the
-  // WS-driven refetch in useTaskOptimisticHelpers handles canonical
-  // refresh after a property mutation commits).
   const storeIssuesRef = useRef(storeIssues);
   useEffect(() => {
     storeIssuesRef.current = storeIssues;
@@ -315,9 +351,6 @@ function useIssueData(id: string) {
   const [activity, setActivity] = useState<TaskActivityEntry[]>([]);
   const [baseSessions, setBaseSessions] = useState<TaskSession[]>([]);
   const [loading, setLoading] = useState(true);
-  // Holds a catalog KEY, not a message: the load effect must not take `t` in
-  // its dep array (a locale switch would re-issue the task fetch), so the key is
-  // stored and resolved at render instead.
   const [errorKey, setErrorKey] = useState<string | null>(null);
 
   const applyDetail = useCallback(
@@ -340,12 +373,15 @@ function useIssueData(id: string) {
       if (fromStore && !cancelled) setTask(mapOfficeTaskToTask(fromStore));
 
       try {
-        const res = await getTask(id);
+        const [res, genericTask] = await Promise.all([
+          getTask(id),
+          fetchTask(id).catch(() => null),
+        ]);
         if (cancelled) return;
         if (!res.task) {
           if (!fromStore) setErrorKey("office:taskNotFound");
         } else {
-          const freshTask = mapOfficeTaskToTask(res.task);
+          const freshTask = mapOfficeTaskToTask(res.task, genericTask ?? undefined);
           setTask(freshTask);
           if (res.timeline) setTimeline(res.timeline);
           const detail = await fetchIssueDetailData(freshTask.workspaceId, id);
@@ -369,10 +405,7 @@ function useIssueData(id: string) {
     setComments(result);
   }, [id]);
 
-  const onTaskRefetch = useCallback((updated: Task, updatedTimeline: TimelineEvent[]) => {
-    setTask(updated);
-    setTimeline(updatedTimeline);
-  }, []);
+  const onTaskRefetch = useTaskDetailRefetch(setTask, setTimeline);
 
   const { sessionStoreStates, sessionStoreMetadata } = useSessionLiveSync({
     task,
@@ -392,7 +425,6 @@ function useIssueData(id: string) {
     [baseSessions, sessionStoreStates, sessionStoreMetadata],
   );
 
-  // Refetch comments when a new comment is created via office WS event
   useOfficeRefetch("comments", fetchComments);
 
   const { applyTaskPatch, restoreTask } = useTaskOptimisticHelpers(id, setTask, setTimeline);

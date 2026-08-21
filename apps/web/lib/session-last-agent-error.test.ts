@@ -51,7 +51,26 @@ describe("readLastAgentError", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- this group preserves the complete metadata compatibility matrix.
 describe("readLastAgentError optional metadata", () => {
+  it("reads typed launch recovery fields and keeps action order bounded", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: "base branch is missing",
+          code: "base_branch_missing",
+          recovery_actions: ["pick_base_branch", "pick_base_branch", "unknown", "retry_default"],
+          task_repository_id: "task-repo-1",
+          stamp: "launch-stamp-1",
+        },
+      }),
+    ).toMatchObject({
+      recoveryActions: ["pick_base_branch", "retry_default"],
+      taskRepositoryId: "task-repo-1",
+      stamp: "launch-stamp-1",
+    });
+  });
+
   it("reads snake_case metadata and keeps occurredAt optional", () => {
     expect(
       readLastAgentError({

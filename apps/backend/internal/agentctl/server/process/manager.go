@@ -1209,14 +1209,15 @@ func (m *Manager) buildAdapterConfig() error {
 		}
 	}
 	m.adapterCfg = &adapter.Config{
-		WorkDir:             m.cfg.WorkDir,
-		AutoApprove:         m.cfg.AutoApprovePermissions,
-		ApprovalPolicy:      m.cfg.ApprovalPolicy,
-		McpServers:          mcpServers,
-		AgentID:             m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
-		AssumeMcpSse:        m.cfg.AssumeMcpSse,
-		AssumeMcpHttp:       m.cfg.AssumeMcpHttp,
-		RequiresProcessKill: m.cfg.RequiresProcessKill,
+		WorkDir:                   m.cfg.WorkDir,
+		AutoApprove:               m.cfg.AutoApprovePermissions,
+		ApprovalPolicy:            m.cfg.ApprovalPolicy,
+		McpServers:                mcpServers,
+		AgentID:                   m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
+		AssumeMcpSse:              m.cfg.AssumeMcpSse,
+		AssumeMcpHttp:             m.cfg.AssumeMcpHttp,
+		RequiresProcessKill:       m.cfg.RequiresProcessKill,
+		NotificationQueueCapacity: m.cfg.NotificationQueueCapacity,
 	}
 
 	// Configure one-shot mode when a continue command is provided.

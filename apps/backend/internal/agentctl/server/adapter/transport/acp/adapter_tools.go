@@ -200,6 +200,7 @@ func (a *Adapter) trackToolCallPayload(
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if signal == codexSubagentSignalNone {
+		a.applyPendingCursorTaskMetaLocked(sessionID, toolCallID, payload)
 		a.activeToolCalls[toolCallID] = payload
 		return payload, eventType, signal, toolCallID, "", false
 	}

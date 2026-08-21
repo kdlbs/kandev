@@ -164,7 +164,7 @@ For multiline Markdown issue or PR bodies, write the body to a file and pass it
 with the relevant `gh ... --body-file <path>` option. Do not send escaped
 newlines through `--body`; GitHub will render them literally.
 
-For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call.
+For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-await <PR>` to block until CI is terminal and get one report (do not manually poll `pr-state` on a timer in the primary conversation; preserve the documented `pr-poller` fallback when `pr-await` is unavailable), `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call.
 
 When a Kandev system message references an MCP tool that is not visible in the active tool list, use the runtime's tool discovery mechanism, such as `tool_search` when available, before falling back to a less specific workflow. Some task messaging and platform helpers are exposed on demand.
 
@@ -239,6 +239,15 @@ Contract authority is intentionally split by implementation boundary: frontend a
 Runtime feature toggles add a SQLite-backed override tier managed through `Settings > System > Feature Toggles`. Effective values use this precedence: explicit environment variable > SQLite override > profile default. The typed runtime flag registry lives in `apps/backend/internal/runtimeflags/registry.go`; each registration owns the public metadata, environment variable, config reader, and config applier. Do not add parallel per-flag maps or switches.
 
 Profile selection: `KANDEV_E2E_MOCK=true` → `e2e`, `KANDEV_DEBUG_DEV_MODE=true` or `KANDEV_DEBUG_PPROF_ENABLED=true` → `dev`, otherwise `prod`. The Go dev launcher (`apps/backend/internal/launcher/dev.go`) and `apps/web/e2e/fixtures/backend.ts` set only the selector — they no longer hardcode the underlying values.
+
+Stable operator startup settings have a separate typed source contract in
+`apps/backend/internal/common/config/catalog.go` and `source.go`. The catalog
+owns each canonical YAML key, compatible environment alias, default, source
+provenance, sensitivity, and reviewed exclusion. Configuration discovery uses
+the first existing `config.yaml` candidate in working-directory, home, and
+`/etc/kandev` order; it does not merge files. Environment values override YAML,
+and consumers receive typed values or explicit child-process contracts instead
+of relying on YAML-to-public-environment copying.
 
 For any task that adds, rolls out, promotes, graduates, or removes a release toggle, use `/runtime-feature-flags`. That skill contains the file-by-file checklist, disabled-path requirements, test commands, promotion procedure, and retired-identity removal steps; do not rely on an agent discovering an ADR or public docs. In brief: merge risky features off in every shipped profile, enable a selected install with an admin override or explicit environment, restart when required by registry metadata, then test. Change `prod:` to `"true"` for the all-user release while retaining the registry entry as a kill-switch. Remove the live flag after the feature is permanent, move its key and environment variable to the append-only retired identities in `runtimeflags/registry.go`, and never reuse either identity. Completeness tests cover the registry/profile/frontend contracts. Runtime overrides and restart support are documented in `docs/decisions/0018-runtime-settings-overrides.md` and `docs/decisions/0019-restart-supervisor.md`.
 

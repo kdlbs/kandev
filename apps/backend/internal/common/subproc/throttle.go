@@ -181,6 +181,37 @@ func (t *Throttle) currentSem() chan struct{} {
 	return t.sem
 }
 
+// Capacity reports the current admission capacity. A non-positive value means
+// throttling is disabled.
+func (t *Throttle) Capacity() int {
+	if t.admission != nil {
+		return t.admission.capacity()
+	}
+	sem := t.currentSem()
+	if sem == nil {
+		return 0
+	}
+	return cap(sem)
+}
+
+// SetCap applies a process startup capacity. Unlike SetCapForTest it does not
+// return a restore function because startup configuration is immutable for the
+// lifetime of the backend process.
+func (t *Throttle) SetCap(newCap int) {
+	if t.admission != nil {
+		t.admission.setCap(newCap)
+		return
+	}
+	t.mu.Lock()
+	if newCap <= 0 {
+		t.sem = nil
+	} else {
+		t.sem = make(chan struct{}, newCap)
+	}
+	t.mu.Unlock()
+	t.publishCap(newCap)
+}
+
 // SetCapForTest replaces the slot pool with one of the given capacity and
 // returns a restore function. Test-only — production code MUST NOT call
 // this. Use cap=0 to disable throttling for a test.

@@ -801,6 +801,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpProfile:                     reqWithWorktree.McpProfile,
 		AuthToken:                      m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
+		AgentctlStartupConfig:          m.agentctlStartupConfig,
 		OnProgress:                     onProgress,
 		RemoteContributions:            remoteContributions,
 		ContributionDestinations:       contributionDestinations,
@@ -913,6 +914,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		WorkspacePath:           workspacePath,
 		RepositoryPath:          req.RepositoryPath,
 		RepositoryID:            req.RepositoryID,
+		TaskRepositoryID:        req.TaskRepositoryID,
 		UseWorktree:             req.UseWorktree,
 		WorktreeID:              req.WorktreeID,
 		SetupScript:             req.SetupScript,
@@ -946,6 +948,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				setup = repoSetupScript
 			}
 			specs = append(specs, RepoPrepareSpec{
+				TaskRepositoryID:        r.TaskRepositoryID,
 				RepositoryID:            r.RepositoryID,
 				RepositoryPath:          r.RepositoryPath,
 				RepoName:                r.RepoName,

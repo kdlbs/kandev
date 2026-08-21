@@ -8,11 +8,28 @@ import { useToast } from "@/components/toast-provider";
 import type { TaskMR } from "@/lib/types/gitlab";
 import { useGitLabStatus } from "./use-gitlab-status";
 
+type WorkspaceMRResponse = Awaited<ReturnType<typeof listWorkspaceTaskMRs>>;
+const workspaceMRRequests = new Map<string, Promise<WorkspaceMRResponse>>();
+
+function acquireWorkspaceMRRequest(workspaceId: string) {
+  const activeRequest = workspaceMRRequests.get(workspaceId);
+  if (activeRequest) return activeRequest;
+
+  const request = listWorkspaceTaskMRs(workspaceId, { cache: "no-store" });
+  workspaceMRRequests.set(workspaceId, request);
+  const release = () => {
+    if (workspaceMRRequests.get(workspaceId) === request) {
+      workspaceMRRequests.delete(workspaceId);
+    }
+  };
+  void request.then(release, release);
+  return request;
+}
+
 /**
- * Hydrate the gitlab task-MRs slice for a workspace. Fetches once per
- * workspaceId switch and clears the cache on null. Mirrors useWorkspacePRs
- * for GitHub but stays minimal (no WS subscription yet — that lands with
- * the poller in a follow-up phase).
+ * Hydrate the GitLab task-MRs slice for a workspace. Co-mounted consumers
+ * share one in-flight request. A later mount can start a fresh request. The
+ * hook clears the cache when the workspace becomes null or a refresh fails.
  */
 export function useWorkspaceMRs(workspaceId: string | null) {
   const setTaskMRs = useAppStore((state) => state.setTaskMRs);
@@ -33,14 +50,17 @@ export function useWorkspaceMRs(workspaceId: string | null) {
     if (fetchedRef.current === workspaceId) return;
     const requestId = ++requestRef.current;
     fetchedRef.current = workspaceId;
-    resetTaskMRs(workspaceId);
-    listWorkspaceTaskMRs(workspaceId, { cache: "no-store" })
+    const request = acquireWorkspaceMRRequest(workspaceId);
+    // Keep the current data visible until the shared request succeeds. A
+    // failure clears that workspace below, so stale data cannot remain.
+    request
       .then((response) => {
         if (requestRef.current !== requestId) return;
         setTaskMRs(workspaceId, response?.task_mrs ?? {});
       })
       .catch(() => {
         if (requestRef.current === requestId) {
+          resetTaskMRs(workspaceId);
           fetchedRef.current = null; // allow retry on failure
         }
       });
