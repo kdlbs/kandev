@@ -1,13 +1,20 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), update: vi.fn() }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), update: vi.fn(), promptEditor: vi.fn() }));
 vi.mock("@/lib/api/domains/azure-devops-api", () => ({
   getAzureDevOpsWorkspaceSettings: mocks.get,
   updateAzureDevOpsWorkspaceSettings: mocks.update,
 }));
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock("@/components/settings/settings-prompt-editor", () => ({
+  SettingsPromptEditor: ({ help, ...props }: { help?: ReactNode; [key: string]: unknown }) => {
+    mocks.promptEditor(props);
+    return help ?? null;
+  },
+}));
 
 import { AzureDevOpsQuickActionsSection } from "./azure-devops-quick-actions";
 
@@ -68,6 +75,12 @@ describe("AzureDevOpsQuickActionsSection", () => {
     });
     expect(screen.getByRole("button", { name: "Reset" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Edit prompt" }));
+    const props = mocks.promptEditor.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(props.promptReferences).toBe(true);
+    expect((props.placeholders as Array<{ key: string }>).map((item) => item.key)).toEqual([
+      "url",
+      "title",
+    ]);
     // The hint is a `<Trans>` whose `<n>` indices address the JSX children
     // positionally, so a reflow of those children silently reassembles the
     // sentence into fragments. Assert the whole reconstructed hint, including

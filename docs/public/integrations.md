@@ -43,6 +43,14 @@ GitHub, GitLab, Azure DevOps, Jira, and Linear configuration are workspace-speci
 
 Provider secrets saved by these forms use Kandev's encrypted secret store. The backend must still decrypt them to make API requests. Limit access to settings and the Kandev data directory, and use the narrowest provider scope that works.
 
+### Author prompt fields
+
+Quick actions and provider watch prompts use the same inline prompt editor. Type `{{` to open the provider's placeholder list, or type `@` after whitespace to find a [saved prompt](developer-tools.md#saved-prompts). Select an item to insert it into the draft. The menu shows the exact tokens supported by that provider and prompt type.
+
+Common quick-action tokens are `{{url}}` and `{{title}}`. Jira quick actions also provide `{{key}}` and `{{description}}`. Watch prompts expose provider data such as `pr.*`, `issue.*`, `mr.*`, `work_item.*`, or `pull_request.*`, depending on the integration and watch type.
+
+Selecting a completion changes the local draft only. Use the route-level **Save changes** action to persist it; **Reset** restores the provider defaults and **Cancel** or discard returns to the last saved draft. Saved-prompt references are expanded when the watch or action runs, so later edits to the referenced prompt apply without changing each integration setting.
+
 ### The Enabled switch
 
 Jira, Linear, and Sentry pages show an **Enabled** switch. It is a browser-local preference, saved per installation in that browser and on by default. It controls some client-side entry points, availability checks, and configuration fetches; settings pages can still poll provider health. It does not delete backend configuration and does not stop a server-side watch. Pause/delete watches or remove the provider configuration when processing must stop.
