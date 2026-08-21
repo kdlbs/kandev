@@ -33,7 +33,7 @@ Verified 2026-08-20 against `~/.kandev/data/kandev.db` (workspace
 
 `office_workspace_routing` for that workspace:
 
-```
+```text
 enabled           = 1
 default_tier      = balanced
 provider_order    = ["claude-acp","codex-acp"]
@@ -167,7 +167,7 @@ One new column on the existing `office_workspace_routing` row. No new table, and
 column on `agent_profiles` — keeping routing policy in one place, per the card's own
 recommendation and consistent with how `tier_per_reason` is stored.
 
-```
+```text
 office_workspace_routing
   role_tiers  TEXT NOT NULL DEFAULT '{}'   -- JSON map: role -> tier
 ```

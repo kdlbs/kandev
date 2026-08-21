@@ -79,28 +79,31 @@ type RowProps = {
 };
 
 function RoleRow({ role, tier, config, disabled, onChange }: RowProps) {
+  const labelId = `role-tier-label-${role.id}`;
   return (
     <div className="py-3 space-y-2 first:pt-0 last:pb-0">
       <div className="flex items-center justify-between gap-3">
-        <RowLabel role={role} />
-        <TierSelect tier={tier} onChange={onChange} disabled={disabled} />
+        <RowLabel role={role} labelId={labelId} />
+        <TierSelect tier={tier} onChange={onChange} disabled={disabled} ariaLabelledBy={labelId} />
       </div>
       <ResolvedRow tier={tier} config={config} />
     </div>
   );
 }
 
-function RowLabel({ role }: { role: RoleMeta }) {
+function RowLabel({ role, labelId }: { role: RoleMeta; labelId: string }) {
   const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-sm font-medium">{role.label}</span>
+      <span id={labelId} className="text-sm font-medium">
+        {role.label}
+      </span>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
             aria-label={t("office:moreInfoAbout", { label: role.label })}
-            className="cursor-pointer text-muted-foreground hover:text-foreground"
+            className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center text-muted-foreground hover:text-foreground"
           >
             <IconInfoCircle className="h-3.5 w-3.5" />
           </button>
@@ -124,10 +127,12 @@ function TierSelect({
   tier,
   onChange,
   disabled,
+  ariaLabelledBy,
 }: {
   tier: Tier | undefined;
   onChange: (tier: Tier | typeof USE_WORKSPACE_DEFAULT) => void;
   disabled?: boolean;
+  ariaLabelledBy: string;
 }) {
   const { t } = useTranslation();
   const selected = tier ?? USE_WORKSPACE_DEFAULT;
@@ -137,7 +142,7 @@ function TierSelect({
       onValueChange={(v) => onChange(v as Tier | typeof USE_WORKSPACE_DEFAULT)}
       disabled={disabled}
     >
-      <SelectTrigger className="w-[220px] cursor-pointer">
+      <SelectTrigger aria-labelledby={ariaLabelledBy} className="min-h-11 w-[220px] cursor-pointer">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

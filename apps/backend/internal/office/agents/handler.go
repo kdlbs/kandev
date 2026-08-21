@@ -199,40 +199,8 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	// Buffered once and decoded twice: a presence check against the raw
-	// keys (below), then the typed decode further down. Gin's
-	// ShouldBindJSON reads and discards the body in one step, so it
-	// cannot be used for both — this is why the body is read directly
-	// here instead.
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUpdateAgentBodyBytes)
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		var maxBytesError *http.MaxBytesError
-		if errors.As(err, &maxBytesError) {
-			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
-			return
-		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	if agent.Role != "" {
-		hasModel, err := requestBodyHasKey(body, "model")
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		if hasModel {
-			respondRoutingValidation(c, &routing.ValidationError{
-				Field: "model",
-				Message: "model no longer selects a launched model for an Office agent; " +
-					"update the agent routing override or workspace tier profiles",
-			})
-			return
-		}
-	}
-	var req UpdateAgentRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	req, ok := decodeUpdateAgentRequest(c, agent.Role != "")
+	if !ok {
 		return
 	}
 	if req.Permissions != nil {
@@ -251,7 +219,7 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		})
 		return
 	}
-	applyAgentUpdates(agent, &req)
+	applyAgentUpdates(agent, req)
 	if err := h.svc.UpdateAgentInstance(ctx, agent); err != nil {
 		if code := agentValidationErrorCode(err); code != "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": code})
@@ -261,6 +229,44 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, AgentResponse{Agent: newAgentResponseBody(agent)})
+}
+
+// decodeUpdateAgentRequest buffers the body once so the handler can inspect
+// raw keys and then decode the typed request. Office identities reject the
+// ignored model key before the request reaches the normal update path.
+func decodeUpdateAgentRequest(c *gin.Context, officeAgent bool) (*UpdateAgentRequest, bool) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUpdateAgentBodyBytes)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return nil, false
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return nil, false
+	}
+	if officeAgent {
+		hasModel, err := requestBodyHasKey(body, "model")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return nil, false
+		}
+		if hasModel {
+			respondRoutingValidation(c, &routing.ValidationError{
+				Field: "model",
+				Message: "model no longer selects a launched model for an Office agent; " +
+					"update the agent routing override or workspace tier profiles",
+			})
+			return nil, false
+		}
+	}
+	var req UpdateAgentRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return nil, false
+	}
+	return &req, true
 }
 
 // requestBodyHasKey reports whether the top-level JSON object in body
