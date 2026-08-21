@@ -103,7 +103,7 @@ func (r *SpritesExecutor) runAuthSetupScripts(
 
 			stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			cmd := sprite.CommandContext(stepCtx, "sh", "-c", method.SetupScript)
-			cmd.Env = r.buildSpriteEnv(req.Env)
+			cmd.Env = r.buildSpriteEnv(req.Env, req.AgentctlStartupConfig)
 			out, err := cmd.CombinedOutput()
 			cancel()
 

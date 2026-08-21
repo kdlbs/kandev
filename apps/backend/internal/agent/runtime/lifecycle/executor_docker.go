@@ -163,6 +163,9 @@ func (r *DockerExecutor) HealthCheck(_ context.Context) error {
 
 func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (instance *ExecutorInstance, err error) {
 	baseCtx := preparationContext(ctx)
+	if err := validateAgentctlStartupConfig(req.AgentctlStartupConfig); err != nil {
+		return nil, fmt.Errorf("invalid agentctl startup configuration: %w", err)
+	}
 	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
 		return nil, err
 	}
@@ -292,6 +295,7 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		RemoteContributions:            req.RemoteContributions,
 		ContributionDestinations:       req.ContributionDestinations,
 		ComparisonTargets:              req.ComparisonTargets,
+		AgentctlStartupConfig:          req.AgentctlStartupConfig,
 	}, nil
 }
 

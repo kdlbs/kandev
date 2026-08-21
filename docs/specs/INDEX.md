@@ -38,6 +38,7 @@ Product-wide capabilities that are not tied to a single feature area.
 
 | Spec | Status |
 |---|---|
+| [startup-configuration-parity](platform/startup-configuration-parity.md) | shipped |
 | [agent-runtime-availability](platform/agent-runtime-availability.md) | draft |
 | [background-work-liveness](platform/background-work-liveness.md) | shipped |
 | [setup-launch-timeout](platform/setup-launch-timeout.md) | approved |

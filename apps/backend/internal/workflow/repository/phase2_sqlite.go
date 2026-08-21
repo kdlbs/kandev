@@ -733,13 +733,17 @@ func (r *Repository) recordStepDecisionTx(ctx context.Context, d *models.Workflo
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// PostgreSQL's partial unique index detects two concurrent inserts, but
-	// retrying after the loser is rejected still leaves a thundering herd of
-	// retries when several callers record the same decider at once. Serialize
-	// the supersede-and-insert sequence by identity before reading or writing.
-	// SQLite's single-writer lock already provides this serialization.
+	// PostgreSQL's READ COMMITTED isolation does not serialize the initial
+	// supersede UPDATE when no active row exists yet. Lock the identity before
+	// that UPDATE so concurrent writers observe the prior commit instead of
+	// racing into the partial unique index. SQLite's single-writer lock already
+	// provides this serialization.
+	lockIdentity := d.ParticipantID
+	if d.DeciderID != "" && d.Role != "" {
+		lockIdentity = strings.Join([]string{d.DeciderID, d.Role}, "|")
+	}
 	if dialect.IsPostgres(r.db.DriverName()) {
-		lockKey := strings.Join([]string{decisionLockNamespace, d.TaskID, d.StepID, d.DeciderID, d.Role}, "|")
+		lockKey := strings.Join([]string{decisionLockNamespace, d.TaskID, d.StepID, lockIdentity}, "|")
 		if _, err := tx.ExecContext(ctx, r.db.Rebind("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"), lockKey); err != nil {
 			return fmt.Errorf("lock active decision identity: %w", err)
 		}

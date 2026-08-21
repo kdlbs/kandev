@@ -744,6 +744,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			PreviousExecutionID:            info.AgentExecutionID,
 			AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
 			BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
+			AgentctlStartupConfig:          m.agentctlStartupConfig,
 			RemoteContributions:            remoteContributions,
 			ContributionDestinations:       contributionDestinations,
 			ComparisonTargets:              comparisonTargets,

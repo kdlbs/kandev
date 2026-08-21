@@ -76,8 +76,12 @@ const (
 )
 
 // acpNotifQueueCapacity returns the per-connection inbound notification queue
-// capacity, honoring KANDEV_ACP_NOTIF_QUEUE when set and parseable.
-func acpNotifQueueCapacity() int {
+// capacity. Managed servers pass the resolved value explicitly; the legacy
+// environment fallback remains for directly constructed adapters.
+func acpNotifQueueCapacity(configured ...int) int {
+	if len(configured) > 0 && configured[0] != 0 {
+		return clampACPNotifQueueCapacity(configured[0])
+	}
 	raw := os.Getenv("KANDEV_ACP_NOTIF_QUEUE")
 	if raw == "" {
 		return acpNotifQueueDefault
@@ -86,6 +90,10 @@ func acpNotifQueueCapacity() int {
 	if err != nil || n <= 0 {
 		return acpNotifQueueDefault
 	}
+	return clampACPNotifQueueCapacity(n)
+}
+
+func clampACPNotifQueueCapacity(n int) int {
 	if n < acpNotifQueueMin {
 		return acpNotifQueueMin
 	}
@@ -454,7 +462,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	// down. The internal notifQueueCapacity channel sits in front of this
 	// queue and is drained by our update worker. Requires a coder/acp-go-sdk
 	// fork with WithMaxQueuedNotifications; see go.mod replace directive.
-	notifQueueCap := acpNotifQueueCapacity()
+	notifQueueCap := acpNotifQueueCapacity(a.cfg.NotificationQueueCapacity)
 	a.acpConn = acp.NewClientSideConnection(a.acpClient, a.stdin, a.stdout,
 		acp.WithMaxQueuedNotifications(notifQueueCap))
 	a.acpConn.SetLogger(slog.Default().With("component", "acp-conn"))

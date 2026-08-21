@@ -118,6 +118,7 @@ func provideGateway(
 	gitlabSvc *gitlab.Service,
 	referenceValidator entityrefs.SubmissionValidator,
 	dataDir string,
+	lspMaxConnections ...int,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, *terminalservice.Service, error) {
 	gateway, err := gateways.Provide(log)
 	if err != nil {
@@ -142,7 +143,7 @@ func provideGateway(
 	scriptSvc := &scriptServiceAdapter{taskSvc: taskSvc}
 	if lifecycleMgr != nil {
 		gateway.SetLifecycleManager(lifecycleMgr, userSvc, scriptSvc)
-		gateway.SetLSPHandler(lifecycleMgr, userSvc)
+		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspMaxConnections...)
 		gateway.SetVscodeProxy(lifecycleMgr)
 		gateway.SetPortProxy(lifecycleMgr)
 		gateway.SetPortTunnel(lifecycleMgr)

@@ -196,6 +196,25 @@ describe("MessageQueueSettings — per-session limit", () => {
     expect(screen.getByTestId("message-queue-source").textContent).toBe("Environment");
     expect(screen.getByText(/KANDEV_QUEUE_MAX_PER_SESSION/)).toBeTruthy();
   });
+
+  it("shows a configuration value as a locked configuration source", async () => {
+    fetchSettingsMock.mockResolvedValueOnce(
+      response({
+        configured: 25,
+        effective: 41,
+        source: "configuration" as MessageQueueSettingsResponse["effective"]["source"],
+        locked: true,
+      }),
+    );
+    render(<MessageQueueSettings />);
+
+    const input = await screen.findByLabelText(MAXIMUM_LABEL);
+    expect(input).toHaveProperty("disabled", true);
+    expect(screen.getByTestId(EFFECTIVE_VALUE_ID).textContent).toBe("41");
+    expect(screen.getByTestId("message-queue-source").textContent).toBe("Configuration");
+    expect(screen.getByText(/Managed by configuration/)).toBeTruthy();
+    expect(screen.queryByText(/KANDEV_QUEUE_MAX_PER_SESSION/)).toBeNull();
+  });
 });
 
 describe("MessageQueueSettings — permissions and recovery", () => {

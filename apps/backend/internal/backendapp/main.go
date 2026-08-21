@@ -28,7 +28,10 @@ import (
 	// Common packages
 	"github.com/kandev/kandev/internal/backendapp/ownershiplock"
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/profiles"
 
 	// Event bus
 	"github.com/kandev/kandev/internal/events"
@@ -54,6 +57,7 @@ import (
 	runtimeskill "github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	agentctltracing "github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/utility/profilebinding"
 
 	// WebSocket gateway
@@ -205,6 +209,12 @@ func Run(args []string, build BuildInfo) int {
 		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
 		return 1
 	}
+	if _, _, err := profiles.ApplyProfile(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to apply profile defaults: %v\n", err)
+		return 1
+	}
+	constants.ApplyPreparationTimeout(cfg.Tasks.PreparationTimeout)
+	subproc.ConfigureCaps(cfg.Limits.GHMaxConcurrent, cfg.Limits.GitMaxConcurrent)
 
 	// Apply command-line flag overrides (flags take precedence over config/env)
 	if parsedFlags.Port > 0 {
@@ -213,6 +223,7 @@ func Run(args []string, build BuildInfo) int {
 	if parsedFlags.LogLevel != "" {
 		cfg.Logging.Level = parsedFlags.LogLevel
 	}
+	agentctltracing.ConfigureEndpoint(cfg.Observability.OTLPEndpoint)
 
 	// Acquire runtime-state ownership before any shared-state initialization.
 	// The lock remains held through logger and service cleanup, so a second
@@ -778,6 +789,7 @@ func startGatewayAndServe(
 		repos.Notification, repos.Task, repos.Terminal, services.GitHub, services.GitLab,
 		referenceValidator,
 		cfg.ResolvedHomeDir(),
+		cfg.Limits.LSPMaxConnections,
 	)
 	if terminalSvc != nil {
 		services.Terminal = terminalSvc
@@ -906,6 +918,7 @@ func startGatewayAndServe(
 	}
 	scheduling := startSchedulingRuntime(
 		ctx, repos, services, eventBus, orchestratorSvc, runProcessorSvc, log,
+		runsscheduler.TickIntervalFromConfig(cfg.Office.SchedulerTickMs),
 	)
 	addCleanup(scheduling.Stop)
 	var restoreQuiesceOnce sync.Once
@@ -953,6 +966,7 @@ func startGatewayAndServe(
 		OrchestratorShutdown: func() { _ = orchestratorSvc.Stop() },
 		RestoreQuiesce:       restoreQuiesce,
 		MessageQueue:         orchestratorSvc.GetMessageQueue(),
+		MessageQueueConfig:   queueConfiguration(cfg),
 		TaskSessions:         repos.Task,
 	})
 	storageComposition, err := provideStorageComposition(
@@ -1431,10 +1445,11 @@ func startSchedulingRuntime(
 	orchestratorSvc *orchestrator.Service,
 	runProcessorSvc *officeservice.Service,
 	log *logger.Logger,
+	tickInterval time.Duration,
 ) *schedulingRuntime {
 	log.Info("Global run processor wired to orchestrator StartTask")
 	orchScheduler := officeservice.NewSchedulerIntegration(
-		runProcessorSvc, runsscheduler.TickIntervalFromEnv(),
+		runProcessorSvc, tickInterval,
 	)
 	// Office task-handoffs prompt enrichment. The HandoffService is
 	// constructed alongside the HTTP routes (helpers.go); we stash the
@@ -1460,11 +1475,11 @@ func startSchedulingRuntime(
 	// orchScheduler.Tick on both periodic ticks and event-driven signals.
 	runScheduler := runsscheduler.New(
 		orchScheduler, runsSvc.SubscribeSignal(),
-		runsscheduler.TickIntervalFromEnv(), log,
+		tickInterval, log,
 	)
 	runScheduler.Start(ctx)
 	log.Info("Runs scheduler started",
-		zap.Duration("tick", runsscheduler.TickIntervalFromEnv()))
+		zap.Duration("tick", tickInterval))
 	// Phase 5 (ADR-0004): start the shared cron loop. The routines handler
 	// degrades to a no-op when routineSvc is nil, so omitting Office's
 	// scheduler is safe when features.office is off.
@@ -1988,7 +2003,7 @@ func buildHTTPServer(
 	// X-Forwarded-Host feeds the port-scoped cookie-name resolver; honor it
 	// only from the same trusted proxies that may rewrite it (an untrusted
 	// value is stripped with a warning, so the resolver falls back to Host).
-	trusted := configureTrustedProxies(router, log)
+	trusted := configureTrustedProxies(router, log, cfg.Server.TrustedProxies)
 	router.Use(authhttpmw.StripUntrustedForwardedHost(trusted, log))
 	router.Use(httpmw.RequestLogger(log, kandevName))
 	router.Use(httpmw.OtelTracing(kandevName))
@@ -2082,6 +2097,8 @@ func buildHTTPServer(
 		devMode:                       cfg.Debug.DevMode || cfg.Debug.PprofEnabled,
 		httpPort:                      resolvedHTTPPort(cfg),
 		features:                      cfg.Features,
+		planCoalesceWindow:            time.Duration(cfg.Planning.CoalesceWindowMs) * time.Millisecond,
+		planCoalesceWindowConfigured:  true,
 		homeDir:                       cfg.ResolvedHomeDir(),
 		interimSettingsInterlockToken: interimSettingsInterlockToken,
 		log:                           log,

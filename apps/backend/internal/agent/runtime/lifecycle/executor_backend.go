@@ -13,6 +13,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -449,6 +450,7 @@ type ExecutorCreateRequest struct {
 	McpProfile               *mcpprofile.Context
 	AuthToken                string // Previously handshaken agentctl token for reconnects
 	BootstrapNonce           string // Stored nonce for re-handshake after container restart
+	AgentctlStartupConfig    commonconfig.AgentctlStartupConfig
 
 	// OnProgress is an optional callback for streaming preparation progress.
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can

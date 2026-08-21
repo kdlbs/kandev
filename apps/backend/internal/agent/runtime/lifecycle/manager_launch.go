@@ -878,6 +878,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpProfile:                     reqWithWorktree.McpProfile,
 		AuthToken:                      m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
+		AgentctlStartupConfig:          m.agentctlStartupConfig,
 		OnProgress:                     onProgress,
 		RemoteContributions:            remoteContributions,
 		ContributionDestinations:       contributionDestinations,

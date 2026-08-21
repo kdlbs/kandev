@@ -578,6 +578,8 @@ type routeParams struct {
 	devMode                       bool
 	httpPort                      int
 	features                      config.FeaturesConfig
+	planCoalesceWindow            time.Duration
+	planCoalesceWindowConfigured  bool
 	homeDir                       string
 	interimSettingsInterlockToken string
 	log                           *logger.Logger
@@ -586,7 +588,12 @@ type routeParams struct {
 // registerRoutes sets up all HTTP and WebSocket routes on the given router.
 func registerRoutes(p routeParams) {
 	workflowCtrl := workflowcontroller.NewController(p.services.Workflow)
-	planService := taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log)
+	var planService *taskservice.PlanService
+	if p.planCoalesceWindowConfigured {
+		planService = taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log, p.planCoalesceWindow)
+	} else {
+		planService = taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log)
+	}
 	// Per-user task scoping for plan reads/writes (opt-in auth).
 	planService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
 	clarificationStore := clarification.NewStore(2 * time.Hour)
