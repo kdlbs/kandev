@@ -12,6 +12,7 @@ export type InlineConfirmActionsProps = {
   confirmLabel: ReactNode;
   confirmAriaLabel?: string;
   confirmTestId?: string;
+  confirmDisabled?: boolean;
   onCancel: () => void;
   onClose?: () => void;
   onConfirm: () => void | Promise<void>;
@@ -29,6 +30,7 @@ export function InlineConfirmActions({
   confirmLabel,
   confirmAriaLabel,
   confirmTestId,
+  confirmDisabled = false,
   onCancel,
   onClose,
   onConfirm,
@@ -43,6 +45,7 @@ export function InlineConfirmActions({
   }, []);
 
   const handleConfirm = () => {
+    if (confirmDisabled) return;
     onClose?.();
     setConfirmed(true);
     queueMicrotask(() => {
@@ -93,6 +96,7 @@ export function InlineConfirmActions({
           size="sm"
           aria-label={confirmAriaLabel}
           data-testid={confirmTestId}
+          disabled={confirmDisabled}
           className={`${actionClass} transition-[color,background-color,border-color,transform] duration-100 active:scale-[0.96]`}
           onClick={handleConfirm}
         >

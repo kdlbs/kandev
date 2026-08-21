@@ -21,6 +21,7 @@ export type ActionConfirmPopoverProps = {
   confirmLabel: ReactNode;
   confirmAriaLabel?: string;
   confirmTestId?: string;
+  confirmDisabled?: boolean;
   testId?: string;
   onOpenChange: (open: boolean) => void;
   onCancel?: () => void;
@@ -44,6 +45,7 @@ export function ActionConfirmPopover({
   confirmLabel,
   confirmAriaLabel,
   confirmTestId,
+  confirmDisabled = false,
   testId = "action-confirm-popover",
   onOpenChange,
   onCancel,
@@ -77,6 +79,7 @@ export function ActionConfirmPopover({
   };
 
   const handleConfirm = () => {
+    if (confirmDisabled) return;
     if (!isConnected(anchorRef.current)) {
       handleOpenChange(false);
       return;
@@ -103,6 +106,7 @@ export function ActionConfirmPopover({
         confirmLabel={confirmLabel}
         confirmAriaLabel={confirmAriaLabel}
         confirmTestId={confirmTestId}
+        confirmDisabled={confirmDisabled}
         testId={testId}
         cancelRef={cancelRef}
         focusBoundaryRef={focusBoundaryRef}
@@ -124,6 +128,7 @@ type ActionConfirmPopoverContentProps = {
   confirmLabel: ReactNode;
   confirmAriaLabel?: string;
   confirmTestId?: string;
+  confirmDisabled: boolean;
   testId: string;
   cancelRef: RefObject<HTMLButtonElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
@@ -142,6 +147,7 @@ function ActionConfirmPopoverContent({
   confirmLabel,
   confirmAriaLabel,
   confirmTestId,
+  confirmDisabled,
   testId,
   cancelRef,
   focusBoundaryRef,
@@ -194,6 +200,7 @@ function ActionConfirmPopoverContent({
           variant="destructive"
           aria-label={confirmAriaLabel}
           data-testid={confirmTestId}
+          disabled={confirmDisabled}
           className="min-h-11 px-3 transition-[color,background-color,border-color,transform] duration-100 active:scale-[0.96]"
           onClick={onConfirm}
         >
