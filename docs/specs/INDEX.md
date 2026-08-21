@@ -314,6 +314,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [executor-profile-env-precedence](executor-profile-env-precedence/spec.md) | building |
 | [automations-yaml-export](automations-yaml-export/spec.md) | building |
 | [task-launch-failure-recovery](task-launch-failure-recovery/spec.md) | draft |
+| [task-delivery-ledger](task-delivery-ledger/spec.md) | draft |
 
 ---
 

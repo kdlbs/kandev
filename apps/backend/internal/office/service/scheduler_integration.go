@@ -214,7 +214,7 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 		si.logger.Info("run skipped (agent not active)",
 			zap.String("run_id", runID),
 			zap.String("agent_status", string(agent.Status)))
-		_ = si.svc.FinishRun(ctx, runID)
+		_ = si.svc.FinishRun(ctx, runID, RunOutcomeAgentInactive)
 		return
 	}
 
@@ -243,7 +243,7 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 				"agent":    agent.Name,
 				"agent_id": agent.ID,
 			}), runID, "")
-		_ = si.svc.FinishRun(ctx, runID)
+		_ = si.svc.FinishRun(ctx, runID, RunOutcomeIdleSkipped)
 		return
 	}
 
@@ -504,7 +504,7 @@ func (si *SchedulerIntegration) isTaskTreeGated(ctx context.Context, runID, task
 		zap.String("task_id", taskID),
 		zap.String("hold_id", hold.ID),
 		zap.String("mode", hold.Mode))
-	_ = si.svc.FinishRun(ctx, runID)
+	_ = si.svc.FinishRun(ctx, runID, RunOutcomeTaskTreeHeld)
 	return true
 }
 
@@ -634,7 +634,8 @@ func (si *SchedulerIntegration) tryCheckout(
 		// successful completion: route it through the same
 		// retry-then-escalate path as every other run failure in this
 		// file, rather than FinishRun, which would silently mark a run
-		// that never executed as finished.
+		// that never executed as finished. This retires RunOutcomeCheckoutError
+		// from this call site (see its doc comment).
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return false
 	}
@@ -642,6 +643,8 @@ func (si *SchedulerIntegration) tryCheckout(
 		si.logger.Info("run skipped (task checked out by another agent)",
 			zap.String("run_id", run.ID),
 			zap.String("task_id", taskID))
+		// Requeue rather than FinishRun: this retires RunOutcomeCheckoutUnavailable
+		// from this call site (see its doc comment).
 		si.requeueContendedCheckout(ctx, run, taskID)
 		return false
 	}
@@ -692,7 +695,7 @@ func (si *SchedulerIntegration) checkBudget(
 		si.logger.Info("run skipped (budget exceeded)",
 			zap.String("run_id", run.ID), zap.String("reason", reason))
 		si.releaseCheckoutIfNeeded(ctx, run)
-		_ = si.svc.FinishRun(ctx, run.ID)
+		_ = si.svc.FinishRun(ctx, run.ID, RunOutcomeBudgetBlocked)
 		si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
 			"scheduler", "office-scheduler",
 			"run_budget_blocked", "run", run.ID,
@@ -707,12 +710,15 @@ func (si *SchedulerIntegration) checkBudget(
 }
 
 // finishRun marks the run as finished, releases checkout, records
-// cooldown timestamp, and logs activity.
+// cooldown timestamp, and logs activity. Reached only when launchOrLog did
+// not launch an agent (no task starter or task ID) — see
+// docs/specs/task-delivery-ledger/spec.md, "Office run outcome", "Why :639
+// is not processed" — so the outcome is no_agent_launched, never processed.
 func (si *SchedulerIntegration) finishRun(
 	ctx context.Context, run *models.Run,
 	agent *models.AgentInstance, taskID string,
 ) {
-	if err := si.svc.FinishRun(ctx, run.ID); err != nil {
+	if err := si.svc.FinishRun(ctx, run.ID, RunOutcomeNoAgentLaunched); err != nil {
 		si.logger.Error("failed to finish run",
 			zap.String("run_id", run.ID), zap.Error(err))
 		return

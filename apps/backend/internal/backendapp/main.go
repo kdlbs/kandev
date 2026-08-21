@@ -130,6 +130,7 @@ import (
 
 	// Database
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/delivery"
 
 	"github.com/kandev/kandev/internal/common/ports"
 )
@@ -735,6 +736,20 @@ func startAgentInfrastructure(
 	// background loops.
 	if services.Plugins != nil {
 		startPluginsSubsystems(ctx, services.Plugins, lifecycleMgr, eventBus, log, addRuntimeCleanup)
+	}
+
+	// Start the task delivery ledger sweep. Must run after task/repository
+	// tables exist (already true here, provided in provideRepositories) —
+	// the ledger's foreign keys require them present at CREATE TABLE time
+	// on PostgreSQL. services.Task satisfies delivery.CheckoutResolver.
+	if _, deliveryCleanup, err := delivery.Provide(dbPool.Writer(), dbPool.Reader(), services.Task, log); err != nil {
+		log.Warn("delivery ledger sweep unavailable", zap.Error(err))
+	} else {
+		// Must be addRuntimeCleanup, not addCleanup: RestoreQuiesce only
+		// stops workers registered here, and a restore checkpoints, closes,
+		// and replaces the shared database pool. A five-minute sweep pass
+		// overlapping that would race the pool swap.
+		addRuntimeCleanup(deliveryCleanup)
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,

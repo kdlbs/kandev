@@ -31,25 +31,31 @@ func (s *Service) ClaimNextRun(ctx context.Context) (*models.Run, error) {
 	return req, nil
 }
 
-// FinishRun marks a claimed run as finished and publishes an
-// OfficeRunProcessed bus event. The run row is fetched first so the
-// published payload carries enough context (agent, task, comment,
-// reason) for downstream WS consumers to scope updates.
-func (s *Service) FinishRun(ctx context.Context, id string) error {
-	return s.transitionRunTerminal(ctx, id, RunStatusFinished)
+// FinishRun marks a claimed run as finished, records outcome (one of the
+// eight docs/specs/task-delivery-ledger/spec.md "Office run outcome"
+// values — the call site's semantic label, never invented), and publishes
+// an OfficeRunProcessed bus event. The run row is fetched first so the
+// published payload carries enough context (agent, task, comment, reason)
+// for downstream WS consumers to scope updates.
+func (s *Service) FinishRun(ctx context.Context, id, outcome string) error {
+	return s.transitionRunTerminal(ctx, id, RunStatusFinished, &outcome)
 }
 
 // FailRun marks a claimed run as failed and publishes an
-// OfficeRunProcessed event. See FinishRun for the lifecycle contract.
+// OfficeRunProcessed event. outcome is written as NULL: a failed run is
+// bucketed by RunCountsByDayForAgent on status alone and never reaches the
+// outcome-derived buckets, so no value from the eight-value vocabulary is
+// invented for it. See FinishRun for the lifecycle contract.
 func (s *Service) FailRun(ctx context.Context, id string) error {
-	return s.transitionRunTerminal(ctx, id, RunStatusFailed)
+	return s.transitionRunTerminal(ctx, id, RunStatusFailed, nil)
 }
 
-// transitionRunTerminal updates the run row to the given terminal
-// status and emits OfficeRunProcessed. Pre-fetching the run keeps the
-// published payload self-contained even when the caller doesn't hold a
-// reference to the model. Publish errors are logged at debug and
-// swallowed; persistence errors are returned to the caller.
+// transitionRunTerminal updates the run row to the given terminal status
+// and outcome (nil writes SQL NULL) and emits OfficeRunProcessed.
+// Pre-fetching the run keeps the published payload self-contained even
+// when the caller doesn't hold a reference to the model. Publish errors
+// are logged at debug and swallowed; persistence errors are returned to
+// the caller.
 //
 // Deliberately does NOT release the task checkout: transitionRunTerminal
 // is reached by every terminal run, including ones that never held the
@@ -66,7 +72,7 @@ func (s *Service) FailRun(ctx context.Context, id string) error {
 // explicitly instead: handleAgentCompleted / handleTasklessAgentCompleted
 // (event_subscribers.go) for the launched-run completion path, and
 // HandleAgentFailure (failure.go) for the launched-run failure path.
-func (s *Service) transitionRunTerminal(ctx context.Context, id, status string) error {
+func (s *Service) transitionRunTerminal(ctx context.Context, id, status string, outcome *string) error {
 	run, getErr := s.repo.GetRunByID(ctx, id)
 	if getErr != nil && !errors.Is(getErr, sql.ErrNoRows) {
 		s.logger.Debug("get run for terminal transition failed",
@@ -74,7 +80,7 @@ func (s *Service) transitionRunTerminal(ctx context.Context, id, status string) 
 			zap.String("status", status),
 			zap.Error(getErr))
 	}
-	if err := s.repo.FinishRun(ctx, id, status); err != nil {
+	if err := s.repo.FinishRun(ctx, id, status, outcome); err != nil {
 		return err
 	}
 	s.publishRunProcessed(ctx, id, status, run)

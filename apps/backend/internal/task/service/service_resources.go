@@ -15,6 +15,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -760,6 +761,9 @@ func (s *Service) createRepository(
 	if sourceType == "" {
 		sourceType = sourceTypeLocal
 	}
+	if req.DefaultBranch != "" && !securityutil.IsValidDefaultBranchName(req.DefaultBranch) {
+		return nil, fmt.Errorf("%w: invalid default branch", ErrInvalidRepositorySettings)
+	}
 	prefix := strings.TrimSpace(req.WorktreeBranchPrefix)
 	if err := worktree.ValidateBranchPrefix(prefix); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
@@ -966,10 +970,20 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 		// Backfill default_branch when the caller carries one and the existing
 		// row is still empty. Lets the synchronous add_branch probe persist its
 		// answer onto a previously-empty Repository row (e.g. one created by
-		// an earlier create_task that left default_branch unset).
+		// an earlier create_task that left default_branch unset). Validated
+		// here directly: this value reaches git argv (worktree fetch/pull via
+		// FallbackBaseBranch) on paths that never go through ancestry.Check,
+		// so that defense-in-depth guard does not cover it. Invalid input
+		// skips only this field's backfill rather than failing the whole
+		// find-or-create call, since this is a best-effort backfill.
 		if existing.DefaultBranch == "" && req.DefaultBranch != "" {
-			existing.DefaultBranch = req.DefaultBranch
-			dirty = true
+			if securityutil.IsValidDefaultBranchName(req.DefaultBranch) {
+				existing.DefaultBranch = req.DefaultBranch
+				dirty = true
+			} else {
+				s.logger.Warn("skipping default_branch backfill: invalid branch name",
+					zap.String("repository_id", existing.ID))
+			}
 		}
 		if existing.RemoteURL == "" && req.RemoteURL != "" {
 			existing.RemoteURL = req.RemoteURL
@@ -1181,6 +1195,9 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 		repository.ProviderName = *req.ProviderName
 	}
 	if req.DefaultBranch != nil {
+		if *req.DefaultBranch != "" && !securityutil.IsValidDefaultBranchName(*req.DefaultBranch) {
+			return fmt.Errorf("%w: invalid default branch", ErrInvalidRepositorySettings)
+		}
 		repository.DefaultBranch = *req.DefaultBranch
 	}
 	if req.WorktreeBranchPrefix != nil {

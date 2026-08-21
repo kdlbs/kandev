@@ -115,6 +115,102 @@ func TestFactoryReset_Confirmed_RunsFullSequence(t *testing.T) {
 	}
 }
 
+// TestFactoryReset_DeletesDeliveryLedgerActivationKeys covers
+// docs/specs/task-delivery-ledger/spec.md, "Reset parity": an activated
+// database resets with both telemetry.*.activated_at keys absent from
+// kandev_meta afterward, while the table itself (and unrelated keys) are
+// kept.
+func TestFactoryReset_DeletesDeliveryLedgerActivationKeys(t *testing.T) {
+	svc, tracker, _, _ := newTestService(t)
+
+	if _, err := svc.pool.Writer().Exec(`
+		INSERT OR REPLACE INTO kandev_meta (key, value) VALUES
+			('telemetry.delivery_ledger.activated_at', '2026-08-01T00:00:00Z'),
+			('telemetry.run_outcome.activated_at', '2026-08-01T00:00:00Z')
+	`); err != nil {
+		t.Fatalf("seed activation keys: %v", err)
+	}
+
+	id, err := svc.FactoryReset(context.Background(), "RESET")
+	if err != nil {
+		t.Fatalf("FactoryReset: %v", err)
+	}
+	job := waitForState(t, tracker, id, jobs.StateSucceeded)
+	if job.State != jobs.StateSucceeded {
+		t.Fatalf("state = %s, want succeeded; message=%s", job.State, job.Message)
+	}
+
+	var count int
+	if err := svc.pool.Reader().QueryRow(`
+		SELECT COUNT(*) FROM kandev_meta
+		WHERE key IN ('telemetry.delivery_ledger.activated_at', 'telemetry.run_outcome.activated_at')
+	`).Scan(&count); err != nil {
+		t.Fatalf("query kandev_meta: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("activation keys remaining = %d, want 0", count)
+	}
+
+	// kandev_meta itself, and its unrelated keys, must survive the reset.
+	var version string
+	if err := svc.pool.Reader().QueryRow(
+		`SELECT value FROM kandev_meta WHERE key = 'kandev_version'`,
+	).Scan(&version); err != nil {
+		t.Fatalf("kandev_version missing after reset: %v", err)
+	}
+	if version != "v0.99.0" {
+		t.Errorf("kandev_version = %q, want unchanged v0.99.0", version)
+	}
+}
+
+// TestFactoryReset_ActivationKeyDeleteFailureLeavesUserTablesIntact is
+// Review round 2, finding #2: runFactoryReset's own comment documents a
+// deliberate fail-safe ordering — delete the delivery-ledger/run-outcome
+// activation keys BEFORE dropping any user table, specifically so that if
+// key deletion fails, the reset aborts before dropUserTables ever runs.
+// Nothing exercised that path: this test forces persistence.DeleteKeys to
+// fail (by dropping kandev_meta, the table it deletes rows from, before
+// the reset runs) and asserts the job surfaces as failed while the seeded
+// user tables (users, sessions_t) are still present.
+func TestFactoryReset_ActivationKeyDeleteFailureLeavesUserTablesIntact(t *testing.T) {
+	svc, tracker, _, _ := newTestService(t)
+
+	if _, err := svc.pool.Writer().Exec(`DROP TABLE kandev_meta`); err != nil {
+		t.Fatalf("drop kandev_meta: %v", err)
+	}
+
+	id, err := svc.FactoryReset(context.Background(), "RESET")
+	if err != nil {
+		t.Fatalf("FactoryReset: %v", err)
+	}
+	job := waitForState(t, tracker, id, jobs.StateFailed)
+	if job.State != jobs.StateFailed {
+		t.Fatalf("state = %s, want failed; message=%s", job.State, job.Message)
+	}
+
+	rows, err := svc.pool.Reader().Query(`
+		SELECT name FROM sqlite_master
+		WHERE type='table' AND name NOT LIKE 'sqlite_%'
+	`)
+	if err != nil {
+		t.Fatalf("query sqlite_master: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	remaining := map[string]bool{}
+	for rows.Next() {
+		var n string
+		if scanErr := rows.Scan(&n); scanErr != nil {
+			t.Fatalf("scan: %v", scanErr)
+		}
+		remaining[n] = true
+	}
+	for _, want := range []string{"users", "sessions_t"} {
+		if !remaining[want] {
+			t.Errorf("table %q missing after a failed activation-key delete; want it kept (drop must not have run)", want)
+		}
+	}
+}
+
 func TestHandleReset_WrongConfirm_Returns400(t *testing.T) {
 	svc, _, _, _ := newTestService(t)
 	gin.SetMode(gin.TestMode)
