@@ -340,6 +340,15 @@ describe("ClarificationCustomInput rune limit", () => {
     );
     const counter = getByTestId("clarification-input-rune-counter");
     expect(counter.getAttribute("data-over-limit")).toBe("true");
+    // i18next leaves an unsubstituted placeholder verbatim in the rendered
+    // text when a t() call omits a key the string interpolates — assert the
+    // actual text, not just the data-over-limit flag, so a call site missing
+    // one of the string's placeholders (e.g. `max`) fails here instead of
+    // only being visible in a live screenshot.
+    expect(counter.textContent).toBe(
+      `1 character over the ${CLARIFICATION_CUSTOM_TEXT_MAX_RUNES}-character limit.`,
+    );
+    expect(counter.textContent).not.toContain("{{");
   });
 
   it("does not show a counter for a short draft far from the limit", () => {

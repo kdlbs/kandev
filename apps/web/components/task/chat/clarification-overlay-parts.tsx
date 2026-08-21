@@ -261,6 +261,7 @@ function ClarificationRuneCounter({
       {overLimit
         ? t("task:clarificationAnswerOverLimit", {
             count: runeCount - CLARIFICATION_CUSTOM_TEXT_MAX_RUNES,
+            max: CLARIFICATION_CUSTOM_TEXT_MAX_RUNES,
           })
         : t("task:clarificationAnswerRuneCount", {
             current: runeCount,
