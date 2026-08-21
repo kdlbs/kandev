@@ -9,6 +9,8 @@ type PropertyRowProps = {
   valueClassName?: string;
   /** When true, align children to the top instead of centred. */
   alignStart?: boolean;
+  /** Test id placed on the value side, for E2E locators. */
+  testId?: string;
 };
 
 /**
@@ -22,6 +24,7 @@ export function PropertyRow({
   className,
   valueClassName,
   alignStart = false,
+  testId,
 }: PropertyRowProps) {
   return (
     <div
@@ -32,7 +35,9 @@ export function PropertyRow({
       )}
     >
       <span className="text-sm text-muted-foreground w-24 shrink-0 pt-0.5">{label}</span>
-      <div className={cn("text-sm text-right flex-1 min-w-0", valueClassName)}>{children}</div>
+      <div className={cn("text-sm text-right flex-1 min-w-0", valueClassName)} data-testid={testId}>
+        {children}
+      </div>
     </div>
   );
 }

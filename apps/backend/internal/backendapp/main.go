@@ -1277,6 +1277,15 @@ func wireOfficeSvcsDependencies(
 	// relayed-comment activity rows get tagged with the originating
 	// run id (Tasks Touched on the run detail page).
 	services.OfficeSvcs.Channels.SetRunResolver(services.Office)
+	// Wire the office service as the dashboard's run resolver so the
+	// synchronous task_status_changed activity write (UpdateTaskStatus)
+	// tags its row with the originating run id, matching the async
+	// subscriber it replaced.
+	services.OfficeSvcs.Dashboard.SetRunResolver(services.Office)
+	// Wire the Office activity projection before task.state_changed events
+	// reach the WebSocket broadcaster, so workflow moves have durable timeline
+	// data when the frontend refetches the task detail.
+	services.Task.SetTaskStateActivityLogger(services.OfficeSvcs.Dashboard)
 	// Wire the office service as the retry canceller for task reassignment.
 	services.OfficeSvcs.Dashboard.SetRetryCanceller(services.Office)
 	// Wire the office service as the task canceller for status→cancelled hard-cancels.

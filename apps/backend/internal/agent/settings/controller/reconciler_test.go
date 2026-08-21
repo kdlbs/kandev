@@ -88,6 +88,59 @@ func copyAgent(a *models.Agent) *models.Agent {
 	return &out
 }
 
+// copyProfile deep-copies a profile so the fake store behaves like a real one:
+// callers get a snapshot, not a handle on stored state. Keep the legacy field
+// that is intentionally omitted from the public JSON representation.
+func copyProfile(p *models.AgentProfile) *models.AgentProfile {
+	if p == nil {
+		return nil
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		panic("fakeStore: marshal profile: " + err.Error())
+	}
+	var out models.AgentProfile
+	if err := json.Unmarshal(data, &out); err != nil {
+		panic("fakeStore: unmarshal profile: " + err.Error())
+	}
+	out.DangerouslySkipPermissions = p.DangerouslySkipPermissions
+	return &out
+}
+
+func TestFakeStoreAgentProfileReadRequiresExplicitUpdate(t *testing.T) {
+	st := newFakeStore()
+	st.profiles["agent-1"] = []*models.AgentProfile{{
+		ID:      "profile-1",
+		AgentID: "agent-1",
+		Name:    "Original",
+	}}
+
+	profile, err := st.GetAgentProfile(context.Background(), "profile-1")
+	if err != nil {
+		t.Fatalf("GetAgentProfile: %v", err)
+	}
+	profile.Name = "Changed"
+
+	stored, err := st.GetAgentProfile(context.Background(), "profile-1")
+	if err != nil {
+		t.Fatalf("GetAgentProfile after local mutation: %v", err)
+	}
+	if stored.Name != "Original" {
+		t.Fatalf("local mutation changed stored profile name to %q", stored.Name)
+	}
+
+	if err := st.UpdateAgentProfile(context.Background(), profile); err != nil {
+		t.Fatalf("UpdateAgentProfile: %v", err)
+	}
+	stored, err = st.GetAgentProfile(context.Background(), "profile-1")
+	if err != nil {
+		t.Fatalf("GetAgentProfile after update: %v", err)
+	}
+	if stored.Name != "Changed" {
+		t.Fatalf("stored profile name = %q, want Changed after explicit update", stored.Name)
+	}
+}
+
 func (f *fakeStore) CreateAgent(_ context.Context, a *models.Agent) error {
 	f.nextAgentID++
 	a.ID = "agent-" + strconv.Itoa(f.nextAgentID)
@@ -161,8 +214,9 @@ func (f *fakeStore) UpsertAgentProfileMcpConfig(_ context.Context, config *model
 func (f *fakeStore) CreateAgentProfile(_ context.Context, p *models.AgentProfile) error {
 	f.nextProfID++
 	p.ID = "profile-" + strconv.Itoa(f.nextProfID)
-	f.profiles[p.AgentID] = append(f.profiles[p.AgentID], p)
-	f.created = append(f.created, p)
+	stored := copyProfile(p)
+	f.profiles[p.AgentID] = append(f.profiles[p.AgentID], stored)
+	f.created = append(f.created, stored)
 	return nil
 }
 
@@ -178,6 +232,9 @@ func (f *fakeStore) DuplicateAgentProfile(_ context.Context, input store.Duplica
 		// must re-read the source and copy the NEW state.
 		input.Source.Name = "Changed Name"
 		input.Source.UpdatedAt = input.Source.UpdatedAt.Add(time.Second)
+		if _, err := f.persistAgentProfile(input.Source); err != nil {
+			return err
+		}
 		return store.ErrProfileChanged
 	}
 	// Version check mirrors the sqlite store: the stored source rows must
@@ -201,8 +258,9 @@ func (f *fakeStore) DuplicateAgentProfile(_ context.Context, input store.Duplica
 	now := time.Now().UTC()
 	p.CreatedAt = now
 	p.UpdatedAt = now
-	f.profiles[p.AgentID] = append(f.profiles[p.AgentID], p)
-	f.created = append(f.created, p)
+	stored := copyProfile(p)
+	f.profiles[p.AgentID] = append(f.profiles[p.AgentID], stored)
+	f.created = append(f.created, stored)
 	if input.McpConfig != nil {
 		input.McpConfig.ProfileID = p.ID
 		f.mcpConfigs[p.ID] = input.McpConfig
@@ -210,8 +268,25 @@ func (f *fakeStore) DuplicateAgentProfile(_ context.Context, input store.Duplica
 	return nil
 }
 
+func (f *fakeStore) persistAgentProfile(p *models.AgentProfile) (*models.AgentProfile, error) {
+	stored := copyProfile(p)
+	for agentID, profiles := range f.profiles {
+		for i, existing := range profiles {
+			if existing.ID == p.ID {
+				f.profiles[agentID][i] = stored
+				return stored, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("agent profile not found: %s", p.ID)
+}
+
 func (f *fakeStore) UpdateAgentProfile(_ context.Context, p *models.AgentProfile) error {
-	f.updated = append(f.updated, p)
+	stored, err := f.persistAgentProfile(p)
+	if err != nil {
+		return err
+	}
+	f.updated = append(f.updated, copyProfile(stored))
 	return nil
 }
 
@@ -223,8 +298,12 @@ func (f *fakeStore) UpdateAgentProfileEnabled(ctx context.Context, id string, en
 	profile.Enabled = enabled
 	profile.UserModified = true
 	profile.UpdatedAt = time.Now().UTC()
-	f.updated = append(f.updated, profile)
-	return profile.UpdatedAt, nil
+	stored, err := f.persistAgentProfile(profile)
+	if err != nil {
+		return time.Time{}, err
+	}
+	f.updated = append(f.updated, copyProfile(stored))
+	return stored.UpdatedAt, nil
 }
 
 func (f *fakeStore) DeleteAgentProfile(_ context.Context, id string) error {
@@ -254,7 +333,7 @@ func (f *fakeStore) GetAgentProfile(_ context.Context, id string) (*models.Agent
 	for _, list := range f.profiles {
 		for _, p := range list {
 			if p.ID == id {
-				return p, nil
+				return copyProfile(p), nil
 			}
 		}
 	}
@@ -270,7 +349,7 @@ func (f *fakeStore) GetAgentProfileIncludingDeleted(ctx context.Context, id stri
 	for _, list := range f.deleted {
 		for _, p := range list {
 			if p.ID == id {
-				return p, nil
+				return copyProfile(p), nil
 			}
 		}
 	}
@@ -283,7 +362,12 @@ func (f *fakeStore) ListAgentProfiles(_ context.Context, agentID string) ([]*mod
 			return nil, err
 		}
 	}
-	return f.profiles[agentID], nil
+	profiles := f.profiles[agentID]
+	out := make([]*models.AgentProfile, 0, len(profiles))
+	for _, p := range profiles {
+		out = append(out, copyProfile(p))
+	}
+	return out, nil
 }
 
 func (f *fakeStore) Close() error { return nil }
@@ -1063,13 +1147,17 @@ func TestProfileReconciler_MigratesCursorVariantModel(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if profile.Model != "grok-4.5" {
-		t.Fatalf("profile model = %q, want bare Cursor model", profile.Model)
+	stored, err := st.GetAgentProfile(context.Background(), profile.ID)
+	if err != nil {
+		t.Fatalf("get migrated profile: %v", err)
 	}
-	if got := profile.ConfigOptions["effort"]; got != "low" {
+	if stored.Model != "grok-4.5" {
+		t.Fatalf("profile model = %q, want bare Cursor model", stored.Model)
+	}
+	if got := stored.ConfigOptions["effort"]; got != "low" {
 		t.Errorf("profile effort = %q, want existing profile value low", got)
 	}
-	if got := profile.ConfigOptions["fast"]; got != "true" {
+	if got := stored.ConfigOptions["fast"]; got != "true" {
 		t.Errorf("profile fast = %q, want migrated value true", got)
 	}
 	if len(st.updated) == 0 {

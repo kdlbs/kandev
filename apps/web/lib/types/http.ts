@@ -378,6 +378,9 @@ export type Task = ActiveSubagentCountFields & {
   /** True when the task's session was mid-turn when the backend died and has
    *  not been resumed since (startup reconciliation marker). */
   interrupted?: boolean;
+  /** True when a workflow step's auto_start_agent on_enter action failed to
+   *  launch a run for this task. */
+  auto_start_failed?: boolean;
   /**
    * Task-level MOST-ACTIVE-WINS activity across sessions. "generating" wins,
    * then "background"; null/absent means none is known. The count is the

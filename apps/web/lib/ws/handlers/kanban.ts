@@ -133,6 +133,7 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               primarySessionPendingAction: existing?.primarySessionPendingAction,
               taskPendingAction: existing?.taskPendingAction,
               interrupted: existing?.interrupted,
+              autoStartFailed: existing?.autoStartFailed,
               foregroundActivity: existing?.foregroundActivity,
               ...queueFields(task, existing),
               ...dependencyFields(task, existing),
@@ -177,6 +178,8 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
                   ? fallback?.foregroundActivity
                   : t.foregroundActivity,
               interrupted: t.interrupted === undefined ? fallback?.interrupted : t.interrupted,
+              autoStartFailed:
+                t.autoStartFailed === undefined ? fallback?.autoStartFailed : t.autoStartFailed,
             };
           });
           return {
