@@ -235,7 +235,8 @@ describe("PluginsSettingsPage", () => {
 
     render(<PluginsSettingsPage />);
     fireEvent.click(screen.getByRole("button", { name: /uninstall/i }));
-    fireEvent.click(screen.getByRole("button", { name: /confirm uninstall/i }));
+    expect(screen.getByTestId("plugin-uninstall-confirm-popover").textContent).toContain("Acme");
+    fireEvent.click(screen.getByTestId("plugin-uninstall-confirm"));
 
     await vi.waitFor(() => expect(uninstallPluginSpy).toHaveBeenCalledWith(PLUGIN_ID));
     expect(unloadPluginSpy).toHaveBeenCalledWith(PLUGIN_ID);

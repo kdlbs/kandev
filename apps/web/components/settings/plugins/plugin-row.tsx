@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState, type RefObject } from "react";
 import { IconArrowUpCircle, IconChevronRight } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
@@ -9,6 +10,7 @@ import Link from "@/components/routing/app-link";
 import { PluginRepoLink } from "./plugin-repo-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
 import { PluginErrorDiagnostic } from "./plugin-error-diagnostic";
+import { PluginUninstallConfirmation } from "./uninstall-plugin-dialog";
 import type { MarketplaceEntry, PluginRecord } from "@/lib/types/plugins";
 import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 
@@ -23,9 +25,15 @@ type PluginRowProps = {
   autoUpdateBusy: boolean;
   /** True when the plugin declares required settings the operator has not filled in. */
   needsSetup?: boolean;
+  /** Fine pointers use an anchored popover; coarse pointers use inline row actions. */
+  isFinePointer?: boolean;
+  /** True while this plugin's uninstall request is in flight. */
+  uninstallBusy?: boolean;
   onEnable: (plugin: PluginRecord) => void;
   onDisable: (plugin: PluginRecord) => void;
   onUninstall: (plugin: PluginRecord) => void;
+  onCancelUninstall?: () => void;
+  onConfirmUninstall?: (plugin: PluginRecord) => void | Promise<void>;
   onUpdate?: (entry: MarketplaceEntry) => void;
   onSetAutoUpdate: (plugin: PluginRecord, value: boolean | null) => void;
 };
@@ -49,9 +57,13 @@ export function PluginRow({
   autoUpdateDefault,
   autoUpdateBusy,
   needsSetup = false,
+  isFinePointer = true,
+  uninstallBusy = false,
   onEnable,
   onDisable,
   onUninstall,
+  onCancelUninstall,
+  onConfirmUninstall,
   onUpdate,
   onSetAutoUpdate,
 }: PluginRowProps) {
@@ -59,6 +71,14 @@ export function PluginRow({
   const canEnable =
     plugin.status === "disabled" || plugin.status === "registered" || plugin.status === "error";
   const canDisable = plugin.status === "active" || plugin.status === "error";
+  const {
+    confirmingUninstall,
+    setConfirmingUninstall,
+    uninstallAnchorRef,
+    requestUninstall,
+    cancelUninstall,
+    confirmUninstall,
+  } = usePluginUninstallConfirmation(plugin, onUninstall, onCancelUninstall, onConfirmUninstall);
 
   return (
     <div
@@ -84,13 +104,16 @@ export function PluginRow({
           <div className="flex items-center gap-2 shrink-0">
             <PluginRowActions
               plugin={plugin}
-              busy={busy}
+              busy={busy || uninstallBusy}
               update={update}
               canEnable={canEnable}
               canDisable={canDisable}
+              isFinePointer={isFinePointer}
+              confirmingUninstall={confirmingUninstall}
+              uninstallAnchorRef={uninstallAnchorRef}
               onEnable={onEnable}
               onDisable={onDisable}
-              onUninstall={onUninstall}
+              onUninstall={requestUninstall}
               onUpdate={onUpdate}
             />
             <IconChevronRight
@@ -121,8 +144,53 @@ export function PluginRow({
           onSetAutoUpdate={onSetAutoUpdate}
         />
       </div>
+      <div className="relative z-10">
+        <PluginUninstallConfirmation
+          target={plugin}
+          open={confirmingUninstall}
+          isFinePointer={isFinePointer}
+          anchorRef={uninstallAnchorRef}
+          onOpenChange={setConfirmingUninstall}
+          onCancel={cancelUninstall}
+          onConfirm={confirmUninstall}
+        />
+      </div>
     </div>
   );
+}
+
+function usePluginUninstallConfirmation(
+  plugin: PluginRecord,
+  onUninstall: (plugin: PluginRecord) => void,
+  onCancelUninstall?: () => void,
+  onConfirmUninstall?: (plugin: PluginRecord) => void | Promise<void>,
+) {
+  const [confirmingUninstall, setConfirmingUninstall] = useState(false);
+  const uninstallAnchorRef = useRef<HTMLButtonElement>(null);
+
+  const requestUninstall = () => {
+    setConfirmingUninstall(true);
+    onUninstall(plugin);
+  };
+
+  const cancelUninstall = () => {
+    setConfirmingUninstall(false);
+    onCancelUninstall?.();
+  };
+
+  const confirmUninstall = () => {
+    setConfirmingUninstall(false);
+    return onConfirmUninstall?.(plugin);
+  };
+
+  return {
+    confirmingUninstall,
+    setConfirmingUninstall,
+    uninstallAnchorRef,
+    requestUninstall,
+    cancelUninstall,
+    confirmUninstall,
+  };
 }
 
 /**
@@ -240,6 +308,9 @@ type PluginRowActionsProps = Omit<
 > & {
   canEnable: boolean;
   canDisable: boolean;
+  isFinePointer: boolean;
+  confirmingUninstall: boolean;
+  uninstallAnchorRef: RefObject<HTMLButtonElement | null>;
   onEnable: (plugin: PluginRecord) => void;
   onDisable: (plugin: PluginRecord) => void;
   onUninstall: (plugin: PluginRecord) => void;
@@ -251,6 +322,9 @@ function PluginRowActions({
   update,
   canEnable,
   canDisable,
+  isFinePointer,
+  confirmingUninstall,
+  uninstallAnchorRef,
   onEnable,
   onDisable,
   onUninstall,
@@ -294,15 +368,18 @@ function PluginRowActions({
           {t("plugins:disable")}
         </Button>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="cursor-pointer min-h-11 text-destructive hover:text-destructive sm:min-h-0"
-        disabled={busy}
-        onClick={() => onUninstall(plugin)}
-      >
-        {t("plugins:uninstall")}
-      </Button>
+      {(isFinePointer || !confirmingUninstall) && (
+        <Button
+          ref={uninstallAnchorRef}
+          variant="ghost"
+          size="sm"
+          className="cursor-pointer min-h-11 text-destructive hover:text-destructive sm:min-h-0"
+          disabled={busy}
+          onClick={() => onUninstall(plugin)}
+        >
+          {t("plugins:uninstall")}
+        </Button>
+      )}
     </div>
   );
 }
