@@ -31,6 +31,8 @@ func ensureSessionTables(t *testing.T, repo *sqlite.Repository) {
 			id TEXT PRIMARY KEY,
 			task_session_id TEXT NOT NULL,
 			type TEXT NOT NULL DEFAULT 'message',
+			author_type TEXT NOT NULL DEFAULT 'user',
+			content TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMP NOT NULL
 		)`,
 	}

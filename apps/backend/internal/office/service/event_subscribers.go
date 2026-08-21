@@ -347,6 +347,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		"session_id": data.SessionID,
 	})
 	s.markRoutingSuccess(ctx, run)
+	s.recordRunOutputSummary(ctx, run, data.SessionID)
 	// resolveLifecycleRun prefers the immutable run ID from the event and
 	// falls back to task plus agent only for legacy events. Releasing here
 	// (rather than unconditionally inside transitionRunTerminal) is safe —
@@ -408,6 +409,7 @@ func (s *Service) handleTasklessAgentCompleted(
 		"session_id": data.SessionID,
 	})
 	s.refreshContinuationSummary(ctx, run, data.AgentID)
+	s.recordRunOutputSummary(ctx, run, data.SessionID)
 	// run came from GetClaimedTasklessRunForAgent: it is the run that
 	// actually launched. Taskless runs typically carry no task_id, so this
 	// is a no-op in the common case, but call it for the same reason as
@@ -499,6 +501,32 @@ func extractRoutineID(snapshot string) string {
 		return ""
 	}
 	return p.RoutineID
+}
+
+// recordRunOutputSummary persists the agent's final message as the run's
+// output_summary. Best-effort — same contract as refreshContinuationSummary
+// above: any failure is logged at warn and never fails the completion
+// event, since the run must still reach a terminal state either way.
+//
+// failure_reason is deliberately left "" on this write.
+// UpdateRunOutputSummary is output_summary's only writer, so this never
+// clobbers a value nothing else sets today; giving failure_reason real
+// semantics (skipped / checkout-contended / failed) is card b5cf0858's
+// territory, not this one's.
+func (s *Service) recordRunOutputSummary(ctx context.Context, run *models.Run, sessionID string) {
+	if s.repo == nil || run == nil || sessionID == "" {
+		return
+	}
+	summary, err := s.repo.GetFinalAgentMessage(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("run output summary: final agent message lookup failed",
+			zap.String("run_id", run.ID), zap.Error(err))
+		return
+	}
+	if updateErr := s.repo.UpdateRunOutputSummary(ctx, run.ID, summary, ""); updateErr != nil {
+		s.logger.Warn("run output summary: update failed",
+			zap.String("run_id", run.ID), zap.Error(updateErr))
+	}
 }
 
 func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error {
