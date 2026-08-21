@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { IconRotateClockwise2 } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { Button } from "@kandev/ui/button";
@@ -14,18 +14,85 @@ import { useTranslation } from "react-i18next";
 type ResetContextButtonProps = {
   sessionId: string;
   presentation?: "desktop" | "mobile";
+  onConfirmationOpenChange?: (open: boolean) => void;
 };
+
+type ResetContextTriggerProps = {
+  actionRef: RefObject<HTMLButtonElement | null>;
+  isResetting: boolean;
+  ariaLabel: string;
+  tooltip: string;
+  onOpen: () => void;
+};
+
+function ResetContextTrigger({
+  actionRef,
+  isResetting,
+  ariaLabel,
+  tooltip,
+  onOpen,
+}: ResetContextTriggerProps) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          ref={actionRef}
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={ariaLabel}
+          className="h-7 w-7 cursor-pointer hover:bg-muted/40 text-muted-foreground"
+          onClick={onOpen}
+          disabled={isResetting}
+          data-testid="reset-context-button"
+        >
+          {isResetting ? (
+            <GridSpinner className="h-4 w-4" />
+          ) : (
+            <IconRotateClockwise2 className="h-4 w-4" />
+          )}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 export function ResetContextButton({
   sessionId,
   presentation = "desktop",
+  onConfirmationOpenChange,
 }: ResetContextButtonProps) {
   const { t } = useTranslation();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const actionRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusAfterCancelRef = useRef(false);
   const clearContextWindow = useAppStore((state) => state.clearContextWindow);
   const resetContextLabel = t("task:resetContext");
+  const resetContextAriaLabel = t("task:resetAgentContext");
+  const resetContextTooltip = t("task:resetAgentContextClearsConversationHistory");
+
+  const updateConfirmationOpen = useCallback(
+    (open: boolean) => {
+      setConfirmOpen(open);
+      onConfirmationOpenChange?.(open);
+    },
+    [onConfirmationOpenChange],
+  );
+
+  useEffect(
+    () => () => {
+      onConfirmationOpenChange?.(false);
+    },
+    [onConfirmationOpenChange],
+  );
+
+  useLayoutEffect(() => {
+    if (confirmOpen || !restoreFocusAfterCancelRef.current) return;
+    restoreFocusAfterCancelRef.current = false;
+    actionRef.current?.focus();
+  }, [confirmOpen]);
 
   const handleReset = useCallback(async () => {
     setIsResetting(true);
@@ -38,28 +105,22 @@ export function ResetContextButton({
       console.error("Failed to reset agent context:", error);
     } finally {
       setIsResetting(false);
-      setConfirmOpen(false);
     }
   }, [clearContextWindow, sessionId]);
 
-  const resetButton = (
-    <Button
-      ref={actionRef}
-      type="button"
-      variant="ghost"
-      size="icon"
-      aria-label={t("task:resetAgentContext")}
-      className="h-7 w-7 cursor-pointer hover:bg-muted/40 text-muted-foreground"
-      onClick={() => setConfirmOpen(true)}
-      disabled={isResetting}
-      data-testid="reset-context-button"
-    >
-      {isResetting ? (
-        <GridSpinner className="h-4 w-4" />
-      ) : (
-        <IconRotateClockwise2 className="h-4 w-4" />
-      )}
-    </Button>
+  const handleMobileCancel = () => {
+    restoreFocusAfterCancelRef.current = true;
+    updateConfirmationOpen(false);
+  };
+
+  const resetContextTrigger = (
+    <ResetContextTrigger
+      actionRef={actionRef}
+      isResetting={isResetting}
+      ariaLabel={resetContextAriaLabel}
+      tooltip={resetContextTooltip}
+      onOpen={() => updateConfirmationOpen(true)}
+    />
   );
 
   if (presentation === "mobile") {
@@ -67,40 +128,35 @@ export function ResetContextButton({
       <InlineConfirmActions
         density="touch"
         testId="reset-context-inline-confirm"
-        ariaLabel={t("task:resetAgentContext")}
+        ariaLabel={resetContextAriaLabel}
+        description={t("task:thisWillClearTheAgentS")}
         cancelLabel={t("common:cancel")}
         confirmLabel={resetContextLabel}
         confirmAriaLabel={resetContextLabel}
         confirmTestId="reset-context-confirm"
-        onCancel={() => setConfirmOpen(false)}
-        onClose={() => setConfirmOpen(false)}
+        onCancel={handleMobileCancel}
+        onClose={() => updateConfirmationOpen(false)}
         onConfirm={handleReset}
       />
     ) : (
-      <Tooltip>
-        <TooltipTrigger asChild>{resetButton}</TooltipTrigger>
-        <TooltipContent>{t("task:resetAgentContextClearsConversationHistory")}</TooltipContent>
-      </Tooltip>
+      resetContextTrigger
     );
   }
 
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger asChild>{resetButton}</TooltipTrigger>
-        <TooltipContent>{t("task:resetAgentContextClearsConversationHistory")}</TooltipContent>
-      </Tooltip>
+      {resetContextTrigger}
       <ActionConfirmPopover
         open={confirmOpen}
         anchorRef={actionRef}
-        title={t("task:resetAgentContext")}
+        title={resetContextAriaLabel}
         description={t("task:thisWillClearTheAgentS")}
         cancelLabel={t("common:cancel")}
-        confirmLabel={isResetting ? t("task:resetting") : resetContextLabel}
+        confirmLabel={resetContextLabel}
         confirmAriaLabel={resetContextLabel}
         confirmTestId="reset-context-confirm"
         testId="reset-context-confirm-popover"
-        onOpenChange={setConfirmOpen}
+        onOpenChange={updateConfirmationOpen}
         onConfirm={handleReset}
       />
     </>

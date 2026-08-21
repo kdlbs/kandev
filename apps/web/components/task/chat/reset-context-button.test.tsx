@@ -21,11 +21,20 @@ import { ResetContextButton } from "./reset-context-button";
 
 const RESET_CONTEXT_BUTTON_TEST_ID = "reset-context-button";
 const RESET_CONTEXT_CONFIRM_TEST_ID = "reset-context-confirm";
+const RESET_CONTEXT_WARNING =
+  "This will clear the agent's conversation history and start a fresh context. Your workspace, files, and git state will be preserved.";
 
-function renderResetButton(presentation: "desktop" | "mobile" = "desktop") {
+function renderResetButton(
+  presentation: "desktop" | "mobile" = "desktop",
+  onConfirmationOpenChange?: (open: boolean) => void,
+) {
   return render(
     <TooltipProvider>
-      <ResetContextButton sessionId="session-1" presentation={presentation} />
+      <ResetContextButton
+        sessionId="session-1"
+        presentation={presentation}
+        onConfirmationOpenChange={onConfirmationOpenChange}
+      />
     </TooltipProvider>,
   );
 }
@@ -127,6 +136,36 @@ describe("ResetContextButton mobile presentation", () => {
     expect(mocks.clearContextWindow).not.toHaveBeenCalled();
   });
 
+  it("shows the destructive warning in the inline confirmation", async () => {
+    renderResetButton("mobile");
+
+    fireEvent.click(screen.getByTestId(RESET_CONTEXT_BUTTON_TEST_ID));
+
+    expect(await screen.findByText(RESET_CONTEXT_WARNING)).toBeTruthy();
+  });
+
+  it("returns focus to the reset trigger after cancelling inline", async () => {
+    renderResetButton("mobile");
+
+    fireEvent.click(screen.getByTestId(RESET_CONTEXT_BUTTON_TEST_ID));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByTestId(RESET_CONTEXT_BUTTON_TEST_ID)),
+    );
+  });
+
+  it("returns focus to the reset trigger after dismissing inline with Escape", async () => {
+    renderResetButton("mobile");
+
+    fireEvent.click(screen.getByTestId(RESET_CONTEXT_BUTTON_TEST_ID));
+    fireEvent.keyDown(await screen.findByRole("group"), { key: "Escape" });
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByTestId(RESET_CONTEXT_BUTTON_TEST_ID)),
+    );
+  });
+
   it("dispatches reset once after inline confirmation", async () => {
     renderResetButton("mobile");
 
@@ -137,5 +176,17 @@ describe("ResetContextButton mobile presentation", () => {
       expect(mocks.request).toHaveBeenCalledTimes(1);
       expect(mocks.clearContextWindow).toHaveBeenCalledWith("session-1");
     });
+    expect(document.activeElement).not.toBe(screen.getByTestId(RESET_CONTEXT_BUTTON_TEST_ID));
+  });
+
+  it("reports one close transition before dispatching the confirmed reset", async () => {
+    const onConfirmationOpenChange = vi.fn();
+    renderResetButton("mobile", onConfirmationOpenChange);
+
+    fireEvent.click(screen.getByTestId(RESET_CONTEXT_BUTTON_TEST_ID));
+    fireEvent.click(await screen.findByTestId(RESET_CONTEXT_CONFIRM_TEST_ID));
+
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(1));
+    expect(onConfirmationOpenChange.mock.calls.map(([open]) => open)).toEqual([true, false]);
   });
 });
