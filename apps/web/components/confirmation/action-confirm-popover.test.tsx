@@ -137,39 +137,46 @@ describe("ActionConfirmPopover anchor lifecycle", () => {
   });
 });
 
+function BoundaryHarness() {
+  const [open, setOpen] = useState(true);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  return (
+    <>
+      <button ref={anchorRef} type="button">
+        Delete
+      </button>
+      <div ref={menuRef} data-testid="menu-boundary" tabIndex={0}>
+        Menu
+      </div>
+      <ActionConfirmPopover
+        open={open}
+        anchorRef={anchorRef}
+        focusBoundaryRef={menuRef}
+        title={deleteTitle}
+        description="This cannot be undone."
+        cancelLabel="Cancel"
+        confirmLabel="Delete"
+        onOpenChange={setOpen}
+        onConfirm={vi.fn()}
+      />
+    </>
+  );
+}
+
 describe("ActionConfirmPopover focus boundaries", () => {
   afterEach(cleanup);
 
   it("keeps the popover open while focus moves inside the optional menu boundary", async () => {
-    function MenuHarness() {
-      const [open, setOpen] = useState(true);
-      const anchorRef = useRef<HTMLButtonElement>(null);
-      const menuRef = useRef<HTMLDivElement>(null);
-      return (
-        <>
-          <button ref={anchorRef} type="button">
-            Delete
-          </button>
-          <div ref={menuRef} data-testid="menu-boundary" tabIndex={0}>
-            Menu
-          </div>
-          <ActionConfirmPopover
-            open={open}
-            anchorRef={anchorRef}
-            focusBoundaryRef={menuRef}
-            title={deleteTitle}
-            description="This cannot be undone."
-            cancelLabel="Cancel"
-            confirmLabel="Delete"
-            onOpenChange={setOpen}
-            onConfirm={vi.fn()}
-          />
-        </>
-      );
-    }
-
-    render(<MenuHarness />);
+    render(<BoundaryHarness />);
     screen.getByTestId("menu-boundary").focus();
+
+    await waitFor(() => expect(screen.getByRole("dialog", { name: deleteTitle })).toBeTruthy());
+  });
+
+  it("keeps the popover open while pointer interaction stays inside the optional boundary", async () => {
+    render(<BoundaryHarness />);
+    fireEvent.pointerDown(screen.getByTestId("menu-boundary"));
 
     await waitFor(() => expect(screen.getByRole("dialog", { name: deleteTitle })).toBeTruthy());
   });

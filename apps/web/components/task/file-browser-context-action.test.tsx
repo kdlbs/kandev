@@ -6,6 +6,7 @@ import type { FileBrowserRow } from "./file-browser-hooks";
 
 vi.mock("./file-context-menu", () => ({
   FileContextMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
+  useFileDeleteAction: () => null,
   useFileRename: () => ({
     isRenaming: false,
     renameValue: "",

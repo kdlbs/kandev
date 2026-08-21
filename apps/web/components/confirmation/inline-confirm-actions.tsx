@@ -63,7 +63,7 @@ export function InlineConfirmActions({
       data-testid={testId}
       className={
         description
-          ? "flex w-full min-w-0 flex-col items-stretch gap-2"
+          ? "flex min-w-0 flex-1 basis-full flex-col items-stretch gap-2"
           : `flex shrink-0 items-center justify-end gap-1 ${touch ? "min-h-11" : "w-full min-h-10"}`
       }
       onPointerDown={(event) => event.stopPropagation()}
@@ -75,7 +75,11 @@ export function InlineConfirmActions({
         onCancel();
       }}
     >
-      {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
+      {description ? (
+        <p className="min-w-0 max-w-full text-xs text-muted-foreground [overflow-wrap:anywhere]">
+          {description}
+        </p>
+      ) : null}
       <div className="flex items-center justify-end gap-1">
         <Button
           ref={cancelRef}

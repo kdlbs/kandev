@@ -1,7 +1,17 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { FileRow } from "./changes-panel-file-row";
+
+const responsive = vi.hoisted(() => ({ isFinePointer: true }));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => responsive,
+}));
+
+afterEach(() => {
+  responsive.isFinePointer = true;
+});
 
 const noop = () => {};
 const noopSelect = () => false;
@@ -215,6 +225,18 @@ describe("FileRow hover swap (stats <-> actions occupy same cell)", () => {
     // they overlap instead of laying out side-by-side.
     expect(gridWrapper.className).toContain("col-start-1");
     expect(gridWrapper.className).toContain("row-start-1");
+  });
+
+  it("hides statistics behind always-visible actions for coarse pointers", () => {
+    responsive.isFinePointer = false;
+    const { container } = renderRow("file.go");
+    const li = container.querySelector("li") as HTMLElement;
+    const gridWrapper = li.children[1] as HTMLElement;
+    const statsLayer = gridWrapper.children[0] as HTMLElement;
+    const actionsLayer = gridWrapper.children[1] as HTMLElement;
+
+    expect(statsLayer.className.split(/\s+/)).toContain("opacity-0");
+    expect(actionsLayer.className.split(/\s+/)).toContain("opacity-100");
   });
 });
 

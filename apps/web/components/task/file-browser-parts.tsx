@@ -8,6 +8,7 @@ import {
   IconFolderOpen,
   IconRefresh,
   IconDotsVertical,
+  IconTrash,
 } from "@tabler/icons-react";
 import {
   DropdownMenu,
@@ -18,6 +19,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "@/components/ui/file-icon";
+import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import type { FileTreeNode } from "@/lib/types/backend";
 import type { FileInfo } from "@/lib/state/store";
 import type { FileBrowserRow } from "./file-browser-hooks";
@@ -25,6 +27,7 @@ import { InlineFileInput } from "./inline-file-input";
 import { renderSessionOrLoadState } from "./file-browser-load-state";
 import {
   FileContextMenu,
+  useFileDeleteAction,
   useFileRename,
   TreeNodeName,
   getGitStatusTextClass,
@@ -151,10 +154,28 @@ export function FileTreeNodeTouchActions({
   showTouchActions?: boolean;
   onAddToChatContext?: (node: FileTreeNode) => void;
 }) {
-  const { t } = useTranslation("chat");
-  if (!showTouchActions || !onAddToChatContext) return null;
+  const { t } = useTranslation();
+  const deleteAction = useFileDeleteAction();
+  if (!showTouchActions || (!onAddToChatContext && !deleteAction)) return null;
 
   const stopRowInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
+
+  if (deleteAction?.confirming && !deleteAction.isBulk) {
+    return (
+      <InlineConfirmActions
+        density="touch"
+        testId="file-delete-inline-confirmation"
+        ariaLabel={deleteAction.title}
+        description={deleteAction.description}
+        cancelLabel={deleteAction.cancelLabel}
+        confirmLabel={deleteAction.label}
+        confirmAriaLabel={deleteAction.title}
+        confirmTestId="file-delete-confirm"
+        onCancel={deleteAction.onCancel}
+        onConfirm={deleteAction.onConfirm}
+      />
+    );
+  }
 
   return (
     <DropdownMenu>
@@ -178,13 +199,28 @@ export function FileTreeNodeTouchActions({
         data-testid="file-tree-touch-menu"
         onClick={stopRowInteraction}
       >
-        <DropdownMenuItem
-          data-testid="file-tree-touch-add-to-chat"
-          className="min-h-11 cursor-pointer"
-          onSelect={() => onAddToChatContext(node)}
-        >
-          {t("chat:addToChatContext")}
-        </DropdownMenuItem>
+        {onAddToChatContext && (
+          <DropdownMenuItem
+            data-testid="file-tree-touch-add-to-chat"
+            className="min-h-11 cursor-pointer"
+            onSelect={() => onAddToChatContext(node)}
+          >
+            {t("chat:addToChatContext")}
+          </DropdownMenuItem>
+        )}
+        {deleteAction && (
+          <DropdownMenuItem
+            data-testid="file-tree-touch-delete"
+            variant="destructive"
+            className="min-h-11 cursor-pointer"
+            onSelect={deleteAction.onDelete}
+          >
+            <IconTrash className="h-3.5 w-3.5" />
+            {deleteAction.isBulk
+              ? t("task:deleteItemsLabel", { count: deleteAction.selectedCount })
+              : t("task:delete")}
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -213,6 +249,7 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
   const rename = useFileRename(node, tree, setTree, onRenameFile);
   const isSelected = props.isSelectedFn?.(node.path) ?? false;
   const isDropTarget = node.is_dir && props.dragOverPath === node.path;
+  const rowAnchorRef = React.useRef<HTMLDivElement>(null);
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.button === 2) return;
@@ -225,6 +262,7 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
   // Inline the row JSX so ContextMenuTrigger asChild can attach directly to the DOM div
   const rowContent = (
     <div
+      ref={rowAnchorRef}
       data-testid="file-tree-node"
       data-path={node.path}
       data-is-dir={node.is_dir ? "true" : "false"}
@@ -232,12 +270,9 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
       data-selected={isSelected ? "true" : "false"}
       aria-selected={isSelected}
       role="treeitem"
-      className={getTreeNodeRowClass(
-        isActive,
-        isActiveFolder,
-        isSelected,
-        props.isDragging,
-        isDropTarget,
+      className={cn(
+        getTreeNodeRowClass(isActive, isActiveFolder, isSelected, props.isDragging, isDropTarget),
+        props.showTouchActions && "flex-wrap",
       )}
       style={{ paddingLeft: treeNodePaddingLeft(row.depth, node.is_dir) }}
       onClick={handleClick}
@@ -282,6 +317,7 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
       onAddToChatContext={onAddToChatContext}
       selectedCount={props.selectedCount}
       selectedPaths={props.selectedPaths}
+      anchorRef={rowAnchorRef}
     >
       {rowContent}
     </FileContextMenu>
@@ -453,7 +489,7 @@ function FileTreeView(props: FileBrowserContentAreaProps) {
   const { tree, visibleRows, creatingInPath, onCreateFileSubmit, onCancelCreate } = props;
   if (!tree) return null;
   return (
-    <div className="pb-2">
+    <div className="w-full min-w-0 max-w-full pb-2">
       {creatingInPath === "" && (
         <InlineFileInput
           depth={0}

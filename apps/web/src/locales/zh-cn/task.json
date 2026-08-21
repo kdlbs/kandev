@@ -308,6 +308,7 @@
   "delete2": "删除 {{name}}",
   "deleteAgent": "删除智能体",
   "deleteComment": "删除评论",
+  "deleteFileConfirm": "将永久删除 <1>{{name}}</1>。此操作无法撤销。",
   "deleteFolderConfirm": "将永久删除 <1>{{name}}</1>。此操作无法撤销。",
   "deleteFolderTitle": "删除文件夹？",
   "deleteFolderWithFilesConfirm_one": "将永久删除 <1>{{name}}</1> 及其内的 <4>{{count}}</4> 个文件。此操作无法撤销。",

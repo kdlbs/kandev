@@ -167,6 +167,12 @@ function ActionConfirmPopoverContent({
       onFocusOutside={(event) => {
         if (focusBoundaryRef?.current?.contains(event.target as Node)) event.preventDefault();
       }}
+      onInteractOutside={(event) => {
+        const target = event.target as Node;
+        if (anchorRef.current?.contains(target) || focusBoundaryRef?.current?.contains(target)) {
+          event.preventDefault();
+        }
+      }}
       onCloseAutoFocus={(event) => {
         event.preventDefault();
         if (!confirmedRef.current && isConnected(anchorRef.current)) anchorRef.current.focus();
