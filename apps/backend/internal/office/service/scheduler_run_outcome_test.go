@@ -145,11 +145,40 @@ func TestSchedulerOutcome_TaskTreeHeld_WritesOutcome(t *testing.T) {
 	assertOutcome(t, run, service.RunOutcomeTaskTreeHeld)
 }
 
-// TestSchedulerOutcome_CheckoutError_WritesOutcome covers scheduler_integration.go:589.
-// Forces a real DB error from CheckoutTask's UPDATE by dropping the tasks
-// table after the run is claimed (so ClaimNextRun itself is unaffected) and
-// driving the claimed run through processRun directly.
-func TestSchedulerOutcome_CheckoutError_WritesOutcome(t *testing.T) {
+// assertRetriedNotFinished asserts a run was requeued for retry rather than
+// finished: still non-terminal, retry_count bumped, a scheduled_retry_at set,
+// and no outcome written (outcome is only ever set on the finished path).
+func assertRetriedNotFinished(t *testing.T, run *models.Run, wantRetryCount int) {
+	t.Helper()
+	if run.Status == "finished" || run.Status == "failed" {
+		t.Fatalf("status = %q, want a non-terminal (retried) status", run.Status)
+	}
+	if run.RetryCount != wantRetryCount {
+		t.Fatalf("retry_count = %d, want %d", run.RetryCount, wantRetryCount)
+	}
+	if run.ScheduledRetryAt == nil {
+		t.Fatalf("scheduled_retry_at = nil, want a scheduled retry time")
+	}
+	if run.Outcome != nil {
+		t.Fatalf("outcome = %q, want nil (never written on the retry path)", *run.Outcome)
+	}
+}
+
+// TestSchedulerOutcome_CheckoutError_RetriesInsteadOfFinishing covers
+// scheduler_integration.go's tryCheckout error branch. Forces a real DB
+// error from CheckoutTask's UPDATE by dropping the tasks table after the
+// run is claimed (so ClaimNextRun itself is unaffected) and driving the
+// claimed run through processRun directly.
+//
+// Documented deviation from docs/specs/task-delivery-ledger/spec.md's
+// literal call-site mapping: this call site used to FinishRun with
+// RunOutcomeCheckoutError, but adopting upstream's already-shipped
+// retry-then-escalate fix (df4dd7998, "dropped contended runs") during
+// this PR's rebase retired that outcome value from this call site — a
+// transient checkout error is retried like any other run failure via
+// HandleRunFailure, not finished. RunOutcomeCheckoutError is no longer
+// reachable in production; see its doc comment.
+func TestSchedulerOutcome_CheckoutError_RetriesInsteadOfFinishing(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
@@ -181,11 +210,37 @@ func TestSchedulerOutcome_CheckoutError_WritesOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	assertOutcome(t, got, service.RunOutcomeCheckoutError)
+	assertRetriedNotFinished(t, got, 1)
+
+	// Past MaxRetryCount, the same error escalates to a permanent failure
+	// instead of retrying again — FailRun deliberately writes a NULL
+	// outcome (outcome is not part of the failed-path vocabulary).
+	svc.ExecSQL(t, `UPDATE runs SET retry_count = ?, status = 'claimed' WHERE id = ?`,
+		service.MaxRetryCount, got.ID)
+	got.RetryCount = service.MaxRetryCount
+	got.Status = "claimed"
+	service.ProcessRunForTest(svc, ctx, got)
+
+	final, err := svc.GetRun(ctx, got.ID)
+	if err != nil {
+		t.Fatalf("get run after escalation: %v", err)
+	}
+	if final.Status != "failed" {
+		t.Fatalf("status = %q, want failed after exhausting retries", final.Status)
+	}
+	if final.Outcome != nil {
+		t.Fatalf("outcome = %q, want nil on the failed path", *final.Outcome)
+	}
 }
 
-// TestSchedulerOutcome_CheckoutUnavailable_WritesOutcome covers scheduler_integration.go:596.
-func TestSchedulerOutcome_CheckoutUnavailable_WritesOutcome(t *testing.T) {
+// TestSchedulerOutcome_CheckoutUnavailable_RetriesInsteadOfFinishing covers
+// scheduler_integration.go's requeueContendedCheckout path.
+//
+// Documented deviation, same as TestSchedulerOutcome_CheckoutError_RetriesInsteadOfFinishing:
+// a lost checkout race used to FinishRun with RunOutcomeCheckoutUnavailable;
+// it is now requeued via requeueContendedCheckout instead, retiring that
+// outcome value from this call site.
+func TestSchedulerOutcome_CheckoutUnavailable_RetriesInsteadOfFinishing(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
@@ -210,7 +265,7 @@ func TestSchedulerOutcome_CheckoutUnavailable_WritesOutcome(t *testing.T) {
 	service.RunSchedulerTick(svc, ctx)
 
 	run := findRunForAgent(t, svc, ctx, "ws-1", agent.ID, service.RunReasonTaskAssigned)
-	assertOutcome(t, run, service.RunOutcomeCheckoutUnavailable)
+	assertRetriedNotFinished(t, run, 1)
 }
 
 // TestSchedulerOutcome_BudgetBlocked_WritesOutcome covers scheduler_integration.go:619.
@@ -284,6 +339,13 @@ func TestSchedulerOutcome_NoAgentLaunched_WritesOutcome(t *testing.T) {
 // coverage (TestRunLifecycle_StepCompleteEventsEmitted) publishes the
 // same AgentCompleted event but only asserts the run's Events log, never
 // the outcome column (spec.md:2118-2120).
+//
+// The synthetic event carries agent_profile_id, matching every real
+// AgentCompleted publish site (lifecycle/events.go sets it from
+// execution.officeProfileID()): resolveLifecycleRun's task+agent fallback
+// (used here since the event carries no run_id) scopes its lookup by
+// agent_profile_id, so an event missing it would never match the claimed
+// run and would leave it stuck at "claimed" instead of "finished".
 func TestSchedulerOutcome_Processed_WritesOutcome(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	ctx := context.Background()
@@ -303,8 +365,9 @@ func TestSchedulerOutcome_Processed_WritesOutcome(t *testing.T) {
 	}
 
 	completed := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
-		"task_id":    taskID,
-		"session_id": "sess-processed",
+		"task_id":          taskID,
+		"session_id":       "sess-processed",
+		"agent_profile_id": "worker-processed",
 	})
 	if err := eb.Publish(ctx, events.AgentCompleted, completed); err != nil {
 		t.Fatalf("publish completed: %v", err)
