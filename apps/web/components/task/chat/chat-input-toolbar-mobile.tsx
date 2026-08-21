@@ -132,7 +132,7 @@ function MobileLeftActions(props: MobileToolbarProps) {
           </div>
           {!props.hideAgentControls && props.sessionId && !props.isAgentBusy && (
             <div data-testid="toolbar-item-reset-context">
-              <ResetContextButton sessionId={props.sessionId} />
+              <ResetContextButton sessionId={props.sessionId} presentation="mobile" />
             </div>
           )}
           {!props.hideAgentControls && !props.isAgentBusy && (

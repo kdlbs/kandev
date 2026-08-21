@@ -19,10 +19,13 @@ vi.mock("@/components/state-provider", () => ({
 
 import { ResetContextButton } from "./reset-context-button";
 
-function renderResetButton() {
+const RESET_CONTEXT_BUTTON_TEST_ID = "reset-context-button";
+const RESET_CONTEXT_CONFIRM_TEST_ID = "reset-context-confirm";
+
+function renderResetButton(presentation: "desktop" | "mobile" = "desktop") {
   return render(
     <TooltipProvider>
-      <ResetContextButton sessionId="session-1" />
+      <ResetContextButton sessionId="session-1" presentation={presentation} />
     </TooltipProvider>,
   );
 }
@@ -37,11 +40,11 @@ describe("ResetContextButton context-window invalidation", () => {
     mocks.request.mockResolvedValue({ success: true });
   });
 
-  it("clears the session usage cache after a successful reset", async () => {
+  it("confirms from an anchored popover and clears the session usage cache once", async () => {
     renderResetButton();
 
-    fireEvent.click(screen.getByTestId("reset-context-button"));
-    fireEvent.click(await screen.findByTestId("reset-context-confirm"));
+    fireEvent.click(screen.getByTestId(RESET_CONTEXT_BUTTON_TEST_ID));
+    fireEvent.click(await screen.findByTestId(RESET_CONTEXT_CONFIRM_TEST_ID));
 
     await waitFor(() => {
       expect(mocks.request).toHaveBeenCalledWith(
@@ -51,6 +54,19 @@ describe("ResetContextButton context-window invalidation", () => {
       );
       expect(mocks.clearContextWindow).toHaveBeenCalledWith("session-1");
     });
+    expect(mocks.request).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("leaves transcript and context untouched when desktop confirmation is cancelled", async () => {
+    renderResetButton();
+
+    fireEvent.click(screen.getByTestId(RESET_CONTEXT_BUTTON_TEST_ID));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    expect(mocks.request).not.toHaveBeenCalled();
+    expect(mocks.clearContextWindow).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("reset-context-confirm-popover")).toBeNull();
   });
 
   it("keeps the session usage cache when reset fails", async () => {
@@ -59,13 +75,67 @@ describe("ResetContextButton context-window invalidation", () => {
 
     renderResetButton();
 
-    fireEvent.click(screen.getByTestId("reset-context-button"));
+    fireEvent.click(screen.getByTestId(RESET_CONTEXT_BUTTON_TEST_ID));
     await act(async () => {
-      fireEvent.click(await screen.findByTestId("reset-context-confirm"));
+      fireEvent.click(await screen.findByTestId(RESET_CONTEXT_CONFIRM_TEST_ID));
     });
 
     await waitFor(() => expect(mocks.request).toHaveBeenCalled());
     expect(mocks.clearContextWindow).not.toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+
+  it("keeps reset busy while the confirmed request is pending", async () => {
+    let resolveRequest!: (value: { success: boolean }) => void;
+    mocks.request.mockReturnValue(
+      new Promise<{ success: boolean }>((resolve) => {
+        resolveRequest = resolve;
+      }),
+    );
+
+    renderResetButton();
+    fireEvent.click(screen.getByTestId(RESET_CONTEXT_BUTTON_TEST_ID));
+    fireEvent.click(await screen.findByTestId(RESET_CONTEXT_CONFIRM_TEST_ID));
+
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId(RESET_CONTEXT_BUTTON_TEST_ID)).toHaveProperty("disabled", true);
+    expect(mocks.clearContextWindow).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveRequest({ success: true });
+    });
+  });
+});
+
+describe("ResetContextButton mobile presentation", () => {
+  beforeEach(() => {
+    mocks.request.mockResolvedValue({ success: true });
+  });
+
+  it("uses inline touch actions without opening a second overlay", async () => {
+    renderResetButton("mobile");
+
+    fireEvent.click(screen.getByTestId(RESET_CONTEXT_BUTTON_TEST_ID));
+
+    const inlineConfirmation = await screen.findByTestId("reset-context-inline-confirm");
+    expect(inlineConfirmation).toBeTruthy();
+    expect(screen.queryByTestId("reset-context-confirm-popover")).toBeNull();
+    expect(screen.getByTestId(RESET_CONTEXT_CONFIRM_TEST_ID).className).toContain("h-11");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(mocks.request).not.toHaveBeenCalled();
+    expect(mocks.clearContextWindow).not.toHaveBeenCalled();
+  });
+
+  it("dispatches reset once after inline confirmation", async () => {
+    renderResetButton("mobile");
+
+    fireEvent.click(screen.getByTestId(RESET_CONTEXT_BUTTON_TEST_ID));
+    fireEvent.click(await screen.findByTestId(RESET_CONTEXT_CONFIRM_TEST_ID));
+
+    await waitFor(() => {
+      expect(mocks.request).toHaveBeenCalledTimes(1);
+      expect(mocks.clearContextWindow).toHaveBeenCalledWith("session-1");
+    });
   });
 });
