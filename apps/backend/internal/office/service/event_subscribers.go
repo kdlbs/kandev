@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -508,6 +509,13 @@ func extractRoutineID(snapshot string) string {
 // above: any failure is logged at warn and never fails the completion
 // event, since the run must still reach a terminal state either way.
 //
+// The lookup is scoped to messages created at or after run.ClaimedAt.
+// Office task-bound sessions are reused across runs, so an unscoped
+// session-wide lookup would attribute a prior run's final message to a
+// later run that produced nothing new. A nil ClaimedAt (defensive only —
+// resolveLifecycleRun only returns claimed runs) falls back to the zero
+// time, matching the old unscoped behavior rather than skipping the write.
+//
 // failure_reason is deliberately left "" on this write.
 // UpdateRunOutputSummary is output_summary's only writer, so this never
 // clobbers a value nothing else sets today; giving failure_reason real
@@ -517,7 +525,11 @@ func (s *Service) recordRunOutputSummary(ctx context.Context, run *models.Run, s
 	if s.repo == nil || run == nil || sessionID == "" {
 		return
 	}
-	summary, err := s.repo.GetFinalAgentMessage(ctx, sessionID)
+	var since time.Time
+	if run.ClaimedAt != nil {
+		since = *run.ClaimedAt
+	}
+	summary, err := s.repo.GetFinalAgentMessage(ctx, sessionID, since)
 	if err != nil {
 		s.logger.Warn("run output summary: final agent message lookup failed",
 			zap.String("run_id", run.ID), zap.Error(err))

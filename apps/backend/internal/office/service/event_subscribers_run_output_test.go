@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -42,6 +43,19 @@ func findRunByID(t *testing.T, svc *service.Service, wsID, runID string) *models
 	return nil
 }
 
+// requireClaimedAt returns run.ClaimedAt, failing the test if it is nil.
+// ClaimNextRun sets it to the real claim time, so fixture message
+// timestamps in these tests are built relative to it rather than a fixed
+// past literal — the run-scoped lookup in recordRunOutputSummary would
+// otherwise exclude every fixture message seeded before "now".
+func requireClaimedAt(t *testing.T, run *models.Run) time.Time {
+	t.Helper()
+	if run.ClaimedAt == nil {
+		t.Fatalf("run %q has nil ClaimedAt", run.ID)
+	}
+	return *run.ClaimedAt
+}
+
 // TestHandleAgentCompleted_RecordsFinalAgentMessageAsOutputSummary pins
 // the fix for "[Office] Finished runs never record an output summary":
 // handleAgentCompleted must write the run's output_summary from the
@@ -66,14 +80,20 @@ func TestHandleAgentCompleted_RecordsFinalAgentMessageAsOutputSummary(t *testing
 	if err != nil || run == nil {
 		t.Fatalf("claim run: %v (run=%v)", err, run)
 	}
+	claimedAt := requireClaimedAt(t, run)
 
 	svc.ExecSQL(t, `
 		INSERT INTO task_session_messages (id, task_session_id, type, author_type, content, created_at) VALUES
-			('m-1', 'sess-1', 'message',   'user',  'please do the thing',        '2026-08-01 10:00:00'),
-			('m-2', 'sess-1', 'message',   'agent', 'first agent reply',          '2026-08-01 10:00:05'),
-			('m-3', 'sess-1', 'tool_call', 'agent', 'ran a tool',                 '2026-08-01 10:00:06'),
-			('m-4', 'sess-1', 'message',   'agent', 'Feasibility note posted.',   '2026-08-01 10:00:10')
-	`)
+			('m-1', 'sess-1', 'message',   'user',  'please do the thing',        ?),
+			('m-2', 'sess-1', 'message',   'agent', 'first agent reply',          ?),
+			('m-3', 'sess-1', 'tool_call', 'agent', 'ran a tool',                 ?),
+			('m-4', 'sess-1', 'message',   'agent', 'Feasibility note posted.',   ?)
+	`,
+		claimedAt.Add(0*time.Second),
+		claimedAt.Add(5*time.Second),
+		claimedAt.Add(6*time.Second),
+		claimedAt.Add(10*time.Second),
+	)
 
 	completed := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
 		"task_id":          taskID,
@@ -117,12 +137,13 @@ func TestHandleAgentCompleted_TruncatesOutputSummaryAt500Chars(t *testing.T) {
 	if err != nil || run == nil {
 		t.Fatalf("claim run: %v (run=%v)", err, run)
 	}
+	claimedAt := requireClaimedAt(t, run)
 
 	long := strings.Repeat("a", 600)
 	svc.ExecSQL(t, `
 		INSERT INTO task_session_messages (id, task_session_id, type, author_type, content, created_at)
-		VALUES ('m-1', 'sess-1', 'message', 'agent', ?, '2026-08-01 10:00:00')
-	`, long)
+		VALUES ('m-1', 'sess-1', 'message', 'agent', ?, ?)
+	`, long, claimedAt.Add(1*time.Second))
 
 	completed := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
 		"task_id":          taskID,
@@ -204,11 +225,12 @@ func TestHandleTasklessAgentCompleted_RecordsOutputSummaryAndKeepsContinuationSu
 	if err != nil || run == nil {
 		t.Fatalf("claim run: %v (run=%v)", err, run)
 	}
+	claimedAt := requireClaimedAt(t, run)
 
 	svc.ExecSQL(t, `
 		INSERT INTO task_session_messages (id, task_session_id, type, author_type, content, created_at)
-		VALUES ('m-1', 'sess-taskless', 'message', 'agent', 'heartbeat done.', '2026-08-01 10:00:00')
-	`)
+		VALUES ('m-1', 'sess-taskless', 'message', 'agent', 'heartbeat done.', ?)
+	`, claimedAt.Add(1*time.Second))
 
 	completed := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
 		"agent_id":   "worker-taskless",
@@ -256,12 +278,13 @@ func TestHandleAgentCompleted_LastAgentMessageWinsOverLaterUserMessage(t *testin
 	if err != nil || run == nil {
 		t.Fatalf("claim run: %v (run=%v)", err, run)
 	}
+	claimedAt := requireClaimedAt(t, run)
 
 	svc.ExecSQL(t, `
 		INSERT INTO task_session_messages (id, task_session_id, type, author_type, content, created_at) VALUES
-			('m-1', 'sess-1', 'message', 'agent', 'agent final answer', '2026-08-01 10:00:00'),
-			('m-2', 'sess-1', 'message', 'user',  'thanks, thats all',  '2026-08-01 10:00:05')
-	`)
+			('m-1', 'sess-1', 'message', 'agent', 'agent final answer', ?),
+			('m-2', 'sess-1', 'message', 'user',  'thanks, thats all',  ?)
+	`, claimedAt.Add(0*time.Second), claimedAt.Add(5*time.Second))
 
 	completed := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
 		"task_id":          taskID,
@@ -275,5 +298,89 @@ func TestHandleAgentCompleted_LastAgentMessageWinsOverLaterUserMessage(t *testin
 	got := findRunByID(t, svc, "ws-1", run.ID)
 	if got.OutputSummary != "agent final answer" {
 		t.Errorf("output_summary = %q, want %q (later user message must not win)", got.OutputSummary, "agent final answer")
+	}
+}
+
+// TestHandleAgentCompleted_SecondRunOnReusedSessionStaysEmpty pins the
+// run-scoping fix raised in PR review: office task-bound sessions are
+// reused across runs (same DB session_id across turns). Before the fix,
+// GetFinalAgentMessage searched the whole session, so a second run that
+// produces no new agent message would report the FIRST run's message as
+// its own output instead of staying empty.
+func TestHandleAgentCompleted_SecondRunOnReusedSessionStaysEmpty(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	ensureTaskSessionMessagesTable(t, svc)
+
+	createTestAgent(t, svc, "ws-1", "worker-1")
+	taskID := createOfficeTask(t, svc, "ws-1", "worker-1")
+
+	// Run 1: queue, claim, produce an agent message, complete. The
+	// session (sess-1) is reused for run 2 below, mirroring how office
+	// task-bound sessions persist across turns.
+	if err := svc.QueueRun(
+		ctx, "worker-1", service.RunReasonTaskAssigned,
+		`{"task_id":"`+taskID+`"}`, "run-output-reuse-1",
+	); err != nil {
+		t.Fatalf("queue run 1: %v", err)
+	}
+	run1, err := svc.ClaimNextRun(ctx)
+	if err != nil || run1 == nil {
+		t.Fatalf("claim run 1: %v (run=%v)", err, run1)
+	}
+	claimedAt1 := requireClaimedAt(t, run1)
+
+	// created_at uses claimedAt1 exactly (no forward offset): in-process
+	// tests run sub-millisecond, so any artificial forward offset risks
+	// landing after run2's real claim time below and silently defeating
+	// the scoping this test exists to pin. Using claimedAt1 itself still
+	// satisfies run1's own since bound (created_at >= since is inclusive)
+	// and is guaranteed <= run2's claim time, which happens strictly
+	// later in wall-clock time.
+	svc.ExecSQL(t, `
+		INSERT INTO task_session_messages (id, task_session_id, type, author_type, content, created_at)
+		VALUES ('m-1', 'sess-1', 'message', 'agent', 'first run reply', ?)
+	`, claimedAt1)
+
+	completed1 := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
+		"task_id":          taskID,
+		"session_id":       "sess-1",
+		"agent_profile_id": "worker-1",
+	})
+	if pErr := eb.Publish(ctx, events.AgentCompleted, completed1); pErr != nil {
+		t.Fatalf("publish completed 1: %v", pErr)
+	}
+
+	got1 := findRunByID(t, svc, "ws-1", run1.ID)
+	if got1.OutputSummary != "first run reply" {
+		t.Fatalf("run 1 output_summary = %q, want %q", got1.OutputSummary, "first run reply")
+	}
+
+	// Run 2: reuses sess-1 but produces no new agent message before
+	// completing (e.g. a turn that only made tool calls, or was cut
+	// short). No new task_session_messages row is inserted here.
+	if err := svc.QueueRun(
+		ctx, "worker-1", service.RunReasonTaskComment,
+		`{"task_id":"`+taskID+`"}`, "run-output-reuse-2",
+	); err != nil {
+		t.Fatalf("queue run 2: %v", err)
+	}
+	run2, err := svc.ClaimNextRun(ctx)
+	if err != nil || run2 == nil {
+		t.Fatalf("claim run 2: %v (run=%v)", err, run2)
+	}
+
+	completed2 := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
+		"task_id":          taskID,
+		"session_id":       "sess-1",
+		"agent_profile_id": "worker-1",
+	})
+	if pErr := eb.Publish(ctx, events.AgentCompleted, completed2); pErr != nil {
+		t.Fatalf("publish completed 2: %v", pErr)
+	}
+
+	got2 := findRunByID(t, svc, "ws-1", run2.ID)
+	if got2.OutputSummary != "" {
+		t.Errorf("run 2 output_summary = %q, want empty (must not inherit run 1's message from the reused session)", got2.OutputSummary)
 	}
 }
