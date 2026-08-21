@@ -914,6 +914,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		WorkspacePath:           workspacePath,
 		RepositoryPath:          req.RepositoryPath,
 		RepositoryID:            req.RepositoryID,
+		TaskRepositoryID:        req.TaskRepositoryID,
 		UseWorktree:             req.UseWorktree,
 		WorktreeID:              req.WorktreeID,
 		SetupScript:             req.SetupScript,
@@ -947,6 +948,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				setup = repoSetupScript
 			}
 			specs = append(specs, RepoPrepareSpec{
+				TaskRepositoryID:        r.TaskRepositoryID,
 				RepositoryID:            r.RepositoryID,
 				RepositoryPath:          r.RepositoryPath,
 				RepoName:                r.RepoName,

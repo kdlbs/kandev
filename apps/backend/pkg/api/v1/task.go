@@ -152,11 +152,16 @@ type Task struct {
 	// when the backend died and has not been resumed since. Derived from the
 	// interrupted_at metadata key at DTO conversion time; the orchestrator
 	// clears it when a session of the task next enters STARTING/RUNNING.
-	Interrupted bool   `json:"interrupted,omitempty"`
-	IsEphemeral bool   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
-	ParentID    string `json:"parent_id,omitempty"` // FK to parent task for subtasks
-	Autopilot   bool   `json:"autopilot"`
-	Identifier  string `json:"identifier,omitempty"`
+	Interrupted bool `json:"interrupted,omitempty"`
+	// AutoStartFailed reports that a workflow step's auto_start_agent on_enter
+	// action failed to launch a run for this task. Derived from the
+	// auto_start_failed metadata key at DTO conversion time; the orchestrator
+	// clears it when a session of the task next enters STARTING/RUNNING.
+	AutoStartFailed bool   `json:"auto_start_failed,omitempty"`
+	IsEphemeral     bool   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
+	ParentID        string `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	Autopilot       bool   `json:"autopilot"`
+	Identifier      string `json:"identifier,omitempty"`
 }
 
 // TaskRepositoryInput for creating/updating task repositories

@@ -146,6 +146,14 @@ const (
 	// surfaces show the red interruption icon; the orchestrator removes the
 	// key when a session of the task next enters STARTING/RUNNING.
 	MetaKeyInterruptedAt = "interrupted_at"
+	// MetaKeyAutoStartFailed is set when a workflow step's auto_start_agent
+	// on_enter action fails to launch a run (kanban StartTask error, or an
+	// Office task queue-run error/unresolvable agent). Its presence makes the
+	// task DTO report `auto_start_failed: true` so the failure surfaces on
+	// the card instead of only in backend logs; the orchestrator removes the
+	// key when a session of the task next enters STARTING/RUNNING (mirrors
+	// MetaKeyInterruptedAt).
+	MetaKeyAutoStartFailed = "auto_start_failed"
 	// MetaKeyAgentTitlePending marks tasks created in prompt-first mode whose
 	// provisional title still needs the first eligible agent session to replace it.
 	MetaKeyAgentTitlePending = "agent_title_pending"
@@ -211,6 +219,10 @@ const (
 	SessionOriginTaskInitial             = "task_initial"
 	SessionMetaKeyContextWindow          = "context_window"
 	SessionMetaKeyContextCompactionCount = "context_compaction_count"
+	// SessionMetaKeyRecoveryResolvedAt stores the server timestamp of the
+	// latest successful agent boot. Recovery cards compare this timestamp with
+	// their own creation time, so the result survives transcript write failures.
+	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
 )
 
 // SessionMetaKeySessionMode records the agent's last-known session permission
@@ -532,6 +544,9 @@ type LastAgentError struct {
 	RemediationURL   string     `json:"remediation_url,omitempty"`
 	Code             string     `json:"code,omitempty"`
 	Details          string     `json:"details,omitempty"`
+	RecoveryActions  []string   `json:"recovery_actions,omitempty"`
+	TaskRepositoryID string     `json:"task_repository_id,omitempty"`
+	StampValue       string     `json:"stamp,omitempty"`
 	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
 }
 
@@ -547,7 +562,7 @@ func LoadLastAgentError(metadata map[string]interface{}) (LastAgentError, bool) 
 	if err := mapToLastAgentError(raw, &out); err != nil || out.Message == "" {
 		return LastAgentError{}, false
 	}
-	return out, true
+	return normalizeLastAgentError(out), true
 }
 
 func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
@@ -559,12 +574,18 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 }
 
 func (e LastAgentError) Stamp() string {
+	if stamp := boundedLaunchErrorStamp(e.StampValue); stamp != "" {
+		return stamp
+	}
 	return e.OccurredAt.UTC().Format(time.RFC3339Nano) + ":" + e.Message
 }
 
 func (e LastAgentError) MatchesStamp(stamp string) bool {
 	if stamp == e.Stamp() {
 		return true
+	}
+	if boundedLaunchErrorStamp(e.StampValue) != "" {
+		return false
 	}
 	suffix := ":" + e.Message
 	if !strings.HasSuffix(stamp, suffix) {
@@ -2160,21 +2181,22 @@ func (t *Task) ToAPI() *v1.Task {
 	}
 
 	result := &v1.Task{
-		ID:           t.ID,
-		WorkspaceID:  t.WorkspaceID,
-		WorkflowID:   t.WorkflowID,
-		Title:        t.Title,
-		Description:  t.Description,
-		State:        t.State,
-		Priority:     t.Priority,
-		Repositories: repositories,
-		CreatedAt:    t.CreatedAt,
-		UpdatedAt:    t.UpdatedAt,
-		Metadata:     t.Metadata,
-		Interrupted:  t.Metadata[MetaKeyInterruptedAt] != nil,
-		IsEphemeral:  t.IsEphemeral,
-		ParentID:     t.ParentID,
-		Autopilot:    t.Autopilot,
+		ID:              t.ID,
+		WorkspaceID:     t.WorkspaceID,
+		WorkflowID:      t.WorkflowID,
+		Title:           t.Title,
+		Description:     t.Description,
+		State:           t.State,
+		Priority:        t.Priority,
+		Repositories:    repositories,
+		CreatedAt:       t.CreatedAt,
+		UpdatedAt:       t.UpdatedAt,
+		Metadata:        t.Metadata,
+		Interrupted:     t.Metadata[MetaKeyInterruptedAt] != nil,
+		AutoStartFailed: t.Metadata[MetaKeyAutoStartFailed] != nil,
+		IsEphemeral:     t.IsEphemeral,
+		ParentID:        t.ParentID,
+		Autopilot:       t.Autopilot,
 	}
 	if t.Identifier != "" {
 		result.Identifier = t.Identifier

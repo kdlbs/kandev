@@ -97,6 +97,9 @@ type parsedRemote struct {
 
 func parseRemote(raw string) (parsedRemote, error) {
 	value := strings.TrimSpace(raw)
+	if !hasSafeRemoteAuthority(value) {
+		return parsedRemote{}, fmt.Errorf("invalid clone URL authority")
+	}
 	canonical := repoclone.CanonicalHTTPSCloneURL(value)
 	if canonical != "" {
 		if err := validateSSHRemote(value); err != nil {
@@ -138,6 +141,9 @@ func validateSSHRemote(value string) error {
 
 func trustedOrigin(input RepositoryIdentityInput, remoteHost string) (string, error) {
 	if host := strings.TrimSpace(input.ProviderHost); host != "" {
+		if !hasSafeProviderHostAuthority(host) {
+			return "", repositoryIdentityError(input.RepositoryID, "has an invalid provider host")
+		}
 		origin, err := repoclone.HTTPSProviderOrigin(host)
 		if err != nil {
 			return "", repositoryIdentityError(input.RepositoryID, "has an invalid provider host")
@@ -167,4 +173,58 @@ func repositoryIdentityError(repositoryID, detail string) error {
 		return fmt.Errorf("repository identity %s", detail)
 	}
 	return fmt.Errorf("repository %q %s; repair its clone URL or provider host", repositoryID, detail)
+}
+
+func hasSafeRemoteAuthority(value string) bool {
+	authority, found := rawRemoteAuthority(value)
+	return found && repoclone.IsSafeRawAuthority(authority)
+}
+
+func rawRemoteAuthority(value string) (string, bool) {
+	if schemeEnd := strings.Index(value, "://"); schemeEnd >= 0 && isURLScheme(value[:schemeEnd]) {
+		return authorityBeforePath(value[schemeEnd+len("://"):])
+	}
+	user, hostAndPath, found := strings.Cut(value, "@")
+	if !found || user == "" {
+		return "", false
+	}
+	host, _, found := strings.Cut(hostAndPath, ":")
+	if !found || host == "" {
+		return "", false
+	}
+	return user + "@" + host, true
+}
+
+func hasSafeProviderHostAuthority(value string) bool {
+	if schemeEnd := strings.Index(value, "://"); schemeEnd >= 0 {
+		if !isURLScheme(value[:schemeEnd]) {
+			return false
+		}
+		value = value[schemeEnd+len("://"):]
+	}
+	authority, found := authorityBeforePath(value)
+	return found && repoclone.IsSafeRawAuthority(authority)
+}
+
+func authorityBeforePath(value string) (string, bool) {
+	if authorityEnd := strings.IndexAny(value, "/?#"); authorityEnd >= 0 {
+		value = value[:authorityEnd]
+	}
+	return value, value != ""
+}
+
+func isURLScheme(value string) bool {
+	if value == "" || !isASCIILetter(value[0]) {
+		return false
+	}
+	for i := 1; i < len(value); i++ {
+		if !isASCIILetter(value[i]) && (value[i] < '0' || value[i] > '9') && value[i] != '+' && value[i] != '-' && value[i] != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIILetter(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'
 }

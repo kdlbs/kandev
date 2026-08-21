@@ -405,8 +405,13 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 		"status": map[string]interface{}{
 			branchFieldKey:          latestSnapshot.Branch,
 			"remote_branch":         latestSnapshot.RemoteBranch,
+			"head_commit":           latestSnapshot.HeadCommit,
+			"base_commit":           latestSnapshot.BaseCommit,
 			"ahead":                 latestSnapshot.Ahead,
 			"behind":                latestSnapshot.Behind,
+			"remote_ahead":          metadata["remote_ahead"],
+			"remote_behind":         metadata["remote_behind"],
+			"remote_head_commit":    metadata["remote_head_commit"],
 			"files":                 latestSnapshot.Files,
 			"modified":              metadata["modified"],
 			addedFieldKey:           metadata[addedFieldKey],
@@ -1577,6 +1582,9 @@ func registerMCPAndDebugRoutes(
 	}
 	if p.services.GitLab != nil {
 		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
+	}
+	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
+		mcpHandlers.SetDashboardService(p.services.OfficeSvcs.Dashboard)
 	}
 
 	// Reuse the cross-task handoff service constructed in registerRoutes —

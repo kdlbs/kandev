@@ -603,6 +603,46 @@ func TestPublishTaskUpdated_EmitsAutopilot(t *testing.T) {
 	}
 }
 
+// TestPublishTaskUpdated_EmitsAutoStartFailed regression-tests the WS gap
+// found in Review round 2: setTaskAutoStartFailedMarker /
+// clearTaskAutoStartFailedMarker both call PublishTaskUpdated expecting open
+// clients to see the flip, but publishTaskEventNow hand-builds the payload
+// map and never carried auto_start_failed, so the publishes were dead code
+// and the badge only ever appeared after a reload (REST snapshot).
+func TestPublishTaskUpdated_EmitsAutoStartFailed(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	svc.PublishTaskUpdated(context.Background(), &models.Task{
+		ID: "task-auto-start-failed", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Metadata: map[string]interface{}{models.MetaKeyAutoStartFailed: true},
+	})
+
+	data := singlePublishedEventData(t, eventBus)
+	if got, ok := data["auto_start_failed"].(bool); !ok || !got {
+		t.Fatalf("auto_start_failed payload = %#v, want true", data["auto_start_failed"])
+	}
+}
+
+// TestPublishTaskUpdated_EmitsAutoStartFailedFalseWhenCleared proves the
+// clear path also propagates: a task with no MetaKeyAutoStartFailed key
+// publishes an explicit `false`, not an omitted field, so
+// preserveOmittedField on the frontend does not pin the stale `true` from a
+// previous failure.
+func TestPublishTaskUpdated_EmitsAutoStartFailedFalseWhenCleared(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	svc.PublishTaskUpdated(context.Background(), &models.Task{
+		ID: "task-auto-start-cleared", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+	})
+
+	data := singlePublishedEventData(t, eventBus)
+	got, ok := data["auto_start_failed"].(bool)
+	if !ok {
+		t.Fatalf("auto_start_failed payload missing or wrong type: %#v", data["auto_start_failed"])
+	}
+	if got {
+		t.Fatalf("auto_start_failed payload = true, want false for a task without the marker")
+	}
+}
+
 func TestPublishWorkspaceSourcesAdoptedPublishesSessionScopedPayload(t *testing.T) {
 	svc, eventBus, _ := createTestService(t)
 	eventBus.ClearEvents()

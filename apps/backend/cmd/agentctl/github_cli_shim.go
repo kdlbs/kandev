@@ -48,7 +48,7 @@ func runGitHubCLIShim(
 	if err != nil {
 		return err
 	}
-	credential, err := client.resolve(ctx)
+	credential, err := client.resolveWithReissue(ctx)
 	if err != nil {
 		return err
 	}

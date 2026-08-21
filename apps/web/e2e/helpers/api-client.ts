@@ -499,6 +499,15 @@ export class ApiClient {
     await this.request("PATCH", `/api/v1/tasks/${taskId}`, { title });
   }
 
+  /** Replace a task's metadata via the same PATCH path a real orchestrator
+   *  mutation would use, so the update travels over `task.updated` WS to any
+   *  page that already has the task open, instead of only landing in the next
+   *  HTTP snapshot. `UpdateTask` replaces metadata wholesale, so pass the full
+   *  desired object. */
+  async updateTaskMetadata(taskId: string, metadata: Record<string, unknown>): Promise<void> {
+    await this.request("PATCH", `/api/v1/tasks/${taskId}`, { metadata });
+  }
+
   async listAgents(): Promise<{ agents: Agent[]; total: number }> {
     const response = await this.request<{ agents: Agent[]; total: number }>(
       "GET",
@@ -873,6 +882,7 @@ export class ApiClient {
   async updateRepository(
     repositoryId: string,
     updates: {
+      default_branch?: string;
       provider?: string;
       provider_repo_id?: string;
       provider_host?: string;

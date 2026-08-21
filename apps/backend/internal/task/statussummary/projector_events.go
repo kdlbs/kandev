@@ -295,6 +295,9 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if err := p.restoreSessionObservations(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreTaskLaunchError(ctx, taskID, state); err != nil {
+		return err
+	}
 	if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
 		return err
 	}
@@ -315,9 +318,14 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 			isPrimary: true,
 		}
 	}
-	if summary.ActiveError != nil && summary.ActiveError.SessionID != "" {
+	if summary.ActiveError != nil {
 		copy := *summary.ActiveError
-		state.errors[summary.ActiveError.SessionID] = &copy
+		copy.RecoveryActions = normalizeRecoveryActions(copy.RecoveryActions)
+		if copy.SessionID != "" {
+			state.errors[copy.SessionID] = &copy
+		} else {
+			state.taskError = &copy
+		}
 	}
 	if summary.Git != nil {
 		copy := *summary.Git
@@ -362,6 +370,8 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	state.pendingObserved = false
 	state.errors = make(map[string]*ActiveErrorSummary)
 	state.errorsObserved = false
+	state.taskError = nil
+	state.taskErrorObserved = false
 	state.git = make(map[string]GitSummary)
 	state.gitBaseline = nil
 	state.gitObserved = false
@@ -373,6 +383,9 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 		return err
 	}
 	if err := p.restoreSessionObservations(ctx, taskID, state); err != nil {
+		return err
+	}
+	if err := p.restoreTaskLaunchError(ctx, taskID, state); err != nil {
 		return err
 	}
 	if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
@@ -424,6 +437,50 @@ func (p *Projector) restoreSessionObservations(
 		state.errorsObserved = true
 	}
 	return nil
+}
+
+func (p *Projector) restoreTaskLaunchError(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) error {
+	if p.loadTaskLaunchError == nil {
+		return nil
+	}
+	observation, err := p.loadTaskLaunchError(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load task launch error for status summary %q: %w", taskID, err)
+	}
+	if !observation.Observed {
+		return nil
+	}
+	state.taskErrorObserved = true
+	state.taskError = normalizeRebuildError(observation.Error, p.now().UTC())
+	return nil
+}
+
+func (p *Projector) refreshTaskLaunchError(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) (bool, error) {
+	observation, err := p.loadTaskLaunchError(ctx, taskID)
+	if err != nil {
+		return false, fmt.Errorf("refresh task launch error for status summary %q: %w", taskID, err)
+	}
+	if !observation.Observed {
+		return false, nil
+	}
+	next := normalizeRebuildError(observation.Error, p.now().UTC())
+	if errorEqual(state.taskError, next) && state.taskErrorObserved {
+		if state.current == nil && next != nil {
+			return true, nil
+		}
+		return false, nil
+	}
+	state.taskErrorObserved = true
+	state.taskError = next
+	return true, nil
 }
 
 func (p *Projector) restoreGitObservations(ctx context.Context, taskID string, state *projectionState) error {

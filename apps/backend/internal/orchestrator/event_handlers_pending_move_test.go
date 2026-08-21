@@ -841,6 +841,13 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 			if finalSess.State != tc.expectSt {
 				t.Errorf("session.State = %q, want %q", finalSess.State, tc.expectSt)
 			}
+			resolvedAt, ok := finalSess.Metadata[models.SessionMetaKeyRecoveryResolvedAt].(string)
+			if !ok || resolvedAt == "" {
+				t.Fatalf("recovery resolution timestamp = %#v, want RFC3339 string", finalSess.Metadata[models.SessionMetaKeyRecoveryResolvedAt])
+			}
+			if _, err := time.Parse(time.RFC3339Nano, resolvedAt); err != nil {
+				t.Fatalf("recovery resolution timestamp %q is invalid: %v", resolvedAt, err)
+			}
 		})
 	}
 }

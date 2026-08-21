@@ -1152,6 +1152,25 @@ func TestApplyResumeRepoConfig_BaseBranchByExecutorType(t *testing.T) {
 	}
 }
 
+func TestResolveResumeBaseBranchPrefersCurrentTaskRepository(t *testing.T) {
+	got := resolveResumeBaseBranch("repo-1", "branch-that-no-longer-exists", []*repoInfo{
+		{RepositoryID: "repo-1", BaseBranch: "main"},
+	})
+	if got != "main" {
+		t.Fatalf("base branch = %q, want main", got)
+	}
+}
+
+func TestResolveResumeBaseBranchKeepsLegacyValueWhenRepositoryRowsAreAmbiguous(t *testing.T) {
+	got := resolveResumeBaseBranch("repo-1", "session-base", []*repoInfo{
+		{RepositoryID: "repo-1", BaseBranch: "main"},
+		{RepositoryID: "repo-1", BaseBranch: "release"},
+	})
+	if got != "session-base" {
+		t.Fatalf("base branch = %q, want session-base", got)
+	}
+}
+
 func TestApplyResumeWorktreeConfigPreservesSelectedRepositoryDestination(t *testing.T) {
 	primaryDestination := resumeTestContributionDestination("200")
 	selectedDestination := resumeTestContributionDestination("201")

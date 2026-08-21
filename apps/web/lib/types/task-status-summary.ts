@@ -1,4 +1,15 @@
 import type { ForegroundActivity, TaskPendingAction, TaskSessionState } from "./http";
+import type { TaskLaunchRecoveryAction } from "./task-launch-error";
+
+export type TaskStatusSummaryActiveError = {
+  session_id?: string;
+  task_repository_id?: string;
+  stamp: string;
+  occurred_at: string;
+  preview: string;
+  category?: string;
+  recovery_actions?: TaskLaunchRecoveryAction[];
+};
 
 export type TaskStatusSummary = {
   revision: number;
@@ -14,12 +25,7 @@ export type TaskStatusSummary = {
   pending_action?: TaskPendingAction;
   /** Number of prompts currently en-queued for the task (all sessions). */
   queued_prompt_count?: number;
-  active_error?: {
-    session_id: string;
-    stamp: string;
-    occurred_at: string;
-    preview: string;
-  } | null;
+  active_error?: TaskStatusSummaryActiveError | null;
   git?: {
     additions?: number;
     deletions?: number;

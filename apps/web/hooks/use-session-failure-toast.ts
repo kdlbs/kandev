@@ -33,9 +33,12 @@ export function useSessionFailureToast() {
       return;
     }
     shownRef.current.add(notification.sessionId);
+    const description = notification.isLaunchFailure
+      ? t("task:launchFailedSeeDetails")
+      : notification.message;
     toast({
       title: t("task:taskFailedToStart"),
-      description: notification.message,
+      description,
       variant: "error",
     });
     if (nativeNotifications.isAvailable()) {
@@ -74,7 +77,7 @@ export function useSessionFailureToast() {
           await nativeNotifications.show({
             eventId: `session.failed:${notification.sessionId}`,
             title: t("task:taskFailedToStart"),
-            body: notification.message,
+            body: description,
             taskId: notification.taskId,
             sessionId: notification.sessionId,
           });

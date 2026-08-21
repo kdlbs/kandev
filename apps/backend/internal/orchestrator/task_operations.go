@@ -17,7 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
-	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/constants"
@@ -640,23 +640,15 @@ func (s *Service) handleSessionLaunchFailure(
 	return safeErr
 }
 
-// recordSessionLaunchFailure transitions a still-active session to FAILED,
-// attaches missing-branch guidance only after that CAS succeeds, and updates
-// the task only while the same failed session still owns it.
+// recordSessionLaunchFailure transitions a still-active session to FAILED and
+// updates the task only while the same failed session still owns it. Typed
+// launch-error persistence belongs to the executor's session transition.
 func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) {
 	_, changed := s.updateTaskSessionStateWithHook(
 		ctx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error(), false,
-		func() { s.handleSessionLaunchFailed(ctx, taskID, sessionID, "", launchErr) }, preloadedSession...,
+		nil, preloadedSession...,
 	)
 	if !changed {
-		// A resume may begin from an already FAILED session. Its state CAS is
-		// intentionally a no-op, but the persisted claim still lets this newly
-		// classified failure publish guidance exactly once. The claim itself is
-		// state-guarded, so a concurrently cancelled/completed session cannot
-		// receive stale recovery UI.
-		if len(preloadedSession) > 0 && preloadedSession[0] != nil && preloadedSession[0].State == models.TaskSessionStateFailed {
-			s.handleSessionLaunchFailed(ctx, taskID, sessionID, "", launchErr)
-		}
 		return
 	}
 	updated, err := s.updateTaskStateForEarlyLaunchFailure(ctx, taskID, sessionID)
@@ -866,6 +858,17 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, err
 		}
 	}
+	// Automated launch callers perform this check before entering startTask,
+	// but several event paths can race after that check and before session
+	// preparation. Keep the terminal-PR guard at the session boundary too so
+	// no automated path can create a session for a closed or merged PR.
+	if autoStart {
+		if task, taskErr := s.repo.GetTask(ctx, taskID); taskErr != nil {
+			return nil, fmt.Errorf("failed to fetch task for automatic launch gate: %w", taskErr)
+		} else if s.shouldSkipTerminalPRAutoStart(ctx, task) {
+			return nil, nil
+		}
+	}
 	workflowSessionConfigStepID := workflowStepID
 	// Manual starts often omit workflow_step_id because the task is already
 	// bound to its current step. Resolve that canonical step before profile
@@ -928,6 +931,10 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return nil, err
+	}
+	launchErrorStamp := ""
+	if launchError, found := models.LoadTaskLaunchError(task.Metadata); found {
+		launchErrorStamp = launchError.Stamp()
 	}
 	if executorID == "" {
 		if v, ok := task.Metadata[models.MetaKeyExecutorID].(string); ok && v != "" {
@@ -1080,6 +1087,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	}
 
 	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, autoStart, attachments)
+	s.clearTaskLaunchErrorIfStamp(ctx, taskID, launchErrorStamp)
 
 	// The agent is running, so the reservation becomes a consumption.
 	launchClaim.consume(ctx)
@@ -2982,6 +2990,15 @@ func (s *Service) publishTaskSessionErrorEvent(
 		eventData["occurred_at"] = lastError.OccurredAt.Format(time.RFC3339Nano)
 		eventData["stamp"] = lastError.Stamp()
 		eventData["agent_execution_id"] = lastError.AgentExecutionID
+		if lastError.TaskRepositoryID != "" {
+			eventData["task_repository_id"] = lastError.TaskRepositoryID
+		}
+		if lastError.Code != "" {
+			eventData["category"] = lastError.Code
+		}
+		if len(lastError.RecoveryActions) > 0 {
+			eventData["recovery_actions"] = append([]string(nil), lastError.RecoveryActions...)
+		}
 		if lastError.RemediationURL != "" {
 			eventData["remediation_url"] = lastError.RemediationURL
 		}
@@ -3435,13 +3452,27 @@ func (s *Service) captureArchiveDiff(ctx context.Context, sessionID, baseCommit 
 		return
 	}
 
-	if err := s.repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
+	snapshot := &models.GitSnapshot{
 		SessionID:    sessionID,
 		SnapshotType: models.SnapshotTypeArchive,
 		HeadCommit:   diffResult.HeadCommit,
 		BaseCommit:   diffResult.BaseCommit,
 		Files:        diffResult.Files,
-	}); err != nil {
+	}
+	status, statusErr := s.agentManager.GetGitStatusFresh(ctx, sessionID)
+	if statusErr != nil {
+		s.logger.Warn("failed to capture git status metadata for archive",
+			zap.String("session_id", sessionID),
+			zap.Error(statusErr))
+	} else if status != nil && status.Success {
+		snapshot.Branch = status.Branch
+		snapshot.RemoteBranch = status.RemoteBranch
+		snapshot.Ahead = status.Ahead
+		snapshot.Behind = status.Behind
+		snapshot.Metadata = archiveGitStatusMetadata(status, diffResult.Files)
+	}
+
+	if err := s.repo.CreateGitSnapshot(ctx, snapshot); err != nil {
 		s.logger.Warn("failed to save archive snapshot",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
@@ -3452,6 +3483,29 @@ func (s *Service) captureArchiveDiff(ctx context.Context, sessionID, baseCommit 
 		zap.String("session_id", sessionID),
 		zap.String("head_commit", diffResult.HeadCommit),
 		zap.Int("total_commits", diffResult.TotalCommits))
+}
+
+func archiveGitStatusMetadata(status *client.GitStatusResult, files map[string]interface{}) map[string]interface{} {
+	if status == nil {
+		return nil
+	}
+	return map[string]interface{}{
+		"timestamp": status.Timestamp,
+		// The archive's files map is a cumulative diff, while these status
+		// lists describe the working tree at capture time. Keep an explicit
+		// count for summary consumers so they do not add two different views.
+		"changed_files":      len(files),
+		"modified":           status.Modified,
+		"added":              status.Added,
+		"deleted":            status.Deleted,
+		"untracked":          status.Untracked,
+		"renamed":            status.Renamed,
+		"remote_ahead":       status.RemoteAhead,
+		"remote_behind":      status.RemoteBehind,
+		"remote_head_commit": status.RemoteHeadCommit,
+		"branch_additions":   status.BranchAdditions,
+		"branch_deletions":   status.BranchDeletions,
+	}
 }
 
 // parseCommitTime parses a commit timestamp from git log output.

@@ -1,0 +1,789 @@
+#!/usr/bin/env bash
+# Block until a pull request's CI reaches a terminal state, then emit one snapshot.
+#
+# Usage:
+#   scripts/pr-await <PR> [options]
+#
+# Options:
+#   --mode all-terminal | first-failure
+#                        all-terminal (default) waits until no check is pending,
+#                        so every failure lands in a single report and a single
+#                        fix pass. first-failure returns as soon as one check
+#                        fails; it exists for the interactive case and costs an
+#                        extra full CI cycle per failure.
+#   --deadline-min N     Hard stop, in minutes (default 45).
+#   --interval-sec N     Seconds between polls (default 60).
+#   --format text | json Report format (default text).
+#   --quiet              Suppress per-poll progress on stderr.
+#
+# Why this exists: `pr-state --summary` is a one-shot snapshot, so waiting for CI
+# costs one model round-trip per snapshot. Measured over 6,658 such round-trips,
+# each re-read ~177k of cached context at ~$0.26. This script moves the waiting
+# below the model: one invocation, one report, regardless of how long CI runs.
+#
+# stdout carries ONLY the final report, so a caller can capture it verbatim.
+# Progress goes to stderr.
+#
+# Exit codes:
+#   0  terminal and clean      - no failed checks, no unresolved threads
+#   1  terminal with findings  - failures and/or review threads to act on
+#   2  deadline reached        - checks still pending; names reported
+#   3  blocked                 - merged/closed, approval required, or access lost
+#
+# Requires: gh (authenticated), jq, and scripts/pr-state alongside this script.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PR_STATE="${PR_AWAIT_PR_STATE:-$SCRIPT_DIR/pr-state}"
+GH="${PR_AWAIT_GH:-gh}"
+SLEEP="${PR_AWAIT_SLEEP:-sleep}"
+ACTIVE_READ_PID=''
+ACTIVE_READ_GROUP=''
+ACTIVE_WATCHDOG_PID=''
+
+# Blocked results leave the poll loop before a snapshot exists, but a caller
+# that asked for JSON still needs to parse the answer.
+emit_blocked() {
+  local outcome=$1 message=$2
+  if [[ "${FORMAT:-text}" == 'json' ]]; then
+    local waited_sec="${WAITED:-0}"
+    local polls="${POLLS:-0}"
+    local head_changes="${HEAD_CHANGES:-0}"
+    local deadline_sec="${DEADLINE_SEC:-0}"
+    local interval_sec="${INTERVAL_SEC:-0}"
+    local mergeable_value='UNKNOWN'
+    local merge_status_value='UNKNOWN'
+    if jq -e . >/dev/null 2>&1 <<<"${MERGE_JSON:-}"; then
+      mergeable_value="$(jq -r '.mergeable // "UNKNOWN"' <<<"$MERGE_JSON")"
+      merge_status_value="$(jq -r '.mergeStateStatus // "UNKNOWN"' <<<"$MERGE_JSON")"
+    fi
+    jq -n \
+      --argjson pr "$PR" \
+      --arg outcome "$outcome" \
+      --arg mode "${MODE:-all-terminal}" \
+      --argjson waited_sec "$waited_sec" \
+      --argjson polls "$polls" \
+      --argjson head_changes "$head_changes" \
+      --argjson exit_code 3 \
+      --arg message "$message" \
+      --arg toolchain "${TOOLCHAIN:-unverified}" \
+      --argjson deadline_sec "$deadline_sec" \
+      --argjson interval_sec "$interval_sec" \
+      --arg mergeable "$mergeable_value" \
+      --arg merge_state_status "$merge_status_value" \
+      '{pr: $pr, outcome: $outcome, mode: $mode, waited_sec: $waited_sec,
+        polls: $polls, head_changes: $head_changes, exit_code: $exit_code,
+        message: $message, toolchain: $toolchain, evidence_complete: false,
+        deadline_sec: $deadline_sec, interval_sec: $interval_sec,
+        mergeable: $mergeable, merge_state_status: $merge_state_status,
+        summary: null}'
+  else
+    printf 'PR %s\n%s\n' "$PR" "$message"
+    toolchain_hint
+  fi
+  exit 3
+}
+
+usage() {
+  sed -n '2,/^# Requires:/p' "$0" | sed 's|^# \{0,1\}||'
+  exit "${1:-1}"
+}
+
+PR=''
+MODE='all-terminal'
+DEADLINE_MIN=45
+INTERVAL_SEC=60
+FORMAT='text'
+QUIET=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mode)
+      shift
+      [[ $# -gt 0 ]] || usage 1
+      case "$1" in
+        all-terminal | first-failure) MODE=$1 ;;
+        *) usage 1 ;;
+      esac
+      shift
+      ;;
+    --deadline-min)
+      shift
+      [[ $# -gt 0 && "$1" =~ ^[0-9]+$ ]] || usage 1
+      # 10# forces base 10. Without it "09" aborts arithmetic under set -e and
+      # "010" silently means 8, because Bash reads a leading zero as octal.
+      DEADLINE_MIN=$((10#$1))
+      shift
+      ;;
+    --interval-sec)
+      shift
+      [[ $# -gt 0 && "$1" =~ ^[0-9]+$ && $((10#$1)) -gt 0 ]] || usage 1
+      INTERVAL_SEC=$((10#$1))
+      shift
+      ;;
+    --format)
+      shift
+      [[ $# -gt 0 ]] || usage 1
+      case "$1" in
+        text | json) FORMAT=$1 ;;
+        *) usage 1 ;;
+      esac
+      shift
+      ;;
+    --quiet)
+      QUIET=1
+      shift
+      ;;
+    -h | --help) usage 0 ;;
+    -*) usage 1 ;;
+    *)
+      [[ -z "$PR" ]] || usage 1
+      PR=$1
+      shift
+      ;;
+  esac
+done
+
+[[ -n "$PR" && "$PR" =~ ^[0-9]+$ ]] || usage 1
+# Normalize so a value like 0012 is 12 everywhere, including `jq --argjson`.
+PR=$((10#$PR))
+# "0" and "00" both pass the pattern above and normalize to 0, which is not a
+# PR number GitHub ever issues; reject it here instead of chasing it through
+# three failed pr-state reads as a confusing blocked-access outcome.
+[[ "$PR" -gt 0 ]] || usage 1
+
+progress() {
+  [[ "$QUIET" -eq 1 ]] || printf '%s\n' "$*" >&2
+}
+
+# Mergeability is deliberately absent from `pr-state --summary`, so it is
+# queried separately below rather than letting a caller assume a clean merge
+# state. There is no `|| {}` fallback: a failed query is unknown state, and the
+# caller must treat it that way instead of reading an empty object as
+# "not conflicting".
+
+TIMEOUT_BIN=''
+TIMEOUT_RESOLVED=0
+resolve_timeout_bin() {
+  [[ "$TIMEOUT_RESOLVED" -eq 0 ]] || return 0
+  TIMEOUT_RESOLVED=1
+  # Set PR_AWAIT_NO_TIMEOUT=1 to exercise the shell fallback on a host that does
+  # have timeout(1). The fallback is the path stock macOS takes, so it needs
+  # coverage somewhere other than stock macOS.
+  [[ -z "${PR_AWAIT_NO_TIMEOUT:-}" ]] || return 0
+  local candidate
+  for candidate in timeout gtimeout; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      TIMEOUT_BIN="$candidate"
+      return 0
+    fi
+  done
+}
+
+stop_active_read() {
+  local pid="${ACTIVE_READ_PID:-}"
+  local group="${ACTIVE_READ_GROUP:-}"
+  local watchdog="${ACTIVE_WATCHDOG_PID:-}"
+
+  # The bounded command is a job-control process-group leader on the fallback
+  # path. Stop the group first so a pr-state shell cannot leave its gh child
+  # running. The KILL fallback makes cancellation deterministic if a child
+  # ignores TERM. The direct kill also covers timeout(1), whose child group is
+  # not portable across implementations.
+  if [[ -n "$group" ]]; then
+    kill -TERM -- "-$group" 2>/dev/null || true
+    kill -KILL -- "-$group" 2>/dev/null || true
+  fi
+  [[ -z "$pid" ]] || kill -TERM "$pid" 2>/dev/null || true
+  [[ -z "$pid" ]] || kill -KILL "$pid" 2>/dev/null || true
+  [[ -z "$watchdog" ]] || kill -KILL "$watchdog" 2>/dev/null || true
+}
+
+# Run a command with a wall-clock bound, keeping its stdout. Used for the GitHub
+# reads so a stalled `pr-state` or `gh pr view` cannot outlive the caller's
+# deadline: the poll loop can only check the clock between reads, never during.
+run_bounded_capture() {
+  local secs=$1 outfile=$2
+  shift 2
+  [[ -z "$outfile" ]] || : >"$outfile"
+
+  resolve_timeout_bin
+  if [[ -n "$TIMEOUT_BIN" ]]; then
+    local had_monitor=0
+    case "$-" in
+      *m*) had_monitor=1 ;;
+    esac
+    set -m
+    if [[ -n "$outfile" ]]; then
+      "$TIMEOUT_BIN" "$secs" "$@" >"$outfile" 2>/dev/null &
+    else
+      "$TIMEOUT_BIN" "$secs" "$@" >/dev/null 2>&1 &
+    fi
+    local pid=$!
+    [[ "$had_monitor" -eq 1 ]] || set +m
+    ACTIVE_READ_PID="$pid"
+    ACTIVE_READ_GROUP="$pid"
+    local rc=0
+    wait "$pid" 2>/dev/null || rc=$?
+    ACTIVE_READ_PID=''
+    ACTIVE_READ_GROUP=''
+    return "$rc"
+  fi
+
+  # Fallback for hosts with no timeout(1), stock macOS among them.
+  #
+  # Job control makes the background job a process-group leader so the watchdog
+  # can kill the whole tree; killing the pr-state shell alone leaves the `gh` it
+  # is blocked on running. The watchdog polls in one-second steps and exits by
+  # itself once the command finishes, because a shell blocked in `sleep N` does
+  # not act on a signal until that sleep returns. Its fds are closed because
+  # callers capture this with $(...), and any background process holding that
+  # pipe keeps the substitution blocked afterwards.
+  local had_monitor=0
+  case "$-" in
+    *m*) had_monitor=1 ;;
+  esac
+  set -m
+  if [[ -n "$outfile" ]]; then
+    "$@" >"$outfile" 2>/dev/null &
+  else
+    "$@" >/dev/null 2>&1 &
+  fi
+  local pid=$!
+  [[ "$had_monitor" -eq 1 ]] || set +m
+  ACTIVE_READ_PID="$pid"
+  ACTIVE_READ_GROUP="$pid"
+
+  (
+    waited=0
+    while [[ "$waited" -lt "$secs" ]]; do
+      sleep 1
+      kill -0 "$pid" 2>/dev/null || exit 0
+      waited=$((waited + 1))
+    done
+    kill -9 -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
+  ) >/dev/null 2>&1 &
+  ACTIVE_WATCHDOG_PID=$!
+
+  local rc=0
+  wait "$pid" 2>/dev/null || rc=$?
+  kill "$ACTIVE_WATCHDOG_PID" 2>/dev/null || true
+  wait "$ACTIVE_WATCHDOG_PID" 2>/dev/null || true
+  ACTIVE_WATCHDOG_PID=''
+  ACTIVE_READ_PID=''
+  ACTIVE_READ_GROUP=''
+  # 137 is SIGKILL, which here can only have come from the watchdog.
+  [[ "$rc" -ne 137 ]] || return 124
+  return "$rc"
+}
+
+# Seconds left before the caller's deadline, floored at zero.
+remaining_budget() {
+  local left=$((DEADLINE_SEC - (SECONDS - START_SEC)))
+  [[ "$left" -gt 0 ]] || left=0
+  printf '%s' "$left"
+}
+
+# Cap on a single GitHub read. A healthy `pr-state --summary` returns in about
+# ten seconds; three minutes means it is wedged, and waiting out a 45 minute
+# default deadline on one wedged read helps nobody.
+READ_CAP=180
+
+# A zero or already-spent deadline still gets exactly one snapshot, so the
+# report can name the pending checks rather than saying nothing at all. That
+# read is bounded tightly: a healthy read returns in about ten seconds, and a
+# caller who asked for no waiting should not get a long one.
+READ_FLOOR="${PR_AWAIT_READ_FLOOR:-15}"
+
+# Recorded in every report as provenance, not as a gate. `pr-state` used to fail
+# silently on jq 1.6 and on the bash 3.2 that macOS ships as /bin/bash, and this
+# script refused to run there. Both are fixed at the source now, and blocking on
+# a version would only turn away working installations.
+#
+# What replaced the gate is stronger than it was: the poll loop rejects a
+# snapshot that reports `errors`, one whose unresolved-thread count is null, and
+# one that does not parse. Those test the data rather than a proxy for it, so
+# they catch a degraded pr-state whatever the cause, including a checkout that
+# predates the fix.
+record_toolchain() {
+  local jq_bin="${PR_AWAIT_JQ:-jq}"
+  local bash_bin="${PR_AWAIT_PROBE_BASH:-bash}"
+  JQ_VERSION="$("$jq_bin" --version 2>/dev/null || printf 'unknown')"
+  BASH_VERSION_SEEN="$("$bash_bin" -c 'printf "%s" "${BASH_VERSION%%(*}"' 2>/dev/null || printf 'unknown')"
+  TOOLCHAIN="$JQ_VERSION, bash $BASH_VERSION_SEEN"
+}
+
+# Appended to a blocked report only. A reader whose pr-state produced nothing
+# usable is the one person who needs to know their toolchain is a known cause.
+toolchain_hint() {
+  local hint=''
+  case "$JQ_VERSION" in
+    jq-1.[0-6] | jq-1.[0-6].* | jq-1.[0-6]-*)
+      hint="$JQ_VERSION loops on an empty-matching gsub; a pr-state predating that fix hangs on it." ;;
+  esac
+  case "$BASH_VERSION_SEEN" in
+    [123].*)
+      hint="${hint:+$hint }bash $BASH_VERSION_SEEN errors on an empty array under set -u; a pr-state predating that fix loses review threads there." ;;
+  esac
+  [[ -z "$hint" ]] || printf '\nToolchain note: %s\n' "$hint"
+}
+
+TOOLCHAIN='unverified'
+JQ_VERSION='unknown'
+BASH_VERSION_SEEN='unknown'
+record_toolchain
+
+READ_TMP="$(mktemp "${TMPDIR:-/tmp}/pr-await-read-XXXXXX")"
+cleanup_read_tmp() {
+  [[ -z "${READ_TMP:-}" ]] || rm -f "$READ_TMP"
+}
+
+handle_signal() {
+  local code=$1
+  stop_active_read
+  exit "$code"
+}
+
+trap cleanup_read_tmp EXIT
+trap 'handle_signal 130' INT
+trap 'handle_signal 143' TERM
+
+DEADLINE_SEC=$((DEADLINE_MIN * 60))
+
+# Sleep until the next poll unless the deadline arrives first, capping the last
+# sleep to whatever time is left. Returns 1 when the caller must stop, so a
+# retry path cannot outlive a limit the caller asked for.
+sleep_or_stop() {
+  local remaining=$((DEADLINE_SEC - (SECONDS - START_SEC)))
+  [[ "$remaining" -gt 0 ]] || return 1
+  if [[ "$remaining" -lt "$INTERVAL_SEC" ]]; then
+    "$SLEEP" "$remaining"
+  else
+    "$SLEEP" "$INTERVAL_SEC"
+  fi
+}
+START_SEC=$SECONDS
+POLLS=0
+CONSECUTIVE_ERRORS=0
+MERGE_ERRORS=0
+MERGE_TIMED_OUT=0
+EVIDENCE_ERRORS=0
+MERGE_UNKNOWN=0
+HEAD_CHANGES=0
+FIRST_HEAD=''
+SUMMARY_JSON=''
+MERGE_JSON=''
+OUTCOME=''
+
+while :; do
+  POLLS=$((POLLS + 1))
+  ELAPSED=$((SECONDS - START_SEC))
+
+  # A spent deadline still buys one snapshot, but one for the whole iteration:
+  # granting the floor again to the second query would let --deadline-min 0 wait
+  # out two floor-length reads.
+  floor_start=''
+  budget="$(remaining_budget)"
+  if [[ "$budget" -le 0 ]]; then
+    if [[ -n "$SUMMARY_JSON" ]]; then
+      OUTCOME='deadline'
+      break
+    fi
+    floor_start=$SECONDS
+    budget="$READ_FLOOR"
+  fi
+  [[ "$budget" -le "$READ_CAP" ]] || budget="$READ_CAP"
+
+  read_rc=0
+  run_bounded_capture "$budget" "$READ_TMP" "$PR_STATE" --summary "$PR" || read_rc=$?
+  if [[ "$read_rc" -eq 124 ]]; then
+    progress "poll ${POLLS}: pr-state exceeded its ${budget}s bound"
+    OUTCOME='deadline'
+    [[ -n "$SUMMARY_JSON" ]] || OUTCOME='blocked-access'
+    break
+  fi
+  summary_body="$(cat "$READ_TMP")"
+  # A non-zero read is a failed read, whatever it printed. Checking only the
+  # parse would let a pr-state that exited 1 through on an empty snapshot.
+  # Staged in a local first: assigning straight into SUMMARY_JSON would
+  # clobber the last good snapshot with this failed read's garbage, so a
+  # deadline reached right after would lose evidence a working poll had
+  # already produced.
+  if [[ "$read_rc" -ne 0 ]] || ! jq -e . >/dev/null 2>&1 <<<"$summary_body"; then
+    CONSECUTIVE_ERRORS=$((CONSECUTIVE_ERRORS + 1))
+    progress "poll ${POLLS}: pr-state failed (${CONSECUTIVE_ERRORS} in a row)"
+    # Three consecutive failures is a lost connection, not a transient blip.
+    # Reporting "blocked" beats looping silently against revoked access.
+    if [[ "$CONSECUTIVE_ERRORS" -ge 3 ]]; then
+      OUTCOME='blocked-access'
+      break
+    fi
+    if ! sleep_or_stop; then
+      OUTCOME='blocked-access'
+      break
+    fi
+    continue
+  fi
+  SUMMARY_JSON="$summary_body"
+  CONSECUTIVE_ERRORS=0
+
+  budget="$(remaining_budget)"
+  if [[ "$budget" -le 0 ]]; then
+    if [[ -n "$MERGE_JSON" ]]; then
+      OUTCOME='deadline'
+      break
+    fi
+    if [[ -n "$floor_start" ]]; then
+      # Whatever the first read left of this iteration's single floor.
+      budget=$((READ_FLOOR - (SECONDS - floor_start)))
+      [[ "$budget" -gt 0 ]] || budget=1
+    else
+      floor_start=$SECONDS
+      budget="$READ_FLOOR"
+    fi
+  fi
+  [[ "$budget" -le "$READ_CAP" ]] || budget="$READ_CAP"
+
+  read_rc=0
+  run_bounded_capture "$budget" "$READ_TMP" \
+    "$GH" pr view "$PR" --json state,mergeable,mergeStateStatus,headRefOid || read_rc=$?
+  if [[ "$read_rc" -eq 124 ]]; then
+    progress "poll ${POLLS}: gh pr view exceeded its ${budget}s bound"
+    OUTCOME='blocked-merge-state'
+    MERGE_TIMED_OUT=1
+    break
+  fi
+  merge_body="$(cat "$READ_TMP")"
+  # Staged in a local first, same reason as the pr-state read above: a failed
+  # read must not overwrite the last good MERGE_JSON with unusable text.
+  if [[ "$read_rc" -ne 0 ]] || ! jq -e . >/dev/null 2>&1 <<<"$merge_body"; then
+    MERGE_ERRORS=$((MERGE_ERRORS + 1))
+    progress "poll ${POLLS}: gh pr view failed (${MERGE_ERRORS} in a row)"
+    if [[ "$MERGE_ERRORS" -ge 3 ]]; then
+      OUTCOME='blocked-merge-state'
+      break
+    fi
+    if ! sleep_or_stop; then
+      OUTCOME='blocked-merge-state'
+      break
+    fi
+    continue
+  fi
+  MERGE_JSON="$merge_body"
+  MERGE_ERRORS=0
+
+  pr_state="$(jq -r '.state // ""' <<<"$MERGE_JSON")"
+  head_oid="$(jq -r '.headRefOid // ""' <<<"$MERGE_JSON")"
+  [[ -n "$head_oid" ]] || head_oid="$(jq -r '.pr.head_ref_oid // ""' <<<"$SUMMARY_JSON")"
+  [[ -n "$FIRST_HEAD" ]] || FIRST_HEAD="$head_oid"
+
+  # A push during the wait restarts CI, so every check counted so far belongs to
+  # a head that no longer exists. Discard that evidence, but not the caller's
+  # clock: --deadline-min is a hard stop, and a PR receiving periodic commits
+  # would otherwise defer it forever.
+  if [[ -n "$head_oid" && "$head_oid" != "$FIRST_HEAD" ]]; then
+    HEAD_CHANGES=$((HEAD_CHANGES + 1))
+    progress "poll ${POLLS}: head moved ${FIRST_HEAD:0:9} -> ${head_oid:0:9}; discarding stale evidence"
+    FIRST_HEAD="$head_oid"
+    EVIDENCE_ERRORS=0
+    MERGE_UNKNOWN=0
+    # The snapshot in hand describes the previous head. Keeping it would let a
+    # deadline reached before the next read print those checks under the new
+    # SHA; with no snapshot the run reports blocked, which is the truth.
+    SUMMARY_JSON=''
+    if ! sleep_or_stop; then
+      OUTCOME='deadline'
+      break
+    fi
+    continue
+  fi
+
+  if [[ "$pr_state" == 'MERGED' || "$pr_state" == 'CLOSED' ]]; then
+    OUTCOME='blocked-pr-state'
+    break
+  fi
+
+  failed="$(jq -r '.failed_checks | length' <<<"$SUMMARY_JSON")"
+  pending="$(jq -r '.pending_checks | length' <<<"$SUMMARY_JSON")"
+  check_count="$(jq -r '.check_count // 0' <<<"$SUMMARY_JSON")"
+  passed="$(jq -r '.passed_check_count // 0' <<<"$SUMMARY_JSON")"
+  complete="$(jq -r '.checks_snapshot_complete' <<<"$SUMMARY_JSON")"
+  checks_head="$(jq -r '.checks_head_sha // ""' <<<"$SUMMARY_JSON")"
+
+  progress "poll ${POLLS} (+$((SECONDS - START_SEC))s): ${passed} passed, ${failed} failed, ${pending} pending"
+
+  # Everything below decides on check evidence, so a snapshot describing a head
+  # that has already been replaced is discarded outright rather than guarded
+  # against case by case. Every snapshot retained past this point is therefore
+  # current-head by construction, and a deadline reached with none in hand
+  # reports blocked instead of printing the previous head's checks under the
+  # new SHA.
+  if [[ -z "$checks_head" || "$checks_head" != "$head_oid" ]]; then
+    progress "poll ${POLLS}: snapshot is for ${checks_head:0:9}, head is ${head_oid:0:9}; discarding"
+    SUMMARY_JSON=''
+    if ! sleep_or_stop; then
+      OUTCOME='deadline'
+      break
+    fi
+    continue
+  fi
+
+  if [[ "$(jq -r '.approval_required_runs | length' <<<"$SUMMARY_JSON")" -gt 0 ]]; then
+    # action_required reads as green-or-skipped in a naive check count. It is
+    # blocked verification: waiting for it to finish would never terminate.
+    OUTCOME='blocked-approval'
+    break
+  fi
+
+  # GitHub can expose a new head before Actions has registered any check. An
+  # empty rollup satisfies "nothing pending" without any evidence behind it;
+  # in this repository the required jobs always run, so zero means not yet.
+  if [[ "$check_count" -eq 0 ]]; then
+    progress "poll ${POLLS}: no checks registered at this head yet; waiting"
+    if ! sleep_or_stop; then
+      OUTCOME='deadline'
+      break
+    fi
+    continue
+  fi
+
+  # A failed job can be visible while its parent workflow is still running, so
+  # in all-terminal mode a failure is never on its own a reason to stop.
+  if [[ "$MODE" == 'first-failure' && "$failed" -gt 0 ]]; then
+    snapshot_errors="$(jq -r '.errors // [] | length' <<<"$SUMMARY_JSON")"
+    threads_known="$(jq -r 'if .unresolved_review_thread_count == null then "no" else "yes" end' <<<"$SUMMARY_JSON")"
+    if [[ "$complete" != 'true' || "$snapshot_errors" -gt 0 || "$threads_known" == 'no' ]]; then
+      EVIDENCE_ERRORS=$((EVIDENCE_ERRORS + 1))
+      progress "poll ${POLLS}: first failure visible but evidence incomplete (${EVIDENCE_ERRORS} in a row)"
+      if [[ "$EVIDENCE_ERRORS" -ge 3 ]]; then
+        OUTCOME='blocked-evidence'
+        break
+      fi
+      if ! sleep_or_stop; then
+        OUTCOME='blocked-evidence'
+        break
+      fi
+      continue
+    fi
+    EVIDENCE_ERRORS=0
+    OUTCOME='terminal'
+    break
+  fi
+
+  if [[ "$pending" -eq 0 && "$complete" == 'true' ]]; then
+    # Terminal by check state, but only trustworthy if the snapshot is whole.
+    # A partial fetch reports `errors`, and a failed thread query leaves the
+    # unresolved count null - which `// 0` would otherwise launder into "clean".
+    snapshot_errors="$(jq -r '.errors // [] | length' <<<"$SUMMARY_JSON")"
+    threads_known="$(jq -r 'if .unresolved_review_thread_count == null then "no" else "yes" end' <<<"$SUMMARY_JSON")"
+    if [[ "$snapshot_errors" -gt 0 || "$threads_known" == 'no' ]]; then
+      EVIDENCE_ERRORS=$((EVIDENCE_ERRORS + 1))
+      progress "poll ${POLLS}: checks terminal but evidence incomplete (${EVIDENCE_ERRORS} in a row)"
+      if [[ "$EVIDENCE_ERRORS" -ge 3 ]]; then
+        OUTCOME='blocked-evidence'
+        break
+      fi
+      if ! sleep_or_stop; then
+        OUTCOME='blocked-evidence'
+        break
+      fi
+      continue
+    fi
+    EVIDENCE_ERRORS=0
+
+    # GitHub reports UNKNOWN while it is still computing mergeability. Deciding
+    # on it would call a PR clean before the answer exists.
+    if [[ "$(jq -r '.mergeable // "UNKNOWN"' <<<"$MERGE_JSON")" == 'UNKNOWN' ]]; then
+      MERGE_UNKNOWN=$((MERGE_UNKNOWN + 1))
+      progress "poll ${POLLS}: mergeability still UNKNOWN (${MERGE_UNKNOWN} in a row)"
+      if [[ "$MERGE_UNKNOWN" -ge 3 ]]; then
+        OUTCOME='blocked-merge-unknown'
+        break
+      fi
+      if ! sleep_or_stop; then
+        OUTCOME='blocked-merge-unknown'
+        break
+      fi
+      continue
+    fi
+    MERGE_UNKNOWN=0
+
+    OUTCOME='terminal'
+    break
+  fi
+
+  if ! sleep_or_stop; then
+    OUTCOME='deadline'
+    break
+  fi
+done
+
+WAITED=$((SECONDS - START_SEC))
+
+# A failed read can leave a partial, unparseable body behind, and that value
+# survives the `continue` that follows it. Normalize before the report rather
+# than letting `jq --argjson` abort under `set -e` with no output at all.
+jq -e . >/dev/null 2>&1 <<<"$MERGE_JSON" || MERGE_JSON='{}'
+
+if [[ -z "$SUMMARY_JSON" ]] || ! jq -e . >/dev/null 2>&1 <<<"$SUMMARY_JSON"; then
+  emit_blocked 'blocked-access' \
+"BLOCKED: no usable pr-state snapshot was obtained; treat CI state as unknown."
+fi
+
+if [[ "$OUTCOME" == 'blocked-access' ]]; then
+  emit_blocked 'blocked-access' \
+"BLOCKED: pr-state failed $CONSECUTIVE_ERRORS times in a row; treat CI state as unknown."
+fi
+
+if [[ "$OUTCOME" == 'blocked-merge-state' ]]; then
+  if [[ "$MERGE_TIMED_OUT" -eq 1 ]]; then
+    emit_blocked 'blocked-merge-state' \
+"BLOCKED: gh pr view exceeded its read bound, so merge state is unknown.
+A conflicted or closed PR is indistinguishable from a clean one here."
+  fi
+  emit_blocked 'blocked-merge-state' \
+"BLOCKED: gh pr view failed $MERGE_ERRORS times in a row, so merge state is unknown.
+A conflicted or closed PR is indistinguishable from a clean one here."
+fi
+
+failed_n="$(jq -r '.failed_checks | length' <<<"$SUMMARY_JSON")"
+pending_n="$(jq -r '.pending_checks | length' <<<"$SUMMARY_JSON")"
+passed_n="$(jq -r '.passed_check_count // 0' <<<"$SUMMARY_JSON")"
+# `unresolved_review_thread_count` is every unresolved thread (pr-state:922);
+# `hidden_unresolved_threads` is the subset filtered out of `unresolved_threads`,
+# not an addition to it. Summing the two counts the hidden ones twice.
+threads_total_n="$(jq -r '.unresolved_review_thread_count // 0' <<<"$SUMMARY_JSON")"
+visible_n="$(jq -r '.unresolved_threads | length' <<<"$SUMMARY_JSON")"
+hidden_n="$(jq -r '.hidden_unresolved_threads | length' <<<"$SUMMARY_JSON")"
+comments_n="$(jq -r '.actionable_issue_comment_count // 0' <<<"$SUMMARY_JSON")"
+changes_req_n="$(jq -r '.review_evidence.active_changes_requested_count // 0' <<<"$SUMMARY_JSON")"
+blocked_rev_n="$(jq -r '.review_evidence.blocked_exact_current_head_review_count // 0' <<<"$SUMMARY_JSON")"
+evidence_errors_n="$(jq -r '.errors // [] | length' <<<"$SUMMARY_JSON")"
+error_sources="$(jq -r '[.errors // [] | .[].source] | join(", ")' <<<"$SUMMARY_JSON")"
+threads_known_final="$(jq -r 'if .unresolved_review_thread_count == null then "no" else "yes" end' <<<"$SUMMARY_JSON")"
+base_advanced="$(jq -r 'if .pr.base_advanced_since_head == true then 1 else 0 end' <<<"$SUMMARY_JSON")"
+mergeable="$(jq -r '.mergeable // "UNKNOWN"' <<<"$MERGE_JSON")"
+merge_status="$(jq -r '.mergeStateStatus // "UNKNOWN"' <<<"$MERGE_JSON")"
+
+conflicted=0
+[[ "$mergeable" == 'CONFLICTING' || "$merge_status" == 'DIRTY' ]] && conflicted=1
+
+# A CHANGES_REQUESTED review, or one whose body carries an explicit blocker,
+# can exist with no unresolved thread and no issue comment attached. Counting
+# only threads would report such a PR clean.
+findings=$((failed_n + threads_total_n + comments_n + conflicted + changes_req_n + blocked_rev_n + base_advanced))
+
+case "$OUTCOME" in
+  blocked-pr-state | blocked-approval | blocked-evidence | blocked-merge-unknown) code=3 ;;
+  deadline) code=2 ;;
+  *) [[ "$findings" -gt 0 ]] && code=1 || code=0 ;;
+esac
+
+if [[ "$FORMAT" == 'json' ]]; then
+  jq -n \
+    --argjson pr "$PR" \
+    --argjson summary "$SUMMARY_JSON" \
+    --argjson merge "$MERGE_JSON" \
+    --arg outcome "$OUTCOME" \
+    --arg mode "$MODE" \
+    --argjson waited_sec "$WAITED" \
+    --argjson polls "$POLLS" \
+    --argjson head_changes "$HEAD_CHANGES" \
+    --argjson exit_code "$code" \
+    --arg toolchain "$TOOLCHAIN" \
+    --argjson deadline_sec "$DEADLINE_SEC" \
+    --argjson interval_sec "$INTERVAL_SEC" \
+    --argjson evidence_complete "$([[ "$evidence_errors_n" -eq 0 && "$threads_known_final" == 'yes' ]] && echo true || echo false)" \
+    '{pr: $pr, outcome: $outcome, mode: $mode, waited_sec: $waited_sec, polls: $polls,
+      head_changes: $head_changes, exit_code: $exit_code,
+      message: null, toolchain: $toolchain, evidence_complete: $evidence_complete,
+      deadline_sec: $deadline_sec, interval_sec: $interval_sec,
+      mergeable: ($merge.mergeable // "UNKNOWN"),
+      merge_state_status: ($merge.mergeStateStatus // "UNKNOWN"),
+      summary: $summary}'
+  exit "$code"
+fi
+
+branch="$(jq -r '.pr.head_ref_name // "?"' <<<"$SUMMARY_JSON")"
+base="$(jq -r '.pr.base_ref_name // "?"' <<<"$SUMMARY_JSON")"
+printf 'PR %s @ %s (%s -> %s)\n' "$PR" "${FIRST_HEAD:0:9}" "$branch" "$base"
+printf 'gate: %s | outcome: %s | waited %dm%02ds over %d poll(s)\n' \
+  "$MODE" "$OUTCOME" "$((WAITED / 60))" "$((WAITED % 60))" "$POLLS"
+[[ "$HEAD_CHANGES" -gt 0 ]] && printf 'note: head moved %d time(s) during the wait\n' "$HEAD_CHANGES"
+printf 'checks: %s passed, %s failed, %s pending\n' "$passed_n" "$failed_n" "$pending_n"
+printf 'merge: %s / %s\n' "$mergeable" "$merge_status"
+printf 'toolchain: %s\n' "$TOOLCHAIN"
+
+if [[ "$failed_n" -gt 0 ]]; then
+  printf '\nFAILED CHECKS:\n'
+  jq -r '.failed_checks[] | "  \(.name)  run=\(.run_id // "?") job=\(.job_id // "?")  \(.conclusion // "?")"' <<<"$SUMMARY_JSON"
+fi
+
+if [[ "$pending_n" -gt 0 ]]; then
+  printf '\nSTILL PENDING:\n'
+  jq -r '.pending_checks[] | "  \(.name)  run=\(.run_id // "?")"' <<<"$SUMMARY_JSON"
+fi
+
+if [[ "$threads_total_n" -gt 0 ]]; then
+  printf '\nUNRESOLVED THREADS (%s total: %s visible, %s hidden):\n' \
+    "$threads_total_n" "$visible_n" "$hidden_n"
+  jq -r '(.unresolved_threads + .hidden_unresolved_threads)[]
+         | "  \(.thread_id)  c=\(.comment_id)  \(.author)  \(.path // "-")"' <<<"$SUMMARY_JSON"
+fi
+
+[[ "$comments_n" -gt 0 ]] && printf '\nACTIONABLE ISSUE COMMENTS: %s\n' "$comments_n"
+
+if [[ "$base_advanced" -eq 1 ]]; then
+  # code-review/SKILL.md: mergeable=MERGEABLE proves conflict compatibility, not
+  # that the merged result was tested. Green checks here ran against an older base.
+  printf '\nBASE ADVANCED since this head: checks did not run against the current base.\n'
+  printf '  Validate the merge result before treating this PR as ready.\n'
+fi
+
+if [[ "$changes_req_n" -gt 0 || "$blocked_rev_n" -gt 0 ]]; then
+  printf '\nBLOCKING REVIEWS: %s active changes requested, %s blocked at this head\n' \
+    "$changes_req_n" "$blocked_rev_n"
+  jq -r '.review_evidence.blocked_exact_current_head_reviews // [] | .[]
+         | "  \(.author)  \(.verdict // .state // "?")"' <<<"$SUMMARY_JSON" 2>/dev/null || true
+fi
+
+if [[ "$evidence_errors_n" -gt 0 || "$threads_known_final" == 'no' ]]; then
+  printf '\nINCOMPLETE EVIDENCE: %s\n' "${error_sources:-unresolved review thread count is null}"
+fi
+
+printf '\nNEXT: '
+case "$OUTCOME" in
+  blocked-pr-state) printf 'PR is %s. Do not push a stale head.\n' "$pr_state" ;;
+  blocked-approval) printf 'workflow approval required; CI cannot complete unattended.\n' ;;
+  blocked-evidence)
+    printf 'checks finished but review evidence is incomplete (%s). Treat as unknown, not clean.\n' \
+      "${error_sources:-null unresolved thread count}" ;;
+  blocked-merge-unknown)
+    printf 'GitHub still reports mergeability as UNKNOWN. Re-run before treating this head as clean.\n' ;;
+  deadline)
+    if [[ "$(jq -r '.check_count // 0' <<<"$SUMMARY_JSON")" -eq 0 ]]; then
+      printf 'deadline hit with no checks registered yet at this head. Re-run or raise --deadline-min.\n'
+    else
+      printf 'deadline hit with %s check(s) pending. Re-run or raise --deadline-min.\n' "$pending_n"
+    fi
+    ;;
+  *)
+    if [[ "$conflicted" -eq 1 ]]; then
+      printf 'resolve the merge conflict before triaging checks or threads.\n'
+    elif [[ "$findings" -eq 0 ]]; then
+      printf 'clean at this head.\n'
+    elif [[ "$failed_n" -eq 0 && "$threads_total_n" -eq 0 ]]; then
+      # The finding is entirely from a category the "N failed / M thread"
+      # phrasing below cannot name: an issue comment, a blocking review, or an
+      # advanced base. Saying "fix 0 failed check(s) and 0 thread(s)" here
+      # would tell the caller there is nothing to do while findings > 0.
+      printf 'review the findings reported above (comments, blocking reviews, or an advanced base), then push once.\n'
+    else
+      printf 'fix %s failed check(s) and %s thread(s) in one pass, then push once.\n' \
+        "$failed_n" "$threads_total_n"
+    fi
+    ;;
+esac
+
+exit "$code"

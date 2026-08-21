@@ -39,12 +39,60 @@ type fakeEngine struct {
 	called   bool
 	err      error
 	result   engine.HandleResult
+
+	decisionCalled  bool
+	decisionSession string
+	decisionIn      engine.DecisionInfo
+	decisionResult  engine.RecordDecisionResult
+	decisionErr     error
+
+	quorumCalled  bool
+	quorumTaskID  string
+	quorumSession string
+	quorumResult  engine.QuorumSnapshot
+	quorumErr     error
+
+	roleCalled         bool
+	roleTaskID         string
+	roleStepID         string
+	roleAgentProfileID string
+	roleResult         string
+	roleParticipantID  string
+	roleErr            error
 }
 
 func (f *fakeEngine) HandleTrigger(_ context.Context, in engine.HandleInput) (engine.HandleResult, error) {
 	f.called = true
 	f.captured = in
 	return f.result, f.err
+}
+
+func (f *fakeEngine) RecordParticipantDecision(
+	_ context.Context, sessionID string, in engine.DecisionInfo,
+) (engine.RecordDecisionResult, error) {
+	f.decisionCalled = true
+	f.decisionSession = sessionID
+	f.decisionIn = in
+	return f.decisionResult, f.decisionErr
+}
+
+func (f *fakeEngine) EvaluateStepQuorum(
+	_ context.Context, taskID, sessionID string,
+) (engine.QuorumSnapshot, error) {
+	f.quorumCalled = true
+	f.quorumTaskID = taskID
+	f.quorumSession = sessionID
+	return f.quorumResult, f.quorumErr
+}
+
+func (f *fakeEngine) ResolveParticipantRole(
+	_ context.Context, taskID, stepID, agentProfileID string,
+) (string, string, error) {
+	f.roleCalled = true
+	f.roleTaskID = taskID
+	f.roleStepID = stepID
+	f.roleAgentProfileID = agentProfileID
+	return f.roleResult, f.roleParticipantID, f.roleErr
 }
 
 type realRunsAdapter struct {
@@ -112,6 +160,12 @@ func (commentWorkflowStore) ApplyTransition(context.Context, string, string, str
 	return errors.New("unexpected transition")
 }
 
+func (commentWorkflowStore) ApplyTransitionIfAtStep(
+	context.Context, string, string, string, string, engine.Trigger,
+) (bool, error) {
+	return false, errors.New("unexpected transition")
+}
+
 func (commentWorkflowStore) PersistData(context.Context, string, map[string]any) error {
 	return nil
 }
@@ -173,6 +227,17 @@ func (s *transitionWorkflowStore) ApplyTransition(
 	s.appliedTo = toStepID
 	s.appliedTrigger = trigger
 	return nil
+}
+
+func (s *transitionWorkflowStore) ApplyTransitionIfAtStep(
+	_ context.Context, taskID, sessionID, expectedStepID, toStepID string, trigger engine.Trigger,
+) (bool, error) {
+	s.appliedTaskID = taskID
+	s.appliedSessionID = sessionID
+	s.appliedFrom = expectedStepID
+	s.appliedTo = toStepID
+	s.appliedTrigger = trigger
+	return true, nil
 }
 
 func (s *transitionWorkflowStore) PersistData(context.Context, string, map[string]any) error {

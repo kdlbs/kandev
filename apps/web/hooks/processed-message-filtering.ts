@@ -116,6 +116,88 @@ export function isAgentBootResumeMessage(message: Message): boolean {
   return metadata?.script_type === "agent_boot" && metadata?.is_resuming === true;
 }
 
+type AgentBootMetadata = {
+  script_type?: string;
+  is_resuming?: boolean;
+  status?: string;
+  exit_code?: number;
+};
+
+export type ScriptExecutionOutcomeMetadata = Pick<AgentBootMetadata, "status" | "exit_code">;
+
+/** True when a script execution row reports a zero or absent exit code. */
+export function isSuccessfulScriptExecutionMetadata(
+  metadata: ScriptExecutionOutcomeMetadata | undefined,
+): boolean {
+  return (
+    metadata?.status === "exited" && (metadata.exit_code === 0 || metadata.exit_code === undefined)
+  );
+}
+
+/** True when a script_execution row reports an agent that finished booting
+ *  successfully, whether resumed or freshly started. Mirrors the success rule
+ *  the boot header renders with (script-execution-message.tsx): an "exited"
+ *  status carrying a zero or absent exit code. */
+export function isSuccessfulAgentBootMessage(message: Message): boolean {
+  if (!isAgentBootMessage(message)) return false;
+  const metadata = message.metadata as AgentBootMetadata | undefined;
+  return isSuccessfulScriptExecutionMetadata(metadata);
+}
+
+/** True when a message is an agent boot row, whatever its outcome. */
+function isAgentBootMessage(message: Message): boolean {
+  if (message.type !== "script_execution") return false;
+  const metadata = message.metadata as AgentBootMetadata | undefined;
+  return metadata?.script_type === "agent_boot";
+}
+
+/** True when an agent boot after `afterCreatedAt` reported a failure — the signal that a
+ *  requested recovery did not take, so its card must come back. */
+export function hasFailedAgentBootAfter(
+  messages: Message[] | undefined,
+  afterCreatedAt: string | undefined,
+): boolean {
+  const failedAt = Date.parse(afterCreatedAt ?? "");
+  if (Number.isNaN(failedAt) || !messages?.length) return false;
+  return messages.some((message) => {
+    if (!isAgentBootMessage(message) || isSuccessfulAgentBootMessage(message)) return false;
+    const metadata = message.metadata as AgentBootMetadata | undefined;
+    if (metadata?.status !== "failed" && metadata?.status !== "exited") return false;
+    const bootedAt = Date.parse(message.created_at ?? "");
+    return !Number.isNaN(bootedAt) && bootedAt > failedAt;
+  });
+}
+
+/** True when the agent was successfully (re)established after `afterCreatedAt`.
+ *  A recovery card is persisted against the failure that produced it, so this is
+ *  the durable signal that the card is stale. Unlike an in-memory acknowledgment
+ *  of the Resume click it survives a reload or task switch, and it also covers
+ *  the auto-resume-on-open path where no button was ever pressed. */
+export function hasSuccessfulAgentBootAfter(
+  messages: Message[] | undefined,
+  afterCreatedAt: string | undefined,
+): boolean {
+  const failedAt = Date.parse(afterCreatedAt ?? "");
+  if (Number.isNaN(failedAt) || !messages?.length) return false;
+  return messages.some((message) => {
+    if (!isSuccessfulAgentBootMessage(message)) return false;
+    const bootedAt = Date.parse(message.created_at ?? "");
+    return !Number.isNaN(bootedAt) && bootedAt > failedAt;
+  });
+}
+
+/** True when session metadata records a successful boot after a recovery card. */
+export function hasSessionRecoveryResolutionAfter(
+  metadata: Record<string, unknown> | null | undefined,
+  afterCreatedAt: string | undefined,
+): boolean {
+  const resolvedAt = Date.parse(
+    typeof metadata?.recovery_resolved_at === "string" ? metadata.recovery_resolved_at : "",
+  );
+  const failedAt = Date.parse(afterCreatedAt ?? "");
+  return !Number.isNaN(resolvedAt) && !Number.isNaN(failedAt) && resolvedAt > failedAt;
+}
+
 export function isSetupScriptMessage(message: Message): boolean {
   if (message.type !== "script_execution") return false;
   const metadata = message.metadata as { script_type?: string } | undefined;
