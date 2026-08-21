@@ -5,6 +5,9 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
+import { useAppStore } from "@/components/state-provider";
+import { utilityProfileEligibility } from "@/components/settings/utility-agent-profile-picker";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useUtilityAgents } from "@/hooks/domains/settings/use-utility-agents";
 import type { PluginConfigField } from "@/lib/plugins/config-schema";
 
@@ -12,6 +15,7 @@ import type { PluginConfigField } from "@/lib/plugins/config-schema";
  * collide with it, and Radix rejects value="" items. */
 const ENUM_UNSET_SENTINEL = "__kandev_enum_unset__";
 const UTILITY_AGENT_UNSET_SENTINEL = "__kandev_utility_agent_unset__";
+const AGENT_PROFILE_UNSET_SENTINEL = "__kandev_agent_profile_unset__";
 
 type PluginConfigFormProps = {
   fields: PluginConfigField[];
@@ -155,6 +159,19 @@ function ConfigFieldControl({
     );
   }
 
+  if (field.type === "agent_profile") {
+    return (
+      <AgentProfileSelect
+        field={field}
+        inputId={inputId}
+        value={value}
+        isDirty={isDirty}
+        disabled={disabled}
+        onChange={onChange}
+      />
+    );
+  }
+
   return (
     <Input
       id={inputId}
@@ -216,6 +233,66 @@ function UtilityAgentSelect({
             disabled={!agent.enabled}
           >
             {agent.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function AgentProfileSelect({
+  field,
+  inputId,
+  value,
+  isDirty,
+  disabled,
+  onChange,
+}: ConfigFieldControlProps) {
+  const { t } = useTranslation();
+  // The plugin settings route does not otherwise hydrate settings state, so
+  // direct visits must initiate the profile load themselves.
+  useSettingsData(true);
+  const profiles = useAppStore((state) => state.agentProfiles.items);
+  const selectedID = typeof value === "string" ? value : "";
+  const selectedProfile = profiles.find((profile) => profile.id === selectedID);
+  const eligibleProfiles = profiles.filter(utilityProfileEligibility);
+  let selectedLabel: string | undefined;
+  if (selectedProfile) {
+    selectedLabel = selectedProfile.label || selectedProfile.agent_name || selectedProfile.id;
+  } else if (selectedID) {
+    selectedLabel = t("settings:utilityUnavailableProfile", { name: selectedID });
+  }
+  const isStale =
+    selectedID !== "" && !eligibleProfiles.some((profile) => profile.id === selectedID);
+
+  return (
+    <Select
+      value={selectedID}
+      disabled={disabled}
+      onValueChange={(next) =>
+        onChange(field.name, next === AGENT_PROFILE_UNSET_SENTINEL ? "" : next)
+      }
+    >
+      <SelectTrigger id={inputId} className="max-w-md cursor-pointer" data-settings-dirty={isDirty}>
+        <SelectValue placeholder={t("plugins:selectPlaceholder")}>{selectedLabel}</SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {!field.required && (
+          <SelectItem
+            value={AGENT_PROFILE_UNSET_SENTINEL}
+            className="cursor-pointer text-muted-foreground"
+          >
+            {t("plugins:notSet")}
+          </SelectItem>
+        )}
+        {isStale && (
+          <SelectItem value={selectedID} className="cursor-pointer" disabled>
+            {selectedLabel}
+          </SelectItem>
+        )}
+        {eligibleProfiles.map((profile) => (
+          <SelectItem key={profile.id} value={profile.id} className="cursor-pointer">
+            {profile.label || profile.agent_name || profile.id}
           </SelectItem>
         ))}
       </SelectContent>

@@ -76,6 +76,135 @@ func TestPluginHost_InvokeUtilityAgent_UsesPluginConfiguredUtilityAgent(t *testi
 	}
 }
 
+func TestPluginHost_InvokeUtilityAgent_UsesConfiguredAgentProfileBeforeUtilityAgent(t *testing.T) {
+	d := configuredUtilityHost(t)
+	d.host.configSchema = map[string]any{
+		"properties": map[string]any{
+			agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+		},
+	}
+	d.host.configs = &fakeConfigReader{configs: map[string]any{
+		agentProfileConfigKey: "profile-99",
+		utilityAgentConfigKey: "utility-agent-42",
+	}}
+	d.profiles.profilesByID = map[string]*AgentProfile{
+		"profile-99": {Enabled: true},
+	}
+
+	got, err := d.host.InvokeUtilityAgent(context.Background(), "summarize yesterday")
+	if err != nil || got != "the summary" {
+		t.Fatalf("InvokeUtilityAgent() = (%q, %v)", got, err)
+	}
+	if d.utilRun.gotProfileID != "profile-99" {
+		t.Fatalf("runner got profile %q", d.utilRun.gotProfileID)
+	}
+	if d.utilAgents.calls != 0 {
+		t.Fatalf("direct profile invocation looked up utility agents %d times", d.utilAgents.calls)
+	}
+}
+
+func TestPluginHost_InvokeUtilityAgent_FallsBackToLegacyUtilityAgentWhenDirectProfileIsUnset(t *testing.T) {
+	d := configuredUtilityHost(t)
+	d.host.configSchema = map[string]any{
+		"properties": map[string]any{
+			agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+		},
+	}
+	d.host.configs = &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}}
+
+	got, err := d.host.InvokeUtilityAgent(context.Background(), "summarize yesterday")
+	if err != nil || got != "the summary" {
+		t.Fatalf("InvokeUtilityAgent() = (%q, %v)", got, err)
+	}
+	if d.utilAgents.gotSelector != "utility-agent-42" {
+		t.Fatalf("looked up utility agent %q", d.utilAgents.gotSelector)
+	}
+	if d.utilRun.gotProfileID != "profile-42" {
+		t.Fatalf("runner got profile %q", d.utilRun.gotProfileID)
+	}
+}
+
+func TestPluginHost_InvokeUtilityAgent_RejectsMissingOrIneligibleConfiguredAgentProfile(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		config   map[string]any
+		profiles map[string]*AgentProfile
+		want     string
+	}{
+		{
+			name:   "missing selection",
+			config: map[string]any{},
+			want:   "no agent profile configured for this plugin",
+		},
+		{
+			name:     "missing profile",
+			config:   map[string]any{agentProfileConfigKey: "missing-profile"},
+			profiles: map[string]*AgentProfile{},
+			want:     `configured agent profile "missing-profile" not found`,
+		},
+		{
+			name:     "disabled profile",
+			config:   map[string]any{agentProfileConfigKey: "disabled-profile"},
+			profiles: map[string]*AgentProfile{"disabled-profile": {Enabled: false}},
+			want:     `configured agent profile "disabled-profile" is not eligible for utility execution`,
+		},
+		{
+			name:     "CLI profile",
+			config:   map[string]any{agentProfileConfigKey: "cli-profile"},
+			profiles: map[string]*AgentProfile{"cli-profile": {Enabled: true, CLIPassthrough: true}},
+			want:     `configured agent profile "cli-profile" is not eligible for utility execution`,
+		},
+		{
+			name:     "workspace profile",
+			config:   map[string]any{agentProfileConfigKey: "workspace-profile"},
+			profiles: map[string]*AgentProfile{"workspace-profile": {Enabled: true, WorkspaceID: "workspace-1"}},
+			want:     `configured agent profile "workspace-profile" is not eligible for utility execution`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := configuredUtilityHost(t)
+			d.host.configSchema = map[string]any{
+				"properties": map[string]any{
+					agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+				},
+			}
+			d.host.configs = &fakeConfigReader{configs: tc.config}
+			if tc.profiles != nil {
+				d.profiles.profilesByID = tc.profiles
+			}
+
+			_, err := d.host.InvokeUtilityAgent(context.Background(), "hi")
+			if status.Code(err) != codes.FailedPrecondition {
+				t.Fatalf("InvokeUtilityAgent() status = %s, want %s; err = %v", status.Code(err), codes.FailedPrecondition, err)
+			}
+			if status.Convert(err).Message() != tc.want {
+				t.Fatalf("InvokeUtilityAgent() message = %q, want %q", status.Convert(err).Message(), tc.want)
+			}
+			if d.utilAgents.calls != 0 || d.utilRun.calls != 0 {
+				t.Fatalf("invalid direct profile touched utility lookup %d times and runner %d times", d.utilAgents.calls, d.utilRun.calls)
+			}
+		})
+	}
+}
+
+func TestPluginHost_InvokeUtilityAgent_PreservesDirectProfileRunnerFailure(t *testing.T) {
+	runnerErr := status.Error(codes.Unavailable, "agentctl unavailable")
+	d := configuredUtilityHost(t)
+	d.host.configSchema = map[string]any{
+		"properties": map[string]any{
+			agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+		},
+	}
+	d.host.configs = &fakeConfigReader{configs: map[string]any{agentProfileConfigKey: "profile-99"}}
+	d.profiles.profilesByID = map[string]*AgentProfile{"profile-99": {Enabled: true}}
+	d.utilRun.err = runnerErr
+
+	_, err := d.host.InvokeUtilityAgent(context.Background(), "summarize")
+	if !errors.Is(err, runnerErr) || status.Code(err) != codes.Unavailable {
+		t.Fatalf("InvokeUtilityAgent() error = %v, want runner error %v", err, runnerErr)
+	}
+}
+
 func TestPluginHost_InvokeUtilityAgent_NotConfigured(t *testing.T) {
 	d := configuredUtilityHost(t)
 	d.host.configs = &fakeConfigReader{configs: map[string]any{}}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/plugins"
@@ -78,9 +79,43 @@ func TestPluginsUtilityAgentAdapter_ResolvesEmptyBuiltinThroughDefault(t *testin
 	}
 }
 
+func TestPluginsAgentProfileAdapter_MapsTypedNotFound(t *testing.T) {
+	adapter := pluginsAgentProfileAdapter{store: &pluginAgentProfileStoreStub{err: sql.ErrNoRows}}
+
+	_, err := adapter.GetProfileByID(context.Background(), "missing")
+	if !errors.Is(err, plugins.ErrAgentProfileNotFound) {
+		t.Fatalf("GetProfileByID() error = %v, want plugin not-found error", err)
+	}
+}
+
+func TestPluginsAgentProfileAdapter_PreservesEligibilityFields(t *testing.T) {
+	adapter := pluginsAgentProfileAdapter{store: &pluginAgentProfileStoreStub{profile: &agentsettingsmodels.AgentProfile{
+		Enabled:        true,
+		CLIPassthrough: false,
+		WorkspaceID:    "",
+	}}}
+
+	got, err := adapter.GetProfileByID(context.Background(), "profile-1")
+	if err != nil {
+		t.Fatalf("GetProfileByID() error = %v", err)
+	}
+	if !got.Enabled || got.CLIPassthrough || got.WorkspaceID != "" {
+		t.Fatalf("GetProfileByID() = %+v, want an eligible profile", got)
+	}
+}
+
 type utilityAgentRepositoryStub struct {
 	utilitystore.Repository
 	agent *utilitymodels.UtilityAgent
+}
+
+type pluginAgentProfileStoreStub struct {
+	profile *agentsettingsmodels.AgentProfile
+	err     error
+}
+
+func (s *pluginAgentProfileStoreStub) GetAgentProfile(context.Context, string) (*agentsettingsmodels.AgentProfile, error) {
+	return s.profile, s.err
 }
 
 func (r *utilityAgentRepositoryStub) GetAgentByID(context.Context, string) (*utilitymodels.UtilityAgent, error) {
