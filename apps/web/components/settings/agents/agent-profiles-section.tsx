@@ -88,14 +88,16 @@ function ProfileRowActions({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem
-          className="cursor-pointer"
-          data-testid={`duplicate-profile-${profile.id}`}
-          onSelect={onDuplicate}
-        >
-          <IconCopy className="h-4 w-4 mr-2" />
-          {t("agents:duplicate")}
-        </DropdownMenuItem>
+        {profile.kind !== "dynamic" && (
+          <DropdownMenuItem
+            className="cursor-pointer"
+            data-testid={`duplicate-profile-${profile.id}`}
+            onSelect={onDuplicate}
+          >
+            <IconCopy className="h-4 w-4 mr-2" />
+            {t("agents:duplicate")}
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem
           className="cursor-pointer text-destructive focus:text-destructive"
           data-testid={`delete-profile-${profile.id}`}

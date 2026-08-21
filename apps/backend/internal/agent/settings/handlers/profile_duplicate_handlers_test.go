@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
@@ -106,6 +107,12 @@ func (r *fakeSettingsRepo) GetAgentProfile(_ context.Context, id string) (*model
 // GetAgentProfileIncludingDeleted implements the settings store interface for the handler tests.
 func (r *fakeSettingsRepo) GetAgentProfileIncludingDeleted(ctx context.Context, id string) (*models.AgentProfile, error) {
 	return r.GetAgentProfile(ctx, id)
+}
+
+// GetAgentProfileTx is not exercised by this package's tests; it exists only
+// to satisfy store.Repository.
+func (r *fakeSettingsRepo) GetAgentProfileTx(_ context.Context, _ *sqlx.Tx, _ string) (*models.AgentProfile, bool, error) {
+	return nil, false, fmt.Errorf("GetAgentProfileTx not implemented")
 }
 
 // CreateAgentProfile implements the settings store interface for the handler tests.

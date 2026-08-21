@@ -2,6 +2,55 @@
 
 All notable changes to Kandev.
 
+## 0.91.0 - 2026-08-21
+
+### Features
+
+- add pr-await CI gate to collapse PR polling into one call ([#2873](https://github.com/kdlbs/kandev/pull/2873)) by @nova28
+- add localized action confirmations ([#2818](https://github.com/kdlbs/kandev/pull/2818))
+- add native agent rich output ([#2773](https://github.com/kdlbs/kandev/pull/2773))
+- periodic idle-session reaper on Service ([#2836](https://github.com/kdlbs/kandev/pull/2836)) by @WaleWangPW
+- add prompt numbers and auto-load older pages ([#2814](https://github.com/kdlbs/kandev/pull/2814)) by @Fclem
+
+### Bug Fixes
+
+- warn once per peer on untrusted X-Forwarded-Host ([#2865](https://github.com/kdlbs/kandev/pull/2865))
+- hide agent profiles that aren't ready from session handoff ([#2874](https://github.com/kdlbs/kandev/pull/2874)) by @nova28
+- make pr-state work on macOS's stock bash and jq 1.6 ([#2871](https://github.com/kdlbs/kandev/pull/2871)) by @nova28
+- reject unsafe clone authorities ([#2869](https://github.com/kdlbs/kandev/pull/2869)) by @yattdev
+- make archived-task git snapshot replay crash-proof and lifecycle-aware ([#2851](https://github.com/kdlbs/kandev/pull/2851)) by @Fclem
+- populate Started/Completed timestamps on task detail ([#2856](https://github.com/kdlbs/kandev/pull/2856)) by @nova28
+- compact model availability warning ([#2857](https://github.com/kdlbs/kandev/pull/2857))
+- show clarification submit spinner ([#2858](https://github.com/kdlbs/kandev/pull/2858))
+- reissue managed git leases ([#2850](https://github.com/kdlbs/kandev/pull/2850)) by @WaleWangPW
+- make auto-start work for Office tasks and surface failures on the kanban card ([#2847](https://github.com/kdlbs/kandev/pull/2847)) by @nova28
+- stop update_agent_profile from renaming agents when only the model changes ([#2849](https://github.com/kdlbs/kandev/pull/2849)) by @nova28
+- add terminal tab context menu ([#2817](https://github.com/kdlbs/kandev/pull/2817))
+- register prompt history in layout editor ([#2846](https://github.com/kdlbs/kandev/pull/2846)) by @Fclem
+- stop agent-created subtasks from losing their project and cost tracking ([#2844](https://github.com/kdlbs/kandev/pull/2844)) by @nova28
+- stop reviewers from being skipped and tasks getting stuck in review ([#2830](https://github.com/kdlbs/kandev/pull/2830)) by @nova28
+- render pasted Nerd Font glyphs instead of notdef boxes ([#2831](https://github.com/kdlbs/kandev/pull/2831)) by @JnManso
+- paste browser links as plain text so URLs survive ([#2804](https://github.com/kdlbs/kandev/pull/2804)) by @JnManso
+- stop new Office tasks from disappearing off the board ([#2829](https://github.com/kdlbs/kandev/pull/2829)) by @nova28
+- show each agent's own avatar in the reviewer and approver chips ([#2833](https://github.com/kdlbs/kandev/pull/2833)) by @nova28
+- preserve FIFO across supersede→requeue ([#2835](https://github.com/kdlbs/kandev/pull/2835)) by @WaleWangPW
+- drain queued peer messages on clarification pause + enqueue fast-path ([#2837](https://github.com/kdlbs/kandev/pull/2837)) by @WaleWangPW
+- preserve inherited KANDEV_SERVER_HOST for embedded backend ([#2838](https://github.com/kdlbs/kandev/pull/2838)) by @WaleWangPW
+- fail-closed profile secret resolution + preserve user-modified profiles ([#2839](https://github.com/kdlbs/kandev/pull/2839)) by @WaleWangPW
+- stop agents from being woken by their own comments ([#2840](https://github.com/kdlbs/kandev/pull/2840)) by @nova28
+- make dev-prod-db honor env KANDEV_DATABASE_PATH / KANDEV_HOME_DIR ([#2834](https://github.com/kdlbs/kandev/pull/2834)) by @JnManso
+- stop reports_to cycles from vanishing agents off the org chart ([#2827](https://github.com/kdlbs/kandev/pull/2827)) by @nova28
+- allow changing an agent's manager from the configuration tab ([#2821](https://github.com/kdlbs/kandev/pull/2821)) by @nova28
+- stop config import from clobbering concurrent row edits ([#2826](https://github.com/kdlbs/kandev/pull/2826)) by @nova28
+- isolate kandev cookies between instances on one host ([#2813](https://github.com/kdlbs/kandev/pull/2813)) by @Fclem
+- clear stale dispatch gate after cancel ([#2825](https://github.com/kdlbs/kandev/pull/2825))
+- controller advancement — subtask WAITING guard, plan_mode gate, idle-session reclaim ([#2811](https://github.com/kdlbs/kandev/pull/2811)) by @WaleWangPW
+- guard against reports_to cycles on import ([#2822](https://github.com/kdlbs/kandev/pull/2822)) by @nova28
+- reconcile cross-agent session config on resume ([#2820](https://github.com/kdlbs/kandev/pull/2820))
+- keep Create Task open on Escape ([#2803](https://github.com/kdlbs/kandev/pull/2803))
+- show model option loading state ([#2806](https://github.com/kdlbs/kandev/pull/2806))
+- stop config import from flattening the agent org chart ([#2812](https://github.com/kdlbs/kandev/pull/2812)) by @nova28
+
 ## 0.90.0 - 2026-08-19
 
 ### Features

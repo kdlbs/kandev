@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-08-01
-updated: 2026-08-17
+updated: 2026-08-19
 owner: kandev
 ---
 
@@ -56,7 +56,7 @@ The initial contract is:
 | `primary_session`                              | Primary session ID and lifecycle state                              | One session                          |
 | `foreground_activity`, `active_subagent_count` | Existing task-level busy aggregate                                  | Constant                             |
 | `pending_action`                               | `permission`, `clarification`, or absent                            | Constant                             |
-| `active_error`                                 | Session ID, stable error stamp, occurrence time, and safe preview   | One preview, at most 512 UTF-8 bytes |
+| `active_error`                                 | Optional session and task-repository IDs, stamp, time, preview, category, and actions | One preview and at most three known actions |
 | `git`                                          | Aggregate additions, deletions, changed files, ahead, and behind    | Numeric totals only                  |
 | `pull_request`                                 | Count, bounded representative identity, and aggregate display state | Constant regardless of PR count      |
 
@@ -99,8 +99,15 @@ remain during migration, but switchers use the summary when present.
   session, Git, and pull-request observations before deriving the new row. The event therefore updates
   one keyed observation without discarding unchanged siblings from other keys.
 - `active_error` is independent of the primary state icon. It represents the
-  newest relevant recoverable agent error and clears after an authoritative
-  dismissal or a newer agent response according to the existing error rules.
+  newest relevant session error or task-owned pre-session launch error.
+- `active_error.session_id` is optional for a task-owned error.
+  `task_repository_id` identifies one exact recovery target when it exists.
+- `active_error.preview` has at most 512 UTF-8 bytes.
+  `category` has at most 64 UTF-8 bytes.
+- `active_error.recovery_actions` contains only known action values.
+  The projector removes duplicates, preserves order, and keeps at most three values.
+- A session error clears after an authoritative dismissal or a newer agent response.
+  A task-owned launch error clears after a successful launch, recovery, or terminal move.
 - Successful session deletion is an authoritative removal of that session's
   error. The summary removes the error without a backend restart or another
   session event.
@@ -250,6 +257,8 @@ intermediate replacement.
   database or metadata error, it logs the read failure and keeps the existing
   recovery, state-reconciliation, and cleanup behavior. Only an authoritative
   missing-session result suppresses those side effects.
+- If task-owned launch-error metadata is malformed, the projector ignores that
+  record. It does not reject or erase the last valid summary.
 
 ## Scenarios
 
@@ -269,6 +278,10 @@ intermediate replacement.
 - **GIVEN** a recoverable error is dismissed or followed by a newer agent
   response, **WHEN** the projector processes that occurrence, **THEN** the
   independent error indicator clears on both task switchers.
+- **GIVEN** auto-start stops before it creates a session, **WHEN** the task stores
+  a `last_launch_error`, **THEN** `active_error` carries it without a session ID.
+- **GIVEN** a task-owned error and a session-owned error, **WHEN** the summary
+  rebuilds, **THEN** `active_error` contains the newer active record.
 - **GIVEN** a stopped session owns the task's `active_error`, **WHEN** the user
   deletes that session, **THEN** desktop and mobile task switchers remove its
   error indicator while the task and replacement sessions remain available.

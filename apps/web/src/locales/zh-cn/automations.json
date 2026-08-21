@@ -61,6 +61,8 @@
   "excludeDraftPrs": "排除草稿 PR",
   "executorProfileLabel": "执行器配置",
   "executorProfilePlaceholder": "选择执行器",
+  "exportFailed": "无法导出自动化",
+  "exportZip": "导出",
   "failedToDeleteAutomation": "删除自动化失败",
   "failedToDeleteRun": "删除运行记录失败",
   "failedToDeleteRuns": "删除运行记录失败",

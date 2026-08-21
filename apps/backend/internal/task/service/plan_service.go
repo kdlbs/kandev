@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"os"
-	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -31,7 +29,6 @@ const (
 	createdByAgent             = "agent"
 	createdByUser              = "user"
 	defaultCoalesceWindow      = 5 * time.Minute
-	coalesceWindowEnvVar       = "KANDEV_PLAN_COALESCE_WINDOW_MS"
 	defaultAgentAuthorFallback = "Agent"
 	defaultUserAuthorFallback  = "User"
 )
@@ -61,12 +58,17 @@ type PlanService struct {
 // NewPlanService creates a new task plan service. The concrete repository
 // passed by callers must implement both PlanRepository and the session-lookup
 // methods on planRepo (the SQLite repository does both).
-func NewPlanService(repo planRepo, eventBus bus.EventBus, log *logger.Logger) *PlanService {
+
+func NewPlanService(repo planRepo, eventBus bus.EventBus, log *logger.Logger, configuredWindow ...time.Duration) *PlanService {
+	coalesceWindow := defaultCoalesceWindow
+	if len(configuredWindow) > 0 {
+		coalesceWindow = resolveCoalesceWindow(configuredWindow[0])
+	}
 	return &PlanService{
 		repo:           repo,
 		eventBus:       eventBus,
 		logger:         log.WithFields(zap.String("component", "plan-service")),
-		coalesceWindow: readCoalesceWindow(),
+		coalesceWindow: coalesceWindow,
 	}
 }
 
@@ -83,16 +85,11 @@ func (s *PlanService) authorize(ctx context.Context, taskID string) error {
 	return s.authorizeTask(ctx, taskID)
 }
 
-func readCoalesceWindow() time.Duration {
-	raw := os.Getenv(coalesceWindowEnvVar)
-	if raw == "" {
+func resolveCoalesceWindow(window time.Duration) time.Duration {
+	if window < 0 {
 		return defaultCoalesceWindow
 	}
-	ms, err := strconv.Atoi(raw)
-	if err != nil || ms < 0 {
-		return defaultCoalesceWindow
-	}
-	return time.Duration(ms) * time.Millisecond
+	return window
 }
 
 // CreatePlanRequest contains parameters for creating/updating a task plan.

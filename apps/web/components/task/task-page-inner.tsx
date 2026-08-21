@@ -17,12 +17,12 @@ import { TaskPRShortcut } from "@/components/task/task-pr-shortcut";
 import { useEmbeddedVscodeSupport } from "@/components/task/task-page-editor-capability";
 import { VcsDialogsProvider } from "@/components/vcs/vcs-dialogs";
 import { PortForwardingVisibilityProvider } from "@/components/task/port-forwarding-visibility-provider";
+import { TaskLaunchErrorProvider } from "@/components/task/task-launch-error-context";
 import {
   buildDebugEntries,
   buildArchivedValue,
   resolveTaskProps,
 } from "@/components/task/task-page-content-helpers";
-import type { useSessionAgent } from "@/hooks/domains/session/use-session-agent";
 import type { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import type { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
 import type {
@@ -36,7 +36,6 @@ export type TaskPageInnerProps = {
   task: Task | null;
   effectiveSessionId: string | null;
   repository: Repository | null;
-  agent: ReturnType<typeof useSessionAgent>;
   merged: ReturnType<typeof useMergedAgentState>;
   resumption: ReturnType<typeof useSessionResumption>;
   sessionPanel: ReturnType<typeof useSessionPanelState>;
@@ -97,8 +96,6 @@ function resolveCurrentStepId(
 
 function buildTaskTopBarProps(params: {
   taskProps: ReturnType<typeof resolveTaskProps>;
-  agent: ReturnType<typeof useSessionAgent>;
-  merged: ReturnType<typeof useMergedAgentState>;
   workflowSteps: ReturnType<typeof useWorkflowStepsMapped>;
   showDebugOverlay: boolean;
   onToggleDebugOverlay: () => void;
@@ -109,22 +106,18 @@ function buildTaskTopBarProps(params: {
   officeTaskHref?: string | null;
   onTaskUnarchived: (taskId: string) => void;
 }) {
-  const { taskProps, agent, merged, workflowSteps, showDebugOverlay, onToggleDebugOverlay } =
-    params;
+  const { taskProps, workflowSteps, showDebugOverlay, onToggleDebugOverlay } = params;
   return {
     taskId: taskProps.taskId,
     activeSessionId: params.effectiveSessionId,
     taskTitle: taskProps.taskTitle,
-    onStartAgent: agent.handleStartAgent,
-    onStopAgent: agent.handleStopAgent,
-    isAgentRunning: agent.isAgentRunning || merged.isResumed,
-    isAgentLoading: agent.isAgentLoading || merged.isResuming,
     showDebugOverlay,
     onToggleDebugOverlay,
     workflowSteps,
     currentStepId: resolveCurrentStepId(params.sessionWorkflowStepId, taskProps.workflowStepId),
     workflowId: taskProps.workflowId,
     workspaceId: taskProps.workspaceId,
+    projectId: taskProps.projectId,
     issueUrl: taskProps.issueUrl,
     issueNumber: taskProps.issueNumber,
     isArchived: taskProps.isArchived,
@@ -215,7 +208,6 @@ function useTaskPageDerivedProps({
   task,
   effectiveSessionId,
   repository,
-  agent,
   merged,
   resumption,
   sessionPanel,
@@ -250,8 +242,6 @@ function useTaskPageDerivedProps({
   });
   const topBarProps = buildTaskTopBarProps({
     taskProps,
-    agent,
-    merged,
     workflowSteps,
     showDebugOverlay,
     onToggleDebugOverlay,
@@ -281,6 +271,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
   const { effectiveSessionId, task, merged, sessionPanel, archivedValue, isMobile, ensureSession } =
     props;
   const { taskProps, debugEntries, topBarProps, layoutProps } = useTaskPageDerivedProps(props);
+  if (!task) return null;
 
   return (
     <TooltipProvider>
@@ -317,7 +308,16 @@ export function TaskPageInner(props: TaskPageInnerProps) {
               />
             )}
             <TaskArchivedProvider value={archivedValue}>
-              <TaskLayout {...layoutProps} />
+              <TaskLaunchErrorProvider
+                value={{
+                  taskId: task.id,
+                  workspaceId: task.workspace_id,
+                  statusSummary: task.status_summary,
+                  repositories: task.repositories,
+                }}
+              >
+                <TaskLayout {...layoutProps} />
+              </TaskLaunchErrorProvider>
             </TaskArchivedProvider>
           </div>
         </VcsDialogsProvider>

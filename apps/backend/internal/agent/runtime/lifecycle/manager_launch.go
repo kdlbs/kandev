@@ -178,6 +178,76 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	return metadata
 }
 
+// collectComparisonTargets projects the validated per-repository comparison
+// targets into the same workspace-subpath keys used by base branches. The
+// target remains credential-free and is revalidated at the runtime boundary.
+func collectComparisonTargets(req *LaunchRequest) (map[string]models.ComparisonTarget, error) {
+	if req == nil {
+		return nil, nil
+	}
+	specs := req.RepoSpecs()
+	if len(specs) == 0 {
+		if req.ComparisonTarget == nil {
+			return nil, nil
+		}
+		if err := req.ComparisonTarget.Validate(); err != nil {
+			return nil, fmt.Errorf("validate comparison target: %w", err)
+		}
+		return map[string]models.ComparisonTarget{"": *req.ComparisonTarget}, nil
+	}
+	targets := make(map[string]models.ComparisonTarget)
+	for index, spec := range specs {
+		if spec.ComparisonTarget == nil {
+			continue
+		}
+		if err := spec.ComparisonTarget.Validate(); err != nil {
+			return nil, fmt.Errorf("validate comparison target for repository %q: %w", spec.RepoName, err)
+		}
+		key := ""
+		if index > 0 {
+			key = baseBranchMetadataKey(spec)
+		}
+		if existing, ok := targets[key]; ok && !existing.Equal(*spec.ComparisonTarget) {
+			return nil, fmt.Errorf("multiple comparison targets map to workspace repository %q", key)
+		}
+		targets[key] = *spec.ComparisonTarget
+	}
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	return targets, nil
+}
+
+func comparisonTargetsFromWorkspaceRepositories(specs []WorkspaceRepositorySpec) (map[string]models.ComparisonTarget, error) {
+	if len(specs) == 0 {
+		return nil, nil
+	}
+	targets := make(map[string]models.ComparisonTarget)
+	for index, spec := range specs {
+		if spec.ComparisonTarget == nil {
+			continue
+		}
+		if err := spec.ComparisonTarget.Validate(); err != nil {
+			return nil, fmt.Errorf("validate comparison target for repository %q: %w", spec.RepoName, err)
+		}
+		key := ""
+		if index > 0 {
+			key = baseBranchMetadataKey(RepoLaunchSpec{
+				RepoName:   spec.RepoName,
+				BranchSlug: spec.BranchSlug,
+			})
+		}
+		if existing, ok := targets[key]; ok && !existing.Equal(*spec.ComparisonTarget) {
+			return nil, fmt.Errorf("comparison target collision for workspace repository %q", key)
+		}
+		targets[key] = *spec.ComparisonTarget
+	}
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	return targets, nil
+}
+
 // collectRemoteContributions projects the validated per-repository bindings
 // into the workspace-subpath keys understood by agentctl. The first repository
 // owns the workspace root; sibling destinations use the same deterministic key
@@ -773,6 +843,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if len(remoteContributions) > 0 {
 		metadata[MetadataKeyRemoteContributions] = remoteContributions
 	}
+	comparisonTargets, err := collectComparisonTargets(reqWithWorktree)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(comparisonTargets) > 0 {
+		metadata[MetadataKeyComparisonTargets] = comparisonTargets
+	}
 	contributionDestinations, err := collectContributionDestinations(reqWithWorktree)
 	if err != nil {
 		return nil, nil, nil, err
@@ -810,9 +887,11 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpProfile:                     reqWithWorktree.McpProfile,
 		AuthToken:                      m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
+		AgentctlStartupConfig:          m.agentctlStartupConfig,
 		OnProgress:                     onProgress,
 		RemoteContributions:            remoteContributions,
 		ContributionDestinations:       contributionDestinations,
+		ComparisonTargets:              comparisonTargets,
 	}
 
 	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
@@ -922,6 +1001,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		WorkspacePath:           workspacePath,
 		RepositoryPath:          req.RepositoryPath,
 		RepositoryID:            req.RepositoryID,
+		TaskRepositoryID:        req.TaskRepositoryID,
 		UseWorktree:             req.UseWorktree,
 		WorktreeID:              req.WorktreeID,
 		SetupScript:             req.SetupScript,
@@ -955,6 +1035,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				setup = repoSetupScript
 			}
 			specs = append(specs, RepoPrepareSpec{
+				TaskRepositoryID:        r.TaskRepositoryID,
 				RepositoryID:            r.RepositoryID,
 				RepositoryPath:          r.RepositoryPath,
 				RepoName:                r.RepoName,

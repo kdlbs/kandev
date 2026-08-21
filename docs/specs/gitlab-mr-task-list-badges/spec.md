@@ -6,6 +6,11 @@ owner: tbd
 
 # GitLab MR Badge on the Sidebar and Tasks-List Rows
 
+> **Amendment:** [Rich task title previews](../tasks/rich-task-title-previews.md)
+> extends this draft. It replaces the requirements that `MRTaskIcon` stay
+> unmodified, add no copy, and have only one hydration owner. The badge
+> placement and provider data-model requirements in this document still apply.
+
 ## Why
 
 A task whose work lives on GitHub shows a pull-request badge on all three

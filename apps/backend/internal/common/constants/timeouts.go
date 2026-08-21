@@ -3,7 +3,6 @@ package constants
 
 import (
 	"math"
-	"os"
 	"time"
 )
 
@@ -38,12 +37,24 @@ const (
 
 var (
 	// SetupScriptTimeout is the maximum time to wait for a setup script to complete.
-	SetupScriptTimeout = resolveSetupScriptTimeout(os.Getenv("KANDEV_TASK_PREPARATION_TIMEOUT"))
+	SetupScriptTimeout = defaultSetupScriptTimeout
 
 	// AgentLaunchTimeout is the maximum time to wait for agent launch,
 	// including worktree creation and setup script execution.
 	AgentLaunchTimeout = SetupScriptTimeout + setupLaunchAllowance
 )
+
+// ApplyPreparationTimeout applies the resolved typed startup setting to the
+// process-wide launch budgets. It is called once after config.Load, before any
+// task or agent services are constructed. Keeping the default here preserves
+// callers that use the constants package without a backend startup sequence.
+func ApplyPreparationTimeout(timeout time.Duration) {
+	if timeout <= 0 || timeout > maxSetupScriptTimeout {
+		timeout = defaultSetupScriptTimeout
+	}
+	SetupScriptTimeout = timeout
+	AgentLaunchTimeout = timeout + setupLaunchAllowance
+}
 
 func resolveSetupScriptTimeout(value string) time.Duration {
 	if value == "" {

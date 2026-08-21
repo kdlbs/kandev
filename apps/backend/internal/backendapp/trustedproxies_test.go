@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,8 +15,36 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 )
+
+func TestConfigureTrustedProxiesUsesTypedStartupConfig(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("server:\n  trustedProxies:\n    - 10.0.0.0/8\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KANDEV_SERVER_PORT", "")
+	t.Setenv("KANDEV_TRUSTED_PROXIES", "")
+	cfg, err := config.LoadWithPath(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	configureTrustedProxies(router, testLogger(t), cfg.Server.TrustedProxies)
+	router.GET("/", func(c *gin.Context) { c.String(http.StatusOK, c.ClientIP()) })
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.5:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.7")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if got := rec.Body.String(); got != "203.0.113.7" {
+		t.Fatalf("typed config ClientIP = %q, want 203.0.113.7", got)
+	}
+}
 
 func TestResolveTrustedProxies(t *testing.T) {
 	tests := []struct {
@@ -117,7 +147,7 @@ func TestConfigureTrustedProxiesInvalidEntryWarnsAndFallsBack(t *testing.T) {
 	}
 	warned := false
 	for _, entry := range logs.All() {
-		if !strings.Contains(entry.Message, "KANDEV_TRUSTED_PROXIES") {
+		if !strings.Contains(entry.Message, "trusted-proxy setting") {
 			continue
 		}
 		for _, field := range entry.Context {

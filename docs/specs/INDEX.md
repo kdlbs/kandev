@@ -21,7 +21,7 @@ The office umbrella covers kandev's autonomous-agent product surface: workspaces
 | [tasks](office/tasks.md) | draft |
 | [scheduler](office/scheduler.md) | draft |
 | [runtime](office/runtime.md) | draft |
-| [routing](office/routing.md) | draft |
+| [routing](office/routing.md) | archived |
 | [costs](office/costs.md) | in-progress |
 | [dashboard](office/dashboard.md) | draft |
 | [live-updates](office/live-updates.md) | draft |
@@ -38,6 +38,7 @@ Product-wide capabilities that are not tied to a single feature area.
 
 | Spec | Status |
 |---|---|
+| [startup-configuration-parity](platform/startup-configuration-parity.md) | shipped |
 | [agent-runtime-availability](platform/agent-runtime-availability.md) | draft |
 | [background-work-liveness](platform/background-work-liveness.md) | shipped |
 | [setup-launch-timeout](platform/setup-launch-timeout.md) | approved |
@@ -53,7 +54,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [plugins — Voice Mode leaves core](plugins/voice-extraction.md) | shipped |
 | [plugin-nav-sidebar-footer](plugin-nav-sidebar-footer/spec.md) | draft |
 | [semantic-notifications](platform/notifications.md) | shipped |
-| [workspace-git-status](platform/workspace-git-status.md) | shipped |
+| [workspace-git-status](platform/workspace-git-status.md) | approved |
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
 | [git-credential-lease-reissue](git-credential-lease-reissue/spec.md) | shipped |
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
@@ -74,6 +75,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [interrupted-task-indicator](tasks/interrupted-task-indicator.md) | complete |
 | [labels](tasks/labels.md) | shipped |
 | [title-length-limit](tasks/title-length-limit.md) | complete |
+| [rich-task-title-previews](tasks/rich-task-title-previews.md) | building |
 | [active clarification lifecycle](clarification-active-lifecycle/spec.md) | approved |
 | [model-unification](tasks/model-unification.md) | draft |
 | [run-scheduling](tasks/run-scheduling.md) | building |
@@ -128,6 +130,9 @@ Roles, governance gates, and granular permissions that apply across human users 
 | [profile-disable](agents/profile-disable.md) | draft |
 | [settings-profile-layout](agents/settings-profile-layout.md) | shipped |
 | [dynamic-provider-options](agents/dynamic-provider-options.md) | shipped |
+| [dynamic-agent-routing](agents/dynamic-agent-routing.md) | draft |
+| [dynamic-agent-routing-rollout-blockers](agents/dynamic-agent-routing-rollout-blockers.md) | draft |
+| [dynamic-agent-telemetry-routing](agents/dynamic-agent-telemetry-routing.md) | draft |
 | [utility-agent-profiles](agents/utility-agent-profiles.md) | approved |
 | [collapsible-agent-blocks](agents/collapsible-agent-blocks.md) | draft |
 | [roles](agents/roles.md) | shipped |
@@ -152,6 +157,7 @@ Per-workspace credentials and triage triggers for external services.
 | [gitlab-mr-task-list-badges](gitlab-mr-task-list-badges/spec.md) | draft |
 | [gitlab-workflow-sync](gitlab-workflow-sync/spec.md) | shipped |
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |
+| [pr-outcome-attribution](pr-outcome-attribution/spec.md) | shipped |
 | [enable-disable-toggle](integrations/enable-disable-toggle.md) | shipped |
 
 ## workspaces/ — workspace lifecycle
@@ -218,6 +224,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [message-queue-send-now](ui/message-queue-send-now.md) | shipped |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
 | [settings-discovery](ui/settings-discovery.md) | shipped |
+| [settings-prompt-editor](ui/settings-prompt-editor.md) | shipped |
 | [settings-typography](settings-typography/spec.md) | draft |
 | [executor-settings-card-spacing](ui/executor-settings-card-spacing.md) | shipped |
 | [quick-chat-elevation](ui/quick-chat-elevation.md) | building |
@@ -280,6 +287,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [auth](auth/spec.md) | building |
 | [create-local-repository](create-local-repository/spec.md) | shipped |
 | [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |
+| [workflow-quorum-decision-recording](workflow-quorum-decision-recording/spec.md) | draft |
 | [improve-kandev](improve-kandev/spec.md) | building |
 | [homebrew-core](homebrew-core/spec.md) | building |
 | [native-kandev-cli](native-kandev-cli/spec.md) | draft |
@@ -304,6 +312,8 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [board-step-visibility-filter](board-step-visibility-filter/spec.md) | draft |
 | [shutdown-turn-failure-suppression](shutdown-turn-failure-suppression/spec.md) | draft |
 | [executor-profile-env-precedence](executor-profile-env-precedence/spec.md) | building |
+| [automations-yaml-export](automations-yaml-export/spec.md) | building |
+| [task-launch-failure-recovery](task-launch-failure-recovery/spec.md) | draft |
 
 ---
 

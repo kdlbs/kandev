@@ -3,6 +3,7 @@ import { type Locator, type Page } from "@playwright/test";
 export class AutomationsPage {
   readonly listPage: Locator;
   readonly newAutomationButton: Locator;
+  readonly exportButton: Locator;
   readonly table: Locator;
   readonly emptyState: Locator;
   readonly editor: Locator;
@@ -24,6 +25,7 @@ export class AutomationsPage {
   ) {
     this.listPage = page.getByTestId("automations-list-page");
     this.newAutomationButton = page.getByTestId("new-automation-button");
+    this.exportButton = page.getByTestId("export-automations-button");
     this.table = page.getByTestId("automations-table");
     this.emptyState = page.getByTestId("automations-empty");
     this.editor = page.getByTestId("automation-editor");

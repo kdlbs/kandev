@@ -60,3 +60,20 @@ func TestResolveSetupScriptTimeoutRejectsLaunchBudgetOverflow(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyPreparationTimeoutUsesTypedStartupValue(t *testing.T) {
+	previousSetup := SetupScriptTimeout
+	previousLaunch := AgentLaunchTimeout
+	t.Cleanup(func() {
+		SetupScriptTimeout = previousSetup
+		AgentLaunchTimeout = previousLaunch
+	})
+
+	ApplyPreparationTimeout(17 * time.Minute)
+	if SetupScriptTimeout != 17*time.Minute {
+		t.Fatalf("SetupScriptTimeout = %s, want 17m", SetupScriptTimeout)
+	}
+	if AgentLaunchTimeout != 22*time.Minute {
+		t.Fatalf("AgentLaunchTimeout = %s, want 22m", AgentLaunchTimeout)
+	}
+}

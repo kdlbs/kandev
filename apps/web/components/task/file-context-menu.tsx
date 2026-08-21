@@ -294,11 +294,27 @@ function FileContextMenuSurface({
   onConfirmDelete,
   onDelete,
 }: FileContextMenuSurfaceProps) {
+  const renamePendingRef = useRef(false);
+
+  const handleStartRename = useCallback(() => {
+    renamePendingRef.current = true;
+  }, []);
+
+  const handleCloseAutoFocus = useCallback(
+    (event: Event) => {
+      if (!renamePendingRef.current) return;
+      event.preventDefault();
+      renamePendingRef.current = false;
+      onStartRename();
+    },
+    [onStartRename],
+  );
+
   return (
     <>
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-        <ContextMenuContent>
+        <ContextMenuContent onCloseAutoFocus={handleCloseAutoFocus}>
           {showOpenInEditor && <OpenInEditorMenuItems node={node} />}
           {showOpenInEditor && (hasFileActions || showAddToChatContext) && <ContextMenuSeparator />}
           {showAddToChatContext && onAddToChatContext && (
@@ -312,7 +328,7 @@ function FileContextMenuSurface({
             onDeleteFile={onDeleteFile}
             onRenameFile={onRenameFile}
             onDownloadFile={onDownloadFile}
-            onStartRename={onStartRename}
+            onStartRename={handleStartRename}
             onDelete={onDelete}
           />
         </ContextMenuContent>
@@ -504,15 +520,12 @@ export function TreeNodeName({
   useEffect(() => {
     if (rename.isRenaming) {
       blurEnabledRef.current = false;
-      const focusTimer = setTimeout(() => {
-        inputRef.current?.focus();
-        inputRef.current?.select();
-      }, 150);
+      inputRef.current?.focus();
+      inputRef.current?.select();
       const blurTimer = setTimeout(() => {
         blurEnabledRef.current = true;
       }, 400);
       return () => {
-        clearTimeout(focusTimer);
         clearTimeout(blurTimer);
       };
     }

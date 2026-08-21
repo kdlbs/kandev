@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { StateProvider, useAppStore } from "@/components/state-provider";
+import { StateProvider } from "@/components/state-provider";
 import type { TaskMR } from "@/lib/types/gitlab";
 import { MRTaskIcon } from "./mr-task-icon";
 
@@ -39,19 +39,18 @@ function makeMR(overrides: Partial<TaskMR> = {}): TaskMR {
   };
 }
 
-// Seeds the store and renders MRTaskIcon inside the same provider tree in one
-// pass — each StateProvider mount owns an independent store instance, so a
-// separate seed-then-render step would seed a store the render never reads.
+// Seeds the store via StateProvider's initialState rather than a render-time
+// setTaskMRs call, matching the pattern task-title-hover-card.test.tsx uses.
 function renderMRTaskIcon(mrs: TaskMR[]) {
-  function Fixture() {
-    const setTaskMRs = useAppStore((s) => s.setTaskMRs);
-    setTaskMRs("ws-1", { "task-1": mrs });
-    return <MRTaskIcon taskId="task-1" />;
-  }
   return render(
     <TooltipProvider>
-      <StateProvider initialState={{ workspaces: { items: [], activeId: "ws-1" } }}>
-        <Fixture />
+      <StateProvider
+        initialState={{
+          workspaces: { items: [], activeId: "ws-1" },
+          taskMRs: { byWorkspaceId: { "ws-1": { "task-1": mrs } } },
+        }}
+      >
+        <MRTaskIcon taskId="task-1" />
       </StateProvider>
     </TooltipProvider>,
   );
@@ -80,8 +79,98 @@ describe("MRTaskIcon", () => {
     renderMRTaskIcon([makeMR({ state: "merged" })]);
     const badge = screen.getByTestId(BADGE_TEST_ID);
     expect(badge.getAttribute("data-mr-state")).toBe("merged");
-    // The tooltip text itself (getMRTooltip's "State: merged" output) is
-    // covered directly in mr-task-icon.test.ts — jsdom does not reliably
-    // open Radix Tooltip content on a non-focusable trigger span.
+  });
+
+  // AC1, AC7, AC24: the trigger is keyboard-focusable and accessible, and the
+  // rendered summary uses MR !{iid} plus labelled rows — no pipe-delimited
+  // string anywhere.
+  it("AC1/AC7: trigger has role=img, tabIndex=0, and a localized aria-label", () => {
+    renderMRTaskIcon([makeMR({ mr_iid: 42 })]);
+    const badge = screen.getByTestId(BADGE_TEST_ID);
+    expect(badge.getAttribute("role")).toBe("img");
+    expect(badge.getAttribute("tabIndex")).toBe("0");
+    expect(badge.getAttribute("aria-label")).toBe("Merge request !42 status");
+  });
+
+  it("AC1/AC24: hovering the trigger opens the structured summary with MR !iid and the title", () => {
+    renderMRTaskIcon([
+      makeMR({
+        mr_iid: 7,
+        mr_title: "Fix the login flow",
+        approval_state: "approved",
+        pipeline_state: "success",
+        detailed_merge_status: "mergeable",
+      }),
+    ]);
+    const badge = screen.getByTestId(BADGE_TEST_ID);
+    fireEvent.pointerEnter(badge, { pointerType: "mouse" });
+
+    // Radix mounts the tooltip content into both a measurement copy and the
+    // visible portal, so scope to the first (portal) match rather than
+    // asserting a single element.
+    expect(screen.getAllByTestId("mr-task-status-summary").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("mr-task-status-iid")[0].textContent).toBe("MR !7");
+    expect(screen.getAllByTestId("mr-task-status-title")[0].textContent).toBe("Fix the login flow");
+    expect(screen.getAllByTestId("mr-task-status-review")[0].textContent).toContain("Review");
+    expect(screen.getAllByTestId("mr-task-status-review")[0].textContent).toContain("Approved");
+    expect(screen.getAllByTestId("mr-task-status-ci")[0].textContent).toContain("CI");
+    expect(screen.getAllByTestId("mr-task-status-merge")[0].textContent).toContain("Merge");
+    expect(document.body.textContent).not.toContain("|");
+  });
+
+  it("AC1/AC24: the multi-MR badge renders one summary entry per MR, separated", () => {
+    renderMRTaskIcon([
+      makeMR({ id: "a", mr_iid: 11, mr_title: "First linked MR", pipeline_state: "success" }),
+      makeMR({ id: "b", mr_iid: 12, mr_title: "Second linked MR", pipeline_state: "failure" }),
+    ]);
+    fireEvent.pointerEnter(screen.getByTestId(BADGE_TEST_ID), { pointerType: "mouse" });
+
+    // Radix force-mounts a measurement copy alongside the visible portal, so
+    // scope to one summary rather than counting matches across the document.
+    const summary = screen.getAllByTestId("mr-task-status-summary")[0];
+    const entries = summary.querySelectorAll('[data-testid="mr-task-status-entry"]');
+    expect(entries).toHaveLength(2);
+    expect(entries[0].textContent).toContain("MR !11");
+    expect(entries[0].textContent).toContain("First linked MR");
+    expect(entries[0].textContent).toContain("Passed");
+    expect(entries[1].textContent).toContain("MR !12");
+    expect(entries[1].textContent).toContain("Second linked MR");
+    expect(entries[1].textContent).toContain("Failed");
+    // Only the trailing entries carry the divider.
+    expect(entries[0].className).not.toContain("border-t");
+    expect(entries[1].className).toContain("border-t");
+  });
+
+  it("AC7: the multi-MR badge reports ready-to-merge only when every open MR is ready", () => {
+    const ready = {
+      pipeline_state: "success" as const,
+      detailed_merge_status: "mergeable",
+    };
+    renderMRTaskIcon([makeMR({ id: "a", ...ready }), makeMR({ id: "b", mr_iid: 2, ...ready })]);
+    expect(screen.getByTestId(BADGE_TEST_ID).getAttribute("data-mr-ready-to-merge")).toBe("true");
+
+    cleanup();
+    renderMRTaskIcon([
+      makeMR({ id: "a", ...ready }),
+      makeMR({ id: "b", mr_iid: 2, pipeline_state: "failure" }),
+    ]);
+    expect(screen.getByTestId(BADGE_TEST_ID).getAttribute("data-mr-ready-to-merge")).toBe("false");
+  });
+
+  it("malformed store value still bails to null instead of throwing", () => {
+    render(
+      <TooltipProvider>
+        <StateProvider
+          initialState={{
+            workspaces: { items: [], activeId: "ws-1" },
+            // @ts-expect-error simulating a partial hydration payload
+            taskMRs: { byWorkspaceId: { "ws-1": { "task-1": { not: "an array" } } } },
+          }}
+        >
+          <MRTaskIcon taskId="task-1" />
+        </StateProvider>
+      </TooltipProvider>,
+    );
+    expect(screen.queryByTestId(BADGE_TEST_ID)).toBeNull();
   });
 });

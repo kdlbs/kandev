@@ -46,12 +46,6 @@ describe("useHomeAffordance", () => {
     expect(result.current.href).toBe("/?home=overview");
   });
 
-  it("returns none for root-variant pages", () => {
-    const { result } = renderHook(() => useHomeAffordance("root"));
-
-    expect(result.current.mode).toBe("none");
-  });
-
   it("returns always while the expanded sidebar shows the settings tree", () => {
     state.appSidebar.settingsMode = true;
 

@@ -102,7 +102,7 @@ function buildCollapsibleItems(props: DesktopToolbarProps): ToolbarItemConfig[] 
       id: "reset-context",
       section: "right",
       visible: !!props.sessionId && !props.isAgentBusy,
-      render: () => <ResetContextButton sessionId={props.sessionId!} />,
+      render: () => <ResetContextButton sessionId={props.sessionId!} presentation="desktop" />,
     },
     {
       id: "sessions",

@@ -257,6 +257,16 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 	if err != nil {
 		return nil, err
 	}
+	if execution == nil {
+		// The automatic terminal-PR gate intentionally skips session creation.
+		// Return a successful no-op response so session.ensure and WS callers do
+		// not dereference a nil execution while the task-owned error card remains
+		// the recovery surface.
+		return &LaunchSessionResponse{
+			Success: true,
+			TaskID:  req.TaskID,
+		}, nil
+	}
 	return executionToLaunchResponse(req.TaskID, execution), nil
 }
 
@@ -424,6 +434,12 @@ func isMissingProfileResumeError(err error) bool {
 
 // executionToLaunchResponse converts a TaskExecution to a LaunchSessionResponse.
 func executionToLaunchResponse(taskID string, exec *executor.TaskExecution) *LaunchSessionResponse {
+	if exec == nil {
+		return &LaunchSessionResponse{
+			Success: true,
+			TaskID:  taskID,
+		}
+	}
 	resp := &LaunchSessionResponse{
 		Success:          true,
 		TaskID:           taskID,
