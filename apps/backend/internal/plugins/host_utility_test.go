@@ -205,6 +205,45 @@ func TestPluginHost_InvokeUtilityAgent_PreservesDirectProfileRunnerFailure(t *te
 	}
 }
 
+func TestPluginHost_InvokeUtilityAgent_DirectProfile_PreservesStoreFailure(t *testing.T) {
+	storeErr := status.Error(codes.Unavailable, "agent profile store unavailable")
+	d := configuredUtilityHost(t)
+	d.host.configSchema = map[string]any{
+		"properties": map[string]any{
+			agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+		},
+	}
+	d.host.configs = &fakeConfigReader{configs: map[string]any{agentProfileConfigKey: "profile-99"}}
+	d.profiles.profileErr = storeErr
+
+	_, err := d.host.InvokeUtilityAgent(context.Background(), "hi")
+	if !errors.Is(err, storeErr) {
+		t.Fatalf("InvokeUtilityAgent() error = %v, want wrapped store error", err)
+	}
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("InvokeUtilityAgent() status = %s, want %s", status.Code(err), codes.Unavailable)
+	}
+	if d.utilRun.calls != 0 {
+		t.Fatalf("runner calls = %d, want 0", d.utilRun.calls)
+	}
+}
+
+func TestPluginHost_InvokeUtilityAgent_DirectProfile_PreservesLookupCancellation(t *testing.T) {
+	d := configuredUtilityHost(t)
+	d.host.configSchema = map[string]any{
+		"properties": map[string]any{
+			agentProfileConfigKey: map[string]any{"type": "string", "format": "agent-profile"},
+		},
+	}
+	d.host.configs = &fakeConfigReader{configs: map[string]any{agentProfileConfigKey: "profile-99"}}
+	d.profiles.profileErr = context.Canceled
+
+	_, err := d.host.InvokeUtilityAgent(context.Background(), "hi")
+	if status.Code(err) != codes.Canceled {
+		t.Fatalf("InvokeUtilityAgent() status = %s, want %s", status.Code(err), codes.Canceled)
+	}
+}
+
 func TestPluginHost_InvokeUtilityAgent_NotConfigured(t *testing.T) {
 	d := configuredUtilityHost(t)
 	d.host.configs = &fakeConfigReader{configs: map[string]any{}}

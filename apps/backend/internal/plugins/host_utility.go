@@ -146,6 +146,9 @@ func (h *pluginHost) invokeConfiguredAgentProfile(
 	if err != nil {
 		return "", fmt.Errorf("plugins: load configured agent profile %q: %w", profileID, err)
 	}
+	// Current adapters translate a deleted profile into ErrAgentProfileNotFound,
+	// but keep this guard so future implementations cannot silently treat a
+	// nil success result as an eligible profile.
 	if profile == nil {
 		return "", status.Errorf(codes.FailedPrecondition, "configured agent profile %q not found", profileID)
 	}
