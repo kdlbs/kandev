@@ -41,6 +41,14 @@ var (
 	// ErrAuthFailed is returned when git authentication fails (e.g. no credentials in non-interactive mode).
 	ErrAuthFailed = errors.New("git authentication failed")
 
+	// ErrRemoteDefaultNetwork is returned when refreshing origin/HEAD fails
+	// because the remote cannot be reached.
+	ErrRemoteDefaultNetwork = errors.New("remote default branch network failure")
+
+	// ErrRemoteDefaultUnresolved is returned when origin has no usable default
+	// branch after the local ref and refresh paths have both been attempted.
+	ErrRemoteDefaultUnresolved = errors.New("remote default branch unresolved")
+
 	// ErrNonFastForward is returned when a fetch/pull is rejected due to non-fast-forward updates.
 	ErrNonFastForward = errors.New("non-fast-forward update rejected")
 
@@ -118,7 +126,9 @@ func isRemoteRefMissingError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "couldn't find remote ref") ||
 		strings.Contains(msg, "does not appear to be a git repository") ||
-		strings.Contains(msg, "no such remote")
+		strings.Contains(msg, "no such remote") ||
+		strings.Contains(msg, "cannot determine remote head") ||
+		strings.Contains(msg, "remote head refers to nonexistent ref")
 }
 
 // ClassifyGitError wraps a raw git error with a user-friendly sentinel error

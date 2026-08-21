@@ -1422,6 +1422,7 @@ export const i18nGuardFiles = [
   "components/github/pr-status-chip.tsx",
   "components/github/pr-topbar-button.tsx",
   "components/gitlab/mr-commits-section.tsx",
+  "components/gitlab/mr-task-status-summary.tsx",
   "components/gitlab/mr-detail-panel.tsx",
   "components/gitlab/mr-discussions-section.tsx",
   "components/gitlab/mr-files-section.tsx",
@@ -1584,6 +1585,9 @@ export const i18nGuardFiles = [
   "components/kanban-board.tsx",
   "components/kanban-card-content.tsx",
   "components/kanban-card-menu-items.tsx",
+  // Extracted out of kanban-card-content.tsx, which is guarded: without its own
+  // entry the card title markup would silently leave whole-file guard coverage.
+  "components/kanban-card-title.tsx",
   "components/kanban-column.tsx",
   "components/kanban-display-dropdown.tsx",
   "components/kanban-with-preview.tsx",

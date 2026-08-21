@@ -996,10 +996,10 @@ func TestServerModeOffice_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOffice)
 	tools := getRegisteredToolNames(s)
-	// 4 plan + 1 interaction + 1 related-tasks + 3 task-documents + 1 rich-output = 10
+	// 4 plan + 1 interaction + 1 related-tasks + 3 task-documents + 1 rich-output + 1 decisions = 11
 	// (delegate_task_kandev retired in favour of `agentctl kandev task create …`).
 	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev is kanban-task-only; office mode advances tasks via its own approval surface")
-	assert.Equal(t, 10, len(tools))
+	assert.Equal(t, 11, len(tools))
 }
 
 func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
@@ -1016,8 +1016,9 @@ func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
 	// delegate_task_kandev was retired from ModeOffice (now lives in
 	// the agentctl CLI as `agentctl kandev task create --parent …`).
 	assert.NotContains(t, tools, "delegate_task_kandev")
-	// 4 plan + 1 related-tasks + 3 task-documents + 1 rich-output = 9 (no ask_user_question, no delegate)
-	assert.Equal(t, 9, len(tools))
+	// 4 plan + 1 related-tasks + 3 task-documents + 1 rich-output + 1 decisions = 10
+	// (no ask_user_question, no delegate)
+	assert.Equal(t, 10, len(tools))
 }
 
 func TestServerModeConstants(t *testing.T) {

@@ -127,6 +127,56 @@ change makes a saved option value unsupported, Kandev removes that value after
 a successful resolution; a failed resolution keeps the draft unchanged so you
 can retry it.
 
+### Use a dynamic profile
+
+> [!EXPERIMENTAL]
+> Dynamic agent routing is disabled in production by default. Enable
+> `features.dynamicAgentRouting` under **Settings > System > Feature Toggles**
+> and restart Kandev before creating or using a dynamic profile.
+
+Choose the **Dynamic** agent family when you create a profile. Add concrete
+profiles in the order that Kandev must try them. The logical dynamic profile
+stays selected in the task and utility binding, while each launch uses one
+concrete candidate behind the scenes. Candidates must be enabled, launchable
+profiles. Dynamic profiles and rich Office profiles cannot be candidates.
+
+Use the **Dynamic agents** card at the top of **Settings > Agents** to create
+and list dynamic profiles. The card is hidden, and dynamic profiles cannot be
+selected for new work, when dynamic routing is disabled. A new profile starts
+with its name and candidates; enable or disable it later from the profile
+editor.
+
+Each candidate has a policy for two shared provider-error classes:
+
+- **Transient errors** include capacity, overload, network, timeout, rate, and
+  provider-availability failures.
+- **Hard errors** include authentication, subscription, quota, credit, model,
+  and provider-configuration failures.
+
+For each class, configure exponential same-candidate retries, the maximum
+retry count, the initial interval, reset-date waiting with a maximum wait, and
+the final **Skip candidate** or **Stop for manual recovery** outcome. Kandev
+uses a trusted future reset date at most once for a candidate and class when it
+fits the configured maximum. It then applies the retry schedule and outcome.
+Unclassified, task, repository, permission, tool, and ambiguous mid-turn
+failures stop for manual recovery so Kandev does not repeat work. The error
+catalogue is versioned and can grow as provider signals become known; an
+ambiguous new signal fails closed. A future classifier may improve catalogue
+coverage, but no model is called to classify errors today.
+
+After a provider switch, the failed provider is paused for the route health
+backoff, or until its trusted reset time when one is available. Kandev runs an
+exclusive health probe before it becomes eligible again. This shared error
+classification is used by task/Kanban and Office routing, while the per-
+candidate policies are configured on dynamic profiles.
+
+Provider errors that occur before a result can use the configured action, such
+as retrying the current candidate or trying the next candidate. A started turn
+with an ambiguous result does not switch providers automatically. If no
+candidate is eligible, the session waits for a recovery action. After the
+current turn settles, use **Retry current agent** or **Try next agent** in the
+session recovery surface. These actions use the current route generation, so a
+stale browser action does not replace a newer route decision.
 ### Host probes and executor model catalogs
 
 The model list shown while editing a profile comes from a host probe. It is an

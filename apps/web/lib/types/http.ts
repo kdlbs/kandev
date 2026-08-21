@@ -104,6 +104,11 @@ export type StepDefinition = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   agent_profile_id?: AgentProfileId;
+  execution_profile_id?: AgentProfileId;
+  route_generation?: number;
+  route_state?: string;
+  route_reason?: string;
+  downstream_acp_session_id?: string;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
@@ -473,6 +478,23 @@ export type TaskSession = ActiveSubagentCountFields & {
   /** Optional user-supplied label shown on the session tab. */
   name?: string;
   agent_profile_id?: AgentProfileId;
+  /** Logical profile selected by the user; dynamic profiles resolve this to a concrete launch profile. */
+  execution_profile_id?: AgentProfileId;
+  /** Monotonic dynamic-route generation used for stale action rejection. */
+  route_generation?: number;
+  /** Durable dynamic-route state, such as starting, waiting, or action_required. */
+  route_state?: string;
+  /** Stable reason code for the current dynamic-route state. */
+  route_reason?: string;
+  /** Classified provider cause currently driving route recovery. */
+  route_error_code?: string;
+  route_error_class?: "transient" | "hard" | "unclassified" | string;
+  route_catalogue_version?: string;
+  route_retry_ordinal?: number;
+  route_deadline?: string;
+  route_pending_outcome?: "skip" | "stop" | string;
+  /** Downstream ACP session ID for the currently selected concrete candidate. */
+  downstream_acp_session_id?: string;
   container_id?: string;
   executor_id?: string;
   environment_id?: string;
@@ -793,6 +815,8 @@ export type Turn = {
   task_id: TaskId;
   started_at: string;
   completed_at?: string;
+  execution_profile_id?: AgentProfileId;
+  route_generation?: number;
   metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;

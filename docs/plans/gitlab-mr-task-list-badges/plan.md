@@ -6,6 +6,10 @@ status: draft
 
 # Implementation Plan: GitLab MR Badge on the Sidebar and Tasks-List Rows
 
+> **Amendment:** The later
+> [rich task title preview plan](../rich-task-title-previews/plan.md) extends
+> this plan. It owns rich badge content and shared hydration behavior.
+
 ## Overview
 
 `MRTaskIcon` ships today with exactly one call site (the Kanban card). This plan

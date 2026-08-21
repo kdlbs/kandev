@@ -3,9 +3,9 @@ import { cleanup, render } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
 
-// AC12: TasksPageClient must call useWorkspaceMRs unconditionally, never
-// gated on tasksListShowDetails. Every direct import of TasksPageClient is
-// mocked so this test asserts only the wiring under AC12, not the behaviour
+// AC12: TasksPageClient must hydrate both change-request providers
+// unconditionally, never gated on tasksListShowDetails. Every direct import
+// of TasksPageClient is mocked so this test asserts only the wiring, not the behaviour
 // of the many unrelated hooks/components the page also renders (per the
 // plan's U9 guidance: mock rather than exercise the whole page).
 const useWorkspaceMRsMock = vi.fn();
@@ -109,16 +109,12 @@ function renderPage(tasksListShowDetails: boolean) {
   );
 }
 
-describe("TasksPageClient MR hydration (AC12)", () => {
-  it("calls useWorkspaceMRs with the workspace id when task details are off", () => {
+describe("TasksPageClient change-request hydration (AC12)", () => {
+  it("hydrates PRs and MRs with the workspace id when task details are off", () => {
     renderPage(false);
 
     expect(useWorkspaceMRsMock).toHaveBeenCalledWith("ws1");
-    // The gated GitHub call is unaffected: contrast case proving the two
-    // hooks are wired differently on purpose. Exact-call-record equality
-    // (not toHaveBeenCalledWith, a presence check) so the assertion fails
-    // if a regression also calls the hook ungated.
-    expect(useWorkspacePRsMock.mock.calls).toEqual([[null]]);
+    expect(useWorkspacePRsMock).toHaveBeenCalledWith("ws1");
   });
 
   it("calls useWorkspaceMRs with the workspace id when task details are on", () => {

@@ -282,6 +282,16 @@ func (a *classAdmission) setCapForTest(newCap int) func() {
 	}
 }
 
+func (a *classAdmission) setCap(newCap int) {
+	a.mu.Lock()
+	a.cap = newCap
+	if newCap > 0 {
+		a.dispatchLocked()
+	}
+	a.mu.Unlock()
+	a.owner.publishCap(newCap)
+}
+
 func (a *classAdmission) capacity() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()

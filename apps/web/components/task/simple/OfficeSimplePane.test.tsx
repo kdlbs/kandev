@@ -3,6 +3,10 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
 import type { Task, TaskSession } from "@/app/office/tasks/[id]/types";
+import {
+  OfficeTopbarChromeProvider,
+  useOfficeTopbarChrome,
+} from "@/app/office/components/office-topbar-context";
 
 const { CHAT_EDITABLE, CHAT_READONLY, CHAT_READONLY_TEST_ID } = vi.hoisted(() => ({
   CHAT_EDITABLE: "editable",
@@ -15,12 +19,6 @@ vi.mock("@/components/routing/app-link", () => ({
     <a href={href} {...props}>
       {children}
     </a>
-  ),
-}));
-
-vi.mock("@/app/office/components/office-topbar-portal", () => ({
-  OfficeTopbarPortal: ({ children }: { children: ReactNode }) => (
-    <div data-testid="office-topbar">{children}</div>
   ),
 }));
 
@@ -138,12 +136,24 @@ const runningSession: TaskSession = {
   updatedAt: "2026-05-01T10:07:00Z",
 };
 
-function renderPane(task: Task, sessions: TaskSession[]) {
-  return render(
+function TopbarActions() {
+  const chrome = useOfficeTopbarChrome();
+  return <>{chrome?.actions}</>;
+}
+
+function PaneHarness({ task, sessions }: { task: Task; sessions: TaskSession[] }) {
+  return (
     <StateProvider>
-      <OfficeSimplePane task={task} comments={[]} activity={[]} sessions={sessions} />
-    </StateProvider>,
+      <OfficeTopbarChromeProvider>
+        <OfficeSimplePane task={task} comments={[]} activity={[]} sessions={sessions} />
+        <TopbarActions />
+      </OfficeTopbarChromeProvider>
+    </StateProvider>
   );
+}
+
+function renderPane(task: Task, sessions: TaskSession[]) {
+  return render(<PaneHarness task={task} sessions={sessions} />);
 }
 
 describe("OfficeSimplePane comment composer", () => {
@@ -151,11 +161,7 @@ describe("OfficeSimplePane comment composer", () => {
     const task = { ...baseTask, status: "done" as const };
     const view = renderPane(task, []);
 
-    view.rerender(
-      <StateProvider>
-        <OfficeSimplePane task={task} comments={[]} activity={[]} sessions={[completedSession]} />
-      </StateProvider>,
-    );
+    view.rerender(<PaneHarness task={task} sessions={[completedSession]} />);
 
     expect(screen.getByTestId(CHAT_READONLY_TEST_ID).textContent).toBe(CHAT_EDITABLE);
   });

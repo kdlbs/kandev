@@ -180,6 +180,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		RequiresProcessKill:      req.RequiresProcessKill,
 		StripEnv:                 req.StripEnv,
 		BaseBranches:             req.BaseBranches,
+		ComparisonTargets:        req.ComparisonTargets,
 		RemoteContributions:      req.RemoteContributions,
 		ContributionDestinations: req.ContributionDestinations,
 		WorkspaceSourceRoots:     req.WorkspaceSourceRoots,
@@ -196,6 +197,9 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 
 	// Create process manager
 	procMgr := process.NewManager(instanceCfg, m.logger)
+	// Materialize provider-qualified comparison targets before any tracker
+	// polling starts. Failures remain explicit unavailable tracker state.
+	procMgr.PrepareComparisonTargets(ctx)
 
 	// Start root + per-repo trackers so file-change events fire even in passthrough mode.
 	procMgr.StartAllWorkspaceTrackers(context.Background())

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/office-fixture";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 
 test.describe("Skills", () => {
   test("create and list skill", async ({ officeApi, officeSeed }) => {
@@ -55,7 +56,7 @@ test.describe("Skills", () => {
 
   test("skills page renders", async ({ testPage, officeSeed: _ }) => {
     await testPage.goto("/office/workspace/skills");
-    await expect(testPage.getByRole("heading", { name: /Skills/i }).first()).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Skills/i, {
       timeout: 10_000,
     });
   });

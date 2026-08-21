@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
 )
@@ -290,6 +291,20 @@ func TestDuplicateProfile_RejectsOfficeScopedSource(t *testing.T) {
 	}
 	if len(st.created) != 0 {
 		t.Errorf("office-scoped source created %d copies, want 0", len(st.created))
+	}
+}
+
+func TestDuplicateProfile_RejectsDynamicSource(t *testing.T) {
+	source := sourceProfile()
+	source.AgentID = agents.DynamicAgentID
+	ctrl, st := duplicateSetup(source)
+
+	_, err := ctrl.DuplicateProfile(context.Background(), DuplicateProfileRequest{ID: source.ID})
+	if !errors.Is(err, ErrDynamicProfileDuplicationUnsupported) {
+		t.Fatalf("err = %v, want dynamic duplication unsupported", err)
+	}
+	if len(st.created) != 0 {
+		t.Errorf("dynamic source created %d copies, want 0", len(st.created))
 	}
 }
 

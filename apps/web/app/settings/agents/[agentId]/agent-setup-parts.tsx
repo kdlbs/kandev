@@ -2,6 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
+import Link from "@/components/routing/app-link";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,6 +26,7 @@ import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
 import type { Agent, ModelConfig, PermissionSetting, PassthroughConfig } from "@/lib/types/http";
 import { ProfileMcpConfigCard } from "./profile-mcp-config-card";
 import { profilePermissionValues } from "@/lib/agent-permissions";
+import { DynamicAgentProfileEditor } from "@/components/settings/dynamic-agent-profile-editor";
 import {
   isProfileDirty,
   toAgentProfilePatch,
@@ -55,6 +57,7 @@ export type AgentHeaderProps = {
   matchedPath: string | null | undefined;
   isCreateMode: boolean;
   savedAgent: Agent | null;
+  showInstallationStatus?: boolean;
   onDelete?: () => void;
 };
 
@@ -63,6 +66,7 @@ export function AgentHeader({
   matchedPath,
   isCreateMode,
   savedAgent,
+  showInstallationStatus = true,
   onDelete,
 }: AgentHeaderProps) {
   const { t } = useTranslation();
@@ -71,14 +75,16 @@ export function AgentHeader({
       title={
         <span className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="min-w-0 break-words">{displayName}</span>
-          <span
-            className={
-              SETTINGS_TYPOGRAPHY.meta +
-              " max-w-full truncate rounded-full border border-muted-foreground/30 px-2 py-1"
-            }
-          >
-            {matchedPath ?? t("agents:installationNotDetected")}
-          </span>
+          {showInstallationStatus && (
+            <span
+              className={
+                SETTINGS_TYPOGRAPHY.meta +
+                " max-w-full truncate rounded-full border border-muted-foreground/30 px-2 py-1"
+              }
+            >
+              {matchedPath ?? t("agents:installationNotDetected")}
+            </span>
+          )}
         </span>
       }
       description={
@@ -222,6 +228,29 @@ export type ProfilesCardProps = {
   onToastError: (error: unknown) => void;
 };
 
+function dynamicProfileRoute(agent: Agent, profile: DraftProfile): string {
+  return `/settings/agents/${encodeURIComponent(agent.name)}/profiles/${encodeURIComponent(profile.id)}`;
+}
+
+function DynamicProfileRouteRow({ agent, profile }: { agent: Agent; profile: DraftProfile }) {
+  const { t } = useTranslation();
+  const candidateCount = profile.dynamic?.candidates.length ?? 0;
+  return (
+    <Link
+      href={dynamicProfileRoute(agent, profile)}
+      className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-md border p-3 transition-colors hover:border-foreground/30 hover:bg-muted/50"
+      data-testid={`dynamic-profile-route-${profile.id}`}
+    >
+      <span className="min-w-0 truncate text-sm font-medium">
+        {profile.name || t("agents:profileName")}
+      </span>
+      <span className="shrink-0 text-xs text-muted-foreground">
+        {t("agents:dynamicCandidates")}: {candidateCount}
+      </span>
+    </Link>
+  );
+}
+
 export function ProfilesCard({
   displayName,
   isCreateMode,
@@ -239,6 +268,49 @@ export function ProfilesCard({
   onToastError,
 }: ProfilesCardProps) {
   const { t } = useTranslation();
+  const dynamicProfiles = draftAgent.profiles.filter(
+    (profile) => profile.kind === "dynamic" || draftAgent.name === "dynamic",
+  );
+
+  if (dynamicProfiles.length > 0) {
+    return (
+      <SettingsCard isDirty={isAgentDirty}>
+        <SettingsCardHeader
+          title={t("agents:dynamicProfileSettings")}
+          actions={
+            !isCreateMode && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onAddProfile}
+                className={settingsActionClassName("cursor-pointer")}
+              >
+                <IconPlus className="mr-2 h-4 w-4" />
+                {t("agents:addProfile")}
+              </Button>
+            )
+          }
+        />
+        <CardContent className="space-y-6">
+          {dynamicProfiles.map((profile) => (
+            <div key={profile.id}>
+              {profile.isNew ? (
+                <DynamicAgentProfileEditor
+                  agent={draftAgent}
+                  profile={profile}
+                  isCreating={Boolean(profile.isNew)}
+                  onDraftChange={(patch) => onProfileChange(profile.id, patch)}
+                />
+              ) : (
+                <DynamicProfileRouteRow agent={draftAgent} profile={profile} />
+              )}
+            </div>
+          ))}
+        </CardContent>
+      </SettingsCard>
+    );
+  }
+
   return (
     <SettingsCard isDirty={isAgentDirty}>
       <SettingsCardHeader

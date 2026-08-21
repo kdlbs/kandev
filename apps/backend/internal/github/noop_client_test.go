@@ -48,4 +48,14 @@ func TestNoopClient_ReturnsErrNoClient(t *testing.T) {
 	if !errors.Is(err, ErrNoClient) {
 		t.Errorf("RequestReviewers error = %v, want ErrNoClient", err)
 	}
+
+	// AC-11: the noop path never returns a PRStatus at all, so it can never
+	// mark the outcome-field or closure-attribution groups populated.
+	status, err := c.GetPRStatus(ctx, "o", "r", 1)
+	if !errors.Is(err, ErrNoClient) {
+		t.Errorf("GetPRStatus error = %v, want ErrNoClient", err)
+	}
+	if status != nil {
+		t.Errorf("GetPRStatus status = %#v, want nil", status)
+	}
 }

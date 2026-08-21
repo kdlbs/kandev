@@ -809,6 +809,40 @@ func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, w
 	}
 }
 
+// seedTaskWithoutSession creates a task, workspace, and workflow in the repo
+// but deliberately no task session — the F38/dispatcher case for a task with
+// zero task_sessions rows.
+func seedTaskWithoutSession(t *testing.T, repo *sqliterepo.Repository, taskID, workflowStepID string) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	ws := &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}
+	if err := repo.CreateWorkspace(ctx, ws); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	wf := &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Test Workflow", CreatedAt: now, UpdatedAt: now}
+	if err := repo.CreateWorkflow(ctx, wf); err != nil {
+		_ = err
+	}
+
+	task := &models.Task{
+		ID:             taskID,
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: workflowStepID,
+		Title:          "Test Task",
+		Description:    "Test",
+		State:          v1.TaskStateInProgress,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+}
+
 type ownershipOverrideRepo struct {
 	sessionExecutorStore
 	tasks map[string]*models.Task

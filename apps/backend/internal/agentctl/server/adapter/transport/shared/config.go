@@ -59,6 +59,10 @@ type Config struct {
 	// adapter's return value to decide whether to kill the entire process
 	// group on shutdown so MCP child processes don't leak.
 	RequiresProcessKill bool
+
+	// NotificationQueueCapacity is the resolved ACP inbound notification queue
+	// capacity. Zero keeps compatibility for directly constructed test configs.
+	NotificationQueueCapacity int
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.

@@ -721,6 +721,7 @@
   "sessionIdBefore": "工作階段 ID（之前）",
   "setSpendingLimitsPerAgentOr": "按代理程式或專案設定支出限額。超出限額時代理程式會暫停。",
   "setupTierAgentProfiles": "設定層級代理程式設定檔",
+  "setupTitle": "初始設置",
   "setUpYourOfficeWorkspace": "設定你的辦公室工作區",
   "ship": "釋出",
   "showSystemTasks": "顯示系統任務",
@@ -772,6 +773,7 @@
   "stepTaskTemplate": "任務模板",
   "stepXOfYTitle": "步驟 {{number}} / {{total}}；{{title}}",
   "structuredResult": "結構化結果",
+  "outputSummary": "輸出摘要",
   "subIssueOfParent": "{{parent}} 的子議題",
   "subscriptionQuota": "訂閱配額",
   "succeeded": "成功",
@@ -902,5 +904,6 @@
   "failedToLoadProviderHealth": "載入服務商健康狀態失敗",
   "failedToLoadRouteAttempts": "載入路由嘗試記錄失敗",
   "failedToLoadRoutingConfig": "載入路由設定失敗",
-  "failedToLoadRoutingPreview": "載入路由預覽失敗"
+  "failedToLoadRoutingPreview": "載入路由預覽失敗",
+  "failedToLoadTaskQuorum": "載入任務法定人數失敗"
 }

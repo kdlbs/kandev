@@ -22,6 +22,7 @@ const REPOSITORY_SELECTOR_TEST_ID = "repository-selector";
 const REPOSITORY_ROWS_TEST_ID = "repository-rows";
 
 const mockState = {
+  features: { dynamicAgentRouting: true },
   workflows: {
     items: [LOCAL_WORKFLOW] as MockWorkflow[],
   },

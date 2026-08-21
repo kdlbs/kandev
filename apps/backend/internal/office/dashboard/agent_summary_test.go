@@ -157,6 +157,9 @@ func TestGetAgentSummary_LatestRunCard(t *testing.T) {
 		now.Add(-2*time.Hour))
 	seedSummaryRun(t, deps.db, "run-newest-id", summaryFixtureAgent, "failed", "task-2",
 		now.Add(-30*time.Minute))
+	if _, err := deps.db.Exec(`UPDATE runs SET output_summary = 'final agent response' WHERE id = 'run-newest-id'`); err != nil {
+		t.Fatalf("seed output summary: %v", err)
+	}
 
 	resp := fetchAgentSummary(t, deps, summaryFixtureAgent, 14)
 	if resp.LatestRun == nil {
@@ -173,6 +176,9 @@ func TestGetAgentSummary_LatestRunCard(t *testing.T) {
 	}
 	if resp.LatestRun.TaskID != "task-2" {
 		t.Errorf("task_id = %q, want task-2", resp.LatestRun.TaskID)
+	}
+	if resp.LatestRun.Summary != "final agent response" {
+		t.Errorf("summary = %q, want persisted output summary", resp.LatestRun.Summary)
 	}
 }
 

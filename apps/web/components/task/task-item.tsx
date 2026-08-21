@@ -2,18 +2,13 @@
 
 import { memo } from "react";
 import {
-  IconAlertCircle,
   IconChevronDown,
   IconCircleCheck,
   IconCircleDashed,
-  IconDots,
   IconMessageQuestion,
   IconProgressCheck,
-  IconPinFilled,
   IconShieldQuestion,
 } from "@tabler/icons-react";
-import { IssueTaskIcon } from "@/components/github/issue-task-icon";
-import { TaskContributionIcons } from "./task-contribution-icons";
 import { cn } from "@/lib/utils";
 import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
 import { TaskItemStatsRow } from "./task-item-stats-row";
@@ -28,12 +23,15 @@ import {
 } from "@/lib/ui/state-icons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
+import { TaskRowMetadata } from "./task-row-plugin-slots";
 import { classifyTask } from "./task-classify";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
-import { TaskAutopilotIcon } from "@/components/task/task-autopilot-icon";
+import { TaskTitleHoverCard } from "@/components/task/task-title-hover-card";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
-import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
+import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
+import { TaskMenuButton } from "./task-item-menu-button";
+import { TaskItemLeadingBadges } from "./task-item-leading-badges";
 
 type DiffStats = {
   additions: number;
@@ -64,6 +62,7 @@ type TaskItemProps = {
    */
   onSelect?: (e: React.MouseEvent | React.KeyboardEvent) => void;
   diffStats?: DiffStats;
+  comparisonUnavailable?: boolean;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string;
   remoteExecutorName?: string;
@@ -73,6 +72,8 @@ type TaskItemProps = {
   menuOpen?: boolean;
   isDeleting?: boolean;
   taskId?: string;
+  /** Drives the `task-row-metadata` plugin slot's `workflowStepId`. */
+  workflowStepId?: string | null;
   primarySessionId?: string | null;
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;
@@ -314,10 +315,26 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
   );
 }
 
+function TaskItemTitle({ taskId, title }: { taskId?: string; title: string }) {
+  // w-full: ScrollOnOverflow's root is inline-block, so once it sits inside
+  // the title-preview trigger's <button> (task-title-hover-card.tsx) rather
+  // than being the flex row's direct child, shrink-to-fit sizing lets it grow
+  // past the button's flex-shrunk width instead of clipping to it — losing
+  // the overflow the hover-scroll marquee depends on.
+  const content = <ScrollOnOverflow className="min-w-0 w-full">{title}</ScrollOnOverflow>;
+  if (!taskId) return content;
+  return (
+    <TaskTitleHoverCard taskId={taskId} title={title} side="right" align="start">
+      {content}
+    </TaskTitleHoverCard>
+  );
+}
+
 function TaskItemContent({
   title,
   autopilot,
   taskId,
+  workflowStepId,
   isRemoteExecutor,
   remoteExecutorType,
   remoteExecutorName,
@@ -333,10 +350,12 @@ function TaskItemContent({
   wipQueue,
   issueInfo,
   agentErrorMessage,
+  comparisonUnavailable,
 }: {
   title: string;
   autopilot?: boolean;
   taskId?: string;
+  workflowStepId?: string | null;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string;
   remoteExecutorName?: string;
@@ -352,23 +371,22 @@ function TaskItemContent({
   wipQueue?: WipQueueStatus;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
+  comparisonUnavailable?: boolean;
 }) {
   const { t } = useTranslation();
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
-        <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
-        {autopilot && <TaskAutopilotIcon />}
-        {isPinned && (
-          <IconPinFilled
-            data-testid="task-pinned-icon"
-            className="h-3 w-3 shrink-0 text-muted-foreground/60"
-          />
-        )}
-        <TaskContributionIcons taskId={taskId} prInfo={prInfo} />
-        {taskId ? <RegisteredChangeRequestTaskIcon taskId={taskId} /> : null}
-        {issueInfo && <IssueTaskIcon issueInfo={issueInfo} />}
-        {agentErrorMessage && <TaskAgentErrorIcon message={agentErrorMessage} />}
+        <TaskItemTitle taskId={taskId} title={title} />
+        <TaskItemLeadingBadges
+          autopilot={autopilot}
+          isPinned={isPinned}
+          taskId={taskId}
+          prInfo={prInfo}
+          issueInfo={issueInfo}
+          agentErrorMessage={agentErrorMessage}
+        />
+        <TaskItemComparisonUnavailable unavailable={comparisonUnavailable} />
         {isRemoteExecutor && (
           <RemoteCloudTooltip
             taskId={taskId ?? ""}
@@ -389,6 +407,13 @@ function TaskItemContent({
           {repositories.join(" · ")}
         </span>
       )}
+      {taskId && (
+        <TaskRowMetadata
+          taskId={taskId}
+          workflowStepId={workflowStepId ?? null}
+          surface="sidebar"
+        />
+      )}
       <TaskItemStatsRow
         updatedAt={showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt}
         prInfo={prInfo}
@@ -397,26 +422,6 @@ function TaskItemContent({
         wipQueue={wipQueue}
       />
     </div>
-  );
-}
-
-function TaskAgentErrorIcon({ message }: { message: string }) {
-  const { t } = useTranslation();
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          data-testid="task-agent-error-icon"
-          className="inline-flex shrink-0 cursor-help text-destructive"
-          aria-label={t("task:taskHasAnAgentError")}
-        >
-          <IconAlertCircle className="h-3.5 w-3.5" aria-hidden="true" />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="right" className="max-w-[320px] whitespace-pre-wrap break-words">
-        {message}
-      </TooltipContent>
-    </Tooltip>
   );
 }
 
@@ -436,6 +441,7 @@ export const TaskItem = memo(function TaskItem({
   onClick,
   onSelect,
   diffStats,
+  comparisonUnavailable,
   isRemoteExecutor,
   remoteExecutorType,
   remoteExecutorName,
@@ -445,6 +451,7 @@ export const TaskItem = memo(function TaskItem({
   menuOpen = false,
   isDeleting,
   taskId,
+  workflowStepId,
   primarySessionId,
   hasPendingClarification,
   hasPendingPermission,
@@ -496,6 +503,7 @@ export const TaskItem = memo(function TaskItem({
         title={title}
         autopilot={autopilot}
         taskId={taskId}
+        workflowStepId={workflowStepId}
         isRemoteExecutor={isRemoteExecutor}
         remoteExecutorType={remoteExecutorType}
         remoteExecutorName={remoteExecutorName}
@@ -511,6 +519,7 @@ export const TaskItem = memo(function TaskItem({
         wipQueue={wipQueue}
         issueInfo={issueInfo}
         agentErrorMessage={agentErrorMessage}
+        comparisonUnavailable={comparisonUnavailable}
       />
       {hasDiffStats ? (
         <div className="mobile-task-actions-with-stats group/actions relative shrink-0 self-center flex items-center">
@@ -598,58 +607,5 @@ function SubtaskToggle({
       <IconChevronDown className={cn("h-3 w-3 transition-transform", collapsed && "-rotate-90")} />
       <span>{count}</span>
     </button>
-  );
-}
-
-function TaskMenuButton({
-  visible,
-  expanded,
-  rowFocus = false,
-}: {
-  visible: boolean;
-  expanded: boolean;
-  rowFocus?: boolean;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div
-      className={cn(
-        "mobile-task-actions self-center shrink-0 flex items-center transition-opacity duration-100",
-        !visible && "[@media(hover:none)]:hidden",
-        visible
-          ? "opacity-100"
-          : cn(
-              "opacity-0 pointer-events-none [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-hover:pointer-events-auto",
-              rowFocus
-                ? "group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
-                : "focus-within:opacity-100 focus-within:pointer-events-auto",
-            ),
-      )}
-    >
-      <button
-        type="button"
-        className={cn(
-          "mobile-task-actions-button flex size-6 items-center justify-center rounded-md cursor-pointer touch-manipulation",
-          "text-muted-foreground hover:text-foreground hover:bg-foreground/10",
-          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-colors",
-        )}
-        onClick={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-          e.currentTarget.dispatchEvent(
-            new MouseEvent("contextmenu", {
-              bubbles: true,
-              clientX: e.clientX,
-              clientY: e.clientY,
-            }),
-          );
-        }}
-        aria-label={t("task:taskActions")}
-        aria-haspopup="menu"
-        aria-expanded={expanded}
-      >
-        <IconDots className="h-4 w-4" />
-      </button>
-    </div>
   );
 }

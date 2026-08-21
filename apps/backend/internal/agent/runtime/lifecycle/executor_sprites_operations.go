@@ -234,7 +234,7 @@ func (r *SpritesExecutor) runPrepareScript(
 
 	r.logger.Debug("running prepare script")
 	cmd := sprite.CommandContext(stepCtx, "bash", "-c", script)
-	cmd.Env = r.buildSpriteEnv(req.Env)
+	cmd.Env = r.buildSpriteEnv(req.Env, req.AgentctlStartupConfig)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -458,6 +458,7 @@ func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInst
 		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:      req.RemoteContributions,
 		ContributionDestinations: req.ContributionDestinations,
+		ComparisonTargets:        req.ComparisonTargets,
 		Env:                      cloneStringMap(req.Env),
 	}
 }

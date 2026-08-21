@@ -152,6 +152,9 @@ export function ChatActivityTabs({
         <ApprovalActionBar task={task} />
         <TaskChat
           taskId={task.id}
+          workspaceId={task.workspaceId}
+          statusSummary={task.statusSummary}
+          repositories={task.repositories}
           comments={comments}
           timeline={timeline}
           sessions={sessions}
