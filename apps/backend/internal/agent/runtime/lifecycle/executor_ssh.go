@@ -259,6 +259,8 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		if err := r.verifyPrimaryCheckout(launchCtx, client, taskDir, req, platform); err != nil {
 			return nil, err
 		}
+	} else if err := ensureReuseRequiredRemoteTaskDirExists(launchCtx, client, taskDir); err != nil {
+		return nil, err
 	}
 	sessionDir, err := r.prepareRemoteSessionDir(launchCtx, client, taskDir, req)
 	if err != nil {

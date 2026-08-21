@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // remoteHomeCommand is the exact probe expandRemoteHome issues; matching on it
@@ -673,6 +675,35 @@ func TestEnsureRemoteSessionDir(t *testing.T) {
 		_, err := ensureRemoteSessionDir(context.Background(), server.dial(t), "/remote/task", "sess-7")
 		if err == nil || !strings.Contains(err.Error(), "mkdir session dir") {
 			t.Fatalf("error = %v", err)
+		}
+	})
+}
+
+func TestEnsureReuseRequiredRemoteTaskDirExists(t *testing.T) {
+	t.Run("existing canonical directory is accepted without creating it", func(t *testing.T) {
+		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+			sshScriptRule{match: "test -d", result: sshOK},
+		).handle)
+		if err := ensureReuseRequiredRemoteTaskDirExists(context.Background(), server.dial(t), "/remote/task"); err != nil {
+			t.Fatalf("ensureReuseRequiredRemoteTaskDirExists: %v", err)
+		}
+		if got := server.commands(); len(got) != 1 || got[0] != "test -d '/remote/task'" {
+			t.Fatalf("commands = %v, want only the non-mutating directory probe", got)
+		}
+	})
+
+	t.Run("missing canonical directory fails closed", func(t *testing.T) {
+		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+			sshScriptRule{match: "test -d", result: sshFail("missing")},
+		).handle)
+		err := ensureReuseRequiredRemoteTaskDirExists(context.Background(), server.dial(t), "/remote/task")
+		if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+			t.Fatalf("error = %v, want workspace reuse unsafe", err)
+		}
+		for _, command := range server.commands() {
+			if strings.Contains(command, "mkdir -p") {
+				t.Fatalf("reuse probe created remote state: %q", command)
+			}
 		}
 	})
 }
