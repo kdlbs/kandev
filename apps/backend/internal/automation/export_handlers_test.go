@@ -134,6 +134,32 @@ func TestExportDocumentHandler_WorkspaceLookupUnavailable_Returns500(t *testing.
 	}
 }
 
+// AC-35: the two 404 paths above must be indistinguishable in body, not just
+// status. Round 7 testing proved this was previously uncovered: mutating
+// respondExportError to leak "workspace access denied: <err>" into the
+// denied-caller body passed the full suite before this test existed.
+
+func TestExportDocumentHandler_DeniedAndNotFound_ProduceIdenticalBody(t *testing.T) {
+	notFoundSvc, _ := exportServiceTestFixture(t)
+	notFoundRouter := newExportTestRouter(notFoundSvc)
+	notFoundRec := doExportRequest(notFoundRouter, "/api/v1/workspaces/ws-missing/automations/export")
+
+	deniedSvc, wsLookup := exportServiceTestFixture(t)
+	wsLookup.exists["ws-1"] = true
+	deniedSvc.SetWorkspaceAuthorizer(func(context.Context, string) error {
+		return errors.Join(errors.New("denied"), repoerrors.ErrWorkspaceNotFound)
+	})
+	deniedRouter := newExportTestRouter(deniedSvc)
+	deniedRec := doExportRequest(deniedRouter, "/api/v1/workspaces/ws-1/automations/export")
+
+	if notFoundRec.Code != http.StatusNotFound || deniedRec.Code != http.StatusNotFound {
+		t.Fatalf("status codes = %d, %d, want both 404", notFoundRec.Code, deniedRec.Code)
+	}
+	if notFoundRec.Body.String() != deniedRec.Body.String() {
+		t.Errorf("bodies differ: not-found=%q, denied=%q; AC-35 requires them indistinguishable", notFoundRec.Body.String(), deniedRec.Body.String())
+	}
+}
+
 func TestExportZipHandler_WorkspaceNotFound_Returns404(t *testing.T) {
 	svc, _ := exportServiceTestFixture(t)
 	router := newExportTestRouter(svc)
