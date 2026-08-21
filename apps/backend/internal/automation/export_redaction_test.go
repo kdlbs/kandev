@@ -78,7 +78,7 @@ func TestExportRedaction_AC23_FullyPopulatedAutomationRoundTripsEveryExportedFie
 	wsLookup := &fakeExportWorkspaceLookup{exists: map[string]bool{"ws-1": true}}
 	svc.SetExportWorkspaceLookup(wsLookup)
 
-	agentLookup.profiles["agent-1"] = &settingsmodels.AgentProfile{Name: "Reviewer", Model: "claude-sonnet-5", Mode: "plan"}
+	agentLookup.profiles["agent-1"] = &settingsmodels.AgentProfile{Name: "Reviewer", AgentDisplayName: "Claude Code", Model: "claude-sonnet-5", Mode: "plan"}
 	executorLookup.profiles["exec-1"] = &taskmodels.ExecutorProfile{ExecutorID: "local_docker", Name: "Default Executor"}
 	workflowLookup.workflows["wf-1"] = &taskmodels.Workflow{Name: "New Feature Dev"}
 	stepLookup.steps["step-1"] = &workflowmodels.WorkflowStep{Name: "Build"}
@@ -149,7 +149,7 @@ func TestExportRedaction_AC23_FullyPopulatedAutomationRoundTripsEveryExportedFie
 	assertScalarField(t, workflow, "step", "Build")
 
 	agentProfile := requireMapKey(t, automation, "agent_profile")
-	assertScalarField(t, agentProfile, "agent_name", "Reviewer")
+	assertScalarField(t, agentProfile, "agent_name", "Claude Code")
 	assertScalarField(t, agentProfile, "model", "claude-sonnet-5")
 	assertScalarField(t, agentProfile, "mode", "plan")
 

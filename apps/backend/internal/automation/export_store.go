@@ -87,7 +87,7 @@ func listRepositoryIDsForAutomationsTx(ctx context.Context, tx *sqlx.Tx, automat
 	}
 	query, args, err := sqlx.In(
 		`SELECT automation_id, repository_id FROM automation_repositories
-		WHERE automation_id IN (?) ORDER BY automation_id, position`, automationIDs)
+		WHERE automation_id IN (?) ORDER BY automation_id, position, repository_id`, automationIDs)
 	if err != nil {
 		return nil, err
 	}

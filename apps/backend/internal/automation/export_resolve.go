@@ -104,7 +104,7 @@ func (s *Service) resolveAgentProfile(ctx context.Context, tx *sqlx.Tx, a *Autom
 	if !found {
 		return nil, "unresolved agent profile", nil
 	}
-	return &exportAgentProfile{AgentName: profile.Name, Model: profile.Model, Mode: profile.Mode}, "", nil
+	return &exportAgentProfile{AgentName: profile.AgentDisplayName, Model: profile.Model, Mode: profile.Mode}, "", nil
 }
 
 // resolveExecutorProfile resolves a.ExecutorProfileID. An empty ID

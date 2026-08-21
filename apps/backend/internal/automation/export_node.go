@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strconv"
 
@@ -18,12 +19,20 @@ const yamlStrTag = "!!str"
 // numeric literals rather than float64, so AC-41's byte-for-byte numeric fidelity
 // (e.g. 18446744073709551616, which overflows both int64 and uint64, or 1e400, which
 // overflows float64) survives the decode step untouched.
+//
+// json.Decoder.Decode only consumes one JSON value and stops; unlike
+// json.Unmarshal it does not reject trailing bytes after that value. A
+// trailing-data check is required so `{"a":1} garbage` is treated as
+// invalid JSON (AC-39) rather than silently accepted as `{"a":1}`.
 func decodeJSONWithNumbers(raw []byte) (any, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	var v any
 	if err := dec.Decode(&v); err != nil {
 		return nil, err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("automation: trailing data after JSON value")
 	}
 	return v, nil
 }

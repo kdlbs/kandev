@@ -69,6 +69,25 @@ func TestBuildTriggerConfigNode_InvalidJSON(t *testing.T) {
 	}
 }
 
+// AC-39: a valid JSON value followed by trailing bytes is not valid JSON as a
+// whole. json.Decoder.Decode only consumes one JSON value and stops, so a
+// naive decode-and-check-error implementation silently accepts trailing
+// garbage. Assert the "config is not valid JSON" warning path is taken, not
+// the value itself, since a decoder that behaves this way would otherwise
+// export the leading value as if the stored bytes were entirely valid.
+func TestBuildTriggerConfigNode_TrailingGarbageAfterValidJSON(t *testing.T) {
+	node, warning, err := buildTriggerConfigNode(json.RawMessage(`{"cron_expression":"0 9 * * *"} trailing garbage`))
+	if err != nil {
+		t.Fatalf("buildTriggerConfigNode: %v", err)
+	}
+	if warning != "config is not valid JSON" {
+		t.Errorf("warning = %q, want %q", warning, "config is not valid JSON")
+	}
+	if node.Kind != yaml.MappingNode || len(node.Content) != 0 {
+		t.Errorf("node = %+v, want an empty mapping", node)
+	}
+}
+
 func TestBuildTriggerConfigNode_ValidJSONNotAnObject(t *testing.T) {
 	cases := map[string]string{
 		"null":   `null`,

@@ -1079,16 +1079,23 @@ func (r *sqliteRepository) applyLegacyBackfill(ctx context.Context, profile *mod
 		return profile
 	}
 	agent, err := r.GetAgent(ctx, profile.AgentID)
+	profile.CLIFlags = legacyCLIFlagsForAgent(agent, err)
+	return profile
+}
+
+// legacyCLIFlagsForAgent is applyLegacyBackfill/applyLegacyBackfillTx's
+// shared decision: only a resolved "auggie" agent backfills the
+// --allow-indexing flag; a lookup failure, a missing agent, or any other
+// agent name backfills an empty list instead.
+func legacyCLIFlagsForAgent(agent *models.Agent, err error) []models.CLIFlag {
 	if err != nil || agent == nil || agent.Name != "auggie" {
-		profile.CLIFlags = []models.CLIFlag{}
-		return profile
+		return []models.CLIFlag{}
 	}
-	profile.CLIFlags = []models.CLIFlag{{
+	return []models.CLIFlag{{
 		Description: "Allow workspace indexing without confirmation",
 		Flag:        "--allow-indexing",
 		Enabled:     true,
 	}}
-	return profile
 }
 
 func (r *sqliteRepository) ListTUIAgents(ctx context.Context) ([]*models.Agent, error) {

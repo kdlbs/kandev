@@ -143,7 +143,11 @@ func TestResolveDescriptors_NoReferencesMade_NoDescriptorsNoWarnings(t *testing.
 
 func TestResolveDescriptors_AgentProfileResolved(t *testing.T) {
 	svc, agentLookup, _, _, _, _ := resolveTestFixture(t)
-	agentLookup.profiles["agent-1"] = &settingsmodels.AgentProfile{Name: "Reviewer", Model: "claude-sonnet-5", Mode: "plan"}
+	// Name (user-assigned label) and AgentDisplayName (underlying agent's display
+	// name) are deliberately different here: exportAgentProfile.AgentName must come
+	// from AgentDisplayName, matching the established wfmodels.AgentProfilePortable
+	// pattern in backendapp.buildAgentProfileResolver, not from the user's label.
+	agentLookup.profiles["agent-1"] = &settingsmodels.AgentProfile{Name: "My Reviewer Profile", AgentDisplayName: "Claude Code", Model: "claude-sonnet-5", Mode: "plan"}
 	tx := beginTestReadTx(t, svc)
 	a := &Automation{ID: "auto-1", Name: "Daily Review", AgentProfileID: "agent-1"}
 
@@ -151,7 +155,7 @@ func TestResolveDescriptors_AgentProfileResolved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveDescriptors: %v", err)
 	}
-	want := &exportAgentProfile{AgentName: "Reviewer", Model: "claude-sonnet-5", Mode: "plan"}
+	want := &exportAgentProfile{AgentName: "Claude Code", Model: "claude-sonnet-5", Mode: "plan"}
 	if got.AgentProfile == nil || *got.AgentProfile != *want {
 		t.Errorf("AgentProfile = %+v, want %+v", got.AgentProfile, want)
 	}
