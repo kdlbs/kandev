@@ -181,3 +181,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-18-never-started-agent-stall-terminal | [Treat Never-Started Agent Stalls as Terminal](2026-08-18-never-started-agent-stall-terminal.md) | accepted | backend, frontend, protocol | 2026-08-18 |
 | 2026-08-18-plugin-task-row-metadata | [Keep Task Row Plugin Metadata Generic](2026-08-18-plugin-task-row-metadata.md) | accepted | frontend | 2026-08-18 |
 | 2026-08-14-kandev-native-agent-rich-output | [Keep Agent Rich Output Host Native](2026-08-14-kandev-native-agent-rich-output.md) | accepted | backend, frontend, protocol, security | 2026-08-14 |
+| 2026-08-20-acp-client-non-underscore-extension-methods | [Route Non-Underscore Inbound Client Methods to the Extension Handler](2026-08-20-acp-client-non-underscore-extension-methods.md) | accepted | backend, protocol | 2026-08-20 |

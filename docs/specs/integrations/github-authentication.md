@@ -435,8 +435,9 @@ post-signature processing failures produce `failing`; a later valid successful d
 - Public base URL validation requires a canonical HTTPS origin with no credentials, query, or
   fragment and rejects loopback, private, link-local, or non-globally-routable DNS results. Kandev
   does not fetch the supplied URL as validation.
-- Repository identity accepts credential-free HTTPS and SSH remote forms. It rejects an SSH
-  password, query, or fragment before canonicalization, and an error never contains the rejected
+- Repository identity accepts credential-free HTTPS and SSH remote forms. Authorities must remain
+  ASCII-only and percent-free before URL parsing or case folding. It rejects an SSH password,
+  query, or fragment before canonicalization, and an error never contains the rejected
   secret-bearing remote.
 - App private keys, client secrets, webhook secrets, personal tokens, and live installation tokens
   never enter executor environments. Only brokered PAT/CLI tokens or repository-restricted

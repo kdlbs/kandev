@@ -21,6 +21,7 @@ import { seedDefaultCLIFlags } from "@/lib/cli-flags";
 import { generateUUID } from "@/lib/utils";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { useAppStore } from "@/components/state-provider";
+import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { deleteAgentAction } from "@/app/actions/agents";
 import { SettingsRedirect } from "@/src/settings-route-helpers";
@@ -157,13 +158,7 @@ function useAgentStoreSync() {
     setSettingsAgents(nextAgents);
     setAgentProfiles(
       nextAgents.flatMap((agent) =>
-        agent.profiles.map((profile) => ({
-          id: profile.id,
-          label: `${profile.agentDisplayName ?? ""} • ${profile.name}`,
-          agent_id: agent.id,
-          agent_name: agent.name,
-          cli_passthrough: profile.cliPassthrough ?? false,
-        })),
+        agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
       ),
     );
   };

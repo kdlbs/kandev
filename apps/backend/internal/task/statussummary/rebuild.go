@@ -48,6 +48,7 @@ type PullRequestInput struct {
 // does not masquerade as an authoritative empty value.
 type RebuildInput struct {
 	Sessions         []RebuildSession
+	TaskError        *ActiveErrorSummary
 	PendingActions   map[string]string
 	ActivityObserved bool
 	LastActivityAt   *time.Time
@@ -97,6 +98,10 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 			}
 		}
 	}
+	if taskError := normalizeRebuildError(input.TaskError, input.Now); taskError != nil {
+		state.taskError = taskError
+		state.taskErrorObserved = true
+	}
 	for sessionID, action := range input.PendingActions {
 		if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(action) == "" {
 			continue
@@ -130,6 +135,10 @@ func normalizeRebuildError(input *ActiveErrorSummary, now time.Time) *ActiveErro
 		copy.OccurredAt = now.UTC()
 	}
 	copy.Preview = truncateString(copy.Preview, MaxActiveErrorPreviewBytes)
+	copy.SessionID = truncateString(copy.SessionID, maxSessionIDBytes)
+	copy.TaskRepositoryID = truncateString(copy.TaskRepositoryID, maxTaskRepositoryIDBytes)
+	copy.Category = truncateString(copy.Category, maxActiveErrorCategoryBytes)
+	copy.RecoveryActions = normalizeRecoveryActions(copy.RecoveryActions)
 	if copy.Stamp == "" {
 		copy.Stamp = copy.OccurredAt.UTC().Format(time.RFC3339Nano) + ":" + copy.Preview
 	}

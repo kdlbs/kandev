@@ -16,7 +16,11 @@ import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
-import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
+import {
+  isAgentConfiguredOnExecutor,
+  shouldFilterHandoffByHostHealth,
+} from "@/lib/agent-executor-compat";
+import { isHealthyAgentProfile } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import type { ExecutorProfile } from "@/lib/types/http";
@@ -164,13 +168,19 @@ function isMissingCompatibleProfile(
 function useCompatibleAgentProfiles(
   agentProfiles: AgentProfileOption[],
   executorProfile: ExecutorProfile | null,
+  filterByHostHealth: boolean,
 ): AgentProfileOption[] {
   const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
   return useMemo(() => {
     const selectable = agentProfiles.filter(isSelectableAgentProfile);
-    if (!executorProfile || !authLoaded) return selectable;
-    return selectable.filter((ap) => isAgentConfiguredOnExecutor(ap, executorProfile, authSpecs));
-  }, [agentProfiles, executorProfile, authSpecs, authLoaded]);
+    const healthFiltered = filterByHostHealth
+      ? selectable.filter((profile) => isHealthyAgentProfile(profile))
+      : selectable;
+    if (!executorProfile || !authLoaded) return healthFiltered;
+    return healthFiltered.filter((ap) =>
+      isAgentConfiguredOnExecutor(ap, executorProfile, authSpecs),
+    );
+  }, [agentProfiles, executorProfile, authSpecs, authLoaded, filterByHostHealth]);
 }
 
 function useHandoffAutoSummarize(
@@ -257,14 +267,20 @@ function useSessionProfileSelection({
   defaultProfileId,
   selectedProfileId,
   setSelectedProfileId,
+  handoff,
 }: {
   agentProfiles: AgentProfileOption[];
   executorProfile: ExecutorProfile | null;
   defaultProfileId: string;
   selectedProfileId: string;
   setSelectedProfileId: (value: string) => void;
+  handoff?: HandoffPreset;
 }) {
-  const compatibleAgentProfiles = useCompatibleAgentProfiles(agentProfiles, executorProfile);
+  const compatibleAgentProfiles = useCompatibleAgentProfiles(
+    agentProfiles,
+    executorProfile,
+    Boolean(handoff && shouldFilterHandoffByHostHealth(executorProfile)),
+  );
   useEnforceCompatibleProfile(compatibleAgentProfiles, selectedProfileId, setSelectedProfileId);
   const profileOptions = useAgentProfileOptions(compatibleAgentProfiles);
   const hasProfiles = profileOptions.length > 0;
@@ -391,6 +407,7 @@ function NewSessionForm({
     defaultProfileId,
     selectedProfileId,
     setSelectedProfileId,
+    handoff,
   });
   const { handleEnhancePrompt, isEnhancingPrompt, pendingResult, applyPending, copyPending } =
     useSessionPromptController(promptRef, taskId);

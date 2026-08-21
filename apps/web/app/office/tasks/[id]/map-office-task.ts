@@ -16,7 +16,13 @@ export function mapDecisionDTO(d: TaskDecisionDTO): TaskDecision {
   };
 }
 
-export function mapOfficeTaskToTask(raw: OfficeTask): Task {
+export function mapOfficeTaskToTask(
+  raw: OfficeTask,
+  supplement?: {
+    repositories?: Task["repositories"];
+    status_summary?: Task["statusSummary"];
+  },
+): Task {
   // The server DTO includes reviewers/approvers/decisions even though the
   // strongly-typed OfficeTask only declares the cross-cutting fields. We
   // read those extra props off the raw object.
@@ -25,6 +31,7 @@ export function mapOfficeTaskToTask(raw: OfficeTask): Task {
     approvers?: string[];
     decisions?: TaskDecisionDTO[];
     blockedBy?: string[];
+    status_summary?: Task["statusSummary"];
   };
   return {
     id: raw.id,
@@ -61,5 +68,7 @@ export function mapOfficeTaskToTask(raw: OfficeTask): Task {
     updatedAt: raw.updatedAt,
     executionPolicy: raw.executionPolicy,
     executionState: raw.executionState,
+    statusSummary: raw.statusSummary ?? extra.status_summary ?? supplement?.status_summary ?? null,
+    repositories: raw.repositories ?? supplement?.repositories,
   };
 }
