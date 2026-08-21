@@ -45,6 +45,16 @@ function hasNewerLiveAutoStartFailed(
   return existing.autoStartFailed !== fetchStart.autoStartFailed;
 }
 
+function hasNewerLiveExecutor(existing: KanbanTask, fetchStart: KanbanTask | undefined): boolean {
+  return (
+    fetchStart !== undefined &&
+    (existing.primaryExecutorId !== fetchStart.primaryExecutorId ||
+      existing.primaryExecutorType !== fetchStart.primaryExecutorType ||
+      existing.primaryExecutorName !== fetchStart.primaryExecutorName ||
+      existing.isRemoteExecutor !== fetchStart.isRemoteExecutor)
+  );
+}
+
 function mergeFetchedTask(
   mapped: KanbanTask,
   existing: KanbanTask,
@@ -90,9 +100,12 @@ function mergeFetchedTask(
   if (merged.autoStartFailed === undefined || hasNewerLiveAutoStartFailed(existing, fetchStart)) {
     merged.autoStartFailed = existing.autoStartFailed;
   }
-  // Executor fields are omitted from lightweight task payloads. Preserve the
-  // cached executor projection when this snapshot does not include it.
-  preserveOmittedExecutorFields(merged, existing);
+  // An omitted executor bundle in a current full snapshot represents a
+  // legitimate detach. Only backfill it when a live update changed the
+  // executor after this request began, making this response stale.
+  if (hasNewerLiveExecutor(existing, fetchStart)) {
+    preserveOmittedExecutorFields(merged, existing);
+  }
   return merged;
 }
 
