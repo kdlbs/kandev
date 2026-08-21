@@ -925,6 +925,8 @@
   "pendingReviewCommentsHelp_one": "{{count}} 條待傳送的審閱評論。點擊展開列表；可編輯每條評論、點擊檔案路徑跳轉到源碼，或用垃圾桶圖標移除評論。",
   "pendingReviewCommentsHelp_other": "{{count}} 條待傳送的審閱評論。點擊展開列表；可編輯每條評論、點擊檔案路徑跳轉到源碼，或用垃圾桶圖標移除評論。",
   "permissionRequested": "已請求權限",
+  "permissionRequestNoLongerAvailable": "此權限請求已不可用。",
+  "permissionResponseFailed": "無法回應權限請求。",
   "permissionRequired": "需要權限",
   "pickADifferentRepoLocalFolder": "選擇其他儲存庫、本地資料夾或遠端 URL",
   "pickAStartingFolderOptional": "選擇起始資料夾（可選）",
