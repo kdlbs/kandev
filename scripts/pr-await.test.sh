@@ -106,6 +106,8 @@ d="$(make_tmp_dir)"; setup_fake "$d"
 run_await "$d" >/dev/null 2>&1 && fail "missing PR should exit non-zero" || pass "missing PR argument is rejected"
 run_await "$d" 12 --mode bogus >/dev/null 2>&1 && fail "bad --mode accepted" || pass "invalid --mode is rejected"
 run_await "$d" notanumber >/dev/null 2>&1 && fail "non-numeric PR accepted" || pass "non-numeric PR is rejected"
+run_await "$d" 0 >/dev/null 2>&1 && fail "PR 0 accepted" || pass "PR #0 is rejected as a usage error"
+run_await "$d" 00 >/dev/null 2>&1 && fail "PR 00 accepted" || pass "PR #00 is rejected as a usage error"
 run_await "$d" 12 --interval-sec 0 >/dev/null 2>&1 && fail "zero interval accepted" || pass "zero --interval-sec is rejected"
 "$SCRIPT" --help >/dev/null 2>&1 && pass "--help exits 0" || fail "--help should exit 0"
 
@@ -550,6 +552,11 @@ for i in 1 2 3 4 5; do snapshot "$d" "$i" 0 0 0; done
 out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet 2>/dev/null)" && rc=0 || rc=$?
 [[ "$rc" -ne 0 ]] || fail "a permanently empty rollup must never exit 0" "$out"
 pass "a rollup that never populates does not become clean at the deadline"
+grep -qi 'no checks registered yet' <<<"$out" \
+  || fail "a zero-check deadline must say no checks registered, not '0 check(s) pending'" "$out"
+grep -q '0 check(s) pending' <<<"$out" \
+  && fail "a zero-check deadline must not be phrased as pending checks" "$out"
+pass "a zero-check deadline is distinguished from a deadline with pending checks"
 
 # --- a base that advanced leaves the merge result untested -----------------
 d="$(make_tmp_dir)"; setup_fake "$d"
@@ -622,12 +629,28 @@ elapsed=$((SECONDS - start))
 [[ "$rc" -ne 0 ]] || fail "a stalled gh pr view must never exit 0, got $rc" "$out"
 [[ "$elapsed" -lt 12 ]] || fail "a zero deadline must not wait out a 120s gh read, took ${elapsed}s"
 pass "a stalled gh pr view read cannot exceed the deadline"
+grep -qi 'exceeded its read bound' <<<"$out" \
+  || fail "a timed-out gh pr view must say so, not report a bare failure count" "$out"
+grep -q 'failed 0 times' <<<"$out" \
+  && fail "a pure gh pr view timeout must not be reported as 'failed 0 times in a row'" "$out"
+pass "a timed-out gh pr view is reported as a timeout, not a miscounted failure"
 
 # Structural guard: both external reads must go through the bounded helper, or
 # the deadline is only enforced between reads and not during them.
 [[ "$(grep -c 'run_bounded_capture' "$ROOT_DIR/scripts/pr-await")" -ge 3 ]] \
   || fail "both GitHub reads must run through run_bounded_capture"
 pass "every external GitHub read is bounded by the remaining deadline"
+
+# Structural guard: a failed read must be validated in a local before it can
+# replace SUMMARY_JSON/MERGE_JSON. Otherwise a transient failure right before
+# the deadline destroys evidence a working poll already produced, and the
+# deadline-clock check ("if -n SUMMARY_JSON: OUTCOME=deadline") wrongly trusts
+# garbage instead of falling back to the last good snapshot.
+grep -q 'summary_body="\$(cat "\$READ_TMP")"' "$ROOT_DIR/scripts/pr-await" \
+  || fail "the pr-state read must stage into a local before committing to SUMMARY_JSON"
+grep -q 'merge_body="\$(cat "\$READ_TMP")"' "$ROOT_DIR/scripts/pr-await" \
+  || fail "the gh pr view read must stage into a local before committing to MERGE_JSON"
+pass "a failed GitHub read is staged before it can clobber the last good snapshot"
 
 
 
@@ -703,5 +726,18 @@ out="$(PR_AWAIT_READ_FLOOR=2 run_await "$d" 12 --interval-sec 1 --deadline-min 0
 jq -e . >/dev/null 2>&1 <<<"$out" || fail "a garbage merge-state read must still yield parseable JSON" "$out"
 pass "a garbage merge-state read still yields parseable JSON"
 
+# --- a comment-only finding gets an accurate NEXT message -------------------
+# Zero failed checks and zero unresolved threads must not be reported as
+# "fix 0 failed check(s) and 0 thread(s)" when an actionable issue comment
+# (or a blocking review, conflict, or advanced base) is the actual finding.
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0 true aaaaaaaaaaaa '{"actionable_issue_comment_count":1}'
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 1 ]] || fail "an actionable issue comment with clean checks should exit 1, got $rc" "$out"
+grep -q 'fix 0 failed check(s) and 0 thread(s)' <<<"$out" \
+  && fail "must not claim nothing to fix when a comment is the only finding" "$out"
+grep -qi 'review the findings reported above' <<<"$out" \
+  || fail "should point the caller at the reported findings instead" "$out"
+pass "a comment-only finding is not reported as '0 failed check(s) and 0 thread(s)'"
 
 printf '\nall tests passed\n'

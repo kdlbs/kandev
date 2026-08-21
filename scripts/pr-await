@@ -118,6 +118,10 @@ done
 [[ -n "$PR" && "$PR" =~ ^[0-9]+$ ]] || usage 1
 # Normalize so a value like 0012 is 12 everywhere, including `jq --argjson`.
 PR=$((10#$PR))
+# "0" and "00" both pass the pattern above and normalize to 0, which is not a
+# PR number GitHub ever issues; reject it here instead of chasing it through
+# three failed pr-state reads as a confusing blocked-access outcome.
+[[ "$PR" -gt 0 ]] || usage 1
 
 progress() {
   [[ "$QUIET" -eq 1 ]] || printf '%s\n' "$*" >&2
@@ -281,6 +285,7 @@ START_SEC=$SECONDS
 POLLS=0
 CONSECUTIVE_ERRORS=0
 MERGE_ERRORS=0
+MERGE_TIMED_OUT=0
 EVIDENCE_ERRORS=0
 MERGE_UNKNOWN=0
 HEAD_CHANGES=0
@@ -316,10 +321,14 @@ while :; do
     [[ -n "$SUMMARY_JSON" ]] || OUTCOME='blocked-access'
     break
   fi
-  SUMMARY_JSON="$(cat "$READ_TMP")"
+  summary_body="$(cat "$READ_TMP")"
   # A non-zero read is a failed read, whatever it printed. Checking only the
   # parse would let a pr-state that exited 1 through on an empty snapshot.
-  if [[ "$read_rc" -ne 0 ]] || ! jq -e . >/dev/null 2>&1 <<<"$SUMMARY_JSON"; then
+  # Staged in a local first: assigning straight into SUMMARY_JSON would
+  # clobber the last good snapshot with this failed read's garbage, so a
+  # deadline reached right after would lose evidence a working poll had
+  # already produced.
+  if [[ "$read_rc" -ne 0 ]] || ! jq -e . >/dev/null 2>&1 <<<"$summary_body"; then
     CONSECUTIVE_ERRORS=$((CONSECUTIVE_ERRORS + 1))
     progress "poll ${POLLS}: pr-state failed (${CONSECUTIVE_ERRORS} in a row)"
     # Three consecutive failures is a lost connection, not a transient blip.
@@ -334,6 +343,7 @@ while :; do
     fi
     continue
   fi
+  SUMMARY_JSON="$summary_body"
   CONSECUTIVE_ERRORS=0
 
   budget="$(remaining_budget)"
@@ -359,10 +369,13 @@ while :; do
   if [[ "$read_rc" -eq 124 ]]; then
     progress "poll ${POLLS}: gh pr view exceeded its ${budget}s bound"
     OUTCOME='blocked-merge-state'
+    MERGE_TIMED_OUT=1
     break
   fi
-  MERGE_JSON="$(cat "$READ_TMP")"
-  if [[ "$read_rc" -ne 0 ]] || ! jq -e . >/dev/null 2>&1 <<<"$MERGE_JSON"; then
+  merge_body="$(cat "$READ_TMP")"
+  # Staged in a local first, same reason as the pr-state read above: a failed
+  # read must not overwrite the last good MERGE_JSON with unusable text.
+  if [[ "$read_rc" -ne 0 ]] || ! jq -e . >/dev/null 2>&1 <<<"$merge_body"; then
     MERGE_ERRORS=$((MERGE_ERRORS + 1))
     progress "poll ${POLLS}: gh pr view failed (${MERGE_ERRORS} in a row)"
     if [[ "$MERGE_ERRORS" -ge 3 ]]; then
@@ -375,6 +388,7 @@ while :; do
     fi
     continue
   fi
+  MERGE_JSON="$merge_body"
   MERGE_ERRORS=0
 
   pr_state="$(jq -r '.state // ""' <<<"$MERGE_JSON")"
@@ -524,6 +538,11 @@ if [[ "$OUTCOME" == 'blocked-access' ]]; then
 fi
 
 if [[ "$OUTCOME" == 'blocked-merge-state' ]]; then
+  if [[ "$MERGE_TIMED_OUT" -eq 1 ]]; then
+    emit_blocked 'blocked-merge-state' \
+"BLOCKED: gh pr view exceeded its read bound, so merge state is unknown.
+A conflicted or closed PR is indistinguishable from a clean one here."
+  fi
   emit_blocked 'blocked-merge-state' \
 "BLOCKED: gh pr view failed $MERGE_ERRORS times in a row, so merge state is unknown.
 A conflicted or closed PR is indistinguishable from a clean one here."
@@ -642,12 +661,24 @@ case "$OUTCOME" in
       "${error_sources:-null unresolved thread count}" ;;
   blocked-merge-unknown)
     printf 'GitHub still reports mergeability as UNKNOWN. Re-run before treating this head as clean.\n' ;;
-  deadline) printf 'deadline hit with %s check(s) pending. Re-run or raise --deadline-min.\n' "$pending_n" ;;
+  deadline)
+    if [[ $((passed_n + failed_n + pending_n)) -eq 0 ]]; then
+      printf 'deadline hit with no checks registered yet at this head. Re-run or raise --deadline-min.\n'
+    else
+      printf 'deadline hit with %s check(s) pending. Re-run or raise --deadline-min.\n' "$pending_n"
+    fi
+    ;;
   *)
     if [[ "$conflicted" -eq 1 ]]; then
       printf 'resolve the merge conflict before triaging checks or threads.\n'
     elif [[ "$findings" -eq 0 ]]; then
       printf 'clean at this head.\n'
+    elif [[ "$failed_n" -eq 0 && "$threads_total_n" -eq 0 ]]; then
+      # The finding is entirely from a category the "N failed / M thread"
+      # phrasing below cannot name: an issue comment, a blocking review, or an
+      # advanced base. Saying "fix 0 failed check(s) and 0 thread(s)" here
+      # would tell the caller there is nothing to do while findings > 0.
+      printf 'review the findings reported above (comments, blocking reviews, or an advanced base), then push once.\n'
     else
       printf 'fix %s failed check(s) and %s thread(s) in one pass, then push once.\n' \
         "$failed_n" "$threads_total_n"
