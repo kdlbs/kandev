@@ -238,6 +238,7 @@ function useFileMenuDeleteHandler({
       if (isBulk || !isFinePointer) {
         handleDelete();
       } else {
+        // Let the 100 ms context-menu exit animation finish before anchoring the popover.
         setTimeout(handleDelete, 150);
       }
     },
@@ -315,13 +316,7 @@ function FileContextMenuSurface({
       </ContextMenu>
       {isBulk && (
         <AlertDialog open={deleteConfirmationOpen} onOpenChange={setDeleteConfirmationOpen}>
-          <DeleteConfirmDialog
-            isBulk
-            selectedCount={selectedCount}
-            node={node}
-            fileCount={countFilesInTree(node)}
-            onConfirm={onConfirmDelete}
-          />
+          <DeleteConfirmDialog selectedCount={selectedCount} onConfirm={onConfirmDelete} />
         </AlertDialog>
       )}
       {!isBulk && isFinePointer && deleteAction && (

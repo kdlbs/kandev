@@ -226,7 +226,8 @@ function useChangesDiscardAmendHandlers(
   }, []);
   const handleDiscardOpenChange = useCallback((open: boolean) => {
     setShowDiscardDialog(open);
-    if (!open) discardAnchorRef.current = null;
+    // Keep the anchor through the popover's close autofocus. A later discard
+    // replaces it, while confirmation clears it after the mutation settles.
   }, []);
   const handleDiscardConfirm = useCallback(async () => {
     const paths = filesToDiscard ?? (fileToDiscard ? [fileToDiscard] : null);

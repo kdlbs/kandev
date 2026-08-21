@@ -287,6 +287,12 @@ test.describe("Changes panel focus behavior", () => {
       caption: "Desktop Changes panel with one-file discard confirmation",
     });
 
+    await testPage.keyboard.press("Escape");
+    await expect(confirmation).not.toBeVisible();
+    await expect(discard).toBeFocused();
+
+    await discard.click();
+    await expect(confirmation).toBeVisible();
     await testPage.getByTestId("discard-local-changes-confirm").click();
     await expect(file).not.toBeVisible({ timeout: 15_000 });
   });

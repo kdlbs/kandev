@@ -10,7 +10,6 @@ import {
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
 import { Trans, useTranslation } from "react-i18next";
-import type { FileTreeNode } from "@/lib/types/backend";
 
 export function DeleteFolderDescription({ name, fileCount }: { name: string; fileCount: number }) {
   if (fileCount > 0) {
@@ -35,32 +34,19 @@ export function DeleteFolderDescription({ name, fileCount }: { name: string; fil
 }
 
 export function DeleteConfirmDialog({
-  isBulk,
   selectedCount,
-  node,
-  fileCount,
   onConfirm,
 }: {
-  isBulk: boolean;
   selectedCount: number;
-  node: FileTreeNode;
-  fileCount: number;
   onConfirm: () => void;
 }) {
   const { t } = useTranslation();
-  const title = isBulk
-    ? t("task:deleteItemsTitle", { count: selectedCount })
-    : t("task:deleteFolderTitle");
   return (
     <AlertDialogContent>
       <AlertDialogHeader>
-        <AlertDialogTitle>{title}</AlertDialogTitle>
+        <AlertDialogTitle>{t("task:deleteItemsTitle", { count: selectedCount })}</AlertDialogTitle>
         <AlertDialogDescription>
-          {isBulk ? (
-            t("task:thisWillPermanentlyDeleteSelectedItems", { selectedCount })
-          ) : (
-            <DeleteFolderDescription name={node.name} fileCount={fileCount} />
-          )}
+          {t("task:thisWillPermanentlyDeleteSelectedItems", { selectedCount })}
         </AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
