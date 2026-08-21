@@ -263,6 +263,7 @@ func (r *Repository) runMigrations() error {
 	// therefore not added or dropped here.
 	r.migrate.Apply("tasks.origin", `ALTER TABLE tasks ADD COLUMN origin TEXT DEFAULT 'manual'`)
 	r.migrate.Apply("tasks.project_id", `ALTER TABLE tasks ADD COLUMN project_id TEXT DEFAULT ''`)
+	r.migrate.Apply("idx_tasks_project_id", `CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id)`)
 	r.migrate.Apply("tasks.labels", `ALTER TABLE tasks ADD COLUMN labels TEXT DEFAULT '[]'`)
 	r.migrate.Apply("tasks.identifier", `ALTER TABLE tasks ADD COLUMN identifier TEXT`)
 	// Office task-handoffs phase 6 - tag tasks archived as part of a cascade so

@@ -502,8 +502,9 @@ func TestGetCostForProject(t *testing.T) {
 	mustExec(t, repo, `UPDATE tasks SET project_id = 'proj-y' WHERE id = 'task-proj-y'`)
 
 	event := &models.CostEvent{
-		TaskID:       "task-proj-y",
-		ProjectID:    "proj-y",
+		TaskID: "task-proj-y",
+		// Leave the event snapshot empty so this assertion requires the live
+		// task.project_id join instead of passing from the legacy field.
 		CostSubcents: 25,
 		OccurredAt:   time.Now().UTC(),
 	}
