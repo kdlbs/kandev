@@ -108,8 +108,10 @@ then re-run the summary and require jobs to materialize before polling. `gh run
 approve` is not a valid command.
 
 Treat the state as clean only when the current head has no failed or pending
-checks, no merge conflict, no actionable review thread or issue comment, and
-qualifying exact-head semantic evidence where PR delivery requires it.
+checks, no merge conflict, no blocking review (an active `CHANGES_REQUESTED`
+or a review blocked at the exact current head), no actionable review thread or
+issue comment, and qualifying exact-head semantic evidence where PR delivery
+requires it.
 
 ## 2. Fix CI Failures
 
