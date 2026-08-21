@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"go.uber.org/zap"
 )
 
 // ClarificationBundleLister is the minimal read surface list_pending_questions_kandev
@@ -102,17 +103,20 @@ func (h *Handlers) handleListPendingQuestions(ctx context.Context, msg *ws.Messa
 	}
 
 	if err := h.resolveBundleVisibility(ctx, &opts); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		h.logger.Error("failed to resolve clarification bundle visibility", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list pending questions", nil)
 	}
 
 	page, err := h.clarificationBundles.ListUnresolvedClarificationBundles(ctx, opts)
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		h.logger.Error("failed to list unresolved clarification bundles", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list pending questions", nil)
 	}
 
 	resp, err := h.buildListPendingQuestionsResponse(ctx, page)
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		h.logger.Error("failed to build list_pending_questions_kandev response", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list pending questions", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
@@ -278,7 +282,8 @@ func (h *Handlers) handleAnswerQuestion(ctx context.Context, msg *ws.Message) (*
 		// IsNotActiveError -> http.StatusConflict mapping (handlers.go).
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
 	default:
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		h.logger.Error("failed to resolve clarification bundle", zap.String("pending_id", req.PendingID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to answer question", nil)
 	}
 }
 
