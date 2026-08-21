@@ -83,8 +83,19 @@ function resolveCurrentModelId(payload: SessionModelsPayload): string {
   return modelOpt?.current_value ?? "";
 }
 
-function isModelConfigOption(option: SessionModelConfigOption): boolean {
+function isModelConfigOption(option: Pick<SessionModelConfigOption, "id" | "category">): boolean {
   return option.id === "model" || option.category === "model";
+}
+
+function isUnsettledStartupModelsPayload(
+  state: AppState,
+  sessionId: string,
+  payload: SessionModelsPayload,
+): boolean {
+  return (
+    state.taskSessions.items[sessionId]?.state === "STARTING" &&
+    payload.config_options_settled !== true
+  );
 }
 
 // During an agentctl relaunch (ready -> starting -> ready) the backend can emit
@@ -164,16 +175,23 @@ function resolveConfigOptions(
   existing: ConfigOptionEntry[] | undefined,
   payload: SessionModelsPayload,
   pendingRuntime: PersistedRuntimeConfig,
+  currentModelId: string,
 ): ConfigOptionEntry[] {
   if (preserve && existing) {
-    return existing;
+    return existing.map((option) =>
+      isModelConfigOption(option) && currentModelId
+        ? { ...option, currentValue: currentModelId }
+        : option,
+    );
   }
   return (payload.config_options ?? []).map((o) => ({
     type: o.type,
     id: o.id,
     name: o.name,
     description: o.description,
-    currentValue: pendingRuntime.configOptions?.[o.id] ?? o.current_value,
+    currentValue: isModelConfigOption(o)
+      ? currentModelId || pendingRuntime.configOptions?.[o.id] || o.current_value
+      : (pendingRuntime.configOptions?.[o.id] ?? o.current_value),
     category: o.category,
     options: o.options,
   }));
@@ -273,8 +291,9 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
       const hydrated = hydratedSessions(store);
       const persisted = hydrated.has(sessionId) ? {} : persistedRuntimeConfig(state, sessionId);
       const matchesPersisted = payloadMatchesPersistedRuntime(payload, persisted);
-      if (matchesPersisted) hydrated.add(sessionId);
-      const pendingRuntime = matchesPersisted ? {} : persisted;
+      const unsettledStartup = isUnsettledStartupModelsPayload(state, sessionId, payload);
+      if (matchesPersisted && !unsettledStartup) hydrated.add(sessionId);
+      const pendingRuntime = hydrated.has(sessionId) ? {} : persisted;
       const resolved = resolveModelsUpdatedState(state, sessionId, payload, pendingRuntime);
       debugModelsUpdate(state, sessionId, payload, resolved);
       if (resolved.isEmpty && resolved.populated) {
@@ -287,6 +306,7 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
         resolved.existingEntry?.configOptions,
         payload,
         pendingRuntime,
+        resolved.currentModelId,
       );
       const configOptionsSettled = resolvedConfigOptionsSettled(payload, resolved.existingEntry);
 

@@ -3083,6 +3083,20 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+	settled := configOptionsSettled(payload.Data.Data)
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session before session model persistence",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if shouldDeferUnsettledStartupModelsEvent(session, settled) {
+		s.logger.Debug("deferring unsettled startup session_models event",
+			zap.String("session_id", sessionID),
+			zap.String("current_model_id", payload.Data.CurrentModelID))
+		return
+	}
 
 	// Store the write-once baseline before the mutable selector snapshot so a
 	// concurrent task-detail boot cannot observe the new state without its
@@ -3094,7 +3108,6 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 			zap.Error(err))
 		return
 	}
-	settled := configOptionsSettled(payload.Data.Data)
 	s.persistSessionModelAndRuntimeConfigWithSettlement(
 		ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.SessionModels, payload.Data.ConfigOptions, settled,
 	)
@@ -3548,6 +3561,10 @@ func configOptionsSettled(data any) bool {
 	metadata, _ := data.(map[string]any)
 	result, _ := metadata["config_options_settled"].(bool)
 	return result
+}
+
+func shouldDeferUnsettledStartupModelsEvent(session *models.TaskSession, settled bool) bool {
+	return !settled && session != nil && session.State == models.TaskSessionStateStarting
 }
 
 func originalConfigSettled(data any) bool {
