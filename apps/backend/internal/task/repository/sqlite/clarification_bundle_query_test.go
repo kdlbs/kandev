@@ -36,9 +36,10 @@ func seedBundleTurn(t *testing.T, repo *Repository, turnID, sessionID, taskID st
 func seedBundleTurnAt(t *testing.T, repo *Repository, turnID, sessionID, taskID string, at time.Time) {
 	t.Helper()
 	_, err := repo.db.Exec(repo.db.Rebind(`
-		INSERT OR IGNORE INTO task_session_turns
+		INSERT INTO task_session_turns
 			(id, task_session_id, task_id, started_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (id) DO NOTHING
 	`), turnID, sessionID, taskID, at, at, at)
 	if err != nil {
 		t.Fatalf("seed turn %s: %v", turnID, err)
