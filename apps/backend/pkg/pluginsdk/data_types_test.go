@@ -31,22 +31,23 @@ func TestPageInfoProtoRoundTrip(t *testing.T) {
 
 func TestTaskProtoRoundTrip(t *testing.T) {
 	task := Task{
-		ID:          "task-1",
-		WorkspaceID: "ws-1",
-		WorkflowID:  "wf-1",
-		Title:       "Fix the bug",
-		Description: "Details here",
-		State:       "in_progress",
-		Priority:    "high",
-		Labels:      []string{"bug", "plugin"},
-		CreatedBy:   "user-1",
-		CreatedAt:   "2026-07-15T12:00:00Z",
-		UpdatedAt:   "2026-07-15T12:05:00Z",
-		StartedAt:   strPtr("2026-07-15T12:01:00Z"),
-		CompletedAt: nil,
-		ParentID:    strPtr("task-0"),
-		Identifier:  "PROJ-42",
-		IsEphemeral: false,
+		ID:             "task-1",
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		Title:          "Fix the bug",
+		Description:    "Details here",
+		State:          "in_progress",
+		Priority:       "high",
+		Labels:         []string{"bug", "plugin"},
+		WorkflowStepID: "in_progress",
+		CreatedBy:      "user-1",
+		CreatedAt:      "2026-07-15T12:00:00Z",
+		UpdatedAt:      "2026-07-15T12:05:00Z",
+		StartedAt:      strPtr("2026-07-15T12:01:00Z"),
+		CompletedAt:    nil,
+		ParentID:       strPtr("task-0"),
+		Identifier:     "PROJ-42",
+		IsEphemeral:    false,
 		Repositories: []TaskRepository{
 			{ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0, CheckoutBranch: "feature/fix"},
 			{ID: "tr-2", RepositoryID: "repo-2", BaseBranch: "develop", Position: 1},
@@ -57,6 +58,7 @@ func TestTaskProtoRoundTrip(t *testing.T) {
 	proto, err := task.toProto()
 	require.NoError(t, err)
 	require.Equal(t, "task-1", proto.GetId())
+	require.Equal(t, "in_progress", proto.GetWorkflowStepId())
 	require.Equal(t, "2026-07-15T12:01:00Z", proto.GetStartedAt())
 	require.Nil(t, proto.CompletedAt)
 	require.Equal(t, "feature/fix", proto.GetRepositories()[0].GetCheckoutBranch())

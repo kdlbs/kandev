@@ -111,6 +111,11 @@ type Task struct {
 	Repositories []TaskRepository
 	Metadata     map[string]any
 	Labels       []string
+	// WorkflowStepID is the readable step identifier (e.g. "in_progress",
+	// "backlog") the task currently sits in, distinct from a UUID. Plugin
+	// reconcile loops match on this when placing inbound tasks; the host
+	// keeps it current as the task moves between steps.
+	WorkflowStepID string
 }
 
 func (t Task) toProto() (*pluginv1.Task, error) {
@@ -126,24 +131,25 @@ func (t Task) toProto() (*pluginv1.Task, error) {
 		}
 	}
 	return &pluginv1.Task{
-		Id:           t.ID,
-		WorkspaceId:  t.WorkspaceID,
-		WorkflowId:   t.WorkflowID,
-		Title:        t.Title,
-		Description:  t.Description,
-		State:        t.State,
-		Priority:     t.Priority,
-		CreatedBy:    t.CreatedBy,
-		CreatedAt:    t.CreatedAt,
-		UpdatedAt:    t.UpdatedAt,
-		StartedAt:    t.StartedAt,
-		CompletedAt:  t.CompletedAt,
-		ParentId:     t.ParentID,
-		Identifier:   t.Identifier,
-		IsEphemeral:  t.IsEphemeral,
-		Repositories: repos,
-		Metadata:     metadata,
-		Labels:       t.Labels,
+		Id:             t.ID,
+		WorkspaceId:    t.WorkspaceID,
+		WorkflowId:     t.WorkflowID,
+		Title:          t.Title,
+		Description:    t.Description,
+		State:          t.State,
+		Priority:       t.Priority,
+		CreatedBy:      t.CreatedBy,
+		CreatedAt:      t.CreatedAt,
+		UpdatedAt:      t.UpdatedAt,
+		StartedAt:      t.StartedAt,
+		CompletedAt:    t.CompletedAt,
+		ParentId:       t.ParentID,
+		Identifier:     t.Identifier,
+		IsEphemeral:    t.IsEphemeral,
+		Repositories:   repos,
+		Metadata:       metadata,
+		Labels:         t.Labels,
+		WorkflowStepId: t.WorkflowStepID,
 	}, nil
 }
 
@@ -163,24 +169,25 @@ func taskFromProto(p *pluginv1.Task) (Task, error) {
 		}
 	}
 	return Task{
-		ID:           p.GetId(),
-		WorkspaceID:  p.GetWorkspaceId(),
-		WorkflowID:   p.GetWorkflowId(),
-		Title:        p.GetTitle(),
-		Description:  p.GetDescription(),
-		State:        p.GetState(),
-		Priority:     p.GetPriority(),
-		CreatedBy:    p.GetCreatedBy(),
-		CreatedAt:    p.GetCreatedAt(),
-		UpdatedAt:    p.GetUpdatedAt(),
-		StartedAt:    p.StartedAt,
-		CompletedAt:  p.CompletedAt,
-		ParentID:     p.ParentId,
-		Identifier:   p.GetIdentifier(),
-		IsEphemeral:  p.GetIsEphemeral(),
-		Repositories: repos,
-		Metadata:     metadata,
-		Labels:       p.GetLabels(),
+		ID:             p.GetId(),
+		WorkspaceID:    p.GetWorkspaceId(),
+		WorkflowID:     p.GetWorkflowId(),
+		Title:          p.GetTitle(),
+		Description:    p.GetDescription(),
+		State:          p.GetState(),
+		Priority:       p.GetPriority(),
+		CreatedBy:      p.GetCreatedBy(),
+		CreatedAt:      p.GetCreatedAt(),
+		UpdatedAt:      p.GetUpdatedAt(),
+		StartedAt:      p.StartedAt,
+		CompletedAt:    p.CompletedAt,
+		ParentID:       p.ParentId,
+		Identifier:     p.GetIdentifier(),
+		IsEphemeral:    p.GetIsEphemeral(),
+		Repositories:   repos,
+		Metadata:       metadata,
+		Labels:         p.GetLabels(),
+		WorkflowStepID: p.GetWorkflowStepId(),
 	}, nil
 }
 

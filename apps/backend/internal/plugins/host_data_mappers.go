@@ -123,12 +123,13 @@ func taskModelToDTO(t *taskmodels.Task) pluginsdk.Task {
 		UpdatedAt: t.UpdatedAt.UTC().Format(time.RFC3339),
 		// StartedAt/CompletedAt: the Task model has no started_at/completed_at
 		// columns (ArchivedAt is a different concept); left nil in v1.
-		ParentID:     stringPtrOrNil(t.ParentID),
-		Identifier:   t.Identifier,
-		IsEphemeral:  t.IsEphemeral,
-		Repositories: repos,
-		Metadata:     t.Metadata,
-		Labels:       taskmodels.DecodeTaskLabels(t.Labels),
+		ParentID:       stringPtrOrNil(t.ParentID),
+		Identifier:     t.Identifier,
+		IsEphemeral:    t.IsEphemeral,
+		Repositories:   repos,
+		Metadata:       t.Metadata,
+		Labels:         taskmodels.DecodeTaskLabels(t.Labels),
+		WorkflowStepID: t.WorkflowStepID,
 	}
 }
 

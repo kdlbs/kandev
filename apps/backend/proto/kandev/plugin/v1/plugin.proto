@@ -346,6 +346,11 @@ message Task {
   repeated TaskRepository repositories = 16;
   google.protobuf.Struct metadata = 17; // free-form; plugin-tolerant
   repeated string labels = 18;
+  // Readable step identifier (e.g. "in_progress", "backlog"), distinct from a
+  // UUID. Plugin reconcile loops match on this field when placing inbound
+  // tasks, so it travels with the task on every read. The host keeps it
+  // current as the task moves between steps.
+  string workflow_step_id = 19;
 }
 message TaskRepository {
   string id = 1;
