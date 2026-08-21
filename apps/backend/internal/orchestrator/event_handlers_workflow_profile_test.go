@@ -142,9 +142,7 @@ func (r *terminalizeCandidateBeforePromotionRepo) SetSessionPrimaryIfNonterminal
 	sessionID string,
 ) (bool, error) {
 	r.waitForPromotion()
-	return r.sessionExecutorStore.(interface {
-		SetSessionPrimaryIfNonterminal(context.Context, string) (bool, error)
-	}).SetSessionPrimaryIfNonterminal(ctx, sessionID)
+	return r.sessionExecutorStore.SetSessionPrimaryIfNonterminal(ctx, sessionID)
 }
 
 func seedAutopilotTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string, sessionState models.TaskSessionState) {

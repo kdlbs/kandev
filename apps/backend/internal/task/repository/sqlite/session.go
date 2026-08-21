@@ -3157,17 +3157,11 @@ func (r *Repository) setSessionPrimary(ctx context.Context, sessionID string, re
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// First, get the task_id for this session. Postgres also locks the target
-	// row, which serializes this nonterminal check against a concurrent state
-	// transition until the primary-session transaction commits.
+	// First, get the task_id for this session. Do not lock the target row here:
+	// every primary promotion must take the owning task lock first so concurrent
+	// promotions keep one lock order.
 	var taskID string
 	query := `SELECT task_id FROM task_sessions WHERE id = ?`
-	if requireNonterminal {
-		query += ` AND state IN ('CREATED', 'STARTING', 'RUNNING', 'IDLE', 'WAITING_FOR_INPUT')`
-	}
-	if dialect.IsPostgres(r.db.DriverName()) {
-		query += ` FOR UPDATE`
-	}
 	err = tx.QueryRowContext(ctx, r.db.Rebind(query), sessionID).Scan(&taskID)
 	if err == sql.ErrNoRows {
 		return primarySessionNotPromoted(sessionID, requireNonterminal)
@@ -3184,6 +3178,19 @@ func (r *Repository) setSessionPrimary(ctx context.Context, sessionID string, re
 		err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT id FROM tasks WHERE id = ? FOR UPDATE`), taskID).Scan(&lockedTaskID)
 		if err != nil && err != sql.ErrNoRows {
 			return false, err
+		}
+	}
+
+	// Once the task lock is held, lock and validate the target row before
+	// promoting it. This serializes the nonterminal check with a concurrent
+	// state transition without reversing the task -> session lock order above.
+	if requireNonterminal {
+		valid, err := r.lockNonterminalPrimarySession(ctx, tx, sessionID)
+		if err != nil {
+			return false, err
+		}
+		if !valid {
+			return false, nil
 		}
 	}
 

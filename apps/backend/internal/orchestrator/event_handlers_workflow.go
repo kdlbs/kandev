@@ -36,10 +36,6 @@ var (
 	errReusableSessionNoLongerActive = errors.New("reusable session is no longer active")
 )
 
-type nonterminalPrimarySessionSetter interface {
-	SetSessionPrimaryIfNonterminal(context.Context, string) (bool, error)
-}
-
 type taskMetadataKeyRemover interface {
 	RemoveTaskMetadataKey(context.Context, string, string) (bool, error)
 }
@@ -2056,15 +2052,9 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 }
 
 // setNonterminalSessionPrimary promotes a workflow-reused session only when
-// its persisted state is still nonterminal. Repositories without the atomic
-// operation fail closed so a stale snapshot can never revive a terminal ACP
-// conversation.
+// its persisted state is still nonterminal.
 func (s *Service) setNonterminalSessionPrimary(ctx context.Context, sessionID string) (bool, error) {
-	setter, ok := s.repo.(nonterminalPrimarySessionSetter)
-	if !ok {
-		return false, nil
-	}
-	return setter.SetSessionPrimaryIfNonterminal(ctx, sessionID)
+	return s.repo.SetSessionPrimaryIfNonterminal(ctx, sessionID)
 }
 
 // createNewSessionForStep is the original switch-and-create-fresh-session path,
