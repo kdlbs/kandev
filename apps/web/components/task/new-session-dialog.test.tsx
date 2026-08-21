@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
+import type { ExecutorProfile } from "@/lib/types/http";
+import type { AgentProfileOption } from "@/lib/state/slices";
 
 const mockToast = vi.fn();
 const mockSummarize = vi.fn();
@@ -9,9 +11,10 @@ const mockLaunchSession = vi.fn();
 const mockSetActiveSession = vi.fn();
 let mockAgentSelectorValue: string | undefined;
 let mockAgentSelectorOnChange: ((value: string) => void) | undefined;
+let mockExecutorProfile: ExecutorProfile | null = null;
 const PLUGIN_COMPOSER_LABEL = "Plugin composer action";
 
-const BASE_PROFILE = {
+const BASE_PROFILE: AgentProfileOption = {
   id: "profile-1",
   label: "Profile 1",
   agent_name: "agent-1",
@@ -188,7 +191,7 @@ vi.mock("@/hooks/domains/settings/use-remote-auth-specs", () => ({
 }));
 
 vi.mock("@/hooks/domains/session/use-task-executor-profile", () => ({
-  useTaskExecutorProfile: () => null,
+  useTaskExecutorProfile: () => mockExecutorProfile,
 }));
 
 vi.mock("@/hooks/use-is-utility-configured", () => ({
@@ -238,6 +241,7 @@ describe("NewSessionDialog", () => {
   afterEach(() => {
     cleanup();
     mockState.agentProfiles.items = [BASE_PROFILE];
+    mockExecutorProfile = null;
     mockAgentSelectorValue = undefined;
     mockAgentSelectorOnChange = undefined;
   });
@@ -353,5 +357,41 @@ describe("NewSessionDialog", () => {
     rerender(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
 
     await waitFor(() => expect(mockAgentSelectorValue).toBe("profile-2"));
+  });
+
+  it("does not keep an unhealthy profile selected during a local handoff", async () => {
+    mockExecutorProfile = {
+      id: "executor-profile-1",
+      name: "Local",
+      executor_id: "executor-1",
+      executor_type: "local_pc",
+      prepare_script: "",
+      cleanup_script: "",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    mockState.agentProfiles.items = [
+      BASE_PROFILE,
+      { ...BASE_PROFILE, id: "profile-2", label: "Profile 2", capability_status: "not_installed" },
+    ];
+
+    render(
+      <NewSessionDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        taskId="task-1"
+        handoff={{ sourceSessionId: "session-9", targetProfileId: "profile-2" }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: PLUGIN_COMPOSER_LABEL }));
+
+    await waitFor(() =>
+      expect(mockBuildStartRequest).toHaveBeenCalledWith(
+        "task-1",
+        "profile-1",
+        expect.objectContaining({ profileExplicit: true }),
+      ),
+    );
   });
 });
