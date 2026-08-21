@@ -20,7 +20,7 @@ type GuardStateDTO struct {
 }
 
 // QuorumResponseDTO is the AC-24b diagnostic response body for
-// GET /workspaces/:wsId/tasks/:id/quorum.
+// GET /workspaces/:wsId/tasks/:taskId/quorum.
 type QuorumResponseDTO struct {
 	Guards              []GuardStateDTO `json:"guards"`
 	ReevaluationBlocked bool            `json:"reevaluation_blocked"`
