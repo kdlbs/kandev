@@ -63,7 +63,7 @@ func TestPluginHost_Tasks_WriteOnlyCannotRead(t *testing.T) {
 
 func TestPluginHost_Tasks_CreateSucceedsAndStampsSource(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
-	d.taskWriter.created = &taskmodels.Task{ID: "task-9", WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate"}
+	d.taskWriter.created = &taskmodels.Task{ID: "task-9", WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate", Priority: "high"}
 
 	task, err := d.host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{
 		WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate", Description: "details",
@@ -73,6 +73,9 @@ func TestPluginHost_Tasks_CreateSucceedsAndStampsSource(t *testing.T) {
 	}
 	if task == nil || task.ID != "task-9" {
 		t.Fatalf("Create() = %+v, want task-9", task)
+	}
+	if task.Priority != "high" {
+		t.Fatalf("Create() priority = %q, want high", task.Priority)
 	}
 	if d.taskWriter.createCalls != 1 {
 		t.Fatalf("task writer create calls = %d, want 1", d.taskWriter.createCalls)
@@ -409,13 +412,13 @@ func TestPluginHost_Tasks_CreateAmbiguousWorkspaceIsInvalidArgument(t *testing.T
 
 func TestPluginHost_Tasks_UpdateSucceedsWithMask(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
-	d.taskWriter.updated = &taskmodels.Task{ID: "task-1", Title: "Renamed"}
+	d.taskWriter.updated = &taskmodels.Task{ID: "task-1", Title: "Renamed", Priority: "high"}
 
 	title := "Renamed"
 	state := "IN_PROGRESS"
 	priority := "high"
 	labels := []string{}
-	_, err := d.host.Tasks().Update(context.Background(), pluginsdk.UpdateTaskInput{ID: "task-1", Title: &title, State: &state, Priority: &priority, Labels: &labels})
+	task, err := d.host.Tasks().Update(context.Background(), pluginsdk.UpdateTaskInput{ID: "task-1", Title: &title, State: &state, Priority: &priority, Labels: &labels})
 	if err != nil {
 		t.Fatalf("Update() unexpected error: %v", err)
 	}
@@ -433,6 +436,9 @@ func TestPluginHost_Tasks_UpdateSucceedsWithMask(t *testing.T) {
 	}
 	if d.taskWriter.lastUpdate.Labels == nil || len(*d.taskWriter.lastUpdate.Labels) != 0 {
 		t.Fatalf("labels = %v, want non-nil empty slice to clear", d.taskWriter.lastUpdate.Labels)
+	}
+	if task.Priority != "high" {
+		t.Fatalf("Update() priority = %q, want high", task.Priority)
 	}
 }
 
