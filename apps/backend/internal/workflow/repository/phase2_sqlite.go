@@ -731,6 +731,24 @@ func (r *Repository) recordStepDecisionTx(ctx context.Context, d *models.Workflo
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// PostgreSQL's READ COMMITTED isolation does not serialize the initial
+	// supersede UPDATE when no active row exists yet. Lock the identity before
+	// that UPDATE so concurrent writers observe the prior commit instead of
+	// racing into the partial unique index. SQLite's single-writer lock already
+	// provides this serialization.
+	lockIdentity := d.ParticipantID
+	if d.DeciderID != "" && d.Role != "" {
+		lockIdentity = d.DeciderID + "\x1f" + d.Role
+	}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		lockKey := "workflow-step-decision:" + d.TaskID + "\x1f" + d.StepID + "\x1f" + lockIdentity
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`
+			SELECT pg_advisory_xact_lock(hashtextextended(?, 0))
+		`), lockKey); err != nil {
+			return fmt.Errorf("lock step decision identity: %w", err)
+		}
+	}
+
 	if d.DeciderID != "" && d.Role != "" {
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`
 			UPDATE workflow_step_decisions
