@@ -102,7 +102,7 @@ func (r *Repository) initSchema() error {
 // task_delivery_ledger exists. See spec "Activation points": the
 // migration runner swallows failures at WARN, so this probe is the only
 // thing standing between a failed migration and a consumer wrongly
-// believing the mechanism is live. WriteKeyIfAbsent makes the write
+// believing the mechanism is live. WriteMetaKeyIfAbsent makes the write
 // replay-safe. Any failure here is logged and swallowed — activation is a
 // published fact for consumers, never a boot-blocking requirement, and it
 // does not gate the sweep.
@@ -119,7 +119,7 @@ func (r *Repository) activate() {
 	if !exists {
 		return
 	}
-	if _, err := persistence.WriteKeyIfAbsent(
+	if _, err := persistence.WriteMetaKeyIfAbsent(
 		r.db, activationKey, time.Now().UTC().Format(time.RFC3339),
 	); err != nil {
 		r.logWarn("write delivery ledger activation key failed", err)

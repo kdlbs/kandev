@@ -85,7 +85,7 @@ func TestNewWithDB_CreatesTableAndActivates(t *testing.T) {
 		t.Fatalf("table missing: %v", err)
 	}
 
-	val, err := persistence.ReadKey(db, "telemetry.delivery_ledger.activated_at")
+	val, err := persistence.ReadMetaKey(db, "telemetry.delivery_ledger.activated_at")
 	if err != nil {
 		t.Fatalf("read activation key: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestNewWithDB_ReplaySafeAndActivationNeverOverwritten(t *testing.T) {
 		t.Fatalf("replay 2: %v", err)
 	}
 
-	got, err := persistence.ReadKey(db, "telemetry.delivery_ledger.activated_at")
+	got, err := persistence.ReadMetaKey(db, "telemetry.delivery_ledger.activated_at")
 	if err != nil {
 		t.Fatalf("read activation key: %v", err)
 	}

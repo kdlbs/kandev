@@ -61,7 +61,7 @@ func TestPostgresDeliveryLedgerMigration_FreshAndReplay(t *testing.T) {
 		t.Fatalf("foreign key count = %d, want 2 (task_id, repository_id)", fkCount)
 	}
 
-	val, err := persistence.ReadKey(db, "telemetry.delivery_ledger.activated_at")
+	val, err := persistence.ReadMetaKey(db, "telemetry.delivery_ledger.activated_at")
 	if err != nil {
 		t.Fatalf("read activation key: %v", err)
 	}
