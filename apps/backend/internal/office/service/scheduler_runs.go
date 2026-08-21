@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -106,6 +107,25 @@ func (s *Service) releaseTaskCheckoutForRun(ctx context.Context, run *models.Run
 		s.logger.Error("failed to release task checkout on terminal transition",
 			zap.String("run_id", run.ID),
 			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+}
+
+// stampRunFinished records the cooldown timestamp for the agent that ran
+// this run. Shared by the synchronous SchedulerIntegration.finishRun path
+// and the async AgentCompleted/AgentStopped event subscribers so the two
+// completion paths cannot drift apart again — see releaseTaskCheckoutForRun
+// for the same split. run.AgentProfileID is the launching agent's own
+// identity (processRun resolves the agent from the run), so no extra
+// agent load is needed here.
+func (s *Service) stampRunFinished(ctx context.Context, run *models.Run) {
+	if run == nil || run.AgentProfileID == "" {
+		return
+	}
+	if err := s.repo.UpdateRuntimeLastRunFinished(ctx, run.AgentProfileID, time.Now().UTC()); err != nil {
+		s.logger.Error("failed to stamp agent runtime last_run_finished_at",
+			zap.String("run_id", run.ID),
+			zap.String("agent_id", run.AgentProfileID),
 			zap.Error(err))
 	}
 }

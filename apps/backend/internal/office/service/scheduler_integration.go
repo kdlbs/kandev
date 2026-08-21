@@ -720,11 +720,7 @@ func (si *SchedulerIntegration) finishRun(
 	}
 
 	si.releaseCheckoutIfNeeded(ctx, run)
-
-	// Record cooldown timestamp in-memory and DB.
-	now := time.Now().UTC()
-	agent.LastRunFinishedAt = &now
-	_ = si.svc.repo.UpdateRuntimeLastRunFinished(ctx, agent.ID, now)
+	si.svc.stampRunFinished(ctx, run)
 
 	si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
 		"scheduler", "office-scheduler",

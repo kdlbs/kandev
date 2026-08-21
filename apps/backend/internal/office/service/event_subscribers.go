@@ -360,6 +360,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		return err
 	}
 	s.releaseTaskCheckoutForRun(ctx, run)
+	s.stampRunFinished(ctx, run)
 	return nil
 }
 
@@ -419,6 +420,7 @@ func (s *Service) handleTasklessAgentCompleted(
 		return err
 	}
 	s.releaseTaskCheckoutForRun(ctx, run)
+	s.stampRunFinished(ctx, run)
 	return nil
 }
 
