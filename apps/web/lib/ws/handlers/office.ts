@@ -66,6 +66,14 @@ function buildTaskHandlers(
       // server-authoritative task DTO after a property mutation.
       triggerRefetch(`task:${taskId}`);
       triggerRefetch("dashboard");
+      // Cost-by-project breakdown groups by the task's live project_id
+      // (see costs.go), so reassigning a task's project changes an
+      // already-computed breakdown without a dedicated cost event. Gate on
+      // `fields` (only DashboardService.UpdateTaskProjectID sends it) so the
+      // generic kanban task.updated forward — which carries no `fields` —
+      // doesn't refetch costs on every unrelated task touch.
+      const fields = p.fields as string[] | undefined;
+      if (fields?.includes("project_id")) triggerRefetch("costs");
     },
 
     "office.task.created": (message) => {

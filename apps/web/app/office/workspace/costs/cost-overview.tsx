@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import {
   IconCurrencyDollar,
@@ -10,6 +10,7 @@ import {
   IconBuilding,
 } from "@tabler/icons-react";
 import { toast } from "@/lib/toast/sonner";
+import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { getCostsBreakdown } from "@/lib/api/domains/office-api";
 import { MetricCard } from "../../components/metric-card";
 import type { CostBreakdownItem } from "@/lib/state/slices/office/types";
@@ -32,7 +33,7 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
   const [byModel, setByModel] = useState<CostBreakdownItem[]>([]);
   const [byProvider, setByProvider] = useState<CostBreakdownItem[]>([]);
 
-  useEffect(() => {
+  const fetchCosts = useCallback(() => {
     // Single composed call (Stream D of office optimization). Was four
     // parallel round-trips (summary + by-agent + by-project + by-model).
     getCostsBreakdown(workspaceId)
@@ -46,7 +47,17 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
       .catch((err) => {
         toast.error(err instanceof Error ? err.message : staticT("office:failedToLoadCostData"));
       });
-  }, [workspaceId, range]);
+  }, [workspaceId]);
+
+  useEffect(() => {
+    fetchCosts();
+  }, [fetchCosts, range]);
+
+  // The WS handler bumps "costs" on a new cost event (office.cost.recorded)
+  // and on a task project reassignment (office.task.updated with
+  // fields: ["project_id"]) — both change the by-project breakdown for an
+  // already-open tab.
+  useOfficeRefetch("costs", fetchCosts);
 
   return (
     <div className="space-y-6">

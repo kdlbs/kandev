@@ -54,6 +54,7 @@ function makeStore(activeWorkspaceId: string | null) {
 }
 
 const ACTIVE_WS = "ws-current";
+const TASK_UPDATED_ACTION = "office.task.updated";
 
 describe("office WS handler — workspace filter", () => {
   beforeEach(() => {
@@ -142,11 +143,11 @@ describe("office WS handler — task field updates", () => {
   it("maps the producer state field on office.task.updated", () => {
     const { store, patchTaskInStore } = makeStore(ACTIVE_WS);
     const handlers = registerOfficeHandlers(store);
-    const handler = handlers["office.task.updated"]!;
+    const handler = handlers[TASK_UPDATED_ACTION]!;
 
     handler({
       type: "notification",
-      action: "office.task.updated",
+      action: TASK_UPDATED_ACTION,
       payload: { workspace_id: ACTIVE_WS, task_id: "t-1", state: "SCHEDULING" },
     } as Parameters<typeof handler>[0]);
 
@@ -223,6 +224,38 @@ describe("office WS handler — task field updates", () => {
     expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("task:t-99");
     expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("dashboard");
     expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("activity");
+  });
+});
+
+describe("office WS handler — costs refetch gating on office.task.updated", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Cost-by-project breakdown groups by the task's live project_id (see
+  // costs.go), so only a project_id field change should bump "costs" — the
+  // generic kanban task.updated forward carries no `fields` at all and must
+  // not refetch costs on every unrelated task touch.
+  it.each([
+    { fields: ["project_id"], expectCosts: true },
+    { fields: ["priority"], expectCosts: false },
+    { fields: undefined, expectCosts: false },
+  ])("gates the costs trigger by fields=$fields", ({ fields, expectCosts }) => {
+    const { store, setOfficeRefetchTrigger } = makeStore(ACTIVE_WS);
+    const handlers = registerOfficeHandlers(store);
+    const handler = handlers[TASK_UPDATED_ACTION]!;
+
+    handler({
+      type: "notification",
+      action: TASK_UPDATED_ACTION,
+      payload: { workspace_id: ACTIVE_WS, task_id: "t-1", fields },
+    } as Parameters<typeof handler>[0]);
+
+    if (expectCosts) {
+      expect(setOfficeRefetchTrigger).toHaveBeenCalledWith("costs");
+    } else {
+      expect(setOfficeRefetchTrigger).not.toHaveBeenCalledWith("costs");
+    }
   });
 });
 
