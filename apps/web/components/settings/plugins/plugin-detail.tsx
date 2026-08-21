@@ -83,7 +83,6 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
         uninstallAnchorRef={uninstallAnchorRef}
         onUninstall={() => {
           setConfirmingUninstall(true);
-          actions.openUninstall(plugin);
         }}
       />
       <PluginUninstallConfirmation
@@ -94,7 +93,6 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
         onOpenChange={setConfirmingUninstall}
         onCancel={() => {
           setConfirmingUninstall(false);
-          actions.closeUninstall();
         }}
         onConfirm={async () => {
           const uninstalled = await actions.confirmUninstall(plugin);

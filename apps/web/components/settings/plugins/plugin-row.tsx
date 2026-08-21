@@ -31,8 +31,6 @@ type PluginRowProps = {
   uninstallBusy?: boolean;
   onEnable: (plugin: PluginRecord) => void;
   onDisable: (plugin: PluginRecord) => void;
-  onUninstall: (plugin: PluginRecord) => void;
-  onCancelUninstall?: () => void;
   onConfirmUninstall?: (plugin: PluginRecord) => void | Promise<void>;
   onUpdate?: (entry: MarketplaceEntry) => void;
   onSetAutoUpdate: (plugin: PluginRecord, value: boolean | null) => void;
@@ -61,8 +59,6 @@ export function PluginRow({
   uninstallBusy = false,
   onEnable,
   onDisable,
-  onUninstall,
-  onCancelUninstall,
   onConfirmUninstall,
   onUpdate,
   onSetAutoUpdate,
@@ -71,6 +67,7 @@ export function PluginRow({
   const canEnable =
     plugin.status === "disabled" || plugin.status === "registered" || plugin.status === "error";
   const canDisable = plugin.status === "active" || plugin.status === "error";
+  const mutationBusy = busy || autoUpdateBusy || uninstallBusy;
   const {
     confirmingUninstall,
     setConfirmingUninstall,
@@ -78,7 +75,7 @@ export function PluginRow({
     requestUninstall,
     cancelUninstall,
     confirmUninstall,
-  } = usePluginUninstallConfirmation(plugin, onUninstall, onCancelUninstall, onConfirmUninstall);
+  } = usePluginUninstallConfirmation(plugin, onConfirmUninstall);
 
   return (
     <div
@@ -104,7 +101,7 @@ export function PluginRow({
           <div className="flex items-center gap-2 shrink-0">
             <PluginRowActions
               plugin={plugin}
-              busy={busy || uninstallBusy}
+              busy={mutationBusy}
               update={update}
               canEnable={canEnable}
               canDisable={canDisable}
@@ -140,7 +137,7 @@ export function PluginRow({
         <PluginAutoUpdateRow
           plugin={plugin}
           autoUpdateDefault={autoUpdateDefault}
-          busy={autoUpdateBusy}
+          busy={mutationBusy}
           onSetAutoUpdate={onSetAutoUpdate}
         />
       </div>
@@ -161,8 +158,6 @@ export function PluginRow({
 
 function usePluginUninstallConfirmation(
   plugin: PluginRecord,
-  onUninstall: (plugin: PluginRecord) => void,
-  onCancelUninstall?: () => void,
   onConfirmUninstall?: (plugin: PluginRecord) => void | Promise<void>,
 ) {
   const [confirmingUninstall, setConfirmingUninstall] = useState(false);
@@ -170,12 +165,10 @@ function usePluginUninstallConfirmation(
 
   const requestUninstall = () => {
     setConfirmingUninstall(true);
-    onUninstall(plugin);
   };
 
   const cancelUninstall = () => {
     setConfirmingUninstall(false);
-    onCancelUninstall?.();
   };
 
   const confirmUninstall = () => {
@@ -305,6 +298,8 @@ type PluginRowActionsProps = Omit<
   | "autoUpdateBusy"
   | "needsSetup"
   | "onSetAutoUpdate"
+  | "onConfirmUninstall"
+  | "uninstallBusy"
 > & {
   canEnable: boolean;
   canDisable: boolean;

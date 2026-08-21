@@ -268,8 +268,6 @@ function PluginList({
           uninstallBusy={actions.uninstallBusy}
           onEnable={actions.handleEnable}
           onDisable={actions.handleDisable}
-          onUninstall={actions.openUninstall}
-          onCancelUninstall={actions.closeUninstall}
           onConfirmUninstall={async (target) => {
             await actions.confirmUninstall(target);
           }}

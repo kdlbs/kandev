@@ -45,8 +45,7 @@ vi.mock("@/lib/api/domains/plugins-api", () => ({
     return Promise.resolve({ disabled: true });
   },
   uninstallPlugin: (...args: [string]) => {
-    uninstallPluginSpy(...args);
-    return Promise.resolve({ deleted: true });
+    return uninstallPluginSpy(...args);
   },
   installPluginFromUrl: (...args: [string]) => installPluginFromUrlSpy(...args),
   installPluginUpload: (...args: [File]) => installPluginUploadSpy(...args),
@@ -150,6 +149,7 @@ function emptySyncResult(overrides: Partial<SyncResult> = {}): SyncResult {
 }
 
 beforeEach(() => {
+  uninstallPluginSpy.mockResolvedValue({ deleted: true });
   installPluginFromUrlSpy.mockResolvedValue({ plugin: installedPlugin() });
   installPluginUploadSpy.mockResolvedValue({ plugin: installedPlugin() });
   syncPluginsSpy.mockResolvedValue(emptySyncResult());
@@ -252,6 +252,30 @@ describe("PluginsSettingsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
 
     expect(uninstallPluginSpy).not.toHaveBeenCalled();
+  });
+
+  it("disables auto-update while an uninstall request is pending", async () => {
+    let resolveUninstall!: (result: { deleted: boolean }) => void;
+    uninstallPluginSpy.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveUninstall = resolve;
+      }),
+    );
+    setStoreState([activePlugin({ auto_update: null })]);
+
+    render(<PluginsSettingsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /uninstall/i }));
+    fireEvent.click(screen.getByTestId("plugin-uninstall-confirm"));
+
+    await vi.waitFor(() => expect(uninstallPluginSpy).toHaveBeenCalledWith(PLUGIN_ID));
+    const autoUpdate = screen.getByTestId(`plugin-auto-update-${PLUGIN_ID}`);
+    try {
+      expect((autoUpdate as HTMLButtonElement).disabled).toBe(true);
+    } finally {
+      resolveUninstall({ deleted: true });
+      const removePlugin = storeState.removePlugin as ReturnType<typeof vi.fn>;
+      await vi.waitFor(() => expect(removePlugin).toHaveBeenCalledWith(PLUGIN_ID));
+    }
   });
 });
 

@@ -153,18 +153,14 @@ function useAutoUpdateAction(upsertPlugin: (p: PluginRecord) => void) {
 }
 
 function useUninstallAction(removePlugin: (id: string) => void) {
-  const [uninstallTarget, setUninstallTarget] = useState<PluginRecord | null>(null);
   const [uninstallBusy, setUninstallBusy] = useState(false);
 
-  const confirmUninstall = async (requestedTarget?: PluginRecord) => {
-    const target = requestedTarget ?? uninstallTarget;
-    if (!target) return false;
+  const confirmUninstall = async (target: PluginRecord) => {
     setUninstallBusy(true);
     try {
       await uninstallPlugin(target.id);
       unloadPlugin(target.id);
       removePlugin(target.id);
-      setUninstallTarget(null);
       return true;
     } catch (err) {
       toast.error(
@@ -179,10 +175,7 @@ function useUninstallAction(removePlugin: (id: string) => void) {
   };
 
   return {
-    uninstallTarget,
     uninstallBusy,
-    openUninstall: setUninstallTarget,
-    closeUninstall: () => setUninstallTarget(null),
     confirmUninstall,
   };
 }

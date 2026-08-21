@@ -55,7 +55,6 @@ const baseProps = {
   autoUpdateBusy: false,
   onEnable: noop,
   onDisable: noop,
-  onUninstall: noop,
   onSetAutoUpdate: noop,
 };
 
@@ -223,31 +222,20 @@ describe("PluginRow uninstall confirmation", () => {
 
   it("anchors fine-pointer confirmation to the row action and names the target", () => {
     const p = plugin({ display_name: pluginName });
-    const onUninstall = vi.fn();
-    const onCancelUninstall = vi.fn();
     const onConfirmUninstall = vi.fn();
 
     render(
-      <PluginRow
-        {...baseProps}
-        plugin={p}
-        isFinePointer
-        onUninstall={onUninstall}
-        onCancelUninstall={onCancelUninstall}
-        onConfirmUninstall={onConfirmUninstall}
-      />,
+      <PluginRow {...baseProps} plugin={p} isFinePointer onConfirmUninstall={onConfirmUninstall} />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: /^Uninstall$/i }));
 
-    expect(onUninstall).toHaveBeenCalledWith(p);
     expect(screen.getByTestId("plugin-uninstall-confirm-popover").textContent).toContain(
       pluginName,
     );
     expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /^Cancel$/i }));
-    expect(onCancelUninstall).toHaveBeenCalledOnce();
     expect(screen.queryByTestId("plugin-uninstall-confirm-popover")).toBeNull();
   });
 
