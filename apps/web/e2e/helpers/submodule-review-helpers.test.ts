@@ -1,11 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import * as submoduleReviewHelpers from "./submodule-review-helpers";
-
-type RetryGitIndexLock = <T>(operation: () => T) => Promise<T>;
-
-const retryGitIndexLock = (
-  submoduleReviewHelpers as unknown as { retryGitIndexLock: RetryGitIndexLock }
-).retryGitIndexLock;
+import { retryGitIndexLock } from "../tests/review/submodule-review-helpers";
 
 describe("retryGitIndexLock", () => {
   it("retries a transient Git index lock before returning the operation result", async () => {
