@@ -902,20 +902,21 @@ func TestSortSessionsNewestFirst_TiesBrokenByID(t *testing.T) {
 func TestTaskModelToDTO_MapsFields(t *testing.T) {
 	created := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	task := &taskmodels.Task{
-		ID:          "task-1",
-		WorkspaceID: "ws-1",
-		WorkflowID:  "wf-1",
-		Title:       "Fix bug",
-		Description: "details",
-		State:       v1.TaskStateInProgress,
-		Priority:    "high",
-		Labels:      `["bug","plugin"]`,
-		Origin:      "agent_created",
-		CreatedAt:   created,
-		UpdatedAt:   created,
-		ParentID:    "parent-1",
-		Identifier:  "KAN-1",
-		IsEphemeral: false,
+		ID:             "task-1",
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "in_progress",
+		Title:          "Fix bug",
+		Description:    "details",
+		State:          v1.TaskStateInProgress,
+		Priority:       "high",
+		Labels:         `["bug","plugin"]`,
+		Origin:         "agent_created",
+		CreatedAt:      created,
+		UpdatedAt:      created,
+		ParentID:       "parent-1",
+		Identifier:     "KAN-1",
+		IsEphemeral:    false,
 		Repositories: []*taskmodels.TaskRepository{
 			{ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0, CheckoutBranch: "feature/fix"},
 		},
@@ -944,6 +945,9 @@ func TestTaskModelToDTO_MapsFields(t *testing.T) {
 	}
 	if got, want := dto.Labels, []string{"bug", "plugin"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("Labels = %#v, want %#v", got, want)
+	}
+	if dto.WorkflowStepID != "in_progress" {
+		t.Errorf("WorkflowStepID = %q, want %q", dto.WorkflowStepID, "in_progress")
 	}
 }
 
