@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 let finePointer = true;
+const DELETE_BUTTON_TEST_ID = "sentry-instance-delete-button";
+const CONFIRM_POPOVER_TEST_ID = "sentry-remove-confirm-popover";
 
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mocks.toast }),
@@ -130,7 +132,66 @@ describe("SentryConnectionSection", () => {
 
     expect(screen.getByRole("button", { name: "Add instance" })).toBeTruthy();
   });
+});
 
+describe("SentryConnectionSection stale delete confirmation", () => {
+  it("clears delete confirmation when polling removes and later restores the instance", async () => {
+    vi.mocked(listSentryInstances)
+      .mockResolvedValueOnce([instance])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([instance]);
+
+    render(
+      <SettingsHarness>
+        <SentryConnectionSection workspaceId="workspace-1" />
+      </SettingsHarness>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByTestId(DELETE_BUTTON_TEST_ID));
+    expect(screen.getByTestId(CONFIRM_POPOVER_TEST_ID)).toBeTruthy();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(screen.queryByTestId("sentry-instance-card")).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(screen.getByTestId("sentry-instance-card")).toBeTruthy();
+    expect(screen.queryByTestId(CONFIRM_POPOVER_TEST_ID)).toBeNull();
+    expect(deleteSentryInstance).not.toHaveBeenCalled();
+  });
+
+  it("clears delete confirmation before editing the same instance", async () => {
+    vi.mocked(listSentryInstances).mockResolvedValue([instance]);
+
+    render(
+      <SettingsHarness>
+        <SentryConnectionSection workspaceId="workspace-1" />
+      </SettingsHarness>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByTestId(DELETE_BUTTON_TEST_ID));
+    expect(screen.getByTestId(CONFIRM_POPOVER_TEST_ID)).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("sentry-instance-edit-button"));
+    const form = screen.getByTestId("sentry-edit-form");
+    fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByTestId("sentry-instance-card")).toBeTruthy();
+    expect(screen.queryByTestId(CONFIRM_POPOVER_TEST_ID)).toBeNull();
+    expect(deleteSentryInstance).not.toHaveBeenCalled();
+  });
+});
+
+describe("SentryConnectionSection loading and removal", () => {
   it("keeps initial load failures visible but silences recurring poll failures", async () => {
     vi.mocked(listSentryInstances).mockRejectedValue(new Error("offline"));
 
@@ -167,19 +228,17 @@ describe("SentryConnectionSection", () => {
       await Promise.resolve();
     });
 
-    const deleteButton = screen.getByTestId("sentry-instance-delete-button");
+    const deleteButton = screen.getByTestId(DELETE_BUTTON_TEST_ID);
     fireEvent.click(deleteButton);
     expect(nativeConfirm).not.toHaveBeenCalled();
-    const popover = screen.getByTestId("sentry-remove-confirm-popover");
+    const popover = screen.getByTestId(CONFIRM_POPOVER_TEST_ID);
     expect(deleteSentryInstance).not.toHaveBeenCalled();
     fireEvent.click(within(popover).getByRole("button", { name: "Cancel" }));
     expect(deleteSentryInstance).not.toHaveBeenCalled();
 
     fireEvent.click(deleteButton);
     fireEvent.click(
-      within(screen.getByTestId("sentry-remove-confirm-popover")).getByTestId(
-        "sentry-remove-confirm",
-      ),
+      within(screen.getByTestId(CONFIRM_POPOVER_TEST_ID)).getByTestId("sentry-remove-confirm"),
     );
     await act(async () => {
       vi.runAllTicks();
@@ -203,15 +262,15 @@ describe("SentryConnectionSection", () => {
       await Promise.resolve();
     });
 
-    const deleteButton = screen.getByTestId("sentry-instance-delete-button");
+    const deleteButton = screen.getByTestId(DELETE_BUTTON_TEST_ID);
     fireEvent.click(deleteButton);
     const inline = screen.getByTestId("sentry-remove-inline-confirmation");
-    expect(screen.queryByTestId("sentry-remove-confirm-popover")).toBeNull();
+    expect(screen.queryByTestId(CONFIRM_POPOVER_TEST_ID)).toBeNull();
     expect(within(inline).getByTestId("sentry-remove-confirm").className).toContain("h-11");
     fireEvent.click(within(inline).getByRole("button", { name: "Cancel" }));
     expect(deleteSentryInstance).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByTestId("sentry-instance-delete-button"));
+    fireEvent.click(screen.getByTestId(DELETE_BUTTON_TEST_ID));
     fireEvent.click(
       within(screen.getByTestId("sentry-remove-inline-confirmation")).getByTestId(
         "sentry-remove-confirm",

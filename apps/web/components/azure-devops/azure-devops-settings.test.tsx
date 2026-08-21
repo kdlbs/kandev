@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
@@ -68,6 +68,8 @@ import { AzureDevOpsConnectionSection, AzureDevOpsIntegrationPage } from "./azur
 
 const OLD_ORGANIZATION_URL = "https://dev.azure.com/old-org";
 const WORKSPACE_ID = "workspace-a";
+const DELETE_BUTTON_TEST_ID = "azure-devops-delete-button";
+const CONFIRM_POPOVER_TEST_ID = "azure-devops-remove-confirm-popover";
 
 const config: AzureDevOpsConfig = {
   workspaceId: WORKSPACE_ID,
@@ -95,6 +97,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -211,18 +214,18 @@ describe("AzureDevOpsConnectionSection removal", () => {
       </SettingsSaveProvider>,
     );
 
-    const removeButton = await screen.findByTestId("azure-devops-delete-button");
+    const removeButton = await screen.findByTestId(DELETE_BUTTON_TEST_ID);
     fireEvent.click(removeButton);
 
     expect(nativeConfirm).not.toHaveBeenCalled();
-    const popover = screen.getByTestId("azure-devops-remove-confirm-popover");
+    const popover = screen.getByTestId(CONFIRM_POPOVER_TEST_ID);
     expect(mocks.deleteConfig).not.toHaveBeenCalled();
     fireEvent.click(within(popover).getByRole("button", { name: "Cancel" }));
     expect(mocks.deleteConfig).not.toHaveBeenCalled();
 
     fireEvent.click(removeButton);
     fireEvent.click(
-      within(screen.getByTestId("azure-devops-remove-confirm-popover")).getByTestId(
+      within(screen.getByTestId(CONFIRM_POPOVER_TEST_ID)).getByTestId(
         "azure-devops-remove-confirm",
       ),
     );
@@ -238,21 +241,52 @@ describe("AzureDevOpsConnectionSection removal", () => {
       </SettingsSaveProvider>,
     );
 
-    const removeButton = await screen.findByTestId("azure-devops-delete-button");
+    const removeButton = await screen.findByTestId(DELETE_BUTTON_TEST_ID);
     fireEvent.click(removeButton);
     const inline = screen.getByTestId("azure-devops-remove-inline-confirmation");
-    expect(screen.queryByTestId("azure-devops-remove-confirm-popover")).toBeNull();
+    expect(screen.queryByTestId(CONFIRM_POPOVER_TEST_ID)).toBeNull();
     expect(within(inline).getByTestId("azure-devops-remove-confirm").className).toContain("h-11");
 
     fireEvent.click(within(inline).getByRole("button", { name: "Cancel" }));
     expect(mocks.deleteConfig).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByTestId("azure-devops-delete-button"));
+    fireEvent.click(screen.getByTestId(DELETE_BUTTON_TEST_ID));
     fireEvent.click(
       within(screen.getByTestId("azure-devops-remove-inline-confirmation")).getByTestId(
         "azure-devops-remove-confirm",
       ),
     );
     await waitFor(() => expect(mocks.deleteConfig).toHaveBeenCalledTimes(1));
+  });
+
+  it("clears confirmation when polling removes and later restores the configuration", async () => {
+    vi.useFakeTimers();
+    mocks.getConfig
+      .mockResolvedValueOnce(config)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(config);
+    render(
+      <SettingsSaveProvider>
+        <AzureDevOpsConnectionSection workspaceId={WORKSPACE_ID} />
+      </SettingsSaveProvider>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByTestId(DELETE_BUTTON_TEST_ID));
+    expect(screen.getByTestId(CONFIRM_POPOVER_TEST_ID)).toBeTruthy();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100_000);
+    });
+    expect(screen.queryByTestId(DELETE_BUTTON_TEST_ID)).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100_000);
+    });
+    expect(screen.getByTestId(DELETE_BUTTON_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId(CONFIRM_POPOVER_TEST_ID)).toBeNull();
+    expect(mocks.deleteConfig).not.toHaveBeenCalled();
   });
 });
 

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JiraConfig } from "@/lib/types/jira";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 let finePointer = true;
+const DELETE_BUTTON_TEST_ID = "jira-delete-button";
+const CONFIRM_POPOVER_TEST_ID = "jira-remove-confirm-popover";
 
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mocks.toast }),
@@ -65,6 +67,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -74,18 +77,18 @@ describe("JiraConnectionSection removal", () => {
     vi.stubGlobal("confirm", nativeConfirm);
     renderSection();
 
-    const removeButton = await screen.findByTestId("jira-delete-button");
+    const removeButton = await screen.findByTestId(DELETE_BUTTON_TEST_ID);
     fireEvent.click(removeButton);
 
     expect(nativeConfirm).not.toHaveBeenCalled();
-    const popover = screen.getByTestId("jira-remove-confirm-popover");
+    const popover = screen.getByTestId(CONFIRM_POPOVER_TEST_ID);
     expect(mocks.deleteConfig).not.toHaveBeenCalled();
     fireEvent.click(within(popover).getByRole("button", { name: "Cancel" }));
     expect(mocks.deleteConfig).not.toHaveBeenCalled();
 
     fireEvent.click(removeButton);
     fireEvent.click(
-      within(screen.getByTestId("jira-remove-confirm-popover")).getByTestId("jira-remove-confirm"),
+      within(screen.getByTestId(CONFIRM_POPOVER_TEST_ID)).getByTestId("jira-remove-confirm"),
     );
     await waitFor(() => expect(mocks.deleteConfig).toHaveBeenCalledTimes(1));
     expect(mocks.deleteConfig).toHaveBeenCalledWith({ workspaceId: "workspace-a" });
@@ -95,20 +98,47 @@ describe("JiraConnectionSection removal", () => {
     finePointer = false;
     renderSection();
 
-    const removeButton = await screen.findByTestId("jira-delete-button");
+    const removeButton = await screen.findByTestId(DELETE_BUTTON_TEST_ID);
     fireEvent.click(removeButton);
     const inline = screen.getByTestId("jira-remove-inline-confirmation");
-    expect(screen.queryByTestId("jira-remove-confirm-popover")).toBeNull();
+    expect(screen.queryByTestId(CONFIRM_POPOVER_TEST_ID)).toBeNull();
     expect(within(inline).getByTestId("jira-remove-confirm").className).toContain("h-11");
 
     fireEvent.click(within(inline).getByRole("button", { name: "Cancel" }));
     expect(mocks.deleteConfig).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByTestId("jira-delete-button"));
+    fireEvent.click(screen.getByTestId(DELETE_BUTTON_TEST_ID));
     fireEvent.click(
       within(screen.getByTestId("jira-remove-inline-confirmation")).getByTestId(
         "jira-remove-confirm",
       ),
     );
     await waitFor(() => expect(mocks.deleteConfig).toHaveBeenCalledTimes(1));
+  });
+
+  it("clears confirmation when polling removes and later restores the configuration", async () => {
+    vi.useFakeTimers();
+    mocks.getConfig
+      .mockResolvedValueOnce(config)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(config);
+    renderSection();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByTestId(DELETE_BUTTON_TEST_ID));
+    expect(screen.getByTestId(CONFIRM_POPOVER_TEST_ID)).toBeTruthy();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100_000);
+    });
+    expect(screen.queryByTestId(DELETE_BUTTON_TEST_ID)).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100_000);
+    });
+    expect(screen.getByTestId(DELETE_BUTTON_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId(CONFIRM_POPOVER_TEST_ID)).toBeNull();
+    expect(mocks.deleteConfig).not.toHaveBeenCalled();
   });
 });

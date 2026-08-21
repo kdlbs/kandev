@@ -257,12 +257,15 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
               isFinePointer={isFinePointer}
               confirmingDeleteId={confirmingDeleteId}
               onEdit={(id) => {
+                cancelDelete();
                 setFormDirty(false);
                 setMode({ kind: "edit", id });
               }}
               onDelete={startDelete}
               onDeleteCancel={cancelDelete}
-              onDeleteOpenChange={cancelDelete}
+              onDeleteOpenChange={(open) => {
+                if (!open) cancelDelete();
+              }}
               onDeleteConfirm={confirmDelete}
               onSaved={handleSaved}
               onCancel={closeForm}

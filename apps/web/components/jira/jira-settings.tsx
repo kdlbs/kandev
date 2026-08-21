@@ -339,6 +339,10 @@ function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete 
   const deleteAnchorRef = useRef<HTMLButtonElement>(null);
   const removeConfirmation = t("jira:removeJiraConfiguration");
 
+  useEffect(() => {
+    if (!hasConfig && confirmingDelete) setConfirmingDelete(false);
+  }, [confirmingDelete, hasConfig]);
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button

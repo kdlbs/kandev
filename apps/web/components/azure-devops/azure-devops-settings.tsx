@@ -446,6 +446,10 @@ function ConnectionActions({ state, disabled }: { state: SettingsState; disabled
   const removeAnchorRef = useRef<HTMLButtonElement>(null);
   const removeConfirmation = t("azuredevops:removeConfigurationConfirm");
 
+  useEffect(() => {
+    if (!state.config && confirmingRemove) setConfirmingRemove(false);
+  }, [confirmingRemove, state.config]);
+
   return (
     <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:items-center">
       <Button
