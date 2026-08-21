@@ -65,7 +65,7 @@ func newSharedDBReviewLoopFixture(t *testing.T) *reviewLoopFixture {
 	agentMgr := &mockAgentManager{repoForExecutionLookup: taskRepo, isAgentRunning: true}
 	svc := createEngineService(t, taskRepo, sg, agentMgr)
 
-	runQueue := &fakeRunQueueAdapter{}
+	runQueue := &stepEntryFakeRunQueue{}
 	participants := &fakeParticipantStore{participants: []engine.ParticipantInfo{
 		{ID: "participant-1", StepID: nameToID["Review"], Role: "reviewer", AgentProfileID: "agent-reviewer-1"},
 	}}

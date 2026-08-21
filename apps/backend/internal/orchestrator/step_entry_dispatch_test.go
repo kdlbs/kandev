@@ -66,21 +66,21 @@ const reviewLoopWorkflowJSON = `{
   ]
 }`
 
-// fakeRunQueueAdapter records every QueueRun call. Safe for concurrent use —
+// stepEntryFakeRunQueue records every QueueRun call. Safe for concurrent use —
 // processOnEnter's dispatch runs on a goroutine.
-type fakeRunQueueAdapter struct {
+type stepEntryFakeRunQueue struct {
 	mu    sync.Mutex
 	calls []engine.QueueRunRequest
 }
 
-func (f *fakeRunQueueAdapter) QueueRun(_ context.Context, req engine.QueueRunRequest) error {
+func (f *stepEntryFakeRunQueue) QueueRun(_ context.Context, req engine.QueueRunRequest) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, req)
 	return nil
 }
 
-func (f *fakeRunQueueAdapter) callCount() int {
+func (f *stepEntryFakeRunQueue) callCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.calls)
@@ -93,6 +93,10 @@ type fakeParticipantStore struct {
 }
 
 func (f *fakeParticipantStore) ListStepParticipants(_ context.Context, _, _ string) ([]engine.ParticipantInfo, error) {
+	return f.participants, nil
+}
+
+func (f *fakeParticipantStore) ListTaskParticipants(_ context.Context, _ string) ([]engine.ParticipantInfo, error) {
 	return f.participants, nil
 }
 
@@ -123,7 +127,7 @@ type reviewLoopFixture struct {
 	svc        *Service
 	repo       sessionExecutorStore
 	agentMgr   *mockAgentManager
-	runQueue   *fakeRunQueueAdapter
+	runQueue   *stepEntryFakeRunQueue
 	decisions  *fakeDecisionStore
 	nameToID   map[string]string
 	taskRepoMk *mockTaskRepo
@@ -139,7 +143,7 @@ func newReviewLoopFixture(t *testing.T) *reviewLoopFixture {
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
 	svc := createEngineService(t, repo, sg, agentMgr)
 
-	runQueue := &fakeRunQueueAdapter{}
+	runQueue := &stepEntryFakeRunQueue{}
 	participants := &fakeParticipantStore{participants: []engine.ParticipantInfo{
 		{ID: "participant-1", StepID: nameToID["Review"], Role: "reviewer", AgentProfileID: "agent-reviewer-1"},
 	}}
