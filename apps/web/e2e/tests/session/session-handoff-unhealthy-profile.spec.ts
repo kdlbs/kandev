@@ -88,6 +88,7 @@ test.describe("Session handoff filters unhealthy profiles", () => {
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
       },
     );
 
@@ -120,10 +121,13 @@ test.describe("Session handoff filters unhealthy profiles", () => {
     // A real agent.available.updated event changes every profile for the
     // agent. Use separate agents for the mixed-health assertion when the
     // fixture provides them. The single-agent mock must mark both profiles
-    // unhealthy instead of creating an impossible mixed state.
+    // unhealthy instead of creating an impossible mixed state. Include the
+    // fixture's seeded profile because it belongs to the same agent and would
+    // otherwise keep one healthy handoff option visible.
     if (profilesShareAgent) {
       await markProfileCapabilityNotInstalled(testPage, profileA.id);
       await markProfileCapabilityNotInstalled(testPage, profileB.id);
+      await markProfileCapabilityNotInstalled(testPage, seedData.agentProfileId);
     } else {
       await markProfileCapabilityNotInstalled(testPage, profileB.id);
     }
