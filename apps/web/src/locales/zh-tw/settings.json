@@ -127,6 +127,7 @@
   "deleteLayoutProfile": "刪除佈局設定",
   "deleteLayoutProfileNamed": "刪除 {{name}}？",
   "deleteSecret": "刪除金鑰",
+  "secretDeleteFailed": "無法刪除金鑰",
   "deleteThisCustomLayoutAfterConfirmation": "確認後刪除此自訂佈局。",
   "desktopNotifications": "桌面通知",
   "desktopNotificationsDescription": "當選定的代理程式回合、問題或辦公室事件發生時通知此裝置。",

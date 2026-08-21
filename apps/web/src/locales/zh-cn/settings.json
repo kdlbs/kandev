@@ -127,6 +127,7 @@
   "deleteLayoutProfile": "删除布局配置",
   "deleteLayoutProfileNamed": "删除 {{name}}？",
   "deleteSecret": "删除密钥",
+  "secretDeleteFailed": "无法删除密钥",
   "deleteThisCustomLayoutAfterConfirmation": "确认后删除此自定义布局。",
   "desktopNotifications": "桌面通知",
   "desktopNotificationsDescription": "当选定的智能体回合、问题或办公室事件发生时通知此设备。",

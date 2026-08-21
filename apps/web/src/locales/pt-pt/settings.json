@@ -124,6 +124,7 @@
   "deleteLayoutProfile": "Eliminar o perfil de esquema",
   "deleteLayoutProfileNamed": "Eliminar {{name}}?",
   "deleteSecret": "Eliminar segredo",
+  "secretDeleteFailed": "Não foi possível eliminar o segredo",
   "deleteThisCustomLayoutAfterConfirmation": "Eliminar este esquema personalizado após confirmação.",
   "desktopNotifications": "Notificações no computador",
   "desktopNotificationsDescription": "Notificar este dispositivo quando ocorrer um turno de agente, uma pergunta ou um evento do Office selecionados.",
