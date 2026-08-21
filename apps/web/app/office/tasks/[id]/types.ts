@@ -135,6 +135,10 @@ export type Task = {
   title: string;
   description?: string;
   status: TaskStatus;
+  // Pre-normalization backend value (e.g. "SCHEDULING", "WAITING_FOR_INPUT"),
+  // preserved so ExecutionIndicator can distinguish sub-states that `status`
+  // collapses to the same canonical bucket. See OfficeTask.rawStatus.
+  rawStatus?: string;
   priority: TaskPriority;
   labels: TaskLabelLocal[];
   assigneeAgentProfileId?: string;

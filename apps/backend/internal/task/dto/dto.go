@@ -207,6 +207,11 @@ type TaskDTO struct {
 	// died and has not been resumed since. Derived from the interrupted_at
 	// metadata key at DTO conversion time (see FromTaskWithSessionInfo).
 	Interrupted bool `json:"interrupted,omitempty"`
+	// AutoStartFailed reports that a workflow step's auto_start_agent on_enter
+	// action failed to launch a run for this task. Derived from the
+	// auto_start_failed metadata key at DTO conversion time (see
+	// FromTaskWithSessionInfo).
+	AutoStartFailed bool `json:"auto_start_failed,omitempty"`
 
 	// Dependency projection. Derived on every read from task_blockers plus each
 	// related task's own state — never persisted, because a stale copy would be
@@ -836,6 +841,7 @@ func FromTaskWithSessionInfo(
 		UpdatedAt:                   task.UpdatedAt,
 		Metadata:                    task.Metadata,
 		Interrupted:                 task.Metadata[models.MetaKeyInterruptedAt] != nil,
+		AutoStartFailed:             task.Metadata[models.MetaKeyAutoStartFailed] != nil,
 		// Office extensions. AssigneeAgentProfileID is a read-time
 		// projection from workflow_step_participants (ADR 0005 Wave F);
 		// the repo's task SELECTs hydrate it via a correlated subquery.

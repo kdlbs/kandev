@@ -7,6 +7,7 @@ import type {
   FileInfo,
 } from "./types";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { normalizeGitStatusEntry } from "./git-status-normalizer";
 
 const debugGit = createDebugLogger("git-status:store");
 
@@ -561,7 +562,7 @@ export const createSessionRuntimeSlice: StateCreator<
   setGitStatus: (sessionId, gitStatus) => {
     let changed = false;
     set((draft) => {
-      changed = applyGitStatus(draft, sessionId, gitStatus);
+      changed = applyGitStatus(draft, sessionId, normalizeGitStatusEntry(gitStatus));
     });
     return changed;
   },

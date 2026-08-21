@@ -398,4 +398,31 @@ test.describe("Task layout profile defaults", () => {
     await testPage.getByRole("button", { name: "Cancel" }).click();
     expect((await apiClient.getUserSettings()).settings.saved_layouts).toHaveLength(1);
   });
+
+  test("adds Prompt History through the layout editor and restores it into a task", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+
+    await expect(layouts.editor.locator(".dv-tab", { hasText: "Prompt History" })).toHaveCount(0);
+    await layouts.addPanel("Prompt History");
+
+    // The added panel survives save and is persisted in the default profile.
+    await layouts.save();
+    const saved = (await apiClient.getUserSettings()).settings.saved_layouts;
+    expect(saved).toHaveLength(1);
+    expect(JSON.stringify(saved[0].layout)).toContain("prompt-history");
+
+    // A new task opens with the edited default layout; the panel restores and renders.
+    const task = await createTaskWithSession(apiClient, seedData, "Prompt History Layout Task");
+    await openTask(testPage, task.id);
+    const tab = testPage.locator(".dv-tab", { hasText: "Prompt History" });
+    await expect(tab).toBeVisible({ timeout: 15_000 });
+    await tab.click();
+    await expect(testPage.getByTestId("prompt-history-panel")).toBeVisible();
+  });
 });

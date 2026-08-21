@@ -426,6 +426,24 @@ func (s *Service) RequeueMessage(ctx context.Context, msg *QueuedMessage, queued
 	return queued, false, err
 }
 
+// RequeueAtHead re-enqueues a user message at a position strictly lower
+// than the session's current head. It is the FIFO-preserving requeue
+// that Service.requeueMessage invokes when an entry was superseded by a
+// newer dispatch before it could be claimed. See Repository
+// .RequeuePreservingFIFO for the position arithmetic and position rebasing.
+//
+// This method is the bug fix entry point — caller code that wants
+// user-message retry should call this instead of RequeueMessage so
+// the original message beats any new arrival on a busy session.
+func (s *Service) RequeueAtHead(ctx context.Context, msg *QueuedMessage) error {
+	if msg == nil {
+		return errors.New("queued message is nil")
+	}
+	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		return s.repo.RequeuePreservingFIFO(admittedCtx, msg)
+	})
+}
+
 // QueueLifecycleMessageWithCoalesceKey accepts a lifecycle entry only while
 // its task remains active. accepted is false for a normal archive/delete win.
 func (s *Service) QueueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, bool, error) {

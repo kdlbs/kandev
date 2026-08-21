@@ -850,6 +850,36 @@ mod tests {
     }
 
     #[test]
+    fn desktop_environment_overrides_inherited_server_host_with_loopback() {
+        // Desktop launches must keep the embedded backend on the loopback host.
+        let mut inherited = BTreeMap::new();
+        inherited.insert(
+            OsString::from("KANDEV_SERVER_HOST"),
+            OsString::from("10.0.0.42"),
+        );
+
+        let env = desktop_environment(Path::new("/opt/kandev"), inherited, None);
+
+        assert_eq!(
+            env.get(OsStr::new("KANDEV_SERVER_HOST")),
+            Some(&OsString::from(LOOPBACK_HOST)),
+            "desktop_environment must force the loopback server host",
+        );
+    }
+
+    #[test]
+    fn desktop_environment_falls_back_to_loopback_when_server_host_unset() {
+        // The default production path: no inherited KANDEV_SERVER_HOST,
+        // desktop_environment must inject the loopback default.
+        let env = desktop_environment(Path::new("/opt/kandev"), BTreeMap::new(), None);
+
+        assert_eq!(
+            env.get(OsStr::new("KANDEV_SERVER_HOST")),
+            Some(&OsString::from(LOOPBACK_HOST))
+        );
+    }
+
+    #[test]
     fn missing_launcher_returns_readable_error() {
         let dir = temp_root("missing-launcher");
         let err = build_backend_command(&dir, 48123, BTreeMap::new(), None)

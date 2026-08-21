@@ -13,13 +13,17 @@
 package httpmw
 
 import (
+	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/common/logger"
 	userstore "github.com/kandev/kandev/internal/user/store"
 )
 
@@ -49,6 +53,114 @@ func Middleware(svc *auth.Service) gin.HandlerFunc {
 	}
 }
 
+// StripUntrustedForwardedHost removes X-Forwarded-Host from requests whose
+// immediate peer is not a trusted proxy. It is a pure header-modifier: it
+// never aborts, so gin continues to the next handler automatically once the
+// function returns (no c.Next() call needed). Browsers never send
+// X-Forwarded-Host; only a reverse proxy in front of the backend should, and
+// only to carry the browser's original host:port through a port-rewrite to
+// the port-scoped cookie-name resolver (httpcookie.PortSuffix). Without this
+// gate a non-browser client could pick its own forwarded host, and with it
+// its own port-scoped cookie name, by setting the header directly. The same
+// trusted list that gates X-Forwarded-For (gin's ClientIP via
+// SetTrustedProxies) gates this header so the two trust decisions cannot
+// diverge; an untrusted value is dropped (with a warning) and the resolver
+// falls back to the request Host. backendapp passes the list returned by its
+// configureTrustedProxies, so the two uses share one configuration.
+func StripUntrustedForwardedHost(trusted []string, log *logger.Logger) gin.HandlerFunc {
+	matcher := newTrustedProxyMatcher(trusted)
+	return func(c *gin.Context) {
+		if c.GetHeader("X-Forwarded-Host") == "" {
+			return
+		}
+		peer := remoteAddrHost(c.Request.RemoteAddr)
+		if matcher.contains(peer) {
+			return
+		}
+		log.Warn("ignoring X-Forwarded-Host from untrusted peer",
+			zap.String("peer", peer),
+			zap.String("forwarded_host", c.GetHeader("X-Forwarded-Host")))
+		c.Request.Header.Del("X-Forwarded-Host")
+	}
+}
+
+// trustedProxyMatcher matches a peer IP against the trusted-proxy list (bare
+// IPs and CIDRs, the same entries configureTrustedProxies handed to gin).
+type trustedProxyMatcher struct {
+	addresses []netip.Addr
+	prefixes  []netip.Prefix
+}
+
+// newTrustedProxyMatcher indexes the trusted-proxy list (bare IPs and CIDRs)
+// for O(1) peer matching. IPv4-mapped entries are normalized to their IPv4
+// form so the matcher agrees with gin's trust decision (see contains).
+func newTrustedProxyMatcher(trusted []string) *trustedProxyMatcher {
+	m := &trustedProxyMatcher{}
+	for _, entry := range trusted {
+		if strings.Contains(entry, "/") {
+			prefix, err := netip.ParsePrefix(entry)
+			if err != nil {
+				continue
+			}
+			if prefix.Addr().Is4In6() {
+				// gin normalizes IPv4-mapped CIDRs to their IPv4 form
+				// (::ffff:10.0.0.0/120 → 10.0.0.0/24, mask sliced 96 bits
+				// shorter); mirror it so the two trust decisions cannot
+				// diverge. A mapped-form CIDR with exactly 96 bits
+				// degenerates to 0.0.0.0/0 in gin (trusts every IPv4 peer)
+				// and is mirrored as such; with fewer than 96 bits gin's
+				// entry matches no IPv4-form peer and the matcher skips it,
+				// failing closed (unsupported configuration).
+				prefix = netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits()-96)
+			}
+			if prefix.IsValid() {
+				m.prefixes = append(m.prefixes, prefix)
+			}
+			continue
+		}
+		if addr, err := netip.ParseAddr(entry); err == nil {
+			m.addresses = append(m.addresses, addr.Unmap())
+		}
+	}
+	return m
+}
+
+// contains reports whether host is one of the trusted addresses or inside one
+// of the trusted prefixes. Unparsable peers (Unix sockets, empty RemoteAddr)
+// are never trusted. IPv4-mapped IPv6 peers are unmapped so the matcher
+// agrees with gin's trust decision (which compares the IPv4 form): if the two
+// ever diverged, the strip would fail CLOSED (dropping a header gin trusts),
+// breaking the port-rewrite cookie flow rather than security.
+func (m *trustedProxyMatcher) contains(host string) bool {
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap()
+	for _, a := range m.addresses {
+		if a == addr {
+			return true
+		}
+	}
+	for _, p := range m.prefixes {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+// remoteAddrHost returns the host part of a RemoteAddr ("IP:port"), or the
+// whole value when it has no port.
+// remoteAddrHost returns the host part of a RemoteAddr ("IP:port"), or the
+// whole value when it has no port.
+func remoteAddrHost(remoteAddr string) string {
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return host
+	}
+	return remoteAddr
+}
+
 // SyntheticIdentity is the implicit identity used while auth is disabled.
 func SyntheticIdentity() authn.Identity {
 	return authn.Identity{UserID: userstore.DefaultUserID, Role: authn.RoleAdmin, Synthetic: true}
@@ -58,7 +170,7 @@ func SyntheticIdentity() authn.Identity {
 // bearer. Shared with the WS gateway's upgrade-time check.
 func ResolveRequest(c *gin.Context, svc *auth.Service) (authn.Identity, bool) {
 	ctx := c.Request.Context()
-	if cookie, err := c.Cookie(svc.CookieName()); err == nil && cookie != "" {
+	if cookie, err := c.Cookie(svc.CookieNameForRequest(c.Request)); err == nil && cookie != "" {
 		if identity, ok := svc.ResolveSessionToken(ctx, cookie); ok {
 			return identity, true
 		}
@@ -106,6 +218,14 @@ func isPublicPath(method, path string) bool {
 		// readiness probe, POST redeems the lease; both self-authenticate
 		// inside the handler, never off request identity.
 		return method == http.MethodGet || method == http.MethodPost
+	case "/api/v1/github/credentials/reissue":
+		// The encrypted execution capability is the credential. The handler
+		// checks its expiry and exact task/session/repository scope.
+		return method == http.MethodPost
+	case "/api/v1/git/credentials/resolve":
+		return method == http.MethodGet || method == http.MethodPost
+	case "/api/v1/git/credentials/reissue":
+		return method == http.MethodPost
 	}
 	switch {
 	case strings.HasPrefix(path, "/api/v1/automations/webhook/"):

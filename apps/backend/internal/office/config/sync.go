@@ -19,7 +19,7 @@ func (s *ConfigService) ScanFilesystem(_ context.Context, _ string) (*ConfigBund
 	bundle := &ConfigBundle{Settings: SettingsConfig{Name: defaultWorkspaceName}}
 	for _, a := range s.cfgLoader.GetAgents(defaultWorkspaceName) {
 		bundle.Agents = append(bundle.Agents, AgentConfig{
-			Name: a.Name, Role: string(a.Role), Icon: a.Icon,
+			Name: a.Name, Role: string(a.Role), Icon: a.Icon, ReportsTo: a.ReportsTo,
 			BudgetMonthlyCents: a.BudgetMonthlyCents, MaxConcurrentSessions: a.MaxConcurrentSessions,
 			DesiredSkills: a.DesiredSkills, ExecutorPreference: a.ExecutorPreference,
 		})
@@ -93,11 +93,16 @@ func (s *ConfigService) OutgoingDiff(ctx context.Context, workspaceID string) (*
 // ApplyIncoming reads the on-disk config and writes it to the DB. Rows in the
 // DB but missing from disk are deleted.
 func (s *ConfigService) ApplyIncoming(ctx context.Context, workspaceID string) (*ImportResult, error) {
+	s.importMu.Lock()
+	defer s.importMu.Unlock()
+
 	bundle, _, err := s.ScanFilesystem(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
-	result, err := s.ApplyImport(ctx, workspaceID, bundle)
+	// The filesystem is an authoritative snapshot for this direction. Do not
+	// resolve reports_to against DB-only managers because they are pruned below.
+	result, err := s.applyImport(ctx, workspaceID, bundle, false)
 	if err != nil {
 		return nil, err
 	}

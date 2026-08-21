@@ -11,7 +11,11 @@ import { listWorkflows } from "@/lib/api/domains/kanban-api";
 import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import { hasHydratedKanbanRouteState } from "@/lib/routing/kanban-route-hydration";
-import { mapWorkspaceItem, readActiveWorkspaceCookie } from "@/lib/routing/route-bootstrap";
+import {
+  mapWorkspaceItem,
+  promoteLegacyWorkspaceSelection,
+  readActiveWorkspaceCookie,
+} from "@/lib/routing/route-bootstrap";
 import { useRouter } from "@/lib/routing/client-router";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { isOfficeWorkspace } from "@/lib/state/slices/workspace/selectors";
@@ -82,6 +86,7 @@ function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boolean) {
   const store = useAppStoreApi();
 
   useEffect(() => {
+    promoteLegacyWorkspaceSelection(store.getState().workspaces.items);
     if (skip) return;
     if (hasHydratedKanbanRouteState(store.getState(), route)) return;
 
@@ -97,6 +102,7 @@ function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boolean) {
       const settingsWorkspaceId = settingsResponse?.settings?.workspace_id || null;
       const settingsWorkflowId = settingsResponse?.settings?.workflow_filter_id || null;
       const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
+      promoteLegacyWorkspaceSelection(workspaceItems);
       const activeWorkspaceId = resolveKanbanRouteWorkspaceId(
         workspaceItems,
         route.workspaceId,

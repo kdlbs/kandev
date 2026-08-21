@@ -15,4 +15,9 @@ var (
 	ErrWorkspaceOutOfScope = fmt.Errorf("%w: workspace out of scope", shared.ErrForbidden)
 	// ErrRuntimeDependencyMissing indicates that a runtime action was not fully wired.
 	ErrRuntimeDependencyMissing = fmt.Errorf("runtime dependency missing")
+	// ErrProjectRequired is returned when a root task has no resolvable
+	// project (no explicit project_id, and the run's current task has none
+	// either) in a workspace that has at least one project to choose from.
+	// Caller-correctable: the caller should retry with an explicit project_id.
+	ErrProjectRequired = fmt.Errorf("project_id is required")
 )

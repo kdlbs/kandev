@@ -21,12 +21,6 @@ func (r *Repository) CreateMessage(ctx context.Context, message *models.Message)
 	if message.ID == "" {
 		message.ID = uuid.New().String()
 	}
-	if message.CreatedAt.IsZero() {
-		message.CreatedAt = time.Now().UTC()
-	}
-	if message.UpdatedAt.IsZero() {
-		message.UpdatedAt = message.CreatedAt
-	}
 	if message.AuthorType == "" {
 		message.AuthorType = models.MessageAuthorUser
 	}
@@ -50,6 +44,20 @@ func (r *Repository) CreateMessage(ctx context.Context, message *models.Message)
 		metadataJSON = string(metadataBytes)
 	}
 
+	if message.AuthorType == models.MessageAuthorUser {
+		// User messages get their prompt-ordering timestamp and ordinal from
+		// the atomic per-session create boundary (see
+		// createUserMessageWithBoundary). Agent/tool messages stay on the hot
+		// path below.
+		return r.createUserMessageWithBoundary(ctx, message, requestsInput, messageType, metadataJSON)
+	}
+
+	if message.CreatedAt.IsZero() {
+		message.CreatedAt = time.Now().UTC()
+	}
+	if message.UpdatedAt.IsZero() {
+		message.UpdatedAt = message.CreatedAt
+	}
 	return r.insertMessageWithSessionLock(ctx, message, requestsInput, messageType, metadataJSON)
 }
 
@@ -61,9 +69,9 @@ func (r *Repository) insertMessageRow(
 	messageType, metadataJSON string,
 ) error {
 	_, err := execer.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO task_session_messages (id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt, message.UpdatedAt)
+		INSERT INTO task_session_messages (id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at, prompt_seq)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt, message.UpdatedAt, message.PromptIndex)
 	return err
 }
 
@@ -169,13 +177,51 @@ func (r *Repository) ListMessagesPaginated(ctx context.Context, sessionID string
 	if err != nil {
 		return nil, false, err
 	}
-	query, args := buildListMessagesQuery(sessionID, opts, cursor, sortDir, limit)
+	// The outer cursor bound is the cursor row's normalized-microsecond key,
+	// derived through the same SQL expression the per-row key uses — never a
+	// driver-parsed Go time.Time (mattn/go-sqlite3 serializes time.Time as
+	// RFC3339Nano, which mis-compares lexicographically against the
+	// space-separated per-row expression and silently shifts page boundaries).
+	var cursorKey string
+	if cursor != nil {
+		cursorKey, err = r.messageCursorKey(ctx, cursor.ID)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	query, args := buildListMessagesQuery(r.ro.DriverName(), sessionID, opts, cursor, cursorKey, sortDir, limit)
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, false, err
 	}
 	defer func() { _ = rows.Close() }()
-	return scanMessageRows(rows, limit)
+	return scanPromptIndexedMessageRows(rows, limit)
+}
+
+// messageCursorKey returns the normalized-microsecond ordering key of the
+// cursor row, derived through the same SQL expression the per-row key uses.
+// On SQLite the expression yields the key text directly; on PostgreSQL the
+// stored timestamp is scanned and formatted to the exact key bytes (the
+// stored value is UTC by convention, and a naive timestamp carries no offset
+// whose parsing could diverge from the per-row expression).
+func (r *Repository) messageCursorKey(ctx context.Context, id string) (string, error) {
+	drv := r.ro.DriverName()
+	query := fmt.Sprintf(
+		"SELECT %s FROM task_session_messages WHERE id = ?",
+		dialect.NormalizedMicrosecond(drv, "created_at"),
+	)
+	if dialect.IsPostgres(drv) {
+		var ts time.Time
+		if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), id).Scan(&ts); err != nil {
+			return "", err
+		}
+		return formatPromptKey(ts), nil
+	}
+	var key string
+	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), id).Scan(&key); err != nil {
+		return "", err
+	}
+	return key, nil
 }
 
 // ListMessagesForPlugin returns messages matching the plugin Host data API
@@ -271,25 +317,79 @@ func (r *Repository) resolveMessageCursor(ctx context.Context, sessionID string,
 	return nil, nil
 }
 
-func buildListMessagesQuery(sessionID string, opts models.ListMessagesOptions, cursor *models.Message, sortDir string, limit int) (string, []interface{}) {
+// buildListMessagesQuery assembles the paginated message list query and bound arguments, ordering rows by the normalized-microsecond key with cursor and limit bounds.
+func buildListMessagesQuery(driverName, sessionID string, opts models.ListMessagesOptions, cursor *models.Message, cursorKey string, sortDir string, limit int) (string, []interface{}) {
+	nm := dialect.NormalizedMicrosecond(driverName, "created_at")
+	// The cursor bound is the normalized key literal `YYYY-MM-DD HH:MM:SS.ffffff`
+	// (space separator, zero-padded 6-digit fraction, no `Z`, UTC). PostgreSQL
+	// casts it to `timestamp` so it compares against its native per-row key;
+	// SQLite compares the text key directly.
+	bound := "?"
+	if dialect.IsPostgres(driverName) {
+		bound = "CAST(? AS timestamp)"
+	}
+	// prompt_index is the durable per-session ordinal persisted at creation
+	// (prompt_seq), so it is a plain column: absolute rather than
+	// page-relative by construction, no window pass needed. The cursor
+	// predicate, ORDER BY, and LIMIT (limit+1) use the same normalized key as
+	// the rest of the package, so every page is contiguous in ordinal order
+	// and the sentinel `promptNumber === 1` stop can never skip a
+	// higher-ordinal prompt sharing a microsecond.
 	query := `
-		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
-		FROM task_session_messages WHERE task_session_id = ?`
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at,
+		       CASE WHEN author_type = 'user' THEN prompt_seq ELSE 0 END AS prompt_index
+		FROM task_session_messages
+		WHERE task_session_id = ?`
 	args := []interface{}{sessionID}
 	if cursor != nil {
 		if opts.Before != "" {
-			query += " AND (created_at < ? OR (created_at = ? AND id < ?))"
+			query += fmt.Sprintf(" AND (%s < %s OR (%s = %s AND id < ?))", nm, bound, nm, bound)
 		} else if opts.After != "" {
-			query += " AND (created_at > ? OR (created_at = ? AND id > ?))"
+			query += fmt.Sprintf(" AND (%s > %s OR (%s = %s AND id > ?))", nm, bound, nm, bound)
 		}
-		args = append(args, cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
+		args = append(args, cursorKey, cursorKey, cursor.ID)
 	}
-	query += fmt.Sprintf(" ORDER BY created_at %s, id %s", sortDir, sortDir)
+	query += fmt.Sprintf(" ORDER BY %s %s, id %s", nm, sortDir, sortDir)
 	if limit > 0 {
 		query += sqlLimitClause
 		args = append(args, limit+1)
 	}
 	return query, args
+}
+
+// scanPromptIndexedMessageRows scans the 13-column indexed message projection
+// (the 12 legacy columns plus the computed prompt_index), returning the
+// page-truncated slice and whether more rows remain, like scanMessageRows.
+func scanPromptIndexedMessageRows(rows interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+}, limit int) ([]*models.Message, bool, error) {
+	var result []*models.Message
+	for rows.Next() {
+		message := &models.Message{}
+		var requestsInput int
+		var messageType string
+		var metadataJSON string
+		if err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt, &message.PromptIndex); err != nil {
+			return nil, false, err
+		}
+		message.RequestsInput = requestsInput == 1
+		message.Type = models.MessageType(messageType)
+		if metadataJSON != "" && metadataJSON != "{}" {
+			if err := json.Unmarshal([]byte(metadataJSON), &message.Metadata); err != nil {
+				return nil, false, fmt.Errorf("failed to deserialize message metadata: %w", err)
+			}
+		}
+		result = append(result, message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	if limit > 0 && len(result) > limit {
+		return result[:limit], true, nil
+	}
+	return result, false, nil
 }
 
 func scanMessageRows(rows interface {

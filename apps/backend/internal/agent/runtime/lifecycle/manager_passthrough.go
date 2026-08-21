@@ -141,8 +141,9 @@ func (m *Manager) GetPassthroughBuffer(ctx context.Context, sessionID string) (s
 
 // buildPassthroughEnv builds the environment map for a passthrough session,
 // including Kandev metadata and required credentials from the agent runtime config.
-func (m *Manager) buildPassthroughEnv(ctx context.Context, execution *AgentExecution, requiredEnv []string) map[string]string {
+func (m *Manager) buildPassthroughEnv(ctx context.Context, execution *AgentExecution, requiredEnv []string) (map[string]string, error) {
 	env := execution.RuntimeEnvironment()
+	hasRuntimeSnapshot := env != nil
 	if env == nil {
 		env = make(map[string]string)
 	}
@@ -150,7 +151,11 @@ func (m *Manager) buildPassthroughEnv(ctx context.Context, execution *AgentExecu
 	env["KANDEV_SESSION_ID"] = execution.SessionID
 	env["KANDEV_AGENT_PROFILE_ID"] = execution.officeProfileID()
 	env["KANDEV_EXECUTION_PROFILE_ID"] = execution.AgentProfileID
-	m.mergeAgentProfileEnv(ctx, execution.AgentProfileID, env)
+	if !hasRuntimeSnapshot {
+		if err := m.mergeAgentProfileEnvForExecution(ctx, execution, env); err != nil {
+			return nil, fmt.Errorf("resolve passthrough profile environment: %w", err)
+		}
+	}
 	if m.credsMgr != nil {
 		for _, credKey := range requiredEnv {
 			if value, err := m.credsMgr.GetCredentialValue(ctx, credKey); err == nil && value != "" {
@@ -163,7 +168,7 @@ func (m *Manager) buildPassthroughEnv(ctx context.Context, execution *AgentExecu
 	for key, value := range getPassthroughMCPEnv(execution) {
 		env[key] = value
 	}
-	return env
+	return env, nil
 }
 
 // startPassthroughShell starts the shell session for a passthrough execution.
@@ -739,7 +744,10 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 		zap.String("session_id", execution.SessionID),
 		zap.Strings("full_command", redactPassthroughArgs(cmd.Args())))
 
-	env := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
+	env, err := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
+	if err != nil {
+		return err
+	}
 
 	processInfo, err := m.startInteractiveProcess(ctx, execution, pt, env, cmd, rt.StripEnv)
 	if err != nil {
@@ -865,14 +873,26 @@ func (m *Manager) restartPassthroughProcess(ctx context.Context, execution *Agen
 		zap.String("session_id", execution.SessionID),
 		zap.String("old_process_id", execution.PassthroughProcessID))
 
-	// 1. Stop the current PTY process.
-	// Clear PassthroughProcessID before stopping so that handlePassthroughStatus
-	// doesn't trigger auto-restart for the deliberately-killed process.
+	// 1. Resolve the replacement command and environment before touching the
+	// current PTY. A profile-secret failure must leave the active session usable.
 	interactiveRunner := m.GetInteractiveRunner()
 	if interactiveRunner == nil {
 		return fmt.Errorf("interactive runner not available")
 	}
 
+	// Build fresh command (no SessionID, no Resume, no Prompt).
+	pt, rt, cmd, err := m.freshPassthroughCommand(ctx, execution)
+	if err != nil {
+		return err
+	}
+	env, err := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
+	if err != nil {
+		return err
+	}
+
+	// 2. Stop the current PTY process. Clear PassthroughProcessID before
+	// stopping so handlePassthroughStatus does not trigger auto-restart for
+	// the deliberately-killed process.
 	oldProcessID := execution.PassthroughProcessID
 	execution.PassthroughProcessID = ""
 	execution.PassthroughStartedAt = time.Time{}
@@ -884,14 +904,7 @@ func (m *Manager) restartPassthroughProcess(ctx context.Context, execution *Agen
 			zap.Error(err))
 	}
 
-	// 2. Build fresh command (no SessionID, no Resume, no Prompt)
-	pt, rt, cmd, err := m.freshPassthroughCommand(ctx, execution)
-	if err != nil {
-		return err
-	}
-
 	// 3. Start new PTY process with ImmediateStart (terminal is already connected)
-	env := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
 	startReq := buildInteractiveStartRequest(execution.SessionID, execution, pt, env, cmd, rt.StripEnv, true)
 
 	processInfo, err := interactiveRunner.Start(ctx, startReq)
@@ -982,7 +995,10 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 		zap.Bool("use_resume", useResume),
 		zap.Strings("command", redactPassthroughArgs(cmd.Args())))
 
-	env := m.buildPassthroughEnv(ctx, execution, resolved.rt.RequiredEnv)
+	env, err := m.buildPassthroughEnv(ctx, execution, resolved.rt.RequiredEnv)
+	if err != nil {
+		return err
+	}
 
 	// Always use immediate start on resume — the terminal WebSocket is already connected,
 	// so we don't need to wait for a resize to get exact dimensions. The first resize
@@ -1303,7 +1319,11 @@ func (m *Manager) attemptResumeFallbackForProcess(execution *AgentExecution, run
 		return
 	}
 
-	env := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
+	env, err := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
+	if err != nil {
+		m.notifyFallbackInfrastructureFailure(runner, sessionID, "resolve profile environment", err)
+		return
+	}
 	startReq := buildInteractiveStartRequest(sessionID, execution, pt, env, cmd, rt.StripEnv, true)
 
 	processInfo, err := runner.Start(ctx, startReq)

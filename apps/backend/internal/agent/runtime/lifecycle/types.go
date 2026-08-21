@@ -28,7 +28,11 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
-	ID                string
+	ID string
+	// RunID identifies the Office run that launched this execution. It is
+	// retained after runtime environment cleanup so delayed stop events can
+	// still be attributed to the correct run.
+	RunID             string
 	TaskID            string
 	SessionID         string
 	TaskEnvironmentID string // Env owning this execution; sessions in the same task share one env
@@ -203,7 +207,7 @@ type AgentExecution struct {
 	// response buffers active for an execution. Agentctl accepts prompt requests
 	// asynchronously, so its transport-level gate alone cannot provide this.
 	promptMu                sync.Mutex
-	dispatchedPromptPending bool
+	dispatchedPromptPending atomic.Bool
 
 	// Closed when the current SendPrompt returns, so CancelAgent can wait
 	// for the in-flight prompt to finish before the caller retries.

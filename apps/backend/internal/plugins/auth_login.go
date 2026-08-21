@@ -28,11 +28,12 @@ type externalLoginAssertion struct {
 
 // AuthLoginBridge establishes an authenticated kandev browser session for an
 // external identity that an auth-capable plugin has validated against an
-// external IdP (OIDC/SAML SSO). The host mints and sets the kandev_session
-// cookie on the response; the plugin never receives the raw session token —
-// its only channel is the reserved login directive header on its webhook
-// response (see handlers.go). Implemented in internal/backendapp over
-// internal/auth so this package need not depend on the auth service.
+// external IdP (OIDC/SAML SSO). The host mints and sets the session cookie
+// (name derived from the request host) on the response; the plugin never
+// receives the raw session token — its only channel is the reserved login
+// directive header on its webhook response (see handlers.go). Implemented in
+// internal/backendapp over internal/auth so this package need not depend on
+// the auth service.
 type AuthLoginBridge interface {
 	// LoginExternal maps the asserted external identity to a kandev user
 	// (linking or just-in-time provisioning as needed) and sets the session

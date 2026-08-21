@@ -5,6 +5,7 @@ import { buildPromptHistoryEntries, formatPromptDuration } from "./prompt-histor
 const MESSAGE_ID = "message-1";
 const TURN_ID = "turn-1";
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
+const ONE_SECOND_LATER = "2026-01-01T00:00:01.000Z";
 
 /** Builds a user Message with fixed defaults, merged with the given overrides. */
 function message(overrides: Partial<Message>): Message {
@@ -77,7 +78,7 @@ const ENTRY_CASES = [
       message({
         id: "dangling",
         turn_id: "not-found",
-        created_at: "2026-01-01T00:00:01.000Z",
+        created_at: ONE_SECOND_LATER,
       }),
       message({ id: "latest", created_at: "2026-01-01T00:00:04.900Z" }),
     ],
@@ -127,7 +128,7 @@ const ENTRY_CASES = [
         id: "b",
         session_id: "session-b" as Message["session_id"],
         turn_id: "turn-a",
-        created_at: "2026-01-01T00:00:01.000Z",
+        created_at: ONE_SECOND_LATER,
       }),
     ],
     turns: [
@@ -189,13 +190,134 @@ describe("buildPromptHistoryEntries", () => {
           id: "agent-prompt",
           metadata: { sender_task_id: "sender-task" },
         }),
-        message({ id: "user-prompt", created_at: "2026-01-01T00:00:01.000Z" }),
+        message({ id: "user-prompt", created_at: ONE_SECOND_LATER }),
       ],
       [],
     );
 
     expect(entries[0]).toMatchObject({ messageId: "user-prompt", isAgentPrompt: false });
     expect(entries[1]).toMatchObject({ messageId: "agent-prompt", isAgentPrompt: true });
+  });
+  it("carries promptNumber from prompt_index regardless of input order", () => {
+    const entries = buildPromptHistoryEntries(
+      [
+        message({ id: "second", prompt_index: 2, created_at: ONE_SECOND_LATER }),
+        message({ id: "first", prompt_index: 1 }),
+      ],
+      [],
+    );
+
+    expect(entries[0]).toMatchObject({ messageId: "second", promptNumber: 2 });
+    expect(entries[1]).toMatchObject({ messageId: "first", promptNumber: 1 });
+  });
+  it("treats absent, 0, and undefined prompt_index as null", () => {
+    const entries = buildPromptHistoryEntries(
+      [
+        message({ id: "absent" }),
+        message({ id: "zero", prompt_index: 0, created_at: ONE_SECOND_LATER }),
+        message({
+          id: "undefined",
+          prompt_index: undefined,
+          created_at: "2026-01-01T00:00:02.000Z",
+        }),
+      ],
+      [],
+    );
+
+    expect(entries.every((entry) => entry.promptNumber === null)).toBe(true);
+  });
+  it("orders by microsecond-truncated timestamp then id when only digits 7-9 differ", () => {
+    // Both timestamps share the microsecond .123456; full nanoseconds differ.
+    // The later instant has the EARLIER id, so (microseconds, id) ordering
+    // puts it first — and the earlier instant's duration uses full-nanosecond
+    // subtraction (floor(788ns / 1e9) = 0 seconds, never negative).
+    const entries = buildPromptHistoryEntries(
+      [
+        message({
+          id: "b",
+          created_at: "2026-01-01T00:00:00.123456789Z",
+          turn_id: "turn-b",
+        }),
+        message({ id: "a", created_at: "2026-01-01T00:00:00.123456001Z" }),
+      ],
+      [turn({ id: "turn-b", completed_at: "2026-01-01T00:00:01.000000000Z" })],
+    );
+
+    expect(entries.map((entry) => entry.messageId)).toEqual(["b", "a"]);
+    expect(entries[1]).toMatchObject({ messageId: "a", durationSeconds: 0 });
+  });
+  it("orders mixed-width fractions, offsets, and exact seconds by UTC microseconds", () => {
+    const entries = buildPromptHistoryEntries(
+      [
+        message({ id: "ns-fraction", created_at: "2026-01-01T00:00:00.123456789Z" }),
+        // .1Z = 100ms = .100000000s — same microsecond as .100000Z, no id tie
+        // here because the microseconds differ from ns-fraction.
+        message({ id: "tenth", created_at: "2026-01-01T00:00:00.1Z" }),
+        // Exact second: no fraction at all.
+        message({ id: "exact", created_at: "2026-01-01T00:00:00Z" }),
+        // Offset +01:00 == 00:00:00.123456 UTC — same microsecond as
+        // ns-fraction's truncated key, so the id tie-break decides.
+        message({ id: "offset-aaa", created_at: "2026-01-01T01:00:00.123456+01:00" }),
+      ],
+      [],
+    );
+
+    // (microseconds, id) ascending: exact (.000000), tenth (.100000),
+    // ns-fraction and offset-aaa share .123456 → id order ("ns-fraction" <
+    // "offset-aaa" in code units) puts ns-fraction first.
+    expect(entries.map((entry) => entry.messageId)).toEqual([
+      "offset-aaa",
+      "ns-fraction",
+      "tenth",
+      "exact",
+    ]);
+    // Entries are newest-first. Every row except the newest is bounded by the
+    // next prompt: exact (.000000) is bounded by tenth (.1Z = 100ms later),
+    // flooring to 0 seconds; the newest (offset-aaa) has no later bound and
+    // no turn, so it shows no duration.
+    expect(entries[0]).toMatchObject({ messageId: "offset-aaa", durationSeconds: null });
+    expect(entries[1]).toMatchObject({ messageId: "ns-fraction", durationSeconds: 0 });
+    expect(entries[2]).toMatchObject({ messageId: "tenth", durationSeconds: 0 });
+    expect(entries[3]).toMatchObject({ messageId: "exact", durationSeconds: 0 });
+  });
+  it("keeps a running newest prompt without a duration while clamping overlaps", () => {
+    // A reversed pair (later prompt's turn completed BEFORE the earlier
+    // prompt's send time) clamps to zero; the newest prompt with a running
+    // turn and no later prompt shows no duration.
+    const entries = buildPromptHistoryEntries(
+      [
+        message({
+          id: "newest",
+          turn_id: "turn-newest",
+          created_at: "2026-01-01T00:00:01.000000000Z",
+        }),
+        message({ id: "older", turn_id: "turn-older" }),
+      ],
+      [
+        turn({ id: "turn-newest" }),
+        turn({ id: "turn-older", completed_at: "2025-12-31T23:59:59.000000000Z" }),
+      ],
+    );
+
+    expect(entries[0]).toMatchObject({ messageId: "newest", durationSeconds: null });
+    expect(entries[1]).toMatchObject({ messageId: "older", durationSeconds: 0 });
+  });
+});
+
+describe("buildPromptHistoryEntries — precision edges", () => {
+  it("floors the microsecond key for pre-epoch timestamps (never truncates toward zero)", () => {
+    // 1969-12-31T23:59:59.999999999Z is -1ns from epoch: the microsecond key
+    // must be -1 (floor), NOT 0 — otherwise it ties with the first post-epoch
+    // microsecond and the id tie-break would misorder the pair.
+    const entries = buildPromptHistoryEntries(
+      [
+        message({ id: "post-epoch", created_at: "1970-01-01T00:00:00.000000001Z" }),
+        message({ id: "pre-epoch", created_at: "1969-12-31T23:59:59.999999999Z" }),
+      ],
+      [],
+    );
+
+    expect(entries.map((entry) => entry.messageId)).toEqual(["post-epoch", "pre-epoch"]);
   });
 });
 

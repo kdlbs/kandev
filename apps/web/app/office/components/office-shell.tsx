@@ -94,9 +94,9 @@ function OfficePageNav({ onClose }: { onClose: () => void }) {
 /**
  * Office page chrome on the shared `PageShell`. List pages show a static
  * title; detail pages render a portal target (#office-topbar-slot) that the
- * page component fills with its breadcrumb via OfficeTopbarPortal. Both paint
- * paths (`src/office-routes.tsx` and `app/office/layout.tsx`) wrap their route
- * output in this shell so they cannot drift.
+ * page component fills with its breadcrumb via OfficeTopbarPortal. The SPA
+ * office paint path (`src/office-routes.tsx`) wraps every route's output in
+ * this shell so the chrome cannot drift.
  */
 export function OfficeShell({
   children,
@@ -147,9 +147,9 @@ export function OfficeShell({
           the specific route, so a mis-pointed URL cannot match another
           screen's anchor.
 
-          The shell owns this outlet (`scroll="none"`) so both paint paths —
-          `src/office-routes.tsx` and `app/office/layout.tsx` — carry the
-          anchor without either one re-declaring it. */}
+          The shell owns this outlet (`scroll="none"`) so the single SPA paint
+          path (`src/office-routes.tsx`) carries the anchor without
+          re-declaring it. */}
       <main className="flex-1 min-h-0 overflow-y-auto" data-office-route={routePath ?? pathname}>
         {children}
       </main>

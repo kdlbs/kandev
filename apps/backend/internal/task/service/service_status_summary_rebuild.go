@@ -622,6 +622,9 @@ func changedFilesFromSnapshot(snapshot *models.GitSnapshot) int {
 	if snapshot == nil {
 		return 0
 	}
+	if _, ok := snapshot.Metadata["changed_files"]; ok {
+		return nonNegative(snapshot.Metadata, "changed_files")
+	}
 	count := 0
 	for _, key := range []string{"modified", "added", "deleted", "untracked", "renamed"} {
 		count += collectionLength(snapshot.Metadata[key])

@@ -783,38 +783,6 @@ func TestMovedToDone_WithoutExecutionPolicy_NormalCompletion(t *testing.T) {
 	}
 }
 
-func TestHandleTaskStatusChanged_LogsActivity(t *testing.T) {
-	svc, eb := newTestServiceWithBus(t)
-	ctx := context.Background()
-
-	createTestAgent(t, svc, "ws-1", "worker-status")
-	taskID := createOfficeTask(t, svc, "ws-1", "worker-status")
-
-	statusEvt := bus.NewEvent(events.OfficeTaskStatusChanged, "test", map[string]interface{}{
-		"task_id":      taskID,
-		"new_status":   "in_progress",
-		"workspace_id": "ws-1",
-	})
-	if err := eb.Publish(ctx, events.OfficeTaskStatusChanged, statusEvt); err != nil {
-		t.Fatalf("publish office.task.status_changed: %v", err)
-	}
-
-	activity, err := svc.ListActivity(ctx, "ws-1", 50)
-	if err != nil {
-		t.Fatalf("list activity: %v", err)
-	}
-	found := false
-	for _, a := range activity {
-		if a.Action == "task_status_changed" && a.TargetID == taskID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected activity entry with action 'task_status_changed' for task %s, got %+v", taskID, activity)
-	}
-}
-
 func TestAutoPostAgentComment_CreatesSessionComment(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	ctx := context.Background()

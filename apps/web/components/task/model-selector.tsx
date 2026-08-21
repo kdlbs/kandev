@@ -87,13 +87,23 @@ function isLegacyAgentConfig(session: TaskSession | null, agents: Agent[]): bool
   });
 }
 
-export function requiredConfigKeys(session: TaskSession | null, agents: Agent[]): string[] {
-  if (!session) return [];
+// profileRequiredConfigKeys returns keys the current agent profile itself
+// declares (snapshot + matched profile). These stay required even when the
+// running agent has not advertised them, because the profile chose them.
+function profileRequiredConfigKeys(session: TaskSession, agents: Agent[]): Set<string> {
   const keys = new Set(configValueKeys(session.agent_profile_snapshot?.config_options));
   for (const agent of agents) {
     const profile = agent.profiles.find((item) => item.id === session.agent_profile_id);
     for (const key of Object.keys(profile?.configOptions ?? {})) keys.add(key);
   }
+  return keys;
+}
+
+// persistedRuntimeConfigKeys returns keys recorded only in the session's
+// persisted runtime metadata. A prior agent type may have written keys the
+// current agent never advertises; these must not block the selector.
+function persistedRuntimeConfigKeys(session: TaskSession): Set<string> {
+  const keys = new Set<string>();
   for (const value of [
     session.metadata?.runtime_config,
     session.metadata?.runtime_config_overrides,
@@ -103,6 +113,13 @@ export function requiredConfigKeys(session: TaskSession | null, agents: Agent[])
       keys.add(key);
     }
   }
+  return keys;
+}
+
+export function requiredConfigKeys(session: TaskSession | null, agents: Agent[]): string[] {
+  if (!session) return [];
+  const keys = profileRequiredConfigKeys(session, agents);
+  for (const key of persistedRuntimeConfigKeys(session)) keys.add(key);
   return [...keys];
 }
 
@@ -122,13 +139,21 @@ export function hasCompleteDynamicConfig(
   // configOptions. Treat that key as satisfied when the session has a flat model
   // list — the selector renders fine from it.
   const hasFlatModelList = !!sessionModelsData.models.length;
-  const hasLegacyAgentConfig =
-    sessionModelsData.configOptionsSettled === true && isLegacyAgentConfig(session, agents);
+  const catalogSettled = sessionModelsData.configOptionsSettled === true;
+  const hasLegacyAgentConfig = catalogSettled && isLegacyAgentConfig(session, agents);
+  // Keys written only by a prior agent type into persisted runtime metadata are
+  // not required for the selector to render: once the current agent's catalog
+  // has settled without advertising them, they are stale cross-agent leftovers
+  // that the backend replay also drops.
+  const profileRequired = session ? profileRequiredConfigKeys(session, agents) : new Set<string>();
+  const isPersistedOnlyStaleKey = (key: string): boolean =>
+    key !== AGENT_CONFIG_KEY && catalogSettled && !available.has(key) && !profileRequired.has(key);
   return required.every(
     (key) =>
       available.has(key) ||
       (key === AGENT_CONFIG_KEY && hasLegacyAgentConfig) ||
-      (key === MODEL_CONFIG_KEY && hasFlatModelList),
+      (key === MODEL_CONFIG_KEY && hasFlatModelList) ||
+      isPersistedOnlyStaleKey(key),
   );
 }
 

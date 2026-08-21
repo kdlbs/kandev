@@ -208,6 +208,11 @@ type WorkflowRepository interface {
 type MessageRepository interface {
 	CreateMessage(ctx context.Context, message *models.Message) error
 	GetMessage(ctx context.Context, id string) (*models.Message, error)
+	// GetMessageWithPromptIndex retrieves a message by ID with its computed
+	// prompt_index (1-based ordinal among the session's user messages).
+	// Used by the idempotent WS replay/response path and user update-event
+	// publication; hot-path reads stay on GetMessage.
+	GetMessageWithPromptIndex(ctx context.Context, id string) (*models.Message, error)
 	GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error)
 	GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error)
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*models.Message, error)

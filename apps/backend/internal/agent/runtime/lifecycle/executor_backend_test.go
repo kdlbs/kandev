@@ -92,3 +92,10 @@ func TestToAgentExecutionCapturesDefensiveRuntimeEnvironment(t *testing.T) {
 	got["PATH"] = "/mutated"
 	require.Equal(t, "/tmp/kandev-shim:/usr/bin", execution.RuntimeEnvironment()["PATH"])
 }
+
+func TestToAgentExecutionCapturesRunID(t *testing.T) {
+	execution := (&ExecutorInstance{InstanceID: "execution"}).ToAgentExecution(&ExecutorCreateRequest{
+		Env: map[string]string{"KANDEV_RUN_ID": "run-1"},
+	})
+	require.Equal(t, "run-1", execution.RunID)
+}

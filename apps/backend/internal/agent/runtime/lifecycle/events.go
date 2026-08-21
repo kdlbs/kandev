@@ -97,6 +97,7 @@ func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType
 func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
 	return AgentEventPayload{
 		AgentExecutionID:   execution.ID,
+		RunID:              execution.RunID,
 		TaskID:             execution.TaskID,
 		SessionID:          execution.SessionID,
 		AgentID:            execution.AgentID,

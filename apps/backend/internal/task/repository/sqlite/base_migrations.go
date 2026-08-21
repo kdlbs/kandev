@@ -365,6 +365,60 @@ func (r *Repository) runMigrations() error {
 	// backfill belongs in the migration phase.
 	r.migrateSubagentContextBackfill()
 
+	// Durable per-session prompt ordinals. prompt_seq is allocated from a
+	// per-session sequence counter inside the create write boundary, so an
+	// ordinal survives message deletion and clock corrections. Previously the
+	// ordinal was derived from the session's remaining user rows (a correlated
+	// count), which renumbered prompts after a delete. SQLite forbids
+	// non-constant column defaults, so the column is added with DEFAULT 0 and
+	// existing user rows are backfilled with the previously derived ordinal
+	// (count of user rows ordered before them by the normalized microsecond
+	// key, ties by id); the counter is seeded to each session's backfilled
+	// maximum. The backfill predicate (prompt_seq = 0) and ON CONFLICT keep
+	// every statement idempotent across replays.
+	r.migrate.Apply("task_session_messages.prompt_seq", `ALTER TABLE task_session_messages ADD COLUMN prompt_seq INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("task_session_prompt_seq.table", `
+		CREATE TABLE IF NOT EXISTS task_session_prompt_seq (
+			task_session_id TEXT PRIMARY KEY,
+			last_seq INTEGER NOT NULL
+		)`)
+	if err := r.backfillPromptSeq(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// backfillPromptSeq assigns existing user rows their previously derived
+// ordinal (the correlated count over the session's user rows using the same
+// normalized-microsecond predicate the create boundary used) and seeds each
+// session's sequence counter at its backfilled maximum. Idempotent: user rows
+// already carrying a nonzero prompt_seq are untouched, and the counter seed
+// ignores existing rows.
+func (r *Repository) backfillPromptSeq() error {
+	nmU := dialect.NormalizedMicrosecond(r.db.DriverName(), "u.created_at")
+	nmM := dialect.NormalizedMicrosecond(r.db.DriverName(), "task_session_messages.created_at")
+	update := fmt.Sprintf(`
+		UPDATE task_session_messages
+		SET prompt_seq = (
+			SELECT COUNT(*) FROM task_session_messages u
+			WHERE u.task_session_id = task_session_messages.task_session_id
+			  AND u.author_type = 'user'
+			  AND (%s < %s OR (%s = %s AND u.id <= task_session_messages.id))
+		)
+		WHERE author_type = 'user' AND prompt_seq = 0`, nmU, nmM, nmU, nmM)
+	if _, err := r.db.Exec(update); err != nil {
+		return fmt.Errorf("backfill prompt_seq: %w", err)
+	}
+	seed := `
+		INSERT INTO task_session_prompt_seq (task_session_id, last_seq)
+		SELECT task_session_id, MAX(prompt_seq) FROM task_session_messages
+		WHERE author_type = 'user' AND prompt_seq > 0
+		GROUP BY task_session_id
+		ON CONFLICT(task_session_id) DO NOTHING`
+	if _, err := r.db.Exec(seed); err != nil {
+		return fmt.Errorf("seed prompt sequence counters: %w", err)
+	}
 	return nil
 }
 

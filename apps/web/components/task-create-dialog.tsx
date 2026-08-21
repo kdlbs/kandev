@@ -253,6 +253,9 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
         ref={setPopoverContainer}
+        onEscapeKeyDown={(event) => {
+          if (setup.isCreateMode) event.preventDefault();
+        }}
         data-testid="create-task-dialog"
         data-webkit-safe-motion="true"
         showCloseButton={false}
