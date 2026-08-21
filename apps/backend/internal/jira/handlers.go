@@ -661,7 +661,7 @@ func (c *Controller) httpOAuthCallback(ctx *gin.Context) {
   var params = new URLSearchParams(window.location.search);
   var data = { type: "jira-oauth-callback", code: params.get("code"), state: params.get("state") };
   if (window.opener) {
-    window.opener.postMessage(data, "*");
+    window.opener.postMessage(data, window.location.origin);
     setTimeout(function() { window.close(); }, 100);
   }
 })();
@@ -684,7 +684,7 @@ func (c *Controller) httpOAuthRefresh(ctx *gin.Context) {
 		}
 		return
 	}
-	if err := c.service.RefreshOAuthToken(ctx.Request.Context(), workspaceID); err != nil {
+	if err := c.service.RefreshOAuthToken(ctx.Request.Context(), workspaceID, ""); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

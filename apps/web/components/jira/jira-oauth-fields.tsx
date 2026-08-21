@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { useToast } from "@/components/toast-provider";
 import { useTranslation } from "react-i18next";
+import { startJiraOAuth, completeJiraOAuth } from "@/lib/api/domains/jira-api";
 
 type OAuthFieldsProps = {
   form: { siteUrl: string };
@@ -51,43 +52,27 @@ function useOAuthConnect(
   const handleConnect = useCallback(async () => {
     setConnecting(true);
     try {
-      const params = new URLSearchParams({ workspaceId, siteUrl });
-      const res = await fetch(`/api/v1/jira/oauth/start?${params}`);
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: t("common:unknownError") }));
-        showError(err.error || String(err));
-        return;
-      }
-      const { authUrl } = await res.json();
+      const { authUrl } = await startJiraOAuth(siteUrl, { workspaceId });
       window.open(authUrl, "_blank");
       setShowPasteDialog(true);
     } catch (err) {
-      showError(String(err));
+      showError(err instanceof Error ? err.message : String(err));
     } finally {
       setConnecting(false);
     }
-  }, [workspaceId, siteUrl, t, showError]);
+  }, [workspaceId, siteUrl, showError]);
 
   const completeOAuth = useCallback(
     async (code: string, state: string) => {
       setCompleting(true);
       try {
-        const res = await fetch(
-          `/api/v1/jira/oauth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}&api=1`,
-          { headers: { Accept: "application/json" } },
-        );
-        if (res.ok) {
-          toast({ description: t("jira:oauthConnected"), variant: "success" });
-          setShowPasteDialog(false);
-          setPasteUrl("");
-          onConnected();
-          return;
-        }
-        const err = await res.json().catch(() => ({ error: t("common:unknownError") }));
-        showError(err.error || t("common:unknownError"));
-        setShowPasteDialog(true);
+        await completeJiraOAuth(code, state);
+        toast({ description: t("jira:oauthConnected"), variant: "success" });
+        setShowPasteDialog(false);
+        setPasteUrl("");
+        onConnected();
       } catch (err) {
-        showError(String(err));
+        showError(err instanceof Error ? err.message : String(err));
         setShowPasteDialog(true);
       } finally {
         setCompleting(false);

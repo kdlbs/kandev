@@ -306,9 +306,14 @@ func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID stri
 		if err := s.secrets.Delete(ctx, SecretKeyForWorkspace(workspaceID)); err != nil {
 			s.log.Warn("jira: secret delete failed", zap.Error(err))
 		}
-		// Clean up OAuth secrets if they exist.
-		_ = s.secrets.Delete(ctx, OAuthAccessTokenKeyForWorkspace(workspaceID))
-		_ = s.secrets.Delete(ctx, OAuthRefreshTokenKeyForWorkspace(workspaceID))
+		// Clean up OAuth secrets if they exist. Log failures so a stale
+		// refresh token left in the store after config removal is visible.
+		if err := s.secrets.Delete(ctx, OAuthAccessTokenKeyForWorkspace(workspaceID)); err != nil {
+			s.log.Warn("jira: oauth access token delete failed", zap.Error(err))
+		}
+		if err := s.secrets.Delete(ctx, OAuthRefreshTokenKeyForWorkspace(workspaceID)); err != nil {
+			s.log.Warn("jira: oauth refresh token delete failed", zap.Error(err))
+		}
 	}
 	s.invalidateClient(workspaceID)
 	return nil

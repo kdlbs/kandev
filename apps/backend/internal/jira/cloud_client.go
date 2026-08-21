@@ -59,7 +59,10 @@ type CloudClient struct {
 // TokenRefresher is implemented by the Service to allow CloudClient to refresh
 // OAuth access tokens on-demand when a request hits a 401.
 type TokenRefresher interface {
-	RefreshOAuthToken(ctx context.Context, workspaceID string) error
+	// staleToken is the access token that just hit a 401; the refresher skips
+	// rotation if the stored token already changed (another goroutine won the
+	// race). Pass "" to force a refresh.
+	RefreshOAuthToken(ctx context.Context, workspaceID, staleToken string) error
 	RevealAccessToken(ctx context.Context, workspaceID string) (string, error)
 }
 
@@ -166,7 +169,10 @@ func (c *CloudClient) tryRefreshOn401(ctx context.Context, err error) bool {
 	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusUnauthorized {
 		return false
 	}
-	if refreshErr := c.refresher.RefreshOAuthToken(ctx, c.workspaceID); refreshErr != nil {
+	c.secretMu.RLock()
+	stale := c.secret
+	c.secretMu.RUnlock()
+	if refreshErr := c.refresher.RefreshOAuthToken(ctx, c.workspaceID, stale); refreshErr != nil {
 		return false
 	}
 	newToken, revealErr := c.refresher.RevealAccessToken(ctx, c.workspaceID)

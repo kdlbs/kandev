@@ -228,6 +228,12 @@ func (s *Service) CompleteOAuthFlow(ctx context.Context, code, state string) (*J
 		CloudID:        cloudID,
 		TokenExpiresAt: &expiresAt,
 	}
+	// UpsertConfigForWorkspace is a full-row write; carry over user-owned fields
+	// so connecting OAuth doesn't wipe an existing email / default project key.
+	if existing, err := s.store.GetConfigForWorkspace(ctx, st.WorkspaceID); err == nil && existing != nil {
+		cfg.Email = existing.Email
+		cfg.DefaultProjectKey = existing.DefaultProjectKey
+	}
 	if err := s.store.UpsertConfigForWorkspace(ctx, st.WorkspaceID, cfg); err != nil {
 		return nil, fmt.Errorf("persist config: %w", err)
 	}
@@ -246,9 +252,17 @@ func (s *Service) CompleteOAuthFlow(ctx context.Context, code, state string) (*J
 // RefreshOAuthToken uses the stored refresh token to get a new access token.
 // PKCE-based flow: only client_id is sent (no client_secret). Refresh tokens
 // are rotating — the old one is invalidated and a new one is returned.
-func (s *Service) RefreshOAuthToken(ctx context.Context, workspaceID string) error {
+func (s *Service) RefreshOAuthToken(ctx context.Context, workspaceID, staleToken string) error {
 	s.oauthMu.Lock(workspaceID)
 	defer s.oauthMu.Unlock(workspaceID)
+
+	// If another goroutine already rotated the token while we waited for the
+	// lock, skip: rotating again with the now-invalid refresh token would fail.
+	if staleToken != "" {
+		if current, err := s.secrets.Reveal(ctx, OAuthAccessTokenKeyForWorkspace(workspaceID)); err == nil && current != "" && current != staleToken {
+			return nil
+		}
+	}
 
 	refreshToken, err := s.secrets.Reveal(ctx, OAuthRefreshTokenKeyForWorkspace(workspaceID))
 	if err != nil {
