@@ -7,10 +7,9 @@
 // Every write routes through the same first-party layer the REST/MCP API uses,
 // never a repository — that is how task.* events fire and how a message reaches
 // the agent through the orchestrator's real delivery path (queue when the
-// session is running, resume/start it otherwise). The service types can't be
-// referenced here without an import cycle (see SetDataSources' doc), so task
-// writes go through a narrow taskWriter interface and message delivery through a
-// narrow taskMessenger interface, both satisfied by backendapp adapters.
+// session is running, resume/start it otherwise). Task writes and message
+// delivery go through narrow taskWriter and taskMessenger interfaces,
+// satisfied by backendapp adapters.
 package plugins
 
 import (
@@ -23,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -117,13 +117,6 @@ type taskStarter interface {
 // spoof another origin.
 const taskSourceMetadataKey = "source"
 
-const (
-	pluginTaskPriorityCritical = "critical"
-	pluginTaskPriorityHigh     = "high"
-	pluginTaskPriorityMedium   = "medium"
-	pluginTaskPriorityLow      = "low"
-)
-
 func (h *pluginHost) pluginSource() string {
 	return "plugin:" + h.pluginID
 }
@@ -152,7 +145,7 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 	if in.Title == "" {
 		return nil, invalidArgument("title is required")
 	}
-	if in.Priority != "" && !validPluginTaskPriority(in.Priority) {
+	if in.Priority != "" && taskservice.ValidateTaskPriority(in.Priority) != nil {
 		return nil, invalidArgument(fmt.Sprintf("invalid task priority %q", in.Priority))
 	}
 	metadata, err := r.host.pluginTaskMetadata(in.Metadata)
@@ -210,7 +203,7 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 	if in.ID == "" {
 		return nil, invalidArgument("id is required")
 	}
-	if in.Priority != nil && !validPluginTaskPriority(*in.Priority) {
+	if in.Priority != nil && taskservice.ValidateTaskPriority(*in.Priority) != nil {
 		return nil, invalidArgument(fmt.Sprintf("invalid task priority %q", *in.Priority))
 	}
 	updated, err := r.host.taskWriter.UpdateTask(ctx, TaskUpdateInput{
@@ -230,15 +223,6 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 	}
 	dto := taskModelToDTO(updated)
 	return &dto, nil
-}
-
-func validPluginTaskPriority(priority string) bool {
-	switch priority {
-	case pluginTaskPriorityCritical, pluginTaskPriorityHigh, pluginTaskPriorityMedium, pluginTaskPriorityLow:
-		return true
-	default:
-		return false
-	}
 }
 
 // resolveCreatePlacement fills the workspace and workflow a created task lands
