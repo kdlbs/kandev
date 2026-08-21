@@ -11,18 +11,18 @@ type AdaptiveDesktopKanbanProps = {
 
 export function AdaptiveDesktopKanban({ steps, renderColumn }: AdaptiveDesktopKanbanProps) {
   return (
-    <div data-testid="desktop-kanban-layout" className="h-full min-w-0">
+    <div data-testid="desktop-kanban-layout" className="h-full min-h-0 min-w-0">
       <div
         data-testid="desktop-kanban-scroll-window"
-        className="h-full min-w-0 overflow-x-auto snap-x snap-mandatory"
+        className="h-full min-h-0 min-w-0 overflow-x-auto snap-x snap-mandatory"
       >
         <div
           data-testid="desktop-kanban-lane-grid"
-          className="grid h-full min-w-full gap-0"
+          className="grid h-full min-h-0 min-w-full gap-0"
           style={{ gridTemplateColumns: getKanbanColumnGridTemplate(steps.length) }}
         >
           {steps.map((step) => (
-            <div key={step.id} className="min-w-0 snap-start">
+            <div key={step.id} className="min-h-0 min-w-0 snap-start">
               {renderColumn(step)}
             </div>
           ))}

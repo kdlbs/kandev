@@ -183,7 +183,11 @@ function SortableWorkflowItem({
   };
   const dragHandleProps = isSortable && !hideHeader ? { ...attributes, ...listeners } : undefined;
   return (
-    <div ref={setNodeRef} style={style} className={fillHeight ? "min-h-0 flex-1" : undefined}>
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={fillHeight ? "h-full min-h-0 flex-1" : undefined}
+    >
       <WorkflowItemContent
         wf={wf}
         hideHeader={hideHeader}
@@ -239,6 +243,7 @@ function WorkflowItemContent({
       dragHandleProps={dragHandleProps}
       onToggleMultiSelect={onToggleMultiSelect}
       isMultiSelectMode={viewProps.isMultiSelectMode}
+      fillHeight={fillHeight}
       columnsMenu={
         <ColumnsMenu
           workflowId={wf.id}
@@ -554,7 +559,7 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
             ViewComponent={ViewComponent}
             hideHeaders={hideHeaders}
             onToggleStepVisibility={onToggleStepVisibility}
-            fillHeight={isMobileKanban}
+            fillHeight={view.id === "kanban"}
             canSortWorkflows={canSortWorkflows}
             isCollapsed={isCollapsed}
             toggleCollapse={toggleCollapse}
