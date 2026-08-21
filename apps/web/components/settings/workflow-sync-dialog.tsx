@@ -403,7 +403,7 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
           <Button
             type="button"
             onClick={handleSave}
-            disabled={disableSave}
+            disabled={disableSave || removeConfirming}
             className="cursor-pointer"
             data-testid="workflow-sync-save"
             data-dialog-default-action

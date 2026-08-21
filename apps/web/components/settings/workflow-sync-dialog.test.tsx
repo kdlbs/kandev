@@ -105,6 +105,18 @@ describe("WorkflowSyncDialog removal confirmation", () => {
     expect(screen.getByTestId(REMOVE_TEST_ID)).toBeTruthy();
   });
 
+  it("prevents saves while removal confirmation is active", () => {
+    const sync = controller();
+    render(<WorkflowSyncDialog open onOpenChange={vi.fn()} sync={sync} />);
+
+    fireEvent.click(screen.getByTestId(REMOVE_TEST_ID));
+
+    const save = screen.getByTestId<HTMLButtonElement>("workflow-sync-save");
+    expect(save.disabled).toBe(true);
+    fireEvent.click(save);
+    expect(sync.handleSave).not.toHaveBeenCalled();
+  });
+
   it("confirms removal once and closes after successful mutation", async () => {
     const sync = controller();
     const onOpenChange = vi.fn();
@@ -145,5 +157,25 @@ describe("WorkflowSyncDialog removal confirmation", () => {
     const nextSync = controller({ config: config({ repo_name: "new-flows" }) });
     rerender(<WorkflowSyncDialog open onOpenChange={vi.fn()} sync={nextSync} />);
     await waitFor(() => expect(screen.queryByTestId(REMOVE_CONFIRMATION_TEST_ID)).toBeNull());
+  });
+
+  it("clears inline state when the user edits the repository URL", async () => {
+    const sync = controller();
+    const { rerender } = render(<WorkflowSyncDialog open onOpenChange={vi.fn()} sync={sync} />);
+
+    fireEvent.click(screen.getByTestId(REMOVE_TEST_ID));
+    fireEvent.change(screen.getByTestId("workflow-sync-url-input"), {
+      target: { value: "https://github.com/acme/other-flows" },
+    });
+    expect(sync.setUrlInput).toHaveBeenCalledWith("https://github.com/acme/other-flows");
+
+    const editedSync = controller({
+      form: { ...sync.form, repo_name: "other-flows" },
+      url: "https://github.com/acme/other-flows",
+    });
+    rerender(<WorkflowSyncDialog open onOpenChange={vi.fn()} sync={editedSync} />);
+
+    await waitFor(() => expect(screen.queryByTestId(REMOVE_CONFIRMATION_TEST_ID)).toBeNull());
+    expect(screen.getByTestId(REMOVE_TEST_ID)).toBeTruthy();
   });
 });
