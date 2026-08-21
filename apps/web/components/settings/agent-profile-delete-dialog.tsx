@@ -1,6 +1,7 @@
 "use client";
 
 import { Trans, useTranslation } from "react-i18next";
+import type { RefObject } from "react";
 import type { TFunction } from "i18next";
 import {
   AlertDialog,
@@ -12,6 +13,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
+import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
+import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import { useAppStore } from "@/components/state-provider";
 import type {
   ActiveSessionInfo,
@@ -30,6 +33,10 @@ const WATCHER_KIND_LABEL_KEYS: Record<WatcherReference["kind"], string> = {
   github_review: "agents:watcherKindGithubReview",
 };
 
+const DELETE_PROFILE_TITLE_KEY = "agents:deleteAgentProfileTitle";
+const DELETE_PROFILE_DESCRIPTION_KEY = "agents:deleteAgentProfileDescription";
+const CANCEL_LABEL_KEY = "common:cancel";
+
 type AgentProfileDeleteConfirmDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -46,13 +53,11 @@ export function AgentProfileDeleteConfirmDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{t("agents:deleteAgentProfileTitle")}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t("agents:deleteAgentProfileDescription")}
-          </AlertDialogDescription>
+          <AlertDialogTitle>{t(DELETE_PROFILE_TITLE_KEY)}</AlertDialogTitle>
+          <AlertDialogDescription>{t(DELETE_PROFILE_DESCRIPTION_KEY)}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">{t(CANCEL_LABEL_KEY)}</AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
@@ -62,6 +67,63 @@ export function AgentProfileDeleteConfirmDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+type AgentProfileDeleteConfirmationProps = {
+  open: boolean;
+  isFinePointer: boolean;
+  anchorRef: RefObject<HTMLElement | null>;
+  onOpenChange: (open: boolean) => void;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
+};
+
+/**
+ * Local confirmation for a simple profile deletion. Conflict handling stays in
+ * AgentProfileDeleteConflictDialog because its dependency lists need a modal.
+ */
+export function AgentProfileDeleteConfirmation({
+  open,
+  isFinePointer,
+  anchorRef,
+  onOpenChange,
+  onCancel,
+  onConfirm,
+}: AgentProfileDeleteConfirmationProps) {
+  const { t } = useTranslation();
+  if (isFinePointer) {
+    return (
+      <ActionConfirmPopover
+        open={open}
+        anchorRef={anchorRef}
+        title={t(DELETE_PROFILE_TITLE_KEY)}
+        description={t(DELETE_PROFILE_DESCRIPTION_KEY)}
+        cancelLabel={t(CANCEL_LABEL_KEY)}
+        confirmLabel={t("agents:delete")}
+        confirmTestId="agent-profile-delete-confirm"
+        testId="agent-profile-delete-confirm-popover"
+        onOpenChange={onOpenChange}
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+      />
+    );
+  }
+
+  if (!open) return null;
+  return (
+    <InlineConfirmActions
+      density="touch"
+      testId="agent-profile-delete-inline-confirmation"
+      ariaLabel={t(DELETE_PROFILE_TITLE_KEY)}
+      description={t(DELETE_PROFILE_DESCRIPTION_KEY)}
+      cancelLabel={t(CANCEL_LABEL_KEY)}
+      confirmLabel={t("agents:delete")}
+      confirmTestId="agent-profile-delete-confirm"
+      onCancel={onCancel}
+      onClose={() => onOpenChange(false)}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -95,7 +157,7 @@ export function AgentProfileDisableConflictDialog({
           ))}
         </ul>
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">{t(CANCEL_LABEL_KEY)}</AlertDialogCancel>
           <AlertDialogAction onClick={onConfirm} className="cursor-pointer">
             {t("agents:disableProfileAnyway")}
           </AlertDialogAction>
@@ -145,9 +207,7 @@ export function AgentProfileDeleteConflictDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {hasHardBlockers
-              ? t("agents:cannotDeleteAgentProfile")
-              : t("agents:deleteAgentProfileTitle")}
+            {hasHardBlockers ? t("agents:cannotDeleteAgentProfile") : t(DELETE_PROFILE_TITLE_KEY)}
           </AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div>
@@ -182,7 +242,7 @@ export function AgentProfileDeleteConflictDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">{t(CANCEL_LABEL_KEY)}</AlertDialogCancel>
           {hasHardBlockers ? null : (
             <AlertDialogAction
               onClick={onConfirm}
