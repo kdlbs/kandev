@@ -20,7 +20,7 @@ import (
 
 func TestAuthenticatedMCPAgentPermissionListResolveAndReplay(t *testing.T) {
 	ts := NewOrchestratorTestServer(t)
-	defer ts.Close()
+	t.Cleanup(func() { ts.Close() })
 
 	h := mcphandlers.NewHandlers(
 		ts.TaskSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil,
