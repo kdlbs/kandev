@@ -290,7 +290,7 @@ func (s *Service) permissionLookupError(ctx context.Context, request ResolveAgen
 		return ErrPermissionAuditFailed
 	}
 	if audit == nil {
-		if updateErr := s.messageCreator.UpdatePermissionMessage(ctx, request.SessionID, request.PendingID, models.PermissionStatusExpired); updateErr != nil {
+		if updateErr := s.messageCreator.UpdatePermissionMessage(ctx, request.TaskID, request.SessionID, request.RequestID, request.PendingID, models.PermissionStatusExpired); updateErr != nil {
 			s.logger.Warn("failed to expire stale permission message",
 				zap.String("session_id", request.SessionID),
 				zap.String("pending_id", request.PendingID),

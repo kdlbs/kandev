@@ -148,6 +148,13 @@ type AgentStreamEventData struct {
 	// PendingID identifies a permission request (for "permission_cancelled" events).
 	PendingID string `json:"pending_id,omitempty"`
 
+	// RequestID is the Kandev-generated identity for the exact permission
+	// request this event concerns (for "permission_cancelled" events). A
+	// provider may reuse PendingID for a later, unrelated request, so a
+	// delayed cancellation must be matched against RequestID too before it
+	// is allowed to expire a permission message.
+	RequestID string `json:"request_id,omitempty"`
+
 	// Normalized contains the typed tool payload data.
 	// This is used to populate message metadata with structured tool information.
 	Normalized *streams.NormalizedPayload `json:"normalized,omitempty"`

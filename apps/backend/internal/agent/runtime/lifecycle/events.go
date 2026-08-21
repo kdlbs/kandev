@@ -192,6 +192,7 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		ToolCallID:              event.ToolCallID,
 		ParentToolCallID:        event.ParentToolCallID,
 		PendingID:               event.PendingID,
+		RequestID:               event.RequestID,
 		ToolName:                event.ToolName,
 		ToolTitle:               event.ToolTitle,
 		ToolStatus:              event.ToolStatus,

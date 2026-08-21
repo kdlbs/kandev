@@ -201,8 +201,9 @@ func TestResolveAgentPermissionExpiresPersistedCardWhenLiveRequestIsMissing(t *t
 		permissionAuditFn: func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error) {
 			return nil, nil
 		},
-		permissionUpdateFn: func(_ context.Context, sessionID, pendingID string, status models.PermissionStatus) error {
-			expired = sessionID == "session-stale-card" && pendingID == "pending-stale-card" &&
+		permissionUpdateFn: func(_ context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error {
+			expired = taskID == "task-stale-card" && sessionID == "session-stale-card" &&
+				requestID == "request-stale-card" && pendingID == "pending-stale-card" &&
 				status == models.PermissionStatusExpired
 			return nil
 		},

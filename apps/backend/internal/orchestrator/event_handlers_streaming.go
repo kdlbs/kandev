@@ -3754,14 +3754,22 @@ func (s *Service) persistTodoMessage(ctx context.Context, taskID, sessionID stri
 }
 
 // handlePermissionCancelledEvent marks the pending permission message as expired.
+//
+// The update is qualified by RequestID as well as PendingID: a provider may
+// reuse pending_id for a later, unrelated request once the original is
+// resolved, and this event can arrive after that happens (agentctl's
+// ctx.Done() cancellation path races the handler goroutine's own teardown).
+// Matching RequestID too keeps a delayed cancellation from expiring the new
+// request's message.
 func (s *Service) handlePermissionCancelledEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	sessionID := payload.SessionID
 	if sessionID == "" || payload.Data.PendingID == "" || s.messageCreator == nil {
 		return
 	}
-	if err := s.messageCreator.UpdatePermissionMessage(ctx, sessionID, payload.Data.PendingID, models.PermissionStatusExpired); err != nil {
+	if err := s.messageCreator.UpdatePermissionMessage(ctx, payload.TaskID, sessionID, payload.Data.RequestID, payload.Data.PendingID, models.PermissionStatusExpired); err != nil {
 		s.logger.Warn("failed to mark permission as expired",
 			zap.String("session_id", sessionID),
+			zap.String("request_id", payload.Data.RequestID),
 			zap.String("pending_id", payload.Data.PendingID),
 			zap.Error(err))
 	}

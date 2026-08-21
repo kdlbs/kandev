@@ -517,6 +517,15 @@ func (r *Repository) GetMessageByPendingID(ctx context.Context, sessionID, pendi
 	return r.getMessageByMetadataField(ctx, sessionID, "pending_id", pendingID, "")
 }
 
+// GetPermissionMessageByIdentity retrieves a permission_request message by its
+// full (task, session, request, pending) identity. A provider may reuse
+// pending_id for a later, unrelated request once the original is resolved, so
+// matching request_id too prevents a delayed event about the old request from
+// being applied to the new one.
+func (r *Repository) GetPermissionMessageByIdentity(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.Message, error) {
+	return r.getPermissionMessageByIdentity(ctx, taskID, sessionID, requestID, pendingID)
+}
+
 // FindMessageByPendingID finds the most-recent message by pending_id alone.
 // This is useful when we only have the pending ID (e.g., from expired clarification responses).
 // For multi-question clarification requests, prefer FindMessagesByPendingID to retrieve

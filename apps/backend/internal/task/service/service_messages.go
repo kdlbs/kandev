@@ -673,7 +673,13 @@ func (s *Service) applyToolCallMessageUpdate(message *models.Message, status, re
 
 // UpdatePermissionMessage updates a permission request message's status.
 // It includes retry logic to handle race conditions.
-func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error {
+//
+// The lookup is qualified by the full (task, session, request, pending)
+// identity rather than pending_id alone: a provider may reuse a pending_id
+// for a later, unrelated request once the original is resolved, and a
+// delayed event about the old request must not be able to expire the new
+// one's message.
+func (s *Service) UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error {
 	const maxRetries = 5
 	const retryDelay = 100 * time.Millisecond
 
@@ -682,7 +688,7 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 
 	// Retry loop to handle race condition
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		message, err = s.messages.GetMessageByPendingID(ctx, sessionID, pendingID)
+		message, err = s.messages.GetPermissionMessageByIdentity(ctx, taskID, sessionID, requestID, pendingID)
 		if err == nil {
 			break
 		}
@@ -694,6 +700,7 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 		if attempt < maxRetries-1 {
 			s.logger.Debug("permission message not found, retrying",
 				zap.String("session_id", sessionID),
+				zap.String("request_id", requestID),
 				zap.String("pending_id", pendingID),
 				zap.Int("attempt", attempt+1),
 				zap.Int("max_retries", maxRetries))

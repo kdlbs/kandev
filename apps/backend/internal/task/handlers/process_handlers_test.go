@@ -285,6 +285,9 @@ func (m *mockRepository) FinalizePermissionResolution(context.Context, models.Pe
 func (m *mockRepository) GetPermissionResolutionAudit(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error) {
 	return nil, nil
 }
+func (m *mockRepository) GetPermissionMessageByIdentity(context.Context, string, string, string, string) (*models.Message, error) {
+	return nil, nil
+}
 func (m *mockRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	return nil, nil
 }
