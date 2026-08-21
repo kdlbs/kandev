@@ -2,12 +2,83 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { expect, type Locator } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import { dwell } from "../../helpers/causal-waits";
 import type { SeedData } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 
 const GIT_PROTOCOL_ARGS = ["-c", "protocol.file.allow=always"];
+
+async function waitForFiniteAnimations(surface: Locator): Promise<void> {
+  await surface.evaluate(async (element) => {
+    const animations = element.getAnimations({ subtree: true }).filter((animation) => {
+      const iterations = animation.effect?.getComputedTiming().iterations;
+      return typeof iterations === "number" && Number.isFinite(iterations);
+    });
+    await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
+  });
+}
+
+export async function expectStickyReviewHeaderClearance(
+  review: Locator,
+  pointer: "mouse" | "touch",
+): Promise<void> {
+  const rootGroup = review.locator('[data-testid="changes-repo-group"][data-repository-name=""]');
+  const repositoryHeader = rootGroup.getByTestId("changes-repo-header");
+  const fileHeader = rootGroup.locator(
+    '[data-testid="review-file-header"][data-file-path="README.md"]',
+  );
+  const fileSection = fileHeader.locator("..");
+  const disclosure = fileHeader.getByRole("button", {
+    name: /^(Collapse|Expand) README\.md$/,
+  });
+
+  await expect(repositoryHeader).toContainText("Other changes");
+  await expect(fileHeader).toHaveCount(1);
+  await expect(disclosure).toHaveCount(1);
+  await waitForFiniteAnimations(review);
+  await fileSection.evaluate((element) =>
+    element.scrollIntoView({ behavior: "auto", block: "start" }),
+  );
+
+  await expect
+    .poll(
+      async () => {
+        const [repositoryBox, fileBox] = await Promise.all([
+          repositoryHeader.boundingBox(),
+          fileHeader.boundingBox(),
+        ]);
+        const disclosureHit = await disclosure.evaluate((control) => {
+          const box = control.getBoundingClientRect();
+          const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+          return hit === control || (hit !== null && control.contains(hit));
+        });
+        const clearance =
+          repositoryBox && fileBox
+            ? Math.round((fileBox.y - (repositoryBox.y + repositoryBox.height)) * 100) / 100
+            : null;
+        return {
+          clearance,
+          headersSeparated: clearance !== null && clearance >= -1,
+          disclosureHit,
+        };
+      },
+      { message: "repository header must not cover the current file header or disclosure" },
+    )
+    .toEqual({
+      clearance: expect.any(Number),
+      headersSeparated: true,
+      disclosureHit: true,
+    });
+
+  if (pointer === "touch") {
+    await disclosure.tap();
+  } else {
+    await disclosure.click();
+  }
+  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+}
 
 export type SubmoduleReviewFixture = {
   taskId: string;
@@ -141,7 +212,10 @@ export async function createSubmoduleReviewFixture(
             env,
           );
         }
-        fs.appendFileSync(path.join(worktreePath, "README.md"), "parent working-tree change\n");
+        fs.appendFileSync(
+          path.join(worktreePath, "README.md"),
+          `parent working-tree change\n${"root review line\n".repeat(80)}`,
+        );
         fs.appendFileSync(path.join(outerWorktree, "README.md"), "outer committed change\n");
         commit(outerWorktree, env, "change outer submodule");
         fs.appendFileSync(path.join(innerWorktree, "README.md"), "inner committed change\n");

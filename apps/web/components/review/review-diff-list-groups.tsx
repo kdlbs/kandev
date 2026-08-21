@@ -24,7 +24,7 @@ export function RepoGroupHeader({
   const label = name || t("task:otherChanges");
   return (
     <div
-      className="sticky top-0 z-20 flex items-center gap-2 px-4 py-1.5 bg-muted/40 backdrop-blur-sm border-y border-border/60 text-xs font-medium text-foreground"
+      className="sticky top-0 z-20 flex h-8 items-center gap-2 border-y border-border/60 bg-muted/40 px-4 text-xs font-medium text-foreground backdrop-blur-sm"
       data-testid="changes-repo-header"
       data-submodule-scope={isSubmodule ? "true" : undefined}
       aria-label={isSubmodule ? t("common:reviewSubmoduleBoundary", { scope: name }) : undefined}
