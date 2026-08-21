@@ -36,8 +36,9 @@ Decision: [ADR-2026-08-11-composer-access-authenticated-webhooks](../../decision
   composer capability and surface metadata; new `task-create-input-actions` and
   `new-session-input-actions` slots cover creation forms. Quick Chat uses `chat-input-actions` with
   `surface: "quick-chat"` and `taskId: null` when it is genuinely task-less.
-- A webhook declaration chooses `access: public` or `access: authenticated`. Existing declarations
-  default to `public`; authenticated webhooks require the current Kandev user and same-origin browser
+- A webhook declaration chooses `access: public` or `access: authenticated`. API v1 declarations
+  keep the public default. API v2 declarations default to authenticated. Public webhooks explicitly
+  opt into anonymous delivery in API v2, while authenticated webhooks require the current Kandev user and same-origin browser
   request checks before the existing plugin webhook RPC runs.
 - A webhook declaration may lower its request cap through `max_body_bytes`. Only authenticated
   webhooks may raise it above the existing 4 MiB public ceiling, up to a host ceiling of 16 MiB.
@@ -49,8 +50,8 @@ Decision: [ADR-2026-08-11-composer-access-authenticated-webhooks](../../decision
   [ADR-2026-08-12-plugin-localization-contract](../../decisions/2026-08-12-plugin-localization-contract.md).
   The later Voice plugin registers its English fallback and supported-locale catalogs before any
   composer contribution.
-- Disabling, uninstalling, or reloading a plugin aborts its in-flight webhook requests, unregisters
-  its composer actions, and leaves native drafts intact.
+- Disabling, uninstalling, or reloading a plugin waits for an in-flight webhook RPC and its response
+  side effects, unregisters its composer actions, and leaves native drafts intact.
 - The current core Voice Mode stays present until a separately delivered Voice plugin proves parity
   on all listed surfaces. Removing core Voice Mode is not part of these host prerequisites. That
   removal has since happened; see [Voice Mode leaves core](voice-extraction.md).
@@ -161,8 +162,8 @@ current external-call behavior. Request cancellation propagates through the exis
 
 ## Compatibility And Versioning
 
-- These additions are backward-compatible within plugin `api_version: 1`; all new manifest and host
-  fields are optional, and existing slot components that ignore added props continue to work.
+- API v1 keeps omitted webhook access public. API v2 makes omitted access authenticated. Existing
+  slot components that ignore added props continue to work.
 - A plugin using `webhooks[].access` or `max_body_bytes` must set `min_kandev_version` to the first
   release containing this contract. Older hosts reject installation instead of silently treating an
   authenticated webhook as public.

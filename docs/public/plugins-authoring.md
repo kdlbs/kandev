@@ -165,8 +165,10 @@ curated React, UI, and app-store surface.
   capabilities.events controls event delivery.
 - GetConfig and EmitEvent are ungated. GetConfig returns this plugin's own
   config, including cleartext secret fields, so do not log or commit it.
-- Declared webhook keys default to public. Set `webhooks[].access: authenticated`
-  for browser UI and billable operations. Kandev does not enforce
+- API v2 webhook keys default to authenticated. API v1 keeps its public default
+  for compatibility and logs a migration warning when `access` is omitted.
+  Set `webhooks[].access: public` only for third-party callbacks or SSO entry
+  points that validate callers. Kandev does not enforce
   `webhooks[].method`; public integrations must still validate the provider
   signature and replay/timestamp rules before side effects.
 - capabilities.auth is the highest-risk capability. A webhook response may
@@ -248,6 +250,7 @@ slice shapes in a released plugin.
 
 ### Frontend hook/API matrix
 
+
 | Surface                     | Location and input                                                                                                                                                                                                                                                                                     | Manifest requirement                                                   | Cleanup/lifecycle                                                                                                                                                                                               | Small example                                                                                                       |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | registerRoute               | registry.registerRoute(path, Component, options?); exact SPA path; options.topbar defaults to host chrome or false for full-bleed                                                                                                                                                                      | Active ui.bundle                                                       | Route is removed on disable/uninstall; use destroy for subscriptions                                                                                                                                            | registry.registerRoute("/acme", Page, { topbar: { title: "Acme" } })                                                |
@@ -270,7 +273,7 @@ slice shapes in a released plugin.
 | host.setIntegrationEnabled | Publishes one registration's live enabled value for one workspace; the value is reactive but not durable                                                                                                                                                                                         | Active ui.bundle                                                       | The host validates that `integrationId` belongs to this plugin; republish after load using `host.context.getWorkspaceIds()` and `subscribeWorkspaces()`                                                                                  | host.setIntegrationEnabled("acme", workspaceId, enabled)                                                          |
 | host.i18n                   | Plugin-scoped `locale`, imperative `t(key, options?)`, and reactive `useTranslation()`                                                                                                                                                                                                                 | A registered English catalog                                           | Locale changes re-render reactive consumers; missing active-locale messages fall back to the plugin's English catalog                                                                                           | const { t } = host.i18n.useTranslation(); t("pullRequests")                                                         |
 | host.store (legacy)         | Compatibility-only access to Kandev's private Zustand store; intentionally absent from `@kandev/plugin-sdk`                                                                                                                                                                                            | Older ui.bundle                                                        | Do not use in new or official plugins; private slices may change without plugin-API compatibility                                                                                                               | Migrate reads to host.context                                                                                       |
-| host.api.fetch / baseUrl    | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments                                                                                                                                                                                      | Active ui.bundle; backend path must be a declared webhook when relayed | Declare `webhooks[].access: authenticated` for UI-only or billable operations; requests are generation-aborted on unload                                                                                        | host.api.fetch("webhooks/inbound", { method: "POST" })                                                              |
+| host.api.fetch / baseUrl    | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments                                                                                                                                                                                      | Active ui.bundle; backend path must be a declared webhook when relayed | Declare `webhooks[].access: authenticated` for UI-only or billable operations; authenticated forwarding strips `Authorization` and `Cookie`; public forwarding strips Kandev session credentials while preserving provider credentials; a generation change waits for the response. | host.api.fetch("webhooks/inbound", { method: "POST" })                                                              |
 | host.api.invokeAction       | Authenticated call to a declared action with host-verified workspace/task/session/repository selectors and bounded untrusted body                                                                                                                                                                      | Matching manifest `actions[]` key/scope                                | Browser abort cancels the bounded plugin RPC; safe domain statuses and `Retry-After` may be returned                                                                                                            | host.api.invokeAction("reviews.get", { taskId }, { signal })                                                        |
 | host.storage                | Authenticated, per-user key/value storage: get(scope, scopeId, key, options?)/set(scope, scopeId, key, value, options?)/delete(scope, scopeId, key, options?)/list(scope, scopeId, options?) plus subscribe(filter, handler); no plugin backend required                                               | capabilities.user_state: true                                          | Reads and writes accept an AbortSignal; set/delete also accept writerId (appended to the host's per-tab id, not a replacement) for echo suppression; list returns every entry under the scope pair, unpaginated | host.storage.set("task", taskId, "note", value, { writerId: panelId, signal })                                      |
 | host.ui                     | Curated host instances: Alert*, Badge, Button, Card*, Checkbox, Dialog*, DropdownMenu*, Input, Label, Pagination*, ScrollArea, Select*, Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea, Tooltip*, RichTextEditor, RichTextReadOnly, plus Combobox, PageTopbar, TaskCreateDialog | Active ui.bundle                                                       | Host owns contexts/portals; render with host React and let modal/slot cleanup run                                                                                                                               | const Button = host.ui.Button                                                                                       |
@@ -437,21 +440,21 @@ display-only until Kandev calls the plugin again to authorize it for submission.
 registerComponent currently has these mounted slots. The source type is open
 to strings, but an unmounted name renders nowhere.
 
-| Slot                      | Mounted location                                          | slotProps                                                        |
-| ------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
-| task-sidebar              | Bottom of task-detail sidebar                             | none                                                             |
-| settings-nav              | Settings navigation tree                                  | none                                                             |
-| chat-input-actions        | Task or Quick Chat composer toolbar                       | PluginComposerSlotProps                                          |
-| task-create-input-actions | Task creation composer toolbar                            | PluginComposerSlotProps                                          |
-| new-session-input-actions | New-session composer toolbar                              | PluginComposerSlotProps                                          |
-| chat-top-bar              | Session top bar                                           | { taskId, taskTitle?, workspaceId, activeSessionId, sessionIds } |
-| main-top-bar              | Home/Kanban/Tasks top bar                                 | { workspaceId, workspaceLabel?, currentPage }                    |
-| app-status-bar-left       | Left side of desktop status bar or mobile status drawer   | AppStatusBarSlotProps                                            |
-| app-status-bar-right      | Right side of desktop status bar or mobile status drawer  | AppStatusBarSlotProps                                            |
-| plugin-settings           | Top of this plugin's Settings > Plugins page              | { pluginId, status }; owner-scoped to the plugin being viewed    |
-| task-card-indicators      | Kanban card, beside the PR status icon                    | { taskId, workspaceId, workflowStepId }                          |
-| task-card-tags            | Kanban card, its own row below the badges row             | { taskId, workspaceId, workflowStepId }                          |
-| sidebar-workspace-actions | Desktop New Task row or phone navigation action group, after Quick Terminal and Quick Chat | SidebarWorkspaceActionsSlotProps |
+| Slot                      | Mounted location                                                                           | slotProps                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| task-sidebar              | Bottom of task-detail sidebar                                                              | none                                                             |
+| settings-nav              | Settings navigation tree                                                                   | none                                                             |
+| chat-input-actions        | Task or Quick Chat composer toolbar                                                        | PluginComposerSlotProps                                          |
+| task-create-input-actions | Task creation composer toolbar                                                             | PluginComposerSlotProps                                          |
+| new-session-input-actions | New-session composer toolbar                                                               | PluginComposerSlotProps                                          |
+| chat-top-bar              | Session top bar                                                                            | { taskId, taskTitle?, workspaceId, activeSessionId, sessionIds } |
+| main-top-bar              | Home/Kanban/Tasks top bar                                                                  | { workspaceId, workspaceLabel?, currentPage }                    |
+| app-status-bar-left       | Left side of desktop status bar or mobile status drawer                                    | AppStatusBarSlotProps                                            |
+| app-status-bar-right      | Right side of desktop status bar or mobile status drawer                                   | AppStatusBarSlotProps                                            |
+| plugin-settings           | Top of this plugin's Settings > Plugins page                                               | { pluginId, status }; owner-scoped to the plugin being viewed    |
+| task-card-indicators      | Kanban card, beside the PR status icon                                                     | { taskId, workspaceId, workflowStepId }                          |
+| task-card-tags            | Kanban card, its own row below the badges row                                              | { taskId, workspaceId, workflowStepId }                          |
+| sidebar-workspace-actions | Desktop New Task row or phone navigation action group, after Quick Terminal and Quick Chat | SidebarWorkspaceActionsSlotProps                                 |
 
 AppStatusBarSlotProps is { placement, presentation, density, pathname,
 activeWorkspaceId, activeTaskId, activeSessionId }. Desktop presentation is a
@@ -539,7 +542,7 @@ Use a no-op backend because the managed installer requires a host executable.
 ```yaml
 # manifest.yaml
 id: "acme-dashboard"
-api_version: 1
+api_version: 2
 version: "0.1.0"
 display_name: "Acme Dashboard"
 runtime:
@@ -599,12 +602,22 @@ established (retrieve it later via `p.Host()`).
 ## Webhooks
 
 Declare each webhook key in `manifest.yaml`. Kandev relays `GET` and `POST`
-requests for `/api/plugins/<id>/webhooks/<key>` to `HandleWebhook`; undeclared
-keys return `404`. Request bodies are limited to **4 MiB** and requests that
-exceed the limit return `413` before reaching the plugin. Kandev does not
-authenticate webhook callers or enforce the manifest's informational `method`,
-so validate the HTTP method and the upstream provider's signature before any
-side effect.
+requests for `/api/plugins/<id>/webhooks/<key>` to `HandleWebhook`. After the
+access check, an undeclared key returns `404`.
+
+API v2 defaults omitted access to `authenticated`. API v1 keeps omitted access
+public for compatibility and logs a migration warning. A public webhook accepts
+anonymous calls. The plugin must validate the HTTP method and the provider
+signature before any side effect. Kandev does not enforce the informational
+`method` field.
+
+The default body limit is 4 MiB. Public webhooks cannot increase this limit.
+Authenticated webhooks can declare a limit up to 16 MiB. An oversized request
+returns `413` before it reaches the plugin.
+
+A session-authenticated call must have an accepted Origin. An authenticated
+webhook receives no `Authorization` or `Cookie` header. A public webhook can
+receive provider credentials, but Kandev removes its own session cookie and PAT.
 
 ## The Host API
 
@@ -939,6 +952,11 @@ plugin never handles the raw token, and any `Set-Cookie` you return is
 dropped. Requires authentication enabled; emitting the header without
 `capabilities.auth` returns 403.
 
+Declare both the initiate webhook and the callback webhook with `access: public`.
+Kandev checks the initiate key before it shows the login button. The manifest
+has no callback field, so your plugin must declare the callback key separately.
+Kandev logs a warning when a declared initiate webhook is not public.
+
 **You MUST only assert an `email` the IdP has verified as owned by `subject`.**
 Kandev auto-links that email to (or provisions) an account, so an unverified or
 user-settable email claim is an account-takeover vector. Kandev refuses to
@@ -1108,7 +1126,9 @@ interface PluginHostApi {
     getActiveWorkspaceId(): string | undefined;
     subscribeActiveWorkspace(listener): () => void;
     getWorkspaceIds(): readonly string[];
-    subscribeWorkspaces(listener: (workspaceIds: readonly string[]) => void): () => void;
+    subscribeWorkspaces(
+      listener: (workspaceIds: readonly string[]) => void,
+    ): () => void;
     getTaskCreationContext(workspaceId: string): TaskCreationContext | null;
     subscribeTaskCreationContext(workspaceId: string, listener): () => void;
     resolveRepositoryId(identity: {
@@ -1167,7 +1187,11 @@ interface PluginHostApi {
   // Publishes one integration registration's live enabled state for one
   // workspace. Persist the source of truth with host.storage and republish it
   // after load.
-  setIntegrationEnabled(integrationId: string, workspaceId: string, enabled: boolean): void;
+  setIntegrationEnabled(
+    integrationId: string,
+    workspaceId: string,
+    enabled: boolean,
+  ): void;
 }
 
 interface SettingsSaveContributor {
@@ -1904,7 +1928,7 @@ task, not for an unbounded per-item collection.
 
 Declare the route, validate the method and provider signature inside the
 backend, and return a bounded status/body. Public webhooks are capped at 4 MiB.
-For plugin-UI operations, declare `access: authenticated`; those routes may
+Authenticated plugin-UI operations may
 raise `max_body_bytes` to 16 MiB. Kandev verifies the current user but strips
 its session cookie and PAT before relaying the remaining headers.
 
@@ -1913,6 +1937,7 @@ webhooks:
   - key: "provider-events"
     description: "Provider event callback"
     method: "POST" # informational; enforce it in HandleWebhook
+    access: public # the plugin validates the provider signature
 ```
 
 ```go

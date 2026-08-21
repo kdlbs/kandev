@@ -16,8 +16,9 @@ spec: "../../specs/plugins/voice-extraction-host.md"
   invoking the existing `HandleWebhook` RPC.
 - Authenticated webhooks require Kandev identity and accepted Origin for cookie-authenticated browser
   calls; public webhooks retain their current unauthenticated behavior.
-- Integration tests cover legacy 4 MiB behavior, authenticated denial/success, Origin rejection,
-  10 MiB multipart success, >16 MiB rejection, cancellation, disabled plugin, and runtime failure.
+- Integration tests cover API v1 compatibility, API v2 default-authenticated denial and success,
+  the 4 MiB default limit, Origin rejection, 10 MiB multipart success, >16 MiB rejection,
+  generation-safe lifecycle changes, disabled plugins, and runtime failure.
 
 ## Verification
 

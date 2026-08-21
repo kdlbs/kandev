@@ -21,7 +21,7 @@ func TestFixtureManifest_ParsesAndValidates(t *testing.T) {
 	require.NoError(t, m.Validate())
 
 	require.Equal(t, "kandev-plugin-e2e", m.ID)
-	require.Equal(t, 1, m.APIVersion)
+	require.Equal(t, manifest.CurrentAPIVersion, m.APIVersion)
 	require.Equal(t, "1.0.0", m.Version)
 	require.True(t, m.IsManaged())
 	require.Equal(t, "https://github.com/kdlbs/kandev-plugin-template", m.RepoURL)
@@ -41,9 +41,12 @@ func TestFixtureManifest_ParsesAndValidates(t *testing.T) {
 	require.Len(t, m.AgentTools, 1)
 	require.Equal(t, "test_echo", m.AgentTools[0].Name)
 
-	require.Len(t, m.Webhooks, 1)
+	require.Len(t, m.Webhooks, 2)
 	require.Equal(t, "test-hook", m.Webhooks[0].Key)
 	require.Equal(t, "POST", m.Webhooks[0].Method)
+	require.Equal(t, manifest.WebhookAccessAuthenticated, m.Webhooks[0].EffectiveAccess(m.APIVersion), "test-hook exercises the private (auth-gated) webhook path")
+	require.Equal(t, "public-hook", m.Webhooks[1].Key)
+	require.Equal(t, manifest.WebhookAccessPublic, m.Webhooks[1].EffectiveAccess(m.APIVersion), "public-hook exercises the anonymous auth-gate opt-in")
 }
 
 func TestFixtureManifest_DeclaresHostPlatformExecutable(t *testing.T) {

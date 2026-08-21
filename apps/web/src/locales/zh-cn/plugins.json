@@ -47,6 +47,7 @@
   "manifestInstalled": "已安装",
   "manifestSigned": "已签名",
   "manifestVersion": "版本",
+  "manifestWebhookPublic": "{{key}}（公开）",
   "manifestWebhooks": "Webhooks",
   "marketplaceSources": "市场来源",
   "marketplaceSourcesDescription": "添加团队或企业注册表，以便与官方目录一起浏览其插件。每个来源提供一份 {{document}} 文档。",

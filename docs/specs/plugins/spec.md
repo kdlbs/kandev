@@ -107,7 +107,7 @@ an optional UI bundle, plus a `runtime` block naming the per-platform executable
 
 ```yaml
 id: "kandev-plugin-slack"                    # Unique, pattern: ^[a-z0-9][a-z0-9._-]*$
-api_version: 1
+api_version: 2
 version: "1.0.0"
 display_name: "Slack Notifications"
 description: "Post to Slack on task events, relay messages to agents"
@@ -153,6 +153,7 @@ webhooks:
   - key: "slack-events"
     description: "Slack Events API webhook"
     method: "POST"
+    access: public # anonymous delivery; the plugin must validate Slack signatures
 
 config_schema:
   type: object
@@ -324,7 +325,8 @@ and authorizes every referenced workspace, task, or repository. It derives a tas
 workspace relation server-side, passes verified actor/resource context separately from
 bounded untrusted JSON, invokes `Plugin.HandleAction` with a hard timeout and
 cancellation, and relays only an allowlisted response-header set. Provider callback
-routes under `/webhooks/` stay public and must not serve authenticated browser actions.
+routes under `/webhooks/` must declare effective public access. They must not serve
+authenticated browser actions.
 Task-scoped actions require a verified task and may optionally select one persisted
 repository attached to that task; Kandev rejects unattached repository IDs and passes
 the accepted repository separately in `VerifiedActionContext`.
@@ -389,9 +391,19 @@ POST /api/plugins/{plugin_id}/webhooks/{webhook_key}
 ```
 
 This remains kandev's one plugin-facing **HTTP** endpoint (external systems like Slack
-or Jira cannot speak gRPC). Kandev validates the plugin is active and the webhook key
-is declared, converts the HTTP request into a `WebhookRequest` gRPC message, and calls
-the plugin's `Plugin.HandleWebhook` RPC:
+or Jira cannot speak gRPC). Kandev enforces an auth gate before anything else: a caller
+with no request identity (session/PAT, or the synthetic identity injected while auth is
+disabled) is rejected with 401 unless the manifest declares `webhooks[].key: <key>`
+with effective public access (see [Plugin manifest reference](../../public/plugins-manifest.md)).
+API v1 uses public access when `access` is omitted. API v2 uses authenticated access.
+An anonymous caller sees 401 for an unknown plugin ID, an undeclared key, and a
+declared-non-public key alike, so a caller with no identity cannot enumerate installed
+plugins. Once the gate passes, kandev validates the plugin is active and the webhook
+key is declared, converts the HTTP request into a `WebhookRequest` gRPC message,
+and calls the plugin's `Plugin.HandleWebhook` RPC. A session identity also requires an
+accepted Origin. Authenticated routes remove all `Authorization` and `Cookie` headers.
+Public routes remove Kandev's session cookie and PAT but can pass provider credentials.
+The access decision, RPC, and response side effects use one plugin generation lease:
 
 ```proto
 message WebhookRequest {
@@ -834,15 +846,15 @@ complete.
   (macOS/Linux) or loopback TCP with AutoMTLS (Windows) — never a routable network
   address. There is no remote/operator-hosted plugin tier in v1; every plugin backend
   is a binary kandev spawns and supervises on the same host. See "Out of scope".
-- **`host.storage`'s user-state routes are the first plugin HTTP surface reachable
-  with the caller's own browser session** (every other plugin HTTP route is either
-  operator-only management or a self-authenticating external webhook). It is
-  guarded the same way any other authenticated API route is — `httpmw`'s allowlist
-  explicitly does not cover it, so an unauthenticated request is rejected before the
-  handler runs — plus a capability gate (`user_state`), scope/key validation, a body
-  cap, and per-user row isolation. The stored value is opaque to the host: it is
-  never interpreted, never included in the `plugin.user-state.updated` WS payload,
-  and never delivered to the plugin's gRPC backend (a browser-only surface).
+- **`host.storage`'s user-state routes are the host-owned plugin HTTP surface for
+  per-user browser data.** Unlike an authenticated webhook, this API owns user
+  isolation and storage semantics. It is guarded the same way any other authenticated API route is —
+  `httpmw`'s allowlist explicitly does not cover it, so an unauthenticated request is
+  rejected before the handler runs — plus a capability gate (`user_state`), scope/key
+  validation, a body cap, and per-user row isolation. The stored value is opaque to
+  the host: it is never interpreted, never included in the
+  `plugin.user-state.updated` WS payload, and never delivered to the plugin's gRPC
+  backend (a browser-only surface).
 
 ## Failure modes
 
@@ -932,7 +944,8 @@ complete.
   the event over the go-plugin unix socket. The plugin formats a Slack message and
   calls the Slack API, then returns `EventAck{}`.
 
-- **GIVEN** a Jira sync plugin with a registered `jira-webhooks` webhook, **WHEN**
+- **GIVEN** a Jira sync plugin with a registered `jira-webhooks` webhook declaring
+  `access: public` (Jira's callback carries no kandev session or PAT), **WHEN**
   Jira POSTs a webhook to
   `https://kandev.example.com/api/plugins/kandev-plugin-jira/webhooks/jira-webhooks`,
   **THEN** kandev converts the HTTP request into a `WebhookRequest` and calls the
