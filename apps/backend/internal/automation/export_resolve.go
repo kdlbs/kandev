@@ -17,6 +17,10 @@ import (
 // silently drop real references the moment a startup wire is missing.
 var ErrExportLookupUnavailable = errors.New("automation: export descriptor lookup is not available")
 
+// warnUnresolvedWorkflowStep is emitted when a workflow resolves but its
+// referenced step does not (AC-19's non-silent case).
+const warnUnresolvedWorkflowStep = "unresolved workflow step"
+
 // exportWarning is one unformatted warning captured during export: an
 // automation name/ID pair plus a message (already carrying any AC-42-escaped
 // interpolation, such as a trigger type, that a trigger-scoped message
@@ -168,7 +172,7 @@ func (s *Service) resolveWorkflow(ctx context.Context, tx *sqlx.Tx, a *Automatio
 		return nil, "", fmt.Errorf("resolve workflow step %q: %w", a.WorkflowStepID, err)
 	}
 	if !stepFound || step == nil || step.WorkflowID != a.WorkflowID {
-		return result, "unresolved workflow step", nil
+		return result, warnUnresolvedWorkflowStep, nil
 	}
 	result.Step = step.Name
 	return result, "", nil

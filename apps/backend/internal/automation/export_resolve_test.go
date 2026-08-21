@@ -308,7 +308,7 @@ func TestResolveDescriptors_WorkflowResolvedStepFromDifferentWorkflow_OmitsStepA
 	if got.Workflow == nil || got.Workflow.Step != "" {
 		t.Errorf("expected workflow name without foreign step, got %+v", got.Workflow)
 	}
-	if len(warnings) != 1 || warnings[0].Message != "unresolved workflow step" {
+	if len(warnings) != 1 || warnings[0].Message != warnUnresolvedWorkflowStep {
 		t.Errorf("warnings = %v, want [unresolved workflow step]", warnings)
 	}
 }
@@ -347,7 +347,7 @@ func TestResolveDescriptors_WorkflowResolvedStepUnresolved_OmitsStepAndWarns(t *
 	if got.Workflow == nil || *got.Workflow != *want {
 		t.Errorf("Workflow = %+v, want %+v", got.Workflow, want)
 	}
-	if len(warnings) != 1 || warnings[0].Message != "unresolved workflow step" {
+	if len(warnings) != 1 || warnings[0].Message != warnUnresolvedWorkflowStep {
 		t.Errorf("warnings = %v, want [unresolved workflow step]", warnings)
 	}
 }
