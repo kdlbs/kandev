@@ -129,7 +129,7 @@ export function usePRDiff(
       if (requestId !== requestIdRef.current) return;
       setState(next);
     });
-  }, [workspaceId, owner, repo, prNumber, identityKey, requestKey]);
+  }, [workspaceId, owner, repo, prNumber, identityKey]);
 
   useEffect(() => {
     if (requestKey === requestKeyRef.current) return;

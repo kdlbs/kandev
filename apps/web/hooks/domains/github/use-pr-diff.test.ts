@@ -67,6 +67,19 @@ describe("resolvePRDiffView", () => {
 });
 
 describe("usePRDiff same-PR refresh", () => {
+  it("keeps the manual refresh callback stable when the automatic refresh key advances", () => {
+    requestMock.mockResolvedValue({ files: staleState.files });
+    const { result, rerender } = renderHook(
+      ({ refreshKey }) => usePRDiff("acme", "app", 1, refreshKey),
+      { initialProps: { refreshKey: "old-sync" }, wrapper },
+    );
+    const refresh = result.current.refresh;
+
+    rerender({ refreshKey: "new-sync" });
+
+    expect(result.current.refresh).toBe(refresh);
+  });
+
   it("keeps current files mounted without re-entering blocking loading", async () => {
     const initial = deferred<{ files: KeyedPRDiffState["files"] }>();
     const refreshed = deferred<{ files: KeyedPRDiffState["files"] }>();
