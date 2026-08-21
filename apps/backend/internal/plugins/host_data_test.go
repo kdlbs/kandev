@@ -927,6 +927,9 @@ func TestTaskModelToDTO_MapsFields(t *testing.T) {
 	if dto.ID != "task-1" || dto.State != "IN_PROGRESS" || dto.CreatedBy != "agent_created" {
 		t.Fatalf("taskModelToDTO() = %+v, unexpected core fields", dto)
 	}
+	if dto.Priority != "high" {
+		t.Errorf("Priority = %q, want high", dto.Priority)
+	}
 	if dto.CreatedAt != created.Format(time.RFC3339) {
 		t.Errorf("CreatedAt = %q, want RFC3339 %q", dto.CreatedAt, created.Format(time.RFC3339))
 	}
