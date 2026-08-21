@@ -120,7 +120,7 @@ function IntegrationCard({
       <Link
         href={href}
         aria-label={label}
-        className="absolute inset-0 rounded-[inherit] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="absolute inset-0 rounded-[inherit] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       />
       <CardContent className="space-y-2">
         <div className="flex items-center justify-between gap-2">

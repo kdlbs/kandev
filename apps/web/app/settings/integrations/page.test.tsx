@@ -191,6 +191,7 @@ describe("IntegrationsIndexPage plugin contributions", () => {
 
     expect(links).toHaveLength(1);
     const link = links[0];
+    expect(link.getAttribute("aria-label")).toBe("Source Control");
     expect(link.getAttribute("href")).toBe(`/settings/integrations/${SOURCE_CONTROL_ID}`);
     expect(screen.getByText(SOURCE_CONTROL_DESCRIPTION)).not.toBeNull();
   });
