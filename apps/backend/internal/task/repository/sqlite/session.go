@@ -3137,22 +3137,43 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 // (`SELECT ... FOR UPDATE`) before touching its sessions, so a second
 // concurrent promotion for the same task blocks until the first commits.
 func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) error {
+	_, err := r.setSessionPrimary(ctx, sessionID, false)
+	return err
+}
+
+// SetSessionPrimaryIfNonterminal marks a session primary only while it remains
+// nonterminal. It is used by workflow profile switching so a completed agent
+// cannot be promoted from a stale lookup and have its ACP conversation resumed.
+func (r *Repository) SetSessionPrimaryIfNonterminal(ctx context.Context, sessionID string) (bool, error) {
+	return r.setSessionPrimary(ctx, sessionID, true)
+}
+
+func (r *Repository) setSessionPrimary(ctx context.Context, sessionID string, requireNonterminal bool) (bool, error) {
 	now := time.Now().UTC()
 
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// First, get the task_id for this session
+	// First, get the task_id for this session. Postgres also locks the target
+	// row, which serializes this nonterminal check against a concurrent state
+	// transition until the primary-session transaction commits.
 	var taskID string
-	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_sessions WHERE id = ?`), sessionID).Scan(&taskID)
+	query := `SELECT task_id FROM task_sessions WHERE id = ?`
+	if requireNonterminal {
+		query += ` AND state IN ('CREATED', 'STARTING', 'RUNNING', 'IDLE', 'WAITING_FOR_INPUT')`
+	}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR UPDATE`
+	}
+	err = tx.QueryRowContext(ctx, r.db.Rebind(query), sessionID).Scan(&taskID)
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("session not found: %s", sessionID)
+		return primarySessionNotPromoted(sessionID, requireNonterminal)
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Serialize concurrent promotions for the same task across Postgres
@@ -3162,7 +3183,7 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 		var lockedTaskID string
 		err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT id FROM tasks WHERE id = ? FOR UPDATE`), taskID).Scan(&lockedTaskID)
 		if err != nil && err != sql.ErrNoRows {
-			return err
+			return false, err
 		}
 	}
 
@@ -3171,20 +3192,25 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 		UPDATE task_sessions SET is_primary = 0, updated_at = ? WHERE task_id = ?
 	`), now, taskID)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Set primary flag on the specified session
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions SET is_primary = 1, updated_at = ? WHERE id = ?
-	`), now, sessionID)
+	promoteQuery := `UPDATE task_sessions SET is_primary = 1, updated_at = ? WHERE id = ?`
+	if requireNonterminal {
+		promoteQuery += ` AND state IN ('CREATED', 'STARTING', 'RUNNING', 'IDLE', 'WAITING_FOR_INPUT')`
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(promoteQuery), now, sessionID)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("session not found: %s", sessionID)
+		return primarySessionNotPromoted(sessionID, requireNonterminal)
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }

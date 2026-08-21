@@ -31,7 +31,14 @@ import (
 
 type turnCompletionCause string
 
-var errDeferredMoveAlreadyApplied = errors.New("deferred move already applied")
+var (
+	errDeferredMoveAlreadyApplied    = errors.New("deferred move already applied")
+	errReusableSessionNoLongerActive = errors.New("reusable session is no longer active")
+)
+
+type nonterminalPrimarySessionSetter interface {
+	SetSessionPrimaryIfNonterminal(context.Context, string) (bool, error)
+}
 
 type taskMetadataKeyRemover interface {
 	RemoveTaskMetadataKey(context.Context, string, string) (bool, error)
@@ -1948,7 +1955,17 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 	}
 
 	if existing != nil {
-		return s.reuseSessionForStep(ctx, taskID, currentSession, existing)
+		reused, err := s.reuseSessionForStep(ctx, taskID, currentSession, existing)
+		if err == nil {
+			return reused, nil
+		}
+		if !errors.Is(err, errReusableSessionNoLongerActive) {
+			return nil, err
+		}
+		s.logger.Info("reusable session became terminal before workflow promotion; creating fresh session",
+			zap.String("task_id", taskID),
+			zap.String("session_id", existing.ID),
+			zap.String("agent_profile_id", newAgentProfileID))
 	}
 
 	return s.createNewSessionForStep(ctx, taskID, currentSession, newAgentProfileID)
@@ -1998,9 +2015,10 @@ func (s *Service) findReusableSessionForProfile(ctx context.Context, taskID, pro
 // session is not relaunched here — when a prompt arrives, the
 // autoStart/PromptTask paths handle the launch (including lazy-resume via
 // ResumeSession for a session that was previously launched and is currently
-// WAITING_FOR_INPUT). findReusableSessionForProfile guarantees `existing` is
-// never terminal (COMPLETED/FAILED/CANCELLED) — see its doc comment for why
-// reviving a terminal session's ACP conversation here would be unsafe.
+// WAITING_FOR_INPUT). Before it promotes the candidate, it atomically checks
+// that the persisted row is still nonterminal. This closes the lookup-to-
+// promotion race where an agent completion could otherwise make a stale ACP
+// conversation primary again.
 func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, currentSession, existing *models.TaskSession) (*models.TaskSession, error) {
 	s.logger.Info("reusing existing session for profile",
 		zap.String("task_id", taskID),
@@ -2009,12 +2027,14 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 		zap.String("reused_profile", existing.AgentProfileID),
 		zap.String("reused_state", string(existing.State)))
 
-	s.tagSessionAsWorkflowSwitched(ctx, existing.ID)
-
-	if err := s.SetPrimarySession(ctx, existing.ID); err != nil {
+	promoted, err := s.setNonterminalSessionPrimary(ctx, existing.ID)
+	if err != nil {
 		s.logger.Warn("failed to set reused session as primary",
 			zap.String("session_id", existing.ID), zap.Error(err))
+	} else if !promoted {
+		return nil, errReusableSessionNoLongerActive
 	}
+	s.tagSessionAsWorkflowSwitched(ctx, existing.ID)
 
 	// Transfer any queued message and pending move from the session being
 	// switched away from to the reused session — without this, a hand-off
@@ -2033,6 +2053,18 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 
 	s.completeAndStopSession(ctx, taskID, currentSession)
 	return existing, nil
+}
+
+// setNonterminalSessionPrimary promotes a workflow-reused session only when
+// its persisted state is still nonterminal. Repositories without the atomic
+// operation fail closed so a stale snapshot can never revive a terminal ACP
+// conversation.
+func (s *Service) setNonterminalSessionPrimary(ctx context.Context, sessionID string) (bool, error) {
+	setter, ok := s.repo.(nonterminalPrimarySessionSetter)
+	if !ok {
+		return false, nil
+	}
+	return setter.SetSessionPrimaryIfNonterminal(ctx, sessionID)
 }
 
 // createNewSessionForStep is the original switch-and-create-fresh-session path,
