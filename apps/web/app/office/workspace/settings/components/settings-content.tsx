@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import type { TFunction } from "i18next";
 import Image from "@/components/routing/app-image";
 import { IconUpload, IconDeviceFloppy } from "@tabler/icons-react";
@@ -443,19 +450,51 @@ function useRecoveryState(activeWorkspace: Workspace | undefined) {
   };
 }
 
+type AppearanceBaseline = {
+  id: string | undefined;
+  name: string;
+  description: string;
+};
+
+function getAppearanceBaseline(workspace: Workspace | undefined): AppearanceBaseline {
+  return {
+    id: workspace?.id,
+    name: workspace?.name ?? "",
+    description: workspace?.description ?? "",
+  };
+}
+
+function reconcileAppearanceDraft(
+  previous: AppearanceBaseline,
+  next: AppearanceBaseline,
+  setName: Dispatch<SetStateAction<string>>,
+  setDescription: Dispatch<SetStateAction<string>>,
+) {
+  if (next.id !== previous.id) {
+    setName(next.name);
+    setDescription(next.description);
+    return;
+  }
+
+  setName((current) => (current === previous.name ? next.name : current));
+  setDescription((current) => (current === previous.description ? next.description : current));
+}
+
 export function useSettingsState(
   activeWorkspace: Workspace | undefined,
   storeApi: WorkspaceStoreApi,
 ) {
   const { t } = useTranslation();
-  const [name, setName] = useState(activeWorkspace?.name ?? "");
-  const [description, setDescription] = useState(activeWorkspace?.description ?? "");
+  const appearance = getAppearanceBaseline(activeWorkspace);
+  const [name, setName] = useState(appearance.name);
+  const [description, setDescription] = useState(appearance.description);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [savingAppearance, setSavingAppearance] = useState(false);
   const recovery = useRecoveryState(activeWorkspace);
   const permissions = usePermissionsState(activeWorkspace);
-  const activeWorkspaceId = activeWorkspace?.id;
+  const { id: appearanceId, name: appearanceName, description: appearanceDescription } = appearance;
+  const appearanceBaselineRef = useRef(appearance);
 
   // If the active workspace's identity changes without this page
   // remounting - e.g. a workspace.deleted WS event elsewhere reassigns
@@ -463,11 +502,20 @@ export function useSettingsState(
   // reset to the new workspace's values. Otherwise the stale draft from
   // the old workspace looks "dirty" against the new one's name, and Save
   // would persist the old workspace's data onto the new, unrelated one.
+  // For same-workspace updates, only fields that still match the previous
+  // baseline are refreshed. This keeps remote changes visible without
+  // overwriting a local draft.
   useEffect(() => {
-    setName(activeWorkspace?.name ?? "");
-    setDescription(activeWorkspace?.description ?? "");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeWorkspaceId]);
+    const next = {
+      id: appearanceId,
+      name: appearanceName,
+      description: appearanceDescription,
+    };
+    const previous = appearanceBaselineRef.current;
+
+    reconcileAppearanceDraft(previous, next, setName, setDescription);
+    appearanceBaselineRef.current = next;
+  }, [appearanceDescription, appearanceId, appearanceName]);
 
   // Latest-value refs so the in-flight save handler (a closure fixed at the
   // moment Save was clicked) can tell whether the draft has moved on since,
@@ -505,9 +553,6 @@ export function useSettingsState(
     [activeWorkspace, name, description, storeApi, nameRef, descriptionRef, t],
   );
 
-  const origName = activeWorkspace?.name ?? "";
-  const origDescription = activeWorkspace?.description ?? "";
-
   return {
     name,
     setName,
@@ -517,7 +562,7 @@ export function useSettingsState(
     fileInputRef,
     ...permissions,
     ...recovery,
-    appearanceDirty: name !== origName || description !== origDescription,
+    appearanceDirty: name !== appearanceName || description !== appearanceDescription,
     savingAppearance,
     handleLogoChange,
     handleSaveAppearance,

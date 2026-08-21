@@ -21,6 +21,8 @@ type Workspace = WorkspaceState["items"][number];
 
 const WORKSPACE_ID = "ws-1";
 const NEW_DESCRIPTION = "New description";
+const REMOTE_NAME = "Remote Name";
+const REMOTE_DESCRIPTION = "Remote description";
 
 function workspace(overrides: Partial<Workspace> = {}): Workspace {
   return {
@@ -77,12 +79,12 @@ async function saveAppearance(result: ReturnType<typeof renderSettings>["result"
   });
 }
 
-describe("useSettingsState appearance save", () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-    mockGetWorkspaceSettings.mockResolvedValue({ settings: {} } as never);
-  });
+beforeEach(() => {
+  vi.resetAllMocks();
+  mockGetWorkspaceSettings.mockResolvedValue({ settings: {} } as never);
+});
 
+describe("useSettingsState appearance save", () => {
   it("saves the trimmed name and description through updateWorkspaceAction and syncs the store", async () => {
     const ws = workspace();
     const { setWorkspaces, result, rerender } = renderWithStore([ws]);
@@ -215,5 +217,30 @@ describe("useSettingsState appearance save", () => {
       { ...ws, name: "Renamed", description: NEW_DESCRIPTION },
       concurrent,
     ]);
+  });
+});
+
+describe("same-workspace appearance updates", () => {
+  it("syncs an untouched draft when the same workspace receives a remote update", () => {
+    const ws = workspace();
+    const { result, rerender } = renderWithStore([ws]);
+
+    rerender({ ws: { ...ws, name: REMOTE_NAME, description: REMOTE_DESCRIPTION } });
+
+    expect(result.current.name).toBe(REMOTE_NAME);
+    expect(result.current.description).toBe(REMOTE_DESCRIPTION);
+    expect(result.current.appearanceDirty).toBe(false);
+  });
+
+  it("preserves edited fields while syncing untouched fields from a remote update", () => {
+    const ws = workspace();
+    const { result, rerender } = renderWithStore([ws]);
+    act(() => result.current.setName("Local Draft"));
+
+    rerender({ ws: { ...ws, name: REMOTE_NAME, description: REMOTE_DESCRIPTION } });
+
+    expect(result.current.name).toBe("Local Draft");
+    expect(result.current.description).toBe(REMOTE_DESCRIPTION);
+    expect(result.current.appearanceDirty).toBe(true);
   });
 });
