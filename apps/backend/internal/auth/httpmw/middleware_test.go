@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"unicode/utf8"
 
@@ -528,6 +529,23 @@ func TestStripUntrustedForwardedHostWarns(t *testing.T) {
 	if !warned {
 		t.Fatal("no X-Forwarded-Host warning was logged")
 	}
+	assertWarningHints(t, logs)
+}
+
+func assertWarningHints(t *testing.T, logs *observer.ObservedLogs) {
+	t.Helper()
+	for i, entry := range logs.All() {
+		hint := ""
+		for _, field := range entry.Context {
+			if field.Key == "hint" {
+				hint = field.String
+				break
+			}
+		}
+		if hint != forwardedHostWarnHint {
+			t.Fatalf("warning %d hint = %q, want %q", i, hint, forwardedHostWarnHint)
+		}
+	}
 }
 
 // stripWarnRouter builds a strip-middleware router over an observed logger and
@@ -573,6 +591,7 @@ func TestStripUntrustedForwardedHostWarnsOncePerPeer(t *testing.T) {
 	if got := logs.Len(); got != 1 {
 		t.Fatalf("warnings for 50 identical requests = %d, want 1", got)
 	}
+	assertWarningHints(t, logs)
 }
 
 // TestStripUntrustedForwardedHostWarnsPerDistinctPair pins the other half: a
@@ -586,6 +605,33 @@ func TestStripUntrustedForwardedHostWarnsPerDistinctPair(t *testing.T) {
 	serveStrip(t, router, "203.0.113.9:5555", "other.example:8443")
 	if got := logs.Len(); got != 3 {
 		t.Fatalf("warnings for 3 distinct pairs = %d, want 3", got)
+	}
+	assertWarningHints(t, logs)
+}
+
+func TestForwardedHostWarnSetFirstIsAtMostOnce(t *testing.T) {
+	set := newForwardedHostWarnSet()
+	const calls = 100
+	results := make(chan bool, calls)
+	var wg sync.WaitGroup
+	for range calls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results <- set.first("203.0.113.9", "public.example:8443")
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	first := 0
+	for result := range results {
+		if result {
+			first++
+		}
+	}
+	if first != 1 {
+		t.Fatalf("first returned true %d times, want 1", first)
 	}
 }
 

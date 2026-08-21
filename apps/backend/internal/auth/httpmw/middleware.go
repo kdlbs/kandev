@@ -137,7 +137,7 @@ func truncateForLog(value string) string {
 // the process lifetime despite the entry cap. A fixed-size digest bounds
 // retention at forwardedHostWarnLimit * 32 bytes whatever the header size.
 type forwardedHostWarnSet struct {
-	mu   sync.Mutex
+	mu   sync.RWMutex
 	seen map[[sha256.Size]byte]struct{}
 }
 
@@ -163,6 +163,14 @@ func forwardedHostWarnKey(peer, forwardedHost string) [sha256.Size]byte {
 // the set is full.
 func (s *forwardedHostWarnSet) first(peer, forwardedHost string) bool {
 	key := forwardedHostWarnKey(peer, forwardedHost)
+	s.mu.RLock()
+	_, seen := s.seen[key]
+	atLimit := len(s.seen) >= forwardedHostWarnLimit
+	s.mu.RUnlock()
+	if seen || atLimit {
+		return false
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.seen[key]; ok {
