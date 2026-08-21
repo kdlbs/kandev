@@ -49,6 +49,8 @@ type TaskCreateInput struct {
 	Launch         TaskLaunchInput
 	Metadata       map[string]any
 	PlanMode       bool
+	Priority       string
+	Labels         []string
 }
 
 // TaskLaunchInput contains validated launch fields for a freshly-created
@@ -70,6 +72,8 @@ type TaskUpdateInput struct {
 	Description    *string
 	State          *string
 	WorkflowStepID *string
+	Priority       *string
+	Labels         *[]string
 }
 
 // PluginMessageResult is the outcome of delivering a message to a task session,
@@ -113,6 +117,13 @@ type taskStarter interface {
 // spoof another origin.
 const taskSourceMetadataKey = "source"
 
+const (
+	pluginTaskPriorityCritical = "critical"
+	pluginTaskPriorityHigh     = "high"
+	pluginTaskPriorityMedium   = "medium"
+	pluginTaskPriorityLow      = "low"
+)
+
 func (h *pluginHost) pluginSource() string {
 	return "plugin:" + h.pluginID
 }
@@ -140,6 +151,9 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 	}
 	if in.Title == "" {
 		return nil, invalidArgument("title is required")
+	}
+	if in.Priority != "" && !validPluginTaskPriority(in.Priority) {
+		return nil, invalidArgument(fmt.Sprintf("invalid task priority %q", in.Priority))
 	}
 	metadata, err := r.host.pluginTaskMetadata(in.Metadata)
 	if err != nil {
@@ -173,6 +187,8 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 		Launch:         launch,
 		Metadata:       metadata,
 		PlanMode:       launch.PlanMode,
+		Priority:       in.Priority,
+		Labels:         in.Labels,
 	})
 	if err != nil {
 		return nil, err
@@ -194,12 +210,17 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 	if in.ID == "" {
 		return nil, invalidArgument("id is required")
 	}
+	if in.Priority != nil && !validPluginTaskPriority(*in.Priority) {
+		return nil, invalidArgument(fmt.Sprintf("invalid task priority %q", *in.Priority))
+	}
 	updated, err := r.host.taskWriter.UpdateTask(ctx, TaskUpdateInput{
 		ID:             in.ID,
 		Title:          in.Title,
 		Description:    in.Description,
 		State:          in.State,
 		WorkflowStepID: in.WorkflowStepID,
+		Priority:       in.Priority,
+		Labels:         in.Labels,
 	})
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrTaskNotFound) {
@@ -209,6 +230,15 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 	}
 	dto := taskModelToDTO(updated)
 	return &dto, nil
+}
+
+func validPluginTaskPriority(priority string) bool {
+	switch priority {
+	case pluginTaskPriorityCritical, pluginTaskPriorityHigh, pluginTaskPriorityMedium, pluginTaskPriorityLow:
+		return true
+	default:
+		return false
+	}
 }
 
 // resolveCreatePlacement fills the workspace and workflow a created task lands

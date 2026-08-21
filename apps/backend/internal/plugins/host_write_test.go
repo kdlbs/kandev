@@ -413,7 +413,9 @@ func TestPluginHost_Tasks_UpdateSucceedsWithMask(t *testing.T) {
 
 	title := "Renamed"
 	state := "IN_PROGRESS"
-	_, err := d.host.Tasks().Update(context.Background(), pluginsdk.UpdateTaskInput{ID: "task-1", Title: &title, State: &state})
+	priority := "high"
+	labels := []string{}
+	_, err := d.host.Tasks().Update(context.Background(), pluginsdk.UpdateTaskInput{ID: "task-1", Title: &title, State: &state, Priority: &priority, Labels: &labels})
 	if err != nil {
 		t.Fatalf("Update() unexpected error: %v", err)
 	}
@@ -425,6 +427,29 @@ func TestPluginHost_Tasks_UpdateSucceedsWithMask(t *testing.T) {
 	}
 	if d.taskWriter.lastUpdate.Description != nil {
 		t.Fatalf("unset description must stay nil, got %v", d.taskWriter.lastUpdate.Description)
+	}
+	if d.taskWriter.lastUpdate.Priority == nil || *d.taskWriter.lastUpdate.Priority != "high" {
+		t.Fatalf("priority = %v, want high", d.taskWriter.lastUpdate.Priority)
+	}
+	if d.taskWriter.lastUpdate.Labels == nil || len(*d.taskWriter.lastUpdate.Labels) != 0 {
+		t.Fatalf("labels = %v, want non-nil empty slice to clear", d.taskWriter.lastUpdate.Labels)
+	}
+}
+
+func TestPluginHost_Tasks_RejectsInvalidPriority(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	bad := "urgent"
+
+	_, err := d.host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "x", Priority: bad})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Create() invalid priority error = %v, want InvalidArgument", err)
+	}
+	_, err = d.host.Tasks().Update(context.Background(), pluginsdk.UpdateTaskInput{ID: "task-1", Priority: &bad})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Update() invalid priority error = %v, want InvalidArgument", err)
+	}
+	if d.taskWriter.createCalls != 0 || d.taskWriter.updateCalls != 0 {
+		t.Fatal("task writer called with an invalid priority")
 	}
 }
 

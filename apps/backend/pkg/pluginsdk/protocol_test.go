@@ -22,7 +22,10 @@ func TestProtocolDeclaresAdditivePluginAndHostMethods(t *testing.T) {
 	assertMessageFields(t, "TaskRepository", "id", "repository_id", "base_branch", "position", "checkout_branch")
 	assertMessageFields(t, "Repository", "id", "workspace_id", "name", "default_branch", "source_type", "provider_id", "provider_repository_id", "provider_host", "owner_or_project", "provider_name", "remote_url", "provider_scope")
 	assertMessageOmitsFields(t, "Repository", "local_path", "setup_script", "cleanup_script", "dev_script", "copy_files")
-	assertMessageFields(t, "CreateTaskRequest", "repositories", "launch", "metadata")
+	assertMessageFields(t, "Task", "labels")
+	assertMessageFields(t, "CreateTaskRequest", "repositories", "launch", "metadata", "priority", "labels")
+	assertMessageFields(t, "UpdateTaskRequest", "priority", "labels")
+	assertMessageFields(t, "TaskLabels", "values")
 	assertMessageFields(t, "RemoteRepositoryDescriptor", "provider_id", "provider_host", "owner_or_project", "provider_repository_id", "name", "clone_url", "provider_scope")
 	assertMessageFields(t, "DeletePluginOwnedTaskTreeProgress", "deleted_task_ids")
 }

@@ -38,6 +38,7 @@ func TestTaskProtoRoundTrip(t *testing.T) {
 		Description: "Details here",
 		State:       "in_progress",
 		Priority:    "high",
+		Labels:      []string{"bug", "plugin"},
 		CreatedBy:   "user-1",
 		CreatedAt:   "2026-07-15T12:00:00Z",
 		UpdatedAt:   "2026-07-15T12:05:00Z",
@@ -168,6 +169,8 @@ func TestCreateTaskInputRichProtoRoundTrip(t *testing.T) {
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Plugin-created task",
+		Priority:    "high",
+		Labels:      []string{"bug", "plugin"},
 		Repositories: []PluginTaskRepository{{
 			Remote: &RemoteRepositoryDescriptor{
 				ProviderID: "example", ProviderHost: "code.example.test", OwnerOrProject: "team",
@@ -185,6 +188,22 @@ func TestCreateTaskInputRichProtoRoundTrip(t *testing.T) {
 	back, err := createTaskInputFromProto(proto)
 	require.NoError(t, err)
 	require.Equal(t, input, back)
+}
+
+func TestUpdateTaskInputProtoRoundTripPreservesLabelsPresence(t *testing.T) {
+	priority := "low"
+	labels := []string{}
+	input := UpdateTaskInput{ID: "task-1", Priority: &priority, Labels: &labels}
+
+	proto := input.toProto()
+	require.NotNil(t, proto.Labels, "an empty non-nil label slice must clear labels")
+	require.Empty(t, proto.Labels.Values)
+	require.Equal(t, input, updateTaskInputFromProto(proto))
+
+	input.Labels = nil
+	proto = input.toProto()
+	require.Nil(t, proto.Labels, "nil labels must leave labels unchanged")
+	require.Equal(t, input, updateTaskInputFromProto(proto))
 }
 
 func TestRepositoryProtoRoundTrip(t *testing.T) {

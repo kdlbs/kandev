@@ -29,7 +29,24 @@ import (
 
 // defaultPriority is the default value for the task priority column.
 // Used when a caller omits priority so the DB CHECK constraint is satisfied.
-const defaultPriority = "medium"
+const (
+	defaultPriority      = "medium"
+	taskPriorityCritical = "critical"
+	taskPriorityHigh     = "high"
+	taskPriorityMedium   = "medium"
+	taskPriorityLow      = "low"
+)
+
+// ValidateTaskPriority checks the canonical priority enum. Creation callers
+// may omit priority and receive the default; updates must always name a value.
+func ValidateTaskPriority(priority string) error {
+	switch priority {
+	case taskPriorityCritical, taskPriorityHigh, taskPriorityMedium, taskPriorityLow:
+		return nil
+	default:
+		return fmt.Errorf("invalid task priority %q", priority)
+	}
+}
 
 const (
 	providerAzureDevOps = "azure_devops"
@@ -581,6 +598,11 @@ func (s *Service) inheritParentProject(ctx context.Context, req *CreateTaskReque
 func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 	if err := validateTaskTitle(req.Title); err != nil {
 		return err
+	}
+	if req.Priority != "" {
+		if err := ValidateTaskPriority(req.Priority); err != nil {
+			return err
+		}
 	}
 	isOffice := isOfficeRequest(req)
 	// Automation runs never land on a board, so they need no workflow — the
@@ -1544,6 +1566,11 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			return nil, err
 		}
 	}
+	if req.Priority != nil {
+		if err := ValidateTaskPriority(*req.Priority); err != nil {
+			return nil, err
+		}
+	}
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
@@ -1557,6 +1584,9 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	}
 	if req.Priority != nil {
 		task.Priority = *req.Priority
+	}
+	if req.Labels != nil {
+		task.Labels = *req.Labels
 	}
 	if req.State != nil && task.State != *req.State {
 		current := task.State

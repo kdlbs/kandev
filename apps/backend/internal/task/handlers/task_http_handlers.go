@@ -806,27 +806,7 @@ var allowedAttachmentTypes = map[string]struct{}{
 }
 
 func encodeTaskLabels(labels []string) (string, error) {
-	normalized := make([]string, 0, len(labels))
-	seen := make(map[string]struct{}, len(labels))
-	for _, label := range labels {
-		label = strings.TrimSpace(label)
-		if label == "" {
-			continue
-		}
-		if _, ok := seen[label]; ok {
-			continue
-		}
-		seen[label] = struct{}{}
-		normalized = append(normalized, label)
-	}
-	if len(normalized) == 0 {
-		return "", nil
-	}
-	encoded, err := json.Marshal(normalized)
-	if err != nil {
-		return "", err
-	}
-	return string(encoded), nil
+	return service.EncodeTaskLabels(labels), nil
 }
 
 func validateAttachments(items []v1.MessageAttachment) error {
