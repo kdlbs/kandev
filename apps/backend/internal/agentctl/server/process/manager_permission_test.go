@@ -282,3 +282,82 @@ func TestPermissionNotificationDoesNotExposeSecretsOrEnvironment(t *testing.T) {
 		t.Fatalf("permission notification leaked environment key: %s", encoded)
 	}
 }
+
+// TestPermissionRequestResolveVersusContextCancelIsExactlyOnce exercises the
+// two terminal paths that used to bypass each other: ResolvePermission and the
+// handlePermissionRequest goroutine's own ctx.Done() branch. Before
+// consumePermission unified them, a resolve racing a context cancellation
+// could both "succeed": the resolve delivered into a buffered channel nobody
+// was reading anymore, while the handler had already returned Cancelled=true
+// via ctx.Done(). Run many times under -race so the exactly-once invariant
+// (never both, never neither) survives real scheduling, not just one order.
+func TestPermissionRequestResolveVersusContextCancelIsExactlyOnce(t *testing.T) {
+	for range 50 {
+		m := &Manager{
+			cfg: &config.InstanceConfig{
+				TaskID:    "task-1",
+				SessionID: "session-1",
+			},
+			logger:             newTestLogger(t),
+			updatesCh:          make(chan adapter.AgentEvent, 2),
+			pendingPermissions: make(map[string]*PendingPermission),
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+
+		type handlerResult struct {
+			resp *adapter.PermissionResponse
+			err  error
+		}
+		handlerDone := make(chan handlerResult, 1)
+		go func() {
+			resp, err := m.handlePermissionRequest(ctx, &adapter.PermissionRequest{
+				PendingID:  "pending-race",
+				ToolCallID: "tool-1",
+				Title:      "Run command",
+				Options: []adapter.PermissionOption{
+					{OptionID: "allow-once", Kind: streams.PermissionOptionKindAllowOnce},
+				},
+			})
+			handlerDone <- handlerResult{resp: resp, err: err}
+		}()
+
+		event := <-m.updatesCh
+		requestID := event.RequestID
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		var resolveErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			cancel()
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			_, resolveErr = m.ResolvePermission(requestID, "pending-race", "allow-once")
+		}()
+		close(start)
+		wg.Wait()
+
+		result := <-handlerDone
+
+		if resolveErr == nil {
+			if result.resp == nil || result.resp.Cancelled || result.resp.OptionID != "allow-once" {
+				t.Fatalf("resolve won but handler response = %+v, want the resolved option", result.resp)
+			}
+			continue
+		}
+		var opErr *PermissionOperationError
+		if !errors.As(resolveErr, &opErr) {
+			t.Fatalf("resolve error = %v, want PermissionOperationError", resolveErr)
+		}
+		if opErr.Code != streams.PermissionErrorStale && opErr.Code != streams.PermissionErrorAlreadyResolved {
+			t.Fatalf("resolve error code = %q, want stale or already-resolved", opErr.Code)
+		}
+		if result.resp == nil || !result.resp.Cancelled {
+			t.Fatalf("context-cancel won but handler response = %+v, want Cancelled=true", result.resp)
+		}
+	}
+}

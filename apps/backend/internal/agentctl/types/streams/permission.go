@@ -3,7 +3,8 @@ package streams
 import "time"
 
 const (
-	PermissionStatusPending = "pending"
+	PermissionStatusPending   = "pending"
+	PermissionStatusResolving = "resolving"
 
 	PermissionErrorNotFound         = "permission_not_found"
 	PermissionErrorStale            = "permission_stale"

@@ -2428,6 +2428,20 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 	case <-ctx.Done():
 		m.logger.Warn("permission request context cancelled",
 			zap.String("pending_id", pendingID))
+		// Claim the terminal transition ourselves so a concurrent resolve/cancel/
+		// respond call that is already past the state check cannot also "win" and
+		// report success for a request this goroutine is about to stop listening on.
+		if _, err := m.consumePermission(pendingID, pending.RequestID, nil,
+			&adapter.PermissionResponse{Cancelled: true}, streams.PermissionErrorStale); err != nil {
+			// Someone else consumed it first; deliver whatever they sent instead of
+			// fabricating our own cancellation.
+			select {
+			case resp := <-pending.ResponseCh:
+				return resp, nil
+			default:
+				return &adapter.PermissionResponse{Cancelled: true}, nil
+			}
+		}
 		// Send cancellation notification so the backend can update the permission message status
 		m.sendPermissionCancelledNotification(pending)
 		return &adapter.PermissionResponse{Cancelled: true}, nil
@@ -2628,99 +2642,99 @@ func (m *Manager) ListPendingPermissions() []streams.PendingAgentPermission {
 	return permissions
 }
 
-// ResolvePermission validates and consumes one exact live request generation.
-// The provider response is sent at most once while the identity lock is held.
-func (m *Manager) ResolvePermission(requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+// consumePermission is the single terminal-transition chokepoint for a live
+// permission request. Every path that can end a request generation — explicit
+// resolve, explicit cancel, the internal respond endpoint, or the request
+// context finishing — must go through this so exactly one caller observes a
+// pending->resolving transition and delivers the response; every later caller
+// gets a stable error instead of silently "succeeding" against an entry
+// nobody is listening on anymore. optionalRequestID empty skips the identity
+// check (RespondToPermission has no requestID). validate runs after the
+// pending/requestID/state checks but before the state mutates, so a rejected
+// option (for example) never claims the transition.
+func (m *Manager) consumePermission(
+	pendingID, optionalRequestID string,
+	validate func(*PendingPermission) error,
+	resp *adapter.PermissionResponse,
+	terminalCode string,
+) (*PendingPermission, error) {
 	m.permissionMu.Lock()
+	defer m.permissionMu.Unlock()
+
 	pending := m.pendingPermissions[pendingID]
 	if pending == nil {
-		code := m.permissionTombstones[requestID]
-		m.permissionMu.Unlock()
+		code := m.permissionTombstones[optionalRequestID]
 		if code == "" {
 			code = streams.PermissionErrorNotFound
 		}
 		return nil, &PermissionOperationError{Code: code}
 	}
-	if pending.RequestID != requestID {
-		m.permissionMu.Unlock()
+	if optionalRequestID != "" && pending.RequestID != optionalRequestID {
 		return nil, &PermissionOperationError{Code: streams.PermissionErrorStale}
 	}
 	if pending.State != streams.PermissionStatusPending {
-		m.permissionMu.Unlock()
 		return nil, &PermissionOperationError{Code: streams.PermissionErrorInProgress}
 	}
-	var selected *streams.PermissionChoice
-	for i := range pending.Snapshot.Options {
-		if pending.Snapshot.Options[i].OptionID == optionID {
-			selected = &pending.Snapshot.Options[i]
-			break
+	if validate != nil {
+		if err := validate(pending); err != nil {
+			return nil, err
 		}
 	}
-	if selected == nil {
-		m.permissionMu.Unlock()
-		return nil, &PermissionOperationError{Code: streams.PermissionErrorOptionNotOffered}
-	}
 
-	pending.State = "resolving"
+	pending.State = streams.PermissionStatusResolving
 	select {
-	case pending.ResponseCh <- &adapter.PermissionResponse{OptionID: optionID}:
+	case pending.ResponseCh <- resp:
 		delete(m.pendingPermissions, pendingID)
-		m.addPermissionTombstoneLocked(requestID, streams.PermissionErrorAlreadyResolved)
-		m.permissionMu.Unlock()
-		m.logger.Info("resolved permission request",
-			zap.String("request_id", requestID),
-			zap.String("pending_id", pendingID),
-			zap.String("option_id", optionID))
-		return &streams.PermissionResolveResponse{
-			RequestID:  requestID,
-			PendingID:  pendingID,
-			OptionID:   optionID,
-			OptionKind: selected.Kind,
-			Status:     "resolved",
-		}, nil
+		m.addPermissionTombstoneLocked(pending.RequestID, terminalCode)
+		return pending, nil
 	default:
 		delete(m.pendingPermissions, pendingID)
-		m.addPermissionTombstoneLocked(requestID, streams.PermissionErrorDeliveryFailed)
-		m.permissionMu.Unlock()
+		m.addPermissionTombstoneLocked(pending.RequestID, streams.PermissionErrorDeliveryFailed)
 		return nil, &PermissionOperationError{Code: streams.PermissionErrorDeliveryFailed}
 	}
+}
+
+// ResolvePermission validates and consumes one exact live request generation.
+// The provider response is sent at most once while the identity lock is held.
+func (m *Manager) ResolvePermission(requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+	var selected *streams.PermissionChoice
+	validate := func(pending *PendingPermission) error {
+		for i := range pending.Snapshot.Options {
+			if pending.Snapshot.Options[i].OptionID == optionID {
+				selected = &pending.Snapshot.Options[i]
+				return nil
+			}
+		}
+		return &PermissionOperationError{Code: streams.PermissionErrorOptionNotOffered}
+	}
+	_, err := m.consumePermission(pendingID, requestID, validate,
+		&adapter.PermissionResponse{OptionID: optionID}, streams.PermissionErrorAlreadyResolved)
+	if err != nil {
+		return nil, err
+	}
+	m.logger.Info("resolved permission request",
+		zap.String("request_id", requestID),
+		zap.String("pending_id", pendingID),
+		zap.String("option_id", optionID))
+	return &streams.PermissionResolveResponse{
+		RequestID:  requestID,
+		PendingID:  pendingID,
+		OptionID:   optionID,
+		OptionKind: selected.Kind,
+		Status:     "resolved",
+	}, nil
 }
 
 // CancelPermission dismisses one exact live request generation. This is an
 // internal compatibility path for the web UI when a provider offers no reject
 // option; it is deliberately separate from option-only external resolution.
 func (m *Manager) CancelPermission(requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
-	m.permissionMu.Lock()
-	pending := m.pendingPermissions[pendingID]
-	if pending == nil {
-		code := m.permissionTombstones[requestID]
-		m.permissionMu.Unlock()
-		if code == "" {
-			code = streams.PermissionErrorNotFound
-		}
-		return nil, &PermissionOperationError{Code: code}
+	_, err := m.consumePermission(pendingID, requestID, nil,
+		&adapter.PermissionResponse{Cancelled: true}, streams.PermissionErrorAlreadyResolved)
+	if err != nil {
+		return nil, err
 	}
-	if pending.RequestID != requestID {
-		m.permissionMu.Unlock()
-		return nil, &PermissionOperationError{Code: streams.PermissionErrorStale}
-	}
-	if pending.State != streams.PermissionStatusPending {
-		m.permissionMu.Unlock()
-		return nil, &PermissionOperationError{Code: streams.PermissionErrorInProgress}
-	}
-	pending.State = "resolving"
-	select {
-	case pending.ResponseCh <- &adapter.PermissionResponse{Cancelled: true}:
-		delete(m.pendingPermissions, pendingID)
-		m.addPermissionTombstoneLocked(requestID, streams.PermissionErrorAlreadyResolved)
-		m.permissionMu.Unlock()
-		return &streams.PermissionCancelResponse{RequestID: requestID, PendingID: pendingID, Status: "cancelled"}, nil
-	default:
-		delete(m.pendingPermissions, pendingID)
-		m.addPermissionTombstoneLocked(requestID, streams.PermissionErrorDeliveryFailed)
-		m.permissionMu.Unlock()
-		return nil, &PermissionOperationError{Code: streams.PermissionErrorDeliveryFailed}
-	}
+	return &streams.PermissionCancelResponse{RequestID: requestID, PendingID: pendingID, Status: "cancelled"}, nil
 }
 
 func (m *Manager) addPermissionTombstoneLocked(requestID, code string) {
@@ -2743,32 +2757,28 @@ func (m *Manager) addPermissionTombstoneLocked(requestID, code string) {
 
 // RespondToPermission responds to a pending permission request
 func (m *Manager) RespondToPermission(pendingID string, optionID string, cancelled bool) error {
-	m.permissionMu.RLock()
-	pending, ok := m.pendingPermissions[pendingID]
-	m.permissionMu.RUnlock()
-
-	if !ok {
-		return fmt.Errorf("pending permission not found: %s", pendingID)
+	validate := func(pending *PendingPermission) error {
+		if !cancelled && !permissionOffersOption(pending, optionID) {
+			return fmt.Errorf("permission option not offered: %s", optionID)
+		}
+		return nil
 	}
-	if !cancelled && !permissionOffersOption(pending, optionID) {
-		return fmt.Errorf("permission option not offered: %s", optionID)
+	_, err := m.consumePermission(pendingID, "", validate, &adapter.PermissionResponse{
+		OptionID:  optionID,
+		Cancelled: cancelled,
+	}, streams.PermissionErrorAlreadyResolved)
+	if err != nil {
+		var opErr *PermissionOperationError
+		if errors.As(err, &opErr) {
+			return fmt.Errorf("pending permission %s: %s", pendingID, opErr.Code)
+		}
+		return err
 	}
-
 	m.logger.Info("responding to permission request",
 		zap.String("pending_id", pendingID),
 		zap.String("option_id", optionID),
 		zap.Bool("cancelled", cancelled))
-
-	// Send response (non-blocking since channel is buffered)
-	select {
-	case pending.ResponseCh <- &adapter.PermissionResponse{
-		OptionID:  optionID,
-		Cancelled: cancelled,
-	}:
-		return nil
-	default:
-		return fmt.Errorf("response channel full for pending permission: %s", pendingID)
-	}
+	return nil
 }
 
 func permissionOffersOption(pending *PendingPermission, optionID string) bool {
@@ -2796,10 +2806,10 @@ func (m *Manager) CancelPendingPermissions() {
 	for _, p := range pending {
 		m.logger.Info("cancelling pending permission before new prompt",
 			zap.String("pending_id", p.ID))
-		select {
-		case p.ResponseCh <- &adapter.PermissionResponse{Cancelled: true}:
-		default:
-		}
+		// Best-effort: another terminal path may have already consumed this
+		// exact generation between the snapshot above and this call.
+		_, _ = m.consumePermission(p.ID, p.RequestID, nil,
+			&adapter.PermissionResponse{Cancelled: true}, streams.PermissionErrorAlreadyResolved)
 	}
 }
 
