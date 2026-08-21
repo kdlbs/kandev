@@ -1,8 +1,8 @@
 /**
  * Authentication methods supported by the Jira integration.
- * - `api_token` ΓÇö Atlassian Cloud only (Basic auth with email + token from id.atlassian.com).
- * - `pat` ΓÇö Jira Server / Data Center only (Personal Access Token, sent as Bearer).
- * - `session_cookie` ΓÇö works on both Cloud and Server (wraps the session JWT cookie).
+ * - `api_token` — Atlassian Cloud only (Basic auth with email + token from id.atlassian.com).
+ * - `pat` — Jira Server / Data Center only (Personal Access Token, sent as Bearer).
+ * - `session_cookie` — works on both Cloud and Server (wraps the session JWT cookie).
  */
 export type JiraAuthMethod = "api_token" | "pat" | "session_cookie" | "oauth";
 
@@ -141,7 +141,7 @@ export interface JiraIssueWatch {
   /**
    * Cap on concurrent open watcher-created tasks for this watch.
    * `null`/omitted means uncapped. Positive integers are accepted; the backend
-   * rejects values Γëñ 0.
+   * rejects values ≤ 0.
    */
   maxInflightTasks?: number | null;
   /** Last poll timestamp, or null when the watch has never run. */

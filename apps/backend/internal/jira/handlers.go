@@ -690,4 +690,3 @@ func (c *Controller) httpOAuthRefresh(ctx *gin.Context) {
 	}
 	ctx.JSON(http.StatusOK, gin.H{"ok": true})
 }
-

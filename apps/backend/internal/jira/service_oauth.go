@@ -24,6 +24,32 @@ func (s *Service) SetOAuthRedirectURI(uri string) {
 	}
 }
 
+// resolveSecret picks the secret to test: inline from the request if present,
+// or from the stored secret/OAuth access token otherwise.
+func (s *Service) resolveSecret(ctx context.Context, workspaceID string, req *SetConfigRequest) (string, error) {
+	if req.Secret != "" {
+		return req.Secret, nil
+	}
+	if s.secrets == nil {
+		return "", errors.New("no secret store configured")
+	}
+	var secret string
+	var err error
+	if req.AuthMethod == AuthMethodOAuth {
+		secret, err = s.secrets.Reveal(ctx, OAuthAccessTokenKeyForWorkspace(workspaceID))
+	} else {
+		secret, err = s.revealSecret(ctx, workspaceID)
+	}
+	if err != nil {
+		s.log.Warn("jira: secret reveal failed", zap.Error(err))
+		return "", fmt.Errorf("read jira secret: %w", err)
+	}
+	if secret == "" {
+		return "", errors.New("no token stored - paste one to test")
+	}
+	return secret, nil
+}
+
 // resolveCredentials picks the credentials to test: if the request carries a
 // secret, use it inline (pre-save); otherwise fall back to the stored secret
 // (post-save re-test). For OAuth, reads the OAuth access token instead of
@@ -35,26 +61,9 @@ func (s *Service) resolveCredentials(ctx context.Context, workspaceID string, re
 		AuthMethod:   req.AuthMethod,
 		InstanceType: req.InstanceType,
 	}
-	var secret string
-	if req.Secret != "" {
-		secret = req.Secret
-	} else {
-		if s.secrets == nil {
-			return nil, "", errors.New("no secret store configured")
-		}
-		var err error
-		if cfg.AuthMethod == AuthMethodOAuth {
-			secret, err = s.secrets.Reveal(ctx, OAuthAccessTokenKeyForWorkspace(workspaceID))
-		} else {
-			secret, err = s.revealSecret(ctx, workspaceID)
-		}
-		if err != nil {
-			s.log.Warn("jira: secret reveal failed", zap.Error(err))
-			return nil, "", fmt.Errorf("read jira secret: %w", err)
-		}
-		if secret == "" {
-			return nil, "", errors.New("no token stored - paste one to test")
-		}
+	secret, err := s.resolveSecret(ctx, workspaceID, req)
+	if err != nil {
+		return nil, "", err
 	}
 	needsStoredConfig := cfg.SiteURL == "" ||
 		cfg.AuthMethod == "" ||

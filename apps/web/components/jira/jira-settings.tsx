@@ -36,12 +36,14 @@ import type {
   TestJiraConnectionResult,
 } from "@/lib/types/jira";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   CookieExpiry,
   SecretHelp,
   secretCopy,
   secretPlaceholder,
 } from "@/components/jira/jira-secret-help";
+import { OAuthFields } from "@/components/jira/jira-oauth-fields";
 import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
 // Cloud sites live under this domain; shown as an example, not as prose, so it
@@ -94,7 +96,7 @@ function defaultAuthForInstance(instance: JiraInstanceType): JiraAuthMethod {
 // instance type. Mirrors the backend validation so the user can't submit an
 // invalid combination. session_cookie is Cloud-only today because the backend
 // wraps the secret under cloud.session.token / tenant.session.token cookie
-// names ΓÇö Server/DC uses JSESSIONID, so the wrapping is a no-op there until we
+// names — Server/DC uses JSESSIONID, so the wrapping is a no-op there until we
 // add a Server-aware path.
 function authAllowedForInstance(auth: JiraAuthMethod, instance: JiraInstanceType): boolean {
   if (auth === "api_token") return instance === "cloud";
@@ -251,172 +253,6 @@ type SecretFieldProps = FieldsRowProps & { hasSavedSecret: boolean };
 
 type SecretFieldPropsWithExpiry = SecretFieldProps & { secretExpiresAt?: string | null };
 
-type OAuthFieldsProps = FieldsRowProps & {
-  workspaceId: string;
-  connected: boolean;
-  tokenExpiresAt?: string | null;
-  onConnected: () => void;
-};
-
-function OAuthFields({
-  form,
-  baseline,
-  loading,
-  workspaceId,
-  connected,
-  tokenExpiresAt,
-  onConnected,
-}: OAuthFieldsProps) {
-  const { t } = useTranslation();
-  const { toast } = useToast();
-  const [connecting, setConnecting] = useState(false);
-  const [showPasteDialog, setShowPasteDialog] = useState(false);
-  const [pasteUrl, setPasteUrl] = useState("");
-  const [completing, setCompleting] = useState(false);
-
-  const handleConnect = useCallback(async () => {
-    setConnecting(true);
-    try {
-      const params = new URLSearchParams({
-        workspaceId,
-        siteUrl: form.siteUrl,
-      });
-      const res = await fetch(`/api/v1/jira/oauth/start?${params}`);
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Request failed" }));
-        toast({
-          description: t("jira:oauthStartFailed", { error: err.error || String(err) }),
-          variant: "error",
-        });
-        return;
-      }
-      const { authUrl } = await res.json();
-      window.open(authUrl, "_blank");
-      setShowPasteDialog(true);
-    } catch (err) {
-      toast({ description: t("jira:oauthStartFailed", { error: String(err) }), variant: "error" });
-    } finally {
-      setConnecting(false);
-    }
-  }, [workspaceId, form.siteUrl, t, toast]);
-
-  const completeOAuth = useCallback(
-    async (code: string, state: string) => {
-      setCompleting(true);
-      try {
-        const res = await fetch(
-          `/api/v1/jira/oauth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}&api=1`,
-          { headers: { Accept: "application/json" } },
-        );
-        if (res.ok) {
-          toast({ description: t("jira:oauthConnected"), variant: "success" });
-          setShowPasteDialog(false);
-          setPasteUrl("");
-          onConnected();
-        } else {
-          const err = await res.json().catch(() => ({ error: "Failed" }));
-          toast({
-            description: t("jira:oauthStartFailed", { error: err.error || "Unknown error" }),
-            variant: "error",
-          });
-          setShowPasteDialog(true);
-        }
-      } catch (err) {
-        toast({
-          description: t("jira:oauthStartFailed", { error: String(err) }),
-          variant: "error",
-        });
-        setShowPasteDialog(true);
-      } finally {
-        setCompleting(false);
-      }
-    },
-    [t, toast, onConnected],
-  );
-
-  const handlePasteComplete = useCallback(async () => {
-    try {
-      const url = new URL(pasteUrl);
-      const code = url.searchParams.get("code");
-      const state = url.searchParams.get("state");
-      if (!code || !state) {
-        toast({ description: t("jira:oauthPasteInvalid"), variant: "error" });
-        return;
-      }
-      await completeOAuth(code, state);
-    } catch {
-      toast({ description: t("jira:oauthPasteInvalid"), variant: "error" });
-    }
-  }, [pasteUrl, t, toast, completeOAuth]);
-
-  return (
-    <div className="space-y-4">
-      {connected && (
-        <Alert>
-          <AlertDescription>
-            {t("jira:oauthConnected")}
-            {tokenExpiresAt && (
-              <span className="ml-2 text-xs text-muted-foreground">
-                {t("jira:oauthTokenExpires", { date: new Date(tokenExpiresAt).toLocaleString() })}
-              </span>
-            )}
-          </AlertDescription>
-        </Alert>
-      )}
-      <Button
-        type="button"
-        onClick={handleConnect}
-        disabled={connecting || loading || !form.siteUrl}
-        className="cursor-pointer"
-        data-testid="jira-oauth-connect"
-      >
-        {connecting ? t("jira:connecting") : t("jira:connectWithAtlassian")}
-      </Button>
-      <p className="text-xs text-muted-foreground">{t("jira:oauthDescription")}</p>
-
-      {showPasteDialog && (
-        <Alert>
-          <AlertDescription className="space-y-3">
-            <p className="font-medium">{t("jira:oauthPasteInstructions")}</p>
-            <p className="text-xs">{t("jira:oauthPasteHelp")}</p>
-            <Input
-              type="text"
-              placeholder="http://localhost:38429/api/v1/jira/oauth/callback?code=...&state=..."
-              value={pasteUrl}
-              onChange={(e) => setPasteUrl(e.target.value)}
-              disabled={completing}
-              data-testid="jira-oauth-paste-url"
-            />
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                onClick={handlePasteComplete}
-                disabled={completing || !pasteUrl}
-                className="cursor-pointer"
-              >
-                {completing ? t("jira:connecting") : t("jira:oauthComplete")}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setShowPasteDialog(false);
-                  setPasteUrl("");
-                }}
-                className="cursor-pointer"
-              >
-                {t("jira:oauthCancel")}
-              </Button>
-            </div>
-          </AlertDescription>
-        </Alert>
-      )}
-    </div>
-  );
-}
-
 function SecretField({
   form,
   baseline,
@@ -462,8 +298,8 @@ function TestResultAlert({ result }: { result: TestJiraConnectionResult | null }
   return (
     <Alert variant={result.ok ? "default" : "destructive"}>
       <AlertDescription>
-        {/* Both values are Jira's own reply ΓÇö an account name and an upstream
-            error message ΓÇö so they travel through `values`, never the catalog. */}
+        {/* Both values are Jira's own reply — an account name and an upstream
+            error message — so they travel through `values`, never the catalog. */}
         {result.ok
           ? t("jira:connectedAs", {
               name: result.displayName || result.email || result.accountId,
@@ -532,7 +368,7 @@ function useJiraConfigRefresh(workspaceId: string, setConfig: (cfg: JiraConfig |
       getJiraConfig({ workspaceId })
         .then((cfg) => setConfig(cfg))
         .catch(() => {
-          /* transient failures are fine ΓÇö next tick retries */
+          /* transient failures are fine — next tick retries */
         });
     }, INTEGRATION_STATUS_REFRESH_MS);
     return () => clearInterval(id);
@@ -698,8 +534,8 @@ function normalizeComparableSiteUrl(value: string): string {
 // savedSecretMatches reports whether the saved secret can be reused against
 // the current form values. Reuse is only safe when every identity component
 // of the saved credential still matches: same auth method, same instance
-// type, same Jira host, and ΓÇö for Cloud api_token where the basic pair is
-// email:token ΓÇö the same email (case-insensitive). Otherwise the user could
+// type, same Jira host, and — for Cloud api_token where the basic pair is
+// email:token — the same email (case-insensitive). Otherwise the user could
 // change the site URL or Cloud account and silently submit the previous
 // token to a different host/account.
 function savedSecretMatches(config: JiraConfig | null, form: FormState): boolean {
@@ -713,10 +549,21 @@ function savedSecretMatches(config: JiraConfig | null, form: FormState): boolean
   return (config.email ?? "").toLowerCase() === form.email.toLowerCase();
 }
 
-export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) {
-  const { t } = useTranslation();
-  const s = useJiraSettings(workspaceId);
-  const baseline = configToForm(s.config);
+type JiraSettings = ReturnType<typeof useJiraSettings>;
+
+type DerivedFormState = {
+  isOAuth: boolean;
+  savedSecretMatchesMode: boolean;
+  disableSave: boolean;
+  disableTest: boolean;
+  revision: string;
+  dirty: boolean;
+  invalidReason: string | undefined;
+};
+
+// Derives save/test gating and the validation message from the form + stored
+// config. Extracted so JiraConnectionSection stays under the complexity limit.
+function deriveFormState(s: JiraSettings, t: TFunction): DerivedFormState {
   const savedSecretMatchesMode = savedSecretMatches(s.config, s.form);
   const isOAuth = s.form.authMethod === "oauth";
   const missingSecret = !isOAuth && !savedSecretMatchesMode && !s.form.secret;
@@ -727,12 +574,34 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
   const disableTest = missingSecret || (isOAuth && oauthNeedsConnect);
   const revision = JSON.stringify(s.form);
   const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
-  // Assigned rather than returned from a helper, but the guard would not see it
-  // either way ΓÇö `invalidReason` is a plain string, never a JSX literal.
   let invalidReason: string | undefined;
   if (!s.form.siteUrl) invalidReason = t("jira:aJiraSiteUrlIsRequired");
   else if (emailRequired && !s.form.email) invalidReason = t("jira:anEmailAddressIsRequired");
   else if (missingSecret) invalidReason = t("jira:aCredentialIsRequired");
+  return {
+    isOAuth,
+    savedSecretMatchesMode,
+    disableSave,
+    disableTest,
+    revision,
+    dirty,
+    invalidReason,
+  };
+}
+
+export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
+  const s = useJiraSettings(workspaceId);
+  const baseline = configToForm(s.config);
+  const {
+    isOAuth,
+    savedSecretMatchesMode,
+    disableSave,
+    disableTest,
+    revision,
+    dirty,
+    invalidReason,
+  } = deriveFormState(s, t);
 
   useSettingsSaveContributor({
     id: `jira-config:${workspaceId}`,
@@ -767,13 +636,11 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
           {isOAuth ? (
             <OAuthFields
               form={s.form}
-              baseline={baseline}
               loading={s.loading}
-              update={s.update}
               workspaceId={workspaceId}
               connected={!!s.config?.hasSecret}
               tokenExpiresAt={s.config?.tokenExpiresAt ?? null}
-              onConnected={() => void load()}
+              onConnected={() => void s.load()}
             />
           ) : (
             <SecretField

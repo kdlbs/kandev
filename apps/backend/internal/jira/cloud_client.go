@@ -678,4 +678,3 @@ func walkADF(node map[string]interface{}, b *strings.Builder) {
 		}
 	}
 }
-

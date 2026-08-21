@@ -845,4 +845,3 @@ func (s *Store) ResetIssueWatchState(ctx context.Context, watchID string) error 
 	}
 	return tx.Commit()
 }
-
