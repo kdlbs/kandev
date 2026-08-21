@@ -2,7 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import {
   seedGitLabReview,
-  seedGitLabMRData,
+  seedTaskWithLinkedGitLabMRs,
   GITLAB_HOST,
   GITLAB_PROJECT,
 } from "../../helpers/gitlab";
@@ -35,54 +35,6 @@ async function seedTaskWithLinkedMR(apiClient: ApiClient, seedData: SeedData, ti
     repository_id: seedData.repositoryId,
     mr_url: `${GITLAB_HOST}/${GITLAB_PROJECT}/-/merge_requests/${MR_IID}`,
   });
-  return task.id;
-}
-
-// Two-MR seed for the multi-MR dropdown independence spec (AC1-AC3, AC26):
-// links `iids` to one task so each renders its own MRAutomationControls
-// block in the dropdown instead of the single-MR hover popover.
-async function seedTaskWithLinkedMRs(
-  apiClient: ApiClient,
-  seedData: SeedData,
-  title: string,
-  iids: number[],
-) {
-  // Configure the GitLab connection once — each call invalidates and
-  // rebuilds the workspace's cached mock client, discarding any MRs already
-  // seeded on it (see seedGitLabMRData's doc comment).
-  await apiClient.configureGitLab(seedData.workspaceId, GITLAB_HOST);
-  for (const iid of iids) {
-    await seedGitLabMRData(
-      apiClient,
-      seedData.workspaceId,
-      iid,
-      `MR automation independence ${iid}`,
-    );
-  }
-  await apiClient.updateRepository(seedData.repositoryId, {
-    provider: "gitlab",
-    provider_host: GITLAB_HOST,
-    provider_owner: "platform",
-    provider_name: "kandev",
-  });
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-  for (const iid of iids) {
-    await apiClient.linkTaskGitLabMR(seedData.workspaceId, {
-      task_id: task.id,
-      repository_id: seedData.repositoryId,
-      mr_url: `${GITLAB_HOST}/${GITLAB_PROJECT}/-/merge_requests/${iid}`,
-    });
-  }
   return task.id;
 }
 
@@ -294,10 +246,13 @@ test.describe("GitLab MR automation — multi-MR independence (AC1-AC3, AC26)", 
     test.setTimeout(120_000);
     const iidA = 220;
     const iidB = 221;
-    const taskId = await seedTaskWithLinkedMRs(apiClient, seedData, "MR automation independence", [
-      iidA,
-      iidB,
-    ]);
+    const taskId = await seedTaskWithLinkedGitLabMRs(
+      apiClient,
+      seedData,
+      "MR automation independence",
+      [iidA, iidB],
+      "MR automation independence",
+    );
     await openTask(testPage, taskId);
 
     // 2+ linked MRs always render the click-only dropdown — never the
