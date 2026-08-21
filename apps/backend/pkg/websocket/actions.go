@@ -84,6 +84,7 @@ const (
 
 	ActionTaskSessionList   = "task.session.list"
 	ActionTaskSessionStatus = "task.session.status"
+	ActionTaskLaunchRecover = "task.launch.recover"
 
 	// Unified session launch
 	ActionSessionLaunch       = "session.launch"
@@ -95,6 +96,7 @@ const (
 	ActionSessionSetPrimary   = "session.set_primary"
 	ActionSessionSetPlanMode  = "session.set_plan_mode"
 	ActionSessionRename       = "session.rename"
+	ActionSessionRouteAction  = "session.route_action"
 
 	// Agent actions
 	ActionAgentList   = "agent.list"
@@ -237,6 +239,11 @@ const (
 	ActionSessionTodosUpdated          = "session.todos_updated"
 	ActionSessionPromptUsage           = "session.prompt_usage"
 	ActionSessionPollModeChanged       = "session.poll_mode_changed"
+	ActionSessionRouteChanging         = "session.route_changing"
+	ActionSessionRouteChanged          = "session.route_changed"
+	ActionSessionCapabilitiesReplaced  = "session.capabilities_replaced"
+	ActionSessionRouteWaiting          = "session.route_waiting"
+	ActionSessionRoutePending          = "session.route_pending"
 	ActionInputRequested               = "input.requested"
 	ActionRepositoryCreated            = "repository.created"
 	ActionRepositoryUpdated            = "repository.updated"
@@ -428,6 +435,9 @@ const (
 	ActionMCPWriteTaskDocument = "mcp.write_task_document"
 	ActionMCPListPluginTools   = "mcp.list_plugin_tools"
 	ActionMCPInvokePluginTool  = "mcp.invoke_plugin_tool"
+
+	// Office quorum decision recording.
+	ActionMCPRecordStepDecision = "mcp.record_step_decision"
 
 	// Config-mode MCP actions (agent-native configuration)
 	ActionMCPCreateWorkflow = "mcp.create_workflow"

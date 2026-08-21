@@ -2,10 +2,12 @@
 
 import { IconGitMerge } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import { t } from "@/lib/i18n";
+import { useChangeRequestTaskTooltipState } from "@/components/integrations/use-change-request-task-tooltip-state";
 import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import type { TaskMR } from "@/lib/types/gitlab";
+import { deriveMRTaskStatusSummary, MRTaskStatusSummary } from "./mr-task-status-summary";
 
 const MUTED_FOREGROUND = "text-muted-foreground";
 const PURPLE_500 = "text-purple-500";
@@ -170,14 +172,14 @@ function mrMergeStatusReady(mr: TaskMR): boolean {
   return mr.merge_status === "can_be_merged";
 }
 
-export function getMRTooltip(mr: TaskMR): string {
-  const parts = [`!${mr.mr_iid}: ${mr.mr_title}`];
-  if (mr.state !== "open") parts.push(t("gitlab:mrTooltipState", { state: mr.state }));
-  if (mr.approval_state) parts.push(t("gitlab:mrTooltipReview", { state: mr.approval_state }));
-  if (mr.pipeline_state) parts.push(t("gitlab:mrTooltipPipeline", { state: mr.pipeline_state }));
-  if (mr.draft) parts.push(t("gitlab:draft"));
-  else if (isMRReadyToMerge(mr)) parts.push(t("gitlab:mrTooltipReadyToMerge"));
-  return parts.join(" | ");
+/**
+ * True when at least one MR is open AND every open MR is ready to merge.
+ * Terminal (merged/closed/locked) siblings are ignored so they can't drag the
+ * result to false. Mirrors github's areAllOpenPRsReadyToMerge.
+ */
+export function areAllOpenMRsReadyToMerge(mrs: TaskMR[]): boolean {
+  const openMRs = mrs.filter((mr) => mr.state === "open");
+  return openMRs.length > 0 && openMRs.every(isMRReadyToMerge);
 }
 
 /**
@@ -226,51 +228,73 @@ export function MRTaskIcon({ taskId }: { taskId: string }) {
 }
 
 function SingleMRIcon({ taskId, mr }: { taskId: string; mr: TaskMR }) {
+  const { t } = useTranslation();
+  const tooltip = useChangeRequestTaskTooltipState();
+  const readyToMerge = isMRReadyToMerge(mr);
+  const summary = deriveMRTaskStatusSummary(mr, readyToMerge);
   return (
-    <Tooltip>
+    <Tooltip open={tooltip.open}>
       <TooltipTrigger asChild>
         <span
           data-testid={`mr-task-icon-${taskId}`}
           data-mr-state={mr.state}
           data-mr-count="1"
-          data-mr-ready-to-merge={isMRReadyToMerge(mr) ? "true" : "false"}
+          data-mr-ready-to-merge={readyToMerge ? "true" : "false"}
+          role="img"
+          tabIndex={0}
+          aria-label={t("gitlab:mergeRequestStatus", { iid: mr.mr_iid })}
+          onPointerEnter={tooltip.onPointerEnter}
+          onPointerLeave={tooltip.onPointerLeave}
+          onFocus={tooltip.onFocus}
+          onBlur={tooltip.onBlur}
           className={cn("inline-flex items-center shrink-0", getMRStatusColor(mr))}
         >
-          <IconGitMerge className="h-3.5 w-3.5" />
+          <IconGitMerge aria-hidden="true" className="h-3.5 w-3.5" />
         </span>
       </TooltipTrigger>
-      {/* MR title/state come from the linked GitLab MR itself, not
-          translatable UI copy — mirrors github's untranslated getPRTooltip. */}
-      <TooltipContent>{getMRTooltip(mr)}</TooltipContent>
+      <TooltipContent
+        sideOffset={6}
+        onEscapeKeyDown={tooltip.onEscapeKeyDown}
+        className="w-80 max-w-[calc(100vw-1rem)] p-3"
+      >
+        <MRTaskStatusSummary summaries={[summary]} />
+      </TooltipContent>
     </Tooltip>
   );
 }
 
 function MultiMRIcon({ taskId, mrs }: { taskId: string; mrs: TaskMR[] }) {
+  const { t } = useTranslation();
+  const tooltip = useChangeRequestTaskTooltipState();
   const aggregateColor = aggregateMRStatusColor(mrs);
+  const allReady = areAllOpenMRsReadyToMerge(mrs);
+  const summaries = mrs.map((mr) => deriveMRTaskStatusSummary(mr, isMRReadyToMerge(mr)));
   return (
-    <Tooltip>
+    <Tooltip open={tooltip.open}>
       <TooltipTrigger asChild>
         <span
           data-testid={`mr-task-icon-${taskId}`}
           data-mr-count={mrs.length}
+          data-mr-ready-to-merge={allReady ? "true" : "false"}
+          role="img"
+          tabIndex={0}
+          aria-label={t("gitlab:mergeRequestStatuses", { count: mrs.length })}
+          onPointerEnter={tooltip.onPointerEnter}
+          onPointerLeave={tooltip.onPointerLeave}
+          onFocus={tooltip.onFocus}
+          onBlur={tooltip.onBlur}
           className={cn("inline-flex items-center gap-0.5 shrink-0", aggregateColor)}
         >
-          <IconGitMerge className="h-3.5 w-3.5" />
-          <span className="text-[9px] font-semibold leading-none">{mrs.length}</span>
+          <IconGitMerge aria-hidden="true" className="h-3.5 w-3.5" />
+          <span className="text-[9px] font-semibold leading-none tabular-nums">{mrs.length}</span>
         </span>
       </TooltipTrigger>
-      <TooltipContent>
-        <div className="flex flex-col gap-1 text-xs">
-          {mrs.map((mr) => (
-            <div key={mr.id} className="flex items-center gap-2">
-              <span className={cn("inline-flex shrink-0", getMRStatusColor(mr))}>
-                <IconGitMerge className="h-3 w-3" />
-              </span>
-              <span>{getMRTooltip(mr)}</span>
-            </div>
-          ))}
-        </div>
+      <TooltipContent
+        sideOffset={6}
+        onEscapeKeyDown={tooltip.onEscapeKeyDown}
+        className="w-80 max-w-[calc(100vw-1rem)] p-3"
+      >
+        <MRTaskStatusSummary summaries={summaries} />
       </TooltipContent>
     </Tooltip>
   );

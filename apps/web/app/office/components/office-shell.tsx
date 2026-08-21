@@ -7,6 +7,10 @@ import { AppSidebarNavItem } from "@/components/app-sidebar/app-sidebar-nav-item
 import { OfficeNavigationSection } from "@/components/app-sidebar/sections/office-navigation-section";
 import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
 import { PageShell } from "@/components/page-shell";
+import {
+  OfficeTopbarChromeProvider,
+  useOfficeTopbarChrome,
+} from "@/app/office/components/office-topbar-context";
 import { usePathname } from "@/lib/routing/client-router";
 // Route -> catalog key, not route -> title. The map is module scope, so a `t()`
 // here would resolve once at import and freeze at the boot locale; the keys are
@@ -24,6 +28,7 @@ const PAGE_TITLE_KEYS: Record<string, string> = {
   "/office/workspace/activity": "office:activity",
   "/office/workspace/routing": "office:providerRouting",
   "/office/workspace/settings": "office:preferences",
+  "/office/setup": "office:setupTitle",
 };
 
 function resolveTitleKey(pathname: string): string | null {
@@ -31,15 +36,6 @@ function resolveTitleKey(pathname: string): string | null {
   if (exact) return exact;
   if (pathname.startsWith("/office/workspace/settings")) return "office:preferences";
   return null;
-}
-
-function isDetailPage(pathname: string): boolean {
-  return (
-    /^\/office\/tasks\/[^/]+$/.test(pathname) ||
-    /^\/office\/agents\/[^/]+(?:\/.*)?$/.test(pathname) ||
-    /^\/office\/projects\/[^/]+$/.test(pathname) ||
-    /^\/office\/routines\/[^/]+$/.test(pathname)
-  );
 }
 
 // Destinations the desktop sidebar reaches through sections other than
@@ -91,32 +87,43 @@ function OfficePageNav({ onClose }: { onClose: () => void }) {
   );
 }
 
-/**
- * Office page chrome on the shared `PageShell`. List pages show a static
- * title; detail pages render a portal target (#office-topbar-slot) that the
- * page component fills with its breadcrumb via OfficeTopbarPortal. The SPA
- * office paint path (`src/office-routes.tsx`) wraps every route's output in
- * this shell so the chrome cannot drift.
- */
-export function OfficeShell({
-  children,
-  routePath,
-}: {
+type OfficeShellProps = {
   children: ReactNode;
   /** Resolved route for the `data-office-route` anchor; defaults to the URL. */
   routePath?: string;
-}) {
+};
+
+/**
+ * Office page chrome on the shared `PageShell`. List pages render their
+ * pathname-derived title as the breadcrumb's current-page crumb, exactly as
+ * Settings does; detail pages declare their chrome (title, parents, action
+ * slots) through `useOfficeTopbar`, and the shell renders it — pages never
+ * inject topbar markup. The SPA office paint path (`src/office-routes.tsx`)
+ * wraps every route's output in this shell so the chrome cannot drift.
+ */
+export function OfficeShell({ children, routePath }: OfficeShellProps) {
+  return (
+    <OfficeTopbarChromeProvider>
+      <OfficeShellChrome routePath={routePath}>{children}</OfficeShellChrome>
+    </OfficeTopbarChromeProvider>
+  );
+}
+
+function OfficeShellChrome({ children, routePath }: OfficeShellProps) {
   const { t } = useTranslation();
   const pathname = usePathname();
+  const chrome = useOfficeTopbarChrome();
   const titleKey = resolveTitleKey(pathname);
-  const detail = isDetailPage(pathname);
-  const title = titleKey ? t(titleKey) : "";
+  const title = chrome?.title ?? (titleKey ? t(titleKey) : "");
 
   return (
     <PageShell
       title={title}
-      variant="root"
-      backLabel=""
+      titleSlot={chrome?.titleSlot}
+      icon={chrome?.icon}
+      parents={chrome?.parents}
+      leftActions={chrome?.leftActions}
+      actions={chrome?.actions}
       topbarTestId="office-topbar"
       className="gap-2 bg-background px-4"
       pageNav={(onClose) => <OfficePageNav onClose={onClose} />}
@@ -125,13 +132,6 @@ export function OfficeShell({
       // goes to /office/tasks, and two rows labelled "Tasks" leading to
       // different surfaces is a coin flip for the user.
       navOmitDestinations={["tasks"]}
-      leading={
-        detail ? (
-          <div id="office-topbar-slot" className="flex items-center gap-2 flex-1 min-w-0" />
-        ) : (
-          titleKey && <h1 className="truncate text-sm font-medium text-foreground">{title}</h1>
-        )
-      }
     >
       {/* `data-office-route` stamps the RESOLVED route onto the outlet, and is
           the render anchor the pseudo-coverage oracle waits on for every

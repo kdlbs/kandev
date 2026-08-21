@@ -31,6 +31,7 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -55,11 +56,60 @@ func openSecondPostgresConnection(t *testing.T, dsn string, db *sqlx.DB) *sqlx.D
 	if err != nil {
 		t.Fatalf("open second postgres connection: %v", err)
 	}
+	second.SetMaxOpenConns(1)
+	second.SetMaxIdleConns(1)
 	t.Cleanup(func() { _ = second.Close() })
 	if _, err := second.Exec("SET search_path TO " + schema); err != nil {
 		t.Fatalf("set search_path on second connection: %v", err)
 	}
 	return second
+}
+
+func postgresBackendWaitsOnLock(ctx context.Context, db *sqlx.DB, pid int) (bool, error) {
+	var waiting bool
+	err := db.GetContext(ctx, &waiting, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_stat_activity
+			WHERE pid = $1 AND wait_event_type = 'Lock'
+		)
+	`, pid)
+	return waiting, err
+}
+
+// waitForPostgresLock waits until the backend identified by pid reports a
+// PostgreSQL lock wait. The done channel lets callers fail immediately when
+// the operation completes without ever reaching the expected contention.
+func waitForPostgresLock(ctx context.Context, observer *sqlx.DB, pid int, done <-chan struct{}) error {
+	const timeout = 5 * time.Second
+	deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-done:
+			return fmt.Errorf("operation completed before backend %d entered a PostgreSQL lock wait", pid)
+		default:
+		}
+
+		waiting, err := postgresBackendWaitsOnLock(deadlineCtx, observer, pid)
+		if err != nil {
+			return fmt.Errorf("query PostgreSQL lock state for backend %d: %w", pid, err)
+		}
+		if waiting {
+			return nil
+		}
+
+		select {
+		case <-done:
+			return fmt.Errorf("operation completed before backend %d entered a PostgreSQL lock wait", pid)
+		case <-ticker.C:
+		case <-deadlineCtx.Done():
+			return fmt.Errorf("timed out waiting for backend %d to enter a PostgreSQL lock wait", pid)
+		}
+	}
 }
 
 func TestPostgresCreateTurnWithStepStampBlocksOnConcurrentStepMove(t *testing.T) {
@@ -74,6 +124,7 @@ func TestPostgresCreateTurnWithStepStampBlocksOnConcurrentStepMove(t *testing.T)
 	// A second, independent connection to the same isolated schema — see the
 	// file comment for why this is required rather than reusing db.
 	moverDB := openSecondPostgresConnection(t, dsn, db)
+	observerDB := openSecondPostgresConnection(t, dsn, db)
 
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-pg-turn-stamp", Name: "Workspace"}); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
@@ -106,9 +157,10 @@ func TestPostgresCreateTurnWithStepStampBlocksOnConcurrentStepMove(t *testing.T)
 	// forever on <-releaseLock, holding its transaction open, and
 	// t.Cleanup's DROP SCHEMA hangs waiting for that lock instead of
 	// reporting the actual test failure.
-	defer release()
 	moverDone := make(chan error, 1)
+	moverFinished := make(chan struct{})
 	go func() {
+		defer close(moverFinished)
 		tx, err := moverDB.BeginTx(ctx, nil)
 		if err != nil {
 			moverDone <- err
@@ -128,11 +180,26 @@ func TestPostgresCreateTurnWithStepStampBlocksOnConcurrentStepMove(t *testing.T)
 		}
 		moverDone <- tx.Commit()
 	}()
+	t.Cleanup(func() {
+		release()
+		select {
+		case <-moverFinished:
+		case <-time.After(5 * time.Second):
+			t.Errorf("timed out waiting for mover goroutine during cleanup")
+		}
+	})
 
 	select {
 	case <-lockHeld:
+	case err := <-moverDone:
+		t.Fatalf("mover goroutine exited before acquiring the row lock: %v", err)
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for the mover goroutine to acquire the row lock")
+	}
+
+	turnPID := 0
+	if err := db.Get(&turnPID, "SELECT pg_backend_pid()"); err != nil {
+		t.Fatalf("read turn backend pid: %v", err)
 	}
 
 	// The turn goroutine runs on repo/db, the FIRST connection — genuinely
@@ -146,12 +213,22 @@ func TestPostgresCreateTurnWithStepStampBlocksOnConcurrentStepMove(t *testing.T)
 		stamped, turnErr = repo.CreateTurnWithStepStamp(ctx, turn)
 		close(turnDone)
 	}()
+	t.Cleanup(func() {
+		release()
+		select {
+		case <-turnDone:
+		case <-time.After(5 * time.Second):
+			t.Errorf("timed out waiting for turn goroutine during cleanup")
+		}
+	})
 
+	if err := waitForPostgresLock(ctx, observerDB, turnPID, turnDone); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case <-turnDone:
 		t.Fatal("CreateTurnWithStepStamp returned while the concurrent mover still held the row lock — the step read is not serialized against concurrent movers")
-	case <-time.After(300 * time.Millisecond):
-		// Still blocked, as expected: the row lock is held.
+	default:
 	}
 
 	release()

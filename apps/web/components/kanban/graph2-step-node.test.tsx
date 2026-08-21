@@ -1,5 +1,6 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
@@ -67,6 +68,50 @@ describe("Graph2StepNode — task-level background-running affordance", () => {
     const { container } = renderCurrentNode(null);
     expect(container.querySelector(ICON_CHECK)).not.toBeNull();
     expect(container.querySelector(ICON_LOADER2)).toBeNull();
+  });
+});
+
+describe("Graph2StepNode — auto-start-failed marker", () => {
+  function renderNodeWithTask(task: Task) {
+    return render(
+      <StateProvider>
+        <TooltipProvider>
+          <Graph2StepNode
+            step={STEP}
+            phase="current"
+            task={task}
+            hasPrev={false}
+            hasNext={false}
+            onMoveTask={() => undefined}
+            onPreviewTask={() => undefined}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+  }
+
+  it("shows the auto-start-failed triangle for a non-terminal task marked auto_start_failed", () => {
+    const task = {
+      id: "task-1",
+      title: "A task",
+      workflowStepId: "step-1",
+      state: "IN_PROGRESS",
+      autoStartFailed: true,
+    } as Task;
+    const { container } = renderNodeWithTask(task);
+    expect(container.querySelector('[data-testid="task-state-auto-start-failed"]')).not.toBeNull();
+  });
+
+  it("does not show the auto-start-failed triangle when the marker is absent", () => {
+    const task = {
+      id: "task-1",
+      title: "A task",
+      workflowStepId: "step-1",
+      state: "IN_PROGRESS",
+      autoStartFailed: false,
+    } as Task;
+    const { container } = renderNodeWithTask(task);
+    expect(container.querySelector('[data-testid="task-state-auto-start-failed"]')).toBeNull();
   });
 });
 

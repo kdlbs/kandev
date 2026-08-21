@@ -17,8 +17,6 @@ package scheduler
 
 import (
 	"context"
-	"os"
-	"strconv"
 	"sync"
 	"time"
 
@@ -42,21 +40,20 @@ const DefaultTickInterval = 5 * time.Second
 // has elapsed.
 const SignalCoalesceWindow = 10 * time.Millisecond
 
-// TickIntervalFromEnv reads KANDEV_OFFICE_SCHEDULER_TICK_MS and returns
-// the corresponding duration. Falls back to DefaultTickInterval when
-// the variable is unset or invalid. The env var name keeps the
-// "office" prefix for backward compatibility with existing
-// deployments.
+// TickIntervalFromConfig converts the resolved typed millisecond setting into
+// the scheduler duration. Invalid values retain the safe default.
+func TickIntervalFromConfig(milliseconds int) time.Duration {
+	if milliseconds <= 0 {
+		return DefaultTickInterval
+	}
+	return time.Duration(milliseconds) * time.Millisecond
+}
+
+// TickIntervalFromEnv remains as a compatibility helper for package callers.
+// Backend startup resolves the setting through common/config and passes the
+// result to New, so this helper no longer performs a package-local env read.
 func TickIntervalFromEnv() time.Duration {
-	raw := os.Getenv("KANDEV_OFFICE_SCHEDULER_TICK_MS")
-	if raw == "" {
-		return DefaultTickInterval
-	}
-	ms, err := strconv.Atoi(raw)
-	if err != nil || ms <= 0 {
-		return DefaultTickInterval
-	}
-	return time.Duration(ms) * time.Millisecond
+	return DefaultTickInterval
 }
 
 // RunProcessor performs one claim-and-dispatch pass. The scheduler

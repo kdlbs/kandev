@@ -80,6 +80,7 @@ func (s *Service) SetWorktreeManager(mgr *worktree.Manager) {
 		return
 	}
 	s.worktreeReaper = mgr
+	s.taskLaunchRecoveryWorktree = mgr
 }
 
 // subscribeAutomationEvents subscribes to automation-related events on the event bus.

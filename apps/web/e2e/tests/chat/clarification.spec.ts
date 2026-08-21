@@ -898,7 +898,12 @@ test.describe("Multi-question clarification carousel", () => {
 
     await session.chat.focus();
     await testPage.keyboard.press("ControlOrMeta+Enter");
-    await expect(session.clarificationSubmit()).toContainText("Submitting");
+    const submit = session.clarificationSubmit();
+    await expect(submit).toContainText("Submitting");
+    await expect(submit).toBeDisabled();
+    await expect(submit.locator('[role="status"]')).toBeVisible();
+    await expect(submit.locator('[role="status"]')).toHaveAttribute("aria-hidden", "true");
+    await expect(submit.locator("svg.tabler-icon-check")).toHaveCount(0);
 
     await testPage.keyboard.press("ArrowLeft");
     await expect(session.clarificationStep(2)).toHaveAttribute("data-active", "true");

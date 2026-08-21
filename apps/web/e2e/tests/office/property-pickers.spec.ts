@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/office-fixture";
 import type { Page } from "@playwright/test";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 /**
  * E2E coverage for office task property pickers (status, priority,
@@ -359,5 +360,54 @@ test.describe("property pickers", () => {
       const after = (await priorityTrigger.textContent())?.trim() ?? "";
       expect(after).toBe(before);
     }).toPass({ timeout: 5_000 });
+  });
+
+  test("started and completed rows show timestamps after a todo -> in_progress -> done transition", async ({
+    testPage,
+    apiClient,
+    officeSeed,
+  }) => {
+    const task = await apiClient.createTask(officeSeed.workspaceId, "Picker Timeline Task", {
+      workflow_id: officeSeed.workflowId,
+    });
+
+    // startedAt/completedAt are derived server-side from the status-change
+    // timeline (see deriveTaskTimestamps in the backend) and delivered to
+    // the open page by the "office.task.status_changed" WS handler's
+    // per-task refetch (GET /api/v1/office/tasks/:id) — assert on that
+    // live-page refetch rather than a reload, so a regression of the
+    // refetch itself fails this test.
+    const taskDetailPath = new RegExp(`^/api/v1/office/tasks/${task.id}$`);
+
+    // gotoTaskPage only waits for the title heading, which can render before
+    // the sidebar's own render pass picks up the same task fetch; wait for
+    // the initial GET explicitly instead of racing the property rows against
+    // an unbudgeted paint (see e2e/helpers/causal-waits.ts).
+    const initialLoad = waitForHttp(testPage, "GET", taskDetailPath);
+    await gotoTaskPage(testPage, task.id, "Picker Timeline Task");
+    await initialLoad;
+
+    const startedRow = testPage.getByTestId("started-row");
+    const completedRow = testPage.getByTestId("completed-row");
+    await expect(startedRow).toHaveText("--");
+    await expect(completedRow).toHaveText("--");
+
+    const startedRefetch = waitForHttp(testPage, "GET", taskDetailPath);
+    await testPage.getByTestId("status-picker-trigger").click();
+    await testPage.getByTestId("status-picker-option-in_progress").click();
+    await expect(testPage.getByTestId("status-picker-trigger")).toContainText(/In Progress/i, {
+      timeout: 15_000,
+    });
+    await startedRefetch;
+    await expect(startedRow).not.toHaveText("--", { timeout: 5_000 });
+
+    const completedRefetch = waitForHttp(testPage, "GET", taskDetailPath);
+    await testPage.getByTestId("status-picker-trigger").click();
+    await testPage.getByTestId("status-picker-option-done").click();
+    await expect(testPage.getByTestId("status-picker-trigger")).toContainText(/Done/i, {
+      timeout: 15_000,
+    });
+    await completedRefetch;
+    await expect(completedRow).not.toHaveText("--", { timeout: 5_000 });
   });
 });

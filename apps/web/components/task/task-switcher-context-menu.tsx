@@ -36,6 +36,7 @@ import {
   TaskDetachItem,
 } from "./task-switcher-action-items";
 import type { StepDef, TaskSwitcherItem } from "./task-switcher-types";
+import { TaskPluginPrimaryMenuItems } from "./task-switcher-plugin-menu-items";
 export type { StepDef } from "./task-switcher-types";
 export { createTaskLinkSelectAction } from "./task-switcher-link-menu";
 
@@ -334,6 +335,7 @@ function SingleSelectionMenuItems({
       />
       {!task.isArchived && <TaskColorMenu taskId={task.id} disabled={isDeleting} />}
       <TaskNestContextMenuItems task={task} disabled={isDeleting} />
+      <TaskPluginPrimaryMenuItems task={task} disabled={isDeleting} />
       <TaskPluginLinkMenu
         task={task}
         disabled={isDeleting}

@@ -8,6 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/utility/models"
 	"github.com/kandev/kandev/internal/utility/profilebinding"
@@ -22,6 +26,7 @@ var (
 	ErrBuiltinAgent        = errors.New("cannot modify built-in agent")
 	ErrProfileRequired     = errors.New("utility agent profile is required")
 	ErrProfileUnconfigured = errors.New("utility agent profile is not configured")
+	ErrExecutionRouting    = errors.New("utility execution routing is not configured")
 )
 
 type ProfileResolver interface {
@@ -29,16 +34,62 @@ type ProfileResolver interface {
 	MatchLegacy(ctx context.Context, agentID, model string) (*agentsettingsmodels.AgentProfile, error)
 }
 
+// ExecutionProfileResolver is an optional shared-router extension. It keeps
+// the logical profile ID on the call while returning the concrete profile used
+// for this one utility invocation.
+type ExecutionProfileResolver interface {
+	ResolveExecution(context.Context, string) (*agentsettingsmodels.AgentProfile, string, error)
+}
+
+// SessionExecutionProfileResolver is the session-aware form used by dynamic
+// routing. The legacy interface remains supported for small callers and test
+// doubles that only need a concrete profile lookup.
+type SessionExecutionProfileResolver interface {
+	ResolveExecutionForSession(context.Context, string, string) (*agentsettingsmodels.AgentProfile, string, error)
+}
+
+// ExecutionDetailsResolver exposes route identity to callers that may need to
+// apply a classified pre-result failure to the same dynamic route.
+type ExecutionDetailsResolver interface {
+	ResolveExecutionDetails(context.Context, string, string) (agentruntime.ProfileExecution, error)
+}
+
+// ExecutionFailureResolver advances a dynamic route after a classified
+// failure that occurred before any user-visible result was produced.
+type ExecutionFailureResolver interface {
+	ResolveExecutionAfterFailure(context.Context, string, string, string, int64, *routingerr.Error) (agentruntime.ProfileExecution, error)
+}
+
 // Service provides business logic for utility agents.
 type Service struct {
-	repo            store.Repository
-	templateEngine  *template.Engine
-	profileResolver ProfileResolver
+	repo              store.Repository
+	templateEngine    *template.Engine
+	profileResolver   ProfileResolver
+	executionResolver ExecutionProfileResolver
 }
 
 // SetProfileResolver wires the operator-owned profile eligibility boundary.
 func (s *Service) SetProfileResolver(resolver ProfileResolver) {
 	s.profileResolver = resolver
+}
+
+func (s *Service) SetExecutionProfileResolver(resolver ExecutionProfileResolver) {
+	s.executionResolver = resolver
+}
+
+// ResolveExecutionAfterFailure advances a shared dynamic route after a
+// classified pre-result utility failure.
+func (s *Service) ResolveExecutionAfterFailure(
+	ctx context.Context,
+	sessionID, profileID, currentExecutionProfileID string,
+	expectedGeneration int64,
+	failure *routingerr.Error,
+) (agentruntime.ProfileExecution, error) {
+	resolver, ok := s.executionResolver.(ExecutionFailureResolver)
+	if !ok {
+		return agentruntime.ProfileExecution{}, ErrExecutionRouting
+	}
+	return resolver.ResolveExecutionAfterFailure(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration, failure)
 }
 
 // NewService creates a new utility agents service.
@@ -345,12 +396,51 @@ func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tm
 		if err != nil {
 			return nil, err
 		}
+		logicalProfileID := profile.ID
+		executionProfileID := logicalProfileID
+		routeSessionID := ""
+		routeGeneration := int64(0)
+		if s.executionResolver != nil {
+			var resolved *agentsettingsmodels.AgentProfile
+			var concreteID string
+			var resolveErr error
+			if detailsResolver, ok := s.executionResolver.(ExecutionDetailsResolver); ok {
+				routeSessionID = "utility:" + uuid.NewString()
+				details, detailsErr := detailsResolver.ResolveExecutionDetails(ctx, routeSessionID, profileID)
+				if detailsErr != nil {
+					return nil, detailsErr
+				}
+				resolved = details.Profile
+				concreteID = details.ExecutionProfileID
+				if details.RouteSessionID != "" {
+					routeSessionID = details.RouteSessionID
+				}
+				routeGeneration = details.Generation
+			} else if sessionResolver, ok := s.executionResolver.(SessionExecutionProfileResolver); ok {
+				routeSessionID = "utility:" + uuid.NewString()
+				resolved, concreteID, resolveErr = sessionResolver.ResolveExecutionForSession(ctx, routeSessionID, profileID)
+			} else {
+				resolved, concreteID, resolveErr = s.executionResolver.ResolveExecution(ctx, profileID)
+			}
+			if resolveErr != nil {
+				return nil, resolveErr
+			}
+			if resolved != nil {
+				profile = resolved
+			}
+			if concreteID != "" {
+				executionProfileID = concreteID
+			}
+		}
 		return &PromptRequest{
-			UtilityID:      utilityID,
-			ResolvedPrompt: resolvedPrompt,
-			AgentCLI:       profile.AgentID,
-			Model:          profile.Model,
-			AgentProfileID: profile.ID,
+			UtilityID:          utilityID,
+			ResolvedPrompt:     resolvedPrompt,
+			AgentCLI:           profile.AgentID,
+			Model:              profile.Model,
+			AgentProfileID:     logicalProfileID,
+			ExecutionProfileID: executionProfileID,
+			RouteSessionID:     routeSessionID,
+			RouteGeneration:    routeGeneration,
 		}, nil
 	}
 
@@ -378,11 +468,14 @@ func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tm
 
 // PromptRequest contains the prepared request for executing a utility prompt.
 type PromptRequest struct {
-	UtilityID      string
-	ResolvedPrompt string
-	AgentCLI       string // The inference agent ID (e.g., "claude-acp", "amp")
-	Model          string // The model to use
-	AgentProfileID string
+	UtilityID          string
+	ResolvedPrompt     string
+	AgentCLI           string // The inference agent ID (e.g., "claude-acp", "amp")
+	Model              string // The model to use
+	AgentProfileID     string
+	ExecutionProfileID string
+	RouteSessionID     string
+	RouteGeneration    int64
 }
 
 // CreateCall creates a new call record (for tracking history).
@@ -402,6 +495,29 @@ func (s *Service) CreateCall(ctx context.Context, utilityID, sessionID, resolved
 		return nil, err
 	}
 	return call, nil
+}
+
+func (s *Service) CreateCallWithExecutionProfile(ctx context.Context, utilityID, sessionID, resolvedPrompt, model, logicalProfileID, executionProfileID string) (*models.UtilityAgentCall, error) {
+	call, err := s.CreateCall(ctx, utilityID, sessionID, resolvedPrompt, model, logicalProfileID)
+	if err != nil {
+		return nil, err
+	}
+	call.ExecutionProfileID = executionProfileID
+	if err := s.repo.UpdateCall(ctx, call); err != nil {
+		return nil, err
+	}
+	return call, nil
+}
+
+// SetCallExecutionProfile updates the concrete profile attribution after a
+// pre-result route fallback succeeds.
+func (s *Service) SetCallExecutionProfile(ctx context.Context, callID, executionProfileID string) error {
+	call, err := s.repo.GetCallByID(ctx, callID)
+	if err != nil {
+		return ErrCallNotFound
+	}
+	call.ExecutionProfileID = executionProfileID
+	return s.repo.UpdateCall(ctx, call)
 }
 
 // CompleteCall marks a call as completed with the response.

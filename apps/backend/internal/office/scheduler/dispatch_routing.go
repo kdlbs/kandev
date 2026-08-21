@@ -281,7 +281,7 @@ func (ss *SchedulerService) tryCandidates(
 		}
 		ss.recordRouteAttempt(agent.WorkspaceID,
 			string(candidate.ProviderID), outcome, string(classified.Code))
-		if routingerr.Decide(routingerr.ContextOffice, classified, time.Now().UTC()) == routingerr.DecisionShortRetry {
+		if officeShortRetryAllowed(classified) {
 			retryCount, countErr := ss.shortRouteRetryCount(ctx, run, candidate)
 			if countErr != nil {
 				return false, nil, countErr

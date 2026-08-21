@@ -23,12 +23,15 @@ const (
 )
 
 var (
-	ErrLeaseInvalid = errors.New("git credential lease is invalid")
-	ErrLeaseExpired = errors.New("git credential lease is expired")
-	ErrLeaseRevoked = errors.New("git credential lease was revoked")
-	ErrLeaseLimit   = errors.New("git credential lease limit reached")
-	ErrScopeDenied  = errors.New("git credential scope denied")
-	ErrUnsupported  = errors.New("git credential provider is unsupported")
+	ErrLeaseInvalid             = errors.New("git credential lease is invalid")
+	ErrLeaseExpired             = errors.New("git credential lease is expired")
+	ErrLeaseRevoked             = errors.New("git credential lease was revoked")
+	ErrLeaseLimit               = errors.New("git credential lease limit reached")
+	ErrScopeDenied              = errors.New("git credential scope denied")
+	ErrUnsupported              = errors.New("git credential provider is unsupported")
+	ErrReissueUnavailable       = errors.New("git credential lease reissue is unavailable")
+	ErrReissueCapabilityInvalid = errors.New("git credential reissue capability is invalid")
+	ErrReissueCapabilityExpired = errors.New("git credential reissue capability is expired")
 )
 
 // Scope is the host-verified identity a lease may redeem for. Path is the
@@ -70,6 +73,27 @@ type Lease struct {
 	ExpiresAt time.Time
 }
 
+// ReissueCapability is an opaque, execution-scoped bearer capability. It is
+// distinct from a lease: a helper may use it only to obtain another lease for
+// the exact scope it was launched with.
+type ReissueCapability struct {
+	Token     string
+	ExpiresAt time.Time
+}
+
+// ReissueRequest carries the helper-supplied non-secret scope. Lease is
+// intentionally absent: an invalid lease must never authenticate reissue.
+type ReissueRequest struct {
+	Capability         string
+	TaskID             string
+	SessionID          string
+	RepositoryID       string
+	Host               string
+	Path               string
+	IdentityProviderID string
+	ParentProviderID   string
+}
+
 // Credential is transient material returned only after a successful lease
 // redemption. Metadata is never retained in a broker lease record.
 type Credential struct {
@@ -92,6 +116,13 @@ type Resolver interface {
 	Supports(providerID string) bool
 	Binding(context.Context, Scope) (string, error)
 	Resolve(context.Context, Scope) (Credential, error)
+}
+
+// ScopeRefresher updates provider-owned binding data in a reissue scope while
+// keeping the execution and repository identity unchanged. It is optional:
+// providers without rotating binding data can reuse the sealed scope as-is.
+type ScopeRefresher interface {
+	RefreshScope(context.Context, Scope) (Scope, error)
 }
 
 // CompositeResolver selects the first live resolver that declares a provider.
@@ -131,6 +162,18 @@ func (r *CompositeResolver) Resolve(ctx context.Context, scope Scope) (Credentia
 	return resolver.Resolve(ctx, scope)
 }
 
+func (r *CompositeResolver) RefreshScope(ctx context.Context, scope Scope) (Scope, error) {
+	resolver := r.resolver(scope.ProviderID)
+	if resolver == nil {
+		return Scope{}, ErrUnsupported
+	}
+	refresher, ok := resolver.(ScopeRefresher)
+	if !ok {
+		return scope, nil
+	}
+	return refresher.RefreshScope(ctx, scope)
+}
+
 func (r *CompositeResolver) resolver(providerID string) Resolver {
 	if r == nil {
 		return nil
@@ -144,16 +187,19 @@ func (r *CompositeResolver) resolver(providerID string) Resolver {
 }
 
 type leaseRecord struct {
-	scope     Scope
-	binding   string
-	ttl       time.Duration
-	expiresAt time.Time
+	scope         Scope
+	binding       string
+	ttl           time.Duration
+	expiresAt     time.Time
+	reissueKey    [sha256.Size]byte
+	hasReissueKey bool
 }
 
 // Broker stores only hashed leases plus non-secret scope and revision data.
 type Broker struct {
-	resolver   Resolver
-	authorizer Authorizer
+	resolver      Resolver
+	authorizer    Authorizer
+	reissueSigner *ReissueCapabilitySigner
 
 	mu     sync.Mutex
 	leases map[[sha256.Size]byte]leaseRecord
@@ -167,9 +213,102 @@ func NewBroker(resolver Resolver, authorizer Authorizer) *Broker {
 	}
 }
 
+// SetReissueCapabilitySigner enables restart-safe reissue. A nil signer
+// leaves the existing lease-only behavior intact and fails reissue closed.
+func (b *Broker) SetReissueCapabilitySigner(signer *ReissueCapabilitySigner) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.reissueSigner = signer
+}
+
+// IssueWithReissueCapability creates a normal lease and, when configured, an
+// opaque capability that may later replace that lease after a broker restart.
+func (b *Broker) IssueWithReissueCapability(ctx context.Context, scope Scope) (Lease, ReissueCapability, error) {
+	if b == nil {
+		return Lease{}, ReissueCapability{}, ErrReissueUnavailable
+	}
+	b.mu.Lock()
+	hasSigner := b.reissueSigner != nil
+	b.mu.Unlock()
+	if !hasSigner {
+		return Lease{}, ReissueCapability{}, ErrReissueUnavailable
+	}
+	capability, err := b.IssueReissueCapability(scope)
+	if err != nil {
+		return Lease{}, ReissueCapability{}, err
+	}
+	reissueKey := sha256.Sum256([]byte(capability.Token))
+	lease, err := b.issue(ctx, scope, &reissueKey)
+	if err != nil {
+		return Lease{}, ReissueCapability{}, err
+	}
+	return lease, capability, nil
+}
+
+// IssueReissueCapability seals a normalized scope with the stable signer.
+func (b *Broker) IssueReissueCapability(scope Scope) (ReissueCapability, error) {
+	normalized, err := normalizeScope(scope)
+	if err != nil {
+		return ReissueCapability{}, err
+	}
+	if b == nil {
+		return ReissueCapability{}, ErrReissueUnavailable
+	}
+	b.mu.Lock()
+	signer := b.reissueSigner
+	now := b.now
+	b.mu.Unlock()
+	if signer == nil {
+		return ReissueCapability{}, ErrReissueUnavailable
+	}
+	return signer.Issue(normalized, now())
+}
+
+// Reissue validates an execution capability against the exact helper scope,
+// then performs normal issuance so live authorization and binding checks are
+// never bypassed by a pre-restart capability.
+func (b *Broker) Reissue(ctx context.Context, request ReissueRequest) (Lease, error) {
+	if b == nil {
+		return Lease{}, ErrUnsupported
+	}
+	b.mu.Lock()
+	signer := b.reissueSigner
+	now := b.now
+	b.mu.Unlock()
+	if signer == nil {
+		return Lease{}, ErrReissueUnavailable
+	}
+	scope, err := signer.Validate(request.Capability, now())
+	if err != nil {
+		return Lease{}, err
+	}
+	if !matchesRedemption(scope, Redemption{
+		TaskID: request.TaskID, SessionID: request.SessionID, RepositoryID: request.RepositoryID,
+		Host: request.Host, Path: request.Path, IdentityProviderID: request.IdentityProviderID,
+		ParentProviderID: request.ParentProviderID,
+	}) {
+		return Lease{}, ErrScopeDenied
+	}
+	if refresher, ok := b.resolver.(ScopeRefresher); ok {
+		scope, err = refresher.RefreshScope(ctx, scope)
+		if err != nil {
+			return Lease{}, err
+		}
+	}
+	reissueKey := sha256.Sum256([]byte(strings.TrimSpace(request.Capability)))
+	return b.issue(ctx, scope, &reissueKey)
+}
+
 // Issue creates a new opaque lease after validating scope ownership and the
 // live provider binding. It never resolves or stores a credential.
 func (b *Broker) Issue(ctx context.Context, scope Scope) (Lease, error) {
+	return b.issue(ctx, scope, nil)
+}
+
+func (b *Broker) issue(ctx context.Context, scope Scope, reissueKey *[sha256.Size]byte) (Lease, error) {
 	normalized, err := normalizeScope(scope)
 	if err != nil {
 		return Lease{}, err
@@ -190,10 +329,10 @@ func (b *Broker) Issue(ctx context.Context, scope Scope) (Lease, error) {
 	if strings.TrimSpace(binding) == "" {
 		return Lease{}, ErrLeaseRevoked
 	}
-	return b.storeLease(normalized, binding)
+	return b.storeLease(normalized, binding, reissueKey)
 }
 
-func (b *Broker) storeLease(scope Scope, binding string) (Lease, error) {
+func (b *Broker) storeLease(scope Scope, binding string, reissueKey *[sha256.Size]byte) (Lease, error) {
 	raw := make([]byte, leaseTokenBytes)
 	if _, err := rand.Read(raw); err != nil {
 		return Lease{}, fmt.Errorf("create Git credential lease: %w", err)
@@ -207,10 +346,22 @@ func (b *Broker) storeLease(scope Scope, binding string) (Lease, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.sweepExpiredLocked(now)
+	if reissueKey != nil {
+		for hash, record := range b.leases {
+			if record.hasReissueKey && record.reissueKey == *reissueKey {
+				delete(b.leases, hash)
+			}
+		}
+	}
 	if b.workspaceLeaseCountLocked(scope.WorkspaceID) >= maxLeasesPerWorkspace {
 		return Lease{}, fmt.Errorf("%w for workspace %s", ErrLeaseLimit, scope.WorkspaceID)
 	}
-	b.leases[hash] = leaseRecord{scope: scope, binding: binding, ttl: ttl, expiresAt: expiresAt}
+	record := leaseRecord{scope: scope, binding: binding, ttl: ttl, expiresAt: expiresAt}
+	if reissueKey != nil {
+		record.reissueKey = *reissueKey
+		record.hasReissueKey = true
+	}
+	b.leases[hash] = record
 	return Lease{Token: token, ExpiresAt: expiresAt}, nil
 }
 

@@ -94,33 +94,50 @@ type profilesFile map[string]map[string]map[string]string
 // already set.
 func ApplyProfile() (count int, env Environment, err error) {
 	env = DetectEnvironment()
-	file, err := parse(profilesYAML)
+	defaults, err := EnvironmentDefaults()
 	if err != nil {
 		return 0, env, err
 	}
-	for _, vars := range file {
-		for name, perProfile := range vars {
-			value := resolve(perProfile, env)
-			if value == "" {
-				// Empty means "leave unset". Skip even if the var is
-				// also currently unset — we don't want to introduce a
-				// noisy empty-string entry that os.LookupEnv would
-				// then report as set.
-				continue
-			}
-			if _, alreadySet := os.LookupEnv(name); alreadySet {
-				continue
-			}
-			if err := os.Setenv(name, value); err != nil {
-				return count, env, fmt.Errorf("setenv %q: %w", name, err)
-			}
-			appliedEnvVars.Lock()
-			appliedEnvVars.names[name] = true
-			appliedEnvVars.Unlock()
-			count++
+	for name, value := range defaults {
+		if value == "" {
+			// Empty means "leave unset". Skip even if the var is
+			// also currently unset — we don't want to introduce a
+			// noisy empty-string entry that os.LookupEnv would
+			// then report as set.
+			continue
 		}
+		if _, alreadySet := os.LookupEnv(name); alreadySet {
+			continue
+		}
+		if err := os.Setenv(name, value); err != nil {
+			return count, env, fmt.Errorf("setenv %q: %w", name, err)
+		}
+		appliedEnvVars.Lock()
+		appliedEnvVars.names[name] = true
+		appliedEnvVars.Unlock()
+		count++
 	}
 	return count, env, nil
+}
+
+// EnvironmentDefaults returns the resolved profile values without mutating the
+// process environment. Startup configuration uses this projection as typed
+// defaults so a selected config.yaml can override a profile value. Callers
+// that need the historical child-process environment should still call
+// ApplyProfile.
+func EnvironmentDefaults() (map[string]string, error) {
+	file, err := parse(profilesYAML)
+	if err != nil {
+		return nil, err
+	}
+	env := DetectEnvironment()
+	out := make(map[string]string)
+	for _, vars := range file {
+		for name, perProfile := range vars {
+			out[name] = resolve(perProfile, env)
+		}
+	}
+	return out, nil
 }
 
 // WasApplied reports whether ApplyProfile wrote name into the process

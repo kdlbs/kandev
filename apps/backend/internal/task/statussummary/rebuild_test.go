@@ -109,6 +109,23 @@ func TestBuildFromAuthoritativeLeavesUnavailableOptionalSourcesEmpty(t *testing.
 	}
 }
 
+func TestBuildFromAuthoritativeSuppressesGitTotalsWhenComparisonIsUnavailable(t *testing.T) {
+	got := BuildFromAuthoritative(RebuildInput{
+		GitObserved: true,
+		Git: []RebuildGit{
+			{Repository: "fork", Summary: GitSummary{Additions: 8, Deletions: 2, ChangedFiles: 3, Ahead: 1}},
+			{Repository: "upstream", Summary: GitSummary{ComparisonUnavailable: true}},
+		},
+	})
+
+	if got.Git == nil {
+		t.Fatal("Git summary is nil")
+	}
+	if want := (GitSummary{ComparisonUnavailable: true}); *got.Git != want {
+		t.Fatalf("Git summary = %+v, want %+v", *got.Git, want)
+	}
+}
+
 func TestPullRequestChecksWithAnIncompleteUnknownRollupArePending(t *testing.T) {
 	got := BuildFromAuthoritative(RebuildInput{
 		PRObserved: true,

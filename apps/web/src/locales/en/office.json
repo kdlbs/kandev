@@ -726,6 +726,7 @@
   "setADefaultTierForEveryAgentOfA": "Set a default tier for every agent of a given role. Falls back to the workspace default tier when a role has no entry here; a wake-reason policy or a per-agent override still takes priority over this.",
   "setSpendingLimitsPerAgentOr": "Set spending limits per agent or project. Agents pause when limits are exceeded.",
   "setupTierAgentProfiles": "Setup tier agent profiles",
+  "setupTitle": "Setup",
   "setUpYourOfficeWorkspace": "Set up your Office workspace",
   "ship": "Ship",
   "showSystemTasks": "Show system tasks",
@@ -777,6 +778,7 @@
   "stepTaskTemplate": "Task template",
   "stepXOfYTitle": "Step {{number}} of {{total}}; {{title}}",
   "structuredResult": "Structured result",
+  "outputSummary": "Output summary",
   "subIssueOfParent": "Sub-issue of {{parent}}",
   "subscriptionQuota": "Subscription Quota",
   "succeeded": "Succeeded",
@@ -913,5 +915,6 @@
   "failedToLoadProviderHealth": "Failed to load provider health",
   "failedToLoadRouteAttempts": "Failed to load route attempts",
   "failedToLoadRoutingConfig": "Failed to load routing config",
-  "failedToLoadRoutingPreview": "Failed to load routing preview"
+  "failedToLoadRoutingPreview": "Failed to load routing preview",
+  "failedToLoadTaskQuorum": "Failed to load task quorum"
 }

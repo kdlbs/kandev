@@ -190,6 +190,21 @@ func (m *mockRepository) ListTaskRepositoriesByTaskIDs(_ context.Context, _ []st
 func (m *mockRepository) UpdateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
 	return nil
 }
+func (m *mockRepository) UpdateTaskRepositoryComparisonTarget(
+	context.Context,
+	string,
+	*models.ComparisonTarget,
+	*models.ComparisonTarget,
+) (*models.TaskRepository, bool, error) {
+	return nil, false, nil
+}
+func (m *mockRepository) UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(
+	context.Context,
+	string,
+	string,
+) (*models.TaskRepository, bool, error) {
+	return nil, false, nil
+}
 func (m *mockRepository) DeleteTaskRepository(ctx context.Context, id string) error {
 	return nil
 }

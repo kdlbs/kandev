@@ -92,31 +92,32 @@ type WatchDependencyValidator interface {
 
 // Service coordinates GitLab integration operations.
 type Service struct {
-	mu                   sync.RWMutex
-	configMutationMu     sync.Mutex
-	host                 string
-	client               Client
-	authMethod           string
-	secrets              SecretProvider
-	secretManager        SecretManager
-	workspaceSecrets     WorkspaceSecretStore
-	workspaceClientFn    WorkspaceClientFactory
-	glabTokenFn          func(context.Context, string) (string, error)
-	workspaceClients     map[string]Client
-	workspaceClientRevs  map[string]int64
-	environmentTokenHost string
-	hostStore            HostStore
-	store                *Store
-	eventBus             bus.EventBus
-	taskEventSubs        []bus.Subscription
-	taskDeleter          TaskDeleter
-	cascadeTaskDeleter   watchreset.TaskDeleter
-	taskSessionChecker   TaskSessionChecker
-	repositoryLookup     RepositoryLookup
-	dependencyValidator  WatchDependencyValidator
-	taskAuthorizer       TaskAuthorizer
-	promptResolver       PromptResolver
-	logger               *logger.Logger
+	mu                       sync.RWMutex
+	configMutationMu         sync.Mutex
+	host                     string
+	client                   Client
+	authMethod               string
+	secrets                  SecretProvider
+	secretManager            SecretManager
+	workspaceSecrets         WorkspaceSecretStore
+	workspaceClientFn        WorkspaceClientFactory
+	glabTokenFn              func(context.Context, string) (string, error)
+	workspaceClients         map[string]Client
+	workspaceClientRevs      map[string]int64
+	environmentTokenHost     string
+	hostStore                HostStore
+	store                    *Store
+	eventBus                 bus.EventBus
+	taskEventSubs            []bus.Subscription
+	taskDeleter              TaskDeleter
+	comparisonTargetObserver ComparisonTargetObserver
+	cascadeTaskDeleter       watchreset.TaskDeleter
+	taskSessionChecker       TaskSessionChecker
+	repositoryLookup         RepositoryLookup
+	dependencyValidator      WatchDependencyValidator
+	taskAuthorizer           TaskAuthorizer
+	promptResolver           PromptResolver
+	logger                   *logger.Logger
 }
 
 // PromptResolver resolves editable prompt content by name. Mirrors
@@ -717,6 +718,7 @@ func (s *Service) syncTaskMRWithClient(
 	if err := store.UpsertTaskMR(ctx, row); err != nil {
 		return nil, fmt.Errorf("upsert task MR: %w", err)
 	}
+	s.reconcileComparisonTargetFromSync(ctx, taskID, host, mr)
 	return &taskMRSyncResult{
 		taskMR:         row,
 		reviewers:      append([]MRReviewer(nil), mr.Reviewers...),

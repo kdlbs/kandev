@@ -47,8 +47,8 @@ func (g *Gateway) SetLifecycleManager(lifecycleMgr *lifecycle.Manager, userServi
 }
 
 // SetLSPHandler enables the LSP WebSocket handler.
-func (g *Gateway) SetLSPHandler(lifecycleMgr *lifecycle.Manager, userService LSPUserService) {
-	g.LSPHandler = NewLSPHandler(lifecycleMgr, userService, g.logger)
+func (g *Gateway) SetLSPHandler(lifecycleMgr *lifecycle.Manager, userService LSPUserService, configuredMax ...int) {
+	g.LSPHandler = NewLSPHandler(lifecycleMgr, userService, g.logger, configuredMax...)
 }
 
 // SetVscodeProxy enables the VS Code reverse proxy handler.

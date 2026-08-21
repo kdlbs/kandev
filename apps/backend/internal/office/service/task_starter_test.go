@@ -253,8 +253,9 @@ func TestSchedulerTick_KeepsRunClaimedUntilAgentCompletes(t *testing.T) {
 	}
 
 	event := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
-		"task_id":    "task-life-1",
-		"session_id": "session-1",
+		"task_id":          "task-life-1",
+		"session_id":       "session-1",
+		"agent_profile_id": agent.ID,
 	})
 	if err := eb.Publish(ctx, events.AgentCompleted, event); err != nil {
 		t.Fatalf("publish agent completed: %v", err)
@@ -308,8 +309,9 @@ func TestSchedulerTick_AgentStoppedFinishesRun(t *testing.T) {
 	// AgentStopped (not AgentCompleted) — this is what the office
 	// fire-and-forget B4 path publishes via lifecycle.StopAgent.
 	event := bus.NewEvent(events.AgentStopped, "test", map[string]string{
-		"task_id":    "task-stop-1",
-		"session_id": "session-stop-1",
+		"task_id":          "task-stop-1",
+		"session_id":       "session-stop-1",
+		"agent_profile_id": agent.ID,
 	})
 	if err := eb.Publish(ctx, events.AgentStopped, event); err != nil {
 		t.Fatalf("publish agent stopped: %v", err)

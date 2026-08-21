@@ -44,9 +44,22 @@ var (
 	// subproc_acquire_total, subproc_acquire_wait_millis_total). Unit
 	// tests that swap the pool via SetCapForTest reuse the same names
 	// so the published gauges stay coherent across cap changes.
-	ghThrottle  = NewNamedThrottle("gh", resolveCap(ghMaxConcurrentEnv, defaultGHMaxConcurrent))
-	gitThrottle = NewNamedClassThrottle("git", resolveCap(gitMaxConcurrentEnv, defaultGitMaxConcurrent))
+	ghThrottle  = NewNamedThrottle("gh", defaultGHMaxConcurrent)
+	gitThrottle = NewNamedClassThrottle("git", defaultGitMaxConcurrent)
 )
+
+// ConfigureCaps applies the typed startup capacities to the process-wide
+// throttles. Invalid values are reduced to the existing safe defaults.
+func ConfigureCaps(ghMax, gitMax int) {
+	if ghMax <= 0 {
+		ghMax = defaultGHMaxConcurrent
+	}
+	if gitMax <= 0 {
+		gitMax = defaultGitMaxConcurrent
+	}
+	ghThrottle.SetCap(ghMax)
+	gitThrottle.SetCap(gitMax)
+}
 
 // GH returns the process-wide throttle gating gh subprocess execs.
 // All gh callers across the codebase share this single semaphore so the

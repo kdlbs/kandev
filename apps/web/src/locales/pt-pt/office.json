@@ -726,6 +726,7 @@
   "setADefaultTierForEveryAgentOfA": "Defina um escalão predefinido para todos os agentes de uma determinada função. Recorre ao escalão predefinido da área de trabalho quando uma função não tem aqui nenhuma entrada; uma política de motivo de despertar ou uma substituição por agente continua a ter prioridade sobre isto.",
   "setSpendingLimitsPerAgentOr": "Defina limites de despesa por agente ou por projeto. Os agentes são pausados quando os limites são excedidos.",
   "setupTierAgentProfiles": "Configurar os perfis de agente por escalão",
+  "setupTitle": "Configuração",
   "setUpYourOfficeWorkspace": "Configure a sua área de trabalho do Office",
   "ship": "Entrega",
   "showSystemTasks": "Mostrar as tarefas de sistema",
@@ -777,6 +778,7 @@
   "stepTaskTemplate": "Modelo de tarefa",
   "stepXOfYTitle": "Passo {{number}} de {{total}}; {{title}}",
   "structuredResult": "Resultado estruturado",
+  "outputSummary": "Resumo da saída",
   "subIssueOfParent": "Subissue de {{parent}}",
   "subscriptionQuota": "Quota da subscrição",
   "succeeded": "Bem-sucedidas",
@@ -913,5 +915,6 @@
   "failedToLoadProviderHealth": "Falha ao carregar a saúde do fornecedor",
   "failedToLoadRouteAttempts": "Falha ao carregar as tentativas de rota",
   "failedToLoadRoutingConfig": "Falha ao carregar a configuração de encaminhamento",
-  "failedToLoadRoutingPreview": "Falha ao carregar a pré-visualização do encaminhamento"
+  "failedToLoadRoutingPreview": "Falha ao carregar a pré-visualização do encaminhamento",
+  "failedToLoadTaskQuorum": "Falha ao carregar o quórum da tarefa"
 }

@@ -22,12 +22,13 @@ replies, and refresh current-head state after pushes and review aggregation.
 Create a visible checklist:
 
 1. Gather PR state
-2. Fix failing CI checks
-3. Triage review comments
-4. Address valid comments
-5. Commit, rerun affected checks, and push
-6. Re-check the new head
-7. Report
+2. Resolve an authorized PR merge conflict
+3. Fix failing CI checks
+4. Triage review comments
+5. Address valid comments
+6. Commit, rerun affected checks, and push
+7. Re-check the new head
+8. Report
 
 ## 1. Gather PR State
 
@@ -45,24 +46,54 @@ classification, authentication fallbacks, and hidden-thread handling. Inspect
 mergeability separately through `references/merge-conflicts.md`.
 
 If the fresh mergeability query reports `mergeable=CONFLICTING` or
-`mergeStateStatus=DIRTY`, stop CI and review triage. Load
-`references/merge-conflicts.md`, resolve or rebase the conflict, verify the
-result, push it, and restart this section with a new PR-state snapshot. Do not
-triage comments or checks against a conflicted head.
+`mergeStateStatus=DIRTY`, stop CI and review triage. This is an actionable PR
+blocker, not a clean or report-only terminal state. Load
+`references/merge-conflicts.md`. If the user has explicitly authorized PR
+fixup or conflict resolution, resolve the conflict now (prefer a merge of the
+fresh base unless the user requests a rebase), verify the result, push it, and
+restart this section with a new PR-state snapshot. If authorization is absent,
+report the conflict and ask for it before mutating the branch. Do not triage
+comments or checks against a conflicted head.
 
-For pending CI, do not run a rapid polling loop. Wait at a reasonable interval,
-then run the same summary again. Stop after about 20 minutes and report the
-exact pending checks as "CI in progress." Use two monitoring modes: default
-monitoring may return early for a failed check, merge conflict, actionable
-finding, or clean terminal state; strict-deadline monitoring applies when the
-user says "wait N minutes" or "then fix up." In strict mode, calculate and
-pass an absolute deadline, accumulate failures/comments, and do not return
-early for findings, pending checks, or a clean snapshot; stop early only when
-the PR is merged/closed or access is revoked. Do not use interactive `gh pr
-checks --watch` in the primary conversation: its TTY redraws make captured
-output unusable. Use saved `scripts/pr-state --summary` snapshots about 60–90
-seconds apart, or the read-only `pr-poller` only when the user explicitly asked
-to wait or monitor.
+For pending CI, wait with `scripts/pr-await <PR>`. It blocks below the
+conversation and prints one report when every check is terminal, so a wait of
+any length costs a single round-trip. Do not re-run `scripts/pr-state
+--summary` on a timer instead: each snapshot is a separate model turn that
+re-reads the whole context, and waiting is only about 6% of what such a turn
+actually does.
+
+Default `--mode all-terminal` is the cost-correct choice and returns only when
+no check is pending, so every failure arrives in one report and is fixed in one
+pass. It is also the correct choice for a reason unrelated to cost: a failed job
+can be visible while its parent workflow is still running, so an early return
+reports a partial failure set. Use `--mode first-failure` only when the user
+wants the first failure interactively; it costs an extra full CI cycle per
+failure. Pass `--deadline-min` for a user-stated limit; on exit 2 report the
+named pending checks as "CI in progress."
+
+Read its exit code rather than re-deriving state: 0 clean, 1 terminal with
+findings, 2 deadline with checks still pending, 3 blocked. Exit 3 covers every
+case where a clean answer cannot be trusted: the PR merged or closed, a workflow
+needs approval, access was lost, the merge-state query failed, the snapshot
+reported `errors` or a null unresolved-thread count, or the host toolchain
+cannot run `pr-state` correctly. Never downgrade an exit 3 to "probably clean."
+
+Exit 1 counts blocking reviews, not only threads: a current-head
+`CHANGES_REQUESTED` review can exist with no unresolved thread attached.
+
+Every report records the jq and bash versions it ran under. That is provenance,
+not a gate: `pr-state` used to fail silently on jq 1.6 and on the bash 3.2 that
+macOS ships as `/bin/bash`, both of which made a dirty PR look clean, and both
+are fixed at the source. What guards against a degraded `pr-state` now is the
+snapshot itself, which is stronger than any version check: a summary reporting
+`errors`, one whose unresolved-thread count is null, and one that does not parse
+are all treated as unknown rather than clean. A blocked report on an old
+toolchain adds a note naming it as a possible cause. A push during the wait
+restarts the gate against the new head and is reported.
+
+Do not use interactive `gh pr checks --watch` in the primary conversation: its
+TTY redraws make captured output unusable. Use the read-only `pr-poller` only
+when the user explicitly asked to wait or monitor and `pr-await` is unavailable.
 Treat a poller's unresolved/pending snapshot as provisional: it can predate a
 primary-session push or thread resolution. Re-run `scripts/pr-state --summary
 <PR>` at the current head before acting on it or declaring completion.
@@ -82,8 +113,10 @@ then re-run the summary and require jobs to materialize before polling. `gh run
 approve` is not a valid command.
 
 Treat the state as clean only when the current head has no failed or pending
-checks, no merge conflict, no actionable review thread or issue comment, and
-qualifying exact-head semantic evidence where PR delivery requires it.
+checks, no merge conflict, no blocking review (an active `CHANGES_REQUESTED`
+or a review blocked at the exact current head), no actionable review thread or
+issue comment, and qualifying exact-head semantic evidence where PR delivery
+requires it.
 
 ## 2. Fix CI Failures
 

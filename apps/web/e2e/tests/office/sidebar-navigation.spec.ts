@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 import { AppSidebarPage } from "../../pages/app-sidebar-page";
 
 test.describe("Sidebar navigation", () => {
@@ -51,7 +52,7 @@ test.describe("Sidebar navigation", () => {
     await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
     // Click the "Agents Enabled" metric card link on the dashboard to navigate to agents
     await testPage.getByRole("link", { name: /Agents Enabled/i }).click();
-    await expect(testPage.getByRole("heading", { name: /Agents/i }).first()).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Agents/i, {
       timeout: 10_000,
     });
   });
@@ -62,13 +63,10 @@ test.describe("Sidebar navigation", () => {
     // Keep dashboard-card navigation covered separately from the sidebar Tasks
     // link asserted above; both are intentional entry points to /office/tasks.
     await testPage.getByRole("link", { name: /Tasks In Progress/i }).click();
-    // Scope the heading assertion to the page content (`<main>` in the office
-    // shell's page content). The unified AppSidebar's collapsible "Tasks"
-    // section header also exposes the accessible text "Tasks", so an unscoped
-    // role=heading/text match could be ambiguous against the global rail.
-    await expect(
-      testPage.locator("main").getByRole("heading", { name: /Tasks/i }).first(),
-    ).toBeVisible({
+    // Assert on the topbar's title crumb rather than an unscoped role=heading/
+    // text match: the unified AppSidebar's collapsible "Tasks" section header
+    // also exposes the accessible text "Tasks" against the global rail.
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Tasks/i, {
       timeout: 10_000,
     });
   });

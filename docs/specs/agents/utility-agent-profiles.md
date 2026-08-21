@@ -25,23 +25,27 @@ permission choice that its caller cannot answer.
 
 ## What
 
-- Settings > Utility Agents has one **Default utility agent profile** selection. The choice is a
-  concrete global agent profile, not an agent family/model pair.
-- Each built-in utility action either inherits the default utility profile or selects one concrete
+- Settings > Utility Agents has one **Default utility agent profile** selection. The choice is an
+  eligible concrete or dynamic global agent profile, not an agent family/model pair.
+- Each built-in utility action either inherits the default utility profile or selects one eligible
   profile as an override.
-- Every custom utility agent selects one concrete profile. A custom utility agent cannot be created
-  or saved without a profile.
-- A built-in utility action without a concrete profile override inherits the default utility
-  profile. A stale concrete override remains **unconfigured** after its profile is deleted or
+- Every custom utility agent selects one eligible concrete or dynamic profile. A custom utility
+  agent cannot be created or saved without a profile.
+- A built-in utility action without a profile override inherits the default utility
+  profile. A stale override remains **unconfigured** after its profile is deleted or
   disabled and cannot run until the user repairs it.
 - An empty `unconfigured` built-in binding is normalized to `inherit`. Selecting Default in an
   action picker persists the same inherited state and never submits an empty explicit binding.
-- Eligible choices are enabled, non-deleted, global profiles for ACP inference-capable agents.
-  CLI-passthrough profiles and workspace-scoped Office profiles are not eligible.
+- Eligible choices are enabled, non-deleted, global concrete profiles for ACP inference-capable
+  agents and global dynamic profiles with at least one valid candidate. CLI-passthrough profiles and
+  workspace-scoped Office profiles are not eligible.
 - A utility invocation resolves its effective profile at the start of the call. It uses that
   profile's agent, model, mode, dynamic config options, enabled CLI flags, command prefix,
   environment/secret references, and permission policy. Editing the profile affects the next call;
   an in-flight call keeps the configuration resolved when it started.
+- A dynamic selection resolves through the shared dynamic conductor. The caller submits the same
+  profile ID as for a concrete selection. The call record retains that logical profile ID and the
+  concrete execution profile that produced the final result.
 - The UI shows profile names and their parent agent names. It does not expose separate utility-only
   model or permission controls.
 - Built-in action overrides and the default profile participate in the shared Settings save/discard
@@ -63,14 +67,14 @@ permission choice that its caller cannot answer.
 
 | Field              | Type   | Constraint                   | Meaning                                                                        |
 | ------------------ | ------ | ---------------------------- | ------------------------------------------------------------------------------ |
-| `agent_profile_id` | string | empty for `inherit`, required for `explicit`, retained for stale `unconfigured` bindings | Concrete profile reference. |
+| `agent_profile_id` | string | empty for `inherit`, required for `explicit`, retained for stale `unconfigured` bindings | Concrete or dynamic logical profile reference. |
 | `profile_binding_state` | enum | `inherit`, `explicit`, or `unconfigured` | Whether the row inherits the default, names a profile, or needs repair. |
 
 `inherit` is valid only for built-in rows. `explicit` requires an eligible profile. `unconfigured`
-is used for a custom row without a profile and for a built-in row whose concrete profile binding is
+is used for a custom row without a profile and for a built-in row whose profile binding is
 stale or unavailable. Only a built-in row whose persisted state is `inherit` uses the selected
 default. A built-in row with an empty profile ID in either the legacy `explicit` or `unconfigured`
-state is normalized to `inherit`. A concrete stale profile ID remains `unconfigured` so the user can
+state is normalized to `inherit`. A stale profile ID remains `unconfigured` so the user can
 repair or replace the known override explicitly.
 
 The legacy `agent_id` and `model` columns may remain temporarily as migration inputs, but they are
@@ -80,8 +84,10 @@ Portable user settings store `default_utility_agent_profile_id: string`. Empty m
 configured. The legacy `default_utility_agent_id` and `default_utility_model` values are migration
 inputs only.
 
-`utility_agent_calls` stores the effective `agent_profile_id` in addition to the already-recorded
-resolved model. Historical calls created before this field exists have an empty profile ID.
+`utility_agent_calls` stores the effective logical `agent_profile_id`, concrete
+`execution_profile_id`, and resolved model. For a concrete selection the two
+profile IDs match. For a dynamic selection they differ. Historical calls
+created before either field exists keep an empty value.
 
 ### Legacy migration
 
@@ -92,10 +98,10 @@ non-deleted, non-passthrough global profiles whose parent agent matches the lega
 and whose configured model matches the legacy model (including an explicit empty model). Exactly
 one match is copied to `agent_profile_id` and sets the row state to `explicit`.
 
-Zero matches or multiple matches set a custom row to `unconfigured`. A built-in row with no concrete
+Zero matches or multiple matches set a custom row to `unconfigured`. A built-in row with no matched
 profile ID becomes `inherit`, including an empty `unconfigured` row written by an older release.
 The backend does not pick the first profile, infer from a display name, or silently use a provider
-default. Concrete stale built-in IDs remain `unconfigured`. Custom utility agents that cannot be
+default. Stale built-in IDs remain `unconfigured`. Custom utility agents that cannot be
 migrated remain stored and editable but are not executable until the user selects a profile. The
 legacy values remain available to a later retry or diagnostic report, but the new state is
 authoritative after the migration.
@@ -111,7 +117,7 @@ authoritative after the migration.
 - User-settings read and patch payloads expose `default_utility_agent_profile_id`.
 - `POST /api/v1/utility/execute` keeps its request shape: callers select a utility-agent ID, and the
   backend resolves the effective profile. Successful responses and call-history responses keep the
-  resolved model and add the effective profile ID to call history.
+  resolved model and expose logical and concrete profile attribution in call history.
 - Plugin `Host.InvokeUtilityAgent` and its plugin manifest selector keep selecting a utility-agent
   ID; there is no plugin-facing profile-ID field.
 
@@ -132,10 +138,11 @@ authoritative after the migration.
 
 - With no effective profile, invocation fails before a call is dispatched and tells the user to
   select a profile in Settings > Utility Agents.
-- A missing, deleted, disabled, CLI-passthrough, workspace-scoped, or non-inference-capable
-  concrete profile binding fails closed. An empty built-in binding is normalized to `inherit` and
-  uses the saved global default. The backend never falls back to another concrete profile, the active
-  task profile, a raw agent/model pair, or the first available agent.
+- A missing, deleted, disabled, CLI-passthrough, workspace-scoped, or otherwise ineligible profile
+  binding fails closed. An empty built-in binding is normalized to `inherit` and uses the saved
+  global default. A concrete selection never falls back to another profile. A dynamic selection may
+  select another configured candidate under its routing policy, but never the active task profile,
+  a raw agent/model pair, or the first available agent.
 - A profile launch-policy error (invalid command prefix, unresolved required secret, invalid config
   option, or unavailable agent runtime) is surfaced as the utility call failure. The runner does not
   retry without that setting.
@@ -159,8 +166,8 @@ authoritative after the migration.
   default repairs them without editing each action.
 - Built-in rows left as empty `unconfigured` by an older release are repaired idempotently to
   `inherit`. Selecting Default in the action picker also persists `inherit` and survives reload.
-- Utility call history retains the effective profile ID and resolved model even if the profile is
-  later edited or deleted.
+- Utility call history retains the logical profile ID, concrete execution profile ID, and resolved
+  model even if either profile is later edited or deleted.
 
 ## Scenarios
 
@@ -175,6 +182,10 @@ authoritative after the migration.
   changed, **THEN** that action continues to use its override.
 - **GIVEN** a custom utility agent, **WHEN** the user opens its create/edit dialog, **THEN** one
   profile picker replaces the separate agent and model controls and saving is gated on a profile.
+- **GIVEN** a utility agent selects a dynamic profile, **WHEN** its first candidate fails with a
+  classified quota error before returning a result, **THEN** the shared conductor tries the next
+  configured candidate and call history retains the dynamic logical profile plus the successful
+  concrete execution profile.
 - **GIVEN** a selected profile with auto-approval enabled, **WHEN** its agent emits an ACP permission
   request, **THEN** the utility call approves it using the profile policy and continues without user
   interaction.

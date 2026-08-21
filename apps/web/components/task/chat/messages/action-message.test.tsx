@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { StateProvider } from "@/components/state-provider";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import type { StoreApi } from "zustand";
 import { ActionMessage } from "./action-message";
 import {
   sessionId as toSessionId,
@@ -161,6 +162,52 @@ function renderAction(
   });
 }
 
+/** Like renderAction, but captures the store so the test can drive live session
+ *  state transitions (STARTING/RUNNING → WAITING_FOR_INPUT) the way a real
+ *  resume does over the WebSocket. */
+function renderActionWithStore(
+  comment: Message,
+  sessionState: TaskSessionState,
+  sessionError = "",
+) {
+  let store: StoreApi<AppState> | null = null;
+  function CaptureStore() {
+    store = useAppStoreApi();
+    return null;
+  }
+  const initialState: Partial<AppState> = {
+    taskSessions: {
+      items: {
+        [TEST_SESSION_ID]: { state: sessionState, error_message: sessionError } as TaskSession,
+      },
+    },
+    turns: {
+      bySession: {},
+      activeBySession: {},
+      loadedBySession: {},
+      reconcileEpochBySession: {},
+      settledBoundaryBySession: {},
+    },
+  };
+  const utils = render(
+    <StateProvider initialState={initialState}>
+      <CaptureStore />
+      <ActionMessage comment={comment} />
+    </StateProvider>,
+  );
+  const setSessionState = (next: TaskSessionState) =>
+    act(() => {
+      store?.getState().setTaskSession({
+        id: toSessionId(TEST_SESSION_ID),
+        task_id: toTaskId(TEST_TASK_ID),
+        state: next,
+        started_at: "",
+        updated_at: "",
+      } as TaskSession);
+    });
+  return { ...utils, setSessionState };
+}
+
 describe("ActionMessage — transient retry (warning variant)", () => {
   it("renders the retrying copy in amber, not red", () => {
     renderAction(retryMessage(), "WAITING_FOR_INPUT");
@@ -244,6 +291,25 @@ describe("ActionMessage — transient retry (warning variant)", () => {
     renderAction(errorMsg, "WAITING_FOR_INPUT", "");
     fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
     await waitFor(() => expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull());
+  });
+
+  it("keeps the recovery card hidden after a successful resume settles back to waiting", async () => {
+    const errorMsg = recoveryMessage(true);
+
+    const { setSessionState } = renderActionWithStore(errorMsg, "WAITING_FOR_INPUT", "");
+    fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
+    await waitFor(() => expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull());
+
+    // A successful resume drives the session through an active state (which
+    // hides the card via isSessionActive) and then back to WAITING_FOR_INPUT
+    // once the agent is idle again. The recovery acknowledgment must survive
+    // that intermediate unmount so the card does not reappear until the user
+    // actually sends the next message.
+    setSessionState("STARTING");
+    setSessionState("WAITING_FOR_INPUT");
+
+    expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull();
+    expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
   });
 
   it("keeps a recovery card visible when the WebSocket client is unavailable", () => {

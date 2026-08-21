@@ -412,6 +412,54 @@ func TestTriggerPRSyncAll_UnwatchedReconcilePreservesAggregates(t *testing.T) {
 	}
 }
 
+// TestTriggerPRSyncAll_UnwatchedReconcileWritesOutcomeAttribution is the
+// regression for AC-36: a PR that merges with no active watch is reconciled
+// only through syncUnwatchedTaskPRGroup, never through SyncTaskPR. Before
+// this fix, reconcileTaskPRLifecycle discarded the already-fetched draft
+// status and merger identity, so the row went terminal with
+// merged_by_login/is_draft still NULL — merged_at >= activation with a NULL
+// merged_by_login is exactly the writer-fault state AC-36 forbids.
+func TestTriggerPRSyncAll_UnwatchedReconcileWritesOutcomeAttribution(t *testing.T) {
+	_, svc, mockClient, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+	seedUnwatchedTaskPR(t, store, "task-1", 1293, "feature/first")
+
+	mergedAt := time.Now().UTC().Add(-10 * time.Minute)
+	mockClient.AddPR(&PR{
+		Number: 1293, Title: "Left behind", State: prStateMerged,
+		HTMLURL:    "https://github.com/owner/repo/pull/1293",
+		HeadBranch: "feature/first", BaseBranch: "main",
+		RepoOwner: "owner", RepoName: "repo",
+		CreatedAt: mergedAt.Add(-2 * time.Hour), UpdatedAt: mergedAt, MergedAt: &mergedAt,
+		Draft: false, IsDraftObserved: true,
+		ChangedFiles: 4, ChangedFilesObserved: true,
+		MergedByLogin: "carlosflorencio",
+	})
+
+	if _, err := svc.TriggerPRSyncAll(ctx, "task-1"); err != nil {
+		t.Fatalf("TriggerPRSyncAll: %v", err)
+	}
+
+	got, err := store.GetTaskPRByRepoAndNumber(ctx, "task-1", "repo-1", 1293)
+	if err != nil || got == nil {
+		t.Fatalf("GetTaskPRByRepoAndNumber: err=%v row=%v", err, got)
+	}
+	if got.State != prStateMerged || got.MergedAt == nil {
+		t.Fatalf("state=%q merged_at=%v, want merged with a timestamp", got.State, got.MergedAt)
+	}
+	if got.MergedByLogin == nil || *got.MergedByLogin != "carlosflorencio" {
+		t.Errorf("merged_by_login = %v, want %q (AC-36 requires non-NULL once merged_at is set)",
+			got.MergedByLogin, "carlosflorencio")
+	}
+	if got.IsDraft == nil || *got.IsDraft != false {
+		t.Errorf("is_draft = %v, want false observed, not NULL", got.IsDraft)
+	}
+	if got.ChangedFiles == nil || *got.ChangedFiles != 4 {
+		t.Errorf("changed_files = %v, want 4 observed, not NULL", got.ChangedFiles)
+	}
+}
+
 func TestUnwatchedTaskPRs_Selection(t *testing.T) {
 	now := time.Now().UTC()
 	stale := now.Add(-1 * time.Hour)
@@ -448,5 +496,72 @@ func TestUnwatchedTaskPRs_Selection(t *testing.T) {
 	}
 	if got[0].PRNumber != 1 || got[1].PRNumber != 6 {
 		t.Errorf("selected PRs = %d, %d; want 1, 6", got[0].PRNumber, got[1].PRNumber)
+	}
+}
+
+// TestReconcileTaskPRLifecycle_PublishesReReadValueNotStaleInMemoryOne is the
+// AC-18 regression on the unwatched-sync path, mirroring
+// TestPersistAndPublishTaskPRSync_PublishesReReadValueNotStaleInMemoryOne in
+// service_pr_outcome_sync_test.go for the codex [P2] race on the other
+// writer. reconcileTaskPRLifecycle used to publish its own in-memory tp
+// directly after UpdateTaskPR; because UpdateTaskPR persists
+// AutoMergeObservedAt through COALESCE(auto_merge_observed_at, ?), a
+// concurrent writer that lands first leaves the stored column holding an
+// earlier timestamp than this call's own resolved value, and the old code
+// would broadcast the wrong one. It now delegates the write+publish to
+// persistAndPublishTaskPRSync, which re-reads before publishing.
+func TestReconcileTaskPRLifecycle_PublishesReReadValueNotStaleInMemoryOne(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedUnwatchedTaskPR(t, store, "task-unwatched-p2-race", 1293, "feature/first")
+
+	tp, err := store.GetTaskPRByRepoAndNumber(ctx, "task-unwatched-p2-race", "repo-1", 1293)
+	if err != nil || tp == nil {
+		t.Fatalf("GetTaskPRByRepoAndNumber: err=%v row=%v", err, tp)
+	}
+
+	// Simulate a concurrent sync that already landed its own write: the DB
+	// now holds persistedAt, set while this call's own tp (below) still
+	// reflects the pre-race value it read moments earlier.
+	concurrentWriter := *tp
+	persistedAt := time.Now().UTC()
+	concurrentWriter.AutoMergeObservedAt = &persistedAt
+	if err := store.UpdateTaskPR(ctx, &concurrentWriter); err != nil {
+		t.Fatalf("simulate concurrent writer: %v", err)
+	}
+
+	// This call's stale in-memory view, computed before the concurrent
+	// writer's timestamp above landed.
+	staleObservedAt := persistedAt.Add(-time.Minute)
+	tp.AutoMergeObservedAt = &staleObservedAt
+
+	updated := subscribeTaskPRUpdated(t, svc)
+
+	mergedAt := time.Now().UTC()
+	status := &PRStatus{
+		PR: &PR{
+			Number: 1293, State: prStateMerged, MergedAt: &mergedAt,
+			HeadBranch: "feature/first", BaseBranch: "main",
+			RepoOwner: "owner", RepoName: "repo",
+		},
+	}
+
+	if err := svc.reconcileTaskPRLifecycle(ctx, tp, status); err != nil {
+		t.Fatalf("reconcileTaskPRLifecycle: %v", err)
+	}
+
+	published := awaitTaskPRUpdated(t, updated)
+	if published.AutoMergeObservedAt == nil || !published.AutoMergeObservedAt.Equal(persistedAt) {
+		t.Fatalf("published AutoMergeObservedAt = %v, want the re-read persisted value %v, not the stale in-memory %v",
+			published.AutoMergeObservedAt, persistedAt, staleObservedAt)
+	}
+
+	got, err := store.GetTaskPRByID(ctx, tp.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPRByID: %v", err)
+	}
+	if got.AutoMergeObservedAt == nil || !got.AutoMergeObservedAt.Equal(persistedAt) {
+		t.Fatalf("persisted AutoMergeObservedAt = %v, want the concurrent writer's %v preserved by COALESCE",
+			got.AutoMergeObservedAt, persistedAt)
 	}
 }

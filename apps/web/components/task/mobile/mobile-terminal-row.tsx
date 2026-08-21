@@ -15,7 +15,8 @@ type MobileTerminalRowProps = {
   onSelect: (id: string) => void;
   onAskClose: (terminal: Terminal) => void;
   onCancelClose: () => void;
-  onConfirmClose: () => void;
+  onClose: () => void;
+  onConfirmClose: () => void | Promise<void>;
 };
 
 export function MobileTerminalRow({
@@ -26,6 +27,7 @@ export function MobileTerminalRow({
   onSelect,
   onAskClose,
   onCancelClose,
+  onClose,
   onConfirmClose,
 }: MobileTerminalRowProps) {
   const { t } = useTranslation();
@@ -55,6 +57,7 @@ export function MobileTerminalRow({
             density="touch"
             testId="mobile-terminal-close-confirmation"
             onCancel={onCancelClose}
+            onClose={onClose}
             onConfirm={onConfirmClose}
           />
         ) : (

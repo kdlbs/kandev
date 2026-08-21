@@ -78,11 +78,11 @@ export function ParkedTerminalsMenu({
               }}
               onAskDestroy={() => setPendingDestroyId(terminal.id)}
               onCancelDestroy={() => setPendingDestroyId(null)}
-              onConfirmDestroy={() => {
+              onCloseDestroy={() => {
                 setPendingDestroyId(null);
                 setOpen(false);
-                void onDestroy(terminal.id);
               }}
+              onConfirmDestroy={() => onDestroy(terminal.id)}
             />
           ))}
         </div>
@@ -97,6 +97,7 @@ function ParkedTerminalRow({
   onResume,
   onAskDestroy,
   onCancelDestroy,
+  onCloseDestroy,
   onConfirmDestroy,
 }: {
   terminal: Terminal;
@@ -104,7 +105,8 @@ function ParkedTerminalRow({
   onResume: () => void;
   onAskDestroy: () => void;
   onCancelDestroy: () => void;
-  onConfirmDestroy: () => void;
+  onCloseDestroy: () => void;
+  onConfirmDestroy: () => void | Promise<void>;
 }) {
   if (isConfirming) {
     return (
@@ -113,7 +115,11 @@ function ParkedTerminalRow({
         data-testid={`parked-terminal-item-${terminal.id}`}
         className="w-full px-1"
       >
-        <TerminalCloseInlineConfirmation onCancel={onCancelDestroy} onConfirm={onConfirmDestroy} />
+        <TerminalCloseInlineConfirmation
+          onCancel={onCancelDestroy}
+          onClose={onCloseDestroy}
+          onConfirm={onConfirmDestroy}
+        />
       </div>
     );
   }

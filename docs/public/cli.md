@@ -239,6 +239,14 @@ See [Configuration](./configuration.md) before putting Kandev behind a reverse p
 
 Flags take precedence over the equivalent port variables. `KANDEV_BACKEND_PORT` takes precedence over `KANDEV_PORT`.
 
+Every CLI launch automatically uses the startup configuration discovery in
+[Configuration](./configuration.md): `config.yaml` in the working directory,
+then `<KANDEV_HOME_DIR>/config.yaml` (or `~/.kandev/config.yaml`), then
+`/etc/kandev/config.yaml`. The first existing file is authoritative; Kandev
+does not merge candidates, and an unreadable or invalid first file stops the
+launch. There is no public `--config` flag. Service launches use the same
+discovery and carry the selected file into the managed backend process.
+
 | Variable | Default | Behavior |
 |---|---|---|
 | `KANDEV_BACKEND_PORT` | unset | Backend port when `--port` is absent. |
@@ -335,4 +343,8 @@ Open the printed URL manually. Linux requires a working `xdg-open`; WSL often ne
 
 ### Configuration appears ignored
 
-The public CLI has no `--config` option. `config.yaml` must be in the launcher's backend working directory or `/etc/kandev/`, and environment values override it. For predictable installed/service deployments, prefer explicit environment variables and verify the active home and database paths printed at startup. See [Configuration](./configuration.md).
+The public CLI has no `--config` option. Confirm the first existing candidate
+in the working-directory, home, and `/etc/kandev/` order, and remember that
+environment values override YAML. For predictable installed/service
+deployments, verify the active home and database paths printed at startup.
+See [Configuration](./configuration.md).

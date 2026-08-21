@@ -146,6 +146,14 @@ const (
 	// surfaces show the red interruption icon; the orchestrator removes the
 	// key when a session of the task next enters STARTING/RUNNING.
 	MetaKeyInterruptedAt = "interrupted_at"
+	// MetaKeyAutoStartFailed is set when a workflow step's auto_start_agent
+	// on_enter action fails to launch a run (kanban StartTask error, or an
+	// Office task queue-run error/unresolvable agent). Its presence makes the
+	// task DTO report `auto_start_failed: true` so the failure surfaces on
+	// the card instead of only in backend logs; the orchestrator removes the
+	// key when a session of the task next enters STARTING/RUNNING (mirrors
+	// MetaKeyInterruptedAt).
+	MetaKeyAutoStartFailed = "auto_start_failed"
 	// MetaKeyAgentTitlePending marks tasks created in prompt-first mode whose
 	// provisional title still needs the first eligible agent session to replace it.
 	MetaKeyAgentTitlePending = "agent_title_pending"
@@ -211,6 +219,10 @@ const (
 	SessionOriginTaskInitial             = "task_initial"
 	SessionMetaKeyContextWindow          = "context_window"
 	SessionMetaKeyContextCompactionCount = "context_compaction_count"
+	// SessionMetaKeyRecoveryResolvedAt stores the server timestamp of the
+	// latest successful agent boot. Recovery cards compare this timestamp with
+	// their own creation time, so the result survives transcript write failures.
+	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
 )
 
 // SessionMetaKeySessionMode records the agent's last-known session permission
@@ -532,6 +544,9 @@ type LastAgentError struct {
 	RemediationURL   string     `json:"remediation_url,omitempty"`
 	Code             string     `json:"code,omitempty"`
 	Details          string     `json:"details,omitempty"`
+	RecoveryActions  []string   `json:"recovery_actions,omitempty"`
+	TaskRepositoryID string     `json:"task_repository_id,omitempty"`
+	StampValue       string     `json:"stamp,omitempty"`
 	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
 }
 
@@ -547,7 +562,7 @@ func LoadLastAgentError(metadata map[string]interface{}) (LastAgentError, bool) 
 	if err := mapToLastAgentError(raw, &out); err != nil || out.Message == "" {
 		return LastAgentError{}, false
 	}
-	return out, true
+	return normalizeLastAgentError(out), true
 }
 
 func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
@@ -559,12 +574,18 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 }
 
 func (e LastAgentError) Stamp() string {
+	if stamp := boundedLaunchErrorStamp(e.StampValue); stamp != "" {
+		return stamp
+	}
 	return e.OccurredAt.UTC().Format(time.RFC3339Nano) + ":" + e.Message
 }
 
 func (e LastAgentError) MatchesStamp(stamp string) bool {
 	if stamp == e.Stamp() {
 		return true
+	}
+	if boundedLaunchErrorStamp(e.StampValue) != "" {
+		return false
 	}
 	suffix := ":" + e.Message
 	if !strings.HasSuffix(stamp, suffix) {
@@ -1200,14 +1221,20 @@ func copyMetadata(m map[string]any) map[string]any {
 // A turn starts when a user sends a prompt and ends when the agent completes,
 // cancels, or errors.
 type Turn struct {
-	ID            string                 `json:"id"`
-	TaskSessionID string                 `json:"session_id"`
-	TaskID        string                 `json:"task_id"`
-	StartedAt     time.Time              `json:"started_at"`
-	CompletedAt   *time.Time             `json:"completed_at,omitempty"`
-	Metadata      map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt     time.Time              `json:"created_at"`
-	UpdatedAt     time.Time              `json:"updated_at"`
+	ID            string `json:"id"`
+	TaskSessionID string `json:"session_id"`
+	TaskID        string `json:"task_id"`
+	// ExecutionProfileID and RouteGeneration are immutable attribution for the
+	// concrete route that started this turn. They are kept alongside the
+	// existing metadata during the compatibility migration so old rows remain
+	// readable.
+	ExecutionProfileID string                 `json:"execution_profile_id,omitempty"`
+	RouteGeneration    int64                  `json:"route_generation,omitempty"`
+	StartedAt          time.Time              `json:"started_at"`
+	CompletedAt        *time.Time             `json:"completed_at,omitempty"`
+	Metadata           map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt          time.Time              `json:"created_at"`
+	UpdatedAt          time.Time              `json:"updated_at"`
 }
 
 // ReviewStatus represents the review state of a TaskSession. The zero value
@@ -1281,31 +1308,41 @@ type SessionBranchInfo struct {
 // TaskSession represents a persistent agent execution session for a task.
 // This replaces the in-memory TaskExecution tracking and survives backend restarts.
 type TaskSession struct {
-	ID                   string                 `json:"id"`
-	TaskID               string                 `json:"task_id"`
-	Name                 string                 `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
-	AgentExecutionID     string                 `json:"agent_execution_id"`   // Docker container/agent execution
-	ContainerID          string                 `json:"container_id"`         // Docker container ID for cleanup
-	AgentProfileID       string                 `json:"agent_profile_id"`     // ID of the agent profile used
-	ExecutionProfileID   string                 `json:"execution_profile_id"` // Concrete profile used for this execution
-	ExecutorID           string                 `json:"executor_id"`
-	ExecutorProfileID    string                 `json:"executor_profile_id"`
-	EnvironmentID        string                 `json:"environment_id"`
-	RepositoryID         string                 `json:"repository_id"`   // Primary repository (for backward compatibility)
-	BaseBranch           string                 `json:"base_branch"`     // Primary base branch (for backward compatibility)
-	BaseCommitSHA        string                 `json:"base_commit_sha"` // Git commit SHA at session start (for cumulative diff)
-	WorkspacePath        string                 `json:"workspace_path"`  // Effective task workspace root; legacy repo-less sessions may use the picked host folder
-	Worktrees            []*TaskEnvironmentRepo `json:"-"`               // Environment repository rows for this session's workspace
-	AgentProfileSnapshot map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
-	ExecutorSnapshot     map[string]interface{} `json:"executor_snapshot,omitempty"`
-	EnvironmentSnapshot  map[string]interface{} `json:"environment_snapshot,omitempty"`
-	RepositorySnapshot   map[string]interface{} `json:"repository_snapshot,omitempty"`
-	State                TaskSessionState       `json:"state"`
-	ErrorMessage         string                 `json:"error_message,omitempty"`
-	Metadata             map[string]interface{} `json:"metadata,omitempty"`
-	StartedAt            time.Time              `json:"started_at"`
-	CompletedAt          *time.Time             `json:"completed_at,omitempty"`
-	UpdatedAt            time.Time              `json:"updated_at"`
+	ID                     string                 `json:"id"`
+	TaskID                 string                 `json:"task_id"`
+	Name                   string                 `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
+	AgentExecutionID       string                 `json:"agent_execution_id"`   // Docker container/agent execution
+	ContainerID            string                 `json:"container_id"`         // Docker container ID for cleanup
+	AgentProfileID         string                 `json:"agent_profile_id"`     // ID of the agent profile used
+	ExecutionProfileID     string                 `json:"execution_profile_id"` // Concrete profile used for this execution
+	RouteGeneration        int64                  `json:"route_generation,omitempty"`
+	RouteState             string                 `json:"route_state,omitempty"`
+	RouteReason            string                 `json:"route_reason,omitempty"`
+	DownstreamACPSessionID string                 `json:"downstream_acp_session_id,omitempty"`
+	RouteErrorCode         string                 `json:"route_error_code,omitempty"`
+	RouteErrorClass        string                 `json:"route_error_class,omitempty"`
+	RouteCatalogueVersion  string                 `json:"route_catalogue_version,omitempty"`
+	RouteRetryOrdinal      int64                  `json:"route_retry_ordinal,omitempty"`
+	RouteDeadline          *time.Time             `json:"route_deadline,omitempty"`
+	RoutePendingOutcome    string                 `json:"route_pending_outcome,omitempty"`
+	ExecutorID             string                 `json:"executor_id"`
+	ExecutorProfileID      string                 `json:"executor_profile_id"`
+	EnvironmentID          string                 `json:"environment_id"`
+	RepositoryID           string                 `json:"repository_id"`   // Primary repository (for backward compatibility)
+	BaseBranch             string                 `json:"base_branch"`     // Primary base branch (for backward compatibility)
+	BaseCommitSHA          string                 `json:"base_commit_sha"` // Git commit SHA at session start (for cumulative diff)
+	WorkspacePath          string                 `json:"workspace_path"`  // Effective task workspace root; legacy repo-less sessions may use the picked host folder
+	Worktrees              []*TaskEnvironmentRepo `json:"-"`               // Environment repository rows for this session's workspace
+	AgentProfileSnapshot   map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
+	ExecutorSnapshot       map[string]interface{} `json:"executor_snapshot,omitempty"`
+	EnvironmentSnapshot    map[string]interface{} `json:"environment_snapshot,omitempty"`
+	RepositorySnapshot     map[string]interface{} `json:"repository_snapshot,omitempty"`
+	State                  TaskSessionState       `json:"state"`
+	ErrorMessage           string                 `json:"error_message,omitempty"`
+	Metadata               map[string]interface{} `json:"metadata,omitempty"`
+	StartedAt              time.Time              `json:"started_at"`
+	CompletedAt            *time.Time             `json:"completed_at,omitempty"`
+	UpdatedAt              time.Time              `json:"updated_at"`
 
 	// Environment reference
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"` // FK to task_environments for shared env
@@ -1327,20 +1364,51 @@ type TaskSession struct {
 // TODO: Add v1.TaskSession type to pkg/api/v1/
 func (s *TaskSession) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
-		"id":                  s.ID,
-		"task_id":             s.TaskID,
-		"agent_execution_id":  s.AgentExecutionID,
-		"container_id":        s.ContainerID,
-		"agent_profile_id":    s.AgentProfileID,
-		"executor_id":         s.ExecutorID,
-		"executor_profile_id": s.ExecutorProfileID,
-		"environment_id":      s.EnvironmentID,
-		"repository_id":       s.RepositoryID,
-		"base_branch":         s.BaseBranch,
-		"base_commit_sha":     s.BaseCommitSHA,
-		"state":               string(s.State),
-		"started_at":          s.StartedAt,
-		"updated_at":          s.UpdatedAt,
+		"id":                   s.ID,
+		"task_id":              s.TaskID,
+		"agent_execution_id":   s.AgentExecutionID,
+		"container_id":         s.ContainerID,
+		"agent_profile_id":     s.AgentProfileID,
+		"execution_profile_id": s.ExecutionProfileID,
+		"executor_id":          s.ExecutorID,
+		"executor_profile_id":  s.ExecutorProfileID,
+		"environment_id":       s.EnvironmentID,
+		"repository_id":        s.RepositoryID,
+		"base_branch":          s.BaseBranch,
+		"base_commit_sha":      s.BaseCommitSHA,
+		"state":                string(s.State),
+		"started_at":           s.StartedAt,
+		"updated_at":           s.UpdatedAt,
+	}
+	if s.RouteGeneration > 0 {
+		result["route_generation"] = s.RouteGeneration
+	}
+	if s.RouteState != "" {
+		result["route_state"] = s.RouteState
+	}
+	if s.RouteReason != "" {
+		result["route_reason"] = s.RouteReason
+	}
+	if s.DownstreamACPSessionID != "" {
+		result["downstream_acp_session_id"] = s.DownstreamACPSessionID
+	}
+	if s.RouteErrorCode != "" {
+		result["route_error_code"] = s.RouteErrorCode
+	}
+	if s.RouteErrorClass != "" {
+		result["route_error_class"] = s.RouteErrorClass
+	}
+	if s.RouteCatalogueVersion != "" {
+		result["route_catalogue_version"] = s.RouteCatalogueVersion
+	}
+	if s.RouteRetryOrdinal > 0 {
+		result["route_retry_ordinal"] = s.RouteRetryOrdinal
+	}
+	if s.RouteDeadline != nil {
+		result["route_deadline"] = s.RouteDeadline
+	}
+	if s.RoutePendingOutcome != "" {
+		result["route_pending_outcome"] = s.RoutePendingOutcome
 	}
 	if worktrees := s.WorktreesAPI(); len(worktrees) > 0 {
 		result["worktrees"] = worktrees
@@ -2160,21 +2228,22 @@ func (t *Task) ToAPI() *v1.Task {
 	}
 
 	result := &v1.Task{
-		ID:           t.ID,
-		WorkspaceID:  t.WorkspaceID,
-		WorkflowID:   t.WorkflowID,
-		Title:        t.Title,
-		Description:  t.Description,
-		State:        t.State,
-		Priority:     t.Priority,
-		Repositories: repositories,
-		CreatedAt:    t.CreatedAt,
-		UpdatedAt:    t.UpdatedAt,
-		Metadata:     t.Metadata,
-		Interrupted:  t.Metadata[MetaKeyInterruptedAt] != nil,
-		IsEphemeral:  t.IsEphemeral,
-		ParentID:     t.ParentID,
-		Autopilot:    t.Autopilot,
+		ID:              t.ID,
+		WorkspaceID:     t.WorkspaceID,
+		WorkflowID:      t.WorkflowID,
+		Title:           t.Title,
+		Description:     t.Description,
+		State:           t.State,
+		Priority:        t.Priority,
+		Repositories:    repositories,
+		CreatedAt:       t.CreatedAt,
+		UpdatedAt:       t.UpdatedAt,
+		Metadata:        t.Metadata,
+		Interrupted:     t.Metadata[MetaKeyInterruptedAt] != nil,
+		AutoStartFailed: t.Metadata[MetaKeyAutoStartFailed] != nil,
+		IsEphemeral:     t.IsEphemeral,
+		ParentID:        t.ParentID,
+		Autopilot:       t.Autopilot,
 	}
 	if t.Identifier != "" {
 		result.Identifier = t.Identifier

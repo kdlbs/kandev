@@ -6,6 +6,7 @@ import type { UserSettingsUpdatePayload } from "@/lib/types/http";
 export type AppearanceState = {
   theme: Theme;
   settingsMenuMode: SettingsMenuMode;
+  richOutputAnimationsEnabled: boolean;
   startupPage: UserSettingsState["startupPage"];
   changesPanelLayout: UserSettingsState["changesPanelLayout"];
   appStatusBarEnabled: boolean;
@@ -16,6 +17,7 @@ export type AppearanceState = {
 export function createAppearanceSavedState(
   theme: Theme,
   settingsMenuMode: SettingsMenuMode,
+  richOutputAnimationsEnabled: boolean,
   userSettings: Pick<
     UserSettingsState,
     "appStatusBarEnabled" | "changesPanelLayout" | "startupPage" | "systemMetricsDisplay"
@@ -26,6 +28,7 @@ export function createAppearanceSavedState(
     appStatusBarEnabled: userSettings.appStatusBarEnabled,
     // Per-device, but drafted and saved with account settings under one control.
     settingsMenuMode,
+    richOutputAnimationsEnabled,
     changesPanelLayout: userSettings.changesPanelLayout,
     startupPage: userSettings.startupPage,
     showMetrics: userSettings.systemMetricsDisplay.showInTopbar,
@@ -73,6 +76,7 @@ export function rebaseAppearanceDraft(
   return {
     theme: rebase("theme"),
     settingsMenuMode: rebase("settingsMenuMode"),
+    richOutputAnimationsEnabled: rebase("richOutputAnimationsEnabled"),
     startupPage: rebase("startupPage"),
     changesPanelLayout: rebase("changesPanelLayout"),
     appStatusBarEnabled: rebase("appStatusBarEnabled"),
@@ -85,6 +89,7 @@ export function appearanceRevision(state: AppearanceState): string {
   return JSON.stringify([
     state.theme,
     state.settingsMenuMode,
+    state.richOutputAnimationsEnabled,
     state.startupPage,
     state.changesPanelLayout,
     state.appStatusBarEnabled,

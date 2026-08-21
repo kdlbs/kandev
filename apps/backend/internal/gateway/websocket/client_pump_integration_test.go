@@ -95,6 +95,7 @@ func newConnectedClient(t *testing.T) *connectedClient {
 	var client *Client
 	select {
 	case client = <-ready:
+		waitForClientCount(t, hub, client.ID)
 	case <-readyTimer.C:
 		t.Fatal("gateway never registered the client")
 	}

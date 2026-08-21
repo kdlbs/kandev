@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/secrets"
@@ -119,6 +120,10 @@ type Manager struct {
 	// launches. See manager_base_branches.go.
 	baseBranchProvider BaseBranchProvider
 
+	// comparisonTargetProvider hydrates task-repository comparison bindings so
+	// every workspace creation path can seed agentctl from durable state.
+	comparisonTargetProvider ComparisonTargetProvider
+
 	// secretStore encrypts/decrypts runtime auth tokens (e.g., agentctl handshake tokens).
 	// Used to persist tokens across backend restarts for remote executor recovery.
 	secretStore secrets.SecretStore
@@ -156,6 +161,10 @@ type Manager struct {
 	// 0 when unset (tests, or before the launcher wires it). Never used for
 	// SSH/remote rows — their process lives on another host.
 	standaloneHostPID atomic.Int64
+
+	// agentctlStartupConfig is the resolved child contract applied to every
+	// managed agentctl launch path.
+	agentctlStartupConfig commonconfig.AgentctlStartupConfig
 
 	// managedGoCache provides the opt-in GOCACHE for host-local executions.
 	// System storage wiring installs it after settings persistence is ready.
@@ -238,6 +247,17 @@ func (m *Manager) SetActivityCoordinator(coordinator *activity.Coordinator) {
 // unset in tests that don't exercise the persistence path.
 func (m *Manager) SetStandaloneHostPID(pid int) {
 	m.standaloneHostPID.Store(int64(pid))
+}
+
+// SetAgentctlStartupConfig wires the resolved backend-owned agentctl values
+// into every executor request. Remote and container executors serialize this
+// contract explicitly instead of inheriting the backend environment.
+func (m *Manager) SetAgentctlStartupConfig(startup commonconfig.AgentctlStartupConfig) error {
+	if err := startup.Validate(); err != nil {
+		return err
+	}
+	m.agentctlStartupConfig = startup
+	return nil
 }
 
 // NewManager creates a new lifecycle manager.
