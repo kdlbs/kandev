@@ -905,7 +905,7 @@ func TestTaskModelToDTO_MapsFields(t *testing.T) {
 		ID:             "task-1",
 		WorkspaceID:    "ws-1",
 		WorkflowID:     "wf-1",
-		WorkflowStepID: "in_progress",
+		WorkflowStepID: "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f",
 		Title:          "Fix bug",
 		Description:    "details",
 		State:          v1.TaskStateInProgress,
@@ -946,8 +946,8 @@ func TestTaskModelToDTO_MapsFields(t *testing.T) {
 	if got, want := dto.Labels, []string{"bug", "plugin"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("Labels = %#v, want %#v", got, want)
 	}
-	if dto.WorkflowStepID != "in_progress" {
-		t.Errorf("WorkflowStepID = %q, want %q", dto.WorkflowStepID, "in_progress")
+	if dto.WorkflowStepID != "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f" {
+		t.Errorf("WorkflowStepID = %q, want %q", dto.WorkflowStepID, "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f")
 	}
 }
 

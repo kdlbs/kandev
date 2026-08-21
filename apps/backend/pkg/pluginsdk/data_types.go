@@ -111,10 +111,10 @@ type Task struct {
 	Repositories []TaskRepository
 	Metadata     map[string]any
 	Labels       []string
-	// WorkflowStepID is the readable step identifier (e.g. "in_progress",
-	// "backlog") the task currently sits in, distinct from a UUID. Plugin
-	// reconcile loops match on this when placing inbound tasks; the host
-	// keeps it current as the task moves between steps.
+	// WorkflowStepID is the opaque workflow-step identifier recording the
+	// task's current placement, passed verbatim from the internal task
+	// model. Plugins use it for equality checks and reconciliation; resolve
+	// a display name via ListWorkflowSteps — no resolution happens here.
 	WorkflowStepID string
 }
 
