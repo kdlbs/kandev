@@ -217,3 +217,23 @@ describe("PluginRow auto-update toggle", () => {
     expect(onSetAutoUpdate).toHaveBeenCalledWith(p, null);
   });
 });
+
+describe("PluginRow member view", () => {
+  it("keeps plugin details available without rendering administrator actions", () => {
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={plugin()}
+        update={updateEntry()}
+        onUpdate={noop}
+        canManage={false}
+      />,
+    );
+
+    expect(screen.getByTestId("plugin-row-link-acme")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Disable" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Uninstall" })).toBeNull();
+    expect(screen.queryByTestId("plugin-update-acme")).toBeNull();
+    expect(screen.queryByTestId(AUTO_UPDATE_TESTID)).toBeNull();
+  });
+});

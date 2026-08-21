@@ -8,6 +8,7 @@ import { Switch } from "@kandev/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { useAutoUpdateSettings } from "@/hooks/domains/plugins/use-auto-update-settings";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { usePluginSetupStatus } from "@/hooks/domains/plugins/use-plugin-setup-status";
 import { usePluginUpdates } from "@/hooks/domains/plugins/use-plugin-updates";
@@ -26,6 +27,7 @@ import { settingsActionClassName } from "@/components/settings/settings-control"
  */
 export function PluginsSettings() {
   const { t } = useTranslation();
+  const canManage = useIsAdmin();
   const list = usePlugins();
   const actions = usePluginActions();
   const autoUpdate = useAutoUpdateSettings();
@@ -76,28 +78,33 @@ export function PluginsSettings() {
             updates={updates}
             updatingId={updatingId}
             onUpdate={handleUpdate}
+            canManage={canManage}
           />
         </TabsContent>
 
         <TabsContent value="browse">
-          <MarketplaceBrowser onInstallUrl={actions.marketplaceInstall} />
+          <MarketplaceBrowser onInstallUrl={actions.marketplaceInstall} canManage={canManage} />
         </TabsContent>
       </Tabs>
 
-      <UninstallPluginDialog
-        target={actions.uninstallTarget}
-        busy={actions.uninstallBusy}
-        onClose={actions.closeUninstall}
-        onConfirm={actions.confirmUninstall}
-      />
-      <InstallPluginDialog
-        open={actions.installOpen}
-        busy={actions.installBusy}
-        error={actions.installError}
-        onOpenChange={actions.setInstallOpen}
-        onSubmitUrl={actions.submitInstallUrl}
-        onSubmitFile={actions.submitInstallFile}
-      />
+      {canManage && (
+        <>
+          <UninstallPluginDialog
+            target={actions.uninstallTarget}
+            busy={actions.uninstallBusy}
+            onClose={actions.closeUninstall}
+            onConfirm={actions.confirmUninstall}
+          />
+          <InstallPluginDialog
+            open={actions.installOpen}
+            busy={actions.installBusy}
+            error={actions.installError}
+            onOpenChange={actions.setInstallOpen}
+            onSubmitUrl={actions.submitInstallUrl}
+            onSubmitFile={actions.submitInstallFile}
+          />
+        </>
+      )}
     </SettingsPageTemplate>
   );
 }
@@ -109,6 +116,7 @@ type InstalledTabProps = {
   updates: Map<string, MarketplaceEntry>;
   updatingId: string | null;
   onUpdate: (entry: MarketplaceEntry) => void;
+  canManage: boolean;
 };
 
 /** The Installed tab: auto-update toggle, sync/install toolbar, sync errors, and the plugin list. */
@@ -119,36 +127,39 @@ function InstalledTab({
   updates,
   updatingId,
   onUpdate,
+  canManage,
 }: InstalledTabProps) {
   const { t } = useTranslation();
   return (
     <>
-      <GlobalAutoUpdateToggle settings={autoUpdate} />
+      {canManage && <GlobalAutoUpdateToggle settings={autoUpdate} />}
 
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div className="text-sm font-medium text-foreground">{t("plugins:installedPlugins")}</div>
-        <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
-          <Button
-            data-testid="plugins-sync-button"
-            variant="secondary"
-            disabled={actions.syncBusy}
-            onClick={actions.handleSync}
-            className={settingsActionClassName("cursor-pointer")}
-          >
-            <IconRefresh className={`h-4 w-4 ${actions.syncBusy ? "animate-spin" : ""}`} />
-            {t("plugins:sync")}
-          </Button>
-          <Button
-            data-testid="install-plugin-trigger"
-            onClick={actions.openInstall}
-            className={settingsActionClassName("cursor-pointer")}
-          >
-            {t("plugins:installPlugin")}
-          </Button>
-        </div>
+        {canManage && (
+          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
+            <Button
+              data-testid="plugins-sync-button"
+              variant="secondary"
+              disabled={actions.syncBusy}
+              onClick={actions.handleSync}
+              className={settingsActionClassName("cursor-pointer")}
+            >
+              <IconRefresh className={`h-4 w-4 ${actions.syncBusy ? "animate-spin" : ""}`} />
+              {t("plugins:sync")}
+            </Button>
+            <Button
+              data-testid="install-plugin-trigger"
+              onClick={actions.openInstall}
+              className={settingsActionClassName("cursor-pointer")}
+            >
+              {t("plugins:installPlugin")}
+            </Button>
+          </div>
+        )}
       </div>
 
-      {actions.syncErrors.length > 0 && (
+      {canManage && actions.syncErrors.length > 0 && (
         <div
           data-testid="plugins-sync-errors"
           className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-400 space-y-1"
@@ -168,6 +179,7 @@ function InstalledTab({
         updates={updates}
         updatingId={updatingId}
         onUpdate={onUpdate}
+        canManage={canManage}
       />
     </>
   );
@@ -214,6 +226,7 @@ type PluginListProps = {
   updates: Map<string, MarketplaceEntry>;
   updatingId: string | null;
   onUpdate: (entry: MarketplaceEntry) => void;
+  canManage: boolean;
 };
 
 function PluginList({
@@ -223,6 +236,7 @@ function PluginList({
   updates,
   updatingId,
   onUpdate,
+  canManage,
 }: PluginListProps) {
   const { t } = useTranslation();
   const { items, loaded, loading, error } = list;
@@ -268,6 +282,7 @@ function PluginList({
           onUninstall={actions.openUninstall}
           onUpdate={onUpdate}
           onSetAutoUpdate={actions.handleSetAutoUpdate}
+          canManage={canManage}
         />
       ))}
     </div>

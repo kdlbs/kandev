@@ -23,6 +23,7 @@ type PluginRowProps = {
   autoUpdateBusy: boolean;
   /** True when the plugin declares required settings the operator has not filled in. */
   needsSetup?: boolean;
+  canManage?: boolean;
   onEnable: (plugin: PluginRecord) => void;
   onDisable: (plugin: PluginRecord) => void;
   onUninstall: (plugin: PluginRecord) => void;
@@ -49,6 +50,7 @@ export function PluginRow({
   autoUpdateDefault,
   autoUpdateBusy,
   needsSetup = false,
+  canManage = true,
   onEnable,
   onDisable,
   onUninstall,
@@ -82,17 +84,19 @@ export function PluginRow({
           <PluginRowIdentity plugin={plugin} needsSetup={needsSetup} />
 
           <div className="flex items-center gap-2 shrink-0">
-            <PluginRowActions
-              plugin={plugin}
-              busy={busy}
-              update={update}
-              canEnable={canEnable}
-              canDisable={canDisable}
-              onEnable={onEnable}
-              onDisable={onDisable}
-              onUninstall={onUninstall}
-              onUpdate={onUpdate}
-            />
+            {canManage && (
+              <PluginRowActions
+                plugin={plugin}
+                busy={busy}
+                update={update}
+                canEnable={canEnable}
+                canDisable={canDisable}
+                onEnable={onEnable}
+                onDisable={onDisable}
+                onUninstall={onUninstall}
+                onUpdate={onUpdate}
+              />
+            )}
             <IconChevronRight
               aria-hidden
               className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
@@ -114,12 +118,14 @@ export function PluginRow({
           </div>
         )}
 
-        <PluginAutoUpdateRow
-          plugin={plugin}
-          autoUpdateDefault={autoUpdateDefault}
-          busy={autoUpdateBusy}
-          onSetAutoUpdate={onSetAutoUpdate}
-        />
+        {canManage && (
+          <PluginAutoUpdateRow
+            plugin={plugin}
+            autoUpdateDefault={autoUpdateDefault}
+            busy={autoUpdateBusy}
+            onSetAutoUpdate={onSetAutoUpdate}
+          />
+        )}
       </div>
     </div>
   );
