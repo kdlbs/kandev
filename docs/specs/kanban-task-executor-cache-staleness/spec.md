@@ -73,9 +73,13 @@ from a given payload.
   a payload that legitimately carries executor state), the incoming value(s)
   win outright — this is not a sticky/permanent preserve, only a gap-fill for a
   payload that omits the field.
-- The same preserve applies to `use-all-workflow-snapshots.ts`'s per-task
-  snapshot merge, alongside its existing `primarySessionId` /
-  `primarySessionState` / `autopilot` / `statusSummary` preserves.
+- In `use-all-workflow-snapshots.ts`, a current cached executor bundle wins
+  when it changed after the snapshot request started, even when the response
+  contains an older explicit executor bundle.
+- When the executor bundle did not change after the request started, the full
+  snapshot is authoritative. An omitted executor bundle can clear the cache.
+- When a task first appears while the request is active, its current cached
+  executor bundle wins over a response captured before that live event.
 - Every other field's existing merge behavior (timestamp comparison, the
   dependency-projection backfill on the older-incoming branch, unrelated
   fields' wholesale replace) is unchanged.
@@ -96,6 +100,12 @@ from a given payload.
   fields for a task the cache already knows the executor for, **WHEN**
   `useAllWorkflowSnapshots` merges that response, **THEN** the merged snapshot
   task keeps the cached executor fields.
+- **GIVEN** a cached task whose executor is known at request start, **WHEN** a
+  live event clears the executor and a stale response returns the old executor
+  bundle, **THEN** the merged task stays clear.
+- **GIVEN** a task that is absent at request start, **WHEN** a live event adds
+  the task with executor data and a stale response omits that data, **THEN**
+  the merged task keeps the live executor bundle.
 
 ## Constraints
 
@@ -106,15 +116,13 @@ from a given payload.
   works around that mapping's loss of "omitted" information for
   `isRemoteExecutor` by gating on `primaryExecutorType`'s own `undefined`-ness
   instead, rather than changing the shared mapper's output contract.
-- Do not attempt to distinguish "executor not yet known" from "executor
-  explicitly cleared" (e.g. on primary-session detachment) at these two merge
-  sites. Unlike the WebSocket handler's raw-payload
-  `primary_session_id === null` check, the mapped `KanbanTask` shape already
-  collapses that distinction (`primarySessionId` maps with `?? undefined`,
-  so an explicit clear and an omitted key are indistinguishable after
-  mapping). This fix accepts the same known limitation the existing
-  dependency-field backfill already accepts at this layer; it does not
-  introduce a new one.
+- The snapshot merge uses the request-start cache as its freshness boundary.
+  It copies the complete current executor bundle when the task changed after
+  request start or first appeared during the request. It does not use omission
+  alone as proof of a stale response.
+- The hydration merge still uses the mapped `KanbanTask` shape. It cannot
+  distinguish an explicit clear from an omitted key in that path, so it keeps
+  the existing gap-fill rule and its known limitation.
 
 ## Out of scope
 

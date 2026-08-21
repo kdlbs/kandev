@@ -10,17 +10,17 @@ spec: "../../specs/kanban-task-executor-cache-staleness/spec.md"
 
 # Task 02: Preserve executor fields in the workflow snapshot merge
 
-Wire the `preserveOmittedExecutorFields` helper from task 01 into
-`useAllWorkflowSnapshots`'s per-task snapshot merge, so a fresh workflow
-snapshot response that omits the executor fields does not blank out an
-already-known executor binding in `kanbanMulti.snapshots`.
+Wire request-start executor freshness into `useAllWorkflowSnapshots`'s
+per-task snapshot merge. A stale workflow response must not blank out or
+restore an executor binding changed by a live event in `kanbanMulti.snapshots`.
 
 ## Acceptance
 
 - In `apps/web/hooks/domains/kanban/use-all-workflow-snapshots.ts`'s
-  `fetchAndWriteSnapshot`, the `if (existing)` block that already preserves
-  `primarySessionId`/`primarySessionState`/`autopilot`/`statusSummary` also
-  calls `preserveOmittedExecutorFields(mapped, existing)`.
+  `fetchAndWriteSnapshot`, compare the current task with its request-start
+  task before applying the HTTP response.
+- Copy all four current executor fields when the task changed after request
+  start or first appeared during the request.
 - A fresh snapshot response whose task omits all four executor fields keeps the
   cached task's executor field values in the merged snapshot.
 - A fresh snapshot response whose task carries a genuinely different
@@ -50,23 +50,19 @@ Task 01 (`preserveOmittedExecutorFields` must exist in `map-task.ts` first).
 
 ## TDD sequence
 
-1. Add a failing test to `use-all-workflow-snapshots.test.ts`: seed
-   `kanbanMulti.snapshots` with a task carrying all four executor fields, mock
-   `fetchWorkflowSnapshot` to return the same task `id` with none of the
-   executor fields, run the hook's fetch, and assert
-   `mockSetWorkflowSnapshot`'s recorded task still has the original executor
-   field values. Confirm it fails first.
-2. Add a second test asserting a fresh response carrying a genuinely different
-   `primary_executor_type` (plus its sibling fields) still wins.
-3. Wire `preserveOmittedExecutorFields(mapped, existing)` into the `if
-   (existing)` block in `fetchAndWriteSnapshot`.
-4. Re-run the tests from step 1-2 and confirm they pass.
+1. Add a failing deferred-response test where a live detach clears the cached
+   executor and the stale response returns the old explicit executor bundle.
+2. Add a failing deferred-response test where a task first appears during the
+   request with live executor data and the stale response omits that data.
+3. Add a complete-copy helper and wire it into the snapshot merge.
+4. Re-run the tests from steps 1-2 and confirm they pass.
 
 ## Verification
 
 ```bash
-cd apps/web && pnpm exec vitest run hooks/domains/kanban/use-all-workflow-snapshots.test.ts
-cd apps/web && pnpm run typecheck
+cd apps/web
+pnpm exec vitest run hooks/domains/kanban/use-all-workflow-snapshots.test.ts hooks/domains/kanban/use-all-workflow-snapshots-inflight.test.ts
+pnpm run typecheck
 ```
 
 ## Risks
@@ -82,31 +78,27 @@ from this task file. Record every exact command and outcome in `## Results`.
 
 ## Results
 
-Wired `preserveOmittedExecutorFields` (from task 01) into the `if (existing)`
-block in `fetchAndWriteSnapshot`, right after the existing `statusSummary`
-preserve, in `apps/web/hooks/domains/kanban/use-all-workflow-snapshots.ts`.
+The merge now uses request-start freshness for the complete executor bundle.
+When the live cache changes during the fetch, or when a task appears while the
+fetch is in flight, the current bundle wins. When it does not change, the
+snapshot remains authoritative and can clear the executor.
 
-- RED: `pnpm exec vitest run hooks/domains/kanban/use-all-workflow-snapshots.test.ts`
-  — the new "preserves cached executor fields..." test failed, asserting the
-  merged snapshot task lost its executor fields (`undefined` instead of the
-  cached values); the "adopts a legitimately different executor value..." test
-  passed even before the fix, as expected.
-- GREEN: same command after wiring in the helper — all 16 tests passed.
-- Deviation from the task file: the two new tests were split into their own
-  top-level `describe("useAllWorkflowSnapshots — executor field
-  preservation", ...)` block (with a small `seedCachedExecutor()` helper)
-  instead of living inside the existing `"snapshot mapping"` describe, because
-  adding them there pushed that describe's arrow function to 139 lines, over
-  the repo's 100-line function limit. The file's total line count (466) stayed
-  well under the 600-line file limit.
-- Full verification: `pnpm exec vitest run
-  hooks/domains/kanban/use-all-workflow-snapshots.test.ts
-  hooks/domains/kanban/use-all-workflow-snapshots-inflight.test.ts
+- RED: `pnpm exec vitest run
+  hooks/domains/kanban/use-all-workflow-snapshots.test.ts` — both new race
+  regressions failed. A stale snapshot restored the old executor after a live
+  detach, and a task added during the fetch lost its live executor.
+- GREEN: the same command after the fix — all 20 tests passed.
+- Focused verification: `pnpm exec vitest run
   lib/kanban/map-task.test.ts lib/state/hydration/hydrator.test.ts
-  lib/state/hydration/hydrator-kanban-tasks.test.ts` — 67 passed.
-  `pnpm exec eslint hooks/domains/kanban/use-all-workflow-snapshots.ts
-  hooks/domains/kanban/use-all-workflow-snapshots.test.ts` — clean, no
-  warnings. `pnpm run typecheck` — clean.
+  lib/state/hydration/hydrator-kanban-tasks.test.ts
+  hooks/domains/kanban/use-all-workflow-snapshots.test.ts
+  hooks/domains/kanban/use-all-workflow-snapshots-inflight.test.ts` — 80
+  tests passed.
+- `pnpm exec eslint` passed for all touched TypeScript files. `pnpm run
+  typecheck` passed.
+- Updated the spec and implementation plan to document the request-start
+  freshness rule and the separate hydration gap-fill rule.
 
 Files changed: `apps/web/hooks/domains/kanban/use-all-workflow-snapshots.ts`,
-`apps/web/hooks/domains/kanban/use-all-workflow-snapshots.test.ts`.
+`apps/web/hooks/domains/kanban/use-all-workflow-snapshots.test.ts`,
+`apps/web/lib/kanban/map-task.ts`, and the related spec and plan files.

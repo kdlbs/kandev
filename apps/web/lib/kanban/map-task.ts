@@ -184,6 +184,10 @@ function dependencyProjection(
  */
 export function preserveOmittedExecutorFields(merged: KanbanTask, existing: KanbanTask): void {
   if (merged.primaryExecutorType !== undefined) return;
+  copyPrimaryExecutorFields(merged, existing);
+}
+
+export function copyPrimaryExecutorFields(merged: KanbanTask, existing: KanbanTask): void {
   merged.primaryExecutorId = existing.primaryExecutorId;
   merged.primaryExecutorType = existing.primaryExecutorType;
   merged.primaryExecutorName = existing.primaryExecutorName;

@@ -83,8 +83,9 @@ None.
 ## Verification
 
 ```bash
-cd apps/web && pnpm exec vitest run lib/state/hydration/hydrator.test.ts lib/kanban/map-task.test.ts
-cd apps/web && pnpm run typecheck
+cd apps/web
+pnpm exec vitest run lib/state/hydration/hydrator.test.ts lib/state/hydration/hydrator-kanban-tasks.test.ts lib/kanban/map-task.test.ts
+pnpm run typecheck
 ```
 
 ## Risks

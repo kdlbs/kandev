@@ -8,16 +8,15 @@ status: completed
 
 ## Overview
 
-Add an executor-fields preserve guard to the two kanban task cache merge sites
-that currently have none: `mergeKanbanTasks`'s wholesale-replace branch in
-`apps/web/lib/state/hydration/hydrator.ts`, and the per-task snapshot merge in
-`apps/web/hooks/domains/kanban/use-all-workflow-snapshots.ts`. Both gate the
-preserve on the incoming task's `primaryExecutorType` being `undefined`, then
-copy `primaryExecutorId`, `primaryExecutorType`, `primaryExecutorName`, and
-`isRemoteExecutor` from the existing cached task onto the merged result. This
-mirrors the existing `preservePrimaryExecutorFields` guard already used by the
-WebSocket handler (`apps/web/lib/ws/handlers/tasks.ts`), adapted to the mapped
-`KanbanTask` shape these two sites operate on.
+Add an executor-fields preserve guard to the hydration merge and a
+request-start freshness guard to the workflow snapshot merge. Hydration uses
+`preserveOmittedExecutorFields` when an equal-or-newer incoming task omits its
+executor bundle. Snapshot reconciliation compares the current task with the
+task captured at request start, then copies the complete current bundle when a
+live change or in-flight task creation makes the response stale. This mirrors
+the existing `preservePrimaryExecutorFields` guard used by the WebSocket
+handler (`apps/web/lib/ws/handlers/tasks.ts`) while keeping HTTP authority
+rules separate from raw WebSocket presence checks.
 
 ## Root cause
 
@@ -43,22 +42,25 @@ event already populated the executor fields therefore blanks them back out.
 check: `toKanbanTask` maps it with `?? false`
 (`apps/web/lib/kanban/map-task.ts:199`), so the mapped value is never
 `undefined`, unlike its three sibling fields (`?? undefined`). Both fixed sites
-instead gate the whole four-field bundle on `primaryExecutorType`'s own
-`undefined`-ness, since the backend only ever emits `is_remote_executor`
-alongside `primary_executor_type` (same derivation, same source; see
-`service_events.go:566-582` and `dto.go:775-782`).
+still use `primaryExecutorType` as the bundle-presence signal when they need to
+recognize an omitted response. The snapshot merge also compares the full
+current bundle with the request-start bundle, so an explicit stale value cannot
+override a live clear.
 
 ## Frontend
 
 ### Executor-fields preserve helper
 
-- In `apps/web/lib/kanban/map-task.ts`, add and export a small helper,
+- In `apps/web/lib/kanban/map-task.ts`, add and export small helpers,
   `preserveOmittedExecutorFields(merged: KanbanTask, existing: KanbanTask):
   void`, that copies `primaryExecutorId`, `primaryExecutorType`,
   `primaryExecutorName`, and `isRemoteExecutor` from `existing` onto `merged`
   only when `merged.primaryExecutorType === undefined`. This is the shared home
   both merge sites import from, matching the existing "single publisher /
   single mapper" convention already documented on `TaskLike` in that file.
+- Export `copyPrimaryExecutorFields` for snapshot reconciliation. This helper
+  copies all four fields, including `undefined` and `false`, when the live
+  cache is newer than the HTTP response.
 - Do not change `toKanbanTask`'s existing `is_remote_executor ?? false`
   mapping or the pinned `"defaults isRemoteExecutor to false when missing"`
   test in `apps/web/lib/kanban/map-task.test.ts` — out of scope per the spec's
@@ -77,17 +79,17 @@ alongside `primary_executor_type` (same derivation, same source; see
 
 ### Workflow snapshot merge
 
-- In `apps/web/hooks/domains/kanban/use-all-workflow-snapshots.ts`, inside
-  `fetchAndWriteSnapshot`'s `tasks` mapping, in the `if (existing)` block
-  alongside the existing `primarySessionId`/`primarySessionState`/`autopilot`/
-  `statusSummary` preserves, call
-  `preserveOmittedExecutorFields(mapped, existing)`.
+- In `apps/web/hooks/domains/kanban/use-all-workflow-snapshots.ts`, capture the
+  task at request start and compare it with the current cached task.
+- Copy the current executor bundle when the task changed after request start or
+  when the task first appeared during the request. Let a full response win
+  when no live executor change occurred.
 
 ## Tests
 
 - **`mergeKanbanTasks` preserves known executor fields on a same/newer-timestamp
   merge that omits them:** add a test to
-  `apps/web/lib/state/hydration/hydrator.test.ts` that hydrates a task with all
+  `apps/web/lib/state/hydration/hydrator-kanban-tasks.test.ts` that hydrates a task with all
   four executor fields populated, then hydrates again with the same `id`, an
   equal `updatedAt`, and no executor fields on the incoming task; assert the
   merged task in `draft.kanban.tasks` still has the original executor field
@@ -104,6 +106,12 @@ alongside `primary_executor_type` (same derivation, same source; see
   omits it"` test, asserting the merged snapshot task keeps its cached
   `primaryExecutorId`/`primaryExecutorType`/`primaryExecutorName`/
   `isRemoteExecutor` when the fresh response's task omits all four.
+- **Snapshot merge preserves a live clear over an explicit stale bundle:** add
+  a deferred-response test where the request starts with executor A, a live
+  event clears it, and the response returns executor A.
+- **Snapshot merge preserves a task added during the request:** add a
+  deferred-response test where the task is absent at request start, a live
+  event adds executor B, and the response omits executor fields.
 - **`preserveOmittedExecutorFields` unit coverage:** add direct test cases in
   `apps/web/lib/kanban/map-task.test.ts` (or a colocated test if the helper
   moves) covering: incoming omits all four fields (preserve fires), incoming
@@ -120,19 +128,16 @@ alongside `primary_executor_type` (same derivation, same source; see
 ## Verification
 
 ```bash
-cd apps/web && pnpm exec vitest run lib/state/hydration/hydrator.test.ts lib/kanban/map-task.test.ts hooks/domains/kanban/use-all-workflow-snapshots.test.ts
-cd apps/web && pnpm run typecheck
+cd apps/web
+pnpm exec vitest run lib/state/hydration/hydrator.test.ts lib/state/hydration/hydrator-kanban-tasks.test.ts lib/kanban/map-task.test.ts hooks/domains/kanban/use-all-workflow-snapshots.test.ts
+pnpm run typecheck
 ```
 
 ## Risks
 
-- Gating on `primaryExecutorType`'s `undefined`-ness rather than
-  `isRemoteExecutor`'s own is a deliberate workaround for `toKanbanTask`'s
-  lossy `?? false` mapping (see spec constraints); if that mapping ever
-  changes to `?? undefined`, this gate remains correct but becomes redundant
-  with a plain per-field check.
-- The preserve cannot distinguish "executor not yet known" from "executor
-  explicitly cleared" at these two merge sites, since the mapped `KanbanTask`
-  shape already loses that distinction ahead of this fix (documented
-  out-of-scope limitation in the spec, consistent with the existing
-  dependency-field backfill's same limitation).
+- Gating omission detection on `primaryExecutorType` is a deliberate
+  workaround for `toKanbanTask`'s lossy `?? false` mapping.
+- Snapshot reconciliation copies the complete current bundle when a live
+  change is proven. This includes explicit clears and tasks added in flight.
+- Hydration keeps the mapped-shape limitation because it has no request-start
+  snapshot or raw payload presence data.
