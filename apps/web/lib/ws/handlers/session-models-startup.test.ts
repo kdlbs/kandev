@@ -105,13 +105,17 @@ function makeStartupPayload(
   });
 }
 
-function expectPersistedModel(store: StoreApi<AppState>): void {
+function expectCurrentModel(store: StoreApi<AppState>, modelId: string): void {
   expect(store.getState().sessionModels.bySessionId["session-1"]).toMatchObject({
-    currentModelId: providerModelId,
+    currentModelId: modelId,
     configOptions: expect.arrayContaining([
-      expect.objectContaining({ id: "model", currentValue: providerModelId }),
+      expect.objectContaining({ id: "model", currentValue: modelId }),
     ]),
   });
+}
+
+function expectPersistedModel(store: StoreApi<AppState>): void {
+  expectCurrentModel(store, providerModelId);
 }
 
 it("keeps persisted model state until a settled startup payload arrives", () => {
@@ -146,4 +150,28 @@ it("keeps persisted model state until a settled startup payload arrives", () => 
   expect(liveState.configOptions.find((option) => option.id === "model")?.currentValue).toBe(
     lunaModelId,
   );
+});
+
+it("hydrates from a settled startup payload when the model differs from persisted runtime", () => {
+  const store = makeStore({
+    taskSessions: {
+      items: {
+        "session-1": {
+          ...makeTaskSession({ runtime_config: { model: providerModelId } }),
+          state: "STARTING",
+        },
+      },
+    },
+  });
+  const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+  handler(makeMessage(makeStartupPayload(lunaModelId, lunaModelId, true, "low")));
+  expectCurrentModel(store, lunaModelId);
+  expect(store.getState().sessionModels.bySessionId["session-1"]).toMatchObject({
+    configOptionsSettled: true,
+  });
+
+  store.getState().taskSessions.items["session-1"].state = "WAITING_FOR_INPUT";
+  handler(makeMessage(makeStartupPayload(providerModelId, providerModelId, false, "high")));
+  expectCurrentModel(store, providerModelId);
 });

@@ -3092,6 +3092,9 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 		return
 	}
 	if shouldDeferUnsettledStartupModelsEvent(session, settled) {
+		// The session state read is optimistic. A concurrent transition out of
+		// STARTING can cause a conservative defer, and the next live model event
+		// corrects the client state without introducing a lock-order dependency.
 		s.logger.Debug("deferring unsettled startup session_models event",
 			zap.String("session_id", sessionID),
 			zap.String("current_model_id", payload.Data.CurrentModelID))

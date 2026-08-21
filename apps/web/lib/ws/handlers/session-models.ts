@@ -98,6 +98,16 @@ function isUnsettledStartupModelsPayload(
   );
 }
 
+function shouldHydrateSessionModelsPayload(
+  payload: SessionModelsPayload,
+  matchesPersisted: boolean,
+  unsettledStartup: boolean,
+): boolean {
+  // Two-layer defense: the backend gates unsettled startup events, while this
+  // barrier protects reconnects where the client session state lags.
+  return payload.config_options_settled === true || (matchesPersisted && !unsettledStartup);
+}
+
 // During an agentctl relaunch (ready -> starting -> ready) the backend can emit
 // a transient session.models_updated with no models, no current model, and no
 // config options before the fresh agent reports its real capabilities. Since
@@ -292,7 +302,9 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
       const persisted = hydrated.has(sessionId) ? {} : persistedRuntimeConfig(state, sessionId);
       const matchesPersisted = payloadMatchesPersistedRuntime(payload, persisted);
       const unsettledStartup = isUnsettledStartupModelsPayload(state, sessionId, payload);
-      if (matchesPersisted && !unsettledStartup) hydrated.add(sessionId);
+      if (shouldHydrateSessionModelsPayload(payload, matchesPersisted, unsettledStartup)) {
+        hydrated.add(sessionId);
+      }
       const pendingRuntime = hydrated.has(sessionId) ? {} : persisted;
       const resolved = resolveModelsUpdatedState(state, sessionId, payload, pendingRuntime);
       debugModelsUpdate(state, sessionId, payload, resolved);

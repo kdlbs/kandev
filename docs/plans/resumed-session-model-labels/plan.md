@@ -86,11 +86,12 @@ No new mobile Playwright case is required. The shared handler unit test and the 
 
 - Backend focused startup regression: `cd apps/backend && go test -run 'TestHandleSessionModelsEvent.*Startup' ./internal/orchestrator` passed.
 - Full backend suite: `make test` from `apps/backend` passed with `CGO_ENABLED=1 go test -tags fts5 ./...`.
-- Frontend focused unit suite: `cd apps && pnpm --filter @kandev/web test -- --run lib/ws/handlers/session-models.test.ts lib/ws/handlers/session-models-startup.test.ts components/task/session-tab-title.test.ts` passed with 3 files and 29 tests.
+- Frontend focused unit suite: `cd apps && pnpm --filter @kandev/web test -- --run lib/ws/handlers/session-models.test.ts lib/ws/handlers/session-models-startup.test.ts components/task/session-tab-title.test.ts` passed with 3 files and 30 tests.
 - Frontend typecheck: `cd apps/web && pnpm run typecheck` passed.
 - Desktop resume E2E: `cd apps/web && pnpm e2e:run tests/session/session-resume.spec.ts -- --grep "keeps distinct model titles during multi-session resume"` passed with 1 test.
 - Mobile selector E2E: `cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-model-selector.spec.ts -- --grep "model"` passed with 1 test.
 - PR evidence capture passed for both desktop session tabs and the existing mobile selector; the manifest maps both fresh PNGs and both images were inspected and compressed.
+- PR fixup remediation: a settled startup payload now releases hydration even when it differs from persisted runtime data; the added regression passed, backend focused tests passed, web lint passed with zero warnings, typecheck passed, and the production desktop resume E2E passed.
 
 ## Implementation Waves And Parallel Candidates
 
