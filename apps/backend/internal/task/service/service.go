@@ -344,6 +344,7 @@ type Service struct {
 	// other's insert and commit a cycle between them.
 	dependencyEdgeMu       sync.Mutex
 	comments               CommentRepository
+	taskStateActivity      TaskStateActivityLogger
 	secretStore            secrets.SecretStore
 	workspaceSecretDeleter WorkspaceSecretDeleter
 	baseBranchPusher       AgentBaseBranchPusher

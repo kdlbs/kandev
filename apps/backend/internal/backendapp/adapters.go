@@ -563,6 +563,12 @@ func (a *lifecycleAdapter) IsAgentRunningForSession(ctx context.Context, session
 	return a.mgr.IsAgentRunningForSession(ctx, sessionID)
 }
 
+// ProbeAgentRunningForSession preserves probe errors so orchestrator cleanup
+// can distinguish an unavailable status check from a confirmed dead agent.
+func (a *lifecycleAdapter) ProbeAgentRunningForSession(ctx context.Context, sessionID string) (bool, error) {
+	return a.mgr.ProbeAgentRunningForSession(ctx, sessionID)
+}
+
 // IsAgentReadyForPrompt checks if the session can accept a prompt immediately.
 func (a *lifecycleAdapter) IsAgentReadyForPrompt(ctx context.Context, sessionID string) bool {
 	return a.mgr.IsAgentReadyForPrompt(ctx, sessionID)
@@ -606,6 +612,16 @@ func (a *lifecycleAdapter) PollRemoteStatusForRecords(ctx context.Context, recor
 
 func (a *lifecycleAdapter) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
 	return a.mgr.CleanupStaleExecutionBySessionID(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) CleanupStaleExecutionBySessionIDIfCurrent(
+	ctx context.Context,
+	sessionID, expectedExecutionID string,
+	expectedUpdatedAt time.Time,
+) error {
+	return a.mgr.CleanupStaleExecutionBySessionIDIfCurrent(
+		ctx, sessionID, expectedExecutionID, expectedUpdatedAt,
+	)
 }
 
 func (a *lifecycleAdapter) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {

@@ -39,7 +39,7 @@ function EditorTab(props: IDockviewPanelHeaderProps) {
   return <DockviewDefaultTab {...props} hideClose />;
 }
 
-const placeholderComponents = {
+export const placeholderComponents: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   chat: PlaceholderPanel,
   files: PlaceholderPanel,
   changes: PlaceholderPanel,
@@ -52,6 +52,8 @@ const placeholderComponents = {
   // so Settings > Layouts renders a generic box instead of throwing on an
   // unknown tabComponent (AC8), regardless of which plugin registered it.
   "plugin-panel": PlaceholderPanel,
+  // Reusable panels rendered through the same placeholder box in the editor.
+  "prompt-history": PlaceholderPanel,
   todos: PlaceholderPanel,
 };
 

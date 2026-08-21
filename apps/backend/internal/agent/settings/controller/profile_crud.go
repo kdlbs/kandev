@@ -179,11 +179,6 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	}
 	if req.Model != nil {
 		profile.Model = *req.Model
-		if req.Name == nil {
-			if newName := c.resolveProfileNameForModel(ctx, profile.AgentID, *req.Model); newName != "" {
-				profile.Name = newName
-			}
-		}
 	}
 	if req.FallbackModel != nil {
 		profile.FallbackModel = strings.TrimSpace(*req.FallbackModel)
@@ -926,31 +921,4 @@ func validateEnvVarValue(ev dto.ProfileEnvVarDTO, i int) error {
 		}
 	}
 	return nil
-}
-
-// resolveProfileNameForModel looks up the agent by ID, fetches its model list (using cache),
-// and returns the display name for the given model ID. Returns empty string on failure.
-func (c *Controller) resolveProfileNameForModel(ctx context.Context, agentID, modelID string) string {
-	agent, err := c.repo.GetAgent(ctx, agentID)
-	if err != nil {
-		return ""
-	}
-	if _, ok := c.agentRegistry.Get(agent.Name); !ok {
-		return ""
-	}
-
-	// Look up the model's display name from the host utility capability
-	// cache. If the cache isn't populated yet (probes not finished, agent
-	// not probed) we fall through to the raw model ID — better than
-	// blocking the save.
-	if c.hostUtility != nil {
-		if caps, ok := c.hostUtility.Get(agent.Name); ok {
-			for _, m := range caps.Models {
-				if m.ID == modelID {
-					return m.Name
-				}
-			}
-		}
-	}
-	return modelID
 }

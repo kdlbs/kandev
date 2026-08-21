@@ -32,7 +32,7 @@ export type MessageListProps = {
   isWorking: boolean;
   sessionState?: TaskSessionState;
   worktreePath?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   /** Render item key (see getItemKey) the unread "New" divider should
    *  appear immediately before; null/undefined renders no divider. */
   dividerBeforeItemKey?: string | null;
@@ -472,7 +472,7 @@ export const MessageItem = memo(function MessageItem({
   childrenByParentToolCallId: Map<string, Message[]>;
   taskId?: string;
   worktreePath?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   isLastGroup: boolean;
   activeTurnId?: string | null;
   streamingMessageId?: string | null;

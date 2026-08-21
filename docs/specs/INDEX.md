@@ -55,6 +55,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [semantic-notifications](platform/notifications.md) | shipped |
 | [workspace-git-status](platform/workspace-git-status.md) | shipped |
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
+| [git-credential-lease-reissue](git-credential-lease-reissue/spec.md) | shipped |
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |
 | [provider-error-recovery](platform/provider-error-recovery.md) | draft |
@@ -104,6 +105,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [agent-generated-titles](tasks/agent-generated-titles.md) | approved |
 | [task-create-executor-default](tasks/task-create-executor-default.md) | approved |
 | [task-create-workflow-memory](tasks/task-create-workflow-memory.md) | approved |
+| [task-create-escape-dismissal](tasks/task-create-escape-dismissal.md) | complete |
 | [repository-sets](repository-sets/spec.md) | building |
 | [external-id-idempotency](tasks/external-id-idempotency/spec.md) | draft |
 | [prompt-attachments](tasks/prompt-attachments.md) | draft |
@@ -207,6 +209,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [entity-reference-composer](ui/entity-reference-composer.md) | draft |
 | [agent-launch-prompt-composer](ui/agent-launch-prompt-composer.md) | shipped |
 | [mermaid-rendering](ui/mermaid-rendering.md) | shipped |
+| [agent-rich-output](agent-rich-output/spec.md) | shipped |
 | [message-queue-auto-merge](ui/message-queue-auto-merge.md) | shipped |
 | [message-queue-management](ui/message-queue-management.md) | shipped |
 | [message-queue-merge](ui/message-queue-merge.md) | shipped |

@@ -195,6 +195,9 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 	execution.promptFinishedMu.Unlock()
 
 	if ch == nil {
+		if execution.dispatchedPromptPending.Load() {
+			return m.escalateStuckCancel(ctx, execution, nil)
+		}
 		if streamDisconnected {
 			m.logger.Info("agent stream already disconnected; cancel is complete",
 				zap.String("execution_id", executionID))
@@ -230,6 +233,9 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 	// Without this, a follow-up PromptAgent races on promptDoneCh with two readers.
 	select {
 	case <-ch:
+		if execution.dispatchedPromptPending.Load() {
+			return m.escalateStuckCancel(ctx, execution, ch)
+		}
 		m.logger.Debug("in-flight prompt finished after cancel",
 			zap.String("execution_id", executionID))
 		return nil
@@ -263,6 +269,10 @@ func (m *Manager) escalateStuckCancel(ctx context.Context, execution *AgentExecu
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID))
 
+	// Clear the cancelled dispatch-only prompt before releasing its waiter. If
+	// the waiter immediately admits a successor, a later cleanup must not clear
+	// the successor's gate.
+	execution.dispatchedPromptPending.Store(false)
 	execution.signalPromptCompletionForStartupGeneration(
 		execution.startupAttemptSnapshot(),
 		PromptCompletionSignal{
@@ -272,18 +282,20 @@ func (m *Manager) escalateStuckCancel(ctx context.Context, execution *AgentExecu
 		},
 	)
 
-	select {
-	case <-ch:
-		m.logger.Info("in-flight prompt released after cancel escalation",
-			zap.String("execution_id", execution.ID))
-	case <-time.After(cancelEscalationTimeout):
-		m.logger.Warn("in-flight prompt did not release after cancel escalation",
-			zap.String("execution_id", execution.ID))
-	case <-ctx.Done():
-		// Fall through to MarkReady/drain below — once the synthetic signal is
-		// queued, the cleanup must survive the caller's context cancellation
-		// or the execution leaks in the Running state and the stale signal
-		// breaks the next PromptAgent call.
+	if ch != nil {
+		select {
+		case <-ch:
+			m.logger.Info("in-flight prompt released after cancel escalation",
+				zap.String("execution_id", execution.ID))
+		case <-time.After(cancelEscalationTimeout):
+			m.logger.Warn("in-flight prompt did not release after cancel escalation",
+				zap.String("execution_id", execution.ID))
+		case <-ctx.Done():
+			// Fall through to MarkReady/drain below — once the synthetic signal is
+			// queued, the cleanup must survive the caller's context cancellation
+			// or the execution leaks in the Running state and the stale signal
+			// breaks the next PromptAgent call.
+		}
 	}
 
 	if err := m.markReadyEventWithContext(context.Background(), execution.ID, events.AgentReady, true); err != nil {
@@ -899,7 +911,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	}
 
 	// Stop the agent execution via the runtime that created it
-	m.stopAgentViaBackend(ctx, executionID, execution, reason, force, agentStopFailed)
+	_ = m.stopAgentViaBackend(ctx, executionID, execution, reason, force, agentStopFailed)
 
 	// Update execution status and remove from tracking
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
@@ -1317,27 +1329,29 @@ func (m *Manager) ListExecutions() []*AgentExecution {
 
 const agentStartupLivenessGrace = 75 * time.Second
 
-// IsAgentRunningForSession checks if an agent process is running or starting for a session.
+// ProbeAgentRunningForSession checks if an agent process is running or
+// starting for a session and reports probe failures to the caller.
 //
 // For passthrough sessions (direct PTY mode), it checks whether the PTY process is alive
 // in the InteractiveRunner. For ACP sessions, it probes agentctl's status endpoint.
 //
-// Returns true if:
+// A successful probe returns true if:
 //   - Passthrough process is alive in the InteractiveRunner
 //   - Agent status is "running" (actively processing prompts)
 //   - Agent status is "starting" (process launched but not yet ready)
 //
-// Returns false if:
+// A successful probe returns false if:
 //   - No execution exists for this session
 //   - Passthrough process ID is set but process is not alive
-//   - agentctl client is not available
-//   - Status check fails (network/timeout error)
 //   - Agent is in any other state (stopped, failed, etc.)
-func (m *Manager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
+//
+// An unavailable agentctl client, interactive runner, or status endpoint is
+// returned as an error rather than as a false result.
+func (m *Manager) ProbeAgentRunningForSession(ctx context.Context, sessionID string) (bool, error) {
 	// First check if we have an execution tracked for this session
 	execution, exists := m.GetExecutionBySessionID(sessionID)
 	if !exists {
-		return false
+		return false, nil
 	}
 
 	// Launch registers the execution before agentctl is guaranteed to answer
@@ -1349,21 +1363,21 @@ func (m *Manager) IsAgentRunningForSession(ctx context.Context, sessionID string
 	if execution.Status == v1.AgentStatusStarting &&
 		!execution.StartedAt.IsZero() &&
 		time.Since(execution.StartedAt) <= agentStartupLivenessGrace {
-		return true
+		return true, nil
 	}
 
 	// Passthrough sessions run as direct PTY processes via InteractiveRunner,
 	// bypassing agentctl's ACP protocol. Check the process directly.
 	if execution.PassthroughProcessID != "" {
 		if runner := m.GetInteractiveRunner(); runner != nil {
-			return runner.IsProcessReadyOrPending(execution.PassthroughProcessID)
+			return runner.IsProcessReadyOrPending(execution.PassthroughProcessID), nil
 		}
-		return false
+		return false, fmt.Errorf("interactive runner is unavailable")
 	}
 
 	// Probe agentctl status to verify the agent process is running
 	if execution.agentctl == nil {
-		return false
+		return false, fmt.Errorf("agentctl client is unavailable")
 	}
 
 	status, err := execution.agentctl.GetStatus(ctx)
@@ -1371,10 +1385,17 @@ func (m *Manager) IsAgentRunningForSession(ctx context.Context, sessionID string
 		m.logger.Debug("failed to get agentctl status",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return false
+		return false, err
 	}
 
-	return status.IsAgentRunning()
+	return status.IsAgentRunning(), nil
+}
+
+// IsAgentRunningForSession preserves the legacy boolean probe for callers
+// that do not need to distinguish a dead process from an unavailable probe.
+func (m *Manager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
+	running, _ := m.ProbeAgentRunningForSession(ctx, sessionID)
+	return running
 }
 
 // IsAgentReadyForPrompt reports whether the session can accept an ACP prompt
@@ -1899,9 +1920,9 @@ func (m *Manager) RespondToPermissionBySessionID(sessionID, pendingID, optionID 
 }
 
 // stopAgentViaBackend stops the agent execution via the runtime that created it.
-func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, execution *AgentExecution, reason string, force bool, agentStopFailed bool) {
+func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, execution *AgentExecution, reason string, force bool, agentStopFailed bool) error {
 	if execution.RuntimeName == "" || m.executorRegistry == nil {
-		return
+		return nil
 	}
 	rt, err := m.executorRegistry.GetBackend(execution.RuntimeName)
 	if err != nil {
@@ -1909,7 +1930,7 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 			zap.String("execution_id", executionID),
 			zap.Stringer("runtime", execution.RuntimeName),
 			zap.Error(err))
-		return
+		return fmt.Errorf("get runtime %s: %w", execution.RuntimeName, err)
 	}
 	m.stopPassthroughProcess(ctx, executionID, execution, rt)
 	runtimeInstance := &ExecutorInstance{
@@ -1926,15 +1947,17 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 		// During shutdown the runtime instance may already be stopping or
 		// absent. Only surface this at WARN outside shutdown.
 		if m.IsShuttingDown() {
-			m.logger.Debug("failed to stop runtime instance, continuing with cleanup",
+			m.logger.Debug("failed to stop runtime instance",
 				zap.String("execution_id", executionID),
 				zap.Error(err))
 		} else {
-			m.logger.Warn("failed to stop runtime instance, continuing with cleanup",
+			m.logger.Warn("failed to stop runtime instance",
 				zap.String("execution_id", executionID),
 				zap.Error(err))
 		}
+		return err
 	}
+	return nil
 }
 
 // stopPassthroughProcess stops the passthrough interactive process if one is running.

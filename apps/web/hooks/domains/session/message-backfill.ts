@@ -1,12 +1,17 @@
 import type { useAppStoreApi } from "@/components/state-provider";
-import { listTaskSessionMessages } from "@/lib/api";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { Message } from "@/lib/types/http";
+import { requestOlderMessages } from "./older-message-pagination";
 
 const BACKFILL_PAGE_LIMIT = 100;
 const debug = createDebugLogger("messages:fetch");
 
 export const MAX_AUTO_BACKFILL_PAGES = 10;
+// The backfill ceiling is a MESSAGE budget (was MAX_AUTO_BACKFILL_PAGES *
+// BACKFILL_PAGE_LIMIT pages); the permitted page count derives from the
+// coordinator's actual first-request-wins page size, so a 20-row winner
+// reaches the same maximum message depth as a 100-row winner.
+export const MAX_AUTO_BACKFILL_MESSAGES = MAX_AUTO_BACKFILL_PAGES * BACKFILL_PAGE_LIMIT;
 export type BackfillStep = "continue" | "stop";
 
 type IsActive = () => boolean;
@@ -29,39 +34,34 @@ async function fetchAndPrependOlder(
   store: SessionMessageStore,
   oldestCursor: string,
   isActive?: IsActive,
-): Promise<number> {
-  const response = await listTaskSessionMessages(sessionId, {
+): Promise<{ count: number; effectiveLimit: number }> {
+  const result = await requestOlderMessages({
+    sessionId,
+    cursor: oldestCursor,
     limit: BACKFILL_PAGE_LIMIT,
-    before: oldestCursor,
-    sort: "desc",
+    store,
   });
-  if (isInactive(isActive)) return 0;
-  const ordered = [...(response.messages ?? [])].reverse();
-  const newOldestCursor = ordered[0]?.id ?? oldestCursor;
-  store.getState().prependMessages(sessionId, ordered, {
-    hasMore: response.has_more ?? false,
-    oldestCursor: newOldestCursor,
-  });
-  return ordered.length;
+  if (isInactive(isActive)) return { count: 0, effectiveLimit: result.effectiveLimit };
+  return { count: result.count, effectiveLimit: result.effectiveLimit };
 }
 
-export async function runBackfillRound(
+async function runBackfillRoundWithBudget(
   sessionId: string,
   store: SessionMessageStore,
   round: number,
   isActive?: IsActive,
-): Promise<BackfillStep> {
-  if (isInactive(isActive)) return "stop";
+): Promise<{ step: BackfillStep; consumed: number }> {
+  if (isInactive(isActive)) return { step: "stop", consumed: 0 };
   const meta = store.getState().messages.metaBySession[sessionId];
   const messages = store.getState().messages.bySession[sessionId] ?? [];
-  if (hasUserOrAgentMessage(messages)) return "stop";
+  if (hasUserOrAgentMessage(messages)) return { step: "stop", consumed: 0 };
   if (!meta?.hasMore || !meta.oldestCursor) {
     debug("autoBackfill: stopping (no more older messages)", {
       sessionId,
       round,
       hasMore: meta?.hasMore ?? false,
     });
-    return "stop";
+    return { step: "stop", consumed: 0 };
   }
   debug("autoBackfill: window has no user/agent message, fetching older", {
     sessionId,
@@ -70,13 +70,28 @@ export async function runBackfillRound(
     oldestCursor: meta.oldestCursor,
   });
   try {
-    const added = await fetchAndPrependOlder(sessionId, store, meta.oldestCursor, isActive);
-    if (isInactive(isActive)) return "stop";
-    return added === 0 ? "stop" : "continue";
+    const { count, effectiveLimit } = await fetchAndPrependOlder(
+      sessionId,
+      store,
+      meta.oldestCursor,
+      isActive,
+    );
+    if (isInactive(isActive)) return { step: "stop", consumed: 0 };
+    return { step: count === 0 ? "stop" : "continue", consumed: effectiveLimit };
   } catch (err) {
     debug("autoBackfill: fetch failed, stopping", { sessionId, round, err });
-    return "stop";
+    return { step: "stop", consumed: 0 };
   }
+}
+
+export async function runBackfillRound(
+  sessionId: string,
+  store: SessionMessageStore,
+  round: number,
+  isActive?: IsActive,
+): Promise<BackfillStep> {
+  const { step } = await runBackfillRoundWithBudget(sessionId, store, round, isActive);
+  return step;
 }
 
 export async function autoBackfillUntilUserMessage(
@@ -84,14 +99,18 @@ export async function autoBackfillUntilUserMessage(
   store: SessionMessageStore,
   isActive?: IsActive,
 ): Promise<void> {
-  for (let round = 0; round < MAX_AUTO_BACKFILL_PAGES; round++) {
+  let messageBudget = MAX_AUTO_BACKFILL_MESSAGES;
+  let round = 0;
+  while (messageBudget > 0) {
     if (isInactive(isActive)) return;
-    const step = await runBackfillRound(sessionId, store, round, isActive);
+    const { step, consumed } = await runBackfillRoundWithBudget(sessionId, store, round, isActive);
     if (step === "stop") return;
+    messageBudget -= consumed;
+    round += 1;
   }
-  debug("autoBackfill: hit page budget without finding user/agent message", {
+  debug("autoBackfill: hit message budget without finding user/agent message", {
     sessionId,
-    pageBudget: MAX_AUTO_BACKFILL_PAGES,
-    messageBudget: MAX_AUTO_BACKFILL_PAGES * BACKFILL_PAGE_LIMIT,
+    pageBudget: round,
+    messageBudget: MAX_AUTO_BACKFILL_MESSAGES,
   });
 }

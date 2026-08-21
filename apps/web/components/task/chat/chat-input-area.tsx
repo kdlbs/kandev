@@ -164,7 +164,6 @@ function usePanelMessageHandler(panelState: ChatPanelState) {
     prompts,
   });
 }
-
 /** Builds the composer's submit handler, tracking in-flight sends and
  *  routing errors to a toast. */
 export function useSubmitHandler(

@@ -117,6 +117,16 @@ const TASK_INTERRUPTED_ICON: IconConfig = {
   className: STYLE_ERROR,
 };
 
+// The task-level auto-start-failed affordance: a workflow step's
+// auto_start_agent on_enter action ran but could not launch a run (kanban
+// StartTask error, or an Office task with no queue adapter wired / no
+// resolvable agent). A triangle — same error hue as the interrupted circle,
+// but a distinct shape so the two failure causes never read as one marker.
+const TASK_AUTO_START_FAILED_ICON: IconConfig = {
+  Icon: IconAlertTriangle,
+  className: STYLE_ERROR,
+};
+
 const DEFAULT_TASK_ICON: IconConfig = {
   Icon: IconAlertCircle,
   className: STYLE_MUTED,
@@ -203,6 +213,34 @@ export function InterruptedTaskIcon({ className }: { className?: string }) {
 }
 
 /**
+ * Shared red alert-triangle affordance for a task whose auto_start_agent
+ * on_enter action failed to launch a run. Carries the accessible "Auto-start
+ * failed" label and tooltip, so every surface that renders this state
+ * presents it consistently.
+ */
+export function AutoStartFailedTaskIcon({ className }: { className?: string }) {
+  const { t } = useTranslation();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          aria-label={t("common:autoStartFailed")}
+          tabIndex={0}
+          className="flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-1"
+        >
+          <IconAlertTriangle
+            aria-hidden="true"
+            data-testid="task-state-auto-start-failed"
+            className={cn("text-red-500", className)}
+          />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right">{t("common:autoStartFailed")}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
  * Returns true when the kanban card should show the spinning loader. The task
  * workflow state and the primary session's runtime state are decoupled — the
  * workflow can keep a task in `IN_PROGRESS` after the agent has finished, or
@@ -249,7 +287,25 @@ type TaskStateIconOptions = {
   hasPendingPermission?: boolean;
   /** True when the task's session was mid-turn when the backend died. */
   interrupted?: boolean;
+  /** True when a workflow step's auto_start_agent action failed to launch a run. */
+  autoStartFailed?: boolean;
 };
+
+// Interrupted (startup reconciliation marker) and auto-start-failed
+// (on_enter action that never launched a run) both replace the idle/done
+// affordances but never override terminal states, which keep their own
+// icons (done check, failure X, cancel pause). Interrupted takes precedence
+// when both happen to be set.
+function getMarkerIconOverride(
+  state: TaskState | undefined,
+  interrupted: boolean,
+  autoStartFailed: boolean,
+): IconConfig | null {
+  if (TERMINAL_TASK_STATES.has(state)) return null;
+  if (interrupted) return TASK_INTERRUPTED_ICON;
+  if (autoStartFailed) return TASK_AUTO_START_FAILED_ICON;
+  return null;
+}
 
 function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions = {}): IconConfig {
   const {
@@ -257,6 +313,7 @@ function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions
     foregroundActivity,
     hasPendingPermission = false,
     interrupted = false,
+    autoStartFailed = false,
   } = options;
   if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
     return PENDING_PERMISSION_ICON;
@@ -270,12 +327,8 @@ function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions
   if (foregroundActivity === "generating") return TASK_GENERATING_ICON;
   if (foregroundActivity === "background") return TASK_BACKGROUND_ICON;
   if (isWaitingForInputState(state)) return TASK_STATE_ICONS.WAITING_FOR_INPUT;
-  // Interrupted (startup reconciliation marker): replaces the idle/done
-  // affordances but never overrides terminal states, which keep their own
-  // icons (done check, failure X, cancel pause).
-  if (interrupted && !TERMINAL_TASK_STATES.has(state)) {
-    return TASK_INTERRUPTED_ICON;
-  }
+  const markerOverride = getMarkerIconOverride(state, interrupted, autoStartFailed);
+  if (markerOverride) return markerOverride;
   if (!state) return DEFAULT_TASK_ICON;
   return TASK_STATE_ICONS[state] ?? DEFAULT_TASK_ICON;
 }
@@ -286,10 +339,14 @@ export function getTaskStateIcon(
   options: TaskStateIconOptions = {},
 ) {
   const config = getTaskStateIconConfig(state, options);
-  // The interrupted affordance carries its own tooltip and accessible label,
-  // so it must render through the shared component rather than a bare icon.
+  // The interrupted and auto-start-failed affordances carry their own
+  // tooltip and accessible label, so they must render through their shared
+  // component rather than a bare icon.
   if (config === TASK_INTERRUPTED_ICON) {
     return <InterruptedTaskIcon className={cn("h-4 w-4", className)} />;
+  }
+  if (config === TASK_AUTO_START_FAILED_ICON) {
+    return <AutoStartFailedTaskIcon className={cn("h-4 w-4", className)} />;
   }
   return <config.Icon className={cn("h-4 w-4", config.className, className)} />;
 }

@@ -462,6 +462,10 @@ func (h *Handler) getTask(c *gin.Context) {
 	h.attachDecisions(ctx, c, task.ID, dto)
 
 	statusChanges, _ := h.svc.ListStatusChanges(ctx, task.WorkspaceID, task.ID)
+	dto.StartedAt, dto.CompletedAt = deriveTaskTimestamps(statusChanges)
+	if !timelineStatusIsDone(dto.Status) {
+		dto.CompletedAt = ""
+	}
 	c.JSON(http.StatusOK, TaskResponse{Task: dto, Timeline: buildStatusTimeline(statusChanges)})
 }
 
@@ -494,19 +498,6 @@ func (h *Handler) attachDecisions(ctx context.Context, c *gin.Context, taskID st
 	for i := range decisions {
 		dto.Decisions[i] = h.decisionToDTO(c, &decisions[i])
 	}
-}
-
-func buildStatusTimeline(changes []TimelineEvent) []TimelineEventDTO {
-	timeline := make([]TimelineEventDTO, len(changes))
-	for i, ev := range changes {
-		timeline[i] = TimelineEventDTO{
-			Type: "status_change",
-			From: ev.From,
-			To:   ev.To,
-			At:   ev.At,
-		}
-	}
-	return timeline
 }
 
 func taskRowToDTO(r *sqlite.TaskRow, lbls []*sqlite.Label) *TaskDTO {

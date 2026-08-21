@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
+// The sidebar write path scopes names with the API-origin port; pin it so the
+// captured write assertions are deterministic.
+vi.mock("@/lib/config", () => ({
+  getBackendConfig: () => ({ apiBaseUrl: "http://localhost:8443" }),
+}));
+
 const navigationMock = vi.hoisted(() => ({ push: vi.fn() }));
 
 vi.mock("@/lib/routing/client-router", () => ({
@@ -159,7 +165,7 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
 
     fireEvent.click(screen.getByTestId(OFFICE_WORKSPACE_ITEM));
 
-    expect(cookieWrites.some((c) => c.startsWith("office-active-workspace=w2"))).toBe(true);
+    expect(cookieWrites.some((c) => c.startsWith("office-active-workspace_8443=w2"))).toBe(true);
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w2");
     expect(navigationMock.push).not.toHaveBeenCalled();
   });
@@ -191,13 +197,13 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
   it("does not overwrite the office workspace cookie when selecting a kanban workspace", () => {
     storeState.features.office = true;
     storeState.workspaces.activeId = "w2";
-    cookieWrites = ["office-active-workspace=w2; path=/"];
+    cookieWrites = ["office-active-workspace_8443=w2; path=/"];
     render(<AppSidebarWorkspacePicker />);
 
     fireEvent.click(screen.getByTestId(KANBAN_WORKSPACE_ITEM));
 
-    expect(cookieWrites.some((c) => c.startsWith("office-active-workspace=w1"))).toBe(false);
-    expect(cookieWrites.some((c) => c.startsWith("office-active-workspace=w2"))).toBe(true);
+    expect(cookieWrites.some((c) => c.startsWith("office-active-workspace_8443=w1"))).toBe(false);
+    expect(cookieWrites.some((c) => c.startsWith("office-active-workspace_8443=w2"))).toBe(true);
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w1");
     expect(navigationMock.push).toHaveBeenCalledWith("/?home=overview&workspaceId=w1");
   });
@@ -217,13 +223,13 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     storeState.workspaces.activeId = "w2";
     // Written when w2 was selected. A workspace is recorded on the way in, not
     // on the way out, so leaving it must simply not disturb this.
-    cookieWrites = ["office-active-workspace=w2; path=/"];
+    cookieWrites = ["office-active-workspace_8443=w2; path=/"];
     render(<AppSidebarWorkspacePicker />);
 
     fireEvent.click(screen.getByTestId(KANBAN_WORKSPACE_ITEM));
 
-    expect(cookieWrites.some((c) => c.startsWith("office-active-workspace=w1"))).toBe(false);
-    expect(cookieWrites.some((c) => c.startsWith("office-active-workspace=w2"))).toBe(true);
+    expect(cookieWrites.some((c) => c.startsWith("office-active-workspace_8443=w1"))).toBe(false);
+    expect(cookieWrites.some((c) => c.startsWith("office-active-workspace_8443=w2"))).toBe(true);
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w1");
     expect(navigationMock.push).toHaveBeenCalledWith("/?home=overview&workspaceId=w1");
   });
@@ -277,7 +283,7 @@ describe("AppSidebarWorkspacePicker — active workspace display and routing", (
 
     fireEvent.click(screen.getByTestId(KANBAN_WORKSPACE_ITEM));
 
-    expect(cookieWrites.some((c) => c.startsWith("kandev-active-workspace=w1"))).toBe(true);
+    expect(cookieWrites.some((c) => c.startsWith("kandev-active-workspace_8443=w1"))).toBe(true);
     // Re-selecting the workspace that is already active goes through the same
     // one selection path as any other pick; the store action ignores a
     // no-op change, so there is no reason for this branch to skip it.

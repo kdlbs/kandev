@@ -367,17 +367,20 @@ func (r *ProfileReconciler) seedDefaultProfile(
 		zap.String("mode", profile.Mode))
 }
 
-// healProfile validates the profile's model and mode against the cache and
-// auto-heals values that no longer exist. User-modified profiles are still
-// healed — we always keep profiles in a usable state; the "user_modified"
-// flag survives the write to retain user intent for other fields.
+// healProfile validates system-managed profile routes against the agent-wide
+// capability cache. Compatibility migrations run for every profile, while
+// catalog-driven route changes skip user-modified profiles because they can
+// use provider configuration that is not visible to the host probe.
 func (r *ProfileReconciler) healProfile(
 	ctx context.Context,
 	p *models.AgentProfile,
 	caps hostutility.AgentCapabilities,
 	agentID string,
 ) {
-	changed := healProfileName(p, caps)
+	// Compatibility migrations describe persisted protocol identifiers, not
+	// catalog-driven route choices. They must run even for user-modified
+	// profiles so an agent bridge upgrade cannot leave an unusable mode/model.
+	changed := false
 	if model, options, migrated := acpcompat.MigrateCursorModel(agentID, p.Model, p.ConfigOptions); migrated {
 		r.log.Info("migrating Cursor variant profile model",
 			zap.String("profile_id", p.ID),
@@ -385,6 +388,27 @@ func (r *ProfileReconciler) healProfile(
 			zap.String("new_model", model))
 		p.Model = model
 		p.ConfigOptions = options
+		changed = true
+	}
+	if healCompatibilityMode(p, caps, agentID) {
+		r.log.Info("migrating legacy agent mode",
+			zap.String("profile_id", p.ID),
+			zap.String("agent_id", agentID),
+			zap.String("mode", p.Mode))
+		changed = true
+	}
+	if p.UserModified {
+		if !changed {
+			return
+		}
+		if err := r.store.UpdateAgentProfile(ctx, p); err != nil {
+			r.log.Warn("profile compatibility migration update failed",
+				zap.String("profile_id", p.ID), zap.Error(err))
+		}
+		return
+	}
+
+	if healProfileName(p, caps) {
 		changed = true
 	}
 
@@ -428,6 +452,20 @@ func (r *ProfileReconciler) healProfile(
 		r.log.Warn("profile heal update failed",
 			zap.String("profile_id", p.ID), zap.Error(err))
 	}
+}
+
+// healCompatibilityMode migrates a mode ID that belonged to the legacy Codex
+// bridge. "auto" was accepted by that bridge but is not advertised by the
+// current bridge. Custom modes on user profiles remain untouched.
+func healCompatibilityMode(p *models.AgentProfile, caps hostutility.AgentCapabilities, agentID string) bool {
+	if p == nil || agentID != "codex-acp" || p.Mode != "auto" || caps.CurrentModeID == "" || caps.CurrentModeID == p.Mode {
+		return false
+	}
+	if !modeExists(caps.CurrentModeID, caps.Modes) {
+		return false
+	}
+	p.Mode = caps.CurrentModeID
+	return true
 }
 
 // healProfileName updates the profile name when it still matches the agent

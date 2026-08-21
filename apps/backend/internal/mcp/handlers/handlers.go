@@ -77,6 +77,14 @@ type ClarificationInputPauser interface {
 	PauseForClarificationInput(ctx context.Context, sessionID string) (int, error)
 }
 
+type clarificationInputPauserWithOptions interface {
+	PauseForClarificationInputWithOptions(
+		ctx context.Context,
+		sessionID string,
+		options orchestrator.ClarificationPauseOptions,
+	) (int, error)
+}
+
 // MessageCreator creates messages for clarification requests.
 type MessageCreator interface {
 	CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []clarification.Question, clarificationContext string) ([]string, error)

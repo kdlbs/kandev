@@ -47,6 +47,7 @@ export function OrgNodeCard({ node }: OrgNodeCardProps) {
   return (
     <Link
       href={`/office/agents/${agent.id}`}
+      data-reports-to={agent.reportsTo ?? ""}
       className="absolute group rounded-xl border border-border bg-card p-3.5 shadow-sm hover:shadow-md hover:border-primary/50 hover:-translate-y-0.5 cursor-pointer transition-all"
       style={{ left: node.x, top: node.y, width: CARD_W }}
     >

@@ -10,6 +10,7 @@ import type {
 
 const fetchDynamicModelsMock = vi.fn();
 const resolveAgentModelConfigMock = vi.fn();
+const resolutionFailure = "resolution failed";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
   fetchDynamicModels: (...args: unknown[]) => fetchDynamicModelsMock(...args),
@@ -251,6 +252,66 @@ describe("useResolvedModelConfig", () => {
       resolveFirst?.(resolvedResponse("model-a", baseline));
     });
     expect(result.current.configOptions).toEqual(secondOptions);
+  });
+
+  it("clears the previous options after selected model resolution fails", async () => {
+    const baseline: ConfigOptionEntry[] = [
+      { type: "select", id: "effort", name: "Effort", current_value: "low", options: [] },
+    ];
+    resolveAgentModelConfigMock
+      .mockResolvedValueOnce(resolvedResponse("model-a", baseline))
+      .mockRejectedValueOnce(new Error(resolutionFailure));
+
+    const { result, rerender } = renderHook(
+      ({ model }) =>
+        useResolvedModelConfig("opencode", model, {
+          initialConfigOptions: baseline,
+        }),
+      { initialProps: { model: "model-a" } },
+    );
+
+    await waitFor(() => expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(1));
+    rerender({ model: "model-b" });
+
+    await waitFor(() => {
+      expect(result.current.status).toBe("failed");
+      expect(result.current.isLoading).toBe(false);
+    });
+    expect(result.current.configOptions).toEqual([]);
+    expect(result.current.error).toBe(resolutionFailure);
+  });
+});
+
+describe("useResolvedModelConfig resolution failures", () => {
+  it("clears the previous options after a failed model resolution response", async () => {
+    const baseline: ConfigOptionEntry[] = [
+      { type: "select", id: "effort", name: "Effort", current_value: "low", options: [] },
+    ];
+    resolveAgentModelConfigMock
+      .mockResolvedValueOnce(resolvedResponse("model-a", baseline))
+      .mockResolvedValueOnce({
+        ...resolvedResponse("model-b", baseline),
+        status: "failed",
+        error: resolutionFailure,
+      });
+
+    const { result, rerender } = renderHook(
+      ({ model }) =>
+        useResolvedModelConfig("opencode", model, {
+          initialConfigOptions: baseline,
+        }),
+      { initialProps: { model: "model-a" } },
+    );
+
+    await waitFor(() => expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(1));
+    rerender({ model: "model-b" });
+
+    await waitFor(() => {
+      expect(result.current.status).toBe("failed");
+      expect(result.current.isLoading).toBe(false);
+    });
+    expect(result.current.configOptions).toEqual([]);
+    expect(result.current.error).toBe(resolutionFailure);
   });
 });
 

@@ -158,6 +158,10 @@ func (h *Handler) createAgent(c *gin.Context) {
 		}
 	}
 	if err := h.svc.CreateAgentInstanceWithCaller(c.Request.Context(), agent, agentCallerFromCtx(c), req.Reason); err != nil {
+		if code := agentValidationErrorCode(err); code != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": code})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -210,6 +214,10 @@ func (h *Handler) updateAgent(c *gin.Context) {
 	}
 	applyAgentUpdates(agent, &req)
 	if err := h.svc.UpdateAgentInstance(ctx, agent); err != nil {
+		if code := agentValidationErrorCode(err); code != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": code})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -261,6 +269,23 @@ func respondRoutingValidation(c *gin.Context, err error) {
 		return
 	}
 	c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+}
+
+// agentValidationErrorCode maps validation sentinels to stable API codes.
+// Clients can translate or handle these codes without matching backend text.
+func agentValidationErrorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrAgentCEOReportsTo):
+		return "agent_ceo_reports_to"
+	case errors.Is(err, ErrAgentReportsToInvalid):
+		return "agent_reports_to_invalid"
+	case errors.Is(err, ErrAgentReportsToSelf):
+		return "agent_reports_to_self"
+	case errors.Is(err, ErrAgentReportsToCycle):
+		return "agent_reports_to_cycle"
+	default:
+		return ""
+	}
 }
 
 func (h *Handler) deleteAgent(c *gin.Context) {

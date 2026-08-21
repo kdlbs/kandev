@@ -66,6 +66,7 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 		execution_state TEXT DEFAULT '',
 		checkout_agent_id TEXT,
 		checkout_at DATETIME,
+		checkout_run_id TEXT,
 		archived_at DATETIME,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP

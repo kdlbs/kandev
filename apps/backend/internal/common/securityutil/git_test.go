@@ -2,6 +2,18 @@ package securityutil
 
 import "testing"
 
+// TestIsKnownSafeGitFlagAllowsDiffPrefixFlags pins the output-formatting flags
+// GetCumulativeDiff and ShowCommit pass to force stable a/ and b/ path
+// prefixes regardless of a user's diff.noprefix config. They only affect diff
+// header formatting (never repository mutation), so any value form is safe.
+func TestIsKnownSafeGitFlagAllowsDiffPrefixFlags(t *testing.T) {
+	for _, flag := range []string{"--src-prefix=a/", "--dst-prefix=b/", "--src-prefix=old/", "--dst-prefix=new/"} {
+		if !IsKnownSafeGitFlag(flag) {
+			t.Fatalf("IsKnownSafeGitFlag(%q) = false, want true — the cumulative-diff parser needs it", flag)
+		}
+	}
+}
+
 func TestIsValidBaseBranchRef(t *testing.T) {
 	cases := map[string]bool{
 		"main":              true,

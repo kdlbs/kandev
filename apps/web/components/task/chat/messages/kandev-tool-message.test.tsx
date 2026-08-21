@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { KandevToolMessage, hasKandevRenderer } from "./kandev-tool-message";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import { KANDEV_RENDERERS } from "./kandev/registry";
 
 // kandevToolCall constructs the kandev Message shape produced by the
 // orchestrator for an MCP tool_call. The shape mirrors live production data
@@ -54,6 +55,9 @@ describe("hasKandevRenderer", () => {
     expect(
       hasKandevRenderer(kandevToolCall({ toolName: "mcp__kandev__show_walkthrough_kandev" })),
     ).toBe(true);
+    expect(
+      hasKandevRenderer(kandevToolCall({ toolName: "mcp__kandev__show_rich_output_kandev" })),
+    ).toBe(true);
   });
 
   it("does not match unrelated tools", () => {
@@ -65,6 +69,95 @@ describe("hasKandevRenderer", () => {
     expect(
       hasKandevRenderer(kandevToolCall({ toolName: "mcp__kandev__never_heard_of_it_kandev" })),
     ).toBe(false);
+  });
+});
+
+describe("KandevToolMessage host context", () => {
+  it("passes session and repository-aware file opening to a renderer", () => {
+    const original = KANDEV_RENDERERS.list_tasks;
+    const renderer = vi.fn(() => <div>Context probe</div>);
+    const onOpenFile = vi.fn();
+    KANDEV_RENDERERS.list_tasks = renderer;
+    try {
+      renderToStaticMarkup(
+        <KandevToolMessage
+          comment={kandevToolCall({ toolName: "mcp__kandev__list_tasks_kandev" })}
+          sessionId="session-1"
+          onOpenFile={onOpenFile}
+        />,
+      );
+    } finally {
+      KANDEV_RENDERERS.list_tasks = original;
+    }
+
+    expect(renderer).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "session-1", onOpenFile }),
+    );
+  });
+
+  it("unwraps the real Codex ACP MCP arguments before rendering rich output", () => {
+    const html = renderToStaticMarkup(
+      <KandevToolMessage
+        comment={kandevToolCall({
+          toolName: "mcp.kandev.show_rich_output_kandev",
+          input: {
+            raw_input: {
+              server: "kandev",
+              tool: "show_rich_output_kandev",
+              arguments: {
+                version: 1,
+                title: "Nested presentation",
+                blocks: [{ type: "metrics", items: [{ label: "Passed", value: "38" }] }],
+              },
+            },
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain("Nested presentation");
+    expect(html).not.toContain("This presentation is unavailable.");
+  });
+
+  it("renders a CSV chart from the persisted tool-result snapshot", () => {
+    const html = renderToStaticMarkup(
+      <KandevToolMessage
+        comment={kandevToolCall({
+          toolName: "mcp__kandev__show_rich_output_kandev",
+          input: {
+            version: 1,
+            title: "CSV presentation",
+            blocks: [
+              {
+                type: "chart",
+                chart_type: "bar",
+                title: "Requests by route",
+                summary: "Request volume from the workspace CSV.",
+                csv: {
+                  path: "reports/routes.csv",
+                  x_column: "route",
+                  series: [{ column: "requests" }],
+                },
+              },
+            ],
+          },
+          resultJson: {
+            version: 1,
+            resolved_charts: [
+              {
+                block_index: 0,
+                labels: ["/api", "/health"],
+                series: [{ label: "requests", values: [2400, 800] }],
+              },
+            ],
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain("CSV presentation");
+    expect(html).toContain('data-testid="rich-output-chart-bar"');
+    expect(html).not.toContain("This presentation is unavailable.");
   });
 });
 

@@ -214,7 +214,7 @@ type TaskChatPanelProps = {
    * it also drives plan mode, the composer, and read tracking.
    */
   statusTaskId?: string | null;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
   /** Callback to open a file at a specific line (for comment clicks) */
@@ -441,7 +441,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const [isFirstMessageHidden, setIsFirstMessageHidden] = useState(false);
   const showScrollToStartButton =
     showScrollToStart && Boolean(firstMessageId) && isFirstMessageHidden;
-  const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(resolvedSessionId);
+  const { loadMore, hasMore, isLoadingMore } = useLazyLoadMessages(resolvedSessionId);
   // A paginated session's `firstMessageId` only reflects the oldest message in
   // the currently loaded page while `hasMore` is true — jumping there directly
   // lands on a partial-page boundary, not the transcript's real start. Drain
@@ -481,11 +481,28 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       lastPromptLookupPagesRef.current = 0;
       return;
     }
-    if (isLoadingMore || lastPromptLookupPagesRef.current >= MAX_LAST_PROMPT_LOOKUP_PAGES) return;
+    // Never start an older-page lookup against a stale SSR cursor while the
+    // session's initial/refetch load is in flight: both writes independently
+    // update hasMore/oldestCursor, and completion order could regress the
+    // pagination metadata.
+    if (
+      messagesLoading ||
+      isLoadingMore ||
+      lastPromptLookupPagesRef.current >= MAX_LAST_PROMPT_LOOKUP_PAGES
+    )
+      return;
     if (!shouldLoadMoreForTranscriptTarget("last_prompt", allMessages, hasMore)) return;
     lastPromptLookupPagesRef.current += 1;
     void loadMore();
-  }, [allMessages, hasMore, isLoadingMore, loadMore, lastPromptMessageId, resolvedSessionId]);
+  }, [
+    allMessages,
+    hasMore,
+    isLoadingMore,
+    loadMore,
+    lastPromptMessageId,
+    messagesLoading,
+    resolvedSessionId,
+  ]);
   const search = useSessionSearch(resolvedSessionId, loadMore);
   const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
   usePanelSearch({
