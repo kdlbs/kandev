@@ -746,7 +746,7 @@ func (r *Repository) recordStepDecisionTx(ctx context.Context, d *models.Workflo
 				d.StepID,
 				d.DeciderID,
 				d.Role,
-			}, "\x00")
+			}, "|")
 			if _, err := tx.ExecContext(ctx, tx.Rebind(
 				`SELECT pg_advisory_xact_lock(hashtextextended(?, 0))`,
 			), lockKey); err != nil {
