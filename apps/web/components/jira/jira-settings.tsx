@@ -36,7 +36,12 @@ import type {
   TestJiraConnectionResult,
 } from "@/lib/types/jira";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
+import {
+  configToForm,
+  deriveFormState,
+  emptyForm,
+  type FormState,
+} from "@/components/jira/jira-form-state";
 import {
   CookieExpiry,
   SecretHelp,
@@ -49,41 +54,6 @@ import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/i
 // Cloud sites live under this domain; shown as an example, not as prose, so it
 // is interpolated rather than written into the catalog.
 const ATLASSIAN_CLOUD_DOMAIN = "*.atlassian.net";
-
-type FormState = {
-  siteUrl: string;
-  email: string;
-  authMethod: JiraAuthMethod;
-  instanceType: JiraInstanceType;
-  defaultProjectKey: string;
-  secret: string;
-  clientId: string;
-};
-
-const emptyForm: FormState = {
-  siteUrl: "",
-  email: "",
-  authMethod: "api_token",
-  instanceType: "cloud",
-  defaultProjectKey: "",
-  secret: "",
-  clientId: "",
-};
-
-function configToForm(cfg: JiraConfig | null): FormState {
-  if (!cfg) return emptyForm;
-  return {
-    siteUrl: cfg.siteUrl,
-    email: cfg.email,
-    authMethod: cfg.authMethod,
-    // Legacy rows written before Server/DC support carry an empty instanceType;
-    // default to cloud so the dropdown has a valid selection.
-    instanceType: cfg.instanceType || "cloud",
-    defaultProjectKey: cfg.defaultProjectKey,
-    secret: "",
-    clientId: cfg.clientId || "",
-  };
-}
 
 // defaultAuthForInstance returns the canonical auth method for an instance
 // type. Used when the user switches Instance type and the current auth method
@@ -522,70 +492,6 @@ function useJiraSettings(workspaceId: string) {
     handleDelete,
     discard,
     load,
-  };
-}
-
-function normalizeComparableSiteUrl(value: string): string {
-  const trimmed = value.trim().replace(/\/+$/, "");
-  if (!trimmed) return "";
-  return trimmed.includes("://") ? trimmed : `https://${trimmed}`;
-}
-
-// savedSecretMatches reports whether the saved secret can be reused against
-// the current form values. Reuse is only safe when every identity component
-// of the saved credential still matches: same auth method, same instance
-// type, same Jira host, and — for Cloud api_token where the basic pair is
-// email:token — the same email (case-insensitive). Otherwise the user could
-// change the site URL or Cloud account and silently submit the previous
-// token to a different host/account.
-function savedSecretMatches(config: JiraConfig | null, form: FormState): boolean {
-  if (!config?.hasSecret) return false;
-  if (config.authMethod !== form.authMethod) return false;
-  if ((config.instanceType || "cloud") !== form.instanceType) return false;
-  if (normalizeComparableSiteUrl(config.siteUrl) !== normalizeComparableSiteUrl(form.siteUrl)) {
-    return false;
-  }
-  if (form.authMethod !== "api_token") return true;
-  return (config.email ?? "").toLowerCase() === form.email.toLowerCase();
-}
-
-type JiraSettings = ReturnType<typeof useJiraSettings>;
-
-type DerivedFormState = {
-  isOAuth: boolean;
-  savedSecretMatchesMode: boolean;
-  disableSave: boolean;
-  disableTest: boolean;
-  revision: string;
-  dirty: boolean;
-  invalidReason: string | undefined;
-};
-
-// Derives save/test gating and the validation message from the form + stored
-// config. Extracted so JiraConnectionSection stays under the complexity limit.
-function deriveFormState(s: JiraSettings, t: TFunction): DerivedFormState {
-  const savedSecretMatchesMode = savedSecretMatches(s.config, s.form);
-  const isOAuth = s.form.authMethod === "oauth";
-  const missingSecret = !isOAuth && !savedSecretMatchesMode && !s.form.secret;
-  const oauthNeedsConnect = isOAuth && !s.config?.hasSecret;
-  const emailRequired = s.form.instanceType === "cloud" && s.form.authMethod === "api_token";
-  const disableSave =
-    s.saving || !s.form.siteUrl || (emailRequired && !s.form.email) || (missingSecret && !isOAuth);
-  const disableTest = missingSecret || (isOAuth && oauthNeedsConnect);
-  const revision = JSON.stringify(s.form);
-  const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
-  let invalidReason: string | undefined;
-  if (!s.form.siteUrl) invalidReason = t("jira:aJiraSiteUrlIsRequired");
-  else if (emailRequired && !s.form.email) invalidReason = t("jira:anEmailAddressIsRequired");
-  else if (missingSecret) invalidReason = t("jira:aCredentialIsRequired");
-  return {
-    isOAuth,
-    savedSecretMatchesMode,
-    disableSave,
-    disableTest,
-    revision,
-    dirty,
-    invalidReason,
   };
 }
 
