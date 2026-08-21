@@ -89,7 +89,7 @@ export function VirtualizedColumnTaskList({
               key={task.id}
               ref={virtualizer.measureElement}
               data-index={virtualItem.index}
-              className="absolute left-0 top-0 w-full pb-2"
+              className="absolute left-0 top-0 w-full"
               style={{ transform: `translateY(${virtualItem.start}px)` }}
             >
               {queuedCount > 0 && virtualItem.index === queuedStartIndex && (
