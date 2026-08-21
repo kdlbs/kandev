@@ -32,6 +32,13 @@ test.describe("mobile-secrets-delete", () => {
 
       const inline = row.getByTestId("secret-delete-inline-confirmation");
       await expect(inline).toBeVisible();
+      await expect(inline).toContainText(
+        `This will permanently remove ${name}. This action cannot be undone.`,
+      );
+      const warningBox = await inline.locator("p").boundingBox();
+      expect(warningBox).not.toBeNull();
+      expect(warningBox!.x).toBeGreaterThanOrEqual(0);
+      expect(warningBox!.x + warningBox!.width).toBeLessThanOrEqual(testPage.viewportSize()!.width);
       await expect(testPage.getByTestId("secret-delete-confirm-popover")).toHaveCount(0);
       await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
       await expect(inline).not.toContainText(SECRET_VALUE);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type RefObject } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { IconCopy, IconEdit, IconEye, IconEyeOff, IconKey, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
@@ -159,7 +159,11 @@ function SecretListItemRowActions({
   const { t } = useTranslation();
   return (
     <>
-      <div className="flex flex-wrap items-center justify-end gap-1 shrink-0">
+      <div
+        className={`flex flex-wrap items-center justify-end gap-1 ${
+          !isFinePointer && isDeleteConfirming ? "w-full min-w-0" : "shrink-0"
+        }`}
+      >
         {(!isDeleteConfirming || isFinePointer) && (
           <>
             <Button
@@ -234,6 +238,16 @@ function SecretListItemRowDeleteAction({
           density="touch"
           testId="secret-delete-inline-confirmation"
           ariaLabel={t("settings:deleteSecretNamed", { name: secret.name })}
+          description={
+            <Trans
+              i18nKey="settings:thisWillPermanentlyRemoveSecret"
+              values={{ name: secret.name }}
+            >
+              This will permanently remove{" "}
+              <span className="font-medium text-foreground">{secret.name}</span>. This action cannot
+              be undone.
+            </Trans>
+          }
           cancelLabel={t("settings:cancel")}
           confirmLabel={t("settings:deleteSecret")}
           confirmAriaLabel={t("settings:deleteSecretNamed", { name: secret.name })}
