@@ -175,7 +175,8 @@ func (a *taskDeleterAdapter) translateDeleteErr(err error) error {
 // workflow belongs to the workspace an automation is saved into, without the
 // automation package importing the task service.
 type automationWorkflowLocatorAdapter struct {
-	svc *taskservice.Service
+	svc       *taskservice.Service
+	workflows *workflowservice.Service
 }
 
 func (a *automationWorkflowLocatorAdapter) WorkflowWorkspaceID(ctx context.Context, workflowID string) (string, error) {
@@ -187,6 +188,27 @@ func (a *automationWorkflowLocatorAdapter) WorkflowWorkspaceID(ctx context.Conte
 		return "", nil
 	}
 	return wf.WorkspaceID, nil
+}
+
+// WorkflowStepBelongs satisfies automation.WorkflowStepLocator. Workflow
+// ownership and step ownership are checked together so a crafted automation
+// request cannot pair a valid workflow with a step from another workflow.
+func (a *automationWorkflowLocatorAdapter) WorkflowStepBelongs(ctx context.Context, workspaceID, workflowID, stepID string) (bool, error) {
+	wf, err := a.svc.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return false, err
+	}
+	if wf == nil || wf.WorkspaceID != workspaceID {
+		return false, nil
+	}
+	if a.workflows == nil {
+		return false, fmt.Errorf("workflow step lookup is unavailable")
+	}
+	step, err := a.workflows.GetStep(ctx, stepID)
+	if err != nil {
+		return false, err
+	}
+	return step != nil && step.WorkflowID == workflowID, nil
 }
 
 // automationAgentProfileLookupAdapter satisfies automation.AgentProfileLookup

@@ -277,7 +277,7 @@ func TestResolveDescriptors_ExecutorProfileResolvedAndUnresolved(t *testing.T) {
 func TestResolveDescriptors_WorkflowResolvedStepResolved(t *testing.T) {
 	svc, _, _, workflowLookup, stepLookup, _ := resolveTestFixture(t)
 	workflowLookup.workflows["wf-1"] = &taskmodels.Workflow{Name: "Review Flow"}
-	stepLookup.steps["step-1"] = &workflowmodels.WorkflowStep{Name: "In Review"}
+	stepLookup.steps["step-1"] = &workflowmodels.WorkflowStep{Name: "In Review", WorkflowID: "wf-1"}
 	tx := beginTestReadTx(t, svc)
 
 	got, warnings, err := svc.resolveDescriptors(context.Background(), tx, &Automation{ID: "a1", Name: "A", WorkflowID: "wf-1", WorkflowStepID: "step-1"})
@@ -290,6 +290,26 @@ func TestResolveDescriptors_WorkflowResolvedStepResolved(t *testing.T) {
 	}
 	if len(warnings) != 0 {
 		t.Errorf("expected no warnings, got %v", warnings)
+	}
+}
+
+func TestResolveDescriptors_WorkflowResolvedStepFromDifferentWorkflow_OmitsStepAndWarns(t *testing.T) {
+	svc, _, _, workflowLookup, stepLookup, _ := resolveTestFixture(t)
+	workflowLookup.workflows["wf-1"] = &taskmodels.Workflow{Name: "Review Flow"}
+	stepLookup.steps["step-1"] = &workflowmodels.WorkflowStep{Name: "Foreign", WorkflowID: "wf-2"}
+	tx := beginTestReadTx(t, svc)
+
+	got, warnings, err := svc.resolveDescriptors(context.Background(), tx, &Automation{
+		ID: "a1", Name: "A", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+	})
+	if err != nil {
+		t.Fatalf("resolveDescriptors: %v", err)
+	}
+	if got.Workflow == nil || got.Workflow.Step != "" {
+		t.Errorf("expected workflow name without foreign step, got %+v", got.Workflow)
+	}
+	if len(warnings) != 1 || warnings[0].Message != "unresolved workflow step" {
+		t.Errorf("warnings = %v, want [unresolved workflow step]", warnings)
 	}
 }
 
@@ -416,7 +436,7 @@ func TestResolveDescriptors_AC29_SameTransactionHandleReachesStoreAndEveryLookup
 	agentLookup.profiles["agent-1"] = &settingsmodels.AgentProfile{Name: "Reviewer", Model: "claude-sonnet-5", Mode: "plan"}
 	executorLookup.profiles["exec-1"] = &taskmodels.ExecutorProfile{ExecutorID: "local_docker", Name: "Default"}
 	workflowLookup.workflows["wf-1"] = &taskmodels.Workflow{Name: "Review Flow"}
-	stepLookup.steps["step-1"] = &workflowmodels.WorkflowStep{Name: "In Review"}
+	stepLookup.steps["step-1"] = &workflowmodels.WorkflowStep{Name: "In Review", WorkflowID: "wf-1"}
 	repoLookup.repositories["repo-a"] = &taskmodels.Repository{Name: "repo-a-name"}
 
 	ctx := context.Background()

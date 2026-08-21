@@ -72,6 +72,13 @@ type WorkflowLocator interface {
 	WorkflowWorkspaceID(ctx context.Context, workflowID string) (string, error)
 }
 
+// WorkflowStepLocator verifies that a workflow step belongs to a workflow in
+// the same workspace. It is separate from WorkflowLocator because the task and
+// workflow services own these two records in different repositories.
+type WorkflowStepLocator interface {
+	WorkflowStepBelongs(ctx context.Context, workspaceID, workflowID, stepID string) (bool, error)
+}
+
 // AgentProfileLookup answers whether an agent profile ID resolves to a live
 // (not soft-deleted) profile row. Satisfied by an adapter over the agent
 // settings store and injected rather than imported, for the same reason
@@ -101,6 +108,9 @@ type Service struct {
 	// workflowLocator gates workflow ownership. Optional: when nil (isolated
 	// tests) ownership is not enforced.
 	workflowLocator WorkflowLocator
+	// workflowStepLocator gates the relationship between a workflow and its
+	// selected step. Optional for isolated tests, but wired in production.
+	workflowStepLocator WorkflowStepLocator
 
 	// repoLookup validates repository_ids on create/update — every ID must
 	// resolve to a repository belonging to the automation's workspace. Nil
@@ -176,6 +186,11 @@ func (s *Service) SetWorkflowLocator(l WorkflowLocator) {
 	s.workflowLocator = l
 }
 
+// SetWorkflowStepLocator wires the workflow-step relationship check.
+func (s *Service) SetWorkflowStepLocator(l WorkflowStepLocator) {
+	s.workflowStepLocator = l
+}
+
 // authorizeWorkflowOwnership rejects a workflow belonging to a workspace other
 // than the one the automation is being saved into.
 func (s *Service) authorizeWorkflowOwnership(ctx context.Context, workspaceID, workflowID string) error {
@@ -188,6 +203,28 @@ func (s *Service) authorizeWorkflowOwnership(ctx context.Context, workspaceID, w
 	}
 	if owner != workspaceID {
 		return fmt.Errorf("workflow does not belong to this workspace")
+	}
+	return nil
+}
+
+// authorizeWorkflowStepOwnership rejects a step that is not part of the
+// selected workflow. A step without a workflow is never a valid binding.
+func (s *Service) authorizeWorkflowStepOwnership(ctx context.Context, workspaceID, workflowID, stepID string) error {
+	if stepID == "" {
+		return nil
+	}
+	if workflowID == "" {
+		return fmt.Errorf("workflow step requires a workflow")
+	}
+	if s.workflowStepLocator == nil {
+		return nil
+	}
+	belongs, err := s.workflowStepLocator.WorkflowStepBelongs(ctx, workspaceID, workflowID, stepID)
+	if err != nil {
+		return fmt.Errorf("resolve workflow step: %w", err)
+	}
+	if !belongs {
+		return fmt.Errorf("workflow step does not belong to this workflow")
 	}
 	return nil
 }
@@ -348,9 +385,12 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 	}
 
 	// Workflow + step are optional for every automation: no automation run is
-	// placed on a board, so no automation needs a starting column. Ownership
-	// is still enforced when one is supplied.
+	// placed on a board, so no automation needs a starting column. When a step
+	// is supplied, it must belong to the selected workflow.
 	if err := s.authorizeWorkflowOwnership(ctx, req.WorkspaceID, req.WorkflowID); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeWorkflowStepOwnership(ctx, req.WorkspaceID, req.WorkflowID, req.WorkflowStepID); err != nil {
 		return nil, err
 	}
 	a := &Automation{
@@ -444,11 +484,11 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 }
 
 // authorizeUpdatedReferences checks the fields of req that name something the
-// automation's workspace must own — its repositories and its workflow. Both
-// need the stored automation to learn that workspace, so it is loaded once
-// here rather than by each check.
+// automation's workspace must own — its repositories, workflow, and workflow
+// step. All three need the stored automation to learn that workspace, so it is
+// loaded once here rather than by each check.
 func (s *Service) authorizeUpdatedReferences(ctx context.Context, id string, req *UpdateAutomationRequest) error {
-	if req.RepositoryIDs == nil && req.WorkflowID == nil {
+	if req.RepositoryIDs == nil && req.WorkflowID == nil && req.WorkflowStepID == nil {
 		return nil
 	}
 	existing, err := s.store.GetAutomation(ctx, id)
@@ -463,10 +503,21 @@ func (s *Service) authorizeUpdatedReferences(ctx context.Context, id string, req
 			return err
 		}
 	}
-	if req.WorkflowID == nil {
+	if req.WorkflowID == nil && req.WorkflowStepID == nil {
 		return nil
 	}
-	return s.authorizeWorkflowOwnership(ctx, existing.WorkspaceID, *req.WorkflowID)
+	workflowID := existing.WorkflowID
+	if req.WorkflowID != nil {
+		workflowID = *req.WorkflowID
+	}
+	if err := s.authorizeWorkflowOwnership(ctx, existing.WorkspaceID, workflowID); err != nil {
+		return err
+	}
+	stepID := existing.WorkflowStepID
+	if req.WorkflowStepID != nil {
+		stepID = *req.WorkflowStepID
+	}
+	return s.authorizeWorkflowStepOwnership(ctx, existing.WorkspaceID, workflowID, stepID)
 }
 
 // validateRepositoryIDs rejects a duplicate entry, or any ID that isn't a

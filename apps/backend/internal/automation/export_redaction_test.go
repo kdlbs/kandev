@@ -81,7 +81,7 @@ func TestExportRedaction_AC23_FullyPopulatedAutomationRoundTripsEveryExportedFie
 	agentLookup.profiles["agent-1"] = &settingsmodels.AgentProfile{Name: "Reviewer", AgentDisplayName: "Claude Code", Model: "claude-sonnet-5", Mode: "plan"}
 	executorLookup.profiles["exec-1"] = &taskmodels.ExecutorProfile{ExecutorID: "local_docker", Name: "Default Executor"}
 	workflowLookup.workflows["wf-1"] = &taskmodels.Workflow{Name: "New Feature Dev"}
-	stepLookup.steps["step-1"] = &workflowmodels.WorkflowStep{Name: "Build"}
+	stepLookup.steps["step-1"] = &workflowmodels.WorkflowStep{Name: "Build", WorkflowID: "wf-1"}
 	repoLookup.repositories["repo-1"] = &taskmodels.Repository{Name: "kandev"}
 	repoLookup.repositories["repo-2"] = &taskmodels.Repository{Name: "kandev-web"}
 

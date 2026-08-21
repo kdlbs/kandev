@@ -229,7 +229,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		automationComponents.Service.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 		// A UI filter is not an authorization boundary: reject a workflow owned
 		// by another workspace even when a request names it directly.
-		automationComponents.Service.SetWorkflowLocator(&automationWorkflowLocatorAdapter{svc: taskSvc})
+		automationWorkflowLocator := &automationWorkflowLocatorAdapter{svc: taskSvc, workflows: workflowSvc}
+		automationComponents.Service.SetWorkflowLocator(automationWorkflowLocator)
+		automationComponents.Service.SetWorkflowStepLocator(automationWorkflowLocator)
 		automationComponents.Service.SetTaskOriginLookup(&automationTaskOriginLookupAdapter{svc: taskSvc, log: log})
 		// Profile deletion disables the automations bound to a profile before
 		// the row goes, but nothing ever checked that the binding pointed at a

@@ -167,7 +167,7 @@ func (s *Service) resolveWorkflow(ctx context.Context, tx *sqlx.Tx, a *Automatio
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve workflow step %q: %w", a.WorkflowStepID, err)
 	}
-	if !stepFound {
+	if !stepFound || step == nil || step.WorkflowID != a.WorkflowID {
 		return result, "unresolved workflow step", nil
 	}
 	result.Step = step.Name
