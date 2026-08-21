@@ -527,13 +527,9 @@ export function TasksPageClient(props: TasksPageClientProps) {
     state.kanban.workflowId === s.activeWorkflowId ? state.kanban.steps : EMPTY_WORKFLOW_STEPS,
   );
   useWorkflowSnapshot(s.activeWorkflowId);
-  useWorkspacePRs(showTaskDetails ? s.activeWorkspaceId : null);
-  // Not gated on showTaskDetails, unlike the PRs above: useWorkspaceMRs(null)
-  // calls resetTaskMRs() with no argument, which empties taskMRs.byWorkspaceId
-  // for every workspace. The AppSidebar's TaskSessionSidebar now hydrates that
-  // same slice for its own MR badges and, having already fetched, will not
-  // refetch, so gating here would blank its badges on every client-side
-  // navigation into /tasks. See spec "Hydration ownership".
+  // Task-title previews render PR/MR glyphs independently of the list-details
+  // preference, so both workspace caches must be hydrated here.
+  useWorkspacePRs(s.activeWorkspaceId);
   useWorkspaceMRs(s.activeWorkspaceId);
   useForegroundRefresh(() => s.fetchTasks(true), Boolean(s.activeWorkspaceId), s.activeWorkspaceId);
   const { handleSortChange, handleGroupChange } = useTasksListPreferenceSync({
