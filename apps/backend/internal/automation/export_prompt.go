@@ -101,6 +101,9 @@ func probeScalarEmission(v any) (*yaml.Node, error) {
 		return nil, err
 	}
 	if doc.Kind == yaml.DocumentNode {
+		if len(doc.Content) == 0 {
+			return nil, fmt.Errorf("automation: pinned encoder produced an empty document")
+		}
 		return doc.Content[0], nil
 	}
 	return &doc, nil

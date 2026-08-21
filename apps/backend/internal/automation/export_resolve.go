@@ -90,6 +90,15 @@ func (s *Service) resolveDescriptors(ctx context.Context, tx *sqlx.Tx, a *Automa
 
 // resolveAgentProfile resolves a.AgentProfileID. An empty ID references
 // nothing, so it returns no descriptor and no warning.
+//
+// validateAgentProfileID (service.go) only checks that the profile row
+// exists, not that it belongs to the automation's own workspace — unlike
+// RepositoryLookup, which fails closed on a cross-workspace reference at
+// create/update time. A workspace-scoped profile (non-empty WorkspaceID)
+// that does not match a.WorkspaceID is therefore treated as unresolved here,
+// the same as a missing row: the export must not leak another workspace's
+// profile name/model/mode just because a stale or crafted ID happens to
+// resolve. A global profile (WorkspaceID == "") is unaffected.
 func (s *Service) resolveAgentProfile(ctx context.Context, tx *sqlx.Tx, a *Automation) (*exportAgentProfile, string, error) {
 	if a.AgentProfileID == "" {
 		return nil, "", nil
@@ -101,7 +110,7 @@ func (s *Service) resolveAgentProfile(ctx context.Context, tx *sqlx.Tx, a *Autom
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve agent profile %q: %w", a.AgentProfileID, err)
 	}
-	if !found {
+	if !found || (profile.WorkspaceID != "" && profile.WorkspaceID != a.WorkspaceID) {
 		return nil, "unresolved agent profile", nil
 	}
 	return &exportAgentProfile{AgentName: profile.AgentDisplayName, Model: profile.Model, Mode: profile.Mode}, "", nil

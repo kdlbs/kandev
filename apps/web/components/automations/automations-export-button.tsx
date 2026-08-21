@@ -44,7 +44,7 @@ export function AutomationsExportButton({ workspaceId }: AutomationsExportButton
       variant="outline"
       size="sm"
       data-testid="export-automations-button"
-      className="cursor-pointer"
+      className="min-h-11 cursor-pointer md:min-h-7"
       onClick={() => void handleExport()}
       disabled={downloading}
     >

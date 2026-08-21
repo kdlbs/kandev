@@ -182,6 +182,53 @@ func TestResolveDescriptors_AgentProfileUnresolved_OmitsAndWarns(t *testing.T) {
 	}
 }
 
+// A workspace-scoped agent profile belonging to a different workspace than
+// the automation must never be exported: resolveAgentProfile has no
+// upstream guarantee that AgentProfileID was validated against the
+// automation's own workspace (validateAgentProfileID checks existence only,
+// unlike RepositoryLookup's fail-closed cross-workspace guard), so the
+// export path must defend the boundary itself rather than leak a foreign
+// workspace's profile name/model/mode through the descriptor.
+func TestResolveDescriptors_AgentProfileFromDifferentWorkspace_OmitsAndWarns(t *testing.T) {
+	svc, agentLookup, _, _, _, _ := resolveTestFixture(t)
+	agentLookup.profiles["agent-1"] = &settingsmodels.AgentProfile{WorkspaceID: "other-workspace", Name: "Foreign Profile", AgentDisplayName: "Claude Code", Model: "claude-sonnet-5", Mode: "plan"}
+	tx := beginTestReadTx(t, svc)
+	a := &Automation{ID: "auto-1", Name: "Daily Review", WorkspaceID: "ws-1", AgentProfileID: "agent-1"}
+
+	got, warnings, err := svc.resolveDescriptors(context.Background(), tx, a)
+	if err != nil {
+		t.Fatalf("resolveDescriptors: %v", err)
+	}
+	if got.AgentProfile != nil {
+		t.Errorf("expected nil AgentProfile for a cross-workspace binding, got %+v", got.AgentProfile)
+	}
+	want := []exportWarning{{AutomationName: "Daily Review", AutomationID: "auto-1", DedupKey: "auto-1", Message: "unresolved agent profile"}}
+	if len(warnings) != 1 || warnings[0] != want[0] {
+		t.Errorf("warnings = %v, want %v", warnings, want)
+	}
+}
+
+// A global agent profile (WorkspaceID == "") is legitimately shared across
+// every workspace and must still resolve normally.
+func TestResolveDescriptors_GlobalAgentProfile_ResolvesAcrossWorkspaces(t *testing.T) {
+	svc, agentLookup, _, _, _, _ := resolveTestFixture(t)
+	agentLookup.profiles["agent-1"] = &settingsmodels.AgentProfile{WorkspaceID: "", Name: "Global Profile", AgentDisplayName: "Claude Code", Model: "claude-sonnet-5", Mode: "plan"}
+	tx := beginTestReadTx(t, svc)
+	a := &Automation{ID: "auto-1", Name: "Daily Review", WorkspaceID: "ws-1", AgentProfileID: "agent-1"}
+
+	got, warnings, err := svc.resolveDescriptors(context.Background(), tx, a)
+	if err != nil {
+		t.Fatalf("resolveDescriptors: %v", err)
+	}
+	want := &exportAgentProfile{AgentName: "Claude Code", Model: "claude-sonnet-5", Mode: "plan"}
+	if got.AgentProfile == nil || *got.AgentProfile != *want {
+		t.Errorf("AgentProfile = %+v, want %+v", got.AgentProfile, want)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings for a global profile, got %v", warnings)
+	}
+}
+
 func TestResolveDescriptors_AgentProfileLookupFails_AbortsWithNoPartialResultAndNoWarning(t *testing.T) {
 	svc, agentLookup, _, _, _, _ := resolveTestFixture(t)
 	sentinel := errors.New("boom")

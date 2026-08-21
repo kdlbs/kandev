@@ -2,6 +2,7 @@ package automation
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
@@ -17,8 +18,16 @@ import (
 // same underlying reader pool (see internal/backendapp/services.go and
 // storage.go), so a *sqlx.Tx opened here is a transaction against the exact
 // pool those other stores' methods also read through.
+//
+// RepeatableRead + ReadOnly is requested explicitly rather than relying on
+// the driver default: SQLite's mattn driver ignores TxOptions entirely (its
+// WAL-mode read transactions already snapshot at BEGIN regardless), but a
+// Postgres reader pool defaults to READ COMMITTED, which takes a fresh
+// snapshot per statement — silently breaking AC-29's one-snapshot promise
+// for this export's multiple sequential reads. Requesting RepeatableRead is
+// a no-op on SQLite and the correct fix on Postgres.
 func (s *Store) BeginReadTx(ctx context.Context) (*sqlx.Tx, error) {
-	return s.ro.BeginTxx(ctx, nil)
+	return s.ro.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 }
 
 // ListAutomationsForExportTx is ListAutomations' transaction-accepting
