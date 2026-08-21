@@ -547,10 +547,13 @@ Enter the site URL (a missing scheme is normalized to HTTPS), choose **Cloud** o
 | Deployment | Method | Required values |
 |---|---|---|
 | Jira Cloud | API token (recommended) | Atlassian account email and API token. |
+| Jira Cloud | OAuth 2.0 | Approval from the Atlassian account in a browser window. |
 | Jira Cloud | Browser session | Only the value of the `cloud.session.token` or `tenant.session.token` cookie. Do not include the cookie name or `=`. |
 | Server/Data Center | Personal access token | Bearer personal access token with the required read/write access. |
 
 Cloud API tokens are not accepted for Server/Data Center, and Server/Data Center PATs are not the Cloud token flow. Browser-session JWTs expire and are less reliable than an API token; Kandev surfaces the decoded expiry and warns as it approaches.
+
+For OAuth, select **Connect with Atlassian**. Then approve the connection in the browser window. Kandev completes the connection when Atlassian returns the result. If the automatic return fails, paste the full callback URL into Kandev.
 
 When editing, a blank secret preserves the saved credential only if the URL, account identity, and authentication method still match. Supply a new secret when changing those identity fields. Save, select **Test connection**, and check the background health result.
 

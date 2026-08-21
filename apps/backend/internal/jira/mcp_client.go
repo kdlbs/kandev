@@ -1,7 +1,6 @@
 package jira
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +10,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	mcpclient "github.com/mark3labs/mcp-go/client"
+	mcptransport "github.com/mark3labs/mcp-go/client/transport"
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // MCPClient implements the Client interface by calling Jira APIs through
@@ -24,9 +27,8 @@ type MCPClient struct {
 	tokenMu     sync.RWMutex // guards accessToken
 	workspaceID string
 	siteURL     string
-	sessionMu   sync.Mutex // guards session init
-	sessionID   string
-	initialized bool
+	sessionMu   sync.Mutex // guards SDK client initialization and replacement
+	session     *mcpclient.Client
 	cloudID     string
 	refresher   TokenRefresher
 }
@@ -41,7 +43,8 @@ func NewMCPClient(accessToken, cloudID, workspaceID, siteURL string) *MCPClient 
 	site := strings.TrimRight(siteURL, "/")
 	return &MCPClient{
 		http: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: &mcpStatusRoundTripper{base: http.DefaultTransport},
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
@@ -71,44 +74,51 @@ func (c *MCPClient) SetRefresher(workspaceID string, r TokenRefresher) {
 	c.refresher = r
 }
 
-type mcpRequest struct {
-	JSONRPC string      `json:"jsonrpc"`
-	Method  string      `json:"method"`
-	Params  interface{} `json:"params,omitempty"`
-	ID      int         `json:"id"`
+type mcpAccessTokenContextKey struct{}
+
+type mcpStatusRoundTripper struct {
+	base http.RoundTripper
 }
 
-type mcpResponse struct {
-	Result struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-		IsError bool `json:"isError"`
-	} `json:"result"`
-	Error *struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-	} `json:"error"`
-	JSONRPC string `json:"jsonrpc"`
-	ID      int    `json:"id"`
+func (t *mcpStatusRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	resp, err := base.RoundTrip(req)
+	if err != nil || resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		return resp, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return nil, &APIError{StatusCode: http.StatusUnauthorized, Message: string(body)}
+}
+
+func withMCPAccessToken(ctx context.Context, token string) context.Context {
+	return context.WithValue(ctx, mcpAccessTokenContextKey{}, token)
 }
 
 // call sends a JSON-RPC request. On 401, refreshes token and retries once.
 func (c *MCPClient) call(ctx context.Context, method string, params interface{}) (string, error) {
-	result, err := c.callOnce(ctx, method, params)
+	staleToken := c.getToken()
+	requestCtx := withMCPAccessToken(ctx, staleToken)
+	result, err := c.callOnce(requestCtx, method, params)
 	if err == nil {
 		return result, nil
 	}
-	if c.tryRefreshOn401(ctx, err) {
-		return c.callOnce(ctx, method, params)
+	if errors.Is(err, mcptransport.ErrSessionTerminated) {
+		c.resetSession()
+		return c.callOnce(requestCtx, method, params)
+	}
+	if c.tryRefreshOn401(ctx, err, staleToken) {
+		return c.callOnce(withMCPAccessToken(ctx, c.getToken()), method, params)
 	}
 	return "", err
 }
 
 // tryRefreshOn401 refreshes the OAuth token on 401 and resets the session.
 // Returns true if the caller should retry.
-func (c *MCPClient) tryRefreshOn401(ctx context.Context, err error) bool {
+func (c *MCPClient) tryRefreshOn401(ctx context.Context, err error, staleToken string) bool {
 	if c.refresher == nil {
 		return false
 	}
@@ -116,7 +126,7 @@ func (c *MCPClient) tryRefreshOn401(ctx context.Context, err error) bool {
 	if !errors.As(err, &apiErr) || apiErr.StatusCode != 401 {
 		return false
 	}
-	if refreshErr := c.refresher.RefreshOAuthToken(ctx, c.workspaceID, c.getToken()); refreshErr != nil {
+	if refreshErr := c.refresher.RefreshOAuthToken(ctx, c.workspaceID, staleToken); refreshErr != nil {
 		return false
 	}
 	newToken, revealErr := c.refresher.RevealAccessToken(ctx, c.workspaceID)
@@ -124,147 +134,95 @@ func (c *MCPClient) tryRefreshOn401(ctx context.Context, err error) bool {
 		return false
 	}
 	c.setToken(newToken)
-	c.sessionMu.Lock()
-	c.sessionID = ""
-	c.initialized = false
-	c.sessionMu.Unlock()
+	c.resetSession()
 	return true
 }
 
 func (c *MCPClient) callOnce(ctx context.Context, method string, params interface{}) (string, error) {
-	sessionID, err := c.ensureSession(ctx)
+	client, err := c.ensureSession(ctx)
 	if err != nil {
 		return "", err
 	}
-	reqBody, _ := json.Marshal(mcpRequest{
-		JSONRPC: "2.0",
-		Method:  method,
-		Params:  params,
-		ID:      nextMCPID(),
-	})
-	req, err := http.NewRequestWithContext(ctx, "POST", mcpEndpoint, bytes.NewReader(reqBody))
+	if method != "tools/call" {
+		return "", fmt.Errorf("unsupported MCP method %q", method)
+	}
+	requestParams, ok := params.(map[string]interface{})
+	if !ok {
+		return "", errors.New("MCP tools/call params must be an object")
+	}
+	toolName, _ := requestParams["name"].(string)
+	if toolName == "" {
+		return "", errors.New("MCP tool name is required")
+	}
+	result, err := client.CallTool(ctx, mcp.CallToolRequest{Params: mcp.CallToolParams{
+		Name: toolName, Arguments: requestParams["arguments"],
+	}})
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.getToken())
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set("MCP-Protocol-Version", mcpProtocol)
-	req.Header.Set("Mcp-Session-Id", sessionID)
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode == 401 {
-		c.sessionMu.Lock()
-		c.sessionID = ""
-		c.initialized = false
-		c.sessionMu.Unlock()
-		return "", &APIError{StatusCode: 401, Message: "MCP session expired"}
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", &APIError{StatusCode: resp.StatusCode, Message: string(raw)}
-	}
-	data := parseSSE(raw)
-	if data == "" {
-		return "", fmt.Errorf("MCP server returned empty response")
-	}
-	var mcpr mcpResponse
-	if err := json.Unmarshal([]byte(data), &mcpr); err != nil {
-		return "", fmt.Errorf("decode MCP response: %w", err)
-	}
-	if mcpr.Error != nil {
-		return "", fmt.Errorf("MCP error %d: %s", mcpr.Error.Code, mcpr.Error.Message)
-	}
-	if mcpr.Result.IsError {
-		if len(mcpr.Result.Content) > 0 {
-			return "", fmt.Errorf("MCP tool error: %s", mcpr.Result.Content[0].Text)
+	text := firstMCPText(result)
+	if result.IsError {
+		if text != "" {
+			return "", fmt.Errorf("MCP tool error: %s", text)
 		}
 		return "", errors.New("MCP tool error (no details)")
 	}
-	if len(mcpr.Result.Content) == 0 {
-		return "", nil
-	}
-	return mcpr.Result.Content[0].Text, nil
+	return text, nil
 }
 
-// ensureSession returns a live MCP session ID, initializing one if needed.
-// Returning the ID (rather than reading c.sessionID unlocked at the call site)
-// keeps concurrent callers from racing on the session fields.
-func (c *MCPClient) ensureSession(ctx context.Context) (string, error) {
+func firstMCPText(result *mcp.CallToolResult) string {
+	for _, content := range result.Content {
+		switch text := content.(type) {
+		case mcp.TextContent:
+			return text.Text
+		case *mcp.TextContent:
+			return text.Text
+		}
+	}
+	return ""
+}
+
+// ensureSession creates and initializes the SDK client once. The SDK owns
+// protocol negotiation, initialized notification, response demultiplexing,
+// and the Streamable HTTP session identifier.
+func (c *MCPClient) ensureSession(ctx context.Context) (*mcpclient.Client, error) {
 	c.sessionMu.Lock()
 	defer c.sessionMu.Unlock()
-	if c.initialized && c.sessionID != "" {
-		return c.sessionID, nil
+	if c.session != nil {
+		return c.session, nil
 	}
-	reqBody, _ := json.Marshal(mcpRequest{
-		JSONRPC: "2.0",
-		Method:  "initialize",
-		Params: map[string]interface{}{
-			"protocolVersion": mcpProtocol,
-			"capabilities":    map[string]interface{}{},
-			"clientInfo":      map[string]string{"name": "kandev", "version": "1.0"},
-		},
-		ID: nextMCPID(),
-	})
-	req, err := http.NewRequestWithContext(ctx, "POST", mcpEndpoint, bytes.NewReader(reqBody))
+	client, err := mcpclient.NewStreamableHttpClient(
+		mcpEndpoint,
+		mcptransport.WithHTTPBasicClient(c.http),
+		mcptransport.WithHTTPHeaderFunc(func(requestCtx context.Context) map[string]string {
+			token, _ := requestCtx.Value(mcpAccessTokenContextKey{}).(string)
+			if token == "" {
+				token = c.getToken()
+			}
+			return map[string]string{"Authorization": "Bearer " + token}
+		}),
+	)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.getToken())
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set("MCP-Protocol-Version", mcpProtocol)
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("MCP initialize: %w", err)
+	if err := client.Start(ctx); err != nil {
+		return nil, fmt.Errorf("MCP start: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		// Surface a 401 as APIError so tryRefreshOn401 can refresh + retry;
-		// a plain error here would strand an expired token unrefreshed.
-		if resp.StatusCode == 401 {
-			return "", &APIError{StatusCode: 401, Message: "MCP initialize unauthorized: " + string(raw)}
-		}
-		return "", fmt.Errorf("MCP initialize failed (%d): %s", resp.StatusCode, string(raw))
+	if _, err := client.Initialize(ctx, mcp.InitializeRequest{Params: mcp.InitializeParams{
+		ProtocolVersion: mcpProtocol,
+		Capabilities:    mcp.ClientCapabilities{},
+		ClientInfo:      mcp.Implementation{Name: "kandev", Version: "1.0"},
+	}}); err != nil {
+		return nil, fmt.Errorf("MCP initialize: %w", err)
 	}
-	c.sessionID = resp.Header.Get("Mcp-Session-Id")
-	if c.sessionID == "" {
-		return "", errors.New("MCP initialize: no session ID in response")
-	}
-	c.initialized = true
-	return c.sessionID, nil
+	c.session = client
+	return client, nil
 }
 
-func parseSSE(raw []byte) string {
-	var sb strings.Builder
-	for _, line := range strings.Split(string(raw), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "data: ") {
-			sb.WriteString(strings.TrimPrefix(line, "data: "))
-		}
-	}
-	return sb.String()
-}
-
-var mcpIDCounter struct {
-	sync.Mutex
-	n int
-}
-
-func nextMCPID() int {
-	mcpIDCounter.Lock()
-	defer mcpIDCounter.Unlock()
-	mcpIDCounter.n++
-	return mcpIDCounter.n
+func (c *MCPClient) resetSession() {
+	c.sessionMu.Lock()
+	c.session = nil
+	c.sessionMu.Unlock()
 }
 
 // --- Client interface ---

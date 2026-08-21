@@ -116,6 +116,9 @@ func (s *Service) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, er
 	if w == nil {
 		return nil, ErrIssueWatchNotFound
 	}
+	if err := s.authorizeWorkspaceAccess(ctx, w.WorkspaceID); err != nil {
+		return nil, err
+	}
 	return w, nil
 }
 
@@ -124,11 +127,6 @@ func (s *Service) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, er
 func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIssueWatchRequest) (*IssueWatch, error) {
 	w, err := s.GetIssueWatch(ctx, id)
 	if err != nil {
-		return nil, err
-	}
-	// Authorize off the loaded row's workspace — the watch ID alone reveals
-	// nothing about ownership, so a caller must not mutate another user's watch.
-	if err := s.authorizeWorkspaceAccess(ctx, w.WorkspaceID); err != nil {
 		return nil, err
 	}
 	prevRepositoryID, prevBaseBranch := w.RepositoryID, w.BaseBranch
@@ -170,6 +168,16 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 // DeleteIssueWatch removes the watch and its dedup rows. Idempotent: deleting
 // a missing ID is a silent success.
 func (s *Service) DeleteIssueWatch(ctx context.Context, id string) error {
+	w, err := s.store.GetIssueWatch(ctx, id)
+	if err != nil {
+		return err
+	}
+	if w == nil {
+		return nil
+	}
+	if err := s.authorizeWorkspaceAccess(ctx, w.WorkspaceID); err != nil {
+		return err
+	}
 	return s.store.DeleteIssueWatch(ctx, id)
 }
 
@@ -192,6 +200,9 @@ func (r *jiraIssueWatchResetter) Clear(ctx context.Context) error {
 // PreviewResetIssueWatch returns how many tasks ResetIssueWatch would
 // cascade-delete. Used by the frontend to populate the confirmation dialog.
 func (s *Service) PreviewResetIssueWatch(ctx context.Context, watchID string) (int, error) {
+	if _, err := s.GetIssueWatch(ctx, watchID); err != nil {
+		return 0, err
+	}
 	return watchreset.Preview(ctx, &jiraIssueWatchResetter{store: s.store, watchID: watchID})
 }
 
@@ -200,6 +211,9 @@ func (s *Service) PreviewResetIssueWatch(ctx context.Context, watchID string) (i
 // rows, and nulls last_polled_at so the next poll re-imports every
 // currently-matching ticket. Returns the count of tasks deleted.
 func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, error) {
+	if _, err := s.GetIssueWatch(ctx, watchID); err != nil {
+		return 0, err
+	}
 	s.mu.Lock()
 	td := s.taskDeleter
 	s.mu.Unlock()
@@ -236,7 +250,7 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*JiraTi
 	if err != nil {
 		s.log.Warn("jira: dedup set fetch failed",
 			zap.String("watch_id", w.ID), zap.Error(err))
-		seen = nil // fall through: a missing dedup set is safer than dropping all tickets
+		return nil, fmt.Errorf("load Jira issue-watch dedup set: %w", err)
 	}
 	out := make([]*JiraTicket, 0, len(res.Tickets))
 	for i := range res.Tickets {

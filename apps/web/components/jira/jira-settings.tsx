@@ -544,7 +544,7 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
               form={s.form}
               loading={s.loading}
               workspaceId={workspaceId}
-              connected={s.config?.authMethod === "oauth" && !!s.config?.hasSecret}
+              connected={savedSecretMatchesMode}
               tokenExpiresAt={s.config?.tokenExpiresAt ?? null}
               onConnected={() => void s.load()}
             />

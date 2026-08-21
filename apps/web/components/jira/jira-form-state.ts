@@ -83,10 +83,14 @@ function jiraDisableSave(
   s: FormStateInputs,
   emailRequired: boolean,
   missingSecret: boolean,
-  isOAuth: boolean,
+  oauthNeedsConnect: boolean,
 ): boolean {
   return (
-    s.saving || !s.form.siteUrl || (emailRequired && !s.form.email) || (missingSecret && !isOAuth)
+    s.saving ||
+    !s.form.siteUrl ||
+    (emailRequired && !s.form.email) ||
+    missingSecret ||
+    oauthNeedsConnect
   );
 }
 
@@ -108,13 +112,18 @@ export function deriveFormState(s: FormStateInputs, t: TFunction): DerivedFormSt
   const savedSecretMatchesMode = savedSecretMatches(s.config, s.form);
   const isOAuth = s.form.authMethod === "oauth";
   const missingSecret = !isOAuth && !savedSecretMatchesMode && !s.form.secret;
-  const oauthNeedsConnect = isOAuth && !s.config?.hasSecret;
+  const oauthNeedsConnect = isOAuth && !savedSecretMatchesMode;
   const emailRequired = s.form.instanceType === "cloud" && s.form.authMethod === "api_token";
-  const disableSave = jiraDisableSave(s, emailRequired, missingSecret, isOAuth);
+  const disableSave = jiraDisableSave(s, emailRequired, missingSecret, oauthNeedsConnect);
   const disableTest = missingSecret || (isOAuth && oauthNeedsConnect);
   const revision = JSON.stringify(s.form);
   const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
-  const invalidReason = jiraInvalidReason(s.form, emailRequired, missingSecret, t);
+  const invalidReason = jiraInvalidReason(
+    s.form,
+    emailRequired,
+    missingSecret || oauthNeedsConnect,
+    t,
+  );
   return {
     isOAuth,
     savedSecretMatchesMode,

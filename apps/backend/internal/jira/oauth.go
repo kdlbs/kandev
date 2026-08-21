@@ -1,7 +1,6 @@
 package jira
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -15,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	mcptransport "github.com/mark3labs/mcp-go/client/transport"
 )
 
 // Atlassian MCP OAuth 2.1 endpoints. The MCP server acts as both
@@ -22,12 +23,9 @@ import (
 // Dynamic Client Registration (RFC 7591) + PKCE (S256) replaces the need for
 // a pre-created app — no client_id/client_secret from the developer console.
 const (
-	mcpAuthorizeURL = "https://mcp.atlassian.com/v1/authorize"
-	mcpTokenURL     = "https://mcp.atlassian.com/v1/token"
-	mcpRegisterURL  = "https://mcp.atlassian.com/v1/register"
-	mcpResourceURL  = "https://mcp.atlassian.com"
-	mcpScopes       = "offline_access read:jira-user read:jira-work write:jira-work"
-	mcpStateTTL     = 10 * time.Minute
+	mcpResourceURL = "https://mcp.atlassian.com"
+	mcpScopes      = "offline_access read:me read:account read:jira-user read:jira-work write:jira-work search:jira-work"
+	mcpStateTTL    = 10 * time.Minute
 )
 
 // mcpTokenResponse is the response from the token endpoint.
@@ -50,13 +48,20 @@ type mcpRegisterResponse struct {
 
 // mcpPendingState holds the CSRF state + PKCE verifier during the OAuth flow.
 type mcpPendingState struct {
-	State        string
-	WorkspaceID  string
-	SiteURL      string
-	ClientID     string // from dynamic registration
-	CodeVerifier string // PKCE verifier (kept server-side)
-	RedirectURI  string
-	CreatedAt    time.Time
+	State         string
+	WorkspaceID   string
+	SiteURL       string
+	ClientID      string // from dynamic registration
+	CodeVerifier  string // PKCE verifier (kept server-side)
+	RedirectURI   string
+	TokenEndpoint string
+	CreatedAt     time.Time
+}
+
+type mcpOAuthEndpoints struct {
+	Authorization string
+	Token         string
+	Registration  string
 }
 
 // mcpStateManager holds pending OAuth states in memory.
@@ -118,7 +123,7 @@ func generatePKCEPair() (verifier, challenge string, err error) {
 // the MCP server. Returns a client_id that is used for the authorization flow.
 // No client_secret is returned — the flow uses PKCE with
 // token_endpoint_auth_method="none".
-func registerMCPClient(redirectURI string) (string, error) {
+func registerMCPClient(ctx context.Context, client *http.Client, registrationEndpoint, redirectURI string) (string, error) {
 	body, _ := json.Marshal(map[string]interface{}{
 		"client_name":                "Kandev",
 		"redirect_uris":              []string{redirectURI},
@@ -127,13 +132,12 @@ func registerMCPClient(redirectURI string) (string, error) {
 		"token_endpoint_auth_method": "none",
 		"scope":                      mcpScopes,
 	})
-	req, err := http.NewRequest("POST", mcpRegisterURL, strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, registrationEndpoint, strings.NewReader(string(body)))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -156,13 +160,43 @@ func registerMCPClient(redirectURI string) (string, error) {
 	return reg.ClientID, nil
 }
 
+func discoverMCPOAuthEndpoints(ctx context.Context, client *http.Client) (*mcpOAuthEndpoints, error) {
+	handler := mcptransport.NewOAuthHandler(mcptransport.OAuthConfig{HTTPClient: client})
+	handler.SetBaseURL(mcpResourceURL)
+	metadata, err := handler.GetServerMetadata(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("discover OAuth server: %w", err)
+	}
+	if metadata.AuthorizationEndpoint == "" || metadata.TokenEndpoint == "" || metadata.RegistrationEndpoint == "" {
+		return nil, errors.New("OAuth server metadata is missing required endpoints")
+	}
+	return &mcpOAuthEndpoints{
+		Authorization: metadata.AuthorizationEndpoint,
+		Token:         metadata.TokenEndpoint,
+		Registration:  metadata.RegistrationEndpoint,
+	}, nil
+}
+
+func newMCPOAuthHTTPClient() *http.Client {
+	return &http.Client{Timeout: 15 * time.Second}
+}
+
 // StartOAuthFlow registers a client dynamically, generates PKCE, and builds the
 // authorization URL. The user never needs to create an Atlassian app.
 func (s *Service) StartOAuthFlow(ctx context.Context, workspaceID, siteURL, redirectURI string) (string, error) {
 	if redirectURI == "" {
 		return "", errors.New("redirect URI is required")
 	}
-	clientID, err := registerMCPClient(redirectURI)
+	resolvedWorkspaceID, err := s.resolveWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	client := newMCPOAuthHTTPClient()
+	endpoints, err := discoverMCPOAuthEndpoints(ctx, client)
+	if err != nil {
+		return "", err
+	}
+	clientID, err := registerMCPClient(ctx, client, endpoints.Registration, redirectURI)
 	if err != nil {
 		return "", fmt.Errorf("dynamic client registration: %w", err)
 	}
@@ -175,13 +209,14 @@ func (s *Service) StartOAuthFlow(ctx context.Context, workspaceID, siteURL, redi
 		return "", err
 	}
 	s.oauthStates.store(mcpPendingState{
-		State:        state,
-		WorkspaceID:  workspaceID,
-		SiteURL:      siteURL,
-		ClientID:     clientID,
-		CodeVerifier: verifier,
-		RedirectURI:  redirectURI,
-		CreatedAt:    time.Now(),
+		State:         state,
+		WorkspaceID:   resolvedWorkspaceID,
+		SiteURL:       siteURL,
+		ClientID:      clientID,
+		CodeVerifier:  verifier,
+		RedirectURI:   redirectURI,
+		TokenEndpoint: endpoints.Token,
+		CreatedAt:     time.Now(),
 	})
 	params := url.Values{
 		"response_type":         {"code"},
@@ -193,7 +228,7 @@ func (s *Service) StartOAuthFlow(ctx context.Context, workspaceID, siteURL, redi
 		"resource":              {mcpResourceURL},
 		"scope":                 {mcpScopes},
 	}
-	return mcpAuthorizeURL + "?" + params.Encode(), nil
+	return endpoints.Authorization + "?" + params.Encode(), nil
 }
 
 // CompleteOAuthFlow exchanges the authorization code for tokens (using PKCE,
@@ -208,13 +243,13 @@ func (s *Service) CompleteOAuthFlow(ctx context.Context, code, state string) (*J
 	if err := s.authorizeWorkspaceAccess(ctx, st.WorkspaceID); err != nil {
 		return nil, fmt.Errorf("authorize workspace: %w", err)
 	}
-	tok, err := exchangeMCPCode(st.ClientID, code, st.RedirectURI, st.CodeVerifier)
+	tok, err := exchangeMCPCode(ctx, newMCPOAuthHTTPClient(), st.TokenEndpoint, st.ClientID, code, st.RedirectURI, st.CodeVerifier)
 	if err != nil {
 		return nil, fmt.Errorf("token exchange: %w", err)
 	}
 	// cloudId is required for every MCP tool call; a workspace saved without it
 	// looks connected but fails on every request, so fail the flow loudly here.
-	cloudID, err := resolveCloudIDViaMCP(tok.AccessToken, st.SiteURL)
+	cloudID, err := resolveCloudIDViaMCP(ctx, tok.AccessToken, st.SiteURL)
 	if err != nil {
 		return nil, fmt.Errorf("resolve Atlassian cloud ID for %q: %w", st.SiteURL, err)
 	}
@@ -234,16 +269,19 @@ func (s *Service) CompleteOAuthFlow(ctx context.Context, code, state string) (*J
 		cfg.Email = existing.Email
 		cfg.DefaultProjectKey = existing.DefaultProjectKey
 	}
-	if err := s.store.UpsertConfigForWorkspace(ctx, st.WorkspaceID, cfg); err != nil {
-		return nil, fmt.Errorf("persist config: %w", err)
+	if tok.AccessToken == "" || tok.RefreshToken == "" {
+		return nil, errors.New("token endpoint did not return the required access and refresh tokens")
+	}
+	// Persist the rotating refresh token first. A later failure then leaves a
+	// credential that can recover, instead of retaining an invalidated token.
+	if err := s.secrets.Set(ctx, OAuthRefreshTokenKeyForWorkspace(st.WorkspaceID), "oauth_refresh_token", tok.RefreshToken); err != nil {
+		return nil, fmt.Errorf("store refresh token: %w", err)
 	}
 	if err := s.secrets.Set(ctx, OAuthAccessTokenKeyForWorkspace(st.WorkspaceID), "oauth_access_token", tok.AccessToken); err != nil {
 		return nil, fmt.Errorf("store access token: %w", err)
 	}
-	if tok.RefreshToken != "" {
-		if err := s.secrets.Set(ctx, OAuthRefreshTokenKeyForWorkspace(st.WorkspaceID), "oauth_refresh_token", tok.RefreshToken); err != nil {
-			return nil, fmt.Errorf("store refresh token: %w", err)
-		}
+	if err := s.store.UpsertConfigForWorkspace(ctx, st.WorkspaceID, cfg); err != nil {
+		return nil, fmt.Errorf("persist config: %w", err)
 	}
 	s.invalidateClient(st.WorkspaceID)
 	return cfg, nil
@@ -253,17 +291,22 @@ func (s *Service) CompleteOAuthFlow(ctx context.Context, code, state string) (*J
 // PKCE-based flow: only client_id is sent (no client_secret). Refresh tokens
 // are rotating — the old one is invalidated and a new one is returned.
 func (s *Service) RefreshOAuthToken(ctx context.Context, workspaceID, staleToken string) error {
+	resolvedWorkspaceID, err := s.resolveWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	workspaceID = resolvedWorkspaceID
 	s.oauthMu.Lock(workspaceID)
 	defer s.oauthMu.Unlock(workspaceID)
+	return s.refreshOAuthTokenLocked(ctx, workspaceID, staleToken)
+}
 
+func (s *Service) refreshOAuthTokenLocked(ctx context.Context, workspaceID, staleToken string) error {
 	// If another goroutine already rotated the token while we waited for the
 	// lock, skip: rotating again with the now-invalid refresh token would fail.
-	if staleToken != "" {
-		if current, err := s.secrets.Reveal(ctx, OAuthAccessTokenKeyForWorkspace(workspaceID)); err == nil && current != "" && current != staleToken {
-			return nil
-		}
+	if s.oauthRefreshAlreadyCompleted(ctx, workspaceID, staleToken) {
+		return nil
 	}
-
 	refreshToken, err := s.secrets.Reveal(ctx, OAuthRefreshTokenKeyForWorkspace(workspaceID))
 	if err != nil {
 		return fmt.Errorf("read refresh token: %w", err)
@@ -278,17 +321,42 @@ func (s *Service) RefreshOAuthToken(ctx context.Context, workspaceID, staleToken
 	if cfg == nil {
 		return errors.New("no config for workspace")
 	}
-	tok, err := refreshMCPToken(cfg.ClientID, refreshToken)
+	endpoints, err := discoverMCPOAuthEndpoints(ctx, newMCPOAuthHTTPClient())
+	if err != nil {
+		return err
+	}
+	tok, err := refreshMCPToken(ctx, newMCPOAuthHTTPClient(), endpoints.Token, cfg.ClientID, refreshToken)
 	if err != nil {
 		return fmt.Errorf("refresh: %w", err)
 	}
+	if tok.AccessToken == "" {
+		return errors.New("token endpoint returned an empty access token")
+	}
+	return s.persistRefreshedOAuthToken(ctx, workspaceID, refreshToken, tok)
+}
+
+func (s *Service) oauthRefreshAlreadyCompleted(ctx context.Context, workspaceID, staleToken string) bool {
+	if staleToken == "" {
+		return false
+	}
+	current, err := s.secrets.Reveal(ctx, OAuthAccessTokenKeyForWorkspace(workspaceID))
+	return err == nil && current != "" && current != staleToken
+}
+
+func (s *Service) persistRefreshedOAuthToken(
+	ctx context.Context,
+	workspaceID, previousRefreshToken string,
+	tok *mcpTokenResponse,
+) error {
+	newRefreshToken := tok.RefreshToken
+	if newRefreshToken == "" {
+		newRefreshToken = previousRefreshToken
+	}
+	if err := s.secrets.Set(ctx, OAuthRefreshTokenKeyForWorkspace(workspaceID), "oauth_refresh_token", newRefreshToken); err != nil {
+		return fmt.Errorf("store refresh token: %w", err)
+	}
 	if err := s.secrets.Set(ctx, OAuthAccessTokenKeyForWorkspace(workspaceID), "oauth_access_token", tok.AccessToken); err != nil {
 		return fmt.Errorf("store access token: %w", err)
-	}
-	if tok.RefreshToken != "" {
-		if err := s.secrets.Set(ctx, OAuthRefreshTokenKeyForWorkspace(workspaceID), "oauth_refresh_token", tok.RefreshToken); err != nil {
-			return fmt.Errorf("store refresh token: %w", err)
-		}
 	}
 	expiresAt := time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second)
 	if err := s.store.UpdateTokenExpiryForWorkspace(ctx, workspaceID, expiresAt); err != nil {
@@ -300,7 +368,7 @@ func (s *Service) RefreshOAuthToken(ctx context.Context, workspaceID, staleToken
 
 // exchangeMCPCode swaps the authorization code for tokens using PKCE.
 // No client_secret is sent — token_endpoint_auth_method="none".
-func exchangeMCPCode(clientID, code, redirectURI, codeVerifier string) (*mcpTokenResponse, error) {
+func exchangeMCPCode(ctx context.Context, client *http.Client, tokenEndpoint, clientID, code, redirectURI, codeVerifier string) (*mcpTokenResponse, error) {
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
@@ -309,29 +377,28 @@ func exchangeMCPCode(clientID, code, redirectURI, codeVerifier string) (*mcpToke
 		"code_verifier": {codeVerifier},
 		"resource":      {mcpResourceURL},
 	}
-	return postMCPTokenRequest(form.Encode())
+	return postMCPTokenRequest(ctx, client, tokenEndpoint, form.Encode())
 }
 
 // refreshMCPToken uses a refresh token to get a new access token. Only
 // client_id is sent (no client_secret — PKCE public client).
-func refreshMCPToken(clientID, refreshToken string) (*mcpTokenResponse, error) {
+func refreshMCPToken(ctx context.Context, client *http.Client, tokenEndpoint, clientID, refreshToken string) (*mcpTokenResponse, error) {
 	form := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
 		"client_id":     {clientID},
 		"resource":      {mcpResourceURL},
 	}
-	return postMCPTokenRequest(form.Encode())
+	return postMCPTokenRequest(ctx, client, tokenEndpoint, form.Encode())
 }
 
-func postMCPTokenRequest(body string) (*mcpTokenResponse, error) {
-	req, err := http.NewRequest("POST", mcpTokenURL, strings.NewReader(body))
+func postMCPTokenRequest(ctx context.Context, client *http.Client, tokenEndpoint, body string) (*mcpTokenResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenEndpoint, strings.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -362,104 +429,15 @@ func postMCPTokenRequest(body string) (*mcpTokenResponse, error) {
 // resolveCloudIDViaMCP uses the MCP getAccessibleAtlassianResources tool to
 // resolve the cloudId. The MCP OAuth token doesn't work for direct
 // api.atlassian.com calls, but it works through the MCP server.
-func resolveCloudIDViaMCP(accessToken, siteURL string) (string, error) {
-	sessionID, err := mcpInitSession(accessToken)
-	if err != nil {
-		return "", err
-	}
-	result, err := mcpCallTool(accessToken, sessionID, "getAccessibleAtlassianResources", map[string]interface{}{})
+func resolveCloudIDViaMCP(ctx context.Context, accessToken, siteURL string) (string, error) {
+	client := NewMCPClient(accessToken, "", "", siteURL)
+	result, err := client.call(ctx, "tools/call", map[string]interface{}{
+		"name": "getAccessibleAtlassianResources", "arguments": map[string]interface{}{},
+	})
 	if err != nil {
 		return "", err
 	}
 	return matchAccessibleResource(result, siteURL)
-}
-
-// mcpInitSession creates a one-off MCP session for the resolveCloudIDViaMCP flow.
-func mcpInitSession(accessToken string) (string, error) {
-	initReq, _ := json.Marshal(mcpRequest{
-		JSONRPC: "2.0",
-		Method:  "initialize",
-		Params: map[string]interface{}{
-			"protocolVersion": mcpProtocol,
-			"capabilities":    map[string]interface{}{},
-			"clientInfo":      map[string]string{"name": "kandev", "version": "1.0"},
-		},
-		ID: nextMCPID(),
-	})
-	req, err := http.NewRequest("POST", mcpEndpoint, bytes.NewReader(initReq))
-	if err != nil {
-		return "", err
-	}
-	setMCPHeaders(req, accessToken, "")
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	sessionID := resp.Header.Get("Mcp-Session-Id")
-	_ = resp.Body.Close()
-	if sessionID == "" {
-		return "", errors.New("MCP initialize: no session ID")
-	}
-	return sessionID, nil
-}
-
-// mcpCallTool sends a tools/call request to the MCP server and returns the
-// text content of the first result.
-func mcpCallTool(accessToken, sessionID, toolName string, args map[string]interface{}) (string, error) {
-	callReq, _ := json.Marshal(mcpRequest{
-		JSONRPC: "2.0",
-		Method:  "tools/call",
-		Params: map[string]interface{}{
-			"name":      toolName,
-			"arguments": args,
-		},
-		ID: nextMCPID(),
-	})
-	req, err := http.NewRequest("POST", mcpEndpoint, bytes.NewReader(callReq))
-	if err != nil {
-		return "", err
-	}
-	setMCPHeaders(req, accessToken, sessionID)
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("MCP %s: %d: %s", toolName, resp.StatusCode, string(raw))
-	}
-	data := parseSSE(raw)
-	if data == "" {
-		return "", errors.New("MCP returned empty response")
-	}
-	var mcpr mcpResponse
-	if err := json.Unmarshal([]byte(data), &mcpr); err != nil {
-		return "", fmt.Errorf("decode MCP response: %w", err)
-	}
-	if mcpr.Error != nil {
-		return "", fmt.Errorf("MCP error %d: %s", mcpr.Error.Code, mcpr.Error.Message)
-	}
-	if len(mcpr.Result.Content) == 0 {
-		return "", errors.New("MCP returned no content")
-	}
-	return mcpr.Result.Content[0].Text, nil
-}
-
-// setMCPHeaders sets the standard MCP HTTP headers on a request.
-func setMCPHeaders(req *http.Request, accessToken, sessionID string) {
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set("MCP-Protocol-Version", mcpProtocol)
-	if sessionID != "" {
-		req.Header.Set("Mcp-Session-Id", sessionID)
-	}
 }
 
 // matchAccessibleResource parses accessible-resources JSON and matches by URL.
@@ -494,29 +472,42 @@ type accessibleResource struct {
 // perWorkspaceMutex provides a lock per workspace ID for OAuth token refresh.
 type perWorkspaceMutex struct {
 	mu    sync.Mutex
-	locks map[string]*sync.Mutex
+	locks map[string]*workspaceLock
+}
+
+type workspaceLock struct {
+	mu   sync.Mutex
+	refs int
 }
 
 func newPerWorkspaceMutex() *perWorkspaceMutex {
-	return &perWorkspaceMutex{locks: make(map[string]*sync.Mutex)}
+	return &perWorkspaceMutex{locks: make(map[string]*workspaceLock)}
 }
 
 func (p *perWorkspaceMutex) Lock(workspaceID string) {
 	p.mu.Lock()
-	m, ok := p.locks[workspaceID]
+	entry, ok := p.locks[workspaceID]
 	if !ok {
-		m = &sync.Mutex{}
-		p.locks[workspaceID] = m
+		entry = &workspaceLock{}
+		p.locks[workspaceID] = entry
 	}
+	entry.refs++
 	p.mu.Unlock()
-	m.Lock()
+	entry.mu.Lock()
 }
 
 func (p *perWorkspaceMutex) Unlock(workspaceID string) {
 	p.mu.Lock()
-	m, ok := p.locks[workspaceID]
+	entry, ok := p.locks[workspaceID]
 	p.mu.Unlock()
-	if ok {
-		m.Unlock()
+	if !ok {
+		return
 	}
+	entry.mu.Unlock()
+	p.mu.Lock()
+	entry.refs--
+	if entry.refs == 0 {
+		delete(p.locks, workspaceID)
+	}
+	p.mu.Unlock()
 }

@@ -23,10 +23,9 @@ const (
 	// Cloud doesn't accept Bearer for the Jira REST API.
 	AuthMethodPAT = "pat"
 	// AuthMethodOAuth is Atlassian's OAuth 2.0 (3LO) authorization code flow.
-	// Cloud-only. The access token (15 min TTL) is sent as Bearer; a rotating
-	// refresh token (90 day inactivity) keeps the session alive. API calls hit
-	// the direct site URL ({site}.atlassian.net/rest/api/3/...), which accepts
-	// OAuth Bearer tokens — the same endpoints used by api_token/session_cookie.
+	// Cloud-only. A rotating refresh token keeps the session alive. API calls
+	// use the Atlassian MCP server because its OAuth token does not work with
+	// the direct Jira REST API.
 	AuthMethodOAuth = "oauth"
 )
 
@@ -55,13 +54,13 @@ type JiraConfig struct {
 	// a JWT (cloud.session.token / tenant.session.token). Nil for api_token or
 	// opaque session cookies.
 	SecretExpiresAt *time.Time `json:"secretExpiresAt,omitempty" db:"-"`
-	// ClientID is the OAuth app's client_id (from Atlassian developer console).
-	// Stored in the config row, not the secret store — it is not sensitive.
+	// ClientID is the client_id from OAuth Dynamic Client Registration.
+	// Stored in the config row, not the secret store; it is not sensitive.
 	// Only set when AuthMethod == AuthMethodOAuth.
 	ClientID string `json:"clientId,omitempty" db:"client_id"`
-	// CloudID is the Atlassian Cloud site ID resolved from the accessible-
-	// resources endpoint during OAuth. Used for gateway routing if direct
-	// calls are blocked. Only set when AuthMethod == AuthMethodOAuth.
+	// CloudID is the Atlassian Cloud site ID resolved through the MCP server.
+	// MCP tool requests use it to select the Jira site. Only set when
+	// AuthMethod == AuthMethodOAuth.
 	CloudID string `json:"cloudId,omitempty" db:"cloud_id"`
 	// TokenExpiresAt is the OAuth access token expiry. The client refreshes
 	// on-demand when a request hits this deadline. Only for AuthMethodOAuth.

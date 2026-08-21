@@ -240,7 +240,8 @@ func (c *Controller) httpCopyConfig(ctx *gin.Context) {
 	if err != nil {
 		status := http.StatusInternalServerError
 		switch {
-		case errors.Is(err, ErrSameWorkspace), errors.Is(err, ErrNothingToCopy), errors.Is(err, ErrInvalidConfig):
+		case errors.Is(err, ErrSameWorkspace), errors.Is(err, ErrNothingToCopy),
+			errors.Is(err, ErrOAuthConfigCopyUnsupported), errors.Is(err, ErrInvalidConfig):
 			status = http.StatusBadRequest
 		case workspaceDenied(err):
 			status = http.StatusNotFound

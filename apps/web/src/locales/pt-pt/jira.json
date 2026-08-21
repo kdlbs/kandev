@@ -212,7 +212,7 @@
   "builtinViewAssignedToMe": "Atribuídos a mim",
   "builtinViewUnassigned": "Sem responsável",
   "connectWithAtlassian": "Ligar à Atlassian",
-  "connecting": "Connecting...",
+  "connecting": "A ligar...",
   "oauth2": "OAuth 2.0",
   "oauthConnected": "Ligado através de OAuth. Os tokens são renovados automaticamente.",
   "oauthDescription": "Autenticação através do OAuth 2.1 da Atlassian com PKCE. Não é necessário criar uma aplicação nem fornecer credenciais. Clique para autorizar através do seu navegador. Os tokens são renovados automaticamente ao expirar.",
@@ -220,6 +220,7 @@
   "oauthTokenExpires": "O token expira a: {{date}}",
   "oauthPasteInstructions": "Conclua a autorização no novo separador",
   "oauthPasteHelp": "Depois de aprovar na Atlassian, será redirecionado para um URL de localhost que não irá carregar. Copie o URL completo da barra de endereço do navegador e cole-o abaixo.",
+  "oauthPopupBlocked": "O navegador bloqueou a janela de autorização. Permita pop-ups e tente novamente.",
   "oauthComplete": "Concluir",
   "oauthCancel": "Cancelar",
   "oauthPasteInvalid": "URL inválido. Certifique-se de que copiou o URL de redirecionamento completo, incluindo os parâmetros code e state."

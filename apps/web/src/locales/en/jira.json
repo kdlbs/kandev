@@ -29,6 +29,7 @@
   "oauthTokenExpires": "Token expires at: {{date}}",
   "oauthPasteInstructions": "Complete authorization in the new tab",
   "oauthPasteHelp": "After approving on Atlassian, you'll be redirected to a localhost URL that won't load. Copy the full URL from your browser's address bar and paste it below.",
+  "oauthPopupBlocked": "Your browser blocked the authorization window. Allow pop-ups and try again.",
   "oauthComplete": "Complete",
   "oauthCancel": "Cancel",
   "oauthPasteInvalid": "Invalid URL. Make sure you copied the full redirect URL including code and state parameters.",
