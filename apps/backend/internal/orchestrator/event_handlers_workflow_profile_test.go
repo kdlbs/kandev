@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,36 @@ import (
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
+
+// terminalizeCandidateBeforePromotionRepo pauses a profile-switch promotion
+// after lookup so the test can terminalize the selected row before the
+// promotion write begins.
+type terminalizeCandidateBeforePromotionRepo struct {
+	sessionExecutorStore
+	promotionReached chan struct{}
+	allowPromotion   chan struct{}
+	once             sync.Once
+}
+
+func (r *terminalizeCandidateBeforePromotionRepo) waitForPromotion() {
+	r.once.Do(func() { close(r.promotionReached) })
+	<-r.allowPromotion
+}
+
+func (r *terminalizeCandidateBeforePromotionRepo) SetSessionPrimary(ctx context.Context, sessionID string) error {
+	r.waitForPromotion()
+	return r.sessionExecutorStore.SetSessionPrimary(ctx, sessionID)
+}
+
+func (r *terminalizeCandidateBeforePromotionRepo) SetSessionPrimaryIfNonterminal(
+	ctx context.Context,
+	sessionID string,
+) (bool, error) {
+	r.waitForPromotion()
+	return r.sessionExecutorStore.(interface {
+		SetSessionPrimaryIfNonterminal(context.Context, string) (bool, error)
+	}).SetSessionPrimaryIfNonterminal(ctx, sessionID)
+}
 
 func seedAutopilotTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string, sessionState models.TaskSessionState) {
 	t.Helper()
@@ -713,6 +744,83 @@ func TestSwitchSessionForStep_ReusesNonterminalSession(t *testing.T) {
 	}
 	if parked.IsPrimary {
 		t.Error("previous current session must no longer be primary")
+	}
+}
+
+func TestSwitchSessionForStep_CreatesFreshSessionWhenCandidateTerminalizesBeforePromotion(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	repo := setupTestRepo(t)
+
+	requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+	requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+	requireNoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "t1", WorkflowID: "wf1", WorkflowStepID: "step1", Title: "Test", Description: "Test",
+		State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now,
+	}))
+
+	candidate := &models.TaskSession{
+		ID: "session-a", TaskID: "t1", AgentProfileID: "profile-a", ExecutorID: "exec-local",
+		ExecutorProfileID: "ep1", State: models.TaskSessionStateWaitingForInput,
+		StartedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute),
+	}
+	current := &models.TaskSession{
+		ID: "session-b", TaskID: "t1", AgentProfileID: "profile-b", ExecutorID: "exec-local",
+		ExecutorProfileID: "ep1", State: models.TaskSessionStateRunning, IsPrimary: true,
+		StartedAt: now, UpdatedAt: now,
+	}
+	requireNoError(t, repo.CreateTaskSession(ctx, candidate))
+	requireNoError(t, repo.CreateTaskSession(ctx, current))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", WorkspaceID: "ws1", WorkflowID: "wf1", Title: "Test", Description: "Test", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	log := testLogger()
+	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	svc := &Service{
+		logger: log, workflowStepGetter: newMockStepGetter(), taskRepo: taskRepo, agentManager: agentMgr,
+		messageQueue: messagequeue.NewServiceMemory(log), executor: exec,
+		scheduler: scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{}),
+	}
+	barrierRepo := &terminalizeCandidateBeforePromotionRepo{
+		sessionExecutorStore: repo,
+		promotionReached:     make(chan struct{}),
+		allowPromotion:       make(chan struct{}),
+	}
+	svc.repo = barrierRepo
+
+	resultCh := make(chan *models.TaskSession, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := svc.switchSessionForStep(ctx, "t1", current, "profile-a")
+		resultCh <- result
+		errCh <- err
+	}()
+
+	<-barrierRepo.promotionReached
+	requireNoError(t, repo.UpdateTaskSessionState(ctx, candidate.ID, models.TaskSessionStateCompleted, "finished concurrently"))
+	close(barrierRepo.allowPromotion)
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("switch session: %v", err)
+	}
+	result := <-resultCh
+	if result == nil || result.ID == candidate.ID {
+		t.Fatalf("expected a fresh session after candidate terminalized, got %+v", result)
+	}
+
+	storedCandidate, err := repo.GetTaskSession(ctx, candidate.ID)
+	requireNoError(t, err)
+	if storedCandidate.State != models.TaskSessionStateCompleted {
+		t.Errorf("candidate state = %s, want COMPLETED", storedCandidate.State)
+	}
+	if storedCandidate.IsPrimary {
+		t.Error("terminalized candidate must not become primary")
+	}
+	fresh, err := repo.GetTaskSession(ctx, result.ID)
+	requireNoError(t, err)
+	if fresh.State != models.TaskSessionStateCreated || !fresh.IsPrimary {
+		t.Errorf("fresh session = state %s, primary %t; want CREATED primary", fresh.State, fresh.IsPrimary)
 	}
 }
 
