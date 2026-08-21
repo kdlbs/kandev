@@ -198,6 +198,9 @@ func TestCostBreakdowns(t *testing.T) {
 		(id, workspace_id, name, created_at, updated_at)
 		VALUES ('proj-1', 'ws-1', 'Acme Migration',
 		        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+	// GetCostsByProject attributes by the task's live project_id, not the
+	// event snapshot, so the task itself must carry the assignment.
+	mustExec(t, repo, `UPDATE tasks SET project_id = 'proj-1' WHERE id = 'task-bd'`)
 
 	for i := 0; i < 3; i++ {
 		event := &models.CostEvent{
@@ -264,6 +267,63 @@ func TestCostBreakdowns(t *testing.T) {
 	if byProvider[0].GroupKey != "unknown" || byProvider[0].GroupLabel != "(unknown)" {
 		t.Errorf("by provider = (key=%q,label=%q), want (unknown,(unknown))",
 			byProvider[0].GroupKey, byProvider[0].GroupLabel)
+	}
+}
+
+// TestGetCostsByProject_FollowsLiveReassignment confirms a task's entire
+// cost history moves to a project the moment the task is assigned to it,
+// even though the cost events were recorded before the assignment existed.
+// office_cost_events.project_id is a write-time snapshot (event_subscribers.go)
+// and must never be consulted for attribution; only the task's current
+// project_id is authoritative. This is the regression for the "assigning a
+// finished task to a project doesn't move its cost" report.
+func TestGetCostsByProject_FollowsLiveReassignment(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	seedTasksTable(t, repo, "task-reassign", "ws-reassign")
+	mustExec(t, repo, `INSERT INTO office_projects
+		(id, workspace_id, name, created_at, updated_at)
+		VALUES ('proj-reassign', 'ws-reassign', 'Kandev',
+		        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+
+	// Recorded while the task had no project assigned, so the snapshot
+	// column (office_cost_events.project_id) is empty on this row.
+	event := &models.CostEvent{
+		TaskID:       "task-reassign",
+		CostSubcents: 2013,
+		OccurredAt:   time.Now().UTC(),
+	}
+	if err := repo.CreateCostEvent(ctx, event); err != nil {
+		t.Fatalf("create cost: %v", err)
+	}
+
+	byProject, err := repo.GetCostsByProject(ctx, "ws-reassign")
+	if err != nil {
+		t.Fatalf("by project (before assignment): %v", err)
+	}
+	if len(byProject) != 1 || byProject[0].GroupKey != "" || byProject[0].TotalSubcents != 2013 {
+		t.Fatalf("before assignment: got %+v, want one unassigned row of 2013", byProject)
+	}
+
+	// The user assigns the (already-finished) task to the project. No new
+	// cost event is recorded.
+	mustExec(t, repo, `UPDATE tasks SET project_id = 'proj-reassign' WHERE id = 'task-reassign'`)
+
+	byProject, err = repo.GetCostsByProject(ctx, "ws-reassign")
+	if err != nil {
+		t.Fatalf("by project (after assignment): %v", err)
+	}
+	if len(byProject) != 1 {
+		t.Fatalf("after assignment: got %+v, want a single row", byProject)
+	}
+	if byProject[0].GroupKey != "proj-reassign" || byProject[0].GroupLabel != "Kandev" {
+		t.Errorf("after assignment: got key=%q label=%q, want proj-reassign/Kandev",
+			byProject[0].GroupKey, byProject[0].GroupLabel)
+	}
+	if byProject[0].TotalSubcents != 2013 {
+		t.Errorf("after assignment: total = %d, want 2013 (unchanged, just re-attributed)",
+			byProject[0].TotalSubcents)
 	}
 }
 
@@ -394,7 +454,11 @@ func TestGetCostForProject(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
+	seedTasksTable(t, repo, "task-proj-y", "ws-proj-y")
+	mustExec(t, repo, `UPDATE tasks SET project_id = 'proj-y' WHERE id = 'task-proj-y'`)
+
 	event := &models.CostEvent{
+		TaskID:       "task-proj-y",
 		ProjectID:    "proj-y",
 		CostSubcents: 25,
 		OccurredAt:   time.Now().UTC(),
@@ -419,6 +483,7 @@ func TestPeriodAwareRollups(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 	seedTasksTable(t, repo, "task-month", "ws-period")
+	mustExec(t, repo, `UPDATE tasks SET project_id = 'proj-period' WHERE id = 'task-month'`)
 
 	now := time.Now().UTC()
 	thisMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
