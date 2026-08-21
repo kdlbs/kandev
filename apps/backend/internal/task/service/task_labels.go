@@ -19,12 +19,19 @@ func EncodeTaskLabelsForUpdate(labels []string) string {
 	return encodeTaskLabels(labels, true)
 }
 
-// ValidateTaskLabels checks that a stored labels value is valid JSON and
-// contains only string elements. It is a defense-in-depth guard on write
-// paths where raw label strings bypass EncodeTaskLabels normalization.
+// ValidateTaskLabels checks that a stored labels value is a valid JSON array
+// containing only non-blank string elements. It rejects null, scalars, and
+// objects — json.Unmarshal of null into []string succeeds silently (nil
+// slice), so non-array semantics are caught explicitly. This is a defense-
+// in-depth guard on write paths where raw label strings bypass
+// EncodeTaskLabels normalization.
 func ValidateTaskLabels(encoded string) error {
 	if encoded == "" || encoded == "[]" {
 		return nil
+	}
+	trimmed := strings.TrimSpace(encoded)
+	if trimmed == "null" || !strings.HasPrefix(trimmed, "[") {
+		return fmt.Errorf("labels must be a JSON array, got %q", encoded)
 	}
 	var labels []string
 	if err := json.Unmarshal([]byte(encoded), &labels); err != nil {
