@@ -11,6 +11,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const restorePopoverTestId = "plan-revision-restore-confirm-popover";
+const restoreInlineTestId = "plan-revision-restore-inline-confirmation";
+const restoreButtonTestId = "plan-revision-revert-button";
+const restoreConfirmTestId = "plan-revision-restore-confirm";
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => mocks.breakpoint,
@@ -41,23 +44,25 @@ function revision(revisionNumber: number): TaskPlanRevision {
 }
 
 function renderHistory(onRevert = vi.fn().mockResolvedValue(revision(3))) {
-  render(
-    <TaskPlanRevisions
-      taskId="task-1"
-      revisions={[revision(2), revision(1)]}
-      isLoading={false}
-      isSaving={false}
-      onOpen={vi.fn()}
-      onRevert={onRevert}
-      loadRevisionContent={vi.fn().mockResolvedValue("content")}
-      previewRevisionId={null}
-      setPreviewRevision={vi.fn()}
-      comparePair={[null, null]}
-      toggleCompareSelection={vi.fn()}
-      clearComparePair={vi.fn()}
-    />,
-  );
+  const props = {
+    taskId: "task-1",
+    revisions: [revision(2), revision(1)],
+    isLoading: false,
+    onOpen: vi.fn(),
+    onRevert,
+    loadRevisionContent: vi.fn().mockResolvedValue("content"),
+    previewRevisionId: null,
+    setPreviewRevision: vi.fn(),
+    comparePair: [null, null] as [string | null, string | null],
+    toggleCompareSelection: vi.fn(),
+    clearComparePair: vi.fn(),
+  };
+  const view = render(<TaskPlanRevisions {...props} isSaving={false} />);
   fireEvent.click(screen.getByTestId("plan-rewind-button"));
+  return {
+    setSaving: (isSaving: boolean) =>
+      view.rerender(<TaskPlanRevisions {...props} isSaving={isSaving} />),
+  };
 }
 
 function olderRevisionRow() {
@@ -80,7 +85,7 @@ describe("TaskPlanRevisions restore confirmation", () => {
     renderHistory(onRevert);
 
     const row = olderRevisionRow();
-    const restore = within(row).getByTestId("plan-revision-revert-button");
+    const restore = within(row).getByTestId(restoreButtonTestId);
     fireEvent.click(restore);
 
     const confirmation = await screen.findByTestId(restorePopoverTestId);
@@ -99,9 +104,9 @@ describe("TaskPlanRevisions restore confirmation", () => {
     renderHistory(onRevert);
 
     const row = olderRevisionRow();
-    fireEvent.click(within(row).getByTestId("plan-revision-revert-button"));
+    fireEvent.click(within(row).getByTestId(restoreButtonTestId));
     const confirmation = await screen.findByTestId(restorePopoverTestId);
-    fireEvent.click(within(confirmation).getByTestId("plan-revision-restore-confirm"));
+    fireEvent.click(within(confirmation).getByTestId(restoreConfirmTestId));
 
     await waitFor(() => expect(onRevert).toHaveBeenCalledTimes(1));
     expect(onRevert).toHaveBeenCalledWith("revision-1");
@@ -113,9 +118,9 @@ describe("TaskPlanRevisions restore confirmation", () => {
     renderHistory();
 
     const row = olderRevisionRow();
-    fireEvent.click(within(row).getByTestId("plan-revision-revert-button"));
+    fireEvent.click(within(row).getByTestId(restoreButtonTestId));
 
-    const confirmation = await screen.findByTestId("plan-revision-restore-inline-confirmation");
+    const confirmation = await screen.findByTestId(restoreInlineTestId);
     expect(confirmation.textContent).toContain("v1");
     expect(screen.queryByTestId(restorePopoverTestId)).toBeNull();
     expect(within(confirmation).getByRole("button", { name: "Restore v1" }).className).toContain(
@@ -125,4 +130,48 @@ describe("TaskPlanRevisions restore confirmation", () => {
       "min-w-11",
     );
   });
+
+  it("clears the phone confirmation when plan history closes", async () => {
+    mocks.breakpoint.isFinePointer = false;
+    renderHistory();
+
+    fireEvent.click(within(olderRevisionRow()).getByTestId(restoreButtonTestId));
+    await screen.findByTestId(restoreInlineTestId);
+
+    fireEvent.click(screen.getByTestId("plan-rewind-button"));
+    await waitFor(() => expect(screen.queryByTestId("plan-revisions-popover")).toBeNull());
+    fireEvent.click(screen.getByTestId("plan-rewind-button"));
+
+    await screen.findByTestId("plan-revisions-popover");
+    expect(screen.queryByTestId(restoreInlineTestId)).toBeNull();
+  });
+
+  it.each([
+    { surface: "desktop", isFinePointer: true, testId: restorePopoverTestId },
+    {
+      surface: "phone",
+      isFinePointer: false,
+      testId: restoreInlineTestId,
+    },
+  ])(
+    "disables open $surface confirmation actions when saving starts",
+    async ({ isFinePointer, testId }) => {
+      mocks.breakpoint.isFinePointer = isFinePointer;
+      const onRevert = vi.fn().mockResolvedValue(revision(3));
+      const { setSaving } = renderHistory(onRevert);
+
+      fireEvent.click(within(olderRevisionRow()).getByTestId(restoreButtonTestId));
+      const confirmation = await screen.findByTestId(testId);
+      setSaving(true);
+
+      expect(
+        (within(confirmation).getByRole("button", { name: "Cancel" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(true);
+      const confirm = within(confirmation).getByTestId(restoreConfirmTestId);
+      expect(confirm).toHaveProperty("disabled", true);
+      fireEvent.click(confirm);
+      expect(onRevert).not.toHaveBeenCalled();
+    },
+  );
 });

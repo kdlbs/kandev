@@ -54,8 +54,15 @@ export function TaskPlanRevisions(props: TaskPlanRevisionsProps) {
   const [rowConfirmTarget, setRowConfirmTarget] = useState<TaskPlanRevision | null>(null);
   const [diffOpen, setDiffOpen] = useState(false);
   const agentName = useActiveAgentBackendName();
-  const handleOpenChange = useTriggerOnFirstOpen(setOpen, props.onOpen);
-  const closePopover = useCallback(() => setOpen(false), []);
+  const triggerOpenChange = useTriggerOnFirstOpen(setOpen, props.onOpen);
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen) setRowConfirmTarget(null);
+      triggerOpenChange(nextOpen);
+    },
+    [triggerOpenChange],
+  );
+  const closePopover = useCallback(() => handleOpenChange(false), [handleOpenChange]);
 
   const handleRevert = useCallback(
     async (revision: TaskPlanRevision) => {
@@ -475,6 +482,7 @@ function RevisionRow({
       <RevisionInlineConfirmation
         revision={revision}
         isCurrent={isCurrent}
+        isSaving={isSaving}
         isFinePointer={isFinePointer}
         rowConfirmTarget={rowConfirmTarget}
         onRevertCancel={onRevertCancel}
@@ -577,6 +585,7 @@ function RevisionRestoreAction({
       {isFinePointer && (
         <ActionConfirmPopover
           open={isConfirming}
+          disabled={isSaving}
           anchorRef={restoreButtonRef}
           title={t("task:restoreToVersionConfirm", { version })}
           description={t("task:restoreToVersionDescription", { version })}
@@ -599,13 +608,20 @@ function RevisionRestoreAction({
 function RevisionInlineConfirmation({
   revision,
   isCurrent,
+  isSaving,
   isFinePointer,
   rowConfirmTarget,
   onRevertCancel,
   onRevert,
 }: Pick<
   RevisionRowProps,
-  "revision" | "isCurrent" | "isFinePointer" | "rowConfirmTarget" | "onRevertCancel" | "onRevert"
+  | "revision"
+  | "isCurrent"
+  | "isSaving"
+  | "isFinePointer"
+  | "rowConfirmTarget"
+  | "onRevertCancel"
+  | "onRevert"
 >) {
   const { t } = useTranslation();
   if (isCurrent || isFinePointer || rowConfirmTarget?.id !== revision.id) return null;
@@ -616,6 +632,7 @@ function RevisionInlineConfirmation({
     <div className="mt-2 min-w-0">
       <InlineConfirmActions
         density="touch"
+        disabled={isSaving}
         testId="plan-revision-restore-inline-confirmation"
         ariaLabel={t("task:restoreToVersionConfirm", { version })}
         description={t("task:restoreToVersionDescription", { version })}
