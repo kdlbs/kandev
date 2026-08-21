@@ -3,6 +3,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 
 export const LARGE_COLUMN_TASK_COUNT = 440;
+const MAX_MOUNTED_TASK_CARDS = 50;
 const TASK_SEED_BATCH_SIZE = 25;
 
 export async function seedLargeColumnTasks(
@@ -37,7 +38,7 @@ export async function mountedTaskCardIds(column: Locator): Promise<string[]> {
 }
 
 export async function expectBoundedMountedCards(column: Locator): Promise<void> {
-  await expect.poll(() => taskCards(column).count()).toBeLessThan(100);
+  await expect.poll(() => taskCards(column).count()).toBeLessThan(MAX_MOUNTED_TASK_CARDS);
 }
 
 export async function scrollColumnToBottom(scrollOwner: Locator): Promise<void> {

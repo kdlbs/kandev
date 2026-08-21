@@ -34,7 +34,7 @@ test("keeps the focused mobile column virtualized and touch-navigable", async ({
   await expect(startColumnTab).toHaveCount(1);
   await startColumnTab.tap();
 
-  const column = testPage.getByTestId(`kanban-column-${seedData.startStepId}`);
+  const column = mobile.mobileKanbanLayout().getByTestId(`kanban-column-${seedData.startStepId}`);
   await expect(column).toBeVisible();
   await expect.poll(() => taskCards(column).count()).toBeGreaterThan(0);
 
@@ -64,6 +64,6 @@ test("keeps the focused mobile column virtualized and touch-navigable", async ({
   if (!reachedCardTestId) throw new Error("reached card has no stable test id");
   const reachedTaskId = reachedCardTestId.replace(/^task-card-/, "");
 
-  await reachedCard.tap();
+  await column.getByTestId(reachedCardTestId).tap();
   await expect(testPage).toHaveURL(new RegExp(`/t/${reachedTaskId}`));
 });

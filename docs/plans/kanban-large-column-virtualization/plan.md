@@ -47,19 +47,24 @@ because it measures the mounted production DOM and operates the real card tree.
 
 - **What:** existing drag, open, selection, and WIP behavior remains available for small columns.
 - **Files:** existing Kanban E2E specifications.
-- **How:** run the focused existing desktop, mobile, and WIP specifications after the repair.
+- **How:** run the focused existing desktop, tablet, mobile, and WIP specifications after the repair.
 
 ## E2E Tests
 
 - **Scenario:** A desktop column contains 440 inert tasks.
 - **File:** `apps/web/e2e/tests/kanban/large-column-virtualization.spec.ts`.
-- **What to validate:** fewer than 100 card bodies mount, the count remains 440, scrolling replaces the
+- **What to validate:** fewer than 50 card bodies mount, the count remains 440, scrolling replaces the
   mounted window, and a reached card opens normally.
 
 - **Scenario:** A phone column contains 440 inert tasks.
 - **File:** `apps/web/e2e/tests/kanban/mobile-large-column-virtualization.spec.ts`.
 - **What to validate:** the focused-column layout remains present, fewer than 100 card bodies mount,
   the document has no horizontal overflow, and a reached card opens by touch.
+
+- **Scenario:** A coarse-pointer tablet column contains 440 inert tasks.
+- **File:** `apps/web/e2e/tests/kanban/tablet-large-column-virtualization.spec.ts`.
+- **What to validate:** the two-column snap-scrolling layout remains present, fewer than 50 card
+  bodies mount, scrolling replaces the mounted window, and a reached card opens normally.
 
 - **Shared setup:** `apps/web/e2e/tests/kanban/large-column-virtualization-helpers.ts` seeds tasks in
   bounded request batches and contains shared structural assertions.
@@ -75,11 +80,11 @@ RED:
 
 GREEN:
 
-- `pnpm e2e:run tests/kanban/large-column-virtualization.spec.ts tests/kanban/kanban-board.spec.ts tests/kanban/wip-overflow-queue.spec.ts`:
-  8 passed.
+- `pnpm e2e:run tests/kanban/large-column-virtualization.spec.ts tests/kanban/tablet-large-column-virtualization.spec.ts tests/kanban/kanban-board.spec.ts tests/kanban/wip-overflow-queue.spec.ts`:
+  9 passed after review remediation.
 - `pnpm e2e:run --no-build --project mobile-chrome tests/kanban/mobile-large-column-virtualization.spec.ts tests/kanban/mobile-kanban.spec.ts`:
   28 passed.
-- `pnpm exec eslint components/kanban-column.tsx components/kanban/virtualized-column-task-list.tsx components/kanban/adaptive-desktop-kanban.tsx components/kanban/swimlane-container.tsx components/kanban/swimlane-kanban-content.tsx components/kanban/swimlane-section.tsx components/kanban/swipeable-columns.tsx e2e/tests/kanban/large-column-virtualization.spec.ts e2e/tests/kanban/mobile-large-column-virtualization.spec.ts e2e/tests/kanban/large-column-virtualization-helpers.ts`: passed.
+- `pnpm exec eslint components/kanban/swimlane-container.tsx components/kanban/virtualized-column-task-list.tsx e2e/tests/kanban/large-column-virtualization-helpers.ts e2e/tests/kanban/large-column-virtualization.spec.ts e2e/tests/kanban/mobile-large-column-virtualization.spec.ts e2e/tests/kanban/tablet-large-column-virtualization.spec.ts`: passed.
 - `pnpm run typecheck`: passed.
 - `pnpm run build:e2e`: passed.
 

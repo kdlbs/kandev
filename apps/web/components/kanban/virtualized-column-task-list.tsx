@@ -68,7 +68,7 @@ export function VirtualizedColumnTaskList({
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: orderedTasks.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 96,
+    estimateSize: (index) => (queuedCount > 0 && index === queuedStartIndex ? 136 : 96),
     getItemKey: (index) => orderedTasks[index]?.id ?? index,
     overscan: 5,
   });

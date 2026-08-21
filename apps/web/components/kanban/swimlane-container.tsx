@@ -402,6 +402,7 @@ type WorkflowItemsProps = {
   ViewComponent: ComponentType<ViewContentProps>;
   hideHeaders: boolean;
   fillHeight: boolean;
+  isMobileKanban: boolean;
   onToggleStepVisibility: (workflowId: string, stepId: string) => void;
   canSortWorkflows: boolean;
   isCollapsed: (workflowId: string) => boolean;
@@ -417,6 +418,7 @@ function WorkflowItems({
   ViewComponent,
   hideHeaders,
   fillHeight,
+  isMobileKanban,
   onToggleStepVisibility,
   canSortWorkflows,
   isCollapsed,
@@ -427,17 +429,18 @@ function WorkflowItems({
   return workflows.map((workflow, index) => {
     const snapshot = snapshots[workflow.id];
     if (!snapshot) return null;
+    const collapsed = isCollapsed(workflow.id);
     return (
       <SortableWorkflowItem
-        key={fillHeight ? "mobile-active-workflow" : workflow.id}
+        key={isMobileKanban ? "mobile-active-workflow" : workflow.id}
         wf={workflow}
         snapshot={snapshot}
         tasks={getFilteredTasks(workflow.id)}
         ViewComponent={ViewComponent}
         hideHeader={hideHeaders}
-        fillHeight={fillHeight}
-        isSortable={canSortWorkflows && !fillHeight}
-        isCollapsed={isCollapsed(workflow.id)}
+        fillHeight={fillHeight && !collapsed}
+        isSortable={canSortWorkflows && !isMobileKanban}
+        isCollapsed={collapsed}
         onToggleCollapse={() => toggleCollapse(workflow.id)}
         onPreviewTask={containerProps.onPreviewTask}
         onOpenTask={containerProps.onOpenTask}
@@ -560,6 +563,7 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
             hideHeaders={hideHeaders}
             onToggleStepVisibility={onToggleStepVisibility}
             fillHeight={view.id === "kanban"}
+            isMobileKanban={isMobileKanban}
             canSortWorkflows={canSortWorkflows}
             isCollapsed={isCollapsed}
             toggleCollapse={toggleCollapse}
