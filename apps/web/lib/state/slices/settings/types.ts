@@ -123,16 +123,26 @@ export function mergeOptionsByNewest(
 /**
  * Maps an AvailableAgent's host-utility probe result to AgentProfileOption's
  * capability fields. `buildModelConfigFromHostUtility` (backend) emits the
- * literal "not_configured" on a cache miss, while the AgentDTO path used by
- * agent.profile.created/updated leaves the field empty for the same case —
- * map it back to undefined so both paths agree with isHealthyAgentProfile,
- * which treats undefined as healthy and "not_configured" as unhealthy.
+ * literal "not_configured" both on a genuine cache miss (agent not probed
+ * yet, e.g. a non-ACP agent that is actually installed) and, permanently,
+ * for agents the host-utility probe never covers at all (TUI/passthrough
+ * agents are not InferenceAgents, so they never enter the probe cache
+ * regardless of install state). `agent.available` disambiguates the two:
+ * when it is explicitly false the agent's own detection already ran and
+ * failed, so map to "not_installed" instead of collapsing to undefined.
+ * The AgentDTO path used by agent.profile.created/updated leaves the field
+ * empty for the true cache-miss case — map that back to undefined so both
+ * paths agree with isHealthyAgentProfile, which treats undefined as healthy
+ * and "not_configured"/"not_installed" as unhealthy.
  */
 export function toProfileCapability(agent: AvailableAgent): {
   capability_status?: CapabilityStatus;
   capability_error?: string;
 } {
   if (agent.model_config.status === "not_configured") {
+    if (agent.available === false) {
+      return { capability_status: "not_installed", capability_error: undefined };
+    }
     return { capability_status: undefined, capability_error: undefined };
   }
   return {

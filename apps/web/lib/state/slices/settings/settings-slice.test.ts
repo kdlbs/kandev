@@ -4,7 +4,7 @@ import { immer } from "zustand/middleware/immer";
 
 import { createSettingsSlice } from "./settings-slice";
 import type { SettingsSlice } from "./types";
-import type { AvailableAgent } from "@/lib/types/http-agents";
+import type { AvailableAgent, CapabilityStatus } from "@/lib/types/http-agents";
 
 const AGENT_NAME = "claude-acp";
 const TIMESTAMP = "2026-07-26T10:00:00Z";
@@ -164,40 +164,77 @@ function notInstalledAvailableAgent(overrides: Partial<AvailableAgent> = {}): Av
   };
 }
 
+/**
+ * Builds an AvailableAgent fixture for a non-inference agent (e.g. a
+ * TUI/passthrough agent) that never enters the host-utility probe cache, so
+ * `model_config.status` stays the cache-miss "not_configured" regardless of
+ * install state. `available` reflects the agent's own detection separately.
+ */
+function nonInferenceAvailableAgent(overrides: Partial<AvailableAgent> = {}): AvailableAgent {
+  return {
+    name: AGENT_NAME,
+    display_name: "Claude",
+    supports_mcp: false,
+    installation_paths: [],
+    available: true,
+    capabilities: {
+      supports_session_resume: false,
+      supports_shell: false,
+      supports_workspace_only: false,
+    },
+    model_config: {
+      default_model: "default",
+      available_models: [],
+      supports_dynamic_models: false,
+      status: "not_configured",
+    },
+    updated_at: TIMESTAMP,
+    ...overrides,
+  };
+}
+
+/** Seeds one profile + its owning settingsAgents entry, both under AGENT_NAME/"agent-1". */
+function seedSingleAgentProfile(
+  store: ReturnType<typeof makeStore>,
+  capabilityStatus?: CapabilityStatus,
+) {
+  const capability = capabilityStatus ? { capability_status: capabilityStatus } : {};
+  store.setState((state) => ({
+    ...state,
+    agentProfiles: {
+      ...state.agentProfiles,
+      items: [
+        {
+          id: "profile-1",
+          label: "Claude • Default",
+          agent_id: "agent-1",
+          agent_name: AGENT_NAME,
+          cli_passthrough: false,
+          ...capability,
+        },
+      ],
+    },
+    settingsAgents: {
+      items: [
+        {
+          id: "agent-1",
+          name: AGENT_NAME,
+          supports_mcp: false,
+          profiles: [],
+          created_at: TIMESTAMP,
+          updated_at: TIMESTAMP,
+          ...capability,
+        },
+      ],
+    },
+  }));
+}
+
 describe("setAvailableAgents capability propagation", () => {
   it("flips a profile and its settingsAgents entry from probing to the settled status a poll snapshot reports", () => {
     const store = makeStore();
     const actions = store.getState();
-
-    store.setState((state) => ({
-      ...state,
-      agentProfiles: {
-        ...state.agentProfiles,
-        items: [
-          {
-            id: "profile-1",
-            label: "Claude • Default",
-            agent_id: "agent-1",
-            agent_name: AGENT_NAME,
-            cli_passthrough: false,
-            capability_status: "probing",
-          },
-        ],
-      },
-      settingsAgents: {
-        items: [
-          {
-            id: "agent-1",
-            name: AGENT_NAME,
-            supports_mcp: false,
-            profiles: [],
-            capability_status: "probing",
-            created_at: TIMESTAMP,
-            updated_at: TIMESTAMP,
-          },
-        ],
-      },
-    }));
+    seedSingleAgentProfile(store, "probing");
 
     actions.setAvailableAgents([notInstalledAvailableAgent()]);
 
@@ -207,6 +244,41 @@ describe("setAvailableAgents capability propagation", () => {
     expect(profile?.capability_error).toBe("agent not installed");
     expect(settingsAgent?.capability_status).toBe("not_installed");
     expect(settingsAgent?.capability_error).toBe("agent not installed");
+  });
+
+  it("treats a non-inference agent's own failed detection as not_installed, not healthy", () => {
+    // TUI/passthrough agents never enter the host-utility probe cache (they
+    // are not InferenceAgents), so model_config.status is permanently
+    // "not_configured" regardless of whether the agent is actually
+    // installed. `available: false` is the only signal that its own
+    // detection failed; collapsing "not_configured" to undefined here would
+    // silently show it as healthy in Handoff.
+    const store = makeStore();
+    const actions = store.getState();
+    seedSingleAgentProfile(store);
+
+    actions.setAvailableAgents([nonInferenceAvailableAgent({ available: false })]);
+
+    const profile = store.getState().agentProfiles.items[0];
+    const settingsAgent = store.getState().settingsAgents.items[0];
+    expect(profile?.capability_status).toBe("not_installed");
+    expect(settingsAgent?.capability_status).toBe("not_installed");
+  });
+
+  it("keeps a not-yet-probed non-inference agent healthy when its own detection succeeded", () => {
+    // The pre-existing cache-miss case: available (installed), just not yet
+    // (or never) probed by the host-utility cache. Must stay undefined so
+    // it does not vanish from Handoff.
+    const store = makeStore();
+    const actions = store.getState();
+    seedSingleAgentProfile(store);
+
+    actions.setAvailableAgents([nonInferenceAvailableAgent({ available: true })]);
+
+    const profile = store.getState().agentProfiles.items[0];
+    const settingsAgent = store.getState().settingsAgents.items[0];
+    expect(profile?.capability_status).toBeUndefined();
+    expect(settingsAgent?.capability_status).toBeUndefined();
   });
 
   it("leaves capability_status untouched when the poll snapshot has no matching agent name", () => {

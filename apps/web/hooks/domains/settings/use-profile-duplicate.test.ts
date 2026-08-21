@@ -283,11 +283,19 @@ describe("applyProfileDuplicated capability_status sync", () => {
       },
     });
 
+    // `agent("a1")` mirrors the click-time Agent captured by the caller
+    // before the WS refresh above landed in the store — it carries no
+    // capability_status, so it must lose to the rebuilt value for both the
+    // pre-existing profile and the new copy.
     const copy = profile("p2", "a1", COPY_NAME);
     const next = applyProfileDuplicated(store.getState(), agent("a1"), copy);
 
     const rebuilt = next.agentProfiles.items.find((o) => o.id === "p1");
     expect(rebuilt?.capability_status).toBe("ok");
     expect(rebuilt?.capability_error).toBeUndefined();
+
+    const rebuiltCopy = next.agentProfiles.items.find((o) => o.id === "p2");
+    expect(rebuiltCopy?.capability_status).toBe("ok");
+    expect(rebuiltCopy?.capability_error).toBeUndefined();
   });
 });
