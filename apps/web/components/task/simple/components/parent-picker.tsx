@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { useAppStore } from "@/components/state-provider";
 import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";
@@ -18,6 +18,27 @@ type ParentPickerProps = {
 };
 
 const NO_PARENT = "__none__";
+const DETACH_CONFIRMATION_DELAY_MS = 300;
+
+function useDeferredDetachConfirmation() {
+  const [open, setOpen] = useState(false);
+  const timerRef = useRef<number | null>(null);
+  const cancelPending = useCallback(() => {
+    if (timerRef.current === null) return;
+    window.clearTimeout(timerRef.current);
+    timerRef.current = null;
+  }, []);
+  const request = useCallback(() => {
+    cancelPending();
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = null;
+      setOpen(true);
+    }, DETACH_CONFIRMATION_DELAY_MS);
+  }, [cancelPending]);
+
+  useEffect(() => cancelPending, [cancelPending]);
+  return { open, setOpen, cancelPending, request };
+}
 
 function useTaskWorkspaceMode(task: Task) {
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode | undefined>(task.workspaceMode);
@@ -72,9 +93,9 @@ export function ParentPicker({ task }: ParentPickerProps) {
   const storeTasks = useAppStore((s) => s.office.tasks.items);
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const [fetched, setFetched] = useState<OfficeTask[]>([]);
-  const [detachRequested, setDetachRequested] = useState(false);
   const [isDetaching, setIsDetaching] = useState(false);
   const detachAnchorRef = useRef<HTMLButtonElement>(null);
+  const detachConfirmation = useDeferredDetachConfirmation();
   const workspaceMode = useTaskWorkspaceMode(task);
   const mutate = useOptimisticTaskMutation();
 
@@ -107,16 +128,13 @@ export function ParentPicker({ task }: ParentPickerProps) {
 
   const currentValue = task.parentId || NO_PARENT;
 
-  const requestDetachConfirmation = () => {
-    // Let the combobox finish closing before the local confirmation opens.
-    window.setTimeout(() => setDetachRequested(true), 300);
-  };
-
   const handleSelect = async (next: string) => {
+    detachConfirmation.cancelPending();
     const sendValue = next === NO_PARENT || next === "" ? "" : next;
     if (sendValue === (task.parentId ?? "")) return;
     if (!sendValue) {
-      requestDetachConfirmation();
+      // Let the combobox finish closing before the local confirmation opens.
+      detachConfirmation.request();
       return;
     }
     const matched = candidates.find((t) => t.id === sendValue);
@@ -148,7 +166,7 @@ export function ParentPicker({ task }: ParentPickerProps) {
         },
         () => detachTask(task.id),
       );
-      setDetachRequested(false);
+      detachConfirmation.setOpen(false);
     } catch {
       // useOptimisticTaskMutation restores state and reports the request error.
     } finally {
@@ -172,11 +190,11 @@ export function ParentPicker({ task }: ParentPickerProps) {
         testId="parent-picker-trigger"
       />
       <TaskDetachConfirmationSurface
-        open={detachRequested}
+        open={detachConfirmation.open}
         anchorRef={detachAnchorRef}
         taskTitle={task.title}
         sharesParentWorkspace={workspaceMode === "inherit_parent"}
-        onOpenChange={setDetachRequested}
+        onOpenChange={detachConfirmation.setOpen}
         onConfirm={handleDetachConfirm}
       />
     </>

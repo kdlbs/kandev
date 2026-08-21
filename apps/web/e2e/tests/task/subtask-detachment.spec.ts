@@ -113,6 +113,9 @@ test.describe("Subtask detachment", () => {
     await expect(contextConfirmation).toBeVisible();
     await contextConfirmation.getByRole("button", { name: "Cancel" }).click();
     await expect(contextConfirmation).toHaveCount(0);
+    await expect(
+      kanban.taskCard(child.id).getByRole("button", { name: "More options" }),
+    ).toBeFocused();
     await expect.poll(async () => (await apiClient.getTask(child.id)).parent_id).toBe(parent.id);
 
     await kanban.openTaskActionsMenu(child.id);

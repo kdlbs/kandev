@@ -54,6 +54,7 @@ function detachConfirmAriaLabel(t: (key: string) => string, taskTitle?: string):
 export type TaskDetachConfirmPopoverProps = TaskDetachConfirmationCopyProps & {
   open: boolean;
   anchorRef: RefObject<HTMLElement | null>;
+  focusReturnRef?: RefObject<HTMLElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
   onOpenChange: (open: boolean) => void;
   onCancel?: () => void;
@@ -63,6 +64,7 @@ export type TaskDetachConfirmPopoverProps = TaskDetachConfirmationCopyProps & {
 export function TaskDetachConfirmPopover({
   open,
   anchorRef,
+  focusReturnRef,
   focusBoundaryRef,
   taskTitle,
   sharesParentWorkspace,
@@ -75,6 +77,7 @@ export function TaskDetachConfirmPopover({
     <ActionConfirmPopover
       open={open}
       anchorRef={anchorRef}
+      focusReturnRef={focusReturnRef}
       focusBoundaryRef={focusBoundaryRef}
       title={t(DETACH_TASK_FROM_PARENT_KEY)}
       description={
@@ -134,6 +137,7 @@ export function TaskDetachInlineConfirmation({
 export type TaskDetachConfirmationSurfaceProps = TaskDetachConfirmationCopyProps & {
   open: boolean;
   anchorRef: RefObject<HTMLElement | null>;
+  focusReturnRef?: RefObject<HTMLElement | null>;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void | Promise<void>;
 };
@@ -141,6 +145,7 @@ export type TaskDetachConfirmationSurfaceProps = TaskDetachConfirmationCopyProps
 export function TaskDetachConfirmationSurface({
   open,
   anchorRef,
+  focusReturnRef,
   taskTitle,
   sharesParentWorkspace,
   onOpenChange,
@@ -152,6 +157,7 @@ export function TaskDetachConfirmationSurface({
       <TaskDetachConfirmPopover
         open={open}
         anchorRef={anchorRef}
+        focusReturnRef={focusReturnRef}
         focusBoundaryRef={anchorRef}
         taskTitle={taskTitle}
         sharesParentWorkspace={sharesParentWorkspace}

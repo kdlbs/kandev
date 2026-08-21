@@ -5,6 +5,7 @@ import { useDraggable } from "@dnd-kit/core";
 import { KanbanCardContextMenu } from "@/components/kanban-card-context-menu";
 import { KanbanCardShell } from "@/components/kanban-card-content";
 import { useActiveWorkspaceRepositories } from "@/components/kanban-card-repositories";
+export { resolveTaskRepositoryChips } from "@/components/kanban-card-repositories";
 import {
   buildKanbanCardMenuEntries,
   useKanbanCardMoveTargets,
@@ -26,10 +27,7 @@ import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
 import { useDetachTask } from "@/hooks/use-detach-task";
-import { repositorySlug } from "@/lib/repository-slug";
-import { formatUserHomePath } from "@/lib/utils";
 import {
-  repositoryId as toRepositoryId,
   type ForegroundActivity,
   type Repository,
   type TaskPendingAction,
@@ -303,6 +301,7 @@ function useKanbanCardMenus({
   const dialogs = useKanbanCardDialogState();
   const { detachTask, detachingTaskId } = useDetachTask();
   const detachAnchorRef = useRef<HTMLDivElement>(null);
+  const detachFocusReturnRef = useRef<HTMLButtonElement>(null);
   const isDetaching = detachingTaskId === task.id;
   const disabled = Boolean(isDeleting || isArchiving || isDetaching);
   const actingOnMultiSelection = Boolean(isSelected && selectedIds && selectedIds.size > 1);
@@ -358,6 +357,7 @@ function useKanbanCardMenus({
     }),
     isDetaching,
     detachAnchorRef,
+    detachFocusReturnRef,
     handleDetachConfirm,
   };
 }
@@ -527,6 +527,7 @@ function KanbanCardFrame({
             isDeleting={isDeleting}
             isArchiving={isArchiving}
             menuEntries={menu.dropdownMenuEntries}
+            menuTriggerRef={menu.detachFocusReturnRef}
             onClick={onClick}
             onCheckboxClick={(e) => {
               e.stopPropagation();
@@ -539,6 +540,7 @@ function KanbanCardFrame({
       <TaskDetachConfirmationSurface
         open={menu.showDetachConfirm}
         anchorRef={menu.detachAnchorRef}
+        focusReturnRef={menu.detachFocusReturnRef}
         taskTitle={task.title}
         sharesParentWorkspace={task.workspaceMode === "inherit_parent"}
         onOpenChange={menu.setShowDetachConfirm}
@@ -629,34 +631,4 @@ export function KanbanCard({
       />
     </>
   );
-}
-
-/**
- * Resolves a task's linked repositories to card chip data. Primary first
- * (`task.repositoryId`), then any others ordered by `task.repositories[].position`.
- * Skips unresolved IDs (repo deleted / not yet hydrated).
- */
-export function resolveTaskRepositoryChips(
-  task: Task,
-  repositories: Repository[],
-): RepositoryChip[] {
-  const byId = new Map(repositories.map((repo) => [repo.id, repo]));
-  const seen = new Set<string>();
-  const chips: RepositoryChip[] = [];
-  const push = (id: string | undefined) => {
-    if (!id || seen.has(id)) return;
-    const repo = byId.get(toRepositoryId(id));
-    if (!repo) return;
-    seen.add(id);
-    const label = repositorySlug(repo);
-    if (!label) return;
-    chips.push({
-      label,
-      ...(repo.local_path ? { path: formatUserHomePath(repo.local_path) } : {}),
-    });
-  };
-  push(task.repositoryId);
-  const ordered = [...(task.repositories ?? [])].sort((a, b) => a.position - b.position);
-  for (const link of ordered) push(link.repository_id);
-  return chips;
 }

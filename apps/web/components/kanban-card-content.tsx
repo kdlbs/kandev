@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { CSS, type Transform } from "@dnd-kit/utilities";
 import type { DraggableAttributes, DraggableSyntheticListeners } from "@dnd-kit/core";
@@ -49,6 +49,7 @@ type KanbanCardActionProps = {
   menuEntries: KanbanCardMenuEntry[];
   isDeleting?: boolean;
   isArchiving?: boolean;
+  menuTriggerRef?: RefObject<HTMLButtonElement | null>;
 };
 
 type DraggableCardState = {
@@ -389,6 +390,7 @@ function KanbanCardActions({
   menuEntries,
   isDeleting,
   isArchiving,
+  menuTriggerRef,
 }: KanbanCardActionProps) {
   const { t } = useTranslation("common");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -476,6 +478,7 @@ function KanbanCardActions({
         isDeleting={isDeleting}
         isArchiving={isArchiving}
         menuEntries={menuEntries}
+        menuTriggerRef={menuTriggerRef}
       />
     </div>
   );
@@ -488,7 +491,7 @@ type KanbanCardMenuProps = KanbanCardActionProps & {
 
 function KanbanCardMenu(props: KanbanCardMenuProps) {
   const { t } = useTranslation();
-  const { effectiveMenuOpen, setMenuOpen, isDeleting, isArchiving } = props;
+  const { effectiveMenuOpen, setMenuOpen, isDeleting, isArchiving, menuTriggerRef } = props;
   const { menuEntries } = props;
   const isProcessing = isDeleting || isArchiving;
 
@@ -502,6 +505,7 @@ function KanbanCardMenu(props: KanbanCardMenuProps) {
     >
       <DropdownMenuTrigger asChild>
         <button
+          ref={menuTriggerRef}
           type="button"
           className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-sm p-1 -m-1 transition-colors cursor-pointer"
           onClick={(e) => e.stopPropagation()}
@@ -554,6 +558,7 @@ function KanbanCardActionSlot({
   menuEntries,
   isDeleting,
   isArchiving,
+  menuTriggerRef,
 }: KanbanCardActionProps & { isMultiSelectMode?: boolean }) {
   if (isMultiSelectMode) return null;
   return (
@@ -564,6 +569,7 @@ function KanbanCardActionSlot({
       menuEntries={menuEntries}
       isDeleting={isDeleting}
       isArchiving={isArchiving}
+      menuTriggerRef={menuTriggerRef}
     />
   );
 }
@@ -586,6 +592,7 @@ export function KanbanCardShell({
   onCheckboxClick,
   onOpenFullPage,
   menuEntries,
+  menuTriggerRef,
 }: KanbanCardShellProps) {
   const showCheckbox = isMultiSelectMode || !!isSelected;
   const style = {
@@ -634,6 +641,7 @@ export function KanbanCardShell({
                   menuEntries={menuEntries}
                   isDeleting={isDeleting}
                   isArchiving={isArchiving}
+                  menuTriggerRef={menuTriggerRef}
                 />
               }
             />
