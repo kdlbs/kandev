@@ -26,11 +26,13 @@ type WalkthroughLauncherProps = {
   activeStep: number;
   confirmDiscardOpen: boolean;
   discardAnchorRef: RefObject<HTMLButtonElement | null>;
+  discardDisabled: boolean;
   hasUnseen: boolean;
   isFinePointer: boolean;
   isOpen: boolean;
   onDiscardClick: () => void;
   onDiscardCancel: () => void;
+  onDiscardClose: () => void;
   onDiscardConfirm: () => void | Promise<void>;
   onToggle: () => void;
   stepCount: number;
@@ -40,11 +42,13 @@ function WalkthroughLauncher({
   activeStep,
   confirmDiscardOpen,
   discardAnchorRef,
+  discardDisabled,
   hasUnseen,
   isFinePointer,
   isOpen,
   onDiscardClick,
   onDiscardCancel,
+  onDiscardClose,
   onDiscardConfirm,
   onToggle,
   stepCount,
@@ -93,12 +97,14 @@ function WalkthroughLauncher({
           aria-label={discardLabel}
           title={discardLabel}
           data-testid="walkthrough-discard"
+          disabled={discardDisabled}
           onClick={onDiscardClick}
           className={cn(
             "absolute -right-3 -top-3 flex cursor-pointer items-center justify-center rounded-full",
             isFinePointer ? "h-7 min-h-7 w-7 min-w-7" : "h-11 min-h-11 w-11 min-w-11",
             "border border-border bg-card text-muted-foreground shadow-md transition-all",
             "hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive",
+            "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-45",
             discardVisibility,
           )}
         >
@@ -114,7 +120,7 @@ function WalkthroughLauncher({
             confirmLabel={discardLabel}
             confirmAriaLabel={discardLabel}
             onCancel={onDiscardCancel}
-            onClose={onDiscardCancel}
+            onClose={onDiscardClose}
             onConfirm={onDiscardConfirm}
           />
         </div>
@@ -184,11 +190,12 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
   );
   const setWalkthrough = useAppStore((s) => s.setWalkthrough);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
-  const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
+  const [discardTargetTaskId, setDiscardTargetTaskId] = useState<string | null>(null);
   const [discarding, setDiscarding] = useState(false);
   const discardAnchorRef = useRef<HTMLButtonElement>(null);
   const { toast } = useToast();
   const open = taskId !== null && openTaskId === taskId;
+  const confirmDiscardOpen = taskId !== null && discardTargetTaskId === taskId;
 
   useWalkthroughBackfill({ connectionStatus, setWalkthrough, taskId, walkthrough });
 
@@ -217,15 +224,15 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
     clearOpenWalkthroughTaskId(taskId);
     setOpenTaskId(null);
   };
-  const discardWalkthrough = async () => {
-    if (!taskId || discarding) return;
+  const discardWalkthrough = async (targetTaskId: string | null) => {
+    if (!targetTaskId || discarding) return;
     setDiscarding(true);
     try {
-      await deleteTaskWalkthrough(taskId);
-      clearOpenWalkthroughTaskId(taskId);
-      setOpenTaskId(null);
-      setWalkthrough(taskId, null);
-      setConfirmDiscardOpen(false);
+      await deleteTaskWalkthrough(targetTaskId);
+      clearOpenWalkthroughTaskId(targetTaskId);
+      setOpenTaskId((currentTaskId) => (currentTaskId === targetTaskId ? null : currentTaskId));
+      setWalkthrough(targetTaskId, null);
+      setDiscardTargetTaskId(null);
       toast({ title: t("review:walkthroughDiscarded"), variant: "success" });
     } catch (error) {
       console.error("Failed to discard walkthrough:", error);
@@ -242,12 +249,17 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
         activeStep={activeStep}
         confirmDiscardOpen={confirmDiscardOpen}
         discardAnchorRef={discardAnchorRef}
+        discardDisabled={discarding}
         hasUnseen={hasUnseen}
         isFinePointer={isFinePointer}
         isOpen={open}
-        onDiscardClick={() => setConfirmDiscardOpen(true)}
-        onDiscardCancel={() => setConfirmDiscardOpen(false)}
-        onDiscardConfirm={discardWalkthrough}
+        onDiscardClick={() => setDiscardTargetTaskId(taskId)}
+        onDiscardCancel={() => {
+          setDiscardTargetTaskId(null);
+          requestAnimationFrame(() => discardAnchorRef.current?.focus());
+        }}
+        onDiscardClose={() => setDiscardTargetTaskId(null)}
+        onDiscardConfirm={() => discardWalkthrough(discardTargetTaskId)}
         onToggle={() => (open ? closeTour() : openTour())}
         stepCount={walkthrough.steps.length}
       />
@@ -261,8 +273,8 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
           confirmLabel={discardLabel}
           confirmTestId="walkthrough-discard-confirm"
           testId="walkthrough-discard-confirmation"
-          onOpenChange={setConfirmDiscardOpen}
-          onConfirm={discardWalkthrough}
+          onOpenChange={(nextOpen) => setDiscardTargetTaskId(nextOpen ? taskId : null)}
+          onConfirm={() => discardWalkthrough(discardTargetTaskId)}
         />
       ) : null}
     </>

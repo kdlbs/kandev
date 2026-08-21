@@ -1090,7 +1090,7 @@ export class SessionPage {
   }
 
   walkthroughDiscardConfirmation(): Locator {
-    return this.page.getByTestId("walkthrough-discard-confirmation");
+    return this.page.locator('[data-testid="walkthrough-discard-confirmation"]:visible');
   }
 
   walkthroughFloating(): Locator {
