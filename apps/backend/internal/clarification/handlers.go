@@ -33,6 +33,7 @@ const (
 	clarificationPersistenceTimeout = 30 * time.Second
 
 	errClarificationRequestNotFound = "clarification request not found"
+	errClarificationInternal        = "failed to authorize clarification request"
 )
 
 // handlerMessageStore is the task repository surface used by HTTP handlers
@@ -296,13 +297,32 @@ func NormalizeAndValidateQuestions(questions []Question) string {
 	return ""
 }
 
+// authorizeBundleAccessOrRespond authorizes pendingID via AuthorizeBundleAccess
+// and writes the response on failure, returning whether the caller may
+// proceed. ErrBundleNotFound (a foreign or nonexistent pending_id) maps to
+// 404, same as before. Any other error -- e.g. a database failure inside
+// resolveIdentity -- previously collapsed to that same silent 404, which hid
+// real failures from operators; it is now logged and reported as 500 instead.
+func (h *Handlers) authorizeBundleAccessOrRespond(c *gin.Context, pendingID string) bool {
+	if _, _, err := h.resolver.AuthorizeBundleAccess(c.Request.Context(), pendingID); err != nil {
+		if errors.Is(err, ErrBundleNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": errClarificationRequestNotFound})
+			return false
+		}
+		h.logger.Error("failed to authorize clarification bundle access",
+			zap.String("pending_id", pendingID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": errClarificationInternal})
+		return false
+	}
+	return true
+}
+
 func (h *Handlers) httpGetRequest(c *gin.Context) {
 	pendingID := c.Param("id")
 
 	// A2/A3/A7/A8: authorize against the bundle's durable task_id before the
 	// in-memory read, so a foreign or nonexistent pending_id is the same 404.
-	if _, _, err := h.resolver.AuthorizeBundleAccess(c.Request.Context(), pendingID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": errClarificationRequestNotFound})
+	if !h.authorizeBundleAccessOrRespond(c, pendingID) {
 		return
 	}
 
@@ -321,8 +341,7 @@ func (h *Handlers) httpWaitForResponse(c *gin.Context) {
 	// A2/A3/A5a/A7/A8: same authorization as httpGetRequest, run first. A
 	// pending_id with no durable messages is now 404 rather than the 504 a
 	// missing in-memory entry produces below.
-	if _, _, err := h.resolver.AuthorizeBundleAccess(c.Request.Context(), pendingID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": errClarificationRequestNotFound})
+	if !h.authorizeBundleAccessOrRespond(c, pendingID) {
 		return
 	}
 
@@ -401,8 +420,7 @@ func (h *Handlers) writeResolutionResult(c *gin.Context, pendingID string, res *
 func (h *Handlers) httpCancelRequest(c *gin.Context) {
 	pendingID := c.Param("id")
 
-	if _, _, err := h.resolver.AuthorizeBundleAccess(c.Request.Context(), pendingID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": errClarificationRequestNotFound})
+	if !h.authorizeBundleAccessOrRespond(c, pendingID) {
 		return
 	}
 

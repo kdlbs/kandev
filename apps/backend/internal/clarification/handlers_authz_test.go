@@ -280,3 +280,67 @@ func TestHttpGetRequest_UnscopedCaller_Authorized(t *testing.T) {
 		t.Fatalf("expected 200 for an unscoped/permissive caller, got %d (body=%s)", rec.Code, rec.Body.String())
 	}
 }
+
+// TestHttpGetRequest_RepositoryFailure_500NotSilent404 and its siblings below
+// prove the fix for the P2 finding that AuthorizeBundleAccess's error path
+// collapsed EVERY error to the same silent 404 as an unknown/foreign
+// pending_id -- including a genuine repository failure (e.g. a database
+// outage), which was previously indistinguishable from "no such bundle" and
+// left no log record for an operator to find. A repository failure now
+// reports 500 and does not leak the raw repository error text into the
+// response body.
+func TestHttpGetRequest_RepositoryFailure_500NotSilent404(t *testing.T) {
+	repo := &stubMessageStore{findErr: errors.New("db is on fire")}
+	gin.SetMode(gin.TestMode)
+	store := NewStore(time.Minute)
+	eventBus := &stubEventBus{}
+	messageCreator := &stubMessageCreator{}
+	resolver := NewResolver(store, repo, messageCreator, &stubAuthorizer{}, eventBus, eventBus, logger.Default())
+	h := NewHandlers(store, nil, messageCreator, repo, eventBus, resolver, logger.Default())
+
+	rec := runGet(t, h, "pending-repo-failure")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for a repository failure, got %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "db is on fire") {
+		t.Fatalf("response must not leak the raw repository error text: %s", rec.Body.String())
+	}
+}
+
+func TestHttpWaitForResponse_RepositoryFailure_500NotSilent404(t *testing.T) {
+	repo := &stubMessageStore{findErr: errors.New("db is on fire")}
+	gin.SetMode(gin.TestMode)
+	store := NewStore(time.Minute)
+	eventBus := &stubEventBus{}
+	messageCreator := &stubMessageCreator{}
+	resolver := NewResolver(store, repo, messageCreator, &stubAuthorizer{}, eventBus, eventBus, logger.Default())
+	h := NewHandlers(store, nil, messageCreator, repo, eventBus, resolver, logger.Default())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	rec := runWait(t, h, "pending-repo-failure", ctx)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for a repository failure, got %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "db is on fire") {
+		t.Fatalf("response must not leak the raw repository error text: %s", rec.Body.String())
+	}
+}
+
+func TestHttpCancelRequest_RepositoryFailure_500NotSilent404(t *testing.T) {
+	repo := &stubMessageStore{findErr: errors.New("db is on fire")}
+	gin.SetMode(gin.TestMode)
+	store := NewStore(time.Minute)
+	eventBus := &stubEventBus{}
+	messageCreator := &stubMessageCreator{}
+	resolver := NewResolver(store, repo, messageCreator, &stubAuthorizer{}, eventBus, eventBus, logger.Default())
+	h := NewHandlers(store, nil, messageCreator, repo, eventBus, resolver, logger.Default())
+
+	rec := runCancel(t, h, "pending-repo-failure")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for a repository failure, got %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "db is on fire") {
+		t.Fatalf("response must not leak the raw repository error text: %s", rec.Body.String())
+	}
+}
