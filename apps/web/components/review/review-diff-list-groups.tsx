@@ -22,6 +22,7 @@ export function RepoGroupHeader({
   // The empty-name group ("uncategorised" — no repository_name on its files)
   // gets a generic label so the user understands what they're looking at.
   const label = name || t("task:otherChanges");
+  // Keep h-8 aligned with ReviewDiffHeader's top-8 and grouped sections' scroll-mt-8.
   return (
     <div
       className="sticky top-0 z-20 flex h-8 items-center gap-2 border-y border-border/60 bg-muted/40 px-4 text-xs font-medium text-foreground backdrop-blur-sm"

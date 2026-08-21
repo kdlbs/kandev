@@ -60,7 +60,7 @@ export async function expectStickyReviewHeaderClearance(
             : null;
         return {
           clearance,
-          headersSeparated: clearance !== null && clearance >= -1,
+          headersSeparated: clearance !== null && clearance >= 0,
           disclosureHit,
         };
       },
