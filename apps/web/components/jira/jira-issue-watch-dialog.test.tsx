@@ -9,6 +9,7 @@ const store = {
   workflows: { items: [{ id: "workflow", name: "Delivery", hidden: false }] },
   agentProfiles: { items: [] },
   executors: { items: [] },
+  features: { dynamicAgentRouting: false },
 };
 
 vi.mock("@/components/state-provider", () => ({

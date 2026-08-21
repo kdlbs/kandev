@@ -281,8 +281,15 @@ test.describe("automations — Pull request merged trigger", () => {
     await expect(automationsPage.saveButton).toBeEnabled({ timeout: 5_000 });
     await automationsPage.saveButton.click();
 
-    // Wait for the save to complete — the floating save button disappears when the dirty state clears
-    await expect(automationsPage.saveButton).not.toBeVisible({ timeout: 10_000 });
+    // Wait for the shared save coordinator to finish. The button's accessible
+    // name changes from "Save changes" to "Saving changes" while the request
+    // is in flight, so waiting for that name to disappear can reload the page
+    // before trigger persistence completes.
+    await expect(testPage.getByTestId("settings-floating-save")).toHaveAttribute(
+      "data-status",
+      "saved",
+      { timeout: 10_000 },
+    );
 
     // Reload the page to verify the saved state is persisted
     await testPage.reload();

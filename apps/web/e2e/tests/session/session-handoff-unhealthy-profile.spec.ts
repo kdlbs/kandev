@@ -57,12 +57,17 @@ async function createProfiles(
   apiClient: InstanceType<typeof import("../../helpers/api-client").ApiClient>,
 ) {
   const { agents } = await apiClient.listAgents();
-  if (agents.length === 0) throw new Error("no agents available in test fixtures");
-  const agentId = agents[0].id;
+  const agent =
+    agents.find((candidate) => candidate.name === "mock-agent") ??
+    agents.find((candidate) => candidate.id !== "dynamic");
+  if (!agent) throw new Error("no concrete agents available in test fixtures");
+  const agentId = agent.id;
   const profileA = await apiClient.createAgentProfile(agentId, "Handoff Filter Profile A", {
     model: "mock-fast",
   });
-  const profileBAgentId = agents[1]?.id ?? agentId;
+  const profileBAgentId =
+    agents.find((candidate) => candidate.id !== "dynamic" && candidate.id !== agentId)?.id ??
+    agentId;
   const profileB = await apiClient.createAgentProfile(profileBAgentId, "Handoff Filter Profile B", {
     model: "mock-slow",
   });
