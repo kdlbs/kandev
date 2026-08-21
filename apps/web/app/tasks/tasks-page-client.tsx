@@ -555,7 +555,6 @@ export function TasksPageClient(props: TasksPageClientProps) {
       <KanbanHeader
         workspaceId={s.activeWorkspaceId ?? undefined}
         currentPage="tasks"
-        hideTitle
         searchQuery={s.searchQuery}
         onSearchChange={s.setSearchQuery}
         isSearchLoading={s.isLoading && !!s.debouncedQuery}

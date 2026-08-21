@@ -357,6 +357,9 @@ func buildGitStatusNotification(sessionID, repositoryName string, status client.
 		"renamed":               status.Renamed,
 		branchAdditionsFieldKey: status.BranchAdditions,
 		branchDeletionsFieldKey: status.BranchDeletions,
+		"comparison_target":     status.ComparisonTarget,
+		"comparison_status":     status.ComparisonStatus,
+		"comparison_error_code": status.ComparisonErrorCode,
 		"is_submodule":          status.IsSubmodule,
 	}
 	if repositoryName != "" {
@@ -420,6 +423,9 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 			"renamed":               metadata["renamed"],
 			branchAdditionsFieldKey: metadata[branchAdditionsFieldKey],
 			branchDeletionsFieldKey: metadata[branchDeletionsFieldKey],
+			"comparison_target":     metadata["comparison_target"],
+			"comparison_status":     metadata["comparison_status"],
+			"comparison_error_code": metadata["comparison_error_code"],
 		},
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)
@@ -572,6 +578,8 @@ type routeParams struct {
 	devMode                       bool
 	httpPort                      int
 	features                      config.FeaturesConfig
+	planCoalesceWindow            time.Duration
+	planCoalesceWindowConfigured  bool
 	homeDir                       string
 	interimSettingsInterlockToken string
 	log                           *logger.Logger
@@ -580,7 +588,12 @@ type routeParams struct {
 // registerRoutes sets up all HTTP and WebSocket routes on the given router.
 func registerRoutes(p routeParams) {
 	workflowCtrl := workflowcontroller.NewController(p.services.Workflow)
-	planService := taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log)
+	var planService *taskservice.PlanService
+	if p.planCoalesceWindowConfigured {
+		planService = taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log, p.planCoalesceWindow)
+	} else {
+		planService = taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log)
+	}
 	// Per-user task scoping for plan reads/writes (opt-in auth).
 	planService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
 	clarificationStore := clarification.NewStore(2 * time.Hour)

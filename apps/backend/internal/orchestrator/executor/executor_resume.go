@@ -69,6 +69,7 @@ type repoInfo struct {
 	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
 	RemoteContribution      *models.RemoteContribution
 	ContributionDestination *models.ContributionDestination
+	ComparisonTarget        *models.ComparisonTarget
 	Position                int
 	WorktreeBranchPrefix    string
 	WorktreeBranchTemplate  string
@@ -184,6 +185,11 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		return nil, fmt.Errorf("load contribution destination for task repository %q: %w", tr.ID, err)
 	} else if found {
 		info.ContributionDestination = &destination
+	}
+	if target, found, err := models.LoadComparisonTarget(tr.Metadata); err != nil {
+		return nil, fmt.Errorf("load comparison target for task repository %q: %w", tr.ID, err)
+	} else if found {
+		info.ComparisonTarget = &target
 	}
 	if info.RepositoryID == "" {
 		return info, nil

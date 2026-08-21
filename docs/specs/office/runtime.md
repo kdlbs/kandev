@@ -6,6 +6,15 @@ owner: cfl
 
 # Office Agent Runtime — Error Handling Contract
 
+> **Amendment (2026-08-17):** The provider-classification and automatic
+> recovery policy in this spec is superseded by
+> [Provider Error Recovery](../platform/provider-error-recovery.md) and
+> [Dynamic Agent Routing](../agents/dynamic-agent-routing.md). Office consumes
+> the shared transient/hard catalogue and the selected dynamic profile's policy.
+> The terminal run state, inbox, and manual recovery contracts below still own
+> non-provider and effect-unsafe failures. The historical v1 classification
+> text remains as migration context and is not the target behavior.
+
 This spec defines the runtime contract for how Office agent errors are observed, classified, and recovered. It covers what the lifecycle layer publishes on failure, how sessions and wakeups transition, how failures surface in the inbox and per-task chat, and how the user recovers — via Mark fixed, Resume session, or reassignment to a different agent.
 
 ## Why
@@ -260,7 +269,7 @@ Recovery and runtime-action authorization splits across three actors: human user
 - **`affected_tasks` snapshot on `agent_paused_after_failures`**: NOT recomputed when listed tasks are reassigned away. The snapshot is intentionally point-in-time so the user resolves the pause entry as a whole.
 - **`scheduled_retry` runs**: not produced in v1. Every adapter error is terminal; the wakeup is stamped `failed` with no follow-up scheduled. The `scheduled_retry` status is reserved for a future classifier.
 
-See also: [`office/routing.md`](routing.md) for the provider-routing error codes consumed at launch / dispatch time, and [`office/scheduler.md`](scheduler.md) for wakeup queue semantics and the staleness check that cancels superseded wakeups.
+See also: [Dynamic Agent Routing](../agents/dynamic-agent-routing.md) for provider routing and [`office/scheduler.md`](scheduler.md) for wakeup queue semantics and the staleness check that cancels superseded wakeups.
 
 ## Scenarios
 

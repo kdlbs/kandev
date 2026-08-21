@@ -770,6 +770,7 @@ type RepoLaunchSpec struct {
 	RepoCleanupScript       string // Repository-level cleanup script (optional)
 	CopyFiles               string // Comma-separated paths/globs to copy from the source repo (gitignored .env / config files)
 	ContributionDestination *models.ContributionDestination
+	ComparisonTarget        *models.ComparisonTarget
 	// BranchSlug, when set, suffixes the worktree directory as
 	// {RepoName}-{BranchSlug} so multi-branch tasks (same repo, multiple
 	// branches) don't collide.
@@ -796,6 +797,7 @@ type WorkspaceRepositorySpec struct {
 	BaseBranch             string
 	DefaultBranch          string
 	CheckoutBranch         string
+	ComparisonTarget       *models.ComparisonTarget
 	WorktreeID             string
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
@@ -896,6 +898,7 @@ type LaunchRequest struct {
 	CheckoutBranch          string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
+	ComparisonTarget        *models.ComparisonTarget
 	WorktreeBranchPrefix    string // Branch prefix for worktree branches
 	WorktreeBranchTemplate  string // Branch name template for worktree branches
 	WorktreeBranchTicket    string // External ticket value for branch templates
@@ -944,6 +947,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		CheckoutBranch:          r.CheckoutBranch,
 		PRNumber:                r.PRNumber,
 		RemoteContribution:      r.RemoteContribution,
+		ComparisonTarget:        r.ComparisonTarget,
 		ContributionDestination: r.ContributionDestination,
 		WorktreeID:              r.WorktreeID,
 		WorktreeBranchPrefix:    r.WorktreeBranchPrefix,

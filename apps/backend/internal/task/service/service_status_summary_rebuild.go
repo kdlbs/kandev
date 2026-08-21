@@ -625,12 +625,21 @@ func gitSummaryFromSnapshot(snapshot *models.GitSnapshot) statussummary.GitSumma
 		return statussummary.GitSummary{}
 	}
 	return statussummary.GitSummary{
-		Additions:    nonNegative(snapshot.Metadata, "branch_additions"),
-		Deletions:    nonNegative(snapshot.Metadata, "branch_deletions"),
-		ChangedFiles: changedFilesFromSnapshot(snapshot),
-		Ahead:        maxInt(snapshot.Ahead, 0),
-		Behind:       maxInt(snapshot.Behind, 0),
+		Additions:             nonNegative(snapshot.Metadata, "branch_additions"),
+		Deletions:             nonNegative(snapshot.Metadata, "branch_deletions"),
+		ChangedFiles:          changedFilesFromSnapshot(snapshot),
+		Ahead:                 maxInt(snapshot.Ahead, 0),
+		Behind:                maxInt(snapshot.Behind, 0),
+		ComparisonUnavailable: snapshotComparisonUnavailable(snapshot),
 	}
+}
+
+func snapshotComparisonUnavailable(snapshot *models.GitSnapshot) bool {
+	if snapshot == nil || snapshot.Metadata == nil {
+		return false
+	}
+	value, _ := snapshot.Metadata["comparison_status"].(string)
+	return value == "unavailable"
 }
 
 func changedFilesFromSnapshot(snapshot *models.GitSnapshot) int {

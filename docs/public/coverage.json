@@ -81,6 +81,21 @@
       ]
     },
     {
+      "id": "office-and-quorum",
+      "audiences": ["user", "operator"],
+      "stability": "beta",
+      "docs": ["automation-and-mcp", "tasks-and-workflows"],
+      "sources": [
+        "apps/backend/internal/mcp/server/agent_decision_tool.go",
+        "apps/backend/internal/office/dashboard/agent_decisions.go"
+      ],
+      "tests": [
+        "apps/backend/internal/mcp/server/agent_decision_tool_test.go",
+        "apps/backend/internal/office/dashboard/agent_decisions_test.go"
+      ],
+      "mcpTools": ["record_step_decision_kandev"]
+    },
+    {
       "id": "task-lifecycle",
       "audiences": ["user"],
       "stability": "stable",
@@ -120,7 +135,6 @@
         "delete_task_kandev",
         "list_tasks_kandev",
         "move_task_kandev",
-        "record_step_decision_kandev",
         "remove_task_dependency_kandev",
         "set_task_title_kandev",
         "step_complete_kandev",

@@ -25,10 +25,32 @@ import (
 const serviceName = "kandev-agentctl"
 
 var (
-	initOnce       sync.Once
-	tracerProvider trace.TracerProvider = noop.NewTracerProvider()
-	sdkProvider    *sdktrace.TracerProvider
+	initOnce           sync.Once
+	tracerProvider     trace.TracerProvider = noop.NewTracerProvider()
+	sdkProvider        *sdktrace.TracerProvider
+	endpointMu         sync.RWMutex
+	configuredEndpoint string
+	configuredSet      bool
 )
+
+// ConfigureEndpoint sets the resolved startup endpoint before the first
+// tracer is requested. Managed backend and agentctl processes use this to
+// avoid depending on inherited environment values.
+func ConfigureEndpoint(endpoint string) {
+	endpointMu.Lock()
+	configuredEndpoint = endpoint
+	configuredSet = true
+	endpointMu.Unlock()
+}
+
+func resolvedEndpoint() string {
+	endpointMu.RLock()
+	defer endpointMu.RUnlock()
+	if configuredSet {
+		return configuredEndpoint
+	}
+	return os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+}
 
 func initTracing() {
 	// Always register the W3C propagator so Inject/Extract work
@@ -40,7 +62,7 @@ func initTracing() {
 		),
 	)
 
-	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	endpoint := resolvedEndpoint()
 	if endpoint == "" {
 		return
 	}

@@ -18,6 +18,7 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/constants"
@@ -84,6 +85,14 @@ type primarySessionTaskStateUpdater interface {
 		expectedSessionState models.TaskSessionState,
 		state v1.TaskState,
 	) (bool, error)
+}
+
+// dynamicRouteStateLoader exposes the durable route row without coupling the
+// orchestrator to the concrete task repository. The route row is authoritative
+// when a generation claim committed before task-session attribution could be
+// written; launch reconciliation repairs the session from that row.
+type dynamicRouteStateLoader interface {
+	LoadRouteState(context.Context, string) (*dynamicruntime.RouteState, error)
 }
 
 // ErrSessionNotPromptable is returned when a session cannot accept a prompt
@@ -294,6 +303,11 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 			workflowStepID = dbTask.WorkflowStepID
 		}
 	}
+	if s.profileExecutionResolver != nil {
+		if err := s.profileExecutionResolver.ValidateProfile(ctx, agentProfileID); err != nil {
+			return "", err
+		}
+	}
 
 	// Create session entry in database. Office tasks route through
 	// EnsureSessionForAgent so runs + advanced-mode reuse one row.
@@ -321,7 +335,37 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 		// and shows preparation progress via executor.prepare.progress WS events.
 		go func() {
 			bgCtx := context.Background()
-			prepExec, launchErr := s.executor.LaunchPreparedSession(bgCtx, task, sessionID, executor.LaunchOptions{AgentProfileID: agentProfileID, ExecutorID: executorID, WorkflowStepID: workflowStepID})
+			launchProfileID := agentProfileID
+			if s.profileExecutionResolver != nil {
+				launchSession, loadErr := s.repo.GetTaskSession(bgCtx, sessionID)
+				if loadErr != nil {
+					s.logger.Warn("failed to reload prepared session for dynamic route resolution",
+						zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(loadErr))
+					_ = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, loadErr)
+					return
+				}
+				resolved, routeClaimed, resolveErr := s.resolveExecutionForLaunchSession(bgCtx, launchSession)
+				if resolveErr != nil {
+					s.recordDynamicRouteResolutionFailure(bgCtx, launchSession, resolveErr)
+					s.logger.Warn("failed to resolve dynamic route for prepared session",
+						zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(resolveErr))
+					_ = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, resolveErr, launchSession)
+					return
+				}
+				if resolved.ExecutionProfileID != "" {
+					launchProfileID = resolved.ExecutionProfileID
+					if routeClaimed {
+						applyResolvedExecution(launchSession, resolved)
+						if updateErr := s.repo.UpdateTaskSession(bgCtx, launchSession); updateErr != nil {
+							s.logger.Warn("failed to persist dynamic route for prepared session",
+								zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(updateErr))
+							_ = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, updateErr, launchSession)
+							return
+						}
+					}
+				}
+			}
+			prepExec, launchErr := s.executor.LaunchPreparedSession(bgCtx, task, sessionID, executor.LaunchOptions{AgentProfileID: launchProfileID, ExecutorID: executorID, WorkflowStepID: workflowStepID})
 			if launchErr != nil {
 				// LaunchAgent failures persist FAILED in the executor. Earlier
 				// workspace failures return here and are recorded through the same
@@ -425,6 +469,11 @@ func (s *Service) StartCreatedSession(
 	if effectiveProfileID == "" {
 		return nil, fmt.Errorf("agent_profile_id is required")
 	}
+	if s.profileExecutionResolver != nil {
+		if err := s.profileExecutionResolver.ValidateProfile(ctx, effectiveProfileID); err != nil {
+			return nil, err
+		}
+	}
 
 	// If the workflow step overrode the profile, update the session record in DB
 	// so the frontend tab displays the correct agent (it reads session.agent_profile_id).
@@ -507,6 +556,10 @@ func (s *Service) StartCreatedSession(
 		effectiveProfileID = activeSession.AgentProfileID
 	}
 
+	if effectiveProfileID, err = s.resolveDynamicLaunchExecution(ctx, session, effectiveProfileID, true); err != nil {
+		return nil, err
+	}
+
 	// Apply workflow step prompt wrapping and plan mode injection.
 	// Called unconditionally so workflow-step prompt composition (prefix/suffix)
 	// applies even when plan mode is not requested.
@@ -562,7 +615,7 @@ func (s *Service) StartCreatedSession(
 		mcpMode = executor.McpModeOffice
 	}
 	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
-	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments, TurnID: initialTurnID})
+	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments, TurnID: initialTurnID})
 	if err != nil {
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
 		// failures here; the session-level claim makes either completion order safe.
@@ -827,6 +880,15 @@ func (s *Service) StartTaskWithRoute(
 func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, opts startTaskOptions) (*executor.TaskExecution, error) {
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
+	// Fail before task-state or session mutations when the selected logical
+	// profile belongs to a disabled dynamic family. The workflow step may later
+	// override the caller profile, so repeat the check after that resolution.
+	if s.profileExecutionResolver != nil {
+		preflightProfileID := s.resolveEffectiveAgentProfile(ctx, taskID, workflowStepID, agentProfileID)
+		if err := s.profileExecutionResolver.ValidateProfile(ctx, preflightProfileID); err != nil {
+			return nil, err
+		}
+	}
 
 	env, route := opts.Env, opts.Route
 	s.logger.Debug("manually starting task",
@@ -919,6 +981,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	} else {
 		agentProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, workflowStepID, agentProfileID)
 	}
+	if s.profileExecutionResolver != nil {
+		if err := s.profileExecutionResolver.ValidateProfile(ctx, agentProfileID); err != nil {
+			return nil, err
+		}
+	}
 	overrideApplied := agentProfileID != callerProfileID
 	if route != nil && route.ExecutionProfileID != "" {
 		agentProfileID = route.ExecutionProfileID
@@ -1002,6 +1069,16 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		return nil, fmt.Errorf("failed to reload launch session: %w", err)
 	}
 
+	if route == nil {
+		if agentProfileID, err = s.resolveDynamicLaunchExecution(ctx, launchSession, agentProfileID, false); err != nil {
+			return nil, err
+		}
+	}
+	// Dynamic resolution updates the session snapshot after the initial
+	// passthrough check. Use the concrete candidate's snapshot for prompt
+	// wrapping and launch behavior.
+	isPassthrough = launchSession.IsPassthrough
+
 	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
 		ctx, effectivePrompt, task.ID, sessionID, workflowStepID,
 		planMode, task.IsEphemeral, isPassthrough,
@@ -1066,7 +1143,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// re-drive this first turn — initial launches bypass PromptTask.
 	s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
 
-	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{
+	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID:       agentProfileID,
 		OfficeAgentProfileID: officeAgentProfileID,
 		ExecutorID:           executorID,
@@ -1312,6 +1389,159 @@ func (s *Service) resolveIsPassthroughForLaunch(ctx context.Context, sessionID s
 		return true
 	}
 	return launchSession.IsPassthrough
+}
+
+// resolveExecutionForLaunchSession keeps the logical profile on the session
+// while selecting a concrete profile only once for a new dynamic route. A
+// persisted route is authoritative during resume and must not advance merely
+// because a caller is launching the same logical session again.
+func (s *Service) resolveExecutionForLaunchSession(
+	ctx context.Context,
+	session *models.TaskSession,
+) (agentruntime.ProfileExecution, bool, error) {
+	if session == nil {
+		return agentruntime.ProfileExecution{}, false, errors.New("launch session is required for profile resolution")
+	}
+	if resolved, routeClaimed, handled, err := s.resolveDurableExecutionForLaunch(ctx, session); handled {
+		return resolved, routeClaimed, err
+	}
+	if session.RouteGeneration > 0 && session.ExecutionProfileID != "" {
+		resolved, err := s.profileExecutionResolver.ResolveExisting(
+			ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID,
+			session.RouteGeneration, 0, session.RouteReason,
+		)
+		return resolved, false, err
+	}
+	resolved, err := s.profileExecutionResolver.Resolve(
+		ctx, session.ID, session.AgentProfileID, session.RouteGeneration, "",
+	)
+	if err != nil {
+		return agentruntime.ProfileExecution{}, false, err
+	}
+	return resolved, resolved.Generation > 0, nil
+}
+
+func (s *Service) resolveDurableExecutionForLaunch(
+	ctx context.Context,
+	session *models.TaskSession,
+) (agentruntime.ProfileExecution, bool, bool, error) {
+	loader, ok := s.repo.(dynamicRouteStateLoader)
+	if !ok {
+		return agentruntime.ProfileExecution{}, false, false, nil
+	}
+	state, err := loader.LoadRouteState(ctx, session.ID)
+	if err != nil {
+		return agentruntime.ProfileExecution{}, false, true, fmt.Errorf("load durable dynamic route state: %w", err)
+	}
+	if state == nil || state.LogicalProfileID != session.AgentProfileID || state.Generation <= 0 {
+		return agentruntime.ProfileExecution{}, false, false, nil
+	}
+	if state.ExecutionProfileID == "" {
+		if state.Status != dynamicRouteStatusWaiting {
+			return agentruntime.ProfileExecution{}, false, true, &dynamicruntime.NoEligibleCandidateError{
+				SessionID: session.ID, LogicalProfile: session.AgentProfileID,
+				Generation: state.Generation,
+			}
+		}
+		resolved, resolveErr := s.profileExecutionResolver.Resolve(
+			ctx, session.ID, session.AgentProfileID, state.Generation, "",
+		)
+		return resolved, resolved.Generation > 0, true, resolveErr
+	}
+	resolved, err := s.profileExecutionResolver.ResolveExisting(
+		ctx, session.ID, session.AgentProfileID, state.ExecutionProfileID,
+		state.Generation, state.ProfileVersion, "durable_route_state",
+	)
+	return resolved, true, true, err
+}
+
+func (s *Service) resolveDynamicLaunchExecution(
+	ctx context.Context,
+	session *models.TaskSession,
+	profileID string,
+	validate bool,
+) (string, error) {
+	if s.profileExecutionResolver == nil {
+		return profileID, nil
+	}
+	if validate {
+		if err := s.profileExecutionResolver.ValidateProfile(ctx, session.AgentProfileID); err != nil {
+			return "", err
+		}
+	}
+	resolved, routeClaimed, err := s.resolveExecutionForLaunchSession(ctx, session)
+	if err != nil {
+		s.recordDynamicRouteResolutionFailure(ctx, session, err)
+		return "", err
+	}
+	if !routeClaimed {
+		if resolved.ExecutionProfileID == "" {
+			return profileID, nil
+		}
+		return resolved.ExecutionProfileID, nil
+	}
+	applyResolvedExecution(session, resolved)
+	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+		return "", fmt.Errorf("persist dynamic route attribution: %w", err)
+	}
+	return resolved.ExecutionProfileID, nil
+}
+
+func applyResolvedExecution(session *models.TaskSession, resolved agentruntime.ProfileExecution) {
+	if session == nil {
+		return
+	}
+	previousExecutionProfileID := session.ExecutionProfileID
+	session.ExecutionProfileID = resolved.ExecutionProfileID
+	session.RouteGeneration = resolved.Generation
+	session.RouteState = "starting"
+	session.RouteReason = resolved.Decision.Reason
+	if session.RouteReason == "" {
+		session.RouteReason = "candidate_order"
+	}
+	applyDynamicRouteDecisionProjection(session, resolved.Decision)
+	// A new concrete candidate never inherits a provider-native ACP identity.
+	// Reapplying the persisted route during restart must keep the identity so
+	// native conversation resume remains possible.
+	if previousExecutionProfileID != resolved.ExecutionProfileID {
+		session.DownstreamACPSessionID = ""
+	}
+	if resolved.Profile != nil {
+		session.AgentProfileSnapshot = map[string]interface{}{
+			"id":                           resolved.Profile.ID,
+			"name":                         resolved.Profile.Name,
+			"agent_id":                     resolved.Profile.AgentID,
+			"model":                        resolved.Profile.Model,
+			"mode":                         resolved.Profile.Mode,
+			"config_options":               resolved.Profile.ConfigOptions,
+			"auto_approve":                 resolved.Profile.AutoApprove,
+			"dangerously_skip_permissions": resolved.Profile.DangerouslySkipPermissions,
+			"cli_passthrough":              resolved.Profile.CLIPassthrough,
+		}
+		session.IsPassthrough = resolved.Profile.CLIPassthrough
+	}
+}
+
+func (s *Service) recordDynamicRouteResolutionFailure(
+	ctx context.Context,
+	session *models.TaskSession,
+	err error,
+) {
+	if session == nil || err == nil {
+		return
+	}
+	var noCandidate *dynamicruntime.NoEligibleCandidateError
+	if !errors.As(err, &noCandidate) {
+		return
+	}
+	session.RouteGeneration = noCandidate.Generation
+	session.RouteState = dynamicRouteStatusWaiting
+	session.RouteReason = "no_eligible_candidate"
+	session.UpdatedAt = time.Now().UTC()
+	if updateErr := s.repo.UpdateTaskSession(ctx, session); updateErr != nil {
+		s.logger.Warn("failed to persist dynamic route waiting state",
+			zap.String("session_id", session.ID), zap.Error(updateErr))
+	}
 }
 
 // createStartSession picks the right session-creation path for the task:
@@ -1683,6 +1913,9 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	}
 	if isOfficeTask {
 		return nil, errOfficeTaskResumeRequiresScheduler
+	}
+	if _, err := s.resolveDynamicLaunchExecution(ctx, session, session.AgentProfileID, true); err != nil {
+		return nil, err
 	}
 
 	// Bury any open turns from the previous run before relaunching. Without
@@ -2239,7 +2472,7 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 	if _, err := s.ClaimTaskTitleSession(launchCtx, session.TaskID, sessionID); err != nil {
 		return fmt.Errorf("failed to claim first-turn task title: %w", err)
 	}
-	if _, err = s.executor.LaunchPreparedSession(launchCtx, task, sessionID, executor.LaunchOptions{
+	if _, err = s.launchPreparedSessionWithDynamicFallback(launchCtx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID: session.AgentProfileID,
 		ExecutorID:     session.ExecutorID,
 		StartAgent:     true,
@@ -3392,14 +3625,18 @@ func (s *Service) saveGitStatusSnapshot(ctx context.Context, sessionID string, f
 	}
 
 	metadata := map[string]interface{}{
-		"timestamp":        status.Timestamp,
-		"modified":         status.Modified,
-		"added":            status.Added,
-		"deleted":          status.Deleted,
-		"untracked":        status.Untracked,
-		"renamed":          status.Renamed,
-		"branch_additions": status.BranchAdditions,
-		"branch_deletions": status.BranchDeletions,
+		"repository_name":       status.RepositoryName,
+		"timestamp":             status.Timestamp,
+		"modified":              status.Modified,
+		"added":                 status.Added,
+		"deleted":               status.Deleted,
+		"untracked":             status.Untracked,
+		"renamed":               status.Renamed,
+		"branch_additions":      status.BranchAdditions,
+		"branch_deletions":      status.BranchDeletions,
+		"comparison_target":     status.ComparisonTarget,
+		"comparison_status":     status.ComparisonStatus,
+		"comparison_error_code": status.ComparisonErrorCode,
 	}
 
 	if err := s.repo.CreateGitSnapshot(ctx, &models.GitSnapshot{

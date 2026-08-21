@@ -650,7 +650,7 @@ func (r *Repository) FindParticipantID(
 // rather than surfacing an error to the caller.
 const decisionActiveDeciderIndexName = "uniq_workflow_step_decisions_active_decider"
 
-const decisionWriteLockNamespace = "workflow-step-decision:"
+const decisionLockNamespace = "workflow-step-decision:"
 
 // sqliteDecisionActiveDeciderViolationMessage is the substring go-sqlite3
 // puts in a UNIQUE-constraint error for this index's column list.
@@ -733,26 +733,23 @@ func (r *Repository) recordStepDecisionTx(ctx context.Context, d *models.Workflo
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// PostgreSQL's READ COMMITTED isolation does not serialize the initial
+	// supersede UPDATE when no active row exists yet. Lock the identity before
+	// that UPDATE so concurrent writers observe the prior commit instead of
+	// racing into the partial unique index. SQLite's single-writer lock already
+	// provides this serialization.
+	lockIdentity := d.ParticipantID
 	if d.DeciderID != "" && d.Role != "" {
-		// SQLite already serializes writers at the database level. PostgreSQL
-		// needs an explicit per-identity lock so the following supersede and
-		// insert statements cannot race across backend processes. Acquiring the
-		// transaction lock as its own statement also makes the next READ
-		// COMMITTED UPDATE observe the previous writer's committed row.
-		if dialect.IsPostgres(r.db.DriverName()) {
-			lockKey := strings.Join([]string{
-				decisionWriteLockNamespace,
-				d.TaskID,
-				d.StepID,
-				d.DeciderID,
-				d.Role,
-			}, "|")
-			if _, err := tx.ExecContext(ctx, tx.Rebind(
-				`SELECT pg_advisory_xact_lock(hashtextextended(?, 0))`,
-			), lockKey); err != nil {
-				return fmt.Errorf("lock decision writes: %w", err)
-			}
+		lockIdentity = strings.Join([]string{d.DeciderID, d.Role}, "|")
+	}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		lockKey := strings.Join([]string{decisionLockNamespace, d.TaskID, d.StepID, lockIdentity}, "|")
+		if _, err := tx.ExecContext(ctx, r.db.Rebind("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"), lockKey); err != nil {
+			return fmt.Errorf("lock active decision identity: %w", err)
 		}
+	}
+
+	if d.DeciderID != "" && d.Role != "" {
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`
 			UPDATE workflow_step_decisions
 			SET superseded_at = ?

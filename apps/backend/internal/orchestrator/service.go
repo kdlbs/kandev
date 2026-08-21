@@ -22,6 +22,7 @@ import (
 
 	"go.uber.org/zap"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -47,6 +48,7 @@ func isNoActiveTurnError(err error) bool {
 var (
 	ErrServiceAlreadyRunning = errors.New("service is already running")
 	ErrServiceNotRunning     = errors.New("service is not running")
+	ErrRouteActionActiveTurn = errors.New("route actions require a settled turn")
 )
 
 // ServiceConfig holds orchestrator service configuration
@@ -323,6 +325,8 @@ type sessionExecutorStore interface {
 	// Messages — used by resume to backfill the initial user prompt when a
 	// prior launch failed before recordInitialMessage ran.
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
+	// Session history + plan used to build a provider-neutral continuation.
+	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 	// Pending clarification rows — durable guard for on_turn_complete while the user is answering.
 	FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
 	// Workspace
@@ -506,6 +510,24 @@ type Service struct {
 	// entry points that name a task rather than a session (session.launch,
 	// session.ensure). Nil = unscoped.
 	taskAccessCheck func(ctx context.Context, taskID string) error
+
+	// routeActionHandler is owned by the dynamic conductor composition. The
+	// orchestrator only validates/authorizes the request and returns the
+	// authoritative route snapshot; concrete and dynamic callers share this
+	// seam.
+	routeActionHandler func(context.Context, RouteActionRequest) (*RouteActionResult, error)
+
+	// profileExecutionResolver is the shared logical-to-concrete profile
+	// boundary used by task and workflow launch paths.
+	profileExecutionResolver *agentruntime.ProfileExecutionResolver
+
+	// dynamicRecovery owns durable reset/retry deadlines. Only pending states
+	// are scheduled after restart; a retrying state means dispatch may have
+	// crossed the process boundary and remains manual until reconciled.
+	dynamicRecoveryMu     sync.Mutex
+	dynamicRecoveryCtx    context.Context
+	dynamicRecoveryCancel context.CancelFunc
+	dynamicRecoveryTimers map[string]*time.Timer
 
 	// titleBranchRuntime performs the lifecycle-owned Git branch rename after
 	// an agent resolves a prompt-first task title. It is optional for tests and
@@ -929,6 +951,12 @@ type Service struct {
 	// context. key: sessionID, value: capturedPrompt. Replaced every turn.
 	lastTurnPrompt sync.Map
 
+	// dynamicAttemptEvidence is keyed by logical session. A dynamic attempt is
+	// replaced at every concrete launch, and its execution ID fences late
+	// stream/lifecycle events from a predecessor. Fallback requires an explicit
+	// no-output/no-effect result from this map.
+	dynamicAttemptEvidence sync.Map
+
 	// Service state
 	mu        sync.RWMutex
 	running   bool
@@ -942,6 +970,103 @@ type Service struct {
 	sendNowCancel  context.CancelFunc
 	sendNowStopped bool
 	sendNowWorkers sync.WaitGroup
+}
+
+type RouteAction string
+
+const (
+	RouteActionRetry      RouteAction = "retry"
+	RouteActionTryNext    RouteAction = "try_next"
+	RouteActionSkip       RouteAction = "skip"
+	RouteActionCancelWait RouteAction = "cancel_wait"
+	RouteActionStop       RouteAction = "stop"
+)
+
+type RouteActionRequest struct {
+	SessionID          string
+	Action             RouteAction
+	ExpectedGeneration int64
+}
+
+type RouteActionResult struct {
+	SessionID          string     `json:"session_id"`
+	LogicalProfileID   string     `json:"logical_profile_id"`
+	ExecutionProfileID string     `json:"execution_profile_id,omitempty"`
+	RouteGeneration    int64      `json:"route_generation"`
+	ProfileVersion     int64      `json:"profile_version"`
+	State              string     `json:"state"`
+	Reason             string     `json:"reason,omitempty"`
+	ErrorCode          string     `json:"error_code,omitempty"`
+	ErrorClass         string     `json:"error_class,omitempty"`
+	CatalogueVersion   string     `json:"catalogue_version,omitempty"`
+	RetryOrdinal       int64      `json:"retry_ordinal,omitempty"`
+	Deadline           *time.Time `json:"deadline,omitempty"`
+	PendingOutcome     string     `json:"pending_outcome,omitempty"`
+}
+
+// RouteActionConflictError carries the authoritative route snapshot when a
+// client submits an old generation. Callers can render the returned snapshot
+// and retry with its generation without issuing a second read request.
+type RouteActionConflictError struct {
+	Result *RouteActionResult
+	Err    error
+}
+
+func (e *RouteActionConflictError) Error() string {
+	if e == nil || e.Err == nil {
+		return "route action conflict"
+	}
+	return e.Err.Error()
+}
+
+func (e *RouteActionConflictError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func (s *Service) SetRouteActionHandler(handler func(context.Context, RouteActionRequest) (*RouteActionResult, error)) {
+	s.routeActionHandler = handler
+}
+
+// SetProfileExecutionResolver wires the shared profile-kind boundary into
+// task and workflow launches.
+func (s *Service) SetProfileExecutionResolver(resolver *agentruntime.ProfileExecutionResolver) {
+	s.profileExecutionResolver = resolver
+}
+
+func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionRequest) (*RouteActionResult, error) {
+	if request.SessionID == "" {
+		return nil, errors.New("session_id is required")
+	}
+	if request.Action != RouteActionRetry && request.Action != RouteActionTryNext &&
+		request.Action != RouteActionSkip && request.Action != RouteActionCancelWait &&
+		request.Action != RouteActionStop {
+		return nil, fmt.Errorf("unsupported route action %q", request.Action)
+	}
+	if s.routeActionHandler == nil {
+		return nil, errors.New("dynamic route actions are not configured")
+	}
+	if err := s.authorizeSession(ctx, request.SessionID); err != nil {
+		return nil, err
+	}
+	lock, release := s.acquireCancelInFlightGuard(request.SessionID)
+	lock.Lock()
+	defer func() {
+		lock.Unlock()
+		release()
+	}()
+	if s.turnService != nil {
+		activeTurn, err := s.turnService.GetActiveTurn(ctx, request.SessionID)
+		if err != nil && !isNoActiveTurnError(err) {
+			return nil, fmt.Errorf("check active turn for route action: %w", err)
+		}
+		if activeTurn != nil {
+			return nil, ErrRouteActionActiveTurn
+		}
+	}
+	return s.routeActionHandler(ctx, request)
 }
 
 // Status contains orchestrator status information
@@ -1027,6 +1152,7 @@ func NewService(
 		taskLaunchRecoveryRepo:       taskLaunchRecoveryRepo,
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
+		dynamicRecoveryTimers:        make(map[string]*time.Timer),
 		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
@@ -2186,6 +2312,10 @@ func (s *Service) Start(ctx context.Context) error {
 	// Reconcile queued tasks when WIP limits or feeder settings change.
 	s.subscribeWorkflowQueueEvents()
 
+	// Restore durable dynamic policy waits after the route and lifecycle
+	// services are ready. Only un-dispatched pending states are scheduled.
+	s.startDynamicPolicyRecovery(ctx)
+
 	// Start the idle-session reaper last. It depends on s.repo
 	// (already wired), s.agentManager (already wired), and the
 	// turnService-cleared reconciler so a turnService == nil error
@@ -2209,6 +2339,7 @@ func (s *Service) Stop() error {
 	s.mu.Unlock()
 
 	s.logger.Info("stopping orchestrator service")
+	s.stopDynamicPolicyRecovery()
 
 	// Stop components in reverse order
 	var errs []error

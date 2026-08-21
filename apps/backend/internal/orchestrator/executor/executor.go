@@ -403,6 +403,7 @@ type LaunchAgentRequest struct {
 	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
 	ContributionDestination *models.ContributionDestination
+	ComparisonTarget        *models.ComparisonTarget
 	WorktreeBranchPrefix    string // Branch prefix for worktree branches
 	WorktreeBranchTemplate  string // Branch name template for worktree branches
 	WorktreeBranchTicket    string // External ticket value for branch templates
@@ -449,6 +450,7 @@ type RepoSpec struct {
 	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
 	ContributionDestination *models.ContributionDestination
+	ComparisonTarget        *models.ComparisonTarget
 	WorktreeID              string
 	WorktreeBranchPrefix    string
 	WorktreeBranchTemplate  string
@@ -491,6 +493,7 @@ type LaunchOptions struct {
 	ExecutorID           string
 	TurnID               string
 	Prompt               string
+	PriorACPSession      string // ACP session ID to resume for the same concrete profile
 	WorkflowStepID       string
 	StartAgent           bool
 	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, or McpModeOffice

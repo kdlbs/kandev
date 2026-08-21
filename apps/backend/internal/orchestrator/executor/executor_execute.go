@@ -1082,7 +1082,13 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	//   - kanban / quick-chat re-launches that hit the full path.
 	// Unlike ResumeSession we do NOT clear req.TaskDescription — wakeups
 	// deliver the new comment / event as the prompt.
-	if startAgent {
+	if startAgent && opts.PriorACPSession != "" {
+		req.ACPSessionID = opts.PriorACPSession
+		e.logger.Info("resuming ACP session via dynamic route state",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", sessionID),
+			zap.String("acp_session_id", opts.PriorACPSession))
+	} else if startAgent {
 		if token := resumeTokenForExecutionProfile(running, agentProfileID); token != "" {
 			req.ACPSessionID = token
 			e.logger.Info("resuming ACP session via stored resume token",
@@ -1514,6 +1520,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			PRNumber:                info.PRNumber,
 			RemoteContribution:      info.RemoteContribution,
 			ContributionDestination: info.ContributionDestination,
+			ComparisonTarget:        info.ComparisonTarget,
 			WorktreeBranchPrefix:    info.WorktreeBranchPrefix,
 			WorktreeBranchTemplate:  info.WorktreeBranchTemplate,
 			PullBeforeWorktree:      info.PullBeforeWorktree,
@@ -1583,6 +1590,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.PRNumber = repoInfo.PRNumber
 		req.RemoteContribution = repoInfo.RemoteContribution
 		req.ContributionDestination = repoInfo.ContributionDestination
+		req.ComparisonTarget = repoInfo.ComparisonTarget
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree

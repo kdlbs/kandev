@@ -32,6 +32,7 @@ export type TaskStatusSummary = {
     changed_files?: number;
     ahead?: number;
     behind?: number;
+    comparison_unavailable?: boolean;
   } | null;
   pull_request?: {
     count?: number;

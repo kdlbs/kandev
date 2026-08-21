@@ -15,11 +15,13 @@ hidden session-launch deadline expires first.
 ## What
 
 - Kandev allows setup and prepare scripts to run for 10 minutes by default.
-- Operators can set `KANDEV_TASK_PREPARATION_TIMEOUT` before Kandev starts. The
-  value uses Go duration syntax, such as `90s`, `10m`, or `1h`.
+- Operators can set `tasks.preparationTimeout` in startup YAML or use
+  `KANDEV_TASK_PREPARATION_TIMEOUT` as its environment override. The value uses
+  Go duration syntax, such as `90s`, `10m`, or `1h`.
+- The environment value overrides YAML when both are present.
 - The configured value must be greater than zero. An unset, invalid, zero, or
   negative value uses the 10-minute default.
-- Kandev reads the environment variable when the backend process starts. A
+- Kandev reads the resolved startup value when the backend process starts. A
   change requires a restart.
 - The timeout applies to repository setup scripts and executor-profile prepare
   scripts on Local, Worktree, Docker, Sprite, and SSH launches.
@@ -39,7 +41,7 @@ Decision: [ADR-2026-08-12-setup-timeout-owns-launch-budget](../../decisions/2026
 
 | Condition | Behavior |
 |---|---|
-| `KANDEV_TASK_PREPARATION_TIMEOUT` is absent | Kandev uses 10 minutes. |
+| `tasks.preparationTimeout` and `KANDEV_TASK_PREPARATION_TIMEOUT` are absent | Kandev uses 10 minutes. |
 | The value is invalid, zero, or negative | Kandev uses 10 minutes. |
 | A setup script reaches the configured limit | Kandev stops the script and reports the existing runtime-specific setup failure. |
 | A runtime launch phase does not finish within its derived launch limit | The launch fails with a deadline error and releases its activity lease. |
@@ -50,7 +52,7 @@ Decision: [ADR-2026-08-12-setup-timeout-owns-launch-budget](../../decisions/2026
 - **GIVEN** no timeout override and a repository setup script that takes 90
   seconds, **WHEN** a user launches a session, **THEN** setup completes without
   a one-minute session-launch deadline error.
-- **GIVEN** `KANDEV_TASK_PREPARATION_TIMEOUT=15m` at process start and a prepare
+- **GIVEN** `tasks.preparationTimeout: 15m` at process start and a prepare
   script that takes more than 10 minutes but less than 15 minutes, **WHEN** a
   user launches a session, **THEN** Kandev allows the script to complete.
 - **GIVEN** an invalid, zero, or negative timeout value, **WHEN** Kandev starts,
@@ -70,5 +72,5 @@ Decision: [ADR-2026-08-12-setup-timeout-owns-launch-budget](../../decisions/2026
 
 - Separate timeout settings for each executor or hook.
 - A configurable cleanup-script timeout.
-- YAML, database, API, or Settings UI configuration.
+- Database, API, or Settings UI configuration.
 - Changing whether a setup-script failure is fatal for a runtime.

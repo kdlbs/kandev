@@ -69,11 +69,15 @@ var lspUpgrader = gorillaws.Upgrader{
 }
 
 // NewLSPHandler creates a new LSPHandler.
-func NewLSPHandler(lifecycleMgr *lifecycle.Manager, userService LSPUserService, log *logger.Logger) *LSPHandler {
+func NewLSPHandler(lifecycleMgr *lifecycle.Manager, userService LSPUserService, log *logger.Logger, configuredMax ...int) *LSPHandler {
+	capacity := newLSPCapacityLimiterFromEnv()
+	if len(configuredMax) > 0 {
+		capacity = newLSPCapacityLimiter(configuredMax[0])
+	}
 	return &LSPHandler{
 		lifecycleMgr: lifecycleMgr,
 		userService:  userService,
-		capacity:     newLSPCapacityLimiterFromEnv(),
+		capacity:     capacity,
 		logger:       log.WithFields(zap.String("component", "lsp_handler")),
 	}
 }

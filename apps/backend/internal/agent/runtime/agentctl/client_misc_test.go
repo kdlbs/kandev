@@ -228,6 +228,24 @@ func TestSetBaseBranches_FailsOnNonOKStatusAndEchoesBody(t *testing.T) {
 	}
 }
 
+func TestSetComparisonTargets_PostsReplacementMap(t *testing.T) {
+	srv, got := captureServer(t, jsonResponder(http.StatusOK, `{}`))
+
+	if err := newHTTPOnlyClient(srv.URL).SetComparisonTargets(context.Background(), nil); err != nil {
+		t.Fatalf("SetComparisonTargets: %v", err)
+	}
+	if got.Method != http.MethodPost || got.Path != "/api/v1/workspace/comparison-targets" {
+		t.Errorf("request = %s %s, want POST /api/v1/workspace/comparison-targets", got.Method, got.Path)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(got.Body, &raw); err != nil {
+		t.Fatalf("decode sent body: %v", err)
+	}
+	if body, present := raw["comparison_targets"]; !present || string(body) != "null" {
+		t.Errorf("comparison_targets = %s, present=%v, want null", body, present)
+	}
+}
+
 func TestInferencePrompt_PostsRequestAndDecodesUsage(t *testing.T) {
 	srv, got := captureServer(t, jsonResponder(http.StatusOK, `{
 		"success":true,"response":"a summary","model":"claude-haiku-4-5",

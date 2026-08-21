@@ -1330,6 +1330,7 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 }
 
 func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.AgentEventData) {
+	data = s.withDynamicAttemptEvidence(data)
 	s.logger.Warn("handling agent failed",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
@@ -1355,6 +1356,9 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	// handleTransientFailure returns false (falling through) for non-transient
 	// errors, office tasks, or an exhausted budget.
 	if data.SessionID != "" && s.handleTransientFailure(ctx, data) {
+		return
+	}
+	if data.SessionID != "" && s.routeDynamicAgentFailure(ctx, data, classifyKanbanFailure(data)) {
 		return
 	}
 

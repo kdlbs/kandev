@@ -25,10 +25,21 @@ This page is the startup-configuration reference. Executor-specific fields are c
 At backend startup, later sources override earlier ones:
 
 1. embedded production-profile values and built-in defaults;
-2. the first readable `config.yaml`; and
+2. the first existing `config.yaml`; and
 3. environment variables.
 
-The public launcher has no `--config` option. It searches for a file named exactly `config.yaml` in the backend working directory and then `/etc/kandev/`. A missing file is allowed. Malformed YAML, unmarshal errors, and validated invalid values stop startup.
+The public launcher has no `--config` option. It searches for exactly these
+files, in order:
+
+1. `config.yaml` in the process working directory;
+2. `<KANDEV_HOME_DIR>/config.yaml`, or `~/.kandev/config.yaml` when
+   `KANDEV_HOME_DIR` is unset; and
+3. `/etc/kandev/config.yaml`.
+
+Kandev uses only the first existing candidate. It does not merge files. A
+missing candidate is skipped, but an unreadable, malformed, or invalid first
+candidate stops startup and names that file. A home configuration file cannot
+set `homeDir`, because it cannot relocate the directory that selected it.
 
 Configuration is read at process start; there is no file watcher. Restart Kandev after changing YAML or environment variables. The CLI, desktop shell, service manager, Docker, or Kubernetes may set environment variables on the backend, so those values can override a file unexpectedly. Use the process/service/container environment as the final source of truth.
 
@@ -54,11 +65,12 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 |---|---|---|---|
 | `homeDir` | `KANDEV_HOME_DIR` | `~/.kandev` | Root for data, tasks, worktrees, cloned repositories, sessions, and logs. A leading `~/` expands. |
 | `server.host` | `KANDEV_SERVER_HOST` | `0.0.0.0` | HTTP listen address. Use `127.0.0.1` for local-only access. |
-| `server.port` | `KANDEV_SERVER_PORT` | `38429` | UI, HTTP API, WebSocket, and MCP port; must be `1`-`65535`. The launcher normally supplies its selected port. |
+| `server.port` | `KANDEV_SERVER_PORT` (`KANDEV_BACKEND_PORT`, `KANDEV_PORT` aliases) | `38429` | UI, HTTP API, WebSocket, and MCP port; must be `1`-`65535`. The launcher normally supplies its selected port. |
 | `server.readTimeout` | `KANDEV_SERVER_READTIMEOUT` | `30` | HTTP read timeout in seconds. |
 | `server.writeTimeout` | `KANDEV_SERVER_WRITETIMEOUT` | `30` | HTTP write timeout in seconds. |
 | `server.webInternalUrl` | `KANDEV_WEB_INTERNAL_URL` | empty | Development reverse-proxy target for a separately running web app. Installed releases normally serve embedded assets. |
 | `server.webTitlePrefix` | `KANDEV_WEB_TITLE_PREFIX` | empty | Prefixes the browser tab title as `<prefix> Kandev` (for example `TEST` renders `TEST Kandev`), so several instances stay distinguishable in adjacent tabs. `make dev` defaults to `Dev`; `make start-debug` keeps production defaults, enables diagnostics, and defaults to `Debug`; PR previews use `Preview`. An explicit value overrides these defaults. Empty keeps the plain `Kandev` title. |
+| `server.trustedProxies` | `KANDEV_TRUSTED_PROXIES` | empty list | IP addresses or CIDR ranges for proxies whose forwarded client headers Kandev accepts. See [Trusted proxies](#trusted-proxies-for-x-forwarded-for). |
 
 The default host exposes the server on every interface even though the CLI prints a `localhost` URL. The current local product path must not be treated as an authenticated multi-user perimeter. For remote access, bind to loopback and use a trusted authenticated tunnel/proxy, or isolate the network at the deployment layer.
 
@@ -121,9 +133,13 @@ The launcher starts `agentctl`, performs a one-time nonce handshake, and supplie
 
 ### Setup and launch timing
 
-`KANDEV_TASK_PREPARATION_TIMEOUT` controls how long Kandev allows repository
-setup and executor-profile prepare scripts to run. The value uses Go duration
-syntax, such as `90s`, `10m`, or `1h`. The default is `10m`.
+| YAML key | Environment variable | Default | Current behavior |
+|---|---|---|---|
+| `tasks.preparationTimeout` | `KANDEV_TASK_PREPARATION_TIMEOUT` | `10m` | Positive Go duration for repository setup and executor-profile prepare scripts. |
+
+`tasks.preparationTimeout` controls how long Kandev allows repository setup and
+executor-profile prepare scripts to run. The value uses Go duration syntax,
+such as `90s`, `10m`, or `1h`.
 
 Only positive durations are accepted. An unset, invalid, zero, or negative value
 uses the `10m` default. Kandev reads this environment variable when the backend
@@ -134,8 +150,32 @@ Runtime launch phases use the configured preparation timeout plus a fixed
 five-minute allowance for runtime creation and `agentctl` readiness. With the
 default, each launch-phase limit is `15m`. Preparation scripts use a separate
 context, so earlier work such as Sprite uploads does not reduce their full
-`10m` preparation budget. This setting is environment-only; it is not read from
-YAML, the database, or Settings.
+`10m` preparation budget. The environment variable overrides YAML. This is a
+startup setting, not a database or Settings value.
+
+### Capacity and managed-process startup settings
+
+| YAML key | Environment variable | Type and default | Current behavior |
+|---|---|---|---|
+| `credentials.file` | `KANDEV_CREDENTIALS_FILE` | path, empty | Optional fallback JSON credential file. The file is read lazily and must be restricted to the Kandev service account. |
+| `limits.ghMaxConcurrent` | `KANDEV_GH_MAX_CONCURRENT` | positive integer, `8` | Process-wide `gh` subprocess admission cap. |
+| `limits.gitMaxConcurrent` | `KANDEV_GIT_MAX_CONCURRENT` | positive integer, `12` | Process-wide `git` subprocess admission cap. |
+| `limits.lspMaxConnections` | `KANDEV_LSP_MAX_CONNECTIONS` | positive integer, `8` | Active browser-to-task-host language-server connection cap. |
+| `messageQueue.maxPerSession` | `KANDEV_QUEUE_MAX_PER_SESSION` | integer `>= 0`, `10` | Per-session pending-message cap. Zero means unlimited. A non-negative YAML or environment value locks capacity in Settings; a negative environment value means unlimited, and invalid environment input falls through to the lower-precedence source. |
+| `agentctl.idleTimeout` | `KANDEV_ACP_IDLE_TIMEOUT` | Go duration, `1h` | Idle managed-agent reaping timeout. Zero disables reaping. |
+| `agentctl.idleReaperInterval` | `KANDEV_ACP_IDLE_REAPER_INTERVAL` | Go duration, `1m` | Interval between idle-agent scans. |
+| `agentctl.notificationQueueCapacity` | `KANDEV_ACP_NOTIF_QUEUE` | integer `1024`-`131072`, `131072` | ACP inbound notification queue capacity. An out-of-range YAML value fails startup; an invalid or out-of-range environment value uses the built-in default. |
+| `planning.coalesceWindowMs` | `KANDEV_PLAN_COALESCE_WINDOW_MS` | integer `>= 0`, `300000` | Same-author plan revision coalescing window in milliseconds. |
+| `observability.otlpEndpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | URL, empty | OTLP tracing endpoint. Treat the value and emitted spans as sensitive. |
+| `office.schedulerTickMs` | `KANDEV_OFFICE_SCHEDULER_TICK_MS` | positive integer, `5000` | Office queued/retry run safety-net interval in milliseconds. |
+| `launcher.webPort` | `KANDEV_WEB_PORT` | automatic, `0` | Development web-server port. It is used with `dev` and ignored by embedded-asset launches. |
+| `launcher.healthTimeoutMs` | `KANDEV_HEALTH_TIMEOUT_MS` | positive integer, `45000` | Launcher startup-health timeout in milliseconds. Development and E2E profiles use a longer default. |
+| `launcher.noBrowser` | `KANDEV_NO_BROWSER` | `false` | Suppresses browser opening when true or `1`, depending on launch mode. |
+
+These settings are read at startup. Their environment aliases remain
+compatible overrides, and a YAML value is not copied into a public process
+environment variable. Managed agentctl children receive their resolved subset
+through a private process contract.
 
 ### Authentication, Office, Plugins, and feature flags
 
@@ -143,12 +183,11 @@ YAML, the database, or Settings.
 |---|---|---|---|
 | `auth.jwtSecret` | `KANDEV_AUTH_JWTSECRET` | generated value | Accepted and validated compatibility configuration; the current main HTTP product path does not use it as an authentication boundary. |
 | `auth.tokenDuration` | `KANDEV_AUTH_TOKENDURATION` | `3600` | Must be positive, but is not consumed by the current main HTTP product path. |
+| `auth.sessionTTLHours` | `KANDEV_AUTH_SESSIONTTLHOURS` | `720` | Compatibility session lifetime setting. |
 | `auth.cookieName` | `KANDEV_AUTH_COOKIE_NAME` | empty | Session cookie base name. Empty (default) means the effective name is derived from the request host: `kandev_session` on a default-port host, `kandev_session_<port>` on a ported host. This isolates multiple instances on one host (see [authentication](authentication.md#multiple-instances-on-one-host)). A non-empty value is used verbatim (never port-suffixed) and disables automatic isolation, so it must be unique per cookie host. Precedence: environment over config file over default. |
 | `office.jwtSigningKey` | `KANDEV_OFFICE_JWTSIGNINGKEY` | random per start | HMAC key for Office agent-runtime JWTs. Set a stable secret when Office tasks must survive restarts. |
-| `features.office` | `KANDEV_FEATURES_OFFICE` | `false` in production | Experimental Office UI, routes, services, and automation. |
-| `features.auth` | `KANDEV_FEATURES_AUTH` | `false` in production | Opt-in authentication and per-user workspaces. The first visitor after enabling completes setup and becomes the admin. |
-| `features.claude_background_prompt_handoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | `false` | High-risk experiment that lets Claude Code accept a new prompt after its foreground yields while adapter-attested background work remains active. Other providers keep the coarse busy gate. |
-| `features.claude_mid_turn_steering` | `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING` | `false` | High-risk experiment that delivers a new prompt into a Claude turn that is still generating (mid-turn steering) instead of queuing it, for agents that advertise prompt queueing. Whether the agent folds the prompt into the running turn or runs it next is the agent's decision; other providers keep the coarse busy gate. |
+| `githubCredentialBroker.publicBaseUrl` | `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL` | empty | Public HTTPS base URL used by remote executors to resolve GitHub credentials. Loopback HTTP is allowed for development. |
+Runtime feature flags are documented in [Runtime feature toggles](#runtime-feature-toggles); they are profile, environment, and database-backed controls, not canonical YAML settings.
 
 Do not infer security from `auth.jwtSecret`: setting it currently does not turn the local server into an authenticated public service. Office's JWT key has a narrower, active purpose. Store both active secrets and third-party API keys in your deployment secret manager; never commit them in `config.yaml`.
 
@@ -158,14 +197,24 @@ in that plugin's own settings. Kandev ignores the old key and no longer serves `
 
 ### Trusted proxies for X-Forwarded-For
 
-`KANDEV_TRUSTED_PROXIES` lists the reverse proxies whose forwarded client IP
-Kandev trusts. Format: a comma-separated list of IP addresses or CIDR ranges,
+`server.trustedProxies` and its `KANDEV_TRUSTED_PROXIES` override list the
+reverse proxies whose forwarded client IP Kandev trusts. YAML uses an array;
+the environment form is a comma-separated list of IP addresses or CIDR ranges,
 for example `10.0.0.0/8,192.168.0.0/16`. IPv6 addresses and CIDRs are
 accepted. When the TCP peer of a request is in the list, the client IP is
 read from `X-Forwarded-For` (then `X-Real-IP`); otherwise those headers are
 ignored and the TCP peer address is used. The resolved IP feeds the login
 session record (Settings > Account > Security) and the login rate-limiter
 key.
+
+For a reverse proxy, use a narrow list of proxy addresses:
+
+```yaml
+server:
+  trustedProxies:
+    - 10.0.0.5
+    - 192.168.0.0/16
+```
 
 Default: unset, meaning no trusted proxies. Forwarded headers are ignored
 entirely and the recorded client IP is always the TCP peer. This is the
@@ -192,9 +241,9 @@ forwarded host. That warning is logged once per distinct peer and host, not per
 request, so it names the misconfiguration without flooding the log. Add the
 peer it names to `KANDEV_TRUSTED_PROXIES` if it is your reverse proxy.
 
-The variable is read once at startup and must reach the backend process: set
-it in the environment of the process that launches kandev, for example a
-systemd drop-in for `kandev.service` (`systemctl --user edit
+The value is read once at startup and must reach the backend process. Set the
+environment override in the environment of the process that launches kandev,
+for example a systemd drop-in for `kandev.service` (`systemctl --user edit
 kandev.service`) or the container environment. The supervisor manifest at
 `~/.kandev/supervisor/launch.json` is generated by the launcher on every
 launch and is not an environment configuration source.
@@ -284,6 +333,7 @@ server:
   port: 38429
   readTimeout: 30
   writeTimeout: 30
+  trustedProxies: []
   webInternalUrl: ""
   webTitlePrefix: ""
 
@@ -320,6 +370,36 @@ agent:
   standaloneHost: "localhost"
   standalonePort: 39429
 
+tasks:
+  preparationTimeout: "10m"
+
+credentials:
+  file: ""
+
+limits:
+  ghMaxConcurrent: 8
+  gitMaxConcurrent: 12
+  lspMaxConnections: 8
+
+messageQueue:
+  maxPerSession: 10
+
+agentctl:
+  idleTimeout: "1h"
+  idleReaperInterval: "1m"
+  notificationQueueCapacity: 131072
+
+planning:
+  coalesceWindowMs: 300000
+
+observability:
+  otlpEndpoint: ""
+
+launcher:
+  webPort: 0
+  healthTimeoutMs: 45000
+  noBrowser: false
+
 auth:
   jwtSecret: ""       # compatibility-only for the main HTTP product path
   tokenDuration: 3600 # compatibility-only for the main HTTP product path
@@ -348,11 +428,8 @@ debug:
 
 office:
   jwtSigningKey: ""
+  schedulerTickMs: 5000
 
-features:
-  office: false
-  auth: false
-  claude_background_prompt_handoff: false
 ```
 
 Copying this entire file is unnecessary and can freeze old defaults in a deployment. Keep only deliberate overrides. On Windows, do not copy the Unix Docker host/path literals from this example.
@@ -365,11 +442,13 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 
 | Key | Environment lock | Production default | Effect |
 |---|---|---|---|
-| `features.office` | `KANDEV_FEATURES_OFFICE` | off | Experimental autonomous-agent Office surfaces and automation. |
-| `features.auth` | `KANDEV_FEATURES_AUTH` | off | Authentication and per-user workspaces for the whole install. |
-| `features.claudeBackgroundPromptHandoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | off | High-risk Claude Code experiment that exposes recognized background-only activity and admits a successor prompt. |
-| `features.claudeMidTurnSteering` | `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING` | off | High-risk Claude Code experiment that delivers a prompt into a still-generating turn (mid-turn steering) instead of queuing it, for agents advertising prompt queueing. |
+| `features.dynamicAgentRouting` | `KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING` | off | Experimental dynamic profiles with ordered provider-error fallback. |
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` | off | High-risk diagnostic endpoints and ACP frame logging. |
+
+The `KANDEV_FEATURES_*` values have no canonical YAML keys. They are selected
+from the embedded profile and can be overridden by the environment or the
+database-backed toggle controls in this section. Use **Settings → System →
+Feature Toggles** for persistent product changes.
 
 UI changes are persisted in the database and require a restart. An explicitly set environment value wins and locks the UI control. Otherwise a database override wins over the embedded profile/default. Resetting a toggle removes its database override.
 
@@ -402,25 +481,37 @@ The file is loaded lazily, expects a flat string-to-string object, and is cached
 
 Profile environment variables are eventually injected into agent subprocesses or remote executor environments. Anyone who can edit a profile, inspect a remote host/container, enable debug frame logs, or run commands as the Kandev account may be able to access them. Use least-privilege, task-scoped credentials and rotate them after exposure.
 
+### YAML secrets and file permissions
+
+Stable startup secrets can be stored in `config.yaml`, including
+`database.password`, `nats.url`, `auth.jwtSecret`, `office.jwtSigningKey`, and
+`observability.otlpEndpoint`. Kandev keeps secret values in typed
+configuration, never writes those values to logs, and warns when a selected
+secret-bearing file is readable by group or other users on Unix. The warning
+does not block startup. Use owner-only mode `0600` and prefer the deployment's
+secret injection mechanism when one is available. Do not commit secret values
+to a repository.
+
 ## Advanced operator tuning
 
-These variables are supported by specific runtime components but are not YAML fields. Most are startup-only; the message queue limit also has a live database-backed setting described below. Leave them at defaults unless diagnosing a measured problem.
+These settings are startup-only unless stated otherwise. Their YAML keys are
+the canonical file form; the environment aliases remain compatibility
+overrides.
 
-| Variable | Default | Parsing and effect |
-|---|---:|---|
-| `KANDEV_GH_MAX_CONCURRENT` | `8` | Positive integer process-wide cap for `gh` subprocesses; invalid/non-positive uses default. |
-| `KANDEV_GIT_MAX_CONCURRENT` | `12` | Positive integer process-wide cap for `git` subprocesses; invalid/non-positive uses default. |
-| `KANDEV_LSP_MAX_CONNECTIONS` | `8` | Positive integer process-wide cap for active browser-to-task-host language-server streams; invalid/non-positive uses default. |
-| `KANDEV_QUEUE_MAX_PER_SESSION` | `10` | Pending messages per session. A valid value overrides and locks the saved UI setting; zero/negative means unlimited, while invalid falls through to the saved setting or default. |
-| `KANDEV_ACP_IDLE_TIMEOUT` | `1h` | Go duration after which idle agentctl instances are reaped; `0` disables. Invalid uses default. |
-| `KANDEV_ACP_IDLE_REAPER_INTERVAL` | `1m` | Go duration between idle scans. Intended mainly for testing; use the default in production. |
-| `KANDEV_ACP_NOTIF_QUEUE` | `131072` | Per-connection ACP inbound notification capacity; positive values clamp to `1024`-`131072`, invalid uses default. |
-| `KANDEV_PLAN_COALESCE_WINDOW_MS` | `300000` | Non-negative milliseconds for same-author plan revision coalescing; invalid/negative uses five minutes. |
-| `KANDEV_OFFICE_SCHEDULER_TICK_MS` | `5000` | Positive integer safety-net interval for queued/retry run claiming. New-run signals are event-driven; invalid/non-positive uses five seconds. |
-| `KANDEV_MCP_LOG_FILE` | unset | File path for per-agentctl MCP debug logs. Logs tool names, arguments, session IDs, results for tool errors, and timings; invalid paths warn and disable this sink. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Enables OTLP/HTTP tracing for backend and agentctl spans; unset uses a no-op tracer. See the transport warning below. |
+| YAML key | Environment variable | Default | Parsing and effect |
+|---|---|---:|---|
+| `limits.ghMaxConcurrent` | `KANDEV_GH_MAX_CONCURRENT` | `8` | Positive integer process-wide cap for `gh` subprocesses; invalid/non-positive uses default. |
+| `limits.gitMaxConcurrent` | `KANDEV_GIT_MAX_CONCURRENT` | `12` | Positive integer process-wide cap for `git` subprocesses; invalid/non-positive uses default. |
+| `limits.lspMaxConnections` | `KANDEV_LSP_MAX_CONNECTIONS` | `8` | Positive integer cap for active browser-to-task-host language-server streams; invalid/non-positive uses default. |
+| `messageQueue.maxPerSession` | `KANDEV_QUEUE_MAX_PER_SESSION` | `10` | Pending messages per session. A non-negative YAML value locks the saved UI capacity; a valid environment value overrides YAML and locks it; a negative environment value means unlimited; malformed environment input falls through to YAML, the saved setting, or default. |
+| `agentctl.idleTimeout` | `KANDEV_ACP_IDLE_TIMEOUT` | `1h` | Go duration after which idle managed agentctl instances are reaped; `0` disables. Invalid uses default. |
+| `agentctl.idleReaperInterval` | `KANDEV_ACP_IDLE_REAPER_INTERVAL` | `1m` | Go duration between idle scans. |
+| `agentctl.notificationQueueCapacity` | `KANDEV_ACP_NOTIF_QUEUE` | `131072` | Per-connection ACP inbound notification capacity. YAML values outside `1024`-`131072` fail startup; invalid or out-of-range environment values use `131072`. |
+| `planning.coalesceWindowMs` | `KANDEV_PLAN_COALESCE_WINDOW_MS` | `300000` | Non-negative milliseconds for same-author plan revision coalescing; invalid/negative uses five minutes. |
+| `office.schedulerTickMs` | `KANDEV_OFFICE_SCHEDULER_TICK_MS` | `5000` | Positive integer safety-net interval for queued/retry run claiming. New-run signals are event-driven. |
+| `observability.otlpEndpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Enables OTLP/HTTP tracing for backend and agentctl spans; unset uses a no-op tracer. |
 
-Changing concurrency values trades process pressure against throughput and requires a restart. The queue environment value is also read at startup. Under **Settings > Task Behavior > Message Queue**, an admin can save an install-wide capacity and independently control manual and automatic merging. All three values apply live and persist across restarts. `KANDEV_QUEUE_MAX_PER_SESSION` overrides and locks only capacity; neither merge switch has an environment override. `0` means unlimited. Lowering the live limit does not prune existing rows; new admissions remain blocked until the pending count drops below the limit, while retries of already accepted work remain eligible. The default-on automatic switch affects only later admissions and never bypasses capacity or sweeps existing rows.
+Changing concurrency values trades process pressure against throughput and requires a restart. Under **Settings > Task Behavior > Message Queue**, an admin can save an install-wide capacity and independently control manual and automatic merging. The merge switches apply live and persist across restarts. `messageQueue.maxPerSession` resolves as environment, YAML, saved setting, then default; a non-negative YAML value or any valid environment value locks only capacity. A negative environment value means unlimited, while malformed environment input falls through to the lower-precedence source. `0` means unlimited. Lowering the live limit does not prune existing rows; new admissions remain blocked until the pending count drops below the limit, while retries of already accepted work remain eligible. The default-on automatic switch affects only later admissions and never bypasses capacity or sweeps existing rows.
 
 The current OTLP exporter strips an `http://` or `https://` prefix from the configured endpoint and always uses `WithInsecure()`. Treat this as implementation-bound cleartext transport: send it only to a trusted private collector over a protected network, not directly across an untrusted network. The service name is `kandev-agentctl`, and spans can include task/session/execution IDs plus raw agent-event JSON truncated to 8192 characters. That payload can contain prompts, files, and tool data. Use collector-side access controls and retention accordingly.
 
@@ -436,6 +527,34 @@ These apply only when `KANDEV_DEBUG_AGENT_MESSAGES=true`:
 | `KANDEV_DEBUG_ACP_MAX_FILE_BYTES` | `8388608` (8 MiB) |
 
 Retention values must be positive integers; invalid/non-positive values use defaults. Directories and files use owner-only `0700`/`0600` modes on Unix. Rotation, age pruning, and file-count pruning bound normal growth, but these files remain highly sensitive and can exist inside a Docker executor rather than on the host.
+
+## Configuration exclusions
+
+The catalog records variables that are not operator startup settings. They have
+no public YAML key:
+
+- Internal launcher and process wiring: `KANDEV_INTERNAL_CONFIG_FILE`,
+  `KANDEV_INTERNAL_CONFIG_HOME_FILE`,
+  `KANDEV_INTERNAL_AGENTCTL_STARTUP_CONFIG`,
+  `KANDEV_LAUNCHER_PARENT_PID`, `KANDEV_BACKEND_PID_FILE`,
+  `KANDEV_DESKTOP_NATIVE_NOTIFICATIONS`, `KANDEV_TASK_ID`,
+  `KANDEV_SESSION_ID`, and `KANDEV_WORKSPACE_ID`.
+- Generated or packaging values: `KANDEV_DESKTOP_HEALTH_TOKEN`,
+  `KANDEV_BUNDLE_DIR`, and `KANDEV_WEB_DIST_DIR`.
+- Test and profile selectors: `KANDEV_E2E_MOCK`, `KANDEV_MOCK_AGENT`,
+  `KANDEV_MOCK_GITHUB`, `KANDEV_MOCK_GITLAB`, `KANDEV_MOCK_JIRA`,
+  `KANDEV_MOCK_LINEAR`, and `AGENTCTL_AUTO_APPROVE_PERMISSIONS`.
+- Runtime flags and diagnostics: `KANDEV_FEATURES_OFFICE`,
+  `KANDEV_FEATURES_AUTH`,
+  `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF`,
+  `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING`,
+  `KANDEV_DEBUG_AGENT_MESSAGES`, `KANDEV_DEBUG_ACP_MAX_FILES`,
+  `KANDEV_DEBUG_ACP_RETENTION_HOURS`, `KANDEV_DEBUG_ACP_MAX_FILE_BYTES`,
+  `KANDEV_MCP_LOG_FILE`, and `KANDEV_DEBUG_LOG_DIR`.
+
+These values are generated, injected by a supervisor or workspace, selected by
+the test/profile system, or intentionally limited to diagnostics. They are
+not part of the stable YAML contract.
 
 ## Validation and troubleshooting
 
@@ -454,10 +573,10 @@ If a value appears ignored:
 
 1. confirm the exact environment spelling, especially camelCase keys;
 2. inspect the launcher/service/container environment for an overriding value;
-3. confirm `config.yaml` is in the backend working directory or `/etc/kandev/`;
+3. confirm the selected `config.yaml` candidate is the first existing file in the working-directory, home, system order;
 4. restart the backend; and
 5. check whether the field is marked compatibility-only above.
 
 Use `kandev --verbose` to surface startup errors. Do not use `--debug` merely to diagnose a YAML typo on an exposed machine; verbose logs are usually sufficient.
 
-Variables used only to assemble/test the runtime: such as `KANDEV_WEB_DIST_DIR`, `KANDEV_DESKTOP_RUNTIME_DIR`, mock/E2E switches, supervisor socket/manifest values, and bootstrap nonces, are internal implementation contracts, not supported deployment configuration. `KANDEV_BUNDLE_DIR` is the narrow exception documented for installer/package integration in [CLI](./cli.md); end users should still let the installer set it.
+Variables used only to assemble/test the runtime, such as `KANDEV_WEB_DIST_DIR`, `KANDEV_DESKTOP_RUNTIME_DIR`, mock/E2E switches, supervisor socket/manifest values, and bootstrap nonces, are internal implementation contracts, not supported deployment configuration. `KANDEV_MCP_LOG_FILE` remains a debug-only component variable without a YAML key. `KANDEV_BUNDLE_DIR` is the narrow exception documented for installer/package integration in [CLI](./cli.md); end users should still let the installer set it.

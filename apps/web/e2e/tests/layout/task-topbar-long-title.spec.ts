@@ -19,7 +19,9 @@ type DesktopTopbarMetrics = {
 async function readDesktopTopbarMetrics(page: Page): Promise<DesktopTopbarMetrics | null> {
   return page.evaluate(() => {
     const topbar = document.querySelector('[data-testid="task-topbar"]') as HTMLElement | null;
-    const title = topbar?.querySelector('[aria-current="page"]') as HTMLElement | null;
+    // The rename control is the element that truncates; the surrounding
+    // title crumb is a flex wrapper whose scrollWidth never overflows.
+    const title = topbar?.querySelector('[data-testid="task-topbar-title"]') as HTMLElement | null;
     const stepper = topbar?.querySelector('[data-testid="workflow-stepper"]') as HTMLElement | null;
     const tools = topbar?.querySelector('[aria-label="Task tools"]') as HTMLElement | null;
     if (!topbar || !title || !stepper || !tools) return null;
@@ -64,11 +66,17 @@ test.describe("Task topbar long title layout", () => {
       },
     );
 
+    // The space policy grants the title all free width and truncates only
+    // under pressure, so the fixture title fits untouched at 1280px. Narrow
+    // the viewport until the title genuinely competes with the stepper and
+    // the tool clusters.
+    await testPage.setViewportSize({ width: 900, height: 800 });
+
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    const title = testPage.locator('[data-testid="task-topbar"] [aria-current="page"]');
+    const title = testPage.locator('[data-testid="task-topbar"] [data-testid="task-topbar-title"]');
     await expect(title).toHaveText(LONG_TASK_TITLE, { timeout: 10_000 });
     await expect(testPage.getByTestId("layout-preset-trigger")).toBeVisible();
 
@@ -77,8 +85,9 @@ test.describe("Task topbar long title layout", () => {
     if (!metrics) return;
 
     expect(metrics.documentScrollWidth).toBeLessThanOrEqual(metrics.documentClientWidth + 1);
+    // The title yields (clips) instead of pushing chrome out of the bar…
     expect(metrics.titleScrollWidth).toBeGreaterThan(metrics.titleClientWidth + 8);
-    expect(metrics.titleWidth).toBeLessThanOrEqual(metrics.topbarWidth * 0.6);
+    // …and never overlaps the stepper or pushes the tools past the bar edge.
     expect(metrics.titleRight).toBeLessThanOrEqual(metrics.stepperLeft + 1);
     expect(metrics.toolsRight).toBeLessThanOrEqual(metrics.topbarRight + 1);
   });

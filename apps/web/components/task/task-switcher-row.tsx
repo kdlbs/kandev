@@ -149,6 +149,7 @@ function TaskRowItem({
       isArchived={task.isArchived}
       isSelected={isSelected}
       diffStats={task.diffStats}
+      comparisonUnavailable={task.comparisonUnavailable}
       isRemoteExecutor={task.isRemoteExecutor}
       remoteExecutorType={task.remoteExecutorType}
       remoteExecutorName={task.remoteExecutorName}

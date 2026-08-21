@@ -39,6 +39,7 @@ import {
   type useRemoteContributionResolution,
 } from "./use-remote-contribution-resolution";
 import { RemoteContributionHeaderActions } from "./remote-contribution-header-actions";
+import { ComparisonTargetDisplay } from "./changes-panel-comparison-target";
 
 export type PerRepoStatus = {
   repository_name: string;
@@ -54,9 +55,6 @@ type BranchRow = {
   repoLabel: string | null;
   branch: string;
   baseBranch: string;
-  /** Name agentctl emits for this repo (= worktree dir basename). Empty for
-   *  single-repo workspaces; passed to the BaseBranchPicker so it can resolve
-   *  the task_repositories row to PATCH. */
   repositoryName: string;
 };
 
@@ -65,12 +63,6 @@ type RenameBranchResult = {
   error?: string;
 };
 
-/**
- * Builds per-repo rows for the branch hover card. Returns [] for single-repo
- * workspaces (callers fall back to the single-row layout); otherwise one row
- * per named repo with that repo's task base_branch (or the workspace-level
- * fallback when none was recorded).
- */
 function buildBranchRows(
   perRepoStatus: PerRepoStatus[],
   baseBranchByRepo: Record<string, string> | undefined,
@@ -223,24 +215,20 @@ function BranchHoverCard({
   onRenameBranch,
   isRenaming,
   credentialDisplay,
+  comparisonTargets,
 }: {
   displayBranch: string;
   baseBranchDisplay: string;
-  /** When non-empty, the card renders one row per repo instead of the single
-   *  workspace-level pair. Single-repo workspaces leave this undefined. */
   rows?: BranchRow[];
-  /** Active task id, plumbed into BaseBranchPicker for the PATCH call. */
   taskId: string | null;
   onRenameBranch?: (newName: string, repo: string) => Promise<RenameBranchResult>;
   isRenaming: boolean;
   credentialDisplay: GitCredentialDisplay | null;
+  comparisonTargets: string[];
 }) {
   const { t } = useTranslation();
   const usesTouchDrawer = useTouchDrawer();
   const [open, setOpen] = useState(false);
-  const isMulti = rows && rows.length > 0;
-  const headerLabel = isMulti ? t("task:yourBranchesLabel") : t("task:yourCodeLivesInLabel");
-  const trailerLabel = t("task:comparingAgainstLabel");
   const trigger = (
     <button
       type="button"
@@ -253,10 +241,12 @@ function BranchHoverCard({
   const content = (
     <div className="flex flex-col gap-2.5 text-xs">
       <div className="flex items-center justify-between gap-6">
-        <span className="text-muted-foreground/60">{headerLabel}</span>
-        <span className="text-muted-foreground/60">{trailerLabel}</span>
+        <span className="text-muted-foreground/60">
+          {rows && rows.length > 0 ? t("task:yourBranchesLabel") : t("task:yourCodeLivesInLabel")}
+        </span>
+        <span className="text-muted-foreground/60">{t("task:comparingAgainstLabel")}</span>
       </div>
-      {isMulti ? (
+      {rows && rows.length > 0 ? (
         <div className="flex flex-col gap-1.5">
           {rows!.map((row) => (
             <BranchRowView
@@ -286,6 +276,7 @@ function BranchHoverCard({
           <p>{credentialDisplay.transport}</p>
         </div>
       )}
+      <ComparisonTargetDisplay targets={comparisonTargets} />
     </div>
   );
   if (usesTouchDrawer) {
@@ -321,23 +312,24 @@ function PullTriggerContent({
   isPulling: boolean;
   isRebasing: boolean;
 }) {
-  const isPullRelated = isPulling || isRebasing;
   let label: string;
   if (isPulling) label = "Pulling…";
   else if (isRebasing) label = "Rebasing…";
   else label = "Pull";
   return (
     <>
-      {isPullRelated ? (
+      {isPulling || isRebasing ? (
         <IconLoader2 className="h-3 w-3 animate-spin" />
       ) : (
         <IconCloudDownload className="h-3 w-3" />
       )}
       {label}
-      {behindCount > 0 && !isPullRelated && (
+      {behindCount > 0 && !(isPulling || isRebasing) && (
         <span className="text-yellow-500 text-[10px]">{behindCount}</span>
       )}
-      {!isPullRelated && <IconChevronDown className="h-2.5 w-2.5 text-muted-foreground" />}
+      {!(isPulling || isRebasing) && (
+        <IconChevronDown className="h-2.5 w-2.5 text-muted-foreground" />
+      )}
     </>
   );
 }
@@ -370,11 +362,6 @@ export function PullDropdown({
   repoDisplayName?: (repositoryName: string) => string | undefined;
 }) {
   const { t } = useTranslation();
-  const isPulling = loadingOperation === "pull";
-  const isRebasing = loadingOperation === "rebase";
-  // For single-repo (empty repo entry), the trigger label uses the global
-  // behindCount; for multi-repo we show the per-repo behinds inside the menu
-  // labels and the trigger summarises with the max.
   const triggerBehind =
     perRepoStatus.length > 0
       ? Math.max(behindCount, ...perRepoStatus.map((s) => s.pullBehind ?? 0))
@@ -388,8 +375,8 @@ export function PullDropdown({
     >
       <PullTriggerContent
         behindCount={triggerBehind}
-        isPulling={isPulling}
-        isRebasing={isRebasing}
+        isPulling={loadingOperation === "pull"}
+        isRebasing={loadingOperation === "rebase"}
       />
     </Button>
   );
@@ -531,6 +518,7 @@ type ChangesPanelHeaderProps = {
   onRepoMerge: (repo: string) => void;
   onRenameBranch?: (newName: string, repo: string) => Promise<RenameBranchResult>;
   credentialDisplay: GitCredentialDisplay | null;
+  comparisonTargets: string[];
   repoDisplayName?: (repositoryName: string) => string | undefined;
   /** Active task id; piped into the base-branch picker so it can resolve
    *  the right task_repositories row to PATCH. Null while task data is
@@ -569,6 +557,7 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
     taskId,
     onRenameBranch,
     credentialDisplay,
+    comparisonTargets,
     relation,
     resolution,
     resolutionTarget,
@@ -581,12 +570,11 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
     baseBranchDisplay,
     repoDisplayName,
   );
-  const showDiffReview = hasChanges || hasCommits || !!hasPRFiles;
   return (
     <PanelHeaderBarSplit
       left={
         <ChangesPanelHeaderLeft
-          showDiffReview={showDiffReview}
+          showDiffReview={hasChanges || hasCommits || !!hasPRFiles}
           onOpenDiffAll={onOpenDiffAll}
           onOpenReview={onOpenReview}
           onRequestWalkthrough={onRequestWalkthrough}
@@ -604,6 +592,7 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
               onRenameBranch={onRenameBranch}
               isRenaming={loadingOperation === "rename_branch"}
               credentialDisplay={credentialDisplay}
+              comparisonTargets={comparisonTargets}
             />
           )}
           <RemoteContributionHeaderActions

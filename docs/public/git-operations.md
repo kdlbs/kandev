@@ -27,6 +27,23 @@ and configures Git to use it for pushes. Run ordinary **Push** or `git push`; do
 or replace it with a fork. The PR workflow uses the canonical repository and an explicit
 `<fork-owner>:<branch>` head. Other tasks keep the normal `origin` push behavior.
 
+### Compare a fork pull request
+
+When a linked pull request uses a fork, Kandev stores the provider-qualified target repository and
+target branch on the exact task-repository attachment. It then fetches that target into a
+comparison-only remote-tracking ref. This ref is read-only and is authoritative for Changes,
+commits, cumulative diff, and ahead/behind counts.
+
+The comparison target does not replace `origin`, the checked-out branch, or the push route. Kandev
+shows the target as `<owner>/<repository>:<branch>` without credentials. If the target cannot be
+validated, fetched, or resolved, Kandev marks comparison as unavailable and does not substitute a
+same-named branch from `origin`. Numeric comparison totals are hidden until the exact target is
+available.
+
+When a provider retargets the pull request, Kandev refreshes the stored target and the live session
+comparison. Selecting a task base branch or removing the owning pull-request association clears the
+explicit target. A PR with incomplete fork identity is not guessed or applied to another repository.
+
 These UI operations enter through Kandev's `/ws` endpoint, which currently has no backend authentication. Anyone who can reach an unprotected backend can invoke destructive Git actions with the executor's permissions. Keep Kandev on loopback or behind an authenticated, origin-protected reverse proxy; see [WebSocket API](websocket-api.md).
 
 Credentials are resolved where `agentctl` runs. A host SSH agent, credential helper, `gh` login, or `az` login is not automatically available inside every Docker, SSH, or remote executor. Give the executor only the repository access it needs and test with a disposable branch. See [Executors](executors.md) for executor-specific credential handling.

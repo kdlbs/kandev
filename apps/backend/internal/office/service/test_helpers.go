@@ -17,6 +17,15 @@ func (s *Service) ListRunEventsForTest(
 	return s.repo.ListRunEvents(ctx, runID, -1, 0)
 }
 
+// GetContinuationSummaryForTest exposes the repo's continuation-summary
+// read so tests can verify refreshContinuationSummary's upsert without
+// duplicating the raw agent_continuation_summaries query.
+func (s *Service) GetContinuationSummaryForTest(
+	ctx context.Context, agentProfileID, scope string,
+) (*sqlite.AgentContinuationSummary, error) {
+	return s.repo.GetContinuationSummary(ctx, agentProfileID, scope)
+}
+
 // ListTasksTouchedByRunForTest exposes the repo's read query so the
 // run-lifecycle integration tests can verify run_id plumbing on the
 // activity log.

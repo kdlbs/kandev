@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { subscribeRunEvents } from "@/lib/ws/handlers/run";
 import type { RunDetail, RunEvent } from "@/lib/api/domains/office-extended-api";
+import { getRunDetail } from "@/lib/api/domains/office-runs-api";
 
 type Status = RunDetail["status"];
 
@@ -15,6 +16,11 @@ const TERMINAL_EVENT_STATUS: Record<string, Status | undefined> = {
 };
 
 const TERMINAL_STATUSES: ReadonlySet<Status> = new Set<Status>(["finished", "failed", "cancelled"]);
+
+type Options = {
+  agentId?: string;
+  initialOutputSummary?: string;
+};
 
 /**
  * Returns the live-merged events list and an observed status that
@@ -37,9 +43,13 @@ export function useRunLiveSync(
   runId: string,
   initialEvents: RunEvent[],
   initialStatus: Status,
-): { events: RunEvent[]; status: Status } {
+  options: Options = {},
+): { events: RunEvent[]; status: Status; outputSummary: string } {
+  const agentId = options.agentId ?? "";
+  const initialOutputSummary = options.initialOutputSummary ?? "";
   const [events, setEvents] = useState<RunEvent[]>(initialEvents);
   const [status, setStatus] = useState<Status>(initialStatus);
+  const [outputSummary, setOutputSummary] = useState(initialOutputSummary);
   // Live-event dedup only: seqs of events already appended over the WS (plus
   // the seqs of the mount-time snapshot, so a reconnect replay of a
   // snapshot-covered event cannot double-insert). Never reset to a snapshot:
@@ -52,6 +62,8 @@ export function useRunLiveSync(
     runId,
     seqs: new Set(initialEvents.map((e) => e.seq)),
   });
+  const outputSnapshotRef = useRef({ runId, value: initialOutputSummary });
+  const refreshedTerminalRunRef = useRef<string | null>(null);
 
   useEffect(() => {
     const nextSeqs = new Set(initialEvents.map((e) => e.seq));
@@ -86,6 +98,34 @@ export function useRunLiveSync(
   }, [initialStatus]);
 
   useEffect(() => {
+    const previous = outputSnapshotRef.current;
+    if (previous.runId === runId && previous.value === initialOutputSummary) return;
+    outputSnapshotRef.current = { runId, value: initialOutputSummary };
+    setOutputSummary(initialOutputSummary);
+    if (previous.runId !== runId) {
+      refreshedTerminalRunRef.current = null;
+    }
+  }, [initialOutputSummary, runId]);
+
+  useEffect(() => {
+    if (!agentId || !TERMINAL_STATUSES.has(status)) return;
+    if (refreshedTerminalRunRef.current === runId) return;
+    refreshedTerminalRunRef.current = runId;
+    let cancelled = false;
+    void getRunDetail(agentId, runId)
+      .then((run) => {
+        if (!cancelled) setOutputSummary(run.output_summary ?? "");
+      })
+      .catch(() => {
+        // The terminal status and event stream remain useful when the detail
+        // refresh fails. A later page reload can retry the snapshot.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId, runId, status]);
+
+  useEffect(() => {
     if (status !== "claimed") return;
     if (TERMINAL_STATUSES.has(status)) return;
 
@@ -109,7 +149,7 @@ export function useRunLiveSync(
     };
   }, [runId, status]);
 
-  return { events, status };
+  return { events, status, outputSummary };
 }
 
 // mergeRunEvent inserts evt into prev keeping seq-ascending order.

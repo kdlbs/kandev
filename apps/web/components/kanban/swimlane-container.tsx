@@ -87,7 +87,7 @@ function getEmptyMessage({
 
 function renderEmptyState(emptyMessage: string) {
   return (
-    <div className="flex-1 min-h-0 px-4 pb-4">
+    <div className="flex-1 min-h-0 px-4 pt-3 pb-4">
       <div className="h-full rounded-lg border border-dashed border-border/60 flex items-center justify-center text-sm text-muted-foreground">
         {emptyMessage}
       </div>
@@ -382,7 +382,7 @@ function getRenderedWorkflows(
 
 function getContainerClass(isMobileKanban: boolean, isMobile: boolean): string {
   if (isMobileKanban) return "flex flex-1 min-h-0 flex-col overflow-hidden pb-4";
-  return `flex-1 min-h-0 space-y-3 overflow-y-auto pb-4${isMobile ? "" : " px-4"}`;
+  return `flex-1 min-h-0 space-y-3 overflow-y-auto pt-3 pb-4${isMobile ? "" : " px-4"}`;
 }
 
 function shouldHideHeaders(

@@ -5,7 +5,6 @@ import {
   IconChevronDown,
   IconCircleCheck,
   IconCircleDashed,
-  IconDots,
   IconMessageQuestion,
   IconProgressCheck,
   IconShieldQuestion,
@@ -30,6 +29,8 @@ import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
 import { TaskTitleHoverCard } from "@/components/task/task-title-hover-card";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
+import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
+import { TaskMenuButton } from "./task-item-menu-button";
 import { TaskItemLeadingBadges } from "./task-item-leading-badges";
 
 type DiffStats = {
@@ -61,6 +62,7 @@ type TaskItemProps = {
    */
   onSelect?: (e: React.MouseEvent | React.KeyboardEvent) => void;
   diffStats?: DiffStats;
+  comparisonUnavailable?: boolean;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string;
   remoteExecutorName?: string;
@@ -348,6 +350,7 @@ function TaskItemContent({
   wipQueue,
   issueInfo,
   agentErrorMessage,
+  comparisonUnavailable,
 }: {
   title: string;
   autopilot?: boolean;
@@ -368,6 +371,7 @@ function TaskItemContent({
   wipQueue?: WipQueueStatus;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
+  comparisonUnavailable?: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -382,6 +386,7 @@ function TaskItemContent({
           issueInfo={issueInfo}
           agentErrorMessage={agentErrorMessage}
         />
+        <TaskItemComparisonUnavailable unavailable={comparisonUnavailable} />
         {isRemoteExecutor && (
           <RemoteCloudTooltip
             taskId={taskId ?? ""}
@@ -436,6 +441,7 @@ export const TaskItem = memo(function TaskItem({
   onClick,
   onSelect,
   diffStats,
+  comparisonUnavailable,
   isRemoteExecutor,
   remoteExecutorType,
   remoteExecutorName,
@@ -513,6 +519,7 @@ export const TaskItem = memo(function TaskItem({
         wipQueue={wipQueue}
         issueInfo={issueInfo}
         agentErrorMessage={agentErrorMessage}
+        comparisonUnavailable={comparisonUnavailable}
       />
       {hasDiffStats ? (
         <div className="mobile-task-actions-with-stats group/actions relative shrink-0 self-center flex items-center">
@@ -600,58 +607,5 @@ function SubtaskToggle({
       <IconChevronDown className={cn("h-3 w-3 transition-transform", collapsed && "-rotate-90")} />
       <span>{count}</span>
     </button>
-  );
-}
-
-function TaskMenuButton({
-  visible,
-  expanded,
-  rowFocus = false,
-}: {
-  visible: boolean;
-  expanded: boolean;
-  rowFocus?: boolean;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div
-      className={cn(
-        "mobile-task-actions self-center shrink-0 flex items-center transition-opacity duration-100",
-        !visible && "[@media(hover:none)]:hidden",
-        visible
-          ? "opacity-100"
-          : cn(
-              "opacity-0 pointer-events-none [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-hover:pointer-events-auto",
-              rowFocus
-                ? "group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
-                : "focus-within:opacity-100 focus-within:pointer-events-auto",
-            ),
-      )}
-    >
-      <button
-        type="button"
-        className={cn(
-          "mobile-task-actions-button flex size-6 items-center justify-center rounded-md cursor-pointer touch-manipulation",
-          "text-muted-foreground hover:text-foreground hover:bg-foreground/10",
-          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-colors",
-        )}
-        onClick={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-          e.currentTarget.dispatchEvent(
-            new MouseEvent("contextmenu", {
-              bubbles: true,
-              clientX: e.clientX,
-              clientY: e.clientY,
-            }),
-          );
-        }}
-        aria-label={t("task:taskActions")}
-        aria-haspopup="menu"
-        aria-expanded={expanded}
-      >
-        <IconDots className="h-4 w-4" />
-      </button>
-    </div>
   );
 }

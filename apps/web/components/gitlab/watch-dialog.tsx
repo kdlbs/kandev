@@ -16,11 +16,13 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { STEP_DEFAULT, resolveProfileId } from "@/lib/watcher-profile-default";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import type {
   CreateIssueWatchRequest,
   CreateReviewWatchRequest,
@@ -100,6 +102,12 @@ function useDialogData(workspaceId: string, workflowId: string) {
   useWorkflows(workspaceId, true);
   const workflows = useAppStore((state) => state.workflows.items).filter((item) => !item.hidden);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
+  const selectableAgentProfiles = useMemo(
+    () =>
+      agentProfiles.filter((profile) => isSelectableAgentProfile(profile, dynamicRoutingEnabled)),
+    [agentProfiles, dynamicRoutingEnabled],
+  );
   const executors = useAppStore((state) => state.executors.items);
   const executorProfiles = useMemo(
     () =>
@@ -109,7 +117,13 @@ function useDialogData(workspaceId: string, workflowId: string) {
     [executors],
   );
   const { steps, loading } = useWorkflowSteps(workflowId);
-  return { workflows, agentProfiles, executorProfiles, steps, stepsLoading: loading };
+  return {
+    workflows,
+    agentProfiles: selectableAgentProfiles,
+    executorProfiles,
+    steps,
+    stepsLoading: loading,
+  };
 }
 
 function FilterFields({ kind, form, setForm }: FormFieldsProps) {

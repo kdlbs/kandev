@@ -69,6 +69,10 @@ type GitSummary struct {
 	ChangedFiles int `json:"changed_files,omitempty"`
 	Ahead        int `json:"ahead,omitempty"`
 	Behind       int `json:"behind,omitempty"`
+	// ComparisonUnavailable means at least one repository had an explicit
+	// provider-qualified target that could not be materialized or compared.
+	// Numeric comparison totals are suppressed while this is true.
+	ComparisonUnavailable bool `json:"comparison_unavailable,omitempty"`
 }
 
 // PullRequestSummary is intentionally an aggregate plus one representative

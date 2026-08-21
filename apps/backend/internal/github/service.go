@@ -112,6 +112,7 @@ type Service struct {
 	eventBus                 bus.EventBus
 	logger                   *logger.Logger
 	taskDeleter              TaskDeleter
+	comparisonTargetObserver ComparisonTargetObserver
 	taskIssueStore           TaskIssueStore
 	// cascadeTaskDeleter is the cascade-delete entry point used by the
 	// watch reset flow. It is distinct from taskDeleter (which only deletes

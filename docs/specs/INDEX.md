@@ -21,7 +21,7 @@ The office umbrella covers kandev's autonomous-agent product surface: workspaces
 | [tasks](office/tasks.md) | draft |
 | [scheduler](office/scheduler.md) | draft |
 | [runtime](office/runtime.md) | draft |
-| [routing](office/routing.md) | draft |
+| [routing](office/routing.md) | archived |
 | [costs](office/costs.md) | in-progress |
 | [dashboard](office/dashboard.md) | draft |
 | [live-updates](office/live-updates.md) | draft |
@@ -38,6 +38,7 @@ Product-wide capabilities that are not tied to a single feature area.
 
 | Spec | Status |
 |---|---|
+| [startup-configuration-parity](platform/startup-configuration-parity.md) | shipped |
 | [agent-runtime-availability](platform/agent-runtime-availability.md) | draft |
 | [background-work-liveness](platform/background-work-liveness.md) | shipped |
 | [setup-launch-timeout](platform/setup-launch-timeout.md) | approved |
@@ -53,7 +54,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [plugins — Voice Mode leaves core](plugins/voice-extraction.md) | shipped |
 | [plugin-nav-sidebar-footer](plugin-nav-sidebar-footer/spec.md) | draft |
 | [semantic-notifications](platform/notifications.md) | shipped |
-| [workspace-git-status](platform/workspace-git-status.md) | shipped |
+| [workspace-git-status](platform/workspace-git-status.md) | approved |
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
 | [git-credential-lease-reissue](git-credential-lease-reissue/spec.md) | shipped |
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
@@ -129,6 +130,9 @@ Roles, governance gates, and granular permissions that apply across human users 
 | [profile-disable](agents/profile-disable.md) | draft |
 | [settings-profile-layout](agents/settings-profile-layout.md) | shipped |
 | [dynamic-provider-options](agents/dynamic-provider-options.md) | shipped |
+| [dynamic-agent-routing](agents/dynamic-agent-routing.md) | draft |
+| [dynamic-agent-routing-rollout-blockers](agents/dynamic-agent-routing-rollout-blockers.md) | draft |
+| [dynamic-agent-telemetry-routing](agents/dynamic-agent-telemetry-routing.md) | draft |
 | [utility-agent-profiles](agents/utility-agent-profiles.md) | approved |
 | [collapsible-agent-blocks](agents/collapsible-agent-blocks.md) | draft |
 | [roles](agents/roles.md) | shipped |
@@ -307,6 +311,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [board-step-visibility-filter](board-step-visibility-filter/spec.md) | draft |
 | [shutdown-turn-failure-suppression](shutdown-turn-failure-suppression/spec.md) | draft |
 | [executor-profile-env-precedence](executor-profile-env-precedence/spec.md) | building |
+| [automations-yaml-export](automations-yaml-export/spec.md) | building |
 | [task-launch-failure-recovery](task-launch-failure-recovery/spec.md) | draft |
 
 ---

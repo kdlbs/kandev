@@ -5,6 +5,7 @@ import { IssueWatchDialog } from "./issue-watch-dialog";
 const promptEditor = vi.hoisted(() => vi.fn());
 
 const store = {
+  features: { dynamicAgentRouting: false },
   workspaces: { activeId: "ws-1" },
   workflows: { items: [] },
   agentProfiles: { items: [] },

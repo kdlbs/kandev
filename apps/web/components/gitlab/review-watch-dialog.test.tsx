@@ -5,6 +5,7 @@ import { ReviewWatchDialog } from "./review-watch-dialog";
 const promptEditor = vi.hoisted(() => vi.fn());
 
 const store = {
+  features: { dynamicAgentRouting: false },
   workspaces: { activeId: "ws-1" },
   workflows: { items: [{ id: "workflow", name: "Delivery", hidden: false }] },
   agentProfiles: { items: [] },

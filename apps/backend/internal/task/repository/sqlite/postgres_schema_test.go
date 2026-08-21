@@ -17,6 +17,31 @@ import (
 	"github.com/kandev/kandev/internal/testutil"
 )
 
+// TestPostgresDynamicInstallationKeyUsesBytea verifies the PostgreSQL schema
+// branch for the installation binding key. SQLite accepts BLOB, while
+// PostgreSQL requires BYTEA. Skips unless KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresDynamicInstallationKeyUsesBytea(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+
+	var dataType string
+	err := db.QueryRowContext(context.Background(), `
+		SELECT data_type
+		FROM information_schema.columns
+		WHERE table_schema = current_schema()
+		  AND table_name = 'dynamic_installation_keys'
+		  AND column_name = 'key_bytes'
+	`).Scan(&dataType)
+	if err != nil {
+		t.Fatalf("inspect dynamic_installation_keys.key_bytes: %v", err)
+	}
+	if dataType != "bytea" {
+		t.Fatalf("dynamic_installation_keys.key_bytes data type = %q, want bytea", dataType)
+	}
+}
+
 // TestPostgresExecutorRunningLocalPIDMigration is the Postgres counterpart to
 // TestExecutorRunningLocalPIDMigrationOnLegacyDB (SQLite): local_pid is on the
 // shared migration path, so ADR 0027 asks for env-gated Postgres replay coverage
