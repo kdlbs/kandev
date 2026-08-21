@@ -115,7 +115,7 @@ func TestUpdateRuntimeLastRunFinished(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	if err := repo.UpsertAgentRuntime(ctx, "agent-1", "idle", ""); err != nil {
+	if err := repo.UpsertAgentRuntime(ctx, "agent-1", "paused", "budget"); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 
@@ -134,6 +134,12 @@ func TestUpdateRuntimeLastRunFinished(t *testing.T) {
 	diff := state.LastRunFinishedAt.Sub(now)
 	if diff < -time.Second || diff > time.Second {
 		t.Errorf("last_run_finished_at off by %v", diff)
+	}
+	if state.Status != "paused" {
+		t.Errorf("status = %q after UpdateRuntimeLastRunFinished, want paused", state.Status)
+	}
+	if state.PauseReason != "budget" {
+		t.Errorf("pause_reason = %q after UpdateRuntimeLastRunFinished, want budget", state.PauseReason)
 	}
 }
 
