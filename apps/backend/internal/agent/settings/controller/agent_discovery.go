@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -166,10 +167,23 @@ func (c *Controller) buildRuntimeUpdateDTO(ctx context.Context, ag agents.Agent,
 	if spec.Package == "" {
 		return nil
 	}
-	item := &dto.RuntimeUpdateDTO{Supported: true, Package: spec.Package}
+	defaultVersion := spec.DefaultVersion
+	if defaultVersion == "" {
+		packageSpec := spec.PackageSpec("")
+		if strings.HasPrefix(packageSpec, spec.Package+"@") {
+			defaultVersion = strings.TrimPrefix(packageSpec, spec.Package+"@")
+		}
+	}
+	item := &dto.RuntimeUpdateDTO{
+		Supported:        true,
+		Package:          spec.Package,
+		DefaultVersion:   defaultVersion,
+		EffectiveVersion: defaultVersion,
+	}
 	if c.managedRuntimeSelections != nil {
 		if selection, found, err := c.managedRuntimeSelections.Get(ctx, ag.ID(), spec.Package); err == nil && found {
 			item.ActiveVersion = selection.Version
+			item.EffectiveVersion = selection.Version
 		}
 	}
 	if c.runtimeUpdater != nil {

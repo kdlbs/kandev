@@ -316,6 +316,43 @@ func TestAgentUpdatePreviewResolvesTrustedCommandWithoutStartingAJob(t *testing.
 	}
 }
 
+func TestAgentUpdatePreviewUseDefaultClassifiesResetAndShowsEffectiveVersions(t *testing.T) {
+	updater := &recoveryRuntimeUpdater{
+		metadata: RuntimeVersionMetadata{Versions: []string{"1.0.0", "1.1.0"}, Latest: "1.1.0"},
+		current: hostutility.AgentCapabilities{
+			Status:       hostutility.StatusOK,
+			AgentVersion: "1.0.0",
+		},
+		currentFound: true,
+	}
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.values["managed-acp\x00@example/managed-acp"] = managedruntime.Selection{
+		Package: "@example/managed-acp",
+		Version: "1.0.0",
+	}
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec: agents.ManagedNPMRuntimeSpec{
+			Package:        "@example/managed-acp",
+			DefaultVersion: "1.1.0",
+		},
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	ctrl.SetRuntimeUpdater(updater)
+	ctrl.SetManagedRuntimeSelectionStore(selectionStore)
+
+	preview, err := ctrl.PreviewAgentUpdateUseDefault(context.Background(), ag.ID())
+	if err != nil {
+		t.Fatalf("PreviewAgentUpdateUseDefault: %v", err)
+	}
+	if preview.Operation != string(managedruntime.OperationUseDefault) {
+		t.Fatalf("operation = %q, want use_default", preview.Operation)
+	}
+	if preview.DefaultVersion != "1.1.0" || preview.EffectiveVersion != "1.0.0" || preview.TargetVersion != "1.1.0" {
+		t.Fatalf("versions = default %q, effective %q, target %q", preview.DefaultVersion, preview.EffectiveVersion, preview.TargetVersion)
+	}
+}
+
 func TestAgentUpdatePreviewRejectsUnsupportedAndResolutionFailure(t *testing.T) {
 	tests := []struct {
 		name    string

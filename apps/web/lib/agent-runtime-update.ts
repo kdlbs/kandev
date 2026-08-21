@@ -61,6 +61,8 @@ export function runtimeOperationLabelKey(operation: AgentUpdateOperation | undef
       return "agents:repairRuntime";
     case "up_to_date":
       return "agents:upToDateRuntime";
+    case "use_default":
+      return "agents:useKandevDefault";
     case "update":
     default:
       return "agents:updateRuntime";

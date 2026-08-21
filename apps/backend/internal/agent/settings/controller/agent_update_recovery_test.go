@@ -61,6 +61,23 @@ func (s *recoverySelectionStore) Save(
 	return nil
 }
 
+func (s *recoverySelectionStore) Delete(
+	_ context.Context,
+	agentName string,
+	packageName string,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	delete(s.values, agentName+"\x00"+packageName)
+	if s.events != nil {
+		*s.events = append(*s.events, "delete")
+	}
+	return nil
+}
+
 type recoveryRuntimeUpdater struct {
 	mu            sync.Mutex
 	metadata      RuntimeVersionMetadata
@@ -218,6 +235,47 @@ func TestAgentUpdateExactCandidatePersistsBeforePublishing(t *testing.T) {
 	}
 	if len(events) != 3 || events[0] != "probe" || events[1] != "persist" || events[2] != "publish" {
 		t.Fatalf("activation order = %#v", events)
+	}
+}
+
+func TestAgentUpdateUseDefaultDeletesSelectionAfterProbe(t *testing.T) {
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.values["managed-acp\x00@example/managed-acp"] = managedruntime.Selection{
+		Package: "@example/managed-acp",
+		Version: "1.0.1",
+	}
+	events := make([]string, 0, 4)
+	selectionStore.events = &events
+	updater := &recoveryRuntimeUpdater{
+		metadata: RuntimeVersionMetadata{
+			Versions: []string{"1.0.1", "1.0.2"},
+			Latest:   "1.0.2",
+		},
+		current:      hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.1"},
+		currentFound: true,
+		probeCaps:    hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.2"},
+	}
+	updater.events = &events
+	store, completed := newRecoveryStore(updater, selectionStore)
+	spec := managedRuntimeSpec()
+	spec.DefaultVersion = "1.0.2"
+
+	job, err := store.EnqueueDefault("managed-acp", spec)
+	if err != nil {
+		t.Fatalf("EnqueueDefault: %v", err)
+	}
+	final := waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusSucceeded)
+	if final.Operation != string(managedruntime.OperationUseDefault) {
+		t.Fatalf("operation = %q, want use_default", final.Operation)
+	}
+	if final.ActiveVersion != "" || final.EffectiveVersion != "1.0.2" {
+		t.Fatalf("final versions = active %q, effective %q", final.ActiveVersion, final.EffectiveVersion)
+	}
+	if _, found, err := selectionStore.Get(context.Background(), "managed-acp", "@example/managed-acp"); err != nil || found {
+		t.Fatalf("selection after reset = found %v, err %v; want absent", found, err)
+	}
+	if len(events) != 3 || events[0] != "probe" || events[1] != "delete" || events[2] != "publish" {
+		t.Fatalf("reset activation order = %#v", events)
 	}
 }
 

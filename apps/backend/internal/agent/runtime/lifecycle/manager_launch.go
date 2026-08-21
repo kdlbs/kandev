@@ -419,23 +419,32 @@ func (m *Manager) buildAgentCommandWithContext(
 
 func (m *Manager) resolveManagedRuntimeVersion(
 	ctx context.Context,
-	runtime agentruntime.Runtime,
+	_ agentruntime.Runtime,
 	agentConfig agents.Agent,
 ) (string, error) {
-	if runtime != agentruntime.RuntimeStandalone || m.managedRuntimeSelections == nil {
-		return "", nil
-	}
 	managed, ok := agentConfig.(agents.ManagedNPMRuntimeAgent)
 	if !ok {
 		return "", nil
 	}
 	spec := managed.ManagedNPMRuntime()
+	effectiveVersion := spec.DefaultVersion
+	if effectiveVersion == "" {
+		// Test and embedded agents may construct a spec literal. PackageSpec
+		// still resolves a known built-in package's reviewed default.
+		packageSpec := spec.PackageSpec("")
+		if packageSpec != spec.Package {
+			effectiveVersion = strings.TrimPrefix(packageSpec, spec.Package+"@")
+		}
+	}
+	if m.managedRuntimeSelections == nil {
+		return effectiveVersion, nil
+	}
 	selection, found, err := m.managedRuntimeSelections.Get(ctx, agentConfig.ID(), spec.Package)
 	if err != nil {
 		return "", fmt.Errorf("resolve active managed runtime version for %s: %w", agentConfig.ID(), err)
 	}
 	if !found || selection.Package != spec.Package {
-		return "", nil
+		return effectiveVersion, nil
 	}
 	return selection.Version, nil
 }

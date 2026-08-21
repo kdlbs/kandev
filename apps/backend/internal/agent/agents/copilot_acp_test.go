@@ -50,7 +50,7 @@ func TestCopilotACP_BuildCommand_NoCLIFlagSpecialCasing(t *testing.T) {
 	ag := NewCopilotACP()
 	cmd := ag.BuildCommand(CommandOptions{})
 	got := cmd.Args()
-	want := []string{"npx", "--yes", "--prefer-offline", "@github/copilot", "--acp"}
+	want := []string{"npx", "--yes", "--prefer-offline", "@github/copilot@1.0.75", "--acp"}
 	if len(got) != len(want) {
 		t.Fatalf("argv length mismatch\n  got:  %#v\n  want: %#v", got, want)
 	}
@@ -63,7 +63,7 @@ func TestCopilotACP_BuildCommand_NoCLIFlagSpecialCasing(t *testing.T) {
 
 func TestCopilotACP_UsesManagedPackageOnEveryNPMCommandSurface(t *testing.T) {
 	ag := NewCopilotACP()
-	wantACP := []string{"npx", "--yes", "--prefer-offline", "@github/copilot", "--acp"}
+	wantACP := []string{"npx", "--yes", "--prefer-offline", "@github/copilot@1.0.75", "--acp"}
 	wantPassthrough := []string{"npx", "--yes", "--prefer-offline", "@github/copilot"}
 
 	if got := ag.Runtime().Cmd.Args(); !slices.Equal(got, wantACP) {
@@ -91,7 +91,7 @@ func TestCopilotACP_BuildCommand_KeepsManagedPackageWhenNativeBinaryIsPresent(t 
 	}
 
 	native := ag.BuildCommand(CommandOptions{PreferNativeBinary: true}).Args()
-	wantNative := []string{"npx", "--yes", "--prefer-offline", "@github/copilot", "--acp"}
+	wantNative := []string{"npx", "--yes", "--prefer-offline", "@github/copilot@1.0.75", "--acp"}
 	if len(native) != len(wantNative) {
 		t.Fatalf("native argv mismatch\n  got:  %#v\n  want: %#v", native, wantNative)
 	}

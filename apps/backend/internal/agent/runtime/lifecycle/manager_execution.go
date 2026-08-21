@@ -682,6 +682,14 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if !ok {
 		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
 	}
+	managedRuntimeVersion, err := m.resolveManagedRuntimeVersion(
+		ctx,
+		models.ExecutorType(info.ExecutorType).Runtime(),
+		agentConfig,
+	)
+	if err != nil {
+		return nil, err
+	}
 
 	executionProfileID := workspaceExecutionProfileID(info)
 	profileInfo := m.resolveWorkspaceExecutionProfile(ctx, executionProfileID)
@@ -736,6 +744,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
 			RemoteContributions:            remoteContributions,
 			ContributionDestinations:       contributionDestinations,
+			ManagedRuntimeVersion:          managedRuntimeVersion,
 		},
 		profileInfo: profileInfo,
 	}, nil

@@ -405,12 +405,16 @@ type ExecutorCreateRequest struct {
 	ContributionDestinations map[string]models.ContributionDestination
 	McpServers               []McpServerConfig
 	AgentConfig              agents.Agent // Agent type info needed by runtimes
-	PreviousExecutionID      string       // Non-empty when reconnecting to a previous execution
-	McpMode                  string       // MCP tool mode: "task" (default), "config", or "office"
-	McpProviders             []string     // Normalized provider capabilities attached to the task
-	McpProfile               *mcpprofile.Context
-	AuthToken                string // Previously handshaken agentctl token for reconnects
-	BootstrapNonce           string // Stored nonce for re-handshake after container restart
+	// ManagedRuntimeVersion is the effective exact version resolved for this
+	// launch. Remote executors use it during preflight before agentctl receives
+	// the final command.
+	ManagedRuntimeVersion string
+	PreviousExecutionID   string   // Non-empty when reconnecting to a previous execution
+	McpMode               string   // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders          []string // Normalized provider capabilities attached to the task
+	McpProfile            *mcpprofile.Context
+	AuthToken             string // Previously handshaken agentctl token for reconnects
+	BootstrapNonce        string // Stored nonce for re-handshake after container restart
 
 	// OnProgress is an optional callback for streaming preparation progress.
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can

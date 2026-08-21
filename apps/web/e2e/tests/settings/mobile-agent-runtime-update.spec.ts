@@ -10,6 +10,9 @@ test.describe("managed agent runtime updates on mobile", () => {
 
     await testPage.goto("/settings/agents");
     const trigger = testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`);
+    await expect(
+      testPage.getByTestId(`agent-update-available-dot-${runtime.agentName}`),
+    ).toBeVisible();
     await trigger.scrollIntoViewIfNeeded();
     const triggerBox = await trigger.boundingBox();
     expect(triggerBox).not.toBeNull();
