@@ -38,16 +38,46 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PR_STATE="${PR_AWAIT_PR_STATE:-$SCRIPT_DIR/pr-state}"
 GH="${PR_AWAIT_GH:-gh}"
 SLEEP="${PR_AWAIT_SLEEP:-sleep}"
+ACTIVE_READ_PID=''
+ACTIVE_READ_GROUP=''
+ACTIVE_WATCHDOG_PID=''
 
 # Blocked results leave the poll loop before a snapshot exists, but a caller
 # that asked for JSON still needs to parse the answer.
 emit_blocked() {
   local outcome=$1 message=$2
   if [[ "${FORMAT:-text}" == 'json' ]]; then
-    jq -n --argjson pr "$PR" --arg outcome "$outcome" --arg message "$message" \
+    local waited_sec="${WAITED:-0}"
+    local polls="${POLLS:-0}"
+    local head_changes="${HEAD_CHANGES:-0}"
+    local deadline_sec="${DEADLINE_SEC:-0}"
+    local interval_sec="${INTERVAL_SEC:-0}"
+    local mergeable_value='UNKNOWN'
+    local merge_status_value='UNKNOWN'
+    if jq -e . >/dev/null 2>&1 <<<"${MERGE_JSON:-}"; then
+      mergeable_value="$(jq -r '.mergeable // "UNKNOWN"' <<<"$MERGE_JSON")"
+      merge_status_value="$(jq -r '.mergeStateStatus // "UNKNOWN"' <<<"$MERGE_JSON")"
+    fi
+    jq -n \
+      --argjson pr "$PR" \
+      --arg outcome "$outcome" \
+      --arg mode "${MODE:-all-terminal}" \
+      --argjson waited_sec "$waited_sec" \
+      --argjson polls "$polls" \
+      --argjson head_changes "$head_changes" \
+      --argjson exit_code 3 \
+      --arg message "$message" \
       --arg toolchain "${TOOLCHAIN:-unverified}" \
-      '{pr: $pr, outcome: $outcome, exit_code: 3, message: $message,
-        toolchain: $toolchain, summary: null}'
+      --argjson deadline_sec "$deadline_sec" \
+      --argjson interval_sec "$interval_sec" \
+      --arg mergeable "$mergeable_value" \
+      --arg merge_state_status "$merge_status_value" \
+      '{pr: $pr, outcome: $outcome, mode: $mode, waited_sec: $waited_sec,
+        polls: $polls, head_changes: $head_changes, exit_code: $exit_code,
+        message: $message, toolchain: $toolchain, evidence_complete: false,
+        deadline_sec: $deadline_sec, interval_sec: $interval_sec,
+        mergeable: $mergeable, merge_state_status: $merge_state_status,
+        summary: null}'
   else
     printf 'PR %s\n%s\n' "$PR" "$message"
     toolchain_hint
@@ -151,6 +181,25 @@ resolve_timeout_bin() {
   done
 }
 
+stop_active_read() {
+  local pid="${ACTIVE_READ_PID:-}"
+  local group="${ACTIVE_READ_GROUP:-}"
+  local watchdog="${ACTIVE_WATCHDOG_PID:-}"
+
+  # The bounded command is a job-control process-group leader on the fallback
+  # path. Stop the group first so a pr-state shell cannot leave its gh child
+  # running. The KILL fallback makes cancellation deterministic if a child
+  # ignores TERM. The direct kill also covers timeout(1), whose child group is
+  # not portable across implementations.
+  if [[ -n "$group" ]]; then
+    kill -TERM -- "-$group" 2>/dev/null || true
+    kill -KILL -- "-$group" 2>/dev/null || true
+  fi
+  [[ -z "$pid" ]] || kill -TERM "$pid" 2>/dev/null || true
+  [[ -z "$pid" ]] || kill -KILL "$pid" 2>/dev/null || true
+  [[ -z "$watchdog" ]] || kill -KILL "$watchdog" 2>/dev/null || true
+}
+
 # Run a command with a wall-clock bound, keeping its stdout. Used for the GitHub
 # reads so a stalled `pr-state` or `gh pr view` cannot outlive the caller's
 # deadline: the poll loop can only check the clock between reads, never during.
@@ -161,12 +210,25 @@ run_bounded_capture() {
 
   resolve_timeout_bin
   if [[ -n "$TIMEOUT_BIN" ]]; then
+    local had_monitor=0
+    case "$-" in
+      *m*) had_monitor=1 ;;
+    esac
+    set -m
     if [[ -n "$outfile" ]]; then
-      "$TIMEOUT_BIN" "$secs" "$@" >"$outfile" 2>/dev/null
+      "$TIMEOUT_BIN" "$secs" "$@" >"$outfile" 2>/dev/null &
     else
-      "$TIMEOUT_BIN" "$secs" "$@" >/dev/null 2>&1
+      "$TIMEOUT_BIN" "$secs" "$@" >/dev/null 2>&1 &
     fi
-    return $?
+    local pid=$!
+    [[ "$had_monitor" -eq 1 ]] || set +m
+    ACTIVE_READ_PID="$pid"
+    ACTIVE_READ_GROUP="$pid"
+    local rc=0
+    wait "$pid" 2>/dev/null || rc=$?
+    ACTIVE_READ_PID=''
+    ACTIVE_READ_GROUP=''
+    return "$rc"
   fi
 
   # Fallback for hosts with no timeout(1), stock macOS among them.
@@ -190,6 +252,8 @@ run_bounded_capture() {
   fi
   local pid=$!
   [[ "$had_monitor" -eq 1 ]] || set +m
+  ACTIVE_READ_PID="$pid"
+  ACTIVE_READ_GROUP="$pid"
 
   (
     waited=0
@@ -200,9 +264,15 @@ run_bounded_capture() {
     done
     kill -9 -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
   ) >/dev/null 2>&1 &
+  ACTIVE_WATCHDOG_PID=$!
 
   local rc=0
   wait "$pid" 2>/dev/null || rc=$?
+  kill "$ACTIVE_WATCHDOG_PID" 2>/dev/null || true
+  wait "$ACTIVE_WATCHDOG_PID" 2>/dev/null || true
+  ACTIVE_WATCHDOG_PID=''
+  ACTIVE_READ_PID=''
+  ACTIVE_READ_GROUP=''
   # 137 is SIGKILL, which here can only have come from the watchdog.
   [[ "$rc" -ne 137 ]] || return 124
   return "$rc"
@@ -265,7 +335,19 @@ BASH_VERSION_SEEN='unknown'
 record_toolchain
 
 READ_TMP="$(mktemp "${TMPDIR:-/tmp}/pr-await-read-XXXXXX")"
-trap 'rm -f "$READ_TMP"' EXIT INT TERM
+cleanup_read_tmp() {
+  [[ -z "${READ_TMP:-}" ]] || rm -f "$READ_TMP"
+}
+
+handle_signal() {
+  local code=$1
+  stop_active_read
+  exit "$code"
+}
+
+trap cleanup_read_tmp EXIT
+trap 'handle_signal 130' INT
+trap 'handle_signal 143' TERM
 
 DEADLINE_SEC=$((DEADLINE_MIN * 60))
 
@@ -424,6 +506,7 @@ while :; do
 
   failed="$(jq -r '.failed_checks | length' <<<"$SUMMARY_JSON")"
   pending="$(jq -r '.pending_checks | length' <<<"$SUMMARY_JSON")"
+  check_count="$(jq -r '.check_count // 0' <<<"$SUMMARY_JSON")"
   passed="$(jq -r '.passed_check_count // 0' <<<"$SUMMARY_JSON")"
   complete="$(jq -r '.checks_snapshot_complete' <<<"$SUMMARY_JSON")"
   checks_head="$(jq -r '.checks_head_sha // ""' <<<"$SUMMARY_JSON")"
@@ -456,7 +539,7 @@ while :; do
   # GitHub can expose a new head before Actions has registered any check. An
   # empty rollup satisfies "nothing pending" without any evidence behind it;
   # in this repository the required jobs always run, so zero means not yet.
-  if [[ $((passed + failed + pending)) -eq 0 ]]; then
+  if [[ "$check_count" -eq 0 ]]; then
     progress "poll ${POLLS}: no checks registered at this head yet; waiting"
     if ! sleep_or_stop; then
       OUTCOME='deadline'
@@ -468,6 +551,22 @@ while :; do
   # A failed job can be visible while its parent workflow is still running, so
   # in all-terminal mode a failure is never on its own a reason to stop.
   if [[ "$MODE" == 'first-failure' && "$failed" -gt 0 ]]; then
+    snapshot_errors="$(jq -r '.errors // [] | length' <<<"$SUMMARY_JSON")"
+    threads_known="$(jq -r 'if .unresolved_review_thread_count == null then "no" else "yes" end' <<<"$SUMMARY_JSON")"
+    if [[ "$complete" != 'true' || "$snapshot_errors" -gt 0 || "$threads_known" == 'no' ]]; then
+      EVIDENCE_ERRORS=$((EVIDENCE_ERRORS + 1))
+      progress "poll ${POLLS}: first failure visible but evidence incomplete (${EVIDENCE_ERRORS} in a row)"
+      if [[ "$EVIDENCE_ERRORS" -ge 3 ]]; then
+        OUTCOME='blocked-evidence'
+        break
+      fi
+      if ! sleep_or_stop; then
+        OUTCOME='blocked-evidence'
+        break
+      fi
+      continue
+    fi
+    EVIDENCE_ERRORS=0
     OUTCOME='terminal'
     break
   fi
@@ -583,6 +682,7 @@ esac
 
 if [[ "$FORMAT" == 'json' ]]; then
   jq -n \
+    --argjson pr "$PR" \
     --argjson summary "$SUMMARY_JSON" \
     --argjson merge "$MERGE_JSON" \
     --arg outcome "$OUTCOME" \
@@ -595,9 +695,9 @@ if [[ "$FORMAT" == 'json' ]]; then
     --argjson deadline_sec "$DEADLINE_SEC" \
     --argjson interval_sec "$INTERVAL_SEC" \
     --argjson evidence_complete "$([[ "$evidence_errors_n" -eq 0 && "$threads_known_final" == 'yes' ]] && echo true || echo false)" \
-    '{outcome: $outcome, mode: $mode, waited_sec: $waited_sec, polls: $polls,
+    '{pr: $pr, outcome: $outcome, mode: $mode, waited_sec: $waited_sec, polls: $polls,
       head_changes: $head_changes, exit_code: $exit_code,
-      toolchain: $toolchain, evidence_complete: $evidence_complete,
+      message: null, toolchain: $toolchain, evidence_complete: $evidence_complete,
       deadline_sec: $deadline_sec, interval_sec: $interval_sec,
       mergeable: ($merge.mergeable // "UNKNOWN"),
       merge_state_status: ($merge.mergeStateStatus // "UNKNOWN"),
@@ -662,7 +762,7 @@ case "$OUTCOME" in
   blocked-merge-unknown)
     printf 'GitHub still reports mergeability as UNKNOWN. Re-run before treating this head as clean.\n' ;;
   deadline)
-    if [[ $((passed_n + failed_n + pending_n)) -eq 0 ]]; then
+    if [[ "$(jq -r '.check_count // 0' <<<"$SUMMARY_JSON")" -eq 0 ]]; then
       printf 'deadline hit with no checks registered yet at this head. Re-run or raise --deadline-min.\n'
     else
       printf 'deadline hit with %s check(s) pending. Re-run or raise --deadline-min.\n' "$pending_n"

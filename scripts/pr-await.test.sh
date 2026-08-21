@@ -33,7 +33,7 @@ setup_fake() {
 n=$(cat "$FAKE_DIR/counter" 2>/dev/null || echo 0)
 n=$((n + 1))
 printf '%s' "$n" > "$FAKE_DIR/counter"
-last=$(ls "$FAKE_DIR/seq" | wc -l | tr -d ' ')
+last=$(ls "$FAKE_DIR"/seq/*.json 2>/dev/null | wc -l | tr -d ' ')
 [[ $n -le $last ]] || n=$last
 if [[ -f "$FAKE_DIR/seq/$n.fail" ]]; then exit 1; fi
 cat "$FAKE_DIR/seq/$n.json"
@@ -82,9 +82,11 @@ snapshot() {
   [[ "$failed" -eq 0 ]] || failed_arr="$(jq -nc --argjson n "$failed" '[range($n) | {name: "Failing \(.)", workflow: "w", status: "completed", conclusion: "failure", run_id: 100, job_id: 200}]')"
   [[ "$pending" -eq 0 ]] || pending_arr="$(jq -nc --argjson n "$pending" '[range($n) | {name: "Pending \(.)", workflow: "w", status: "in_progress", run_id: 101, job_id: 201}]')"
   jq -n --argjson f "$failed_arr" --argjson p "$pending_arr" --argjson passed "$passed" \
+        --argjson failed "$failed" --argjson pending "$pending" \
         --argjson complete "$complete" --arg head "$head" --argjson extra "$extra" \
     '{pr: {number: 1, head_ref_name: "feat", base_ref_name: "main", head_ref_oid: $head},
       failed_checks: $f, pending_checks: $p, passed_check_count: $passed,
+      check_count: ($passed + $failed + $pending),
       checks_head_sha: $head, checks_snapshot_complete: $complete,
       approval_required_runs: [], unresolved_review_thread_count: 0,
       unresolved_threads: [], hidden_unresolved_threads: [],
@@ -99,6 +101,20 @@ run_await() {
     PR_AWAIT_SLEEP="$dir/sleep" \
     PR_AWAIT_JQ="${PROBE_JQ:-$dir/jq-ok}" PR_AWAIT_PROBE_BASH="${PROBE_BASH:-$dir/bash-ok}" \
     "$SCRIPT" "$@"
+}
+
+assert_json_envelope() {
+  local name=$1 json=$2
+  jq -e '
+    (keys | sort) == [
+      "deadline_sec", "evidence_complete", "exit_code", "head_changes",
+      "interval_sec", "merge_state_status", "mergeable", "message", "mode",
+      "outcome", "polls", "pr", "summary", "toolchain", "waited_sec"
+    ]
+    and (.pr | type) == "number"
+    and (.message == null or (.message | type) == "string")
+    and (.summary == null or (.summary | type) == "object")
+  ' <<<"$json" >/dev/null || fail "$name" "$json"
 }
 
 # --- argument validation ---------------------------------------------------
@@ -131,6 +147,19 @@ out="$(run_await "$d" 12 --mode first-failure --interval-sec 1 --quiet 2>/dev/nu
 grep -q '1 failed' <<<"$out" || fail "first-failure should return on the first failure" "$out"
 grep -q '5 pending' <<<"$out" || fail "first-failure returns with checks still pending" "$out"
 pass "first-failure returns on the first failing check"
+
+# --- first-failure requires complete evidence before returning --------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+for i in 1 2 3; do
+  snapshot "$d" "$i" 10 1 2 false aaaaaaaaaaaa \
+    '{"errors":[{"source":"review_threads","message":"graphql failed"}]}'
+done
+out="$(run_await "$d" 12 --mode first-failure --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "incomplete first-failure evidence should block, got $rc" "$out"
+[[ "$(jq -r '.outcome' <<<"$out")" == 'blocked-evidence' ]] \
+  || fail "incomplete first-failure evidence should report blocked-evidence" "$out"
+assert_json_envelope "blocked-evidence must use the JSON envelope" "$out"
+pass "first-failure waits for complete evidence before returning a failure"
 
 # --- clean terminal state ---------------------------------------------------
 d="$(make_tmp_dir)"; setup_fake "$d"
@@ -243,6 +272,9 @@ out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" &&
 jq -e . >/dev/null <<<"$out" || fail "json mode must emit valid JSON" "$out"
 [[ "$(jq -r '.outcome' <<<"$out")" == 'terminal' ]] || fail "outcome missing" "$out"
 [[ "$(jq -r '.summary.failed_checks | length' <<<"$out")" == '2' ]] || fail "summary should be embedded whole" "$out"
+assert_json_envelope "terminal JSON must use the shared envelope" "$out"
+[[ "$(jq -r '.pr' <<<"$out")" == '12' ]] || fail "terminal JSON must include the PR number" "$out"
+[[ "$(jq -r '.message' <<<"$out")" == 'null' ]] || fail "terminal JSON message must be null" "$out"
 pass "--format json embeds the full pr-state summary and keeps the exit code"
 
 # --- the cost claim: one invocation, not one per poll ----------------------
@@ -494,6 +526,7 @@ out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" &&
 jq -e . >/dev/null <<<"$out" || fail "blocked-access must still emit JSON" "$out"
 [[ "$(jq -r '.outcome' <<<"$out")" == 'blocked-access' ]] || fail "outcome missing" "$out"
 [[ "$(jq -r '.exit_code' <<<"$out")" == '3' ]] || fail "exit_code missing" "$out"
+assert_json_envelope "blocked-access JSON must use the shared envelope" "$out"
 pass "a blocked-access result is still valid JSON under --format json"
 
 d="$(make_tmp_dir)"; setup_fake "$d"
@@ -515,7 +548,35 @@ chmod +x "$d/gh"
 out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
 jq -e . >/dev/null <<<"$out" || fail "merge-state failure must emit JSON" "$out"
 [[ "$(jq -r '.outcome' <<<"$out")" == 'blocked-merge-state' ]] || fail "outcome missing" "$out"
+assert_json_envelope "blocked-merge-state JSON must use the shared envelope" "$out"
 pass "a blocked merge-state result is still valid JSON under --format json"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0 true aaaaaaaaaaaa \
+  '{"approval_required_runs":[{"run_id":9,"name":"E2E","conclusion":"action_required"}]}'
+out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "blocked-approval JSON should exit 3, got $rc" "$out"
+[[ "$(jq -r '.outcome' <<<"$out")" == 'blocked-approval' ]] || fail "blocked-approval outcome missing" "$out"
+assert_json_envelope "blocked-approval JSON must use the shared envelope" "$out"
+pass "blocked-approval produces the shared JSON envelope"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+printf '{"state":"MERGED","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"aaaaaaaaaaaa"}' > "$d/gh.json"
+out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "blocked-pr-state JSON should exit 3, got $rc" "$out"
+[[ "$(jq -r '.outcome' <<<"$out")" == 'blocked-pr-state' ]] || fail "blocked-pr-state outcome missing" "$out"
+assert_json_envelope "blocked-pr-state JSON must use the shared envelope" "$out"
+pass "blocked-pr-state produces the shared JSON envelope"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+for i in 1 2 3; do snapshot "$d" "$i" 20 0 0; done
+printf '{"state":"OPEN","mergeable":"UNKNOWN","mergeStateStatus":"UNKNOWN","headRefOid":"aaaaaaaaaaaa"}' > "$d/gh.json"
+out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "blocked-merge-unknown JSON should exit 3, got $rc" "$out"
+[[ "$(jq -r '.outcome' <<<"$out")" == 'blocked-merge-unknown' ]] || fail "blocked-merge-unknown outcome missing" "$out"
+assert_json_envelope "blocked-merge-unknown JSON must use the shared envelope" "$out"
+pass "blocked-merge-unknown produces the shared JSON envelope"
 
 
 # --- hidden threads are a subset of the total, not an addition -------------
@@ -557,6 +618,18 @@ grep -qi 'no checks registered yet' <<<"$out" \
 grep -q '0 check(s) pending' <<<"$out" \
   && fail "a zero-check deadline must not be phrased as pending checks" "$out"
 pass "a zero-check deadline is distinguished from a deadline with pending checks"
+
+# Skipped and neutral checks are terminal evidence even though pr-state does
+# not include them in passed_check_count. The separate check_count prevents the
+# await loop from treating such a rollup as if Actions had not registered it.
+for conclusion in skipped neutral; do
+  d="$(make_tmp_dir)"; setup_fake "$d"
+  snapshot "$d" 1 0 0 0 true aaaaaaaaaaaa "{\"check_count\":1,\"terminal_conclusions\":[\"$conclusion\"]}"
+  out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+  [[ "$rc" -eq 0 ]] || fail "$conclusion-only check rollup should be terminal, got $rc" "$out"
+  [[ "$(jq -r '.outcome' <<<"$out")" == 'terminal' ]] || fail "$conclusion-only rollup should emit terminal" "$out"
+done
+pass "skipped and neutral terminal checks do not look like an empty rollup"
 
 # --- a base that advanced leaves the merge result untested -----------------
 d="$(make_tmp_dir)"; setup_fake "$d"
@@ -637,8 +710,11 @@ pass "a timed-out gh pr view is reported as a timeout, not a miscounted failure"
 
 # Structural guard: both external reads must go through the bounded helper, or
 # the deadline is only enforced between reads and not during them.
-[[ "$(grep -c 'run_bounded_capture' "$ROOT_DIR/scripts/pr-await")" -ge 3 ]] \
-  || fail "both GitHub reads must run through run_bounded_capture"
+grep -q 'run_bounded_capture "\$budget" "\$READ_TMP" "\$PR_STATE"' "$ROOT_DIR/scripts/pr-await" \
+  || fail "the pr-state read must run through run_bounded_capture"
+grep -A2 'run_bounded_capture "\$budget" "\$READ_TMP"' "$ROOT_DIR/scripts/pr-await" \
+  | grep -q '"\$GH" pr view' \
+  || fail "the gh pr view read must run through run_bounded_capture"
 pass "every external GitHub read is bounded by the remaining deadline"
 
 # Structural guard: a failed read must be validated in a local before it can
@@ -691,6 +767,46 @@ if kill -0 "$child" 2>/dev/null; then
   fail "a timed-out read left its child process running (pid $child)"
 fi
 pass "a timed-out read terminates the whole process group, not just the shell"
+
+# --- cancellation stops an active bounded read -----------------------------
+# A caller that cancels the waiter must not leave a child GitHub read alive.
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+cat > "$d/pr-state" <<'CANCEL'
+#!/usr/bin/env bash
+sleep 120 &
+printf '%s' "$!" > "$FAKE_DIR/childpid"
+wait "$!"
+CANCEL
+chmod +x "$d/pr-state"
+FAKE_DIR="$d" PR_AWAIT_PR_STATE="$d/pr-state" PR_AWAIT_GH="$d/gh" \
+  PR_AWAIT_SLEEP="$d/sleep" PR_AWAIT_JQ="$d/jq-ok" PR_AWAIT_PROBE_BASH="$d/bash-ok" \
+  PR_AWAIT_NO_TIMEOUT=1 PR_AWAIT_READ_FLOOR=30 "$SCRIPT" 12 --interval-sec 1 --deadline-min 30 --quiet >"$d/out" 2>"$d/err" &
+await_pid=$!
+for _ in 1 2 3 4 5; do
+  [[ -s "$d/childpid" ]] && break
+  /bin/sleep 1
+done
+[[ -s "$d/childpid" ]] || { kill -KILL "$await_pid" 2>/dev/null || true; fail "the fake did not start a bounded child read"; }
+child="$(<"$d/childpid")"
+kill -TERM "$await_pid"
+for _ in 1 2 3 4 5; do
+  kill -0 "$await_pid" 2>/dev/null || break
+  /bin/sleep 1
+done
+if kill -0 "$await_pid" 2>/dev/null; then
+  kill -KILL "$await_pid" 2>/dev/null || true
+  kill -KILL "$child" 2>/dev/null || true
+  wait "$await_pid" 2>/dev/null || true
+  fail "SIGTERM must stop an active bounded read"
+fi
+wait "$await_pid" && rc=0 || rc=$?
+[[ "$rc" -eq 143 ]] || fail "SIGTERM should return 143, got $rc" "$(<"$d/err")"
+if kill -0 "$child" 2>/dev/null; then
+  kill -KILL "$child" 2>/dev/null || true
+  fail "SIGTERM left the bounded child read running (pid $child)"
+fi
+pass "SIGTERM stops the waiter and its active bounded read"
 
 
 # --- a spent deadline grants one read floor, not one per query -------------
