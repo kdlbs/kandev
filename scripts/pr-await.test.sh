@@ -347,21 +347,41 @@ pass "--interval-sec 010 and --deadline-min 010 parse as decimal 10, not octal 8
 
 
 # --- toolchain preflight: pr-state degrades silently, so refuse to run ------
+# An old toolchain is recorded, not refused. pr-state works on jq 1.6 and bash
+# 3.2 now, so a version gate would only turn away working installations; the
+# snapshot-quality guards below cover a degraded pr-state whatever its cause.
 d="$(make_tmp_dir)"; setup_fake "$d"
 snapshot "$d" 1 20 0 0
 out="$(PROBE_JQ="$d/jq-bad" run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
-[[ "$rc" -eq 3 ]] || fail "jq that loops on empty-match gsub must block, got $rc" "$out"
-grep -q 'jq-1.6-fake' <<<"$out" || fail "should name the jq version" "$out"
-grep -qi 'cannot be read' <<<"$out" || fail "should explain the impact" "$out"
-pass "a jq whose gsub loops blocks before any polling"
+[[ "$rc" -eq 0 ]] || fail "an old jq must not block a healthy run, got $rc" "$out"
+grep -q 'jq-1.6-fake' <<<"$out" || fail "the old jq should still be recorded" "$out"
+pass "an old jq is recorded in the report rather than refused"
 
 d="$(make_tmp_dir)"; setup_fake "$d"
 snapshot "$d" 1 20 0 0
 out="$(PROBE_BASH="$d/bash-bad" run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
-[[ "$rc" -eq 3 ]] || fail "bash that fails empty-array expansion must block, got $rc" "$out"
-grep -q '3.2.57-fake' <<<"$out" || fail "should name the bash version" "$out"
-grep -qi 'unresolved review threads' <<<"$out" || fail "should explain the silent thread loss" "$out"
-pass "a bash that aborts empty-array expansion blocks before any polling"
+[[ "$rc" -eq 0 ]] || fail "an old bash must not block a healthy run, got $rc" "$out"
+grep -q '3.2.57-fake' <<<"$out" || fail "the old bash should still be recorded" "$out"
+pass "an old bash is recorded in the report rather than refused"
+
+# But a reader whose pr-state produced nothing usable needs to know the
+# toolchain is a known cause of exactly that.
+d="$(make_tmp_dir)"; setup_fake "$d"
+for i in 1 2 3; do : > "$d/seq/$i.fail"; snapshot "$d" "$i" 0 0 0; done
+out="$(PROBE_JQ="$d/jq-bad" PROBE_BASH="$d/bash-bad" run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "expected blocked, got $rc" "$out"
+grep -qi 'Toolchain note' <<<"$out" || fail "a blocked report should name the toolchain risk" "$out"
+grep -qi 'empty-matching gsub' <<<"$out" || fail "should explain the jq risk" "$out"
+grep -qi 'empty array under set -u' <<<"$out" || fail "should explain the bash risk" "$out"
+pass "a blocked report explains a known-bad toolchain as a possible cause"
+
+# A current toolchain gets no note, so the hint stays signal.
+d="$(make_tmp_dir)"; setup_fake "$d"
+for i in 1 2 3; do : > "$d/seq/$i.fail"; snapshot "$d" "$i" 0 0 0; done
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "expected blocked, got $rc" "$out"
+grep -qi 'Toolchain note' <<<"$out" && fail "a current toolchain must not emit a note" "$out"
+pass "a current toolchain produces no toolchain note"
 
 d="$(make_tmp_dir)"; setup_fake "$d"
 snapshot "$d" 1 20 0 0
@@ -419,10 +439,16 @@ pass "a retry path stops at the deadline instead of sleeping out its full strike
 # silently skip on the exact hosts that carry the broken jq.
 d="$(make_tmp_dir)"; setup_fake "$d"
 snapshot "$d" 1 20 0 0
-out="$(PR_AWAIT_NO_TIMEOUT=1 PROBE_JQ="$d/jq-bad" run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
-[[ "$rc" -eq 3 ]] || fail "hanging jq must be caught without timeout(1), got $rc" "$out"
-grep -q 'jq-1.6-fake' <<<"$out" || fail "should still name the bad jq" "$out"
-pass "the jq probe catches a hanging jq with no timeout(1) available"
+cat > "$d/pr-state" <<'HANGNT'
+#!/usr/bin/env bash
+exec sleep 120
+HANGNT
+chmod +x "$d/pr-state"
+start=$SECONDS
+out="$(PR_AWAIT_NO_TIMEOUT=1 PR_AWAIT_READ_FLOOR=2 run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -ne 0 ]] || fail "a stalled read must be bounded without timeout(1), got $rc" "$out"
+[[ $((SECONDS - start)) -lt 12 ]] || fail "the shell fallback did not bound the read"
+pass "a stalled read is bounded without timeout(1) available"
 
 # The fallback must also complete a normal run, not merely catch a hang.
 d="$(make_tmp_dir)"; setup_fake "$d"
@@ -471,11 +497,11 @@ pass "a blocked-access result is still valid JSON under --format json"
 d="$(make_tmp_dir)"; setup_fake "$d"
 snapshot "$d" 1 20 0 0
 out="$(PROBE_JQ="$d/jq-bad" run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
-[[ "$rc" -eq 3 ]] || fail "expected 3, got $rc" "$out"
-jq -e . >/dev/null <<<"$out" || fail "preflight failure must emit JSON too" "$out"
-[[ "$(jq -r '.outcome' <<<"$out")" == 'blocked-toolchain' ]] || fail "outcome missing" "$out"
-grep -q 'jq-1.6-fake' <<<"$(jq -r '.message' <<<"$out")" || fail "message should name the jq" "$out"
-pass "a preflight toolchain failure is still valid JSON under --format json"
+[[ "$rc" -eq 0 ]] || fail "an old jq must not block the JSON path, got $rc" "$out"
+jq -e . >/dev/null <<<"$out" || fail "must emit valid JSON" "$out"
+[[ "$(jq -r '.outcome' <<<"$out")" == 'terminal' ]] || fail "outcome should be terminal" "$out"
+grep -q 'jq-1.6-fake' <<<"$(jq -r '.toolchain' <<<"$out")" || fail "toolchain should record the jq" "$out"
+pass "an old jq is recorded in the JSON toolchain field, not treated as blocked"
 
 d="$(make_tmp_dir)"; setup_fake "$d"
 snapshot "$d" 1 20 0 0

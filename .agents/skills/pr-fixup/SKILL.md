@@ -76,15 +76,15 @@ cannot run `pr-state` correctly. Never downgrade an exit 3 to "probably clean."
 Exit 1 counts blocking reviews, not only threads: a current-head
 `CHANGES_REQUESTED` review can exist with no unresolved thread attached.
 
-The toolchain check is not optional ceremony. `pr-state` fails silently in two
-host environments, and both look like a clean PR: jq 1.6 loops on the
-empty-matching `gsub` in its review-evidence filter, and bash 3.2 aborts
-review-thread pagination under `set -u` so the unresolved count returns null.
-Measured against a PR with four unresolved threads, bash 3.2 reported none and
-still exited 0. `pr-await` probes both behaviours before polling and records the
-verified versions in every report; if it exits 3 naming the toolchain, fix PATH
-rather than working around the gate. A push during the wait restarts the gate
-against the new head and is reported.
+Every report records the jq and bash versions it ran under. That is provenance,
+not a gate: `pr-state` used to fail silently on jq 1.6 and on the bash 3.2 that
+macOS ships as `/bin/bash`, both of which made a dirty PR look clean, and both
+are fixed at the source. What guards against a degraded `pr-state` now is the
+snapshot itself, which is stronger than any version check: a summary reporting
+`errors`, one whose unresolved-thread count is null, and one that does not parse
+are all treated as unknown rather than clean. A blocked report on an old
+toolchain adds a note naming it as a possible cause. A push during the wait
+restarts the gate against the new head and is reported.
 
 Do not use interactive `gh pr checks --watch` in the primary conversation: its
 TTY redraws make captured output unusable. Use the read-only `pr-poller` only

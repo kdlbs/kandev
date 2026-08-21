@@ -50,6 +50,7 @@ emit_blocked() {
         toolchain: $toolchain, summary: null}'
   else
     printf 'PR %s\n%s\n' "$PR" "$message"
+    toolchain_hint
   fi
   exit 3
 }
@@ -128,29 +129,6 @@ progress() {
 # caller must treat it that way instead of reading an empty object as
 # "not conflicting".
 
-# `pr-state` degrades silently under two host toolchains, and both failures
-# surface as a PR that looks clean:
-#
-#   jq 1.6   - its review-evidence filter runs a gsub whose pattern can match
-#              the empty string, which loops. Observed burning ~105s of CPU on
-#              9 KB of input before dying with "cannot allocate memory".
-#   bash 3.2 - `"${arr[@]}"` on an empty array under `set -u` is an error, so
-#              review-thread pagination aborts non-fatally and the unresolved
-#              count comes back null. Measured against a PR with 4 unresolved
-#              threads, `pr-state` reported none and still exited 0.
-#
-# Probe the behaviour rather than parsing version strings: vendors backport
-# (`jq-1.7.1-apple`), and the defect is what matters, not the number.
-# Run a command with a wall-clock bound, using nothing but the shell. Stock
-# macOS ships no timeout(1), and those are precisely the hosts carrying the
-# jq this probes for, so depending on it would skip the check where it matters.
-# Run a command with a wall-clock bound, using nothing but the shell. Stock
-# macOS ships no timeout(1), and those are precisely the hosts carrying the jq
-# this guards against, so depending on it would skip the check where it matters.
-#
-# A watchdog rather than a polling loop: `wait` returns the moment the command
-# does, so a healthy read costs nothing. Polling at a fixed tick charged every
-# invocation for the worst case.
 TIMEOUT_BIN=''
 TIMEOUT_RESOLVED=0
 resolve_timeout_bin() {
@@ -169,6 +147,9 @@ resolve_timeout_bin() {
   done
 }
 
+# Run a command with a wall-clock bound, keeping its stdout. Used for the GitHub
+# reads so a stalled `pr-state` or `gh pr view` cannot outlive the caller's
+# deadline: the poll loop can only check the clock between reads, never during.
 run_bounded_capture() {
   local secs=$1 outfile=$2
   shift 2
@@ -184,17 +165,15 @@ run_bounded_capture() {
     return $?
   fi
 
-  # Fallback for hosts with no timeout(1) - stock macOS among them, which is
-  # exactly where the broken jq this guards against tends to live.
+  # Fallback for hosts with no timeout(1), stock macOS among them.
   #
-  # The watchdog polls in one-second steps and exits by itself once the command
-  # finishes: a shell blocked in `sleep N` does not act on a signal until that
-  # sleep returns, so the parent cannot reliably kill one long sleep. Its fds
-  # are closed because callers capture this with $(...), and any background
-  # process holding that pipe keeps the substitution blocked afterwards.
-  # Job control makes the background job a process-group leader, so the
-  # watchdog can kill the whole tree. Killing the pr-state shell alone leaves
-  # the `gh` it is blocked on running and still issuing requests.
+  # Job control makes the background job a process-group leader so the watchdog
+  # can kill the whole tree; killing the pr-state shell alone leaves the `gh` it
+  # is blocked on running. The watchdog polls in one-second steps and exits by
+  # itself once the command finishes, because a shell blocked in `sleep N` does
+  # not act on a signal until that sleep returns. Its fds are closed because
+  # callers capture this with $(...), and any background process holding that
+  # pipe keeps the substitution blocked afterwards.
   local had_monitor=0
   case "$-" in
     *m*) had_monitor=1 ;;
@@ -225,12 +204,6 @@ run_bounded_capture() {
   return "$rc"
 }
 
-run_bounded() {
-  local secs=$1
-  shift
-  run_bounded_capture "$secs" '' "$@"
-}
-
 # Seconds left before the caller's deadline, floored at zero.
 remaining_budget() {
   local left=$((DEADLINE_SEC - (SECONDS - START_SEC)))
@@ -245,35 +218,47 @@ READ_CAP=180
 
 # A zero or already-spent deadline still gets exactly one snapshot, so the
 # report can name the pending checks rather than saying nothing at all. That
-# read is bounded tightly: a healthy `pr-state --summary` returns in about ten
-# seconds, and a caller who asked for no waiting should not get a long one.
+# read is bounded tightly: a healthy read returns in about ten seconds, and a
+# caller who asked for no waiting should not get a long one.
 READ_FLOOR="${PR_AWAIT_READ_FLOOR:-15}"
 
-preflight_toolchain() {
+# Recorded in every report as provenance, not as a gate. `pr-state` used to fail
+# silently on jq 1.6 and on the bash 3.2 that macOS ships as /bin/bash, and this
+# script refused to run there. Both are fixed at the source now, and blocking on
+# a version would only turn away working installations.
+#
+# What replaced the gate is stronger than it was: the poll loop rejects a
+# snapshot that reports `errors`, one whose unresolved-thread count is null, and
+# one that does not parse. Those test the data rather than a proxy for it, so
+# they catch a degraded pr-state whatever the cause, including a checkout that
+# predates the fix.
+record_toolchain() {
   local jq_bin="${PR_AWAIT_JQ:-jq}"
   local bash_bin="${PR_AWAIT_PROBE_BASH:-bash}"
-  local jq_ver bash_ver
-  jq_ver="$("$jq_bin" --version 2>/dev/null || printf 'unknown')"
-  bash_ver="$("$bash_bin" -c 'printf "%s" "${BASH_VERSION%%(*}"' 2>/dev/null || printf 'unknown')"
+  JQ_VERSION="$("$jq_bin" --version 2>/dev/null || printf 'unknown')"
+  BASH_VERSION_SEEN="$("$bash_bin" -c 'printf "%s" "${BASH_VERSION%%(*}"' 2>/dev/null || printf 'unknown')"
+  TOOLCHAIN="$JQ_VERSION, bash $BASH_VERSION_SEEN"
+}
 
-  if ! run_bounded 3 "$jq_bin" -n '"x" | gsub("a?"; "")'; then
-    emit_blocked 'blocked-toolchain' \
-"BLOCKED: $jq_ver loops on an empty-matching gsub, which pr-state uses.
-CI state cannot be read at all. Install jq 1.7 or later and put it first on PATH."
-  fi
-
-  if ! "$bash_bin" -c 'set -u; a=(); printf "%s" "${a[@]}"' >/dev/null 2>&1; then
-    emit_blocked 'blocked-toolchain' \
-"BLOCKED: bash $bash_ver aborts empty-array expansion under set -u.
-pr-state silently reports zero unresolved review threads on this shell, so a
-clean result would not be trustworthy. Put bash 4.4 or later first on PATH."
-  fi
-
-  TOOLCHAIN="$jq_ver, bash $bash_ver"
+# Appended to a blocked report only. A reader whose pr-state produced nothing
+# usable is the one person who needs to know their toolchain is a known cause.
+toolchain_hint() {
+  local hint=''
+  case "$JQ_VERSION" in
+    jq-1.[0-6] | jq-1.[0-6].* | jq-1.[0-6]-*)
+      hint="$JQ_VERSION loops on an empty-matching gsub; a pr-state predating that fix hangs on it." ;;
+  esac
+  case "$BASH_VERSION_SEEN" in
+    [123].*)
+      hint="${hint:+$hint }bash $BASH_VERSION_SEEN errors on an empty array under set -u; a pr-state predating that fix loses review threads there." ;;
+  esac
+  [[ -z "$hint" ]] || printf '\nToolchain note: %s\n' "$hint"
 }
 
 TOOLCHAIN='unverified'
-preflight_toolchain
+JQ_VERSION='unknown'
+BASH_VERSION_SEEN='unknown'
+record_toolchain
 
 READ_TMP="$(mktemp "${TMPDIR:-/tmp}/pr-await-read-XXXXXX")"
 trap 'rm -f "$READ_TMP"' EXIT INT TERM
