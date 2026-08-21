@@ -93,7 +93,11 @@ vi.mock("./implement-plan-button", () => ({
 }));
 
 vi.mock("./reset-context-button", () => ({
-  ResetContextButton: () => <button type="button">Reset context</button>,
+  ResetContextButton: ({ presentation = "desktop" }: { presentation?: "desktop" | "mobile" }) => (
+    <button type="button" data-testid="reset-context-button" data-reset-presentation={presentation}>
+      Reset context
+    </button>
+  ),
 }));
 
 vi.mock("./chat-input-plugin-actions", () => ({
@@ -388,6 +392,9 @@ describe("ChatInputToolbar responsive wrapper", () => {
     expect(screen.queryByTestId("mock-sessions-dropdown")).toBeNull();
     expect(screen.getByTestId("toolbar-item-context")).toBeTruthy();
     expect(screen.getByTestId("toolbar-item-reset-context")).toBeTruthy();
+    expect(screen.getByTestId("reset-context-button").getAttribute("data-reset-presentation")).toBe(
+      "mobile",
+    );
     expect(screen.getByTestId("toolbar-item-enhance")).toBeTruthy();
     expect(screen.getByTestId("mock-mode-selector").className).toContain("max-w-[46vw]");
     expect(screen.getByTestId("mock-model-selector").className).toContain("max-w-[56vw]");
@@ -420,6 +427,9 @@ describe("ChatInputToolbar responsive wrapper", () => {
       renderFullToolbar();
 
       expect(screen.getByTestId("chat-input-toolbar")).toBeTruthy();
+      expect(
+        screen.getByTestId("reset-context-button").getAttribute("data-reset-presentation"),
+      ).toBe("desktop");
       expect(screen.queryByTestId(MOBILE_TOOLBAR_TEST_ID)).toBeNull();
     },
   );

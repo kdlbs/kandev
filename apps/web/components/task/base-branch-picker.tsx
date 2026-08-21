@@ -10,7 +10,8 @@ import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { invalidateCumulativeDiffCache } from "@/hooks/domains/session/use-cumulative-diff";
 import { updateTaskRepositoryBaseBranch } from "@/lib/api/domains/kanban-api";
 import { useToast } from "@/components/toast-provider";
-import { repositoryId, type Branch, type Repository } from "@/lib/types/http";
+import { repositoryId, type Repository } from "@/lib/types/http";
+import { BranchPickerList } from "./branch-picker-list";
 import { useTranslation } from "react-i18next";
 
 type ResolvedRepo = {
@@ -125,107 +126,6 @@ function usePickerLogic(taskId: string | null, repositoryName: string, fallbackB
   };
 }
 
-function BranchList({
-  branches,
-  isLoadingBranches,
-  currentBase,
-  onSelect,
-}: {
-  branches: Branch[];
-  isLoadingBranches: boolean;
-  currentBase: string;
-  onSelect: (name: string) => void;
-}) {
-  const { t } = useTranslation();
-  const [filter, setFilter] = useState("");
-  // Dedupe by name (local + remote variants collapse to one option) so the
-  // list shows each branch once even when the API returns both kinds.
-  const uniqueByName = useMemo(() => {
-    const seen = new Set<string>();
-    const out: Branch[] = [];
-    for (const b of branches) {
-      if (seen.has(b.name)) continue;
-      seen.add(b.name);
-      out.push(b);
-    }
-    return out;
-  }, [branches]);
-  const filtered = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return uniqueByName;
-    return uniqueByName.filter((b) => b.name.toLowerCase().includes(q));
-  }, [filter, uniqueByName]);
-
-  return (
-    <div className="flex flex-col gap-1">
-      <input
-        type="text"
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        placeholder={t("task:filterBranches")}
-        data-testid="base-branch-picker-filter"
-        className="w-full rounded border border-input bg-background px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
-        autoFocus
-      />
-      <BranchListBody
-        filtered={filtered}
-        isLoadingBranches={isLoadingBranches}
-        currentBase={currentBase}
-        onSelect={onSelect}
-      />
-    </div>
-  );
-}
-
-function BranchListBody({
-  filtered,
-  isLoadingBranches,
-  currentBase,
-  onSelect,
-}: {
-  filtered: Branch[];
-  isLoadingBranches: boolean;
-  currentBase: string;
-  onSelect: (name: string) => void;
-}) {
-  const { t } = useTranslation();
-  if (isLoadingBranches && filtered.length === 0) {
-    return (
-      <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
-        <IconLoader2 className="h-3 w-3 animate-spin" />
-        {t("task:loadingBranches")}
-      </div>
-    );
-  }
-  if (filtered.length === 0) {
-    return (
-      <div className="px-2 py-1.5 text-xs text-muted-foreground">
-        {t("task:noMatchingBranches")}
-      </div>
-    );
-  }
-  return (
-    <>
-      {filtered.map((b) => (
-        <button
-          key={`${b.type}:${b.name}`}
-          type="button"
-          role="option"
-          aria-selected={b.name === currentBase}
-          data-testid={`base-branch-picker-option-${b.name}`}
-          className={cn(
-            "flex w-full items-center gap-2 rounded border border-transparent px-2 py-1.5 text-left text-xs cursor-pointer hover:bg-muted",
-            b.name === currentBase && "border-primary/50 bg-card font-medium",
-          )}
-          onClick={() => onSelect(b.name)}
-        >
-          <span className="truncate">{b.name}</span>
-        </button>
-      ))}
-    </>
-  );
-}
-
 /**
  * Compare-against picker rendered inline inside the branch hover card.
  * Replaces the static base branch label with a click-to-edit trigger.
@@ -273,7 +173,7 @@ export function BaseBranchPicker({
         role="listbox"
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        <BranchList
+        <BranchPickerList
           branches={logic.branches}
           isLoadingBranches={logic.isLoadingBranches}
           currentBase={logic.currentBase}

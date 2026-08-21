@@ -3,12 +3,14 @@ package httpmw
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/authn"
+	authhttpapi "github.com/kandev/kandev/internal/auth/httpapi"
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -27,8 +30,9 @@ import (
 )
 
 // newTestService builds an auth service with the features.auth flag set to
-// authEnabled (on ⇒ setup mode until an admin is created via setupAdmin).
-func newTestService(t *testing.T, authEnabled bool) *auth.Service {
+// authEnabled (on ⇒ setup mode until an admin is created via setupAdmin) and
+// returns the backing auth store for direct session seeding.
+func newTestService(t *testing.T, authEnabled bool) (*auth.Service, *authstore.Store) {
 	t.Helper()
 	conn, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -53,15 +57,23 @@ func newTestService(t *testing.T, authEnabled bool) *auth.Service {
 	if err != nil {
 		t.Fatalf("auth service: %v", err)
 	}
-	return svc
+	return svc, store
 }
 
 // newTestRouter returns a router with the auth middleware and one probe route
 // that echoes the resolved identity. Requests to unregistered paths report
-// 404 when the middleware passed them through, 401 when it aborted.
-func newTestRouter(svc *auth.Service) *gin.Engine {
+// 404 when the middleware passed them through, 401 when it aborted. Trusted
+// proxies mirror production: no trusted-proxy args clears gin's trust-all
+// default exactly like configureTrustedProxies does.
+func newTestRouter(svc *auth.Service, trustedProxies ...string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
+	if len(trustedProxies) == 0 {
+		trustedProxies = nil
+	}
+	if err := router.SetTrustedProxies(trustedProxies); err != nil {
+		panic(err)
+	}
 	router.Use(Middleware(svc))
 	router.GET("/api/v1/probe", func(c *gin.Context) {
 		identity, ok := authn.FromGin(c)
@@ -96,7 +108,7 @@ func setupAdmin(t *testing.T, svc *auth.Service) (cookieToken string) {
 }
 
 func TestDisabledModeInjectsSyntheticAdmin(t *testing.T) {
-	svc := newTestService(t, false)
+	svc, _ := newTestService(t, false)
 	router := newTestRouter(svc)
 
 	rec := doRequest(router, http.MethodGet, "/api/v1/probe")
@@ -110,7 +122,7 @@ func TestDisabledModeInjectsSyntheticAdmin(t *testing.T) {
 }
 
 func TestEnabledModeBlocksAPIWithoutCredentials(t *testing.T) {
-	svc := newTestService(t, true)
+	svc, _ := newTestService(t, true)
 	setupAdmin(t, svc)
 	router := newTestRouter(svc)
 
@@ -120,7 +132,7 @@ func TestEnabledModeBlocksAPIWithoutCredentials(t *testing.T) {
 }
 
 func TestEnabledModeSessionCookieAuthenticates(t *testing.T) {
-	svc := newTestService(t, true)
+	svc, _ := newTestService(t, true)
 	token := setupAdmin(t, svc)
 	router := newTestRouter(svc)
 
@@ -136,7 +148,7 @@ func TestEnabledModeSessionCookieAuthenticates(t *testing.T) {
 }
 
 func TestEnabledModePATAuthenticates(t *testing.T) {
-	svc := newTestService(t, true)
+	svc, _ := newTestService(t, true)
 	setupAdmin(t, svc)
 	_, pat, err := svc.MintToken(context.Background(), userstore.DefaultUserID, "ci", 0)
 	if err != nil {
@@ -153,7 +165,7 @@ func TestEnabledModePATAuthenticates(t *testing.T) {
 }
 
 func TestEnabledModePATAuthenticatesPluginWebhook(t *testing.T) {
-	svc := newTestService(t, true)
+	svc, _ := newTestService(t, true)
 	setupAdmin(t, svc)
 	_, pat, err := svc.MintToken(context.Background(), userstore.DefaultUserID, "plugin-ui", 0)
 	if err != nil {
@@ -180,7 +192,7 @@ func TestEnabledModePATAuthenticatesPluginWebhook(t *testing.T) {
 // class from the plan's allowlist spec. 404 = middleware passed through
 // (route unregistered), 401 = middleware denied.
 func TestEnabledModeAllowlistMatrix(t *testing.T) {
-	svc := newTestService(t, true)
+	svc, _ := newTestService(t, true)
 	setupAdmin(t, svc)
 	router := newTestRouter(svc)
 
@@ -273,7 +285,7 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 
 func TestSetupModeAllowsOnlyBootstrapSurfaces(t *testing.T) {
 	// Flag on but no admin yet ⇒ setup mode.
-	svc := newTestService(t, true)
+	svc, _ := newTestService(t, true)
 	if svc.Mode() != auth.ModeSetup {
 		t.Fatalf("mode = %s, want setup", svc.Mode())
 	}
@@ -291,7 +303,7 @@ func TestSetupModeAllowsOnlyBootstrapSurfaces(t *testing.T) {
 }
 
 func TestInvalidCredentialsAreRejected(t *testing.T) {
-	svc := newTestService(t, true)
+	svc, _ := newTestService(t, true)
 	setupAdmin(t, svc)
 	router := newTestRouter(svc)
 
@@ -313,7 +325,7 @@ func TestInvalidCredentialsAreRejected(t *testing.T) {
 // request-aware cookie resolution: on a ported Host it reads the
 // port-scoped session cookie name.
 func TestEnabledModeScopedSessionCookieAuthenticates(t *testing.T) {
-	svc := newTestService(t, true)
+	svc, _ := newTestService(t, true)
 	token := setupAdmin(t, svc)
 	router := newTestRouter(svc)
 
@@ -332,7 +344,7 @@ func TestEnabledModeScopedSessionCookieAuthenticates(t *testing.T) {
 // TestEnabledModeRejectsForeignPortSessionCookie pins per-port resolution: a
 // token carried under another port's scoped name is not read for this Host.
 func TestEnabledModeRejectsForeignPortSessionCookie(t *testing.T) {
-	svc := newTestService(t, true)
+	svc, _ := newTestService(t, true)
 	token := setupAdmin(t, svc)
 	router := newTestRouter(svc)
 
@@ -741,4 +753,169 @@ func TestTruncateForLogPreservesShortValuesAndRuneBoundaries(t *testing.T) {
 			t.Fatalf("truncated multi-byte value is not valid UTF-8: %q", got)
 		}
 	}
+}
+
+// TestSessionIPRefreshedThroughMiddleware proves the full chain gin →
+// middleware → service → store for the session-IP refresh, in four transport
+// sub-cases: (a) RemoteAddr-only on a cleared-proxy router, with a real-route
+// read-back of GET /api/v1/auth/sessions; (b) a trusted peer whose
+// X-Forwarded-For wins over X-Real-IP; (c) an untrusted peer whose forwarded
+// header is ignored; (d) a cookie-authenticated deferred-path request (/ws)
+// still refreshes. Each sub-case runs on a FRESH harness with its own aged
+// session so a resolve cannot be throttled by a sibling's touch.
+func TestSessionIPRefreshedThroughMiddleware(t *testing.T) {
+	// createAgedSession seeds a session whose last_seen_at is ≥2 minutes in
+	// the past (the 1-minute touch interval is unexported in package auth,
+	// so this recipe cannot name it) with a 24h future expiry so a slow
+	// test cannot trip the delete-before-touch path, under the active
+	// DefaultUserID row seeded by userstore.Provide. setupAdmin is NOT
+	// called: it would mint a second DefaultUserID session.
+	createAgedSession := func(t *testing.T, store *authstore.Store) (token, hash string) {
+		t.Helper()
+		token, hash, err := auth.GenerateSessionToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Now().UTC()
+		session := &authstore.Session{
+			UserID: userstore.DefaultUserID, TokenHash: hash,
+			CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour), LastSeenAt: now.Add(-2 * time.Hour),
+			IP: "1.1.1.1",
+		}
+		if err := store.CreateSession(context.Background(), session); err != nil {
+			t.Fatal(err)
+		}
+		return token, hash
+	}
+	// sessionIP selects by TokenHash, never list index, so a future fixture
+	// extension cannot silently break the assertions.
+	sessionIP := func(t *testing.T, svc *auth.Service, hash string) string {
+		t.Helper()
+		sessions, err := svc.ListSessions(context.Background(), userstore.DefaultUserID)
+		if err != nil {
+			t.Fatalf("list sessions: %v", err)
+		}
+		for _, s := range sessions {
+			if s.TokenHash == hash {
+				return s.IP
+			}
+		}
+		t.Fatalf("no session row for hash %s", hash)
+		return ""
+	}
+	withCookie := func(svc *auth.Service, token string) func(*http.Request) {
+		return func(r *http.Request) {
+			r.AddCookie(&http.Cookie{Name: svc.CookieName(), Value: token})
+		}
+	}
+
+	t.Run("cleared proxies uses RemoteAddr", func(t *testing.T) {
+		svc, store := newTestService(t, true)
+		token, hash := createAgedSession(t, store)
+		router := newTestRouter(svc)
+
+		// Probe first (assert its 200), then the stored IP, then the
+		// real-route read-back: the read-back runs after the probe's touch
+		// so a buggy expires=now touch 401s the read-back's resolve, where
+		// the JSON assertion lives.
+		rec := doRequest(router, http.MethodGet, "/api/v1/probe", withCookie(svc, token), func(r *http.Request) {
+			r.RemoteAddr = "2.2.2.2:1234"
+		})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("probe: %d body=%s", rec.Code, rec.Body.String())
+		}
+		if got := sessionIP(t, svc, hash); got != "2.2.2.2" {
+			t.Fatalf("stored IP = %q, want 2.2.2.2", got)
+		}
+
+		log, err := logger.NewFromZap(zap.NewNop())
+		if err != nil {
+			t.Fatal(err)
+		}
+		authhttpapi.RegisterRoutes(router, svc, log)
+		rec = doRequest(router, http.MethodGet, "/api/v1/auth/sessions", withCookie(svc, token), func(r *http.Request) {
+			r.RemoteAddr = "2.2.2.2:1234"
+		})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("sessions read-back: %d body=%s (expires=now bug or resolution failure)", rec.Code, rec.Body.String())
+		}
+		var out struct {
+			Sessions []struct {
+				IP      string `json:"ip"`
+				Current bool   `json:"current"`
+			} `json:"sessions"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode sessions: %v", err)
+		}
+		gotIP := ""
+		for _, s := range out.Sessions {
+			if s.Current {
+				gotIP = s.IP
+			}
+		}
+		if gotIP != "2.2.2.2" {
+			t.Fatalf("read-back IP = %q, want 2.2.2.2", gotIP)
+		}
+	})
+
+	t.Run("trusted peer honors X-Forwarded-For over X-Real-IP", func(t *testing.T) {
+		svc, store := newTestService(t, true)
+		token, hash := createAgedSession(t, store)
+		router := newTestRouter(svc, "10.0.0.0/8")
+
+		rec := doRequest(router, http.MethodGet, "/api/v1/probe", withCookie(svc, token), func(r *http.Request) {
+			r.RemoteAddr = "10.0.0.5:1234"
+			r.Header.Set("X-Forwarded-For", "2.2.2.2")
+			r.Header.Set("X-Real-IP", "9.9.9.9")
+		})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("probe: %d body=%s", rec.Code, rec.Body.String())
+		}
+		// A RemoteAddr-wired middleware stores 10.0.0.5; an X-Real-IP-wired
+		// one stores 9.9.9.9; only c.ClientIP() with gin's header
+		// precedence stores 2.2.2.2.
+		if got := sessionIP(t, svc, hash); got != "2.2.2.2" {
+			t.Fatalf("stored IP = %q, want 2.2.2.2", got)
+		}
+	})
+
+	t.Run("untrusted peer ignores X-Forwarded-For", func(t *testing.T) {
+		svc, store := newTestService(t, true)
+		token, hash := createAgedSession(t, store)
+		router := newTestRouter(svc) // cleared proxies, not gin's trust-all default
+
+		rec := doRequest(router, http.MethodGet, "/api/v1/probe", withCookie(svc, token), func(r *http.Request) {
+			r.RemoteAddr = "10.0.0.5:1234"
+			r.Header.Set("X-Forwarded-For", "2.2.2.2")
+		})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("probe: %d body=%s", rec.Code, rec.Body.String())
+		}
+		// A middleware reading the raw header would store 2.2.2.2; the
+		// untrusted header must be ignored and the TCP peer recorded.
+		if got := sessionIP(t, svc, hash); got != "10.0.0.5" {
+			t.Fatalf("stored IP = %q, want 10.0.0.5", got)
+		}
+	})
+
+	t.Run("deferred path request still refreshes", func(t *testing.T) {
+		svc, store := newTestService(t, true)
+		token, hash := createAgedSession(t, store)
+		router := newTestRouter(svc)
+
+		// /ws is deferred: the middleware never 401s it and this router
+		// registers no gateway route, so 404 is NOT a resolution proof —
+		// the stored-IP assertion below is the real discriminator (only a
+		// successful resolve touches the session row).
+		rec := doRequest(router, http.MethodGet, "/ws", withCookie(svc, token), func(r *http.Request) {
+			r.RemoteAddr = "2.2.2.2:1234"
+		})
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("deferred /ws = %d, want 404 pass-through", rec.Code)
+		}
+		if got := sessionIP(t, svc, hash); got != "2.2.2.2" {
+			t.Fatalf("stored IP = %q, want 2.2.2.2 (deferred-path resolve must refresh)", got)
+		}
+	})
 }

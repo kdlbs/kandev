@@ -111,6 +111,11 @@ type PromptOptions struct {
 	Model  string // if non-empty, set via session/set_model (or unstable variant)
 	Mode   string // if non-empty, set via session/set_mode
 	Prompt string // required — text body of the session/prompt request
+	// Linger, when > 0, keeps the session open after session/prompt returns
+	// its stopReason and drains (recording, auto-replying to) any further
+	// out-of-band frames the agent pushes. This is how we observe a delayed
+	// async subagent result delivered on the same session after end_turn.
+	Linger time.Duration
 }
 
 // PromptResult holds the text response collected from session/update
@@ -160,7 +165,26 @@ func Prompt(ctx context.Context, r *Runner, opts PromptOptions) (*PromptResult, 
 	if err != nil {
 		return nil, fmt.Errorf("session/prompt: %w", err)
 	}
+
+	if opts.Linger > 0 {
+		lingerAfterPrompt(ctx, r, opts.Linger)
+	}
+
 	return &PromptResult{ProbeResult: *probe, Text: text}, nil
+}
+
+// lingerAfterPrompt keeps draining out-of-band frames for the given duration
+// after session/prompt has already returned its stopReason. Every frame is
+// still recorded by the read loop, and NextOOB auto-replies to any
+// agent-initiated request so the agent does not hang. This exists to capture a
+// delayed async update (e.g. Cursor pushing a background subagent result on the
+// same session after end_turn). We swallow the terminal error: a deadline or a
+// child that exits first are both expected ways to stop lingering.
+func lingerAfterPrompt(ctx context.Context, r *Runner, d time.Duration) {
+	lingerCtx, cancel := context.WithTimeout(ctx, d)
+	defer cancel()
+	// Never returns true, so it drains until the linger deadline or EOF.
+	_ = r.DrainOOBUntil(lingerCtx, func(Frame) bool { return false })
 }
 
 // SessionLoad runs initialize → session/load → [session/prompt].

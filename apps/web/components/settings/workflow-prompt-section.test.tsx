@@ -4,6 +4,22 @@ import type { Workflow } from "@/lib/types/http";
 import { WorkflowPromptSection } from "./workflow-prompt-section";
 
 const PROMPT_INPUT = "workflow-prompt-input";
+const promptEditor = vi.hoisted(() => vi.fn());
+
+vi.mock("./settings-prompt-editor", () => ({
+  SettingsPromptEditor: (props: Record<string, unknown>) => {
+    promptEditor(props);
+    return (
+      <textarea
+        data-testid={props.testId as string}
+        data-settings-dirty={String(props.isDirty)}
+        value={props.value as string}
+        onChange={(event) => (props.onChange as (value: string) => void)(event.target.value)}
+        readOnly={props.readOnly as boolean}
+      />
+    );
+  },
+}));
 
 const baseWorkflow = {
   id: "workflow-1",
@@ -16,6 +32,7 @@ const baseWorkflow = {
 
 afterEach(() => {
   cleanup();
+  promptEditor.mockReset();
 });
 
 describe("WorkflowPromptSection", () => {
@@ -36,6 +53,13 @@ describe("WorkflowPromptSection", () => {
 
     const input = screen.getByTestId(PROMPT_INPUT) as HTMLTextAreaElement;
     expect(input.value).toBe(workflow.prompt);
+    expect(promptEditor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptReferences: true,
+        testId: PROMPT_INPUT,
+        isDirty: true,
+      }),
+    );
   });
 
   it("auto-expands when an empty prompt becomes non-empty", () => {

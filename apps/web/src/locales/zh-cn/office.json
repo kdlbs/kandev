@@ -902,5 +902,6 @@
   "failedToLoadProviderHealth": "加载服务商健康状态失败",
   "failedToLoadRouteAttempts": "加载路由尝试记录失败",
   "failedToLoadRoutingConfig": "加载路由配置失败",
-  "failedToLoadRoutingPreview": "加载路由预览失败"
+  "failedToLoadRoutingPreview": "加载路由预览失败",
+  "failedToLoadTaskQuorum": "加载任务法定人数失败"
 }

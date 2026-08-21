@@ -23,10 +23,7 @@ import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
 import { searchJiraTickets } from "@/lib/api/domains/jira-api";
-import {
-  ScriptEditor,
-  computeEditorHeight,
-} from "@/components/settings/profile-edit/script-editor";
+import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import {
   jiraIssueWatchPlaceholders,
   DEFAULT_JIRA_ISSUE_WATCH_PROMPT,
@@ -289,21 +286,21 @@ function PromptField({ value, onChange }: { value: string; onChange: (v: string)
         <Label>{t("jira:taskPrompt")}</Label>
         <PlaceholdersHelp />
       </div>
-      <p className="text-xs text-muted-foreground">
-        {/* The `{{` token is passed as a value so it never reaches the catalog,
-            where i18next would interpolate it away. */}
-        {t("jira:promptFieldHelp", { token: "{{" })}
-      </p>
-      <div className="rounded-md border border-border overflow-hidden">
-        <ScriptEditor
-          value={value}
-          onChange={onChange}
-          language="markdown"
-          height={computeEditorHeight(value)}
-          lineNumbers="off"
-          placeholders={placeholders}
-        />
-      </div>
+      <SettingsPromptEditor
+        value={value}
+        onChange={onChange}
+        placeholders={placeholders}
+        promptReferences
+        ariaLabel={t("jira:taskPrompt")}
+        testId="jira-issue-watch-prompt-editor"
+        help={
+          <p className="text-xs text-muted-foreground">
+            {/* The `{{` token is passed as a value so it never reaches the catalog,
+                where i18next would interpolate it away. */}
+            {t("jira:promptFieldHelp", { token: "{{" })}
+          </p>
+        }
+      />
     </div>
   );
 }

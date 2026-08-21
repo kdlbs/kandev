@@ -262,7 +262,7 @@ slice shapes in a released plugin.
 | registerTaskAction          | Child action inside the task menu's native Link section                                                                                                                                                                                                                                                | Active ui.bundle                                                       | Action is revoked on unload; host supplies current task/workspace and desktop/mobile presentation                                                                                                               | registry.registerTaskAction({ id: "link-pr", placement: "link", ... })                                              |
 | registerReviewProvider      | Normalized task reviews, workspace associations, unlink, and shared Review panel                                                                                                                                                                                                                       | ui.bundle and matching `repository_providers[]` id                     | Snapshots/subscriptions are owner-scoped and revoked on unload; host owns status chrome, indicators, unlink UI, and responsive Review placement                                                                 | registry.registerReviewProvider({ id: "acme", ...reviews })                                                         |
 | registerTaskPanel           | { id, title, icon?, Component, mobileEnabled? }; adds a row to the task workspace's "+" (add panel) menu; Component receives { panelId, taskId, sessionId, presentation }                                                                                                                              | Active ui.bundle                                                       | Panel renders behind its own error boundary; slow/failed reloads preserve it, a ready generation missing it closes it, and disable/uninstall closes every owned instance                                        | registry.registerTaskPanel({ id: "notes", title: "Notes", Component: NotesPanel })                                  |
-| registerTaskMenuAction      | { id, label, icon?, group: "edit" \| "primary", visible?(context), run(context) }; "edit" nests inside the card's Edit submenu, "primary" renders as a flat top-level item between "Move to"/"Send to workflow" and "Link"                                                                             | Active ui.bundle                                                       | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged                                                                                                                           | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "edit", run: doEnhance })                 |
+| registerTaskMenuAction      | { id, label, icon?, group: "edit" \| "primary", visible?(context), run(context) }; "edit" is card-only inside Edit, while "primary" is a flat item on cards and desktop/mobile task-row menus                                                                                                                     | Active ui.bundle                                                       | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged                                                                                                                           | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "primary", run: doEnhance })              |
 | registerTaskFilter          | { id, label, getOptions(), matches(context, selected) }; adds a client-side, multi-select filter section to the kanban board's display dropdown, alongside Workflow/Repository                                                                                                                         | Active ui.bundle                                                       | Filter is revoked on disable/uninstall; selections are ephemeral (not persisted); matches is only called for a non-empty selection, and a throw is caught, logged, and treated as non-matching                  | registry.registerTaskFilter({ id: "tags", label: "Tags", getOptions: listTagOptions, matches: taskHasSelectedTag }) |
 | host.React / host.jsx       | Shared React instance and React.createElement alias                                                                                                                                                                                                                                                    | Active ui.bundle                                                       | No cleanup; never bundle a second React/Radix runtime                                                                                                                                                           | const h = host.jsx                                                                                                  |
 | host.context                | Versioned provider-neutral reads/subscriptions for active workspace, all workspace ids, native task creation, and exact provider repository identity                                                                                                                                                  | Active ui.bundle                                                       | Subscriptions are generation-owned and revoked on unload; records are stable SDK shapes, not private app state                                                                                                  | const ids = host.context.getWorkspaceIds()                                                                           |
@@ -451,6 +451,7 @@ to strings, but an unmounted name renders nowhere.
 | plugin-settings           | Top of this plugin's Settings > Plugins page              | { pluginId, status }; owner-scoped to the plugin being viewed    |
 | task-card-indicators      | Kanban card, beside the PR status icon                    | { taskId, workspaceId, workflowStepId }                          |
 | task-card-tags            | Kanban card, its own row below the badges row             | { taskId, workspaceId, workflowStepId }                          |
+| task-row-metadata         | Sidebar task tree and `/tasks` rows                       | TaskRowMetadataSlotProps                                        |
 | sidebar-workspace-actions | Desktop New Task row or phone navigation action group, after Quick Terminal and Quick Chat | SidebarWorkspaceActionsSlotProps |
 
 AppStatusBarSlotProps is { placement, presentation, density, pathname,
@@ -1950,21 +1951,24 @@ func (p *plugin) OnEvent(ctx context.Context, event *pluginsdk.Event) error {
 For critical workflows, periodically reconcile from host.Tasks() or another
 Host reader because event queues are bounded and delivery is best-effort.
 
-### 6. Kanban-aware contribution
+### 6. Task contributions
 
-`registerTaskMenuAction` adds an item to the kanban card's context/dropdown
-menu; group `"edit"` nests it inside the `Edit` submenu, group `"primary"`
-renders it as a flat, top-level item positioned between the "Move
-to"/"Send to workflow" submenus and the "Link" submenu.
+`registerTaskMenuAction` adds an item to native task menus. Group `"edit"` is
+card-only and nests inside the kanban card's `Edit` submenu. Group `"primary"`
+renders as a flat top-level item on cards and desktop/mobile task-row menus.
 `task-card-indicators` (see the named slots table) is the matching read-only
 surface, rendered beside the PR status icon on every card. `task-card-tags`
 is a sibling read-only surface with the same `slotProps` shape, mounted in its
 own row instead of that cramped title-row spot; reach for it when a
-contribution (e.g. a row of tag chips) needs its own width. Both
-`visible(context)` and `run(context)` receive the card's actual `presentation`:
-`"desktop"` on the desktop kanban and `"mobile"` on the phone kanban. Use it
-when an action needs to choose responsive behavior; the host supplies it
-through the card composition.
+contribution (for example, a row of tag chips) needs its own width.
+`visible(context)` and `run(context)` receive the actual `presentation`.
+The value is `"desktop"` or `"mobile"` for the current native task menu.
+
+`task-row-metadata` is the plugin-agnostic compact counterpart for the sidebar
+task tree and `/tasks` list. It receives `{ taskId, workspaceId,
+workflowStepId, surface: "sidebar" | "task-list" }`. Use it for read-only
+metadata such as labels, ownership, provider state, or tags. An empty slot
+adds no wrapper or spacing.
 
 ```js
 registry.registerTaskMenuAction({
@@ -1982,9 +1986,9 @@ With no plugin action registered, the card's `Edit` item stays flat; once any
 plugin registers one for group `"edit"`, it becomes `Edit > Edit task`
 followed by each visible action. A `run` that throws or rejects is caught and
 logged, not left to crash the card; the menu closes either way. Group
-`"primary"` actions render and behave the same way, just as their own
-top-level menu row instead of nested under `Edit`. Do not patch first-party
-Kanban components directly.
+`"primary"` actions render and behave the same way as their own top-level row,
+including in desktop and phone task-row menus. Do not patch first-party task
+components directly.
 
 `registerTaskFilter` adds a client-side, multi-select filter section to the
 kanban board's display dropdown, next to the built-in Workflow and Repository

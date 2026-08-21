@@ -37,6 +37,9 @@ import { useAppStore } from "@/components/state-provider";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
 import { useTranslation } from "react-i18next";
+import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error";
+import { useTaskLaunchErrorContext } from "./task-launch-error-context";
+import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 
 /**
  * Cap on how many extra pages the last-prompt background lookup will fetch
@@ -355,6 +358,11 @@ export const TaskChatPanel = memo(function TaskChatPanel({
 }: TaskChatPanelProps) {
   const isArchived = useIsTaskArchived();
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
+  const launchErrorContext = useTaskLaunchErrorContext();
+  const launchStatusSummary = useTaskStatusSummary(
+    launchErrorContext?.taskId,
+    launchErrorContext?.statusSummary,
+  );
 
   useSettingsData(true);
   const panelState = useChatPanelState({
@@ -531,6 +539,15 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       className="outline-none"
     >
       <PanelBody padding={false} className="relative">
+        {launchErrorContext && (
+          <TaskChatLaunchError
+            taskId={launchErrorContext.taskId}
+            workspaceId={launchErrorContext.workspaceId}
+            statusSummary={launchStatusSummary}
+            runErrors={[]}
+            repositories={launchErrorContext.repositories}
+          />
+        )}
         <MessageList
           ref={messageListRef}
           items={groupedItems}

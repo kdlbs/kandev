@@ -17,7 +17,7 @@ type EnsureSessionResponse struct {
 	SessionID      string `json:"session_id,omitempty"`
 	State          string `json:"state"`
 	AgentProfileID string `json:"agent_profile_id,omitempty"`
-	Source         string `json:"source"`                   // existing_primary | existing_newest | created_prepare | created_start
+	Source         string `json:"source"`                   // existing_primary | existing_newest | created_prepare | created_start | skipped_terminal_pr
 	NewlyCreated   bool   `json:"newly_created"`            // true when a new session was created by this call
 	WorkspacePath  string `json:"workspace_path,omitempty"` // effective workspace path (for quick-chat sessions without worktrees)
 }
@@ -116,6 +116,22 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...Ensu
 	})
 	if err != nil {
 		return nil, err
+	}
+	if launchResp == nil {
+		return nil, fmt.Errorf("session launch returned no response")
+	}
+	if launchResp.SessionID == "" {
+		// An automatic launch can be intentionally skipped after the task is
+		// found to have a terminal pull request. Keep ensure idempotent and let
+		// the task-owned launch error card render without creating a session.
+		return &EnsureSessionResponse{
+			Success:        true,
+			TaskID:         taskID,
+			State:          launchResp.State,
+			AgentProfileID: agentProfileID,
+			Source:         "skipped_terminal_pr",
+			NewlyCreated:   false,
+		}, nil
 	}
 
 	return &EnsureSessionResponse{

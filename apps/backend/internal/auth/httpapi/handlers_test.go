@@ -221,9 +221,14 @@ func loginSessionIP(t *testing.T, router *gin.Engine, remoteAddr, forwardedFor, 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("setup: %d body=%s", rec.Code, rec.Body.String())
 	}
-	rec = client.do(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"email": "admin@x.dev", "password": "adminpass123",
-	}, func(req *http.Request) {
+	// The read-back GET must re-apply the login request's FULL transport
+	// closure (RemoteAddr + forwarded headers): the session-IP refresh rides
+	// the touch path, so a >60s gap between login and read-back would let
+	// the read-back's own resolve overwrite the asserted IP (with the
+	// httptest default RemoteAddr, or with the fixture's RemoteAddr where
+	// the stored IP came from a forwarded header). The identical transport
+	// resolves the same ClientIP, making the touch idempotent.
+	transport := func(req *http.Request) {
 		req.RemoteAddr = remoteAddr
 		if forwardedFor != "" {
 			req.Header.Set("X-Forwarded-For", forwardedFor)
@@ -231,11 +236,14 @@ func loginSessionIP(t *testing.T, router *gin.Engine, remoteAddr, forwardedFor, 
 		if xRealIP != "" {
 			req.Header.Set("X-Real-IP", xRealIP)
 		}
-	})
+	}
+	rec = client.do(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"email": "admin@x.dev", "password": "adminpass123",
+	}, transport)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("login: %d body=%s", rec.Code, rec.Body.String())
 	}
-	rec = client.do(http.MethodGet, "/api/v1/auth/sessions", nil)
+	rec = client.do(http.MethodGet, "/api/v1/auth/sessions", nil, transport)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("sessions: %d body=%s", rec.Code, rec.Body.String())
 	}

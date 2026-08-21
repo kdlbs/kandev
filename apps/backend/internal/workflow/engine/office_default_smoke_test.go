@@ -167,10 +167,15 @@ func TestOfficeDefaultWorkflow_RejectRoutesBackToWork(t *testing.T) {
 
 	store.setCurrentStep(steps["review"].ID)
 
-	// One reviewer rejects, one approves — any_reject fires first.
+	// One reviewer rejects, one approves — any_reject fires first. any_reject
+	// is a decider-identity veto (AC-43/58), not a seat-mapped decision, so
+	// the rejection carries the decider's identity and the role the guard
+	// checks against rather than a seat id.
 	if err := decisions.RecordStepDecision(ctx, DecisionInfo{
 		TaskID: "task-1", StepID: steps["review"].ID,
-		ParticipantID: "reviewer-1", Decision: DecisionRejected,
+		ParticipantID: "reviewer-1",
+		DeciderType:   DeciderTypeAgent, DeciderID: "rev-A", Role: "reviewer",
+		Decision: DecisionRejected,
 	}); err != nil {
 		t.Fatalf("record decision: %v", err)
 	}
@@ -283,6 +288,17 @@ func (s *smokeStore) ApplyTransition(_ context.Context, _, _, fromStepID, toStep
 	return nil
 }
 
+func (s *smokeStore) ApplyTransitionIfAtStep(
+	_ context.Context, _, _, expectedStepID, toStepID string, _ Trigger,
+) (bool, error) {
+	if s.currentStepID != expectedStepID {
+		return false, nil
+	}
+	s.transitions = append(s.transitions, expectedStepID+"->"+toStepID)
+	s.currentStepID = toStepID
+	return true, nil
+}
+
 func (s *smokeStore) PersistData(_ context.Context, _ string, _ map[string]any) error { return nil }
 
 func (s *smokeStore) IsOperationApplied(_ context.Context, op string) (bool, error) {
@@ -316,6 +332,10 @@ func newSmokeParticipants(steps map[string]StepSpec) *smokeParticipants {
 
 func (p *smokeParticipants) ListStepParticipants(_ context.Context, stepID, _ string) ([]ParticipantInfo, error) {
 	return p.byStep[stepID], nil
+}
+
+func (p *smokeParticipants) ListTaskParticipants(_ context.Context, _ string) ([]ParticipantInfo, error) {
+	return nil, nil
 }
 
 type stubPrimary struct{ id string }

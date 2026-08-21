@@ -679,6 +679,13 @@ export class ApiClient {
     await this.request("DELETE", `/api/v1/prompts/${promptId}`);
   }
 
+  async resetGitHubActionPresets(workspaceId: string): Promise<void> {
+    await this.request(
+      "POST",
+      `/api/v1/github/action-presets/reset?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
+  }
+
   async createTaskWithAgent(
     workspaceId: string,
     title: string,
@@ -882,6 +889,7 @@ export class ApiClient {
   async updateRepository(
     repositoryId: string,
     updates: {
+      default_branch?: string;
       provider?: string;
       provider_repo_id?: string;
       provider_host?: string;

@@ -2,6 +2,8 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -213,6 +215,71 @@ func TestForwardPermissionRequestTitleDerivation(t *testing.T) {
 				if !reflect.DeepEqual(gotRaw, tt.wantRawInput) {
 					t.Errorf("ActionDetails.raw_input = %v, want %v", gotRaw, tt.wantRawInput)
 				}
+			}
+		})
+	}
+}
+
+func TestHandleExtensionMethod(t *testing.T) {
+	tests := []struct {
+		name       string
+		method     string
+		params     json.RawMessage
+		wantErr    bool
+		wantCalled bool
+	}{
+		{
+			name:       "cursor task succeeds and forwards params",
+			method:     cursorTaskMethod,
+			params:     json.RawMessage(`{"toolCallId":"tool-1","prompt":"summarize"}`),
+			wantCalled: true,
+		},
+		{
+			name:    "unknown method returns method not found",
+			method:  "foo/bar",
+			params:  json.RawMessage(`{"x":1}`),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var called bool
+			var gotParams json.RawMessage
+			client := NewClient(WithCursorTaskHandler(func(params json.RawMessage) {
+				called = true
+				gotParams = append(json.RawMessage(nil), params...)
+			}))
+
+			resp, err := client.HandleExtensionMethod(context.Background(), tt.method, tt.params)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				var reqErr *acp.RequestError
+				if !errors.As(err, &reqErr) {
+					t.Fatalf("error type = %T, want *acp.RequestError", err)
+				}
+				if reqErr.Code != -32601 {
+					t.Fatalf("error code = %d, want -32601", reqErr.Code)
+				}
+				if called {
+					t.Fatal("handler was called for unknown method")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("HandleExtensionMethod returned error: %v", err)
+			}
+			if !reflect.DeepEqual(resp, struct{}{}) {
+				t.Fatalf("response = %#v, want empty success object", resp)
+			}
+			if called != tt.wantCalled {
+				t.Fatalf("handler called = %v, want %v", called, tt.wantCalled)
+			}
+			if !reflect.DeepEqual(gotParams, tt.params) {
+				t.Fatalf("params = %s, want %s", gotParams, tt.params)
 			}
 		})
 	}

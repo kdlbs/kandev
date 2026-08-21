@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/workflow/models"
@@ -69,7 +71,49 @@ func (r *Repository) initPhase2Schema() error {
 		return fmt.Errorf("failed to create workflow_step_decisions table: %w", err)
 	}
 
+	// Must run before decisionActiveDeciderIndexName is created below: an
+	// install that hit the pre-fix AC-27/29 concurrent double-insert race
+	// (commit 73226d29b) can already hold duplicate active rows for the same
+	// (task_id, step_id, decider_id, role) identity, and CREATE UNIQUE INDEX
+	// over them fails outright, aborting backend startup.
+	if err := r.dedupeActiveStepDecisionsBeforeUniqueIndex(); err != nil {
+		return fmt.Errorf("failed to dedupe workflow_step_decisions before unique index: %w", err)
+	}
+
+	if _, err := r.db.Exec(`
+	CREATE UNIQUE INDEX IF NOT EXISTS ` + decisionActiveDeciderIndexName + `
+		ON workflow_step_decisions(task_id, step_id, decider_id, role)
+		WHERE superseded_at IS NULL AND decider_id != '' AND role != '';
+	`); err != nil {
+		return fmt.Errorf("failed to create %s: %w", decisionActiveDeciderIndexName, err)
+	}
+
 	return nil
+}
+
+// dedupeActiveStepDecisionsBeforeUniqueIndex supersedes every active
+// workflow_step_decisions row except the newest per (task_id, step_id,
+// decider_id, role) group, using the same last-row-wins ordering
+// (decided_at DESC, id DESC) the engine already uses to evaluate quorum.
+// Idempotent: a database with no duplicate active rows leaves this a no-op.
+// Mirrors normalizeDuplicateStartSteps below.
+func (r *Repository) dedupeActiveStepDecisionsBeforeUniqueIndex() error {
+	_, err := r.db.Exec(`
+		WITH ranked AS (
+			SELECT
+				id,
+				ROW_NUMBER() OVER (
+					PARTITION BY task_id, step_id, decider_id, role
+					ORDER BY decided_at DESC, id DESC
+				) AS decision_rank
+			FROM workflow_step_decisions
+			WHERE superseded_at IS NULL AND decider_id != '' AND role != ''
+		)
+		UPDATE workflow_step_decisions
+		SET superseded_at = decided_at
+		WHERE id IN (SELECT id FROM ranked WHERE decision_rank > 1)
+	`)
+	return err
 }
 
 // ----------------------------------------------------------------------------
@@ -205,6 +249,89 @@ func (r *Repository) ListStepParticipantsForTask(
 		return nil, err
 	}
 	return mergeParticipantRows(all), nil
+}
+
+// ListParticipantsForTaskAnyStep returns every per-task participant row for
+// a task (task_id = taskID) regardless of step_id, unmerged with any
+// template-level row. Used by the quorum engine's requiredSeats to build the
+// AC-49/50 required slate, which combines this with template rows scoped to
+// the evaluating step. An empty result is valid, not an error.
+func (r *Repository) ListParticipantsForTaskAnyStep(
+	ctx context.Context, taskID string,
+) ([]*models.WorkflowStepParticipant, error) {
+	if taskID == "" {
+		return nil, errors.New("task_id is required")
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position
+		FROM workflow_step_participants
+		WHERE task_id = ?
+		ORDER BY role ASC, position ASC, id ASC
+	`), taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list participants for task: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	all := make([]*models.WorkflowStepParticipant, 0)
+	for rows.Next() {
+		p := &models.WorkflowStepParticipant{}
+		var role string
+		var decisionRequired int
+		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position); err != nil {
+			return nil, fmt.Errorf("scan step participant: %w", err)
+		}
+		p.Role = models.ParticipantRole(role)
+		p.DecisionRequired = decisionRequired == 1
+		all = append(all, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return all, nil
+}
+
+// ListParticipantsForTaskWorkflow returns every per-task participant row for
+// a task whose step belongs to workflowID. Participant overrides remain
+// durable when a task changes workflow, but they must not leak into quorum
+// evaluation for the new workflow.
+func (r *Repository) ListParticipantsForTaskWorkflow(
+	ctx context.Context, taskID, workflowID string,
+) ([]*models.WorkflowStepParticipant, error) {
+	if taskID == "" {
+		return nil, errors.New("task_id is required")
+	}
+	if workflowID == "" {
+		return nil, errors.New("workflow_id is required")
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT p.id, p.step_id, p.task_id, p.role, p.agent_profile_id, p.decision_required, p.position
+		FROM workflow_step_participants p
+		JOIN workflow_steps ws ON ws.id = p.step_id
+		WHERE p.task_id = ? AND ws.workflow_id = ?
+		ORDER BY p.role ASC, p.position ASC, p.id ASC
+	`), taskID, workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("list participants for task workflow: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	all := make([]*models.WorkflowStepParticipant, 0)
+	for rows.Next() {
+		p := &models.WorkflowStepParticipant{}
+		var role string
+		var decisionRequired int
+		if err := rows.Scan(&p.ID, &p.StepID, &p.TaskID, &role, &p.AgentProfileID, &decisionRequired, &p.Position); err != nil {
+			return nil, fmt.Errorf("scan step participant: %w", err)
+		}
+		p.Role = models.ParticipantRole(role)
+		p.DecisionRequired = decisionRequired == 1
+		all = append(all, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return all, nil
 }
 
 // mergeParticipantRows enforces the per-task-precedence rule. Given a set of
@@ -510,6 +637,48 @@ func (r *Repository) FindParticipantID(
 // WorkflowStepDecision CRUD
 // ----------------------------------------------------------------------------
 
+// decisionActiveDeciderIndexName is the partial unique index enforcing at
+// most one non-superseded decision per (task_id, step_id, decider_id, role).
+// Naming it explicitly keeps isDecisionActiveDeciderViolation attributable
+// to this constraint specifically (AC-27/29): under PostgreSQL READ
+// COMMITTED, two concurrent RecordStepDecision calls for the same decider
+// identity can both run the "supersede prior" UPDATE and see zero matching
+// rows (neither has committed yet), then both INSERT — this index turns the
+// second INSERT into a constraint violation instead of a silent duplicate
+// active row, and recordStepDecisionTx retries on that specific violation so
+// the loser's write still lands (properly superseding the winner's row)
+// rather than surfacing an error to the caller.
+const decisionActiveDeciderIndexName = "uniq_workflow_step_decisions_active_decider"
+
+// sqliteDecisionActiveDeciderViolationMessage is the substring go-sqlite3
+// puts in a UNIQUE-constraint error for this index's column list.
+const sqliteDecisionActiveDeciderViolationMessage = "UNIQUE constraint failed: workflow_step_decisions.task_id, " +
+	"workflow_step_decisions.step_id, workflow_step_decisions.decider_id, workflow_step_decisions.role"
+
+// isDecisionActiveDeciderViolation reports whether err is a violation of
+// decisionActiveDeciderIndexName specifically, not any unique violation. On
+// PostgreSQL it inspects the typed pgconn.PgError's constraint name; on
+// SQLite (no typed access to the constraint name) it matches the
+// column-list message documented above.
+func isDecisionActiveDeciderViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505" && pgErr.ConstraintName == decisionActiveDeciderIndexName
+	}
+	return strings.Contains(err.Error(), sqliteDecisionActiveDeciderViolationMessage)
+}
+
+// recordStepDecisionMaxAttempts bounds the retry loop in RecordStepDecision.
+// One retry resolves the race this index exists for (a second concurrent
+// writer's supersede-then-insert observes the first writer's now-committed
+// row and correctly supersedes it); further attempts only matter if a third
+// writer interleaves in the same narrow window, which two spare attempts
+// comfortably covers without ever looping unbounded.
+const recordStepDecisionMaxAttempts = 3
+
 // RecordStepDecision inserts a new decision row. If id is empty a UUID is
 // generated. If decided_at is the zero value the current UTC time is used.
 //
@@ -520,7 +689,9 @@ func (r *Repository) FindParticipantID(
 // the prior row superseded inside a transaction, then inserts the new one.
 // When decider_id is empty (engine-side callers that only know the
 // participant_id) the prior-row check falls back to (task, step,
-// participant_id). The transaction guarantees readers never observe a row gap.
+// participant_id). The transaction guarantees readers never observe a row
+// gap. See decisionActiveDeciderIndexName for why a decider_id+role write
+// retries instead of erroring on a lost supersede race.
 func (r *Repository) RecordStepDecision(ctx context.Context, d *models.WorkflowStepDecision) error {
 	if d == nil {
 		return errors.New("decision must not be nil")
@@ -538,6 +709,22 @@ func (r *Repository) RecordStepDecision(ctx context.Context, d *models.WorkflowS
 		d.DecidedAt = time.Now().UTC()
 	}
 
+	var err error
+	for attempt := 0; attempt < recordStepDecisionMaxAttempts; attempt++ {
+		err = r.recordStepDecisionTx(ctx, d)
+		if err == nil || !isDecisionActiveDeciderViolation(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("record step decision: exhausted retries on active-decider race: %w", err)
+}
+
+// recordStepDecisionTx runs one supersede-then-insert attempt in its own
+// transaction. A caller that loses the AC-27/29 race gets its INSERT
+// rejected by decisionActiveDeciderIndexName; RecordStepDecision's retry
+// loop then re-runs this from scratch so the supersede UPDATE sees the
+// winner's now-committed row.
+func (r *Repository) recordStepDecisionTx(ctx context.Context, d *models.WorkflowStepDecision) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -571,6 +758,9 @@ func (r *Repository) RecordStepDecision(ctx context.Context, d *models.WorkflowS
 		VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
 	`), d.ID, d.TaskID, d.StepID, d.ParticipantID, d.Decision, d.Note, d.DecidedAt,
 		d.DeciderType, d.DeciderID, d.Role, d.Comment); err != nil {
+		if isDecisionActiveDeciderViolation(err) {
+			return err
+		}
 		return fmt.Errorf("record step decision: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

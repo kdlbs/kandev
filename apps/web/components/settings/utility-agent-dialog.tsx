@@ -13,7 +13,7 @@ import {
   getTemplateVariables,
 } from "@/lib/api/domains/utility-api";
 import { useAppStore } from "@/components/state-provider";
-import { ScriptEditor } from "./profile-edit/script-editor";
+import { SettingsPromptEditor } from "./settings-prompt-editor";
 import { UtilityAgentProfilePicker } from "./utility-agent-profile-picker";
 import type { ScriptPlaceholder } from "./profile-edit/script-editor-completions";
 
@@ -141,25 +141,25 @@ export function UtilityAgentDialog({ open, onOpenChange, agent, onSuccess }: Pro
           </div>
           <div className="space-y-2">
             <Label>{t("settings:utilityAgentPromptTemplate")}</Label>
-            <div className="border rounded-md overflow-hidden">
-              <ScriptEditor
-                value={form.prompt}
-                onChange={(value) => setForm((current) => ({ ...current, prompt: value }))}
-                language="plaintext"
-                height="200px"
-                placeholders={placeholders}
-                lineNumbers="off"
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              <Trans
-                i18nKey="settings:utilityAgentPromptHint"
-                values={{ sigil: PROMPT_VARIABLE_SIGIL }}
-              >
-                Type <code>{PROMPT_VARIABLE_SIGIL}</code> to see available variables with
-                autocomplete
-              </Trans>
-            </p>
+            <SettingsPromptEditor
+              value={form.prompt}
+              onChange={(value) => setForm((current) => ({ ...current, prompt: value }))}
+              language="plaintext"
+              height="200px"
+              placeholders={placeholders}
+              testId="utility-agent-prompt-editor"
+              help={
+                <p className="text-xs text-muted-foreground">
+                  <Trans
+                    i18nKey="settings:utilityAgentPromptHint"
+                    values={{ sigil: PROMPT_VARIABLE_SIGIL }}
+                  >
+                    Type <code>{PROMPT_VARIABLE_SIGIL}</code> to see available variables with
+                    autocomplete
+                  </Trans>
+                </p>
+              }
+            />
           </div>
         </div>
         <DialogFooter>
