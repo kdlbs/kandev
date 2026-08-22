@@ -55,10 +55,23 @@ function hasNewerLiveExecutor(existing: KanbanTask, fetchStart: KanbanTask | und
   );
 }
 
+function preserveLiveExecutorBinding(
+  merged: KanbanTask,
+  existing: KanbanTask,
+  fetchStart: KanbanTask | undefined,
+  source: Task,
+): void {
+  // An explicit primary-session clear is authoritative, even if a newer live
+  // update changed the cached executor while this snapshot was in flight.
+  if (source.primary_session_id === null || !hasNewerLiveExecutor(existing, fetchStart)) return;
+  copyPrimaryExecutorFields(merged, existing);
+}
+
 function mergeFetchedTask(
   mapped: KanbanTask,
   existing: KanbanTask,
   fetchStart: KanbanTask | undefined,
+  source: Task,
   statusSummaryInvalidated: boolean,
 ): KanbanTask {
   // Production snapshot payloads can be surfaced through read-only objects.
@@ -100,12 +113,7 @@ function mergeFetchedTask(
   if (merged.autoStartFailed === undefined || hasNewerLiveAutoStartFailed(existing, fetchStart)) {
     merged.autoStartFailed = existing.autoStartFailed;
   }
-  // An omitted executor bundle in a current full snapshot represents a
-  // legitimate detach. Only copy live fields when a live update changed the
-  // executor after this request began, or when the task appeared in flight.
-  if (hasNewerLiveExecutor(existing, fetchStart)) {
-    copyPrimaryExecutorFields(merged, existing);
-  }
+  preserveLiveExecutorBinding(merged, existing, fetchStart, source);
   return merged;
 }
 
@@ -132,6 +140,7 @@ function mergeSnapshotTasks(
             mapped,
             existing,
             fetchStartById.get(mapped.id),
+            task,
             task.status_summary_invalidated === true,
           )
         : mapped;

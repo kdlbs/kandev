@@ -1940,6 +1940,49 @@ func (m *Manager) RespondToPermissionBySessionID(sessionID, pendingID, optionID 
 	return m.RespondToPermission(execution.ID, pendingID, optionID, cancelled)
 }
 
+// ListPendingPermissionsBySessionID reads safe live snapshots from the current
+// execution for a task session. It never starts or resumes an execution.
+func (m *Manager) ListPendingPermissionsBySessionID(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return nil, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
+	}
+	if execution.agentctl == nil {
+		return nil, fmt.Errorf("agent execution has no agentctl client: %s", execution.ID)
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return execution.agentctl.ListPendingPermissions(requestCtx)
+}
+
+// ResolvePermissionBySessionID selects one exact option on one exact request
+// generation in the current execution.
+func (m *Manager) ResolvePermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return nil, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
+	}
+	if execution.agentctl == nil {
+		return nil, fmt.Errorf("agent execution has no agentctl client: %s", execution.ID)
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return execution.agentctl.ResolvePermission(requestCtx, requestID, pendingID, optionID)
+}
+
+func (m *Manager) CancelPermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return nil, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
+	}
+	if execution.agentctl == nil {
+		return nil, fmt.Errorf("agent execution has no agentctl client: %s", execution.ID)
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return execution.agentctl.CancelPermission(requestCtx, requestID, pendingID)
+}
+
 // stopAgentViaBackend stops the agent execution via the runtime that created it.
 func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, execution *AgentExecution, reason string, force bool, agentStopFailed bool) error {
 	if execution.RuntimeName == "" || m.executorRegistry == nil {

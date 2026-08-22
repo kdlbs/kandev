@@ -95,6 +95,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-15-portable-agent-configuration-bundles | [Use Explicit Portable Agent Configuration Bundles](2026-08-15-portable-agent-configuration-bundles.md) | accepted | backend, frontend, protocol, security | 2026-08-15 |
 | 2026-08-15-executor-authoritative-model-selection | [Let the Executor Own Model Selection](2026-08-15-executor-authoritative-model-selection.md) | accepted | backend, frontend, protocol, persistence | 2026-08-15 |
 | 2026-08-18-context-reset-preserves-runtime-configuration | [Preserve ACP Runtime Configuration Across Context Reset](2026-08-18-context-reset-preserves-runtime-configuration.md) | accepted | backend, protocol, workflow | 2026-08-18 |
+| 2026-08-19-parent-authorized-child-workspace-sources | [Parent-authorized child workspace sources](2026-08-19-parent-authorized-child-workspace-sources.md) | accepted | backend, protocol, security | 2026-08-19 |
 | 2026-07-28-coarse-running-busy-signal | [Restore Coarse Running Prompt Admission](2026-07-28-coarse-running-busy-signal.md) | accepted | backend, frontend, protocol | 2026-07-28 |
 | 2026-07-29-agent-stall-user-controlled-recovery | [Keep Agent Stall Recovery User Controlled](2026-07-29-agent-stall-user-controlled-recovery.md) | accepted | backend, frontend, protocol | 2026-07-29 |
 | 2026-07-29-quarantine-retention-override | [Make Quarantine Retention Overridable but Visible](2026-07-29-quarantine-retention-override.md) | accepted | backend, frontend | 2026-07-29 |
@@ -162,6 +163,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-10-duration-aware-e2e-sharding | [Duration-aware E2E sharding uses rolling `main` timings](2026-08-10-duration-aware-e2e-sharding.md) | accepted | infra, workflow | 2026-08-10 |
 | 2026-08-10-debug-launcher-profile-selection | [Keep Debug Launches on the Production Profile](2026-08-10-debug-launcher-profile-selection.md) | accepted | backend, frontend, cli | 2026-08-10 |
 | 2026-08-11-plugin-tools-through-kandev-mcp | [Route Plugin Agent Tools Through Kandev MCP](2026-08-11-plugin-tools-through-kandev-mcp.md) | accepted | backend, agentctl, protocol, plugins, security | 2026-08-11 |
+| 2026-08-11-live-agent-permission-authority | [Keep Pending Agent Permission Authority in the Live Runtime](2026-08-11-live-agent-permission-authority.md) | accepted | backend, agentctl, protocol, security | 2026-08-11 |
 | 2026-08-10-remote-contribution-head-drift | [Separate Current Contribution and Local Checkout Histories](2026-08-10-remote-contribution-head-drift.md) | accepted (remote-action policy superseded, provider-error presentation amended) | backend, frontend, protocol, GitHub, GitLab | 2026-08-10 |
 | 2026-08-12-local-first-contribution-replacement | [Keep Remote Contribution Work Local-First](2026-08-12-local-first-contribution-replacement.md) | accepted | backend, frontend, protocol, security, GitHub, GitLab | 2026-08-12 |
 | 2026-08-13-provider-history-changes-enrichment | [Treat Provider History as Changes Enrichment](2026-08-13-provider-history-changes-enrichment.md) | accepted | frontend, GitHub, GitLab | 2026-08-13 |
@@ -187,5 +189,6 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-19-repository-qualified-comparison-targets | [Qualify Git Comparison Targets by Repository](2026-08-19-repository-qualified-comparison-targets.md) | accepted | backend, agentctl, frontend, protocol, GitHub, GitLab | 2026-08-19 |
 | 2026-08-20-startup-configuration-source-parity | [Startup Configuration Uses One Typed Source Model](2026-08-20-startup-configuration-source-parity.md) | accepted | backend, agentctl, frontend, cli, security, operations | 2026-08-20 |
 | 2026-08-20-acp-client-non-underscore-extension-methods | [Route Non-Underscore Inbound Client Methods to the Extension Handler](2026-08-20-acp-client-non-underscore-extension-methods.md) | accepted | backend, protocol | 2026-08-20 |
+| 2026-08-22-persistent-fork-approval-labels | [Persist Fork Approval Labels Across Pushes](2026-08-22-persistent-fork-approval-labels.md) | accepted | infra, workflow, security | 2026-08-22 |
 | 2026-08-22-plugin-version-retention | [Keep Exactly One Superseded Plugin Version](2026-08-22-plugin-version-retention.md) | accepted | backend | 2026-08-22 |
 | 2026-08-22-system-oriented-specifications | [Organize specifications by system](2026-08-22-system-oriented-specifications.md) | accepted | workflow, infra | 2026-08-22 |

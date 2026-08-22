@@ -13,6 +13,7 @@ import (
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentctlshared "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -900,4 +901,30 @@ func (e *Executor) RespondToPermission(ctx context.Context, sessionID, pendingID
 		zap.Bool("cancelled", cancelled))
 
 	return e.agentManager.RespondToPermissionBySessionID(ctx, sessionID, pendingID, optionID, cancelled)
+}
+
+// ListPendingPermissions returns live safe snapshots without starting an agent.
+func (e *Executor) ListPendingPermissions(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error) {
+	permissions, err := e.agentManager.ListPendingPermissionsBySessionID(ctx, sessionID)
+	if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+		return nil, ErrExecutionNotFound
+	}
+	return permissions, err
+}
+
+// ResolvePermission selects one exact option on the current live request.
+func (e *Executor) ResolvePermission(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+	result, err := e.agentManager.ResolvePermissionBySessionID(ctx, sessionID, requestID, pendingID, optionID)
+	if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+		return nil, ErrExecutionNotFound
+	}
+	return result, err
+}
+
+func (e *Executor) CancelPermission(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
+	result, err := e.agentManager.CancelPermissionBySessionID(ctx, sessionID, requestID, pendingID)
+	if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+		return nil, ErrExecutionNotFound
+	}
+	return result, err
 }

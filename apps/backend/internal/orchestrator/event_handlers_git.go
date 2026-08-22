@@ -670,6 +670,7 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 			ctx,
 			data.TaskID,
 			data.TaskSessionID,
+			data.RequestID,
 			data.PendingID,
 			data.ToolCallID,
 			data.Title,
@@ -716,8 +717,10 @@ func (s *Service) failAutomationRunOnPermission(ctx context.Context, data watche
 
 	// Use rejected=true so the backend persists "rejected" status. cancelled is
 	// also true here because the session is going to be marked failed anyway.
-	optionID := pickRejectOption(data.Options)
-	if err := s.RespondToPermission(ctx, data.TaskSessionID, data.PendingID, optionID, true, true); err != nil {
+	if err := s.cancelAgentPermission(ctx, ResolveAgentPermissionRequest{
+		TaskID: data.TaskID, SessionID: data.TaskSessionID, RequestID: data.RequestID,
+		PendingID: data.PendingID, Source: models.PermissionSourceAutomation,
+	}); err != nil {
 		s.logger.Warn("failed to auto-reject permission for automation run",
 			zap.String("task_id", data.TaskID),
 			zap.String("pending_id", data.PendingID),

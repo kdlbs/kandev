@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
@@ -25,6 +26,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 	"go.uber.org/zap"
@@ -50,10 +52,22 @@ type errorWrapper struct {
 // PendingPermission represents a permission request waiting for user response
 type PendingPermission struct {
 	ID         string
+	RequestID  string
 	Request    *adapter.PermissionRequest
+	Snapshot   streams.PendingAgentPermission
 	ResponseCh chan *adapter.PermissionResponse
 	CreatedAt  time.Time
+	State      string
 }
+
+// PermissionOperationError carries a stable code across the agentctl stream.
+type PermissionOperationError struct {
+	Code string
+}
+
+func (e *PermissionOperationError) Error() string { return e.Code }
+
+const maxPermissionTombstones = 256
 
 // PermissionNotification is sent when the agent requests permission
 type PermissionNotification struct {
@@ -188,8 +202,10 @@ type Manager struct {
 	updatesCh chan adapter.AgentEvent
 
 	// Pending permission requests waiting for user response
-	pendingPermissions map[string]*PendingPermission
-	permissionMu       sync.RWMutex
+	pendingPermissions       map[string]*PendingPermission
+	permissionTombstones     map[string]string
+	permissionTombstoneOrder []string
+	permissionMu             sync.RWMutex
 
 	// VS Code server manager (lazy-initialized on demand)
 	vscode   *VscodeManager
@@ -2361,7 +2377,6 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		zap.String("pending_id", pendingID),
 		zap.String("session_id", req.SessionID),
 		zap.String("tool_call_id", req.ToolCallID),
-		zap.String("title", req.Title),
 		zap.Bool("auto_approve", m.cfg.AutoApprovePermissions))
 
 	// If auto-approve is enabled, immediately approve with the first "allow" option
@@ -2370,22 +2385,36 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 	}
 
 	// Create pending permission with response channel
+	createdAt := time.Now().UTC()
 	pending := &PendingPermission{
 		ID:         pendingID,
+		RequestID:  uuid.NewString(),
 		Request:    req,
 		ResponseCh: make(chan *adapter.PermissionResponse, 1),
-		CreatedAt:  time.Now(),
+		CreatedAt:  createdAt,
+		State:      streams.PermissionStatusPending,
 	}
+	pending.Snapshot = m.permissionSnapshot(pending)
 
 	// Store pending permission
 	m.permissionMu.Lock()
+	if replaced := m.pendingPermissions[pendingID]; replaced != nil {
+		m.addPermissionTombstoneLocked(replaced.RequestID, streams.PermissionErrorStale)
+		select {
+		case replaced.ResponseCh <- &adapter.PermissionResponse{Cancelled: true}:
+		default:
+		}
+	}
 	m.pendingPermissions[pendingID] = pending
 	m.permissionMu.Unlock()
 
 	// Clean up when done
 	defer func() {
 		m.permissionMu.Lock()
-		delete(m.pendingPermissions, pendingID)
+		if current := m.pendingPermissions[pendingID]; current == pending {
+			delete(m.pendingPermissions, pendingID)
+			m.addPermissionTombstoneLocked(pending.RequestID, streams.PermissionErrorStale)
+		}
 		m.permissionMu.Unlock()
 	}()
 
@@ -2406,6 +2435,20 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 	case <-ctx.Done():
 		m.logger.Warn("permission request context cancelled",
 			zap.String("pending_id", pendingID))
+		// Claim the terminal transition ourselves so a concurrent resolve/cancel/
+		// respond call that is already past the state check cannot also "win" and
+		// report success for a request this goroutine is about to stop listening on.
+		if _, err := m.consumePermission(pendingID, pending.RequestID, nil,
+			&adapter.PermissionResponse{Cancelled: true}, streams.PermissionErrorStale); err != nil {
+			// Someone else consumed it first; deliver whatever they sent instead of
+			// fabricating our own cancellation.
+			select {
+			case resp := <-pending.ResponseCh:
+				return resp, nil
+			default:
+				return &adapter.PermissionResponse{Cancelled: true}, nil
+			}
+		}
 		// Send cancellation notification so the backend can update the permission message status
 		m.sendPermissionCancelledNotification(pending)
 		return &adapter.PermissionResponse{Cancelled: true}, nil
@@ -2437,7 +2480,6 @@ func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapte
 
 	m.logger.Info("auto-approving permission request",
 		zap.String("option_id", selectedOption.OptionID),
-		zap.String("option_name", selectedOption.Name),
 		zap.String("kind", string(selectedOption.Kind)))
 
 	return &adapter.PermissionResponse{
@@ -2449,24 +2491,28 @@ func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapte
 // Uses a blocking send with timeout to ensure delivery. If delivery fails within 5 seconds,
 // auto-cancels the permission so the agent doesn't hang waiting for a response.
 func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
-	// Convert options to streams.PermissionOption (types.PermissionOption is an alias)
-	options := make([]streams.PermissionOption, len(pending.Request.Options))
-	copy(options, pending.Request.Options)
-
+	options := make([]streams.PermissionOption, len(pending.Snapshot.Options))
+	for i, option := range pending.Snapshot.Options {
+		options[i] = streams.PermissionOption{
+			OptionID: option.OptionID,
+			Name:     option.Name,
+			Kind:     option.Kind,
+		}
+	}
 	event := adapter.AgentEvent{
 		Type:              adapter.EventTypePermissionRequest,
-		SessionID:         pending.Request.SessionID,
+		SessionID:         m.permissionSessionID(pending),
 		ToolCallID:        pending.Request.ToolCallID,
+		RequestID:         pending.RequestID,
 		PendingID:         pending.ID,
-		PermissionTitle:   pending.Request.Title,
+		PermissionTitle:   pending.Snapshot.Title,
 		PermissionOptions: options,
-		ActionType:        pending.Request.ActionType,
-		ActionDetails:     pending.Request.ActionDetails,
+		ActionType:        pending.Snapshot.Action.Type,
+		ActionDetails:     permissionActionDetailsForEvent(pending.Snapshot.Action),
 	}
 
 	m.logger.Info("sending permission notification via updates channel",
 		zap.String("pending_id", pending.ID),
-		zap.String("title", pending.Request.Title),
 		zap.String("action_type", pending.Request.ActionType))
 
 	timer := time.NewTimer(5 * time.Second)
@@ -2490,7 +2536,8 @@ func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 func (m *Manager) sendPermissionCancelledNotification(pending *PendingPermission) {
 	event := adapter.AgentEvent{
 		Type:      adapter.EventTypePermissionCancelled,
-		SessionID: pending.Request.SessionID,
+		SessionID: m.permissionSessionID(pending),
+		RequestID: pending.RequestID,
 		PendingID: pending.ID,
 	}
 
@@ -2507,31 +2554,252 @@ func (m *Manager) sendPermissionCancelledNotification(pending *PendingPermission
 	}
 }
 
-// RespondToPermission responds to a pending permission request
-func (m *Manager) RespondToPermission(pendingID string, optionID string, cancelled bool) error {
+func (m *Manager) permissionSessionID(pending *PendingPermission) string {
+	if m.cfg != nil && m.cfg.SessionID != "" {
+		return m.cfg.SessionID
+	}
+	if pending != nil && pending.Request != nil {
+		return pending.Request.SessionID
+	}
+	return ""
+}
+
+func (m *Manager) permissionSnapshot(pending *PendingPermission) streams.PendingAgentPermission {
+	title, titleRedacted := securityutil.SanitizePermissionText(pending.Request.Title)
+	action := securityutil.ProjectPermissionAction(
+		pending.Request.ActionType,
+		pending.Request.Title,
+		pending.Request.ActionDetails,
+	)
+	options := make([]streams.PermissionChoice, 0, len(pending.Request.Options))
+	for _, option := range pending.Request.Options {
+		name, nameRedacted := securityutil.SanitizePermissionText(option.Name)
+		action.Redacted = action.Redacted || nameRedacted
+		options = append(options, streams.PermissionChoice{
+			OptionID: option.OptionID,
+			Name:     name,
+			Kind:     option.Kind,
+		})
+	}
+	action.Redacted = action.Redacted || titleRedacted
+	taskID := ""
+	if m.cfg != nil {
+		taskID = m.cfg.TaskID
+	}
+	return streams.PendingAgentPermission{
+		TaskID:     taskID,
+		SessionID:  m.permissionSessionID(pending),
+		RequestID:  pending.RequestID,
+		PendingID:  pending.ID,
+		ToolCallID: pending.Request.ToolCallID,
+		Title:      title,
+		Action: streams.PermissionAction{
+			Type:        action.Type,
+			Description: action.Description,
+			Command:     action.Command,
+			CWD:         action.CWD,
+			Path:        action.Path,
+			Destination: action.Destination,
+			Server:      action.Server,
+			Tool:        action.Tool,
+			Redacted:    action.Redacted,
+		},
+		Options:   options,
+		CreatedAt: pending.CreatedAt,
+		Status:    streams.PermissionStatusPending,
+	}
+}
+
+func permissionActionDetailsForEvent(action streams.PermissionAction) map[string]any {
+	projected := securityutil.PermissionActionProjection{
+		Type:        action.Type,
+		Description: action.Description,
+		Command:     action.Command,
+		CWD:         action.CWD,
+		Path:        action.Path,
+		Destination: action.Destination,
+		Server:      action.Server,
+		Tool:        action.Tool,
+		Redacted:    action.Redacted,
+	}
+	return securityutil.PermissionActionDetailsForEvent(projected)
+}
+
+// ListPendingPermissions returns bounded immutable snapshots of live requests.
+func (m *Manager) ListPendingPermissions() []streams.PendingAgentPermission {
 	m.permissionMu.RLock()
-	pending, ok := m.pendingPermissions[pendingID]
+	permissions := make([]streams.PendingAgentPermission, 0, len(m.pendingPermissions))
+	for _, pending := range m.pendingPermissions {
+		if pending == nil || pending.State != streams.PermissionStatusPending {
+			continue
+		}
+		snapshot := pending.Snapshot
+		snapshot.Options = append([]streams.PermissionChoice(nil), pending.Snapshot.Options...)
+		permissions = append(permissions, snapshot)
+	}
 	m.permissionMu.RUnlock()
 
-	if !ok {
-		return fmt.Errorf("pending permission not found: %s", pendingID)
+	sort.Slice(permissions, func(i, j int) bool {
+		if permissions[i].CreatedAt.Equal(permissions[j].CreatedAt) {
+			return permissions[i].RequestID < permissions[j].RequestID
+		}
+		return permissions[i].CreatedAt.Before(permissions[j].CreatedAt)
+	})
+	if len(permissions) > 100 {
+		permissions = permissions[:100]
+	}
+	return permissions
+}
+
+// consumePermission is the single terminal-transition chokepoint for a live
+// permission request. Every path that can end a request generation — explicit
+// resolve, explicit cancel, the internal respond endpoint, or the request
+// context finishing — must go through this so exactly one caller observes a
+// pending->resolving transition and delivers the response; every later caller
+// gets a stable error instead of silently "succeeding" against an entry
+// nobody is listening on anymore. optionalRequestID empty skips the identity
+// check (RespondToPermission has no requestID). validate runs after the
+// pending/requestID/state checks but before the state mutates, so a rejected
+// option (for example) never claims the transition.
+func (m *Manager) consumePermission(
+	pendingID, optionalRequestID string,
+	validate func(*PendingPermission) error,
+	resp *adapter.PermissionResponse,
+	terminalCode string,
+) (*PendingPermission, error) {
+	m.permissionMu.Lock()
+	defer m.permissionMu.Unlock()
+
+	pending := m.pendingPermissions[pendingID]
+	if pending == nil {
+		code := m.permissionTombstones[optionalRequestID]
+		if code == "" {
+			code = streams.PermissionErrorNotFound
+		}
+		return nil, &PermissionOperationError{Code: code}
+	}
+	if optionalRequestID != "" && pending.RequestID != optionalRequestID {
+		return nil, &PermissionOperationError{Code: streams.PermissionErrorStale}
+	}
+	if pending.State != streams.PermissionStatusPending {
+		return nil, &PermissionOperationError{Code: streams.PermissionErrorInProgress}
+	}
+	if validate != nil {
+		if err := validate(pending); err != nil {
+			return nil, err
+		}
 	}
 
+	pending.State = streams.PermissionStatusResolving
+	select {
+	case pending.ResponseCh <- resp:
+		delete(m.pendingPermissions, pendingID)
+		m.addPermissionTombstoneLocked(pending.RequestID, terminalCode)
+		return pending, nil
+	default:
+		delete(m.pendingPermissions, pendingID)
+		m.addPermissionTombstoneLocked(pending.RequestID, streams.PermissionErrorDeliveryFailed)
+		return nil, &PermissionOperationError{Code: streams.PermissionErrorDeliveryFailed}
+	}
+}
+
+// ResolvePermission validates and consumes one exact live request generation.
+// The provider response is sent at most once while the identity lock is held.
+func (m *Manager) ResolvePermission(requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+	var selected *streams.PermissionChoice
+	validate := func(pending *PendingPermission) error {
+		for i := range pending.Snapshot.Options {
+			if pending.Snapshot.Options[i].OptionID == optionID {
+				selected = &pending.Snapshot.Options[i]
+				return nil
+			}
+		}
+		return &PermissionOperationError{Code: streams.PermissionErrorOptionNotOffered}
+	}
+	_, err := m.consumePermission(pendingID, requestID, validate,
+		&adapter.PermissionResponse{OptionID: optionID}, streams.PermissionErrorAlreadyResolved)
+	if err != nil {
+		return nil, err
+	}
+	m.logger.Info("resolved permission request",
+		zap.String("request_id", requestID),
+		zap.String("pending_id", pendingID),
+		zap.String("option_id", optionID))
+	return &streams.PermissionResolveResponse{
+		RequestID:  requestID,
+		PendingID:  pendingID,
+		OptionID:   optionID,
+		OptionKind: selected.Kind,
+		Status:     "resolved",
+	}, nil
+}
+
+// CancelPermission dismisses one exact live request generation. This is an
+// internal compatibility path for the web UI when a provider offers no reject
+// option; it is deliberately separate from option-only external resolution.
+func (m *Manager) CancelPermission(requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
+	_, err := m.consumePermission(pendingID, requestID, nil,
+		&adapter.PermissionResponse{Cancelled: true}, streams.PermissionErrorAlreadyResolved)
+	if err != nil {
+		return nil, err
+	}
+	return &streams.PermissionCancelResponse{RequestID: requestID, PendingID: pendingID, Status: "cancelled"}, nil
+}
+
+func (m *Manager) addPermissionTombstoneLocked(requestID, code string) {
+	if requestID == "" {
+		return
+	}
+	if m.permissionTombstones == nil {
+		m.permissionTombstones = make(map[string]string)
+	}
+	if _, exists := m.permissionTombstones[requestID]; !exists {
+		m.permissionTombstoneOrder = append(m.permissionTombstoneOrder, requestID)
+	}
+	m.permissionTombstones[requestID] = code
+	for len(m.permissionTombstoneOrder) > maxPermissionTombstones {
+		oldest := m.permissionTombstoneOrder[0]
+		m.permissionTombstoneOrder = m.permissionTombstoneOrder[1:]
+		delete(m.permissionTombstones, oldest)
+	}
+}
+
+// RespondToPermission responds to a pending permission request
+func (m *Manager) RespondToPermission(pendingID string, optionID string, cancelled bool) error {
+	validate := func(pending *PendingPermission) error {
+		if !cancelled && !permissionOffersOption(pending, optionID) {
+			return fmt.Errorf("permission option not offered: %s", optionID)
+		}
+		return nil
+	}
+	_, err := m.consumePermission(pendingID, "", validate, &adapter.PermissionResponse{
+		OptionID:  optionID,
+		Cancelled: cancelled,
+	}, streams.PermissionErrorAlreadyResolved)
+	if err != nil {
+		var opErr *PermissionOperationError
+		if errors.As(err, &opErr) {
+			return fmt.Errorf("pending permission %s: %s", pendingID, opErr.Code)
+		}
+		return err
+	}
 	m.logger.Info("responding to permission request",
 		zap.String("pending_id", pendingID),
 		zap.String("option_id", optionID),
 		zap.Bool("cancelled", cancelled))
+	return nil
+}
 
-	// Send response (non-blocking since channel is buffered)
-	select {
-	case pending.ResponseCh <- &adapter.PermissionResponse{
-		OptionID:  optionID,
-		Cancelled: cancelled,
-	}:
-		return nil
-	default:
-		return fmt.Errorf("response channel full for pending permission: %s", pendingID)
+func permissionOffersOption(pending *PendingPermission, optionID string) bool {
+	if pending == nil || pending.Request == nil {
+		return false
 	}
+	for _, option := range pending.Request.Options {
+		if option.OptionID == optionID {
+			return true
+		}
+	}
+	return false
 }
 
 // CancelPendingPermissions cancels all pending permission requests.
@@ -2547,10 +2815,10 @@ func (m *Manager) CancelPendingPermissions() {
 	for _, p := range pending {
 		m.logger.Info("cancelling pending permission before new prompt",
 			zap.String("pending_id", p.ID))
-		select {
-		case p.ResponseCh <- &adapter.PermissionResponse{Cancelled: true}:
-		default:
-		}
+		// Best-effort: another terminal path may have already consumed this
+		// exact generation between the snapshot above and this call.
+		_, _ = m.consumePermission(p.ID, p.RequestID, nil,
+			&adapter.PermissionResponse{Cancelled: true}, streams.PermissionErrorAlreadyResolved)
 	}
 }
 

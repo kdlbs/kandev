@@ -611,6 +611,7 @@ export function KanbanCardShell({
       data-testid={`task-card-${task.id}`}
       className={cn(
         "group max-h-48 bg-card rounded-sm data-[size=sm]:py-1 cursor-pointer mb-2 w-full py-0 relative border border-border overflow-visible shadow-none ring-0",
+        "touch-none md:touch-auto",
         needsAction(task) && !isSelected && "border-l-2 border-l-amber-500",
         isDragging && "opacity-50 z-50",
         isSelected && "ring-1 ring-primary/60 border-primary/60",
