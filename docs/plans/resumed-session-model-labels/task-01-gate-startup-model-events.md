@@ -70,3 +70,4 @@ Report the RED assertion, code change, files changed, exact test results, blocke
 - GREEN: The same focused test passed after adding the `STARTING` plus unsettled gate.
 - Full backend check: `make test` from `apps/backend` passed (`CGO_ENABLED=1 go test -tags fts5 ./...`).
 - The test also confirms the original effective configuration candidate is captured before the gate and an unsettled live update is accepted after the session leaves `STARTING`.
+- Rebase/fixup verification: rebased cleanly onto `origin/main` at `032ea05b`, then `go build ./...` and `go test -race ./...` passed (`10,069` tests in `136` packages). The focused GitHub and orchestrator race suites also passed; the former CI compile failure is fixed by the current `main` base.
