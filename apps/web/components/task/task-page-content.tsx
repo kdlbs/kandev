@@ -379,7 +379,6 @@ export function TaskPageContent({
       task={task}
       effectiveSessionId={effectiveSessionId ?? null}
       repository={repository}
-      agent={agent}
       merged={merged}
       resumption={resumption}
       sessionPanel={sessionPanel}

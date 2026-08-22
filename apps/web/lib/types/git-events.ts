@@ -14,6 +14,9 @@ export type GitStatusData = {
   remote_branch: string | null;
   head_commit?: string;
   base_commit?: string;
+  comparison_target?: string;
+  comparison_status?: string;
+  comparison_error_code?: string;
   remote_head_commit?: string;
   modified: string[];
   added: string[];

@@ -228,6 +228,58 @@ func TestUpdateRepositoryBaseBranch_NoChangeSkipsWork(t *testing.T) {
 	}
 }
 
+func TestUpdateRepositoryBaseBranch_SameBranchClearsComparisonTarget(t *testing.T) {
+	svc, bus, repo := createTestService(t)
+	ctx := context.Background()
+	setBranchUpdateWorkflowStep(svc)
+	pusher := &fakeBaseBranchPusher{}
+	svc.SetAgentBaseBranchPusher(pusher)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "Clear target",
+		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/a"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	rows, err := repo.ListTaskRepositories(ctx, taskResult.Task.ID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("ListTaskRepositories: %v, rows=%d", err, len(rows))
+	}
+	target := models.ComparisonTarget{
+		Version: models.ComparisonTargetVersion, Provider: models.ComparisonTargetProviderGitHub,
+		Kind: models.ComparisonTargetKindPullRequest, Number: 42, HeadBranch: "feature/a", TargetBranch: "main",
+		HeadRepository:   models.ComparisonTargetRepository{Host: "github.com", Path: "contributor/frontend", RemoteURL: "https://github.com/contributor/frontend.git"},
+		TargetRepository: models.ComparisonTargetRepository{Host: "github.com", Path: "upstream/frontend", RemoteURL: "https://github.com/upstream/frontend.git"},
+	}
+	if _, changed, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, rows[0].ID, &target, nil); err != nil || !changed {
+		t.Fatalf("seed comparison target: changed=%v err=%v", changed, err)
+	}
+	bus.ClearEvents()
+
+	updated, err := svc.UpdateRepositoryBaseBranch(ctx, UpdateRepositoryBaseBranchRequest{
+		TaskID: taskResult.Task.ID, TaskRepositoryID: rows[0].ID, BaseBranch: "main",
+	})
+	if err != nil {
+		t.Fatalf("UpdateRepositoryBaseBranch: %v", err)
+	}
+	if updated.BaseBranch != "main" {
+		t.Fatalf("BaseBranch = %q, want main", updated.BaseBranch)
+	}
+	if _, ok, err := models.LoadComparisonTarget(updated.Metadata); err != nil || ok {
+		t.Fatalf("comparison target remains: present=%v err=%v", ok, err)
+	}
+	if !eventBusHasType(bus, events.TaskUpdated) {
+		t.Fatal("same-branch target removal should publish task.updated")
+	}
+	if len(pusher.snapshot()) != 1 {
+		t.Fatalf("same-branch target removal should push live base map once, got %d", len(pusher.snapshot()))
+	}
+}
+
 // TestUpdateRepositoryBaseBranch_RejectsUnsafeRefs ensures unsafe ref
 // names (leading "-", shell metacharacters, …) are rejected at the
 // service boundary before reaching the DB or the live agentctl push. The

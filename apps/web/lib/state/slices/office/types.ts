@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- this file is the canonical Office entity contract. */
 // --- Office entity types ---
 //
 // Per ADR 0005 Wave E the canonical `AgentProfile`, `AgentRole`, `AgentStatus`,
@@ -19,6 +20,7 @@ export type {
 export type { OfficeAgentProfile as AgentProfile } from "@/lib/types/agent-profile";
 
 import type { OfficeAgentProfile as AgentProfile } from "@/lib/types/agent-profile";
+import type { QuorumResponseDTO, TaskQuorumSliceState } from "./quorum-types";
 
 export type SkillSourceType =
   | "inline"
@@ -457,9 +459,10 @@ export type OfficeMeta = {
 };
 
 // --- Provider routing types ---
-// Extracted to routing-types.ts to keep this file under the file-length
-// lint limit; re-exported here so existing `from ".../office/types"`
-// imports keep working unchanged.
+//
+// Defined in `./routing-types` (kept out of this file to stay under the
+// 600-line cap) and re-exported here so existing
+// `@/lib/state/slices/office/types` imports keep working unchanged.
 
 export type {
   Tier,
@@ -469,6 +472,8 @@ export type {
   ExecutionProfileSummary,
   WakeReason,
   TierPerReason,
+  RoleTierMap,
+  TierSource,
   WorkspaceRouting,
   AgentRoutingOverrides,
   ProviderHealthState,
@@ -484,6 +489,7 @@ export type {
   RunAttemptsState,
   AgentRoutingSliceState,
 } from "./routing-types";
+
 import type {
   AgentRouteData,
   AgentRoutePreview,
@@ -542,6 +548,7 @@ export type OfficeSliceState = {
     providerHealth: ProviderHealthSliceState;
     runAttempts: RunAttemptsState;
     agentRouting: AgentRoutingSliceState;
+    taskQuorum: TaskQuorumSliceState;
   };
 };
 
@@ -588,6 +595,7 @@ export type OfficeSliceActions = {
   setRunAttempts: (runId: string, attempts: RouteAttempt[]) => void;
   appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
+  setTaskQuorum: (taskId: string, quorum: QuorumResponseDTO) => void;
 };
 
 export type OfficeSlice = OfficeSliceState & OfficeSliceActions;

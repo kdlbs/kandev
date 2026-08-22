@@ -63,3 +63,19 @@ export function deriveSessionGitValues(
     canCreatePR: changes.hasCommits,
   };
 }
+
+export function deriveComparisonValues(statuses: GitStatusEntry[]) {
+  const comparisonTargets = Array.from(
+    new Set(
+      statuses
+        .map((status) => status.comparison_target?.trim())
+        .filter((target): target is string => Boolean(target)),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
+  const unavailableStatus = statuses.find((status) => status.comparison_status === "unavailable");
+  return {
+    comparisonTargets,
+    comparisonUnavailable: Boolean(unavailableStatus),
+    comparisonErrorCode: unavailableStatus?.comparison_error_code ?? null,
+  };
+}

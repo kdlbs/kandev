@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   updatePrompt: vi.fn(),
   setPrompts: vi.fn(),
   toast: vi.fn(),
+  promptEditor: vi.fn(),
 }));
 
 vi.mock("@/hooks/domains/settings/use-custom-prompts", () => ({
@@ -23,6 +24,19 @@ vi.mock("@/components/state-provider", () => ({
 
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mocks.toast }),
+}));
+vi.mock("@/components/settings/settings-prompt-editor", () => ({
+  SettingsPromptEditor: (props: Record<string, unknown>) => {
+    mocks.promptEditor(props);
+    return (
+      <textarea
+        data-testid={props.testId as string}
+        value={props.value as string}
+        onChange={(event) => (props.onChange as (value: string) => void)(event.target.value)}
+        placeholder="Prompt content"
+      />
+    );
+  },
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -73,9 +87,15 @@ describe("PromptsSettings coordinated creation", () => {
     fireEvent.change(screen.getByPlaceholderText("Prompt name"), {
       target: { value: "Review" },
     });
-    fireEvent.change(screen.getByPlaceholderText("Prompt content"), {
+    fireEvent.change(screen.getByTestId("prompt-content-input"), {
       target: { value: "Review this change" },
     });
+    expect(mocks.promptEditor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptReferences: true,
+        testId: "prompt-content-input",
+      }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() =>

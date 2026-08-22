@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -90,6 +91,20 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
 		}
 		return
+	}
+	switch eventType {
+	case "message_streaming", "thinking_streaming", agentEventComplete:
+		s.observeDynamicAttempt(
+			payload.SessionID,
+			payload.ExecutionID,
+			strings.TrimSpace(payload.Data.Text) != "",
+			false,
+		)
+	case agentEventToolCall, agentEventToolUpdate:
+		s.observeDynamicAttempt(payload.SessionID, payload.ExecutionID, false, true)
+	}
+	if eventType == agentEventComplete {
+		defer s.clearDynamicAttemptEvidence(payload.SessionID, payload.ExecutionID)
 	}
 
 	if !terminalCompleteStream {
@@ -287,6 +302,23 @@ func (s *Service) completeTurnForStreamEvent(
 func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
+	if sessionID != "" {
+		failure := watcher.AgentEventData{
+			TaskID:           taskID,
+			SessionID:        sessionID,
+			AgentExecutionID: payload.ExecutionID,
+			AgentID:          payload.AgentID,
+			ErrorMessage:     payload.Data.Error,
+			ProviderError:    payload.Data.ProviderError,
+		}
+		if failure.ErrorMessage == "" {
+			failure.ErrorMessage = payload.Data.Text
+		}
+		failure = s.withDynamicAttemptEvidence(failure)
+		if s.routeDynamicAgentFailure(ctx, failure, classifyKanbanFailure(failure)) {
+			return
+		}
+	}
 	if sessionID != "" && s.messageCreator != nil {
 		errorMsg := payload.Data.Error
 		if errorMsg == "" {
@@ -1158,6 +1190,11 @@ func (s *Service) transitionTaskSessionState(
 	}
 	if onChanged != nil {
 		onChanged()
+		// The hook may persist state-specific metadata after the state CAS. Read
+		// the row again so the state event carries that metadata to projections.
+		// Without this refresh, the event publishes the pre-hook snapshot and a
+		// typed launch error can be durable but invisible in the task summary.
+		refreshed = s.refreshTaskSessionOr(ctx, sessionID, refreshed)
 	}
 	if isTerminalSessionState(nextState) {
 		if err := s.expireTerminalClarificationWaiters(ctx, sessionID); err != nil {
@@ -1335,15 +1372,26 @@ func (s *Service) publishTaskSessionStateChanged(
 		foregroundActivity = string(activity)
 	}
 	eventData := map[string]interface{}{
-		metaKeyTaskID:            taskID,
-		metaKeySessionID:         sessionID,
-		"old_state":              string(oldState),
-		metaKeyNewState:          string(nextState),
-		"error_message":          errorMessage,
-		metaKeyAgentProfileID:    agentProfileID,
-		"agent_profile_snapshot": session.AgentProfileSnapshot,
-		"is_passthrough":         session.IsPassthrough,
-		"is_primary":             session.IsPrimary,
+		metaKeyTaskID:               taskID,
+		metaKeySessionID:            sessionID,
+		"old_state":                 string(oldState),
+		metaKeyNewState:             string(nextState),
+		"error_message":             errorMessage,
+		metaKeyAgentProfileID:       agentProfileID,
+		"agent_profile_snapshot":    session.AgentProfileSnapshot,
+		"execution_profile_id":      session.ExecutionProfileID,
+		"route_generation":          session.RouteGeneration,
+		"route_state":               session.RouteState,
+		"route_reason":              session.RouteReason,
+		"route_error_code":          session.RouteErrorCode,
+		"route_error_class":         session.RouteErrorClass,
+		"route_catalogue_version":   session.RouteCatalogueVersion,
+		"route_retry_ordinal":       session.RouteRetryOrdinal,
+		"route_deadline":            session.RouteDeadline,
+		"route_pending_outcome":     session.RoutePendingOutcome,
+		"downstream_acp_session_id": session.DownstreamACPSessionID,
+		"is_passthrough":            session.IsPassthrough,
+		"is_primary":                session.IsPrimary,
 		// Carry activity only while the durable session is RUNNING. Every other
 		// state gets an explicit null so partial client-store merges clear a
 		// previously-live busy signal during settlement or teardown.
@@ -3035,6 +3083,23 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+	settled := configOptionsSettled(payload.Data.Data)
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session before session model persistence",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if shouldDeferUnsettledStartupModelsEvent(session, settled) {
+		// The session state read is optimistic. A concurrent transition out of
+		// STARTING can cause a conservative defer, and the next live model event
+		// corrects the client state without introducing a lock-order dependency.
+		s.logger.Debug("deferring unsettled startup session_models event",
+			zap.String("session_id", sessionID),
+			zap.String("current_model_id", payload.Data.CurrentModelID))
+		return
+	}
 
 	// Store the write-once baseline before the mutable selector snapshot so a
 	// concurrent task-detail boot cannot observe the new state without its
@@ -3046,7 +3111,6 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 			zap.Error(err))
 		return
 	}
-	settled := configOptionsSettled(payload.Data.Data)
 	s.persistSessionModelAndRuntimeConfigWithSettlement(
 		ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.SessionModels, payload.Data.ConfigOptions, settled,
 	)
@@ -3502,6 +3566,10 @@ func configOptionsSettled(data any) bool {
 	return result
 }
 
+func shouldDeferUnsettledStartupModelsEvent(session *models.TaskSession, settled bool) bool {
+	return !settled && session != nil && session.State == models.TaskSessionStateStarting
+}
+
 func originalConfigSettled(data any) bool {
 	metadata, _ := data.(map[string]any)
 	result, _ := metadata["original_config_settled"].(bool)
@@ -3754,14 +3822,22 @@ func (s *Service) persistTodoMessage(ctx context.Context, taskID, sessionID stri
 }
 
 // handlePermissionCancelledEvent marks the pending permission message as expired.
+//
+// The update is qualified by RequestID as well as PendingID: a provider may
+// reuse pending_id for a later, unrelated request once the original is
+// resolved, and this event can arrive after that happens (agentctl's
+// ctx.Done() cancellation path races the handler goroutine's own teardown).
+// Matching RequestID too keeps a delayed cancellation from expiring the new
+// request's message.
 func (s *Service) handlePermissionCancelledEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	sessionID := payload.SessionID
 	if sessionID == "" || payload.Data.PendingID == "" || s.messageCreator == nil {
 		return
 	}
-	if err := s.messageCreator.UpdatePermissionMessage(ctx, sessionID, payload.Data.PendingID, models.PermissionStatusExpired); err != nil {
+	if err := s.messageCreator.UpdatePermissionMessage(ctx, payload.TaskID, sessionID, payload.Data.RequestID, payload.Data.PendingID, models.PermissionStatusExpired); err != nil {
 		s.logger.Warn("failed to mark permission as expired",
 			zap.String("session_id", sessionID),
+			zap.String("request_id", payload.Data.RequestID),
 			zap.String("pending_id", payload.Data.PendingID),
 			zap.Error(err))
 	}

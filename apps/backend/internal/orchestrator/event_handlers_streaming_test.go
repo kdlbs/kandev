@@ -449,6 +449,45 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 	require.Equal(t, []bool{true}, canceller.expireContextDeadline)
 }
 
+func TestTransitionTaskSessionStatePublishesMetadataWrittenByHook(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+	errorValue := models.LastAgentError{
+		Message:    "The selected base branch is not available.",
+		Code:       "base_branch_missing",
+		OccurredAt: time.Date(2026, 8, 19, 23, 10, 41, 0, time.UTC),
+		StampValue: "launch-error-stamp",
+	}
+
+	changed, _, err := svc.transitionTaskSessionState(
+		ctx,
+		"t1",
+		"s1",
+		models.TaskSessionStateFailed,
+		errorValue.Message,
+		func() {
+			require.NoError(t, repo.SetSessionMetadataKey(
+				ctx, "s1", models.SessionMetaKeyLastAgentError, errorValue,
+			))
+		},
+	)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Len(t, eb.events, 1)
+	data, ok := eb.events[0].event.Data.(map[string]interface{})
+	require.True(t, ok)
+	metadata, ok := data["session_metadata"].(map[string]interface{})
+	require.True(t, ok)
+	lastError, ok := metadata[models.SessionMetaKeyLastAgentError].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "base_branch_missing", lastError["code"])
+}
+
 func TestTransitionTaskSessionStateReportsPersistenceFailure(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -3376,6 +3415,100 @@ func TestPersistSessionRuntimeConfigUpdatesProviderState(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "mock-fast", cfg.Model)
 	require.Equal(t, map[string]string{"model": "mock-fast", "effort": "medium"}, cfg.ConfigOptions)
+}
+
+func TestHandleSessionModelsEventDefersUnsettledStartupState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateStarting, ""))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyOrigin, models.SessionOriginTaskInitial))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyRuntimeConfig, models.SessionRuntimeConfig{
+		Model: "gpt-5.6-sol",
+		ConfigOptions: map[string]string{
+			"model":            "gpt-5.6-sol",
+			"reasoning_effort": "high",
+		},
+	}))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPConfigBaseline, map[string]string{
+		"model":            "gpt-5.6-sol",
+		"reasoning_effort": "medium",
+	}))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPModelState, lifecycle.SessionModelsSnapshot{
+		CurrentModelID: "gpt-5.6-sol",
+		Models:         []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6 Sol"}},
+		ConfigOptions: []streams.ConfigOption{{
+			ID: "model", Category: "model", CurrentValue: "gpt-5.6-sol",
+		}},
+		ConfigOptionsSettled: true,
+	}))
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.AgentProfileSnapshot = map[string]interface{}{"model": "gpt-5.6-sol"}
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	eb := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eb}
+	unsettled := func(model string) {
+		svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			TaskID:    "t1",
+			SessionID: "s1",
+			AgentID:   "a1",
+			Data: &lifecycle.AgentStreamEventData{
+				CurrentModelID: model,
+				SessionModels:  []streams.SessionModelInfo{{ModelID: model, Name: model}},
+				OriginalConfigCandidate: []streams.ConfigOption{{
+					Type: "select", ID: "reasoning_effort", CurrentValue: "high",
+				}},
+				ConfigOptions: []streams.ConfigOption{
+					{ID: "model", Category: "model", CurrentValue: model},
+					{ID: "reasoning_effort", CurrentValue: "low"},
+				},
+				Data: map[string]any{"original_config_settled": true},
+			},
+		})
+	}
+
+	unsettled("gpt-5.6-luna")
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	runtimeConfig, ok := models.LoadSessionRuntimeConfig(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-sol", runtimeConfig.Model)
+	require.Equal(t, "gpt-5.6-sol", updated.AgentProfileSnapshot["model"])
+	modelState, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-sol", modelState.CurrentModelID)
+	require.Empty(t, eb.events)
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		AgentID:   "a1",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID: "gpt-5.6-sol",
+			SessionModels:  []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6 Sol"}},
+			ConfigOptions: []streams.ConfigOption{
+				{ID: "model", Category: "model", CurrentValue: "gpt-5.6-sol"},
+				{ID: "reasoning_effort", CurrentValue: "high"},
+			},
+			Data: map[string]any{
+				"config_options_settled":  true,
+				"original_config_settled": true,
+			},
+		},
+	})
+	require.Len(t, eb.events, 1)
+
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateRunning, ""))
+	unsettled("gpt-5.6-luna")
+	require.Len(t, eb.events, 2)
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	runtimeConfig, ok = models.LoadSessionRuntimeConfig(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-luna", runtimeConfig.Model)
 }
 
 func TestHandleSessionModelsEventPublishesPersistedConfigBaselineAfterRestart(t *testing.T) {

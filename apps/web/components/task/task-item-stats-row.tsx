@@ -25,18 +25,39 @@ const POLL_MODE_CONFIG: Record<
 };
 
 /**
- * The sidebar row's metadata line: relative last-update time, PR number,
+ * The repository a task belongs to. The one element of the stats row allowed to
+ * shrink: a long `owner/repo` truncates rather than pushing the PR number and
+ * badges out of the row, and `title` keeps the full name reachable on hover.
+ */
+function RepositoryLabel({ label }: { label?: string }) {
+  if (!label) return null;
+  return (
+    <span
+      data-testid="sidebar-task-repository"
+      title={label}
+      className="min-w-0 truncate text-muted-foreground/50"
+    >
+      {label}
+    </span>
+  );
+}
+
+/**
+ * The sidebar row's metadata line: relative last-update time, repository, PR number,
  * queued-prompt mail badge, WIP queue icon, and (debug UI only) the session
  * poll-mode letter.
  */
 export function TaskItemStatsRow({
   updatedAt,
+  repositoryLabel,
   prInfo,
   primarySessionId,
   queuedCount,
   wipQueue,
 }: {
   updatedAt?: string;
+  /** Repository the task belongs to; already resolved to a slug or name. */
+  repositoryLabel?: string;
   prInfo?: { number: number; state: string; aggregateState?: string };
   primarySessionId?: string | null;
   queuedCount?: number;
@@ -49,7 +70,9 @@ export function TaskItemStatsRow({
       : null,
   );
 
-  if (!updatedAt && !prInfo && !pollMode && !queuedCount && !wipQueue) return null;
+  if (!updatedAt && !repositoryLabel && !prInfo && !pollMode && !queuedCount && !wipQueue) {
+    return null;
+  }
 
   const modeConfig = pollMode ? POLL_MODE_CONFIG[pollMode] : null;
   const modeLabel = modeConfig ? t(modeConfig.labelKey) : "";
@@ -62,17 +85,18 @@ export function TaskItemStatsRow({
     : "";
 
   return (
-    <span className="flex items-center gap-1.5 text-[11px]">
+    <span className="flex min-w-0 items-center gap-1.5 text-[11px]">
       {updatedAt && (
         <span
           data-testid="sidebar-task-time"
           data-time-value={updatedAt}
-          className="text-muted-foreground/50"
+          className="shrink-0 text-muted-foreground/50"
         >
           {formatRelativeTime(updatedAt)}
         </span>
       )}
-      {prInfo && <span className="text-muted-foreground/50">#{prInfo.number}</span>}
+      <RepositoryLabel label={repositoryLabel} />
+      {prInfo && <span className="shrink-0 text-muted-foreground/50">#{prInfo.number}</span>}
       {queuedCount ? (
         <span
           data-testid="sidebar-task-queued-count"

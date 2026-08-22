@@ -10,10 +10,12 @@ import type * as SentryIssueWatchMultiselectModule from "./sentry-issue-watch-mu
 import { SentryIssueWatchDialog } from "./sentry-issue-watch-dialog";
 
 const { WORKSPACE_ID } = vi.hoisted(() => ({ WORKSPACE_ID: "ws-1" }));
+const promptEditor = vi.hoisted(() => vi.fn());
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
+      features: { dynamicAgentRouting: false },
       workspaces: { activeId: WORKSPACE_ID, items: [{ id: WORKSPACE_ID, name: "Workspace" }] },
       workflows: { items: [] },
       agentProfiles: { items: [] },
@@ -27,9 +29,11 @@ vi.mock("@/hooks/use-workflow-steps", () => ({
   stepPlaceholder: () => "Select workflow first",
 }));
 vi.mock("@/components/watcher-repository-fields", () => ({ WatcherRepositoryFields: () => null }));
-vi.mock("@/components/settings/profile-edit/script-editor", () => ({
-  ScriptEditor: () => null,
-  computeEditorHeight: () => 0,
+vi.mock("@/components/settings/settings-prompt-editor", () => ({
+  SettingsPromptEditor: (props: Record<string, unknown>) => {
+    promptEditor(props);
+    return <div aria-label={props.ariaLabel as string} data-testid={props.testId as string} />;
+  },
 }));
 vi.mock("./sentry-issue-watch-multiselect", async (importOriginal) => {
   const actual = await importOriginal<typeof SentryIssueWatchMultiselectModule>();
@@ -124,6 +128,29 @@ beforeEach(() => {
 });
 
 describe("SentryIssueWatchDialog", () => {
+  it("uses Sentry placeholders with saved-prompt references", async () => {
+    render(
+      <SentryIssueWatchDialog
+        open
+        onOpenChange={vi.fn()}
+        watch={null}
+        workspaceId={WORKSPACE_ID}
+        onCreate={vi.fn()}
+        onUpdate={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(promptEditor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          promptReferences: true,
+          testId: "sentry-issue-watch-prompt-editor",
+          placeholders: expect.arrayContaining([expect.objectContaining({ key: "issue.url" })]),
+        }),
+      );
+    });
+  });
+
   it("removes the previous instance's org and project choices before the new lookup resolves", async () => {
     render(
       <SentryIssueWatchDialog
@@ -155,7 +182,9 @@ describe("SentryIssueWatchDialog", () => {
     fireEvent.click(selectTrigger("Project slug"));
     expect(screen.queryByRole("option", { name: FRONTEND_OPTION })).toBeNull();
   });
+});
 
+describe("SentryIssueWatchDialog project selection", () => {
   it("allows selecting multiple projects for a single Sentry watcher", async () => {
     vi.mocked(listSentryProjects).mockResolvedValue({
       projects: [

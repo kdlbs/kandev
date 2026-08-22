@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toKanbanTask, type TaskLike } from "./map-task";
+import { toKanbanTask, preserveOmittedExecutorFields, type TaskLike } from "./map-task";
 
 /**
  * Parity matrix: the HTTP DTO and the WS payload describe the same task from
@@ -271,5 +271,52 @@ describe("toKanbanTask priority", () => {
   it("preserves the canonical priority from HTTP and WebSocket payloads", () => {
     expect(toKanbanTask(httpDTO()).priority).toBe("critical");
     expect(toKanbanTask(wsPayload()).priority).toBe("critical");
+  });
+});
+
+describe("preserveOmittedExecutorFields", () => {
+  const existing = toKanbanTask(
+    httpDTO({
+      primary_executor_id: "exec-1",
+      primary_executor_type: "worktree",
+      primary_executor_name: "Worktree",
+      is_remote_executor: false,
+    }),
+  );
+
+  it("backfills all four executor fields when the incoming task omits them", () => {
+    const incoming = toKanbanTask(
+      httpDTO({
+        primary_executor_id: undefined,
+        primary_executor_type: undefined,
+        primary_executor_name: undefined,
+        is_remote_executor: undefined,
+      }),
+    );
+
+    preserveOmittedExecutorFields(incoming, existing);
+
+    expect(incoming.primaryExecutorId).toBe("exec-1");
+    expect(incoming.primaryExecutorType).toBe("worktree");
+    expect(incoming.primaryExecutorName).toBe("Worktree");
+    expect(incoming.isRemoteExecutor).toBe(false);
+  });
+
+  it("leaves a real incoming executor value untouched", () => {
+    const incoming = toKanbanTask(
+      httpDTO({
+        primary_executor_id: "exec-2",
+        primary_executor_type: "ssh",
+        primary_executor_name: "Remote box",
+        is_remote_executor: true,
+      }),
+    );
+
+    preserveOmittedExecutorFields(incoming, existing);
+
+    expect(incoming.primaryExecutorId).toBe("exec-2");
+    expect(incoming.primaryExecutorType).toBe("ssh");
+    expect(incoming.primaryExecutorName).toBe("Remote box");
+    expect(incoming.isRemoteExecutor).toBe(true);
   });
 });

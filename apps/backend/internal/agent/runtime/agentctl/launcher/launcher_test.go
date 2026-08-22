@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,22 @@ func TestLauncherConfigSupportsUnexpectedExitCallback(t *testing.T) {
 	}
 	if field.Type != reflect.TypeOf((func())(nil)) {
 		t.Fatalf("unexpected-exit callback type = %v, want func()", field.Type)
+	}
+}
+
+func TestEnvironmentWithOverridesRemovesInheritedValues(t *testing.T) {
+	got := environmentWithOverrides(
+		[]string{"KANDEV_ACP_IDLE_TIMEOUT=host", "PATH=/bin", "DUP=old"},
+		"KANDEV_ACP_IDLE_TIMEOUT=resolved",
+		"DUP=new",
+	)
+
+	joined := strings.Join(got, "\n")
+	if strings.Count(joined, "KANDEV_ACP_IDLE_TIMEOUT=") != 1 || !strings.Contains(joined, "KANDEV_ACP_IDLE_TIMEOUT=resolved") {
+		t.Fatalf("resolved timeout override = %v", got)
+	}
+	if strings.Count(joined, "DUP=") != 1 || !strings.Contains(joined, "DUP=new") {
+		t.Fatalf("duplicate override = %v", got)
 	}
 }
 

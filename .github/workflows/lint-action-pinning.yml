@@ -58,6 +58,9 @@ jobs:
       - name: Test preview environment workflow contract
         run: python3 .github/scripts/preview-env-workflow-contract_test.py
 
+      - name: Test OpenCode code review workflow contract
+        run: python3 .github/scripts/opencode-code-review-workflow-contract_test.py
+
       - name: Test frontend tests workflow contract
         run: python3 .github/scripts/frontend-tests-workflow-contract_test.py
 

@@ -1,5 +1,6 @@
 import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { promptEditorText } from "../../helpers/settings-prompt-editor";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 import { dwell } from "../../helpers/causal-waits";
 
@@ -566,9 +567,10 @@ test.describe("Workflow settings", () => {
     await expect(descriptionInput).toHaveValue("New description from another tab");
     await expect(descriptionInput).toHaveAttribute("data-settings-dirty", "false");
     const promptInput = card.getByTestId("workflow-prompt-input");
+    const promptEditor = promptInput.locator("..");
     await expect(promptInput).toBeVisible();
-    await expect(promptInput).toHaveValue("New prompt from another tab");
-    await expect(promptInput).toHaveAttribute("data-settings-dirty", "false");
+    await expect(promptEditorText(promptInput)).toContainText("New prompt from another tab");
+    await expect(promptEditor).toHaveAttribute("data-settings-dirty", "false");
 
     // The unsaved local name edit was not clobbered by the cross-tab sync.
     await expect(nameInput).toHaveValue("Unsaved local name");

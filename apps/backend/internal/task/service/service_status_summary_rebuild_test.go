@@ -241,7 +241,19 @@ func TestReconcileTaskStatusSummariesRepairsMissingTaskOnce(t *testing.T) {
 	prReader := &statusSummaryRebuildPRReader{}
 	svc.SetTaskStatusSummaryPRReader(prReader)
 	svc.SetQueuedPromptCounter(statusSummaryQueuedPromptCounter{counts: map[string]int{"task-1": 2}})
-	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
+	task := &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1",
+		Metadata: map[string]interface{}{
+			models.MetaKeyLastLaunchError: models.TaskLaunchError{
+				Message:          "The linked pull request is already closed or merged.",
+				OccurredAt:       now.Add(time.Minute),
+				Code:             models.LaunchErrorCategoryPRAlreadyClosed,
+				RecoveryActions:  []string{models.RecoveryActionMarkReviewDone},
+				TaskRepositoryID: "task-repository-1",
+				StampValue:       "task-error-1",
+			},
+		},
+	}
 	sessions := map[string][]*models.TaskSession{task.ID: {session}}
 	pending := map[string]models.TaskPendingAction{session.ID: models.TaskPendingActionPermission}
 
@@ -264,8 +276,12 @@ func TestReconcileTaskStatusSummariesRepairsMissingTaskOnce(t *testing.T) {
 	if summary.ForegroundActivity != "generating" || summary.ActiveSubagentCount != 3 {
 		t.Fatalf("activity summary = %+v", summary)
 	}
-	if summary.ActiveError == nil || summary.ActiveError.Preview != "agent failed to complete the turn" {
+	if summary.ActiveError == nil || summary.ActiveError.Preview != "The linked pull request is already closed or merged." {
 		t.Fatalf("active error = %+v", summary.ActiveError)
+	}
+	if summary.ActiveError.TaskRepositoryID != "task-repository-1" ||
+		summary.ActiveError.Category != models.LaunchErrorCategoryPRAlreadyClosed {
+		t.Fatalf("task-owned active error = %+v", summary.ActiveError)
 	}
 	if summary.Git == nil || summary.Git.Additions != 5 || summary.Git.Deletions != 2 || summary.Git.ChangedFiles != 2 {
 		t.Fatalf("Git summary = %+v", summary.Git)

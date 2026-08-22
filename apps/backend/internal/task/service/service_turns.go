@@ -73,13 +73,15 @@ func (s *Service) createTurn(
 		metadata[models.TurnMetaKeyPromptDispatchClarificationMessageIDs] = recovery.MessageIDs
 	}
 	turn := &models.Turn{
-		ID:            uuid.New().String(),
-		TaskSessionID: sessionID,
-		TaskID:        session.TaskID,
-		StartedAt:     time.Now().UTC(),
-		Metadata:      metadata,
-		CreatedAt:     time.Now().UTC(),
-		UpdatedAt:     time.Now().UTC(),
+		ID:                 uuid.New().String(),
+		TaskSessionID:      sessionID,
+		TaskID:             session.TaskID,
+		ExecutionProfileID: session.ExecutionProfileID,
+		RouteGeneration:    session.RouteGeneration,
+		StartedAt:          time.Now().UTC(),
+		Metadata:           metadata,
+		CreatedAt:          time.Now().UTC(),
+		UpdatedAt:          time.Now().UTC(),
 	}
 
 	stamped, err := s.turns.CreateTurnWithStepStamp(ctx, turn)
@@ -275,14 +277,16 @@ func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskS
 	}
 	now := time.Now().UTC()
 	turn := &models.Turn{
-		ID:            uuid.New().String(),
-		TaskSessionID: session.ID,
-		TaskID:        session.TaskID,
-		StartedAt:     now,
-		CompletedAt:   &now,
-		Metadata:      turnStartRuntimeMetadata(session),
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:                 uuid.New().String(),
+		TaskSessionID:      session.ID,
+		TaskID:             session.TaskID,
+		ExecutionProfileID: session.ExecutionProfileID,
+		RouteGeneration:    session.RouteGeneration,
+		StartedAt:          now,
+		CompletedAt:        &now,
+		Metadata:           turnStartRuntimeMetadata(session),
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	stamped, err := s.turns.CreateTurnWithStepStamp(ctx, turn)
 	if err != nil {
@@ -602,13 +606,16 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutpu
 	metadata := maps.Clone(turn.Metadata)
 	models.ClearPromptDispatchMetadata(metadata)
 	payload := map[string]interface{}{
-		"id":           turn.ID,
-		"session_id":   turn.TaskSessionID,
-		"task_id":      turn.TaskID,
-		"started_at":   turn.StartedAt,
-		"completed_at": turn.CompletedAt,
-		"created_at":   turn.CreatedAt,
-		"updated_at":   turn.UpdatedAt,
+		"id":                   turn.ID,
+		"session_id":           turn.TaskSessionID,
+		"task_id":              turn.TaskID,
+		"execution_profile_id": turn.ExecutionProfileID,
+		"route_generation":     turn.RouteGeneration,
+		"started_at":           turn.StartedAt,
+		"completed_at":         turn.CompletedAt,
+		"metadata":             turn.Metadata,
+		"created_at":           turn.CreatedAt,
+		"updated_at":           turn.UpdatedAt,
 	}
 	payload[turnEventMetadataKey] = metadata
 	if hadOutput != nil {

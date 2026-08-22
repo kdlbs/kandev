@@ -18,6 +18,7 @@ import { useAppStore } from "@/components/state-provider";
 import { isHealthyAgentProfile } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import {
   isAgentConfiguredOnExecutor,
   shouldFilterHandoffByHostHealth,
@@ -46,12 +47,13 @@ function profileDisplayLabel(profile: AgentProfileOption): { label: string; agen
 export function useHandoffProfiles(taskId: string, enabled = true): HandoffProfile[] {
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
   const executorProfile = useTaskExecutorProfile(taskId, enabled);
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
 
   return useMemo(() => {
     const filterByHostHealth = shouldFilterHandoffByHostHealth(executorProfile);
     return agentProfiles
-      .filter(isSelectableAgentProfile)
+      .filter((profile) => isSelectableAgentProfile(profile, dynamicRoutingEnabled))
       .filter((profile) => !filterByHostHealth || isHealthyAgentProfile(profile))
       .map((profile) => {
         const { label, agentName } = profileDisplayLabel(profile);
@@ -61,7 +63,7 @@ export function useHandoffProfiles(taskId: string, enabled = true): HandoffProfi
         }
         return { id: profile.id, label, agentName, disabled };
       });
-  }, [agentProfiles, executorProfile, authSpecs, authLoaded]);
+  }, [agentProfiles, dynamicRoutingEnabled, executorProfile, authSpecs, authLoaded]);
 }
 
 /**
@@ -73,7 +75,11 @@ export function useHandoffProfiles(taskId: string, enabled = true): HandoffProfi
  */
 export function useHasSelectableAgentProfiles(): boolean {
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
-  return useMemo(() => agentProfiles.some(isSelectableAgentProfile), [agentProfiles]);
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
+  return useMemo(
+    () => agentProfiles.some((profile) => isSelectableAgentProfile(profile, dynamicRoutingEnabled)),
+    [agentProfiles, dynamicRoutingEnabled],
+  );
 }
 
 function HandoffProfileList({

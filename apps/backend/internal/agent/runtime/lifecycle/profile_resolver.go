@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
@@ -19,6 +20,11 @@ type DeletedProfileError struct {
 	ProfileID   string
 	ProfileName string
 }
+
+// ErrVirtualProfile marks a profile family that is a routing owner rather
+// than a concrete subprocess. Direct lifecycle launches must stop here; the
+// shared dynamic conductor is the only owner allowed to select a candidate.
+var ErrVirtualProfile = errors.New("agent profile belongs to a virtual execution family")
 
 func (e *DeletedProfileError) Error() string {
 	if e.ProfileName != "" {
@@ -64,6 +70,9 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 	}
 	if err := r.migrateCursorProfile(ctx, profile, agent); err != nil {
 		return nil, err
+	}
+	if agent.Name == agents.DynamicAgentID {
+		return nil, fmt.Errorf("profile %s: %w", profile.ID, ErrVirtualProfile)
 	}
 
 	// Resolve agent capabilities from the registry.

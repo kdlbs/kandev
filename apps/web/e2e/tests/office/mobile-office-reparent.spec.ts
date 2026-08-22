@@ -1,5 +1,6 @@
 import { expect, test } from "../../fixtures/office-fixture";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 
 test.describe("Office manager reassignment on mobile", () => {
   test("saves a manager change and renders the new parent-child link", async ({
@@ -35,7 +36,7 @@ test.describe("Office manager reassignment on mobile", () => {
       .getByRole("link", { name: /Org chart/i })
       .click();
     await expect(testPage).toHaveURL(/\/office\/workspace\/org$/);
-    await expect(testPage.getByRole("heading", { name: /Org/i }).first()).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Org/i, {
       timeout: 10_000,
     });
     await expect(

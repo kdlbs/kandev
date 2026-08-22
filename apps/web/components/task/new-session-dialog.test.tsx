@@ -24,6 +24,7 @@ const BASE_PROFILE: AgentProfileOption = {
 };
 
 const mockState = {
+  features: { dynamicAgentRouting: true },
   kanban: {
     workflowId: null,
     tasks: [{ id: "task-1", title: "Task title" }],

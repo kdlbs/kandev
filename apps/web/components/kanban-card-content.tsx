@@ -26,6 +26,7 @@ import {
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
 import { TaskCardIndicators, TaskCardTags } from "@/components/kanban-card-plugin-slots";
+import { CardTitle } from "@/components/kanban-card-title";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
@@ -133,10 +134,12 @@ export function KanbanCardBody({
   task,
   repositoryChips,
   actions,
+  enableTitleHover,
 }: {
   task: Task;
   repositoryChips: RepositoryChip[];
   actions?: React.ReactNode;
+  enableTitleHover?: boolean;
 }) {
   return (
     <>
@@ -144,12 +147,7 @@ export function KanbanCardBody({
         <div className="min-w-0 flex-1">
           <RepoChipRow chips={repositoryChips} />
           <div className="flex items-center gap-1 min-w-0" data-testid="kanban-card-title-row">
-            <p
-              data-testid="task-card-title"
-              className="text-sm font-medium leading-tight line-clamp-1 min-w-0"
-            >
-              {task.title}
-            </p>
+            <CardTitle task={task} enableTitleHover={enableTitleHover} />
             <PRTaskIcon taskId={task.id} />
             <MRTaskIcon taskId={task.id} />
             <RegisteredChangeRequestTaskIcon taskId={task.id} />
@@ -613,6 +611,7 @@ export function KanbanCardShell({
       data-testid={`task-card-${task.id}`}
       className={cn(
         "group max-h-48 bg-card rounded-sm data-[size=sm]:py-1 cursor-pointer mb-2 w-full py-0 relative border border-border overflow-visible shadow-none ring-0",
+        "touch-none md:touch-auto",
         needsAction(task) && !isSelected && "border-l-2 border-l-amber-500",
         isDragging && "opacity-50 z-50",
         isSelected && "ring-1 ring-primary/60 border-primary/60",
@@ -636,6 +635,7 @@ export function KanbanCardShell({
             <KanbanCardBody
               task={task}
               repositoryChips={repositoryChips ?? []}
+              enableTitleHover
               actions={
                 <KanbanCardActionSlot
                   isMultiSelectMode={isMultiSelectMode}

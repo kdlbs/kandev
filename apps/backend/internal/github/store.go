@@ -15,6 +15,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	dbutil "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/persistence"
 )
 
 // Store provides SQLite persistence for GitHub integration data.
@@ -136,6 +137,11 @@ const createTablesSQL = `
 		last_synced_at DATETIME,
 		detached_at DATETIME,
 		updated_at DATETIME NOT NULL,
+		is_draft BOOLEAN,
+		changed_files INTEGER,
+		merged_by_login TEXT,
+		closed_by_login TEXT,
+		auto_merge_observed_at DATETIME,
 		UNIQUE(task_id, repository_id, pr_number)
 	);
 
@@ -477,11 +483,41 @@ func (s *Store) initSchema(legacyUpgrade bool) error {
 	if err := s.initSchemaUpgrades(); err != nil {
 		return err
 	}
+	if err := s.activateTaskPROutcomeTracking(); err != nil {
+		return err
+	}
 	if err := s.initSchemaData(legacyUpgrade); err != nil {
 		return err
 	}
 	s.applyIdempotentSchemaIndexes()
 	return s.ensureWorkspaceOwnershipIndexes()
+}
+
+// taskPROutcomeActivatedAtMetaKey is the kandev_meta key under which the
+// PR-outcome-attribution feature's one-time activation instant is recorded
+// (AC-05). Any point-in-time extract over the five outcome columns must
+// read this key to scope its window and distinguish "not yet activated"
+// from "writer broke" (spec: Persistence guarantees).
+const taskPROutcomeActivatedAtMetaKey = "github_task_pr_outcome_activated_at"
+
+// activateTaskPROutcomeTracking stamps the activation instant exactly once
+// per database (AC-05, AC-06). WriteMetaKeyIfAbsent's ON CONFLICT DO NOTHING
+// makes this safe to call on every boot rather than gate it behind whether
+// this boot's migration literally ran an ALTER TABLE: a fresh install
+// receives the five columns inline via createTablesSQL, not an ALTER, but
+// still needs the instant stamped on its very first boot. A write failure
+// aborts startup — a database with the columns but no activation instant is
+// unreportable and must not be shipped (spec: Failure modes).
+func (s *Store) activateTaskPROutcomeTracking() error {
+	if err := persistence.EnsureMetaTable(s.db); err != nil {
+		return fmt.Errorf("ensure kandev_meta table: %w", err)
+	}
+	if _, err := persistence.WriteMetaKeyIfAbsent(
+		s.db, taskPROutcomeActivatedAtMetaKey, time.Now().UTC().Format(time.RFC3339),
+	); err != nil {
+		return fmt.Errorf("activate task PR outcome tracking: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) initSchemaFoundations() error {
@@ -553,6 +589,49 @@ func (s *Store) initSchemaUpgrades() error {
 	}
 	if err := s.addAppRegistrationReferenceColumns(); err != nil {
 		return err
+	}
+	if err := s.addTaskPROutcomeColumns(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// taskPROutcomeColumnDDL lists the five nullable PR-outcome-attribution
+// columns and their type fragments. Every column is nullable with no
+// DEFAULT (AC-01): NULL means "never observed" and must never be confused
+// with a zero value or an empty string.
+var taskPROutcomeColumnDDL = []struct {
+	name string
+	ddl  string
+}{
+	{"is_draft", "BOOLEAN"},
+	{"changed_files", "INTEGER"},
+	{"merged_by_login", "TEXT"},
+	{"closed_by_login", "TEXT"},
+	{"auto_merge_observed_at", "DATETIME"},
+}
+
+// addTaskPROutcomeColumns adds the five PR-outcome-attribution columns to
+// github_task_prs. These columns join taskPRColumns, so every existing read
+// scans them unconditionally; unlike applyIdempotentSchemaColumns, a
+// driver-level ALTER failure here must abort startup rather than silently
+// turn into a scan error on the next read (AC-03). Only
+// dbutil.IsDuplicateColumnError is tolerated, per ADR 0027 — no local
+// error-string classifier, and no UPDATE/backfill runs against
+// github_task_prs anywhere in this path (AC-04).
+func (s *Store) addTaskPROutcomeColumns() error {
+	cols, err := s.tableColumns("github_task_prs")
+	if err != nil {
+		return fmt.Errorf("read github_task_prs columns: %w", err)
+	}
+	for _, col := range taskPROutcomeColumnDDL {
+		if _, ok := cols[col.name]; ok {
+			continue
+		}
+		stmt := "ALTER TABLE github_task_prs ADD COLUMN " + col.name + " " + col.ddl
+		if _, err := s.db.Exec(stmt); err != nil && !dbutil.IsDuplicateColumnError(err) {
+			return fmt.Errorf("add github_task_prs.%s: %w", col.name, err)
+		}
 	}
 	return nil
 }
@@ -1267,18 +1346,30 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			last_synced_at DATETIME,
 			detached_at DATETIME,
 			updated_at DATETIME NOT NULL,
+			is_draft BOOLEAN,
+			changed_files INTEGER,
+			merged_by_login TEXT,
+			closed_by_login TEXT,
+			auto_merge_observed_at DATETIME,
 			UNIQUE(task_id, repository_id, pr_number)
 		)`,
+		// The five outcome-attribution columns are selected directly, not
+		// via COALESCE: addTaskPROutcomeColumns runs earlier in
+		// initSchemaUpgrades, before this data-migration step, so the old
+		// table being rebuilt here already has them (fail-loud — startup
+		// would have aborted otherwise).
 		`INSERT INTO github_task_prs_new (
 			id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title,
 			head_branch, base_branch, author_login, state, review_state, checks_state,
 			mergeable_state, review_count, pending_review_count, comment_count,
-			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at
+			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
+			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at
 		) SELECT
 			id, COALESCE(workspace_id, ''), task_id, COALESCE(repository_id, ''), owner, repo, pr_number, pr_url, pr_title,
 			head_branch, base_branch, author_login, state, review_state, checks_state,
 			mergeable_state, review_count, pending_review_count, comment_count,
-			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at
+			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
+			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at
 		FROM github_task_prs`,
 	)
 }
@@ -1596,12 +1687,14 @@ func (s *Store) CreateTaskPR(ctx context.Context, tp *TaskPR) error {
 		INSERT INTO github_task_prs (id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
 			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
 			unresolved_review_threads, checks_total, checks_passing, additions, deletions,
-			created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
+			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tp.ID, tp.WorkspaceID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
 		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing, tp.Additions, tp.Deletions,
-		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.DetachedAt, tp.UpdatedAt)
+		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.DetachedAt, tp.UpdatedAt,
+		tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt)
 	return err
 }
 
@@ -1618,7 +1711,8 @@ const taskPRColumns = `id, workspace_id, task_id, repository_id, owner, repo, pr
 	pr_title, head_branch, base_branch, author_login, state, review_state, checks_state,
 	mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
 	unresolved_review_threads, checks_total, checks_passing, additions, deletions,
-	created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at`
+	created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
+	is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at`
 
 // taskPRColumnsQualified is taskPRColumns with each column qualified by the
 // `gtp` alias, for queries that join github_task_prs against another table.
@@ -1627,7 +1721,8 @@ const taskPRColumnsQualified = `gtp.id, gtp.workspace_id, gtp.task_id, gtp.repos
 	gtp.state, gtp.review_state, gtp.checks_state, gtp.mergeable_state, gtp.review_count,
 	gtp.pending_review_count, gtp.required_reviews, gtp.comment_count, gtp.unresolved_review_threads,
 	gtp.checks_total, gtp.checks_passing, gtp.additions, gtp.deletions,
-	gtp.created_at, gtp.merged_at, gtp.closed_at, gtp.last_synced_at, gtp.detached_at, gtp.updated_at`
+	gtp.created_at, gtp.merged_at, gtp.closed_at, gtp.last_synced_at, gtp.detached_at, gtp.updated_at,
+	gtp.is_draft, gtp.changed_files, gtp.merged_by_login, gtp.closed_by_login, gtp.auto_merge_observed_at`
 
 // GetTaskPR returns the first PR association for a task. For multi-repo tasks
 // the result is non-deterministic across repos — use ListTaskPRsByTask instead.
@@ -1757,18 +1852,52 @@ func (s *Store) DetachTaskPR(ctx context.Context, associationID string) (*TaskPR
 
 // RestoreTaskPR clears a detached tombstone for an explicit link action and
 // refreshes the persisted fields available from the fetched GitHub PR.
-func (s *Store) RestoreTaskPR(ctx context.Context, taskID, repositoryID string, pr *PR) (*TaskPR, error) {
-	if pr == nil {
+// status carries the caller's raw PR observation and its populated-ness
+// flags (AC-43p) — RestoreTaskPR resolves the five outcome-attribution
+// columns itself, inside this call's own transaction, against the outgoing
+// row it is about to overwrite (AC-43, AC-43a). The caller must not
+// pre-resolve them via resolveTaskPROutcomeFields: a value resolved against
+// an earlier read is stale by the time this statement executes, and on a
+// row that has just reached a terminal state there is no later poll to
+// repair a value clobbered that way (AC-36).
+func (s *Store) RestoreTaskPR(ctx context.Context, taskID, repositoryID string, status *PRStatus) (*TaskPR, error) {
+	if status == nil || status.PR == nil {
 		return nil, errors.New("restore task PR: missing PR data")
 	}
-	if _, err := s.db.ExecContext(ctx,
+	pr := status.PR
+
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var outgoing TaskPR
+	err = tx.GetContext(ctx, &outgoing,
+		`SELECT `+taskPRColumns+` FROM github_task_prs
+		 WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+		taskID, repositoryID, pr.Number)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
+	isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt :=
+		resolveTaskPROutcomeFields(&outgoing, status)
+
+	if _, err := tx.ExecContext(ctx,
 		`UPDATE github_task_prs SET owner = ?, repo = ?, pr_url = ?, pr_title = ?,
 			head_branch = ?, base_branch = ?, author_login = ?, state = ?, mergeable_state = ?,
-			additions = ?, deletions = ?, merged_at = ?, closed_at = ?, detached_at = NULL, updated_at = ?
+			additions = ?, deletions = ?, merged_at = ?, closed_at = ?, detached_at = NULL, updated_at = ?,
+			is_draft = ?, changed_files = ?, merged_by_login = ?, closed_by_login = ?,
+			auto_merge_observed_at = COALESCE(auto_merge_observed_at, ?)
 		 WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
 		pr.RepoOwner, pr.RepoName, pr.HTMLURL, pr.Title, pr.HeadBranch, pr.BaseBranch, pr.AuthorLogin,
 		pr.State, pr.MergeableState, pr.Additions, pr.Deletions, pr.MergedAt, pr.ClosedAt, time.Now().UTC(),
+		isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt,
 		taskID, repositoryID, pr.Number); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return s.GetTaskPRByRepoAndNumber(ctx, taskID, repositoryID, pr.Number)
@@ -1881,11 +2010,23 @@ func groupTaskPRsByTask(prs []TaskPR) map[string][]*TaskPR {
 // callers (RepositoryID == "") only delete legacy untagged rows for the
 // same PR number.
 //
+// status carries the caller's raw PR observation and its populated-ness
+// flags (AC-43p): ReplaceTaskPR resolves the five outcome-attribution
+// columns itself, inside this transaction, against the outgoing row it is
+// about to replace (AC-43, AC-43a) — callers must not pre-resolve them.
+// When no outgoing row exists (this method's ordinary production path,
+// since its caller only reaches here after confirming no row exists for
+// this PR number), resolution runs against a zero-value outgoing row: a
+// populating observation writes what it observed, a non-populating one
+// writes NULL in all five (AC-43).
+//
 // The DELETE+INSERT pair inside one transaction is the upsert form; an
 // ON CONFLICT would also work but the per-row delete pattern matches the
 // existing migration layout (rebuilds are easier to reason about) and
-// avoids leaking SQLite-specific syntax into the service layer.
-func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
+// avoids leaking SQLite-specific syntax into the service layer. Returns
+// the row actually written, since the five resolved outcome fields may
+// differ from what the caller's tp carried in.
+func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR, status *PRStatus) (*TaskPR, error) {
 	if tp.ID == "" {
 		tp.ID = uuid.New().String()
 	}
@@ -1894,41 +2035,91 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
 
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	outgoing, err := replaceTaskPROutgoingRow(ctx, tx, tp)
+	if err != nil {
+		return nil, err
+	}
+	tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt =
+		resolveTaskPROutcomeFields(outgoing, status)
 
 	if tp.RepositoryID != "" {
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM github_task_prs
 			 WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
 			tp.TaskID, tp.RepositoryID, tp.PRNumber); err != nil {
-			return err
+			return nil, err
 		}
 	} else {
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM github_task_prs
 			 WHERE task_id = ? AND repository_id = '' AND pr_number = ?`,
 			tp.TaskID, tp.PRNumber); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO github_task_prs (id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
 			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
 			unresolved_review_threads, checks_total, checks_passing, additions, deletions,
-			created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
+			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tp.ID, tp.WorkspaceID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
 		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing, tp.Additions, tp.Deletions,
-		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.DetachedAt, tp.UpdatedAt); err != nil {
-		return err
+		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.DetachedAt, tp.UpdatedAt,
+		tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt); err != nil {
+		return nil, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return tp, nil
 }
 
-// UpdateTaskPR updates a task-PR association.
+// replaceTaskPROutgoingRow reads, inside tx, the row ReplaceTaskPR is about
+// to delete-and-replace for tp's (task_id, repository_id, pr_number), or a
+// zero-value TaskPR when none exists (AC-43's "no outgoing row" case, the
+// ordinary production path). Reading via tx means this observes the same
+// snapshot the subsequent DELETE/INSERT commits against (AC-43a).
+func replaceTaskPROutgoingRow(ctx context.Context, tx *sqlx.Tx, tp *TaskPR) (*TaskPR, error) {
+	var outgoing TaskPR
+	var err error
+	if tp.RepositoryID != "" {
+		err = tx.GetContext(ctx, &outgoing,
+			`SELECT `+taskPRColumns+` FROM github_task_prs
+			 WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+			tp.TaskID, tp.RepositoryID, tp.PRNumber)
+	} else {
+		err = tx.GetContext(ctx, &outgoing,
+			`SELECT `+taskPRColumns+` FROM github_task_prs
+			 WHERE task_id = ? AND repository_id = '' AND pr_number = ?`,
+			tp.TaskID, tp.PRNumber)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return &TaskPR{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &outgoing, nil
+}
+
+// UpdateTaskPR updates a task-PR association. This is the sync writer's
+// exclusive write path.
+// UpdateTaskPR writes auto_merge_observed_at through a SQL-level
+// COALESCE(auto_merge_observed_at, ?) rather than a direct SET. The Go-side
+// latch check in resolveTaskPROutcomeFields (tp.AutoMergeObservedAt == nil)
+// reads a snapshot that can be stale by the time this statement executes —
+// two concurrent syncs can both observe NULL and each compute their own
+// "now" timestamp. COALESCE evaluates the row's *current* value at
+// UPDATE-execution time, inside this single statement, so whichever write
+// actually lands first wins atomically and the second's differing timestamp
+// is silently discarded instead of overwriting it (AC-16/AC-17).
 func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 	tp.UpdatedAt = time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, `
@@ -1936,13 +2127,17 @@ func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 			review_count = ?, pending_review_count = ?, required_reviews = ?, comment_count = ?,
 			unresolved_review_threads = ?, checks_total = ?, checks_passing = ?,
 			additions = ?, deletions = ?, pr_title = ?, base_branch = ?,
-			merged_at = ?, closed_at = ?, last_synced_at = ?, updated_at = ?
+			merged_at = ?, closed_at = ?, last_synced_at = ?, updated_at = ?,
+			is_draft = ?, changed_files = ?, merged_by_login = ?, closed_by_login = ?,
+			auto_merge_observed_at = COALESCE(auto_merge_observed_at, ?)
 		WHERE id = ?`,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState,
 		tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
 		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing,
 		tp.Additions, tp.Deletions, tp.PRTitle, tp.BaseBranch,
-		tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt, tp.ID)
+		tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt,
+		tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin,
+		tp.AutoMergeObservedAt, tp.ID)
 	return err
 }
 

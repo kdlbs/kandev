@@ -20,6 +20,11 @@ func newMRAutomationControllerFixture(t *testing.T) (*gin.Engine, *Service) {
 	store := newTestStore(t)
 	seedWorkspace(t, store, "ws-1")
 	seedTask(t, store, "task-1", "ws-1")
+	// The switches are per-MR, so a PATCH only has somewhere to land once the
+	// task has at least one linked MR.
+	if err := store.UpsertTaskMR(context.Background(), newTestMR("task-1", "", "group/a", 1)); err != nil {
+		t.Fatalf("seed linked MR: %v", err)
+	}
 	if err := store.SaveConfigForWorkspace(context.Background(), "ws-1", &GitLabConfig{
 		Host: "https://gitlab.example.com", AuthMethod: AuthMethodPAT,
 	}); err != nil {
@@ -377,5 +382,82 @@ func TestControllerPatchTaskMRAutomation_PublishesEvent(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected GitLabTaskMROptionsUpdated event to be published")
+	}
+}
+
+// TestControllerPatchTaskMRAutomation_ScopesToTheNamedMR covers the per-MR
+// PATCH contract: a body carrying repository_id/project_path/mr_iid applies
+// the switch to that MR alone.
+func TestControllerPatchTaskMRAutomation_ScopesToTheNamedMR(t *testing.T) {
+	router, svc := newMRAutomationControllerFixture(t)
+	if err := svc.store.UpsertTaskMR(context.Background(), newTestMR("task-1", "", "group/b", 2)); err != nil {
+		t.Fatalf("seed second MR: %v", err)
+	}
+
+	body := `{"repository_id":"","project_path":"group/a","mr_iid":1,"auto_merge_enabled":true}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/gitlab/tasks/task-1/mr-automation", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	var got TaskMRAutomationResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.MROptions) != 2 {
+		t.Fatalf("expected one mr_options entry per linked MR, got %+v", got.MROptions)
+	}
+	for _, opt := range got.MROptions {
+		wantEnabled := opt.ProjectPath == "group/a"
+		if opt.AutoMergeEnabled != wantEnabled {
+			t.Errorf("MR %s auto_merge_enabled = %v, want %v", opt.ProjectPath, opt.AutoMergeEnabled, wantEnabled)
+		}
+	}
+}
+
+// TestControllerPatchTaskMRAutomation_RejectsBadMRIdentity keeps a caller
+// mistake a 400 rather than a 500 — and, for a partial identity, keeps it
+// from being silently reinterpreted as "apply to every linked MR".
+func TestControllerPatchTaskMRAutomation_RejectsBadMRIdentity(t *testing.T) {
+	router, _ := newMRAutomationControllerFixture(t)
+	for name, body := range map[string]string{
+		"unlinked MR":      `{"repository_id":"","project_path":"group/nope","mr_iid":9,"auto_fix_enabled":true}`,
+		"partial identity": `{"project_path":"group/a","auto_fix_enabled":true}`,
+		"null identity":    `{"repository_id":null,"project_path":null,"mr_iid":null,"auto_fix_enabled":true}`,
+		"identity only":    `{"repository_id":"","project_path":"group/a","mr_iid":1}`,
+	} {
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/gitlab/tasks/task-1/mr-automation", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		if resp.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400 (body = %s)", name, resp.Code, resp.Body.String())
+		}
+	}
+}
+
+// TestControllerPatchTaskMRAutomation_RejectsSwitchesWithNoLinkedMRs is the
+// HTTP half of the zero-target rule: because the switches only exist per MR,
+// a task with none has nowhere to store them, and answering 200 would report
+// a write that never happened. The task-level prompt override stays accepted.
+func TestControllerPatchTaskMRAutomation_RejectsSwitchesWithNoLinkedMRs(t *testing.T) {
+	router, svc := newMRAutomationControllerFixture(t)
+	seedTask(t, svc.store, "task-2", "ws-1")
+
+	patch := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/gitlab/tasks/task-2/mr-automation", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		return resp
+	}
+
+	if resp := patch(`{"auto_merge_enabled":true}`); resp.Code != http.StatusBadRequest {
+		t.Errorf("switch patch status = %d, want 400 (body = %s)", resp.Code, resp.Body.String())
+	}
+	if resp := patch(`{"auto_fix_prompt_override":"custom"}`); resp.Code != http.StatusOK {
+		t.Errorf("prompt override status = %d, want 200 (body = %s)", resp.Code, resp.Body.String())
 	}
 }

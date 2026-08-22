@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -105,7 +106,7 @@ func TestEnableThenSetupPromotesDefaultUser(t *testing.T) {
 		t.Fatalf("mode after setup = %s, want enabled", f.svc.Mode())
 	}
 	// The minted session authenticates.
-	identity, ok := f.svc.ResolveSessionToken(ctx, token)
+	identity, ok := f.svc.ResolveSessionToken(ctx, token, "")
 	if !ok || identity.UserID != userstore.DefaultUserID || !identity.IsAdmin() {
 		t.Fatalf("session identity = %+v ok=%v", identity, ok)
 	}
@@ -141,7 +142,7 @@ func TestLoginFlow(t *testing.T) {
 	if user.Email != "admin@x.dev" {
 		t.Fatalf("unexpected user: %+v", user)
 	}
-	identity, ok := f.svc.ResolveSessionToken(ctx, token)
+	identity, ok := f.svc.ResolveSessionToken(ctx, token, "")
 	if !ok || !identity.IsAdmin() {
 		t.Fatalf("resolve: %+v ok=%v", identity, ok)
 	}
@@ -149,7 +150,7 @@ func TestLoginFlow(t *testing.T) {
 	if err := f.svc.Logout(ctx, identity.SessionID, identity.UserID); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := f.svc.ResolveSessionToken(ctx, token); ok {
+	if _, ok := f.svc.ResolveSessionToken(ctx, token, ""); ok {
 		t.Fatal("session must be dead after logout")
 	}
 }
@@ -181,15 +182,15 @@ func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	identityA, _ := f.svc.ResolveSessionToken(ctx, tokenA)
+	identityA, _ := f.svc.ResolveSessionToken(ctx, tokenA, "")
 
 	if err := f.svc.ChangePassword(ctx, identityA.UserID, identityA.SessionID, "adminpass123", "newpass12345"); err != nil {
 		t.Fatalf("change password: %v", err)
 	}
-	if _, ok := f.svc.ResolveSessionToken(ctx, tokenA); !ok {
+	if _, ok := f.svc.ResolveSessionToken(ctx, tokenA, ""); !ok {
 		t.Fatal("current session must survive password change")
 	}
-	if _, ok := f.svc.ResolveSessionToken(ctx, tokenB); ok {
+	if _, ok := f.svc.ResolveSessionToken(ctx, tokenB, ""); ok {
 		t.Fatal("other sessions must be revoked")
 	}
 	if _, _, err := f.svc.Login(ctx, "admin@x.dev", "newpass12345", "", ""); err != nil {
@@ -217,7 +218,7 @@ func TestInviteFlow(t *testing.T) {
 	if user.Role != usermodels.RoleMember {
 		t.Fatalf("role = %s, want member", user.Role)
 	}
-	identity, ok := f.svc.ResolveSessionToken(ctx, sessionToken)
+	identity, ok := f.svc.ResolveSessionToken(ctx, sessionToken, "")
 	if !ok || identity.IsAdmin() {
 		t.Fatalf("member identity: %+v ok=%v", identity, ok)
 	}
@@ -261,7 +262,7 @@ func TestAdminUserManagement(t *testing.T) {
 	if _, err := f.svc.AdminSetRoleStatus(ctx, member.ID, "", "disabled"); err != nil {
 		t.Fatalf("disable member: %v", err)
 	}
-	if _, ok := f.svc.ResolveSessionToken(ctx, memberToken); ok {
+	if _, ok := f.svc.ResolveSessionToken(ctx, memberToken, ""); ok {
 		t.Fatal("disabled member session must fail")
 	}
 	if _, ok := f.svc.ResolveBearer(ctx, pat); ok {
@@ -277,4 +278,167 @@ func TestResolveBearerIgnoresNonPAT(t *testing.T) {
 	if _, ok := f.svc.ResolveBearer(context.Background(), "eyJhbGciOiJIUzI1NiJ9.agent.jwt"); ok {
 		t.Fatal("non-PAT bearer must not resolve")
 	}
+}
+
+// TestResolveSessionTokenRefreshesChangedIP pins the session-IP refresh on
+// the throttled touch path: after the touch interval the request IP replaces
+// the stored value when non-empty and differing; same-IP, empty-IP, and
+// within-interval requests never change it. Each case runs on a FRESH aged
+// session (the first resolve's touch bumps last_seen_at, which would
+// throttle later resolves into vacuous passes). Rows are always selected by
+// TokenHash, never list index: sessions accumulate on the shared fixture and
+// ListSessionsByUser orders by last_seen_at DESC with arbitrary ties (the
+// within-interval row's future seed sorts above touched rows).
+func TestResolveSessionTokenRefreshesChangedIP(t *testing.T) {
+	f := newServiceFixture(t, true)
+	ctx := context.Background()
+
+	// seedAgedSession inserts a session whose last_seen_at is far enough in
+	// the past that the strict > sessionTouchInterval gate is open, with a
+	// 24h future expiry so a slow test cannot trip the delete-before-touch
+	// path, under the active DefaultUserID row seeded by userstore.Provide.
+	seedAgedSession := func(ip string) (token, hash string, seededLastSeen, seededExpires time.Time) {
+		t.Helper()
+		now := time.Now().UTC()
+		token, hash, err := GenerateSessionToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		seededLastSeen = now.Add(-2 * time.Hour)
+		seededExpires = now.Add(24 * time.Hour)
+		session := &store.Session{
+			UserID: userstore.DefaultUserID, TokenHash: hash,
+			CreatedAt: now, ExpiresAt: seededExpires, LastSeenAt: seededLastSeen,
+			IP: ip,
+		}
+		if err := f.svc.store.CreateSession(ctx, session); err != nil {
+			t.Fatal(err)
+		}
+		return token, hash, seededLastSeen, seededExpires
+	}
+
+	sessionByHash := func(hash string) *store.Session {
+		t.Helper()
+		sessions, err := f.svc.ListSessions(ctx, userstore.DefaultUserID)
+		if err != nil {
+			t.Fatalf("list sessions: %v", err)
+		}
+		for _, s := range sessions {
+			if s.TokenHash == hash {
+				return s
+			}
+		}
+		t.Fatalf("no session row for hash %s", hash)
+		return nil
+	}
+
+	t.Run("different IP refreshes stored IP", func(t *testing.T) {
+		token, hash, _, _ := seedAgedSession("1.1.1.1")
+		if _, ok := f.svc.ResolveSessionToken(ctx, token, "2.2.2.2"); !ok {
+			t.Fatal("resolve failed")
+		}
+		if got := sessionByHash(hash).IP; got != "2.2.2.2" {
+			t.Fatalf("stored IP = %q, want 2.2.2.2", got)
+		}
+	})
+
+	t.Run("non-empty request IP backfills empty stored IP", func(t *testing.T) {
+		token, hash, _, _ := seedAgedSession("")
+		if _, ok := f.svc.ResolveSessionToken(ctx, token, "2.2.2.2"); !ok {
+			t.Fatal("resolve failed")
+		}
+		if got := sessionByHash(hash).IP; got != "2.2.2.2" {
+			t.Fatalf("stored IP = %q, want backfill 2.2.2.2", got)
+		}
+	})
+
+	t.Run("same IP keeps stored IP and still touches", func(t *testing.T) {
+		token, hash, seededLastSeen, seededExpires := seedAgedSession("1.1.1.1")
+		if _, ok := f.svc.ResolveSessionToken(ctx, token, "1.1.1.1"); !ok {
+			t.Fatal("resolve failed")
+		}
+		got := sessionByHash(hash)
+		if got.IP != "1.1.1.1" {
+			t.Fatalf("stored IP = %q, want 1.1.1.1", got.IP)
+		}
+		// The touch must still advance the gate input (sliding expiry)…
+		assertNow := time.Now().UTC()
+		if !got.LastSeenAt.After(seededLastSeen) {
+			t.Fatalf("last_seen_at = %v, want after %v", got.LastSeenAt, seededLastSeen)
+		}
+		// …with the resolve-time now (not now+TTL: a swapped-args touch
+		// would blow the upper bound), and the expiry must extend past the
+		// seed's, not pass it through unchanged.
+		if got.LastSeenAt.After(assertNow.Add(time.Minute)) {
+			t.Fatalf("last_seen_at = %v, want not after %v", got.LastSeenAt, assertNow.Add(time.Minute))
+		}
+		if !got.ExpiresAt.After(seededExpires.Add(time.Hour)) {
+			t.Fatalf("expires_at = %v, want after %v", got.ExpiresAt, seededExpires.Add(time.Hour))
+		}
+	})
+
+	t.Run("empty request IP keeps stored IP and still touches", func(t *testing.T) {
+		token, hash, seededLastSeen, seededExpires := seedAgedSession("1.1.1.1")
+		if _, ok := f.svc.ResolveSessionToken(ctx, token, ""); !ok {
+			t.Fatal("resolve failed")
+		}
+		got := sessionByHash(hash)
+		if got.IP != "1.1.1.1" {
+			t.Fatalf("stored IP = %q, want 1.1.1.1", got.IP)
+		}
+		assertNow := time.Now().UTC()
+		if !got.LastSeenAt.After(seededLastSeen) {
+			t.Fatalf("last_seen_at = %v, want after %v", got.LastSeenAt, seededLastSeen)
+		}
+		if got.LastSeenAt.After(assertNow.Add(time.Minute)) {
+			t.Fatalf("last_seen_at = %v, want not after %v", got.LastSeenAt, assertNow.Add(time.Minute))
+		}
+		if !got.ExpiresAt.After(seededExpires.Add(time.Hour)) {
+			t.Fatalf("expires_at = %v, want after %v", got.ExpiresAt, seededExpires.Add(time.Hour))
+		}
+	})
+
+	t.Run("within-interval different IP defers refresh to next touch", func(t *testing.T) {
+		now := time.Now().UTC()
+		// 10 intervals in the future: the strict > gate stays closed for
+		// ~11 minutes of wall clock, so the always-touch variants
+		// self-reveal (writing 2.2.2.2 or bumping the future seed) while the
+		// correct implementation leaves the row untouched. Truncated to the
+		// second for the Equal() pin, per the store-test convention.
+		seed := now.Truncate(time.Second).Add(10 * sessionTouchInterval)
+		future := now.Add(24 * time.Hour)
+		token, hash, err := GenerateSessionToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		session := &store.Session{
+			UserID: userstore.DefaultUserID, TokenHash: hash,
+			CreatedAt: now, ExpiresAt: future, LastSeenAt: seed,
+			IP: "1.1.1.1",
+		}
+		if err := f.svc.store.CreateSession(ctx, session); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := f.svc.ResolveSessionToken(ctx, token, "2.2.2.2"); !ok {
+			t.Fatal("resolve must succeed for future-seed session")
+		}
+		got := sessionByHash(hash)
+		if got.IP != "1.1.1.1" {
+			t.Fatalf("stored IP = %q within interval, want 1.1.1.1", got.IP)
+		}
+		if !got.LastSeenAt.Equal(seed) {
+			t.Fatalf("last_seen_at = %v, want seed %v (no touch within interval)", got.LastSeenAt, seed)
+		}
+		// Spec scenario 5's second half: once the interval elapses the next
+		// resolve with the same different IP refreshes the stored value.
+		if err := f.svc.store.TouchSession(ctx, session.ID, now.Add(-2*time.Hour), future, ""); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := f.svc.ResolveSessionToken(ctx, token, "2.2.2.2"); !ok {
+			t.Fatal("resolve after aging failed")
+		}
+		if got := sessionByHash(hash).IP; got != "2.2.2.2" {
+			t.Fatalf("stored IP after interval = %q, want 2.2.2.2", got)
+		}
+	})
 }

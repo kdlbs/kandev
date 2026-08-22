@@ -14,13 +14,9 @@ import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
 import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
-import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
-import {
-  isAgentConfiguredOnExecutor,
-  shouldFilterHandoffByHostHealth,
-} from "@/lib/agent-executor-compat";
-import { isHealthyAgentProfile } from "@/hooks/domains/settings/use-healthy-agent-profiles";
+import { useCompatibleAgentProfiles } from "@/hooks/domains/session/use-compatible-agent-profiles";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import type { ExecutorProfile } from "@/lib/types/http";
@@ -54,6 +50,7 @@ function agentProfileDisplayLabel(profile: AgentProfileOption): string {
 
 function useNewSessionDialogState(taskId: string) {
   const { t } = useTranslation();
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   const resolvedWorkspaceId = useAppStore((state) =>
     resolveComposerWorkspaceId({
       sessionId: null,
@@ -102,7 +99,9 @@ function useNewSessionDialogState(taskId: string) {
   // The default for a NEW session must be selectable: a current session
   // that uses a now-disabled profile still runs (no effect on existing
   // sessions), but the dialog falls back to the first enabled profile.
-  const selectableProfiles = agentProfiles.filter(isSelectableAgentProfile);
+  const selectableProfiles = agentProfiles.filter((profile) =>
+    isSelectableAgentProfile(profile, dynamicRoutingEnabled),
+  );
   const profileIsValid = selectableProfiles.some((p: { id: string }) => p.id === sessionProfileId);
   const effectiveDefaultProfileId: string = profileIsValid
     ? sessionProfileId
@@ -163,24 +162,6 @@ function isMissingCompatibleProfile(
   if (!executorProfile) return false;
   if (totalAgentCount === 0) return false;
   return !hasCompatibleProfiles;
-}
-
-function useCompatibleAgentProfiles(
-  agentProfiles: AgentProfileOption[],
-  executorProfile: ExecutorProfile | null,
-  filterByHostHealth: boolean,
-): AgentProfileOption[] {
-  const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
-  return useMemo(() => {
-    const selectable = agentProfiles.filter(isSelectableAgentProfile);
-    const healthFiltered = filterByHostHealth
-      ? selectable.filter((profile) => isHealthyAgentProfile(profile))
-      : selectable;
-    if (!executorProfile || !authLoaded) return healthFiltered;
-    return healthFiltered.filter((ap) =>
-      isAgentConfiguredOnExecutor(ap, executorProfile, authSpecs),
-    );
-  }, [agentProfiles, executorProfile, authSpecs, authLoaded, filterByHostHealth]);
 }
 
 function useHandoffAutoSummarize(
@@ -279,7 +260,7 @@ function useSessionProfileSelection({
   const compatibleAgentProfiles = useCompatibleAgentProfiles(
     agentProfiles,
     executorProfile,
-    Boolean(handoff && shouldFilterHandoffByHostHealth(executorProfile)),
+    handoff,
   );
   useEnforceCompatibleProfile(compatibleAgentProfiles, selectedProfileId, setSelectedProfileId);
   const profileOptions = useAgentProfileOptions(compatibleAgentProfiles);

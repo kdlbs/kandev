@@ -32,6 +32,7 @@ export type TaskSwitcherItem = {
   /** Persisted task-to-repository links used by host-owned plugin task actions. */
   repositoryLinks?: Array<{ repository_id: string; position?: number }>;
   diffStats?: { additions: number; deletions: number };
+  comparisonUnavailable?: boolean;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string;
   remoteExecutorName?: string;

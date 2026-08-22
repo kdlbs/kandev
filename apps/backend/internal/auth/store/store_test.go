@@ -126,7 +126,7 @@ func TestSessionLifecycle(t *testing.T) {
 	if _, err := s.GetSessionByTokenHash(ctx, "nope"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
-	if err := s.TouchSession(ctx, session.ID, now.Add(time.Minute), now.Add(2*time.Hour)); err != nil {
+	if err := s.TouchSession(ctx, session.ID, now.Add(time.Minute), now.Add(2*time.Hour), ""); err != nil {
 		t.Fatalf("touch: %v", err)
 	}
 	sessions, err := s.ListSessionsByUser(ctx, "u1")
@@ -159,6 +159,114 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 	if _, err := s.GetSessionByTokenHash(ctx, "old"); !errors.Is(err, ErrNotFound) {
 		t.Fatal("expired session should be gone")
+	}
+}
+
+// TestTouchSessionIPRefresh pins the conditional-IP half of TouchSession:
+// timestamps always update, and the ip column refreshes only when the passed
+// ip is non-empty (empty never clobbers; an empty stored IP is backfilled by
+// a non-empty touch). Two targets (non-empty and empty seeded IPs) plus a
+// same-user_id decoy make the transitions unambiguous: a missing WHERE clause
+// or a user_id-scoped WHERE that touches the decoy would trip the untouched
+// assertions.
+func TestTouchSessionIPRefresh(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	// First-transition touch args; later transitions advance from these so
+	// each transition's Equal() pin is fresh and distinct per column (a
+	// SET clause swapping the two columns writes identical values only when
+	// the args are identical).
+	lastSeen := now
+	expires := lastSeen.Add(time.Hour)
+
+	targetA := &Session{
+		UserID: "u1", TokenHash: "hashA", IP: "1.1.1.1",
+		CreatedAt: now, ExpiresAt: expires.Add(24 * time.Hour), LastSeenAt: lastSeen.Add(-time.Hour),
+	}
+	targetB := &Session{
+		UserID: "u1", TokenHash: "hashB", IP: "",
+		CreatedAt: now, ExpiresAt: expires.Add(24 * time.Hour), LastSeenAt: lastSeen.Add(-time.Hour),
+	}
+	decoy := &Session{
+		UserID: "u1", TokenHash: "hashDecoy", IP: "10.0.0.9",
+		CreatedAt: now, ExpiresAt: expires.Add(48 * time.Hour), LastSeenAt: lastSeen.Add(-2 * time.Hour),
+	}
+	for _, session := range []*Session{targetA, targetB, decoy} {
+		if err := s.CreateSession(ctx, session); err != nil {
+			t.Fatalf("create session: %v", err)
+		}
+	}
+
+	// Transition 1: non-empty ip refreshes the stored value on target A.
+	lastSeen2 := lastSeen.Add(time.Second)
+	expires2 := expires.Add(time.Second)
+	if err := s.TouchSession(ctx, targetA.ID, lastSeen2, expires2, "2.2.2.2"); err != nil {
+		t.Fatalf("touch: %v", err)
+	}
+	gotA := mustGetSession(t, s, "hashA")
+	if gotA.IP != "2.2.2.2" {
+		t.Fatalf("target A IP = %q, want 2.2.2.2", gotA.IP)
+	}
+	if !gotA.LastSeenAt.Equal(lastSeen2) || !gotA.ExpiresAt.Equal(expires2) {
+		t.Fatalf("target A timestamps = %v / %v, want %v / %v", gotA.LastSeenAt, gotA.ExpiresAt, lastSeen2, expires2)
+	}
+	assertSessionUntouched(t, s, decoy)
+
+	// Transition 2: empty ip preserves the recorded value but still touches.
+	lastSeen3 := lastSeen2.Add(time.Second)
+	expires3 := expires2.Add(time.Second)
+	if err := s.TouchSession(ctx, targetA.ID, lastSeen3, expires3, ""); err != nil {
+		t.Fatalf("touch: %v", err)
+	}
+	gotA = mustGetSession(t, s, "hashA")
+	if gotA.IP != "2.2.2.2" {
+		t.Fatalf("target A IP = %q after empty touch, want 2.2.2.2", gotA.IP)
+	}
+	if !gotA.LastSeenAt.Equal(lastSeen3) || !gotA.ExpiresAt.Equal(expires3) {
+		t.Fatalf("target A timestamps = %v / %v, want %v / %v", gotA.LastSeenAt, gotA.ExpiresAt, lastSeen3, expires3)
+	}
+	assertSessionUntouched(t, s, decoy)
+
+	// Transition 3: a non-empty touch backfills an empty stored IP (target B).
+	lastSeen4 := lastSeen3.Add(time.Second)
+	expires4 := expires3.Add(time.Second)
+	if err := s.TouchSession(ctx, targetB.ID, lastSeen4, expires4, "2.2.2.2"); err != nil {
+		t.Fatalf("touch: %v", err)
+	}
+	gotB := mustGetSession(t, s, "hashB")
+	if gotB.IP != "2.2.2.2" {
+		t.Fatalf("target B IP = %q after backfill touch, want 2.2.2.2", gotB.IP)
+	}
+	if !gotB.LastSeenAt.Equal(lastSeen4) || !gotB.ExpiresAt.Equal(expires4) {
+		t.Fatalf("target B timestamps = %v / %v, want %v / %v", gotB.LastSeenAt, gotB.ExpiresAt, lastSeen4, expires4)
+	}
+	assertSessionUntouched(t, s, decoy)
+}
+
+func mustGetSession(t *testing.T, s *Store, tokenHash string) *Session {
+	t.Helper()
+	got, err := s.GetSessionByTokenHash(context.Background(), tokenHash)
+	if err != nil {
+		t.Fatalf("get session %s: %v", tokenHash, err)
+	}
+	return got
+}
+
+// assertSessionUntouched verifies a row outside the touch target was not
+// modified: same-IP, last_seen_at, and expires_at all still equal the seeds.
+func assertSessionUntouched(t *testing.T, s *Store, seed *Session) {
+	t.Helper()
+	got := mustGetSession(t, s, seed.TokenHash)
+	if got.IP != seed.IP {
+		t.Fatalf("decoy IP = %q, want %q", got.IP, seed.IP)
+	}
+	if !got.LastSeenAt.Equal(seed.LastSeenAt) {
+		t.Fatalf("decoy last_seen_at = %v, want %v", got.LastSeenAt, seed.LastSeenAt)
+	}
+	if !got.ExpiresAt.Equal(seed.ExpiresAt) {
+		t.Fatalf("decoy expires_at = %v, want %v", got.ExpiresAt, seed.ExpiresAt)
 	}
 }
 
