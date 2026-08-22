@@ -2,6 +2,7 @@
 title: Pull request outcome attribution
 status: shipped
 created: 2026-08-12
+updated: 2026-08-22
 owner: kandev
 ---
 
@@ -80,6 +81,11 @@ transaction while reading the outgoing row. This preserves values when an
 operation has no new upstream observation. The stored row is re-read before a
 sync event is published, so the event matches the committed state.
 
+After the task-PR write succeeds, the normal sync reconciles the
+repository-qualified comparison target. The reconciliation receives the same
+task ID and pull-request payload as the sync. A reconciliation error does not
+reverse the task-PR write.
+
 ## Acceptance criteria
 
 - **AC-01 to AC-03:** schema creation and replay add nullable columns without
@@ -99,6 +105,8 @@ sync event is published, so the event matches the committed state.
 - **AC-16 and AC-17:** the auto-merge timestamp is write-once.
 - **AC-18 to AC-18c:** unchanged syncs publish no update, changed syncs publish
   the committed row, and failed writes publish nothing.
+- **AC-18d:** a successful normal sync keeps its task and pull-request context
+  through persistence, comparison-target reconciliation, and event publication.
 - **AC-19:** draft pull requests remain non-mergeable in the stored state.
 - **AC-30 and AC-30b:** the backend emits explicit nullable JSON keys and the
   frontend exposes types without adding a core screen.
@@ -108,6 +116,14 @@ sync event is published, so the event matches the committed state.
   dev-mode expvar output.
 - **AC-43, AC-43a, and AC-43p:** replace and restore resolve and preserve
   outcome fields inside their own transaction using explicit observation flags.
+
+## Regression scenarios
+
+- **GIVEN** a stored task PR and a comparison-target observer, **WHEN** a normal
+  sync applies an authoritative pull-request payload, **THEN** the write succeeds
+  before the observer receives the same task and pull-request identity.
+- **GIVEN** comparison-target reconciliation returns an error, **WHEN** the
+  task-PR write succeeds, **THEN** the stored task-PR update remains committed.
 
 ## Verification
 
