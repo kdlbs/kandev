@@ -31,18 +31,14 @@ class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
             deploy_job,
         )
 
-    def test_safe_to_test_approval_survives_follow_up_pushes(self) -> None:
+    def test_safe_to_test_label_persists_without_reauthorizing_new_heads(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         _, separator, deploy_job = workflow.partition("  deploy-fork:")
 
         self.assertTrue(separator, "Fork preview deploy job is missing")
         self.assertIn(
-            "((contains(github.event.pull_request.labels.*.name, 'safe-to-test')) ||",
-            deploy_job,
-        )
-        self.assertNotIn(
-            "github.event.action != 'synchronize' && contains("
-            "github.event.pull_request.labels.*.name, 'safe-to-test')",
+            "((github.event.action != 'synchronize' && contains("
+            "github.event.pull_request.labels.*.name, 'safe-to-test')) ||",
             deploy_job,
         )
         self.assertNotIn("  strip-safe-to-test:", workflow)

@@ -10,7 +10,8 @@ on:
   pull_request_target:
     # `labeled` is needed so a maintainer applying `safe-to-test` to a fork PR
     # triggers a deploy against the current head SHA. Subsequent fork pushes
-    # (synchronize) re-use the maintainer's approval for the new head.
+    # (synchronize) keep the label visible but require fresh approval before
+    # privileged preview execution of a new fork head.
     types: [opened, synchronize, reopened, closed, labeled]
 
 concurrency:
@@ -73,9 +74,10 @@ jobs:
   #   - CLAUDE_REVIEW_ALLOWLIST repo variable (trusted login list, all events;
   #     the Claude workflow also adds the approval labels on open)
   #   - `safe-to-test` label (maintainer opt-in, durable until removed). It
-  #     authorizes the current and subsequent fork heads. This matters more
-  #     here than for claude-code-review.yml because deploy actually runs the
-  #     fork's `cmd/preview` code with SPRITES_API_TOKEN.
+  #     remains visible across pushes, but a new fork head still needs a fresh
+  #     label event before preview execution. This matters more here than for
+  #     claude-code-review.yml because deploy runs the fork's `cmd/preview`
+  #     code with SPRITES_API_TOKEN.
   # -----------------------------------------------------------------------
   # Branch order matters: keep cheap/safe checks before `fromJSON(vars.*)`,
   # which throws (and skips the whole job) if the repo variable is
@@ -85,7 +87,7 @@ jobs:
       github.event.action != 'closed' &&
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.head.repo.full_name != github.repository &&
-      ((contains(github.event.pull_request.labels.*.name, 'safe-to-test')) ||
+      ((github.event.action != 'synchronize' && contains(github.event.pull_request.labels.*.name, 'safe-to-test')) ||
        (vars.PREVIEW_ENV_ALLOWLIST != '' && contains(fromJSON(vars.PREVIEW_ENV_ALLOWLIST), github.event.pull_request.user.login)) ||
        (vars.CLAUDE_REVIEW_ALLOWLIST != '' && contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)))
     runs-on: ubuntu-latest
@@ -101,8 +103,9 @@ jobs:
           # NOTE: The allowlist gate (safe-to-test, PREVIEW_ENV_ALLOWLIST,
           # CLAUDE_REVIEW_ALLOWLIST)
           # authorizes running the fork's cmd/preview code with SPRITES_API_TOKEN and GH_TOKEN.
-          # The safe-to-test label remains an explicit maintainer approval for
-          # follow-up pushes until the maintainer removes it.
+          # The safe-to-test label remains visible after a push, but a
+          # synchronize event must receive fresh maintainer approval before
+          # the fork's preview code runs with deployment credentials.
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
 
