@@ -438,6 +438,14 @@ func TestPluginHost_Interactions_WriteSurvivesFailedReread(t *testing.T) {
 	if got.ID != "pending-2" {
 		t.Fatalf("interaction = %+v, want the pre-write snapshot", got)
 	}
+	// The response contract says every write returns the interaction in its NEW
+	// terminal state. Handing back the pre-write snapshot verbatim would report
+	// "pending" for a response the agent already received, inviting the retry
+	// terminal-once exists to prevent. A cancel is delivered as a decline of the
+	// bundle, so its terminal status is rejected.
+	if got.Status != pluginsdk.InteractionStatusRejected {
+		t.Fatalf("status = %q, want the resolved status stamped on the fallback", got.Status)
+	}
 	if !d.responder.writeCalled {
 		t.Fatal("write never happened")
 	}
