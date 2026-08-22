@@ -32,7 +32,7 @@ func TestBuildContainerLaunchConfig_AllowUserNamespacesFailsClosed(t *testing.T)
 			if tt.value != nil {
 				metadata[MetadataKeyAllowUserNamespaces] = tt.value
 			}
-			r := &DockerExecutor{}
+			r := &DockerExecutor{logger: newTestDockerLogger()}
 			cfg, err := r.buildContainerLaunchConfig(&ExecutorCreateRequest{Metadata: metadata})
 			if err != nil {
 				t.Fatalf("buildContainerLaunchConfig() error = %v", err)

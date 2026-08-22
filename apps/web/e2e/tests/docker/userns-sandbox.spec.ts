@@ -4,7 +4,7 @@ import { dockerExec, dockerSecurityOpt } from "../../helpers/docker";
 import { waitForLatestSessionDone } from "../../helpers/session";
 
 // Both probes run through `sh -c` on purpose. `docker exec <container> bwrap
-// ...` execs bwrap as the container's entry process, and writing
+// ...` execs bwrap as the exec'd process itself, and writing
 // /proc/self/uid_map from that process is refused ("setting up uid map:
 // Permission denied") even when user namespaces are fully permitted. One shell
 // layer makes bwrap a forked child, which is how a real agent runtime spawns
