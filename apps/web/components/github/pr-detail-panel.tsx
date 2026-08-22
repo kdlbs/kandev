@@ -22,6 +22,7 @@ import { submitPRReview } from "@/lib/api/domains/github-pr-api";
 import type { TaskPR, PRFeedback } from "@/lib/types/github";
 import { PRMergeButton } from "./pr-merge-button";
 import { PRMergeabilityNotice, buildConflictResolutionMessage } from "./pr-mergeability-notice";
+import { hasActiveMergeQueueEntry, PRMergeQueueStatus } from "./pr-merge-queue-status";
 import { usePRScopedReviewRequest } from "./use-pr-scoped-review-request";
 
 // --- Dockview panel wrapper ---
@@ -449,15 +450,19 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
         </>
       }
       notice={
-        <PRMergeabilityNotice
-          state={mergeableState}
-          mergeable={isMergeable}
-          isDraft={isDraft}
-          prState={liveState}
-          baseBranch={taskPR.base_branch}
-          onResolveConflicts={onResolveConflicts}
-          resolveDisabled={conflictQueued}
-        />
+        hasActiveMergeQueueEntry(taskPR) ? (
+          <PRMergeQueueStatus pr={taskPR} />
+        ) : (
+          <PRMergeabilityNotice
+            state={mergeableState}
+            mergeable={isMergeable}
+            isDraft={isDraft}
+            prState={liveState}
+            baseBranch={taskPR.base_branch}
+            onResolveConflicts={onResolveConflicts}
+            resolveDisabled={conflictQueued}
+          />
+        )
       }
     />
   );

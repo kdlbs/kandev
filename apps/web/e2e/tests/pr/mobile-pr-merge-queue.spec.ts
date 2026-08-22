@@ -1,11 +1,12 @@
 import { test, expect } from "../../fixtures/test-base";
-import { assertNoDocumentHorizontalOverflow, requireBox } from "../../helpers/layout-assertions";
+import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 
-test("adds a GitHub PR to the merge queue from mobile Review", async ({
+test("surfaces queued PR metadata in the mobile drawer and Review", async ({
   testPage,
   apiClient,
   seedData,
+  prCapture,
 }) => {
   test.setTimeout(120_000);
   await testPage.setViewportSize({ width: 393, height: 852 });
@@ -43,6 +44,9 @@ test("adds a GitHub PR to the merge queue from mobile Review", async ({
     review_state: "approved",
     checks_state: "success",
     mergeable_state: "blocked",
+    merge_queue_state: "queued",
+    merge_queue_position: 2,
+    merge_queue_estimated_time_to_merge_seconds: 61,
     review_count: 2,
     pending_review_count: 0,
     required_reviews: 2,
@@ -56,6 +60,15 @@ test("adds a GitHub PR to the merge queue from mobile Review", async ({
   await session.waitForLoad();
   await testPage.reload();
   await session.waitForLoad();
+  await session.tapPRStatusChip();
+  const drawer = session.prStatusChipPopoverInner();
+  await expect(drawer.getByTestId("pr-merge-queue-status")).toContainText("Queued");
+  await expect(drawer.getByTestId("pr-merge-queue-status")).toContainText("Position 2");
+  await expect(drawer.getByTestId("pr-merge-queue-status")).toContainText("2 minutes");
+  await prCapture.screenshot("mobile-pr-merge-queue-status", {
+    caption: "Mobile pull request queue status in the touch drawer",
+  });
+  await session.prStatusChipDrawerClose().tap();
   await testPage.getByRole("button", { name: "Review", exact: true }).tap();
 
   const panel = testPage.getByTestId("mobile-review-panel");
@@ -73,16 +86,18 @@ test("adds a GitHub PR to the merge queue from mobile Review", async ({
     review_state: "approved",
     checks_state: "success",
     mergeable_state: "blocked",
+    merge_queue_state: "queued",
+    merge_queue_position: 2,
+    merge_queue_estimated_time_to_merge_seconds: 61,
     review_count: 2,
     pending_review_count: 0,
     required_reviews: 2,
     checks_total: 3,
     checks_passing: 3,
   });
-  const merge = panel.getByRole("button", { name: "Merge PR" });
-  await expect(merge).toBeVisible({ timeout: 15_000 });
-  expect((await requireBox(merge, "mobile merge queue action")).height).toBeGreaterThanOrEqual(44);
+  const queueStatus = panel.getByTestId("pr-merge-queue-status");
+  await expect(queueStatus).toContainText("Queued");
+  await expect(queueStatus).toContainText("Position 2");
+  await expect(queueStatus).toContainText("2 minutes");
   await assertNoDocumentHorizontalOverflow(testPage);
-  await merge.tap();
-  await expect(testPage.getByText("PR added to merge queue", { exact: true })).toBeVisible();
 });

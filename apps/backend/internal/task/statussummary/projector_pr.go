@@ -25,6 +25,7 @@ func applyPullRequestInputs(state *projectionState, inputs []PullRequestInput) {
 			reviewState:           input.ReviewState,
 			checksState:           input.ChecksState,
 			mergeableState:        input.MergeableState,
+			mergeQueueState:       input.MergeQueueState,
 			unresolvedReviewCount: maxInt(input.UnresolvedReviewCount, 0),
 			pendingReviewCount:    maxInt(input.PendingReviewCount, 0),
 			requiredReviews:       maxInt(input.RequiredReviews, 0),
@@ -124,6 +125,9 @@ func pullRequestAggregateState(pr pullRequestObservation) string {
 	if lifecycle := pullRequestLifecycleState(state, mergeable); lifecycle != "" {
 		return lifecycle
 	}
+	if strings.TrimSpace(pr.mergeQueueState) != "" {
+		return prStateQueued
+	}
 	if mergeable == prStateBlocked || mergeable == prStateDirty {
 		return prStateBlocked
 	}
@@ -186,6 +190,8 @@ func pullRequestStateRank(state string) int {
 		return 70
 	case prStateReady:
 		return 60
+	case prStateQueued:
+		return 55
 	case prStatePassing:
 		return 50
 	case prStateDraft:
