@@ -363,3 +363,5 @@ func projectionHash(p *GitMetadataProjection) string {
 func invalidGitMetadata(err error) error {
 	return fmt.Errorf("%w: %v", ErrGitMetadataProjectionInvalid, err)
 }
+
+// CI: trigger re-run
