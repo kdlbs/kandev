@@ -63,7 +63,7 @@ External MCP clients (Claude Code, Cursor connecting to `/mcp`) must be configur
 
 ## Endpoints that stay public
 
-`/health` (readiness probes), the login/setup/invite pages, `GET /api/v1/features`, and self-authenticating webhook receivers (automation webhooks with `X-Webhook-Secret`, office channel HMAC webhooks, plugin webhooks). Everything else requires a session or token.
+`/health` (liveness probes) and `/ready` (readiness probes), the login/setup/invite pages, `GET /api/v1/features`, and self-authenticating webhook receivers (automation webhooks with `X-Webhook-Secret`, office channel HMAC webhooks, plugin webhooks). Everything else requires a session or token.
 
 ## Multiple instances on one host
 

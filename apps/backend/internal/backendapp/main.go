@@ -176,15 +176,18 @@ func parseBackendFlags(args []string) (backendFlags, func(), error) {
 	return out, flags.Usage, flags.Parse(args)
 }
 
-// ready is the readiness flag consulted by the GET /health handler.
-// Until it flips true, /health returns 503 — so callers polling for
-// readiness (Playwright fixtures, container orchestrators, manual
-// curl loops) keep waiting instead of racing ahead. The HTTP listener
-// itself is bound and answering liveness probes well before this flips
-// (see bindBootstrapListeners); startGatewayAndServe flips it
-// synchronously in the same step that swaps the bootstrap handler for
-// the fully wired router, so there is no window where the real router
-// is live but ready is still false.
+// ready is the readiness flag consulted by the GET /ready handler. Until it
+// flips true, /ready returns 503 — so callers polling for readiness
+// (Playwright fixtures, container orchestrators, manual curl loops) keep
+// waiting instead of racing ahead of route registration. GET /health is a
+// liveness probe and is unaffected by this flag: it answers 200 as soon as
+// the listener is bound (see bindBootstrapListeners), because the launcher's
+// healthcheck must succeed regardless of startup progress — making it depend
+// on readiness would bring back the crash loop docs/specs/startup-listener-
+// before-recovery/spec.md exists to fix. startGatewayAndServe flips this flag
+// before swapping the bootstrap handler for the fully wired router (in that
+// order — see the comment at the call site), so a request racing the swap
+// never observes the real router with ready still false.
 var ready atomic.Bool
 
 // Run contains all startup logic and returns 0 on success or 1 on fatal error.
@@ -1093,16 +1096,29 @@ func startGatewayAndServe(
 		zap.String("http", "/api/v1"),
 	)
 
-	// Swap the bootstrap handler for the fully wired router and flip
-	// readiness synchronously in the same step. The socket has been
-	// accepting connections since bindListeners ran, so there is no window
-	// in which the real router is live but ready is still false, or vice
-	// versa.
-	handler.Store(builtServer.Handler)
-	ready.Store(true)
+	// Flip readiness before swapping in the fully wired router — see
+	// publishReadiness for why the order matters and
+	// TestPublishReadinessFlipsReadyBeforeSwappingHandler for the regression
+	// test pinning it.
+	publishReadiness(func() { ready.Store(true) }, func() { handler.Store(builtServer.Handler) })
 
 	awaitShutdown(server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
 	return true
+}
+
+// publishReadiness flips readiness and then swaps in the fully wired router,
+// in that order — never the reverse. A request landing between the two must
+// never observe the real router while ready is still false: readyHandler
+// gates on ready.Load(), so the reverse order would 503 a client on a router
+// that is otherwise already fully up, recreating the exact flap
+// docs/specs/startup-listener-before-recovery/spec.md exists to prevent.
+// Flipping ready first means any request in that window still hits the
+// bootstrap handler, whose /health branch is unconditionally 200 and whose
+// every other path (including /ready) is a deterministic 503 "starting" —
+// never a stale ready=false read through the real router.
+func publishReadiness(markReady func(), swapHandler func()) {
+	markReady()
+	swapHandler()
 }
 
 // serverListenAddr formats the host and port into a listen address, binding
@@ -1113,24 +1129,6 @@ func serverListenAddr(host string, port int) string {
 		return fmt.Sprintf(":%d", port)
 	}
 	return net.JoinHostPort(host, fmt.Sprint(port))
-}
-
-// serverProbeAddr rewrites a listen address into a loopback address suitable
-// for local probing, mapping wildcard hosts to 127.0.0.1 / ::1.
-func serverProbeAddr(listenAddr string) string {
-	host, port, err := net.SplitHostPort(listenAddr)
-	if err != nil {
-		return listenAddr
-	}
-	switch host {
-	case "", "0.0.0.0":
-		host = "127.0.0.1"
-	case "::":
-		// Preserve the address family: an IPv6-only wildcard listener isn't
-		// reachable via 127.0.0.1, so probe the IPv6 loopback instead.
-		host = "::1"
-	}
-	return net.JoinHostPort(host, port)
 }
 
 // initOfficeServices constructs the run processor service for every backend and

@@ -259,21 +259,3 @@ func (sl *serverListeners) Stop() {
 		}
 	})
 }
-
-// probeAddr returns an address the readiness probe can dial. It prefers a bound
-// address that resolves to loopback (always reachable from the box without
-// depending on a routable interface), falling back to the first bound address.
-func (sl *serverListeners) probeAddr() string {
-	sl.mu.Lock()
-	defer sl.mu.Unlock()
-	if len(sl.bound) == 0 {
-		return ""
-	}
-	for _, a := range sl.bound {
-		probe := serverProbeAddr(a)
-		if host, _, err := net.SplitHostPort(probe); err == nil && config.IsLoopbackHost(host) {
-			return probe
-		}
-	}
-	return serverProbeAddr(sl.bound[0])
-}

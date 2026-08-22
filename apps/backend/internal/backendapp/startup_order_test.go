@@ -71,3 +71,24 @@ func TestStartOrchestratorAndAutomationConsumersStopsAfterBindFailure(t *testing
 			orchestratorStarted, automationStarted, githubStarted)
 	}
 }
+
+// TestPublishReadinessFlipsReadyBeforeSwappingHandler is the regression test
+// for R1-2 (docs/specs/health-endpoint-version/spec.md's 2026-08-22
+// amendment): startGatewayAndServe must flip the readiness flag before
+// swapping in the fully wired router, never the reverse, or a request racing
+// the swap could observe the real router with ready still false and get a
+// spurious 503 — recreating the exact flap docs/specs/startup-listener-
+// before-recovery/spec.md exists to prevent.
+func TestPublishReadinessFlipsReadyBeforeSwappingHandler(t *testing.T) {
+	var order []string
+
+	publishReadiness(
+		func() { order = append(order, "ready") },
+		func() { order = append(order, "handler") },
+	)
+
+	want := []string{"ready", "handler"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("publishReadiness order = %v, want %v", order, want)
+	}
+}

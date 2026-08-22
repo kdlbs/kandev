@@ -140,13 +140,18 @@ Numbered, pass/fail, EARS-form. Each is directly testable against the handler.
 
 **Starting-path payload**
 
-5. WHILE the readiness flag is unset, a `GET /health` request SHALL receive HTTP 503.
-6. WHILE the readiness flag is unset, a `GET /health` request SHALL receive a JSON body
+5. **SUPERSEDED, see [Amendment](#amendment-2026-08-22--liveness-readiness-split).**
+   ~~WHILE the readiness flag is unset, a `GET /health` request SHALL receive HTTP 503.~~
+   `/health` now always answers 200; the not-ready 503 contract moved to `GET /ready`
+   (AC-16).
+6. **SUPERSEDED, see [Amendment](#amendment-2026-08-22--liveness-readiness-split).**
+   ~~WHILE the readiness flag is unset, a `GET /health` request SHALL receive a JSON body
    containing a `version` key whose value equals the process's configured build version
-   string.
-7. WHILE the readiness flag is unset, a `GET /health` response body SHALL contain exactly
+   string.~~ Moved to `GET /ready` (AC-17).
+7. **SUPERSEDED, see [Amendment](#amendment-2026-08-22--liveness-readiness-split).**
+   ~~WHILE the readiness flag is unset, a `GET /health` response body SHALL contain exactly
    the keys `status`, `service`, and `version`, with `status` equal to `"starting"` and
-   `service` equal to `"kandev"`.
+   `service` equal to `"kandev"`.~~ Moved to `GET /ready` (AC-18).
 
 **Value correctness**
 
@@ -164,9 +169,12 @@ Numbered, pass/fail, EARS-form. Each is directly testable against the handler.
 12. WHEN authentication is enabled AND a `GET /health` request arrives with no credential,
     the backend SHALL respond with the full body including `version`, and SHALL NOT
     respond 401 or 403.
-13. The change SHALL NOT alter the response status code, headers, or the `status` field
+13. **SUPERSEDED, see [Amendment](#amendment-2026-08-22--liveness-readiness-split).**
+    ~~The change SHALL NOT alter the response status code, headers, or the `status` field
     value for any readiness state, so that an existing prober asserting only HTTP status
-    or `status` continues to pass unmodified.
+    or `status` continues to pass unmodified.~~ `/health`'s status code for the not-ready
+    state changed (503 → 200) by the amendment below; the original no-status-code-change
+    guarantee now applies to `GET /ready` instead (AC-19, AC-21).
 14. WHEN authentication is enabled AND a `GET /api/v1/system/info` request arrives with no
     credential, the backend SHALL continue to reject it, confirming this change does not
     widen the allowlist.
@@ -296,6 +304,109 @@ Resolved with the requester on 2026-08-07, before this spec was frozen.
 - Consider noting in `docs/public/operations.md` that `/health` is now the
   credential-free way to read the running version, since that is the operator-visible
   benefit.
+
+## Amendment (2026-08-22) — Liveness/Readiness Split
+
+Made during the `backend-never-binds` DEFECT fix
+(`docs/specs/startup-listener-before-recovery/spec.md`), by nova28, after Review
+flagged that fix's bootstrap handler as violating this spec's frozen AC-5/6/7/13.
+
+**Why.** `startup-listener-before-recovery` binds the HTTP listener and serves a
+bootstrap handler *before* orchestrator startup recovery sweeps run, so the
+launcher's liveness probe (`internal/launcher/health.go`) never times out
+waiting for a socket that startup recovery is blocking. That bootstrap handler
+answers `GET /health` 200 unconditionally, because the launcher's healthcheck
+must succeed regardless of startup progress — gating it on readiness is exactly
+the crash-loop bug that fix exists to close. But this spec's AC-5/6/7/13 require
+`/health` to answer 503 while the readiness flag is unset, and the real router
+(`healthHandler`, `internal/backendapp/helpers.go`) enforced that. The two
+requirements are mutually exclusive on one endpoint: `/health` cannot be both
+"always 200 so liveness never flaps" and "503 until ready so readiness probers
+wait." Reordering `ready.Store`/`handler.Store` (the fix's own R1-2 correction)
+only fixes *when* the swap between the bootstrap and real handler is safe; it
+does not resolve this contract conflict, because the real handler's `!ready`
+branch is what conflicts with the bootstrap handler's unconditional 200.
+
+**Resolution.** Split the concerns onto two endpoints, matching standard
+liveness/readiness terminology (Kubernetes' own naming for the same
+distinction):
+
+- **`GET /health` becomes a pure liveness probe.** It answers 200 as soon as
+  the listener is bound — before, during, and after startup — and never gates
+  on the `ready` flag. This is now true in **both** the bootstrap handler
+  (`internal/backendapp/httpserver.go`) and the real router's `healthHandler`
+  (`internal/backendapp/helpers.go`), so the endpoint's behavior is identical
+  across the handler swap. All of this spec's ready-path ACs (AC-1..4, AC-8..12,
+  AC-14, AC-15) continue to apply to `/health`'s response, since it still always
+  returns the shape those ACs describe (`status: "ok"`, `service`, `mode`,
+  `version`) — the only change is that shape is now served for *every* request,
+  not conditionally.
+- **`GET /ready` is a new endpoint that inherits `/health`'s original readiness
+  contract.** It is registered only on the real router (`helpers.go`), not the
+  bootstrap handler — while the bootstrap handler is in effect, any non-`/health`
+  path (including `/ready`) already falls through to its existing 503
+  `"starting"` branch (`internal/backendapp/httpserver.go`), so `/ready`
+  correctly reports not-ready during that window with zero bootstrap-handler
+  code change. Once the real router is swapped in, `/ready` gates on the same
+  `ready` flag `/health` used to.
+
+**New acceptance criteria** (supersede AC-5, AC-6, AC-7, AC-13 for `/health`;
+apply to `/ready`):
+
+16. WHILE the readiness flag is unset, a `GET /ready` request SHALL receive
+    HTTP 503.
+17. WHILE the readiness flag is unset, a `GET /ready` request SHALL receive a
+    JSON body containing a `version` key whose value equals the process's
+    configured build version string.
+18. WHILE the readiness flag is unset, a `GET /ready` response body SHALL
+    contain exactly the keys `status`, `service`, and `version`, with `status`
+    equal to `"starting"` and `service` equal to `"kandev"`.
+19. WHEN the readiness flag is set, a `GET /ready` request SHALL receive HTTP
+    200 and a JSON body containing exactly the keys `status`, `service`, and
+    `version`, with `status` equal to `"ok"` and `service` equal to `"kandev"`.
+    `/ready`'s 200 body deliberately omits `mode` — it is not a duplicate of
+    `/health`, it exists solely to answer "can this backend serve real
+    traffic yet."
+20. A `GET /health` request SHALL receive HTTP 200 regardless of the readiness
+    flag's state, once the listener is accepting connections. This formalizes
+    the bootstrap-handler behavior `startup-listener-before-recovery` depends
+    on and is the reason AC-5/6/7 are superseded rather than merely relocated
+    unchanged.
+21. The desktop health-token response header (AC in the original "## What"
+    section) SHALL be set only on `GET /health`, never on `GET /ready` — the
+    token contract belongs to the desktop launcher's liveness probe
+    (`internal/launcher/health.go`), which does not consult `/ready`.
+22. `GET /ready` SHALL be on the unauthenticated allowlist
+    (`internal/auth/httpmw/middleware.go`), identically to `/health`, so
+    Kubernetes' `readinessProbe` and the e2e fixture's readiness wait do not
+    need a credential.
+
+**Updated Consumer Compatibility Audit** (rows changed from the original
+table):
+
+| Consumer | File | How it reads readiness | Impact |
+|---|---|---|---|
+| K8s readinessProbe | `k8s/deployment.yaml` | HTTP status only, now against `/ready` | Repointed |
+| K8s livenessProbe | `k8s/deployment.yaml` | HTTP status only, stays on `/health` | None |
+| Playwright fixture | `apps/web/e2e/fixtures/backend.ts` | Waits for HTTP readiness, now against `/ready` | Repointed |
+| Go launcher | `internal/launcher/health.go` | Status code against `/health`; body discarded | None — still liveness, unaffected |
+| CLI, Desktop shell, Homebrew service, Docker docs | (unchanged files) | Status/socket against `/health` | None — liveness consumers, correctly unaffected |
+
+**Updated Out of Scope note.** The original spec's "Renaming, moving, or
+changing the auth posture of any endpoint" bullet refers to `/health` itself,
+which is unchanged in name, route, or auth posture by this amendment. `/ready`
+is a new endpoint, not a rename — adding it does not conflict with that bullet.
+
+**Updated Files Reference** (in addition to the original table):
+
+| File | Change |
+|---|---|
+| `apps/backend/internal/backendapp/helpers.go` | `healthHandler` no longer gates on `ready`; new `readyHandler` gains the original 503/200 gate |
+| `apps/backend/internal/backendapp/httpserver.go` | No change required — the bootstrap handler's existing "any non-`/health` path" 503 branch already covers `/ready` |
+| `apps/backend/internal/auth/httpmw/middleware.go` | Added `/ready` to `isPublicPath`, mirroring `/health` |
+| `k8s/deployment.yaml` | `readinessProbe.httpGet.path` changed to `/ready`; `livenessProbe` stays `/health` |
+| `apps/web/e2e/fixtures/backend.ts` | Readiness waits repointed to `/ready` |
+| `docs/public/{operations,k8s,docker,run-as-a-service,authentication,remote-cloud-environment}.md` | Updated to describe the liveness/readiness split |
 
 ## Rollback
 
