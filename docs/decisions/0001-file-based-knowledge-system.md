@@ -1,6 +1,6 @@
 # 0001: File-based knowledge system
 
-**Status:** accepted
+**Status:** accepted (specification layout amended by ADR-2026-08-22-system-oriented-specifications)
 **Date:** 2026-03-28 (updated 2026-07-16)
 **Area:** infra
 
@@ -22,6 +22,10 @@ same-day collisions. The complete filename stem is the stable ADR ID. This remov
 parallel branches to reserve a shared next number.
 
 Architecture decisions are recorded as ADRs (this file is an example). Product features are captured as specs under `docs/specs/<slug>/` — the "what & why", committed to git. Implementation plans (`docs/specs/<slug>/plan.md`) and post-ship notes (`docs/specs/<slug>/notes.md`) live alongside specs but are **gitignored** — they are ephemeral working files regenerated from the spec as needed, not permanent records.
+
+> The current specification and plan layout is defined by
+> `ADR-2026-08-22-system-oriented-specifications`. The paragraph above records
+> the original layout.
 
 A `/record` skill creates ADRs and a `/spec` skill creates specs, but the system works without them — agents can create files directly following the conventions.
 

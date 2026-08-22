@@ -1,6 +1,6 @@
 ---
 name: interview-me
-description: Clarify what the user actually wants before specs, plans, or code. Use when an ask is underspecified, when the user says "interview me", "grill me", "stress-test my thinking", or when you would otherwise fill in important product/architecture assumptions silently.
+description: Clarify what the user wants before requirements, system design, plans, or code. Use when an ask is underspecified, when the user asks for an interview or stress test, or when important product or architecture assumptions are missing.
 ---
 
 # Interview Me
@@ -73,7 +73,10 @@ Do not proceed to `/spec`, `/plan`, or implementation until the user explicitly 
 
 ## Output
 
-The deliverable is a confirmed statement of intent. If the user wants it persisted, save it only after confirmation, usually in a feature spec via `/spec`; avoid creating standalone intent docs unless explicitly requested.
+The deliverable is a confirmed statement of intent. If the user wants it
+persisted, save it only after confirmation. Use `/spec` to update the owning
+system requirement. Do not create a standalone intent document unless the user
+explicitly requests one.
 
 ## Red Flags
 

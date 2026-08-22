@@ -20,8 +20,8 @@ If <condition>, do <action>. Why: <short reason>. Verify with <command/output>.
 
 ## Pre-PR Validation Policy
 
-When task files define exact unit, integration, and E2E commands and two
-configured PR AI reviewers provide semantic review, make those task commands
+When work orders define exact unit, integration, and E2E commands and two
+configured PR AI reviewers provide semantic review, make those commands
 the only default local pre-PR validation. Do not add generic local simplify,
 QA, code/security review, or broad verification passes. Run an extra local gate
 only on explicit user request or to remediate a PR/CI finding.

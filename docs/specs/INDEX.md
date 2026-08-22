@@ -1,6 +1,12 @@
-# Feature Specs
+# Legacy Feature Specification Catalog
 
-Specs for kandev product features, grouped by umbrella. Each spec describes a user-invocable capability and is the source of truth for "is this feature done?"
+This catalog locates specifications that predate the system-oriented structure.
+Do not add new standalone feature specifications here. New specifications follow
+[`docs/specs/README.md`](README.md) and live under an owning system in
+`requirements/` or `system-design/`.
+
+Each legacy specification remains authoritative until its system `README.md`
+names a replacement.
 
 The bar: an agent given only a spec (no source code) should be able to either reimplement the feature or test the existing system for conformance. See `.agents/skills/spec/SKILL.md` for the workflow and template.
 
@@ -321,15 +327,18 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 
 ---
 
-## Conventions
+## Legacy conventions
 
-- **Spec layout.** Umbrella specs live as flat `.md` files under the umbrella directory (`docs/specs/office/agents.md`). Standalone specs use a folder (`docs/specs/improve-kandev/spec.md`).
-- **Plans are not specs.** Implementation plans are committed under `docs/plans/<feature>/` with individual sibling task files named `task-<NN>-<short-slug>.md`. Specs are the durable requirements; plans and task files are implementation records for the current buildout.
+- **Spec layout.** These two layouts remain valid only during migration.
+  Umbrella specs use flat files. Standalone specs use a `spec.md` file.
+- **Plans are not specifications.** Implementation plans remain under
+  `docs/plans/<initiative>/`. Their task files are work orders.
 - **Bug fixes are not specs.** Bugs produce a regression test plus an ADR if they encoded a new convention. See `/fix` skill.
 - **Architecture decisions are not specs.** ADRs live under `docs/decisions/`. See `/record decision`.
 
 ## Cross-references
 
 - ADRs: [`../decisions/INDEX.md`](../decisions/INDEX.md)
+- Specification system: [`README.md`](README.md)
 - Spec workflow: [`.agents/skills/spec/SKILL.md`](../../.agents/skills/spec/SKILL.md)
 - Bug-fix workflow: [`.agents/skills/fix/SKILL.md`](../../.agents/skills/fix/SKILL.md)
