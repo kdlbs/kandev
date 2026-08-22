@@ -132,3 +132,37 @@ describe("buildReviewGitStatusFiles", () => {
     expect(result.files?.["vendor/lib\u0000src/lib.ts"]?.repository_name).toBe("vendor/lib");
   });
 });
+
+describe("legacy composite file replay", () => {
+  it("repairs pathless composite files before the Review dialog reads them", () => {
+    const result = buildReviewGitStatusFiles(
+      status({
+        "frontend\u0000src/app.ts": { status: "modified", staged: false } as FileInfo,
+      }),
+      [],
+      2,
+    );
+
+    expect(result.files?.["frontend\u0000src/app.ts"]).toMatchObject({
+      path: "src/app.ts",
+      repository_name: "frontend",
+    });
+  });
+
+  it("does not duplicate a composite key when a named status replays it", () => {
+    const result = buildReviewGitStatusFiles(
+      undefined,
+      [
+        {
+          repository_name: "frontend",
+          status: status({
+            "frontend\u0000src/app.ts": { status: "modified", staged: false } as FileInfo,
+          }),
+        },
+      ],
+      2,
+    );
+
+    expect(Object.keys(result.files ?? {})).toEqual(["frontend\u0000src/app.ts"]);
+  });
+});

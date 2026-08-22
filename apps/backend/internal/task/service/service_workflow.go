@@ -393,6 +393,10 @@ type MoveTaskResult struct {
 // MoveTaskOptions controls non-default move behavior for trusted callers.
 type MoveTaskOptions struct {
 	AllowActivePrimarySession bool
+	// AllowFailedToCompletedRecovery permits the trusted launch-recovery
+	// action to complete a failed task when it moves into a validated terminal
+	// workflow step. Ordinary task moves preserve failed and cancelled states.
+	AllowFailedToCompletedRecovery bool
 	// PreserveDeferredLaunch keeps the deferred launch intent when an internal
 	// queue promotion changes workflow steps. Manual moves still clear it.
 	PreserveDeferredLaunch bool
@@ -490,7 +494,7 @@ func (s *Service) MoveTaskWithOptions(
 	stepChanged := oldStepID != workflowStepID
 	stateAfterAdmission := *task
 	if stepChanged {
-		if err := s.syncTaskStateForWorkflowMove(ctx, &stateAfterAdmission, oldStepID, workflowStepID); err != nil {
+		if err := s.syncTaskStateForWorkflowMove(ctx, &stateAfterAdmission, oldStepID, workflowStepID, opts); err != nil {
 			return nil, fmt.Errorf("failed to sync task state for workflow move: %w", err)
 		}
 	}
@@ -534,6 +538,15 @@ func (s *Service) MoveTaskWithOptions(
 	var admittedState *v1.TaskState
 	if stepChanged {
 		admittedState = &stateAfterAdmission.State
+	}
+	if !stepChanged && opts.AllowFailedToCompletedRecovery && task.State == v1.TaskStateFailed {
+		terminal, err := s.terminalWorkflowStep(ctx, workflowStepID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to validate recovery target: %w", err)
+		}
+		if terminal {
+			task.State = v1.TaskStateCompleted
+		}
 	}
 
 	// manual_move only applies when no outer caller already declared a
@@ -624,13 +637,15 @@ func (s *Service) terminalWorkflowStep(ctx context.Context, workflowStepID strin
 	return wfmodels.IsTerminalStep(step, nextStep), nil
 }
 
-func (s *Service) syncTaskStateForWorkflowMove(ctx context.Context, task *models.Task, oldStepID, newStepID string) error {
+func (s *Service) syncTaskStateForWorkflowMove(ctx context.Context, task *models.Task, oldStepID, newStepID string, opts MoveTaskOptions) error {
 	newTerminal, err := s.terminalWorkflowStep(ctx, newStepID)
 	if err != nil {
 		return err
 	}
 	if newTerminal {
-		if !models.IsTerminalTaskState(task.State) {
+		if task.State == v1.TaskStateFailed && opts.AllowFailedToCompletedRecovery {
+			task.State = v1.TaskStateCompleted
+		} else if !models.IsTerminalTaskState(task.State) {
 			task.State = v1.TaskStateCompleted
 		}
 		return nil

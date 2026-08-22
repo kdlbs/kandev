@@ -22,6 +22,8 @@ export type TaskRowProps = {
   activeTaskId: string | null;
   selectedTaskId: string | null;
   showActivityTime?: boolean;
+  /** False when the list is grouped by repository and the header already names it. */
+  showRepository?: boolean;
   onSelectTask: (taskId: string) => void;
   onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
@@ -93,6 +95,7 @@ type TaskRowItemProps = Pick<
   | "activeTaskId"
   | "selectedTaskId"
   | "showActivityTime"
+  | "showRepository"
   | "onSelectTask"
   | "selectedTaskIds"
   | "onToggleSelectTask"
@@ -110,6 +113,7 @@ function TaskRowItem({
   activeTaskId,
   selectedTaskId,
   showActivityTime,
+  showRepository,
   onSelectTask,
   selectedTaskIds,
   onToggleSelectTask,
@@ -149,17 +153,20 @@ function TaskRowItem({
       isArchived={task.isArchived}
       isSelected={isSelected}
       diffStats={task.diffStats}
+      comparisonUnavailable={task.comparisonUnavailable}
       isRemoteExecutor={task.isRemoteExecutor}
       remoteExecutorType={task.remoteExecutorType}
       remoteExecutorName={task.remoteExecutorName}
       taskId={task.id}
+      workflowStepId={task.workflowStepId}
       primarySessionId={task.primarySessionId ?? null}
       hasPendingClarification={task.hasPendingClarification}
       hasPendingPermission={task.hasPendingPermission}
       updatedAt={task.updatedAt}
       lastActivityAt={task.lastActivityAt}
       showActivityTime={showActivityTime}
-      repositories={task.repositories}
+      repositoryPath={task.repositoryPath}
+      showRepository={showRepository}
       prInfo={task.prInfo}
       queuedCount={task.queuedCount}
       wipQueue={task.wipQueue}

@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -20,6 +21,14 @@ import (
 // checkout) never reached. Before the fix, handleAgentCompleted called
 // Service.FinishRun directly, which never released the checkout, so
 // every other agent was permanently blocked from acquiring the task.
+//
+// It also covers the sibling divergence in the same async path: the
+// SAME early return skips SchedulerIntegration.finishRun's
+// UpdateRuntimeLastRunFinished stamp, so office_agent_runtime.
+// last_run_finished_at is never written for any run that actually
+// launches an agent. Asserting only that the run reached "finished"
+// (the pre-existing assertion below) passes today and proves nothing
+// about either leak.
 func TestSchedulerTick_AgentCompletedReleasesTaskCheckout(t *testing.T) {
 	mock := &mockTaskStarter{}
 	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
@@ -29,6 +38,7 @@ func TestSchedulerTick_AgentCompletedReleasesTaskCheckout(t *testing.T) {
 	if err := svc.RegisterEventSubscribers(eb); err != nil {
 		t.Fatalf("register subscribers: %v", err)
 	}
+	beforePublish := time.Now().UTC()
 
 	agent := &models.AgentInstance{
 		ID:                 "profile-checkout-release",
@@ -86,6 +96,17 @@ func TestSchedulerTick_AgentCompletedReleasesTaskCheckout(t *testing.T) {
 	}
 	if !ok {
 		t.Fatal("expected task checkout to be released after AgentCompleted, but another agent still cannot check it out")
+	}
+
+	runtime, err := svc.GetAgentRuntimeForTest(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get agent runtime: %v", err)
+	}
+	if runtime == nil || runtime.LastRunFinishedAt == nil {
+		t.Fatal("expected last_run_finished_at to be stamped after AgentCompleted, but it is still unset")
+	}
+	if runtime.LastRunFinishedAt.Before(beforePublish) {
+		t.Errorf("last_run_finished_at = %v, want at/after %v", runtime.LastRunFinishedAt, beforePublish)
 	}
 }
 
@@ -158,6 +179,68 @@ func TestSchedulerTick_AgentFailedReleasesTaskCheckout(t *testing.T) {
 	}
 	if !ok {
 		t.Fatal("expected task checkout to be released after AgentFailed, but another agent still cannot check it out")
+	}
+}
+
+// TestSchedulerTick_TasklessAgentCompletedStampsRuntime is the taskless-path
+// parity check for the same async completion divergence: handleAgentCompleted
+// routes a task_id-less event to handleTasklessAgentCompleted (the
+// agent_heartbeat-cron completion path), which must also stamp
+// office_agent_runtime.last_run_finished_at. The run is claimed directly via
+// ClaimNextRun rather than a full scheduler tick, because a taskless run's
+// own processRun→prepareAndLaunch path finishes it synchronously before any
+// launch (taskID == "" bypasses the "leave it claimed for the async
+// subscriber" branch) — going through the tick would finish the run before
+// the event ever had anything claimed to resolve.
+func TestSchedulerTick_TasklessAgentCompletedStampsRuntime(t *testing.T) {
+	svc := newTestService(t)
+	svc.SetSyncHandlers(true)
+	ctx := context.Background()
+	eb := bus.NewMemoryEventBus(logger.Default())
+	if err := svc.RegisterEventSubscribers(eb); err != nil {
+		t.Fatalf("register subscribers: %v", err)
+	}
+	beforePublish := time.Now().UTC()
+
+	agent := &models.AgentInstance{
+		ID:          "profile-taskless-stamp",
+		WorkspaceID: "ws-1",
+		Name:        "taskless-stamp-worker",
+		Role:        models.AgentRoleWorker,
+		Status:      models.AgentStatusIdle,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	claimed, err := svc.ClaimNextRun(ctx)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if claimed == nil {
+		t.Fatal("expected a run to be claimed")
+	}
+
+	event := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
+		"session_id": "session-taskless-stamp",
+		"agent_id":   agent.ID,
+	})
+	if err := eb.Publish(ctx, events.AgentCompleted, event); err != nil {
+		t.Fatalf("publish agent completed: %v", err)
+	}
+
+	runtime, err := svc.GetAgentRuntimeForTest(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get agent runtime: %v", err)
+	}
+	if runtime == nil || runtime.LastRunFinishedAt == nil {
+		t.Fatal("expected last_run_finished_at to be stamped after taskless AgentCompleted, but it is still unset")
+	}
+	if runtime.LastRunFinishedAt.Before(beforePublish) {
+		t.Errorf("last_run_finished_at = %v, want at/after %v", runtime.LastRunFinishedAt, beforePublish)
 	}
 }
 

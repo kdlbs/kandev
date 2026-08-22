@@ -2,11 +2,260 @@ package sqlite
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+func TestPermissionResolutionClaimAndFinalizeCAS(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-permission-cas", "session-permission-cas", "turn-permission-cas")
+	message := &models.Message{
+		ID:            "message-permission-cas",
+		TaskID:        "task-permission-cas",
+		TaskSessionID: "session-permission-cas",
+		TurnID:        "turn-permission-cas",
+		AuthorType:    models.MessageAuthorAgent,
+		Type:          models.MessageTypePermissionRequest,
+		Metadata: map[string]any{
+			"request_id":     "request-1",
+			"pending_id":     "pending-1",
+			"action_details": map[string]any{"env": map[string]any{"API_TOKEN": "secret-canary"}},
+		},
+	}
+	if err := repo.CreateMessage(ctx, message); err != nil {
+		t.Fatal(err)
+	}
+	selectedAt := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	claim := models.PermissionResolutionClaimRequest{
+		TaskID:    message.TaskID,
+		SessionID: message.TaskSessionID,
+		Audit: models.PermissionResolutionAudit{
+			ClaimID:     "claim-1",
+			ActorUserID: "user-1",
+			ActorKind:   models.PermissionActorPersonalAccessToken,
+			Source:      models.PermissionSourceExternalMCP,
+			RequestID:   "request-1",
+			PendingID:   "pending-1",
+			OptionID:    "allow-once",
+			OptionKind:  "allow_once",
+			SelectedAt:  selectedAt,
+		},
+	}
+
+	claimed, err := repo.ClaimPermissionResolution(ctx, claim)
+	if err != nil || claimed.Outcome != models.PermissionClaimed {
+		t.Fatalf("claim = %+v, err=%v", claimed, err)
+	}
+	competing := claim
+	competing.Audit.ClaimID = "claim-2"
+	result, err := repo.ClaimPermissionResolution(ctx, competing)
+	if err != nil || result.Outcome != models.PermissionClaimInProgress {
+		t.Fatalf("competing claim = %+v, err=%v", result, err)
+	}
+
+	wrongClaim, err := repo.FinalizePermissionResolution(ctx, models.PermissionResolutionFinalizeRequest{
+		TaskID:      message.TaskID,
+		SessionID:   message.TaskSessionID,
+		RequestID:   "request-1",
+		PendingID:   "pending-1",
+		ClaimID:     "claim-2",
+		Result:      models.PermissionResolutionAccepted,
+		Status:      models.PermissionStatusApproved,
+		FinalizedAt: selectedAt.Add(time.Second),
+	})
+	if err != nil || wrongClaim.Outcome != models.PermissionFinalizeClaimMismatch {
+		t.Fatalf("wrong claim finalize = %+v, err=%v", wrongClaim, err)
+	}
+
+	finalized, err := repo.FinalizePermissionResolution(ctx, models.PermissionResolutionFinalizeRequest{
+		TaskID:      message.TaskID,
+		SessionID:   message.TaskSessionID,
+		RequestID:   "request-1",
+		PendingID:   "pending-1",
+		ClaimID:     "claim-1",
+		Result:      models.PermissionResolutionAccepted,
+		Status:      models.PermissionStatusApproved,
+		FinalizedAt: selectedAt.Add(time.Second),
+	})
+	if err != nil || finalized.Outcome != models.PermissionFinalized {
+		t.Fatalf("finalize = %+v, err=%v", finalized, err)
+	}
+	audit, ok := permissionAuditFromMetadata(finalized.Message.Metadata)
+	if !ok || audit.ActorUserID != "user-1" || audit.Result != models.PermissionResolutionAccepted || audit.FinalizedAt == nil {
+		t.Fatalf("unexpected audit: %+v", audit)
+	}
+	encoded, err := json.Marshal(audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "secret-canary") || strings.Contains(string(encoded), "action_details") {
+		t.Fatalf("audit leaked action details: %s", encoded)
+	}
+
+	replayed, err := repo.ClaimPermissionResolution(ctx, competing)
+	if err != nil || replayed.Outcome != models.PermissionClaimAlreadyFinal {
+		t.Fatalf("replayed claim = %+v, err=%v", replayed, err)
+	}
+	missing := claim
+	missing.Audit.RequestID = "request-missing"
+	notFound, err := repo.ClaimPermissionResolution(ctx, missing)
+	if err != nil || notFound.Outcome != models.PermissionClaimNotFound {
+		t.Fatalf("missing claim = %+v, err=%v", notFound, err)
+	}
+}
+
+func TestPermissionResolutionPostgresExpressionsUseJSONB(t *testing.T) {
+	for name, expression := range map[string]string{
+		"claim":    permissionClaimJSONExpression("pgx"),
+		"finalize": permissionFinalizeJSONExpression("pgx"),
+		"extract":  permissionJSONExtract("pgx", "metadata", "permission_resolution", "claim_id"),
+	} {
+		if strings.Contains(expression, "json_set") || strings.Contains(expression, "json_extract") {
+			t.Fatalf("%s expression uses SQLite JSON: %s", name, expression)
+		}
+		if !strings.Contains(expression, "jsonb") {
+			t.Fatalf("%s expression does not use PostgreSQL JSONB: %s", name, expression)
+		}
+	}
+	extract := permissionJSONExtract("pgx", "metadata", "permission_resolution", "claim_id")
+	if !strings.Contains(extract, "COALESCE(NULLIF(metadata, ''), '{}')::jsonb") {
+		t.Fatalf("extract expression does not guard empty metadata: %s", extract)
+	}
+}
+
+func TestPermissionResolutionClaimIgnoresInvalidSQLiteMetadataRows(t *testing.T) {
+	for _, metadata := range []string{"", "not-json"} {
+		t.Run(fmt.Sprintf("metadata_%q", metadata), func(t *testing.T) {
+			repo := newRepoForSessionTests(t)
+			ctx := context.Background()
+			seedForMsgTest(t, repo, "task-invalid-metadata", "session-invalid-metadata", "turn-invalid-metadata")
+			if err := repo.CreateMessage(ctx, &models.Message{
+				ID: "permission-valid", TaskID: "task-invalid-metadata",
+				TaskSessionID: "session-invalid-metadata", TurnID: "turn-invalid-metadata",
+				AuthorType: models.MessageAuthorAgent, Type: models.MessageTypePermissionRequest,
+				Metadata: map[string]any{"request_id": "request-valid", "pending_id": "pending-valid"},
+			}); err != nil {
+				t.Fatalf("create valid permission: %v", err)
+			}
+			// Simulate a legacy database that predates the JSON expression indexes;
+			// current indexes reject malformed metadata before the claim path runs.
+			for _, index := range []string{"idx_messages_metadata_tool_call_id", "idx_messages_metadata_pending_id"} {
+				if _, err := repo.db.Exec("DROP INDEX " + index); err != nil {
+					t.Fatalf("drop %s: %v", index, err)
+				}
+			}
+			now := time.Now().UTC()
+			if _, err := repo.db.Exec(repo.db.Rebind(`
+				INSERT INTO task_session_messages
+					(id, task_session_id, task_id, turn_id, author_type, author_id, content,
+					 requests_input, type, metadata, created_at, updated_at)
+				VALUES (?, ?, ?, ?, 'agent', '', '', 0, 'permission_request', ?, ?, ?)
+			`), "permission-invalid", "session-invalid-metadata", "task-invalid-metadata",
+				"turn-invalid-metadata", metadata, now, now); err != nil {
+				t.Fatalf("seed invalid metadata: %v", err)
+			}
+
+			claimed, err := repo.ClaimPermissionResolution(ctx, models.PermissionResolutionClaimRequest{
+				TaskID: "task-invalid-metadata", SessionID: "session-invalid-metadata",
+				Audit: models.PermissionResolutionAudit{
+					ClaimID: "claim-valid", ActorKind: models.PermissionActorSynthetic,
+					Source: models.PermissionSourceAutomation, RequestID: "request-valid",
+					PendingID: "pending-valid", OptionID: "allow-once", OptionKind: "allow_once",
+					SelectedAt: now,
+				},
+			})
+			if err != nil || claimed == nil || claimed.Outcome != models.PermissionClaimed {
+				t.Fatalf("claim = %+v, err=%v, want valid permission claimed", claimed, err)
+			}
+		})
+	}
+}
+
+func TestGetPermissionResolutionAuditMissingReturnsNil(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-permission-audit-missing", "session-permission-audit-missing", "turn-permission-audit-missing")
+
+	audit, err := repo.GetPermissionResolutionAudit(
+		context.Background(),
+		"task-permission-audit-missing",
+		"session-permission-audit-missing",
+		"request-missing",
+		"pending-missing",
+	)
+	if err != nil || audit != nil {
+		t.Fatalf("audit=%+v err=%v, want nil, nil for a missing permission row", audit, err)
+	}
+}
+
+func TestPermissionResolutionConcurrentClaimsHaveOneWinner(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-permission-race", "session-permission-race", "turn-permission-race")
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID:            "message-permission-race",
+		TaskID:        "task-permission-race",
+		TaskSessionID: "session-permission-race",
+		TurnID:        "turn-permission-race",
+		AuthorType:    models.MessageAuthorAgent,
+		Type:          models.MessageTypePermissionRequest,
+		Metadata: map[string]any{
+			"request_id": "request-race",
+			"pending_id": "pending-race",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	outcomes := make(chan models.PermissionResolutionClaimOutcome, 2)
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, claimID := range []string{"claim-a", "claim-b"} {
+		claimID := claimID
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, err := repo.ClaimPermissionResolution(ctx, models.PermissionResolutionClaimRequest{
+				TaskID:    "task-permission-race",
+				SessionID: "session-permission-race",
+				Audit: models.PermissionResolutionAudit{
+					ClaimID:    claimID,
+					ActorKind:  models.PermissionActorSynthetic,
+					Source:     models.PermissionSourceExternalMCP,
+					RequestID:  "request-race",
+					PendingID:  "pending-race",
+					OptionID:   "allow-once",
+					OptionKind: "allow_once",
+					SelectedAt: time.Now().UTC(),
+				},
+			})
+			if err != nil {
+				errs <- err
+				return
+			}
+			outcomes <- result.Outcome
+		}()
+	}
+	wg.Wait()
+	close(outcomes)
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent claim: %v", err)
+	}
+	counts := map[models.PermissionResolutionClaimOutcome]int{}
+	for outcome := range outcomes {
+		counts[outcome]++
+	}
+	if counts[models.PermissionClaimed] != 1 || counts[models.PermissionClaimInProgress] != 1 {
+		t.Fatalf("outcomes = %+v, want one claimed and one in progress", counts)
+	}
+}
 
 // insertMsgWithType inserts a message row with a configurable type column,
 // so tests can mix tool_call and plain message rows in the same session.

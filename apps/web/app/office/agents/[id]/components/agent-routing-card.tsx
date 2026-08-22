@@ -11,12 +11,15 @@ import { useAgentRoute } from "@/hooks/domains/office/use-agent-route";
 import { useAppStore } from "@/components/state-provider";
 import { useWorkspaceRouting } from "@/hooks/domains/office/use-workspace-routing";
 import type {
+  AgentRoutePreview,
   AgentRoutingOverrides,
   Tier,
+  TierPerReason,
   WorkspaceRouting,
 } from "@/lib/state/slices/office/types";
 import { ProviderOrderEditor } from "../../../workspace/routing/components/provider-order-editor";
 import { AgentWakeReasonOverrides } from "./agent-wake-reason-overrides";
+import { WAKE_REASONS } from "../../../workspace/routing/components/wake-reason-info";
 import type { TFunction } from "i18next";
 import { Trans, useTranslation } from "react-i18next";
 import { TIER_NAME_KEYS } from "../../../lib/label-keys";
@@ -90,6 +93,12 @@ export function AgentRoutingCard({ agentId, initial }: Props) {
           workspaceConfig={workspace.config}
           knownProviders={workspace.knownProviders}
           saving={saving}
+          preview={route.data?.preview}
+        />
+        <TierShadowingNotice
+          overrides={overrides}
+          workspaceConfig={workspace.config}
+          preview={route.data?.preview}
         />
         <AgentWakeReasonOverrides
           overrides={overrides}
@@ -163,6 +172,7 @@ type FieldsProps = {
   workspaceConfig: WorkspaceRouting | undefined;
   knownProviders: string[];
   saving: boolean;
+  preview: AgentRoutePreview | undefined;
 };
 
 function RoutingFields({
@@ -171,6 +181,7 @@ function RoutingFields({
   workspaceConfig,
   knownProviders,
   saving,
+  preview,
 }: FieldsProps) {
   const { t } = useTranslation();
   const overrideTier = overrides.tier_source === "override";
@@ -204,7 +215,7 @@ function RoutingFields({
           onChange={(t) => setOverrides({ ...overrides, tier: t })}
         />
       ) : (
-        <InheritedTierHint defaultTier={workspaceConfig?.default_tier} />
+        <InheritedTierHint preview={preview} defaultTier={workspaceConfig?.default_tier} />
       )}
       <InheritRow
         label={t("office:overrideWorkspaceProviderOrder")}
@@ -240,23 +251,81 @@ function TierToggleGroup({ value, onChange }: { value: string; onChange: (t: Tie
   );
 }
 
-function InheritedTierHint({ defaultTier }: { defaultTier?: Tier }) {
+// AC-16: names both the tier in force and the level that supplied it. The
+// preview's tier_source is authoritative (role vs. workspace); while it is
+// still loading, fall back to the workspace default with "workspace"
+// wording, since that is the only level we can name without it.
+function InheritedTierHint({
+  preview,
+  defaultTier,
+}: {
+  preview: AgentRoutePreview | undefined;
+  defaultTier?: Tier;
+}) {
   const { t } = useTranslation();
-  if (!defaultTier) return null;
+  const tier = preview?.effective_tier ?? defaultTier;
+  if (!tier) return null;
+  const i18nKey =
+    preview?.tier_source === "role"
+      ? "office:inheritsTierFromRole"
+      : "office:inheritsTierFromWorkspace";
   return (
     // One sentence, one key: "Inherits" + a bare tier id + "from workspace"
     // froze the English order and rendered the wire value as display copy.
     <p className="text-xs text-muted-foreground">
-      <Trans
-        i18nKey="office:inheritsTierFromWorkspace"
-        values={{ tier: t(TIER_NAME_KEYS[defaultTier]) }}
-      >
+      <Trans i18nKey={i18nKey} values={{ tier: t(TIER_NAME_KEYS[tier]) }}>
         Inherits
         <Badge variant="secondary" className="capitalize">
           tier
         </Badge>
         from workspace.
       </Trans>
+    </p>
+  );
+}
+
+// AC-17 / AC-17a / AC-17b: names the wake reasons whose policy shadows the
+// tier displayed above, whichever level supplied it. The effective map is
+// the agent's own tier_per_reason when it overrides the workspace policy
+// (an override replaces the map entirely, per docs/specs/office/routing.md)
+// and the workspace map otherwise; keys with an empty value do not shadow
+// anything and are excluded.
+function effectiveWakeReasonMap(
+  overrides: AgentRoutingOverrides,
+  workspaceConfig: WorkspaceRouting | undefined,
+): TierPerReason {
+  if (overrides.tier_per_reason_source === "override") {
+    return overrides.tier_per_reason ?? {};
+  }
+  return workspaceConfig?.tier_per_reason ?? {};
+}
+
+function TierShadowingNotice({
+  overrides,
+  workspaceConfig,
+  preview,
+}: {
+  overrides: AgentRoutingOverrides;
+  workspaceConfig: WorkspaceRouting | undefined;
+  preview: AgentRoutePreview | undefined;
+}) {
+  const { t } = useTranslation();
+  const overriding = overrides.tier_source === "override";
+  // AC-18b: a preview never reports wake_reason, so the role/workspace case
+  // is only reachable once the preview has actually loaded.
+  const roleOrWorkspace = preview?.tier_source === "role" || preview?.tier_source === "workspace";
+  if (!overriding && !roleOrWorkspace) return null;
+
+  const map = effectiveWakeReasonMap(overrides, workspaceConfig);
+  const reasons = WAKE_REASONS.filter((r) => !!map[r.id]).map((r) => t(r.labelKey));
+  if (reasons.length === 0) return null;
+
+  const i18nKey = overriding
+    ? "office:overrideShadowedByWakeReasons"
+    : "office:tierShadowedByWakeReasons";
+  return (
+    <p className="text-xs text-muted-foreground" role="note">
+      {t(i18nKey, { list: reasons.join(", ") })}
     </p>
   );
 }

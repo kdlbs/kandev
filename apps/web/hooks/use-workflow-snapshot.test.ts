@@ -44,7 +44,16 @@ vi.mock("@/lib/api", () => ({
 }));
 
 vi.mock("@/lib/ssr/mapper", () => ({
-  snapshotToState: (snapshot: unknown) => ({ snapshot }),
+  snapshotToState: (snapshot: { tasks?: Array<{ id: string; auto_start_failed?: boolean }> }) => ({
+    kanban: {
+      workflowId: "wf-1",
+      steps: [],
+      tasks: (snapshot.tasks ?? []).map((task) => ({
+        id: task.id,
+        autoStartFailed: task.auto_start_failed,
+      })),
+    },
+  }),
 }));
 
 import { useWorkflowSnapshot } from "./use-workflow-snapshot";
@@ -173,5 +182,36 @@ describe("useWorkflowSnapshot — kanban.isLoading", () => {
 
     expect(mockHydrate).not.toHaveBeenCalled();
     expect(mockState.kanban.isLoading).toBe(false);
+  });
+});
+
+describe("useWorkflowSnapshot marker races", () => {
+  beforeEach(() => resetState());
+
+  it("keeps a newer live auto-start marker when an older snapshot finishes later", async () => {
+    let resolveFetch: (snapshot: { steps: unknown[]; tasks: unknown[] }) => void = () => {};
+    mockFetchWorkflowSnapshot.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    renderHook(() => useWorkflowSnapshot("wf-1"));
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalled());
+
+    mockState.kanban.tasks = [{ id: "task-live-marker", autoStartFailed: true }];
+    resolveFetch({
+      steps: [],
+      tasks: [{ id: "task-live-marker", auto_start_failed: false }],
+    });
+
+    await waitFor(() => expect(mockHydrate).toHaveBeenCalled());
+    expect(mockHydrate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kanban: expect.objectContaining({
+          tasks: [expect.objectContaining({ id: "task-live-marker", autoStartFailed: true })],
+        }),
+      }),
+    );
   });
 });

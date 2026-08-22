@@ -37,48 +37,23 @@ import type {
 } from "@/lib/types/jira";
 import { useTranslation } from "react-i18next";
 import {
+  configToForm,
+  deriveFormState,
+  emptyForm,
+  type FormState,
+} from "@/components/jira/jira-form-state";
+import {
   CookieExpiry,
   SecretHelp,
   secretCopy,
   secretPlaceholder,
 } from "@/components/jira/jira-secret-help";
+import { OAuthFields } from "@/components/jira/jira-oauth-fields";
 import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
 // Cloud sites live under this domain; shown as an example, not as prose, so it
 // is interpolated rather than written into the catalog.
 const ATLASSIAN_CLOUD_DOMAIN = "*.atlassian.net";
-
-type FormState = {
-  siteUrl: string;
-  email: string;
-  authMethod: JiraAuthMethod;
-  instanceType: JiraInstanceType;
-  defaultProjectKey: string;
-  secret: string;
-};
-
-const emptyForm: FormState = {
-  siteUrl: "",
-  email: "",
-  authMethod: "api_token",
-  instanceType: "cloud",
-  defaultProjectKey: "",
-  secret: "",
-};
-
-function configToForm(cfg: JiraConfig | null): FormState {
-  if (!cfg) return emptyForm;
-  return {
-    siteUrl: cfg.siteUrl,
-    email: cfg.email,
-    authMethod: cfg.authMethod,
-    // Legacy rows written before Server/DC support carry an empty instanceType;
-    // default to cloud so the dropdown has a valid selection.
-    instanceType: cfg.instanceType || "cloud",
-    defaultProjectKey: cfg.defaultProjectKey,
-    secret: "",
-  };
-}
 
 // defaultAuthForInstance returns the canonical auth method for an instance
 // type. Used when the user switches Instance type and the current auth method
@@ -97,6 +72,7 @@ function authAllowedForInstance(auth: JiraAuthMethod, instance: JiraInstanceType
   if (auth === "api_token") return instance === "cloud";
   if (auth === "pat") return instance === "server";
   if (auth === "session_cookie") return instance === "cloud";
+  if (auth === "oauth") return instance === "cloud";
   return false;
 }
 
@@ -212,6 +188,7 @@ function AuthFields({ form, baseline, loading, update }: FieldsRowProps) {
             {form.instanceType === "cloud" ? (
               <>
                 <SelectItem value="api_token">{t("jira:apiTokenRecommended")}</SelectItem>
+                <SelectItem value="oauth">{t("jira:oauth2")}</SelectItem>
                 <SelectItem value="session_cookie">{t("jira:browserSessionCookie")}</SelectItem>
               </>
             ) : (
@@ -402,6 +379,7 @@ function useJiraConfigMutations({
           instanceType: form.instanceType,
           defaultProjectKey: form.defaultProjectKey,
           secret: form.secret || undefined,
+          clientId: form.clientId || undefined,
         },
         { workspaceId },
       );
@@ -513,51 +491,23 @@ function useJiraSettings(workspaceId: string) {
     handleSave,
     handleDelete,
     discard,
+    load,
   };
-}
-
-function normalizeComparableSiteUrl(value: string): string {
-  const trimmed = value.trim().replace(/\/+$/, "");
-  if (!trimmed) return "";
-  return trimmed.includes("://") ? trimmed : `https://${trimmed}`;
-}
-
-// savedSecretMatches reports whether the saved secret can be reused against
-// the current form values. Reuse is only safe when every identity component
-// of the saved credential still matches: same auth method, same instance
-// type, same Jira host, and — for Cloud api_token where the basic pair is
-// email:token — the same email (case-insensitive). Otherwise the user could
-// change the site URL or Cloud account and silently submit the previous
-// token to a different host/account.
-function savedSecretMatches(config: JiraConfig | null, form: FormState): boolean {
-  if (!config?.hasSecret) return false;
-  if (config.authMethod !== form.authMethod) return false;
-  if ((config.instanceType || "cloud") !== form.instanceType) return false;
-  if (normalizeComparableSiteUrl(config.siteUrl) !== normalizeComparableSiteUrl(form.siteUrl)) {
-    return false;
-  }
-  if (form.authMethod !== "api_token") return true;
-  return (config.email ?? "").toLowerCase() === form.email.toLowerCase();
 }
 
 export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
   const s = useJiraSettings(workspaceId);
   const baseline = configToForm(s.config);
-  const savedSecretMatchesMode = savedSecretMatches(s.config, s.form);
-  const missingSecret = !savedSecretMatchesMode && !s.form.secret;
-  const emailRequired = s.form.instanceType === "cloud" && s.form.authMethod === "api_token";
-  const disableSave =
-    s.saving || !s.form.siteUrl || (emailRequired && !s.form.email) || missingSecret;
-  const disableTest = missingSecret;
-  const revision = JSON.stringify(s.form);
-  const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
-  // Assigned rather than returned from a helper, but the guard would not see it
-  // either way — `invalidReason` is a plain string, never a JSX literal.
-  let invalidReason: string | undefined;
-  if (!s.form.siteUrl) invalidReason = t("jira:aJiraSiteUrlIsRequired");
-  else if (emailRequired && !s.form.email) invalidReason = t("jira:anEmailAddressIsRequired");
-  else if (missingSecret) invalidReason = t("jira:aCredentialIsRequired");
+  const {
+    isOAuth,
+    savedSecretMatchesMode,
+    disableSave,
+    disableTest,
+    revision,
+    dirty,
+    invalidReason,
+  } = deriveFormState(s, t);
 
   useSettingsSaveContributor({
     id: `jira-config:${workspaceId}`,
@@ -589,14 +539,25 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
           />
           <SiteFields form={s.form} baseline={baseline} loading={s.loading} update={s.update} />
           <AuthFields form={s.form} baseline={baseline} loading={s.loading} update={s.update} />
-          <SecretField
-            form={s.form}
-            baseline={baseline}
-            loading={s.loading}
-            update={s.update}
-            hasSavedSecret={savedSecretMatchesMode}
-            secretExpiresAt={s.config?.secretExpiresAt ?? null}
-          />
+          {isOAuth ? (
+            <OAuthFields
+              form={s.form}
+              loading={s.loading}
+              workspaceId={workspaceId}
+              connected={savedSecretMatchesMode}
+              tokenExpiresAt={s.config?.tokenExpiresAt ?? null}
+              onConnected={() => void s.load()}
+            />
+          ) : (
+            <SecretField
+              form={s.form}
+              baseline={baseline}
+              loading={s.loading}
+              update={s.update}
+              hasSavedSecret={savedSecretMatchesMode}
+              secretExpiresAt={s.config?.secretExpiresAt ?? null}
+            />
+          )}
           <TestResultAlert result={s.testResult} />
           <Separator />
           <ActionBar

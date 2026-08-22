@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconPlayerPlay, IconPlus, IconRefresh, IconTrash, IconX } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
@@ -18,6 +18,11 @@ import { SettingsSection } from "@/components/settings/settings-section";
 import { formatDateTime } from "@/lib/i18n/formats";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAzureDevOpsWatches } from "@/hooks/domains/azure-devops/use-azure-devops-watches";
+import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
+import {
+  azurePullRequestWatchPlaceholders,
+  azureWorkItemWatchPlaceholders,
+} from "./azure-devops-watch-placeholders";
 import type {
   AzureDevOpsCleanupPolicy,
   AzureDevOpsPullRequestWatch,
@@ -296,6 +301,13 @@ function WatchEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const current = kind === "work-item" ? workItem : pullRequest;
+  const placeholders = useMemo(
+    () =>
+      kind === "work-item"
+        ? azureWorkItemWatchPlaceholders(t)
+        : azurePullRequestWatchPlaceholders(t),
+    [kind, t],
+  );
   const set = (key: string, value: string | number) => {
     if (kind === "work-item") setWorkItem((previous) => ({ ...previous, [key]: value }));
     else setPullRequest((previous) => ({ ...previous, [key]: value }));
@@ -470,10 +482,13 @@ function WatchEditor({
       </div>
       <div className="space-y-1.5">
         <Label>{t("azuredevops:prompt")}</Label>
-        <textarea
-          className="min-h-24 w-full rounded-md border bg-background p-3 text-sm"
+        <SettingsPromptEditor
           value={current.prompt}
-          onChange={(event) => set("prompt", event.target.value)}
+          onChange={(value) => set("prompt", value)}
+          placeholders={placeholders}
+          promptReferences
+          ariaLabel={t("azuredevops:prompt")}
+          testId={`azure-${kind}-watch-prompt-editor`}
         />
       </div>
       <div className="grid gap-3 sm:grid-cols-2">

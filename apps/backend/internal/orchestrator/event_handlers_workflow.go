@@ -39,6 +39,10 @@ type taskMetadataKeySetter interface {
 	SetTaskMetadataKey(context.Context, string, string, interface{}) error
 }
 
+type taskMetadataKeySetterIfNoActiveSession interface {
+	SetTaskMetadataKeyIfNoActiveSession(context.Context, string, string, interface{}) (bool, error)
+}
+
 type lifecycleTaskMetadataLister interface {
 	ListTasksWithMetadataKey(context.Context, string) ([]*models.Task, error)
 }
@@ -1041,6 +1045,9 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 	if s.dependencyBlocksAutoStart(ctx, taskID, eventName) {
 		return
 	}
+	if task != nil && s.shouldSkipTerminalPRAutoStart(ctx, task) {
+		return
+	}
 	if s.launchDeferredTask(ctx, task, eventName) {
 		return
 	}
@@ -1061,6 +1068,9 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 	if task == nil || task.QueuedForStepID != "" || step == nil {
 		return
 	}
+	if s.shouldSkipTerminalPRAutoStart(ctx, task) {
+		return
+	}
 	if s.launchDeferredTask(ctx, task, eventName) {
 		return
 	}
@@ -1068,6 +1078,11 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		s.logger.Debug(eventName+": target step has no auto-start",
 			zap.String("task_id", task.ID),
 			zap.String("to_step_id", step.ID))
+		return
+	}
+
+	if s.isOfficeTask(ctx, task.ID) {
+		s.autoStartOfficeTaskForLoadedStep(ctx, task, step, eventName, restoreQueuePromotion)
 		return
 	}
 
@@ -1097,7 +1112,8 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		// can fire. Only the first atomic claim of MetaKeyAutoStartClaimed wins;
 		// the loser skips launch because the winner will handle it.
 		// Absent guard = ordinary (non-watcher) auto-start; proceed as before.
-		if _, hasGuard := task.Metadata[models.MetaKeyAutoStartGuard]; hasGuard {
+		_, hasGuard := task.Metadata[models.MetaKeyAutoStartGuard]
+		if hasGuard {
 			if !s.claimAutoStart(asyncCtx, task.ID, eventName) {
 				s.logger.Debug(eventName+": auto-start claim lost; watcher path will launch",
 					zap.String("task_id", task.ID))
@@ -1114,12 +1130,101 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 			s.logger.Error(eventName+": failed to auto-start task",
 				zap.String("task_id", task.ID),
 				zap.Error(err))
-			s.restoreAutoStartClaim(asyncCtx, task.ID, eventName)
-			if restoreQueuePromotion {
-				s.restoreTaskLifecycleToken(asyncCtx, task.ID, models.MetaKeyQueuePromotionPending, eventName)
-			}
+			s.handleAutoStartFailure(asyncCtx, task.ID, eventName, hasGuard, restoreQueuePromotion)
 		}
 	}()
+}
+
+// autoStartOfficeTaskForLoadedStep is the Office-aware counterpart of the
+// kanban launch path above. An Office task has no session-based launch route
+// (see validateOfficeRuntimeEnv) — StartTask can never succeed for it, it
+// just logs "office runtime context is incomplete" and starts nothing. Queue
+// a run through the engine's Office adapters instead, the same mechanism the
+// scheduler's recovery sweep and the "assign task" flow already use to start
+// Office work (internal/office/service/scheduler_recovery.go).
+func (s *Service) autoStartOfficeTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool) {
+	s.logger.Info(eventName+": queueing office run (no session, auto-start step)",
+		zap.String("task_id", task.ID),
+		zap.String("to_step_id", step.ID))
+
+	// Async for the same reason as the kanban path above: the event bus
+	// delivers synchronously and blocking here would stall the HTTP handler
+	// that published the move.
+	go func() {
+		asyncCtx := context.WithoutCancel(ctx)
+
+		_, hasGuard := task.Metadata[models.MetaKeyAutoStartGuard]
+		if hasGuard {
+			if !s.claimAutoStart(asyncCtx, task.ID, eventName) {
+				s.logger.Debug(eventName+": auto-start claim lost; watcher path will launch",
+					zap.String("task_id", task.ID))
+				return
+			}
+		}
+
+		if err := s.queueOfficeAutoStartRun(asyncCtx, task, step); err != nil {
+			s.logger.Error(eventName+": failed to queue office auto-start run",
+				zap.String("task_id", task.ID),
+				zap.Error(err))
+			s.handleAutoStartFailure(asyncCtx, task.ID, eventName, hasGuard, restoreQueuePromotion)
+		}
+	}()
+}
+
+// officeAutoStartRunReason mirrors office/service.RunReasonTaskAssigned
+// ("task_assigned"). Kept as a literal rather than importing
+// internal/office/service: the two packages intentionally avoid importing
+// each other (see runsServiceEngineAdapter in backendapp/main.go), so a
+// shared reason string is duplicated rather than pulled across the boundary.
+const officeAutoStartRunReason = "task_assigned"
+
+// queueOfficeAutoStartRun makes auto_start_agent Office-aware: instead of
+// StartTask (kanban-only), it resolves an agent the same way a "primary"
+// queue_run target would — preferring the task's current runner participant,
+// falling back to its assignee — and queues a run through engineRunQueue.
+func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep) error {
+	if s.engineRunQueue == nil {
+		return fmt.Errorf("office run queue is not wired")
+	}
+	agentProfileID := task.AssigneeAgentProfileID
+	if s.enginePrimary != nil {
+		resolved, err := s.enginePrimary.PrimaryAgentProfileID(ctx, step.ID, task.ID)
+		if err != nil {
+			return fmt.Errorf("resolve primary agent for office auto-start on task %s: %w", task.ID, err)
+		}
+		if resolved != "" {
+			agentProfileID = resolved
+		}
+	}
+	if agentProfileID == "" {
+		return fmt.Errorf("no agent profile resolved for office auto-start on task %s", task.ID)
+	}
+	return s.engineRunQueue.QueueRun(ctx, engine.QueueRunRequest{
+		AgentProfileID: agentProfileID,
+		TaskID:         task.ID,
+		WorkflowStepID: step.ID,
+		Reason:         officeAutoStartRunReason,
+		IdempotencyKey: fmt.Sprintf("%s:%s:%s:%s", officeAutoStartRunReason, task.ID, agentProfileID, step.ID),
+		Payload:        map[string]any{"task_id": task.ID},
+	})
+}
+
+// handleAutoStartFailure records a failed auto-start attempt. It restores the
+// MetaKeyAutoStartClaimed token only when hasGuard is true: claimAutoStart is
+// only ever called (and the token only ever taken) when the task carries
+// MetaKeyAutoStartGuard, so restoring it unconditionally stamps
+// auto_start_claimed onto tasks that never carried the guard, corrupting the
+// invariant documented at MetaKeyAutoStartGuard. It also stamps
+// MetaKeyAutoStartFailed so the failure surfaces on the task card instead of
+// only in backend logs.
+func (s *Service) handleAutoStartFailure(ctx context.Context, taskID, eventName string, hasGuard, restoreQueuePromotion bool) {
+	if hasGuard {
+		s.restoreAutoStartClaim(ctx, taskID, eventName)
+	}
+	if restoreQueuePromotion {
+		s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, eventName)
+	}
+	s.setTaskAutoStartFailedMarker(ctx, taskID, eventName)
 }
 
 func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eventName string) bool {
@@ -1245,6 +1350,37 @@ func (s *Service) restoreAutoStartClaim(ctx context.Context, taskID, eventName s
 		s.logger.Warn(eventName+": failed to restore auto-start claim",
 			zap.String("task_id", taskID), zap.Error(err))
 	}
+}
+
+// setTaskAutoStartFailedMarker stamps MetaKeyAutoStartFailed on a task and
+// republishes task.updated so the failure surfaces on the card. Cleared by
+// clearTaskAutoStartFailedMarker when a session for the task next reaches
+// STARTING/RUNNING.
+func (s *Service) setTaskAutoStartFailedMarker(ctx context.Context, taskID, eventName string) {
+	setter, ok := s.repo.(taskMetadataKeySetterIfNoActiveSession)
+	if !ok {
+		s.logger.Warn(eventName+": repository cannot conditionally set auto-start-failed marker",
+			zap.String("task_id", taskID))
+		return
+	}
+	written, err := setter.SetTaskMetadataKeyIfNoActiveSession(ctx, taskID, models.MetaKeyAutoStartFailed, true)
+	if err != nil {
+		s.logger.Warn(eventName+": failed to set auto-start-failed marker",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	if !written {
+		s.logger.Debug(eventName+": skipped auto-start-failed marker because task work is active",
+			zap.String("task_id", taskID))
+		return
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		s.logger.Warn(eventName+": failed to load task for auto-start-failed publish",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	s.publishTaskUpdated(ctx, task)
 }
 
 // handleTaskMovedWithSession handles the case where a task with an existing session
@@ -3738,24 +3874,31 @@ func (s *Service) buildMachineState(ctx context.Context, task *models.Task, sess
 
 // assembleMachineState creates an engine.MachineState from pre-loaded models.
 // Shared by Service.buildMachineState and workflowStore.LoadState to avoid duplication.
+// assembleMachineState accepts a nil session for the AC-62/F38 case of a
+// task with zero task_sessions rows (sessionID == ""): CurrentStepID is
+// always derived from the task row, never the session, so SessionID and
+// SessionState are left at their zero values and no workflow_data is
+// available in that case.
 func assembleMachineState(task *models.Task, session *models.TaskSession, isPassthrough bool) engine.MachineState {
 	currentStepID := task.WorkflowStepID
-	var data map[string]any
-	if session.Metadata != nil {
-		if wd, ok := session.Metadata["workflow_data"].(map[string]any); ok {
-			data = wd
-		}
-	}
-	return engine.MachineState{
+	state := engine.MachineState{
 		TaskID:          task.ID,
-		SessionID:       session.ID,
 		WorkflowID:      task.WorkflowID,
 		CurrentStepID:   currentStepID,
-		SessionState:    string(session.State),
 		TaskDescription: task.Description,
 		IsPassthrough:   isPassthrough,
-		Data:            data,
 	}
+	if session == nil {
+		return state
+	}
+	state.SessionID = session.ID
+	state.SessionState = string(session.State)
+	if session.Metadata != nil {
+		if wd, ok := session.Metadata["workflow_data"].(map[string]any); ok {
+			state.Data = wd
+		}
+	}
+	return state
 }
 
 // processOnTurnCompleteViaEngine uses the workflow engine to evaluate on_turn_complete
@@ -3920,12 +4063,94 @@ func (s *Service) allowEngineSignalCompletion(
 	return true
 }
 
+// applyGuardedTransitionLifecycle is the service-owned lifecycle bridge for
+// quorum re-evaluation. The engine still selects the target and owns the CAS,
+// but credential checks, on_exit, history, signal cleanup, terminal handling,
+// session/profile state, and on_enter stay in the orchestrator path.
+func (s *Service) applyGuardedTransitionLifecycle(
+	ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger,
+) (bool, error) {
+	if s.workflowStore == nil {
+		return false, errors.New("workflow store is not initialized")
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return false, fmt.Errorf("load task for guarded transition lifecycle: %w", err)
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, fmt.Errorf("load session for guarded transition lifecycle: %w", err)
+	}
+
+	casAttempted := false
+	casApplied := false
+	lifecycleApplied := s.applyEngineTransitionWithCommit(
+		ctx,
+		taskID,
+		session,
+		engine.HandleResult{Transitioned: true, FromStepID: fromStepID, ToStepID: toStepID},
+		trigger,
+		task.Description,
+		true,
+		func(commitCtx context.Context) (bool, error) {
+			casAttempted = true
+			transitionCtx := commitCtx
+			if !steptelemetry.HasTrigger(transitionCtx) {
+				transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
+			}
+			committedTask, oldWorkflowID, applied, commitErr := s.workflowStore.applyTransitionIfAtStepRaw(
+				transitionCtx, taskID, fromStepID, toStepID,
+			)
+			if commitErr != nil {
+				return false, commitErr
+			}
+			if !applied {
+				return false, nil
+			}
+			casApplied = true
+			// The raw CAS commit intentionally has no side effects. The shared
+			// lifecycle helper performs session state and on_enter work below.
+			s.publishTaskUpdated(ctx, committedTask, oldWorkflowID)
+			s.workflowStore.pullNextTaskOnVacate(ctx, fromStepID, taskID)
+			return true, nil
+		},
+	)
+	if lifecycleApplied || casApplied {
+		return true, nil
+	}
+	if casAttempted {
+		// A false CAS is an expected concurrent re-evaluation outcome.
+		return false, nil
+	}
+	return false, errors.New("guarded transition lifecycle did not apply")
+}
+
 // applyEngineTransition applies an engine-evaluated transition: on_exit, DB transition,
 // data patches, and optionally on_enter processing. Returns true if the transition was applied.
 func (s *Service) applyEngineTransition(
 	ctx context.Context, taskID string, session *models.TaskSession,
 	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
 	triggerOnEnter bool,
+) bool {
+	return s.applyEngineTransitionWithCommit(ctx, taskID, session, result, trigger, taskDescription, triggerOnEnter,
+		func(commitCtx context.Context) (bool, error) {
+			if err := s.workflowStore.ApplyTransition(commitCtx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger); err != nil {
+				return false, err
+			}
+			return true, nil
+		})
+}
+
+// applyEngineTransitionWithCommit applies the shared lifecycle around a
+// transition commit. The default path commits through ApplyTransition. The
+// quorum decision path supplies a CAS commit so lifecycle hooks cannot be
+// bypassed by the engine's guarded-transition re-evaluation.
+//
+//nolint:cyclop,funlen // this coordinates independent transition lifecycle stages.
+func (s *Service) applyEngineTransitionWithCommit(
+	ctx context.Context, taskID string, session *models.TaskSession,
+	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
+	triggerOnEnter bool, commit func(context.Context) (bool, error),
 ) bool {
 	// Validate the target step exists BEFORE persisting the transition.
 	// This prevents the task from being moved to an invalid step_id
@@ -3972,12 +4197,16 @@ func (s *Service) applyEngineTransition(
 		s.processOnExit(ctx, taskID, session, fromStep)
 	}
 
-	if err := s.workflowStore.ApplyTransition(ctx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger); err != nil {
+	applied, err := commit(ctx)
+	if err != nil {
 		s.logger.Error("failed to apply engine transition",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.Error(err))
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return false
+	}
+	if !applied {
 		return false
 	}
 

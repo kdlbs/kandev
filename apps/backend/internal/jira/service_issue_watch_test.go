@@ -313,3 +313,34 @@ func TestService_CheckIssueWatch_StampsLastPolledOnError(t *testing.T) {
 		t.Error("expected last_polled_at stamped even on search failure (liveness signal)")
 	}
 }
+
+func TestService_CheckIssueWatchReturnsDedupLookupError(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	if err := f.store.UpsertConfigForWorkspace(ctx, "ws-1", &JiraConfig{
+		WorkspaceID: "ws-1", SiteURL: "https://a.net", Email: "e",
+		AuthMethod: AuthMethodAPIToken, InstanceType: InstanceTypeCloud,
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	if err := f.secrets.Set(ctx, SecretKeyForWorkspace("ws-1"), "token", "tok"); err != nil {
+		t.Fatalf("seed secret: %v", err)
+	}
+	if _, err := f.svc.clientFor(ctx, "ws-1"); err != nil {
+		t.Fatalf("prime client: %v", err)
+	}
+	f.client.withSearchResults([]JiraTicket{{Key: "PROJ-1"}})
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step", JQL: "project = PROJ",
+	})
+	if err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+	if _, err := f.store.db.ExecContext(ctx, "DROP TABLE jira_issue_watch_tasks"); err != nil {
+		t.Fatalf("break dedup lookup: %v", err)
+	}
+
+	if _, err := f.svc.CheckIssueWatch(ctx, w); err == nil {
+		t.Fatal("expected dedup lookup failure to stop ticket delivery")
+	}
+}

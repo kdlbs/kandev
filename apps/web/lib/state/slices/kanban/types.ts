@@ -106,6 +106,9 @@ export type KanbanState = {
     foregroundActivity?: ForegroundActivity | null;
     /** True when the task's session was mid-turn when the backend died. */
     interrupted?: boolean;
+    /** True when a workflow step's auto_start_agent on_enter action failed to
+     *  launch a run for this task. */
+    autoStartFailed?: boolean;
     /** Live subagents across this task's sessions; drives the board count chip. */
     activeSubagentCount?: number;
     sessionCount?: number | null;

@@ -1,13 +1,39 @@
 "use client";
 
-import { useCallback, useEffect, useRef, type RefObject } from "react";
+import { useCallback, useEffect, type RefObject } from "react";
 import { getTaskMRAutomation, updateTaskMRAutomation } from "@/lib/api/domains/gitlab-api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
-import type { TaskMRAutomationOptions, TaskMRAutomationPatch } from "@/lib/types/gitlab";
+import type {
+  TaskMRAutomationOptions,
+  TaskMRAutomationOptionsForMR,
+  TaskMRAutomationPatch,
+} from "@/lib/types/gitlab";
 import { t } from "@/lib/i18n";
 
 type AppStoreApi = ReturnType<typeof useAppStoreApi>;
+
+type MRAutomationRequestRefs = Pick<
+  MRAutomationRequestContext,
+  "refreshRequestRef" | "updateRequestRef" | "updateSettleCounterRef"
+>;
+
+// One task can mount a control for every linked MR. Those controls share a
+// store, so they must also share request ordering: an older control's full
+// response must not overwrite a newer control's response for another MR.
+const requestRefsByStore = new WeakMap<AppStoreApi, MRAutomationRequestRefs>();
+
+function requestRefsForStore(storeApi: AppStoreApi): MRAutomationRequestRefs {
+  const existing = requestRefsByStore.get(storeApi);
+  if (existing) return existing;
+  const refs: MRAutomationRequestRefs = {
+    refreshRequestRef: { current: {} },
+    updateRequestRef: { current: {} },
+    updateSettleCounterRef: { current: {} },
+  };
+  requestRefsByStore.set(storeApi, refs);
+  return refs;
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : t("gitlab:failedToLoadMrAutomationOptions");
@@ -54,6 +80,14 @@ async function performRefresh(
     setLoading,
     setError,
   } = ctx;
+  // A task with several linked MRs mounts one MRAutomationControls per MR,
+  // and every instance's mount effect sees the same pre-fetch render snapshot
+  // (options null, loading false) — so without this guard, opening the
+  // dropdown would fire one identical GET per linked MR. The in-flight
+  // request commits to the shared store slot that all of them read.
+  if (storeApi.getState().taskMRAutomation.loading[taskId]) {
+    return storeApi.getState().taskMRAutomation.byTaskId[taskId] ?? null;
+  }
   const requestId = (refreshRequestRef.current[taskId] ?? 0) + 1;
   refreshRequestRef.current[taskId] = requestId;
   const settleCounterAtStart = updateSettleCounterRef.current[taskId] ?? 0;
@@ -89,6 +123,84 @@ async function performRefresh(
   }
 }
 
+/**
+ * Applies a patch to the cached options the way the backend will. The five
+ * switches live per-MR in `mr_options`, so a naive `{...previous, ...patch}`
+ * would write them onto the task-level *aggregate* instead — showing the
+ * switch as on for every linked MR until the response landed. Switch fields
+ * are therefore merged into the targeted MR's entry (or every entry, when the
+ * patch names no MR, which is the fan-out the backend performs); the
+ * remaining task-level fields merge at the top level as before.
+ */
+function applyMRAutomationPatchOptimistically(
+  previous: TaskMRAutomationOptions,
+  patch: TaskMRAutomationPatch,
+): TaskMRAutomationOptions {
+  const {
+    repository_id: repositoryID,
+    project_path: projectPath,
+    mr_iid: mrIID,
+    ...fields
+  } = patch;
+  const switchKeys = [
+    "auto_fix_enabled",
+    "auto_merge_enabled",
+    "prompt_on_review_requested",
+    "prompt_on_merged",
+    "prompt_on_closed",
+  ] as const;
+  const switchPatch: Partial<TaskMRAutomationOptionsForMR> = {};
+  const taskLevel: Partial<TaskMRAutomationOptions> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if ((switchKeys as readonly string[]).includes(key)) {
+      Object.assign(switchPatch, { [key]: value });
+    } else {
+      Object.assign(taskLevel, { [key]: value });
+    }
+  }
+  if (Object.keys(switchPatch).length === 0) {
+    return { ...previous, ...taskLevel };
+  }
+  const targetsOneMR =
+    repositoryID !== undefined && projectPath !== undefined && mrIID !== undefined;
+  const mrOptions = (previous.mr_options ?? []).map((option) => {
+    const isTarget =
+      !targetsOneMR ||
+      (option.repository_id === repositoryID &&
+        option.project_path === projectPath &&
+        option.mr_iid === mrIID);
+    return isTarget ? { ...option, ...switchPatch } : option;
+  });
+  return { ...previous, ...taskLevel, mr_options: mrOptions };
+}
+
+type UpdateResponseCommitContext = {
+  automation: AppState["taskMRAutomation"];
+  updateRequestRef: Record<string, number>;
+  taskId: string;
+  requestId: number;
+  externalGenAtStart: number;
+  response: TaskMRAutomationOptions;
+};
+
+function shouldCommitUpdateResponse({
+  automation,
+  updateRequestRef,
+  taskId,
+  requestId,
+  externalGenAtStart,
+  response,
+}: UpdateResponseCommitContext): boolean {
+  const currentRevision = automation.byTaskId[taskId]?.automation_revision ?? 0;
+  const responseRevision = response.automation_revision ?? 0;
+  const isLatestRequest = updateRequestRef[taskId] === requestId;
+  const isNewerRevision = responseRevision > currentRevision;
+  return (
+    (automation.externalGeneration[taskId] ?? 0) === externalGenAtStart &&
+    (isLatestRequest || isNewerRevision)
+  );
+}
+
 async function performUpdate(
   ctx: MRAutomationRequestContext,
   patch: TaskMRAutomationPatch,
@@ -108,21 +220,25 @@ async function performUpdate(
   const previous = storeApi.getState().taskMRAutomation.byTaskId[taskId] ?? null;
   // Optimistic update: apply immediately, revert on failure (AC27).
   if (previous) {
-    setOptions(taskId, { ...previous, ...patch });
+    setOptions(taskId, applyMRAutomationPatchOptimistically(previous, patch));
   }
   setSaving(taskId, true);
   setError(taskId, null);
   try {
     const response = await updateTaskMRAutomation(taskId, patch, { cache: "no-store" });
     const automation = storeApi.getState().taskMRAutomation;
+    // Request-start order is not server revision order. The helper allows an
+    // older request through only when its server revision is strictly newer;
+    // the store then applies its monotonic revision guard.
     if (
-      isCurrentAndUnchangedExternally(
+      shouldCommitUpdateResponse({
         automation,
-        updateRequestRef.current,
+        updateRequestRef: updateRequestRef.current,
         taskId,
         requestId,
         externalGenAtStart,
-      )
+        response,
+      })
     ) {
       setOptions(taskId, response);
     }
@@ -189,11 +305,10 @@ async function performUpdate(
  *    corrects it again.
  */
 export function useTaskMRAutomationOptions(taskId: string | null) {
-  const refreshRequestRef = useRef<Record<string, number>>({});
-  const updateRequestRef = useRef<Record<string, number>>({});
-  const updateSettleCounterRef = useRef<Record<string, number>>({});
   const storeApi = useAppStoreApi();
 
+  const { refreshRequestRef, updateRequestRef, updateSettleCounterRef } =
+    requestRefsForStore(storeApi);
   const options = useAppStore((state) =>
     taskId ? (state.taskMRAutomation.byTaskId[taskId] ?? null) : null,
   );

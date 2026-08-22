@@ -20,9 +20,9 @@
  * end to end: a "Notes" task panel (registerTaskPanel, mobile-enabled) that
  * round-trips a single per-user document through host.storage
  * (get on mount, debounced set, subscribe to pick up a write from another
- * tab/surface), a task-card-indicators slot component, a task-card-tags slot
- * component, and a registerTaskMenuAction under the kanban card's "edit"
- * group. It also registers one composer action on all three composer slots
+ * tab/surface), task-card indicator/tag components, generic task-row metadata,
+ * and task-menu actions under the "edit" and "primary" groups. It also
+ * registers one composer action on all three composer slots
  * (chat-input-actions, task-create-input-actions, new-session-input-actions),
  * which is how the e2e suite exercises PluginComposerCapability against real
  * native composers rather than a mock.
@@ -377,6 +377,19 @@
         );
       }
 
+      function RowMetadata(props) {
+        var slotProps = props.slotProps || {};
+        return jsx(
+          "span",
+          {
+            "data-testid": "e2e-row-metadata",
+            "data-task-id": slotProps.taskId,
+            "data-surface": slotProps.surface,
+          },
+          "fixture metadata",
+        );
+      }
+
       function WorkspaceActionsSlot(props) {
         var slotProps = props.slotProps || {};
         return jsx(
@@ -681,6 +694,7 @@
       registry.registerComponent("new-session-input-actions", ComposerAction);
       registry.registerComponent("task-card-indicators", CardIndicator);
       registry.registerComponent("task-card-tags", CardTags);
+      registry.registerComponent("task-row-metadata", RowMetadata);
       registry.registerComponent("sidebar-workspace-actions", WorkspaceActionsSlot);
       registry.registerTaskMenuAction({
         id: "enhance-notes",
@@ -699,6 +713,19 @@
                 context.presentation,
               );
             });
+        },
+      });
+      registry.registerTaskMenuAction({
+        id: "inspect-task-metadata",
+        label: "Inspect task metadata",
+        group: "primary",
+        run: function (context) {
+          return host.storage.set(
+            "task",
+            context.taskId,
+            "primary-menu-presentation",
+            context.presentation,
+          );
         },
       });
 

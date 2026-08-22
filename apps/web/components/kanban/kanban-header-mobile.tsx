@@ -23,7 +23,6 @@ import { cn } from "@/lib/utils";
 type KanbanHeaderMobileProps = {
   workspaceId?: string;
   currentPage?: "kanban" | "tasks";
-  hideTitle?: boolean;
   title: string;
   workspaceLabel: string;
   searchQuery?: string;
@@ -102,8 +101,6 @@ function MobileQuickChatButton({
 function MobileHeaderActionItems({
   workspaceId,
   workspaceLabel,
-  title,
-  hideTitle,
   currentPage,
   onSearchChange,
   isSearchOpen,
@@ -113,8 +110,6 @@ function MobileHeaderActionItems({
 }: {
   workspaceId?: string;
   workspaceLabel: string;
-  title: string;
-  hideTitle: boolean;
   currentPage: "kanban" | "tasks";
   onSearchChange?: (query: string) => void;
   isSearchOpen: boolean;
@@ -123,19 +118,9 @@ function MobileHeaderActionItems({
   toggleSearch: () => void;
 }) {
   const { t } = useTranslation();
-  const isHome = currentPage !== "tasks";
 
   return (
     <>
-      {!hideTitle && !isHome && (
-        <span
-          className="flex shrink-0 min-w-0 max-w-[38vw] flex-col leading-tight"
-          data-testid="mobile-topbar-page-context"
-        >
-          <span className="truncate text-sm font-medium text-muted-foreground">{title}</span>
-          <span className="truncate text-[10px] text-muted-foreground/60">{workspaceLabel}</span>
-        </span>
-      )}
       <MainTopBarPluginActions
         workspaceId={workspaceId}
         workspaceLabel={workspaceLabel}
@@ -228,7 +213,6 @@ function MobileHeaderActions(
 export function KanbanHeaderMobile({
   workspaceId,
   currentPage = "kanban",
-  hideTitle = false,
   title,
   workspaceLabel,
   searchQuery = "",
@@ -242,6 +226,7 @@ export function KanbanHeaderMobile({
   const setSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
   const handleOpenQuickTerminal = useQuickTerminalLauncher(workspaceId);
+
   const toggleSearch = () => {
     const next = !isSearchOpen;
     setSearchOpen(next);
@@ -251,21 +236,25 @@ export function KanbanHeaderMobile({
 
   return (
     <>
-      {/* Keep mobile root chrome compact so metrics and actions stay visible. */}
       <PageTopbar
         title={title}
-        backLabel=""
         leading={<MobileBrandLink workspaceId={workspaceId} />}
         showStatusTrigger={false}
-        className="h-10 px-3 py-1"
-        variant="root"
+        // The brand link is this bar's home affordance; a home crumb on top
+        // of it would say the same thing twice.
+        homeAffordance="none"
+        // The strip is this bar's flexible zone, so the bar's leftover width has
+        // to reach it. Left with the lead zone it would sit in the empty middle
+        // and the `flex-1` strip, whose base size is zero, would render at zero
+        // width with the actions unreachable behind it.
+        freeWidth="actions"
+        // The action strip scrolls rather than pushing the title crumb off the
+        // bar, so this cluster has to be the flexible one in the right zone.
         actionsClassName="min-w-0 flex-1 !shrink gap-2"
         actions={
           <MobileHeaderActions
             workspaceId={workspaceId}
             workspaceLabel={workspaceLabel}
-            title={title}
-            hideTitle={hideTitle}
             currentPage={currentPage}
             onSearchChange={onSearchChange}
             isSearchOpen={isSearchOpen}

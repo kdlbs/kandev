@@ -62,6 +62,7 @@ import type { AgentProfileMcpConfig } from "@/lib/types/http";
 import { useAgentProfileSettings } from "@/app/settings/agents/[agentId]/profiles/[profileId]/use-agent-profile-settings";
 import { agentProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { DynamicAgentProfileEditor } from "@/components/settings/dynamic-agent-profile-editor";
 
 type ProfileEditorProps = {
   agent: Agent;
@@ -531,6 +532,10 @@ export function AgentProfilePage({ initialMcpConfig }: AgentProfilePageClientPro
         </CardContent>
       </Card>
     );
+  }
+
+  if (profile.kind === "dynamic" || agent.name === "dynamic") {
+    return <DynamicAgentProfileEditor agent={agent} profile={profile} />;
   }
 
   return (

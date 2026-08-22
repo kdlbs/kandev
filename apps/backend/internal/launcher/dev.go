@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/config"
 )
 
 var (
@@ -27,7 +29,7 @@ func runDev(ctx context.Context, opts Options) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	logStartup("dev mode: using local repo", cfg.ports, cfg.dbPath, cfg.logLevel)
+	logStartup("dev mode: using local repo", cfg.ports, cfg.dbPath, cfg.logLevel, serverHostForConfig(cfg.startup))
 
 	ignoreBrokenPipeSignal()
 	setLauncherShutdownDebug(cfg.debug || os.Getenv("KANDEV_SHUTDOWN_DEBUG") == "1")
@@ -40,7 +42,7 @@ func runDev(ctx context.Context, opts Options) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	env := backendEnv(cfg.ports, cfg.logLevel, resolveConsoleLogLevel(opts), opts.Debug, healthToken, cfg.extra)
+	env := backendEnvForConfig(cfg.ports, cfg.logLevel, resolveConsoleLogLevel(opts), opts.Debug, healthToken, cfg.extra, cfg.startup)
 	env = upsertEnv(env, backendPIDFileEnv, filepath.Join(devKandevHome(cfg.repoRoot), "supervisor", "backend.pid"))
 	backend, dumpLogs, err := launchBackendFn(backendLaunchConfig{
 		Command:    "make",
@@ -50,7 +52,7 @@ func runDev(ctx context.Context, opts Options) int {
 		Quiet:      false,
 		Ports:      cfg.ports,
 		Mode:       "dev",
-		HomeDir:    devKandevHome(cfg.repoRoot),
+		HomeDir:    cfg.homeDir,
 		Supervisor: supervisor,
 	})
 	if err != nil {
@@ -60,7 +62,7 @@ func runDev(ctx context.Context, opts Options) int {
 	}
 
 	fmt.Println("[kandev] starting backend...")
-	if err := waitForHealthFn(ctx, cfg.ports.BackendURL, backend, healthTimeout(healthTimeoutDevMS), healthToken, dumpLogs); err != nil {
+	if err := waitForHealthFn(ctx, cfg.ports.BackendURL, backend, healthTimeoutForConfig(healthTimeoutDevMS, cfg.startup), healthToken, dumpLogs); err != nil {
 		supervisor.shutdown("backend health failure")
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
@@ -75,13 +77,13 @@ func runDev(ctx context.Context, opts Options) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	if err := waitForURLFn(ctx, webURL, webProc, healthTimeout(healthTimeoutDevMS)); err != nil {
+	if err := waitForURLFn(ctx, webURL, webProc, healthTimeoutForConfig(healthTimeoutDevMS, cfg.startup)); err != nil {
 		supervisor.shutdown("web readiness failure")
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
 
-	if opts.Headless {
+	if !shouldOpenBrowser(opts, cfg.startup) {
 		fmt.Printf("[kandev] ready (headless) at %s\n", cfg.ports.BackendURL)
 		return waitForAppExit(supervisor, backend, webProc)
 	}
@@ -97,12 +99,18 @@ type devLaunchConfig struct {
 	extra    []string
 	logLevel string
 	debug    bool
+	homeDir  string
+	startup  *config.Config
 }
 
 // devLaunchConfigFor resolves everything runDev needs before any process is
 // spawned: repo root, dev ports, and the dev backend env. It returns a
 // nonzero exit code (having printed the error) when any step fails.
-func devLaunchConfigFor(opts Options) (devLaunchConfig, int) {
+func devLaunchConfigFor(opts Options, configs ...*config.Config) (devLaunchConfig, int) {
+	startupConfig, exitCode := devStartupConfig(configs...)
+	if exitCode != 0 {
+		return devLaunchConfig{}, exitCode
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
@@ -113,12 +121,12 @@ func devLaunchConfigFor(opts Options) (devLaunchConfig, int) {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return devLaunchConfig{}, 2
 	}
-	backendPort, err := resolvePorts(opts)
+	backendPort, err := resolvePorts(opts, startupConfig)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return devLaunchConfig{}, 2
 	}
-	webPort, err := resolveWebPort(opts)
+	webPort, err := resolveWebPort(opts, startupConfig)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return devLaunchConfig{}, 2
@@ -128,15 +136,61 @@ func devLaunchConfigFor(opts Options) (devLaunchConfig, int) {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return devLaunchConfig{}, 1
 	}
-	dbPath, extra := resolveDevBackendEnv(repoRoot)
+	dbPath, extra := resolveDevBackendEnv(repoRoot, startupConfig)
+	homeDir := devKandevHome(repoRoot)
+	if !isInsideKandevTask(repoRoot) && configSourceIsExplicit(startupConfig, "homeDir") {
+		homeDir = startupConfig.ResolvedHomeDir()
+	}
 	return devLaunchConfig{
 		repoRoot: repoRoot,
 		ports:    ports,
 		dbPath:   dbPath,
 		extra:    extra,
-		logLevel: resolveLogLevel(opts),
+		logLevel: resolveLogLevelForConfig(opts, startupConfig),
 		debug:    opts.Debug,
+		homeDir:  homeDir,
+		startup:  startupConfig,
 	}, 0
+}
+
+func devStartupConfig(configs ...*config.Config) (*config.Config, int) {
+	if len(configs) > 0 {
+		return configs[0], 0
+	}
+	// Load dev defaults with the same selector that the child receives.
+	if os.Getenv("KANDEV_E2E_MOCK") == "" {
+		if err := os.Setenv("KANDEV_DEBUG_DEV_MODE", "true"); err != nil {
+			fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+			return nil, 1
+		}
+	}
+	startupConfig, err := loadDevBootstrapConfig()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return nil, 1
+	}
+	return startupConfig, 0
+}
+
+func loadDevBootstrapConfig() (*config.Config, error) {
+	if os.Getenv("KANDEV_E2E_MOCK") != "" || os.Getenv("KANDEV_DEBUG_DEV_MODE") != "" {
+		return loadBootstrapConfig()
+	}
+
+	const selector = "KANDEV_DEBUG_DEV_MODE"
+	previous, present := os.LookupEnv(selector)
+	if err := os.Setenv(selector, "true"); err != nil {
+		return nil, err
+	}
+	cfg, err := loadBootstrapConfig()
+	if present {
+		if restoreErr := os.Setenv(selector, previous); err == nil {
+			err = restoreErr
+		}
+	} else if restoreErr := os.Unsetenv(selector); err == nil {
+		err = restoreErr
+	}
+	return cfg, err
 }
 
 // backupProductionDBIfNeeded snapshots the resolved DB before dev mode runs

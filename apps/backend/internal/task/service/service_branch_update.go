@@ -60,14 +60,18 @@ func (s *Service) UpdateRepositoryBaseBranch(ctx context.Context, req UpdateRepo
 	if err != nil {
 		return nil, err
 	}
-	if taskRepo.BaseBranch == baseBranch {
-		return taskRepo, nil
-	}
-
-	taskRepo.BaseBranch = baseBranch
-	if err := s.taskRepos.UpdateTaskRepository(ctx, taskRepo); err != nil {
+	updatedTaskRepo, changed, err := s.taskRepos.UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(
+		ctx,
+		taskRepo.ID,
+		baseBranch,
+	)
+	if err != nil {
 		return nil, fmt.Errorf("update task repository: %w", err)
 	}
+	if !changed {
+		return updatedTaskRepo, nil
+	}
+	taskRepo = updatedTaskRepo
 
 	// Detach from the caller's ctx for post-commit fan-out: the DB row is
 	// already persisted, so if the HTTP / WS request gets cancelled mid-
@@ -136,25 +140,22 @@ func (s *Service) applyBaseBranchSideEffects(ctx context.Context, taskID, reposi
 	if task, err := s.tasks.GetTask(ctx, taskID); err == nil && task != nil {
 		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
 	}
-	if s.baseBranchPusher == nil {
-		return
+	if s.baseBranchPusher != nil {
+		branches, mapErr := s.collectTaskBaseBranches(ctx, taskID)
+		if mapErr != nil {
+			s.logger.Warn("UpdateRepositoryBaseBranch: failed to collect base branches for live push",
+				zap.String("task_id", taskID),
+				zap.Error(mapErr))
+		} else if len(branches) > 0 {
+			// Empty map = task currently has no recorded base_branches. Pushing
+			// nil to agentctl would call Manager.UpdateBaseBranches(nil) and wipe
+			// every tracker's override, including ones the caller didn't touch.
+			// Skip the push instead — the DB row we just updated is the source of
+			// truth for the next session launch.
+			s.baseBranchPusher.PushBaseBranchesForTask(ctx, taskID, branches)
+		}
 	}
-	branches, mapErr := s.collectTaskBaseBranches(ctx, taskID)
-	if mapErr != nil {
-		s.logger.Warn("UpdateRepositoryBaseBranch: failed to collect base branches for live push",
-			zap.String("task_id", taskID),
-			zap.Error(mapErr))
-		return
-	}
-	// Empty map = task currently has no recorded base_branches. Pushing
-	// nil to agentctl would call Manager.UpdateBaseBranches(nil) and wipe
-	// every tracker's override, including ones the caller didn't touch.
-	// Skip the push instead — the DB row we just updated is the source of
-	// truth for the next session launch.
-	if len(branches) == 0 {
-		return
-	}
-	s.baseBranchPusher.PushBaseBranchesForTask(ctx, taskID, branches)
+	s.pushTaskComparisonTargets(ctx, taskID)
 }
 
 // isSafeBaseBranchRef delegates to the shared

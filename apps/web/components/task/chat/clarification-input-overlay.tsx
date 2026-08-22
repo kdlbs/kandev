@@ -13,10 +13,12 @@ import type {
 import { useClarificationGroup } from "@/hooks/domains/session/use-clarification-group";
 import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 import {
+  CLARIFICATION_CUSTOM_TEXT_MAX_RUNES,
   ClarificationCarouselNav,
   ClarificationCustomInput,
   ClarificationOptions,
   ClarificationStepper,
+  countRunes,
 } from "./clarification-overlay-parts";
 import { ClarificationHeaderActions } from "./clarification-overlay-header";
 import { useTranslation } from "react-i18next";
@@ -437,10 +439,14 @@ function buildQuestionHandlers(ctx: QuestionHandlerCtx): QuestionHandlers {
     // Live-record the draft so the stepper updates and the custom input lights
     // up the moment the user types. Emptying the draft clears the answer so
     // allAnswered reverts to false. Enter/Cmd+Enter still drives advance/submit.
+    // An over-limit draft is also treated as unanswered (W4): otherwise it
+    // could sit recorded from live-typing and reach the header Submit button,
+    // which has no per-question rune check of its own, and fail the request
+    // with an opaque 400 the user never saw coming from this input.
     onCustomDraftChange(value) {
       setCustomDrafts((prev) => ({ ...prev, [meta.questionId]: value }));
       const trimmed = value.trim();
-      if (trimmed.length === 0) {
+      if (trimmed.length === 0 || countRunes(trimmed) > CLARIFICATION_CUSTOM_TEXT_MAX_RUNES) {
         group.clearAnswer(meta.questionId);
         return;
       }

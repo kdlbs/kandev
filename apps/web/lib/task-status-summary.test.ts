@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { isNewerStatusSummary, pickFreshestStatusSummary } from "./task-status-summary";
+import {
+  isNewerStatusSummary,
+  pickFreshestStatusSummary,
+  selectTaskStatusSummary,
+  statusSummaryActiveErrorPreview,
+} from "./task-status-summary";
 import type { TaskStatusSummary } from "./types/task-status-summary";
 
 function summary(revision: number, queuedPromptCount = 0): TaskStatusSummary {
@@ -54,5 +59,35 @@ describe("pickFreshestStatusSummary", () => {
     // response can still carry a newer count than the cache.
     const next = summary(3, 5);
     expect(pickFreshestStatusSummary(next, summary(3, 0))).toBe(next);
+  });
+});
+
+describe("selectTaskStatusSummary", () => {
+  it("selects the newest detail or live cache reading", () => {
+    const detail = summary(4);
+    const live = summary(7);
+    expect(selectTaskStatusSummary(detail, [summary(3), live])).toBe(live);
+  });
+
+  it("lets a newer live reading clear an older detail error", () => {
+    const detail = summary(5);
+    detail.active_error = {
+      stamp: "launch-error-5",
+      occurred_at: "2026-08-20T10:00:00Z",
+      preview: "launch failed",
+    };
+    const live = summary(6);
+    live.active_error = null;
+    expect(selectTaskStatusSummary(detail, [live])).toBe(live);
+  });
+
+  it("keeps a task-owned active error visible without a session key", () => {
+    const taskOwned = summary(2);
+    taskOwned.active_error = {
+      stamp: "task-error-2",
+      occurred_at: "2026-08-19T10:00:00Z",
+      preview: "Choose a base branch",
+    };
+    expect(statusSummaryActiveErrorPreview(taskOwned, {}, {})).toBe("Choose a base branch");
   });
 });

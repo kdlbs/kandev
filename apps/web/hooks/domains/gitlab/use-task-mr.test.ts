@@ -89,6 +89,29 @@ function workspaceProbe(workspaceId: string) {
   });
 }
 
+// Simulates AppSidebar and /tasks mounting separate hook instances for the
+// same workspace. Both instances share one store and one active request.
+function DualWorkspaceMRInstance() {
+  useWorkspaceMRs("ws-1");
+  return null;
+}
+function DualWorkspaceMRHarness({ mountSecond }: { mountSecond: boolean }) {
+  const mrs = useAppStore((state) => state.taskMRs.byWorkspaceId["ws-1"] ?? EMPTY_TASK_MRS);
+  return createElement(
+    "div",
+    null,
+    createElement(DualWorkspaceMRInstance, { key: "first" }),
+    mountSecond ? createElement(DualWorkspaceMRInstance, { key: "second" }) : null,
+    createElement("output", { "data-testid": WORKSPACE_MRS_TEST_ID }, JSON.stringify(mrs)),
+  );
+}
+function dualWorkspaceMRTree(mountSecond: boolean) {
+  return createElement(StateProvider, {
+    initialState: { workspaces: { items: [], activeId: "ws-1" } },
+    children: createElement(DualWorkspaceMRHarness, { mountSecond }),
+  });
+}
+
 describe("useWorkspaceMRs", () => {
   beforeEach(() => {
     listWorkspaceTaskMRsMock.mockReset();
@@ -206,6 +229,69 @@ describe("useWorkspaceMRs", () => {
     listWorkspaceTaskMRsMock.mockResolvedValueOnce({ task_mrs: {} });
     rerender({ ws: "ws-1" });
     await waitFor(() => expect(listWorkspaceTaskMRsMock).toHaveBeenCalledTimes(3));
+  });
+});
+
+describe("useWorkspaceMRs cache failures", () => {
+  beforeEach(() => {
+    listWorkspaceTaskMRsMock.mockReset();
+  });
+
+  it("removes cached workspace data when its refresh fails", async () => {
+    const staleMR = makeMR({ id: "stale", task_id: "task-1" });
+    listWorkspaceTaskMRsMock.mockRejectedValueOnce(new Error("boom"));
+
+    const { result } = renderHook(
+      () => {
+        useWorkspaceMRs("ws-1");
+        return useAppStore((state) => state.taskMRs.byWorkspaceId["ws-1"] ?? EMPTY_TASK_MRS);
+      },
+      {
+        wrapper: ({ children }) =>
+          createElement(StateProvider, {
+            initialState: {
+              workspaces: { items: [], activeId: "ws-1" },
+              taskMRs: { byWorkspaceId: { "ws-1": { "task-1": [staleMR] } } },
+            },
+            children,
+          }),
+      },
+    );
+
+    expect(result.current["task-1"]).toEqual([staleMR]);
+    await waitFor(() => expect(result.current).toEqual({}));
+  });
+});
+
+describe("useWorkspaceMRs, co-mounted instances", () => {
+  beforeEach(() => {
+    listWorkspaceTaskMRsMock.mockReset();
+  });
+
+  it("shares an in-flight request but permits a later refresh", async () => {
+    const mr = makeMR({ task_id: "task-1" });
+    let resolveFirst: (v: { task_mrs: Record<string, TaskMR[]> }) => void = () => {};
+    const firstPromise = new Promise<{ task_mrs: Record<string, TaskMR[]> }>((resolve) => {
+      resolveFirst = resolve;
+    });
+    listWorkspaceTaskMRsMock.mockReturnValueOnce(firstPromise);
+
+    const view = render(dualWorkspaceMRTree(true));
+    await waitFor(() => expect(listWorkspaceTaskMRsMock).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      resolveFirst({ task_mrs: { "task-1": [mr] } });
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId(WORKSPACE_MRS_TEST_ID).textContent).toEqual(
+        JSON.stringify({ "task-1": [mr] }),
+      ),
+    );
+
+    view.rerender(dualWorkspaceMRTree(false));
+    listWorkspaceTaskMRsMock.mockResolvedValueOnce({ task_mrs: { "task-1": [mr] } });
+    view.rerender(dualWorkspaceMRTree(true));
+    await waitFor(() => expect(listWorkspaceTaskMRsMock).toHaveBeenCalledTimes(2));
   });
 });
 

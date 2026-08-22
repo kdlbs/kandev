@@ -113,9 +113,9 @@ func (r *Repository) insertTurnRow(ctx context.Context, execer taskSessionExecut
 	}
 
 	_, err := execer.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`), turn.ID, turn.TaskSessionID, turn.TaskID, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt)
+		INSERT INTO task_session_turns (id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), turn.ID, turn.TaskSessionID, turn.TaskID, turn.ExecutionProfileID, turn.RouteGeneration, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt)
 	return err
 }
 
@@ -188,7 +188,7 @@ func scanTurn(scanner turnScanner) (*models.Turn, error) {
 	turn := &models.Turn{}
 	var metadataJSON string
 	var completedAt sql.NullTime
-	err := scanner.Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
+	err := scanner.Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.ExecutionProfileID, &turn.RouteGeneration, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +210,7 @@ func scanTurnRow(row *sql.Row) (*models.Turn, error) {
 // GetTurn retrieves a turn by ID
 func (r *Repository) GetTurn(ctx context.Context, id string) (*models.Turn, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
+		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns WHERE id = ?
 	`), id)
 	return scanTurnRow(row)
@@ -219,7 +219,7 @@ func (r *Repository) GetTurn(ctx context.Context, id string) (*models.Turn, erro
 // GetActiveTurnBySessionID gets the currently active (non-completed) turn for a session
 func (r *Repository) GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error) {
 	query := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
+		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns turn_row
 		WHERE turn_row.task_session_id = ?
 		  AND turn_row.completed_at IS NULL
@@ -248,9 +248,9 @@ func (r *Repository) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 	updatedAt := r.nowUTC()
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_session_turns
-		SET completed_at = ?, metadata = ?, updated_at = ?
+		SET completed_at = ?, metadata = ?, execution_profile_id = ?, route_generation = ?, updated_at = ?
 		WHERE id = ? AND task_session_id = ? AND updated_at = ?
-	`), turn.CompletedAt, metadataJSON, updatedAt, turn.ID, turn.TaskSessionID, turn.UpdatedAt)
+	`), turn.CompletedAt, metadataJSON, turn.ExecutionProfileID, turn.RouteGeneration, updatedAt, turn.ID, turn.TaskSessionID, turn.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -429,7 +429,7 @@ func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) (
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTurnsBySession")
 	defer span.End()
 	query := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
+		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns turn_row
 		WHERE turn_row.task_session_id = ? AND %s
 		ORDER BY turn_row.started_at ASC, turn_row.created_at ASC, turn_row.id ASC
@@ -469,7 +469,8 @@ func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) (
 // the two column names that used to live here have collapsed into one.
 const taskSessionSelectCols = `ts.id, ts.task_id,
 	COALESCE(er.agent_execution_id, ''), COALESCE(er.container_id, ''),
-	ts.agent_profile_id, ts.execution_profile_id, ts.executor_id, ts.executor_profile_id, ts.environment_id,
+	ts.agent_profile_id, ts.execution_profile_id, ts.route_generation, ts.route_state, ts.route_reason, ts.downstream_acp_session_id,
+	ts.executor_id, ts.executor_profile_id, ts.environment_id,
 	ts.repository_id, ts.base_branch, ts.base_commit_sha,
 	COALESCE(NULLIF(te.workspace_path, ''), ts.workspace_path),
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
@@ -676,14 +677,20 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 	}
 	_, err = exec.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_sessions (
-			id, task_id, agent_profile_id, execution_profile_id, executor_id, executor_profile_id, environment_id,
+			id, task_id, agent_profile_id, execution_profile_id, route_generation, route_state, route_reason, downstream_acp_session_id,
+			executor_id, executor_profile_id, environment_id,
 			repository_id, base_branch, base_commit_sha, workspace_path,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
 			is_primary, review_status, is_passthrough, task_environment_id, name
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		)
 	`), session.ID, session.TaskID, agentProfileID,
-		session.ExecutionProfileID, session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID, session.RepositoryID, session.BaseBranch, session.BaseCommitSHA, session.WorkspacePath,
+		session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
+		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID, session.RepositoryID, session.BaseBranch, session.BaseCommitSHA, session.WorkspacePath,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
@@ -730,7 +737,8 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 
 	err := row.Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &agentProfileID,
-		&session.ExecutionProfileID, &session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
+		&session.ExecutionProfileID, &session.RouteGeneration, &session.RouteState, &session.RouteReason, &session.DownstreamACPSessionID,
+		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
@@ -783,8 +791,52 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		return nil, fmt.Errorf("failed to load session worktrees: %w", err)
 	}
 	session.Worktrees = worktrees
+	if err := r.hydrateDynamicRoutePolicy(ctx, session); err != nil {
+		return nil, err
+	}
 
 	return session, nil
+}
+
+// hydrateDynamicRoutePolicy projects the durable route decision into session
+// responses. The route row remains the source of truth, so this projection
+// survives a backend restart without adding a second mutable policy store to
+// task_sessions.
+func (r *Repository) hydrateDynamicRoutePolicy(ctx context.Context, session *models.TaskSession) error {
+	if session == nil || session.RouteGeneration <= 0 {
+		return nil
+	}
+	var policyStateJSON string
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT policy_state_json FROM dynamic_route_states WHERE session_id = ?`,
+	), session.ID).Scan(&policyStateJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to load dynamic route policy projection: %w", err)
+	}
+	var projection struct {
+		FailureCode      string     `json:"failure_code"`
+		FailureClass     string     `json:"failure_class"`
+		CatalogueVersion string     `json:"catalogue_version"`
+		RetryOrdinal     int64      `json:"retry_ordinal"`
+		Deadline         *time.Time `json:"deadline"`
+		PendingOutcome   string     `json:"pending_outcome"`
+	}
+	if policyStateJSON == "" {
+		return nil
+	}
+	if err := json.Unmarshal([]byte(policyStateJSON), &projection); err != nil {
+		return fmt.Errorf("failed to decode dynamic route policy projection: %w", err)
+	}
+	session.RouteErrorCode = projection.FailureCode
+	session.RouteErrorClass = projection.FailureClass
+	session.RouteCatalogueVersion = projection.CatalogueVersion
+	session.RouteRetryOrdinal = projection.RetryOrdinal
+	session.RouteDeadline = projection.Deadline
+	session.RoutePendingOutcome = projection.PendingOutcome
+	return nil
 }
 
 // GetTaskSession retrieves an agent session by ID
@@ -1118,13 +1170,15 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	}
 	query := `
 		UPDATE task_sessions SET
-			agent_profile_id = ?, execution_profile_id = ?, executor_id = ?, executor_profile_id = ?, environment_id = ?,
+			agent_profile_id = ?, execution_profile_id = ?, route_generation = ?, route_state = ?, route_reason = ?, downstream_acp_session_id = ?,
+			executor_id = ?, executor_profile_id = ?, environment_id = ?,
 			repository_id = ?, base_branch = ?, base_commit_sha = ?, workspace_path = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
 			state = ?, error_message = ?, completed_at = ?, updated_at = ?,
 			is_primary = ?, review_status = ?, is_passthrough = ?, task_environment_id = ?
 		WHERE id = ?`
-	args := []interface{}{agentProfileID, session.ExecutionProfileID, session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
+	args := []interface{}{agentProfileID, session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
+		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
 		session.RepositoryID, session.BaseBranch, session.BaseCommitSHA, session.WorkspacePath,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, session.CompletedAt, session.UpdatedAt,
@@ -1418,22 +1472,21 @@ func (r *Repository) updateSessionMetadataJSON(
 }
 
 // SetSessionMetadataKey atomically sets a single key in the session's metadata
-// using SQLite's json_set. Unlike UpdateSessionMetadata (which does a full
-// replacement), this preserves all other metadata keys.
+// using the active database dialect. Unlike UpdateSessionMetadata (which does
+// a full replacement), this preserves all other metadata keys.
 func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
 	valueJSON, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("failed to serialize metadata value: %w", err)
 	}
-	now := time.Now().UTC()
-	path := "$." + key
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)), updated_at = ? WHERE id = ?
-	`), path, string(valueJSON), now, sessionID)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(metadataKeyUpdateQuery("task_sessions", r.db.DriverName())), metadataKeyUpdateArgs(r.db.DriverName(), key, string(valueJSON), r.nowUTC(), sessionID)...)
 	if err != nil {
 		return err
 	}
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
 	if rows == 0 {
 		return fmt.Errorf("agent session not found: %s", sessionID)
 	}
@@ -1643,6 +1696,48 @@ func (r *Repository) RemoveSessionMetadataKeyIfState(
 	}
 	rows, _ := result.RowsAffected()
 	return rows > 0, nil
+}
+
+// RemoveSessionMetadataKeyIfStamp removes a metadata object only when its
+// nested stamp still equals expectedStamp. The comparison and key removal are
+// one statement so a successful recovery cannot erase a newer session error.
+func (r *Repository) RemoveSessionMetadataKeyIfStamp(
+	ctx context.Context,
+	sessionID, key, expectedStamp string,
+) (bool, error) {
+	if strings.TrimSpace(expectedStamp) == "" {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	driver := r.db.DriverName()
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(driver) {
+		query = `
+			UPDATE task_sessions
+			SET metadata = (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END #- ARRAY[?]::text[])::text,
+				updated_at = ?
+			WHERE id = ?
+				AND jsonb_extract_path_text(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ?, 'stamp') = ?
+		`
+		args = []interface{}{key, now, sessionID, key, expectedStamp}
+	} else {
+		path := "$" + "." + key
+		query = `
+			UPDATE task_sessions
+			SET metadata = json_remove(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?),
+				updated_at = ?
+			WHERE id = ?
+				AND json_extract(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = ?
+		`
+		args = []interface{}{path, now, sessionID, path + ".stamp", expectedStamp}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
 }
 
 func setSessionMetadataKeyIfAbsentQuery(driver string) string {
@@ -2276,7 +2371,8 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 
 	err := rows.Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &agentProfileID,
-		&session.ExecutionProfileID, &session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
+		&session.ExecutionProfileID, &session.RouteGeneration, &session.RouteState, &session.RouteReason, &session.DownstreamACPSessionID,
+		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,

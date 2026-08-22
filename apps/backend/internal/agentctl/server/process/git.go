@@ -602,17 +602,16 @@ func (g *GitOperator) Rebase(ctx context.Context, baseBranch string) (*GitOperat
 		Operation: "rebase",
 	}
 
-	// Fetch the base branch first
-	fetchOutput, err := g.runGitCommand(ctx, "fetch", "origin", baseBranch)
+	prepareOutput, target, err := g.prepareBaseBranchTarget(ctx, baseBranch)
 	if err != nil {
-		result.Error = fmt.Sprintf("failed to fetch base branch: %s", err.Error())
-		result.Output = fetchOutput
+		result.Error = err.Error()
+		result.Output = prepareOutput
 		return result, nil
 	}
 
 	// Perform the rebase
-	rebaseOutput, err := g.runGitCommand(ctx, "rebase", "origin/"+baseBranch)
-	result.Output = fetchOutput + rebaseOutput
+	rebaseOutput, err := g.runGitCommand(ctx, "rebase", target)
+	result.Output = prepareOutput + rebaseOutput
 
 	if err != nil {
 		result.Error = err.Error()
@@ -649,17 +648,16 @@ func (g *GitOperator) Merge(ctx context.Context, baseBranch string) (*GitOperati
 		Operation: "merge",
 	}
 
-	// Fetch the base branch first
-	fetchOutput, err := g.runGitCommand(ctx, "fetch", "origin", baseBranch)
+	prepareOutput, target, err := g.prepareBaseBranchTarget(ctx, baseBranch)
 	if err != nil {
-		result.Error = fmt.Sprintf("failed to fetch base branch: %s", err.Error())
-		result.Output = fetchOutput
+		result.Error = err.Error()
+		result.Output = prepareOutput
 		return result, nil
 	}
 
 	// Perform the merge
-	mergeOutput, err := g.runGitCommand(ctx, "merge", "origin/"+baseBranch)
-	result.Output = fetchOutput + mergeOutput
+	mergeOutput, err := g.runGitCommand(ctx, "merge", target)
+	result.Output = prepareOutput + mergeOutput
 
 	if err != nil {
 		result.Error = err.Error()

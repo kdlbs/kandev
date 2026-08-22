@@ -23,8 +23,7 @@ const (
 // errAgentNeverStarted is the launch-failure error recorded when a stalled
 // prompt's agent has emitted zero events since dispatch. Its Error() string
 // is persisted as the session's error_message by recordSessionLaunchFailure;
-// it is not a missing-branch error, so handleSessionLaunchFailed's
-// branch-guidance side effect stays inert for this path.
+// it is not a missing-branch error, so no legacy branch guidance is created.
 var errAgentNeverStarted = errors.New("agent produced no output since start")
 
 // handleAgentStalled persists an advisory recovery affordance for a turn that
