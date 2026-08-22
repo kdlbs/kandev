@@ -10,6 +10,9 @@ test.describe("managed agent runtime updates on mobile", () => {
 
     await testPage.goto("/settings/agents");
     const trigger = testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`);
+    await expect(
+      testPage.getByTestId(`agent-update-available-dot-${runtime.agentName}`),
+    ).toBeVisible();
     await trigger.scrollIntoViewIfNeeded();
     const triggerBox = await trigger.boundingBox();
     expect(triggerBox).not.toBeNull();
@@ -95,7 +98,14 @@ test.describe("managed agent runtime updates on mobile", () => {
     const selectorBox = await selector.boundingBox();
     expect(selectorBox).not.toBeNull();
     expect(selectorBox!.height).toBeGreaterThanOrEqual(44);
-    await selector.selectOption("0.61.0");
+    await selector.tap();
+    const option = drawer
+      .getByTestId(`agent-update-version-browser-${runtime.agentName}`)
+      .getByTestId(`agent-update-version-option-${runtime.agentName}-0.61.0`);
+    const optionBox = await option.boundingBox();
+    expect(optionBox).not.toBeNull();
+    expect(optionBox!.height).toBeGreaterThanOrEqual(44);
+    await option.tap();
 
     await expect(drawer).toContainText("0.62.0 → 0.61.0");
     await expect(testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toHaveText(
@@ -104,6 +114,44 @@ test.describe("managed agent runtime updates on mobile", () => {
     await testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`).tap();
     expect(runtime.postTargets()).toEqual(["0.61.0"]);
     expect(runtime.previewTargets()).toEqual(["", "0.61.0"]);
+  });
+
+  test("searches the full version history in the drawer", async ({ testPage }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage, {
+      previewResponse: {
+        agent_name: "claude-acp",
+        package: "@agentclientprotocol/claude-agent-acp",
+        current_version: "0.62.0",
+        default_version: "0.64.0",
+        active_version: "0.62.0",
+        effective_version: "0.62.0",
+        target_version: "0.63.0",
+        available_versions: Array.from({ length: 12 }, (_, index) => ({
+          version: `0.${74 - index}.0`,
+          latest: index === 0,
+        })),
+        command: ["npm", "exec"],
+        command_string: "npm exec",
+      },
+    });
+
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).tap();
+    const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
+    await drawer.getByTestId(`agent-update-version-${runtime.agentName}`).tap();
+    const search = drawer.getByPlaceholder("Search versions");
+    await expect(search).toBeVisible();
+    await search.fill("0.70");
+    const option = drawer
+      .getByTestId(`agent-update-version-browser-${runtime.agentName}`)
+      .getByTestId(`agent-update-version-option-${runtime.agentName}-0.70.0`);
+    await expect(option).toBeVisible();
+    const optionBox = await option.boundingBox();
+    expect(optionBox).not.toBeNull();
+    expect(optionBox!.height).toBeGreaterThanOrEqual(44);
+    await option.tap();
+    await expect(drawer).toContainText("0.62.0 → 0.70.0");
+    expect(runtime.previewTargets()).toEqual(["", "0.70.0"]);
   });
 
   test("keeps retry available after an update job fails", async ({ testPage }) => {

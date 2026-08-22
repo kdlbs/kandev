@@ -17,10 +17,11 @@ var ErrNoStableVersions = errors.New("no stable runtime versions available")
 type Operation string
 
 const (
-	OperationUpdate   Operation = "update"
-	OperationRollback Operation = "rollback"
-	OperationRepair   Operation = "repair"
-	OperationUpToDate Operation = "up_to_date"
+	OperationUpdate     Operation = "update"
+	OperationRollback   Operation = "rollback"
+	OperationRepair     Operation = "repair"
+	OperationUpToDate   Operation = "up_to_date"
+	OperationUseDefault Operation = "use_default"
 )
 
 // VersionOption is one selectable version in the bounded catalogue.
@@ -202,6 +203,48 @@ func ClassifyOperation(active, current, target string) (Operation, error) {
 		return OperationRepair, nil
 	}
 	compare := targetVersion.Compare(baseVersion)
+	if compare > 0 {
+		return OperationUpdate, nil
+	}
+	if compare < 0 {
+		return OperationRollback, nil
+	}
+	return OperationRepair, nil
+}
+
+// ClassifyEffectiveOperation derives the operator action from the effective
+// version used by future commands. An active selection is distinct from the
+// effective version because choosing the shipped default removes that
+// selection only after the candidate has been validated.
+func ClassifyEffectiveOperation(
+	useDefault bool,
+	active string,
+	effective string,
+	current string,
+	target string,
+	defaultVersion string,
+) (Operation, error) {
+	targetParsed, err := ParseStableVersion(target)
+	if err != nil {
+		return "", err
+	}
+	if useDefault && active != "" && defaultVersion != "" {
+		if _, err := ParseStableVersion(defaultVersion); err != nil {
+			return "", err
+		}
+		if target == defaultVersion {
+			return OperationUseDefault, nil
+		}
+	}
+	effectiveParsed, effectiveOK := parseKnownVersion(effective)
+	_, currentOK := parseKnownVersion(current)
+	if !effectiveOK || !currentOK {
+		return OperationRepair, nil
+	}
+	if effective == target && current == target {
+		return OperationUpToDate, nil
+	}
+	compare := targetParsed.Compare(effectiveParsed)
 	if compare > 0 {
 		return OperationUpdate, nil
 	}

@@ -681,7 +681,8 @@ func TestController_PreviewAgentCommand_CopilotKeepsManagedPackage(t *testing.T)
 	if err != nil {
 		t.Fatalf("PreviewAgentCommand() error = %v", err)
 	}
-	want := []string{"npx", "--yes", "--prefer-offline", "@github/copilot", "--acp"}
+	managed := agents.NewCopilotACP()
+	want := []string{"npx", "--yes", "--prefer-offline", managed.ManagedNPMRuntime().PackageSpec(""), "--acp"}
 	if got := res.Command; !slices.Equal(got, want) {
 		t.Errorf("preview with copilot on PATH = %v, want %v", got, want)
 	}
