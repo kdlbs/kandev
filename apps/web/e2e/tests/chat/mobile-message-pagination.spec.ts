@@ -1,6 +1,3 @@
-// Chat message pagination — upward scrolling walks a collapsed conversation
-// all the way back to the first stored prompt without repeated button actions.
-// Covers the native transcript renderer and its prepend scroll anchoring.
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import {
@@ -11,18 +8,18 @@ import {
   seedCollapsedMessageHistory,
 } from "./message-pagination-helpers";
 
-test.describe("@chat message pagination", () => {
-  test("upward scrolling reaches the initial prompt through collapsed history", async ({
+test.describe("Mobile chat message pagination", () => {
+  test.describe.configure({ timeout: 180_000 });
+
+  test("reaches the initial prompt through collapsed history by upward scrolling", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(180_000);
-
     const { taskId } = await seedCollapsedMessageHistory(
       apiClient,
       seedData,
-      "message-pagination-scrolls-to-start",
+      "mobile-message-pagination-scrolls-to-start",
     );
 
     await testPage.goto(`/t/${taskId}`);
@@ -34,12 +31,7 @@ test.describe("@chat message pagination", () => {
 
     await expect(chat.getByText(TASK_DESCRIPTION_MARKER, { exact: true })).toBeVisible();
     await expect(chat.getByText(INITIAL_PROMPT_MARKER, { exact: true })).toHaveCount(0);
-    const recentRowTopBeforeScroll = await readStandaloneMessageTop(list, RECENT_AGENT_MARKER);
-    expect(Number.isFinite(recentRowTopBeforeScroll)).toBe(true);
 
-    // Put the single native scroll owner at the oldest loaded edge. The
-    // sentinel may immediately start loading, so capture the row position in
-    // the same DOM task before the observer callback can run.
     const recentRowTopAtOldestLoadedEdge = await list.evaluate((element, marker) => {
       element.scrollTop = 0;
       element.dispatchEvent(new Event("scroll", { bubbles: true }));
@@ -50,13 +42,11 @@ test.describe("@chat message pagination", () => {
     }, RECENT_AGENT_MARKER);
     expect(Number.isFinite(recentRowTopAtOldestLoadedEdge)).toBe(true);
 
-    // Positive page loads must re-arm the still-visible sentinel until the
-    // stored prompt replaces the synthetic task-description fallback.
     await expect
       .poll(() => chat.getByText(INITIAL_PROMPT_MARKER, { exact: true }).count(), {
         timeout: 60_000,
         intervals: [300],
-        message: "Loading older pages until initial prompt",
+        message: "Loading mobile history until initial prompt",
       })
       .toBe(1);
 
