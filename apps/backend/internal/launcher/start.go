@@ -17,6 +17,7 @@ var (
 	newSupervisorFn = newSupervisor
 	launchBackendFn = launchRestartableBackend
 	waitForHealthFn = waitForHealth
+	waitForReadyFn  = waitForReady
 	attachSignalsFn = func(supervisor *processSupervisor) {
 		supervisor.attachSignals()
 	}
@@ -145,6 +146,12 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	fmt.Println("[kandev] starting backend...")
 	if err := waitForHealthFn(ctx, cfg.Ports.BackendURL, backend, healthTimeoutForConfig(healthTimeoutReleaseMS, cfg.Startup), healthToken, dumpLogs); err != nil {
 		supervisor.shutdown("backend health failure")
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	shutdownDebugf("runManagedApp backend healthy, waiting for readiness")
+	if err := waitForReadyFn(ctx, cfg.Ports.BackendURL, backend); err != nil {
+		supervisor.shutdown("backend readiness failure")
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}

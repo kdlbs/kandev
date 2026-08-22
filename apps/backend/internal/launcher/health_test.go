@@ -197,6 +197,113 @@ func TestWaitForHealthCallsOnFailureWhenContextCanceled(t *testing.T) {
 	}
 }
 
+func TestWaitForReadyReturnsNilOnReadyResponse(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ready" {
+			t.Errorf("path = %q, want /ready", r.URL.Path)
+		}
+		// The first probe still reports 503 (bootstrap handler / not-ready-yet),
+		// exercising the poll loop, before flipping to ready.
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"starting"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	if err := waitForReady(context.Background(), srv.URL, fakeChild{}); err != nil {
+		t.Fatalf("waitForReady() = %v, want nil", err)
+	}
+	if got := calls.Load(); got < 2 {
+		t.Fatalf("probe calls = %d, want at least 2", got)
+	}
+}
+
+func TestWaitForReadyIgnoresMissingDesktopHealthToken(t *testing.T) {
+	// readyHandler never sets X-Kandev-Desktop-Health-Token (that header is
+	// /health-only); probeReady must accept a bare 2xx regardless.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	if err := waitForReady(context.Background(), srv.URL, fakeChild{}); err != nil {
+		t.Fatalf("waitForReady() = %v, want nil", err)
+	}
+}
+
+func TestWaitForReadyKeepsPollingPastWhatWouldBeAHealthTimeout(t *testing.T) {
+	// waitForReady has no timeout of its own: unlike waitForHealth's
+	// healthTimeoutReleaseMS/healthTimeoutDevMS budget, a long readiness wait
+	// (startup recovery still running) must not be treated as a failure.
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+	defer cancel()
+	err := waitForReady(ctx, srv.URL, fakeChild{})
+	if err == nil {
+		t.Fatal("waitForReady() = nil, want the injected context deadline to end the wait")
+	}
+	if !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("error = %v, want a cancellation error", err)
+	}
+	if got := calls.Load(); got < 2 {
+		t.Fatalf("probe calls = %d, want at least 2 (proves it kept polling past a single failure)", got)
+	}
+}
+
+func TestWaitForReadyReturnsWhenContextCanceled(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(func() {
+		close(release)
+		srv.Close()
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- waitForReady(ctx, srv.URL, fakeChild{})
+	}()
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("waitForReady() = nil, want cancellation error")
+		}
+		if !strings.Contains(err.Error(), "canceled") {
+			t.Fatalf("error = %v, want a cancellation error", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("waitForReady ignored context cancellation")
+	}
+}
+
+func TestWaitForReadyFailsFastWhenBackendExited(t *testing.T) {
+	err := waitForReady(context.Background(), "http://127.0.0.1:1", fakeChild{exited: true, code: 3})
+	if err == nil {
+		t.Fatal("waitForReady() = nil, want exit error")
+	}
+	if !strings.Contains(err.Error(), "code 3") {
+		t.Fatalf("error = %v, want the backend exit code", err)
+	}
+}
+
 func TestWaitForHealthFailsFastWhenBackendExited(t *testing.T) {
 	var failures int
 	err := waitForHealth(
