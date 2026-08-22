@@ -51,15 +51,16 @@ import type { ApiClient } from "../../helpers/api-client";
 import { holdPluginInstallResponse } from "../../helpers/plugin-install";
 import { dwell } from "../../helpers/causal-waits";
 import { MAX_INLINE_PLUGIN_FOOTER_ITEMS } from "@/lib/navigation/plugin-footer-budget";
+import {
+  openInstallDialog,
+  PACKAGE_PATH,
+  PLUGIN_ID,
+  uninstallPluginFixture,
+  uploadPackage,
+} from "./plugin-test-helpers";
 
-const PLUGIN_ID = "kandev-plugin-e2e";
 const NAV_ITEM_ID = "e2e-hello";
 const PLUGIN_ROUTE = "/plugins/e2e-hello";
-
-const PACKAGE_PATH = path.resolve(
-  __dirname,
-  "../../../../../apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz",
-);
 
 /** Every deliveries.jsonl `event_type` recorded so far, read straight off
  * disk from the plugin's real KANDEV_PLUGIN_DATA_DIR (no in-process mock —
@@ -75,18 +76,6 @@ function deliveredEventTypes(pluginsDir: string): string[] {
     .map((line) => (JSON.parse(line) as { event_type: string }).event_type);
 }
 
-async function openInstallDialog(page: Page) {
-  await page.goto("/settings/plugins");
-  await page.getByTestId("install-plugin-trigger").click();
-  await expect(page.getByTestId("install-plugin-dialog")).toBeVisible();
-}
-
-async function uploadPackage(page: Page, filePath: string) {
-  await page.getByTestId("install-plugin-tab-upload").click();
-  await page.getByTestId("install-plugin-file-input").setInputFiles(filePath);
-  await page.getByTestId("install-plugin-upload-submit").click();
-}
-
 async function waitForPluginBundleReady(page: Page): Promise<void> {
   const navItem = page.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`);
   await expect(navItem).toBeVisible({ timeout: 15_000 });
@@ -98,7 +87,7 @@ async function waitForPluginBundleReady(page: Page): Promise<void> {
 }
 
 async function uninstallViaApi(apiClient: ApiClient) {
-  await apiClient.rawRequest("DELETE", `/api/plugins/${PLUGIN_ID}`).catch(() => undefined);
+  await uninstallPluginFixture(apiClient);
 }
 
 async function installedPluginPath(apiClient: ApiClient): Promise<string> {
@@ -381,6 +370,100 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     // Leave the instance-wide default off so sibling tests start clean.
     await globalToggle.click();
     await expect(globalToggle).toHaveAttribute("aria-checked", "false");
+  });
+
+  /**
+   * Deliberate scope limit (see docs/plans/plugins/task-*): there is no
+   * fixture package for a *second* signed version, so this proves the
+   * operator-triggered check surfaces the "Update available" badge via a
+   * route-mocked catalog, and that a manual update failing against a
+   * (deliberately unreachable) mocked `package_url` renders inline without
+   * disturbing the rest of the row. The real, successful reinstall path is
+   * covered at the unit level (use-plugin-update-action.test.tsx).
+   */
+  test("marketplace update check surfaces an available-version badge, and a failing manual update shows an inline error", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
+    await expect(pluginRow).toBeVisible({ timeout: 15_000 });
+
+    const newerVersion = "9.9.9";
+    await testPage.route("**/api/plugins/marketplace", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          plugins: [
+            {
+              id: PLUGIN_ID,
+              name: "E2E Hello",
+              description: "",
+              author: "kandev",
+              categories: [],
+              icon_url: "",
+              repo_url: "",
+              version: newerVersion,
+              min_kandev_version: "",
+              package_url: "https://example.invalid/kandev-plugin-e2e-9.9.9.tar.gz",
+              package_sha256: "",
+              stars: 0,
+              updated_at: new Date(0).toISOString(),
+              install_state: "update_available",
+              installed_version: "1.0.0",
+              source_id: "official",
+              source_name: "Kandev Official",
+            },
+          ],
+          sources: [
+            {
+              id: "official",
+              name: "Kandev Official",
+              url: "https://example.invalid",
+              enabled: true,
+              builtin: true,
+              healthy: true,
+            },
+          ],
+        }),
+      });
+    });
+    await testPage.route("**/api/plugins/marketplace/refresh", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ refreshed: true }),
+      }),
+    );
+
+    await testPage.getByTestId("plugins-check-updates-button").click();
+
+    const latestVersion = pluginRow.getByTestId(`plugin-latest-version-${PLUGIN_ID}`);
+    const updateBadge = pluginRow.getByTestId(`plugin-update-available-${PLUGIN_ID}`);
+    const updateButton = pluginRow.getByTestId(`plugin-update-${PLUGIN_ID}`);
+    await expect(latestVersion).toContainText(newerVersion, { timeout: 15_000 });
+    await expect(updateBadge).toContainText(newerVersion);
+    await expect(updateButton).toBeVisible();
+    await expect(testPage.getByTestId("plugins-updates-last-checked")).toBeVisible();
+
+    // The update tries to install from the (deliberately unreachable) mocked
+    // package_url and fails — the row surfaces the error inline, keeps the
+    // old version, and keeps the button clickable, without disturbing
+    // enable/disable/uninstall or the rest of the row.
+    await updateButton.click();
+    await expect(pluginRow.getByTestId(`plugin-update-error-${PLUGIN_ID}`)).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(updateButton).toBeEnabled();
+    await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible();
+    await expect(pluginRow.getByRole("button", { name: "Disable" })).toBeEnabled();
+
+    await testPage.unroute("**/api/plugins/marketplace");
+    await testPage.unroute("**/api/plugins/marketplace/refresh");
   });
 
   test("shows boot failure diagnostics and retries an errored plugin", async ({
