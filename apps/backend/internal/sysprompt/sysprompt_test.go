@@ -129,6 +129,20 @@ func TestKandevContext_PrefersNativeSubagentsForOrdinaryDelegation(t *testing.T)
 	assert.Contains(t, context, "do not silently create a Kandev task or session")
 }
 
+func TestFormatKandevContext_UserQuestionIsHardInputBarrier(t *testing.T) {
+	context := FormatKandevContextWithOptions("task-abc", "session-xyz", KandevContextOptions{
+		IncludeUserQuestionTool:        true,
+		IncludeCoordinatorTaskControls: true,
+	})
+
+	assert.Contains(t, context, "hard user-input barrier")
+	assert.Contains(t, context, "do not call another tool")
+	assert.Contains(t, context, "do not continue working")
+	assert.Contains(t, context, "do not provide a final response")
+	assert.Contains(t, context, "until the tool returns the user's answers")
+	assert.Contains(t, context, "If it returns without completed answers, end your turn immediately")
+}
+
 func TestFormatKandevContext_TitleToolFollowsCapability(t *testing.T) {
 	withoutTitle := FormatKandevContextWithOptions("task-abc", "session-xyz", KandevContextOptions{})
 	assert.NotContains(t, withoutTitle, "set_task_title_kandev")
