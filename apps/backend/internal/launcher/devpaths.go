@@ -59,11 +59,31 @@ func isInsideKandevTask(repoRoot string) bool {
 // When invoked from inside a kandev task workspace, any KANDEV_DATABASE_PATH
 // is assumed to be leaked from the parent backend and is ignored. In a normal
 // shell, an explicit KANDEV_DATABASE_PATH is honored as an escape hatch.
-//
-// The returned dbPath is display-only; the backend derives its own DB path
-// from KANDEV_HOME_DIR via resolveDatabasePath(). Both resolve to the same
-// location.
+type devDatabaseSource string
+
+const (
+	devDatabaseDefault       devDatabaseSource = "repo-local default"
+	devDatabaseTask          devDatabaseSource = "task workspace"
+	devDatabaseEnvironment   devDatabaseSource = "environment"
+	devDatabaseConfiguration devDatabaseSource = "configuration"
+	devDatabaseConfigHome    devDatabaseSource = "configuration home"
+)
+
+// devDatabaseTarget is the one database decision shared by the launcher and
+// its backend child. Keeping the provenance with the path prevents a backup
+// from being performed against a different database than the child receives.
+type devDatabaseTarget struct {
+	path   string
+	source devDatabaseSource
+	extra  []string
+}
+
 func resolveDevBackendEnv(repoRoot string, configs ...*config.Config) (dbPath string, extra []string) {
+	target := resolveDevDatabaseTarget(repoRoot, configs...)
+	return target.path, target.extra
+}
+
+func resolveDevDatabaseTarget(repoRoot string, configs ...*config.Config) devDatabaseTarget {
 	devHome := devKandevHome(repoRoot)
 	devDBPath := filepath.Join(devHome, "data", "kandev.db")
 	var startupConfig *config.Config
@@ -79,29 +99,54 @@ func resolveDevBackendEnv(repoRoot string, configs ...*config.Config) (dbPath st
 
 	if isInsideKandevTask(repoRoot) {
 		fmt.Println("[kandev] task workspace detected → using local dev state")
-		return devDBPath, append(baseExtra,
+		return devDatabaseTarget{path: devDBPath, source: devDatabaseTask, extra: append(baseExtra,
 			"KANDEV_HOME_DIR="+devHome,
-			// Clear a parent-leaked DB path so the backend uses the
-			// HomeDir-derived default.
-			"KANDEV_DATABASE_PATH=",
-		)
+			"KANDEV_DATABASE_PATH="+devDBPath,
+		)}
+	}
+	if startupConfig == nil {
+		if override := strings.TrimSpace(os.Getenv("KANDEV_DATABASE_PATH")); override != "" {
+			return devDatabaseTarget{path: override, source: devDatabaseEnvironment, extra: append(baseExtra, "KANDEV_DATABASE_PATH="+override)}
+		}
 	}
 
-	if startupConfig != nil && startupConfig.SourceFor("database.path") == config.SourceConfiguration &&
-		strings.TrimSpace(startupConfig.Database.Path) != "" {
-		return startupConfig.Database.Path, baseExtra
+	if startupConfig != nil && strings.TrimSpace(startupConfig.Database.Path) != "" {
+		switch startupConfig.SourceFor("database.path") {
+		case config.SourceEnvironment:
+			return devDatabaseTarget{path: startupConfig.Database.Path, source: devDatabaseEnvironment, extra: append(baseExtra, "KANDEV_DATABASE_PATH="+startupConfig.Database.Path)}
+		case config.SourceConfiguration:
+			return devDatabaseTarget{path: startupConfig.Database.Path, source: devDatabaseConfiguration, extra: append(baseExtra, "KANDEV_DATABASE_PATH="+startupConfig.Database.Path)}
+		}
 	}
-	if startupConfig != nil && (startupConfig.SourceFor("homeDir") == config.SourceConfiguration ||
-		startupConfig.SourceFor("homeDir") == config.SourceEnvironment) {
-		return filepath.Join(startupConfig.ResolvedDataDir(), "kandev.db"), baseExtra
+	if startupConfig != nil && startupConfig.SourceFor("homeDir") == config.SourceConfiguration {
+		path := filepath.Join(startupConfig.ResolvedDataDir(), "kandev.db")
+		return devDatabaseTarget{path: path, source: devDatabaseConfigHome, extra: append(baseExtra, "KANDEV_DATABASE_PATH="+path)}
 	}
 
-	if override := strings.TrimSpace(os.Getenv("KANDEV_DATABASE_PATH")); override != "" {
-		return override, append(baseExtra, "KANDEV_DATABASE_PATH="+override)
-	}
-
-	return devDBPath, append(baseExtra,
+	return devDatabaseTarget{path: devDBPath, source: devDatabaseDefault, extra: append(baseExtra,
 		"KANDEV_HOME_DIR="+devHome,
-		"KANDEV_DATABASE_PATH=",
-	)
+		"KANDEV_DATABASE_PATH="+devDBPath,
+	)}
+}
+
+func validateDevDatabaseTarget(repoRoot string, target devDatabaseTarget) error {
+	path, err := filepath.Abs(target.path)
+	if err != nil {
+		return fmt.Errorf("resolve dev database path %q: %w", target.path, err)
+	}
+	if target.source != devDatabaseDefault && target.source != devDatabaseTask {
+		return nil
+	}
+	home, err := filepath.Abs(devKandevHome(repoRoot))
+	if err != nil {
+		return fmt.Errorf("resolve dev state home: %w", err)
+	}
+	rel, err := filepath.Rel(home, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return fmt.Errorf("refusing dev database path outside repo-local state: %s", path)
+	}
+	if err := rejectSymlinkComponents(path); err != nil {
+		return fmt.Errorf("refusing dev database path %s: %w", path, err)
+	}
+	return nil
 }

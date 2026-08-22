@@ -117,10 +117,6 @@ type devLaunchConfig struct {
 // spawned: repo root, dev ports, and the dev backend env. It returns a
 // nonzero exit code (having printed the error) when any step fails.
 func devLaunchConfigFor(opts Options, configs ...*config.Config) (devLaunchConfig, int) {
-	startupConfig, exitCode := devStartupConfig(configs...)
-	if exitCode != 0 {
-		return devLaunchConfig{}, exitCode
-	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
@@ -130,6 +126,10 @@ func devLaunchConfigFor(opts Options, configs ...*config.Config) (devLaunchConfi
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return devLaunchConfig{}, 2
+	}
+	startupConfig, exitCode := devStartupConfig(repoRoot, configs...)
+	if exitCode != 0 {
+		return devLaunchConfig{}, exitCode
 	}
 	backendPort, err := resolvePorts(opts, startupConfig)
 	if err != nil {
@@ -152,16 +152,20 @@ func devLaunchConfigFor(opts Options, configs ...*config.Config) (devLaunchConfi
 		return devLaunchConfig{}, 1
 	}
 	ports.BackendURL = endpoints.accessURL
-	dbPath, extra := resolveDevBackendEnv(repoRoot, startupConfig)
+	database := resolveDevDatabaseTarget(repoRoot, startupConfig)
+	if err := validateDevDatabaseTarget(repoRoot, database); err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return devLaunchConfig{}, 1
+	}
 	homeDir := devKandevHome(repoRoot)
-	if !isInsideKandevTask(repoRoot) && configSourceIsExplicit(startupConfig, "homeDir") {
+	if !isInsideKandevTask(repoRoot) && startupConfig.SourceFor("homeDir") == config.SourceConfiguration {
 		homeDir = startupConfig.ResolvedHomeDir()
 	}
 	return devLaunchConfig{
 		repoRoot:  repoRoot,
 		ports:     ports,
-		dbPath:    dbPath,
-		extra:     extra,
+		dbPath:    database.path,
+		extra:     database.extra,
 		logLevel:  resolveLogLevelForConfig(opts, startupConfig),
 		debug:     opts.Debug,
 		homeDir:   homeDir,
@@ -170,7 +174,7 @@ func devLaunchConfigFor(opts Options, configs ...*config.Config) (devLaunchConfi
 	}, 0
 }
 
-func devStartupConfig(configs ...*config.Config) (*config.Config, int) {
+func devStartupConfig(repoRoot string, configs ...*config.Config) (*config.Config, int) {
 	if len(configs) > 0 {
 		return configs[0], 0
 	}
@@ -181,7 +185,7 @@ func devStartupConfig(configs ...*config.Config) (*config.Config, int) {
 			return nil, 1
 		}
 	}
-	startupConfig, err := loadDevBootstrapConfig()
+	startupConfig, err := loadDevBootstrapConfig(repoRoot)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return nil, 1
@@ -189,9 +193,9 @@ func devStartupConfig(configs ...*config.Config) (*config.Config, int) {
 	return startupConfig, 0
 }
 
-func loadDevBootstrapConfig() (*config.Config, error) {
+func loadDevBootstrapConfig(repoRoot string) (*config.Config, error) {
 	if os.Getenv("KANDEV_E2E_MOCK") != "" || os.Getenv("KANDEV_DEBUG_DEV_MODE") != "" {
-		return loadBootstrapConfig()
+		return loadBootstrapConfigWithHome(devKandevHome(repoRoot))
 	}
 
 	const selector = "KANDEV_DEBUG_DEV_MODE"
@@ -199,7 +203,7 @@ func loadDevBootstrapConfig() (*config.Config, error) {
 	if err := os.Setenv(selector, "true"); err != nil {
 		return nil, err
 	}
-	cfg, err := loadBootstrapConfig()
+	cfg, err := loadBootstrapConfigWithHome(devKandevHome(repoRoot))
 	if present {
 		if restoreErr := os.Setenv(selector, previous); err == nil {
 			err = restoreErr
