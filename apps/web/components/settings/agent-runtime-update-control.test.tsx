@@ -76,6 +76,82 @@ afterEach(() => {
 });
 
 describe("AgentRuntimeUpdateControl", () => {
+  it("keeps a long version history behind the browse action", async () => {
+    const onPreview = vi.fn().mockResolvedValue(
+      preview({
+        available_versions: [
+          { version: "0.71.0", latest: true },
+          { version: ACTIVE_VERSION, latest: false },
+          { version: "0.69.0", latest: false },
+          { version: "0.50.0", latest: false },
+        ],
+      }),
+    );
+    render(
+      <AgentRuntimeUpdateControl
+        agentName={AGENT_NAME}
+        displayName="Claude Code"
+        runtimeUpdate={{
+          supported: true,
+          package: PACKAGE_NAME,
+          default_version: ACTIVE_VERSION,
+          effective_version: ACTIVE_VERSION,
+        }}
+        onPreview={onPreview}
+        onUpdate={vi.fn().mockResolvedValue(queuedJob())}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Browse all versions" })).toBeTruthy();
+    });
+    expect(screen.queryByText("0.50.0")).toBeNull();
+  });
+
+  it("filters the full version history and previews the selected version", async () => {
+    const onPreview = vi.fn().mockResolvedValue(
+      preview({
+        available_versions: [
+          { version: "0.71.0", latest: true },
+          { version: ACTIVE_VERSION, latest: false },
+          { version: "0.69.0", latest: false },
+          { version: "0.50.0", latest: false },
+        ],
+      }),
+    );
+    render(
+      <AgentRuntimeUpdateControl
+        agentName={AGENT_NAME}
+        displayName="Claude Code"
+        runtimeUpdate={{
+          supported: true,
+          package: PACKAGE_NAME,
+          default_version: ACTIVE_VERSION,
+          effective_version: ACTIVE_VERSION,
+        }}
+        onPreview={onPreview}
+        onUpdate={vi.fn().mockResolvedValue(queuedJob())}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Browse all versions" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Browse all versions" }));
+    const search = screen.getByPlaceholderText("Search versions");
+    expect(screen.getByTestId(`agent-update-version-option-${AGENT_NAME}-0.50.0`)).toBeTruthy();
+    fireEvent.change(search, { target: { value: "0.50" } });
+    expect(screen.getByTestId(`agent-update-version-option-${AGENT_NAME}-0.50.0`)).toBeTruthy();
+    expect(screen.queryByTestId(`agent-update-version-option-${AGENT_NAME}-0.69.0`)).toBeNull();
+
+    fireEvent.click(screen.getByTestId(`agent-update-version-option-${AGENT_NAME}-0.50.0`));
+    await waitFor(() => expect(onPreview).toHaveBeenLastCalledWith(AGENT_NAME, "0.50.0"));
+  });
+});
+
+describe("AgentRuntimeUpdateControl", () => {
   it("shows the update dot and exposes effective and latest versions", () => {
     render(
       <AgentRuntimeUpdateControl
@@ -140,7 +216,7 @@ describe("AgentRuntimeUpdateControl", () => {
     fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
     await waitFor(() => expect(onPreview).toHaveBeenCalledWith(AGENT_NAME, undefined));
     expect(
-      screen.getByRole("option", { name: `Use Kandev default (${ACTIVE_VERSION})` }),
+      screen.getByRole("button", { name: `Use Kandev default (${ACTIVE_VERSION})` }),
     ).toBeTruthy();
   });
 
@@ -171,7 +247,7 @@ describe("AgentRuntimeUpdateControl", () => {
     fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
     await waitFor(() => expect(onPreview).toHaveBeenCalledWith(AGENT_NAME, undefined));
     expect(
-      screen.getByRole("option", { name: `Use Kandev default (${ACTIVE_VERSION})` }),
+      screen.getByRole("button", { name: `Use Kandev default (${ACTIVE_VERSION})` }),
     ).toBeTruthy();
   });
 });
@@ -226,12 +302,10 @@ describe("AgentRuntimeUpdateControl reset state", () => {
     fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
     await waitFor(() =>
       expect(
-        screen.getByRole("option", { name: `Use Kandev default (${defaultVersion})` }),
+        screen.getByRole("button", { name: `Use Kandev default (${defaultVersion})` }),
       ).toBeTruthy(),
     );
-    fireEvent.change(screen.getByTestId(`agent-update-version-${AGENT_NAME}`), {
-      target: { value: "__kandev_default__" },
-    });
+    fireEvent.click(screen.getByTestId(`agent-update-quick-default-${AGENT_NAME}`));
     await waitFor(() => expect(onPreview).toHaveBeenLastCalledWith(AGENT_NAME, undefined, true));
     fireEvent.click(screen.getByTestId(`agent-update-confirm-${AGENT_NAME}`));
 

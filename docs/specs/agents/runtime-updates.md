@@ -81,6 +81,9 @@ action unless they inspect backend logs.
   by supported npm CLI versions, including npm versions that wrap a
   multi-field `npm view` response in a one-element array. A valid response
   always produces the same stable version catalogue for the operator.
+- The version dialog presents a compact status summary and quick choices for
+  the latest and Kandev default versions. The complete stable catalogue stays
+  behind an explicit browse action and can be searched by version.
 
 The managed package set is:
 
@@ -390,6 +393,10 @@ produces a repair job.
 - The version selector is inside the shared body, is keyboard and touch
   accessible, and shows latest and active markers without encoding state in
   color alone.
+- The compact dialog does not render the complete catalogue by default. The
+  browse surface exposes the complete list only after the operator requests it,
+  provides a search field, and keeps the selected, latest, active, and default
+  markers available.
 - The body is the single internal scroll owner. The safe-area-aware footer
   keeps the operation action reachable while long version lists and process
   output remain viewport-contained.
@@ -453,6 +460,16 @@ produces a repair job.
   or a supported one-element collection form, **WHEN** the operator opens a
   managed runtime update dialog, **THEN** the dialog lists the stable versions,
   selects npm's stable latest version, and does not show a resolution error.
+- **GIVEN** a managed runtime has a long stable version catalogue, **WHEN** the
+  operator opens its update dialog, **THEN** the dialog shows the status summary
+  and quick choices without rendering the full version history.
+- **GIVEN** the operator opens the full version browser and enters a version
+  fragment, **WHEN** matching versions exist, **THEN** only matching stable
+  versions remain selectable and selecting one previews that exact target.
+- **GIVEN** the operator opens the full version browser on a phone, **WHEN** the
+  operator searches or selects a version, **THEN** the existing update drawer
+  keeps one contained scroll owner, exposes 44px touch rows, and preserves the
+  same target selection behavior as desktop.
 - **GIVEN** a dotted update control on a phone, **WHEN** the operator taps it,
   **THEN** the existing update drawer opens and shows a live authoritative
   preview without requiring hover.

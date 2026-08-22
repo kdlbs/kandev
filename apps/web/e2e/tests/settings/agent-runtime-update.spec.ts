@@ -44,7 +44,7 @@ test.describe("managed agent runtime updates", () => {
       .getByTestId(`agent-update-version-${runtime.agentName}`)
       .boundingBox();
     expect(selectorBox).not.toBeNull();
-    expect(selectorBox!.height).toBeLessThanOrEqual(40);
+    expect(selectorBox!.height).toBeGreaterThanOrEqual(44);
     await expect(dialog).toContainText("0.62.0 → 0.63.0");
     await expect(dialog).toContainText(
       'npm exec --yes --prefer-online --package=@agentclientprotocol/claude-agent-acp -- node -e ""',
@@ -172,8 +172,7 @@ test.describe("managed agent runtime updates", () => {
     await testPage.goto("/settings/agents");
     await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
     const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
-    const selector = dialog.getByTestId(`agent-update-version-${runtime.agentName}`);
-    await selector.selectOption({ label: "Use Kandev default (0.64.0)" });
+    await dialog.getByTestId(`agent-update-quick-default-${runtime.agentName}`).click();
 
     await expect(dialog).toContainText("0.62.0 → 0.64.0");
     await expect(testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toHaveText(
@@ -263,7 +262,11 @@ test.describe("managed agent runtime updates", () => {
     await testPage.goto("/settings/agents");
     await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
     const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
-    await testPage.getByTestId(`agent-update-version-${runtime.agentName}`).selectOption("0.61.0");
+    await testPage.getByTestId(`agent-update-version-${runtime.agentName}`).click();
+    await dialog
+      .getByTestId(`agent-update-version-browser-${runtime.agentName}`)
+      .getByTestId(`agent-update-version-option-${runtime.agentName}-0.61.0`)
+      .click();
 
     await expect(dialog).toContainText("0.62.0 → 0.61.0");
     await expect(testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toHaveText(
@@ -282,7 +285,11 @@ test.describe("managed agent runtime updates", () => {
     const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
     const body = dialog.getByTestId(`agent-update-dialog-body-${runtime.agentName}`);
 
-    await dialog.getByTestId(`agent-update-version-${runtime.agentName}`).selectOption("0.61.0");
+    await dialog.getByTestId(`agent-update-version-${runtime.agentName}`).click();
+    await dialog
+      .getByTestId(`agent-update-version-browser-${runtime.agentName}`)
+      .getByTestId(`agent-update-version-option-${runtime.agentName}-0.61.0`)
+      .click();
 
     await expect(
       dialog.getByTestId(`agent-update-version-loading-${runtime.agentName}`),
@@ -314,14 +321,21 @@ test.describe("managed agent runtime updates", () => {
 
     await testPage.goto("/settings/agents");
     await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
+    const selector = testPage.getByTestId(`agent-update-version-${runtime.agentName}`);
+    await expect(
+      testPage.getByTestId(`agent-update-version-option-${runtime.agentName}-0.74.0`),
+    ).toHaveCount(0);
+    await selector.click();
     const options = testPage
-      .getByTestId(`agent-update-version-${runtime.agentName}`)
-      .locator("option");
+      .getByTestId(`agent-update-version-browser-${runtime.agentName}`)
+      .getByRole("option");
 
     await expect(options).toHaveCount(12);
     expect(
       await options.evaluateAll((elements) =>
-        elements.map((element) => (element as HTMLOptionElement).value),
+        elements.map(
+          (element) => element.getAttribute("data-value") ?? element.textContent?.trim(),
+        ),
       ),
     ).toEqual([
       "0.74.0",
@@ -347,7 +361,11 @@ test.describe("managed agent runtime updates", () => {
     await testPage.goto("/settings/agents");
     await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
     const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
-    await testPage.getByTestId(`agent-update-version-${runtime.agentName}`).selectOption("0.61.0");
+    await testPage.getByTestId(`agent-update-version-${runtime.agentName}`).click();
+    await dialog
+      .getByTestId(`agent-update-version-browser-${runtime.agentName}`)
+      .getByTestId(`agent-update-version-option-${runtime.agentName}-0.61.0`)
+      .click();
 
     await expect(dialog.getByRole("alert")).toContainText("preview temporarily unavailable");
     await dialog.getByRole("button", { name: "Retry version check" }).click();
@@ -426,9 +444,10 @@ test.describe("managed agent runtime updates", () => {
     );
 
     await expect(dialog).toContainText("Active version: 0.63.0");
+    await dialog.getByTestId(`agent-update-version-${runtime.agentName}`).click();
     const successOptionText = await dialog
-      .getByTestId(`agent-update-version-${runtime.agentName}`)
-      .locator("option")
+      .getByTestId(`agent-update-version-browser-${runtime.agentName}`)
+      .getByRole("option")
       .allTextContents();
     expect(
       successOptionText.some((text) => text.includes("0.63.0") && text.includes("active")),
@@ -451,9 +470,7 @@ test.describe("managed agent runtime updates", () => {
     await testPage.goto("/settings/agents");
     await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
     const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
-    await dialog
-      .getByTestId(`agent-update-version-${runtime.agentName}`)
-      .selectOption({ label: "Use Kandev default (0.64.0)" });
+    await dialog.getByTestId(`agent-update-quick-default-${runtime.agentName}`).click();
     await testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`).click();
 
     await expect(dialog).toContainText("Effective version: 0.64.0");
@@ -477,9 +494,10 @@ test.describe("managed agent runtime updates", () => {
     );
 
     await expect(dialog).toContainText("Active version: 0.62.0");
+    await dialog.getByTestId(`agent-update-version-${runtime.agentName}`).click();
     const failedOptionText = await dialog
-      .getByTestId(`agent-update-version-${runtime.agentName}`)
-      .locator("option")
+      .getByTestId(`agent-update-version-browser-${runtime.agentName}`)
+      .getByRole("option")
       .allTextContents();
     expect(
       failedOptionText.some((text) => text.includes("0.62.0") && text.includes("active")),
