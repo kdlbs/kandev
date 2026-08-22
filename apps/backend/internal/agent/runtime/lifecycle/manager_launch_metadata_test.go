@@ -53,7 +53,7 @@ func TestBuildLaunchMetadataExecutorConfigWinsForTrustedKeys(t *testing.T) {
 		},
 	}
 
-	metadata := buildLaunchMetadata(req, "", "", "")
+	metadata := buildLaunchMetadata(req, "", "")
 
 	require.Equal(t, "trusted.example.com", metadata[MetadataKeySSHHost],
 		"a task metadata payload must never be able to pivot the SSH host")
@@ -88,7 +88,7 @@ func TestBuildLaunchMetadataProjectsWorktreeAndRepoFields(t *testing.T) {
 		BaseBranch:     "main",
 	}
 
-	metadata := buildLaunchMetadata(req, "/repos/widget/.git", "wt-1", "kandev/feature")
+	metadata := buildLaunchMetadata(req, "wt-1", "kandev/feature")
 
 	require.NotContains(t, metadata, MetadataKeyMainRepoGitDir)
 	require.Equal(t, "wt-1", metadata[MetadataKeyWorktreeID])
@@ -370,7 +370,7 @@ func (e *gitMetadataResumeCreateInstanceExecutor) PrepareGitMetadataProjection(_
 }
 
 func TestBuildLaunchMetadataOmitsEmptyOptionalKeys(t *testing.T) {
-	metadata := buildLaunchMetadata(&LaunchRequest{}, "", "", "")
+	metadata := buildLaunchMetadata(&LaunchRequest{}, "", "")
 
 	for _, key := range []string{
 		MetadataKeyWorktreeID, MetadataKeyWorktreeBranch,

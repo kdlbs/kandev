@@ -136,7 +136,7 @@ func isTrustedExecutorConfigKey(k string) bool { return trustedExecutorConfigKey
 // values the caller passed in req.Metadata. Other keys (per-task settings
 // like setup_script, base_branch, repo_setup_script, etc.) keep the caller's
 // value when present.
-func buildLaunchMetadata(req *LaunchRequest, _ string, worktreeID, worktreeBranch string) map[string]interface{} {
+func buildLaunchMetadata(req *LaunchRequest, worktreeID, worktreeBranch string) map[string]interface{} {
 	metadata := make(map[string]interface{})
 	for k, v := range req.Metadata {
 		metadata[k] = v
@@ -805,7 +805,9 @@ func (r *prepareProgressRecorder) recordStep(step PrepareStep, index int) {
 
 // launchBuildExecutorRequest resolves MCP servers, builds the ExecutorCreateRequest,
 // and creates the runtime instance.
-func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID string, reqWithWorktree *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo, mainRepoGitDir, worktreeID, worktreeBranch string, gitMetadata []*worktree.GitMetadataProjection, onProgress PrepareProgressCallback) (*ExecutorCreateRequest, *ExecutorInstance, ExecutorBackend, error) {
+//
+//nolint:funlen // This is one transactional launch phase; splitting it obscures its cleanup boundaries.
+func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID string, reqWithWorktree *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo, worktreeID, worktreeBranch string, gitMetadata []*worktree.GitMetadataProjection, onProgress PrepareProgressCallback) (*ExecutorCreateRequest, *ExecutorInstance, ExecutorBackend, error) {
 	rt, err := m.getExecutorBackend(reqWithWorktree.ExecutorType)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("no runtime configured: %w", err)
@@ -830,7 +832,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 			Headers: srv.Headers,
 		})
 	}
-	metadata := buildLaunchMetadata(reqWithWorktree, mainRepoGitDir, worktreeID, worktreeBranch)
+	metadata := buildLaunchMetadata(reqWithWorktree, worktreeID, worktreeBranch)
 	remoteContributions, err := collectRemoteContributions(reqWithWorktree)
 	if err != nil {
 		return nil, nil, nil, err
@@ -1505,7 +1507,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	if req.ACPSessionID == "" {
 		runtimeProgress = progressRecorder.Callback(progressRecorder.Len())
 	}
-	execReq, execInstance, rt, err := m.launchBuildExecutorRequest(ctx, executionID, &reqWithWorktree, agentConfig, profileInfo, mainRepoGitDir, worktreeID, worktreeBranch, gitMetadata, runtimeProgress)
+	execReq, execInstance, rt, err := m.launchBuildExecutorRequest(ctx, executionID, &reqWithWorktree, agentConfig, profileInfo, worktreeID, worktreeBranch, gitMetadata, runtimeProgress)
 	if err != nil {
 		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
 		return nil, err

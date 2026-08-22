@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"reflect"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1042,6 +1043,60 @@ func TestCreateExecutionResolvesProfileOnceForEnvAndAutoApprove(t *testing.T) {
 	}
 	if got := backend.lastRequest.Env["CLAUDE_CONFIG_DIR"]; got != "/tmp/claude" {
 		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want %q", got, "/tmp/claude")
+	}
+}
+
+func TestPrepareWorkspaceExecutionProjectsTaskGitMetadata(t *testing.T) {
+	repositoryPath := initBareGitRepo(t, "workspace-execution")
+	preparer, worktreeManager := newPreparerForTest(t)
+	prepared, err := preparer.Prepare(context.Background(), &EnvPrepareRequest{
+		TaskID:         "task-workspace-policy",
+		SessionID:      "session-workspace-policy",
+		TaskTitle:      "Workspace policy",
+		ExecutorType:   executor.NameStandalone,
+		TaskDirName:    "workspace-policy",
+		RepositoryID:   "repo-workspace-policy",
+		RepositoryPath: repositoryPath,
+		RepoName:       "workspace-execution",
+		BaseBranch:     "main",
+		Repositories: []RepoPrepareSpec{{
+			RepositoryID:   "repo-workspace-policy",
+			RepositoryPath: repositoryPath,
+			RepoName:       "workspace-execution",
+			BaseBranch:     "main",
+		}},
+	}, nil)
+	if err != nil || !prepared.Success {
+		t.Fatalf("prepare worktree: result=%+v err=%v", prepared, err)
+	}
+
+	manager, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{})
+	manager.SetWorktreeManager(worktreeManager)
+	_, err = manager.createExecution(context.Background(), "task-workspace-policy", &WorkspaceInfo{
+		SessionID:     "session-workspace-policy",
+		AgentID:       "auggie",
+		WorkspacePath: prepared.WorkspacePath,
+		TaskDirName:   "workspace-policy",
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		WorkspaceRepositories: []WorkspaceRepositorySpec{{
+			RepositoryID:   "repo-workspace-policy",
+			RepositoryPath: repositoryPath,
+			RepoName:       "workspace-execution",
+			BaseBranch:     "main",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create workspace execution: %v", err)
+	}
+	if backend.lastRequest == nil || len(backend.lastRequest.GitMetadataProjections) != 1 {
+		t.Fatalf("GitMetadataProjections = %#v, want one task projection", backend.lastRequest)
+	}
+	checkout := backend.lastRequest.GitMetadataProjections[0].CheckoutPath
+	if checkout == repositoryPath {
+		t.Fatalf("projection checkout = source repository %q, want task-owned worktree", checkout)
+	}
+	if !slices.Contains(backend.lastRequest.WorkspaceSourceRoots, checkout) {
+		t.Fatalf("WorkspaceSourceRoots = %v, want projection checkout %q", backend.lastRequest.WorkspaceSourceRoots, checkout)
 	}
 }
 

@@ -157,6 +157,12 @@ func (m *workspaceSourceMaterializer) materializeHostWorkspaceSources(ctx contex
 	if materializeErr != nil {
 		return nil, materializeErr
 	}
+	if state.environment.ExecutorType == string(models.ExecutorTypeWorktree) {
+		materialization.postRoots, err = workspaceFolderSourceRoots(materialization.root, state.folders, batch, true)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if state.environment.WorkspacePath != materialization.root {
 		state.environment.WorkspacePath, state.environment.UpdatedAt = materialization.root, time.Now().UTC()
 		if err = m.repo.UpdateTaskEnvironment(ctx, state.environment); err != nil {
@@ -170,6 +176,7 @@ func (m *workspaceSourceMaterializer) materializeHostWorkspaceSources(ctx contex
 		if projectionErr != nil {
 			return nil, projectionErr
 		}
+		materialization.postRoots = workspaceSourceRootsWithGitMetadata(materialization.postRoots, projections)
 	}
 	ids, adopted, adoptErr := m.adoptSessionWorkspaces(ctx, state.sessions, materialization.root, materialization.postRoots, projections)
 	adoptedSessions = append(adoptedSessions, adopted...)
@@ -183,6 +190,10 @@ func (m *workspaceSourceMaterializer) materializeHostWorkspaceSources(ctx contex
 }
 
 func (m *workspaceSourceMaterializer) prepareHostWorkspaceMaterialization(ctx context.Context, taskID string, state *workspaceSourceMaterializationState, batch *models.WorkspaceSourceBatch) (*hostWorkspaceMaterialization, error) {
+	root, err := m.worktreeMgr.TaskRoot(state.environment.TaskDirName)
+	if err != nil {
+		return nil, fmt.Errorf("resolve owned task root: %w", err)
+	}
 	postRoots, err := canonicalWorkspaceSourceRoots(state, batch, true)
 	if err != nil {
 		return nil, err
@@ -191,9 +202,12 @@ func (m *workspaceSourceMaterializer) prepareHostWorkspaceMaterialization(ctx co
 	if err != nil {
 		return nil, err
 	}
-	root, err := m.worktreeMgr.TaskRoot(state.environment.TaskDirName)
-	if err != nil {
-		return nil, fmt.Errorf("resolve owned task root: %w", err)
+	if state.environment.ExecutorType == string(models.ExecutorTypeWorktree) {
+		postRoots = nil
+		priorRoots, err = workspaceFolderSourceRoots(state.environment.WorkspacePath, state.folders, batch, false)
+		if err != nil {
+			return nil, err
+		}
 	}
 	worktrees, err := m.worktreeMgr.GetAllByTaskID(ctx, taskID)
 	if err != nil {
@@ -330,11 +344,12 @@ func (m *workspaceSourceMaterializer) restoreSessionWorkspaces(ctx context.Conte
 	var rollbackErr error
 	for index := len(sessions) - 1; index >= 0; index-- {
 		adopted := sessions[index]
+		roots := workspaceSourceRootsWithGitMetadata(sourceRoots, adopted.projections)
 		if rebinder, ok := m.rescanner.(workspaceGitMetadataRebinder); ok {
-			if err := rebinder.RebindWorkspaceWithGitMetadata(rollbackCtx, adopted.session.ID, workspacePath, adopted.projections, sourceRoots); err != nil {
+			if err := rebinder.RebindWorkspaceWithGitMetadata(rollbackCtx, adopted.session.ID, workspacePath, adopted.projections, roots); err != nil {
 				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("session %s: %w", adopted.session.ID, err))
 			}
-		} else if err := m.rescanner.RebindWorkspaceForSession(rollbackCtx, adopted.session.ID, workspacePath, sourceRoots); err != nil {
+		} else if err := m.rescanner.RebindWorkspaceForSession(rollbackCtx, adopted.session.ID, workspacePath, roots); err != nil {
 			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("session %s: %w", adopted.session.ID, err))
 		}
 	}
@@ -457,6 +472,36 @@ func taskCheckoutRepositoryPath(path, primaryPath, primaryRepositoryPath string,
 		return primaryRepositoryPath
 	}
 	return ""
+}
+
+func workspaceFolderSourceRoots(workspacePath string, folders []*models.TaskWorkspaceFolder, batch *models.WorkspaceSourceBatch, includeBatch bool) ([]string, error) {
+	_, batchFolders := workspaceSourceBatchIDs(batch)
+	collector := newWorkspaceSourceRootCollector(1 + len(folders))
+	if err := collector.add(workspacePath); err != nil {
+		return nil, err
+	}
+	if err := collector.addFolders(folders, batchFolders, includeBatch); err != nil {
+		return nil, err
+	}
+	if includeBatch {
+		if err := collector.addUnpersistedBatchFolders(batch, batchFolders); err != nil {
+			return nil, err
+		}
+	}
+	return collector.roots, nil
+}
+
+func workspaceSourceRootsWithGitMetadata(roots []string, projections []*worktree.GitMetadataProjection) []string {
+	collector := newWorkspaceSourceRootCollector(len(roots) + len(projections))
+	for _, root := range roots {
+		_ = collector.add(root)
+	}
+	for _, projection := range projections {
+		if projection != nil {
+			_ = collector.add(projection.CheckoutPath)
+		}
+	}
+	return collector.roots
 }
 
 func canonicalWorkspaceSourceRoots(state *workspaceSourceMaterializationState, batch *models.WorkspaceSourceBatch, includeBatch bool) ([]string, error) {

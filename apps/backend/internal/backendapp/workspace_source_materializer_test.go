@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -522,6 +523,15 @@ func TestWorkspaceSourceMaterializer_WorktreeAttachmentRebindsCompleteGitMetadat
 	if !checkoutPaths[primaryPath] || !checkoutPaths[filepath.Join(taskRoot, "kandev-branch-2")] {
 		t.Fatalf("projection checkouts = %#v, want primary and attached worktree", checkoutPaths)
 	}
+	roots := rebinder.calls[0].roots
+	if slices.Contains(roots, repoPath) {
+		t.Fatalf("ACP roots include source repository %q: %v", repoPath, roots)
+	}
+	for checkout := range checkoutPaths {
+		if !slices.Contains(roots, checkout) {
+			t.Fatalf("ACP roots = %v, missing task checkout %q", roots, checkout)
+		}
+	}
 }
 
 func TestWorkspaceSourceMaterializer_RollsBackLinkAndPathWhenAdoptionFails(t *testing.T) {
@@ -675,6 +685,7 @@ type gitMetadataRebindCall struct {
 	sessionID   string
 	workspace   string
 	projections []*worktree.GitMetadataProjection
+	roots       []string
 }
 
 type gitMetadataRebindStub struct {
@@ -692,11 +703,16 @@ func (s *gitMetadataRebindStub) GitMetadataProjectionsForSession(sessionID strin
 	return append([]*worktree.GitMetadataProjection{}, projections...), ok
 }
 
-func (s *gitMetadataRebindStub) RebindWorkspaceWithGitMetadata(_ context.Context, sessionID, workspace string, projections []*worktree.GitMetadataProjection, _ ...[]string) error {
+func (s *gitMetadataRebindStub) RebindWorkspaceWithGitMetadata(_ context.Context, sessionID, workspace string, projections []*worktree.GitMetadataProjection, roots ...[]string) error {
+	var rootSnapshot []string
+	if len(roots) == 1 {
+		rootSnapshot = append([]string(nil), roots[0]...)
+	}
 	s.calls = append(s.calls, gitMetadataRebindCall{
 		sessionID:   sessionID,
 		workspace:   workspace,
 		projections: append([]*worktree.GitMetadataProjection(nil), projections...),
+		roots:       rootSnapshot,
 	})
 	if len(s.calls) == s.failOnCall {
 		return errors.New("rebind failed")

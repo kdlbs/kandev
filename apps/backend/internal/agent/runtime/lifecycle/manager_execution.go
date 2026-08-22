@@ -586,7 +586,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	}
 
 	executionID := uuid.New().String()
-	preparation, err := m.prepareExecutionCreateRequest(ctx, taskID, info, executionID)
+	preparation, err := m.prepareExecutionCreateRequest(ctx, taskID, info, executionID, rt)
 	if err != nil {
 		return nil, err
 	}
@@ -674,6 +674,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 	taskID string,
 	info *WorkspaceInfo,
 	executionID string,
+	rt ExecutorBackend,
 ) (*executionCreatePreparation, error) {
 	if info.AgentID == "" {
 		return nil, fmt.Errorf("agent ID is required in WorkspaceInfo")
@@ -725,6 +726,10 @@ func (m *Manager) prepareExecutionCreateRequest(
 			return nil, err
 		}
 	}
+	gitMetadata, err := m.workspaceExecutionGitMetadataProjections(ctx, taskID, info)
+	if err != nil {
+		return nil, err
+	}
 	autoApprove := false
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -752,7 +757,9 @@ func (m *Manager) prepareExecutionCreateRequest(
 			AgentProfileID:                 executionProfileID,
 			OfficeAgentProfileID:           info.AgentProfileID,
 			WorkspacePath:                  info.WorkspacePath,
-			WorkspaceSourceRoots:           taskWorkspaceSourceRoots(info.WorkspacePath, info.WorkspaceFolders, nil),
+			WorkspaceSourceRoots:           taskWorkspaceSourceRoots(info.WorkspacePath, info.WorkspaceFolders, gitMetadata),
+			GitMetadataRequirement:         cloneGitMetadataRequirement(rt != nil && rt.RequiresCloneURL() && len(info.WorkspaceRepositories) > 0),
+			GitMetadataProjections:         gitMetadata,
 			Protocol:                       string(agentConfig.Runtime().Protocol),
 			Env:                            envPreparation.env,
 			AutoApprovePermissions:         autoApprove,
@@ -771,6 +778,42 @@ func (m *Manager) prepareExecutionCreateRequest(
 		},
 		profileInfo: profileInfo,
 	}, nil
+}
+
+func (m *Manager) workspaceExecutionGitMetadataProjections(ctx context.Context, taskID string, info *WorkspaceInfo) ([]*worktree.GitMetadataProjection, error) {
+	if info == nil || info.ExecutorType != string(models.ExecutorTypeWorktree) || len(info.WorkspaceRepositories) == 0 {
+		return nil, nil
+	}
+	if m.worktreeMgr == nil {
+		return nil, fmt.Errorf("%s: worktree manager is not configured", gitMetadataProjectionInvalid)
+	}
+	worktrees, err := m.worktreeMgr.GetAllByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list workspace Git metadata: %w", err)
+	}
+	projections := make([]*worktree.GitMetadataProjection, 0, len(worktrees))
+	seen := make(map[string]struct{}, len(worktrees))
+	for _, wt := range worktrees {
+		if wt == nil || wt.Path == "" || wt.RepositoryPath == "" {
+			continue
+		}
+		projection, err := worktree.ResolveGitMetadataForRepository(wt.Path, wt.RepositoryPath)
+		if err != nil {
+			return nil, fmt.Errorf("resolve workspace Git metadata for repository %q: %w", wt.RepositoryID, err)
+		}
+		if _, exists := seen[projection.CheckoutPath]; exists {
+			continue
+		}
+		seen[projection.CheckoutPath] = struct{}{}
+		projections = append(projections, projection)
+	}
+	if len(projections) == 0 {
+		return nil, fmt.Errorf("%s: no task worktrees found", gitMetadataProjectionInvalid)
+	}
+	if err := validateGitMetadataProjections(projections); err != nil {
+		return nil, fmt.Errorf("%s: %w", gitMetadataProjectionInvalid, err)
+	}
+	return projections, nil
 }
 
 func (m *Manager) resolveWorkspaceExecutionProfile(ctx context.Context, profileID string) *AgentProfileInfo {

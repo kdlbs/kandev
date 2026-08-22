@@ -170,7 +170,7 @@ func TestBuildLaunchMetadata_IncludesBaseBranches(t *testing.T) {
 			{RepoName: "beta", BaseBranch: "develop"},
 		},
 	}
-	md := buildLaunchMetadata(req, "", "", "")
+	md := buildLaunchMetadata(req, "", "")
 	raw, ok := md[MetadataKeyBaseBranches]
 	if !ok {
 		t.Fatalf("metadata missing key %q", MetadataKeyBaseBranches)
