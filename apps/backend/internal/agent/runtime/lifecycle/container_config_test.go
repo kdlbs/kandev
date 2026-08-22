@@ -214,6 +214,30 @@ func TestBuildContainerConfigBoundsPrepareScriptBeforeAgentctl(t *testing.T) {
 	}
 }
 
+func TestBuildContainerConfigFailsClosedForRequiredCloneMetadataAttestation(t *testing.T) {
+	cm := newCMTest(t)
+	base := ContainerConfig{AgentConfig: newConfigStubAgent(), InstanceID: "0123456789abcdef", TaskID: "task-1", PrepareScript: "false"}
+
+	required, err := cm.buildContainerConfig(ContainerConfig{
+		AgentConfig: base.AgentConfig, InstanceID: base.InstanceID, TaskID: base.TaskID, PrepareScript: base.PrepareScript,
+		RequiresCloneGitMetadataPolicy: true,
+	})
+	if err != nil {
+		t.Fatalf("build required policy config: %v", err)
+	}
+	if !containsExactString(required.Env, "KANDEV_REQUIRE_GIT_METADATA_ATTESTATION=1") || !strings.Contains(required.Entrypoint[2], `exit "$prep_rc"`) {
+		t.Fatalf("required clone policy must stop bootstrap: env=%v script=%s", required.Env, required.Entrypoint[2])
+	}
+
+	optional, err := cm.buildContainerConfig(base)
+	if err != nil {
+		t.Fatalf("build optional policy config: %v", err)
+	}
+	if containsExactString(optional.Env, "KANDEV_REQUIRE_GIT_METADATA_ATTESTATION=1") || !strings.Contains(optional.Entrypoint[2], "exec /usr/local/bin/agentctl") {
+		t.Fatalf("optional prepare failure must continue to agentctl: env=%v script=%s", optional.Env, optional.Entrypoint[2])
+	}
+}
+
 func TestCloneGitMetadataPrepareScriptAttestsCanonicalWorkspace(t *testing.T) {
 	script := cloneGitMetadataPrepareScript("git clone https://example.test/repo /workspace")
 	if !strings.Contains(script, "git clone https://example.test/repo /workspace") {
