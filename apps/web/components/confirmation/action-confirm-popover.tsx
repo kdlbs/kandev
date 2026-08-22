@@ -13,6 +13,7 @@ import {
 
 export type ActionConfirmPopoverProps = {
   open: boolean;
+  disabled?: boolean;
   anchorRef: RefObject<HTMLElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
   title: ReactNode;
@@ -37,6 +38,7 @@ export type ActionConfirmPopoverProps = {
  */
 export function ActionConfirmPopover({
   open,
+  disabled = false,
   anchorRef,
   focusBoundaryRef,
   title,
@@ -55,6 +57,7 @@ export function ActionConfirmPopover({
   const descriptionId = useId();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const confirmedRef = useRef(false);
+  const confirmIsDisabled = disabled || confirmDisabled;
 
   // Intentionally runs on every render: an anchor can disappear through live
   // data without changing the confirmation's open state, so each render must
@@ -79,7 +82,7 @@ export function ActionConfirmPopover({
   };
 
   const handleConfirm = () => {
-    if (confirmDisabled) return;
+    if (confirmIsDisabled) return;
     if (!isConnected(anchorRef.current)) {
       handleOpenChange(false);
       return;
@@ -106,8 +109,9 @@ export function ActionConfirmPopover({
         confirmLabel={confirmLabel}
         confirmAriaLabel={confirmAriaLabel}
         confirmTestId={confirmTestId}
-        confirmDisabled={confirmDisabled}
+        confirmDisabled={confirmIsDisabled}
         testId={testId}
+        disabled={disabled}
         cancelRef={cancelRef}
         focusBoundaryRef={focusBoundaryRef}
         confirmedRef={confirmedRef}
@@ -130,6 +134,7 @@ type ActionConfirmPopoverContentProps = {
   confirmTestId?: string;
   confirmDisabled: boolean;
   testId: string;
+  disabled: boolean;
   cancelRef: RefObject<HTMLButtonElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
   confirmedRef: { current: boolean };
@@ -149,6 +154,7 @@ function ActionConfirmPopoverContent({
   confirmTestId,
   confirmDisabled,
   testId,
+  disabled,
   cancelRef,
   focusBoundaryRef,
   confirmedRef,
@@ -190,6 +196,7 @@ function ActionConfirmPopoverContent({
           ref={cancelRef}
           type="button"
           variant="outline"
+          disabled={disabled}
           className="min-h-11 px-3 transition-[color,background-color,border-color,transform] duration-100 active:scale-[0.96]"
           onClick={onCancel}
         >

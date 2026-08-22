@@ -121,6 +121,7 @@ describe("InlineConfirmActions disabled confirmation", () => {
 
     const confirm = screen.getByRole("button", { name: "Delete" });
     expect(confirm.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")).toBe(false);
     fireEvent.click(confirm);
 
     expect(onConfirm).not.toHaveBeenCalled();
