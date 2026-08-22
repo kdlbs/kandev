@@ -58,6 +58,38 @@ func TestErrSessionWorkspaceNotReady_UnrelatedError(t *testing.T) {
 	}
 }
 
+func TestPrepareExecutionCreateRequest_ReuseRequiredDockerUsesEnvironmentControlToken(t *testing.T) {
+	mgr := newTestManager(t)
+	store := newInMemorySecretStore()
+	store.store["session-auth"] = &secrets.SecretWithValue{Value: "sibling-session-token"}
+	store.store["container-control"] = &secrets.SecretWithValue{Value: "environment-control-token"}
+	mgr.secretStore = store
+
+	prepared, err := mgr.prepareExecutionCreateRequest(context.Background(), "task-1", &WorkspaceInfo{
+		TaskID:            "task-1",
+		SessionID:         "session-2",
+		TaskEnvironmentID: "environment-1",
+		WorkspacePath:     "/workspace",
+		AgentID:           "auggie",
+		ExecutorType:      string(models.ExecutorTypeLocalDocker),
+		Metadata: map[string]interface{}{
+			MetadataKeyContainerID:                "container-1",
+			MetadataKeyAuthTokenSecret:            "session-auth",
+			MetadataKeyContainerControlAuthSecret: "container-control",
+		},
+	}, "execution-2")
+	if err != nil {
+		t.Fatalf("prepareExecutionCreateRequest() error = %v", err)
+	}
+
+	if got := prepared.request.AuthToken; got != "environment-control-token" {
+		t.Fatalf("reconnect auth token = %q, want environment control token", got)
+	}
+	if !prepared.request.WorkspaceReuseRequired {
+		t.Fatal("on-demand execution for a task environment must attach rather than provision a replacement workspace")
+	}
+}
+
 func TestResolveSessionRuntimeDoesNotCreateUnsupportedExecution(t *testing.T) {
 	provider := &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
 		"session-ssh": {
