@@ -107,6 +107,13 @@ test.describe("managed agent runtime updates on mobile", () => {
     const browser = testPage.getByTestId(`agent-update-version-browser-${runtime.agentName}`);
     await expect(browser).toBeVisible();
     await expect(browser).toHaveAttribute("data-slot", "popover-content");
+    const browserBox = await settledBoundingBox(browser);
+    const viewport = testPage.viewportSize();
+    expect(viewport).not.toBeNull();
+    expect(browserBox.x).toBeGreaterThanOrEqual(0);
+    expect(browserBox.y).toBeGreaterThanOrEqual(0);
+    expect(browserBox.x + browserBox.width).toBeLessThanOrEqual(viewport!.width);
+    expect(browserBox.y + browserBox.height).toBeLessThanOrEqual(viewport!.height);
     const drawerAfter = await settledBoundingBox(drawer);
     expect(Math.abs(drawerAfter.height - drawerBefore.height)).toBeLessThan(2);
     expect(

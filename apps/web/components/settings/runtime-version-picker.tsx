@@ -78,7 +78,7 @@ function RuntimeVersionBrowser({
           placeholder={t("agents:searchRuntimeVersions")}
           aria-label={t("agents:searchRuntimeVersions")}
         />
-        <CommandList className="max-h-[min(24rem,var(--radix-popover-content-available-height))]">
+        <CommandList className="max-h-[min(18rem,var(--radix-popover-content-available-height))]">
           <CommandEmpty>{t("agents:noMatchingRuntimeVersions")}</CommandEmpty>
           <CommandGroup>
             {versions.map((version) => {
