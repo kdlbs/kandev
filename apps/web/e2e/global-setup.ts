@@ -77,7 +77,10 @@ export function isContainerRun(env: NodeJS.ProcessEnv, argv = process.argv): boo
     return [];
   });
 
-  return selectedProjects.some((projects) => projects.split(",").includes("containers"));
+  return selectedProjects.some((projects) => {
+    const names = projects.split(",");
+    return names.includes("containers") || names.includes("docker");
+  });
 }
 
 function backendMakeCommand(backendDir: string, target: string): string {
