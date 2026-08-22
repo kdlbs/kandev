@@ -150,6 +150,44 @@ func TestTaskEnvironment_PersistsDockerBootstrapNonceReference(t *testing.T) {
 	}
 }
 
+func TestFinalizeTaskEnvironmentMaterializationPublishesInventoryAtomically(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-finalize-environment")
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-finalize-environment", WorkspaceID: "workspace-finalize-environment", Title: "Finalize environment"}); err != nil {
+		t.Fatal(err)
+	}
+	env := &models.TaskEnvironment{
+		ID:                       "env-finalize",
+		TaskID:                   "task-finalize-environment",
+		ExecutorType:             string(models.ExecutorTypeWorktree),
+		Status:                   models.TaskEnvironmentStatusCreating,
+		MaterializationSessionID: "session-materializer",
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	env.Status = models.TaskEnvironmentStatusReady
+	env.MaterializationSessionID = ""
+	env.WorkspacePath = "/tasks/task-finalize/repo"
+	if err := repo.FinalizeTaskEnvironmentMaterialization(ctx, env, []*models.TaskEnvironmentRepo{{
+		RepositoryID: "repository-1", WorktreeID: "worktree-1", WorktreePath: env.WorkspacePath, WorktreeBranch: "feature/finalize",
+	}}, "session-materializer"); err != nil {
+		t.Fatalf("FinalizeTaskEnvironmentMaterialization: %v", err)
+	}
+
+	persisted, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if persisted.Status != models.TaskEnvironmentStatusReady || persisted.MaterializationSessionID != "" {
+		t.Fatalf("environment = status %q owner %q, want ready with no owner", persisted.Status, persisted.MaterializationSessionID)
+	}
+	if len(persisted.Repos) != 1 || persisted.Repos[0].WorktreeID != "worktree-1" {
+		t.Fatalf("canonical inventory = %#v, want one finalized repository", persisted.Repos)
+	}
+}
+
 func TestCreateTaskSessionWithWorkspaceBindingElectsAndAttaches(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

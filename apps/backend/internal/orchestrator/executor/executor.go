@@ -102,6 +102,13 @@ type initialRuntimeSeedTaskSessionCreator interface {
 	CreateTaskSessionWithInitialRuntimeSeed(context.Context, *models.TaskSession) error
 }
 
+// taskEnvironmentMaterializationFinalizer publishes a successfully prepared
+// canonical environment only after its complete repository inventory is saved.
+// It is kept narrow so legacy test stores retain the existing fallback path.
+type taskEnvironmentMaterializationFinalizer interface {
+	FinalizeTaskEnvironmentMaterialization(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, string) error
+}
+
 // workspaceBindingTaskSessionCreator elects the single materializing session
 // and inserts its creating environment in the same transaction as the session.
 // It is optional for lightweight test/legacy stores; production repositories

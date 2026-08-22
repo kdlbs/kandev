@@ -179,6 +179,70 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 	return nil
 }
 
+// FinalizeTaskEnvironmentMaterialization writes the complete canonical
+// repository inventory and transitions the elected creating environment to
+// ready in one transaction. The materializer ID prevents a sibling session
+// from publishing another session's workspace.
+func (r *Repository) FinalizeTaskEnvironmentMaterialization(
+	ctx context.Context,
+	env *models.TaskEnvironment,
+	repos []*models.TaskEnvironmentRepo,
+	materializationSessionID string,
+) error {
+	if env == nil || env.ID == "" || materializationSessionID == "" {
+		return fmt.Errorf("finalize task environment: environment and materializer are required")
+	}
+	if env.ExecutorType == string(models.ExecutorTypeWorktree) && env.WorkspacePath == "" {
+		return fmt.Errorf("finalize task environment: worktree-mode env requires workspace_path (id=%s)", env.ID)
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var taskID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_environments WHERE id = ?`), env.ID).Scan(&taskID); err != nil {
+		return fmt.Errorf("finalize task environment: resolve owner: %w", err)
+	}
+	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environment_repos WHERE task_environment_id = ?`), env.ID); err != nil {
+		return err
+	}
+	for _, repo := range repos {
+		repo.TaskEnvironmentID = env.ID
+		if err := r.insertTaskEnvironmentRepoTx(ctx, tx, repo); err != nil {
+			return err
+		}
+	}
+	env.UpdatedAt = time.Now().UTC()
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_environments SET
+			executor_type = ?, executor_id = ?, executor_profile_id = ?,
+			control_port = ?, status = ?, materialization_session_id = '',
+			workspace_path = ?, container_id = ?,
+			container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?,
+			sandbox_id = ?, task_dir_name = ?, updated_at = ?
+		WHERE id = ? AND status = ? AND materialization_session_id = ?
+	`),
+		env.ExecutorType, env.ExecutorID, env.ExecutorProfileID,
+		env.ControlPort, string(models.TaskEnvironmentStatusReady),
+		env.WorkspacePath, env.ContainerID,
+		env.ContainerBootstrapNonceSecretID, env.ContainerControlAuthTokenSecretID,
+		env.SandboxID, env.TaskDirName, env.UpdatedAt,
+		env.ID, string(models.TaskEnvironmentStatusCreating), materializationSessionID,
+	)
+	if err != nil {
+		return err
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return fmt.Errorf("finalize task environment: materialization claim was not current")
+	}
+	return tx.Commit()
+}
+
 func (r *Repository) TransferTaskEnvironmentToTask(ctx context.Context, envID, taskID string) error {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environments SET

@@ -135,3 +135,40 @@ func TestCreate_ReuseRequiredRejectsCanonicalWorktreeFromAnotherBranch(t *testin
 		t.Fatalf("Create() error = %v, want ErrReuseWorktreeUnavailable", err)
 	}
 }
+
+func TestCreate_ReuseRequiredAllowsAuthorizedEnvironmentFromAnotherTask(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	worktreePath := filepath.Join(t.TempDir(), "canonical")
+	runGit(t, repoPath, "worktree", "add", "-b", "shared-environment", worktreePath, "main")
+	store := newMockStore()
+	store.worktrees["canonical-worktree"] = &Worktree{
+		ID:                "canonical-worktree",
+		TaskID:            "owner-task",
+		TaskEnvironmentID: "shared-environment",
+		RepositoryID:      "repository-1",
+		Path:              worktreePath,
+		Branch:            "shared-environment",
+		Status:            StatusActive,
+	}
+	mgr, err := NewManager(newTestConfig(t), store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	got, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:            "inherited-task",
+		SessionID:         "session-2",
+		TaskEnvironmentID: "shared-environment",
+		RepositoryID:      "repository-1",
+		RepositoryPath:    repoPath,
+		BaseBranch:        "main",
+		WorktreeID:        "canonical-worktree",
+		ReuseRequired:     true,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v, want inherited task to attach: %v", err, err)
+	}
+	if got.ID != "canonical-worktree" {
+		t.Fatalf("Create() worktree ID = %q, want canonical-worktree", got.ID)
+	}
+}

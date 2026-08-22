@@ -226,7 +226,8 @@ func (r *Repository) insertNormalized(c *worktreeCutover, tx *sqlx.Tx) error {
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 			env.id, taskID, env.executorType, env.executorID, env.executorProfileID,
 			env.controlPort, env.status, "", env.workspacePath, env.containerID,
-			"", "", env.sandboxID, env.taskDirName, env.createdAt, env.updatedAt); err != nil {
+			env.containerBootstrapNonceSecretID, env.containerControlAuthTokenSecretID,
+			env.sandboxID, env.taskDirName, env.createdAt, env.updatedAt); err != nil {
 			return fmt.Errorf("cutover: insert shadow environment %s: %w", env.id, err)
 		}
 	}

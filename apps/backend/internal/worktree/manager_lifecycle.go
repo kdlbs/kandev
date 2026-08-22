@@ -176,7 +176,7 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrReuseWorktreeUnavailable, err)
 	}
-	if wt == nil || wt.Status != StatusActive || wt.TaskID != req.TaskID ||
+	if wt == nil || wt.Status != StatusActive ||
 		wt.RepositoryID != req.RepositoryID ||
 		wt.TaskEnvironmentID != req.TaskEnvironmentID ||
 		(requestedBranchSlug != "" && SanitizeBranchSlug(wt.BranchSlug) != requestedBranchSlug) ||

@@ -295,6 +295,7 @@ type mockRepository struct {
 	setSessionPrimaryCalls            []string
 	createTaskEnvironmentCalls        []*models.TaskEnvironment
 	updateTaskEnvironmentCalls        []*models.TaskEnvironment
+	finalizeTaskEnvironmentCalls      []*models.TaskEnvironment
 	updateTaskStateIfCurrentInCalls   []updateTaskStateIfCurrentInCall
 	updateTaskStateIfNotArchivedCalls []updateTaskStateIfNotArchivedCall
 }
@@ -1124,6 +1125,12 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 	}
 	m.updateTaskEnvironmentCalls = append(m.updateTaskEnvironmentCalls, env)
 	m.taskEnvironments[env.ID] = env
+	return nil
+}
+func (m *mockRepository) FinalizeTaskEnvironmentMaterialization(_ context.Context, env *models.TaskEnvironment, repos []*models.TaskEnvironmentRepo, _ string) error {
+	m.finalizeTaskEnvironmentCalls = append(m.finalizeTaskEnvironmentCalls, env)
+	m.taskEnvironments[env.ID] = env
+	m.taskEnvironmentRepos[env.ID] = repos
 	return nil
 }
 func (m *mockRepository) CreateTaskEnvironmentRepo(_ context.Context, repo *models.TaskEnvironmentRepo) error {
