@@ -114,12 +114,12 @@ test.describe("Sentry settings — instances", () => {
     await expect(settings.cards).toHaveCount(2);
 
     await settings.cardByName("Primary").getByTestId("sentry-instance-delete-button").click();
-    await testPage.getByTestId("sentry-remove-confirm").click();
+    await testPage.getByRole("button", { name: 'Remove Sentry instance "Primary"?' }).click();
     await expect(testPage.getByText(/still bound to it/i)).toBeVisible();
     await expect(settings.cardByName("Primary")).toBeVisible();
 
     await settings.cardByName("Secondary").getByTestId("sentry-instance-delete-button").click();
-    await testPage.getByTestId("sentry-remove-confirm").click();
+    await testPage.getByRole("button", { name: 'Remove Sentry instance "Secondary"?' }).click();
     await expect(settings.cardByName("Secondary")).toHaveCount(0);
     await expect(settings.cardByName("Primary")).toBeVisible();
   });
