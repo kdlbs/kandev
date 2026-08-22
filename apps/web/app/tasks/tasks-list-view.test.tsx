@@ -14,6 +14,9 @@ import { TasksListView, type TasksListViewProps } from "./tasks-list-view";
 
 afterEach(cleanup);
 
+const PLUGIN_TAGS_FACET = "facet:plugin:tags";
+const TASKS_LIST_SECTION = "tasks-list-section";
+
 function message(overrides: Partial<Message>): Message {
   return {
     id: "msg-1",
@@ -140,7 +143,7 @@ describe("TasksListView facet grouping", () => {
         <TooltipProvider>
           <TasksListView
             {...props([tagged, untagged])}
-            tasksListGroup="facet:plugin:tags"
+            tasksListGroup={PLUGIN_TAGS_FACET}
             facetValues={{
               "facet:plugin:tags:tagged": [{ value: "untagged", label: "Custom untagged" }],
             }}
@@ -149,7 +152,7 @@ describe("TasksListView facet grouping", () => {
       </StateProvider>,
     );
 
-    expect(screen.getAllByTestId("tasks-list-section")).toHaveLength(2);
+    expect(screen.getAllByTestId(TASKS_LIST_SECTION)).toHaveLength(2);
   });
 
   it("keeps the host fallback separate from any plugin value", () => {
@@ -161,7 +164,7 @@ describe("TasksListView facet grouping", () => {
         <TooltipProvider>
           <TasksListView
             {...props([tagged, untagged])}
-            tasksListGroup="facet:plugin:tags"
+            tasksListGroup={PLUGIN_TAGS_FACET}
             facetValues={{
               "facet:plugin:tags:tagged": [
                 { value: "__host_ungrouped__", label: "Custom host value" },
@@ -172,7 +175,7 @@ describe("TasksListView facet grouping", () => {
       </StateProvider>,
     );
 
-    expect(screen.getAllByTestId("tasks-list-section")).toHaveLength(2);
+    expect(screen.getAllByTestId(TASKS_LIST_SECTION)).toHaveLength(2);
   });
 
   // A wrapping section label used to squeeze the flex sibling swatch down to
@@ -186,7 +189,7 @@ describe("TasksListView facet grouping", () => {
         <TooltipProvider>
           <TasksListView
             {...props([tagged])}
-            tasksListGroup="facet:plugin:tags"
+            tasksListGroup={PLUGIN_TAGS_FACET}
             facetValues={{
               "facet:plugin:tags:tagged": [
                 { value: "long", label: "A very long facet label".repeat(6), color: "#0ea5e9" },
@@ -198,7 +201,7 @@ describe("TasksListView facet grouping", () => {
     );
 
     const swatch = screen
-      .getByTestId("tasks-list-section")
+      .getByTestId(TASKS_LIST_SECTION)
       .querySelector('span[style*="background-color"]');
     expect(swatch).not.toBeNull();
     expect(swatch?.classList.contains("shrink-0")).toBe(true);
@@ -213,7 +216,7 @@ describe("TasksListView facet grouping", () => {
         <TooltipProvider>
           <TasksListView
             {...props([multi, single])}
-            tasksListGroup="facet:plugin:tags"
+            tasksListGroup={PLUGIN_TAGS_FACET}
             facetValues={{
               "facet:plugin:tags:multi": [
                 { value: "alpha", label: "Alpha" },
@@ -227,7 +230,7 @@ describe("TasksListView facet grouping", () => {
     );
 
     const titles = screen
-      .getAllByTestId("tasks-list-section")
+      .getAllByTestId(TASKS_LIST_SECTION)
       .map((section) => section.textContent ?? "");
     expect(titles).toHaveLength(2);
     expect(titles[0]).toContain("Alpha");
