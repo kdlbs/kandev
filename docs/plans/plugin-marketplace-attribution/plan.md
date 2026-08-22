@@ -97,15 +97,16 @@ Wave 1 contains two disjoint plugin-repository changes. They are marked as
 parallel-safe for planning purposes, but the primary session executes them
 sequentially unless the user explicitly authorizes delegation.
 
-- [x] [task-01-bitbucket-attribution](task-01-bitbucket-attribution.md) -
-  done locally; release publication follows merge
-- [x] [task-02-youtrack-attribution](task-02-youtrack-attribution.md) -
-  done locally; upstream maintainer release publication follows merge
+- [ ] [task-01-bitbucket-attribution](task-01-bitbucket-attribution.md) -
+  in progress; local fix complete, release publication follows merge
+- [ ] [task-02-youtrack-attribution](task-02-youtrack-attribution.md) -
+  in progress; local fix complete, upstream maintainer release publication
+  follows merge
 
 Wave 2 verifies the published releases and regenerated catalog:
 
 - [ ] [task-03-registry-verification](task-03-registry-verification.md) -
-  in progress; depends on the two published releases
+  pending; blocked until the two corrected releases are published
 
 ## Open Questions
 

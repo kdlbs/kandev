@@ -1,7 +1,7 @@
 ---
 id: "03-registry-verification"
 title: "Verify regenerated catalog attribution"
-status: in_progress
+status: pending
 wave: 2
 depends_on: ["01-bitbucket-attribution", "02-youtrack-attribution"]
 plan: "plan.md"
@@ -71,6 +71,6 @@ handling, `git diff --check` result, and synchronized task/plan statuses.
 - `pnpm --filter @kandev/web test -- --run components/settings/plugins/marketplace-entry-row.test.tsx` (3 tests)
 - `git diff --check`
 
-The live catalog rebuild is intentionally pending the Bitbucket and YouTrack
-release publications. `plugin-registry/plugins.yaml` remains unchanged and
+The live catalog rebuild is blocked until the Bitbucket and YouTrack release
+publications exist. `plugin-registry/plugins.yaml` remains unchanged and
 contains no author override.

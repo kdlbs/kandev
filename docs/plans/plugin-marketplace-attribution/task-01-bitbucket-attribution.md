@@ -1,7 +1,7 @@
 ---
 id: "01-bitbucket-attribution"
 title: "Correct Bitbucket attribution"
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"

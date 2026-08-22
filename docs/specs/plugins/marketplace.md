@@ -36,13 +36,18 @@ while keeping install-by-URL and sideloading as escape hatches.
   or actively-maintained plugins are not buried under older high-star incumbents.
 - Each catalog entry shows: display name, description, author, categories, the source
   repository link, the latest published version, and its star count.
-- Catalog attribution SHALL preserve the plugin's declared ownership. First-party
-  `kdlbs/kandev-plugin-*` releases SHALL declare `author: "kandev"`; community
-  releases SHALL declare the contributor's stable identity. A plugin SHALL NOT be
-  labeled `kandev` only because a maintainer curated it into the official source.
+- Release authors and registry reviewers SHALL apply the attribution convention:
+  first-party `kdlbs/kandev-plugin-*` releases declare `author: "kandev"`,
+  community releases declare the contributor's stable identity, and a plugin is
+  not labeled `kandev` only because a maintainer curated it into the official
+  source. This is a release and curation check, not an index-builder ownership
+  validation rule. The builder preserves a declared manifest author and falls
+  back to the repository owner for legacy releases without one.
 - The catalog source repository link SHALL identify the repository named by the
-  registry entry. A release manifest's `repo_url`, when present, SHALL identify the
-  same repository so installed and marketplace views do not disagree.
+  registry entry. The index builder derives this value from the registry pointer.
+  A release manifest's `repo_url`, when present, SHOULD identify the same
+  repository so installed and marketplace views do not disagree; release and
+  registry review is responsible for flagging mismatches.
 - Installing from the catalog SHALL be **one click**: it resolves to the plugin's
   latest release tarball URL and runs the existing verified install pipeline
   (`POST /api/plugins/install`). No new install mechanism is introduced.

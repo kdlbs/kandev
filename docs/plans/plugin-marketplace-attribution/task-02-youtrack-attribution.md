@@ -1,7 +1,7 @@
 ---
 id: "02-youtrack-attribution"
 title: "Correct YouTrack attribution"
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
