@@ -11,7 +11,6 @@ import {
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
-import { TaskItemStatsRow } from "./task-item-stats-row";
 import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
 import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
@@ -22,15 +21,11 @@ import {
   shouldUsePermissionTaskIcon,
 } from "@/lib/ui/state-icons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
-import { TaskRowMetadata } from "./task-row-plugin-slots";
 import { classifyTask } from "./task-classify";
-import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
-import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
 import { TaskMenuButton } from "./task-item-menu-button";
-import { TaskItemLeadingBadges } from "./task-item-leading-badges";
+import { TaskItemContent } from "./task-item-content";
 
 type DiffStats = {
   additions: number;
@@ -320,99 +315,6 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
     >
       <span className="text-emerald-500">+{diffStats.additions}</span>{" "}
       <span className="text-rose-500">-{diffStats.deletions}</span>
-    </div>
-  );
-}
-
-function TaskItemContent({
-  title,
-  autopilot,
-  taskId,
-  workflowStepId,
-  isRemoteExecutor,
-  remoteExecutorType,
-  remoteExecutorName,
-  primarySessionId,
-  isArchived,
-  isPinned,
-  repositoryPath,
-  showRepository,
-  updatedAt,
-  lastActivityAt,
-  showActivityTime,
-  prInfo,
-  queuedCount,
-  wipQueue,
-  issueInfo,
-  agentErrorMessage,
-  comparisonUnavailable,
-}: {
-  title: string;
-  autopilot?: boolean;
-  taskId?: string;
-  workflowStepId?: string | null;
-  isRemoteExecutor?: boolean;
-  remoteExecutorType?: string;
-  remoteExecutorName?: string;
-  primarySessionId?: string | null;
-  isArchived?: boolean;
-  isPinned?: boolean;
-  repositoryPath?: string;
-  showRepository: boolean;
-  updatedAt?: string;
-  lastActivityAt?: string;
-  showActivityTime?: boolean;
-  prInfo?: { number: number; state: string; aggregateState?: string };
-  queuedCount?: number;
-  wipQueue?: WipQueueStatus;
-  issueInfo?: { url: string; number: number };
-  agentErrorMessage?: string | null;
-  comparisonUnavailable?: boolean;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
-        <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
-        <TaskItemLeadingBadges
-          autopilot={autopilot}
-          isPinned={isPinned}
-          taskId={taskId}
-          prInfo={prInfo}
-          issueInfo={issueInfo}
-          agentErrorMessage={agentErrorMessage}
-        />
-        <TaskItemComparisonUnavailable unavailable={comparisonUnavailable} />
-        {isRemoteExecutor && (
-          <RemoteCloudTooltip
-            taskId={taskId ?? ""}
-            sessionId={primarySessionId ?? null}
-            executorType={remoteExecutorType}
-            fallbackName={remoteExecutorName ?? remoteExecutorType}
-            iconClassName="h-3 w-3 text-muted-foreground/60"
-          />
-        )}
-        {isArchived && (
-          <span className="rounded px-1 py-px text-[10px] bg-amber-500/15 text-amber-500">
-            {t("task:filterDimensionArchived")}
-          </span>
-        )}
-      </span>
-      {taskId && (
-        <TaskRowMetadata
-          taskId={taskId}
-          workflowStepId={workflowStepId ?? null}
-          surface="sidebar"
-        />
-      )}
-      <TaskItemStatsRow
-        updatedAt={showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt}
-        repositoryLabel={showRepository ? repositoryPath : undefined}
-        prInfo={prInfo}
-        primarySessionId={primarySessionId}
-        queuedCount={queuedCount}
-        wipQueue={wipQueue}
-      />
     </div>
   );
 }

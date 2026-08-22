@@ -23,6 +23,7 @@ spec: "../../specs/tasks/rich-task-title-previews.md"
   and
   `cd apps/web && pnpm e2e:run --project mobile-chrome tests/kanban/mobile-task-title-hover-subtasks.spec.ts`.
 - **Files touched:** `apps/web/components/task/task-item.tsx`,
+  `apps/web/components/task/task-item-content.tsx`,
   `apps/web/app/tasks/rich-task-list-row.tsx`,
   `apps/web/components/task/task-title-hover-card.tsx`,
   `apps/web/components/task/task-title-hover-card.test.tsx`,
@@ -45,3 +46,7 @@ spec: "../../specs/tasks/rich-task-title-previews.md"
 - `cd apps/web && pnpm run lint` passed.
 - `git diff --check` passed.
 - The managed E2E runner cleaned its temporary backend, fixture repository, and test data. No external side effects remain.
+- PR fixup extracted the sidebar task-content renderer into
+  `apps/web/components/task/task-item-content.tsx` to satisfy the repository's
+  600-line file limit. This is an internal, behavior-preserving refactor, so
+  the product behavior and acceptance criteria are unchanged.
