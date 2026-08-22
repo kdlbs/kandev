@@ -42,7 +42,7 @@ func TestInstallAttestedCloneGitMetadataPolicyAttestsBeforeRendering(t *testing.
 	req := &ExecutorCreateRequest{
 		GitMetadataRequirement: cloneGitMetadataRequirement(true),
 		AgentConfig:            agents.NewCodexACP(),
-		Env:                    map[string]string{"CODEX_CONFIG": `{}`},
+		Env:                    map[string]string{"CODEX_CONFIG": `{}`, "RUNTIME_TOKEN": "preserve-me"},
 	}
 	instance := &ExecutorInstance{
 		Client:               agentctl.NewClient(parsed.Hostname(), port, log),
@@ -60,6 +60,9 @@ func TestInstallAttestedCloneGitMetadataPolicyAttestsBeforeRendering(t *testing.
 		t.Fatalf("clone launch synthesized host projections: %#v", req.GitMetadataProjections)
 	}
 	policyEnv := instance.Metadata["runtime_env"].(map[string]string)
+	if policyEnv["RUNTIME_TOKEN"] != "preserve-me" {
+		t.Fatalf("runtime environment lost non-policy values: %#v", policyEnv)
+	}
 	if strings.Contains(policyEnv["CODEX_CONFIG"], "/host/") {
 		t.Fatalf("rendered clone policy leaked host path: %s", policyEnv["CODEX_CONFIG"])
 	}

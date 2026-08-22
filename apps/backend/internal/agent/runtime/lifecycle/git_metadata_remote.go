@@ -212,7 +212,12 @@ func remoteGitMetadataRuntimeEnv(req *ExecutorCreateRequest) (map[string]string,
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{descriptor.ConfigEnvKey: req.Env[descriptor.ConfigEnvKey]}, nil
+	env := cloneStringMap(req.Env)
+	if env == nil {
+		env = make(map[string]string)
+	}
+	env[descriptor.ConfigEnvKey] = req.Env[descriptor.ConfigEnvKey]
+	return env, nil
 }
 
 func validRemoteRegularGitMetadata(metadata remoteRegularGitMetadata) bool {
