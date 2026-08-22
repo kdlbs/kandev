@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { i18n } from "@/lib/i18n";
 import type { LinearIssueWatch } from "@/lib/types/linear";
 import { LinearIssueWatchTable } from "./linear-issue-watch-table";
 
@@ -36,8 +37,9 @@ function watch(overrides: Partial<LinearIssueWatch> = {}): LinearIssueWatch {
   } as LinearIssueWatch;
 }
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  await i18n.changeLanguage("en");
   responsive.isFinePointer = true;
   responsive.usesDesktopWorkbench = true;
   Object.defineProperty(window, "confirm", { configurable: true, value: undefined });
@@ -54,6 +56,7 @@ function installNativeConfirm() {
 
 describe("LinearIssueWatchTable delete confirmation", () => {
   it("uses anchored localized confirmation instead of browser confirm", async () => {
+    await i18n.changeLanguage("pseudo");
     const onDelete = vi.fn();
     const nativeConfirm = installNativeConfirm();
     render(
@@ -72,9 +75,9 @@ describe("LinearIssueWatchTable delete confirmation", () => {
     );
 
     fireEvent.click(screen.getByTestId("linear-watch-delete-linear-1"));
-    expect(await screen.findByRole("dialog", { name: "Delete this Linear watcher?" })).toBeTruthy();
+    expect(await screen.findByRole("dialog", { name: "Ďēĺēţē ţĥĩś Ĺĩńēàŕ ŵàţćĥēŕ?" })).toBeTruthy();
     expect(nativeConfirm).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ćàńćēĺ" }));
     expect(onDelete).not.toHaveBeenCalled();
   });
 
@@ -101,6 +104,7 @@ describe("LinearIssueWatchTable delete confirmation", () => {
   });
 
   it("uses touch-sized inline actions for coarse pointers", async () => {
+    await i18n.changeLanguage("pseudo");
     responsive.isFinePointer = false;
     const onDelete = vi.fn();
     render(
@@ -120,11 +124,11 @@ describe("LinearIssueWatchTable delete confirmation", () => {
 
     fireEvent.click(screen.getByTestId("linear-watch-delete-linear-1"));
     const confirmation = await screen.findByRole("group", {
-      name: "Delete this Linear watcher?",
+      name: "Ďēĺēţē ţĥĩś Ĺĩńēàŕ ŵàţćĥēŕ?",
     });
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByRole("button", { name: "Cancel" }).className).toContain("h-11");
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByRole("button", { name: "Ćàńćēĺ" }).className).toContain("h-11");
+    fireEvent.click(screen.getByRole("button", { name: "Ďēĺēţē" }));
     await waitFor(() => expect(onDelete).toHaveBeenCalledWith("linear-1"));
     await waitFor(() => expect(confirmation.isConnected).toBe(false));
   });
