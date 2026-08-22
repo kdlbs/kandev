@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""Contract tests for PR walkthrough generation, publication, and linking."""
+
+from pathlib import Path
+import re
+import unittest
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pr-walkthrough.yml"
+REVIEW_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "opencode-code-review.yml"
+LINT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
+SETUP_OPENCODE_ACTION = REPO_ROOT / ".github" / "actions" / "setup-opencode" / "action.yml"
+OPENCODE_RENDER_TOOL = REPO_ROOT / ".github" / "scripts" / "opencode-pr-walkthrough-tool.ts"
+PR_BODY_HELPER = REPO_ROOT / "scripts" / "pr-walkthrough-pr-body"
+
+
+def workflow_job(workflow: str, name: str) -> str:
+    marker = f"  {name}:\n"
+    _, separator, remainder = workflow.partition(marker)
+    if not separator:
+        raise AssertionError(f"workflow job is missing: {name}")
+    next_job = re.search(r"^  [A-Za-z0-9_-]+:\n", remainder, re.MULTILINE)
+    return remainder[: next_job.start()] if next_job else remainder
+
+
+class PRWalkthroughWorkflowContractTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        if not WORKFLOW.is_file():
+            raise AssertionError("PR walkthrough must have a dedicated workflow file")
+        cls.workflow = WORKFLOW.read_text(encoding="utf-8")
+        cls.review_workflow = REVIEW_WORKFLOW.read_text(encoding="utf-8")
+        cls.generation = workflow_job(cls.workflow, "pr-walkthrough-generate")
+        cls.publication = workflow_job(cls.workflow, "pr-walkthrough-publish")
+        cls.link = workflow_job(cls.workflow, "pr-walkthrough-link")
+        cls.same_repo_review = workflow_job(cls.review_workflow, "opencode-review-same-repo")
+        cls.fork_review = workflow_job(cls.review_workflow, "opencode-review-fork")
+
+    def test_walkthrough_is_separate_and_independently_enabled(self) -> None:
+        self.assertNotIn("pr-walkthrough-generate:", self.review_workflow)
+        self.assertNotIn("pr-walkthrough-publish:", self.review_workflow)
+        self.assertNotIn("PR_WALKTHROUGH_ENABLED", self.review_workflow)
+        self.assertIn("vars.PR_WALKTHROUGH_ENABLED == 'true'", self.generation)
+        self.assertIn("vars.PR_WALKTHROUGH_ENABLED == 'true'", self.publication)
+        self.assertNotIn("OPENCODE_REVIEW_ENABLED", self.workflow)
+
+    def test_generation_is_limited_to_authorized_same_repository_events(self) -> None:
+        self.assertIn("pull_request_target:", self.workflow)
+        self.assertIn(
+            "types: [opened, ready_for_review, reopened, labeled]",
+            self.workflow,
+        )
+        for condition in (
+            "github.event_name == 'pull_request_target'",
+            "github.event.pull_request.draft == false",
+            "github.event.pull_request.head.repo.full_name == github.repository",
+            "github.event.action == 'opened'",
+            "github.event.action == 'reopened'",
+            "github.event.action == 'ready_for_review'",
+            "github.event.action == 'labeled' && github.event.label.name == 'generate-pr-walkthrough'",
+        ):
+            self.assertIn(condition, self.generation)
+        self.assertNotIn("synchronize", self.workflow)
+
+    def test_generation_uses_requested_model_native_high_reasoning_variant(self) -> None:
+        model = "opencode-go/muse-spark-1.2-contributor#high"
+        self.assertIn(f"PR_WALKTHROUGH_MODEL: {model}", self.workflow)
+        self.assertIn(f'model: "{model}"', self.generation)
+        self.assertIn('--model "$PR_WALKTHROUGH_MODEL"', self.generation)
+        self.assertNotIn("reasoningEffort", self.generation)
+
+    def test_generation_checks_out_exact_head_without_credentials(self) -> None:
+        self.assertIn("ref: ${{ github.event.pull_request.head.sha }}", self.generation)
+        self.assertIn("fetch-depth: 0", self.generation)
+        self.assertIn("persist-credentials: false", self.generation)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$HEAD_SHA"', self.generation)
+
+    def test_generation_uses_trusted_base_skill_renderer_and_helper(self) -> None:
+        for path in (
+            ".agents/skills/pr-walkthrough/SKILL.md",
+            ".agents/skills/pr-walkthrough/references/build.py",
+            ".agents/skills/pr-walkthrough/references/shell.html",
+            "scripts/pr-walkthrough-render",
+            ".github/scripts/opencode-pr-walkthrough-tool.ts",
+        ):
+            self.assertIn(f'git show "$BASE_SHA:{path}"', self.generation)
+        self.assertIn("git diff --find-renames --find-copies", self.generation)
+        self.assertIn("git diff --name-only", self.generation)
+
+    def test_opencode_walkthrough_agent_is_read_only(self) -> None:
+        self.assertIn('permission:\n            "*": deny', self.generation)
+        for allowed in ("read: allow", "glob: allow", "grep: allow"):
+            self.assertIn(allowed, self.generation)
+        self.assertIn("--agent github-pr-walkthrough", self.generation)
+        self.assertIn("--file .opencode-walkthrough/guidelines.md", self.generation)
+        self.assertIn("render_pr_walkthrough: allow", self.generation)
+        self.assertNotIn("CLOUDFLARE_R2", self.generation)
+        self.assertNotIn("pull-requests: write", self.generation)
+
+    def test_managed_render_tool_is_fixed_to_the_trusted_helper(self) -> None:
+        self.assertTrue(OPENCODE_RENDER_TOOL.is_file())
+        tool = OPENCODE_RENDER_TOOL.read_text(encoding="utf-8")
+        self.assertIn('".opencode-walkthrough", "render"', tool)
+        self.assertIn('Bun.spawn(["python3", helper]', tool)
+        self.assertNotIn("args.command", tool)
+        for value in (
+            "PR_NUMBER: ${{ github.event.pull_request.number }}",
+            "PR_TITLE: ${{ github.event.pull_request.title }}",
+            "PR_URL: ${{ github.event.pull_request.html_url }}",
+            "PR_REPO: ${{ github.repository }}",
+            "PR_BASE: ${{ github.event.pull_request.base.ref }}",
+            "PR_HEAD: ${{ github.event.pull_request.head.ref }}",
+        ):
+            self.assertIn(value, self.generation)
+
+    def test_generation_uploads_agent_built_outputs_and_diagnostics(self) -> None:
+        self.assertIn("Verify agent-built walkthrough", self.generation)
+        self.assertIn('"docs/pr-walkthrough/pr-${PR_NUMBER}.json"', self.generation)
+        self.assertIn('"docs/pr-walkthrough/pr-${PR_NUMBER}.html"', self.generation)
+        self.assertIn(
+            "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+            self.generation,
+        )
+        self.assertIn("- name: Stage walkthrough artifact\n        if: always()", self.generation)
+        self.assertIn("path: pr-walkthrough-artifact/", self.generation)
+        self.assertIn("if-no-files-found: error", self.generation)
+
+    def test_workflow_events_do_not_cancel_different_actions_for_the_same_pr(self) -> None:
+        workflow_header = self.workflow.split("jobs:", 1)[0]
+        self.assertNotIn("concurrency:", workflow_header)
+        self.assertIn("concurrency:", self.generation)
+        self.assertIn("github.event.action", self.generation)
+        self.assertIn("github.event.label.name", self.generation)
+        self.assertIn("concurrency:", self.same_repo_review)
+        self.assertIn("concurrency:", self.fork_review)
+
+    def test_walkthrough_label_does_not_run_the_normal_code_review(self) -> None:
+        self.assertIn("github.event.action != 'labeled'", self.same_repo_review)
+        self.assertIn(
+            "github.event.label.name != 'generate-pr-walkthrough'",
+            self.same_repo_review,
+        )
+
+    def test_all_opencode_jobs_use_the_trusted_reusable_setup_action(self) -> None:
+        workflows = self.workflow + self.review_workflow
+        self.assertEqual(workflows.count("uses: ./.trusted-actions/setup-opencode"), 3)
+        self.assertEqual(
+            workflows.count(
+                'git show "$BASE_SHA:.github/actions/setup-opencode/action.yml"'
+            ),
+            3,
+        )
+        self.assertNotIn("curl -fsSL", workflows)
+        self.assertTrue(SETUP_OPENCODE_ACTION.is_file())
+        action = SETUP_OPENCODE_ACTION.read_text(encoding="utf-8")
+        self.assertIn(
+            "60fe5a92dc9af64ec079348fedde17e12da6a867efe7e8353be8038480607924",
+            action,
+        )
+
+    def test_fork_job_fetches_base_before_materializing_setup_action(self) -> None:
+        fetch = self.fork_review.index('git fetch --no-tags --prune origin "$BASE_SHA"')
+        materialize = self.fork_review.index(
+            'git show "$BASE_SHA:.github/actions/setup-opencode/action.yml"'
+        )
+        self.assertLess(fetch, materialize)
+
+    def test_publication_is_artifact_only_and_exports_validated_url(self) -> None:
+        self.assertIn("needs: pr-walkthrough-generate", self.publication)
+        self.assertIn(
+            "uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            self.publication,
+        )
+        self.assertNotIn("actions/checkout", self.publication)
+        self.assertNotIn("opencode run", self.publication.lower())
+        self.assertNotIn("CLOUDFLARE_API_TOKEN", self.publication)
+        self.assertIn("permissions: {}", self.publication)
+        self.assertIn("url: ${{ steps.publish.outputs.url }}", self.publication)
+        self.assertIn("printf 'url=%s\\n' \"$PUBLIC_URL\"", self.publication)
+
+    def test_publication_uploads_only_html_with_expected_metadata(self) -> None:
+        for value in (
+            'OBJECT_KEY="pr/${PR_NUMBER}/${HEAD_SHA}.html"',
+            "aws s3 cp",
+            '--content-type "text/html; charset=utf-8"',
+            '--cache-control "public, max-age=300"',
+            "aws s3api head-object",
+            'test "$content_type" = "text/html; charset=utf-8"',
+            'test "$content_length" -gt 0',
+            "CLOUDFLARE_R2_ACCESS_KEY_ID",
+            "CLOUDFLARE_R2_SECRET_ACCESS_KEY",
+        ):
+            self.assertIn(value, self.publication)
+
+    def test_r2_secrets_are_scoped_to_the_upload_step(self) -> None:
+        job_header, _, steps = self.publication.partition("    steps:\n")
+        self.assertNotIn("CLOUDFLARE_R2_ACCESS_KEY_ID", job_header)
+        self.assertNotIn("CLOUDFLARE_R2_SECRET_ACCESS_KEY", job_header)
+        upload_step = steps.split("      - name:", 2)[2]
+        self.assertIn("CLOUDFLARE_R2_ACCESS_KEY_ID", upload_step)
+        self.assertIn("CLOUDFLARE_R2_SECRET_ACCESS_KEY", upload_step)
+
+    def test_publication_validates_public_url_before_linking(self) -> None:
+        self.assertIn("curl --fail", self.publication)
+        self.assertIn('cmp -- "$HTML_PATH" "$FETCHED_PATH"', self.publication)
+        self.assertIn("GITHUB_STEP_SUMMARY", self.publication)
+        self.assertIn("https://walkthrough.kandev.ai", self.publication)
+        self.assertNotIn("pull-requests: write", self.publication)
+        self.assertNotIn("gh api", self.publication)
+
+    def test_link_job_uses_trusted_base_helper_and_minimal_write_permission(self) -> None:
+        self.assertIn("needs: pr-walkthrough-publish", self.link)
+        self.assertIn("contents: read", self.link)
+        self.assertIn("pull-requests: write", self.link)
+        self.assertIn("ref: ${{ github.event.pull_request.base.sha }}", self.link)
+        self.assertIn("persist-credentials: false", self.link)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$BASE_SHA"', self.link)
+        self.assertIn("scripts/pr-walkthrough-pr-body", self.link)
+        self.assertIn("--github-response", self.link)
+        self.assertIn("--input", self.link)
+        self.assertIn("needs.pr-walkthrough-publish.outputs.url", self.link)
+        self.assertNotIn("CLOUDFLARE_R2", self.link)
+        self.assertNotIn("OPENCODE_API_KEY", self.link)
+        self.assertTrue(PR_BODY_HELPER.is_file())
+
+    def test_lint_workflow_runs_contract_and_body_helper_tests(self) -> None:
+        lint_workflow = LINT_WORKFLOW.read_text(encoding="utf-8")
+        for command in (
+            "python3 .github/scripts/pr-walkthrough-workflow-contract_test.py",
+            "python3 scripts/pr-walkthrough-pr-body.test.py",
+        ):
+            self.assertIn(command, lint_workflow)
+
+
+if __name__ == "__main__":
+    unittest.main()

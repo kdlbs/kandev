@@ -304,6 +304,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [board-step-visibility-filter](board-step-visibility-filter/spec.md) | draft |
 | [shutdown-turn-failure-suppression](shutdown-turn-failure-suppression/spec.md) | draft |
 | [executor-profile-env-precedence](executor-profile-env-precedence/spec.md) | building |
+| [pr-walkthrough](pr-walkthrough/spec.md) | building |
 
 ---
 
