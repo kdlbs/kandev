@@ -473,7 +473,10 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.dockerExecutorProfileId,
       prompt: "/e2e:simple-message",
-      auto_start: true,
+      // This is a user-initiated New Session launch. `auto_start` is reserved
+      // for workflow on-enter automation and correctly prepares (rather than
+      // starts) a session when this simple workflow does not opt into it.
+      auto_start: false,
     });
 
     await waitForSessionEnvironment(apiClient, {
