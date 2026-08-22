@@ -12,9 +12,8 @@ spec: "../../specs/claude-fork-review-allowlist/spec.md"
 
 ## Acceptance
 
-- `safe-to-test` remains on a fork pull request after a contributor push, but
-  does not authorize privileged preview execution of the new head on
-  `synchronize` without fresh approval.
+- `safe-to-test` remains on a fork pull request after a contributor push and
+  keeps the preview fork job eligible for the current head on `synchronize`.
 - `safe-to-review` remains on a fork pull request after a contributor push and
   keeps the OpenCode fork-review job eligible for the current head on
   `synchronize`.
@@ -67,9 +66,9 @@ coupled change.
 
 ## Risks
 
-Persisting a label keeps visible approval state across pushes. Do not broaden
-the preview workflow beyond its existing external-PR label gate, and do not
-remove the fresh-approval boundary or direct allowlist paths.
+Persisting a label makes a maintainer approval apply to future fork heads.
+Do not broaden the workflow conditions beyond the existing external-PR label
+gates or remove the direct allowlist paths.
 
 ## Output contract
 
@@ -80,14 +79,12 @@ verification still needed after merge, and synchronized task/plan statuses.
 ## Results
 
 - Removed the preview and OpenCode synchronize-time label cleanup jobs.
-- Kept the preview label-path `synchronize` exclusion so a persistent marker
-  cannot authorize new fork code with deployment credentials.
-- Removed the OpenCode label-path `synchronize` exclusion so its constrained
-  review path continues across follow-up pushes.
+- Removed both label-path `synchronize` exclusions so existing maintainer
+  approvals authorize follow-up fork heads.
 - Added preview and OpenCode contract tests, and registered the OpenCode test
   in the always-on action-pinning workflow.
-- RED passed as an expected failure against the durable-preview implementation.
-  GREEN passed with 2 preview tests, 3 OpenCode tests, and 9 Claude tests.
+- RED passed as an expected failure against the old workflows. GREEN passed
+  with 2 preview tests, 3 OpenCode tests, and 9 Claude tests.
 - `lint-action-pinning_test.py` (9 tests), `lint-action-pinning.py`, and
   `git diff --check` pass.
 - `zizmor .github/workflows` ran and reported existing repository-wide

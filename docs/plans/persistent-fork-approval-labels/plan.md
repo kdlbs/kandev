@@ -8,12 +8,11 @@ status: implemented
 
 ## Overview
 
-Keep `safe-to-test` and `safe-to-review` as durable maintainer markers while
-preserving the privileged preview reapproval boundary. Remove the
-synchronize-time cleanup jobs, keep the preview label path blocked on new fork
-heads, allow the constrained OpenCode label path on follow-up pushes, and add
-contract coverage for both policies. Update the related security decision and
-allowlist spec in the same change.
+Change the fork approval workflows so `safe-to-test` and `safe-to-review` are
+durable maintainer approvals. Remove the synchronize-time cleanup jobs, allow
+the existing label paths on follow-up pushes, and add contract coverage that
+prevents either workflow from silently returning to per-commit re-approval.
+Update the related security decision and allowlist spec in the same change.
 
 ## Confirmed root cause
 
@@ -27,11 +26,10 @@ files.
 ## Workflow changes
 
 - `.github/workflows/preview-env.yml`
-  - Keep `safe-to-test` in the `deploy-fork` authorization expression and keep
-    its `github.event.action != 'synchronize'` exclusion for privileged preview
-    execution of new fork heads.
-  - Remove the `strip-safe-to-test` job so the label remains visible after
-    pushes, and update comments to explain the fresh approval boundary.
+  - Keep `safe-to-test` in the `deploy-fork` authorization expression.
+  - Remove the `github.event.action != 'synchronize'` exclusion from that label
+    path so an existing approval authorizes the current fork head after pushes.
+  - Remove the `strip-safe-to-test` job and stale per-commit comments.
 - `.github/workflows/opencode-code-review.yml`
   - Keep `safe-to-review` in the fork review authorization expression.
   - Remove the synchronize exclusion from that label path.
@@ -43,9 +41,8 @@ files.
 ## Contract tests
 
 - `.github/scripts/preview-env-workflow-contract_test.py`
-  - Assert the preview workflow keeps the label authorization path and its
-    synchronize exclusion.
-  - Assert the `strip-safe-to-test` job and label-removal call are absent.
+  - Assert the preview workflow keeps the label authorization path.
+  - Assert the synchronize exclusion and `strip-safe-to-test` job are absent.
 - `.github/scripts/opencode-code-review-workflow-contract_test.py`
   - Add focused coverage for the fork label gate, synchronize eligibility, and
     absence of `strip-safe-to-review`/`removeLabel` cleanup.
@@ -63,11 +60,11 @@ files.
 
 ## Tests
 
-- **What:** The preview label remains visible without authorizing a new fork
-  head on `synchronize`, and no cleanup job removes `safe-to-test`.
+- **What:** The preview label path authorizes a fork `synchronize` event and no
+  cleanup job removes `safe-to-test`.
   **File:** `.github/scripts/preview-env-workflow-contract_test.py`.
   **How:** Read the workflow text and assert the label expression remains, the
-  synchronize exclusion is present, and the cleanup job is absent.
+  synchronize exclusion is absent, and the cleanup job is absent.
 - **What:** The OpenCode label path authorizes a fork `synchronize` event and
   no cleanup job removes `safe-to-review`.
   **File:** `.github/scripts/opencode-code-review-workflow-contract_test.py`.
@@ -101,10 +98,8 @@ Wave 1 (sequential; one coupled security-boundary change):
 
 ## Risks and out of scope
 
-- `safe-to-review` intentionally applies to future constrained OpenCode fork
-  heads. `safe-to-test` remains visible but requires fresh approval before
-  privileged preview execution of a new fork head.
-- Maintainers must remove labels when trust should be revoked.
+- This intentionally makes a maintainer label approval apply to future fork
+  heads. Maintainers must remove labels when trust should be revoked.
 - `CLAUDE_REVIEW_ALLOWLIST` and the other direct allowlist paths remain
   independent and fail-closed.
 - The Claude review workflow does not gain a `synchronize` trigger in this
@@ -113,8 +108,9 @@ Wave 1 (sequential; one coupled security-boundary change):
 
 ## Verification Results
 
-- RED: The updated preview contract assertion failed against the durable-label
-  implementation because its synchronize exclusion was absent.
+- RED: The new preview and OpenCode contract assertions failed against the
+  pre-change workflows because the synchronize exclusions and cleanup jobs
+  were still present.
 - GREEN: `preview-env-workflow-contract_test.py` (2 tests),
   `opencode-code-review-workflow-contract_test.py` (3 tests), and the existing
   `claude-code-review-workflow-contract_test.py` (9 tests) pass.

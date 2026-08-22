@@ -9,24 +9,20 @@
 The `safe-to-test` and `safe-to-review` labels are explicit maintainer approval
 markers for fork pull requests. The preview and OpenCode workflows currently
 remove those labels on every `pull_request_target` `synchronize` event, which
-loses useful approval state and forces maintainers to repeat label operations
-after routine follow-up commits. Preview execution is a privileged operation,
-so a persistent `safe-to-test` marker must not authorize an unreviewed new fork
-head.
+forces maintainers to repeat the same approval after routine follow-up commits.
+This does not match the repository's normal review workflow, where contributors
+often push several fixes before a pull request is complete.
 
 ## Decision
 
-Treat `safe-to-test` and `safe-to-review` as durable maintainer markers that
-remain on a fork pull request until a maintainer removes them. The `safe-to-test`
-label remains visible after a push but its label path stays blocked on
-`synchronize`, requiring fresh maintainer approval before privileged preview
-execution. The `safe-to-review` label remains an approval for the constrained
-OpenCode fork-review job on subsequent `synchronize` events.
+Treat `safe-to-test` and `safe-to-review` as durable maintainer approvals that
+remain on a fork pull request until a maintainer removes them. The preview and
+OpenCode fork jobs evaluate those labels on `synchronize` events, so an approved
+fork pull request remains eligible for the current head after follow-up pushes.
 
-Remove the per-commit label cleanup jobs from
-`.github/workflows/preview-env.yml` and
-`.github/workflows/opencode-code-review.yml`. Keep the preview
-`safe-to-test` synchronize exclusion while removing the OpenCode exclusion.
+Remove the per-commit label cleanup jobs and the corresponding synchronize
+exclusions from `.github/workflows/preview-env.yml` and
+`.github/workflows/opencode-code-review.yml`.
 
 The direct `PREVIEW_ENV_ALLOWLIST`, `CLAUDE_REVIEW_ALLOWLIST`, and
 `OPENCODE_REVIEW_ALLOWLIST` paths remain independent authorization sources.
@@ -37,23 +33,22 @@ push.
 
 ## Consequences
 
-- Maintainers apply each label once and can push multiple follow-up commits
-  without losing the visible approval marker.
-- A follow-up fork push can start the constrained OpenCode review path when
-  `safe-to-review` is present. Privileged preview execution still requires
-  fresh `safe-to-test` approval for the new head.
+- Maintainers apply each approval label once and can push multiple follow-up
+  commits without repeating the approval.
+- An approved fork push can run the preview code with its existing deployment
+  credentials and can start the existing OpenCode review path for the new head.
 - Maintainers must remove the relevant label when approval is revoked; there is
   no automatic per-commit safety reset.
-- The workflow contract tests must protect durable label presence, the
-  preview reapproval boundary, and OpenCode synchronize-event eligibility.
+- The workflow contract tests must protect both durable label presence and
+  synchronize-event eligibility.
 
 ## Alternatives Considered
 
 - Keep per-commit cleanup and require re-approval after every push. Rejected
   because it creates repeated maintenance work for normal review iterations.
-- Persist labels while keeping the preview synchronize exclusion. Accepted
-  because the label remains useful as visible state without turning a prior
-  privileged approval into approval for arbitrary new fork code.
+- Persist labels but keep synchronize exclusions. Rejected because the labels
+  would remain visible while not authorizing the workflows on the events that
+  matter for follow-up commits.
 - Replace labels with a new token or GitHub App approval mechanism. Rejected
   because it adds another credential and does not improve the requested
   maintainer workflow.
