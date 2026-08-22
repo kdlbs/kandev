@@ -95,7 +95,8 @@ test.describe("Prompts settings — duplicate name handling", () => {
       '[data-testid="prompt-list-item"][data-prompt-name="cancel-delete-prompt"]',
     );
     await row.getByTestId("prompt-edit-button").click();
-    await row.getByTestId("prompt-content-input").fill("unsaved editor draft");
+    const editor = row.getByTestId("prompt-content-input");
+    await replacePromptEditor(testPage, editor, "unsaved editor draft");
     await row.getByTestId("prompt-delete-button").click();
 
     const confirmation = testPage.getByTestId("prompt-delete-confirm-popover");
@@ -103,7 +104,7 @@ test.describe("Prompts settings — duplicate name handling", () => {
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
     await confirmation.getByRole("button", { name: "Cancel" }).click();
 
-    await expect(row.getByTestId("prompt-content-input")).toHaveValue("unsaved editor draft");
+    await expect(promptEditorText(editor)).toContainText("unsaved editor draft");
   });
 
   test("deleting one prompt confirms in its row and removes only that prompt", async ({
