@@ -16,6 +16,7 @@ import { Input } from "@kandev/ui/input";
 import { Switch } from "@kandev/ui/switch";
 import { Button } from "@kandev/ui/button";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { updateWorkspaceSettings, getWorkspaceSettings } from "@/lib/api/domains/office-api";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
 import type { AppState } from "@/lib/state/store";
@@ -68,24 +69,18 @@ function AppearanceSection({
   logoPreview,
   initial,
   fileInputRef,
-  dirty,
-  saving,
   onNameChange,
   onDescriptionChange,
   onLogoChange,
-  onSave,
 }: {
   name: string;
   description: string;
   logoPreview: string | null;
   initial: string;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
-  dirty: boolean;
-  saving: boolean;
   onNameChange: (v: string) => void;
   onDescriptionChange: (v: string) => void;
   onLogoChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onSave: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -143,20 +138,6 @@ function AppearanceSection({
           className="mt-1"
         />
       </div>
-      {dirty && (
-        <div className="flex justify-end pt-2">
-          <Button
-            size="sm"
-            onClick={onSave}
-            disabled={saving}
-            className="cursor-pointer"
-            data-testid="appearance-save-button"
-          >
-            <IconDeviceFloppy className="h-4 w-4 mr-1.5" />
-            {saving ? t("office:saving") : t("common:save")}
-          </Button>
-        </div>
-      )}
     </SettingCard>
   );
 }
@@ -331,6 +312,7 @@ function buildSaveAppearanceHandler({
       toast.success(t("office:appearanceSettingsSaved"));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("office:failedToSaveSettings"));
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -553,6 +535,29 @@ export function useSettingsState(
     [activeWorkspace, name, description, storeApi, nameRef, descriptionRef, t],
   );
 
+  const appearanceDirty =
+    Boolean(appearanceId) && (name !== appearanceName || description !== appearanceDescription);
+  const appearanceRevision = JSON.stringify({
+    id: appearanceId,
+    name,
+    description,
+  });
+
+  useSettingsSaveContributor({
+    id: "office-workspace-appearance",
+    order: 10,
+    revision: appearanceRevision,
+    isDirty: appearanceDirty,
+    canSave: Boolean(name.trim()),
+    invalidReason: name.trim() ? undefined : t("workspaces:workspaceNameIsRequired"),
+    save: handleSaveAppearance,
+    discard: (revision) => {
+      if (!Object.is(revision, appearanceRevision)) return;
+      setName(appearanceName);
+      setDescription(appearanceDescription);
+    },
+  });
+
   return {
     name,
     setName,
@@ -562,7 +567,7 @@ export function useSettingsState(
     fileInputRef,
     ...permissions,
     ...recovery,
-    appearanceDirty: name !== appearanceName || description !== appearanceDescription,
+    appearanceDirty,
     savingAppearance,
     handleLogoChange,
     handleSaveAppearance,
@@ -589,12 +594,9 @@ export function SettingsContent() {
           logoPreview={s.logoPreview}
           initial={initial}
           fileInputRef={s.fileInputRef}
-          dirty={s.appearanceDirty}
-          saving={s.savingAppearance}
           onNameChange={s.setName}
           onDescriptionChange={s.setDescription}
           onLogoChange={s.handleLogoChange}
-          onSave={s.handleSaveAppearance}
         />
       </div>
 

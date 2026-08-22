@@ -1,9 +1,13 @@
-import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, renderHook, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSettingsState } from "./settings-content";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
 import { getWorkspaceSettings } from "@/lib/api/domains/office-api";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
+import {
+  SettingsSaveProvider,
+  useSettingsSaveCoordinator,
+} from "@/components/settings/settings-save-provider";
 
 vi.mock("@/app/actions/workspaces", () => ({
   updateWorkspaceAction: vi.fn(),
@@ -63,7 +67,22 @@ function renderSettings(
 ) {
   return renderHook(({ ws }: { ws: Workspace }) => useSettingsState(ws, storeApi), {
     initialProps: { ws: activeWorkspace },
+    wrapper: SettingsSaveProvider,
   });
+}
+
+function renderCoordinatedSettings(
+  activeWorkspace: Workspace,
+  storeApi: ReturnType<typeof makeStoreApi>["storeApi"],
+) {
+  return renderHook(
+    ({ ws }: { ws: Workspace }) => {
+      const settings = useSettingsState(ws, storeApi);
+      const coordinator = useSettingsSaveCoordinator();
+      return { settings, coordinator };
+    },
+    { initialProps: { ws: activeWorkspace }, wrapper: SettingsSaveProvider },
+  );
 }
 
 // Combines the two setup calls every test needs: a store double plus the
@@ -83,6 +102,8 @@ beforeEach(() => {
   vi.resetAllMocks();
   mockGetWorkspaceSettings.mockResolvedValue({ settings: {} } as never);
 });
+
+afterEach(cleanup);
 
 describe("useSettingsState appearance save", () => {
   it("saves the trimmed name and description through updateWorkspaceAction and syncs the store", async () => {
@@ -143,17 +164,6 @@ describe("useSettingsState appearance save", () => {
 
     expect(mockUpdateWorkspaceAction).not.toHaveBeenCalled();
     expect(setWorkspaces).not.toHaveBeenCalled();
-  });
-
-  it("clears saving state and does not update the store when the action throws", async () => {
-    mockUpdateWorkspaceAction.mockRejectedValue(new Error("network error"));
-    const { setWorkspaces, result } = renderWithStore([workspace()]);
-
-    act(() => result.current.setName("Changed"));
-    await saveAppearance(result);
-
-    expect(setWorkspaces).not.toHaveBeenCalled();
-    expect(result.current.savingAppearance).toBe(false);
   });
 
   // A newer keystroke landing before the PATCH from an older one resolves
@@ -217,6 +227,64 @@ describe("useSettingsState appearance save", () => {
       { ...ws, name: "Renamed", description: NEW_DESCRIPTION },
       concurrent,
     ]);
+  });
+});
+
+describe("coordinated appearance save", () => {
+  it("registers appearance drafts with the shared save coordinator", async () => {
+    const ws = workspace();
+    const store = makeStoreApi([ws]);
+    const { result } = renderCoordinatedSettings(ws, store.storeApi);
+    mockUpdateWorkspaceAction.mockResolvedValue({ ...ws, name: "Renamed" } as never);
+
+    act(() => result.current.settings.setName("Renamed"));
+
+    expect(result.current.coordinator.hasDirty).toBe(true);
+    await act(async () => {
+      await expect(result.current.coordinator.saveAll()).resolves.toMatchObject({
+        canLeave: true,
+      });
+    });
+
+    expect(mockUpdateWorkspaceAction).toHaveBeenCalledWith(WORKSPACE_ID, {
+      name: "Renamed",
+      description: ws.description,
+    });
+    expect(store.setWorkspaces).toHaveBeenCalled();
+  });
+
+  it("propagates save failures after clearing saving state", async () => {
+    mockUpdateWorkspaceAction.mockRejectedValue(new Error("network error"));
+    const { setWorkspaces, result } = renderWithStore([workspace()]);
+
+    act(() => result.current.setName("Changed"));
+    await expect(
+      act(async () => {
+        await result.current.handleSaveAppearance();
+      }),
+    ).rejects.toThrow("network error");
+
+    expect(setWorkspaces).not.toHaveBeenCalled();
+    expect(result.current.savingAppearance).toBe(false);
+  });
+
+  it("resets the appearance draft to the authoritative workspace baseline", async () => {
+    const ws = workspace();
+    const { result } = renderCoordinatedSettings(ws, makeStoreApi([ws]).storeApi);
+
+    act(() => {
+      result.current.settings.setName("Unsaved name");
+      result.current.settings.setDescription("Unsaved description");
+    });
+
+    expect(screen.getByTestId("settings-floating-save")).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /reset/i }));
+    });
+
+    expect(result.current.settings.name).toBe(ws.name);
+    expect(result.current.settings.description).toBe(ws.description);
+    expect(result.current.settings.appearanceDirty).toBe(false);
   });
 });
 

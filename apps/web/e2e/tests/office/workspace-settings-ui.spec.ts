@@ -20,7 +20,9 @@ test.describe("Workspace settings UI", () => {
       await expect(nameInput).toBeVisible({ timeout: 10_000 });
       originalName = await nameInput.inputValue();
       await nameInput.fill(renamed);
-      const saveButton = testPage.getByTestId("appearance-save-button");
+      const saveBar = testPage.getByTestId("settings-floating-save");
+      const saveButton = saveBar.getByRole("button", { name: "Save changes" });
+      await expect(saveBar).toBeVisible();
 
       const workspaceSaved = waitForHttp(
         testPage,
@@ -30,8 +32,7 @@ test.describe("Workspace settings UI", () => {
       await saveButton.click();
       await workspaceSaved;
 
-      // Save button clears once the store reflects the persisted name.
-      await expect(saveButton).toBeHidden();
+      await expect(saveBar).toHaveAttribute("data-status", "saved");
       await expect(testPage.getByTestId("sidebar-workspace-trigger")).toContainText(renamed);
 
       await testPage.reload();
