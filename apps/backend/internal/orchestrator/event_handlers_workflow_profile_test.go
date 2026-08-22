@@ -982,7 +982,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			scheduler:          sched,
 		}
 
-		svc.processOnEnter(ctx, "t1", session, step, "desc")
+		svc.processOnEnter(ctx, "t1", session, step, "desc", 0)
 
 		// The old session should be completed
 		oldSession, err := repo.GetTaskSession(ctx, "s1")
@@ -1050,7 +1050,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		sg.steps["step1"] = step
 
 		svc := createTestService(repo, sg, newMockTaskRepo())
-		svc.processOnEnter(ctx, "t1", session, step, "desc")
+		svc.processOnEnter(ctx, "t1", session, step, "desc", 0)
 
 		// Session should remain running (not completed)
 		updatedSession, err := repo.GetTaskSession(ctx, "s1")
@@ -1114,7 +1114,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 
 		agentMgr := &mockAgentManager{isPassthrough: true}
 		svc := createTestServiceWithAgent(repo, sg, newMockTaskRepo(), agentMgr)
-		svc.processOnEnter(ctx, "t1", session, step, "desc")
+		svc.processOnEnter(ctx, "t1", session, step, "desc", 0)
 
 		// Session should NOT be completed (passthrough skips profile switch)
 		updatedSession, err := repo.GetTaskSession(ctx, "s1")
@@ -1162,7 +1162,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		sg.steps["step1"] = step
 
 		svc := createTestService(repo, sg, newMockTaskRepo())
-		svc.processOnEnter(ctx, "t1", session, step, "desc")
+		svc.processOnEnter(ctx, "t1", session, step, "desc", 0)
 
 		// Session should remain running
 		sessions, err := repo.ListTaskSessions(ctx, "t1")
@@ -1223,7 +1223,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		sg.steps["step1"] = step
 
 		svc := createTestService(repo, sg, newMockTaskRepo())
-		svc.processOnEnter(ctx, "t1", session, step, "desc")
+		svc.processOnEnter(ctx, "t1", session, step, "desc", 0)
 
 		// Critical: no new profile-a session should be spawned, and the
 		// user-chosen profile-b session must NOT be marked COMPLETED.
@@ -1310,7 +1310,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			scheduler:          sched,
 		}
 
-		svc.processOnEnter(ctx, "t1", session, step, "desc")
+		svc.processOnEnter(ctx, "t1", session, step, "desc", 0)
 
 		updated, err := repo.GetTaskSession(ctx, "s1")
 		if err != nil {

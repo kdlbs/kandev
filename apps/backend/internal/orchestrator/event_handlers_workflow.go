@@ -22,8 +22,10 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	workflowadapters "github.com/kandev/kandev/internal/workflow/adapters"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/stepentry"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -1768,7 +1770,14 @@ func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID strin
 		return fmt.Errorf("load session for on_enter: %w", err)
 	}
 
-	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription)
+	// entryID 0: this path (manual move / legacy on_turn_start/complete) does
+	// not attach a step-entry ResultHolder before ApplyTransition, so no
+	// entry was allocated for this step-entry. processOnEnter's engine-owned
+	// action cases treat entryID==0 as "not this Build round's dispatch
+	// path" and skip with a log rather than executing — see
+	// docs/specs/workflow-on-enter-action-dispatch/spec.md and the task
+	// plan's scope note for why E2-E5 dispatch is deferred.
+	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, 0)
 	return nil
 }
 
@@ -2184,8 +2193,73 @@ func (s *Service) maybySwitchSessionForProfile(
 	return effective, true
 }
 
+// dispatchOnEnterActions runs each on_enter action declared on step, in
+// order, and reports whether an auto_start_agent action was among them.
+// Extracted from processOnEnter to keep that function's cognitive
+// complexity within the repo's lint threshold.
+//
+// AC-C2: if clear_decisions fails, no further on_enter action for this step
+// entry may execute — stale decision rows plus a fresh participant fan-out
+// could otherwise satisfy wait_for_quorum without every current-round
+// participant actually voting. The loop stops entirely (not just further
+// engine-owned actions) the moment that happens.
+func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, entryID int64, isPassthrough, hasPlanMode bool) bool {
+	hasAutoStart := false
+dispatchLoop:
+	for i, action := range step.Events.OnEnter {
+		switch action.Type {
+		case wfmodels.OnEnterEnablePlanMode:
+			// Skip plan mode for passthrough — CLI manages its own state.
+			// Also skip if agent doesn't support MCP (hasPlanMode is already false above).
+			if !isPassthrough && hasPlanMode {
+				s.setSessionPlanMode(ctx, session, true)
+			}
+		case wfmodels.OnEnterSetSessionMode:
+			mode, _ := action.Config["mode"].(string)
+			s.applyStepSessionMode(ctx, session, mode, isPassthrough)
+		case wfmodels.OnEnterAutoStartAgent:
+			hasAutoStart = true
+		case wfmodels.OnEnterResetAgentContext, wfmodels.OnEnterConfigureSession:
+			// Already handled earlier in processOnEnter (context reset must run
+			// before auto_start_agent; session config runs right after it).
+		case wfmodels.OnEnterClearDecisions, wfmodels.OnEnterQueueRunForEachParticipant:
+			failed, cause := s.dispatchEngineOwnedOnEnterAction(ctx, taskID, step, action, i, entryID)
+			if failed && action.Type == wfmodels.OnEnterClearDecisions {
+				s.logger.Error("processOnEnter: clear_decisions failed, aborting remaining on_enter actions for step entry",
+					zap.String("workflow_id", step.WorkflowID),
+					zap.String("step_id", step.ID),
+					zap.String("task_id", taskID),
+					zap.String("cause", cause),
+				)
+				break dispatchLoop
+			}
+		case wfmodels.OnEnterQueueRun, wfmodels.OnEnterRunCodeReview:
+			// Engine-owned per the spec, but their on_enter dispatch (AC-A7/
+			// AC-A8) is explicitly deferred to a later Build round — see
+			// docs/specs/workflow-on-enter-action-dispatch/spec.md. This is a
+			// known, recognized type, not the AC-A6 default warning case.
+		default:
+			// AC-A6: a genuinely unrecognized on_enter action type. Warn
+			// instead of silently discarding it — this is the exact failure
+			// mode the step-entry dispatch fix exists to close.
+			s.logger.Warn("processOnEnter: unrecognized on_enter action type",
+				zap.String("task_id", taskID),
+				zap.String("step_id", step.ID),
+				zap.String("action_type", string(action.Type)),
+			)
+		}
+	}
+	return hasAutoStart
+}
+
 // processOnEnter processes the on_enter events for a step after transitioning to it.
-func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string) {
+// entryID is the workflow_step_entries row allocated for this step-entry by
+// the write site that persisted the transition (0 when no entry was
+// allocated for this call path — see finalizeStepEnter's call site). Only a
+// non-zero entryID lets the engine-owned on_enter cases below dispatch;
+// this is this Build round's E1-only scope boundary, not a general
+// precondition of the marker CAS mechanism itself.
+func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string, entryID int64) {
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
 
@@ -2245,22 +2319,22 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	// auto-start prompt is dispatched. It never switches or creates a tab.
 	s.applyWorkflowSessionConfigOnEnter(ctx, taskID, session, step)
 
-	hasAutoStart := false
-	for _, action := range step.Events.OnEnter {
-		switch action.Type {
-		case wfmodels.OnEnterEnablePlanMode:
-			// Skip plan mode for passthrough — CLI manages its own state.
-			// Also skip if agent doesn't support MCP (hasPlanMode is already false above).
-			if !isPassthrough && hasPlanMode {
-				s.setSessionPlanMode(ctx, session, true)
-			}
-		case wfmodels.OnEnterSetSessionMode:
-			mode, _ := action.Config["mode"].(string)
-			s.applyStepSessionMode(ctx, session, mode, isPassthrough)
-		case wfmodels.OnEnterAutoStartAgent:
-			hasAutoStart = true
-		}
-	}
+	hasAutoStart := s.dispatchOnEnterActions(ctx, taskID, session, step, entryID, isPassthrough, hasPlanMode)
+
+	s.launchAfterOnEnterDispatch(ctx, taskID, session, step, taskDescription, hasPlanMode, hasAutoStart, sessionSwitched)
+}
+
+// launchAfterOnEnterDispatch runs the auto-start decision that follows
+// on_enter action dispatch: passthrough vs. ACP auto-start, the
+// profile-switch fallback launch, and the plain wait-for-input path.
+// Extracted from processOnEnter to keep that function's complexity within
+// the repo's lint thresholds.
+func (s *Service) launchAfterOnEnterDispatch(
+	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
+	taskDescription string, hasPlanMode, hasAutoStart, sessionSwitched bool,
+) {
+	sessionID := session.ID
+	isPassthrough := s.agentManager.IsPassthroughSession(ctx, sessionID)
 
 	switch {
 	case hasAutoStart && isPassthrough && session.State != models.TaskSessionStateCreated:
@@ -2295,49 +2369,208 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		}
 
 	default:
-		// When the session was just switched (agent profile change) but the step
-		// has no auto_start_agent, launch the agent anyway — the profile override
-		// implies the user wants this agent to run on this step.
-		if sessionSwitched && step.Prompt != "" {
-			effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
-			planMode := hasPlanMode
-			stepID := step.ID
-			s.logger.Info("auto-launching agent after profile switch (no explicit auto_start)",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.String("step_name", step.Name))
-			// Launch asynchronously because processOnEnter may also be called
-			// synchronously from finalizeStepEnter (manual task move). In that path,
-			// autoStartStepPrompt would block the caller's goroutine.
-			go func() {
-				asyncCtx := context.WithoutCancel(ctx)
-				err := s.autoStartStepPrompt(asyncCtx, taskID, session, step, effectivePrompt, planMode, true)
-				if err != nil {
-					s.logger.Error("failed to launch agent after profile switch",
-						zap.String("task_id", taskID),
-						zap.String("session_id", sessionID),
-						zap.Error(err))
-					s.setSessionWaitingForInput(asyncCtx, taskID, sessionID, session)
-					s.publishSessionWaitingEvent(asyncCtx, taskID, sessionID, stepID, session)
-					s.drainQueuedMessageForPromptableSession(asyncCtx, sessionID)
-				}
-			}()
-			return
+		s.launchAfterProfileSwitchOrWait(ctx, taskID, session, step, taskDescription, hasPlanMode, sessionSwitched, isPassthrough)
+	}
+}
+
+// launchAfterProfileSwitchOrWait handles the no-auto-start fallback: launch
+// the agent anyway when the profile was just switched, otherwise settle the
+// session into WAITING_FOR_INPUT and drain any queued message.
+func (s *Service) launchAfterProfileSwitchOrWait(
+	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
+	taskDescription string, hasPlanMode, sessionSwitched, isPassthrough bool,
+) {
+	sessionID := session.ID
+	// When the session was just switched (agent profile change) but the step
+	// has no auto_start_agent, launch the agent anyway — the profile override
+	// implies the user wants this agent to run on this step.
+	if sessionSwitched && step.Prompt != "" {
+		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
+		planMode := hasPlanMode
+		stepID := step.ID
+		s.logger.Info("auto-launching agent after profile switch (no explicit auto_start)",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("step_name", step.Name))
+		// Launch asynchronously because processOnEnter may also be called
+		// synchronously from finalizeStepEnter (manual task move). In that path,
+		// autoStartStepPrompt would block the caller's goroutine.
+		go func() {
+			asyncCtx := context.WithoutCancel(ctx)
+			err := s.autoStartStepPrompt(asyncCtx, taskID, session, step, effectivePrompt, planMode, true)
+			if err != nil {
+				s.logger.Error("failed to launch agent after profile switch",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.Error(err))
+				s.setSessionWaitingForInput(asyncCtx, taskID, sessionID, session)
+				s.publishSessionWaitingEvent(asyncCtx, taskID, sessionID, stepID, session)
+				s.drainQueuedMessageForPromptableSession(asyncCtx, sessionID)
+			}
+		}()
+		return
+	}
+	// Same active-turn guard as the no-on_enter branch in processOnEnter: if
+	// the agent is still mid-turn, leave state alone so handleAgentReady can
+	// run on turn end. See that branch for the full rationale.
+	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+		return
+	}
+	s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+	s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+	// handleAgentReady early-returns when a workflow transition occurs (#677),
+	// so user-queued messages would otherwise stick forever on transitions to
+	// steps without auto_start_agent (e.g. Review). Drain here to match the
+	// pre-#677 behavior where handleAgentReady always drained after returning
+	// from inline processOnEnter.
+	s.drainQueuedMessageForPromptableSession(ctx, sessionID)
+}
+
+// dispatchEngineOwnedOnEnterAction executes a clear_decisions or
+// queue_run_for_each_participant on_enter declaration through the Phase 2
+// engine callback registry (see workflow_callbacks.go), guarded by the
+// step-entry CAS marker so a given step-entry executes the action at most
+// once (AC-D3/AC-D4).
+//
+// entryID==0 means the caller resolved this transition without allocating a
+// step entry — currently only finalizeStepEnter's legacy manual-move/
+// on_turn_start/complete path, which has not opted into step-entry
+// allocation this Build round (see workflow_store.applyTransition). This is
+// a deliberate, scoped-down gap (E2/E3/E5 in the task plan's scope note),
+// not a regression: dispatch through those paths is a no-op until a later
+// round wires their write sites the same way applyEngineTransition's is.
+//
+// failed reports whether this call ended (or left) the action in a
+// non-done outcome — either the callback itself returned an error, or the
+// marker couldn't even be claimed, so the caller (dispatchOnEnterActions,
+// AC-C2) cannot assume the action ran. failed is false for the no-op paths
+// above and for "already claimed" (AC-D3/AC-D4's at-most-once outcome,
+// handled by an earlier call, not a fresh failure to react to here). cause
+// is the underlying error string when failed is true, empty otherwise.
+//
+// For clear_decisions specifically, once claimed this tries the AC-B6
+// atomic path (dispatchClearDecisionsAtomic) before falling back to the
+// generic callback.Execute + CompleteStepEntryMarker sequence below, which
+// is correct but — for clear_decisions only — not atomic across a crash
+// between the two calls.
+func (s *Service) dispatchEngineOwnedOnEnterAction(
+	ctx context.Context, taskID string, step *wfmodels.WorkflowStep, action wfmodels.OnEnterAction, position int, entryID int64,
+) (failed bool, cause string) {
+	if entryID == 0 {
+		return false, ""
+	}
+	compiled, ok := engine.CompileOnEnterAction(action)
+	if !ok {
+		return false, ""
+	}
+	callback := s.engineOnEnterCallback(action.Type)
+	if callback == nil {
+		return false, ""
+	}
+	operationID := fmt.Sprintf("step_entry:%d:%d", entryID, position)
+	now := time.Now()
+	claimed, err := s.repo.ClaimStepEntryMarker(ctx, entryID, position, string(action.Type), operationID, now)
+	if err != nil {
+		s.logger.Error("processOnEnter: claim step entry marker failed",
+			zap.Error(err), zap.String("task_id", taskID), zap.String("step_id", step.ID),
+			zap.Int64("entry_id", entryID), zap.Int("position", position))
+		return true, err.Error()
+	}
+	if !claimed {
+		// Already claimed by a concurrent or prior attempt, or already
+		// terminal — AC-D3/AC-D4's at-most-once guarantee for this
+		// step-entry. Most outcomes here (still in progress elsewhere,
+		// already done) are not errors — the expected outcome on retry.
+		// But if a prior attempt for this exact position already recorded
+		// a terminal failure, silently returning "not failed" would let
+		// dispatchOnEnterActions fall through to the next on_enter action
+		// as if clear_decisions had never failed — the same fall-through
+		// AC-C2's break exists to close for a fresh failure. Surface the
+		// stored failure so the caller aborts the remaining actions here
+		// too, instead of only on a failure it just witnessed itself.
+		if priorState, priorCause, found, stateErr := s.repo.GetStepEntryMarkerState(ctx, entryID, position); stateErr == nil && found && priorState == stepentry.MarkerFailed {
+			return true, priorCause
 		}
-		// Same active-turn guard as the no-on_enter branch above: if the agent
-		// is still mid-turn, leave state alone so handleAgentReady can run on
-		// turn end. See that branch for the full rationale.
-		if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
-			return
+		return false, ""
+	}
+
+	if action.Type == wfmodels.OnEnterClearDecisions {
+		if handled, atomicFailed, atomicCause := s.dispatchClearDecisionsAtomic(ctx, taskID, step, entryID, position); handled {
+			return atomicFailed, atomicCause
 		}
-		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
-		// handleAgentReady early-returns when a workflow transition occurs (#677),
-		// so user-queued messages would otherwise stick forever on transitions to
-		// steps without auto_start_agent (e.g. Review). Drain here to match the
-		// pre-#677 behavior where handleAgentReady always drained after returning
-		// from inline processOnEnter.
-		s.drainQueuedMessageForPromptableSession(ctx, sessionID)
+	}
+
+	in := engine.ActionInput{
+		Trigger:     engine.TriggerOnEnter,
+		State:       engine.MachineState{TaskID: taskID, CurrentStepID: step.ID, WorkflowID: step.WorkflowID},
+		Step:        engine.StepSpec{ID: step.ID, WorkflowID: step.WorkflowID, Name: step.Name, Position: step.Position},
+		Action:      compiled,
+		OperationID: operationID,
+	}
+	state, execCause := stepentry.MarkerDone, ""
+	if _, execErr := callback.Execute(ctx, in); execErr != nil {
+		state, execCause = stepentry.MarkerFailed, execErr.Error()
+		s.logger.Error("processOnEnter: engine-owned on_enter action failed",
+			zap.Error(execErr), zap.String("task_id", taskID), zap.String("step_id", step.ID),
+			zap.String("action_type", string(action.Type)))
+	}
+	if err := s.repo.CompleteStepEntryMarker(ctx, entryID, position, state, execCause, time.Now()); err != nil {
+		s.logger.Error("processOnEnter: complete step entry marker failed",
+			zap.Error(err), zap.String("task_id", taskID), zap.String("step_id", step.ID),
+			zap.Int64("entry_id", entryID), zap.Int("position", position))
+	}
+	return state == stepentry.MarkerFailed, execCause
+}
+
+// dispatchClearDecisionsAtomic executes clear_decisions through
+// Repository.ClearStepDecisionsAndCompleteMarker (AC-B6) when it is safe to
+// do so: only when engineDecisions is confirmed to be
+// *workflowadapters.DecisionAdapter, the type SetEngineDecisionStore is
+// wired with at the one production construction site
+// (backendapp/main.go:1501, NewDecisionAdapter(repos.Workflow) —
+// repos.Workflow is always the real workflow repository, sharing s.repo's
+// writer *sqlx.DB per backendapp/storage.go). Test doubles
+// (fakeDecisionStore, failingDecisionStore in step_entry_dispatch_test.go)
+// are not that type — no test constructs a DecisionAdapter — so handled is
+// false for them and the caller falls back to the pre-existing, non-atomic
+// callback.Execute + CompleteStepEntryMarker sequence, preserving every
+// existing AC-C2/AC-D3/AC-D4 test's error-injection behavior unchanged.
+//
+// When handled is true, failed/cause report the outcome exactly like
+// dispatchEngineOwnedOnEnterAction's own return values. On error, the
+// transaction rolled back — neither the delete nor the marker update
+// committed, so the marker is left in_progress, which is precisely AC-B6's
+// invariant (in_progress proves the delete did not commit). No compensating
+// write is attempted; returning failed=true is enough to trigger AC-C2's
+// abort in dispatchOnEnterActions.
+func (s *Service) dispatchClearDecisionsAtomic(
+	ctx context.Context, taskID string, step *wfmodels.WorkflowStep, entryID int64, position int,
+) (handled, failed bool, cause string) {
+	if _, ok := s.engineDecisions.(*workflowadapters.DecisionAdapter); !ok {
+		return false, false, ""
+	}
+	if _, err := s.repo.ClearStepDecisionsAndCompleteMarker(ctx, taskID, step.ID, entryID, position, time.Now()); err != nil {
+		s.logger.Error("processOnEnter: atomic clear_decisions failed",
+			zap.Error(err), zap.String("task_id", taskID), zap.String("step_id", step.ID),
+			zap.Int64("entry_id", entryID), zap.Int("position", position))
+		return true, true, err.Error()
+	}
+	return true, false, ""
+}
+
+// engineOnEnterCallback returns the Phase 2 callback for an engine-owned
+// on_enter action kind. The returned callback's Execute reports its own
+// ErrActionNotYetWired when the required adapter isn't wired (kanban-only
+// deployments) — that surfaces as a failed marker with a clear cause rather
+// than a silent no-op, matching AC-A6's "never discard" intent.
+func (s *Service) engineOnEnterCallback(t wfmodels.OnEnterActionType) engine.ActionCallback {
+	switch t {
+	case wfmodels.OnEnterClearDecisions:
+		return engine.ClearDecisionsCallback{Decisions: s.engineDecisions}
+	case wfmodels.OnEnterQueueRunForEachParticipant:
+		return engine.QueueRunForEachParticipantCallback{Adapter: s.engineRunQueue, Participants: s.engineParticipants}
+	default:
+		return nil
 	}
 }
 
@@ -3922,6 +4155,12 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		return false
 	}
 
+	unlock, task, proceed := s.acquireTurnCompletionCriticalSection(ctx, taskID, session, task)
+	defer unlock()
+	if !proceed {
+		return false
+	}
+
 	if s.workflowEngine == nil {
 		return s.processOnTurnCompleteWithCause(ctx, task, session, cause)
 	}
@@ -3962,6 +4201,37 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		ctx = cancellationTransitionAttribution(ctx)
 	}
 	return s.applyEngineTransition(ctx, taskID, session, result, engine.TriggerOnTurnComplete, task.Description, true)
+}
+
+// acquireTurnCompletionCriticalSection serializes on_turn_complete
+// processing per session (see turnCompletionLocks' field comment for the
+// double-allocation/double-dispatch race this closes) and detects a
+// duplicate call that lost the race for the lock: if another caller already
+// moved the task off the step observedTask reflects while this one waited,
+// evaluating on_turn_complete against the task's new (fresh) step would
+// fire that step's own on_turn_complete — e.g. Review's on_turn_complete
+// sending the task back to Work — for a turn nobody actually completed
+// there. proceed is false when this call must stop and treat itself as
+// that redundant duplicate; the caller must still invoke unlock regardless
+// of proceed. session == nil callers (none exist today, but the type
+// allows it) skip locking entirely, matching pre-fix behavior.
+func (s *Service) acquireTurnCompletionCriticalSection(
+	ctx context.Context, taskID string, session *models.TaskSession, observedTask *models.Task,
+) (unlock func(), fresh *models.Task, proceed bool) {
+	if session == nil {
+		return func() {}, observedTask, true
+	}
+	unlock = s.acquireTurnCompletionLock(session.ID)
+	current, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		// Best-effort re-check: fall back to the already-validated snapshot
+		// rather than fail a call that succeeded its primary read.
+		return unlock, observedTask, true
+	}
+	if current.WorkflowStepID != observedTask.WorkflowStepID {
+		return unlock, current, false
+	}
+	return unlock, current, true
 }
 
 func (s *Service) prepareEngineTurnCompletion(
@@ -4197,7 +4467,18 @@ func (s *Service) applyEngineTransitionWithCommit(
 		s.processOnExit(ctx, taskID, session, fromStep)
 	}
 
-	applied, err := commit(ctx)
+	// A ResultHolder is only attached when this transition will actually
+	// trigger on_enter (triggerOnEnter) — an on_turn_start transition never
+	// reaches launchProcessOnEnter below, so allocating a step-entry it will
+	// never dispatch would be a needless write. See applyTransition's
+	// matching gate in workflow_store.go.
+	var stepEntry *stepentry.AllocationResult
+	applyCtx := ctx
+	if triggerOnEnter {
+		stepEntry = &stepentry.AllocationResult{}
+		applyCtx = stepentry.WithResultHolder(applyCtx, stepEntry)
+	}
+	applied, err := commit(applyCtx)
 	if err != nil {
 		s.logger.Error("failed to apply engine transition",
 			zap.String("task_id", taskID),
@@ -4299,7 +4580,11 @@ func (s *Service) applyEngineTransitionWithCommit(
 	// ResetAgentContext → sendStreamRequest, which blocks G_reader waiting for a response
 	// that can only be delivered by G_reader reading from the same WebSocket — a deadlock.
 	// The DB transition is already persisted above, so it's safe to process on_enter async.
-	s.launchProcessOnEnter(context.WithoutCancel(ctx), taskID, session, targetStep, taskDescription)
+	var stepEntryID int64
+	if stepEntry != nil {
+		stepEntryID = stepEntry.EntryID
+	}
+	s.launchProcessOnEnter(context.WithoutCancel(ctx), taskID, session, targetStep, taskDescription, stepEntryID)
 	return true
 }
 
@@ -4309,6 +4594,7 @@ func (s *Service) launchProcessOnEnter(
 	session *models.TaskSession,
 	targetStep *wfmodels.WorkflowStep,
 	taskDescription string,
+	entryID int64,
 ) {
 	go func() {
 		defer func() {
@@ -4316,7 +4602,7 @@ func (s *Service) launchProcessOnEnter(
 				s.onProcessOnEnterComplete()
 			}
 		}()
-		s.processOnEnter(ctx, taskID, session, targetStep, taskDescription)
+		s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, entryID)
 	}()
 }
 

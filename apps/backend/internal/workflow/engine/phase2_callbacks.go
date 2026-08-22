@@ -356,6 +356,13 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 		return ActionResult{}, fmt.Errorf("queue_run_for_each_participant list participants: %w", err)
 	}
 	reason := queueRunForEachParticipantReason(in)
+	// Collect-and-continue (AC-C1): one participant's QueueRun failure must
+	// not abort the fan-out to their siblings — a reviewer whose queue is
+	// briefly unavailable should not silently block every other reviewer's
+	// run from ever being queued. Every matching participant gets an attempt
+	// regardless of earlier failures; the errors are joined and returned
+	// together so the caller still sees (and can log/retry) every failure.
+	var errs []error
 	for _, p := range all {
 		if p.Role != cfg.Role {
 			continue
@@ -369,8 +376,11 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 			Payload:        queueRunPayload(in, cfg.Payload, taskID),
 		}
 		if err := c.Adapter.QueueRun(ctx, req); err != nil {
-			return ActionResult{}, fmt.Errorf("queue_run for participant %s: %w", p.ID, err)
+			errs = append(errs, fmt.Errorf("queue_run for participant %s: %w", p.ID, err))
 		}
+	}
+	if len(errs) > 0 {
+		return ActionResult{}, errors.Join(errs...)
 	}
 	return ActionResult{}, nil
 }

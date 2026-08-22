@@ -37,6 +37,7 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/stepentry"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -336,6 +337,22 @@ type sessionExecutorStore interface {
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	// Step-entry CAS markers (see internal/workflow/stepentry) — claim/complete
+	// an engine-owned on_enter action at most once per step-entry.
+	ClaimStepEntryMarker(ctx context.Context, entryID int64, position int, kind, operationID string, claimedAt time.Time) (bool, error)
+	CompleteStepEntryMarker(ctx context.Context, entryID int64, position int, state stepentry.MarkerState, cause string, completedAt time.Time) error
+	// GetStepEntryMarkerState reads back a marker's terminal (or in-progress)
+	// state after a lost CAS claim, so the caller can tell "already failed"
+	// apart from "already done" or "still in progress elsewhere."
+	GetStepEntryMarkerState(ctx context.Context, entryID int64, position int) (state stepentry.MarkerState, cause string, found bool, err error)
+	// ClearStepDecisionsAndCompleteMarker satisfies AC-B6: clears every
+	// decision for (taskID, stepID) and completes the clear_decisions
+	// marker in one database transaction, so a crash between the two can
+	// never leave the marker showing in_progress after the delete already
+	// committed. Only usable when the DecisionStore backing clear_decisions
+	// shares this repository's writer DB — see the capability check at
+	// dispatchClearDecisionsAtomic's call site.
+	ClearStepDecisionsAndCompleteMarker(ctx context.Context, taskID, stepID string, entryID int64, position int, now time.Time) (int64, error)
 }
 
 // ClaimTaskTitleSession claims the first-turn generated-title handoff for a
@@ -874,6 +891,17 @@ type Service struct {
 	// Entries are not deleted: deleting a lock can let a new caller create a
 	// second mutex while an existing waiter still owns the old one.
 	sessionLifecycleLocks sync.Map // map[sessionID]*sync.Mutex
+	// turnCompletionLocks serializes processOnTurnCompleteViaEngineWithCause
+	// per session. Several independent event sources (normal agent turn
+	// completion, agent-exit, step_complete_kandev's out-of-band signal,
+	// user cancellation) can each call it for the same session; without
+	// serialization, two concurrent calls can both read the same
+	// pre-transition engine state and each call applyEngineTransition,
+	// allocating two independent workflow_step_entries rows for what should
+	// be a single logical transition and double-dispatching that entry's
+	// on_enter actions (clear_decisions, queue_run_for_each_participant).
+	// Entries are not deleted — see sessionLifecycleLocks above for why.
+	turnCompletionLocks sync.Map // map[sessionID]*sync.Mutex
 	// contextWindowGuards serializes live context usage writes and gives each
 	// session a generation boundary that reset_agent_context can invalidate.
 	contextWindowGuards sync.Map
@@ -2198,6 +2226,20 @@ func (s *Service) acquireSessionLifecycleLock(sessionID string) func() {
 		return func() {}
 	}
 	value, _ := s.sessionLifecycleLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	lock.Lock()
+	return lock.Unlock
+}
+
+// acquireTurnCompletionLock serializes on_turn_complete processing for a
+// single session — see turnCompletionLocks' field comment for the race it
+// closes. A caller with no session ID (defensive callers pass "" rather than
+// skip the lock call) gets a no-op unlock.
+func (s *Service) acquireTurnCompletionLock(sessionID string) func() {
+	if sessionID == "" {
+		return func() {}
+	}
+	value, _ := s.turnCompletionLocks.LoadOrStore(sessionID, &sync.Mutex{})
 	lock := value.(*sync.Mutex)
 	lock.Lock()
 	return lock.Unlock
