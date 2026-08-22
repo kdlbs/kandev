@@ -172,6 +172,14 @@ func (s *Service) publishTaskQueueStatusEvent(ctx context.Context, taskID, sessi
 // requeueMessage re-enqueues a message that could not be delivered, publishing a queue status event on success.
 // Preserves the original Metadata (e.g. sender_task_id from message_task_kandev)
 // so attribution survives transient failures + retries.
+//
+// User messages go through RequeueAtHead (FIFO-preserving) so a
+// supersede→requeue cycle does not strand the original entry behind any
+// new arrival — the busy-session starvation bug fix. Lifecycle messages
+// keep their tail-requeue semantics (requeueLifecycleMessage) because
+// they are gated by a generation token that already gives them
+// priority; mixing the two paths would risk merging durable
+// reservations with transient user-state.
 func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, queuedBy string) {
 	coalesceKey := messageCoalesceKey(queuedMsg)
 	if queuedMsg.QueuedBy != "" && coalesceKey != "" {
@@ -181,26 +189,20 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 		s.requeueLifecycleMessage(ctx, queuedMsg, queuedBy, coalesceKey)
 		return
 	}
-	requeuedMsg, replaced, queueErr := s.messageQueue.RequeueMessage(
-		ctx, queuedMsg, queuedBy, coalesceKey,
-	)
-	if queueErr != nil {
-		s.logger.Error("failed to requeue message",
+	if err := s.messageQueue.RequeueAtHead(ctx, queuedMsg); err != nil {
+		s.logger.Error("failed to requeue message at head",
 			zap.String("session_id", queuedMsg.SessionID),
 			zap.String("task_id", queuedMsg.TaskID),
 			zap.String("queue_id", queuedMsg.ID),
 			zap.String("queued_by", queuedBy),
-			zap.Error(queueErr))
+			zap.Error(err))
 		return
 	}
-	s.logger.Info("message requeued",
+	s.logger.Info("message requeued at head (FIFO preserved)",
 		zap.String("session_id", queuedMsg.SessionID),
 		zap.String("task_id", queuedMsg.TaskID),
-		zap.String("old_queue_id", queuedMsg.ID),
-		zap.String("new_queue_id", requeuedMsg.ID),
-		zap.String("queued_by", queuedBy),
-		zap.String("coalesce_key", coalesceKey),
-		zap.Bool("replaced", replaced))
+		zap.String("queue_id", queuedMsg.ID),
+		zap.String("queued_by", queuedBy))
 	s.publishQueueStatusEvent(ctx, queuedMsg.SessionID)
 }
 
@@ -345,6 +347,7 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 			zap.String("session_state", string(session.State)))
 		return
 	}
+	recoveryResolvedAt := s.markRecoveryResolved(ctx, data.SessionID, session)
 
 	// Idempotent: if the session is already WAITING_FOR_INPUT (e.g. revived
 	// from a previously launched session and the boot signal arrived faster
@@ -352,6 +355,18 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	// fall through to the drain below: an orphaned queued message would
 	// otherwise sit forever.
 	if session.State == models.TaskSessionStateWaitingForInput {
+		if recoveryResolvedAt != nil {
+			s.publishTaskSessionStateChanged(
+				ctx,
+				data.TaskID,
+				data.SessionID,
+				session.State,
+				session.State,
+				session.ErrorMessage,
+				recoveryResolvedAt,
+				session,
+			)
+		}
 		s.logger.Debug("agent.boot_ready: session already WAITING_FOR_INPUT, skipping flip",
 			zap.String("session_id", data.SessionID))
 	} else {
@@ -773,7 +788,12 @@ func (s *Service) executeQueuedMessageWithReservation(
 	if reservation == nil {
 		reservation = s.queuedDispatchReservationForEntry(reservedSessionID, queuedMsg.ID)
 	}
-	defer s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, reservation)
+	defer func() {
+		s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, reservation)
+		if s.onQueuedMessageExecutionComplete != nil {
+			s.onQueuedMessageExecutionComplete()
+		}
+	}()
 	lifecyclePrompt := isLifecycleAutomationOrigin(queuedMsg.Metadata["origin"])
 
 	claimEntryID, handoffDone := s.claimQueuedMessageHandoff(
@@ -1242,7 +1262,16 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 		zap.Bool("workflow_transitioned", transitioned))
 
 	if !transitioned && session.State != models.TaskSessionStateWaitingForInput {
-		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
+		// Terminal-receipt path. Only flip the session to WAITING_FOR_INPUT
+		// when the most recent agent-authored message actually asked the
+		// user for input. Sibling sessions (root task, ParentID empty)
+		// keep the original affordance so a finishing session on a
+		// multi-session task still flips to WAITING — only subtasks
+		// (ParentID non-empty) get the guard. setSessionWaitingForInputIfRequested
+		// itself inspects the task row to pick the path; for sibling
+		// sessions the call is a no-op pass-through to the unconditional
+		// helper, preserving the pre-fix behavior.
+		s.setSessionWaitingForInputIfRequested(ctx, data.TaskID, data.SessionID, session)
 	}
 
 	// Capture a git status snapshot before cleanup so it can be served
@@ -1255,6 +1284,22 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 	// Finalize the automation run: mark status=succeeded so the automation's
 	// concurrency slot is released. The worktree stays.
 	s.finalizeAutomationRun(ctx, data.TaskID, true, "")
+
+	// Settle point: turn has been completed and the session state has been
+	// reconciled. reclaimIdleSession is the synchronous equivalent of the
+	// (intentionally-not-built) runtime auto-convergence tick. It only
+	// proceeds when no live agent process and no active turn are observed,
+	// so the typical WAITING_FOR_INPUT case (live agent waiting for the
+	// user) is a no-op pass-through. Subtask terminals that already
+	// collapsed to COMPLETED inside setSessionWaitingForInputIfRequested
+	// reclaimed earlier; this call covers sibling/office flows whose
+	// settled shape has no live runtime.
+	if err := s.reclaimIdleSession(context.WithoutCancel(ctx), data.SessionID); err != nil {
+		s.logger.Warn("agent.completed settle: reclaim failed; row preserved",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+	}
 }
 
 // handleAgentFailed handles agent failure events
@@ -1285,6 +1330,7 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 }
 
 func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.AgentEventData) {
+	data = s.withDynamicAttemptEvidence(data)
 	s.logger.Warn("handling agent failed",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
@@ -1310,6 +1356,9 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	// handleTransientFailure returns false (falling through) for non-transient
 	// errors, office tasks, or an exhausted budget.
 	if data.SessionID != "" && s.handleTransientFailure(ctx, data) {
+		return
+	}
+	if data.SessionID != "" && s.routeDynamicAgentFailure(ctx, data, classifyKanbanFailure(data)) {
 		return
 	}
 
@@ -1760,6 +1809,31 @@ func (s *Service) clearRecoveredAgentError(ctx context.Context, taskID string, s
 			zap.String("session_id", session.ID),
 			zap.Error(err))
 	}
+}
+
+// markRecoveryResolved persists the successful boot timestamp on the session.
+// The boot transcript is useful observability, but its writes are best effort.
+// Session metadata is the authoritative recovery result used by the frontend
+// after a reload when the transcript row is missing or incomplete.
+func (s *Service) markRecoveryResolved(ctx context.Context, sessionID string, session *models.TaskSession) *time.Time {
+	resolvedAt := time.Now().UTC()
+	resolvedAtValue := resolvedAt.Format(time.RFC3339Nano)
+	if err := s.repo.SetSessionMetadataKey(
+		ctx,
+		sessionID,
+		models.SessionMetaKeyRecoveryResolvedAt,
+		resolvedAtValue,
+	); err != nil {
+		s.logger.Warn("failed to persist recovery resolution",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil
+	}
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	session.Metadata[models.SessionMetaKeyRecoveryResolvedAt] = resolvedAtValue
+	return &resolvedAt
 }
 
 // providerRemediationURL returns the adapter-validated remediation URL from the

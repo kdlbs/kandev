@@ -108,9 +108,5 @@ func newStopTaskFailure(msg *ws.Message, code, message string) *stopTaskFailure 
 }
 
 func canStopTask(sender, target *models.Task) bool {
-	return sender.WorkspaceID != "" &&
-		target.WorkspaceID != "" &&
-		target.ParentID != "" &&
-		target.ParentID == sender.ID &&
-		target.WorkspaceID == sender.WorkspaceID
+	return canDirectParentAccess(sender, target)
 }

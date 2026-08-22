@@ -84,6 +84,7 @@ const (
 
 	ActionTaskSessionList   = "task.session.list"
 	ActionTaskSessionStatus = "task.session.status"
+	ActionTaskLaunchRecover = "task.launch.recover"
 
 	// Unified session launch
 	ActionSessionLaunch       = "session.launch"
@@ -95,6 +96,7 @@ const (
 	ActionSessionSetPrimary   = "session.set_primary"
 	ActionSessionSetPlanMode  = "session.set_plan_mode"
 	ActionSessionRename       = "session.rename"
+	ActionSessionRouteAction  = "session.route_action"
 
 	// Agent actions
 	ActionAgentList   = "agent.list"
@@ -237,6 +239,11 @@ const (
 	ActionSessionTodosUpdated          = "session.todos_updated"
 	ActionSessionPromptUsage           = "session.prompt_usage"
 	ActionSessionPollModeChanged       = "session.poll_mode_changed"
+	ActionSessionRouteChanging         = "session.route_changing"
+	ActionSessionRouteChanged          = "session.route_changed"
+	ActionSessionCapabilitiesReplaced  = "session.capabilities_replaced"
+	ActionSessionRouteWaiting          = "session.route_waiting"
+	ActionSessionRoutePending          = "session.route_pending"
 	ActionInputRequested               = "input.requested"
 	ActionRepositoryCreated            = "repository.created"
 	ActionRepositoryUpdated            = "repository.updated"
@@ -409,6 +416,8 @@ const (
 	ActionMCPStepComplete               = "mcp.step_complete" // ADR 0015: agent-emitted explicit completion signal
 	ActionMCPAskUserQuestion            = "mcp.ask_user_question"
 	ActionMCPAskParentQuestion          = "mcp.ask_parent_question"
+	ActionMCPListPendingQuestions       = "mcp.list_pending_questions"
+	ActionMCPAnswerQuestion             = "mcp.answer_question"
 	ActionMCPCreateTaskPlan             = "mcp.create_task_plan"
 	ActionMCPGetTaskPlan                = "mcp.get_task_plan"
 	ActionMCPUpdateTaskPlan             = "mcp.update_task_plan"
@@ -428,6 +437,9 @@ const (
 	ActionMCPWriteTaskDocument = "mcp.write_task_document"
 	ActionMCPListPluginTools   = "mcp.list_plugin_tools"
 	ActionMCPInvokePluginTool  = "mcp.invoke_plugin_tool"
+
+	// Office quorum decision recording.
+	ActionMCPRecordStepDecision = "mcp.record_step_decision"
 
 	// Config-mode MCP actions (agent-native configuration)
 	ActionMCPCreateWorkflow = "mcp.create_workflow"
@@ -457,15 +469,17 @@ const (
 	ActionMCPUpdateExecutorProfile = "mcp.update_executor_profile"
 	ActionMCPDeleteExecutorProfile = "mcp.delete_executor_profile"
 
-	ActionMCPMoveTask            = "mcp.move_task"
-	ActionMCPDeleteTask          = "mcp.delete_task"
-	ActionMCPArchiveTask         = "mcp.archive_task"
-	ActionMCPUpdateTaskState     = "mcp.update_task_state"
-	ActionMCPMessageTask         = "mcp.message_task"
-	ActionMCPStopTask            = "mcp.stop_task"
-	ActionMCPSpawnSession        = "mcp.spawn_session"
-	ActionMCPGetTaskConversation = "mcp.get_task_conversation"
-	ActionMCPListTaskSessions    = "mcp.list_task_sessions"
+	ActionMCPMoveTask                    = "mcp.move_task"
+	ActionMCPDeleteTask                  = "mcp.delete_task"
+	ActionMCPArchiveTask                 = "mcp.archive_task"
+	ActionMCPUpdateTaskState             = "mcp.update_task_state"
+	ActionMCPMessageTask                 = "mcp.message_task"
+	ActionMCPStopTask                    = "mcp.stop_task"
+	ActionMCPSpawnSession                = "mcp.spawn_session"
+	ActionMCPGetTaskConversation         = "mcp.get_task_conversation"
+	ActionMCPListTaskSessions            = "mcp.list_task_sessions"
+	ActionMCPListPendingAgentPermissions = "mcp.list_pending_agent_permissions"
+	ActionMCPResolveAgentPermission      = "mcp.resolve_agent_permission"
 )
 
 const (

@@ -81,6 +81,7 @@ func TestScanFilesystem_CarriesEveryFieldFromDisk(t *testing.T) {
 	assertEqual(t, "agent name", agent.Name, "ada")
 	assertEqual(t, "agent role", agent.Role, "cto")
 	assertEqual(t, "agent icon", agent.Icon, "🤖")
+	assertEqual(t, "agent reports_to", agent.ReportsTo, "grace")
 	assertEqual(t, "agent budget", agent.BudgetMonthlyCents, 4200)
 	assertEqual(t, "agent max sessions", agent.MaxConcurrentSessions, 3)
 	assertEqual(t, "agent desired skills", agent.DesiredSkills, `["go","sql"]`)
@@ -117,15 +118,16 @@ func TestScanFilesystem_CarriesEveryFieldFromDisk(t *testing.T) {
 		`{"type":"local_docker"}`)
 }
 
-// TestScanFilesystem_DropsNameReferences records the same gap the importer
-// has: the scan does not carry reports_to, assignee_name or lead_agent_name
-// off disk even though all three are present in the fixture files. The result
-// is a lossy sync — applying a checked-in workspace config erases the org
-// chart, routine assignees and project leads rather than resolving the
-// portable names to IDs.
+// TestScanFilesystem_DropsNameReferences records a gap that remains for
+// routines and projects: the scan does not carry assignee_name or
+// lead_agent_name off disk even though both are present in the fixture
+// files. The result is a lossy sync for those two fields — applying a
+// checked-in workspace config erases routine assignees and project leads
+// rather than resolving the portable names to IDs. Agent reports_to no
+// longer drops (see TestScanFilesystem_CarriesEveryFieldFromDisk).
 //
-// Recorded rather than fixed (test-only change); carrying the names through
-// the scan and resolving them on import must update this test.
+// Recorded rather than fixed (test-only change); carrying the remaining
+// names through the scan and resolving them on import must update this test.
 func TestScanFilesystem_DropsNameReferences(t *testing.T) {
 	env := newTestEnv(t)
 	seedFullFSState(t, env)
@@ -134,7 +136,6 @@ func TestScanFilesystem_DropsNameReferences(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanFilesystem: %v", err)
 	}
-	assertEqual(t, "agent reports_to", bundle.Agents[0].ReportsTo, "")
 	assertEqual(t, "routine assignee", bundle.Routines[0].AssigneeName, "")
 	assertEqual(t, "project lead", bundle.Projects[0].LeadAgentName, "")
 }

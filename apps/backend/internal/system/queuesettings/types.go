@@ -16,16 +16,18 @@ const (
 type Source string
 
 const (
-	SourceDefault     Source = "default"
-	SourceSetting     Source = "setting"
-	SourceEnvironment Source = "environment"
+	SourceDefault       Source = "default"
+	SourceSetting       Source = "setting"
+	SourceConfiguration Source = "configuration"
+	SourceEnvironment   Source = "environment"
 )
 
 var (
-	ErrValidation        = errors.New("message queue settings validation")
-	ErrInvalidPersisted  = errors.New("invalid persisted message queue settings")
-	ErrEnvironmentLocked = errors.New("message queue capacity is controlled by the environment")
-	ErrTargetUnavailable = errors.New("message queue live target is unavailable")
+	ErrValidation          = errors.New("message queue settings validation")
+	ErrInvalidPersisted    = errors.New("invalid persisted message queue settings")
+	ErrEnvironmentLocked   = errors.New("message queue capacity is controlled by the environment")
+	ErrConfigurationLocked = errors.New("message queue capacity is controlled by configuration")
+	ErrTargetUnavailable   = errors.New("message queue live target is unavailable")
 )
 
 type Settings struct {
@@ -78,6 +80,13 @@ type Effective struct {
 
 type Environment struct {
 	Value   string
+	Present bool
+}
+
+// Configuration is the startup value for max_per_session. Present is kept
+// separate from Value because zero is a valid, explicit unlimited setting.
+type Configuration struct {
+	Value   int
 	Present bool
 }
 

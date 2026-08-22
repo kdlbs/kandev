@@ -1,6 +1,9 @@
 package engine
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // RunQueueAdapter is the engine's contract with the runs queue. The Phase 2
 // final integration emits QueueRun requests through this interface; Phase 3
@@ -45,6 +48,17 @@ type ParticipantInfo struct {
 }
 
 // DecisionInfo is a lightweight projection of a workflow_step_decisions row.
+//
+// DeciderType, DeciderID, Role and Comment carry the decider's identity and
+// human-facing reason. Role is the role the decision was recorded under
+// (which may differ from a guard's role — AC-42/58). Comment is the
+// human-facing reason column; Note is a separate, unrelated field no Office
+// surface reads.
+//
+// ID and DecidedAt are stamped by Engine.RecordParticipantDecision (AC-66,
+// AC-57b-i) before the write — DecisionStore.RecordStepDecision receives
+// DecisionInfo by value and never generates or echoes back either field, so
+// a caller cannot read them off the row after the call.
 type DecisionInfo struct {
 	ID            string
 	TaskID        string
@@ -52,6 +66,12 @@ type DecisionInfo struct {
 	ParticipantID string
 	Decision      string
 	Note          string
+	DecidedAt     time.Time
+
+	DeciderType string
+	DeciderID   string
+	Role        string
+	Comment     string
 }
 
 // ParticipantStore reads the workflow_step_participants table for an engine
@@ -64,8 +84,25 @@ type DecisionInfo struct {
 // template-level rows with per-task rows for that task and return the
 // resolved set. Returning nil/empty list is valid and signals a
 // single-agent step for that task.
+//
+// ListTaskParticipants returns every per-task row (task_id = taskID)
+// regardless of step_id — the AC-49 port that makes AC-18's cross-step
+// counting expressible. Template rows are never returned by this method;
+// callers combine it with ListStepParticipants(stepID, "") to gather
+// template rows scoped to one step (AC-50 step 1). An empty result is
+// valid, not an error.
 type ParticipantStore interface {
 	ListStepParticipants(ctx context.Context, stepID, taskID string) ([]ParticipantInfo, error)
+	ListTaskParticipants(ctx context.Context, taskID string) ([]ParticipantInfo, error)
+}
+
+// WorkflowScopedParticipantStore is an optional refinement of
+// ParticipantStore. It limits per-task overrides to the task's active
+// workflow, so rows left by a previous workflow cannot contribute to a new
+// workflow's quorum. The base interface remains small for plugins and test
+// doubles that do not have workflow-aware storage.
+type WorkflowScopedParticipantStore interface {
+	ListTaskParticipantsForWorkflow(ctx context.Context, taskID, workflowID string) ([]ParticipantInfo, error)
 }
 
 // DecisionStore reads and writes workflow_step_decisions rows. The engine

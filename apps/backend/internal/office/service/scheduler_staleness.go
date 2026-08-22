@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -17,18 +18,30 @@ const staleRunThreshold = 2 * time.Hour
 func (si *SchedulerIntegration) evaluateRunStaleness(
 	ctx context.Context,
 	run *models.Run,
-) (bool, string) {
-	if run.RetryCount == 0 {
-		return false, ""
+) (bool, string, error) {
+	if run.RetryCount > 0 && !run.RequestedAt.IsZero() &&
+		time.Since(run.RequestedAt) > staleRunThreshold {
+		return true, "execution_too_old", nil
 	}
-	if run.RequestedAt.IsZero() {
-		return false, ""
+
+	// Engine-emitted runs carry the workflow step that produced them. A task
+	// can move to another step while the run waits in the queue, so compare
+	// the queued step with the task's current step before launch. Legacy runs
+	// do not include workflow_step_id and retain the existing behaviour.
+	payload := ParseRunPayload(run.Payload)
+	expectedStepID := payload["workflow_step_id"]
+	taskID := payload["task_id"]
+	if expectedStepID == "" || taskID == "" {
+		return false, "", nil
 	}
-	if time.Since(run.RequestedAt) > staleRunThreshold {
-		return true, "execution_too_old"
+	currentStepID, err := si.svc.repo.GetTaskWorkflowStepID(ctx, taskID)
+	if err != nil {
+		return false, "", fmt.Errorf("resolve current workflow step for task %s: %w", taskID, err)
 	}
-	_ = ctx
-	return false, ""
+	if currentStepID != expectedStepID {
+		return true, "workflow_step_changed", nil
+	}
+	return false, "", nil
 }
 
 // cancelStaleRun marks the run cancelled, logs the event, and releases any checkout.
@@ -44,8 +57,7 @@ func (si *SchedulerIntegration) cancelStaleRun(
 		zap.String("reason", reason),
 		zap.Time("requested_at", run.RequestedAt))
 
-	taskID := si.extractTaskID(run.Payload)
-	si.releaseCheckoutIfNeeded(ctx, taskID)
+	si.releaseCheckoutIfNeeded(ctx, run)
 
 	if err := si.svc.repo.CancelRun(ctx, run.ID, reason); err != nil {
 		si.logger.Error("failed to cancel stale run",

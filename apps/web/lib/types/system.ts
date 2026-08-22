@@ -195,7 +195,7 @@ export interface MessageQueueSettingsValue {
 /** Partial PATCH payload: omitted fields are left unchanged server-side. */
 export type MessageQueueSettingsPatch = Partial<MessageQueueSettingsValue>;
 
-export type MessageQueueSettingsSource = "default" | "setting" | "environment";
+export type MessageQueueSettingsSource = "default" | "setting" | "configuration" | "environment";
 
 export interface MessageQueueEffectiveSettings extends MessageQueueSettingsValue {
   source: MessageQueueSettingsSource;

@@ -57,7 +57,7 @@ func (r *Repository) ReconcileUnpublishedPromptTurns(ctx context.Context) (int, 
 // the marker through ClearTurnPromptDispatchMetadata.
 func (r *Repository) ListTurnsPendingStartEvent(ctx context.Context) ([]*models.Turn, error) {
 	query := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
+		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns turn_row
 		WHERE %s
 		ORDER BY turn_row.task_session_id, turn_row.started_at, turn_row.created_at, turn_row.id

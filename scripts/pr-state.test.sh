@@ -1248,6 +1248,7 @@ test_summary_mode_returns_compact_fixup_state() {
   assert_jq "summary pending check count" '.pending_checks | length == 2' "$json"
   assert_jq "summary pending check" '.pending_checks[0] | .name == "claude-review" and .status == "in_progress" and .run_id == "27340000003"' "$json"
   assert_jq "summary pending status context keeps target url" '.pending_checks[] | select(.name == "external pending") | .status == "pending" and .details_url == null and .target_url == "https://ci.example.test/build/1"' "$json"
+  assert_jq "summary counts every effective check" '.check_count == 7' "$json"
   assert_jq "summary exposes normalized passing checks" '(.passed_check_count == (.successful_checks | length)) and any(.successful_checks[]; .name == "web lint" and .conclusion == "success") and any(.successful_checks[]; .name == "opencode-review-same-repo" and .conclusion == "success")' "$json"
   assert_jq "summary unresolved count" '.unresolved_review_thread_count == 2' "$json"
   assert_jq "summary filtered thread count" '.filtered_review_thread_count == 1' "$json"
@@ -1484,6 +1485,85 @@ test_jq_file_args_avoid_process_substitution() {
 }
 
 test_jq_file_args_avoid_process_substitution
+# Both of these guard against host-toolchain failures that CI cannot reproduce:
+# the runners ship bash 5 and jq 1.7, while macOS ships bash 3.2 as /bin/bash and
+# jq 1.6 is still widely installed. Each bug made pr-state report a dirty PR as
+# clean, so the invariant is asserted structurally rather than left untested.
+test_array_expansions_are_safe_under_set_u() {
+  local offenders
+  # The guarded form contains "${arr[@]}" inside it, so lines carrying the
+  # [@]+ guard are not offenders.
+  offenders="$(grep -n '"\${[A-Za-z_][A-Za-z0-9_]*\[@\]}"' "$SCRIPT" | grep -v '\[@\]+' || true)"
+  if [ -n "$offenders" ]; then
+    printf '%s\n' "$offenders" >&2
+    fail "array expansions use \${arr[@]+\"\${arr[@]}\"} (bash 3.2 errors on an empty array under set -u)"
+  fi
+
+  # And the guarded form itself must be safe both empty and populated.
+  if ! bash -c 'set -u; a=(); : ${a[@]+"${a[@]}"}' 2>/dev/null; then
+    fail "the guarded expansion is safe for an empty array"
+  fi
+  if [ "$(bash -c 'set -u; a=(one two); printf "%s," ${a[@]+"${a[@]}"}')" != "one,two," ]; then
+    fail "the guarded expansion preserves array elements"
+  fi
+
+  pass "array expansions survive bash 3.2 under set -u"
+}
+
+test_anchored_prefix_strip_cannot_loop() {
+  # A gsub whose pattern is entirely optional matches the empty string at every
+  # position, which never terminates on jq 1.6. The strips here are ^-anchored,
+  # so sub() is both the terminating and the semantically correct operator.
+  # The hazard is a pattern that can match the empty string. A trailing optional
+  # group is the realistic shape of that: gsub("...(?:x)?"; ...) matches nothing
+  # at every position. This source guard is conservative. It flags any gsub
+  # pattern that contains `?`, including safe patterns that contain required atoms.
+  local offenders
+  offenders="$(grep -n 'gsub("[^"]*?";' "$SCRIPT" || true)"
+  if [ -n "$offenders" ]; then
+    printf '%s\n' "$offenders" >&2
+    fail "a gsub pattern ending in an optional group can match empty and loops on jq 1.6; use sub()"
+  fi
+
+  # The filter must terminate quickly whatever jq is installed. Use a background
+  # watchdog because macOS does not provide the GNU `timeout` command by default.
+  local start elapsed tmp timeout_file jq_pid watchdog_pid jq_status
+  make_tmp_dir tmp
+  timeout_file="$tmp/jq-timeout"
+  start=$(date +%s)
+  jq -n '"- **blocked** on review" | sub("^[[:space:]]*(?:(?:[-*+]\\s+)|(?:[0-9]+\\.\\s+))?(?:\\*\\*|__|_|\\*)?"; "")' >/dev/null 2>&1 &
+  jq_pid=$!
+  (
+    sleep 5
+    if kill -0 "$jq_pid" 2>/dev/null; then
+      : >"$timeout_file"
+      kill "$jq_pid" 2>/dev/null || true
+    fi
+  ) &
+  watchdog_pid=$!
+
+  if wait "$jq_pid"; then
+    jq_status=0
+  else
+    jq_status=$?
+  fi
+  kill "$watchdog_pid" 2>/dev/null || true
+  wait "$watchdog_pid" 2>/dev/null || true
+
+  if [ -e "$timeout_file" ]; then
+    fail "the prefix strip terminates promptly (timed out after 5s)"
+  fi
+  if [ "$jq_status" -ne 0 ]; then
+    fail "the prefix strip evaluates successfully"
+  fi
+  elapsed=$(( $(date +%s) - start ))
+  if [ "$elapsed" -gt 5 ]; then
+    fail "the prefix strip terminates promptly (took ${elapsed}s)"
+  fi
+
+  pass "anchored prefix strips terminate on jq 1.6"
+}
+
 test_snapshot_happy_path
 test_old_head_review_does_not_qualify
 test_exact_head_selected_review_qualifies
@@ -1524,3 +1604,5 @@ test_job_log_mode_unpacks_zip_responses
 test_comment_mode_returns_full_review_comment
 test_comment_mode_reports_fetch_failure
 test_comment_mode_rejects_incompatible_flags
+test_array_expansions_are_safe_under_set_u
+test_anchored_prefix_strip_cannot_loop

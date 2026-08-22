@@ -159,32 +159,45 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	// Surface per-repo worktree results from the prepare step so the orchestrator
 	// can persist N TaskEnvironmentRepo / TaskSessionWorktree rows when multi-repo.
 	var worktrees []executor.RepoWorktreeResult
+	var requestedBaseBranch, baseBranch, baseBranchFallbackWarning string
+	if execution.PrepareResult != nil {
+		requestedBaseBranch = execution.PrepareResult.RequestedBaseBranch
+		baseBranch = execution.PrepareResult.BaseBranch
+		baseBranchFallbackWarning = execution.PrepareResult.BaseBranchFallbackWarning
+	}
 	if execution.PrepareResult != nil && len(execution.PrepareResult.Worktrees) > 0 {
 		worktrees = make([]executor.RepoWorktreeResult, 0, len(execution.PrepareResult.Worktrees))
 		for _, w := range execution.PrepareResult.Worktrees {
 			worktrees = append(worktrees, executor.RepoWorktreeResult{
-				RepositoryID:   w.RepositoryID,
-				BranchSlug:     w.BranchSlug,
-				WorktreeID:     w.WorktreeID,
-				WorktreeBranch: w.WorktreeBranch,
-				WorktreePath:   w.WorktreePath,
-				MainRepoGitDir: w.MainRepoGitDir,
-				ErrorMessage:   w.ErrorMessage,
+				TaskRepositoryID:          w.TaskRepositoryID,
+				RepositoryID:              w.RepositoryID,
+				BranchSlug:                w.BranchSlug,
+				WorktreeID:                w.WorktreeID,
+				WorktreeBranch:            w.WorktreeBranch,
+				WorktreePath:              w.WorktreePath,
+				MainRepoGitDir:            w.MainRepoGitDir,
+				RequestedBaseBranch:       w.RequestedBaseBranch,
+				BaseBranch:                w.BaseBranch,
+				BaseBranchFallbackWarning: w.BaseBranchFallbackWarning,
+				ErrorMessage:              w.ErrorMessage,
 			})
 		}
 	}
 
 	return &executor.LaunchAgentResponse{
-		AgentExecutionID: execution.ID,
-		ContainerID:      execution.ContainerID,
-		Status:           execution.Status,
-		WorktreeID:       worktreeID,
-		WorktreePath:     worktreePath,
-		WorktreeBranch:   worktreeBranch,
-		WorkspacePath:    execution.WorkspacePath,
-		Metadata:         metadata,
-		PrepareResult:    execution.PrepareResult,
-		Worktrees:        worktrees,
+		AgentExecutionID:          execution.ID,
+		ContainerID:               execution.ContainerID,
+		Status:                    execution.Status,
+		WorktreeID:                worktreeID,
+		WorktreePath:              worktreePath,
+		WorktreeBranch:            worktreeBranch,
+		RequestedBaseBranch:       requestedBaseBranch,
+		BaseBranch:                baseBranch,
+		BaseBranchFallbackWarning: baseBranchFallbackWarning,
+		WorkspacePath:             execution.WorkspacePath,
+		Metadata:                  metadata,
+		PrepareResult:             execution.PrepareResult,
+		Worktrees:                 worktrees,
 	}, nil
 }
 
@@ -224,6 +237,7 @@ func buildLifecycleLaunchRequest(
 		UseWorktree:                   req.UseWorktree,
 		WorktreeID:                    req.WorktreeID,
 		RepositoryID:                  req.RepositoryID,
+		TaskRepositoryID:              req.TaskRepositoryID,
 		RepositoryPath:                req.RepositoryPath,
 		BaseBranch:                    req.BaseBranch,
 		DefaultBranch:                 req.DefaultBranch,
@@ -231,6 +245,7 @@ func buildLifecycleLaunchRequest(
 		PRNumber:                      req.PRNumber,
 		RemoteContribution:            req.RemoteContribution,
 		ContributionDestination:       req.ContributionDestination,
+		ComparisonTarget:              req.ComparisonTarget,
 		WorktreeBranchPrefix:          req.WorktreeBranchPrefix,
 		WorktreeBranchTemplate:        req.WorktreeBranchTemplate,
 		WorktreeBranchTicket:          req.WorktreeBranchTicket,
@@ -280,6 +295,7 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 	specs := make([]lifecycle.RepoLaunchSpec, 0, len(repos))
 	for _, r := range repos {
 		specs = append(specs, lifecycle.RepoLaunchSpec{
+			TaskRepositoryID:        r.TaskRepositoryID,
 			RepositoryID:            r.RepositoryID,
 			RepositoryPath:          r.RepositoryPath,
 			RepositoryURL:           r.RepositoryURL,
@@ -290,6 +306,7 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 			PRNumber:                r.PRNumber,
 			RemoteContribution:      r.RemoteContribution,
 			ContributionDestination: r.ContributionDestination,
+			ComparisonTarget:        r.ComparisonTarget,
 			WorktreeID:              r.WorktreeID,
 			WorktreeBranchPrefix:    r.WorktreeBranchPrefix,
 			WorktreeBranchTemplate:  r.WorktreeBranchTemplate,
@@ -557,10 +574,28 @@ func (a *lifecycleAdapter) RespondToPermissionBySessionID(ctx context.Context, s
 	return a.mgr.RespondToPermissionBySessionID(sessionID, pendingID, optionID, cancelled)
 }
 
+func (a *lifecycleAdapter) ListPendingPermissionsBySessionID(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error) {
+	return a.mgr.ListPendingPermissionsBySessionID(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) ResolvePermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+	return a.mgr.ResolvePermissionBySessionID(ctx, sessionID, requestID, pendingID, optionID)
+}
+
+func (a *lifecycleAdapter) CancelPermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
+	return a.mgr.CancelPermissionBySessionID(ctx, sessionID, requestID, pendingID)
+}
+
 // IsAgentRunningForSession checks if an agent is actually running for a session
 // This probes the actual agent (Docker container or standalone process)
 func (a *lifecycleAdapter) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	return a.mgr.IsAgentRunningForSession(ctx, sessionID)
+}
+
+// ProbeAgentRunningForSession preserves probe errors so orchestrator cleanup
+// can distinguish an unavailable status check from a confirmed dead agent.
+func (a *lifecycleAdapter) ProbeAgentRunningForSession(ctx context.Context, sessionID string) (bool, error) {
+	return a.mgr.ProbeAgentRunningForSession(ctx, sessionID)
 }
 
 // IsAgentReadyForPrompt checks if the session can accept a prompt immediately.
@@ -606,6 +641,16 @@ func (a *lifecycleAdapter) PollRemoteStatusForRecords(ctx context.Context, recor
 
 func (a *lifecycleAdapter) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
 	return a.mgr.CleanupStaleExecutionBySessionID(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) CleanupStaleExecutionBySessionIDIfCurrent(
+	ctx context.Context,
+	sessionID, expectedExecutionID string,
+	expectedUpdatedAt time.Time,
+) error {
+	return a.mgr.CleanupStaleExecutionBySessionIDIfCurrent(
+		ctx, sessionID, expectedExecutionID, expectedUpdatedAt,
+	)
 }
 
 func (a *lifecycleAdapter) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
@@ -949,8 +994,9 @@ func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID
 }
 
 // CreatePermissionRequestMessage creates a message for a permission request
-func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
+func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
 	metadata := map[string]interface{}{
+		"request_id":     requestID,
 		"pending_id":     pendingID,
 		"tool_call_id":   toolCallID,
 		"options":        options,
@@ -974,8 +1020,20 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 }
 
 // UpdatePermissionMessage updates a permission message's status
-func (a *messageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error {
-	return a.svc.UpdatePermissionMessage(ctx, sessionID, pendingID, status)
+func (a *messageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error {
+	return a.svc.UpdatePermissionMessage(ctx, taskID, sessionID, requestID, pendingID, status)
+}
+
+func (a *messageCreatorAdapter) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+	return a.svc.ClaimPermissionResolution(ctx, request)
+}
+
+func (a *messageCreatorAdapter) FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error) {
+	return a.svc.FinalizePermissionResolution(ctx, request)
+}
+
+func (a *messageCreatorAdapter) GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error) {
+	return a.svc.GetPermissionResolutionAudit(ctx, taskID, sessionID, requestID, pendingID)
 }
 
 // CreateClarificationRequestMessages emits one chat message per question in a
@@ -1054,9 +1112,19 @@ func (a *messageCreatorAdapter) rollbackPartialBundle(ctx context.Context, ids [
 	}
 }
 
-// UpdateClarificationMessage updates a clarification message's status and answer
-// for a specific (pending_id, question_id) pair within the session.
+// UpdateClarificationMessage updates a clarification message's status and
+// answer.
+//
+// A nil answer must be forwarded as an untyped nil, not as a nil
+// *clarification.Answer boxed into the service method's interface{}
+// parameter (COR-001): a typed nil pointer boxed into an interface produces
+// a non-nil interface value, so the service's own `answer != nil` check
+// would fire and write a literal "response": null into every rejected or
+// cancelled clarification message's metadata.
 func (a *messageCreatorAdapter) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, questionID, status string, answer *clarification.Answer) error {
+	if answer == nil {
+		return a.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, nil)
+	}
 	return a.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, answer)
 }
 

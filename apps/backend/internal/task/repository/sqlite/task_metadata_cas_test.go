@@ -99,6 +99,50 @@ func runMetadataCASContract(t *testing.T, repo *Repository) {
 	}
 }
 
+func runMetadataNoActiveSessionContract(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO task_sessions (id, task_id, state, started_at, updated_at)
+		VALUES ('session-cas', ?, 'STARTING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`), casTaskID); err != nil {
+		t.Fatalf("insert starting session: %v", err)
+	}
+
+	written, err := repo.SetTaskMetadataKeyIfNoActiveSession(ctx, casTaskID, "auto_start_failed", true)
+	if err != nil {
+		t.Fatalf("SetTaskMetadataKeyIfNoActiveSession while starting: %v", err)
+	}
+	if written {
+		t.Fatal("active STARTING session must block the marker write")
+	}
+	if _, present := metadataValue(t, repo, "auto_start_failed"); present {
+		t.Fatal("blocked marker write changed metadata")
+	}
+
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE task_sessions SET state = 'RUNNING' WHERE id = 'session-cas'`)); err != nil {
+		t.Fatalf("update running session: %v", err)
+	}
+	written, err = repo.SetTaskMetadataKeyIfNoActiveSession(ctx, casTaskID, "auto_start_failed", true)
+	if err != nil {
+		t.Fatalf("SetTaskMetadataKeyIfNoActiveSession while running: %v", err)
+	}
+	if written {
+		t.Fatal("active RUNNING session must block the marker write")
+	}
+
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE task_sessions SET state = 'COMPLETED' WHERE id = 'session-cas'`)); err != nil {
+		t.Fatalf("complete session: %v", err)
+	}
+	written, err = repo.SetTaskMetadataKeyIfNoActiveSession(ctx, casTaskID, "auto_start_failed", true)
+	if err != nil {
+		t.Fatalf("SetTaskMetadataKeyIfNoActiveSession after completion: %v", err)
+	}
+	if !written {
+		t.Fatal("completed session must allow the marker write")
+	}
+}
+
 func newRepoForMetadataCASTests(t *testing.T) *Repository {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "metadata-cas-test.db"))
@@ -121,6 +165,7 @@ func TestSetTaskMetadataKeyIfPresentSQLite(t *testing.T) {
 		"other_key":       "keep me",
 	})
 	runMetadataCASContract(t, repo)
+	runMetadataNoActiveSessionContract(t, repo)
 }
 
 // The JSON patch and its presence predicate are written per dialect, so SQLite
@@ -134,6 +179,7 @@ func TestPostgresSetTaskMetadataKeyIfPresent(t *testing.T) {
 		"other_key":       "keep me",
 	})
 	runMetadataCASContract(t, repo)
+	runMetadataNoActiveSessionContract(t, repo)
 }
 
 func newPostgresMetadataCASRepo(t *testing.T, db *sqlx.DB) *Repository {

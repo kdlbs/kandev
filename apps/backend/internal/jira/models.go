@@ -22,6 +22,11 @@ const (
 	// Created from the user's profile on the Jira instance. Server/DC-only —
 	// Cloud doesn't accept Bearer for the Jira REST API.
 	AuthMethodPAT = "pat"
+	// AuthMethodOAuth is Atlassian's OAuth 2.0 (3LO) authorization code flow.
+	// Cloud-only. A rotating refresh token keeps the session alive. API calls
+	// use the Atlassian MCP server because its OAuth token does not work with
+	// the direct Jira REST API.
+	AuthMethodOAuth = "oauth"
 )
 
 // Instance type identifiers persisted in JiraConfig.InstanceType. Cloud sites
@@ -49,6 +54,17 @@ type JiraConfig struct {
 	// a JWT (cloud.session.token / tenant.session.token). Nil for api_token or
 	// opaque session cookies.
 	SecretExpiresAt *time.Time `json:"secretExpiresAt,omitempty" db:"-"`
+	// ClientID is the client_id from OAuth Dynamic Client Registration.
+	// Stored in the config row, not the secret store; it is not sensitive.
+	// Only set when AuthMethod == AuthMethodOAuth.
+	ClientID string `json:"clientId,omitempty" db:"client_id"`
+	// CloudID is the Atlassian Cloud site ID resolved through the MCP server.
+	// MCP tool requests use it to select the Jira site. Only set when
+	// AuthMethod == AuthMethodOAuth.
+	CloudID string `json:"cloudId,omitempty" db:"cloud_id"`
+	// TokenExpiresAt is the OAuth access token expiry. The client refreshes
+	// on-demand when a request hits this deadline. Only for AuthMethodOAuth.
+	TokenExpiresAt *time.Time `json:"tokenExpiresAt,omitempty" db:"token_expires_at"`
 	// LastCheckedAt / LastOk / LastError are written by the background auth
 	// poller. They let the UI render a "connected/disconnected + checked Xs ago"
 	// indicator without doing its own probing.
@@ -69,6 +85,10 @@ type SetConfigRequest struct {
 	InstanceType      string `json:"instanceType"`
 	DefaultProjectKey string `json:"defaultProjectKey"`
 	Secret            string `json:"secret"`
+	// ClientID is the OAuth app client_id (dynamically registered via MCP).
+	// Only used when authMethod == "oauth". Stored in the config row, not
+	// the secret store — it is not sensitive.
+	ClientID string `json:"clientId"`
 }
 
 // TestConnectionResult reports what the backend learned when pinging Jira with
@@ -155,6 +175,19 @@ const SecretKey = "jira:singleton:token"
 // SecretKeyForWorkspace returns the workspace-scoped Jira secret key.
 func SecretKeyForWorkspace(workspaceID string) string {
 	return "jira:" + workspaceID + ":token"
+}
+
+// OAuthAccessTokenKeyForWorkspace returns the secret-store key for the OAuth
+// access token. The access token has a 15-minute TTL and is refreshed on-demand.
+func OAuthAccessTokenKeyForWorkspace(workspaceID string) string {
+	return "jira:" + workspaceID + ":oauth_access_token"
+}
+
+// OAuthRefreshTokenKeyForWorkspace returns the secret-store key for the OAuth
+// refresh token. The refresh token is rotating — every refresh invalidates the
+// old one and returns a new one.
+func OAuthRefreshTokenKeyForWorkspace(workspaceID string) string {
+	return "jira:" + workspaceID + ":oauth_refresh_token"
 }
 
 // LegacySecretKeyForWorkspace is kept for older tests/callers.

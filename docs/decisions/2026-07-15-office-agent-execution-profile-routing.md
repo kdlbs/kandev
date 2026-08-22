@@ -1,8 +1,14 @@
 # ADR-2026-07-15-office-agent-execution-profile-routing: Separate Office identity from routed execution profiles
 
-**Status:** proposed
+**Status:** superseded by ADR-2026-08-13-dynamic-agent-profile-routing
 **Date:** 2026-07-15
 **Area:** backend, frontend
+
+This decision is superseded by
+[Unify Provider Routing Behind Dynamic Agent Profiles](2026-08-13-dynamic-agent-profile-routing.md).
+The newer decision retains the separation between Office identity and concrete
+execution configuration, but moves routing ownership from Office workspace
+settings to reusable dynamic agent profiles.
 
 ## Context
 

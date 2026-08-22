@@ -13,12 +13,14 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -75,6 +77,14 @@ type SessionCanceller interface {
 // number of clarification bundles detached while pausing.
 type ClarificationInputPauser interface {
 	PauseForClarificationInput(ctx context.Context, sessionID string) (int, error)
+}
+
+type clarificationInputPauserWithOptions interface {
+	PauseForClarificationInputWithOptions(
+		ctx context.Context,
+		sessionID string,
+		options orchestrator.ClarificationPauseOptions,
+	) (int, error)
 }
 
 // MessageCreator creates messages for clarification requests.
@@ -169,6 +179,14 @@ type TaskStopper interface {
 	StopTaskForCoordinator(ctx context.Context, taskID string) (orchestrator.CoordinatorTaskStopResult, error)
 }
 
+// AgentPermissionService is the authorized domain boundary for external
+// permission discovery and one-shot resolution. MCP handlers never reach into
+// agentctl or UI state directly.
+type AgentPermissionService interface {
+	ListPendingAgentPermissions(ctx context.Context, taskID, sessionID string) ([]streams.PendingAgentPermission, error)
+	ResolveAgentPermission(ctx context.Context, request orchestrator.ResolveAgentPermissionRequest) (*orchestrator.ResolveAgentPermissionResult, error)
+}
+
 // TaskTitleBranchRenamer performs the best-effort branch side effect after an
 // owner session accepts a prompt-first task title.
 type TaskTitleBranchRenamer interface {
@@ -237,6 +255,10 @@ type Handlers struct {
 	// MCP tools introduced in office task handoffs phase 2.
 	handoffSvc *service.HandoffService
 
+	// Office dashboard service (optional, set via SetDashboardService).
+	// Wires the record_step_decision_kandev MCP tool.
+	dashboardSvc *dashboard.DashboardService
+
 	// Optional PR lister (set via SetTaskPRLister) used to enrich
 	// task-listing responses with associated pull requests.
 	taskPRLister TaskPRLister
@@ -254,6 +276,16 @@ type Handlers struct {
 	diagnosticMaterializer DiagnosticBundleMaterializer
 	// Optional task-bound GitLab MR automation controls.
 	taskMRAutomation TaskMRAutomationService
+
+	// Optional list_pending_questions_kandev / answer_question_kandev
+	// dependencies (external MCP surface only, set via
+	// SetClarificationResolver).
+	clarificationResolver *clarification.Resolver
+	clarificationBundles  ClarificationBundleLister
+
+	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
+	// dependency (external MCP surface only, set via SetAgentPermissionService).
+	agentPermissionSvc AgentPermissionService
 }
 
 // NewHandlers creates new MCP handlers.
@@ -309,6 +341,11 @@ func (h *Handlers) SetPromptReferenceResolver(resolver PromptReferenceResolver) 
 // SetTaskStopper wires the orchestrator-owned halt operation.
 func (h *Handlers) SetTaskStopper(stopper TaskStopper) {
 	h.taskStopper = stopper
+}
+
+// SetAgentPermissionService wires the authorized permission domain service.
+func (h *Handlers) SetAgentPermissionService(svc AgentPermissionService) {
+	h.agentPermissionSvc = svc
 }
 
 // SetTaskTitleBranchRenamer wires the best-effort branch rename performed
@@ -377,6 +414,8 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
 	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
+	d.RegisterFunc(ws.ActionMCPListPendingAgentPermissions, h.handleListPendingAgentPermissions)
+	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
 	d.RegisterFunc(ws.ActionMCPAskUserQuestion, h.handleAskUserQuestion)
 	d.RegisterFunc(ws.ActionMCPAskParentQuestion, h.handleAskParentQuestion)
 	d.RegisterFunc(ws.ActionMCPCreateTaskPlan, h.handleCreateTaskPlan)
@@ -394,6 +433,10 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
 	if h.diagnosticBundles != nil && h.diagnosticMaterializer != nil {
 		d.RegisterFunc(ws.ActionMCPGetDiagnosticBundle, h.handleGetDiagnosticBundle)
+	}
+	if h.clarificationResolver != nil && h.clarificationBundles != nil {
+		d.RegisterFunc(ws.ActionMCPListPendingQuestions, h.handleListPendingQuestions)
+		d.RegisterFunc(ws.ActionMCPAnswerQuestion, h.handleAnswerQuestion)
 	}
 	h.registerReviewHandlers(d)
 
@@ -431,6 +474,9 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPListTaskDocuments, h.handleListTaskDocuments)
 		d.RegisterFunc(ws.ActionMCPGetTaskDocument, h.handleGetTaskDocument)
 		d.RegisterFunc(ws.ActionMCPWriteTaskDocument, h.handleWriteTaskDocument)
+	}
+	if h.dashboardSvc != nil {
+		d.RegisterFunc(ws.ActionMCPRecordStepDecision, h.handleRecordStepDecision)
 	}
 	if h.taskSvc != nil {
 		d.RegisterFunc(ws.ActionMCPMoveTask, h.handleMoveTask)
@@ -569,6 +615,7 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 			for _, t := range tasks {
 				dtos = append(dtos, dto.FromTask(t))
 			}
+			h.enrichTasksWithPendingActions(ctx, tasks, dtos)
 			h.enrichTasksWithPRs(ctx, dtos)
 			return dto.ListTasksResponse{Tasks: dtos, Total: len(dtos)}, nil
 		})
@@ -1813,27 +1860,107 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 // union to the shared attachment service. It deliberately rejects fields from
 // the other variant so callers cannot get a silently ambiguous attachment.
 func (h *Handlers) handleAddWorkspaceSources(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		TaskID  string            `json:"task_id"`
-		Sources []json.RawMessage `json:"sources"`
+	req, sources, response := parseAddWorkspaceSourcesRequest(msg)
+	if response != nil {
+		return response, nil
 	}
-	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	caller, response := h.verifyWorkspaceSourceCaller(ctx, msg, req)
+	if response != nil {
+		return response, nil
 	}
-	if req.TaskID == "" || len(req.Sources) == 0 {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id and at least one source are required", nil)
+	_, isChildTarget, response := h.authorizeWorkspaceSourceTarget(ctx, msg, req, caller)
+	if response != nil {
+		return response, nil
 	}
-	sources, err := parseWorkspaceSources(req.Sources)
-	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	attachReq := service.AttachWorkspaceSourcesRequest{TaskID: req.TaskID, Sources: sources}
+	if isChildTarget {
+		attachReq.ExpectedParentID = caller.ID
+		attachReq.ExpectedParentWorkspaceID = caller.WorkspaceID
 	}
-	result, err := h.taskSvc.AttachWorkspaceSources(ctx, service.AttachWorkspaceSourcesRequest{TaskID: req.TaskID, Sources: sources})
+	result, err := h.taskSvc.AttachWorkspaceSources(ctx, attachReq)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, classifyWorkspaceSourceError(err), "Failed to attach workspace sources: "+err.Error(), nil)
+	}
+	if h.logger != nil {
+		h.logger.Info("workspace sources attached through task MCP",
+			zap.String("caller_task_id", req.CallerTaskID), zap.String("caller_session_id", req.CallerSessionID),
+			zap.String("target_task_id", req.TaskID), zap.Int("requested_source_count", len(req.Sources)), zap.Bool("durable_state_changed", result.Changed))
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"task_id": result.Task.ID, "repositories": result.Task.Repositories, "workspace_folders": result.Task.WorkspaceFolders, "workspace_path": result.WorkspacePath, "session_ids": result.SessionIDs,
 	})
+}
+
+type addWorkspaceSourcesRequest struct {
+	TaskID          string            `json:"task_id"`
+	CallerTaskID    string            `json:"caller_task_id"`
+	CallerSessionID string            `json:"caller_session_id"`
+	Sources         []json.RawMessage `json:"sources"`
+}
+
+func parseAddWorkspaceSourcesRequest(msg *ws.Message) (addWorkspaceSourcesRequest, []service.WorkspaceSourceInput, *ws.Message) {
+	var req addWorkspaceSourcesRequest
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return req, nil, newWorkspaceSourceError(msg, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error())
+	}
+	if req.TaskID == "" || req.CallerTaskID == "" || req.CallerSessionID == "" || len(req.Sources) == 0 {
+		return req, nil, newWorkspaceSourceError(msg, ws.ErrorCodeValidation, "task_id, caller provenance, and at least one source are required")
+	}
+	sources, err := parseWorkspaceSources(req.Sources)
+	if err != nil {
+		return req, nil, newWorkspaceSourceError(msg, ws.ErrorCodeValidation, err.Error())
+	}
+	return req, sources, nil
+}
+
+func (h *Handlers) verifyWorkspaceSourceCaller(ctx context.Context, msg *ws.Message, req addWorkspaceSourcesRequest) (*models.Task, *ws.Message) {
+	if h.sessionRepo == nil || h.taskSvc == nil {
+		return nil, newWorkspaceSourceError(msg, ws.ErrorCodeInternalError, "workspace source authorization is not configured")
+	}
+	callerSession, err := h.sessionRepo.GetTaskSession(ctx, req.CallerSessionID)
+	if err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			return nil, newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "caller session is not authorized for the calling task")
+		}
+		return nil, newWorkspaceSourceError(msg, ws.ErrorCodeInternalError, "failed to verify caller session")
+	}
+	if callerSession == nil || callerSession.TaskID != req.CallerTaskID {
+		return nil, newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "caller session is not authorized for the calling task")
+	}
+	caller, err := h.taskSvc.GetTask(ctx, req.CallerTaskID)
+	if err != nil {
+		if errors.Is(err, taskrepository.ErrTaskNotFound) {
+			return nil, newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "caller task is not authorized")
+		}
+		return nil, newWorkspaceSourceError(msg, ws.ErrorCodeInternalError, "failed to verify caller task")
+	}
+	if caller == nil {
+		return nil, newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "caller task is not authorized")
+	}
+	return caller, nil
+}
+
+func (h *Handlers) authorizeWorkspaceSourceTarget(ctx context.Context, msg *ws.Message, req addWorkspaceSourcesRequest, caller *models.Task) (*models.Task, bool, *ws.Message) {
+	target, err := h.taskSvc.GetTask(ctx, req.TaskID)
+	if err != nil {
+		if errors.Is(err, taskrepository.ErrTaskNotFound) {
+			return nil, false, newWorkspaceSourceError(msg, ws.ErrorCodeNotFound, "target task not found")
+		}
+		return nil, false, newWorkspaceSourceError(msg, ws.ErrorCodeInternalError, "failed to load target task")
+	}
+	if target == nil {
+		return nil, false, newWorkspaceSourceError(msg, ws.ErrorCodeNotFound, "target task not found")
+	}
+	isChildTarget := req.TaskID != req.CallerTaskID
+	if isChildTarget && !canDirectParentAccess(caller, target) {
+		return nil, false, newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "only a task's direct parent in the same workspace can attach its sources")
+	}
+	return target, isChildTarget, nil
+}
+
+func newWorkspaceSourceError(msg *ws.Message, code, message string) *ws.Message {
+	response, _ := ws.NewError(msg.ID, msg.Action, code, message, nil)
+	return response
 }
 
 func parseWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSourceInput, error) {
@@ -1874,6 +2001,8 @@ func parseWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSourceInpu
 
 func classifyWorkspaceSourceError(err error) string {
 	switch {
+	case errors.Is(err, taskrepository.ErrTaskParentMismatch):
+		return ws.ErrorCodeForbidden
 	case errors.Is(err, service.ErrInvalidWorkspaceSource):
 		return ws.ErrorCodeValidation
 	case errors.Is(err, taskrepo.ErrTaskNotFound), errors.Is(err, taskrepository.ErrRepositoryNotFound), errors.Is(err, service.ErrTaskRepositoryNotFound):
@@ -2613,6 +2742,7 @@ const errorField = "error"
 // a wire-protocol key updates every handler in one place.
 const (
 	keyTaskID           = "task_id"
+	keySessionID        = "session_id"
 	keyTotal            = "total"
 	keyRepositoryID     = "repository_id"
 	keyTaskRepositoryID = "task_repository_id"

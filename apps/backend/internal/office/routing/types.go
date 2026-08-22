@@ -12,6 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 )
 
 // Tier is a normalized model strength bucket. Workspace and agent
@@ -36,6 +38,19 @@ const ProviderOrderSourceOverride = "override"
 // TierSourceOverride is the magic value AgentOverrides uses to signal
 // that the override blob's Tier replaces the workspace default.
 const TierSourceOverride = "override"
+
+// Tier-resolution level names for the widened, four-value tier_source
+// contract computed by effectiveTier and carried on Resolution and
+// RouteAttempt: wake_reason | override | role | workspace. This is a
+// different contract from AgentOverrides.TierSource above (still
+// inherit | override | "" — a persisted "did the user override"
+// marker, not a resolution level) even though both are spelled
+// "tier_source" and share the "override" string. See spec AC-18a.
+const (
+	TierSourceWakeReason = "wake_reason"
+	TierSourceRole       = "role"
+	TierSourceWorkspace  = "workspace"
+)
 
 // TierPerReasonSourceOverride is the magic value AgentOverrides uses to
 // signal that its TierPerReason map replaces the workspace policy
@@ -66,6 +81,26 @@ var AllWakeReasons = []string{
 // effective tier." Stored as JSON on the workspace routing row and
 // the agent overrides blob.
 type TierPerReason map[string]Tier
+
+// AllAgentRoles enumerates the seven role_tiers keys, in the
+// settingsmodels.AgentRole constants' declaration order. This order is
+// also what the frontend role list follows, so it lives here as the
+// single source of truth rather than being duplicated as a literal list.
+var AllAgentRoles = []settingsmodels.AgentRole{
+	settingsmodels.AgentRoleCEO,
+	settingsmodels.AgentRoleWorker,
+	settingsmodels.AgentRoleSpecialist,
+	settingsmodels.AgentRoleAssistant,
+	settingsmodels.AgentRoleSecurity,
+	settingsmodels.AgentRoleQA,
+	settingsmodels.AgentRoleDevOps,
+}
+
+// RoleTierMap maps an agent role to the tier that role should run at.
+// Keys are restricted to AllAgentRoles; values to AllTiers. Empty /
+// missing keys mean "no role policy — fall through to the workspace
+// default_tier." Stored as JSON on the workspace routing row.
+type RoleTierMap map[string]Tier
 
 // ProviderID identifies a CLI provider (the agent type ID from the
 // agent/registry package). First-class IDs in v1 are restricted by
@@ -224,6 +259,11 @@ type WorkspaceConfig struct {
 	// empty / missing map means "no special policy — every reason uses
 	// the agent's effective tier."
 	TierPerReason TierPerReason `json:"tier_per_reason,omitempty"`
+	// RoleTiers maps an agent role onto the tier that role should run
+	// at, applied below TierPerReason and the per-agent override but
+	// above DefaultTier. An empty / missing map means "no role policy"
+	// — the default for every workspace.
+	RoleTiers RoleTierMap `json:"role_tiers,omitempty"`
 }
 
 // AgentOverrides is the routing override blob stored on
@@ -294,6 +334,12 @@ func ValidateWorkspaceConfig(cfg WorkspaceConfig, known []ProviderID) error {
 		return err
 	}
 	if err := validateTierPerReason(cfg.TierPerReason, "tier_per_reason"); err != nil {
+		return err
+	}
+	if err := validateRoleTiers(cfg.RoleTiers, "role_tiers"); err != nil {
+		return err
+	}
+	if err := checkRoleTiersMapped(cfg.RoleTiers, &cfg); err != nil {
 		return err
 	}
 	if !cfg.Enabled {
@@ -504,6 +550,109 @@ func wakeReasonSet() map[string]struct{} {
 		out[r] = struct{}{}
 	}
 	return out
+}
+
+// validateRoleTiers rejects role_tiers keys outside the seven
+// AllAgentRoles values and values outside AllTiers. Unlike
+// validateTierPerReason (fail-fast on the first bad entry),
+// role_tiers accumulates one ValidationDetail per offending key —
+// role_tiers is a map that may carry several bad entries in a single
+// write, and a single flat error would collapse them into one message
+// and hide which of the seven roles is broken. Messages are built
+// directly here rather than through validateTier, whose Field is
+// hardcoded to "default_tier" and whose Error() text is prefixed with
+// "routing config invalid:" — either leaking into a role_tiers message
+// would misattribute the offending field.
+func validateRoleTiers(m RoleTierMap, field string) error {
+	if len(m) == 0 {
+		return nil
+	}
+	knownRoles := agentRoleSet()
+	var details []ValidationDetail
+	for role, tier := range m {
+		if _, ok := knownRoles[role]; !ok {
+			details = append(details, ValidationDetail{
+				Field:   role,
+				Message: fmt.Sprintf("unknown role %q", role),
+			})
+			continue
+		}
+		if tier == "" {
+			// AC-11: empty value means "absent"; dropped before
+			// persistence, not rejected.
+			continue
+		}
+		if !isValidTierValue(tier) {
+			details = append(details, ValidationDetail{
+				Field:   role,
+				Message: fmt.Sprintf("invalid tier %q", string(tier)),
+			})
+		}
+	}
+	if len(details) == 0 {
+		return nil
+	}
+	return &ValidationError{
+		Field:   field,
+		Message: "role_tiers references unknown roles or invalid tiers",
+		Details: details,
+	}
+}
+
+// isValidTierValue reports whether t is one of AllTiers. Unlike
+// validateTier, it carries no field/message opinion — callers that need
+// a role_tiers-scoped error build it themselves (see validateRoleTiers).
+func isValidTierValue(t Tier) bool {
+	for _, v := range AllTiers {
+		if v == t {
+			return true
+		}
+	}
+	return false
+}
+
+// agentRoleSet returns the lookup set used by validateRoleTiers. Built
+// from AllAgentRoles so the source of truth stays single.
+func agentRoleSet() map[string]struct{} {
+	out := make(map[string]struct{}, len(AllAgentRoles))
+	for _, r := range AllAgentRoles {
+		out[string(r)] = struct{}{}
+	}
+	return out
+}
+
+// checkRoleTiersMapped returns nil when every non-empty tier in
+// role_tiers is mapped on at least one provider in cfg.ProviderOrder.
+// Mirrors checkTierPerReasonMapped's accumulation shape rather than
+// checkTierMapped's single-value shape, for the same reason
+// validateRoleTiers does: role_tiers may hold several bad entries at
+// once. Checked unconditionally (not gated on cfg.Enabled) because a
+// role tier can supply the effective tier for a launch even while
+// automatic fallback is disabled (AC-12/AC-12a).
+func checkRoleTiersMapped(m RoleTierMap, cfg *WorkspaceConfig) error {
+	var details []ValidationDetail
+	for role, tier := range m {
+		if tier == "" {
+			continue
+		}
+		if tierMappedOnAnyProvider(tier, cfg.ProviderOrder, cfg.ProviderProfiles) {
+			continue
+		}
+		details = append(details, ValidationDetail{
+			Field: role,
+			Message: fmt.Sprintf(
+				"tier %q is not mapped on any provider in the workspace provider order",
+				string(tier)),
+		})
+	}
+	if len(details) == 0 {
+		return nil
+	}
+	return &ValidationError{
+		Field:   "role_tiers",
+		Message: "role tier overrides reference unmapped tiers",
+		Details: details,
+	}
 }
 
 // validateTier returns an error when t is not in AllTiers. Empty tier

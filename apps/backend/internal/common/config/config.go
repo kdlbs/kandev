@@ -31,6 +31,14 @@ type Config struct {
 	// live under this root.
 	HomeDir                string                       `mapstructure:"homeDir"`
 	Server                 ServerConfig                 `mapstructure:"server"`
+	Tasks                  TasksConfig                  `mapstructure:"tasks"`
+	Credentials            CredentialsConfig            `mapstructure:"credentials"`
+	Limits                 LimitsConfig                 `mapstructure:"limits"`
+	MessageQueue           MessageQueueConfig           `mapstructure:"messageQueue"`
+	Agentctl               AgentctlConfig               `mapstructure:"agentctl"`
+	Planning               PlanningConfig               `mapstructure:"planning"`
+	Observability          ObservabilityConfig          `mapstructure:"observability"`
+	Launcher               LauncherConfig               `mapstructure:"launcher"`
 	Database               DatabaseConfig               `mapstructure:"database"`
 	NATS                   NATSConfig                   `mapstructure:"nats"`
 	Events                 EventsConfig                 `mapstructure:"events"`
@@ -45,13 +53,62 @@ type Config struct {
 	Office                 OfficeConfig                 `mapstructure:"office"`
 	Features               FeaturesConfig               `mapstructure:"features"`
 	GitHubCredentialBroker GitHubCredentialBrokerConfig `mapstructure:"githubCredentialBroker"`
+	Source                 ConfigSource                 `mapstructure:"-" json:"-"`
+}
+
+// TasksConfig contains task lifecycle startup limits.
+type TasksConfig struct {
+	PreparationTimeout time.Duration `mapstructure:"preparationTimeout"`
+}
+
+// CredentialsConfig contains operator-managed credential file settings.
+type CredentialsConfig struct {
+	File string `mapstructure:"file"`
+}
+
+// LimitsConfig contains process and protocol capacity limits.
+type LimitsConfig struct {
+	GHMaxConcurrent   int `mapstructure:"ghMaxConcurrent"`
+	GitMaxConcurrent  int `mapstructure:"gitMaxConcurrent"`
+	LSPMaxConnections int `mapstructure:"lspMaxConnections"`
+}
+
+// MessageQueueConfig contains prompt queue limits.
+type MessageQueueConfig struct {
+	MaxPerSession int `mapstructure:"maxPerSession"`
+}
+
+// AgentctlConfig contains settings owned by managed agentctl processes.
+type AgentctlConfig struct {
+	IdleTimeout               time.Duration `mapstructure:"idleTimeout"`
+	IdleReaperInterval        time.Duration `mapstructure:"idleReaperInterval"`
+	NotificationQueueCapacity int           `mapstructure:"notificationQueueCapacity"`
+}
+
+// PlanningConfig contains planning service timing settings.
+type PlanningConfig struct {
+	CoalesceWindowMs int `mapstructure:"coalesceWindowMs"`
+}
+
+// ObservabilityConfig contains process-wide tracing settings.
+type ObservabilityConfig struct {
+	OTLPEndpoint string `mapstructure:"otlpEndpoint"`
+}
+
+// LauncherConfig contains settings used by the native launcher. The backend
+// reads the same values so a selected file remains one source of truth.
+type LauncherConfig struct {
+	WebPort         int  `mapstructure:"webPort"`
+	HealthTimeoutMs int  `mapstructure:"healthTimeoutMs"`
+	NoBrowser       bool `mapstructure:"noBrowser"`
 }
 
 // GitHubCredentialBrokerConfig holds the externally reachable service URL
 // used by managed remote executors. It is independent of GitHub App setup so
 // PAT and named gh CLI workspaces can use remote executors.
 type GitHubCredentialBrokerConfig struct {
-	PublicBaseURL string `mapstructure:"publicBaseUrl" json:"-"`
+	PublicBaseURL     string `mapstructure:"publicBaseUrl" json:"-"`
+	ReissueSigningKey string `mapstructure:"reissueSigningKey" json:"-"`
 }
 
 func (c GitHubCredentialBrokerConfig) validate() error {
@@ -128,6 +185,7 @@ type ServerConfig struct {
 	// Hosts is the YAML-array form of Host, for config files that prefer an
 	// array to a comma-separated string. It is used only when Host is unset.
 	Hosts          []string `mapstructure:"hosts"`
+	TrustedProxies []string `mapstructure:"trustedProxies"`
 	Port           int      `mapstructure:"port"`
 	ReadTimeout    int      `mapstructure:"readTimeout"`  // in seconds
 	WriteTimeout   int      `mapstructure:"writeTimeout"` // in seconds
@@ -340,8 +398,12 @@ type AuthConfig struct {
 	// is extended whenever it is used with less than TTL-24h remaining.
 	SessionTTLHours int `mapstructure:"sessionTTLHours"`
 
-	// CookieName is the session cookie name. Only override for unusual
-	// reverse-proxy setups that need distinct cookie names per instance.
+	// CookieName is the session cookie base name. Empty (the default) means
+	// the service uses the "kandev_session" base and port-scopes it from the
+	// request host, isolating instances on one host (see
+	// auth.Service.CookieNameForRequest). Only override for unusual
+	// reverse-proxy setups that need a fixed cookie name; a custom value is
+	// used verbatim (never port-suffixed) and disables automatic isolation.
 	CookieName string `mapstructure:"cookieName"`
 }
 
@@ -351,7 +413,8 @@ type OfficeConfig struct {
 	// When empty, a random key is generated at startup — fine for dev, but
 	// means every restart invalidates outstanding agent tokens. Production
 	// deployments should set a stable value (e.g. via KANDEV_OFFICE_JWTSIGNINGKEY).
-	JWTSigningKey string `mapstructure:"jwtSigningKey"`
+	JWTSigningKey   string `mapstructure:"jwtSigningKey"`
+	SchedulerTickMs int    `mapstructure:"schedulerTickMs"`
 }
 
 // FeaturesConfig is the typed wire/config shape for runtime feature flags.
@@ -378,6 +441,11 @@ type FeaturesConfig struct {
 	// Toggles). Off by default so kandev stays single-user until a deployment
 	// opts in.
 	Auth bool `mapstructure:"auth" json:"auth"`
+
+	// DynamicAgentRouting gates dynamic profile configuration, execution
+	// routing, and the shared route health service. It is disabled in every
+	// embedded profile until the complete feature is ready.
+	DynamicAgentRouting bool `mapstructure:"dynamic_agent_routing" json:"dynamicAgentRouting"`
 
 	// ClaudeBackgroundPromptHandoff gates the high-risk experiment that lets a
 	// claude-acp session accept a successor prompt after an adapter-attested
@@ -537,11 +605,15 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("agent.standaloneHost", "localhost")
 	v.SetDefault("agent.standalonePort", ports.AgentCtl)
 
-	// Auth defaults
+	// Auth defaults. auth.cookieName defaults to empty on purpose: the auth
+	// service keeps the "kandev_session" base fallback internally and
+	// port-scopes it from the request host, so an empty default must not be
+	// seeded with a concrete name or the suffixing would never fire in
+	// production. A non-empty configured value is used verbatim.
 	v.SetDefault("auth.jwtSecret", "")
 	v.SetDefault("auth.tokenDuration", 3600)  // 1 hour
 	v.SetDefault("auth.sessionTTLHours", 720) // 30 days, sliding
-	v.SetDefault("auth.cookieName", "kandev_session")
+	v.SetDefault("auth.cookieName", "")
 
 	// Office defaults
 	v.SetDefault("office.jwtSigningKey", "")
@@ -603,31 +675,36 @@ func defaultDockerVolumePath() string {
 // Environment variables use the prefix KANDEV_ with snake_case naming.
 // Config file should be named config.yaml and placed in the current directory or /etc/kandev/.
 func Load() (*Config, error) {
-	return LoadWithPath("")
+	return LoadWithHome("")
+}
+
+// LoadWithHome reads the selected configuration while using homeDir as the
+// bootstrap directory for home-file discovery. The override affects file
+// selection only; environment variables still retain their normal precedence
+// over values read from the selected file.
+func LoadWithHome(homeDir string) (*Config, error) {
+	if path := strings.TrimSpace(os.Getenv(InternalConfigFileEnv)); path != "" {
+		return loadWithPath(path, homeDir)
+	}
+	return loadWithPath("", homeDir)
 }
 
 // LoadWithPath reads configuration from the specified path or default locations.
 func LoadWithPath(configPath string) (*Config, error) {
+	return loadWithPath(configPath, "")
+}
+
+func loadWithPath(configPath, homeDir string) (*Config, error) {
 	v := viper.New()
 
-	// Apply the active runtime profile (prod / dev / e2e) from the
-	// embedded profiles.yaml. This writes env vars onto our own
-	// process so the subsequent AutomaticEnv and the rest of the
-	// codebase's os.Getenv reads see the YAML-declared values.
-	// Vars already set by the launcher / shell / per-spec override
-	// are left alone, giving precedence:
-	//
-	//   shell env / launcher env > profiles.yaml > Go zero values
-	//
-	// A parse error here means someone committed a malformed
-	// profiles.yaml; fail loud so CI catches it before a release ships.
-	if _, _, err := profiles.ApplyProfile(); err != nil {
-		return nil, fmt.Errorf("apply profile defaults: %w", err)
+	profileDefaults, err := profiles.EnvironmentDefaults()
+	if err != nil {
+		return nil, fmt.Errorf("read profile defaults: %w", err)
 	}
 
 	// Set defaults next. setDefaults seeds non-feature config
 	// (server, database, logging, …); feature-flag defaults flow
-	// through env via ApplyProfile + AutomaticEnv below.
+	// through EnvironmentDefaults and AutomaticEnv below.
 	setDefaults(v)
 
 	// Seed Viper's features.* keyspace from profiles.yaml so the
@@ -640,52 +717,60 @@ func LoadWithPath(configPath string) (*Config, error) {
 	for name, value := range flags {
 		v.SetDefault("features."+name, value == "true")
 	}
+	setProfileDefaults(v, profileDefaults)
 
 	// Configure environment variables
 	v.SetEnvPrefix("KANDEV")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
-	// Explicit bindings for snake_case env vars (camelCase config keys)
-	// AutomaticEnv does not handle camelCase to SNAKE_CASE conversion,
-	// so we explicitly bind keys where env var naming differs from config key naming.
-	_ = v.BindEnv("agent.standalonePort", "AGENTCTL_PORT", "KANDEV_AGENT_STANDALONE_PORT")
-	_ = v.BindEnv("agent.standaloneHost", "KANDEV_AGENT_STANDALONE_HOST")
-	_ = v.BindEnv("server.webInternalUrl", "KANDEV_WEB_INTERNAL_URL")
-	_ = v.BindEnv("server.webTitlePrefix", "KANDEV_WEB_TITLE_PREFIX")
-	_ = v.BindEnv("homeDir", "KANDEV_HOME_DIR")
-	_ = v.BindEnv("logging.level", "KANDEV_LOG_LEVEL")
-	_ = v.BindEnv("events.namespace", "KANDEV_EVENTS_NAMESPACE")
-	_ = v.BindEnv("debug.devMode", "KANDEV_DEBUG_DEV_MODE")
-	_ = v.BindEnv("debug.pprofEnabled", "KANDEV_DEBUG_PPROF_ENABLED")
+	bindCatalogEnvironment(v)
+	// camelCase key, so AutomaticEnv would expose the undocumented
+	// KANDEV_AUTH_COOKIENAME; the canonical override is KANDEV_AUTH_COOKIE_NAME.
+	_ = v.BindEnv("auth.cookieName", "KANDEV_AUTH_COOKIE_NAME")
 	_ = v.BindEnv(
 		"githubCredentialBroker.publicBaseUrl",
 		"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL",
 	)
+	_ = v.BindEnv(
+		"githubCredentialBroker.reissueSigningKey",
+		"KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY",
+	)
 
-	// Configure config file
-	v.SetConfigName("config")
-	v.SetConfigType("yaml")
-
-	if configPath != "" {
-		v.AddConfigPath(configPath)
+	selection, found, err := selectConfigFile(configPath, homeDir)
+	if err != nil {
+		return nil, fmt.Errorf("select configuration file: %w", err)
 	}
-	v.AddConfigPath(".")
-	v.AddConfigPath("/etc/kandev/")
-
-	// Read config file (ignore if not found)
-	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return nil, fmt.Errorf("error reading config file: %w", err)
+	if found {
+		if err := readSelectedConfig(v, selection); err != nil {
+			return nil, err
 		}
 	}
+	yamlKeys := configKeys(v)
+	envSnapshot := environmentSnapshot()
 
 	var cfg Config
-	if err := v.Unmarshal(&cfg); err != nil {
+	if err := decodeConfig(v, &cfg); err != nil {
+		if found {
+			return nil, fmt.Errorf("error unmarshaling config file %q: %w", selection.path, err)
+		}
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
+	}
+	sources := applyStartupDefaultsAndEnvironment(&cfg, yamlKeys, profileDefaults, envSnapshot)
+	warnings := inspectSecretPermissions(selection, v)
+	cfg.Source = buildConfigSource(selection, v, sources, warnings)
+
+	if err := validateStartupSettings(&cfg); err != nil {
+		if found {
+			return nil, fmt.Errorf("config validation failed for %q: %w", selection.path, err)
+		}
+		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
 	if err := validate(&cfg); err != nil {
+		if found {
+			return nil, fmt.Errorf("config validation failed for %q: %w", selection.path, err)
+		}
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 

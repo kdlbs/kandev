@@ -3,6 +3,7 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,6 +24,12 @@ type UpdateHandler func(notification acp.SessionNotification)
 // Returns the selected option ID, or empty string with cancelled=true to cancel
 type PermissionRequestHandler func(ctx context.Context, req *types.PermissionRequest) (*types.PermissionResponse, error)
 
+// CursorTaskHandler is called when Cursor sends its non-standard `cursor/task`
+// request with subagent metadata. The handler is fire-and-forget: it must be
+// best-effort, return without surfacing errors to Cursor, and has no
+// cancellation semantics, so it takes no context.
+type CursorTaskHandler func(params json.RawMessage)
+
 // Client implements acp.Client interface and handles all agent requests
 type Client struct {
 	logger        *zap.Logger
@@ -32,6 +39,7 @@ type Client struct {
 	mu                sync.RWMutex
 	updateHandler     UpdateHandler
 	permissionHandler PermissionRequestHandler
+	cursorTaskHandler CursorTaskHandler
 }
 
 // ClientOption configures a Client
@@ -65,6 +73,13 @@ func WithPermissionHandler(h PermissionRequestHandler) ClientOption {
 	}
 }
 
+// WithCursorTaskHandler sets the handler for Cursor's `cursor/task` request.
+func WithCursorTaskHandler(h CursorTaskHandler) ClientOption {
+	return func(c *Client) {
+		c.cursorTaskHandler = h
+	}
+}
+
 // NewClient creates a new ACP client implementation
 func NewClient(opts ...ClientOption) *Client {
 	c := &Client{
@@ -90,6 +105,13 @@ func (c *Client) SetPermissionHandler(h PermissionRequestHandler) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.permissionHandler = h
+}
+
+// SetCursorTaskHandler sets the Cursor `cursor/task` handler (thread-safe).
+func (c *Client) SetCursorTaskHandler(h CursorTaskHandler) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cursorTaskHandler = h
 }
 
 // RequestPermission handles permission requests from the agent
@@ -268,6 +290,28 @@ func (c *Client) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 
 	return nil
 }
+
+// HandleExtensionMethod accepts explicitly-supported inbound extension-style
+// requests from the agent. Cursor currently sends subagent metadata over the
+// non-standard vendor method `cursor/task`; unknown methods still decline with
+// method-not-found. The ctx satisfies the SDK's ExtensionMethodHandler
+// signature; the fire-and-forget cursor/task handler does not consume it.
+func (c *Client) HandleExtensionMethod(_ context.Context, method string, params json.RawMessage) (any, error) {
+	if method != cursorTaskMethod {
+		return nil, acp.NewMethodNotFound(method)
+	}
+
+	c.mu.RLock()
+	handler := c.cursorTaskHandler
+	c.mu.RUnlock()
+	if handler != nil {
+		handler(params)
+	}
+
+	return struct{}{}, nil
+}
+
+const cursorTaskMethod = "cursor/task"
 
 // resolvePath resolves a file path, making relative paths relative to the workspace root.
 // It validates that the resolved path stays within the workspace root to prevent path traversal.

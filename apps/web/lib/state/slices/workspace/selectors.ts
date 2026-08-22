@@ -7,9 +7,9 @@ export type WorkspaceItem = WorkspaceState["items"][number];
  * The fields an Office-vs-kanban decision needs, and nothing more.
  *
  * Structural rather than `WorkspaceItem` because callers hold workspace-shaped
- * records from several sources — store items, API list responses, server-side
- * helpers under `app/office/lib/`, test fixtures — and every one of them can
- * answer this question without first being widened to the full record.
+ * records from several sources — store items, API list responses, test
+ * fixtures — and every one of them can answer this question without first
+ * being widened to the full record.
  */
 export type ModeWorkspace = { id: string; office_workflow_id?: string | null };
 

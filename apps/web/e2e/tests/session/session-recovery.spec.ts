@@ -223,6 +223,30 @@ test.describe("Session recovery", () => {
       },
     );
 
+    // The resume settles the session back to WAITING_FOR_INPUT (agent idle).
+    // The recovery card must not reappear now that the resume is resolved —
+    // before the fix it came back until the next message flipped the session to
+    // RUNNING, without the user ever typing anything.
+    await expect(session.recoveryResumeButton()).toHaveCount(0);
+    await expect(session.recoveryFreshButton()).toHaveCount(0);
+
+    // Reload: the card is persisted, so a fix that only remembered the click in
+    // component state would resurrect it here (this is also what the user hits
+    // when a task is reopened and the session auto-resumes on open). The
+    // transcript's own agent-boot record is what keeps it hidden.
+    await testPage.reload();
+    await session.waitForLoad();
+    // Gate on the transcript's own boot record rather than the composer becoming
+    // editable: the boot row is the signal the card is derived from, so waiting
+    // for it removes the race where a fast hydration outruns the WS history.
+    // (session.waitForChatIdle is unusable here — it clicks a visible Resume
+    // button, which would hide the very regression this asserts.)
+    await expect(testPage.getByText(/Resumed agent|Started agent/i).first()).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(session.recoveryResumeButton()).toHaveCount(0);
+    await expect(session.recoveryFreshButton()).toHaveCount(0);
+
     // Verify agent works after recovery
     await session.sendMessage("/e2e:simple-message");
     await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });

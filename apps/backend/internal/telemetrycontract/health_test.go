@@ -3,6 +3,7 @@ package telemetrycontract
 import (
 	"context"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -142,6 +143,42 @@ func TestLogHealthReportsTaskStepTransitionsTableAndRowCount(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no health line for task_step_transitions")
+	}
+}
+
+func TestLogHealthReportsActivatedAt(t *testing.T) {
+	// Activate first so telemetry_activations has a row for every registered
+	// contract, then assert LogHealth actually surfaces it: activated_at is
+	// built from contractHealth.activatedAt and only appended to the log
+	// fields when non-nil (store.go:96-98), but until this test nothing read
+	// the field back, so a regression that stopped populating it (e.g. an
+	// error swallowed by activatedAt, or the field silently dropped from the
+	// zap.Field slice) would leave the whole suite green.
+	db := memDB(t)
+	store, err := NewWithDB(db, db)
+	if err != nil {
+		t.Fatalf("NewWithDB: %v", err)
+	}
+	if err := store.Activate(context.Background()); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	log, logs := observerLogger(t)
+	store.LogHealth(context.Background(), log)
+
+	entries := logs.FilterMessage("telemetry.contract.health").All()
+	if len(entries) != len(Registry()) {
+		t.Fatalf("health lines = %d, want %d", len(entries), len(Registry()))
+	}
+	for i, c := range Registry() {
+		ctxMap := entries[i].ContextMap()
+		activatedAt, ok := ctxMap["activated_at"].(time.Time)
+		if !ok {
+			t.Fatalf("entry %d (%s) activated_at missing or wrong type: %v", i, c.Key, ctxMap["activated_at"])
+		}
+		if activatedAt.IsZero() {
+			t.Fatalf("entry %d (%s) activated_at is zero, want a real activation timestamp", i, c.Key)
+		}
 	}
 }
 

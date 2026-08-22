@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils";
 import { resolveComposerWorkspaceId } from "./composer-workspace";
 import { t } from "@/lib/i18n";
 import { ChatStatusBar, resolveStatusRowTaskId } from "./chat-status-bar";
+import { DynamicRouteRecovery } from "./dynamic-route-recovery";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -164,7 +165,6 @@ function usePanelMessageHandler(panelState: ChatPanelState) {
     prompts,
   });
 }
-
 /** Builds the composer's submit handler, tracking in-flight sends and
  *  routing errors to a toast. */
 export function useSubmitHandler(
@@ -460,6 +460,7 @@ export function ChatInputArea({
       data-testid="chat-input-area"
       className={cn("bg-card flex-shrink-0 px-2 pb-2 pt-1", surfaceClassName)}
     >
+      <DynamicRouteRecovery session={panelState.session} />
       <ComposerAgentStartHint
         show={showAgentStartHint}
         needsRecovery={panelState.needsRecovery}

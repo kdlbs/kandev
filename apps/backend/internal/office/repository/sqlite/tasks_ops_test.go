@@ -628,6 +628,36 @@ func TestCheckoutTask_ExclusiveLockLifecycle(t *testing.T) {
 	}
 }
 
+func TestCheckoutTaskForRun_ReleaseOnlyOwningRun(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+	insertTask(t, repo, ctx, "co-run-1", "ws-1", "Run-scoped lock", "", "KAN-1")
+
+	acquired, err := repo.CheckoutTaskForRun(ctx, "co-run-1", "agent-a", "run-a")
+	if err != nil || !acquired {
+		t.Fatalf("first checkout = %v, %v; want true, nil", acquired, err)
+	}
+	if acquired, err = repo.CheckoutTaskForRun(ctx, "co-run-1", "agent-a", "run-b"); err != nil {
+		t.Fatalf("successor checkout: %v", err)
+	} else if acquired {
+		t.Fatal("successor run replaced the live owner's checkout")
+	}
+
+	if err := repo.ReleaseTaskCheckoutForRun(ctx, "co-run-1", "agent-a", "run-b"); err != nil {
+		t.Fatalf("release by successor: %v", err)
+	}
+	if got := checkoutRun(t, repo, "co-run-1"); got != "run-a" {
+		t.Fatalf("checkout_run_id after successor release = %q, want run-a", got)
+	}
+
+	if err := repo.ReleaseTaskCheckoutForRun(ctx, "co-run-1", "agent-a", "run-a"); err != nil {
+		t.Fatalf("release by owner: %v", err)
+	}
+	if got := checkoutRun(t, repo, "co-run-1"); got != "" {
+		t.Fatalf("checkout_run_id after owner release = %q, want empty", got)
+	}
+}
+
 // An empty-string checkout_agent_id counts as unheld, same as NULL.
 func TestCheckoutTask_TreatsEmptyHolderAsFree(t *testing.T) {
 	repo := newSearchTestRepo(t)
@@ -664,6 +694,16 @@ func checkoutAt(t *testing.T, repo *sqlite.Repository, taskID string) string {
 	if err := repo.ReaderDB().Get(&got,
 		`SELECT COALESCE(CAST(checkout_at AS TEXT), '') FROM tasks WHERE id = ?`, taskID); err != nil {
 		t.Fatalf("read checkout_at: %v", err)
+	}
+	return got
+}
+
+func checkoutRun(t *testing.T, repo *sqlite.Repository, taskID string) string {
+	t.Helper()
+	var got string
+	if err := repo.ReaderDB().Get(&got,
+		`SELECT COALESCE(checkout_run_id, '') FROM tasks WHERE id = ?`, taskID); err != nil {
+		t.Fatalf("read checkout_run_id: %v", err)
 	}
 	return got
 }

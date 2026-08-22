@@ -3,7 +3,7 @@ import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import { listTasks, type ListTasksParams } from "@/lib/api/domains/office-extended-api";
 import type { TaskFilterState, TaskSortDir, TaskSortField } from "@/lib/state/slices/office/types";
-import { canonicalStatusesToBackend } from "./normalize-status";
+import { canonicalStatusesToBackend } from "@/lib/api/domains/office-task-normalize";
 // Module-level `t` (resolved at call time, not import time): these strings are
 // error-only and live inside a fetching effect and its callbacks. Putting the
 // hook's `t` in those dep arrays would re-issue the task list request on every

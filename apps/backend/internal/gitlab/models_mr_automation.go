@@ -18,26 +18,87 @@ const (
 // Mirrors github.TaskCIAutoFixMaxRounds.
 const TaskMRAutoFixMaxRounds = 10
 
-// TaskMRAutomationOptions stores task-level MR automation preferences:
-// the three lifecycle notification switches from #2125, plus auto-fix CI
-// and auto-merge (this task). Parallel to github.TaskCIOptions.
+// MRIdentity names one merge request linked to a task. RepositoryID may be
+// empty for single-repo tasks, matching gitlab_task_mrs' own key.
+type MRIdentity struct {
+	RepositoryID string
+	ProjectPath  string
+	MRIID        int
+}
+
+// TaskMRAutomationOptions stores the genuinely task-level MR automation
+// preferences: the auto-fix prompt override and the server-resolved reviewer
+// username. Parallel to github.TaskCIOptions.
+//
+// The five switch fields below are legacy: they are no longer written by
+// UpdateTaskMRAutomationOptions and are read only by the one-time
+// mr_scope_migrated_at fan-out migration (migrateTaskMROptionsToMRScope).
+// The per-MR source of truth is TaskMRAutomationOptionsForMR /
+// gitlab_task_mr_automation_options.
 type TaskMRAutomationOptions struct {
 	TaskID                  string    `json:"task_id" db:"task_id"`
-	AutoFixEnabled          bool      `json:"auto_fix_enabled" db:"auto_fix_enabled"`
-	AutoMergeEnabled        bool      `json:"auto_merge_enabled" db:"auto_merge_enabled"`
+	AutomationRevision      int64     `json:"-" db:"automation_revision"`
+	AutoFixEnabled          bool      `json:"-" db:"auto_fix_enabled"`
+	AutoMergeEnabled        bool      `json:"-" db:"auto_merge_enabled"`
 	AutoFixPromptOverride   *string   `json:"auto_fix_prompt_override,omitempty" db:"auto_fix_prompt_override"`
-	PromptOnReviewRequested bool      `json:"prompt_on_review_requested" db:"prompt_on_review_requested"`
-	PromptOnMerged          bool      `json:"prompt_on_merged" db:"prompt_on_merged"`
-	PromptOnClosed          bool      `json:"prompt_on_closed" db:"prompt_on_closed"`
+	PromptOnReviewRequested bool      `json:"-" db:"prompt_on_review_requested"`
+	PromptOnMerged          bool      `json:"-" db:"prompt_on_merged"`
+	PromptOnClosed          bool      `json:"-" db:"prompt_on_closed"`
 	ReviewReviewerUsername  string    `json:"review_reviewer_username" db:"review_reviewer_username"`
 	CreatedAt               time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt               time.Time `json:"updated_at" db:"updated_at"`
 }
 
+// TaskMRAutomationOptionsForMR stores the five automation switches for one
+// linked merge request. This is the per-MR source of truth; the aggregated
+// booleans on TaskMRAutomationResponse only report "every linked MR has this
+// switch on". Parallel to github.TaskPRAutomationOptions.
+type TaskMRAutomationOptionsForMR struct {
+	TaskID                  string    `json:"task_id" db:"task_id"`
+	RepositoryID            string    `json:"repository_id" db:"repository_id"`
+	ProjectPath             string    `json:"project_path" db:"project_path"`
+	MRIID                   int       `json:"mr_iid" db:"mr_iid"`
+	AutoFixEnabled          bool      `json:"auto_fix_enabled" db:"auto_fix_enabled"`
+	AutoMergeEnabled        bool      `json:"auto_merge_enabled" db:"auto_merge_enabled"`
+	PromptOnReviewRequested bool      `json:"prompt_on_review_requested" db:"prompt_on_review_requested"`
+	PromptOnMerged          bool      `json:"prompt_on_merged" db:"prompt_on_merged"`
+	PromptOnClosed          bool      `json:"prompt_on_closed" db:"prompt_on_closed"`
+	CreatedAt               time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// Identity returns the MR this options row belongs to.
+func (o *TaskMRAutomationOptionsForMR) Identity() MRIdentity {
+	return MRIdentity{RepositoryID: o.RepositoryID, ProjectPath: o.ProjectPath, MRIID: o.MRIID}
+}
+
+// TaskMRAutomationSwitchPatch is a partial update for one MR's automation
+// switches.
+type TaskMRAutomationSwitchPatch struct {
+	AutoFixEnabled          *bool
+	AutoMergeEnabled        *bool
+	PromptOnReviewRequested *bool
+	PromptOnMerged          *bool
+	PromptOnClosed          *bool
+}
+
+// HasAny reports whether the patch contains at least one requested field change.
+func (p TaskMRAutomationSwitchPatch) HasAny() bool {
+	return p.AutoFixEnabled != nil || p.AutoMergeEnabled != nil ||
+		p.PromptOnReviewRequested != nil || p.PromptOnMerged != nil || p.PromptOnClosed != nil
+}
+
 // TaskMRAutomationPatch is a partial update for task MR automation options.
-// ReviewReviewerUsername is intentionally absent — it is server-resolved from
-// the workspace's authenticated GitLab user, never client-supplied.
+// RepositoryID/ProjectPath/MRIID optionally target one linked MR for the five
+// automation switches; when all three are nil the switches fan out to every
+// MR currently linked to the task. AutoFixPromptOverride is always
+// task-level. ReviewReviewerUsername is intentionally absent — it is
+// server-resolved from the workspace's authenticated GitLab user, never
+// client-supplied.
 type TaskMRAutomationPatch struct {
+	RepositoryID            *string
+	ProjectPath             *string
+	MRIID                   *int
 	AutoFixEnabled          *bool
 	AutoMergeEnabled        *bool
 	AutoFixPromptOverride   *string
@@ -46,16 +107,71 @@ type TaskMRAutomationPatch struct {
 	PromptOnClosed          *bool
 }
 
-// HasAny reports whether the patch contains at least one requested field change.
+// HasAny reports whether the patch contains at least one requested field
+// change. MR identity alone is not a change — it only says which MR the
+// (absent) switch changes would have applied to.
 func (p TaskMRAutomationPatch) HasAny() bool {
-	return p.AutoFixEnabled != nil || p.AutoMergeEnabled != nil || p.AutoFixPromptOverride != nil ||
-		p.PromptOnReviewRequested != nil || p.PromptOnMerged != nil || p.PromptOnClosed != nil
+	return p.AutoFixPromptOverride != nil || p.SwitchPatch().HasAny()
+}
+
+// SwitchPatch extracts the per-MR automation switch fields.
+func (p TaskMRAutomationPatch) SwitchPatch() TaskMRAutomationSwitchPatch {
+	return TaskMRAutomationSwitchPatch{
+		AutoFixEnabled:          p.AutoFixEnabled,
+		AutoMergeEnabled:        p.AutoMergeEnabled,
+		PromptOnReviewRequested: p.PromptOnReviewRequested,
+		PromptOnMerged:          p.PromptOnMerged,
+		PromptOnClosed:          p.PromptOnClosed,
+	}
+}
+
+// HasMRIdentity reports whether the patch names a specific MR.
+func (p TaskMRAutomationPatch) HasMRIdentity() bool {
+	return p.RepositoryID != nil && p.ProjectPath != nil && p.MRIID != nil
+}
+
+// HasPartialMRIdentity reports whether the patch names some but not all of
+// the three MR identity fields — a caller mistake that must be rejected
+// rather than silently fanned out to every linked MR.
+func (p TaskMRAutomationPatch) HasPartialMRIdentity() bool {
+	set := 0
+	if p.RepositoryID != nil {
+		set++
+	}
+	if p.ProjectPath != nil {
+		set++
+	}
+	if p.MRIID != nil {
+		set++
+	}
+	return set != 0 && set != 3
+}
+
+// MRIdentity returns the MR named by the patch. Only meaningful when
+// HasMRIdentity reports true.
+func (p TaskMRAutomationPatch) MRIdentity() MRIdentity {
+	id := MRIdentity{}
+	if p.RepositoryID != nil {
+		id.RepositoryID = *p.RepositoryID
+	}
+	if p.ProjectPath != nil {
+		id.ProjectPath = *p.ProjectPath
+	}
+	if p.MRIID != nil {
+		id.MRIID = *p.MRIID
+	}
+	return id
 }
 
 // TaskMRAutomationResponse is the HTTP/MCP shape for task MR automation
-// options, including the per-MR lifecycle checkpoints for observability.
+// options, including the per-MR switches, and the per-MR lifecycle
+// checkpoints for observability. The five top-level switch booleans are an
+// aggregate over MROptions ("every linked MR has this switch on, and at
+// least one MR is linked") kept for MCP/API read compatibility; MROptions is
+// the per-MR source of truth.
 type TaskMRAutomationResponse struct {
 	TaskID                  string                  `json:"task_id"`
+	AutomationRevision      int64                   `json:"automation_revision"`
 	AutoFixEnabled          bool                    `json:"auto_fix_enabled"`
 	AutoMergeEnabled        bool                    `json:"auto_merge_enabled"`
 	AutoFixPromptOverride   *string                 `json:"auto_fix_prompt_override"`
@@ -68,6 +184,9 @@ type TaskMRAutomationResponse struct {
 	ReviewReviewerUsername  string                  `json:"review_reviewer_username"`
 	UpdatedAt               time.Time               `json:"updated_at"`
 	MRStates                []*TaskMRLifecycleState `json:"mr_states"`
+	// MROptions carries one entry per MR currently linked to the task, so
+	// the UI can render each MR's own switches instead of the aggregate.
+	MROptions []*TaskMRAutomationOptionsForMR `json:"mr_options"`
 	// WorkspaceID is internal routing metadata (best-effort resolved, may be
 	// empty) that lets the websocket broadcaster scope the
 	// gitlab.task_mr_options.updated event to the owning workspace instead of

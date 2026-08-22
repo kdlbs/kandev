@@ -147,6 +147,7 @@ func (s *Service) rebuildMissingSummaries(
 	for _, task := range missing {
 		activityAt := activityAtByTask[task.ID]
 		s.rebuildMissingSummary(ctx, task, summaries, s.rebuildInput(
+			taskLaunchErrorSummary(task),
 			sessionsByTask[task.ID],
 			pendingBySession,
 			gitBySession,
@@ -515,6 +516,7 @@ func (s *Service) loadSummaryGit(
 }
 
 func (s *Service) rebuildInput(
+	taskError *statussummary.ActiveErrorSummary,
 	sessions []*models.TaskSession,
 	pendingBySession map[string]models.TaskPendingAction,
 	gitBySession map[string]*models.GitSnapshot,
@@ -528,6 +530,7 @@ func (s *Service) rebuildInput(
 ) statussummary.RebuildInput {
 	input := statussummary.RebuildInput{
 		Sessions:          make([]statussummary.RebuildSession, 0, len(sessions)),
+		TaskError:         taskError,
 		PendingActions:    make(map[string]string),
 		ActivityObserved:  s.foregroundActivity != nil,
 		LastActivityAt:    nil,
@@ -560,10 +563,13 @@ func (s *Service) rebuildInput(
 		var activeError *statussummary.ActiveErrorSummary
 		if lastError, ok := models.LoadLastAgentError(session.Metadata); ok && !lastError.IsDismissed() {
 			activeError = &statussummary.ActiveErrorSummary{
-				SessionID:  session.ID,
-				Stamp:      lastError.Stamp(),
-				OccurredAt: lastError.OccurredAt,
-				Preview:    lastError.Message,
+				SessionID:        session.ID,
+				TaskRepositoryID: lastError.TaskRepositoryID,
+				Stamp:            lastError.Stamp(),
+				OccurredAt:       lastError.OccurredAt,
+				Preview:          lastError.Message,
+				Category:         lastError.Code,
+				RecoveryActions:  lastError.RecoveryActions,
 			}
 		}
 		input.Sessions = append(input.Sessions, statussummary.RebuildSession{
@@ -587,6 +593,24 @@ func (s *Service) rebuildInput(
 	return input
 }
 
+func taskLaunchErrorSummary(task *models.Task) *statussummary.ActiveErrorSummary {
+	if task == nil {
+		return nil
+	}
+	errorValue, ok := models.LoadTaskLaunchError(task.Metadata)
+	if !ok {
+		return nil
+	}
+	return &statussummary.ActiveErrorSummary{
+		TaskRepositoryID: errorValue.TaskRepositoryID,
+		Stamp:            errorValue.Stamp(),
+		OccurredAt:       errorValue.OccurredAt,
+		Preview:          errorValue.Message,
+		Category:         errorValue.Code,
+		RecoveryActions:  errorValue.RecoveryActions,
+	}
+}
+
 func snapshotRepositoryKey(snapshot *models.GitSnapshot, fallback string) string {
 	if snapshot != nil && snapshot.Metadata != nil {
 		if repository, ok := snapshot.Metadata["repository_name"].(string); ok && strings.TrimSpace(repository) != "" {
@@ -601,17 +625,29 @@ func gitSummaryFromSnapshot(snapshot *models.GitSnapshot) statussummary.GitSumma
 		return statussummary.GitSummary{}
 	}
 	return statussummary.GitSummary{
-		Additions:    nonNegative(snapshot.Metadata, "branch_additions"),
-		Deletions:    nonNegative(snapshot.Metadata, "branch_deletions"),
-		ChangedFiles: changedFilesFromSnapshot(snapshot),
-		Ahead:        maxInt(snapshot.Ahead, 0),
-		Behind:       maxInt(snapshot.Behind, 0),
+		Additions:             nonNegative(snapshot.Metadata, "branch_additions"),
+		Deletions:             nonNegative(snapshot.Metadata, "branch_deletions"),
+		ChangedFiles:          changedFilesFromSnapshot(snapshot),
+		Ahead:                 maxInt(snapshot.Ahead, 0),
+		Behind:                maxInt(snapshot.Behind, 0),
+		ComparisonUnavailable: snapshotComparisonUnavailable(snapshot),
 	}
+}
+
+func snapshotComparisonUnavailable(snapshot *models.GitSnapshot) bool {
+	if snapshot == nil || snapshot.Metadata == nil {
+		return false
+	}
+	value, _ := snapshot.Metadata["comparison_status"].(string)
+	return value == "unavailable"
 }
 
 func changedFilesFromSnapshot(snapshot *models.GitSnapshot) int {
 	if snapshot == nil {
 		return 0
+	}
+	if _, ok := snapshot.Metadata["changed_files"]; ok {
+		return nonNegative(snapshot.Metadata, "changed_files")
 	}
 	count := 0
 	for _, key := range []string{"modified", "added", "deleted", "untracked", "renamed"} {

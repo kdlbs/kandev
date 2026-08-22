@@ -74,6 +74,9 @@ export type GitStatusEntry = {
   behind: number;
   head_commit?: string;
   base_commit?: string;
+  comparison_target?: string;
+  comparison_status?: string;
+  comparison_error_code?: string;
   remote_ahead?: number;
   remote_behind?: number;
   remote_head_commit?: string;
@@ -139,6 +142,8 @@ export type CumulativeDiff = {
   head_commit: string;
   total_commits: number;
   files: Record<string, FileInfo>;
+  /** Bounded machine-readable failure reason for an unavailable comparison. */
+  error_code?: string;
   /**
    * Files dropped from `files` because the cumulative range exceeded the
    * backend's per-request file cap (a mid-rebase base→working-tree diff can

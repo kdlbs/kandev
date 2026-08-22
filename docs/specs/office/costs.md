@@ -38,7 +38,7 @@ Office adds per-session cost estimation, aggregated views by agent/project/model
 | `session_id` | string | FK -> `task_sessions.id` |
 | `task_id` | string | FK -> `tasks.id` |
 | `agent_instance_id` | string | null for non-office sessions |
-| `project_id` | string | null if unassigned |
+| `project_id` | string | write-time project snapshot, null if unassigned at event time |
 | `model` | string | e.g. `claude-sonnet-4-20250514` |
 | `provider` | string | e.g. `anthropic`, `openai` |
 | `tokens_in` | int64 | input token count |
@@ -59,6 +59,11 @@ Office adds per-session cost estimation, aggregated views by agent/project/model
 | `occurred_at` | timestamp | when the cost was incurred |
 
 Disk-runner rows are upserted by `(session_id, provider_event_id)`. For codex, after a successful aggregate row lands, the wire-side `estimated=true` rows for the same session are deleted to avoid double-counting.
+
+Project cost attribution uses the current task assignment:
+
+- `office_cost_events.project_id` is a write-time snapshot retained for cleanup and historical inspection.
+- `tasks.project_id` is the current source of truth for project cost views and project budget totals.
 
 **Contract v2 columns** (`tokens_cached_read`, `tokens_cached_write`, `turn_id`, `usage_event_id`, `cost_source`, the four `rate_*_per_million` columns, `pricing_catalog_version`, `cost_contract_version`) were added via an idempotent nullable-column migration (`migrateCostEventContract`); every legacy row reads NULL for all of them, never `0` - see the cross-cutting rule in `Persistence guarantees` below. Postgres parity follows the same migration shape per ADR 0027.
 

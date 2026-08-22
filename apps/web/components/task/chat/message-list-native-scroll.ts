@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStoreApi } from "@/components/state-provider";
 import { getStoredAutoScrollTop } from "@/lib/local-storage";
+import { useLazyLoadSentinel as useSharedLazyLoadSentinel } from "@/hooks/use-lazy-load-sentinel";
 import type { Message } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import { getItemKey, shouldAutoScrollToBottom } from "./message-list-shared";
@@ -73,64 +74,19 @@ function useScrollPositionOnPrepend(
 
 /**
  * Observes a sentinel element at the top of the list to trigger lazy loading.
- * Uses a callback ref so the observer reconnects when the sentinel remounts.
- *
- * Handles the timing issue where the sentinel DOM node mounts (callback ref fires)
- * before the useEffect creates the IntersectionObserver. The sentinelNodeRef bridges
- * the gap: the callback ref stores the node, and the effect observes it if present.
+ * Delegates to the shared useLazyLoadSentinel hook with the transcript's
+ * defaults (no automatic re-arm, no join), so the transcript's behavior is
+ * unchanged: the callback-ref bridging, stateRef, observer lifecycle, and
+ * no-automatic-re-arm semantics are the shared hook's defaults.
  */
 function useLazyLoadSentinel(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   hasMore: boolean,
+  blocked: boolean,
   isLoadingMore: boolean,
   loadMore: () => Promise<number>,
 ) {
-  const stateRef = useRef({ hasMore, isLoadingMore });
-  useEffect(() => {
-    stateRef.current = { hasMore, isLoadingMore };
-  }, [hasMore, isLoadingMore]);
-
-  const observerRef = useRef<IntersectionObserver | null>(null);
-  const sentinelNodeRef = useRef<HTMLDivElement | null>(null);
-
-  // Create/destroy observer when scroll container changes
-  useEffect(() => {
-    const root = scrollRef.current;
-    if (!root) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const { hasMore, isLoadingMore } = stateRef.current;
-        const isIntersecting = entries[0]?.isIntersecting;
-        if (isIntersecting && hasMore && !isLoadingMore) {
-          loadMore();
-        }
-      },
-      { root, rootMargin: "200px 0px 0px 0px" },
-    );
-    observerRef.current = observer;
-    // If sentinel already mounted before this effect ran, observe it now
-    if (sentinelNodeRef.current) {
-      observer.observe(sentinelNodeRef.current);
-    }
-    return () => {
-      observer.disconnect();
-      observerRef.current = null;
-    };
-  }, [scrollRef, loadMore]);
-
-  // Callback ref — stores node and observes if observer already exists
-  const sentinelRef = useCallback((node: HTMLDivElement | null) => {
-    sentinelNodeRef.current = node;
-    const observer = observerRef.current;
-    if (observer) {
-      observer.disconnect();
-      if (node) {
-        observer.observe(node);
-      }
-    }
-  }, []);
-
-  return sentinelRef;
+  return useSharedLazyLoadSentinel(scrollRef, hasMore, blocked, isLoadingMore, loadMore);
 }
 
 /** Duration a programmatic scroll's guard stays held if the browser never
@@ -574,6 +530,8 @@ export function useNativeScrollManagement(params: {
   sessionId: string | null;
   enabled: boolean;
   hasUnreadDivider: boolean;
+  /** Initial/refetch loading: the sentinel's hard block (never fires, never joins). */
+  messagesLoading: boolean;
   hasMore: boolean;
   isLoadingMore: boolean;
   loadMore: () => Promise<number>;
@@ -586,6 +544,7 @@ export function useNativeScrollManagement(params: {
     sessionId,
     enabled,
     hasUnreadDivider,
+    messagesLoading,
     hasMore,
     isLoadingMore,
     loadMore,
@@ -608,7 +567,13 @@ export function useNativeScrollManagement(params: {
   );
   const handleScrollToMessage = useScrollToMessage(scrollRef, runGuardedScroll);
   useScrollPositionOnPrepend(scrollRef, items, isProgrammaticScrollLocked);
-  const sentinelRef = useLazyLoadSentinel(scrollRef, hasMore, isLoadingMore, loadMore);
+  const { sentinelRef } = useLazyLoadSentinel(
+    scrollRef,
+    hasMore,
+    messagesLoading,
+    isLoadingMore,
+    loadMore,
+  );
   useInitialScrollPosition(scrollRef, items.length, sessionId, enabled, isNearBottomRef);
 
   return { handleScrollToMessage, sentinelRef, resyncIsNearBottom, markNotNearBottom };

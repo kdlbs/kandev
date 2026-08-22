@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/auth/authn"
@@ -422,4 +423,36 @@ func TestWSListTasksSurfacesUnknownWorkflow(t *testing.T) {
 	payload := wsWorkflowError(t, resp)
 	require.Equal(t, string(ws.ErrorCodeInternalError), payload.Code)
 	require.Equal(t, "Failed to list tasks", payload.Message)
+}
+
+// TestWSCreateTask_PlanModeStartAgentPreservesPlanMode pins the task.create
+// contract on the WS handler. plan_mode describes the execution prompt and
+// must survive task persistence and the deferred launch intent.
+func TestWSCreateTask_PlanModeStartAgentPreservesPlanMode(t *testing.T) {
+	repo := &wsTaskRepo{}
+	h := newWSTaskHandlers(t, repo)
+
+	resp, err := h.wsCreateTask(context.Background(), wsWorkflowRequest(t, ws.ActionTaskCreate, map[string]any{
+		"workspace_id":     "ws-b",
+		"workflow_id":      "wf-b",
+		"title":            "Plan then boot",
+		"agent_profile_id": "profile-1",
+		"start_agent":      true,
+		"plan_mode":        true,
+	}))
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type, "body: %s", resp.Payload)
+	require.Len(t, repo.created, 1, "task.create must persist the task")
+	captured := repo.created[0]
+	require.NotNil(t, captured.Metadata, "task metadata must hold the deferred intent")
+
+	deferredRaw, ok := captured.Metadata[models.MetaKeyDeferredLaunch]
+	require.True(t, ok, "start_agent=true must persist a deferred_launch intent")
+	deferred, ok := deferredRaw.(map[string]interface{})
+	require.True(t, ok, "deferred_launch intent must be a map[string]interface{}")
+	pmFlag, present := deferred["plan_mode"]
+	require.True(t, present, "the deferred intent must carry the plan_mode key (to assert the !StartAgent guard)")
+	assert.Equal(t, true, pmFlag,
+		"plan_mode=true must remain true in the deferred launch intent")
 }

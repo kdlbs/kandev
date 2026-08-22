@@ -14,11 +14,13 @@ import (
 const gitHubTokenUsername = "x-access-token"
 
 var (
-	ErrCredentialLeaseInvalid = gitcredentials.ErrLeaseInvalid
-	ErrCredentialLeaseExpired = gitcredentials.ErrLeaseExpired
-	ErrCredentialLeaseRevoked = gitcredentials.ErrLeaseRevoked
-	ErrCredentialLeaseLimit   = gitcredentials.ErrLeaseLimit
-	ErrCredentialScopeDenied  = gitcredentials.ErrScopeDenied
+	ErrCredentialLeaseInvalid             = gitcredentials.ErrLeaseInvalid
+	ErrCredentialLeaseExpired             = gitcredentials.ErrLeaseExpired
+	ErrCredentialLeaseRevoked             = gitcredentials.ErrLeaseRevoked
+	ErrCredentialLeaseLimit               = gitcredentials.ErrLeaseLimit
+	ErrCredentialScopeDenied              = gitcredentials.ErrScopeDenied
+	ErrCredentialReissueCapabilityInvalid = gitcredentials.ErrReissueCapabilityInvalid
+	ErrCredentialReissueCapabilityExpired = gitcredentials.ErrReissueCapabilityExpired
 )
 
 // BrokerScopeAuthorizer verifies task/workspace/repository ownership. It is
@@ -62,6 +64,21 @@ type CredentialLease struct {
 
 type BrokerCredentialRequest struct {
 	Lease            string
+	TaskID           string
+	SessionID        string
+	RepositoryID     string
+	Owner            string
+	Repo             string
+	Host             string
+	Path             string
+	ProviderID       string
+	ParentProviderID string
+}
+
+// CredentialLeaseReissueRequest is authorized only by its opaque execution
+// capability; it deliberately has no lease field.
+type CredentialLeaseReissueRequest struct {
+	Capability       string
 	TaskID           string
 	SessionID        string
 	RepositoryID     string
@@ -156,6 +173,25 @@ func (b *CredentialBroker) Resolve(ctx context.Context, req BrokerCredentialRequ
 	}, nil
 }
 
+func (b *CredentialBroker) Reissue(ctx context.Context, req CredentialLeaseReissueRequest) (*CredentialLease, error) {
+	if b == nil || b.broker == nil {
+		return nil, ErrGitHubNotConfigured
+	}
+	path := req.Path
+	if strings.TrimSpace(path) == "" {
+		path = githubCredentialPath(req.Owner, req.Repo)
+	}
+	lease, err := b.broker.Reissue(ctx, gitcredentials.ReissueRequest{
+		Capability: req.Capability, TaskID: req.TaskID, SessionID: req.SessionID,
+		RepositoryID: req.RepositoryID, Host: req.Host, Path: path,
+		IdentityProviderID: req.ProviderID, ParentProviderID: req.ParentProviderID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &CredentialLease{Token: lease.Token, ExpiresAt: lease.ExpiresAt}, nil
+}
+
 func (b *CredentialBroker) RevokeTask(taskID string) {
 	if b != nil && b.broker != nil {
 		b.broker.RevokeTask(taskID)
@@ -229,6 +265,40 @@ func (p *gitHubCredentialProvider) Binding(ctx context.Context, scope gitcredent
 		}
 	}
 	return githubCredentialBindingFor(connection, appGeneration)
+}
+
+func (p *gitHubCredentialProvider) RefreshScope(ctx context.Context, scope gitcredentials.Scope) (gitcredentials.Scope, error) {
+	rawBinding := strings.TrimSpace(scope.CredentialBinding)
+	if rawBinding == "" {
+		return scope, nil
+	}
+	var binding taskmodels.ContributionDestinationCredentialBinding
+	if err := json.Unmarshal([]byte(rawBinding), &binding); err != nil {
+		return gitcredentials.Scope{}, fmt.Errorf("%w: invalid destination credential binding", ErrCredentialScopeDenied)
+	}
+	if err := binding.Validate(); err != nil {
+		return gitcredentials.Scope{}, fmt.Errorf("%w: invalid destination credential binding", ErrCredentialScopeDenied)
+	}
+	connection, appGeneration, err := p.issueConnection(ctx, scope.WorkspaceID)
+	if err != nil {
+		return gitcredentials.Scope{}, err
+	}
+	if !destinationBindingIdentityMatchesConnection(&binding, connection) {
+		return gitcredentials.Scope{}, fmt.Errorf("%w: destination credential binding does not match the active workspace connection", ErrCredentialScopeDenied)
+	}
+	binding.CredentialGeneration = connection.CredentialGeneration
+	if connection.Source == ConnectionSourceGitHubAppInstallation {
+		binding.AppCredentialGeneration = appGeneration
+	} else {
+		binding.AppCredentialGeneration = 0
+		binding.InstallationID = 0
+	}
+	encoded, err := json.Marshal(binding)
+	if err != nil {
+		return gitcredentials.Scope{}, fmt.Errorf("encode contribution destination credential binding: %w", err)
+	}
+	scope.CredentialBinding = string(encoded)
+	return scope, nil
 }
 
 func (p *gitHubCredentialProvider) Resolve(ctx context.Context, scope gitcredentials.Scope) (gitcredentials.Credential, error) {
@@ -321,9 +391,8 @@ func destinationBindingMatchesConnection(
 	connection *WorkspaceConnection,
 	appCredentialGeneration int64,
 ) bool {
-	if binding == nil || connection == nil || binding.Source != string(connection.Source) ||
-		binding.CredentialGeneration != connection.CredentialGeneration ||
-		binding.AppRegistrationID != connection.AppRegistrationID {
+	if !destinationBindingIdentityMatchesConnection(binding, connection) ||
+		binding.CredentialGeneration != connection.CredentialGeneration {
 		return false
 	}
 	if connection.Source == ConnectionSourceGitHubAppInstallation {
@@ -334,4 +403,18 @@ func destinationBindingMatchesConnection(
 		return false
 	}
 	return binding.AppCredentialGeneration == 0 && binding.InstallationID == 0
+}
+
+func destinationBindingIdentityMatchesConnection(
+	binding *taskmodels.ContributionDestinationCredentialBinding,
+	connection *WorkspaceConnection,
+) bool {
+	if binding == nil || connection == nil || binding.Source != string(connection.Source) ||
+		binding.AppRegistrationID != connection.AppRegistrationID {
+		return false
+	}
+	if connection.Source == ConnectionSourceGitHubAppInstallation {
+		return connection.InstallationID != nil && binding.InstallationID == *connection.InstallationID
+	}
+	return binding.Login == "" || strings.EqualFold(binding.Login, connection.Login)
 }

@@ -72,6 +72,7 @@ type UserSettingsDTO struct {
 	AppStatusBarEnabled               bool                                `json:"app_status_bar_enabled"`
 	AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
 	KanbanHiddenStepIDs               map[string][]string                 `json:"kanban_hidden_step_ids"`
+	WorkflowIDsWithAutoHideEmptySteps []string                            `json:"workflow_ids_with_auto_hide_empty_steps"`
 	Revision                          int64                               `json:"revision"`
 	UpdatedAt                         string                              `json:"updated_at"`
 }
@@ -148,6 +149,7 @@ type UpdateUserSettingsRequest struct {
 	AppStatusBarEnabled               *bool                              `json:"app_status_bar_enabled,omitempty"`
 	AppStatusBarOrder                 *models.AppStatusBarOrder          `json:"app_status_bar_order,omitempty"`
 	KanbanHiddenStepIDs               *map[string][]string               `json:"kanban_hidden_step_ids,omitempty"`
+	WorkflowIDsWithAutoHideEmptySteps *[]string                          `json:"workflow_ids_with_auto_hide_empty_steps,omitempty"`
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -298,6 +300,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		AppStatusBarEnabled:               settings.AppStatusBarEnabled,
 		AppStatusBarOrder:                 settings.AppStatusBarOrder,
 		KanbanHiddenStepIDs:               settings.KanbanHiddenStepIDs,
+		WorkflowIDsWithAutoHideEmptySteps: append([]string{}, settings.WorkflowIDsWithAutoHideEmptySteps...),
 		Revision:                          settings.Revision,
 		UpdatedAt:                         settings.UpdatedAt.Format(time.RFC3339),
 	}

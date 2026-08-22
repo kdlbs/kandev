@@ -23,10 +23,15 @@ route-owned loading.
 
 ## Decision
 
-The active workspace decides the mode. The URL never does. When a route and
-the active workspace disagree, the workspace wins and the URL follows: the
+The active workspace decides the mode. The URL never does — **with one
+explicit exception (amended 2026-08-17): an explicit `?workspaceId=` query
+param on the office page is honored at page bootstrap** (route-first
+resolution, matching ADR 0023's URL-params precedence), because the office
+page resolves its data workspace from the URL. Navigation without an
+explicit param cannot change the active workspace; when a route and the
+active workspace disagree, the workspace wins and the URL follows (the
 kanban board route redirects to the workspace's Office home instead of
-reassigning the workspace.
+reassigning the workspace).
 
 Mode resolves through a `WorkspaceScopeProvider` context rather than direct
 store reads, with one provider at the app root. Mode is tri-state:
@@ -61,8 +66,10 @@ dashboards) render under the active workspace's chrome; they do not redirect.
   settings fallback, so a workspace activated only by visiting a URL (never
   explicitly selected) can snap back. Unchanged from before, minus the kanban
   bias.
-- The legacy `office-active-workspace` cookie keeps its ADR-0023 role: written
-  on office selections, read by the office boot paths.
+- The legacy `office-active-workspace` cookie keeps its ADR-0023 role as a
+  read-only fallback for the office boot paths; office selections now write
+  the port-scoped name (amended 2026-08-17, see
+  `docs/specs/fix-multi-instance-cookie-isolation/spec.md`).
 
 ## Alternatives Considered
 

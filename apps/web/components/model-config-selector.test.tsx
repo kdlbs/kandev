@@ -102,6 +102,126 @@ describe("ModelConfigSelector", () => {
   });
 });
 
+describe("ModelConfigSelector loading behavior", () => {
+  it("keeps the picker open after selecting a model without existing dependent options", () => {
+    const onModelChange = vi.fn();
+
+    render(
+      <ModelConfigSelector
+        modelOptions={[
+          { id: "model-a", name: "Model A" },
+          { id: "model-b", name: "Model B" },
+        ]}
+        currentModel="model-a"
+        onModelChange={onModelChange}
+        keepOpenOnModelChange
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+    fireEvent.click(screen.getByRole("option", { name: /Model B/ }));
+
+    expect(onModelChange).toHaveBeenCalledWith("model-b");
+    expect(screen.getByRole("option", { name: /Model B/ })).toBeTruthy();
+  });
+
+  it("replaces dependent options with a loading row until the snapshot resolves", () => {
+    const { rerender } = render(
+      <ModelConfigSelector
+        modelOptions={[{ id: "model-a", name: "Model A" }]}
+        currentModel="model-a"
+        onModelChange={() => {}}
+        configOptions={[
+          {
+            type: "select",
+            id: "effort",
+            name: "Effort",
+            currentValue: "medium",
+            options: [{ value: "medium", name: "Medium" }],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+    expect(screen.getByTestId(effortTriggerTestId)).toBeTruthy();
+
+    rerender(
+      <ModelConfigSelector
+        modelOptions={[{ id: "model-b", name: "Model B" }]}
+        currentModel="model-b"
+        onModelChange={() => {}}
+        configOptions={[
+          {
+            type: "select",
+            id: "effort",
+            name: "Effort",
+            currentValue: "medium",
+            options: [{ value: "medium", name: "Medium" }],
+          },
+        ]}
+        configOptionsLoading
+        keepOpenOnModelChange
+      />,
+    );
+
+    const loadingRow = screen.getByTestId("model-config-options-loading");
+    expect(loadingRow.getAttribute("role")).toBe("status");
+    expect(screen.getByRole("status", { name: "Loading model options…" })).toBe(loadingRow);
+    expect(screen.queryByTestId(effortTriggerTestId)).toBeNull();
+    const selectedModelRow = screen.getByTestId("model-config-selected-row");
+    expect(selectedModelRow.querySelector("svg.tabler-icon-loader")).toBeTruthy();
+    expect(selectedModelRow.querySelector("svg.tabler-icon-check.absolute")).toBeNull();
+
+    rerender(
+      <ModelConfigSelector
+        modelOptions={[{ id: "model-b", name: "Model B" }]}
+        currentModel="model-b"
+        onModelChange={() => {}}
+        configOptions={[
+          {
+            type: "select",
+            id: "effort",
+            name: "Effort",
+            currentValue: "max",
+            options: [{ value: "max", name: "Max" }],
+          },
+        ]}
+        keepOpenOnModelChange
+      />,
+    );
+
+    expect(screen.queryByTestId("model-config-options-loading")).toBeNull();
+    expect(selectedModelRow.querySelector("svg.tabler-icon-loader")).toBeNull();
+    expect(selectedModelRow.querySelector("svg.tabler-icon-check.absolute")).toBeTruthy();
+    expect(screen.getByTestId(effortTriggerTestId).textContent).toContain("Max");
+  });
+});
+
+describe("ModelConfigSelector loading guard", () => {
+  it("keeps the picker open when options are loading without the explicit open flag", () => {
+    const onModelChange = vi.fn();
+
+    render(
+      <ModelConfigSelector
+        modelOptions={[
+          { id: "model-a", name: "Model A" },
+          { id: "model-b", name: "Model B" },
+        ]}
+        currentModel="model-a"
+        onModelChange={onModelChange}
+        configOptionsLoading
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+    fireEvent.click(screen.getByRole("option", { name: /Model B/ }));
+
+    expect(onModelChange).toHaveBeenCalledWith("model-b");
+    expect(screen.getByTestId("model-config-options-loading")).toBeTruthy();
+  });
+});
+
 describe("ModelConfigSelector filtering", () => {
   it("deduplicates repeated model ids from provider config", () => {
     const modelConfig: SelectConfigOption = {

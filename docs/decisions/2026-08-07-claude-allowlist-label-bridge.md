@@ -1,6 +1,6 @@
 # ADR-2026-08-07-claude-allowlist-label-bridge: Use the Claude Allowlist as a Trusted Preview Gate
 
-**Status:** accepted  
+**Status:** accepted (amended by 2026-08-22-persistent-fork-approval-labels)
 **Date:** 2026-08-07  
 **Area:** infra, workflow, security
 
@@ -30,9 +30,9 @@ non-closed pull-request-target events. The labels remain visible approval
 markers and continue to support the manual label paths; privileged workflow
 execution does not depend on a recursive `labeled` event.
 
-The new labeling job applies only to fork pull requests on open. Existing
-per-commit cleanup and manual re-approval behavior for `safe-to-test` remains
-unchanged.
+The new labeling job applies only to fork pull requests on open. Approval-label
+persistence and follow-up push behavior are defined by
+2026-08-22-persistent-fork-approval-labels.
 
 ## Consequences
 

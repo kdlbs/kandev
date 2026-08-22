@@ -127,7 +127,12 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 	}
 
 	toolKind := string(tc.Kind)
+	toolName := toolKind
 	normalizedPayload := a.normalizer.NormalizeToolCall(toolKind, args)
+	if frame, ok := a.dialect.parseMCPToolCall(tc.Meta, tc.RawInput); ok {
+		toolName = frame.name
+		normalizedPayload = streams.NewMCPTool(frame.name, frame.arguments)
+	}
 
 	toolCallID := string(tc.ToolCallId)
 	normalizedPayload, eventType, codexSignal, emittedToolCallID, codexParentToolCallID, suppress := a.trackToolCallPayload(
@@ -147,7 +152,7 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 	a.handleWakeupEvent(sessionID, toolCallID, tc.Meta, tc.RawInput, false)
 
 	// Detect tool type for logging
-	toolType := DetectToolOperationType(toolKind, args)
+	toolType := DetectToolOperationType(toolName, args)
 	_ = toolType // Used for normalization
 
 	status := string(tc.Status)
@@ -168,7 +173,7 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 		SessionID:         sessionID,
 		ToolCallID:        emittedToolCallID,
 		ParentToolCallID:  parentToolCallID,
-		ToolName:          toolKind, // Kind is effectively the tool name
+		ToolName:          toolName,
 		ToolTitle:         tc.Title,
 		ToolStatus:        status,
 		NormalizedPayload: normalizedPayload,
@@ -195,6 +200,7 @@ func (a *Adapter) trackToolCallPayload(
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if signal == codexSubagentSignalNone {
+		a.applyPendingCursorTaskMetaLocked(sessionID, toolCallID, payload)
 		a.activeToolCalls[toolCallID] = payload
 		return payload, eventType, signal, toolCallID, "", false
 	}
@@ -657,7 +663,8 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		return nil
 	}
 	monitorCommand := ""
-	if payload != nil && (tcu.RawInput != nil || len(tcu.Locations) > 0) {
+	canonicalMCPUpdate := payload != nil && payload.IsMCPTool() && payload.Generic() != nil
+	if payload != nil && !canonicalMCPUpdate && (tcu.RawInput != nil || len(tcu.Locations) > 0) {
 		a.normalizer.UpdatePayloadInput(payload, tcu.RawInput, supplemental)
 	}
 	if payload != nil && (tcu.Title != nil || tcu.Meta != nil || tcu.RawInput != nil || supplemental != nil) {
@@ -703,7 +710,13 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	if payload != nil && payload.Kind() == streams.ToolKindShellExec {
 		recognizedShellUpdate = a.normalizer.NormalizeShellToolUpdate(payload, tcu.Meta, convertedContents, tcu.RawOutput)
 	} else if tcu.RawOutput != nil && payload != nil && !isTrackedMonitorTerminal {
-		a.normalizer.NormalizeToolResult(payload, tcu.RawOutput)
+		result := tcu.RawOutput
+		if canonicalMCPUpdate {
+			if normalizedResult, ok := a.dialect.normalizeMCPToolResult(tcu.RawOutput); ok {
+				result = normalizedResult
+			}
+		}
+		a.normalizer.NormalizeToolResult(payload, result)
 	}
 	var shellExitCode *int
 	if payload != nil && payload.ShellExec() != nil && payload.ShellExec().Output != nil {

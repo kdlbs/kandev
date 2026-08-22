@@ -15,7 +15,7 @@ const mockState = {
   messages: {
     bySession: { "sess-1": [] as Message[] },
     metaBySession: {
-      "sess-1": { hasMore: false, oldestCursor: null, isLoading: false },
+      "sess-1": { hasMore: false, oldestCursor: null, isLoading: false, isLoadingMore: false },
     },
   },
   taskSessions: { items: { "sess-1": { state: "RUNNING" } } },
@@ -70,6 +70,7 @@ beforeEach(() => {
     hasMore: false,
     oldestCursor: null,
     isLoading: false,
+    isLoadingMore: false,
   };
   mockState.connection.status = "connected";
   mockState.taskSessions.items["sess-1"] = { state: "RUNNING" };
@@ -116,7 +117,8 @@ function makeMessage(overrides: Partial<Message>): Message {
   } as Message;
 }
 
-/** Stateful store mock — prependMessages actually updates the stored messages. */
+/** Stateful store mock — prependMessages actually updates the stored messages
+ * and the shared coordinator's setMessagesMetadata tracks isLoadingMore. */
 function makeStore(options: {
   messages?: Message[];
   hasMore?: boolean;
@@ -127,6 +129,7 @@ function makeStore(options: {
     hasMore: options.hasMore ?? false,
     oldestCursor: options.oldestCursor ?? null,
     isLoading: false,
+    isLoadingMore: false,
   };
   const prependMessages = vi.fn(
     (
@@ -135,9 +138,12 @@ function makeStore(options: {
       newMeta: { hasMore: boolean; oldestCursor: string | null },
     ) => {
       messages = [...newMsgs, ...messages];
-      meta = { ...meta, ...newMeta };
+      meta = { ...meta, ...newMeta, isLoadingMore: false };
     },
   );
+  const setMessagesMetadata = vi.fn((_sessionId: string, patch: { isLoadingMore?: boolean }) => {
+    meta = { ...meta, ...patch };
+  });
   return {
     getState: () => ({
       messages: {
@@ -145,8 +151,10 @@ function makeStore(options: {
         metaBySession: { "sess-1": meta },
       },
       prependMessages,
+      setMessagesMetadata,
     }),
     _prependMessages: prependMessages,
+    _setMessagesMetadata: setMessagesMetadata,
   };
 }
 
@@ -376,7 +384,7 @@ describe("runBackfillRound", () => {
     expect(result).toBe("stop");
   });
 
-  it("does not prepend messages when cleanup occurs during the fetch", async () => {
+  it("stops the round when cleanup occurs during the fetch, without a second request", async () => {
     const request = deferred<{ messages: Message[]; has_more: boolean }>();
     mockListTaskSessionMessages.mockReturnValueOnce(request.promise);
     const store = makeStore({ messages: [], hasMore: true, oldestCursor: "msg-1" });
@@ -388,7 +396,10 @@ describe("runBackfillRound", () => {
     request.resolve({ messages: [makeMessage({ id: "old-1" })], has_more: true });
 
     await expect(round).resolves.toBe("stop");
-    expect(store._prependMessages).not.toHaveBeenCalled();
+    // The round stops and the coordinator settles its loading flag; no second
+    // page is requested after deactivation.
+    expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(1);
+    expect(store._setMessagesMetadata).toHaveBeenCalledWith("sess-1", { isLoadingMore: false });
   });
 });
 
@@ -456,6 +467,40 @@ describe("autoBackfillUntilUserMessage", () => {
     const store = makeStore({ messages: [], hasMore: true, oldestCursor: "cursor-0" });
     await autoBackfillUntilUserMessage("sess-1", store as never);
     expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(MAX_AUTO_BACKFILL_PAGES);
+  });
+
+  it("derives the page budget from the first-request-wins page size (message budget)", async () => {
+    // A concurrent panel request wins the shared cursor with limit 20 before
+    // the backfill's round-1 request starts, so that round joins the
+    // effective 20-row page. The 1000-message budget then permits the
+    // remaining rounds at 100 rows each — the same maximum message depth a
+    // 100-row winner would reach.
+    let calls = 0;
+    mockListTaskSessionMessages.mockImplementation(() => {
+      calls++;
+      return Promise.resolve({
+        messages: [makeMessage({ id: `tool-${calls}`, type: "tool_call", author_type: "agent" })],
+        has_more: true,
+      });
+    });
+    const store = makeStore({ messages: [], hasMore: true, oldestCursor: "cursor-0" });
+    const { requestOlderMessages } = await import("./older-message-pagination");
+    // Synchronously start the panel request; the backfill's round-1 request
+    // for the same cursor joins it (first-request-wins limit 20).
+    const seed = requestOlderMessages({
+      sessionId: "sess-1",
+      cursor: "cursor-0",
+      limit: 20,
+      store: store as never,
+    });
+
+    await autoBackfillUntilUserMessage("sess-1", store as never);
+    await seed;
+
+    // 1 seed request + 1 joined round (20 rows) + 9 × 100-row rounds + 1
+    // final 100-row round (budget 1000 − 20 = 980; 9 full rounds, then one
+    // more overshoot) = 11 total requests (1 seed + 10 backfill fetches).
+    expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(11);
   });
 
   it("stops after round 1 once a user message is prepended", async () => {

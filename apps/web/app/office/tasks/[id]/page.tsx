@@ -1,17 +1,28 @@
 "use client";
 
-import { use, useState, useEffect, useRef, useCallback, useMemo, Suspense } from "react";
+import {
+  use,
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+  Suspense,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
+import { useLatestOnly } from "@/hooks/use-latest-only";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
 import {
   getTask,
   listActivityForTarget,
   listComments,
   type TaskCommentResponse,
-  type TaskDecisionDTO,
 } from "@/lib/api/domains/office-api";
+import { fetchTask } from "@/lib/api/domains/kanban-api";
 import { listTaskSessions } from "@/lib/api/domains/session-api";
 import {
   liveSessionMetadataFromStore,
@@ -21,19 +32,13 @@ import { OfficeSimplePane } from "@/components/task/simple/OfficeSimplePane";
 import { TaskAdvancedMode } from "./task-advanced-mode";
 import { IssueDetailSkeleton } from "./task-detail-skeleton";
 import { TaskBody, resolveTaskBodyMode, type TaskBodyMode } from "@/components/task/TaskBody";
-import type {
-  Task,
-  TaskComment,
-  TaskActivityEntry,
-  TaskDecision,
-  TaskSession,
-  TimelineEvent,
-} from "./types";
-import type { ActivityEntry, OfficeTask } from "@/lib/state/slices/office/types";
+import type { Task, TaskComment, TaskActivityEntry, TaskSession, TimelineEvent } from "./types";
+import type { ActivityEntry } from "@/lib/state/slices/office/types";
 import type { TaskSession as ApiTaskSession } from "@/lib/types/http";
 import { useSessionLiveSyncSubscriptions } from "./use-session-live-sync";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { mapOfficeTaskToTask } from "./map-office-task";
 
 type IssueDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -43,65 +48,6 @@ type IssueDetailPageProps = {
 // (keep the initial fetch) from an explicit server-side null (metadata was
 // cleared and must not be resurrected).
 const SESSION_METADATA_ABSENT = "\u0000absent\u0000";
-
-function mapDecisionDTO(d: TaskDecisionDTO): TaskDecision {
-  return {
-    id: d.id,
-    taskId: d.task_id,
-    deciderType: d.decider_type,
-    deciderId: d.decider_id,
-    deciderName: d.decider_name ?? "",
-    role: d.role,
-    decision: d.decision,
-    comment: d.comment ?? "",
-    createdAt: d.created_at,
-  };
-}
-
-function mapOfficeTaskToTask(raw: OfficeTask): Task {
-  // The server DTO includes reviewers/approvers/decisions even though the
-  // strongly-typed OfficeTask only declares the cross-cutting fields. We
-  // read those extra props off the raw object.
-  const extra = raw as OfficeTask & {
-    reviewers?: string[];
-    approvers?: string[];
-    decisions?: TaskDecisionDTO[];
-    blockedBy?: string[];
-  };
-  return {
-    id: raw.id,
-    workspaceId: raw.workspaceId,
-    identifier: raw.identifier,
-    title: raw.title,
-    description: raw.description,
-    status: raw.status as Task["status"],
-    priority: (raw.priority || "medium") as Task["priority"],
-    labels: (raw.labels ?? []).map((l) =>
-      typeof l === "string" ? { name: l, color: "#6b7280" } : l,
-    ),
-    assigneeAgentProfileId: raw.assigneeAgentProfileId,
-    parentId: raw.parentId,
-    projectId: raw.projectId,
-    blockedBy: extra.blockedBy ?? [],
-    blocking: [],
-    children: (raw.children ?? []).map((child) => ({
-      id: child.id,
-      identifier: child.identifier,
-      title: child.title,
-      status: child.status as Task["status"],
-      blockedBy: child.blockedBy ?? [],
-      createdAt: child.createdAt,
-    })),
-    reviewers: extra.reviewers ?? [],
-    approvers: extra.approvers ?? [],
-    decisions: (extra.decisions ?? []).map(mapDecisionDTO),
-    createdBy: "",
-    createdAt: raw.createdAt,
-    updatedAt: raw.updatedAt,
-    executionPolicy: raw.executionPolicy,
-    executionState: raw.executionState,
-  };
-}
 
 function mapCommentResponse(c: TaskCommentResponse): TaskComment {
   return {
@@ -315,17 +261,27 @@ function useTaskOptimisticHelpers(
   // (priority / project / parent / blockers / participants / assignee).
   // The optimistic patch we applied locally gets reconciled with server
   // state.
+  //
+  // A WS-driven trigger can fire again before a prior GET resolves (two
+  // status changes in quick succession, ordinary network jitter). Without
+  // a guard, a slower earlier response can land after a faster later one
+  // and overwrite fresher task state with stale data. useLatestOnly
+  // discards a response once a newer refetchTask call has started,
+  // regardless of arrival order.
+  const { begin, isCurrent } = useLatestOnly();
   const refetchTask = useCallback(async () => {
+    const token = begin();
     try {
-      const res = await getTask(id);
+      const [res, genericTask] = await Promise.all([getTask(id), fetchTask(id).catch(() => null)]);
+      if (!isCurrent(token)) return;
       if (res.task) {
-        setTask(mapOfficeTaskToTask(res.task));
+        setTask(mapOfficeTaskToTask(res.task, genericTask ?? undefined));
         if (res.timeline) setTimeline(res.timeline);
       }
     } catch {
       /* swallow — next user action will retry */
     }
-  }, [id, setTask, setTimeline]);
+  }, [id, setTask, setTimeline, begin, isCurrent]);
   useOfficeRefetch(`task:${id}`, () => {
     void refetchTask();
   });
@@ -347,18 +303,43 @@ function useTaskOptimisticHelpers(
   return { applyTaskPatch, restoreTask };
 }
 
+function useTaskDetailRefetch(
+  setTask: Dispatch<SetStateAction<Task | null>>,
+  setTimeline: Dispatch<SetStateAction<TimelineEvent[]>>,
+) {
+  return useCallback(
+    (updated: Task, updatedTimeline: TimelineEvent[]) => {
+      setTask((previous) =>
+        previous
+          ? {
+              ...updated,
+              // Office's live refetch endpoint does not carry the generic
+              // status summary or repository rows. Preserve the supplement
+              // loaded by the initial detail request until the next full load.
+              statusSummary: updated.statusSummary ?? previous.statusSummary,
+              repositories: updated.repositories ?? previous.repositories,
+            }
+          : updated,
+      );
+      setTimeline(updatedTimeline);
+    },
+    [setTask, setTimeline],
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Primary data hook
 // ---------------------------------------------------------------------------
 
+// Snapshot storeIssues in a ref so the load effect can seed `task` from the
+// store without re-running on every store update. Re-running the GET
+// on store changes would race with in-flight optimistic mutations (the WS-
+// driven refetch in useTaskOptimisticHelpers handles canonical refresh after
+// a property mutation commits).
+// `errorKey` remains a catalog key so locale changes do not re-issue the load.
 function useIssueData(id: string) {
   const storeIssues = useAppStore((s) => s.office.tasks.items);
   const setTaskSessionsForTask = useAppStore((s) => s.setTaskSessionsForTask);
-  // Snapshot storeIssues in a ref so the load effect can seed `task` from
-  // the store without re-running on every store update. Re-running the GET
-  // on store changes would race with in-flight optimistic mutations (the
-  // WS-driven refetch in useTaskOptimisticHelpers handles canonical
-  // refresh after a property mutation commits).
   const storeIssuesRef = useRef(storeIssues);
   useEffect(() => {
     storeIssuesRef.current = storeIssues;
@@ -370,9 +351,6 @@ function useIssueData(id: string) {
   const [activity, setActivity] = useState<TaskActivityEntry[]>([]);
   const [baseSessions, setBaseSessions] = useState<TaskSession[]>([]);
   const [loading, setLoading] = useState(true);
-  // Holds a catalog KEY, not a message: the load effect must not take `t` in
-  // its dep array (a locale switch would re-issue the task fetch), so the key is
-  // stored and resolved at render instead.
   const [errorKey, setErrorKey] = useState<string | null>(null);
 
   const applyDetail = useCallback(
@@ -395,12 +373,15 @@ function useIssueData(id: string) {
       if (fromStore && !cancelled) setTask(mapOfficeTaskToTask(fromStore));
 
       try {
-        const res = await getTask(id);
+        const [res, genericTask] = await Promise.all([
+          getTask(id),
+          fetchTask(id).catch(() => null),
+        ]);
         if (cancelled) return;
         if (!res.task) {
           if (!fromStore) setErrorKey("office:taskNotFound");
         } else {
-          const freshTask = mapOfficeTaskToTask(res.task);
+          const freshTask = mapOfficeTaskToTask(res.task, genericTask ?? undefined);
           setTask(freshTask);
           if (res.timeline) setTimeline(res.timeline);
           const detail = await fetchIssueDetailData(freshTask.workspaceId, id);
@@ -424,10 +405,7 @@ function useIssueData(id: string) {
     setComments(result);
   }, [id]);
 
-  const onTaskRefetch = useCallback((updated: Task, updatedTimeline: TimelineEvent[]) => {
-    setTask(updated);
-    setTimeline(updatedTimeline);
-  }, []);
+  const onTaskRefetch = useTaskDetailRefetch(setTask, setTimeline);
 
   const { sessionStoreStates, sessionStoreMetadata } = useSessionLiveSync({
     task,
@@ -447,7 +425,6 @@ function useIssueData(id: string) {
     [baseSessions, sessionStoreStates, sessionStoreMetadata],
   );
 
-  // Refetch comments when a new comment is created via office WS event
   useOfficeRefetch("comments", fetchComments);
 
   const { applyTaskPatch, restoreTask } = useTaskOptimisticHelpers(id, setTask, setTimeline);

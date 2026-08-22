@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
@@ -17,7 +17,7 @@ const terminal: Terminal = {
 describe("ParkedTerminalsMenu", () => {
   afterEach(cleanup);
 
-  it("confirms a right-click destroy while preserving cancel", () => {
+  it("confirms a right-click destroy while preserving cancel", async () => {
     const onResume = vi.fn();
     const onDestroy = vi.fn();
 
@@ -47,7 +47,7 @@ describe("ParkedTerminalsMenu", () => {
       }),
     );
 
-    expect(onDestroy).toHaveBeenCalledOnce();
+    await waitFor(() => expect(onDestroy).toHaveBeenCalledOnce());
     expect(onDestroy).toHaveBeenCalledWith(terminal.id);
     expect(screen.queryByTestId("parked-terminals-menu")).toBeNull();
   });
