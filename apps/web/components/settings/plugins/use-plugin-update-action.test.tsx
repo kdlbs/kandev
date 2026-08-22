@@ -77,6 +77,20 @@ describe("usePluginUpdateAction", () => {
     expect(reloadUpdates).toHaveBeenCalledTimes(1);
   });
 
+  it("marks a successful install as current before rechecking the catalog", async () => {
+    marketplaceInstall.mockResolvedValue({ ok: true });
+    const markUpdated = vi.fn();
+    const { result } = renderHook(() =>
+      usePluginUpdateAction(marketplaceInstall, reloadUpdates, INSTALLED, markUpdated),
+    );
+
+    await act(async () => {
+      await result.current.runUpdate(entry());
+    });
+
+    expect(markUpdated).toHaveBeenCalledWith(ENTRY_ID);
+  });
+
   it("records a per-row error on failure without throwing, and still re-checks the catalog", async () => {
     marketplaceInstall.mockResolvedValue({ ok: false, error: CHECKSUM_ERROR });
     const { result } = renderHook(() =>

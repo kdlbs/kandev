@@ -36,6 +36,7 @@ export function PluginsSettings() {
     actions.marketplaceInstall,
     updates.reload,
     installedIds,
+    updates.markUpdated,
   );
 
   const handleMarketplaceInstall = async (url: string) => {

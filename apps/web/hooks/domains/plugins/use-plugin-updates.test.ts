@@ -82,6 +82,22 @@ describe("usePluginUpdates — latestById", () => {
     });
     await waitFor(() => expect(getMarketplaceCatalog).toHaveBeenCalledTimes(2));
   });
+
+  it("marks an update entry installed locally while a catalog reload is unavailable", async () => {
+    getMarketplaceCatalog.mockResolvedValue({
+      plugins: [entry("acme", "update_available", "2.0.0")],
+      sources: [source()],
+    });
+    const { result } = renderHook(() => usePluginUpdates());
+    await waitFor(() => expect(result.current.updates.has("acme")).toBe(true));
+
+    act(() => {
+      result.current.markUpdated("acme");
+    });
+
+    expect(result.current.latestById.get("acme")?.install_state).toBe("installed");
+    expect(result.current.updates.has("acme")).toBe(false);
+  });
 });
 
 describe("usePluginUpdates — checkForUpdates", () => {
@@ -147,6 +163,50 @@ describe("usePluginUpdates — checkForUpdates", () => {
     });
 
     expect(result.current.latestById.get("acme")?.version).toBe("2.0.0");
+  });
+
+  it("keeps the cache-busting check alive when a reload overlaps it", async () => {
+    getMarketplaceCatalog.mockResolvedValueOnce({
+      plugins: [entry("acme", "installed", "1.0.0")],
+      sources: [source()],
+    });
+    const refresh = deferred<{ refreshed: boolean }>();
+    refreshMarketplace.mockReturnValueOnce(refresh.promise);
+    getMarketplaceCatalog.mockResolvedValueOnce({
+      plugins: [entry("acme", "update_available", "2.0.0")],
+      sources: [source()],
+    });
+    getMarketplaceCatalog.mockResolvedValueOnce({
+      plugins: [entry("acme", "installed", "2.0.0")],
+      sources: [source()],
+    });
+
+    const { result } = renderHook(() => usePluginUpdates());
+    await waitFor(() => expect(result.current.checked).toBe(true));
+
+    let checkPromise!: Promise<void>;
+    act(() => {
+      checkPromise = result.current.checkForUpdates();
+    });
+    let reloadPromise!: Promise<void>;
+    act(() => {
+      reloadPromise = result.current.reload();
+    });
+
+    // The reload must wait for the refresh + catalog GET pair. If it starts
+    // its GET here, it can steal the check's request generation and make the
+    // cache-busting check finish without applying a fresh catalog.
+    expect(getMarketplaceCatalog).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      refresh.resolve({ refreshed: true });
+      await checkPromise;
+      await reloadPromise;
+    });
+
+    expect(result.current.latestById.get("acme")?.version).toBe("2.0.0");
+    expect(result.current.updates.has("acme")).toBe(false);
+    expect(getMarketplaceCatalog).toHaveBeenCalledTimes(3);
   });
 });
 

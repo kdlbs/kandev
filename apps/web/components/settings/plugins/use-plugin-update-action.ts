@@ -12,7 +12,9 @@ import type { MarketplaceEntry } from "@/lib/types/plugins";
  * install/enable use — never disagrees with the auto-updater's own
  * `install_state` comparison), and always re-checks the catalog afterward so
  * a resolved update's row converges within one round-trip whether the
- * install succeeded or failed.
+ * install succeeded or failed. A successful install also marks the catalog
+ * entry current before that re-check, so a failed catalog request cannot leave
+ * an already-installed version looking updateable.
  *
  * `installedIds` is the id set of what is currently installed. A failure is a
  * fact about one installed copy of a plugin, so it is dropped as soon as that
@@ -24,6 +26,7 @@ export function usePluginUpdateAction(
   marketplaceInstall: (url: string) => Promise<{ ok: boolean; error?: string }>,
   reloadUpdates: () => Promise<void>,
   installedIds: ReadonlySet<string>,
+  markUpdated?: (pluginId: string) => void,
 ) {
   // A set, not a single id: rows update independently, so two installs can be
   // in flight at once. With one slot the first to settle cleared the marker for
@@ -61,6 +64,8 @@ export function usePluginUpdateAction(
         if (!result.ok) {
           const message = result.error ?? t("plugins:failedToUpdatePlugin", { name: entry.name });
           setErrorsById((prev) => new Map(prev).set(entry.id, message));
+        } else {
+          markUpdated?.(entry.id);
         }
       } finally {
         try {
@@ -75,7 +80,7 @@ export function usePluginUpdateAction(
         }
       }
     },
-    [marketplaceInstall, reloadUpdates, clearError],
+    [marketplaceInstall, reloadUpdates, clearError, markUpdated],
   );
 
   return { updatingIds, errorsById, runUpdate };

@@ -14,6 +14,25 @@ function checkFailedMessage(err?: unknown): string {
   return err instanceof Error ? err.message : t("plugins:updateCheckFailed");
 }
 
+async function runMarketplaceCheck(
+  check: number,
+  checkGeneration: { current: number },
+  applyCatalog: (catalog: MarketplaceCatalog) => void,
+  setChecking: (checking: boolean) => void,
+  setError: (error: string | null) => void,
+) {
+  try {
+    await refreshMarketplace();
+    if (check !== checkGeneration.current) return;
+    const catalog = await getMarketplaceCatalog();
+    if (check === checkGeneration.current) applyCatalog(catalog);
+  } catch (err) {
+    if (check === checkGeneration.current) setError(checkFailedMessage(err));
+  } finally {
+    if (check === checkGeneration.current) setChecking(false);
+  }
+}
+
 /**
  * Cross-references installed plugins against the marketplace catalog: which
  * ones have a catalog entry at all (`latestById`), and which of those are
@@ -41,6 +60,7 @@ export function usePluginUpdates() {
   const [sourcesDegraded, setSourcesDegraded] = useState(false);
   const requestGeneration = useRef(0);
   const checkGeneration = useRef(0);
+  const checkInFlight = useRef<Promise<void> | null>(null);
 
   const applyCatalog = useCallback((catalog: MarketplaceCatalog) => {
     const enabledSources = catalog.sources.filter((source) => source.enabled);
@@ -86,6 +106,10 @@ export function usePluginUpdates() {
   }, []);
 
   const reload = useCallback(async () => {
+    while (checkInFlight.current) {
+      await checkInFlight.current;
+    }
+
     const generation = ++requestGeneration.current;
     try {
       const catalog = await getMarketplaceCatalog();
@@ -103,21 +127,34 @@ export function usePluginUpdates() {
     };
   }, [reload]);
 
-  const checkForUpdates = useCallback(async () => {
-    const request = ++requestGeneration.current;
+  const checkForUpdates = useCallback(() => {
+    // Invalidate any older reload. Reloads that begin while this pair is in
+    // flight wait for it, so they cannot steal the post-refresh GET.
+    ++requestGeneration.current;
     const check = ++checkGeneration.current;
     setChecking(true);
-    try {
-      await refreshMarketplace();
-      if (request !== requestGeneration.current) return;
-      const catalog = await getMarketplaceCatalog();
-      if (request === requestGeneration.current) applyCatalog(catalog);
-    } catch (err) {
-      if (request === requestGeneration.current) setError(checkFailedMessage(err));
-    } finally {
-      if (check === checkGeneration.current) setChecking(false);
-    }
+    const run = runMarketplaceCheck(check, checkGeneration, applyCatalog, setChecking, setError);
+    checkInFlight.current = run;
+    void run.then(
+      () => {
+        if (checkInFlight.current === run) checkInFlight.current = null;
+      },
+      () => {
+        if (checkInFlight.current === run) checkInFlight.current = null;
+      },
+    );
+    return run;
   }, [applyCatalog]);
+
+  const markUpdated = useCallback((pluginId: string) => {
+    setLatestById((previous) => {
+      const current = previous.get(pluginId);
+      if (!current || current.install_state !== "update_available") return previous;
+      const next = new Map(previous);
+      next.set(pluginId, { ...current, install_state: "installed" });
+      return next;
+    });
+  }, []);
 
   const updates = useMemo(() => {
     const next = new Map<string, MarketplaceEntry>();
@@ -137,5 +174,6 @@ export function usePluginUpdates() {
     error,
     reload,
     checkForUpdates,
+    markUpdated,
   };
 }
