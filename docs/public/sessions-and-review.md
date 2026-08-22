@@ -34,11 +34,11 @@ The profile picker shows only profiles compatible with the task executor. If non
 
 ### Choose starting context
 
-| Option | What the new session receives | When to use it |
-|---|---|---|
-| **Blank** | Only the prompt you enter | Independent work that needs no earlier discussion |
+| Option                  | What the new session receives                                                                  | When to use it                                                                                                        |
+| ----------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| **Blank**               | Only the prompt you enter                                                                      | Independent work that needs no earlier discussion                                                                     |
 | **Copy initial prompt** | Copies the first user message from the currently active session into the editable prompt field | A parallel approach; it is not guaranteed to be the task's original description, so inspect and edit it before launch |
-| **Summarize a session** | Inserts a utility-agent summary of the selected conversation into the editable prompt field | Continue or branch from work already discussed |
+| **Summarize a session** | Inserts a utility-agent summary of the selected conversation into the editable prompt field    | Continue or branch from work already discussed                                                                        |
 
 **Handoff** from an existing session opens the same dialog and selects a summary of that session. Summarization requires a working `summarize-session` utility agent. Review generated summaries: they can omit constraints or decisions.
 
@@ -48,16 +48,20 @@ Prompts support pasted, dropped, or selected attachments. A prompt can contain a
 
 Right-click an agent tab on desktop to manage it. Available actions depend on its current state.
 
-| Action | Effect |
-|---|---|
-| **Rename** | Changes the session's display name |
-| **Set as Primary** | Makes a stoppable session the task's primary target |
-| **Stop** | Cancels the active agent turn for this session |
-| **Resume** | Attempts to continue a completed, failed, or cancelled session |
-| **Delete** | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
-| **Share** | Opens the publishing preview for an eligible session |
-| **Handoff** | Starts another session with a generated summary of this conversation |
-| **Close Others** | Closes other visible agent panels without deleting their sessions |
+| Action             | Effect                                                                                                                                                                     |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rename**         | Changes the session's display name                                                                                                                                         |
+| **Set as Primary** | Makes a stoppable session the task's primary target                                                                                                                        |
+| **Stop**           | Cancels the active agent turn for this session                                                                                                                             |
+| **Resume**         | Attempts to continue a completed, failed, or cancelled session                                                                                                             |
+| **Delete**         | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
+| **Share**          | Opens the publishing preview for an eligible session                                                                                                                       |
+| **Handoff**        | Starts another session with a generated summary of this conversation                                                                                                       |
+| **Close Others**   | Closes other visible agent panels in that tab group without deleting their sessions                                                                                        |
+
+On desktop, the X on an agent tab closes only that panel. Reopen the same conversation from
+**+ > Agents**. Use **Delete** from the tab menu only when you intend to permanently remove the
+session. The final visible agent panel cannot be closed with an X.
 
 Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. The failure banner offers **Start fresh** when continuation is unavailable.
 
