@@ -435,7 +435,10 @@ function TaskListSectionView({
       {section.title && (
         <div className="flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-normal text-muted-foreground">
           {section.color && (
-            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: section.color }} />
+            <span
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ backgroundColor: section.color }}
+            />
           )}
           <span>{section.title}</span>
           <span className="text-muted-foreground/70">{rows.length}</span>

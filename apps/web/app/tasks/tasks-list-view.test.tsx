@@ -174,6 +174,67 @@ describe("TasksListView facet grouping", () => {
 
     expect(screen.getAllByTestId("tasks-list-section")).toHaveLength(2);
   });
+
+  // A wrapping section label used to squeeze the flex sibling swatch down to
+  // ~1px wide, which erased the plugin's colour coding exactly when the label
+  // was long enough to need it.
+  it("keeps the colour swatch from shrinking when a long facet label wraps", () => {
+    const tagged = makeTask({ id: toTaskId("tagged") });
+
+    render(
+      <StateProvider initialState={{ messages: { bySession: {}, metaBySession: {} } }}>
+        <TooltipProvider>
+          <TasksListView
+            {...props([tagged])}
+            tasksListGroup="facet:plugin:tags"
+            facetValues={{
+              "facet:plugin:tags:tagged": [
+                { value: "long", label: "A very long facet label".repeat(6), color: "#0ea5e9" },
+              ],
+            }}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    const swatch = screen
+      .getByTestId("tasks-list-section")
+      .querySelector('span[style*="background-color"]');
+    expect(swatch).not.toBeNull();
+    expect(swatch?.classList.contains("shrink-0")).toBe(true);
+  });
+
+  it("groups a task under every facet value it carries", () => {
+    const multi = makeTask({ id: toTaskId("multi") });
+    const single = makeTask({ id: toTaskId("single") });
+
+    render(
+      <StateProvider initialState={{ messages: { bySession: {}, metaBySession: {} } }}>
+        <TooltipProvider>
+          <TasksListView
+            {...props([multi, single])}
+            tasksListGroup="facet:plugin:tags"
+            facetValues={{
+              "facet:plugin:tags:multi": [
+                { value: "alpha", label: "Alpha" },
+                { value: "beta", label: "Beta" },
+              ],
+              "facet:plugin:tags:single": [{ value: "beta", label: "Beta" }],
+            }}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    const titles = screen
+      .getAllByTestId("tasks-list-section")
+      .map((section) => section.textContent ?? "");
+    expect(titles).toHaveLength(2);
+    expect(titles[0]).toContain("Alpha");
+    expect(titles[0]).toContain("1");
+    expect(titles[1]).toContain("Beta");
+    expect(titles[1]).toContain("2");
+  });
 });
 
 describe("TasksListView row — task-row-metadata slot", () => {
