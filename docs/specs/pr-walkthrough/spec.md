@@ -20,12 +20,17 @@ lifecycle policy.
 
 **Decisions:**
 [ADR-2026-08-22-pr-walkthrough-r2-hosting](../../decisions/2026-08-22-pr-walkthrough-r2-hosting.md),
-[ADR-2026-08-22-agent-owned-pr-walkthrough-rendering](../../decisions/2026-08-22-agent-owned-pr-walkthrough-rendering.md),
+[ADR-2026-08-22-pr-walkthrough-filesystem-runner](../../decisions/2026-08-22-pr-walkthrough-filesystem-runner.md),
 [ADR-2026-08-22-pr-walkthrough-description-link](../../decisions/2026-08-22-pr-walkthrough-description-link.md)
+
+**Implementation plan:**
+[Portable PR walkthrough runner fix](../../plans/pr-walkthrough-portable-runner-fix/plan.md)
 
 ## What
 
 - A project skill named `pr-walkthrough` is available to compatible agents.
+  Its directory is a self-contained, copyable package with instructions,
+  renderer assets, deterministic generation scripts, and focused tests.
 - The skill produces one JSON data file and one HTML file for a pull request:
   `docs/pr-walkthrough/pr-<number>.json` and
   `docs/pr-walkthrough/pr-<number>.html`.
@@ -44,6 +49,12 @@ lifecycle policy.
   ready for review. OpenCode is the initial runner, but the skill and artifact
   contract do not depend on it. A maintainer can explicitly retrigger
   generation by adding the `generate-pr-walkthrough` label.
+- The workflow gives each runner the same fixed prompt, prepared context, draft
+  JSON path, renderer command, and final output paths. A provider change does
+  not change this contract.
+- Kandev CI uses `.pr-walkthrough/draft.json` as the provider-neutral draft
+  path. Its renderer command invokes the script bundled under
+  `.agents/skills/pr-walkthrough/scripts/`.
 - Walkthrough automation lives in `.github/workflows/pr-walkthrough.yml` and
   is enabled independently with the `PR_WALKTHROUGH_ENABLED` repository
   variable. It does not share the `OPENCODE_REVIEW_ENABLED` code-review gate.
@@ -66,8 +77,10 @@ lifecycle policy.
 ## Generation contract
 
 The walkthrough agent compares the exact pull request head SHA with the exact
-base SHA. It creates the JSON, invokes the trusted renderer, and corrects its
-data until both outputs pass renderer validation. The generated `pr` object
+base SHA through their merge base. It reads a trusted base checkout, a prepared
+patch, and bounded text files from the immutable PR head. It creates a draft
+JSON file, invokes the trusted renderer, and corrects its data until both
+outputs pass renderer validation. The generated `pr` object
 includes the pull request number, title, URL, repository slug, base branch,
 head branch, and diff statistics when they are available. The managed runner
 binds identity and links to trusted event metadata before rendering.
@@ -81,21 +94,28 @@ The walkthrough is an explanation, not a code review. It does not approve,
 request changes, post findings, or claim that the pull request is safe to
 merge.
 
+All reusable generation logic lives in
+`.agents/skills/pr-walkthrough/`. The skill-local scripts resolve their
+renderer assets relative to that directory. A copied skill does not depend on
+`scripts/pr-walkthrough-context`, `scripts/pr-walkthrough-render`, or tests at
+the repository root. GitHub workflow, setup, publication, and PR-description
+adapters remain outside the skill because they are platform integration code.
+
 ## Permissions
 
 - The workflow may read pull request metadata and repository contents.
-- The selected agent reads the trusted base checkout and attached diff. A
-  narrow base-controlled tool may read bounded regular UTF-8 files directly
-  from the immutable pull request head Git object. The agent may not run
-  arbitrary shell commands, read outside the trusted worktree, modify source files,
-  invoke subagents, fetch external URLs, commit, push, or publish GitHub
-  changes. A managed runner may expose a narrow trusted-renderer tool that
-  writes only the fixed walkthrough JSON and HTML paths.
+- The selected agent reads the trusted base checkout and prepared context. The
+  context contains a patch, a manifest, and bounded regular UTF-8 files from
+  the immutable PR head Git object.
+- The agent can edit only one fixed draft JSON file. It can run only the fixed
+  base-controlled renderer command. It cannot run arbitrary shell commands,
+  read outside the trusted worktree, change source files, invoke subagents,
+  fetch external URLs, commit, push, or publish GitHub changes.
 - The workflow checks out only the trusted base commit in the secret-bearing
-  worktree. It fetches the event head SHA as a Git object without checking it
-  out, and uses base-commit copies of the walkthrough skill, renderer, managed
-  rendering adapter, and constrained file reader. Pull request changes cannot
-  replace those instructions or executable generation components.
+  worktree. It fetches enough history for the event head SHA to resolve the
+  merge base without checking out that SHA. It uses a base-commit copy of the
+  complete skill bundle and the runner setup action. Pull request changes
+  cannot replace these instructions or executable components.
 - The agent invokes the fixed renderer before it finishes. The workflow only
   verifies and packages the ignored walkthrough output directory.
 - The R2 publishing job receives only the bucket-scoped S3-compatible R2
@@ -113,6 +133,11 @@ merge.
 - If the selected agent command fails, exits non-zero, or does not produce both
   required walkthrough files, generation fails and the workflow records the
   diagnostic output in its CI artifacts.
+- If the workflow cannot resolve a merge base between the event SHAs, context
+  preparation fails before the agent starts.
+- If a changed PR file is unsafe, binary, oversized, or outside the total
+  context budget, the manifest records the omission. The patch remains
+  available to the agent.
 - If the JSON is missing required fields, contains invalid edges or risk data,
   includes a reserved renderer token, or otherwise violates the renderer
   contract, the renderer fails and no HTML is treated as generated.
@@ -142,6 +167,21 @@ not from merge time.
   marked ready for review, **WHEN** the walkthrough job runs, **THEN** it
   creates non-empty JSON and HTML artifacts and publishes the HTML under the
   current head SHA in R2.
+- **GIVEN** a fetched PR head, **WHEN** the workflow computes the triple-dot
+  diff, **THEN** the merge base exists and context preparation succeeds.
+- **GIVEN** a changed file contains bounded UTF-8 text, **WHEN** context is
+  prepared, **THEN** the agent reads the exact head bytes.
+- **GIVEN** a changed path is unsafe or unsupported, **WHEN** context is
+  prepared, **THEN** the manifest records the omission and no file appears.
+- **GIVEN** the agent receives the prompt, **WHEN** it generates the page,
+  **THEN** it changes only the draft and invokes only the fixed renderer.
+- **GIVEN** a future agent replaces OpenCode, **WHEN** its adapter starts the
+  walkthrough, **THEN** it receives the same prompt, context, draft path,
+  renderer command, and output contract.
+- **GIVEN** a user copies `.agents/skills/pr-walkthrough/` to another compatible
+  project, **WHEN** the user runs the skill, **THEN** its generation scripts,
+  renderer assets, and focused tests do not require repository-root helper
+  files.
 - **GIVEN** a maintainer adds the `generate-pr-walkthrough` label, **WHEN** the
   label-triggered walkthrough job runs, **THEN** it regenerates the current PR
   head and updates the corresponding R2 object and job-summary URL.
