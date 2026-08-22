@@ -68,7 +68,11 @@ test.describe("Mobile saved-layout confirmation", () => {
     await session.waitForLoad();
     const presetTrigger = testPage.getByTestId("layout-preset-trigger");
     await expect(presetTrigger).toBeVisible({ timeout: 30_000 });
+    await expect(presetTrigger).toHaveAccessibleName("Saved Layouts");
     await presetTrigger.tap();
+    await expect(testPage.getByTestId("layout-reset-item")).toHaveCount(0);
+    await expect(testPage.getByTestId("layout-preset-item")).toHaveCount(0);
+    await expect(testPage.getByText("Save current layout...", { exact: true })).toHaveCount(0);
 
     const deleteAction = testPage.locator(
       '[data-testid="layout-saved-delete"][data-layout-id="mobile-layout-to-delete"]',

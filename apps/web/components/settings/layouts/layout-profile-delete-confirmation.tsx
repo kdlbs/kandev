@@ -32,6 +32,10 @@ export function LayoutProfileDeleteConfirmation({
   const description = profile.is_default
     ? t("settings:theBuiltInDefaultLayoutWill")
     : t("settings:thisProfileWillBeRemovedWhen");
+  const cancelInlineDelete = () => {
+    onOpenChange(false);
+    queueMicrotask(() => anchorRef.current?.focus());
+  };
 
   if (!isFinePointer) {
     if (!open)
@@ -46,7 +50,7 @@ export function LayoutProfileDeleteConfirmation({
         confirmLabel={t("settings:delete")}
         confirmAriaLabel={title}
         confirmTestId="layout-profile-delete-confirm"
-        onCancel={() => onOpenChange(false)}
+        onCancel={cancelInlineDelete}
         onClose={() => onOpenChange(false)}
         onConfirm={onConfirm}
       />

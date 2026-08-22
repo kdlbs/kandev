@@ -43,6 +43,7 @@ export function SavedLayoutDeleteConfirmation({
       confirmAriaLabel={t("task:delete2", { name: layout.name })}
       confirmTestId="layout-saved-delete-confirm"
       testId="layout-saved-delete-confirm-popover"
+      confirmationBoundary
       onOpenChange={onOpenChange}
       onConfirm={() => onConfirm(layout.id)}
     />

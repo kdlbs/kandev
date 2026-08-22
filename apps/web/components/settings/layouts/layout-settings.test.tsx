@@ -133,6 +133,9 @@ describe("LayoutSettings deletion confirmation", () => {
 
     fireEvent.click(within(inline).getByRole("button", { name: "settings:cancel" }));
     expect(mocks.deleteSelected).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByTestId(DELETE_PROFILE_TEST_ID)),
+    );
 
     fireEvent.click(screen.getByTestId(DELETE_PROFILE_TEST_ID));
     fireEvent.click(

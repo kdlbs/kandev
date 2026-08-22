@@ -22,6 +22,7 @@ export type ActionConfirmPopoverProps = {
   confirmAriaLabel?: string;
   confirmTestId?: string;
   testId?: string;
+  confirmationBoundary?: boolean;
   onOpenChange: (open: boolean) => void;
   onCancel?: () => void;
   onConfirm: () => void | Promise<void>;
@@ -45,6 +46,7 @@ export function ActionConfirmPopover({
   confirmAriaLabel,
   confirmTestId,
   testId = "action-confirm-popover",
+  confirmationBoundary = false,
   onOpenChange,
   onCancel,
   onConfirm,
@@ -104,6 +106,7 @@ export function ActionConfirmPopover({
         confirmAriaLabel={confirmAriaLabel}
         confirmTestId={confirmTestId}
         testId={testId}
+        confirmationBoundary={confirmationBoundary}
         cancelRef={cancelRef}
         focusBoundaryRef={focusBoundaryRef}
         confirmedRef={confirmedRef}
@@ -125,6 +128,7 @@ type ActionConfirmPopoverContentProps = {
   confirmAriaLabel?: string;
   confirmTestId?: string;
   testId: string;
+  confirmationBoundary: boolean;
   cancelRef: RefObject<HTMLButtonElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
   confirmedRef: { current: boolean };
@@ -143,6 +147,7 @@ function ActionConfirmPopoverContent({
   confirmAriaLabel,
   confirmTestId,
   testId,
+  confirmationBoundary,
   cancelRef,
   focusBoundaryRef,
   confirmedRef,
@@ -156,6 +161,7 @@ function ActionConfirmPopoverContent({
       aria-labelledby={titleId}
       aria-describedby={description ? descriptionId : undefined}
       data-testid={testId}
+      data-confirmation-boundary={confirmationBoundary ? "" : undefined}
       side="bottom"
       align="end"
       sideOffset={8}
