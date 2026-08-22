@@ -27,7 +27,6 @@ import { TaskRowMetadata } from "./task-row-plugin-slots";
 import { classifyTask } from "./task-classify";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
-import { TaskTitleHoverCard } from "@/components/task/task-title-hover-card";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
 import { TaskMenuButton } from "./task-item-menu-button";
@@ -325,21 +324,6 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
   );
 }
 
-function TaskItemTitle({ taskId, title }: { taskId?: string; title: string }) {
-  // w-full: ScrollOnOverflow's root is inline-block, so once it sits inside
-  // the title-preview trigger's <button> (task-title-hover-card.tsx) rather
-  // than being the flex row's direct child, shrink-to-fit sizing lets it grow
-  // past the button's flex-shrunk width instead of clipping to it — losing
-  // the overflow the hover-scroll marquee depends on.
-  const content = <ScrollOnOverflow className="min-w-0 w-full">{title}</ScrollOnOverflow>;
-  if (!taskId) return content;
-  return (
-    <TaskTitleHoverCard taskId={taskId} title={title} side="right" align="start">
-      {content}
-    </TaskTitleHoverCard>
-  );
-}
-
 function TaskItemContent({
   title,
   autopilot,
@@ -389,7 +373,7 @@ function TaskItemContent({
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
-        <TaskItemTitle taskId={taskId} title={title} />
+        <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
         <TaskItemLeadingBadges
           autopilot={autopilot}
           isPinned={isPinned}
