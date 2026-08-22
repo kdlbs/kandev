@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-07-26
-updated: 2026-08-21
+updated: 2026-08-22
 owner: Kandev
 ---
 
@@ -77,6 +77,10 @@ action unless they inspect backend logs.
 - Kandev caches successful registry status checks for six hours per package and
   failed checks for fifteen minutes. Opening the version dialog still performs
   an authoritative live preview.
+- The authoritative preview normalizes valid stable package metadata returned
+  by supported npm CLI versions, including npm versions that wrap a
+  multi-field `npm view` response in a one-element array. A valid response
+  always produces the same stable version catalogue for the operator.
 
 The managed package set is:
 
@@ -323,6 +327,9 @@ produces a repair job.
 ## Failure and recovery behavior
 
 - Registry failure during preview keeps approval disabled and runs no command.
+- A valid package metadata response in a supported npm CLI output shape is not
+  treated as a registry failure. Malformed, empty, or ambiguous metadata still
+  fails closed and keeps approval disabled.
 - Registry failure or target disappearance after approval fails before staging.
 - Preparation failure invalidates only the deterministic `_npx` tree for the
   exact `package@version` and retries once. Kandev never runs a global npm cache
@@ -442,6 +449,10 @@ produces a repair job.
 - **GIVEN** the update-status lookup fails for one managed package, **WHEN** the
   Agents settings page loads, **THEN** that package shows no blue dot, its
   update control remains usable, and other package statuses still render.
+- **GIVEN** npm returns valid stable package metadata in either its object form
+  or a supported one-element collection form, **WHEN** the operator opens a
+  managed runtime update dialog, **THEN** the dialog lists the stable versions,
+  selects npm's stable latest version, and does not show a resolution error.
 - **GIVEN** a dotted update control on a phone, **WHEN** the operator taps it,
   **THEN** the existing update drawer opens and shows a live authoritative
   preview without requiring hover.

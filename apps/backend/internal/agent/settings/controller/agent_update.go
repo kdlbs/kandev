@@ -237,6 +237,11 @@ type RuntimeVersionMetadata struct {
 	Latest   string
 }
 
+type npmRuntimeMetadata struct {
+	Versions []string          `json:"versions"`
+	DistTags map[string]string `json:"dist-tags"`
+}
+
 // RuntimeVersionResolver obtains package metadata without executing a package.
 type RuntimeVersionResolver interface {
 	ResolveVersions(context.Context, string) (RuntimeVersionMetadata, error)
@@ -337,12 +342,9 @@ func (u *hostRuntimeUpdater) ResolveVersions(
 	if err != nil {
 		return RuntimeVersionMetadata{}, err
 	}
-	var metadata struct {
-		Versions []string          `json:"versions"`
-		DistTags map[string]string `json:"dist-tags"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &metadata); err != nil {
-		return RuntimeVersionMetadata{}, fmt.Errorf("parse npm runtime metadata: %w", err)
+	metadata, err := parseNPMRuntimeMetadata(output)
+	if err != nil {
+		return RuntimeVersionMetadata{}, err
 	}
 	latest := ""
 	if metadata.DistTags != nil {
@@ -352,6 +354,26 @@ func (u *hostRuntimeUpdater) ResolveVersions(
 		return RuntimeVersionMetadata{}, errors.New("npm latest runtime version is empty")
 	}
 	return RuntimeVersionMetadata{Versions: metadata.Versions, Latest: latest}, nil
+}
+
+func parseNPMRuntimeMetadata(output string) (npmRuntimeMetadata, error) {
+	payload := []byte(strings.TrimSpace(output))
+	if len(payload) > 0 && payload[0] == '[' {
+		var records []npmRuntimeMetadata
+		if err := json.Unmarshal(payload, &records); err != nil {
+			return npmRuntimeMetadata{}, fmt.Errorf("parse npm runtime metadata: %w", err)
+		}
+		if len(records) != 1 {
+			return npmRuntimeMetadata{}, errors.New("parse npm runtime metadata: expected one record")
+		}
+		return records[0], nil
+	}
+
+	var metadata npmRuntimeMetadata
+	if err := json.Unmarshal(payload, &metadata); err != nil {
+		return npmRuntimeMetadata{}, fmt.Errorf("parse npm runtime metadata: %w", err)
+	}
+	return metadata, nil
 }
 
 func runDirectCommandOutput(ctx context.Context, command agents.Command) (string, error) {
