@@ -401,6 +401,9 @@ func TestSpriteCreateInstanceRequestMapsEveryField(t *testing.T) {
 	if got.ID != "instance-1" || got.WorkspacePath != spritesWorkspacePath {
 		t.Fatalf("request = %+v", got)
 	}
+	if !equalStrings(got.WorkspaceSourceRoots, []string{spritesWorkspacePath}) {
+		t.Fatalf("WorkspaceSourceRoots = %v, want the sprite workspace only", got.WorkspaceSourceRoots)
+	}
 	if got.AgentType != "codex" || !got.RequiresProcessKill {
 		t.Fatalf("agent fields = %+v", got)
 	}

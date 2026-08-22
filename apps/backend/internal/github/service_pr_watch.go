@@ -994,7 +994,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		)
 	}
 
-	return s.persistAndPublishTaskPRSync(ctx, tp, changed, status.OutcomeFieldsPopulated)
+	return s.persistAndPublishTaskPRSync(ctx, tp, changed, status, taskID)
 }
 
 // persistAndPublishTaskPRSync writes the reconciled sync state and, on
@@ -1009,12 +1009,12 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 // what a subsequent read of the row returns (codex [P2]). Split out of
 // SyncTaskPR to keep that function within the repo's complexity limits and
 // to make the re-read-before-publish behavior directly testable.
-func (s *Service) persistAndPublishTaskPRSync(ctx context.Context, tp *TaskPR, changed, outcomeFieldsPopulated bool) error {
+func (s *Service) persistAndPublishTaskPRSync(ctx context.Context, tp *TaskPR, changed bool, status *PRStatus, taskID string) error {
 	// AC-38/AC-18c: the counter fires at the populated-ness decision point,
 	// before the write is attempted, and survives write failure — it
 	// measures what the sync observed, not whether the store call happened
 	// to succeed.
-	incTaskPROutcomeSync(outcomeFieldsPopulated)
+	incTaskPROutcomeSync(status.OutcomeFieldsPopulated)
 	if err := s.store.UpdateTaskPR(ctx, tp); err != nil {
 		return fmt.Errorf("update task PR: %w", err)
 	}

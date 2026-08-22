@@ -24,9 +24,50 @@ type MaterializeRepositoryRequest struct {
 
 // MaterializeRepositoryResponse reports the adopted workspace subdirectory.
 type MaterializeRepositoryResponse struct {
-	Destination string `json:"destination"`
-	Reused      bool   `json:"reused,omitempty"`
-	Error       string `json:"error,omitempty"`
+	Destination         string `json:"destination"`
+	Reused              bool   `json:"reused,omitempty"`
+	GitMetadataAttested bool   `json:"git_metadata_attested,omitempty"`
+	Error               string `json:"error,omitempty"`
+}
+
+// GitMetadataAttestationResponse reports agentctl's final validation of its
+// server-owned checkout allowlist. Its executor paths stay on the authenticated
+// lifecycle control channel and are never sent to a user-facing error.
+type GitMetadataAttestationResponse struct {
+	Attested  bool                     `json:"attested"`
+	Checkouts []GitMetadataAttestation `json:"checkouts,omitempty"`
+	Error     string                   `json:"error,omitempty"`
+}
+
+// GitMetadataAttestation is an agentctl-approved executor checkout and its
+// regular Git directory. Lifecycle uses only these returned pairs when it
+// renders a clone policy.
+type GitMetadataAttestation struct {
+	CheckoutPath string `json:"checkout_path"`
+	GitDir       string `json:"git_dir"`
+}
+
+// AttestWorkspaceGitMetadata asks agentctl to validate the regular .git
+// directory in its current workspace before lifecycle configures a mutable
+// agent. This is the executor-side attestation boundary for clone launches.
+func (c *Client) AttestWorkspaceGitMetadata(ctx context.Context) ([]GitMetadataAttestation, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/workspace/attest-git-metadata", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create workspace Git metadata attestation request: %w", err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("send workspace Git metadata attestation request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var response GitMetadataAttestationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("decode workspace Git metadata attestation response: %w", err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices || !response.Attested || len(response.Checkouts) == 0 {
+		return nil, fmt.Errorf("workspace Git metadata attestation failed")
+	}
+	return response.Checkouts, nil
 }
 
 // RemoveMaterializedRepositoryRequest identifies an owned checkout for

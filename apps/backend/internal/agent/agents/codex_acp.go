@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -23,6 +24,7 @@ var (
 	_ PassthroughAgent       = (*CodexACP)(nil)
 	_ InferenceAgent         = (*CodexACP)(nil)
 	_ ManagedNPMRuntimeAgent = (*CodexACP)(nil)
+	_ FilesystemPolicyAgent  = (*CodexACP)(nil)
 )
 
 // CodexACP implements Agent for the Agent Client Protocol codex-acp package.
@@ -190,6 +192,46 @@ func (a *CodexACP) BillingType() usage.BillingType { return codexBillingType() }
 
 func (a *CodexACP) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings
+}
+
+// FilesystemPolicyDescriptor returns the Codex ACP bridge's supported session
+// configuration overlay. CODEX_CONFIG is parsed by the bridge as JSON and
+// merged into the Codex session configuration; the lifecycle renderer owns all
+// concrete paths and never relies on a repository-provided config file.
+func (a *CodexACP) FilesystemPolicyDescriptor() (*FilesystemPolicyDescriptor, bool) {
+	return &FilesystemPolicyDescriptor{
+		ConfigEnvKey: "CODEX_CONFIG",
+		Renderer:     codexACPFilesystemPolicyRenderer{},
+	}, true
+}
+
+type codexACPFilesystemPolicyRenderer struct{}
+
+func (codexACPFilesystemPolicyRenderer) Render(policy FilesystemPolicy) (map[string]any, error) {
+	if policy.Name == "" {
+		return nil, fmt.Errorf("filesystem policy name is required")
+	}
+	rules := make(map[string]string, len(policy.Rules))
+	for _, rule := range policy.Rules {
+		if rule.Path == "" {
+			return nil, fmt.Errorf("filesystem policy path is required")
+		}
+		switch rule.Access {
+		case FilesystemAccessRead, FilesystemAccessWrite, FilesystemAccessDeny:
+			rules[rule.Path] = string(rule.Access)
+		default:
+			return nil, fmt.Errorf("invalid filesystem access %q", rule.Access)
+		}
+	}
+	return map[string]any{
+		"default_permissions": policy.Name,
+		"permissions": map[string]any{
+			policy.Name: map[string]any{
+				"extends":    ":workspace",
+				"filesystem": rules,
+			},
+		},
+	}, nil
 }
 
 // InferenceConfig returns configuration for one-shot inference using ACP.

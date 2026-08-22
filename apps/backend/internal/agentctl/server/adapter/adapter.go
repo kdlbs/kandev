@@ -59,6 +59,13 @@ type OneShotAdapter interface {
 	IsOneShot() bool
 }
 
+// AdditionalDirectoriesSessioner is implemented by ACP adapters that can
+// negotiate per-session filesystem roots with the connected provider.
+// Callers must pass only server-owned, canonical roots.
+type AdditionalDirectoriesSessioner interface {
+	NewSessionWithAdditionalDirectories(context.Context, []types.McpServer, []string) (string, error)
+}
+
 // OneShotConfig holds command configuration for one-shot adapters that manage
 // their own subprocess lifecycle. The adapter spawns a new process per prompt.
 type OneShotConfig struct {

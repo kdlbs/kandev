@@ -136,7 +136,7 @@ func isTrustedExecutorConfigKey(k string) bool { return trustedExecutorConfigKey
 // values the caller passed in req.Metadata. Other keys (per-task settings
 // like setup_script, base_branch, repo_setup_script, etc.) keep the caller's
 // value when present.
-func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktreeBranch string) map[string]interface{} {
+func buildLaunchMetadata(req *LaunchRequest, _ string, worktreeID, worktreeBranch string) map[string]interface{} {
 	metadata := make(map[string]interface{})
 	for k, v := range req.Metadata {
 		metadata[k] = v
@@ -153,9 +153,9 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 			metadata[k] = v
 		}
 	}
-	if mainRepoGitDir != "" {
-		metadata[MetadataKeyMainRepoGitDir] = mainRepoGitDir
-	}
+	// MainRepoGitDir was a legacy single-repository Docker grant. It remains
+	// accepted by the preparation compatibility DTO, but must never cross the
+	// launch boundary: every executor receives only GitMetadataProjections.
 	if worktreeID != "" {
 		metadata[MetadataKeyWorktreeID] = worktreeID
 	}
@@ -693,7 +693,6 @@ func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentPro
 	if req.TurnID != "" {
 		reqWithWorktree.Metadata["prompt_turn_id"] = req.TurnID
 	}
-
 	if err := mergeRouteOverrideEnv(&reqWithWorktree); err != nil {
 		return LaunchRequest{}, "", err
 	}
@@ -797,35 +796,19 @@ func (r *prepareProgressRecorder) recordStep(step PrepareStep, index int) {
 
 // launchBuildExecutorRequest resolves MCP servers, builds the ExecutorCreateRequest,
 // and creates the runtime instance.
-func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID string, reqWithWorktree *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo, mainRepoGitDir, worktreeID, worktreeBranch string, onProgress PrepareProgressCallback) (*ExecutorCreateRequest, *ExecutorInstance, ExecutorBackend, error) {
+func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID string, reqWithWorktree *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo, mainRepoGitDir, worktreeID, worktreeBranch string, gitMetadata []*worktree.GitMetadataProjection, onProgress PrepareProgressCallback) (*ExecutorCreateRequest, *ExecutorInstance, ExecutorBackend, error) {
 	rt, err := m.getExecutorBackend(reqWithWorktree.ExecutorType)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("no runtime configured: %w", err)
 	}
-
 	env, err := m.buildEnvForExecution(ctx, executionID, reqWithWorktree, agentConfig, profileInfo)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build launch environment: %w", err)
 	}
-
-	acpMcpServers, err := m.resolveMcpServersWithParams(ctx, executionProfileID(reqWithWorktree), reqWithWorktree.Metadata, agentConfig)
+	mcpServers, err := m.resolveMcpServerConfigs(ctx, reqWithWorktree, agentConfig)
 	if err != nil {
 		m.logger.Warn("failed to resolve MCP servers for launch", zap.Error(err))
 	}
-
-	var mcpServers []McpServerConfig
-	for _, srv := range acpMcpServers {
-		mcpServers = append(mcpServers, McpServerConfig{
-			Name:    srv.Name,
-			URL:     srv.URL,
-			Type:    srv.Type,
-			Command: srv.Command,
-			Args:    srv.Args,
-			Env:     srv.Env,
-			Headers: srv.Headers,
-		})
-	}
-
 	metadata := buildLaunchMetadata(reqWithWorktree, mainRepoGitDir, worktreeID, worktreeBranch)
 	remoteContributions, err := collectRemoteContributions(reqWithWorktree)
 	if err != nil {
@@ -849,10 +832,6 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		metadata[MetadataKeyContributionDestinations] = contributionDestinations
 	}
 
-	var autoApproveOverride *bool
-	if profileInfo != nil {
-		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
-	}
 	execReq := &ExecutorCreateRequest{
 		InstanceID:                     executionID,
 		TaskID:                         reqWithWorktree.TaskID,
@@ -863,11 +842,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		PromptTurnID:                   reqWithWorktree.TurnID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
-		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
+		WorkspaceSourceRoots:           taskWorkspaceSourceRoots(reqWithWorktree.WorkspacePath, reqWithWorktree.WorkspaceFolders, gitMetadata),
+		GitMetadataRequirement:         cloneGitMetadataRequirement(rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) > 0),
+		GitMetadataProjections:         gitMetadata,
 		Protocol:                       string(agentConfig.Runtime().Protocol),
 		Env:                            env,
 		AutoApprovePermissions:         profileInfo != nil && profileInfo.AutoApprove,
-		AutoApprovePermissionsOverride: autoApproveOverride,
+		AutoApprovePermissionsOverride: autoApproveOverride(reqWithWorktree, profileInfo),
 		Metadata:                       metadata,
 		AgentConfig:                    agentConfig,
 		ApprovedSecretEnvKeys:          append([]string(nil), reqWithWorktree.ApprovedSecretEnvKeys...),
@@ -884,18 +865,56 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		ContributionDestinations:       contributionDestinations,
 		ComparisonTargets:              comparisonTargets,
 	}
-
-	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
-	defer launchCancel()
-	if err := resumeRemoteInstancePreflight(launchCtx, rt, execReq); err != nil {
+	execInstance, err := createLaunchInstance(ctx, rt, execReq)
+	if err != nil {
 		return nil, nil, nil, err
 	}
-
-	execInstance, err := rt.CreateInstance(launchCtx, execReq)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create execution: %w", err)
-	}
 	return execReq, execInstance, rt, nil
+}
+
+// resolveMcpServerConfigs resolves MCP server parameters and converts them
+// to McpServerConfig structs for the executor request.
+func (m *Manager) resolveMcpServerConfigs(ctx context.Context, req *LaunchRequest, agentConfig agents.Agent) ([]McpServerConfig, error) {
+	acpMcpServers, err := m.resolveMcpServersWithParams(ctx, executionProfileID(req), req.Metadata, agentConfig)
+	if err != nil {
+		return nil, err
+	}
+	mcpServers := make([]McpServerConfig, 0, len(acpMcpServers))
+	for _, srv := range acpMcpServers {
+		mcpServers = append(mcpServers, McpServerConfig{
+			Name:    srv.Name,
+			URL:     srv.URL,
+			Type:    srv.Type,
+			Command: srv.Command,
+			Args:    srv.Args,
+			Env:     srv.Env,
+			Headers: srv.Headers,
+		})
+	}
+	return mcpServers, nil
+}
+
+func autoApproveOverride(reqWithWorktree *LaunchRequest, profileInfo *AgentProfileInfo) *bool {
+	if profileInfo != nil {
+		return boolPtr(profileInfo.AutoApprove)
+	}
+	return nil
+}
+
+func createLaunchInstance(ctx context.Context, rt ExecutorBackend, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
+	defer launchCancel()
+	if err := preflightGitMetadataProjection(launchCtx, rt, req); err != nil {
+		return nil, err
+	}
+	if err := resumeRemoteInstancePreflight(launchCtx, rt, req); err != nil {
+		return nil, err
+	}
+	instance, err := rt.CreateInstance(launchCtx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create execution: %w", err)
+	}
+	return instance, nil
 }
 
 func resumeRemoteInstancePreflight(ctx context.Context, rt ExecutorBackend, req *ExecutorCreateRequest) error {
@@ -1059,6 +1078,16 @@ func (m *Manager) launchApplyPrepareResult(
 	result *EnvPrepareResult,
 	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch *string,
 ) error {
+	var ignored []*worktree.GitMetadataProjection
+	return m.launchApplyPrepareResultWithGitMetadata(req, result, workspacePath, mainRepoGitDir, worktreeID, worktreeBranch, &ignored)
+}
+
+func (m *Manager) launchApplyPrepareResultWithGitMetadata(
+	req *LaunchRequest,
+	result *EnvPrepareResult,
+	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch *string,
+	gitMetadata *[]*worktree.GitMetadataProjection,
+) error {
 	if !result.Success {
 		m.eventPublisher.PublishPrepareCompleted(req.SessionID, &PrepareCompletedEventPayload{
 			TaskID:       req.TaskID,
@@ -1095,6 +1124,11 @@ func (m *Manager) launchApplyPrepareResult(
 	if result.WorktreeBranch != "" {
 		*worktreeBranch = result.WorktreeBranch
 	}
+	projections, err := projectionsFromPrepareResult(result)
+	if err != nil {
+		return err
+	}
+	*gitMetadata = projections
 	return nil
 }
 
@@ -1126,6 +1160,66 @@ func (m *Manager) publishLaunchPrepareCompleted(req *LaunchRequest, result *EnvP
 		payload.ErrorMessage = err.Error()
 	}
 	m.eventPublisher.PublishPrepareCompleted(req.SessionID, payload)
+}
+
+func gitMetadataProjectionForResumedWorktree(req *LaunchRequest, workspacePath string) ([]*worktree.GitMetadataProjection, error) {
+	if req == nil || !req.UseWorktree || workspacePath == "" {
+		return nil, nil
+	}
+	specs := req.RepoSpecs()
+	if len(specs) <= 1 {
+		if req.RepositoryPath == "" {
+			return nil, nil
+		}
+		projection, err := worktree.ResolveGitMetadataForRepository(workspacePath, req.RepositoryPath)
+		if err != nil {
+			return nil, errors.New(gitMetadataProjectionInvalid)
+		}
+		return []*worktree.GitMetadataProjection{projection}, nil
+	}
+
+	projections := make([]*worktree.GitMetadataProjection, 0, len(specs))
+	seen := make(map[string]struct{}, len(specs))
+	for _, spec := range specs {
+		checkoutPath, err := resumedWorktreeCheckoutPath(workspacePath, spec)
+		if err != nil {
+			return nil, errors.New(gitMetadataProjectionInvalid)
+		}
+		if _, exists := seen[checkoutPath]; exists {
+			return nil, errors.New(gitMetadataProjectionInvalid)
+		}
+		projection, err := worktree.ResolveGitMetadataForRepository(checkoutPath, spec.RepositoryPath)
+		if err != nil {
+			return nil, errors.New(gitMetadataProjectionInvalid)
+		}
+		seen[checkoutPath] = struct{}{}
+		projections = append(projections, projection)
+	}
+	if err := validateGitMetadataProjections(projections); err != nil {
+		return nil, errors.New(gitMetadataProjectionInvalid)
+	}
+	return projections, nil
+}
+
+func resumedWorktreeCheckoutPath(taskRoot string, spec RepoLaunchSpec) (string, error) {
+	if spec.WorktreePath != "" {
+		return spec.WorktreePath, nil
+	}
+	if spec.RepositoryPath == "" {
+		return "", errors.New(gitMetadataProjectionInvalid)
+	}
+	repoName := worktree.SanitizeRepoDirName(spec.RepoName)
+	if repoName == "" {
+		return "", errors.New(gitMetadataProjectionInvalid)
+	}
+	if spec.BranchSlug != "" {
+		branchSlug := worktree.SanitizeBranchSlug(spec.BranchSlug)
+		if branchSlug == "" {
+			return "", errors.New(gitMetadataProjectionInvalid)
+		}
+		repoName += "-" + branchSlug
+	}
+	return filepath.Join(taskRoot, repoName), nil
 }
 
 // Launch launches a new agent for a task. Concurrent calls for the same
@@ -1322,6 +1416,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 
 	// 4. Resolve workspace path (non-worktree executors use this directly)
 	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch := m.launchResolveWorkspacePath(ctx, req)
+	var gitMetadata []*worktree.GitMetadataProjection
 	owner := ownedDirectoryLinkOwner(req.TaskID, req.TaskDirName)
 	if err := reconcileWorkspaceSources(ctx, workspacePath, req.WorkspaceFolders, owner); err != nil {
 		return nil, err
@@ -1362,7 +1457,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	}
 	if prepResult != nil {
 		progressRecorder.Merge(prepResult.Steps)
-		if err := m.launchApplyPrepareResult(&reqWithWorktree, prepResult, &workspacePath, &mainRepoGitDir, &worktreeID, &worktreeBranch); err != nil {
+		if err := m.launchApplyPrepareResultWithGitMetadata(&reqWithWorktree, prepResult, &workspacePath, &mainRepoGitDir, &worktreeID, &worktreeBranch, &gitMetadata); err != nil {
 			return nil, err
 		}
 		// The preparer owns the final workspace location for worktree-backed
@@ -1370,6 +1465,13 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		// state; otherwise standalone receives the repository path (or an empty
 		// path) that was present before preparation completed.
 		reqWithWorktree.WorkspacePath = workspacePath
+	}
+	if req.ACPSessionID != "" && len(gitMetadata) == 0 {
+		gitMetadata, err = gitMetadataProjectionForResumedWorktree(&reqWithWorktree, workspacePath)
+		if err != nil {
+			m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
+			return nil, err
+		}
 	}
 
 	// 6b. Deploy per-profile skills + custom prompt (ADR 0005 Wave A).
@@ -1382,7 +1484,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	if req.ACPSessionID == "" {
 		runtimeProgress = progressRecorder.Callback(progressRecorder.Len())
 	}
-	execReq, execInstance, rt, err := m.launchBuildExecutorRequest(ctx, executionID, &reqWithWorktree, agentConfig, profileInfo, mainRepoGitDir, worktreeID, worktreeBranch, runtimeProgress)
+	execReq, execInstance, rt, err := m.launchBuildExecutorRequest(ctx, executionID, &reqWithWorktree, agentConfig, profileInfo, mainRepoGitDir, worktreeID, worktreeBranch, gitMetadata, runtimeProgress)
 	if err != nil {
 		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
 		return nil, err
@@ -1393,7 +1495,11 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	if rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) > 1 && execInstance != nil && execInstance.Client != nil {
 		projection, projectionErr := remoteWorkspaceProjectionFromLaunch(&reqWithWorktree)
 		if projectionErr == nil {
-			projectionErr = materializeWorkspaceRepositories(ctx, execInstance.Client, projection)
+			roots := remoteWorkspaceSourceRoots(execInstance.WorkspacePath, projection)
+			projectionErr = materializeWorkspaceRepositories(ctx, execInstance.Client, projection, roots)
+			if projectionErr == nil {
+				execInstance.WorkspaceSourceRoots = roots
+			}
 		}
 		if projectionErr != nil {
 			_ = rt.StopInstance(context.WithoutCancel(ctx), execInstance, false)
@@ -1401,6 +1507,12 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 			m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
 			return nil, err
 		}
+	}
+	if policyErr := installAttestedCloneGitMetadataPolicy(ctx, execReq, execInstance); policyErr != nil {
+		_ = rt.StopInstance(context.WithoutCancel(ctx), execInstance, false)
+		err = fmt.Errorf("install clone Git metadata policy: %w", policyErr)
+		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
+		return nil, err
 	}
 
 	// Remote executors (Docker, Sprites) clone the workspace inside the

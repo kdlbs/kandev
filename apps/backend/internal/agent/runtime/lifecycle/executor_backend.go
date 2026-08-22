@@ -16,6 +16,7 @@ import (
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -426,8 +427,15 @@ type ExecutorCreateRequest struct {
 	PromptTurnID         string
 	WorkspacePath        string
 	WorkspaceSourceRoots []string
-	Protocol             string
-	Env                  map[string]string
+	// GitMetadataRequirement describes metadata that must be attested by the
+	// executor itself. It deliberately carries no host paths: a clone executor
+	// must validate its canonical checkout before the agent is configured.
+	GitMetadataRequirement GitMetadataRequirement
+	// GitMetadataProjections are fresh, task-owned grants compiled by the
+	// executor; they replace legacy source-repository gitdir metadata.
+	GitMetadataProjections []*worktree.GitMetadataProjection
+	Protocol               string
+	Env                    map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
 	ApprovedSecretEnvKeys  []string
@@ -458,6 +466,35 @@ type ExecutorCreateRequest struct {
 	OnProgress PrepareProgressCallback
 }
 
+// GitMetadataRequirementMode identifies an executor-side metadata policy.
+// Only mutable clone checkouts need this descriptor today; the zero value has
+// no special metadata requirement.
+type GitMetadataRequirementMode string
+
+const gitMetadataRequirementMutableClone GitMetadataRequirementMode = "mutable_clone_checkout"
+
+// GitMetadataRequirement is an explicit, path-free request to attest a
+// mutable clone. It is intentionally distinct from GitMetadataProjections,
+// which carry host-visible worktree metadata for local executors.
+type GitMetadataRequirement struct {
+	Mode GitMetadataRequirementMode
+}
+
+func (r GitMetadataRequirement) RequiresMutableCloneCheckout() bool {
+	return r.Mode == gitMetadataRequirementMutableClone
+}
+
+func requiresCloneGitMetadataPolicy(req *ExecutorCreateRequest) bool {
+	return req != nil && req.GitMetadataRequirement.RequiresMutableCloneCheckout()
+}
+
+func cloneGitMetadataRequirement(required bool) GitMetadataRequirement {
+	if !required {
+		return GitMetadataRequirement{}
+	}
+	return GitMetadataRequirement{Mode: gitMetadataRequirementMutableClone}
+}
+
 // ExecutorInstance represents an agentctl instance created by a runtime.
 // This is returned by the runtime and contains enough info to build an AgentExecution.
 type ExecutorInstance struct {
@@ -479,10 +516,11 @@ type ExecutorInstance struct {
 	StandalonePort       int    // Standalone
 
 	// Common fields
-	WorkspacePath   string
-	Metadata        map[string]interface{}
-	StopReason      string
-	AgentStopFailed bool
+	WorkspacePath        string
+	WorkspaceSourceRoots []string // Canonical executor-visible roots for agentctl workspace operations.
+	Metadata             map[string]interface{}
+	StopReason           string
+	AgentStopFailed      bool
 
 	// AuthToken is the agentctl auth token retrieved via handshake.
 	// Populated by Docker executor for encrypted storage in SecretStore.
@@ -511,6 +549,10 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	if workspacePath == "" {
 		workspacePath = req.WorkspacePath
 	}
+	workspaceSourceRoots := req.WorkspaceSourceRoots
+	if len(ri.WorkspaceSourceRoots) > 0 {
+		workspaceSourceRoots = ri.WorkspaceSourceRoots
+	}
 
 	var historyEnabled bool
 	var agentID string
@@ -523,28 +565,29 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	}
 
 	execution := &AgentExecution{
-		ID:                   ri.InstanceID,
-		RunID:                req.Env["KANDEV_RUN_ID"],
-		TaskID:               req.TaskID,
-		SessionID:            req.SessionID,
-		TaskEnvironmentID:    req.TaskEnvironmentID,
-		AgentProfileID:       req.AgentProfileID,
-		OfficeAgentProfileID: req.OfficeAgentProfileID,
-		promptTurnID:         req.PromptTurnID,
-		AgentID:              agentID,
-		ContainerID:          ri.ContainerID,
-		ContainerIP:          ri.ContainerIP,
-		WorkspacePath:        workspacePath,
-		WorkspaceSourceRoots: append([]string(nil), req.WorkspaceSourceRoots...),
-		RuntimeName:          ri.RuntimeName,
-		Status:               v1.AgentStatusRunning,
-		StartedAt:            time.Now(),
-		metadata:             metadata,
-		agentctl:             ri.Client,
-		standaloneInstanceID: ri.StandaloneInstanceID,
-		standalonePort:       ri.StandalonePort,
-		historyEnabled:       historyEnabled,
-		promptDoneCh:         make(chan PromptCompletionSignal, 1),
+		ID:                     ri.InstanceID,
+		RunID:                  req.Env["KANDEV_RUN_ID"],
+		TaskID:                 req.TaskID,
+		SessionID:              req.SessionID,
+		TaskEnvironmentID:      req.TaskEnvironmentID,
+		AgentProfileID:         req.AgentProfileID,
+		OfficeAgentProfileID:   req.OfficeAgentProfileID,
+		promptTurnID:           req.PromptTurnID,
+		AgentID:                agentID,
+		ContainerID:            ri.ContainerID,
+		ContainerIP:            ri.ContainerIP,
+		WorkspacePath:          workspacePath,
+		WorkspaceSourceRoots:   append([]string(nil), workspaceSourceRoots...),
+		GitMetadataProjections: append([]*worktree.GitMetadataProjection(nil), req.GitMetadataProjections...),
+		RuntimeName:            ri.RuntimeName,
+		Status:                 v1.AgentStatusRunning,
+		StartedAt:              time.Now(),
+		metadata:               metadata,
+		agentctl:               ri.Client,
+		standaloneInstanceID:   ri.StandaloneInstanceID,
+		standalonePort:         ri.StandalonePort,
+		historyEnabled:         historyEnabled,
+		promptDoneCh:           make(chan PromptCompletionSignal, 1),
 	}
 	execution.setRuntimeEnvironment(req.Env)
 	return execution

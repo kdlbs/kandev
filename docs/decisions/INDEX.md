@@ -95,6 +95,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-15-portable-agent-configuration-bundles | [Use Explicit Portable Agent Configuration Bundles](2026-08-15-portable-agent-configuration-bundles.md) | accepted | backend, frontend, protocol, security | 2026-08-15 |
 | 2026-08-15-executor-authoritative-model-selection | [Let the Executor Own Model Selection](2026-08-15-executor-authoritative-model-selection.md) | accepted | backend, frontend, protocol, persistence | 2026-08-15 |
 | 2026-08-18-context-reset-preserves-runtime-configuration | [Preserve ACP Runtime Configuration Across Context Reset](2026-08-18-context-reset-preserves-runtime-configuration.md) | accepted | backend, protocol, workflow | 2026-08-18 |
+| 2026-08-20-clone-policy-and-acp-workspace-roots | [Attest Clone Policies and Negotiate ACP Roots](2026-08-20-clone-policy-and-acp-workspace-roots.md) | accepted | backend, protocol, security | 2026-08-20 |
 | 2026-07-28-coarse-running-busy-signal | [Restore Coarse Running Prompt Admission](2026-07-28-coarse-running-busy-signal.md) | accepted | backend, frontend, protocol | 2026-07-28 |
 | 2026-07-29-agent-stall-user-controlled-recovery | [Keep Agent Stall Recovery User Controlled](2026-07-29-agent-stall-user-controlled-recovery.md) | accepted | backend, frontend, protocol | 2026-07-29 |
 | 2026-07-29-quarantine-retention-override | [Make Quarantine Retention Overridable but Visible](2026-07-29-quarantine-retention-override.md) | accepted | backend, frontend | 2026-07-29 |
@@ -181,6 +182,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-17-separate-task-activity-from-summary-freshness | [Separate Task Activity From Summary Freshness](2026-08-17-separate-task-activity-from-summary-freshness.md) | accepted | backend, frontend, protocol | 2026-08-17 |
 | 2026-08-17-release-pr-ruleset-bypass | [Give Stable Release PRs an Administrator Token Bypass](2026-08-17-release-pr-ruleset-bypass.md) | accepted | infra, workflow, security | 2026-08-17 |
 | 2026-08-18-never-started-agent-stall-terminal | [Treat Never-Started Agent Stalls as Terminal](2026-08-18-never-started-agent-stall-terminal.md) | accepted | backend, frontend, protocol | 2026-08-18 |
+| 2026-08-19-task-scoped-git-metadata-projection | [Task-Scoped Git Metadata Projection](2026-08-19-task-scoped-git-metadata-projection.md) | accepted | backend, security, workflow | 2026-08-19 |
 | 2026-08-18-plugin-task-row-metadata | [Keep Task Row Plugin Metadata Generic](2026-08-18-plugin-task-row-metadata.md) | accepted | frontend | 2026-08-18 |
 | 2026-08-20-settings-prompt-editor-provider-ownership | [Settings Prompt Editors Own Monaco Completion Providers](2026-08-20-settings-prompt-editor-provider-ownership.md) | accepted | frontend | 2026-08-20 |
 | 2026-08-14-kandev-native-agent-rich-output | [Keep Agent Rich Output Host Native](2026-08-14-kandev-native-agent-rich-output.md) | accepted | backend, frontend, protocol, security | 2026-08-14 |

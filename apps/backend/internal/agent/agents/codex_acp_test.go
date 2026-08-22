@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -62,5 +63,54 @@ func TestCodexACPSessionDirTemplate(t *testing.T) {
 	}
 	if cfg.SessionDirTarget != "/root/.codex" {
 		t.Fatalf("SessionDirTarget = %q, want %q", cfg.SessionDirTarget, "/root/.codex")
+	}
+}
+
+func TestCodexACPRendersNarrowFilesystemPolicy(t *testing.T) {
+	policy, ok := NewCodexACP().FilesystemPolicyDescriptor()
+	if !ok {
+		t.Fatal("Codex ACP must advertise a filesystem-policy renderer")
+	}
+
+	config, err := policy.Renderer.Render(FilesystemPolicy{
+		Name: "kandev_task_git_metadata",
+		Rules: []FilesystemPolicyRule{
+			{Path: ":minimal", Access: FilesystemAccessRead},
+			{Path: "/task", Access: FilesystemAccessWrite},
+			{Path: "/source/.git", Access: FilesystemAccessRead},
+			{Path: "/source/.git/worktrees", Access: FilesystemAccessDeny},
+			{Path: "/source/.git/worktrees/task", Access: FilesystemAccessWrite},
+			{Path: "/source/.git/objects", Access: FilesystemAccessWrite},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		t.Fatalf("marshal rendered policy: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal rendered policy: %v", err)
+	}
+	if got := decoded["default_permissions"]; got != "kandev_task_git_metadata" {
+		t.Fatalf("default_permissions = %#v, want task profile", got)
+	}
+	permissions := decoded["permissions"].(map[string]any)
+	profile := permissions["kandev_task_git_metadata"].(map[string]any)
+	if got := profile["extends"]; got != ":workspace" {
+		t.Fatalf("profile extends = %#v, want :workspace", got)
+	}
+	rules := profile["filesystem"].(map[string]any)
+	if got := rules["/source/.git"]; got != "read" {
+		t.Fatalf("common Git root = %#v, want read", got)
+	}
+	if got := rules["/source/.git/worktrees"]; got != "deny" {
+		t.Fatalf("worktrees parent = %#v, want deny", got)
+	}
+	if got := rules["/source/.git/worktrees/task"]; got != "write" {
+		t.Fatalf("owned worktree metadata = %#v, want write", got)
 	}
 }

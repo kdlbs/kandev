@@ -439,9 +439,12 @@ type WorkspaceFolderSpec struct{ Name, LocalPath string }
 // the orchestrator package does not need to import lifecycle types into its
 // public API.
 type RepoSpec struct {
-	TaskRepositoryID        string
-	RepositoryID            string
-	RepositoryPath          string
+	TaskRepositoryID string
+	RepositoryID     string
+	RepositoryPath   string
+	// WorktreePath is the task environment's persisted checkout path. It is
+	// populated for worktree resumes, not fresh materialization.
+	WorktreePath string
 	RepositoryURL           string
 	RepoName                string
 	BaseBranch              string

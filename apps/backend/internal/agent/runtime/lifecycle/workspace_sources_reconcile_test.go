@@ -15,6 +15,23 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+func TestTaskWorkspaceSourceRootsExcludesMaterializationSourceRepository(t *testing.T) {
+	sourceRepository := t.TempDir()
+	taskCheckout := t.TempDir()
+	projection := &worktree.GitMetadataProjection{CheckoutPath: taskCheckout}
+
+	roots := taskWorkspaceSourceRoots(taskCheckout, nil, []*worktree.GitMetadataProjection{projection})
+
+	if !sameStrings(roots, []string{taskCheckout}) {
+		t.Fatalf("task workspace source roots = %v, want only task checkout", roots)
+	}
+	for _, root := range roots {
+		if root == sourceRepository {
+			t.Fatalf("source repository was exposed as a task workspace root: %v", roots)
+		}
+	}
+}
+
 func TestReconcileWorkspaceSources_RejectsMissingFolderTarget(t *testing.T) {
 	err := reconcileWorkspaceSources(context.Background(), t.TempDir(), []WorkspaceFolderSpec{{Name: "missing", LocalPath: "/definitely/not/a/kandev-folder"}}, testWorkspaceLinkOwner())
 	if err == nil {

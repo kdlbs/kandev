@@ -151,6 +151,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/workspace/diagnostics/:id", s.handleWorkspaceDiagnostics)
 		api.POST("/workspace/materialize-repository", s.handleWorkspaceMaterializeRepository)
 		api.POST("/workspace/materialize-repository/remove", s.handleWorkspaceRemoveMaterializedRepository)
+		api.POST("/workspace/attest-git-metadata", s.handleWorkspaceGitMetadataAttestation)
 
 		// Shell access (HTTP endpoints only - streaming is via /workspace/stream)
 		api.GET("/shell/status", s.handleShellStatus)

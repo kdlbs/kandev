@@ -55,6 +55,15 @@ type workspaceSourceMaterializer struct {
 	logger     *logger.Logger
 }
 
+// workspaceGitMetadataRebinder is the typed lifecycle extension used by host
+// worktree attachments. Keep the legacy rebinder above for non-Git workspace
+// sources and compatibility test doubles; only this contract can atomically
+// replace and later restore an active Git metadata projection.
+type workspaceGitMetadataRebinder interface {
+	RebindWorkspaceWithGitMetadata(context.Context, string, string, []*worktree.GitMetadataProjection, ...[]string) error
+	GitMetadataProjectionsForSession(string) ([]*worktree.GitMetadataProjection, bool)
+}
+
 type workspaceSourceMaterializationState struct {
 	environment  *models.TaskEnvironment
 	sessions     []*models.TaskSession
@@ -71,6 +80,11 @@ type hostWorkspaceMaterialization struct {
 	priorRoots    []string
 	postRoots     []string
 	linkUndo      []ownedDirectoryLinkUndo
+}
+
+type adoptedWorkspaceSession struct {
+	session     *models.TaskSession
+	projections []*worktree.GitMetadataProjection
 }
 
 type ownedDirectoryLinkUndo struct {
@@ -129,7 +143,7 @@ func (m *workspaceSourceMaterializer) materializeHostWorkspaceSources(ctx contex
 	if err != nil {
 		return nil, err
 	}
-	adoptedSessions := make([]*models.TaskSession, 0, len(state.sessions))
+	adoptedSessions := make([]adoptedWorkspaceSession, 0, len(state.sessions))
 	defer func() {
 		if err == nil {
 			return
@@ -149,7 +163,15 @@ func (m *workspaceSourceMaterializer) materializeHostWorkspaceSources(ctx contex
 			return nil, fmt.Errorf("persist task workspace path: %w", err)
 		}
 	}
-	ids, adopted, adoptErr := m.adoptSessionWorkspaces(ctx, state.sessions, materialization.root, materialization.postRoots)
+	var projections []*worktree.GitMetadataProjection
+	if workspaceSourceBatchHasRepository(batch) {
+		var projectionErr error
+		projections, projectionErr = m.taskGitMetadataProjections(ctx, taskID, state, materialization.oldPath, branchMaterializations)
+		if projectionErr != nil {
+			return nil, projectionErr
+		}
+	}
+	ids, adopted, adoptErr := m.adoptSessionWorkspaces(ctx, state.sessions, materialization.root, materialization.postRoots, projections)
 	adoptedSessions = append(adoptedSessions, adopted...)
 	if adoptErr != nil {
 		return nil, adoptErr
@@ -222,22 +244,29 @@ func materializeDirectoryLinks(root string, entries map[string]string, descripti
 	return created, nil
 }
 
-func (m *workspaceSourceMaterializer) adoptSessionWorkspaces(ctx context.Context, sessions []*models.TaskSession, root string, sourceRoots []string) ([]string, []*models.TaskSession, error) {
+func (m *workspaceSourceMaterializer) adoptSessionWorkspaces(ctx context.Context, sessions []*models.TaskSession, root string, sourceRoots []string, projections []*worktree.GitMetadataProjection) ([]string, []adoptedWorkspaceSession, error) {
 	ids := make([]string, 0, len(sessions))
-	adopted := make([]*models.TaskSession, 0, len(sessions))
+	adopted := make([]adoptedWorkspaceSession, 0, len(sessions))
 	for _, session := range sessions {
 		if m.rescanner != nil {
-			if err := m.rescanner.RebindWorkspaceForSession(ctx, session.ID, root, sourceRoots); err != nil {
+			if rebinder, ok := m.rescanner.(workspaceGitMetadataRebinder); ok {
+				oldProjections, _ := rebinder.GitMetadataProjectionsForSession(session.ID)
+				if err := rebinder.RebindWorkspaceWithGitMetadata(ctx, session.ID, root, projections, sourceRoots); err != nil {
+					return nil, adopted, fmt.Errorf("adopt workspace for session %s: %w", session.ID, err)
+				}
+				adopted = append(adopted, adoptedWorkspaceSession{session: session, projections: oldProjections})
+			} else if err := m.rescanner.RebindWorkspaceForSession(ctx, session.ID, root, sourceRoots); err != nil {
 				return nil, adopted, fmt.Errorf("adopt workspace for session %s: %w", session.ID, err)
+			} else {
+				adopted = append(adopted, adoptedWorkspaceSession{session: session})
 			}
-			adopted = append(adopted, session)
 		}
 		ids = append(ids, session.ID)
 	}
 	return ids, adopted, nil
 }
 
-func (m *workspaceSourceMaterializer) rollbackHostWorkspaceMaterialization(ctx context.Context, taskID string, state *workspaceSourceMaterializationState, materialization *hostWorkspaceMaterialization, adopted []*models.TaskSession) error {
+func (m *workspaceSourceMaterializer) rollbackHostWorkspaceMaterialization(ctx context.Context, taskID string, state *workspaceSourceMaterializationState, materialization *hostWorkspaceMaterialization, adopted []adoptedWorkspaceSession) error {
 	rollbackErr := m.restoreSessionWorkspaces(ctx, adopted, materialization.oldPath, materialization.priorRoots)
 	if err := rollbackOwnedDirectoryLinks(materialization.linkUndo); err != nil {
 		rollbackErr = errors.Join(rollbackErr, err)
@@ -293,19 +322,141 @@ func (m *workspaceSourceMaterializer) cleanupNewWorktrees(ctx context.Context, t
 	}
 }
 
-func (m *workspaceSourceMaterializer) restoreSessionWorkspaces(ctx context.Context, sessions []*models.TaskSession, workspacePath string, sourceRoots []string) error {
+func (m *workspaceSourceMaterializer) restoreSessionWorkspaces(ctx context.Context, sessions []adoptedWorkspaceSession, workspacePath string, sourceRoots []string) error {
 	if m.rescanner == nil || len(sessions) == 0 {
 		return nil
 	}
 	rollbackCtx := context.WithoutCancel(ctx)
 	var rollbackErr error
 	for index := len(sessions) - 1; index >= 0; index-- {
-		session := sessions[index]
-		if err := m.rescanner.RebindWorkspaceForSession(rollbackCtx, session.ID, workspacePath, sourceRoots); err != nil {
-			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("session %s: %w", session.ID, err))
+		adopted := sessions[index]
+		if rebinder, ok := m.rescanner.(workspaceGitMetadataRebinder); ok {
+			if err := rebinder.RebindWorkspaceWithGitMetadata(rollbackCtx, adopted.session.ID, workspacePath, adopted.projections, sourceRoots); err != nil {
+				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("session %s: %w", adopted.session.ID, err))
+			}
+		} else if err := m.rescanner.RebindWorkspaceForSession(rollbackCtx, adopted.session.ID, workspacePath, sourceRoots); err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("session %s: %w", adopted.session.ID, err))
 		}
 	}
 	return rollbackErr
+}
+
+func workspaceSourceBatchHasRepository(batch *models.WorkspaceSourceBatch) bool {
+	if batch == nil {
+		return false
+	}
+	for _, source := range batch.Sources {
+		if source.Repository != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *workspaceSourceMaterializer) taskGitMetadataProjections(ctx context.Context, taskID string, state *workspaceSourceMaterializationState, primaryPath string, newWorktrees []*branchMaterialization) ([]*worktree.GitMetadataProjection, error) {
+	if state == nil || state.environment == nil || state.environment.ExecutorType != string(models.ExecutorTypeWorktree) {
+		return nil, nil
+	}
+	worktrees, err := m.worktreeMgr.GetAllByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task worktrees for Git metadata projection: %w", err)
+	}
+	projections := make([]*worktree.GitMetadataProjection, 0, len(worktrees)+1)
+	seen := make(map[string]struct{}, len(worktrees)+1)
+	worktreeRepositories := taskWorktreeRepositoryPaths(worktrees, state, newWorktrees)
+	primaryRepositoryPath := taskPrimaryRepositoryPath(state)
+	appendProjection := func(path string) error {
+		repositoryPath := taskCheckoutRepositoryPath(path, primaryPath, primaryRepositoryPath, worktreeRepositories)
+		if repositoryPath == "" {
+			return fmt.Errorf("resolve task Git metadata projection: task checkout has no trusted repository record")
+		}
+		projection, err := worktree.ResolveGitMetadataForRepository(path, repositoryPath)
+		if err != nil {
+			return fmt.Errorf("resolve task Git metadata projection: %w", err)
+		}
+		if _, exists := seen[projection.CheckoutPath]; exists {
+			return nil
+		}
+		seen[projection.CheckoutPath] = struct{}{}
+		projections = append(projections, projection)
+		return nil
+	}
+	checkoutPaths, err := taskGitMetadataCheckoutPaths(primaryPath, worktrees, newWorktrees)
+	if err != nil {
+		return nil, err
+	}
+	for _, path := range checkoutPaths {
+		if err := appendProjection(path); err != nil {
+			return nil, err
+		}
+	}
+	return projections, nil
+}
+
+func taskGitMetadataCheckoutPaths(primaryPath string, worktrees []*worktree.Worktree, materializations []*branchMaterialization) ([]string, error) {
+	paths := make([]string, 0, len(worktrees)+len(materializations)+1)
+	// The primary checkout predates task_environment_repos on older task
+	// environments. Its environment-owned workspace path remains the durable
+	// authority until the task is promoted to a non-Git root, at which point
+	// the recorded worktree entries below are authoritative.
+	if primaryPath != "" {
+		if _, err := os.Lstat(filepath.Join(primaryPath, ".git")); err == nil {
+			paths = append(paths, primaryPath)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("inspect task primary Git metadata: %w", err)
+		}
+	}
+	for _, wt := range worktrees {
+		if wt != nil && wt.Path != "" {
+			paths = append(paths, wt.Path)
+		}
+	}
+	for _, materialization := range materializations {
+		if materialization != nil && materialization.worktree != nil && materialization.worktree.Path != "" {
+			paths = append(paths, materialization.worktree.Path)
+		}
+	}
+	return paths, nil
+}
+
+func taskWorktreeRepositoryPaths(worktrees []*worktree.Worktree, state *workspaceSourceMaterializationState, materializations []*branchMaterialization) map[string]string {
+	paths := make(map[string]string, len(worktrees)+len(materializations))
+	for _, wt := range worktrees {
+		if wt != nil && wt.Path != "" && wt.RepositoryPath != "" {
+			paths[wt.Path] = wt.RepositoryPath
+		}
+	}
+	for _, materialization := range materializations {
+		if materialization == nil || materialization.worktree == nil || materialization.worktree.Path == "" || state == nil {
+			continue
+		}
+		repository := state.entities[materialization.repositoryID]
+		if repository != nil && repository.LocalPath != "" {
+			paths[materialization.worktree.Path] = repository.LocalPath
+		}
+	}
+	return paths
+}
+
+func taskPrimaryRepositoryPath(state *workspaceSourceMaterializationState) string {
+	if state == nil || len(state.repositories) == 0 {
+		return ""
+	}
+	repository := state.entities[state.repositories[0].RepositoryID]
+	if repository == nil {
+		return ""
+	}
+	return repository.LocalPath
+}
+
+func taskCheckoutRepositoryPath(path, primaryPath, primaryRepositoryPath string, worktreeRepositories map[string]string) string {
+	if repositoryPath := worktreeRepositories[path]; repositoryPath != "" {
+		return repositoryPath
+	}
+	if path == primaryPath {
+		return primaryRepositoryPath
+	}
+	return ""
 }
 
 func canonicalWorkspaceSourceRoots(state *workspaceSourceMaterializationState, batch *models.WorkspaceSourceBatch, includeBatch bool) ([]string, error) {

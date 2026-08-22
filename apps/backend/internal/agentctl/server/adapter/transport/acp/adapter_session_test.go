@@ -3,6 +3,8 @@ package acp
 import (
 	"context"
 	"io"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,6 +111,52 @@ func TestMCPSessionNewAndLoadUseHTTPWithSSEFallback(t *testing.T) {
 			}
 			assertCapturedKandevTransport(t, capture.loadRequest.McpServers, tt.wantType)
 		})
+	}
+}
+
+func TestAdditionalDirectoriesExcludeCWDAndDuplicates(t *testing.T) {
+	got, err := additionalDirectoriesForSession(
+		"/workspace",
+		[]string{"/workspace", "/workspace/api", "/workspace/api", "/workspace/web"},
+	)
+	if err != nil {
+		t.Fatalf("additionalDirectoriesForSession: %v", err)
+	}
+	want := []string{"/workspace/api", "/workspace/web"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("additionalDirectoriesForSession() = %v, want %v", got, want)
+	}
+}
+
+func TestAdditionalDirectoriesRejectRelativeRoots(t *testing.T) {
+	if _, err := additionalDirectoriesForSession("/workspace", []string{"api", "/workspace/api"}); err == nil {
+		t.Fatal("additionalDirectoriesForSession accepted a relative root")
+	}
+}
+
+func TestNewSessionNegotiatesAdditionalDirectories(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	adapter.capabilities.SessionCapabilities.AdditionalDirectories = &acpsdk.SessionAdditionalDirectoriesCapabilities{}
+
+	if _, err := adapter.NewSessionWithAdditionalDirectories(context.Background(), nil, []string{
+		"/tmp/test", "/tmp/test/api", "/tmp/test/api", "/tmp/test/web",
+	}); err != nil {
+		t.Fatalf("NewSessionWithAdditionalDirectories: %v", err)
+	}
+	want := []string{"/tmp/test/api", "/tmp/test/web"}
+	if !slices.Equal(capture.newRequest.AdditionalDirectories, want) {
+		t.Fatalf("ACP additionalDirectories = %v, want %v", capture.newRequest.AdditionalDirectories, want)
+	}
+}
+
+func TestNewSessionDoesNotSendAdditionalDirectoriesWithoutCapability(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+
+	if _, err := adapter.NewSessionWithAdditionalDirectories(context.Background(), nil, []string{"/tmp/test/api"}); err == nil || !strings.Contains(err.Error(), "git_metadata_projection_unsupported") {
+		t.Fatalf("NewSessionWithAdditionalDirectories error = %v, want unsupported projection", err)
+	}
+	if capture.newRequest.Cwd != "" {
+		t.Fatalf("ACP NewSession was called despite unsupported additional directories: %+v", capture.newRequest)
 	}
 }
 

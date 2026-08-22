@@ -87,6 +87,13 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	if err != nil {
 		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: err.Error(), Error: err, Duration: time.Since(start)}, nil
 	}
+	projection, err := worktree.ResolveGitMetadataForRepository(wt.Path, req.RepositoryPath)
+	if err != nil {
+		if req.WorktreeID == "" || wt.ID != req.WorktreeID {
+			p.rollbackWorktrees(ctx, []string{wt.ID})
+		}
+		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: "git metadata projection invalid", Error: err, Duration: time.Since(start)}, nil
+	}
 
 	if len(wt.CopiedFiles) > 0 || len(wt.CopyFilesWarnings) > 0 {
 		totalSteps++
@@ -140,6 +147,7 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 		WorktreeID:                wt.ID,
 		WorktreeBranch:            wt.Branch,
 		MainRepoGitDir:            mainRepoGitDir,
+		GitMetadataProjection:     projection,
 		RequestedBaseBranch:       req.BaseBranch,
 		BaseBranch:                wt.BaseBranch,
 		BaseBranchFallbackWarning: wt.BaseBranchFallbackWarning,
@@ -416,6 +424,17 @@ func (p *WorktreePreparer) prepareMultiRepo(
 		if spec.WorktreeID == "" || wt.ID != spec.WorktreeID {
 			createdIDs = append(createdIDs, wt.ID)
 		}
+		projection, projectionErr := worktree.ResolveGitMetadataForRepository(wt.Path, spec.RepositoryPath)
+		if projectionErr != nil {
+			p.rollbackWorktrees(ctx, createdIDs)
+			return &EnvPrepareResult{
+				Success:      false,
+				Steps:        steps,
+				ErrorMessage: "git metadata projection invalid",
+				Error:        projectionErr,
+				Duration:     time.Since(start),
+			}, nil
+		}
 		worktrees = append(worktrees, RepoWorktreeResult{
 			TaskRepositoryID:          spec.TaskRepositoryID,
 			RepositoryID:              spec.RepositoryID,
@@ -423,6 +442,7 @@ func (p *WorktreePreparer) prepareMultiRepo(
 			WorktreeID:                wt.ID,
 			WorktreeBranch:            wt.Branch,
 			WorktreePath:              wt.Path,
+			GitMetadataProjection:     projection,
 			MainRepoGitDir:            filepath.Join(spec.RepositoryPath, ".git"),
 			RequestedBaseBranch:       spec.BaseBranch,
 			BaseBranch:                wt.BaseBranch,
@@ -450,6 +470,7 @@ func (p *WorktreePreparer) prepareMultiRepo(
 		res.WorktreeID = worktrees[0].WorktreeID
 		res.WorktreeBranch = worktrees[0].WorktreeBranch
 		res.MainRepoGitDir = worktrees[0].MainRepoGitDir
+		res.GitMetadataProjection = worktrees[0].GitMetadataProjection
 		res.RequestedBaseBranch = worktrees[0].RequestedBaseBranch
 		res.BaseBranch = worktrees[0].BaseBranch
 		res.BaseBranchFallbackWarning = worktrees[0].BaseBranchFallbackWarning

@@ -169,8 +169,13 @@ func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositor
 	return result
 }
 
-func workspaceSourceRoots(folders []WorkspaceFolderSpec, repositories []WorkspaceRepositorySpec) []string {
-	roots := make([]string, 0, len(folders)+len(repositories))
+// taskWorkspaceSourceRoots returns only task-owned workspace entries suitable
+// for agentctl and ACP. RepositoryPath is deliberately absent: it identifies
+// the source repository used to materialize a worktree, not a checkout an ACP
+// session may receive as an additional directory. Validated projections are
+// the authority for repository roots.
+func taskWorkspaceSourceRoots(workspacePath string, folders []WorkspaceFolderSpec, projections []*worktree.GitMetadataProjection) []string {
+	roots := make([]string, 0, 1+len(folders)+len(projections))
 	seen := make(map[string]struct{}, cap(roots))
 	add := func(path string) {
 		resolved, err := filepath.EvalSymlinks(filepath.Clean(path))
@@ -187,11 +192,14 @@ func workspaceSourceRoots(folders []WorkspaceFolderSpec, repositories []Workspac
 		seen[resolved] = struct{}{}
 		roots = append(roots, resolved)
 	}
+	add(workspacePath)
 	for _, folder := range folders {
 		add(folder.LocalPath)
 	}
-	for _, repository := range repositories {
-		add(repository.RepositoryPath)
+	for _, projection := range projections {
+		if projection != nil {
+			add(projection.CheckoutPath)
+		}
 	}
 	return roots
 }

@@ -104,6 +104,12 @@ func (r *SSHExecutor) HealthCheck(_ context.Context) error {
 	return nil
 }
 
+// PrepareGitMetadataProjection attests the agent-side policy capability before
+// SSH provisioning. Remote paths are resolved only after the checkout exists.
+func (r *SSHExecutor) PrepareGitMetadataProjection(_ context.Context, req *ExecutorCreateRequest) error {
+	return validateRemoteGitMetadataRequest(req)
+}
+
 // Close terminates every still-tracked SSH session. Normal teardown happens
 // session-by-session via StopInstance; Close is the shutdown safety net for
 // sessions whose StopInstance didn't run (e.g. a hard kandev exit).
@@ -245,6 +251,9 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	if err := r.verifyPrimaryCheckout(launchCtx, client, taskDir, req, platform); err != nil {
 		return nil, err
 	}
+	if err := r.installRemoteGitMetadataPolicy(launchCtx, client, taskDir, req, platform); err != nil {
+		return nil, err
+	}
 	sessionDir, err := r.prepareRemoteSessionDir(launchCtx, client, taskDir, req)
 	if err != nil {
 		return nil, err
@@ -277,8 +286,29 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	return r.buildInstance(req, target, fwd, taskDir, sessionDir, port, pid, workdir, authToken), nil
 }
 
+func (r *SSHExecutor) installRemoteGitMetadataPolicy(
+	ctx context.Context,
+	client *ssh.Client,
+	taskDir string,
+	req *ExecutorCreateRequest,
+	platform SSHRemotePlatform,
+) error {
+	if len(req.GitMetadataProjections) == 0 && !requiresCloneGitMetadataPolicy(req) {
+		return nil
+	}
+	shell := sshShellForRemote(req.Metadata, platform)
+	output, _, err := runSSHCommand(ctx, client, WrapLoginShell(shell, remoteRegularGitMetadataProbeScript(taskDir)))
+	if err != nil {
+		return errors.New("ssh: remote Git metadata policy validation failed")
+	}
+	if _, err := parseRemoteRegularGitMetadata(output); err != nil {
+		return errors.New("ssh: remote Git metadata policy validation failed")
+	}
+	return nil
+}
+
 func (r *SSHExecutor) resumedStateForCreate(req *ExecutorCreateRequest) (*sshSessionState, bool) {
-	if req == nil || hasManagedGitHubBrokerEnv(req.Env) {
+	if req == nil || hasManagedGitHubBrokerEnv(req.Env) || requiresCloneGitMetadataPolicy(req) {
 		return nil, false
 	}
 	r.mu.Lock()
@@ -468,8 +498,9 @@ func (r *SSHExecutor) buildInstance(
 		Client: agentctl.NewClient(sshAgentctlLoopbackHost, fwd.LocalPort(), r.logger,
 			agentctl.WithExecutionID(req.InstanceID),
 			agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(authToken)),
-		WorkspacePath: taskDir,
-		AuthToken:     authToken,
+		WorkspacePath:        taskDir,
+		WorkspaceSourceRoots: []string{taskDir},
+		AuthToken:            authToken,
 		Metadata: map[string]interface{}{
 			MetadataKeySSHHost:               target.Host,
 			MetadataKeySSHPort:               strconv.Itoa(target.Port),
@@ -502,13 +533,14 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 			agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(state.authToken))
 	}
 	return &ExecutorInstance{
-		InstanceID:    req.InstanceID,
-		TaskID:        req.TaskID,
-		SessionID:     req.SessionID,
-		RuntimeName:   r.Name(),
-		Client:        client,
-		WorkspacePath: taskDir,
-		AuthToken:     state.authToken,
+		InstanceID:           req.InstanceID,
+		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
+		RuntimeName:          r.Name(),
+		Client:               client,
+		WorkspacePath:        taskDir,
+		WorkspaceSourceRoots: []string{taskDir},
+		AuthToken:            state.authToken,
 		Metadata: map[string]interface{}{
 			MetadataKeySSHHost:               state.target.Host,
 			MetadataKeySSHPort:               strconv.Itoa(state.target.Port),
