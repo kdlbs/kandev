@@ -89,6 +89,16 @@ func TestInitializePromptQueueingCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestInitializeAdvertisesAdditionalDirectories(t *testing.T) {
+	response, err := (&mockAgent{}).Initialize(context.Background(), acp.InitializeRequest{})
+	if err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	if response.AgentCapabilities.SessionCapabilities.AdditionalDirectories == nil {
+		t.Fatal("mock ACP agent must advertise additionalDirectories support")
+	}
+}
+
 // capturingUpdater records every SessionUpdate it receives and exposes two
 // one-shot signals: anySeen (first notification of any kind — in practice the
 // available_commands_update Prompt emits before handlePrompt runs) and
