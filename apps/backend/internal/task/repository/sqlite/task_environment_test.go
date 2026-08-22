@@ -281,6 +281,99 @@ func TestCreateTaskSessionWithWorkspaceBindingConcurrentElectionHasOneOwner(t *t
 	}
 }
 
+func TestCreateTaskSessionWithSharedGroupWorkspaceBindingElectsOneMaterializer(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-group-binding")
+	for _, taskID := range []string{"task-group-a", "task-group-b"} {
+		if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: "workspace-group-binding", Title: taskID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repo.db.Exec(`
+		CREATE TABLE task_workspace_groups (
+			id TEXT PRIMARY KEY,
+			materialized_environment_id TEXT NOT NULL DEFAULT '',
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE task_workspace_group_members (
+			workspace_group_id TEXT NOT NULL,
+			task_id TEXT NOT NULL,
+			released_at TIMESTAMP NULL
+		);
+		INSERT INTO task_workspace_groups (id, updated_at) VALUES ('group-binding', CURRENT_TIMESTAMP);
+		INSERT INTO task_workspace_group_members (workspace_group_id, task_id) VALUES
+			('group-binding', 'task-group-a'), ('group-binding', 'task-group-b');
+	`); err != nil {
+		t.Fatalf("seed workspace group: %v", err)
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, taskID := range []string{"task-group-a", "task-group-b"} {
+		wg.Add(1)
+		go func(taskID string) {
+			defer wg.Done()
+			<-start
+			errs <- repo.CreateTaskSessionWithSharedGroupWorkspaceBinding(ctx,
+				&models.TaskSession{ID: "session-" + taskID, TaskID: taskID},
+				&models.TaskEnvironment{TaskID: taskID, ExecutorType: string(models.ExecutorTypeLocal)},
+				"group-binding")
+		}(taskID)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	var succeeded, preparing int
+	for err := range errs {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, models.ErrWorkspacePreparing):
+			preparing++
+		default:
+			t.Fatalf("concurrent group binding error = %v", err)
+		}
+	}
+	if succeeded != 1 || preparing != 1 {
+		t.Fatalf("group election results: success=%d preparing=%d, want one each", succeeded, preparing)
+	}
+	var environmentID string
+	if err := repo.db.Get(&environmentID, `SELECT materialized_environment_id FROM task_workspace_groups WHERE id = 'group-binding'`); err != nil {
+		t.Fatal(err)
+	}
+	if environmentID == "" {
+		t.Fatal("shared group has no elected environment")
+	}
+	var sessionCount int
+	if err := repo.db.Get(&sessionCount, `SELECT COUNT(*) FROM task_sessions WHERE task_id IN ('task-group-a', 'task-group-b')`); err != nil {
+		t.Fatal(err)
+	}
+	if sessionCount != 1 {
+		t.Fatalf("group sessions = %d, want 1", sessionCount)
+	}
+	environment, err := repo.GetTaskEnvironment(ctx, environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	environment.Status = models.TaskEnvironmentStatusReady
+	environment.MaterializationSessionID = ""
+	if err := repo.UpdateTaskEnvironment(ctx, environment); err != nil {
+		t.Fatal(err)
+	}
+	follower := &models.TaskSession{ID: "session-group-follower", TaskID: "task-group-b"}
+	if err := repo.CreateTaskSessionWithSharedGroupWorkspaceBinding(ctx, follower, &models.TaskEnvironment{
+		TaskID: "task-group-b", ExecutorType: string(models.ExecutorTypeLocal),
+	}, "group-binding"); err != nil {
+		t.Fatalf("bind shared group follower: %v", err)
+	}
+	if follower.TaskEnvironmentID != environmentID {
+		t.Fatalf("follower environment = %q, want %q", follower.TaskEnvironmentID, environmentID)
+	}
+}
+
 func TestCreateTaskSessionWithWorkspaceBindingFailsClosedForAbandonedCreatingClaim(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

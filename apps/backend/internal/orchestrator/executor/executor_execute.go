@@ -764,7 +764,58 @@ func (e *Executor) PrepareSessionForExistingEnvironment(ctx context.Context, tas
 	if taskEnvironmentID == "" {
 		return "", fmt.Errorf("%w: workflow replacement requires a canonical workspace", models.ErrWorkspaceReuseUnsafe)
 	}
+	if err := e.preflightWorkflowWorkspaceReuse(ctx, task, taskEnvironmentID); err != nil {
+		return "", err
+	}
 	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, false, taskEnvironmentID)
+}
+
+// preflightWorkflowWorkspaceReuse rejects an invalid retained environment
+// before a workflow replacement can promote its session and stop the current
+// one. Lifecycle still validates the physical executor resource immediately
+// before attach; this preflight covers durable readiness and inventory while
+// the old session remains usable.
+func (e *Executor) preflightWorkflowWorkspaceReuse(ctx context.Context, task *v1.Task, environmentID string) error {
+	environment, err := e.repo.GetTaskEnvironment(ctx, environmentID)
+	if err != nil || environment == nil {
+		return fmt.Errorf("%w: workflow workspace is unavailable", models.ErrWorkspaceReuseUnsafe)
+	}
+	switch environment.Status {
+	case models.TaskEnvironmentStatusCreating:
+		return fmt.Errorf("%w: retry after the workspace launch completes", models.ErrWorkspacePreparing)
+	case models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
+	default:
+		return fmt.Errorf("%w: workflow workspace is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+	if task == nil {
+		return fmt.Errorf("%w: workflow task is unavailable", models.ErrWorkspaceReuseUnsafe)
+	}
+	taskRepos, err := e.repo.ListTaskRepositories(ctx, task.ID)
+	if err != nil {
+		return fmt.Errorf("%w: load workflow repositories", models.ErrWorkspaceReuseUnsafe)
+	}
+	if len(taskRepos) == 0 {
+		return nil
+	}
+	rows, err := e.repo.ListTaskEnvironmentRepos(ctx, environment.ID)
+	if err != nil {
+		return fmt.Errorf("%w: load workflow workspace inventory", models.ErrWorkspaceReuseUnsafe)
+	}
+	for _, taskRepo := range taskRepos {
+		if !workflowEnvironmentHasRepository(rows, taskRepo.RepositoryID) {
+			return fmt.Errorf("%w: workflow workspace repository inventory is incomplete", models.ErrWorkspaceReuseUnsafe)
+		}
+	}
+	return nil
+}
+
+func workflowEnvironmentHasRepository(rows []*models.TaskEnvironmentRepo, repositoryID string) bool {
+	for _, row := range rows {
+		if row != nil && row.RepositoryID == repositoryID && row.DeletedAt == nil && row.Status != "failed" && row.Status != "deleted" {
+			return true
+		}
+	}
+	return false
 }
 
 //nolint:cyclop,funlen // Session construction keeps its existing validation sequence in one transaction boundary.
@@ -879,20 +930,7 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 		return "", err
 	}
 
-	var createErr error
-	if binder, ok := e.repo.(workspaceBindingTaskSessionCreator); ok && bindWorkspace && !taskUsesDeferredEnvironmentInheritance(task.Metadata) {
-		createErr = binder.CreateTaskSessionWithWorkspaceBinding(ctx, session, &models.TaskEnvironment{
-			TaskID:            task.ID,
-			ExecutorType:      execConfig.ExecutorType,
-			ExecutorID:        execConfig.ExecutorID,
-			ExecutorProfileID: session.ExecutorProfileID,
-			Status:            models.TaskEnvironmentStatusCreating,
-		})
-	} else if atomicCreator, ok := e.repo.(initialRuntimeSeedTaskSessionCreator); ok {
-		createErr = atomicCreator.CreateTaskSessionWithInitialRuntimeSeed(ctx, session)
-	} else {
-		createErr = e.repo.CreateTaskSession(ctx, session)
-	}
+	createErr := e.createPreparedSession(ctx, session, task.Metadata, bindWorkspace, execConfig)
 	if createErr != nil {
 		e.logger.Error("failed to persist agent session",
 			zap.String("task_id", task.ID),
@@ -921,17 +959,60 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 	return sessionID, nil
 }
 
-// taskUsesDeferredEnvironmentInheritance keeps the existing handoff resolver
-// authoritative for inherited/shared tasks. It supplies the parent/group
-// environment immediately after the session exists; claiming a task-local
-// creating environment first would transiently create a second owner.
+func (e *Executor) createPreparedSession(
+	ctx context.Context,
+	session *models.TaskSession,
+	metadata map[string]interface{},
+	bindWorkspace bool,
+	execConfig executorConfig,
+) error {
+	candidate := &models.TaskEnvironment{
+		TaskID:            session.TaskID,
+		ExecutorType:      execConfig.ExecutorType,
+		ExecutorID:        execConfig.ExecutorID,
+		ExecutorProfileID: session.ExecutorProfileID,
+		Status:            models.TaskEnvironmentStatusCreating,
+	}
+	if groupID := sharedWorkspaceGroupID(metadata); bindWorkspace && groupID != "" {
+		binder, ok := e.repo.(sharedGroupWorkspaceBindingTaskSessionCreator)
+		if !ok {
+			return fmt.Errorf("%w: shared workspace binding is unavailable", models.ErrWorkspaceReuseUnsafe)
+		}
+		return binder.CreateTaskSessionWithSharedGroupWorkspaceBinding(ctx, session, candidate, groupID)
+	}
+	if binder, ok := e.repo.(workspaceBindingTaskSessionCreator); ok && bindWorkspace && !taskUsesDeferredEnvironmentInheritance(metadata) {
+		return binder.CreateTaskSessionWithWorkspaceBinding(ctx, session, candidate)
+	}
+	if atomicCreator, ok := e.repo.(initialRuntimeSeedTaskSessionCreator); ok {
+		return atomicCreator.CreateTaskSessionWithInitialRuntimeSeed(ctx, session)
+	}
+	return e.repo.CreateTaskSession(ctx, session)
+}
+
+// taskUsesDeferredEnvironmentInheritance keeps the handoff resolver
+// authoritative for inherited tasks. Shared groups use the transactional
+// shared-group binder above, which elects the first materializer before any
+// member can enter lifecycle preparation.
 func taskUsesDeferredEnvironmentInheritance(metadata map[string]interface{}) bool {
 	workspace, ok := metadata["workspace"].(map[string]interface{})
 	if !ok {
 		return false
 	}
 	mode, _ := workspace["mode"].(string)
-	return mode == "inherit_parent" || mode == "shared_group"
+	return mode == "inherit_parent"
+}
+
+func sharedWorkspaceGroupID(metadata map[string]interface{}) string {
+	workspace, ok := metadata["workspace"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	mode, _ := workspace["mode"].(string)
+	if mode != "shared_group" {
+		return ""
+	}
+	groupID, _ := workspace["group_id"].(string)
+	return groupID
 }
 
 // resolveAgentProfileSnapshot resolves an agent profile ID to a snapshot map and passthrough flag.

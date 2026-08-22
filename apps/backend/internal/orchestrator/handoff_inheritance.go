@@ -67,15 +67,10 @@ func (s *Service) propagateInheritedEnvironment(ctx context.Context, task *v1.Ta
 			s.workspaceMaterializer.MarkOwnerSessionMaterialized(ctx, task.ParentID)
 		}
 	case "shared_group":
-		// shared_group: look up the task's workspace group via the
-		// materializer and, if the group has been materialized by an
-		// earlier member, propagate its environment id to the new
-		// session. If the group has NOT been materialized yet, this
-		// task is the first member to launch — let the standard launch
-		// path create a fresh environment; the post-launch
-		// MarkOwnerSessionMaterialized call (below) flips the group to
-		// materialized with this session's env id, and later members
-		// will inherit it.
+		// shared_group: the session binder elects a creating canonical
+		// environment before this hook runs. Propagate that durable group
+		// binding (or fail closed if it cannot be read) rather than
+		// allowing a member to create a task-local fallback workspace.
 		if err := s.inheritFromSharedGroup(ctx, task, sessionID); err != nil {
 			return err
 		}
@@ -153,12 +148,7 @@ func (s *Service) inheritFromSharedGroup(ctx context.Context, task *v1.Task, ses
 	}
 	envID := s.workspaceMaterializer.GetSharedGroupEnvironment(ctx, task.ID)
 	if envID == "" {
-		// Group hasn't been materialized yet — this task is likely the
-		// first member to launch. The standard launch path will create
-		// a fresh env; MarkOwnerSessionMaterialized (called below in
-		// propagateInheritedEnvironment) records it on the group so
-		// later members inherit it.
-		return nil
+		return fmt.Errorf("%w: shared workspace group has no canonical environment", models.ErrWorkspaceReuseUnsafe)
 	}
 	target, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || target == nil {
