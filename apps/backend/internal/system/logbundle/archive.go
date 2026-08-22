@@ -329,26 +329,6 @@ func (s *Service) addBackendFiles(
 	return manifestFiles, included, partial, warnings, nil
 }
 
-type backendCandidate struct {
-	Name string
-	Path string
-}
-
-func (s *Service) backendCandidates() []backendCandidate {
-	logDir := filepath.Join(s.config.HomeDir, "logs")
-	now := s.config.Now().UTC()
-	names := []string{"backend-logs.log"}
-	for daysAgo := 1; daysAgo <= 2; daysAgo++ {
-		date := now.AddDate(0, 0, -daysAgo).Format("2006-01-02")
-		names = append(names, "backend-logs-"+date+".log")
-	}
-	out := make([]backendCandidate, 0, len(names))
-	for _, name := range names {
-		out = append(out, backendCandidate{Name: name, Path: filepath.Join(logDir, name)})
-	}
-	return out
-}
-
 func addFrontendFiles(writer *zip.Writer, item *job) ([]frontendArchiveFile, error) {
 	browsers := make([]*browserCapture, 0, len(item.Browsers))
 	for _, browser := range item.Browsers {

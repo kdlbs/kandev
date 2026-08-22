@@ -6,9 +6,15 @@ owner: tbd
 
 # Diagnostic logging
 
-Decision: [ADR-2026-07-30-file-backed-diagnostic-bundles](../../decisions/2026-07-30-file-backed-diagnostic-bundles.md)
+Decisions:
 
-Implementation plan: [diagnostic-logging](../../plans/diagnostic-logging/plan.md)
+- [ADR-2026-07-30-file-backed-diagnostic-bundles](../../decisions/2026-07-30-file-backed-diagnostic-bundles.md)
+- [ADR-2026-08-22-preserve-newest-bounded-backend-logs](../../decisions/2026-08-22-preserve-newest-bounded-backend-logs.md)
+
+Implementation plans:
+
+- [diagnostic-logging](../../plans/diagnostic-logging/plan.md)
+- [bounded-rolling-backend-logs](../../plans/bounded-rolling-backend-logs/plan.md)
 
 ## Why
 
@@ -34,28 +40,36 @@ history or returning an unbounded log export.
   remains `warn` and higher.
 - An explicitly verbose run writes `info` and higher entries to both the file
   and stdout.
+- Normal browser WebSocket closure code `1000` is a lifecycle event. It does
+  not create a backend error entry or stack trace. Unexpected WebSocket close
+  codes remain error entries with stack traces.
 - `logging.level` / `KANDEV_LOG_LEVEL` remains the supported override for the
   file threshold, and `logging.format` remains supported.
   `logging.outputPath`, `logging.maxSizeMb`, `logging.maxBackups`,
   `logging.maxAgeDays`, and `logging.compress` are removed; the diagnostic
   path and daily retention policy are not configurable.
-- `backend-logs.log` represents the current UTC calendar day. At UTC midnight,
-  the backend atomically rolls it to `backend-logs-YYYY-MM-DD.log` and creates
-  a new owner-readable, owner-writable active file.
-- A restart during the same UTC day appends to `backend-logs.log`. On the first
-  startup after a day boundary, the previous active file is rolled to the date
-  it represents before new entries are written.
-- Cleanup retains a rolling three-day UTC window: the current active day and
-  at most the two preceding dated daily files. Older recognized daily files
-  are removed; unrelated files in the log directory are preserved.
-- Each daily backend file accepts at most 256 MiB. Once the active file reaches
-  that bound, entries that would exceed it are dropped without blocking
-  application work and are reflected in file-sink loss statistics. UTC
-  rollover resumes normal writes into the next day's file.
-- Rollover is crash-recoverable. A small owner-only rollover journal records
-  the source day, source identity/size, destination, and copied offset before
-  an existing dated destination is extended. Recovery resumes that transaction
-  exactly once and never replaces an existing dated file.
+- `backend-logs.log` is the writable segment for the current UTC day. It
+  accepts at most 16 MiB.
+- Before an entry exceeds the segment bound, the backend closes the active
+  segment as `backend-logs-YYYY-MM-DD-NNNNNN.log` and opens a new active file.
+- All retained backend segments use at most 256 MiB in total. Rotation removes
+  the oldest closed segments across retained days until new entries fit within
+  the budget.
+- Logging continues after the total budget becomes full. The retained files
+  contain the newest bounded evidence instead of stopping at the first 256 MiB.
+- At UTC midnight, the backend closes the active file as the final segment for
+  the prior day. It then opens a new `backend-logs.log` for the new day.
+- Cleanup uses three UTC days as a maximum age. It removes older recognized
+  segments even when the total is below 256 MiB. Unrelated files remain
+  unchanged.
+- A same-day restart appends to a valid active segment and continues the next
+  sequence number. It never replaces an existing closed segment.
+- Legacy `backend-logs-YYYY-MM-DD.log` files remain readable and count toward
+  the total budget. An oversized legacy active file is converted to a bounded
+  newest-first segment set before normal writes continue.
+- Size rotation, day rotation, and legacy conversion are crash-recoverable.
+  Recovery completes each operation once and does not duplicate or replace a
+  completed segment.
 - The structured backend in-memory ring buffer is removed. The System Logs
   page, Improve Kandev, and agent diagnostics use the files and bundles
   described below.
@@ -230,6 +244,7 @@ history or returning an unbounded log export.
 ```text
 manifest.json
 backend/backend-logs.log
+backend/backend-logs-YYYY-MM-DD-NNNNNN.log
 backend/backend-logs-YYYY-MM-DD.log
 frontend/browser-01.jsonl
 frontend/browser-02.jsonl
@@ -238,8 +253,9 @@ acp/session-01/raw-acp.jsonl
 acp/session-01/normalized-acp.jsonl
 ```
 
-- `backend/` contains the recognized active and dated files still inside the
-  three-day retention window. File bytes are copied without reformatting.
+- `backend/` contains recognized active, segmented, and legacy files inside the
+  three-day retention window. Candidates are selected newest-first, and file
+  bytes are copied without reformatting.
 - `frontend/` contains one JSON Lines file per distinct responding browser
   profile. Multiple tabs from one browser profile are deduplicated. Client
   values never determine archive paths or filenames.
@@ -559,9 +575,9 @@ with the same task/session rules and excludes message bodies and user identity.
   backend startup prints the intended path and a warning to stderr, continues
   with stdout/stderr logging, and retries the file sink every 30 seconds.
   Retention-cleanup failures are warnings and do not prevent startup.
-- If midnight rollover fails after startup, the backend emits an error to
-  stderr and its existing sinks, continues writing to the active file, and
-  retries rollover on the next write without dropping the triggering entry.
+- If size or day rotation fails, the backend preserves the existing files and
+  does not exceed the total retention budget. It reports the error to stderr
+  and retries the file sink after 30 seconds.
 - If browser persistence fails, capture continues in the bounded memory
   fallback and the bundle manifest marks the degraded storage mode.
 - If no eligible frontend is connected, a frontend-only bundle becomes
@@ -597,12 +613,12 @@ with the same task/session rules and excludes message bodies and user identity.
 
 ## Persistence guarantees
 
-- `backend-logs.log` preserves entries accepted by the file queue during the
-  current UTC day until the fixed 256 MiB daily bound. Pressure drops, startup
-  fallback gaps, bounded-shutdown loss, and archive truncation are explicit in
-  counters and bundle manifests.
-- Dated archives preserve the two preceding UTC calendar days. Files outside
-  that rolling window are deleted at startup and after successful rollover.
+- Backend segments preserve the newest accepted entries across retained UTC
+  days, up to the fixed 256 MiB total budget. High volume shortens the available
+  time window instead of removing later evidence.
+- Three UTC days is the maximum backend-log age. It is not a guaranteed
+  allocation for each day. Files outside that window are removed at startup
+  and after successful rotation.
 - Browser console history remains in the browser profile for three UTC days,
   subject to its entry/byte caps. It is not server-persistent before capture.
 - Raw ACP files retain their existing debug-only executor/host retention: at
@@ -632,12 +648,34 @@ with the same task/session rules and excludes message bodies and user identity.
   error entries, **THEN** all are in the file while only warn/error are on
   stdout.
 - **GIVEN** a same-UTC-day restart, **WHEN** the backend opens its log,
-  **THEN** it appends without losing earlier entries.
+  **THEN** it appends to the active segment and does not replace closed
+  segments.
+- **GIVEN** the backend emits more than 256 MiB before old segments expire,
+  **WHEN** size rotation runs, **THEN** logging continues and the retained set
+  contains the newest 256 MiB within segment boundaries.
+- **GIVEN** a full retained segment set, **WHEN** a later error is written,
+  **THEN** the later error remains available and the oldest closed segment is
+  removed.
+- **GIVEN** a restart after multiple same-day rotations, **WHEN** logging
+  resumes, **THEN** the backend continues the sequence and preserves the total
+  budget.
+- **GIVEN** rotation cannot remove an old segment or open its replacement,
+  **WHEN** the active segment needs more space, **THEN** the backend preserves
+  existing files, reports the file-sink error, and retries after 30 seconds.
+- **GIVEN** an oversized legacy active file, **WHEN** the upgraded backend
+  starts, **THEN** it preserves the newest bounded content and continues
+  logging without waiting for UTC midnight.
 - **GIVEN** the configured log directory is temporarily unwritable, **WHEN**
   Kandev starts, **THEN** product startup succeeds with a stderr warning and
   the backend retries file activation every 30 seconds.
 - **GIVEN** more than three UTC days of backend files, **WHEN** cleanup runs,
   **THEN** only the current and two preceding days remain.
+- **GIVEN** a browser sends WebSocket close code `1000`, **WHEN** the gateway
+  read pump receives it, **THEN** no `WebSocket read error` entry or stack
+  trace is written.
+- **GIVEN** a browser sends an unexpected WebSocket close code, **WHEN** the
+  gateway read pump receives it, **THEN** the backend writes one
+  `WebSocket read error` entry with a stack trace.
 - **GIVEN** an error toast on a recognized task route, **WHEN** its report is
   accepted, **THEN** one backend error entry includes its visible text,
   browser context, and `task_id`.
@@ -726,3 +764,5 @@ with the same task/session rules and excludes message bodies and user identity.
 - Adding a setting for log path, retention, browser capture, or bundle bounds.
 - Supporting configurable size-based, per-process, or local-time backend
   rotation.
+- Changing the browser reconnection policy.
+- Increasing the fixed 256 MiB total backend-log budget.

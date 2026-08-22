@@ -1,8 +1,12 @@
 # ADR-2026-07-30-file-backed-diagnostic-bundles: File-backed diagnostic bundles
 
-**Status:** accepted
+**Status:** accepted (backend file retention amended by ADR-2026-08-22-preserve-newest-bounded-backend-logs)
 **Date:** 2026-07-30
 **Area:** backend, frontend, infra, protocol, workflow
+
+The 2026-08-22 amendment replaces the stop-at-256-MiB behavior with bounded
+size segments and one 256 MiB budget across retained backend logs. The original
+bundle, privacy, UTC-day, and maximum-age decisions remain accepted.
 
 ## Context
 

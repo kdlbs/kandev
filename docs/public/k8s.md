@@ -140,7 +140,7 @@ See [Configuration](configuration.md) for exact YAML and `KANDEV_` names. Import
 | `KANDEV_LOG_LEVEL` | `info` | Backend log threshold |
 | `KANDEV_DATABASE_DRIVER` | `sqlite` by default | Set `postgres` for an external database |
 
-Kubernetes detection makes the default log format JSON. Kandev writes daily files under `/data/logs/`, caps each day at 256 MiB, and emits warn-and-above to stdout by default; ensure the home path is persistent if the three-day file history must survive pod replacement.
+Kubernetes detection makes the default log format JSON. Kandev writes the active file under `/data/logs/backend-logs.log`, rolls full files to `backend-logs-YYYY-MM-DD-NNNNNN.log`, and caps each segment at 16 MiB. Active and closed backend files use at most 256 MiB in total. High-volume periods keep the newest evidence and can shorten the available history. Three UTC days is the maximum file age. Kandev emits warn-and-above to stdout by default; ensure the home path is persistent if the retained file history must survive pod replacement.
 
 ### PostgreSQL
 
