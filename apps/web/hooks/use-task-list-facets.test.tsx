@@ -6,6 +6,7 @@ import { pluginRegistry } from "@/lib/plugins/registry";
 
 const TASKS = [{ id: "task-1" }] as never[];
 const PLUGIN_ID = "facet-hook-test";
+const WORKSPACE_ID = "workspace-1";
 
 afterEach(() => {
   cleanup();
@@ -49,7 +50,7 @@ describe("resolveTaskFacetValues", () => {
         }),
       ],
       TASKS,
-      "workspace-1",
+      WORKSPACE_ID,
     );
 
     expect(values).toEqual({
@@ -67,7 +68,7 @@ describe("useTaskListFacets", () => {
       getValues: () => [],
     });
 
-    const { result } = renderHook(() => useTaskListFacets(TASKS, "workspace-1"));
+    const { result } = renderHook(() => useTaskListFacets(TASKS, WORKSPACE_ID));
 
     expect(result.current.facets.map((entry) => entry.key)).toEqual([`facet:${PLUGIN_ID}:tags`]);
   });
@@ -91,10 +92,53 @@ describe("useTaskListFacets", () => {
       },
     });
 
-    const { unmount } = renderHook(() => useTaskListFacets(TASKS, "workspace-1"));
+    const { unmount } = renderHook(() => useTaskListFacets(TASKS, WORKSPACE_ID));
 
     expect(subscribe).toHaveBeenCalledOnce();
     act(unmount);
     expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  // The facet is a live projection, not a load-time snapshot: a plugin whose
+  // catalog changes after mount notifies through subscribe(), and every consumer
+  // of `values` (facet sort order, facet group sections) has to see the new
+  // labels without the task list itself refetching.
+  it("reprojects values when a facet notifies its subscriber", () => {
+    let labels = ["Alpha"];
+    let notify = () => undefined as void;
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskListFacet({
+      id: "tags",
+      label: "Tag",
+      getValues: () => labels.map((label) => ({ value: label.toLowerCase(), label })),
+      subscribe: (listener) => {
+        notify = listener;
+        return () => undefined;
+      },
+    });
+
+    const { result } = renderHook(() => useTaskListFacets(TASKS, WORKSPACE_ID));
+    const key = `facet:${PLUGIN_ID}:tags:task-1`;
+    expect(result.current.values[key]).toEqual([{ value: "alpha", label: "Alpha" }]);
+
+    labels = ["Beta", "Gamma"];
+    act(() => notify());
+
+    expect(result.current.values[key]).toEqual([
+      { value: "beta", label: "Beta" },
+      { value: "gamma", label: "Gamma" },
+    ]);
+  });
+
+  it("passes the active workspace id to getValues", () => {
+    const getValues = vi.fn(() => []);
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskListFacet({
+      id: "tags",
+      label: "Tag",
+      getValues,
+    });
+
+    renderHook(() => useTaskListFacets(TASKS, WORKSPACE_ID));
+
+    expect(getValues).toHaveBeenCalledWith({ taskId: "task-1", workspaceId: WORKSPACE_ID });
   });
 });
