@@ -1,7 +1,7 @@
 ---
 status: shipped
 created: 2026-08-05
-amended: 2026-08-08
+amended: 2026-08-22
 owner: kandev
 ---
 
@@ -15,10 +15,22 @@ its progress directly, and the pending tab control must use the same circular vi
 the neighboring terminal-tab close action. Promoting a session to primary is also a routine tab
 state change whose successful result does not need a global toast.
 
+Session deletion is available from several surfaces. Confirmation should stay beside the
+initiating action where the layout permits, instead of opening a second blocking surface that
+hides the session context the user is acting on.
+
 ## What
 
 - Clicking the X on a deletable agent-session tab continues to open the existing delete
   confirmation dialog.
+- Choosing Delete from a desktop session context menu keeps that menu mounted and opens a compact,
+  non-modal confirmation popover anchored to the Delete item. Cancelling or dismissing the popover
+  leaves the session unchanged.
+- On phone, choosing Delete from a row in the Sessions picker morphs that row into touch-sized
+  Cancel and Delete actions. It does not open another dialog or drawer. Cancelling, selecting
+  another session, or closing the picker clears the pending confirmation without deleting.
+- Desktop and phone confirmation surfaces share the same conversation-deletion,
+  workspace-retention, primary-session, and only-session warnings.
 - After the user confirms, the X is replaced in place by a compact circular indeterminate spinner
   matching the terminal-tab close action, not the grid-shaped activity spinner, until the delete
   request settles. The close action is non-interactive and exposed as busy while the request is
@@ -30,8 +42,8 @@ state change whose successful result does not need a global toast.
   explains the failure so the user can retry.
 - Promoting a non-primary agent session to primary updates the primary marker without a progress or
   success toast. If the promotion fails, one error toast explains the failure.
-- Deletion started from the session context menu or a mobile session action keeps its existing
-  feedback behavior.
+- After local confirmation, context-menu and mobile deletion retain the default request progress,
+  success, and error feedback.
 
 ## Failure modes
 
@@ -60,14 +72,21 @@ state change whose successful result does not need a global toast.
   current primary session remains unchanged and one error toast is shown.
 - **GIVEN** the user cancels the delete confirmation, **WHEN** the dialog closes, **THEN** the tab
   remains unchanged and no spinner or deletion toast appears.
-- **GIVEN** a phone viewport, **WHEN** the user deletes a session from the Sessions picker, **THEN**
-  the mobile flow remains reachable and removes the selected session without relying on a desktop
-  tab X.
+- **GIVEN** a desktop session context menu, **WHEN** the user chooses Delete, **THEN** a compact
+  confirmation popover stays anchored to that menu item without opening an alert dialog or starting
+  deletion.
+- **GIVEN** a phone viewport, **WHEN** the user chooses Delete from a Sessions picker row, **THEN**
+  that row shows touch-sized inline Cancel and Delete actions without opening an alert dialog.
+- **GIVEN** a phone row has pending delete confirmation, **WHEN** the user closes the Sessions
+  picker externally, **THEN** the pending confirmation is cleared and reopening the picker shows
+  the normal row actions without dispatching deletion.
+- **GIVEN** a phone viewport, **WHEN** the user confirms deletion from the inline row actions,
+  **THEN** the selected session is removed and the remaining session stays reachable without
+  relying on a desktop tab X.
 
 ## Out of scope
 
-- Removing or redesigning the delete confirmation dialog.
+- Removing or redesigning the tab-X delete confirmation dialog.
 - Changing backend session-deletion semantics, active-session selection, or Dockview reconciliation.
-- Changing the mobile session picker layout or controls; its shared primary-session action follows
-  the same no-success-toast feedback rule.
+- Changing the Sessions picker hierarchy, drawer, or non-delete row actions.
 - Replacing feedback for context-menu, mobile, stop, or resume actions.

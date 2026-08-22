@@ -32,7 +32,7 @@ import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/ty
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
-import { SessionDeleteDescription } from "../session-tab-menu";
+import { SessionDeleteDescription } from "../session-delete-description";
 
 type SessionRow = {
   id: string;

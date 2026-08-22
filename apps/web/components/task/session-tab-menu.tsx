@@ -23,6 +23,7 @@ import { HandoffContextMenuSub } from "@/components/task/handoff-profile-menu-it
 import { NewSessionDialog, type HandoffPreset } from "@/components/task/new-session-dialog";
 import type { TaskSessionState } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
+import { SessionDeleteDescription } from "./session-delete-description";
 
 /** Lifecycle callbacks the context menu needs from the owning tab. */
 export type SessionTabMenuActions = {
@@ -31,27 +32,6 @@ export type SessionTabMenuActions = {
   handleResume: () => void;
   handleCloseOthers: () => void;
 };
-
-export function SessionDeleteDescription({
-  isPrimary,
-  isOnlySession,
-}: {
-  isPrimary: boolean;
-  isOnlySession: boolean;
-}) {
-  const { t } = useTranslation();
-  return (
-    <>
-      <span>{t("task:thisWillPermanentlyDeleteTheConversation")}</span>
-      {isPrimary && !isOnlySession && (
-        <span className="mt-2 block font-medium">{t("task:thisIsThePrimarySessionAnother")}</span>
-      )}
-      {isOnlySession && (
-        <span className="mt-2 block font-medium">{t("task:thisIsTheOnlySessionFor")}</span>
-      )}
-    </>
-  );
-}
 
 export function DeleteSessionDialog({
   open,
@@ -154,6 +134,7 @@ export function SessionContextMenuItems({
   taskId: string | null;
   sessionId: string | undefined;
   actions: SessionTabMenuActions;
+  /** Passes the Radix selection event so the owner can capture its currentTarget as an anchor. */
   onDelete: (event: Event) => void;
   onShare: () => void;
   onHandoffProfile: (profileId: string) => void;
@@ -187,6 +168,7 @@ export function SessionContextMenuItems({
         <ContextMenuItem
           className="cursor-pointer text-destructive"
           onSelect={(event) => {
+            // Keep the context menu mounted so the confirmation popover can stay anchored here.
             event.preventDefault();
             onDelete(event);
           }}
