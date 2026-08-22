@@ -48,7 +48,12 @@ func TestCreateNewSessionForStep_TerminalPrimaryReusesCanonicalEnvironment(t *te
 			seedExecutorRunning(t, repo, current.ID, current.TaskID, "sibling-execution")
 			taskRepo := newMockTaskRepo()
 			taskRepo.tasks[current.TaskID] = &v1.Task{ID: current.TaskID, WorkspaceID: "ws1", Title: "Test Task"}
-			svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{repoForExecutionLookup: repo})
+			svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{
+				repoForExecutionLookup: repo,
+				launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+					return &executor.LaunchAgentResponse{AgentExecutionID: "replacement-execution"}, nil
+				},
+			})
 
 			created, err := svc.createNewSessionForStep(ctx, current.TaskID, current, "profile-new")
 			if err != nil {
@@ -65,6 +70,49 @@ func TestCreateNewSessionForStep_TerminalPrimaryReusesCanonicalEnvironment(t *te
 				t.Fatalf("canonical environment = %+v, %v", got, err)
 			}
 		})
+	}
+}
+
+func TestCreateNewSessionForStepKeepsCurrentSessionWhenWorkspaceAttachFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-workflow-attach", "session-workflow-current", "step-one")
+	current, err := repo.GetTaskSession(ctx, "session-workflow-current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.State = models.TaskSessionStateRunning
+	current.IsPrimary = true
+	current.AgentProfileID = "profile-old"
+	current.ExecutorID = models.ExecutorIDWorktree
+	current.TaskEnvironmentID = "environment-workflow-attach"
+	if err := repo.UpdateTaskSession(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: current.TaskEnvironmentID, TaskID: current.TaskID,
+		ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[current.TaskID] = &v1.Task{ID: current.TaskID, WorkspaceID: "ws1", Title: "Test Task"}
+	launchErr := errors.New("attach failed")
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		return nil, launchErr
+	}}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	_, err = svc.createNewSessionForStep(ctx, current.TaskID, current, "profile-new")
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("createNewSessionForStep error = %v, want attach failure", err)
+	}
+	persisted, err := repo.GetTaskSession(ctx, current.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.State != models.TaskSessionStateRunning || !persisted.IsPrimary {
+		t.Fatalf("current session after failed attach = state %q primary %t, want running primary", persisted.State, persisted.IsPrimary)
 	}
 }
 

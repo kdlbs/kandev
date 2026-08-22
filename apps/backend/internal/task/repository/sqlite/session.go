@@ -578,17 +578,8 @@ func (r *Repository) CreateTaskSessionWithWorkspaceBinding(
 		candidate.MaterializationSessionID = session.ID
 		candidate.CreatedAt = r.nowUTC()
 		candidate.UpdatedAt = candidate.CreatedAt
-		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-			INSERT INTO task_environments (
-				id, task_id, executor_type, executor_id, executor_profile_id,
-				control_port, status, materialization_session_id, workspace_path,
-				container_id, sandbox_id, task_dir_name, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`), candidate.ID, candidate.TaskID, candidate.ExecutorType, candidate.ExecutorID,
-			candidate.ExecutorProfileID, candidate.ControlPort, string(candidate.Status),
-			candidate.MaterializationSessionID, candidate.WorkspacePath, candidate.ContainerID,
-			candidate.SandboxID, candidate.TaskDirName, candidate.CreatedAt, candidate.UpdatedAt); err != nil {
-			return fmt.Errorf("create workspace binding: %w", err)
+		if err := r.insertCreatingWorkspaceEnvironment(ctx, tx, candidate); err != nil {
+			return err
 		}
 		session.TaskEnvironmentID = candidate.ID
 	case err != nil:
@@ -618,6 +609,132 @@ func (r *Repository) CreateTaskSessionWithWorkspaceBinding(
 		return err
 	}
 	return tx.Commit()
+}
+
+// CreateTaskSessionWithSharedGroupWorkspaceBinding atomically elects the
+// shared group's first materializer. The elected environment is published to
+// the group while it is still creating, so another member can never create a
+// second physical workspace: it receives workspace_preparing until the elected
+// owner finalizes the canonical environment.
+func (r *Repository) CreateTaskSessionWithSharedGroupWorkspaceBinding(
+	ctx context.Context,
+	session *models.TaskSession,
+	candidate *models.TaskEnvironment,
+	groupID string,
+) error {
+	if candidate == nil || groupID == "" {
+		return fmt.Errorf("shared workspace binding requires a candidate and group")
+	}
+	if candidate.TaskID != session.TaskID {
+		return fmt.Errorf("shared workspace binding task mismatch")
+	}
+	if session.ID == "" {
+		session.ID = uuid.New().String()
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
+		return err
+	}
+
+	if candidate.ID == "" {
+		candidate.ID = uuid.New().String()
+	}
+	candidate.Status = models.TaskEnvironmentStatusCreating
+	candidate.MaterializationSessionID = session.ID
+	candidate.CreatedAt = r.nowUTC()
+	candidate.UpdatedAt = candidate.CreatedAt
+
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_workspace_groups
+		SET materialized_environment_id = ?, updated_at = ?
+		WHERE id = ?
+		  AND materialized_environment_id = ''
+		  AND EXISTS (
+			SELECT 1 FROM task_workspace_group_members
+			WHERE workspace_group_id = ? AND task_id = ? AND released_at IS NULL
+		  )
+	`), candidate.ID, candidate.UpdatedAt, groupID, groupID, session.TaskID)
+	if err != nil {
+		return fmt.Errorf("elect shared workspace materializer: %w", err)
+	}
+	won, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect shared workspace election: %w", err)
+	}
+	if won == 0 {
+		return r.bindReadySharedGroupEnvironment(ctx, tx, session, groupID)
+	}
+
+	if err := r.insertCreatingWorkspaceEnvironment(ctx, tx, candidate); err != nil {
+		return err
+	}
+	session.TaskEnvironmentID = candidate.ID
+	if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
+		return err
+	}
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) bindReadySharedGroupEnvironment(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	session *models.TaskSession,
+	groupID string,
+) error {
+	var environmentID, status string
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COALESCE(e.id, ''), COALESCE(e.status, '')
+		FROM task_workspace_groups g
+		JOIN task_workspace_group_members m
+		  ON m.workspace_group_id = g.id AND m.task_id = ? AND m.released_at IS NULL
+		LEFT JOIN task_environments e ON e.id = g.materialized_environment_id
+		WHERE g.id = ?
+	`), session.TaskID, groupID).Scan(&environmentID, &status)
+	if errors.Is(err, sql.ErrNoRows) || environmentID == "" {
+		return fmt.Errorf("%w: shared workspace group is unavailable", models.ErrWorkspaceReuseUnsafe)
+	}
+	if err != nil {
+		return fmt.Errorf("load shared workspace environment: %w", err)
+	}
+	switch models.TaskEnvironmentStatus(status) {
+	case models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
+		session.TaskEnvironmentID = environmentID
+	case models.TaskEnvironmentStatusCreating:
+		return fmt.Errorf("%w: retry after the shared workspace launch completes", models.ErrWorkspacePreparing)
+	default:
+		return fmt.Errorf("%w: shared workspace is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+	if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
+		return err
+	}
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) insertCreatingWorkspaceEnvironment(ctx context.Context, tx *sqlx.Tx, candidate *models.TaskEnvironment) error {
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO task_environments (
+			id, task_id, executor_type, executor_id, executor_profile_id,
+			control_port, status, materialization_session_id, workspace_path,
+			container_id, sandbox_id, task_dir_name, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), candidate.ID, candidate.TaskID, candidate.ExecutorType, candidate.ExecutorID,
+		candidate.ExecutorProfileID, candidate.ControlPort, string(candidate.Status),
+		candidate.MaterializationSessionID, candidate.WorkspacePath, candidate.ContainerID,
+		candidate.SandboxID, candidate.TaskDirName, candidate.CreatedAt, candidate.UpdatedAt); err != nil {
+		return fmt.Errorf("create workspace binding: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) failAbandonedWorkspaceMaterialization(

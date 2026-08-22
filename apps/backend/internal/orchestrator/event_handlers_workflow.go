@@ -2012,6 +2012,14 @@ func (s *Service) createNewSessionForStep(ctx context.Context, taskID string, cu
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare new session: %w", err)
 	}
+	if _, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{
+		AgentProfileID: newAgentProfileID,
+		ExecutorID:     currentSession.ExecutorID,
+		WorkflowStepID: dbTask.WorkflowStepID,
+		StartAgent:     false,
+	}); err != nil {
+		return nil, fmt.Errorf("failed to attach workflow replacement workspace: %w", err)
+	}
 
 	newSession, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {

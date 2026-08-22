@@ -306,10 +306,16 @@ type mockRepository struct {
 	setSessionMetadataKeyCalls        []setSessionMetadataKeyCall
 	setSessionPrimaryCalls            []string
 	createTaskEnvironmentCalls        []*models.TaskEnvironment
+	sharedWorkspaceBindingCalls       []sharedWorkspaceBindingCall
 	updateTaskEnvironmentCalls        []*models.TaskEnvironment
 	finalizeTaskEnvironmentCalls      []*models.TaskEnvironment
 	updateTaskStateIfCurrentInCalls   []updateTaskStateIfCurrentInCall
 	updateTaskStateIfNotArchivedCalls []updateTaskStateIfNotArchivedCall
+}
+
+type sharedWorkspaceBindingCall struct {
+	Session *models.TaskSession
+	GroupID string
 }
 
 // updateTaskStateIfCurrentInCall records one UpdateTaskStateIfCurrentIn
@@ -382,6 +388,18 @@ func (m *mockRepository) CreateTaskSession(ctx context.Context, session *models.
 	}
 	m.mu.Unlock()
 	return fn(ctx, session)
+}
+
+func (m *mockRepository) CreateTaskSessionWithSharedGroupWorkspaceBinding(ctx context.Context, session *models.TaskSession, environment *models.TaskEnvironment, groupID string) error {
+	m.mu.Lock()
+	m.sharedWorkspaceBindingCalls = append(m.sharedWorkspaceBindingCalls, sharedWorkspaceBindingCall{Session: session, GroupID: groupID})
+	if environment.ID == "" {
+		environment.ID = "environment-" + session.ID
+	}
+	session.TaskEnvironmentID = environment.ID
+	m.taskEnvironments[environment.ID] = environment
+	m.mu.Unlock()
+	return m.CreateTaskSession(ctx, session)
 }
 
 func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
