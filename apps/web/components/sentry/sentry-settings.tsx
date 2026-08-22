@@ -79,8 +79,7 @@ type InstanceListProps = {
   confirmingDeleteId: string | null;
   onEdit: (id: string) => void;
   onDelete: (instance: SentryConfig) => void;
-  onDeleteCancel: () => void;
-  onDeleteOpenChange: (open: boolean) => void;
+  onDeleteCancel: (instanceId: string) => void;
   onDeleteConfirm: () => void;
   onSaved: () => void;
   onCancel: () => void;
@@ -96,7 +95,6 @@ function InstanceList({
   onEdit,
   onDelete,
   onDeleteCancel,
-  onDeleteOpenChange,
   onDeleteConfirm,
   onSaved,
   onCancel,
@@ -132,7 +130,6 @@ function InstanceList({
             isFinePointer={isFinePointer}
             confirmingDelete={confirmingDeleteId === instance.id}
             onDeleteCancel={onDeleteCancel}
-            onDeleteOpenChange={onDeleteOpenChange}
             onDeleteConfirm={onDeleteConfirm}
           />
         ),
@@ -194,13 +191,18 @@ function useSentryDeleteConfirmation(
   const cancelDelete = useCallback(() => {
     setConfirmingDeleteId(null);
   }, []);
+  const cancelDeleteFor = useCallback((instanceId: string) => {
+    // Popover close events can arrive after another card opens its confirmation.
+    // A stale close must not disarm that newer, instance-scoped action.
+    setConfirmingDeleteId((currentId) => (currentId === instanceId ? null : currentId));
+  }, []);
   const confirmDelete = useCallback(() => {
     const instance = instances.find((item) => item.id === confirmingDeleteId);
     setConfirmingDeleteId(null);
     if (instance) void handleDelete(instance);
   }, [confirmingDeleteId, handleDelete, instances]);
 
-  return { confirmingDeleteId, startDelete, cancelDelete, confirmDelete };
+  return { confirmingDeleteId, startDelete, cancelDelete, cancelDeleteFor, confirmDelete };
 }
 
 /** Sentry connection card: title/enable toggle plus the list of configured Sentry instances. */
@@ -222,7 +224,7 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
   }, [reload]);
 
   const handleDelete = useDeleteInstance(workspaceId, reload);
-  const { confirmingDeleteId, startDelete, cancelDelete, confirmDelete } =
+  const { confirmingDeleteId, startDelete, cancelDelete, cancelDeleteFor, confirmDelete } =
     useSentryDeleteConfirmation(instances, handleDelete);
 
   const canAddInstance =
@@ -262,10 +264,7 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
                 setMode({ kind: "edit", id });
               }}
               onDelete={startDelete}
-              onDeleteCancel={cancelDelete}
-              onDeleteOpenChange={(open) => {
-                if (!open) cancelDelete();
-              }}
+              onDeleteCancel={cancelDeleteFor}
               onDeleteConfirm={confirmDelete}
               onSaved={handleSaved}
               onCancel={closeForm}

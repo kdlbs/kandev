@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { SentryConfig } from "@/lib/types/sentry";
 import { SentryInstanceCard } from "./sentry-instance-card";
 
@@ -30,7 +30,6 @@ describe("SentryInstanceCard", () => {
           isFinePointer
           confirmingDelete={false}
           onDeleteCancel={() => {}}
-          onDeleteOpenChange={() => {}}
           onDeleteConfirm={() => {}}
         />
         <SentryInstanceCard
@@ -40,7 +39,6 @@ describe("SentryInstanceCard", () => {
           isFinePointer
           confirmingDelete={false}
           onDeleteCancel={() => {}}
-          onDeleteOpenChange={() => {}}
           onDeleteConfirm={() => {}}
         />
       </>,
@@ -48,5 +46,25 @@ describe("SentryInstanceCard", () => {
 
     expect(screen.getByRole("button", { name: "Edit Production Sentry instance" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Delete Self-hosted Sentry instance" })).toBeTruthy();
+  });
+
+  it("reports which instance owns a closing confirmation", () => {
+    const onDeleteCancel = vi.fn();
+
+    render(
+      <SentryInstanceCard
+        instance={instance("instance-2", "Self-hosted")}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        isFinePointer
+        confirmingDelete
+        onDeleteCancel={onDeleteCancel}
+        onDeleteConfirm={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onDeleteCancel).toHaveBeenCalledWith("instance-2");
   });
 });

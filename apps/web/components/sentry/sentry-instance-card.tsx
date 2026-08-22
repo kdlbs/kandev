@@ -30,8 +30,7 @@ type SentryInstanceCardProps = {
   onDelete: () => void;
   isFinePointer: boolean;
   confirmingDelete: boolean;
-  onDeleteCancel: () => void;
-  onDeleteOpenChange: (open: boolean) => void;
+  onDeleteCancel: (instanceId: string) => void;
   onDeleteConfirm: () => void;
 };
 
@@ -44,12 +43,12 @@ export function SentryInstanceCard({
   isFinePointer,
   confirmingDelete,
   onDeleteCancel,
-  onDeleteOpenChange,
   onDeleteConfirm,
 }: SentryInstanceCardProps) {
   const { t } = useTranslation();
   const deleteAnchorRef = useRef<HTMLButtonElement>(null);
   const confirmationTitle = t("sentry:removeInstanceConfirm", { name: instance.name });
+  const cancelDelete = () => onDeleteCancel(instance.id);
   return (
     <div className="space-y-3 rounded-md border p-4" data-testid="sentry-instance-card">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -99,8 +98,8 @@ export function SentryInstanceCard({
           confirmLabel={t("sentry:delete")}
           confirmAriaLabel={confirmationTitle}
           confirmTestId="sentry-remove-confirm"
-          onCancel={onDeleteCancel}
-          onClose={() => onDeleteOpenChange(false)}
+          onCancel={cancelDelete}
+          onClose={cancelDelete}
           onConfirm={onDeleteConfirm}
         />
       ) : null}
@@ -114,8 +113,10 @@ export function SentryInstanceCard({
           confirmAriaLabel={confirmationTitle}
           confirmTestId="sentry-remove-confirm"
           testId="sentry-remove-confirm-popover"
-          onOpenChange={onDeleteOpenChange}
-          onCancel={onDeleteCancel}
+          onOpenChange={(open) => {
+            if (!open) cancelDelete();
+          }}
+          onCancel={cancelDelete}
           onConfirm={onDeleteConfirm}
         />
       ) : null}
