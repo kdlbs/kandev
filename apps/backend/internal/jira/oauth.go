@@ -23,9 +23,10 @@ import (
 // Dynamic Client Registration (RFC 7591) + PKCE (S256) replaces the need for
 // a pre-created app — no client_id/client_secret from the developer console.
 const (
-	mcpResourceURL = "https://mcp.atlassian.com"
-	mcpScopes      = "offline_access read:me read:account read:jira-user read:jira-work write:jira-work search:jira-work"
-	mcpStateTTL    = 10 * time.Minute
+	mcpResourceURL          = "https://mcp.atlassian.com"
+	mcpScopes               = "offline_access read:me read:account read:jira-user read:jira-work write:jira-work search:jira-work"
+	mcpStateTTL             = 10 * time.Minute
+	oauthPersistenceTimeout = 10 * time.Second
 )
 
 // mcpTokenResponse is the response from the token endpoint.
@@ -181,6 +182,13 @@ func newMCPOAuthHTTPClient() *http.Client {
 	return &http.Client{Timeout: 15 * time.Second}
 }
 
+// oauthPersistenceContext keeps credential writes alive after the request
+// ends. The token exchange invalidates the previous refresh token, so losing
+// the new token between the exchange and persistence would force re-auth.
+func oauthPersistenceContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), oauthPersistenceTimeout)
+}
+
 // StartOAuthFlow registers a client dynamically, generates PKCE, and builds the
 // authorization URL. The user never needs to create an Atlassian app.
 func (s *Service) StartOAuthFlow(ctx context.Context, workspaceID, siteURL, redirectURI string) (string, error) {
@@ -272,15 +280,17 @@ func (s *Service) CompleteOAuthFlow(ctx context.Context, code, state string) (*J
 	if tok.AccessToken == "" || tok.RefreshToken == "" {
 		return nil, errors.New("token endpoint did not return the required access and refresh tokens")
 	}
+	persistCtx, cancel := oauthPersistenceContext(ctx)
+	defer cancel()
 	// Persist the rotating refresh token first. A later failure then leaves a
 	// credential that can recover, instead of retaining an invalidated token.
-	if err := s.secrets.Set(ctx, OAuthRefreshTokenKeyForWorkspace(st.WorkspaceID), "oauth_refresh_token", tok.RefreshToken); err != nil {
+	if err := s.secrets.Set(persistCtx, OAuthRefreshTokenKeyForWorkspace(st.WorkspaceID), "oauth_refresh_token", tok.RefreshToken); err != nil {
 		return nil, fmt.Errorf("store refresh token: %w", err)
 	}
-	if err := s.secrets.Set(ctx, OAuthAccessTokenKeyForWorkspace(st.WorkspaceID), "oauth_access_token", tok.AccessToken); err != nil {
+	if err := s.secrets.Set(persistCtx, OAuthAccessTokenKeyForWorkspace(st.WorkspaceID), "oauth_access_token", tok.AccessToken); err != nil {
 		return nil, fmt.Errorf("store access token: %w", err)
 	}
-	if err := s.store.UpsertConfigForWorkspace(ctx, st.WorkspaceID, cfg); err != nil {
+	if err := s.store.UpsertConfigForWorkspace(persistCtx, st.WorkspaceID, cfg); err != nil {
 		return nil, fmt.Errorf("persist config: %w", err)
 	}
 	s.invalidateClient(st.WorkspaceID)
@@ -348,18 +358,20 @@ func (s *Service) persistRefreshedOAuthToken(
 	workspaceID, previousRefreshToken string,
 	tok *mcpTokenResponse,
 ) error {
+	persistCtx, cancel := oauthPersistenceContext(ctx)
+	defer cancel()
 	newRefreshToken := tok.RefreshToken
 	if newRefreshToken == "" {
 		newRefreshToken = previousRefreshToken
 	}
-	if err := s.secrets.Set(ctx, OAuthRefreshTokenKeyForWorkspace(workspaceID), "oauth_refresh_token", newRefreshToken); err != nil {
+	if err := s.secrets.Set(persistCtx, OAuthRefreshTokenKeyForWorkspace(workspaceID), "oauth_refresh_token", newRefreshToken); err != nil {
 		return fmt.Errorf("store refresh token: %w", err)
 	}
-	if err := s.secrets.Set(ctx, OAuthAccessTokenKeyForWorkspace(workspaceID), "oauth_access_token", tok.AccessToken); err != nil {
+	if err := s.secrets.Set(persistCtx, OAuthAccessTokenKeyForWorkspace(workspaceID), "oauth_access_token", tok.AccessToken); err != nil {
 		return fmt.Errorf("store access token: %w", err)
 	}
 	expiresAt := time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second)
-	if err := s.store.UpdateTokenExpiryForWorkspace(ctx, workspaceID, expiresAt); err != nil {
+	if err := s.store.UpdateTokenExpiryForWorkspace(persistCtx, workspaceID, expiresAt); err != nil {
 		return fmt.Errorf("update token expiry: %w", err)
 	}
 	s.invalidateClient(workspaceID)

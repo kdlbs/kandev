@@ -35,6 +35,17 @@ func withDefaultOAuthTransport(t *testing.T, transport http.RoundTripper) {
 	t.Cleanup(func() { http.DefaultTransport = previous })
 }
 
+type contextAwareSecretStore struct {
+	*fakeSecretStore
+}
+
+func (s *contextAwareSecretStore) Set(ctx context.Context, id, name, value string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.fakeSecretStore.Set(ctx, id, name, value)
+}
+
 func TestGeneratePKCEPairUsesS256(t *testing.T) {
 	verifier, challenge, err := generatePKCEPair()
 	if err != nil {
@@ -142,6 +153,44 @@ func TestRefreshOAuthTokenAuthorizesBeforeReadingSecrets(t *testing.T) {
 	err := f.svc.RefreshOAuthToken(context.Background(), "ws-foreign", "stale")
 	if !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
 		t.Fatalf("expected workspace denial, got %v", err)
+	}
+}
+
+func TestPersistRefreshedOAuthTokenOutlivesCanceledRequest(t *testing.T) {
+	f := newSvcFixture(t)
+	f.svc.secrets = &contextAwareSecretStore{fakeSecretStore: f.secrets}
+	if err := f.store.UpsertConfigForWorkspace(context.Background(), "ws-1", &JiraConfig{
+		WorkspaceID: "ws-1",
+		SiteURL:     "https://x.atlassian.net",
+		AuthMethod:  AuthMethodOAuth,
+		ClientID:    "client-1",
+		CloudID:     "cloud-1",
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := f.svc.persistRefreshedOAuthToken(ctx, "ws-1", "old-refresh", &mcpTokenResponse{
+		AccessToken:  "new-access",
+		RefreshToken: "new-refresh",
+		ExpiresIn:    300,
+	})
+	if err != nil {
+		t.Fatalf("persist refreshed token: %v", err)
+	}
+	if got, _ := f.secrets.Reveal(context.Background(), OAuthRefreshTokenKeyForWorkspace("ws-1")); got != "new-refresh" {
+		t.Fatalf("refresh token = %q, want new-refresh", got)
+	}
+	if got, _ := f.secrets.Reveal(context.Background(), OAuthAccessTokenKeyForWorkspace("ws-1")); got != "new-access" {
+		t.Fatalf("access token = %q, want new-access", got)
+	}
+	cfg, err := f.store.GetConfigForWorkspace(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("read persisted config: %v", err)
+	}
+	if cfg.TokenExpiresAt == nil {
+		t.Fatal("token expiry was not persisted")
 	}
 }
 

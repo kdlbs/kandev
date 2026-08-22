@@ -221,8 +221,12 @@ func (c *MCPClient) ensureSession(ctx context.Context) (*mcpclient.Client, error
 
 func (c *MCPClient) resetSession() {
 	c.sessionMu.Lock()
+	previous := c.session
 	c.session = nil
 	c.sessionMu.Unlock()
+	if previous != nil {
+		_ = previous.Close()
+	}
 }
 
 // --- Client interface ---

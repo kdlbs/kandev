@@ -8,6 +8,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	mcpclient "github.com/mark3labs/mcp-go/client"
+	mcptransport "github.com/mark3labs/mcp-go/client/transport"
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 type mcpRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -30,6 +34,9 @@ func setMCPTestTransport(c *MCPClient, transport http.RoundTripper) {
 
 func mcpMethod(t *testing.T, req *http.Request) string {
 	t.Helper()
+	if req.Body == nil {
+		return req.Method
+	}
 	var body struct {
 		Method string `json:"method"`
 	}
@@ -178,5 +185,46 @@ func TestMCPClientRefreshUsesTokenSentByFailedRequest(t *testing.T) {
 	defer refresher.mu.Unlock()
 	if len(refresher.stale) != 2 || refresher.stale[0] != "token-a" || refresher.stale[1] != "token-a" {
 		t.Fatalf("stale tokens = %v, want [token-a token-a]", refresher.stale)
+	}
+}
+
+type resetSessionTransport struct {
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (t *resetSessionTransport) Start(context.Context) error { return nil }
+
+func (t *resetSessionTransport) SendRequest(context.Context, mcptransport.JSONRPCRequest) (*mcptransport.JSONRPCResponse, error) {
+	return nil, nil
+}
+
+func (t *resetSessionTransport) SendNotification(context.Context, mcp.JSONRPCNotification) error {
+	return nil
+}
+
+func (t *resetSessionTransport) SetNotificationHandler(func(mcp.JSONRPCNotification)) {}
+
+func (t *resetSessionTransport) Close() error {
+	t.once.Do(func() { close(t.closed) })
+	return nil
+}
+
+func (t *resetSessionTransport) GetSessionId() string { return "test-session" }
+
+func TestMCPClientResetSessionClosesPreviousClient(t *testing.T) {
+	transport := &resetSessionTransport{closed: make(chan struct{})}
+	c := NewMCPClient("token", "cloud", "ws", "https://x.atlassian.net")
+	c.session = mcpclient.NewClient(transport)
+
+	c.resetSession()
+
+	if c.session != nil {
+		t.Fatal("session was not cleared")
+	}
+	select {
+	case <-transport.closed:
+	default:
+		t.Fatal("previous session was not closed")
 	}
 }
