@@ -142,6 +142,10 @@ function fireIntersection(isIntersecting: boolean, target?: Element) {
   }
 }
 
+function waitForDeferredLoad() {
+  return new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
 class CapturingResizeObserver {
   private readonly callback: ResizeObserverCallback;
   /** Set once the instance is torn down; lets tests prove cleanup runs. */
@@ -811,18 +815,15 @@ describe("PromptHistoryPanelContent — auto-load sentinel", () => {
 
   it("re-arms after a positive result while still intersecting", async () => {
     pagination.hasMore = true;
-    pagination.loadMore.mockResolvedValue(20);
+    pagination.loadMore.mockResolvedValueOnce(20).mockResolvedValueOnce(0);
     messagesBySession[SESSION_A] = [message({ id: "m1", prompt_index: 2, content: "prompt" })];
 
     render(<PromptHistoryPanelContent />);
 
     fireIntersection(true);
-    await act(async () => {});
-    expect(pagination.loadMore).toHaveBeenCalledTimes(1);
-
-    // Positive progress re-arms: a further intersection fires the next page.
-    fireIntersection(true);
-    await act(async () => {});
+    // Positive progress re-arms: the still-intersecting sentinel automatically
+    // fires the next page after prepend/layout work settles.
+    await act(waitForDeferredLoad);
     expect(pagination.loadMore).toHaveBeenCalledTimes(2);
   });
 
