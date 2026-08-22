@@ -799,6 +799,69 @@ func TestGetStatus(t *testing.T) {
 	})
 }
 
+func TestQueueWorkflowControlMessageCoalescesWithoutUsingOrdinaryCapacity(t *testing.T) {
+	svc := NewService(NewMemoryRepository(), 1, logger.Default())
+	svc.SetAutoMergeEnabled(false)
+	ctx := context.Background()
+
+	first, replaced, accepted, err := svc.QueueWorkflowControlMessage(
+		ctx, "session", "task", "review the change", "", QueuedByWorkflow, false, nil, nil, 42,
+	)
+	if err != nil || !accepted || replaced {
+		t.Fatalf("QueueWorkflowControlMessage first = (%+v, %v, %v, %v), want accepted insert", first, replaced, accepted, err)
+	}
+	if first.Metadata[MetadataWorkflowTransitionID] != int64(42) {
+		t.Fatalf("control metadata = %+v, want transition identity", first.Metadata)
+	}
+	second, replaced, accepted, err := svc.QueueWorkflowControlMessage(
+		ctx, "session", "task", "updated review prompt", "", QueuedByWorkflow, false, nil, nil, 42,
+	)
+	if err != nil || !accepted || !replaced || second.ID != first.ID {
+		t.Fatalf("QueueWorkflowControlMessage duplicate = (%+v, %v, %v, %v), want same entry replacement", second, replaced, accepted, err)
+	}
+	if _, err := svc.QueueMessage(ctx, "session", "task", "ordinary", "", QueuedByUser, false, nil); err != nil {
+		t.Fatalf("QueueMessage after control = %v, want ordinary capacity available", err)
+	}
+	if _, err := svc.QueueMessage(ctx, "session", "task", "overflow", "", QueuedByUser, false, nil); !errors.Is(err, ErrQueueFull) {
+		t.Fatalf("QueueMessage overflow error = %v, want ErrQueueFull", err)
+	}
+}
+
+func TestWorkflowControlReservationRecoversAfterRestartAndAcknowledgesOnce(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+	service := NewService(repo, 1, logger.Default())
+	queued, _, accepted, err := service.QueueWorkflowControlMessage(
+		ctx, "session", "task", "review the change", "", QueuedByWorkflow, false, nil, nil, 42,
+	)
+	if err != nil || !accepted {
+		t.Fatalf("QueueWorkflowControlMessage = (%+v, %v, %v), want accepted", queued, accepted, err)
+	}
+	reserved, ok := service.ReserveQueued(ctx, "session")
+	if !ok || reserved.ID != queued.ID {
+		t.Fatalf("ReserveQueued = (%+v, %v), want %q", reserved, ok, queued.ID)
+	}
+
+	resumed := NewService(repo, 1, logger.Default())
+	recovered, ok := resumed.ReserveQueued(ctx, "session")
+	if !ok || recovered.ID != queued.ID {
+		t.Fatalf("ReserveQueued after restart = (%+v, %v), want %q", recovered, ok, queued.ID)
+	}
+	if err := resumed.AcknowledgeQueued(ctx, "session", recovered.ID); err != nil {
+		t.Fatalf("AcknowledgeQueued: %v", err)
+	}
+	if err := resumed.AcknowledgeQueued(ctx, "session", recovered.ID); err != nil {
+		t.Fatalf("duplicate AcknowledgeQueued: %v", err)
+	}
+	entries, err := repo.ListBySession(ctx, "session")
+	if err != nil {
+		t.Fatalf("ListBySession: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("entries after acknowledgement = %+v, want empty", entries)
+	}
+}
+
 func TestTransferSession(t *testing.T) {
 	t.Run("moves entries and pending move", func(t *testing.T) {
 		svc := setupService(t)

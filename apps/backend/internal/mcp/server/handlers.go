@@ -410,6 +410,7 @@ func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 			"sender_session_id": s.sessionID,
 		}
 		copyOptionalStringArg(payload, req, "delivery_mode")
+		copyOptionalStringArg(payload, req, "idempotency_key")
 		copyOptionalStringArg(payload, req, "session_id")
 		copyOptionalStringArg(payload, req, "reply_to_question_id")
 		var result map[string]interface{}
@@ -419,6 +420,47 @@ func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+func (s *Server) getMessageDeliveryHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		deliveryID, err := req.RequireString("delivery_id")
+		if err != nil {
+			return mcp.NewToolResultError("delivery_id is required"), nil
+		}
+		result, err := s.messageDeliveryRequest(ctx, ws.ActionMCPGetMessageDelivery, deliveryID)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) retryMessageDeliveryHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		deliveryID, err := req.RequireString("delivery_id")
+		if err != nil {
+			return mcp.NewToolResultError("delivery_id is required"), nil
+		}
+		result, err := s.messageDeliveryRequest(ctx, ws.ActionMCPRetryMessageDelivery, deliveryID)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) messageDeliveryRequest(ctx context.Context, action, deliveryID string) (map[string]interface{}, error) {
+	payload := map[string]interface{}{
+		"delivery_id": deliveryID, "sender_task_id": s.taskID, "sender_session_id": s.sessionID,
+	}
+	var result map[string]interface{}
+	if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (s *Server) stopTaskHandler() server.ToolHandlerFunc {
@@ -435,6 +477,31 @@ func (s *Server) stopTaskHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPStopTask, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) settleStaleSessionHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		sessionID, err := req.RequireString("session_id")
+		if err != nil {
+			return mcp.NewToolResultError("session_id is required"), nil
+		}
+		turnID, err := req.RequireString("turn_id")
+		if err != nil {
+			return mcp.NewToolResultError("turn_id is required"), nil
+		}
+		// As with the halt tool, construct server-owned attribution rather than
+		// forwarding arbitrary arguments supplied by an agent model.
+		payload := map[string]interface{}{
+			"session_id": sessionID, "turn_id": turnID,
+			"sender_task_id": s.taskID, "sender_session_id": s.sessionID,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPSettleStaleSession, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

@@ -215,7 +215,11 @@ const (
 	SessionCreatedByWorkflowSwitch = "workflow_switch"
 	// SessionMetaKeyOrigin identifies immutable task-session provenance. Unlike
 	// IsPrimary, it never changes when the user selects another conversation tab.
-	SessionMetaKeyOrigin                 = "origin"
+	SessionMetaKeyOrigin = "origin"
+	// SessionMetaKeySpawnSupervision is immutable server-derived provenance
+	// for a session created by spawn_session_kandev. Legacy sessions leave it
+	// absent and therefore never grant supervisor authority.
+	SessionMetaKeySpawnSupervision       = "spawn_supervision"
 	SessionOriginTaskInitial             = "task_initial"
 	SessionMetaKeyContextWindow          = "context_window"
 	SessionMetaKeyContextCompactionCount = "context_compaction_count"
@@ -224,6 +228,44 @@ const (
 	// their own creation time, so the result survives transcript write failures.
 	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
 )
+
+// SessionSpawnSupervision records the verified task/session that spawned a
+// session. It is written exactly once during session creation and never comes
+// from MCP tool arguments or prompt text.
+type SessionSpawnSupervision struct {
+	SupervisorTaskID    string    `json:"supervisor_task_id"`
+	SupervisorSessionID string    `json:"supervisor_session_id"`
+	SpawnedAt           time.Time `json:"spawned_at"`
+}
+
+// IsValid reports whether this record is safe to use for authority checks.
+func (s SessionSpawnSupervision) IsValid() bool {
+	return s.SupervisorTaskID != "" && s.SupervisorSessionID != "" && !s.SpawnedAt.IsZero()
+}
+
+// LoadSessionSpawnSupervision decodes the write-once supervision record from
+// session metadata after JSON round trips.
+func LoadSessionSpawnSupervision(metadata map[string]interface{}) (SessionSpawnSupervision, bool) {
+	if metadata == nil {
+		return SessionSpawnSupervision{}, false
+	}
+	raw, ok := metadata[SessionMetaKeySpawnSupervision]
+	if !ok || raw == nil {
+		return SessionSpawnSupervision{}, false
+	}
+	if supervision, ok := raw.(SessionSpawnSupervision); ok {
+		return supervision, supervision.IsValid()
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return SessionSpawnSupervision{}, false
+	}
+	var supervision SessionSpawnSupervision
+	if err := json.Unmarshal(encoded, &supervision); err != nil {
+		return SessionSpawnSupervision{}, false
+	}
+	return supervision, supervision.IsValid()
+}
 
 // SessionMetaKeySessionMode records the agent's last-known session permission
 // mode (auto / default / accept-edits, etc.) so it survives a backend restart or
@@ -534,6 +576,12 @@ const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
 // failure for UI surfaces that need to keep the error visible after auto-resume.
 const SessionMetaKeyLastAgentError = "last_agent_error"
 
+// SessionMetaKeyBackgroundWorkAttested records that an adapter positively
+// observed detached background work for this session. Completion reconciliation
+// treats a persisted true value as a fail-closed stale-settlement barrier after
+// a backend restart, until a terminal adapter frame clears it.
+const SessionMetaKeyBackgroundWorkAttested = "background_work_attested"
+
 // LastAgentError is persisted under TaskSession.Metadata[SessionMetaKeyLastAgentError].
 // RemediationURL is only ever set from an adapter-validated provider
 // diagnostic; it is never reconstructed from the error message.
@@ -624,6 +672,84 @@ type PendingStepCompletionSignal struct {
 	Handoff    string    `json:"handoff,omitempty"`
 	Blockers   string    `json:"blockers,omitempty"`
 	SignaledAt time.Time `json:"signaled_at"`
+}
+
+// CompletionIntentState is the durable lifecycle of an exact-turn completion
+// request. Terminal states intentionally cannot be reopened or settled again:
+// a later user message owns a successor intent rather than mutating history.
+type CompletionIntentState string
+
+// CompletionIntentQuietGrace is the conservative initial and re-armed delay
+// before a signal-gated turn can be recovered without a provider ready event.
+// It gives final output and tool activity an opportunity to arrive first.
+const CompletionIntentQuietGrace = 5 * time.Second
+
+const (
+	CompletionIntentStatePending    CompletionIntentState = "pending"
+	CompletionIntentStateSettling   CompletionIntentState = "settling"
+	CompletionIntentStateSettled    CompletionIntentState = "settled"
+	CompletionIntentStateReopened   CompletionIntentState = "reopened"
+	CompletionIntentStateSuperseded CompletionIntentState = "superseded"
+	CompletionIntentStateRejected   CompletionIntentState = "rejected"
+)
+
+// CanTransitionTo permits the compare-and-set transitions used by completion
+// admission and exact-turn settlement. A transient settlement failure may
+// release its claim back to pending, while same-state writes remain rejected
+// so duplicate callbacks must observe an existing outcome.
+func (state CompletionIntentState) CanTransitionTo(next CompletionIntentState) bool {
+	switch state {
+	case CompletionIntentStatePending:
+		return next == CompletionIntentStateSettling ||
+			next == CompletionIntentStateReopened ||
+			next == CompletionIntentStateSuperseded ||
+			next == CompletionIntentStateRejected
+	case CompletionIntentStateSettling:
+		return next == CompletionIntentStatePending ||
+			next == CompletionIntentStateSettled ||
+			next == CompletionIntentStateSuperseded ||
+			next == CompletionIntentStateRejected
+	default:
+		return false
+	}
+}
+
+// CompletionIntent binds an accepted completion signal to the only turn it is
+// allowed to settle. AgentExecutionID and PromptGeneration are captured when
+// the provider exposes them, so late frames cannot close a successor turn.
+type CompletionIntent struct {
+	ID                       string                `json:"id"`
+	TaskID                   string                `json:"task_id"`
+	SessionID                string                `json:"session_id"`
+	TurnID                   string                `json:"turn_id"`
+	WorkflowStepID           string                `json:"workflow_step_id"`
+	AgentExecutionID         string                `json:"agent_execution_id,omitempty"`
+	PromptGeneration         int64                 `json:"prompt_generation,omitempty"`
+	State                    CompletionIntentState `json:"state"`
+	Summary                  string                `json:"summary"`
+	Handoff                  string                `json:"handoff,omitempty"`
+	Blockers                 string                `json:"blockers,omitempty"`
+	RequestedAt              time.Time             `json:"requested_at"`
+	LastPostSignalActivityAt time.Time             `json:"last_post_signal_activity_at"`
+	EligibleAt               time.Time             `json:"eligible_at"`
+	SettledAt                *time.Time            `json:"settled_at,omitempty"`
+	Outcome                  string                `json:"outcome,omitempty"`
+}
+
+// SessionControlEvent is the immutable audit record for an authorized attempt
+// to settle one exact stale turn. It intentionally contains only identities and
+// normalized evidence codes, never prompt or report content.
+type SessionControlEvent struct {
+	ID              string    `json:"id"`
+	ActorTaskID     string    `json:"actor_task_id"`
+	ActorSessionID  string    `json:"actor_session_id"`
+	TargetTaskID    string    `json:"target_task_id"`
+	TargetSessionID string    `json:"target_session_id"`
+	TargetTurnID    string    `json:"target_turn_id"`
+	AuthorityBasis  string    `json:"authority_basis"`
+	EvidenceCode    string    `json:"evidence_code"`
+	Result          string    `json:"result"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // LoadSessionRuntimeConfig decodes the runtime-config bag entry from session
@@ -850,6 +976,20 @@ type Task struct {
 	// tasks always come back false. UI callers gate office-only surfaces on
 	// this (e.g. the "Open in office view" topbar link).
 	IsFromOffice bool `json:"is_from_office,omitempty"`
+}
+
+// TaskStepTransition is the immutable ledger identity for one committed task
+// workflow-step change. ID is monotonic and therefore authoritative when
+// clock timestamps are equal or move backwards.
+type TaskStepTransition struct {
+	ID                 int64     `json:"id"`
+	TaskID             string    `json:"task_id"`
+	SessionID          string    `json:"session_id,omitempty"`
+	FromWorkflowID     string    `json:"from_workflow_id,omitempty"`
+	FromWorkflowStepID string    `json:"from_workflow_step_id,omitempty"`
+	ToWorkflowID       string    `json:"to_workflow_id,omitempty"`
+	ToWorkflowStepID   string    `json:"to_workflow_step_id,omitempty"`
+	OccurredAt         time.Time `json:"occurred_at"`
 }
 
 // IsOfficeOwnedAndAssigned reports whether runtime behavior belongs to an

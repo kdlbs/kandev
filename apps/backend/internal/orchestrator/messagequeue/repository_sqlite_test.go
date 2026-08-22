@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -192,6 +193,96 @@ func TestSQLiteRepository_ReserveHeadMarksLifecycleRowInFlight(t *testing.T) {
 	}
 	if !entries[0].IsDurableLifecycle() {
 		t.Error("stored row lost its durable lifecycle marker")
+	}
+}
+
+func TestSQLiteRepository_PreAcceptancePeerReservationIsReclaimedAfterRestart(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+	ledger := repo.(DeliveryLedger)
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn",
+		IdempotencyKey: "restart-pre-acceptance", TargetTaskID: "t1", TargetSessionID: "s1",
+		Content: "accepted peer report", State: DeliveryPendingCapacity,
+	})
+	if err != nil {
+		t.Fatalf("create delivery: %v", err)
+	}
+	claimed, err := ledger.ClaimDueDeliveries(ctx, delivery.NextAttemptAt, "worker", time.Minute, 1)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim delivery = (%+v, %v)", claimed, err)
+	}
+	msg := &QueuedMessage{
+		SessionID: "s1", TaskID: "t1", Content: "accepted peer report", QueuedBy: QueuedByAgent,
+		Metadata: map[string]interface{}{MetadataLifecycleDurable: true, MetadataDeliveryID: delivery.ID},
+	}
+	if err := repo.Insert(ctx, msg, 0); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if _, err := ledger.MarkDeliveryQueued(ctx, delivery.ID, "worker", msg.ID); err != nil {
+		t.Fatalf("mark queued: %v", err)
+	}
+	reserved, err := repo.ReserveHead(ctx, "s1")
+	if err != nil || reserved == nil {
+		t.Fatalf("first reserve = (%+v, %v), want row", reserved, err)
+	}
+	// A process dying before the executor accepts the prompt leaves only the
+	// reservation marker. It must be safely reclaimable, not hidden forever.
+	replayed, err := repo.ReserveHead(ctx, "s1")
+	if err != nil || replayed == nil {
+		t.Fatalf("restart reserve = (%+v, %v), want row", replayed, err)
+	}
+	if replayed.ID != msg.ID {
+		t.Fatalf("restart reserved %q, want original %q", replayed.ID, msg.ID)
+	}
+}
+
+func TestSQLiteRepository_AmbiguousPeerReservationIsNotReplayedAfterRestart(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+	ledger := repo.(DeliveryLedger)
+	delivery, _, err := ledger.CreateOrGetDelivery(ctx, Delivery{
+		SenderTaskID: "source-task", SenderSessionID: "source-session", SourceTurnID: "source-turn",
+		IdempotencyKey: "restart-ambiguous", TargetTaskID: "t1", TargetSessionID: "s1",
+		Content: "accepted peer report", State: DeliveryPendingCapacity,
+	})
+	if err != nil {
+		t.Fatalf("create delivery: %v", err)
+	}
+	claimed, err := ledger.ClaimDueDeliveries(ctx, delivery.NextAttemptAt, "worker", time.Minute, 1)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim delivery = (%+v, %v)", claimed, err)
+	}
+	msg := &QueuedMessage{
+		SessionID: "s1", TaskID: "t1", Content: "accepted peer report", QueuedBy: QueuedByAgent,
+		Metadata: map[string]interface{}{MetadataLifecycleDurable: true, MetadataDeliveryID: delivery.ID},
+	}
+	if err := repo.Insert(ctx, msg, 0); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if _, err := ledger.MarkDeliveryQueued(ctx, delivery.ID, "worker", msg.ID); err != nil {
+		t.Fatalf("mark queued: %v", err)
+	}
+	reserved, err := repo.ReserveHead(ctx, "s1")
+	if err != nil || reserved == nil {
+		t.Fatalf("first reserve = (%+v, %v), want row", reserved, err)
+	}
+	if _, err := ledger.MarkDeliveryAmbiguousByQueueEntry(ctx, msg.ID, "accepted_prompt_receipt_failed"); err != nil {
+		t.Fatalf("mark ambiguous: %v", err)
+	}
+	// The executor might already have accepted this prompt. The retained
+	// receipt is visible to authorized callers, but a restart must never guess
+	// that replaying it is safe.
+	replayed, err := repo.ReserveHead(ctx, "s1")
+	if err != nil || replayed != nil {
+		t.Fatalf("restart reserve = (%+v, %v), want nil", replayed, err)
+	}
+	stored, err := ledger.GetDelivery(ctx, delivery.ID)
+	if err != nil {
+		t.Fatalf("get delivery: %v", err)
+	}
+	if stored.State != DeliveryAmbiguous {
+		t.Fatalf("delivery state = %q, want %q", stored.State, DeliveryAmbiguous)
 	}
 }
 

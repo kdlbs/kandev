@@ -148,6 +148,15 @@ type TaskRepository interface {
 	ReleaseTaskExternalID(ctx context.Context, workspaceID, externalID string) (*models.Task, error)
 }
 
+// TaskStepTransitionRepository reads authoritative workflow-step ledger
+// identities. It remains separate from TaskRepository so older adapters can
+// continue serving ordinary task reads while transition-keyed consumers opt in.
+type TaskStepTransitionRepository interface {
+	// GetLatestTaskStepTransition returns the greatest committed ledger ID for
+	// taskID, or nil when the task has no workflow-step history.
+	GetLatestTaskStepTransition(ctx context.Context, taskID string) (*models.TaskStepTransition, error)
+}
+
 // TaskStatusSummaryRepository stores the bounded task-level projection used by
 // list and switcher surfaces. Implementations must compare revisions and the
 // semantic payload atomically so retries and concurrent source observations do
@@ -299,6 +308,34 @@ type TurnRepository interface {
 	AbandonTurn(ctx context.Context, id string) error
 	CompletePendingToolCallsForTurn(ctx context.Context, turnID string) (int64, error)
 	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
+}
+
+// CompletionIntentRepository persists exact-turn completion ownership. Its
+// compare-and-set transition prevents duplicate provider and reconciler events
+// from settling the same intent twice.
+type CompletionIntentRepository interface {
+	CreateOrGetCompletionIntent(ctx context.Context, intent *models.CompletionIntent) (created bool, stored *models.CompletionIntent, err error)
+	GetCompletionIntent(ctx context.Context, id string) (*models.CompletionIntent, error)
+	// GetCompletionIntentForTurn returns the completion intent bound to one
+	// exact session turn, when a normal provider ready/completed lifecycle
+	// event needs to settle it before the recovery worker runs.
+	GetCompletionIntentForTurn(ctx context.Context, sessionID, turnID string) (*models.CompletionIntent, error)
+	// ListDueCompletionIntents returns pending intents whose quiet grace has
+	// elapsed, in eligible-time order. The bounded reconciler uses this indexed
+	// query instead of scanning all running sessions after a restart.
+	ListDueCompletionIntents(ctx context.Context, now time.Time, limit int) ([]*models.CompletionIntent, error)
+	CountPendingCompletionIntents(ctx context.Context) (int, error)
+	// RearmCompletionIntent moves the quiet-grace deadline forward after
+	// observed foreground or tool activity, but never revives a claimed intent.
+	RearmCompletionIntent(ctx context.Context, id string, activityAt, eligibleAt time.Time) (bool, error)
+	TransitionCompletionIntent(ctx context.Context, id string, from, to models.CompletionIntentState, settledAt time.Time) (bool, error)
+}
+
+// SessionControlEventRepository stores authorized stale-turn control attempts.
+// Denied requests are deliberately not written: they are security-log only to
+// avoid creating a durable write-amplification primitive for untrusted callers.
+type SessionControlEventRepository interface {
+	CreateSessionControlEvent(ctx context.Context, event *models.SessionControlEvent) error
 }
 
 // SessionRepository handles task session lifecycle and workflow-session relationships.

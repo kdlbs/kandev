@@ -248,6 +248,69 @@ func TestProcessOnTurnComplete(t *testing.T) {
 	})
 }
 
+func TestProcessOnEnterQueuesOneCurrentTransitionControlPrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	task.WorkflowStepID = "step2"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("UpdateTask step2: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.activeTurns.Store("s1", "turn-1")
+	step := &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Review",
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}}},
+	}
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	svc.processOnEnter(ctx, "t1", session, step, "review the change")
+	session, err = repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("GetTaskSession after first entry: %v", err)
+	}
+	svc.processOnEnter(ctx, "t1", session, step, "review the change")
+
+	entries := svc.messageQueue.GetStatus(ctx, "s1").Entries
+	if len(entries) != 1 {
+		t.Fatalf("queued on-entry entries = %+v, want exactly one transition control prompt", entries)
+	}
+	if !entries[0].IsWorkflowControl() {
+		t.Fatalf("queued entry metadata = %+v, want workflow control", entries[0].Metadata)
+	}
+
+	task, err = repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("GetTask before later move: %v", err)
+	}
+	task.WorkflowStepID = "step3"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("UpdateTask step3: %v", err)
+	}
+	if svc.lifecycleQueuedDispatchIsCurrent(ctx, &entries[0]) {
+		t.Fatal("later workflow move must suppress the stale transition control prompt")
+	}
+	reserved, ok := svc.messageQueue.ReserveQueued(ctx, "s1")
+	if !ok {
+		t.Fatal("ReserveQueued stale control prompt = false, want reserved entry")
+	}
+	svc.executeQueuedMessage("s1", reserved)
+	persisted, _, err := svc.messageQueue.SnapshotSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("SnapshotSession after stale dispatch: %v", err)
+	}
+	if len(persisted) != 0 {
+		t.Fatalf("stale control prompt remained after suppression: %+v", persisted)
+	}
+}
+
 func TestProcessOnTurnStart(t *testing.T) {
 	ctx := context.Background()
 
@@ -468,6 +531,14 @@ func TestProcessOnEnter(t *testing.T) {
 	t.Run("auto_start_agent queues prompt when session is already running", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
+		task, err := repo.GetTask(ctx, "t1")
+		if err != nil {
+			t.Fatalf("GetTask: %v", err)
+		}
+		task.WorkflowStepID = "step2"
+		if err := repo.UpdateTask(ctx, task); err != nil {
+			t.Fatalf("UpdateTask step2: %v", err)
+		}
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, newMockStepGetter(), taskRepo)

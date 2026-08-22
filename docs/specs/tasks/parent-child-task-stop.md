@@ -52,6 +52,7 @@ for a turn boundary, queuing a message, or starting another agent turn.
 | Send information that can wait | `message_task_kandev` with `delivery_mode="queued"` or omitted | Current turn continues; message waits FIFO. |
 | Stop the current approach and give replacement work now | `message_task_kandev` with `delivery_mode="interrupt"` | Requests immediate cancel-and-redispatch. If immediate dispatch cannot land safely, the message remains queued. |
 | Stop all current work because nothing should replace it | `stop_task_kandev` | Logical cancellation is accepted and runtime teardown begins; no message or replacement turn is created. |
+| Settle one proven administrative stale turn | `settle_stale_session_kandev` | Preserves the resumable session and queues; it is not a broad stop. |
 
 ## API surface
 
@@ -140,6 +141,8 @@ The tool is absent from Config, Office, and External MCP modes. Those modes eith
 lack trusted current-task identity or use a different mutation surface.
 The raw browser WebSocket rejects the entire `mcp.*` action namespace before
 dispatcher routing, so it cannot forge the task-mode server's injected identity.
+
+The separate stale-settlement tool has a narrower target and evidence requirement but a broader, still same-workspace, supervision relation. Its exact authorization and fail-closed activity checks are specified by [Administrative Turn Settlement](../workflow/administrative-turn-settlement/spec.md); this does not change the direct-parent rule for `stop_task_kandev`.
 
 ## State and persistence
 

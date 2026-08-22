@@ -398,6 +398,27 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 // autoStart marks the launch as having been triggered by an automated path
 // (only consumed when skipMessageRecord is false — callers that store their
 // own message control its metadata directly).
+type startCreatedAcceptanceCallbackKey struct{}
+
+// StartCreatedSessionWithAcceptedCallback preserves StartCreatedSession's
+// public contract while binding a delivery receipt to the real initial prompt
+// acceptance boundary. The callback is deliberately carried in context only
+// through this in-process launch; durable recovery remains owned by the
+// delivery ledger if the process dies before acceptance.
+func (s *Service) StartCreatedSessionWithAcceptedCallback(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	afterDispatch func() error,
+) (*executor.TaskExecution, error) {
+	return s.StartCreatedSession(
+		context.WithValue(ctx, startCreatedAcceptanceCallbackKey{}, afterDispatch),
+		taskID, sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references,
+	)
+}
+
 // references contains validated entity references whose exact server-generated
 // context block may survive first-turn canonicalization.
 //
@@ -615,7 +636,15 @@ func (s *Service) StartCreatedSession(
 		mcpMode = executor.McpModeOffice
 	}
 	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
-	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments, TurnID: initialTurnID})
+	var onInitialPromptAccepted func()
+	if afterDispatch, _ := ctx.Value(startCreatedAcceptanceCallbackKey{}).(func() error); afterDispatch != nil {
+		onInitialPromptAccepted = func() {
+			if err := afterDispatch(); err != nil {
+				s.logger.Error("failed to record accepted initial prompt delivery", zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+			}
+		}
+	}
+	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments, TurnID: initialTurnID, OnInitialPromptAccepted: onInitialPromptAccepted})
 	if err != nil {
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
 		// failures here; the session-level claim makes either completion order safe.
@@ -1031,6 +1060,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		return nil, err
+	}
+	if sessionCreated && opts.SpawnOrigin != nil {
+		if err := s.persistSpawnSupervision(ctx, sessionID, opts.SpawnOrigin); err != nil {
+			return nil, err
+		}
 	}
 	// Seed a matching conditional session configuration before lifecycle
 	// startup. The ACP manager applies this durable runtime layer after the
@@ -3817,10 +3851,21 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	return s.promptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, promptTaskOptions{})
 }
 
+// PromptTaskWithAcceptedCallback runs afterDispatch at the synchronous
+// agentctl-acceptance boundary. It is used by durable peer delivery to commit
+// its receipt before any caller can observe successful prompt acceptance.
+func (s *Service) PromptTaskWithAcceptedCallback(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, afterDispatch func() error) (*PromptResult, error) {
+	return s.promptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, promptTaskOptions{afterDispatch: afterDispatch})
+}
+
 type promptTaskOptions struct {
-	claimEntryID          string
-	lifecyclePrompt       bool
-	afterClaim            func() error
+	claimEntryID    string
+	lifecyclePrompt bool
+	afterClaim      func() error
+	// afterDispatch runs synchronously from the adapter's accepted-prompt
+	// callback. Durable queue owners use it to commit their receipt before the
+	// executor returns, closing the post-acceptance crash window.
+	afterDispatch         func() error
 	preservePromptContext bool
 	// reserveTurnUntilDispatch persists detached-resume ownership before agentctl
 	// dispatch, while delaying the visible turn.started event until acceptance.
@@ -4003,6 +4048,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	dispatchOutcome := &promptDispatchOutcome{}
 	onDispatched := s.promptDispatchCallback(
 		promptCtx, taskID, sessionID, rollback.reservedTurn, foregroundDispatch, dispatchOutcome,
+		options.afterDispatch,
 	)
 	result, err := s.executor.PromptWithDispatchCallback(
 		promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly,
@@ -4156,6 +4202,7 @@ func (s *Service) promptDispatchCallback(
 	reservedTurn *models.Turn,
 	dispatch *foregroundDispatch,
 	outcome *promptDispatchOutcome,
+	afterDispatch ...func() error,
 ) func() {
 	return func() {
 		var publicationErr error
@@ -4181,6 +4228,13 @@ func (s *Service) promptDispatchCallback(
 				s.bindAcceptedDispatchTurn(sessionID, reservedTurn.ID)
 			}
 			s.resolveReservedPromptTurn(sessionID, reservedTurn.ID, true)
+		}
+		if len(afterDispatch) > 0 && afterDispatch[0] != nil {
+			if err := afterDispatch[0](); err != nil {
+				publicationErr = errors.Join(publicationErr, err)
+				s.logger.Error("failed to persist accepted queued delivery",
+					zap.String("session_id", sessionID), zap.Error(err))
+			}
 		}
 		outcome.recordAccepted(publicationErr)
 		if s.acceptForegroundDispatch(dispatch) {

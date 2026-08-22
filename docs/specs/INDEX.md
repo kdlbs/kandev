@@ -101,6 +101,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [quick-chat-repository-context](tasks/quick-chat-repository-context.md) | shipped |
 | [parent-child-message-interrupt](tasks/parent-child-message-interrupt.md) | shipped |
 | [parent-child-task-stop](tasks/parent-child-task-stop.md) | shipped |
+| [recoverable-cross-task-delivery](tasks/recoverable-cross-task-delivery.md) | building |
 | [mcp-task-agent-profile-default](tasks/mcp-task-agent-profile-default/spec.md) | shipped |
 | [spawn-session-effective-profile](spawn-session-effective-profile/spec.md) | shipped |
 | [runtime-state-publication-order](tasks/runtime-state-publication-order.md) | shipped |
@@ -116,6 +117,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
 | [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | building |
 | [task-step-transition-ledger](workflow/task-step-transition-ledger/spec.md) | draft |
+| [administrative-turn-settlement](workflow/administrative-turn-settlement/spec.md) | building |
 | [conditional-session-settings](workflow-session-settings/spec.md) | approved |
 | [prevent-agent-autostart-on-open](prevent-agent-autostart-on-open/spec.md) | draft |
 | [workflow-duplication](workflow-duplication/spec.md) | draft |

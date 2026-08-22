@@ -93,6 +93,9 @@ type AgentExecution struct {
 	// completion's attribution while its stream frame is in flight.
 	promptTurnID      string
 	promptLifecycleMu sync.Mutex
+	// initialPromptAccepted is consumed at the real initial-prompt acceptance
+	// boundary. A crash before it runs leaves the durable receipt reclaimable.
+	initialPromptAccepted func()
 
 	// PrepareResult carries the environment preparation result back to the caller
 	// so it can be persisted synchronously before UpdateTaskSession clobbers metadata.
@@ -244,6 +247,14 @@ type AgentExecution struct {
 	startupAttemptGeneration uint64
 	startupRecoveryStarted   bool
 	startupLifecycleMu       sync.Mutex
+}
+
+func (e *AgentExecution) takeInitialPromptAcceptedCallback() func() {
+	e.promptLifecycleMu.Lock()
+	callback := e.initialPromptAccepted
+	e.initialPromptAccepted = nil
+	e.promptLifecycleMu.Unlock()
+	return callback
 }
 
 func (e *AgentExecution) isSessionInitialized() bool {
@@ -833,13 +844,14 @@ type LaunchRequest struct {
 	AgentProfileID string
 	// ExecutionProfileID selects the complete CLI runtime profile. Empty keeps
 	// backward-compatible behavior by using AgentProfileID.
-	ExecutionProfileID string
-	StartAgent         bool                // Transfer launch activity through initial startup/prompt
-	TurnID             string              // Durable Kandev turn for the initial prompt, when present
-	WorkspacePath      string              // Host path to workspace (original repository path)
-	TaskDescription    string              // Task description to send via ACP prompt
-	Attachments        []MessageAttachment // Attachments (images/files) for the initial prompt
-	Env                map[string]string   // Additional env vars
+	ExecutionProfileID      string
+	StartAgent              bool                // Transfer launch activity through initial startup/prompt
+	TurnID                  string              // Durable Kandev turn for the initial prompt, when present
+	WorkspacePath           string              // Host path to workspace (original repository path)
+	TaskDescription         string              // Task description to send via ACP prompt
+	Attachments             []MessageAttachment // Attachments (images/files) for the initial prompt
+	OnInitialPromptAccepted func()
+	Env                     map[string]string // Additional env vars
 	// ApprovedSecretEnvKeys contains repository binding keys that SSH may
 	// forward in addition to its managed credential allowlist.
 	ApprovedSecretEnvKeys []string
