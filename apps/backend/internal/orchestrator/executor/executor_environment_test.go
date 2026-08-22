@@ -152,8 +152,27 @@ func TestEnvironmentReposForLaunch_PersistsRemoteWorkspaceIdentity(t *testing.T)
 		t.Fatalf("environment repos = %#v, want one remote repository row", repos)
 	}
 	got := repos[0]
-	if got.RepositoryID != "repo-1" || got.BranchSlug != "feature-task" || got.WorktreePath != "/remote/tasks/task-1" || got.WorktreeID != "" {
+	if got.RepositoryID != "repo-1" || got.BranchSlug != "feature-task" || got.WorktreePath != "" || got.WorktreeID != "" {
 		t.Fatalf("remote environment repo = %#v", got)
+	}
+}
+
+func TestEnvironmentReposForLaunch_LocalInventoryDoesNotPointAtSeedCheckout(t *testing.T) {
+	req := &LaunchAgentRequest{
+		ExecutorType:       string(models.ExecutorTypeLocal),
+		RepositoryID:       "repo-1",
+		RepositoryPath:     "/tmp/e2e-repo",
+		BranchIdentitySlug: "feature/task",
+	}
+	resp := &LaunchAgentResponse{WorkspacePath: req.RepositoryPath}
+
+	repos := environmentReposForLaunch(req, resp)
+	if len(repos) != 1 {
+		t.Fatalf("environment repos = %#v, want one inventory row", repos)
+	}
+	got := repos[0]
+	if got.WorktreeID != "" || got.WorktreePath != "" || got.WorktreeBranch != "" {
+		t.Fatalf("local inventory row points at a physical checkout: %#v", got)
 	}
 }
 
