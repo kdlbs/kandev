@@ -2043,6 +2043,8 @@ func (e *Executor) persistTaskEnvironment(
 	workspacePath := computeWorkspacePath(req, resp)
 
 	if existingEnv != nil {
+		materializationSessionID := existingEnv.MaterializationSessionID
+		isInitialMaterializer := existingEnv.Status == models.TaskEnvironmentStatusCreating && materializationSessionID == session.ID
 		// agent_execution_id is no longer stored on task_environments — the column
 		// is being dropped (executors_running is the single source of truth).
 		// Status, workspace, and container fields are still env-row-owned; the
@@ -2074,6 +2076,23 @@ func (e *Executor) persistTaskEnvironment(
 		// empty task_dir_name and the resume regenerates it.
 		if req.TaskDirName != "" {
 			existingEnv.TaskDirName = req.TaskDirName
+		}
+		if isInitialMaterializer {
+			// The initial materializer must publish its full repository inventory
+			// in the same transaction as the ready transition. Otherwise a sibling
+			// can bind to a ready environment whose canonical rows are incomplete.
+			existingEnv.Status = models.TaskEnvironmentStatusReady
+			existingEnv.MaterializationSessionID = ""
+			if finalizer, ok := e.repo.(taskEnvironmentMaterializationFinalizer); ok {
+				if err := finalizer.FinalizeTaskEnvironmentMaterialization(ctx, existingEnv, environmentReposForLaunch(req, resp), materializationSessionID); err != nil {
+					e.logger.Warn("failed to finalize task environment materialization",
+						zap.String("task_id", taskID), zap.String("env_id", existingEnv.ID), zap.Error(err))
+					return
+				}
+				session.TaskEnvironmentID = existingEnv.ID
+				e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
+				return
+			}
 		}
 		if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
 			e.logger.Warn("failed to update task environment",

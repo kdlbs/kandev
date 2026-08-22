@@ -251,6 +251,41 @@ func TestPersistTaskEnvironment_DockerBootstrapNonceBecomesEnvironmentHandle(t *
 	}
 }
 
+func TestPersistTaskEnvironment_FinalizesCreatingEnvironmentWithInventory(t *testing.T) {
+	repo := newMockRepository()
+	env := &models.TaskEnvironment{
+		ID:                       "env-1",
+		TaskID:                   "task-1",
+		ExecutorType:             string(models.ExecutorTypeWorktree),
+		Status:                   models.TaskEnvironmentStatusCreating,
+		MaterializationSessionID: "session-1",
+	}
+	repo.taskEnvironments[env.ID] = env
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{ID: "session-1", TaskID: "task-1", TaskEnvironmentID: env.ID}
+
+	e.persistTaskEnvironment(context.Background(), "task-1", session, env,
+		&LaunchAgentRequest{TaskID: "task-1", ExecutorType: string(models.ExecutorTypeWorktree)},
+		&LaunchAgentResponse{WorktreePath: "/tasks/task-1/repo", Worktrees: []RepoWorktreeResult{{
+			RepositoryID: "repo-1", WorktreeID: "wt-1", WorktreePath: "/tasks/task-1/repo", WorktreeBranch: "feature/task-1",
+		}}},
+		executorConfig{ExecutorID: models.ExecutorIDWorktree})
+
+	if len(repo.finalizeTaskEnvironmentCalls) != 1 {
+		t.Fatalf("FinalizeTaskEnvironmentMaterialization calls = %d, want 1", len(repo.finalizeTaskEnvironmentCalls))
+	}
+	if len(repo.updateTaskEnvironmentCalls) != 0 {
+		t.Fatalf("UpdateTaskEnvironment calls = %d, want 0 before atomic finalization", len(repo.updateTaskEnvironmentCalls))
+	}
+	persisted := repo.taskEnvironments[env.ID]
+	if persisted.Status != models.TaskEnvironmentStatusReady || persisted.MaterializationSessionID != "" {
+		t.Fatalf("environment publication = status %q owner %q, want ready with cleared owner", persisted.Status, persisted.MaterializationSessionID)
+	}
+	if got := repo.taskEnvironmentRepos[env.ID]; len(got) != 1 || got[0].WorktreeID != "wt-1" {
+		t.Fatalf("canonical inventory = %#v, want one finalized worktree", got)
+	}
+}
+
 func TestReuseExistingEnvironment_DockerBranchReuse(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1", ExecutorType: "local_docker"}
