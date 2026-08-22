@@ -151,6 +151,29 @@ describe("TasksListView facet grouping", () => {
 
     expect(screen.getAllByTestId("tasks-list-section")).toHaveLength(2);
   });
+
+  it("keeps the host fallback separate from any plugin value", () => {
+    const tagged = makeTask({ id: toTaskId("tagged") });
+    const untagged = makeTask({ id: toTaskId("untagged") });
+
+    render(
+      <StateProvider initialState={{ messages: { bySession: {}, metaBySession: {} } }}>
+        <TooltipProvider>
+          <TasksListView
+            {...props([tagged, untagged])}
+            tasksListGroup="facet:plugin:tags"
+            facetValues={{
+              "facet:plugin:tags:tagged": [
+                { value: "__host_ungrouped__", label: "Custom host value" },
+              ],
+            }}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    expect(screen.getAllByTestId("tasks-list-section")).toHaveLength(2);
+  });
 });
 
 describe("TasksListView row — task-row-metadata slot", () => {

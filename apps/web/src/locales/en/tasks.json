@@ -23,7 +23,7 @@
   "groupByRepository": "Repository",
   "groupByState": "State",
   "groupByWorkflow": "Workflow",
-  "ungrouped": "Untagged",
+  "ungrouped": "Ungrouped",
   "loading": "Loading...",
   "loadingTasks": "Loading tasks...",
   "noRepository": "No repository",

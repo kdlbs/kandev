@@ -689,6 +689,13 @@
         Component: NotesPanel,
         mobileEnabled: true,
       });
+      registry.registerTaskListFacet({
+        id: "fixture",
+        label: "Fixture facet",
+        getValues: function (_context) {
+          return [{ value: "fixture", label: "Fixture facet", color: "#2563eb" }];
+        },
+      });
       registry.registerComponent("chat-input-actions", ComposerAction);
       registry.registerComponent("task-create-input-actions", ComposerAction);
       registry.registerComponent("new-session-input-actions", ComposerAction);
