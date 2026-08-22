@@ -109,6 +109,7 @@ export function ModelPicker({
       }
       placeholder={placeholder ?? t("settings:selectAModel")}
       ariaLabel={ariaLabel}
+      popoverAlign="start"
       disabled={disabled}
       configOptionsLoading={configOptionsLoading}
       keepOpenOnModelChange={keepOpenOnModelChange}

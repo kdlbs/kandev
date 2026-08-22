@@ -198,6 +198,13 @@ describe("ProfileFormFields no-silent-model-fallback rows", () => {
 });
 
 describe("ProfileFormFields model options", () => {
+  it("constrains a single start model field on desktop", () => {
+    renderForm(formData());
+
+    const row = screen.getByTestId("profile-capabilities-model-row");
+    expect(row.firstElementChild?.className).toContain("md:max-w-xl");
+  });
+
   it("loads model-specific options in the profile model selector", async () => {
     const dynamicModelConfig: ModelConfig = {
       default_model: "model-a",
