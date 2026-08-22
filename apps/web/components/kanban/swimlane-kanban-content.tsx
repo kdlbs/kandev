@@ -363,18 +363,18 @@ function TabletKanbanLayout({
   return (
     <div
       className="flex h-full min-h-0 gap-2 overflow-x-auto snap-x snap-mandatory scrollbar-hide"
-        data-testid="tablet-kanban-layout"
-      >
-        {steps.map((step) => (
-          <div
-            key={step.id}
-            data-kanban-step-id={step.id}
-            className={cn(
-              "h-full min-h-0 w-[calc(50%-4px)] flex-shrink-0 snap-start",
-              temporaryStepIds.has(step.id) && "opacity-70",
-            )}
-          >
-            <KanbanColumn
+      data-testid="tablet-kanban-layout"
+    >
+      {steps.map((step) => (
+        <div
+          key={step.id}
+          data-kanban-step-id={step.id}
+          className={cn(
+            "h-full min-h-0 w-[calc(50%-4px)] flex-shrink-0 snap-start",
+            temporaryStepIds.has(step.id) && "opacity-70",
+          )}
+        >
+          <KanbanColumn
             step={step}
             tasks={getTasksForStep(step.id)}
             presentation="desktop"

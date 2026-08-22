@@ -583,14 +583,14 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
             workflows={renderedWorkflows}
             snapshots={snapshots}
             getFilteredTasks={getFilteredTasks}
-              getOccupancyTasks={getOccupancyTasks}
-              ViewComponent={ViewComponent}
-              hideHeaders={hideHeaders}
-              onToggleStepVisibility={onToggleStepVisibility}
-              onToggleAutoHideEmpty={onToggleAutoHideEmpty}
-              fillHeight={view.id === "kanban"}
-              isMobileKanban={isMobileKanban}
-              canSortWorkflows={canSortWorkflows}
+            getOccupancyTasks={getOccupancyTasks}
+            ViewComponent={ViewComponent}
+            hideHeaders={hideHeaders}
+            onToggleStepVisibility={onToggleStepVisibility}
+            onToggleAutoHideEmpty={onToggleAutoHideEmpty}
+            fillHeight={view.id === "kanban"}
+            isMobileKanban={isMobileKanban}
+            canSortWorkflows={canSortWorkflows}
             isCollapsed={isCollapsed}
             toggleCollapse={toggleCollapse}
             containerProps={containerProps}
