@@ -416,6 +416,11 @@ func TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession(t *tes
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("update session: %v", err)
 	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-1", TaskID: "t1", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create task environment: %v", err)
+	}
 
 	stepGetter := newMockStepGetter()
 	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
@@ -429,7 +434,12 @@ func TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession(t *tes
 	}
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", WorkflowID: "wf1", State: v1.TaskStateInProgress}
-	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "workflow-profile-execution"}, nil
+		},
+	}
 	log := testLogger()
 	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
@@ -644,7 +654,12 @@ func TestSwitchSessionForStep(t *testing.T) {
 			State:       v1.TaskStateInProgress,
 		}
 
-		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		agentMgr := &mockAgentManager{
+			repoForExecutionLookup: repo,
+			launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				return &executor.LaunchAgentResponse{AgentExecutionID: "workflow-switch-execution"}, nil
+			},
+		}
 		log := testLogger()
 		exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 		sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
