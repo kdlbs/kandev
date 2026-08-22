@@ -441,6 +441,15 @@ function useVisibleMessages(
   );
 }
 
+export function shouldShowTaskDescriptionFallback(
+  taskDescription: string | null,
+  visibleMessages: Message[],
+): boolean {
+  return (
+    Boolean(taskDescription) && !visibleMessages.some((message) => message.author_type === "user")
+  );
+}
+
 export function useProcessedMessages(
   messages: Message[],
   taskId: string | null,
@@ -469,18 +478,18 @@ export function useProcessedMessages(
   const visibleMessages = useVisibleMessages(messages, toolCallIds, subagentChildIds, scope);
 
   const taskDescriptionMessage: Message | null = useMemo(() => {
-    return taskDescription && visibleMessages.length === 0
+    return shouldShowTaskDescriptionFallback(taskDescription, visibleMessages)
       ? {
           id: "task-description",
           task_id: toTaskId(taskId ?? ""),
           session_id: toSessionId(resolvedSessionId ?? ""),
           author_type: "user",
-          content: taskDescription,
+          content: taskDescription ?? "",
           type: "message",
           created_at: "",
         }
       : null;
-  }, [taskDescription, visibleMessages.length, taskId, resolvedSessionId]);
+  }, [taskDescription, visibleMessages, taskId, resolvedSessionId]);
 
   const allMessages = useMemo(() => {
     return taskDescriptionMessage ? [taskDescriptionMessage, ...visibleMessages] : visibleMessages;

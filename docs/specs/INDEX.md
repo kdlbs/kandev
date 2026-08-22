@@ -196,6 +196,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [resizable-markdown-tables](ui/resizable-markdown-tables.md) | building |
 | [transcript-auto-scroll](ui/transcript-auto-scroll.md) | building |
+| [task-transcript-history-visibility](ui/task-prompt-transcript-visibility.md) | building |
 | [clarification-context](ui/clarification-context.md) | shipped |
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
 | [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |
