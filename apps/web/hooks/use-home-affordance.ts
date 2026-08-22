@@ -13,7 +13,8 @@ export type HomeAffordance = {
 /**
  * The one rule for whether a page shows a home crumb and where it leads.
  *
- * - `none` for root-variant pages — the surface *is* home.
+ * - `none` while the workspace mode is still unknown — there is no home to
+ *   point at yet.
  * - `always` while the sidebar's settings takeover is active (expanded sidebar
  *   in settings mode): the sidebar's Home row is replaced by the settings tree,
  *   so desktop users would otherwise be left with only the unlabelled logo.
@@ -22,14 +23,13 @@ export type HomeAffordance = {
  * The href comes from the navigation manifest's home entry, so it follows the
  * active workspace and lands on the office dashboard inside Office.
  */
-export function useHomeAffordance(variant: "breadcrumb" | "root" = "breadcrumb"): HomeAffordance {
+export function useHomeAffordance(): HomeAffordance {
   const ctx = useNavContext();
   const workspaceMode = useOfficeModeState();
   const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
   const collapsed = useAppStore((s) => s.appSidebar.collapsed);
   if (workspaceMode === "unknown") return { mode: "none", href: "" };
   const href = homeDestinationHref(ctx);
-  if (variant === "root") return { mode: "none", href };
   // The takeover only renders in the expanded sidebar (see AppSidebarNavigation),
   // so a collapsed sidebar still shows its icon rail and needs no extra crumb.
   return { mode: settingsMode && !collapsed ? "always" : "phone", href };

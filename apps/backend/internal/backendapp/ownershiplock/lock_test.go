@@ -2,8 +2,11 @@ package ownershiplock
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -83,6 +86,32 @@ func TestOwnershipLockReleasesAfterForcedProcessExit(t *testing.T) {
 	}
 	if err := owner.Close(); err != nil {
 		t.Fatalf("release after forced exit: %v", err)
+	}
+}
+
+func TestOwnershipLockRejectsSymlinkedLockPath(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	link := filepath.Join(dir, "lock")
+	want := []byte("must remain unchanged")
+	if err := os.WriteFile(target, want, 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	file, err := openLockFile(link)
+	if err == nil {
+		_ = file.Close()
+		t.Fatal("openLockFile succeeded for symlinked lock path")
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("symlink target changed to %q, want %q", got, want)
 	}
 }
 
@@ -223,4 +252,126 @@ func TestOwnershipLockConflictErrorIncludesTarget(t *testing.T) {
 	if conflict.Target.ResourcePath != targets[0].ResourcePath {
 		t.Fatalf("conflict target = %q, want canonical home path %q", conflict.Target.ResourcePath, targets[0].ResourcePath)
 	}
+	if conflict.Owner == nil {
+		t.Fatal("conflict owner metadata is nil")
+	}
+	if conflict.Owner.PID != int64(os.Getpid()) {
+		t.Fatalf("conflict owner PID = %d, want %d", conflict.Owner.PID, os.Getpid())
+	}
+	if !strings.Contains(conflict.Error(), fmt.Sprintf("pid %d", os.Getpid())) {
+		t.Fatalf("conflict error = %q, want owner PID", conflict.Error())
+	}
+}
+
+func TestOwnershipLockConflictFallsBackWithoutUsableOwner(t *testing.T) {
+	oldLiveness := ownerLivenessFn
+	ownerLivenessFn = func(int64) (bool, bool) { return false, true }
+	t.Cleanup(func() { ownerLivenessFn = oldLiveness })
+
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{name: "empty", data: ownerMetadataFixture("")},
+		{name: "invalid", data: ownerMetadataFixture("not json")},
+		{name: "dead", data: ownerMetadataBytes(mustOwnerJSON(t, OwnerRecord{PID: 987654321, Executable: "dead-kandev", StartedAt: "2026-08-19T09:14:35Z"}))},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			targets, err := Targets(home, "sqlite", "")
+			if err != nil {
+				t.Fatalf("Targets: %v", err)
+			}
+			owner, err := Acquire(targets)
+			if err != nil {
+				t.Fatalf("Acquire primary owner: %v", err)
+			}
+			t.Cleanup(func() { _ = owner.Close() })
+			if err := writeOwnerMetadataFixture(owner.held[0].file, test.data); err != nil {
+				t.Fatalf("write conflict metadata: %v", err)
+			}
+
+			_, err = Acquire(targets)
+			var conflict *ConflictError
+			if !errors.As(err, &conflict) {
+				t.Fatalf("second Acquire error = %v, want ConflictError", err)
+			}
+			want := fmt.Sprintf("%s target %q is already owned by another backend", TargetHome, targets[0].ResourcePath)
+			if conflict.Error() != want {
+				t.Fatalf("conflict error = %q, want %q", conflict.Error(), want)
+			}
+			if conflict.Owner != nil {
+				t.Fatalf("conflict owner = %+v, want nil", conflict.Owner)
+			}
+		})
+	}
+}
+
+func writeOwnerMetadataFixture(file *os.File, data []byte) error {
+	if err := file.Truncate(0); err != nil {
+		return err
+	}
+	n, err := file.WriteAt(data, 0)
+	if err != nil {
+		return err
+	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
+}
+
+func TestOwnershipLockConflictKeepsUnknownOwner(t *testing.T) {
+	oldLiveness := ownerLivenessFn
+	ownerLivenessFn = func(int64) (bool, bool) { return false, false }
+	t.Cleanup(func() { ownerLivenessFn = oldLiveness })
+
+	home := t.TempDir()
+	targets, err := Targets(home, "sqlite", "")
+	if err != nil {
+		t.Fatalf("Targets: %v", err)
+	}
+	owner, err := Acquire(targets)
+	if err != nil {
+		t.Fatalf("Acquire primary owner: %v", err)
+	}
+	t.Cleanup(func() { _ = owner.Close() })
+
+	_, err = Acquire(targets)
+	var conflict *ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("second Acquire error = %v, want ConflictError", err)
+	}
+	if conflict.Owner == nil {
+		t.Fatal("unknown liveness dropped owner metadata")
+	}
+}
+
+func TestOwnershipLockMetadataWriteFailureDoesNotBlockAcquire(t *testing.T) {
+	oldWriteOwner := writeOwnerFn
+	writeOwnerFn = func(*os.File) error { return errors.New("metadata unavailable") }
+	t.Cleanup(func() { writeOwnerFn = oldWriteOwner })
+
+	home := t.TempDir()
+	targets, err := Targets(home, "sqlite", "")
+	if err != nil {
+		t.Fatalf("Targets: %v", err)
+	}
+	owner, err := Acquire(targets)
+	if err != nil {
+		t.Fatalf("Acquire with metadata failure: %v", err)
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func mustOwnerJSON(t *testing.T, owner OwnerRecord) []byte {
+	t.Helper()
+	data, err := json.Marshal(owner)
+	if err != nil {
+		t.Fatalf("marshal owner: %v", err)
+	}
+	return data
 }

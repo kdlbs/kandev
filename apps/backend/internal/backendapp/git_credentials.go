@@ -32,6 +32,7 @@ func newGitCredentialBroker(
 	githubSvc *githubpkg.Service,
 	pluginSvc *plugins.Service,
 	repo gitCredentialTaskRepository,
+	reissueSigningKey string,
 ) *gitcredentials.Broker {
 	resolvers := make([]gitcredentials.Resolver, 0, 2)
 	if githubSvc != nil {
@@ -40,7 +41,11 @@ func newGitCredentialBroker(
 	if pluginSvc != nil {
 		resolvers = append(resolvers, pluginGitCredentialResolver{service: pluginCredentialServiceAdapter{service: pluginSvc}})
 	}
-	return gitcredentials.NewBroker(gitcredentials.NewCompositeResolver(resolvers...), &githubBrokerScopeAuthorizer{repo: repo})
+	broker := gitcredentials.NewBroker(gitcredentials.NewCompositeResolver(resolvers...), &githubBrokerScopeAuthorizer{repo: repo})
+	if signer, err := gitcredentials.NewReissueCapabilitySigner(reissueSigningKey); err == nil {
+		broker.SetReissueCapabilitySigner(signer)
+	}
+	return broker
 }
 
 // pluginGitCredentialResolver resolves only live, active manifest-declared

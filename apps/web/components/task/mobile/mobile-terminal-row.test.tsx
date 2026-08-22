@@ -95,7 +95,7 @@ describe("mobile terminal close feedback", () => {
     expect(screen.getByRole("group", { name: CLOSE_CONFIRMATION_NAME })).toBeTruthy();
   });
 
-  it("always morphs the close action into inline cancel and confirm actions", () => {
+  it("always morphs the close action into inline cancel and confirm actions", async () => {
     mockDestroyTerminal.mockImplementation(() => new Promise<boolean>(() => {}));
     renderOpenPicker();
 
@@ -116,7 +116,7 @@ describe("mobile terminal close feedback", () => {
       }),
     );
 
-    expect(mockDestroyTerminal).toHaveBeenCalledWith(terminal.id);
+    await waitFor(() => expect(mockDestroyTerminal).toHaveBeenCalledWith(terminal.id));
     expect(screen.queryByRole("group", { name: CLOSE_CONFIRMATION_NAME })).toBeNull();
   });
 

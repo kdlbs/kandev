@@ -84,6 +84,7 @@ const (
 
 	ActionTaskSessionList   = "task.session.list"
 	ActionTaskSessionStatus = "task.session.status"
+	ActionTaskLaunchRecover = "task.launch.recover"
 
 	// Unified session launch
 	ActionSessionLaunch       = "session.launch"
@@ -95,6 +96,7 @@ const (
 	ActionSessionSetPrimary   = "session.set_primary"
 	ActionSessionSetPlanMode  = "session.set_plan_mode"
 	ActionSessionRename       = "session.rename"
+	ActionSessionRouteAction  = "session.route_action"
 
 	// Agent actions
 	ActionAgentList   = "agent.list"
@@ -125,6 +127,7 @@ const (
 	ActionMessageQueueAppend        = "message.queue.append"
 	ActionMessageQueueDrain         = "message.queue.drain"          // Dispatch one queued entry now when the session is promptable
 	ActionMessageQueueSendNow       = "message.queue.send_now"       // Interrupt and replace the active turn with an exact queue selection
+	ActionMessageQueueAutoRunSet    = "message.queue.auto_run.set"   // Persist automatic queue processing and optionally dispatch the head
 	ActionMessageQueueRemove        = "message.queue.remove"         // Delete a single entry by id
 	ActionMessageQueueMerge         = "message.queue.merge"          // Fold an entry into the entry above it
 	ActionMessageQueueReorder       = "message.queue.reorder"        // Rewrite the visible pending order for a session
@@ -236,6 +239,11 @@ const (
 	ActionSessionTodosUpdated          = "session.todos_updated"
 	ActionSessionPromptUsage           = "session.prompt_usage"
 	ActionSessionPollModeChanged       = "session.poll_mode_changed"
+	ActionSessionRouteChanging         = "session.route_changing"
+	ActionSessionRouteChanged          = "session.route_changed"
+	ActionSessionCapabilitiesReplaced  = "session.capabilities_replaced"
+	ActionSessionRouteWaiting          = "session.route_waiting"
+	ActionSessionRoutePending          = "session.route_pending"
 	ActionInputRequested               = "input.requested"
 	ActionRepositoryCreated            = "repository.created"
 	ActionRepositoryUpdated            = "repository.updated"
@@ -428,11 +436,15 @@ const (
 	ActionMCPListPluginTools   = "mcp.list_plugin_tools"
 	ActionMCPInvokePluginTool  = "mcp.invoke_plugin_tool"
 
+	// Office quorum decision recording.
+	ActionMCPRecordStepDecision = "mcp.record_step_decision"
+
 	// Config-mode MCP actions (agent-native configuration)
 	ActionMCPCreateWorkflow = "mcp.create_workflow"
 	ActionMCPUpdateWorkflow = "mcp.update_workflow"
 	ActionMCPDeleteWorkflow = "mcp.delete_workflow"
 	ActionMCPImportWorkflow = "mcp.import_workflow"
+	ActionMCPExportWorkflow = "mcp.export_workflow"
 
 	ActionMCPCreateWorkflowStep  = "mcp.create_workflow_step"
 	ActionMCPUpdateWorkflowStep  = "mcp.update_workflow_step"

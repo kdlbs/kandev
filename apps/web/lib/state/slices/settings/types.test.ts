@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { agentProfileId } from "@/lib/types/ids";
-import { isSelectableAgentProfile, toAgentProfileOption } from "./types";
+import { isSelectableAgentProfile, toAgentProfileOption, toProfileCapability } from "./types";
 
 describe("isSelectableAgentProfile", () => {
   it.each([
@@ -9,6 +9,12 @@ describe("isSelectableAgentProfile", () => {
     ["legacy", undefined, true],
   ])("treats %s profiles correctly", (_label, enabled, expected) => {
     expect(isSelectableAgentProfile({ enabled })).toBe(expected);
+  });
+
+  it("excludes dynamic profiles when dynamic routing is disabled", () => {
+    expect(isSelectableAgentProfile({ enabled: true, kind: "dynamic" }, false)).toBe(false);
+    expect(isSelectableAgentProfile({ enabled: true, kind: "dynamic" }, true)).toBe(true);
+    expect(isSelectableAgentProfile({ enabled: true, kind: "concrete" }, false)).toBe(true);
   });
 });
 
@@ -35,5 +41,61 @@ describe("toAgentProfileOption", () => {
       name: "legacy",
     });
     expect(legacy.enabled).toBe(true);
+  });
+
+  it("preserves profile kind for picker filtering", () => {
+    const option = toAgentProfileOption(agent, {
+      id: agentProfileId("dynamic"),
+      agentDisplayName: "Dynamic",
+      name: "Frontier",
+      kind: "dynamic",
+    });
+    expect(option.kind).toBe("dynamic");
+  });
+
+  it("preserves the owning agent capability fields", () => {
+    const option = toAgentProfileOption(
+      {
+        ...agent,
+        capability_status: "not_installed",
+        capability_error: "CLI not found",
+      },
+      {
+        id: agentProfileId("p3"),
+        agentDisplayName: "Claude Code",
+        name: "default",
+      },
+    );
+
+    expect(option).toMatchObject({
+      capability_status: "not_installed",
+      capability_error: "CLI not found",
+    });
+  });
+});
+
+describe("toProfileCapability", () => {
+  it("maps an unavailable agent to not_installed even when its cached status is ok", () => {
+    expect(
+      toProfileCapability({
+        name: "claude-acp",
+        display_name: "Claude",
+        supports_mcp: false,
+        installation_paths: [],
+        available: false,
+        capabilities: {
+          supports_session_resume: false,
+          supports_shell: false,
+          supports_workspace_only: false,
+        },
+        model_config: {
+          default_model: "default",
+          available_models: [],
+          supports_dynamic_models: false,
+          status: "ok",
+        },
+        updated_at: "2026-07-26T10:00:00Z",
+      }),
+    ).toMatchObject({ capability_status: "not_installed" });
   });
 });

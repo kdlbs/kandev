@@ -589,6 +589,21 @@ func (s *Store) GetTaskMR(ctx context.Context, taskID, repositoryID, projectPath
 	return &tm, nil
 }
 
+// GetTaskMRByID returns one association by its stable primary key. It is used
+// by source-aware detach cleanup before the row is removed.
+func (s *Store) GetTaskMRByID(ctx context.Context, id string) (*TaskMR, error) {
+	var tm TaskMR
+	err := s.ro.GetContext(ctx, &tm, `
+		SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs WHERE id = ? LIMIT 1`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &tm, nil
+}
+
 // ListTaskMRsByTask returns every MR association for a task, oldest first.
 func (s *Store) ListTaskMRsByTask(ctx context.Context, taskID string) ([]*TaskMR, error) {
 	var mrs []TaskMR

@@ -242,7 +242,7 @@ func (r *Repository) BulkReleaseTaskCheckout(ctx context.Context, taskIDs []stri
 		return nil
 	}
 	query, args := taskIDInQuery(`
-		UPDATE tasks SET checkout_agent_id = '', checkout_at = NULL, updated_at = CURRENT_TIMESTAMP
+		UPDATE tasks SET checkout_agent_id = '', checkout_at = NULL, checkout_run_id = NULL, updated_at = CURRENT_TIMESTAMP
 		WHERE id IN (%s)
 	`, taskIDs)
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)

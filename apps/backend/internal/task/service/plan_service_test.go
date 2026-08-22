@@ -51,6 +51,12 @@ func createTestPlanService(t *testing.T) (*PlanService, *MockEventBus, *sqlitere
 	return svc, eventBus, repo
 }
 
+func TestResolveCoalesceWindowUsesTypedStartupValue(t *testing.T) {
+	if got := resolveCoalesceWindow(2400 * time.Millisecond); got != 2400*time.Millisecond {
+		t.Fatalf("coalesce window = %s, want 2.4s", got)
+	}
+}
+
 type nilMarkPlanRepo struct {
 	*sqliterepo.Repository
 }

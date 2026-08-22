@@ -40,11 +40,11 @@ function useTerminalCloseHandler({
     [destroyTerminal, environmentId, terminals.length, addTerminal],
   );
 
-  const handleConfirmClose = useCallback(() => {
+  const handleConfirmClose = useCallback(async () => {
     if (!pendingClose) return;
     const terminal = pendingClose;
     setPendingClose(null);
-    void closeTerminal(terminal);
+    await closeTerminal(terminal);
   }, [pendingClose, closeTerminal]);
 
   return { pendingClose, setPendingClose, handleConfirmClose };
@@ -138,6 +138,7 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
             onSelect={handleSelect}
             onAskClose={handleAskClose}
             onCancelClose={() => setPendingClose(null)}
+            onClose={() => setPendingClose(null)}
             onConfirmClose={handleConfirmClose}
           />
         ))}

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/lib/i18n";
 import type {
@@ -9,10 +9,16 @@ import type {
 const PR_CARD = "azure-pull-request-watch-pr-1";
 const WI_CARD = "azure-work-item-watch-wi-1";
 
-const mocks = vi.hoisted(() => ({ watches: vi.fn() }));
+const mocks = vi.hoisted(() => ({ watches: vi.fn(), promptEditor: vi.fn() }));
 
 vi.mock("@/hooks/domains/azure-devops/use-azure-devops-watches", () => ({
   useAzureDevOpsWatches: mocks.watches,
+}));
+vi.mock("@/components/settings/settings-prompt-editor", () => ({
+  SettingsPromptEditor: (props: Record<string, unknown>) => {
+    mocks.promptEditor(props);
+    return <div data-testid={props.testId as string} />;
+  },
 }));
 
 import { AzureDevOpsWatchSettings } from "@/components/azure-devops/azure-devops-watch-settings";
@@ -115,5 +121,22 @@ describe("AzureDevOpsWatchSettings", () => {
     await i18n.changeLanguage("pseudo");
     render(<AzureDevOpsWatchSettings workspaceId="workspace-a" />);
     expect(screen.getByTestId(PR_CARD).textContent).toContain("Śţàţũś: draft");
+  });
+
+  it("uses typed Azure DevOps placeholders with saved-prompt references", () => {
+    render(<AzureDevOpsWatchSettings workspaceId="workspace-a" />);
+
+    fireEvent.click(screen.getByTestId("azure-pull-request-watch-edit-pr-1"));
+
+    expect(mocks.promptEditor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptReferences: true,
+        testId: "azure-pull-request-watch-prompt-editor",
+        placeholders: expect.arrayContaining([
+          expect.objectContaining({ key: "pull_request.url" }),
+          expect.objectContaining({ key: "pull_request.target_branch" }),
+        ]),
+      }),
+    );
   });
 });

@@ -128,6 +128,9 @@ func (s *Server) setupRoutes() {
 		// and triggers a fresh git-status emit so the UI updates without
 		// waiting for the next poll tick.
 		api.POST("/workspace/base-branches", s.handleSetBaseBranches)
+		// Provider-qualified comparison targets are authenticated internal state;
+		// the backend uses this route after association, retarget, and resume.
+		api.POST("/workspace/comparison-targets", s.handleSetComparisonTargets)
 
 		// Workspace file operations (simple HTTP)
 		api.GET("/workspace/tree", s.handleFileTree)

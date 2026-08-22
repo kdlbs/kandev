@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -75,6 +76,14 @@ type SessionCanceller interface {
 // number of clarification bundles detached while pausing.
 type ClarificationInputPauser interface {
 	PauseForClarificationInput(ctx context.Context, sessionID string) (int, error)
+}
+
+type clarificationInputPauserWithOptions interface {
+	PauseForClarificationInputWithOptions(
+		ctx context.Context,
+		sessionID string,
+		options orchestrator.ClarificationPauseOptions,
+	) (int, error)
 }
 
 // MessageCreator creates messages for clarification requests.
@@ -236,6 +245,10 @@ type Handlers struct {
 	// Wires the list_related_tasks_kandev / *_task_document_kandev
 	// MCP tools introduced in office task handoffs phase 2.
 	handoffSvc *service.HandoffService
+
+	// Office dashboard service (optional, set via SetDashboardService).
+	// Wires the record_step_decision_kandev MCP tool.
+	dashboardSvc *dashboard.DashboardService
 
 	// Optional PR lister (set via SetTaskPRLister) used to enrich
 	// task-listing responses with associated pull requests.
@@ -403,6 +416,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPUpdateWorkflow, h.handleUpdateWorkflow)
 		d.RegisterFunc(ws.ActionMCPDeleteWorkflow, h.handleDeleteWorkflow)
 		d.RegisterFunc(ws.ActionMCPImportWorkflow, h.handleImportWorkflow)
+		d.RegisterFunc(ws.ActionMCPExportWorkflow, h.handleExportWorkflow)
 		d.RegisterFunc(ws.ActionMCPCreateWorkflowStep, h.handleCreateWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPUpdateWorkflowStep, h.handleUpdateWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPDeleteWorkflowStep, h.handleDeleteWorkflowStep)
@@ -430,6 +444,9 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPListTaskDocuments, h.handleListTaskDocuments)
 		d.RegisterFunc(ws.ActionMCPGetTaskDocument, h.handleGetTaskDocument)
 		d.RegisterFunc(ws.ActionMCPWriteTaskDocument, h.handleWriteTaskDocument)
+	}
+	if h.dashboardSvc != nil {
+		d.RegisterFunc(ws.ActionMCPRecordStepDecision, h.handleRecordStepDecision)
 	}
 	if h.taskSvc != nil {
 		d.RegisterFunc(ws.ActionMCPMoveTask, h.handleMoveTask)
@@ -3400,10 +3417,12 @@ func (h *Handlers) publishQueueStatusEvent(ctx context.Context, sessionID string
 		events.MessageQueueStatusChanged,
 		"mcp-handlers",
 		map[string]interface{}{
-			"session_id": sessionID,
-			"entries":    status.Entries,
-			"count":      status.Count,
-			"max":        status.Max,
+			"session_id":    sessionID,
+			"entries":       status.Entries,
+			"count":         status.Count,
+			"max":           status.Max,
+			"auto_run":      status.AutoRun,
+			"merge_enabled": status.MergeEnabled,
 		},
 	))
 }

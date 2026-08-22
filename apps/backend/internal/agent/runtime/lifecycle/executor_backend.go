@@ -13,6 +13,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -91,6 +92,42 @@ func validateContributionDestinations(values map[string]models.ContributionDesti
 	return validated, nil
 }
 
+func comparisonTargetsFromMetadata(metadata map[string]interface{}) (map[string]models.ComparisonTarget, error) {
+	if metadata == nil {
+		return nil, nil
+	}
+	raw, ok := metadata[MetadataKeyComparisonTargets]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	if typed, ok := raw.(map[string]models.ComparisonTarget); ok {
+		return validateComparisonTargets(typed)
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("encode comparison targets: %w", err)
+	}
+	var decoded map[string]models.ComparisonTarget
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return nil, fmt.Errorf("decode comparison targets: %w", err)
+	}
+	return validateComparisonTargets(decoded)
+}
+
+func validateComparisonTargets(values map[string]models.ComparisonTarget) (map[string]models.ComparisonTarget, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	validated := make(map[string]models.ComparisonTarget, len(values))
+	for key, target := range values {
+		if err := target.Validate(); err != nil {
+			return nil, fmt.Errorf("validate comparison target %q: %w", key, err)
+		}
+		validated[key] = target
+	}
+	return validated, nil
+}
+
 // Runtime abstracts the agent execution environment (Docker, Standalone, K8s, SSH, etc.)
 // Each runtime is responsible for creating and managing agentctl instances.
 // Agent subprocess launching is handled separately via agentctl client methods.
@@ -152,6 +189,7 @@ const (
 	MetadataKeyBaseBranches             = "base_branches"
 	MetadataKeyRemoteContributions      = "remote_contributions"
 	MetadataKeyContributionDestinations = "contribution_destinations"
+	MetadataKeyComparisonTargets        = "comparison_targets"
 	MetadataKeyIsRemote                 = "is_remote"
 	MetadataKeyRemoteAuthHome           = "remote_auth_target_home"
 	MetadataKeyAgentConfigBundles       = "agent_config_bundles"
@@ -411,6 +449,7 @@ type ExecutorCreateRequest struct {
 	// as BaseBranches; the empty key is the workspace root.
 	RemoteContributions      map[string]models.RemoteContribution
 	ContributionDestinations map[string]models.ContributionDestination
+	ComparisonTargets        map[string]models.ComparisonTarget
 	McpServers               []McpServerConfig
 	AgentConfig              agents.Agent // Agent type info needed by runtimes
 	PreviousExecutionID      string       // Non-empty when reconnecting to a previous execution
@@ -419,6 +458,7 @@ type ExecutorCreateRequest struct {
 	McpProfile               *mcpprofile.Context
 	AuthToken                string // Previously handshaken agentctl token for reconnects
 	BootstrapNonce           string // Stored nonce for re-handshake after container restart
+	AgentctlStartupConfig    commonconfig.AgentctlStartupConfig
 
 	// OnProgress is an optional callback for streaming preparation progress.
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can
@@ -526,6 +566,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 
 	execution := &AgentExecution{
 		ID:                     ri.InstanceID,
+		RunID:                  req.Env["KANDEV_RUN_ID"],
 		TaskID:                 req.TaskID,
 		SessionID:              req.SessionID,
 		TaskEnvironmentID:      req.TaskEnvironmentID,

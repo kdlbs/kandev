@@ -1,8 +1,16 @@
 # ADR-2026-07-18-turn-configuration-snapshots: Attribute Runtime Configuration to Turns
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-13)
 **Date:** 2026-07-18
 **Area:** backend, frontend
+
+## Amendment (2026-08-13)
+
+[ADR-2026-08-13-dynamic-agent-profile-routing](2026-08-13-dynamic-agent-profile-routing.md)
+extends the immutable turn snapshot for routed sessions. At turn creation, the
+snapshot also captures the concrete execution profile, safe provider/model
+labels, and route generation. This keeps partial and completed output attributed
+to the route that produced it after later provider switches.
 
 ## Context
 

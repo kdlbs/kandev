@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -90,6 +91,20 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
 		}
 		return
+	}
+	switch eventType {
+	case "message_streaming", "thinking_streaming", agentEventComplete:
+		s.observeDynamicAttempt(
+			payload.SessionID,
+			payload.ExecutionID,
+			strings.TrimSpace(payload.Data.Text) != "",
+			false,
+		)
+	case agentEventToolCall, agentEventToolUpdate:
+		s.observeDynamicAttempt(payload.SessionID, payload.ExecutionID, false, true)
+	}
+	if eventType == agentEventComplete {
+		defer s.clearDynamicAttemptEvidence(payload.SessionID, payload.ExecutionID)
 	}
 
 	if !terminalCompleteStream {
@@ -287,6 +302,23 @@ func (s *Service) completeTurnForStreamEvent(
 func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
+	if sessionID != "" {
+		failure := watcher.AgentEventData{
+			TaskID:           taskID,
+			SessionID:        sessionID,
+			AgentExecutionID: payload.ExecutionID,
+			AgentID:          payload.AgentID,
+			ErrorMessage:     payload.Data.Error,
+			ProviderError:    payload.Data.ProviderError,
+		}
+		if failure.ErrorMessage == "" {
+			failure.ErrorMessage = payload.Data.Text
+		}
+		failure = s.withDynamicAttemptEvidence(failure)
+		if s.routeDynamicAgentFailure(ctx, failure, classifyKanbanFailure(failure)) {
+			return
+		}
+	}
 	if sessionID != "" && s.messageCreator != nil {
 		errorMsg := payload.Data.Error
 		if errorMsg == "" {
@@ -1022,6 +1054,7 @@ func (s *Service) updateTaskSessionStateWithHook(
 	// drop the red interruption icon. No-op when the marker is absent.
 	if nextState == models.TaskSessionStateStarting || nextState == models.TaskSessionStateRunning {
 		s.clearTaskInterruptedMarker(ctx, taskID)
+		s.clearTaskAutoStartFailedMarker(ctx, taskID)
 	}
 	if authoritativeUpdatedAt == nil {
 		s.logger.Warn("skipping session state_changed publish; could not read authoritative updated_at",
@@ -1157,6 +1190,11 @@ func (s *Service) transitionTaskSessionState(
 	}
 	if onChanged != nil {
 		onChanged()
+		// The hook may persist state-specific metadata after the state CAS. Read
+		// the row again so the state event carries that metadata to projections.
+		// Without this refresh, the event publishes the pre-hook snapshot and a
+		// typed launch error can be durable but invisible in the task summary.
+		refreshed = s.refreshTaskSessionOr(ctx, sessionID, refreshed)
 	}
 	if isTerminalSessionState(nextState) {
 		if err := s.expireTerminalClarificationWaiters(ctx, sessionID); err != nil {
@@ -1334,15 +1372,26 @@ func (s *Service) publishTaskSessionStateChanged(
 		foregroundActivity = string(activity)
 	}
 	eventData := map[string]interface{}{
-		metaKeyTaskID:            taskID,
-		metaKeySessionID:         sessionID,
-		"old_state":              string(oldState),
-		metaKeyNewState:          string(nextState),
-		"error_message":          errorMessage,
-		metaKeyAgentProfileID:    agentProfileID,
-		"agent_profile_snapshot": session.AgentProfileSnapshot,
-		"is_passthrough":         session.IsPassthrough,
-		"is_primary":             session.IsPrimary,
+		metaKeyTaskID:               taskID,
+		metaKeySessionID:            sessionID,
+		"old_state":                 string(oldState),
+		metaKeyNewState:             string(nextState),
+		"error_message":             errorMessage,
+		metaKeyAgentProfileID:       agentProfileID,
+		"agent_profile_snapshot":    session.AgentProfileSnapshot,
+		"execution_profile_id":      session.ExecutionProfileID,
+		"route_generation":          session.RouteGeneration,
+		"route_state":               session.RouteState,
+		"route_reason":              session.RouteReason,
+		"route_error_code":          session.RouteErrorCode,
+		"route_error_class":         session.RouteErrorClass,
+		"route_catalogue_version":   session.RouteCatalogueVersion,
+		"route_retry_ordinal":       session.RouteRetryOrdinal,
+		"route_deadline":            session.RouteDeadline,
+		"route_pending_outcome":     session.RoutePendingOutcome,
+		"downstream_acp_session_id": session.DownstreamACPSessionID,
+		"is_passthrough":            session.IsPassthrough,
+		"is_primary":                session.IsPrimary,
 		// Carry activity only while the durable session is RUNNING. Every other
 		// state gets an explicit null so partial client-store merges clear a
 		// previously-live busy signal during settlement or teardown.
@@ -1769,6 +1818,7 @@ func (s *Service) setSessionStarting(
 	// updateTaskSessionStateWithHook, so clear the interruption marker here
 	// too (no-op when absent).
 	s.clearTaskInterruptedMarker(ctx, taskID)
+	s.clearTaskAutoStartFailedMarker(ctx, taskID)
 
 	if publishSession != nil {
 		s.publishTaskSessionStateChanged(ctx, taskID, session.ID, oldState, session.State, session.ErrorMessage, stateUpdatedAt, publishSession)
@@ -1798,6 +1848,36 @@ func (s *Service) clearTaskInterruptedMarker(ctx context.Context, taskID string)
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || task == nil {
 		s.logger.Warn("failed to load task for interrupted-clear publish",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	s.publishTaskUpdated(ctx, task)
+}
+
+// clearTaskAutoStartFailedMarker removes the auto-start-failure marker from a
+// task and republishes task.updated when it was actually present, so open
+// clients drop the failure badge. Called from the same session-start funnel
+// as clearTaskInterruptedMarker: a session entering STARTING/RUNNING means an
+// agent did launch, so any earlier auto-start failure no longer applies.
+// No-op when the marker is absent.
+func (s *Service) clearTaskAutoStartFailedMarker(ctx context.Context, taskID string) {
+	if taskID == "" {
+		return
+	}
+	removed, err := s.repo.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyAutoStartFailed)
+	if err != nil {
+		s.logger.Warn("failed to clear auto-start-failed marker",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	if !removed {
+		return
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		s.logger.Warn("failed to load task for auto-start-failed-clear publish",
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return
@@ -1870,6 +1950,80 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 	}
 
 	s.writeTaskReviewState(ctx, taskID, sessionID)
+}
+
+// Child terminal receipts use the task's parent relationship and durable
+// clarification projection to decide whether a session can collapse to
+// COMPLETED. Root-task sibling sessions keep the original WAITING affordance.
+// setSessionWaitingForInputIfRequested is the terminal-receipt variant
+// of setSessionWaitingForInput. It only applies to subtasks (task.ParentID
+// non-empty) because the symptom it guards — "child WAITING_FOR_INPUT
+// after the agent's last turn had no active clarification" — only
+// arises for child tasks whose task or workflow step is terminal, not to
+// surface a UI prompt. Sibling sessions on a root task keep the original
+// affordance so a finishing session on a multi-session task still flips to
+// WAITING_FOR_INPUT.
+//
+// When a terminal task has no input request, collapse the session to
+// COMPLETED so the child row does not leak in a stuck active state. A clean
+// turn on a non-terminal child is not enough evidence for that collapse, so
+// it remains WAITING_FOR_INPUT.
+func (s *Service) setSessionWaitingForInputIfRequested(
+	ctx context.Context,
+	taskID, sessionID string,
+	preloadedSession ...*models.TaskSession,
+) {
+	task, taskErr := s.repo.GetTask(ctx, taskID)
+	if taskErr != nil || task == nil {
+		// A task lookup failure is not evidence that a child reached a terminal
+		// state. Preserve the promptable session instead of leaving it RUNNING.
+		s.logger.Warn("failed to load task before terminal receipt; preserving WAITING state",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(taskErr))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID, preloadedSession...)
+		return
+	}
+	if task.ParentID == "" {
+		s.setSessionWaitingForInput(ctx, taskID, sessionID, preloadedSession...)
+		return
+	}
+	activeClarifications, err := s.repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
+	if err != nil {
+		// A transient reader error is not evidence that the child completed.
+		// Preserve the promptable state and avoid leaving the session RUNNING.
+		s.logger.Warn("failed to read active clarifications; preserving WAITING state",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID, preloadedSession...)
+		return
+	}
+	taskTerminal := models.IsTerminalTaskState(task.State) || s.workflowStepIsTerminal(ctx, task.WorkflowStepID)
+	if len(activeClarifications) == 0 && taskTerminal {
+		s.logger.Debug("subtask terminal: skipping WAITING write; collapsing session to COMPLETED",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateCompleted, "", false)
+		// The child has no further use for the provider-runtime reservation.
+		// reclaimIdleSession is fail-closed (only proceeds when there is no
+		// live agent and no active turn) and best-effort: a reclaim failure
+		// logs and returns without affecting the terminal collapse.
+		if err := s.reclaimIdleSession(ctx, sessionID); err != nil {
+			s.logger.Warn("subtask terminal: reclaim failed; row preserved",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return
+	}
+	if len(activeClarifications) == 0 {
+		s.logger.Debug("subtask turn completed before terminal task state; preserving WAITING state",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("task_state", string(task.State)))
+	}
+	s.setSessionWaitingForInput(ctx, taskID, sessionID, preloadedSession...)
 }
 
 // taskArchived reports whether a task row has been archived. Runtime-state
@@ -2336,7 +2490,13 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 		zap.String("task_id", payload.TaskID),
 		zap.String("session_id", payload.SessionID),
 		zap.String("prev_state", sessionStateString(session)))
-	s.setSessionWaitingForInput(ctx, payload.TaskID, payload.SessionID, session)
+	// Terminal-receipt path. Only flip the session to WAITING_FOR_INPUT
+	// when the most recent agent-authored message actually asked the
+	// user for input. Sibling sessions (root task, ParentID empty) keep
+	// the original affordance so a finishing session on a multi-session
+	// task still flips to WAITING — only subtasks (ParentID non-empty)
+	// get the guard.
+	s.setSessionWaitingForInputIfRequested(ctx, payload.TaskID, payload.SessionID, session)
 }
 
 func (s *Service) detachClarificationWaiters(ctx context.Context, sessionID string) {

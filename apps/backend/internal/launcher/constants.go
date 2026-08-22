@@ -10,6 +10,7 @@ const (
 	defaultBackendPort  = 38429
 	defaultWebPort      = 37429
 	defaultAgentctlPort = 39429
+	parentPIDEnv        = "KANDEV_LAUNCHER_PARENT_PID"
 
 	healthTimeoutReleaseMS = 45000
 	healthTimeoutDevMS     = 600000

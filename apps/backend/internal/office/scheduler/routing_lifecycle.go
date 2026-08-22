@@ -54,7 +54,7 @@ func (ss *SchedulerService) HandlePostStartFailure(
 	if !classified.FallbackAllowed {
 		return false, nil
 	}
-	if routingerr.Decide(routingerr.ContextOffice, classified, time.Now().UTC()) == routingerr.DecisionShortRetry {
+	if officeShortRetryAllowed(classified) {
 		retryCount, err := ss.shortRouteRetryCount(ctx, run, candidate)
 		if err != nil {
 			return false, err
@@ -70,6 +70,15 @@ func (ss *SchedulerService) HandlePostStartFailure(
 		return false, err
 	}
 	return true, nil
+}
+
+// officeShortRetryAllowed consumes the shared provider-error class rather
+// than maintaining an Office-only code allow-list. Hard errors fall through
+// to candidate switching by default; a selected dynamic policy can add a
+// retry through the shared runtime evaluator.
+func officeShortRetryAllowed(classified *routingerr.Error) bool {
+	return classified != nil && classified.FallbackAllowed &&
+		classified.Class == routingerr.ClassTransient && classified.AutoRetryable
 }
 
 const officeShortRetryMaxAttempts = 3

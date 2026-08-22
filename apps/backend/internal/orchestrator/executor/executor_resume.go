@@ -61,6 +61,7 @@ func isTerminalSessionState(state models.TaskSessionState) bool {
 
 // repoInfo holds resolved repository details for agent launch.
 type repoInfo struct {
+	TaskRepositoryID        string
 	RepositoryID            string
 	RepositoryPath          string
 	BaseBranch              string
@@ -68,6 +69,7 @@ type repoInfo struct {
 	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
 	RemoteContribution      *models.RemoteContribution
 	ContributionDestination *models.ContributionDestination
+	ComparisonTarget        *models.ComparisonTarget
 	Position                int
 	WorktreeBranchPrefix    string
 	WorktreeBranchTemplate  string
@@ -159,11 +161,12 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 	ctx context.Context, sessionID string, tr *models.TaskRepository,
 ) (*repoInfo, error) {
 	info := &repoInfo{
-		RepositoryID:   tr.RepositoryID,
-		BaseBranch:     tr.BaseBranch,
-		CheckoutBranch: tr.CheckoutBranch,
-		PRNumber:       prNumberFromMetadata(tr.Metadata),
-		Position:       tr.Position,
+		TaskRepositoryID: tr.ID,
+		RepositoryID:     tr.RepositoryID,
+		BaseBranch:       tr.BaseBranch,
+		CheckoutBranch:   tr.CheckoutBranch,
+		PRNumber:         prNumberFromMetadata(tr.Metadata),
+		Position:         tr.Position,
 	}
 	if binding, found, err := models.LoadRemoteContribution(tr.Metadata); err != nil {
 		return nil, fmt.Errorf("load remote contribution for task repository %q: %w", tr.ID, err)
@@ -182,6 +185,11 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		return nil, fmt.Errorf("load contribution destination for task repository %q: %w", tr.ID, err)
 	} else if found {
 		info.ContributionDestination = &destination
+	}
+	if target, found, err := models.LoadComparisonTarget(tr.Metadata); err != nil {
+		return nil, fmt.Errorf("load comparison target for task repository %q: %w", tr.ID, err)
+	} else if found {
+		info.ComparisonTarget = &target
 	}
 	if info.RepositoryID == "" {
 		return info, nil
@@ -1138,6 +1146,7 @@ func (e *Executor) applyResumeRepoConfig(
 		return "", err
 	}
 	repositoryID, baseBranch := resolveResumeRepoIDAndBranch(task, session)
+	baseBranch = resolveResumeBaseBranch(repositoryID, baseBranch, allRepos)
 	if baseBranch != "" {
 		req.Branch = baseBranch
 	}
@@ -1214,6 +1223,29 @@ func resolveResumeRepoIDAndBranch(task *v1.Task, session *models.TaskSession) (s
 		baseBranch = task.Repositories[0].BaseBranch
 	}
 	return repositoryID, baseBranch
+}
+
+// resolveResumeBaseBranch prefers the current task-repository row when a
+// recovery action changed it after the session was created. A session keeps a
+// legacy primary base snapshot, but that snapshot must not overwrite an exact
+// task-repository recovery choice on the next launch. If the task has multiple
+// rows for the same repository, the legacy session value remains the only
+// unambiguous choice because TaskSession predates exact row identity.
+func resolveResumeBaseBranch(repositoryID, sessionBaseBranch string, repos []*repoInfo) string {
+	var match *repoInfo
+	for _, info := range repos {
+		if info == nil || info.RepositoryID != repositoryID {
+			continue
+		}
+		if match != nil {
+			return sessionBaseBranch
+		}
+		match = info
+	}
+	if match != nil && strings.TrimSpace(match.BaseBranch) != "" {
+		return match.BaseBranch
+	}
+	return sessionBaseBranch
 }
 
 // applyResumeRepoBasics copies the repository's local path and setup script
@@ -1322,6 +1354,9 @@ func (e *Executor) applyResumeWorktreeConfig(
 	}
 	// Carry forward CheckoutBranch from task repository (e.g. PR head branch)
 	primaryTaskRepo, _ := e.repo.GetPrimaryTaskRepository(ctx, task.ID)
+	if primaryTaskRepo != nil && primaryTaskRepo.RepositoryID == repositoryID {
+		req.TaskRepositoryID = primaryTaskRepo.ID
+	}
 	if primaryTaskRepo != nil && primaryTaskRepo.CheckoutBranch != "" {
 		req.CheckoutBranch = primaryTaskRepo.CheckoutBranch
 		req.PRNumber = prNumberFromMetadata(primaryTaskRepo.Metadata)

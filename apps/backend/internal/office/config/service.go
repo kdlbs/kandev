@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/configloader"
@@ -26,6 +27,8 @@ type ConfigService struct {
 	cfgWriter *configloader.FileWriter
 	logger    *logger.Logger
 	activity  shared.ActivityLogger
+	// importMu keeps each import's read/validate/write lifecycle atomic.
+	importMu sync.Mutex
 }
 
 // NewConfigService constructs a ConfigService.

@@ -829,15 +829,18 @@ function useTextareaHandlers(
       mentionHandleChange(e.target.value, e.target.selectionStart),
     [mentionHandleChange],
   );
+  const handleKeyDownCapture = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => mentionHandleKeyDown(e),
+    [mentionHandleKeyDown],
+  );
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      mentionHandleKeyDown(e);
       if (e.defaultPrevented) return;
       onKeyDown?.(e);
     },
-    [mentionHandleKeyDown, onKeyDown],
+    [onKeyDown],
   );
-  return { handleChange, handleKeyDown };
+  return { handleChange, handleKeyDownCapture, handleKeyDown };
 }
 
 function useFileInputClick(addFiles: (files: File[]) => Promise<void> | void) {
@@ -935,7 +938,10 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     value: description,
     onChange: setDescriptionValue,
   });
-  const { handleChange, handleKeyDown } = useTextareaHandlers(mention, onKeyDown);
+  const { handleChange, handleKeyDownCapture, handleKeyDown } = useTextareaHandlers(
+    mention,
+    onKeyDown,
+  );
   const { fileInputRef, handleAttachClick, handleFileInputChange } = useFileInputClick(addFiles);
   const pluginActions = useCreationComposerPluginActions({
     isSessionMode,
@@ -969,6 +975,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           }
           value={description}
           onChange={handleChange}
+          onKeyDownCapture={handleKeyDownCapture}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           data-testid="task-description-input"

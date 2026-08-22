@@ -190,6 +190,21 @@ func (m *mockRepository) ListTaskRepositoriesByTaskIDs(_ context.Context, _ []st
 func (m *mockRepository) UpdateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
 	return nil
 }
+func (m *mockRepository) UpdateTaskRepositoryComparisonTarget(
+	context.Context,
+	string,
+	*models.ComparisonTarget,
+	*models.ComparisonTarget,
+) (*models.TaskRepository, bool, error) {
+	return nil, false, nil
+}
+func (m *mockRepository) UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(
+	context.Context,
+	string,
+	string,
+) (*models.TaskRepository, bool, error) {
+	return nil, false, nil
+}
 func (m *mockRepository) DeleteTaskRepository(ctx context.Context, id string) error {
 	return nil
 }
@@ -221,6 +236,11 @@ func (m *mockRepository) CreateMessage(ctx context.Context, message *models.Mess
 	return nil
 }
 func (m *mockRepository) GetMessage(ctx context.Context, id string) (*models.Message, error) {
+	return nil, nil
+}
+
+// GetMessageWithPromptIndex returns the message for id with its derived prompt index, mirroring the repository contract.
+func (m *mockRepository) GetMessageWithPromptIndex(ctx context.Context, id string) (*models.Message, error) {
 	return nil, nil
 }
 func (m *mockRepository) GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error) {

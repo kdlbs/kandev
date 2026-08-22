@@ -26,6 +26,7 @@ import {
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
 import { TaskCardIndicators, TaskCardTags } from "@/components/kanban-card-plugin-slots";
+import { CardTitle } from "@/components/kanban-card-title";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
@@ -133,10 +134,12 @@ export function KanbanCardBody({
   task,
   repositoryChips,
   actions,
+  enableTitleHover,
 }: {
   task: Task;
   repositoryChips: RepositoryChip[];
   actions?: React.ReactNode;
+  enableTitleHover?: boolean;
 }) {
   return (
     <>
@@ -144,12 +147,7 @@ export function KanbanCardBody({
         <div className="min-w-0 flex-1">
           <RepoChipRow chips={repositoryChips} />
           <div className="flex items-center gap-1 min-w-0" data-testid="kanban-card-title-row">
-            <p
-              data-testid="task-card-title"
-              className="text-sm font-medium leading-tight line-clamp-1 min-w-0"
-            >
-              {task.title}
-            </p>
+            <CardTitle task={task} enableTitleHover={enableTitleHover} />
             <PRTaskIcon taskId={task.id} />
             <MRTaskIcon taskId={task.id} />
             <RegisteredChangeRequestTaskIcon taskId={task.id} />
@@ -316,16 +314,26 @@ export function renderTaskStatusIcon(
   const showPermissionIcon = shouldUsePermissionTaskIcon(hasPendingPermission);
   const needsMe = showQuestionIcon || showPermissionIcon;
   const showInterrupted = !!task.interrupted;
+  const showAutoStartFailed = !!task.autoStartFailed;
   const hasActivity =
     task.foregroundActivity === "generating" || task.foregroundActivity === "background";
-  if (!showRunningSpinner && !needsMe && !hasActivity && !showInterrupted) {
+  if (!showRunningSpinner && !needsMe && !hasActivity && !showInterrupted && !showAutoStartFailed) {
     return null;
   }
   // A "needs me" prompt (pending clarification / permission) must not be masked
   // by the launch-spinner short-circuit — a mid-turn prompt can coincide with a
   // coarse running state. Live foreground activity still wins, handled inside
-  // getTaskStateIcon.
-  if (showRunningSpinner && !needsMe && task.foregroundActivity !== "background") {
+  // getTaskStateIcon. A failed auto-start must not be masked either: startTask
+  // sets the task to SCHEDULING before the launch, so a launch failure before
+  // session creation leaves a session-less SCHEDULING/IN_PROGRESS task, which
+  // reads as showRunningSpinner=true — the exact shape the failure marker exists
+  // to surface.
+  if (
+    showRunningSpinner &&
+    !needsMe &&
+    !showAutoStartFailed &&
+    task.foregroundActivity !== "background"
+  ) {
     return <IconLoader2 className="h-4 w-4 text-blue-500 animate-spin" />;
   }
   return getTaskStateIcon(task.state, "h-4 w-4", {
@@ -333,6 +341,7 @@ export function renderTaskStatusIcon(
     foregroundActivity: task.foregroundActivity,
     hasPendingPermission,
     interrupted: showInterrupted,
+    autoStartFailed: showAutoStartFailed,
   });
 }
 
@@ -625,6 +634,7 @@ export function KanbanCardShell({
             <KanbanCardBody
               task={task}
               repositoryChips={repositoryChips ?? []}
+              enableTitleHover
               actions={
                 <KanbanCardActionSlot
                   isMultiSelectMode={isMultiSelectMode}

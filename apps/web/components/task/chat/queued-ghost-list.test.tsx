@@ -7,6 +7,7 @@ import type { EntityReference } from "@/lib/types/entity-reference";
 import { entityReferenceMarkdown } from "@/lib/entity-references/message-references";
 import { QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
 import { toast } from "sonner";
+import { simulateReorderDrag } from "./queued-ghost-list.test-helpers";
 
 const useQueueMock = vi.fn();
 
@@ -50,6 +51,7 @@ const MERGE_BUTTON_ID = "queue-entry-merge";
 const EDIT_BUTTON_ID = "queue-entry-edit";
 const REMOVE_BUTTON_ID = "queue-entry-remove";
 const SEND_NOW_BUTTON_ID = "queue-entry-send-now";
+const AUTO_RUN_BUTTON_ID = "queue-auto-run";
 
 function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   return {
@@ -89,16 +91,16 @@ function baseState(entries: QueuedMessage[]) {
     max: 10,
     isFull: false,
     mergeEnabled: true,
+    autoRun: true,
     isLoading: false,
     queue: vi.fn(async () => {}),
     clearAll: vi.fn(async () => {}),
-    drainNext: vi.fn(async () => {}),
+    setAutoRun: vi.fn(async () => {}),
     editEntry: vi.fn(async () => {}),
     removeEntry: vi.fn(async () => {}),
     mergeEntry: vi.fn(async () => {}),
     reorderEntries: vi.fn(async () => {}),
     sendEntryNow: vi.fn(async () => {}),
-    sendAllNow: vi.fn(async () => {}),
     cancellationPending: false,
     refetch: vi.fn(async () => {}),
   };
@@ -212,31 +214,27 @@ describe("QueueAffordance", () => {
     expect(state.clearAll).toHaveBeenCalledTimes(1);
   });
 
-  it("shows a run-next action when manual drain is available", () => {
+  it("shows Auto-run and removes legacy header dispatch actions", () => {
     const state = queueState([entry()]);
     useQueueMock.mockReturnValue(state);
-    render(
-      <QueueAffordance sessionId={SESSION_ID} canDrain>
-        {CHILD}
-      </QueueAffordance>,
-    );
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
     fireEvent.click(screen.getByTestId(CHIP_ID));
-    fireEvent.click(screen.getByTestId("queue-drain-next"));
-    expect(state.drainNext).toHaveBeenCalledTimes(1);
+
+    const autoRun = screen.getByTestId(AUTO_RUN_BUTTON_ID);
+    expect(autoRun.getAttribute("data-state")).toBe("checked");
+    const autoRunHelpId = autoRun.getAttribute("aria-describedby");
+    expect(autoRunHelpId).toBeTruthy();
+    expect(document.getElementById(autoRunHelpId!)).toBeTruthy();
+    expect(screen.getByText("Runs queued messages one at a time.")).toBeTruthy();
+    expect(autoRun.className).toContain("[@media(pointer:coarse)]:after:-inset-y-3.5");
+    expect(autoRun.parentElement?.className).toContain("[@media(pointer:coarse)]:min-h-11");
+    expect(screen.queryByTestId("queue-drain-next")).toBeNull();
+    expect(screen.queryByTestId("queue-send-now")).toBeNull();
   });
 });
 
 describe("QueueAffordance Send Now", () => {
-  it("sends the whole visible queue from the header", () => {
-    const state = queueState([entry(), entry({ id: "q-2", content: "second" })]);
-    useQueueMock.mockReturnValue(state);
-    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
-    fireEvent.click(screen.getByTestId(CHIP_ID));
-    fireEvent.click(screen.getByTestId("queue-send-now"));
-    expect(state.sendAllNow).toHaveBeenCalledTimes(1);
-  });
-
-  it("sends the selected row now", () => {
+  it("offers Send Now on the head and every later row", () => {
     const state = queueState([
       entry({ id: "q-1", content: "first" }),
       entry({ id: "q-2", content: "second" }),
@@ -244,29 +242,53 @@ describe("QueueAffordance Send Now", () => {
     useQueueMock.mockReturnValue(state);
     render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
     fireEvent.click(screen.getByTestId(CHIP_ID));
-    fireEvent.click(screen.getAllByTestId(SEND_NOW_BUTTON_ID)[1]);
+    const sendNowButtons = screen.getAllByTestId(SEND_NOW_BUTTON_ID);
+    expect(sendNowButtons).toHaveLength(2);
+    fireEvent.click(sendNowButtons[0]);
+    expect(state.sendEntryNow).toHaveBeenCalledWith("q-1");
+    fireEvent.click(sendNowButtons[1]);
     expect(state.sendEntryNow).toHaveBeenCalledWith("q-2");
   });
 
-  it("disables row and header Send Now while cancellation is pending", () => {
-    useQueueMock.mockReturnValue(queueState([entry()], { cancellationPending: true }));
+  it.each([
+    ["queue mutation", { isLoading: true }],
+    ["cancellation", { cancellationPending: true }],
+  ])("disables row Send Now and Auto-run during %s", (_name, extra) => {
+    useQueueMock.mockReturnValue(queueState([entry()], extra));
     render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
     fireEvent.click(screen.getByTestId(CHIP_ID));
-    expect((screen.getByTestId("queue-send-now") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId(AUTO_RUN_BUTTON_ID) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId(SEND_NOW_BUTTON_ID) as HTMLButtonElement).disabled).toBe(true);
   });
-});
 
-describe("QueueAffordance busy controls", () => {
-  it("hides the run-next action while the agent is busy", () => {
-    useQueueMock.mockReturnValue(queueState([entry()]));
-    render(
-      <QueueAffordance sessionId={SESSION_ID} canDrain={false}>
-        {CHILD}
-      </QueueAffordance>,
-    );
+  it("changes the backend-owned Auto-run policy", () => {
+    const state = queueState([entry()], { autoRun: false });
+    useQueueMock.mockReturnValue(state);
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
     fireEvent.click(screen.getByTestId(CHIP_ID));
-    expect(screen.queryByTestId("queue-drain-next")).toBeNull();
+    const autoRun = screen.getByTestId(AUTO_RUN_BUTTON_ID);
+    expect(autoRun.getAttribute("data-state")).toBe("unchecked");
+    expect(
+      screen.getByText("Finishes the current response, then queued messages wait."),
+    ).toBeTruthy();
+    fireEvent.click(autoRun);
+    expect(state.setAutoRun).toHaveBeenCalledWith(true);
+  });
+
+  it("reports an Auto-run update failure", async () => {
+    const state = queueState([entry()]);
+    state.setAutoRun = vi.fn(async () => {
+      throw new Error("policy failed");
+    });
+    useQueueMock.mockReturnValue(state);
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+
+    fireEvent.click(screen.getByTestId(AUTO_RUN_BUTTON_ID));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Failed to update queue Auto-run."),
+    );
   });
 });
 
@@ -622,69 +644,3 @@ describe("QueueAffordance reorder", () => {
     await waitFor(() => expect(state.reorderEntries).toHaveBeenCalledWith(["q-3", "q-1", "q-2"]));
   });
 });
-
-/**
- * Drives a dnd-kit PointerSensor drag in happy-dom: mocks per-row droppable
- * rects for collision detection, patches isPrimary (happy-dom omits the
- * primary-pointer computation), and dispatches down / move / move / up.
- * The first move only activates the drag (distance constraint); the second
- * dispatches DragMove so collision detection resolves the target.
- */
-function simulateReorderDrag(handle: HTMLElement, rowCount: number, targetClientY: number) {
-  const original = HTMLElement.prototype.getBoundingClientRect;
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
-    this: HTMLElement,
-  ) {
-    const inner = this.querySelector?.('[data-testid="queue-entry"]') as HTMLElement | null;
-    const rows = screen.queryAllByTestId("queue-entry");
-    const index = inner ? rows.indexOf(inner) : -1;
-    if (index >= 0) {
-      const top = index * 40;
-      return {
-        x: 0,
-        y: top,
-        top,
-        bottom: top + 36,
-        left: 0,
-        right: 400,
-        width: 400,
-        height: 36,
-      } as DOMRect;
-    }
-    return original.call(this);
-  });
-
-  // isPrimary is an own property created by the PointerEvent constructor
-  // (prototype patching is shadowed), so a capture-phase listener rewrites it
-  // before React's root handler runs.
-  const patchPrimary = (e: Event) => {
-    Object.defineProperty(e, "isPrimary", { configurable: true, value: true });
-  };
-  document.addEventListener("pointerdown", patchPrimary, true);
-  fireEvent.pointerDown(handle, {
-    pointerId: 0,
-    pointerType: "mouse",
-    button: 0,
-    clientX: 10,
-    clientY: (rowCount - 1) * 40 + 10,
-  });
-  document.removeEventListener("pointerdown", patchPrimary, true);
-  fireEvent.pointerMove(document.body, {
-    pointerId: 0,
-    pointerType: "mouse",
-    clientX: 10,
-    clientY: targetClientY,
-  });
-  fireEvent.pointerMove(document.body, {
-    pointerId: 0,
-    pointerType: "mouse",
-    clientX: 10,
-    clientY: targetClientY + 2,
-  });
-  fireEvent.pointerUp(document.body, {
-    pointerId: 0,
-    pointerType: "mouse",
-    clientX: 10,
-    clientY: targetClientY + 2,
-  });
-}

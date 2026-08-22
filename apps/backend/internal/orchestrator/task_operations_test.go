@@ -1251,11 +1251,14 @@ func TestUserCancelCompletion_SilentCancelDoesNotTrigger(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-silent-cancel", "session-silent-cancel", "step1")
 	svc := createEngineService(t, repo, cancelCompletionStepGetter(true, false), &mockAgentManager{})
+	_, err := svc.messageQueue.QueueMessage(ctx, "session-silent-cancel", "task-silent-cancel", "stay armed", "", messagequeue.QueuedByUser, false, nil)
+	require.NoError(t, err)
 
 	require.NoError(t, svc.cancelAgentSilent(ctx, "task-silent-cancel", "session-silent-cancel"))
 	task, err := repo.GetTask(ctx, "task-silent-cancel")
 	require.NoError(t, err)
 	assert.Equal(t, "step1", task.WorkflowStepID)
+	assert.True(t, svc.messageQueue.GetStatus(ctx, "session-silent-cancel").AutoRun)
 }
 
 func TestCancelAgent_AllowsAcknowledgementStreamToDrain(t *testing.T) {
@@ -1954,6 +1957,7 @@ func TestCancelAgent_LeavesQueuedMessageParked(t *testing.T) {
 
 			status := svc.messageQueue.GetStatus(ctx, "session1")
 			require.Equal(t, 1, status.Count)
+			require.False(t, status.AutoRun, "explicit cancel with a backlog must pause Auto-run")
 			require.Len(t, status.Entries, 1)
 			require.Equal(t, queued.ID, status.Entries[0].ID, "cancel must leave the same queued entry parked")
 		})
@@ -2006,6 +2010,9 @@ func TestCancelAgent_QueuedMessageRunsAfterExplicitDrain(t *testing.T) {
 	status := svc.messageQueue.GetStatus(ctx, "session1")
 	if status.Count != 0 {
 		t.Fatalf("expected explicit drain to remove the queued prompt, count=%d entries=%+v", status.Count, status.Entries)
+	}
+	if !status.AutoRun {
+		t.Fatal("expected explicit drain to resume Auto-run")
 	}
 }
 
@@ -3416,6 +3423,28 @@ func TestCancelIntentDoesNotFollowSharedGuard(t *testing.T) {
 
 // --- StartCreatedSession ---
 
+func requirePersistedSessionLaunchError(t *testing.T, repo *sqliterepo.Repository, sessionID string) models.LastAgentError {
+	t.Helper()
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	lastError, ok := models.LoadLastAgentError(session.Metadata)
+	if !ok {
+		t.Fatalf("session %q has no typed launch error: %#v", sessionID, session.Metadata)
+	}
+	if lastError.Code == "" || lastError.Stamp() == "" {
+		t.Fatalf("session %q has incomplete typed launch error: %#v", sessionID, lastError)
+	}
+	return lastError
+}
+
+func sessionMessageCount(messages *mockMessageCreator) int {
+	messages.mu.Lock()
+	defer messages.mu.Unlock()
+	return len(messages.sessionMessages)
+}
+
 func TestStartCreatedSession_WrongTask(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -3441,7 +3470,7 @@ func TestStartCreatedSession_NotInCreatedState(t *testing.T) {
 	}
 }
 
-func TestStartCreatedSession_MissingRemoteRefCreatesNeutralRecoveryMessage(t *testing.T) {
+func TestStartCreatedSession_MissingRemoteRefPersistsTypedRecoveryError(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
@@ -3462,7 +3491,6 @@ func TestStartCreatedSession_MissingRemoteRefCreatesNeutralRecoveryMessage(t *te
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
-	svc.executor.SetOnLaunchFailed(svc.handleSessionLaunchFailed)
 	svc.executor.SetOnSessionStateChange(func(callbackCtx context.Context, callbackTaskID, callbackSessionID string, state models.TaskSessionState, errorMessage string) error {
 		svc.updateTaskSessionState(callbackCtx, callbackTaskID, callbackSessionID, state, errorMessage, true)
 		return nil
@@ -3473,19 +3501,16 @@ func TestStartCreatedSession_MissingRemoteRefCreatesNeutralRecoveryMessage(t *te
 		t.Fatalf("StartCreatedSession error = %v, want %v", err, launchErr)
 	}
 
-	if len(messages.sessionMessages) != 1 {
-		t.Fatalf("expected one recovery message, got %d", len(messages.sessionMessages))
+	if got := sessionMessageCount(messages); got != 0 {
+		t.Fatalf("typed launch failure created legacy guidance messages: %d", got)
 	}
-	message := messages.sessionMessages[0]
-	if message.metadata["failure_kind"] != "branch_fetch_failed" {
-		t.Fatalf("failure_kind = %#v, want branch_fetch_failed", message.metadata["failure_kind"])
+	if _, suppressed := svc.suppressToast.Load("session1"); suppressed {
+		t.Fatal("typed launch failure must not suppress the pointer toast")
 	}
-	if _, ok := message.metadata["actions"]; ok {
-		t.Fatalf("expected neutral guidance without archive/delete actions, got %#v", message.metadata["actions"])
-	}
+	requirePersistedSessionLaunchError(t, repo, "session1")
 }
 
-func TestStartCreatedSession_MissingRemoteRefDoesNotDuplicateExecutorRecoveryMessage(t *testing.T) {
+func TestStartCreatedSession_MissingRemoteRefDoesNotDuplicateTypedRecoveryError(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
@@ -3507,21 +3532,19 @@ func TestStartCreatedSession_MissingRemoteRefDoesNotDuplicateExecutorRecoveryMes
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 	svc.eventBus = bus.NewMemoryEventBus(testLogger())
-	svc.executor.SetOnLaunchFailed(svc.handleSessionLaunchFailed)
-	// Production routes terminal failures through the strict transition callback
-	// so recovery guidance can set suppressToast before state_changed publishes it.
 	svc.executor.SetOnSessionStateTransition(svc.transitionTaskSessionState)
 
 	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "start the task", true, false, true, nil, nil)
 	if !errors.Is(err, launchErr) {
 		t.Fatalf("StartCreatedSession error = %v, want %v", err, launchErr)
 	}
-	if len(messages.sessionMessages) != 1 {
-		t.Fatalf("expected exactly one recovery message, got %d", len(messages.sessionMessages))
+	if got := sessionMessageCount(messages); got != 0 {
+		t.Fatalf("typed launch failure created legacy guidance messages: %d", got)
 	}
 	if _, suppressed := svc.suppressToast.Load("session1"); suppressed {
-		t.Fatal("state-change publishing did not consume the toast-suppression marker")
+		t.Fatal("typed launch failure must not suppress the pointer toast")
 	}
+	requirePersistedSessionLaunchError(t, repo, "session1")
 }
 
 func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
@@ -3540,7 +3563,7 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 		}
 	}
 
-	t.Run("early missing remote ref creates one neutral recovery message", func(t *testing.T) {
+	t.Run("early missing remote ref stays neutral before executor classification", func(t *testing.T) {
 		baseRepo := setupTestRepo(t)
 		seedTaskAndSession(t, baseRepo, taskID, "existing-session", models.TaskSessionStateCreated)
 		failureRepo := &taskEnvironmentFailureRepo{
@@ -3571,24 +3594,6 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 			t.Fatalf("PrepareTaskSession: %v", err)
 		}
 
-		select {
-		case <-messages.sessionMessageDone:
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for missing-branch recovery message")
-		}
-		if len(messages.sessionMessages) != 1 {
-			t.Fatalf("expected exactly one recovery message, got %d", len(messages.sessionMessages))
-		}
-		message := messages.sessionMessages[0]
-		if message.sessionID != sessionID {
-			t.Fatalf("recovery message session = %q, want %q", message.sessionID, sessionID)
-		}
-		if message.metadata["failure_kind"] != "branch_fetch_failed" {
-			t.Fatalf("failure_kind = %#v, want branch_fetch_failed", message.metadata["failure_kind"])
-		}
-		if _, ok := message.metadata["actions"]; ok {
-			t.Fatalf("expected neutral guidance without archive/delete actions, got %#v", message.metadata["actions"])
-		}
 		require.Eventually(t, func() bool {
 			failedSession, getErr := baseRepo.GetTaskSession(context.Background(), sessionID)
 			return getErr == nil && failedSession.State == models.TaskSessionStateFailed
@@ -3599,7 +3604,10 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 			return taskRepo.updatedStates[taskID] == v1.TaskStateFailed
 		}, time.Second, 10*time.Millisecond, "expected early launch failure to mark the task FAILED")
 		if _, suppressed := svc.suppressToast.Load(sessionID); suppressed {
-			t.Fatal("missing-branch recovery left a stale toast-suppression marker")
+			t.Fatal("typed launch failure must not suppress the pointer toast")
+		}
+		if got := sessionMessageCount(messages); got != 0 {
+			t.Fatalf("typed launch failure created legacy guidance messages: %d", got)
 		}
 	})
 
@@ -3667,30 +3675,25 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 			},
 		}
 		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
-		svc.executor.SetOnLaunchFailed(svc.handleSessionLaunchFailed)
 		svc.eventBus = bus.NewMemoryEventBus(testLogger())
 		svc.executor.SetOnSessionStateChange(func(callbackCtx context.Context, callbackTaskID, callbackSessionID string, state models.TaskSessionState, errorMessage string) error {
 			svc.updateTaskSessionState(callbackCtx, callbackTaskID, callbackSessionID, state, errorMessage, true)
 			return nil
 		})
-		messages := &mockMessageCreator{sessionMessageDone: make(chan struct{})}
+		messages := &mockMessageCreator{}
 		svc.messageCreator = messages
 
 		sessionID, err := svc.PrepareTaskSession(context.Background(), taskID, "profile1", "", "", "", true)
 		if err != nil {
 			t.Fatalf("PrepareTaskSession: %v", err)
 		}
-		select {
-		case <-messages.sessionMessageDone:
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for executor recovery message")
-		}
 		require.Eventually(t, func() bool {
 			session, getErr := repo.GetTaskSession(context.Background(), sessionID)
 			return getErr == nil && session.State == models.TaskSessionStateFailed
 		}, time.Second, 10*time.Millisecond, "expected failed state after workspace launch error")
-		if len(messages.sessionMessages) != 1 {
-			t.Fatalf("expected exactly one recovery message, got %d", len(messages.sessionMessages))
+		requirePersistedSessionLaunchError(t, repo, sessionID)
+		if got := sessionMessageCount(messages); got != 0 {
+			t.Fatalf("typed launch failure created legacy guidance messages: %d", got)
 		}
 	})
 }
@@ -3967,8 +3970,8 @@ func TestHandleSessionLaunchFailure_ConcurrentLaunchesCreateOneMessage(t *testin
 	messages.mu.Lock()
 	messageCount := len(messages.sessionMessages)
 	messages.mu.Unlock()
-	if messageCount != 1 {
-		t.Fatalf("recovery message count = %d, want 1", messageCount)
+	if messageCount != 0 {
+		t.Fatalf("legacy recovery message count = %d, want 0", messageCount)
 	}
 	taskRepo.mu.Lock()
 	defer taskRepo.mu.Unlock()
@@ -3999,7 +4002,6 @@ func TestPrepareAndStartCreatedSession_MissingRemoteRefClaimsRecoveryOnce(t *tes
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.eventBus = bus.NewMemoryEventBus(testLogger())
 	svc.executor.SetOnSessionStateTransition(svc.transitionTaskSessionState)
-	svc.executor.SetOnLaunchFailed(svc.handleSessionLaunchFailed)
 	messages := &mockMessageCreator{sessionMessageDone: make(chan struct{})}
 	svc.messageCreator = messages
 
@@ -4024,12 +4026,6 @@ func TestPrepareAndStartCreatedSession_MissingRemoteRefClaimsRecoveryOnce(t *tes
 	case <-time.After(time.Second):
 		t.Fatal("StartCreatedSession did not settle after prepared launch failed")
 	}
-	select {
-	case <-messages.sessionMessageDone:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for missing-branch recovery message")
-	}
-
 	failed, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("GetTaskSession: %v", err)
@@ -4039,8 +4035,8 @@ func TestPrepareAndStartCreatedSession_MissingRemoteRefClaimsRecoveryOnce(t *tes
 	}
 	messages.mu.Lock()
 	defer messages.mu.Unlock()
-	if len(messages.sessionMessages) != 1 {
-		t.Fatalf("recovery message count = %d, want 1", len(messages.sessionMessages))
+	if len(messages.sessionMessages) != 0 {
+		t.Fatalf("legacy recovery message count = %d, want 0", len(messages.sessionMessages))
 	}
 }
 
@@ -5628,15 +5624,8 @@ func TestResumeTaskSession_AlreadyFailedMissingRemoteRefCreatesNeutralRecoveryMe
 	}
 
 	messages := svc.messageCreator.(*mockMessageCreator).sessionMessages
-	if len(messages) != 1 {
-		t.Fatalf("expected one recovery message, got %d", len(messages))
-	}
-	message := messages[0]
-	if message.metadata["failure_kind"] != "branch_fetch_failed" {
-		t.Fatalf("failure_kind = %#v, want branch_fetch_failed", message.metadata["failure_kind"])
-	}
-	if _, ok := message.metadata["actions"]; ok {
-		t.Fatalf("expected no destructive actions without a repository-scoped PR match, got %#v", message.metadata["actions"])
+	if len(messages) != 0 {
+		t.Fatalf("typed launch failure created legacy guidance messages: %d", len(messages))
 	}
 	taskRepo.mu.Lock()
 	defer taskRepo.mu.Unlock()

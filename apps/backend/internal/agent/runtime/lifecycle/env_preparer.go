@@ -27,6 +27,7 @@ const (
 // carried at the top level. When EnvPrepareRequest.Repositories is non-empty,
 // each entry produces one prepared worktree under the shared TaskDirName.
 type RepoPrepareSpec struct {
+	TaskRepositoryID        string
 	RepositoryID            string
 	RepositoryPath          string
 	RepoName                string
@@ -65,6 +66,7 @@ type EnvPrepareRequest struct {
 	WorkspacePath           string
 	RepositoryPath          string
 	RepositoryID            string
+	TaskRepositoryID        string
 	UseWorktree             bool
 	SetupScript             string
 	RepoSetupScript         string // Repository-level setup script (e.g. "make install")
@@ -112,6 +114,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		return nil
 	}
 	return []RepoPrepareSpec{{
+		TaskRepositoryID:        r.TaskRepositoryID,
 		RepositoryID:            r.RepositoryID,
 		RepositoryPath:          r.RepositoryPath,
 		RepoName:                r.RepoName,
@@ -151,16 +154,20 @@ type PrepareStep struct {
 // Populated by preparers that handle multi-repo launches; each entry corresponds
 // to one RepoPrepareSpec from the request.
 type RepoWorktreeResult struct {
-	RepositoryID   string `json:"repository_id"`
-	BranchSlug     string `json:"branch_slug,omitempty"`
-	WorktreeID     string `json:"worktree_id,omitempty"`
-	WorktreeBranch string `json:"worktree_branch,omitempty"`
-	WorktreePath   string `json:"worktree_path,omitempty"`
+	TaskRepositoryID          string `json:"task_repository_id,omitempty"`
+	RepositoryID              string `json:"repository_id"`
+	BranchSlug                string `json:"branch_slug,omitempty"`
+	WorktreeID                string `json:"worktree_id,omitempty"`
+	WorktreeBranch            string `json:"worktree_branch,omitempty"`
+	WorktreePath              string `json:"worktree_path,omitempty"`
 	// GitMetadataProjection is computed from the materialized checkout, never
 	// from the source repository. It is runtime-only authorization data.
-	GitMetadataProjection *worktree.GitMetadataProjection `json:"-"`
-	MainRepoGitDir        string                          `json:"main_repo_git_dir,omitempty"`
-	ErrorMessage          string                          `json:"error_message,omitempty"`
+	GitMetadataProjection     *worktree.GitMetadataProjection `json:"-"`
+	MainRepoGitDir            string                          `json:"main_repo_git_dir,omitempty"`
+	RequestedBaseBranch       string                          `json:"requested_base_branch,omitempty"`
+	BaseBranch                string                          `json:"base_branch,omitempty"`
+	BaseBranchFallbackWarning string                          `json:"base_branch_fallback_warning,omitempty"`
+	ErrorMessage              string                          `json:"error_message,omitempty"`
 }
 
 // EnvPrepareResult contains the result of environment preparation.
@@ -173,10 +180,13 @@ type EnvPrepareResult struct {
 
 	// Worktree fields (populated when worktree preparer runs).
 	// Legacy single-worktree fields; for multi-repo results they mirror Worktrees[0].
-	WorktreeID            string                          `json:"worktree_id,omitempty"`
-	WorktreeBranch        string                          `json:"worktree_branch,omitempty"`
-	MainRepoGitDir        string                          `json:"main_repo_git_dir,omitempty"`
-	GitMetadataProjection *worktree.GitMetadataProjection `json:"-"`
+	WorktreeID                string                          `json:"worktree_id,omitempty"`
+	WorktreeBranch            string                          `json:"worktree_branch,omitempty"`
+	MainRepoGitDir            string                          `json:"main_repo_git_dir,omitempty"`
+	GitMetadataProjection     *worktree.GitMetadataProjection `json:"-"`
+	RequestedBaseBranch       string                          `json:"requested_base_branch,omitempty"`
+	BaseBranch                string                          `json:"base_branch,omitempty"`
+	BaseBranchFallbackWarning string                          `json:"base_branch_fallback_warning,omitempty"`
 
 	// Worktrees is the per-repository outcome list when the preparer ran in
 	// multi-repo mode. Empty for single-repo or repo-less results.

@@ -185,7 +185,7 @@ export function ApprovalActionBar({ task }: ApprovalActionBarProps) {
 // optimistic id with the real decision row id is performed implicitly
 // when `task:<id>` refetches via the WS handler. We keep the helper
 // available so future flows (e.g. a per-decision detail view) can map
-// the wire DTO consistently with mapDecisionDTO in page.tsx.
+// the wire DTO consistently with mapDecisionDTO in map-office-task.ts.
 export { dtoToDecision };
 
 type ApprovalCommentFormProps = {

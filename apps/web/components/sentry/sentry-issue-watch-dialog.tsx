@@ -17,16 +17,15 @@ import {
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
-import {
-  ScriptEditor,
-  computeEditorHeight,
-} from "@/components/settings/profile-edit/script-editor";
+import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import { listSentryInstances, listSentryOrganizations } from "@/lib/api/domains/sentry-api";
 import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
 import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
 import { sentryIssueWatchPlaceholders } from "./sentry-issue-watch-placeholders";
 import { MaxInflightTasksField } from "./sentry-issue-watch-throttle-field";
@@ -67,6 +66,7 @@ function useFormData(workspaceId: string) {
   const allWorkflows = useAppStore((s) => s.workflows.items);
   const workflows = useMemo(() => allWorkflows.filter((w) => !w.hidden), [allWorkflows]);
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   const executors = useAppStore((s) => s.executors.items);
   const allExecutorProfiles = useMemo(
     () =>
@@ -76,8 +76,12 @@ function useFormData(workspaceId: string) {
     [executors],
   );
   const filteredAgentProfiles = useMemo(
-    () => agentProfiles.filter((p) => !p.cli_passthrough),
-    [agentProfiles],
+    () =>
+      agentProfiles.filter(
+        (profile) =>
+          !profile.cli_passthrough && isSelectableAgentProfile(profile, dynamicRoutingEnabled),
+      ),
+    [agentProfiles, dynamicRoutingEnabled],
   );
   return { workflows, agentProfiles: filteredAgentProfiles, allExecutorProfiles };
 }
@@ -124,21 +128,21 @@ function PromptField({ value, onChange }: { value: string; onChange: (v: string)
         <Label>{t("sentry:taskPrompt")}</Label>
         <PlaceholdersHelp placeholders={placeholders} />
       </div>
-      <p className="text-xs text-muted-foreground">
-        {/* The `{{` token is passed as a value so it never reaches the catalog,
-            where i18next would interpolate it away. */}
-        {t("sentry:promptFieldHelp", { token: "{{" })}
-      </p>
-      <div className="rounded-md border border-border overflow-hidden">
-        <ScriptEditor
-          value={value}
-          onChange={onChange}
-          language="markdown"
-          height={computeEditorHeight(value)}
-          lineNumbers="off"
-          placeholders={placeholders}
-        />
-      </div>
+      <SettingsPromptEditor
+        value={value}
+        onChange={onChange}
+        placeholders={placeholders}
+        promptReferences
+        ariaLabel={t("sentry:taskPrompt")}
+        testId="sentry-issue-watch-prompt-editor"
+        help={
+          <p className="text-xs text-muted-foreground">
+            {/* The `{{` token is passed as a value so it never reaches the catalog,
+                where i18next would interpolate it away. */}
+            {t("sentry:promptFieldHelp", { token: "{{" })}
+          </p>
+        }
+      />
     </div>
   );
 }

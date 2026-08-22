@@ -1,5 +1,6 @@
 import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
+import { promptEditorText } from "../../helpers/settings-prompt-editor";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 import { seedWorkflowDuplication } from "./workflow-duplication-helpers";
 
@@ -31,7 +32,7 @@ test.describe("workflow duplication", () => {
     await expect(copyCard.getByTestId("workflow-description-input")).toHaveValue(
       "Copied workflow description",
     );
-    await expect(copyCard.getByTestId("workflow-prompt-input")).toHaveValue(
+    await expect(promptEditorText(copyCard.getByTestId("workflow-prompt-input"))).toContainText(
       "Copied workflow prompt",
     );
     await expect(copyCard.getByText("Review", { exact: true })).toBeVisible();

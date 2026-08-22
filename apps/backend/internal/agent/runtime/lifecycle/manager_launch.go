@@ -178,6 +178,76 @@ func buildLaunchMetadata(req *LaunchRequest, _ string, worktreeID, worktreeBranc
 	return metadata
 }
 
+// collectComparisonTargets projects the validated per-repository comparison
+// targets into the same workspace-subpath keys used by base branches. The
+// target remains credential-free and is revalidated at the runtime boundary.
+func collectComparisonTargets(req *LaunchRequest) (map[string]models.ComparisonTarget, error) {
+	if req == nil {
+		return nil, nil
+	}
+	specs := req.RepoSpecs()
+	if len(specs) == 0 {
+		if req.ComparisonTarget == nil {
+			return nil, nil
+		}
+		if err := req.ComparisonTarget.Validate(); err != nil {
+			return nil, fmt.Errorf("validate comparison target: %w", err)
+		}
+		return map[string]models.ComparisonTarget{"": *req.ComparisonTarget}, nil
+	}
+	targets := make(map[string]models.ComparisonTarget)
+	for index, spec := range specs {
+		if spec.ComparisonTarget == nil {
+			continue
+		}
+		if err := spec.ComparisonTarget.Validate(); err != nil {
+			return nil, fmt.Errorf("validate comparison target for repository %q: %w", spec.RepoName, err)
+		}
+		key := ""
+		if index > 0 {
+			key = baseBranchMetadataKey(spec)
+		}
+		if existing, ok := targets[key]; ok && !existing.Equal(*spec.ComparisonTarget) {
+			return nil, fmt.Errorf("multiple comparison targets map to workspace repository %q", key)
+		}
+		targets[key] = *spec.ComparisonTarget
+	}
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	return targets, nil
+}
+
+func comparisonTargetsFromWorkspaceRepositories(specs []WorkspaceRepositorySpec) (map[string]models.ComparisonTarget, error) {
+	if len(specs) == 0 {
+		return nil, nil
+	}
+	targets := make(map[string]models.ComparisonTarget)
+	for index, spec := range specs {
+		if spec.ComparisonTarget == nil {
+			continue
+		}
+		if err := spec.ComparisonTarget.Validate(); err != nil {
+			return nil, fmt.Errorf("validate comparison target for repository %q: %w", spec.RepoName, err)
+		}
+		key := ""
+		if index > 0 {
+			key = baseBranchMetadataKey(RepoLaunchSpec{
+				RepoName:   spec.RepoName,
+				BranchSlug: spec.BranchSlug,
+			})
+		}
+		if existing, ok := targets[key]; ok && !existing.Equal(*spec.ComparisonTarget) {
+			return nil, fmt.Errorf("comparison target collision for workspace repository %q", key)
+		}
+		targets[key] = *spec.ComparisonTarget
+	}
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	return targets, nil
+}
+
 // collectRemoteContributions projects the validated per-repository bindings
 // into the workspace-subpath keys understood by agentctl. The first repository
 // owns the workspace root; sibling destinations use the same deterministic key
@@ -735,21 +805,9 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build launch environment: %w", err)
 	}
-	acpMcpServers, err := m.resolveMcpServersWithParams(ctx, executionProfileID(reqWithWorktree), reqWithWorktree.Metadata, agentConfig)
+	mcpServers, err := m.resolveMcpServerConfigs(ctx, reqWithWorktree, agentConfig)
 	if err != nil {
 		m.logger.Warn("failed to resolve MCP servers for launch", zap.Error(err))
-	}
-	var mcpServers []McpServerConfig
-	for _, srv := range acpMcpServers {
-		mcpServers = append(mcpServers, McpServerConfig{
-			Name:    srv.Name,
-			URL:     srv.URL,
-			Type:    srv.Type,
-			Command: srv.Command,
-			Args:    srv.Args,
-			Env:     srv.Env,
-			Headers: srv.Headers,
-		})
 	}
 	metadata := buildLaunchMetadata(reqWithWorktree, mainRepoGitDir, worktreeID, worktreeBranch)
 	remoteContributions, err := collectRemoteContributions(reqWithWorktree)
@@ -759,6 +817,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if len(remoteContributions) > 0 {
 		metadata[MetadataKeyRemoteContributions] = remoteContributions
 	}
+	comparisonTargets, err := collectComparisonTargets(reqWithWorktree)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(comparisonTargets) > 0 {
+		metadata[MetadataKeyComparisonTargets] = comparisonTargets
+	}
 	contributionDestinations, err := collectContributionDestinations(reqWithWorktree)
 	if err != nil {
 		return nil, nil, nil, err
@@ -767,10 +832,6 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		metadata[MetadataKeyContributionDestinations] = contributionDestinations
 	}
 
-	var autoApproveOverride *bool
-	if profileInfo != nil {
-		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
-	}
 	execReq := &ExecutorCreateRequest{
 		InstanceID:                     executionID,
 		TaskID:                         reqWithWorktree.TaskID,
@@ -787,7 +848,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		Protocol:                       string(agentConfig.Runtime().Protocol),
 		Env:                            env,
 		AutoApprovePermissions:         profileInfo != nil && profileInfo.AutoApprove,
-		AutoApprovePermissionsOverride: autoApproveOverride,
+		AutoApprovePermissionsOverride: autoApproveOverride(reqWithWorktree, profileInfo),
 		Metadata:                       metadata,
 		AgentConfig:                    agentConfig,
 		ApprovedSecretEnvKeys:          append([]string(nil), reqWithWorktree.ApprovedSecretEnvKeys...),
@@ -798,15 +859,46 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpProfile:                     reqWithWorktree.McpProfile,
 		AuthToken:                      m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
+		AgentctlStartupConfig:          m.agentctlStartupConfig,
 		OnProgress:                     onProgress,
 		RemoteContributions:            remoteContributions,
 		ContributionDestinations:       contributionDestinations,
+		ComparisonTargets:              comparisonTargets,
 	}
 	execInstance, err := createLaunchInstance(ctx, rt, execReq)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	return execReq, execInstance, rt, nil
+}
+
+// resolveMcpServerConfigs resolves MCP server parameters and converts them
+// to McpServerConfig structs for the executor request.
+func (m *Manager) resolveMcpServerConfigs(ctx context.Context, req *LaunchRequest, agentConfig agents.Agent) ([]McpServerConfig, error) {
+	acpMcpServers, err := m.resolveMcpServersWithParams(ctx, executionProfileID(req), req.Metadata, agentConfig)
+	if err != nil {
+		return nil, err
+	}
+	mcpServers := make([]McpServerConfig, 0, len(acpMcpServers))
+	for _, srv := range acpMcpServers {
+		mcpServers = append(mcpServers, McpServerConfig{
+			Name:    srv.Name,
+			URL:     srv.URL,
+			Type:    srv.Type,
+			Command: srv.Command,
+			Args:    srv.Args,
+			Env:     srv.Env,
+			Headers: srv.Headers,
+		})
+	}
+	return mcpServers, nil
+}
+
+func autoApproveOverride(reqWithWorktree *LaunchRequest, profileInfo *AgentProfileInfo) *bool {
+	if profileInfo != nil {
+		return boolPtr(profileInfo.AutoApprove)
+	}
+	return nil
 }
 
 func createLaunchInstance(ctx context.Context, rt ExecutorBackend, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
@@ -919,6 +1011,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		WorkspacePath:           workspacePath,
 		RepositoryPath:          req.RepositoryPath,
 		RepositoryID:            req.RepositoryID,
+		TaskRepositoryID:        req.TaskRepositoryID,
 		UseWorktree:             req.UseWorktree,
 		WorktreeID:              req.WorktreeID,
 		SetupScript:             req.SetupScript,
@@ -952,6 +1045,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				setup = repoSetupScript
 			}
 			specs = append(specs, RepoPrepareSpec{
+				TaskRepositoryID:        r.TaskRepositoryID,
 				RepositoryID:            r.RepositoryID,
 				RepositoryPath:          r.RepositoryPath,
 				RepoName:                r.RepoName,
@@ -1214,7 +1308,7 @@ func (m *Manager) markAgentStartPending(execution *AgentExecution) {
 // dedicated singleflight key so they don't race on the shared AgentExecution
 // pointer.
 func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *AgentExecution, req *LaunchRequest) error {
-	_, err := m.doCoalescedExecution(ctx, "promote:"+req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+	_, err := m.doCoalescedExecution(ctx, req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
 		activityLease, acquireErr := m.acquireActivity(sharedCtx, activity.KindExecutionPreparing)
 		if acquireErr != nil {
 			return nil, acquireErr
@@ -1456,9 +1550,6 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 			execInstance.Client.Close()
 		}
 		return nil, err
-	}
-	if profileInfo != nil && len(profileInfo.EnvVars) > 0 {
-		m.cacheResolvedProfileEnv(execution, m.resolveAgentProfileEnvVars(ctx, profileInfo.EnvVars))
 	}
 	if !reqWithWorktree.IsPassthrough {
 		if err := m.materializeRuntimeProjectMCP(ctx, execution, agentConfig); err != nil {
@@ -1933,8 +2024,21 @@ func getAttachmentsFromMetadata(execution *AgentExecution) []MessageAttachment {
 // configureAndStartAgent configures the agent command and starts the agent subprocess.
 // Returns the effective boot command (full command with adapter args, or base command).
 func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution, approvalPolicy string) (string, error) {
-	env := runtimeEnvFromMetadata(execution.MetadataSnapshot())
-	m.mergeAgentProfileEnvForExecution(ctx, execution, env)
+	env := execution.RuntimeEnvironment()
+	metadataEnv := runtimeEnvFromMetadata(execution.MetadataSnapshot())
+	if env == nil {
+		env = metadataEnv
+		if err := m.mergeAgentProfileEnvForExecution(ctx, execution, env); err != nil {
+			m.updateExecutionError(execution.ID, "failed to resolve agent profile environment: "+err.Error())
+			return "", fmt.Errorf("resolve agent profile environment: %w", err)
+		}
+	} else {
+		// SetExecutionEnv carries per-run values such as repository credentials.
+		// Overlay them on the launch snapshot without re-reading profile secrets.
+		for key, value := range metadataEnv {
+			env[key] = value
+		}
+	}
 	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
 		m.updateExecutionError(execution.ID, "failed to prepare agent env: "+err.Error())
 		return "", fmt.Errorf("failed to prepare agent env: %w", err)

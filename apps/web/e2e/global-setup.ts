@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { FullConfig } from "@playwright/test";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "..");
@@ -10,7 +9,7 @@ export type BackendArtifact = {
   rebuildTarget: string;
 };
 
-export default function globalSetup(config: FullConfig) {
+export default function globalSetup() {
   const customKandevBin = process.env.KANDEV_E2E_BIN;
   const kandevBin = customKandevBin ?? path.join(BACKEND_DIR, "bin", "kandev");
   const artifacts: BackendArtifact[] = [
@@ -24,7 +23,7 @@ export default function globalSetup(config: FullConfig) {
   if (!customKandevBin) {
     artifacts.unshift({ path: kandevBin, rebuildTarget: "build" });
   }
-  if (isContainerRun(config, process.env)) {
+  if (isContainerRun(process.env)) {
     artifacts.push(
       {
         path: path.join(BACKEND_DIR, "bin", "mock-agent-linux-amd64"),
@@ -53,12 +52,32 @@ export default function globalSetup(config: FullConfig) {
   assertPseudoCatalogBundled();
 }
 
-function isContainerRun(config: FullConfig, env: NodeJS.ProcessEnv): boolean {
-  return (
-    config.projects.some(({ name }) => name === "containers" || name === "docker") ||
-    env.KANDEV_E2E_CONTAINERS === "1" ||
-    env.KANDEV_E2E_DOCKER === "1"
-  );
+/**
+ * Playwright's `globalSetup` receives the fully resolved `FullConfig`, whose
+ * `projects` array always lists every project declared in
+ * `playwright.config.ts` — it is not filtered down to the project(s) selected
+ * via `--project=`. `config.projects.some((p) => p.name === "containers")` is
+ * therefore always true and cannot distinguish a `--project=chromium` run
+ * from a `--project=containers` one; verified empirically, not just by
+ * reading the types.
+ *
+ * Managed runs and CI pass an explicit environment marker. Direct Playwright
+ * runs keep the selected project in `process.argv`, so this function reads the
+ * CLI value as well. This mirrors `fixtures/backend.ts`'s
+ * `isContainerProjectActive`, whose project-name branch reads
+ * `testInfo.project.name` — the per-test resolved project — instead of
+ * `FullConfig`.
+ */
+export function isContainerRun(env: NodeJS.ProcessEnv, argv = process.argv): boolean {
+  if (env.KANDEV_E2E_CONTAINERS === "1" || env.KANDEV_E2E_DOCKER === "1") return true;
+
+  const selectedProjects = argv.flatMap((arg, index) => {
+    if (arg === "--project") return argv[index + 1] ? [argv[index + 1]!] : [];
+    if (arg.startsWith("--project=")) return [arg.slice("--project=".length)];
+    return [];
+  });
+
+  return selectedProjects.some((projects) => projects.split(",").includes("containers"));
 }
 
 function backendMakeCommand(backendDir: string, target: string): string {

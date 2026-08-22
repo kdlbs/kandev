@@ -90,7 +90,10 @@ export function useWorkspaceRepositorySets({ workspaceId }: { workspaceId: strin
     }
   }, [draft, saving, workspaceId, upsertRepositorySet, t]);
 
-  const startDelete = useCallback((set: RepositorySet) => setDeleting(set), []);
+  const startDelete = useCallback((set: RepositorySet) => {
+    setError(null);
+    setDeleting(set);
+  }, []);
   const cancelDelete = useCallback(() => setDeleting(null), []);
 
   const confirmDelete = useCallback(async () => {

@@ -462,7 +462,10 @@ func TestPassthroughOpenCodeInjectsConfigEnv(t *testing.T) {
 		t.Fatalf("opencode config not written: %v", err)
 	}
 	// OPENCODE_CONFIG must be merged into the passthrough environment.
-	env := mgr.buildPassthroughEnv(context.Background(), execution, nil)
+	env, err := mgr.buildPassthroughEnv(context.Background(), execution, nil)
+	if err != nil {
+		t.Fatalf("buildPassthroughEnv: %v", err)
+	}
 	if env["OPENCODE_CONFIG"] != files[0] {
 		t.Fatalf("OPENCODE_CONFIG = %q, want %q", env["OPENCODE_CONFIG"], files[0])
 	}
@@ -1104,12 +1107,15 @@ func TestBuildPassthroughEnv_MergesProfileEnvVars(t *testing.T) {
 		},
 	}
 
-	env := mgr.buildPassthroughEnv(context.Background(), &AgentExecution{
+	env, err := mgr.buildPassthroughEnv(context.Background(), &AgentExecution{
 		TaskID:               "task-1",
 		SessionID:            "session-1",
 		AgentProfileID:       "profile-1",
 		OfficeAgentProfileID: "office-cto",
 	}, nil)
+	if err != nil {
+		t.Fatalf("buildPassthroughEnv: %v", err)
+	}
 
 	if env["PLAIN"] != "plain-value" {
 		t.Fatalf("profile env var missing: %+v", env)
@@ -1140,7 +1146,10 @@ func TestBuildPassthroughEnvIncludesEffectiveRuntimeEnv(t *testing.T) {
 		"PATH":                                "/tmp/kandev-shim:/usr/bin",
 	})
 
-	env := mgr.buildPassthroughEnv(context.Background(), execution, nil)
+	env, err := mgr.buildPassthroughEnv(context.Background(), execution, nil)
+	if err != nil {
+		t.Fatalf("buildPassthroughEnv: %v", err)
+	}
 	for key, want := range map[string]string{
 		"KANDEV_GITHUB_CREDENTIAL_BROKER_URL": "http://127.0.0.1:9876",
 		"GIT_CONFIG_COUNT":                    "1",

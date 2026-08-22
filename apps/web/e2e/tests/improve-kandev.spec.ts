@@ -136,7 +136,10 @@ test.describe("Improve Kandev dialog", () => {
     await contribute.click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible({ timeout: 10_000 });
 
-    await testPage.keyboard.press("Escape");
+    await testPage
+      .getByTestId("create-task-dialog")
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeHidden();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
 

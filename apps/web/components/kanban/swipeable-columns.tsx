@@ -117,11 +117,11 @@ export function SwipeableColumns({
 
   return (
     <div className="flex-1 min-h-0 overflow-hidden" ref={emblaRef}>
-      <div className="flex h-full touch-pan-y">
+      <div className="flex h-full min-h-0 touch-pan-y">
         {steps.map((step) => (
           <div
             key={step.id}
-            className="flex-shrink-0 w-full h-full min-w-0 px-4 py-2 flex flex-col"
+            className="flex h-full min-h-0 w-full min-w-0 flex-shrink-0 flex-col px-4 py-2"
           >
             <KanbanColumn
               step={step}

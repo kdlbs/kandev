@@ -3,6 +3,10 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
 import type { Task, TaskSession } from "@/app/office/tasks/[id]/types";
+import {
+  OfficeTopbarChromeProvider,
+  useOfficeTopbarChrome,
+} from "@/app/office/components/office-topbar-context";
 
 const { CHAT_EDITABLE, CHAT_READONLY, CHAT_READONLY_TEST_ID } = vi.hoisted(() => ({
   CHAT_EDITABLE: "editable",
@@ -18,12 +22,6 @@ vi.mock("@/components/routing/app-link", () => ({
   ),
 }));
 
-vi.mock("@/app/office/components/office-topbar-portal", () => ({
-  OfficeTopbarPortal: ({ children }: { children: ReactNode }) => (
-    <div data-testid="office-topbar">{children}</div>
-  ),
-}));
-
 vi.mock("@kandev/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -31,7 +29,9 @@ vi.mock("@kandev/ui/tooltip", () => ({
 }));
 
 vi.mock("@/app/office/components/execution-indicator", () => ({
-  ExecutionIndicator: () => <div data-testid="execution-indicator" />,
+  ExecutionIndicator: ({ status }: { status: string }) => (
+    <div data-testid="execution-indicator">{status}</div>
+  ),
 }));
 
 vi.mock("./components/topbar-working-indicator", () => ({
@@ -136,12 +136,24 @@ const runningSession: TaskSession = {
   updatedAt: "2026-05-01T10:07:00Z",
 };
 
-function renderPane(task: Task, sessions: TaskSession[]) {
-  return render(
+function TopbarActions() {
+  const chrome = useOfficeTopbarChrome();
+  return <>{chrome?.actions}</>;
+}
+
+function PaneHarness({ task, sessions }: { task: Task; sessions: TaskSession[] }) {
+  return (
     <StateProvider>
-      <OfficeSimplePane task={task} comments={[]} activity={[]} sessions={sessions} />
-    </StateProvider>,
+      <OfficeTopbarChromeProvider>
+        <OfficeSimplePane task={task} comments={[]} activity={[]} sessions={sessions} />
+        <TopbarActions />
+      </OfficeTopbarChromeProvider>
+    </StateProvider>
   );
+}
+
+function renderPane(task: Task, sessions: TaskSession[]) {
+  return render(<PaneHarness task={task} sessions={sessions} />);
 }
 
 describe("OfficeSimplePane comment composer", () => {
@@ -149,11 +161,7 @@ describe("OfficeSimplePane comment composer", () => {
     const task = { ...baseTask, status: "done" as const };
     const view = renderPane(task, []);
 
-    view.rerender(
-      <StateProvider>
-        <OfficeSimplePane task={task} comments={[]} activity={[]} sessions={[completedSession]} />
-      </StateProvider>,
-    );
+    view.rerender(<PaneHarness task={task} sessions={[completedSession]} />);
 
     expect(screen.getByTestId(CHAT_READONLY_TEST_ID).textContent).toBe(CHAT_EDITABLE);
   });
@@ -174,5 +182,29 @@ describe("OfficeSimplePane comment composer", () => {
     renderPane({ ...baseTask, status: "cancelled" }, [completedSession]);
 
     expect(screen.getByTestId(CHAT_READONLY_TEST_ID).textContent).toBe(CHAT_READONLY);
+  });
+});
+
+describe("OfficeSimplePane ExecutionIndicator wiring", () => {
+  // Regression: the detail page's store-seeded task must feed ExecutionIndicator
+  // the raw backend status, not the normalized canonical one, so it still tells
+  // SCHEDULING (live) apart from WAITING_FOR_INPUT (not live) — the same
+  // distinction task-row.tsx already preserves for the board/list views.
+  it("prefers rawStatus over status so a SCHEDULING task still shows Live", () => {
+    renderPane({ ...baseTask, status: "todo", rawStatus: "SCHEDULING" }, []);
+
+    expect(screen.getByTestId("execution-indicator").textContent).toBe("SCHEDULING");
+  });
+
+  it("prefers rawStatus over status so a WAITING_FOR_INPUT task does not falsely show Live", () => {
+    renderPane({ ...baseTask, status: "in_progress", rawStatus: "WAITING_FOR_INPUT" }, []);
+
+    expect(screen.getByTestId("execution-indicator").textContent).toBe("WAITING_FOR_INPUT");
+  });
+
+  it("falls back to status when rawStatus is absent", () => {
+    renderPane({ ...baseTask, status: "in_progress" }, []);
+
+    expect(screen.getByTestId("execution-indicator").textContent).toBe("in_progress");
   });
 });

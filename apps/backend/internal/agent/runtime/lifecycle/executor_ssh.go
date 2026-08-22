@@ -17,6 +17,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 )
@@ -201,6 +202,9 @@ func (r *SSHExecutor) workdirRoot(md map[string]interface{}) string {
 // instead of starting a second remote agentctl on top of the live one.
 func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
 	baseCtx := preparationContext(ctx)
+	if err := validateAgentctlStartupConfig(req.AgentctlStartupConfig); err != nil {
+		return nil, fmt.Errorf("invalid agentctl startup configuration: %w", err)
+	}
 	resumed, ok := r.resumedStateForCreate(req)
 	if ok {
 		return r.buildResumedInstance(req, resumed), nil
@@ -417,6 +421,7 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	env := sshAgentctlLaunchEnv(
 		managedGitCredentialBrokerEnv(sshRemoteContributionEnv(req, agentctlBin)),
 		nonce,
+		req.AgentctlStartupConfig,
 	)
 	shell := sshShellForRemote(req.Metadata, platform)
 	controlPort, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, env, r.logger)
@@ -461,7 +466,7 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	return instancePort, pid, fwd, authToken, nil
 }
 
-func sshAgentctlLaunchEnv(base map[string]string, nonce string) map[string]string {
+func sshAgentctlLaunchEnv(base map[string]string, nonce string, startup ...commonconfig.AgentctlStartupConfig) map[string]string {
 	env := make(map[string]string, len(base))
 	for key, value := range base {
 		env[key] = value
@@ -472,6 +477,11 @@ func sshAgentctlLaunchEnv(base map[string]string, nonce string) map[string]strin
 	delete(env, "AGENTCTL_AUTH_TOKEN")
 	env["AGENTCTL_BOOTSTRAP_NONCE"] = nonce
 	env["AGENTCTL_LISTEN_HOST"] = sshAgentctlLoopbackHost
+	if len(startup) > 0 {
+		for key, value := range agentctlStartupEnvironment(startup[0]) {
+			env[key] = value
+		}
+	}
 	return env
 }
 

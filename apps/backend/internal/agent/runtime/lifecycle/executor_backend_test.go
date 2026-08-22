@@ -101,3 +101,10 @@ func TestToAgentExecutionUsesExecutorVisibleSourceRoots(t *testing.T) {
 	require.Equal(t, []string{"/workspace", "/workspace/frontend-main"}, execution.WorkspaceSourceRoots)
 	require.NotContains(t, execution.WorkspaceSourceRoots, "/host/private/source")
 }
+
+func TestToAgentExecutionCapturesRunID(t *testing.T) {
+	execution := (&ExecutorInstance{InstanceID: "execution"}).ToAgentExecution(&ExecutorCreateRequest{
+		Env: map[string]string{"KANDEV_RUN_ID": "run-1"},
+	})
+	require.Equal(t, "run-1", execution.RunID)
+}

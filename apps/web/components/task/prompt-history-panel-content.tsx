@@ -10,6 +10,8 @@ import {
 } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionMessages } from "@/hooks/domains/session/use-session-messages";
+import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
+import { useLazyLoadSentinel } from "@/hooks/use-lazy-load-sentinel";
 import { useSessionTurnsState } from "@/hooks/domains/session/use-session-turns";
 import { useMessageFavorite } from "@/hooks/domains/session/use-message-favorite";
 import { formatDateTime, formatRelativeCompact } from "@/lib/i18n/formats";
@@ -23,15 +25,22 @@ import { PanelRoot } from "./panel-primitives";
 
 type PromptHistoryPanelContentProps = { onNavigateToPrompt?: (messageId: string) => void };
 
+const SENTINEL_TEST_ID = "prompt-history-sentinel";
+const LOADING_OLDER_TEST_ID = "prompt-history-loading-older";
+
 /** The prompt-history panel: builds entries from the session's messages and
- * turns and renders one expandable row per prompt; shows an empty-state
- * message for passthrough sessions or when there are no entries. */
+ * turns and renders one expandable row per prompt. Older pages auto-load via
+ * the shared lazy-load sentinel (like the transcript's scroll-up sentinel),
+ * with no load-more button. Passthrough sessions are an unconditional
+ * empty-state with NO controls (rows, arrows, sentinel, loading indicators):
+ * the transcript the arrow would jump to does not exist. */
 export function PromptHistoryPanelContent({ onNavigateToPrompt }: PromptHistoryPanelContentProps) {
   const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement>(null);
   const sessionId = useAppStore((state) => state.tasks.activeSessionId);
   const session = useAppStore((state) => (sessionId ? state.taskSessions.items[sessionId] : null));
-  const { messages } = useSessionMessages(sessionId);
+  const { messages, isLoading: messagesLoading } = useSessionMessages(sessionId);
+  const { loadMore, hasMore, isLoadingMore } = useLazyLoadMessages(sessionId);
   const { turns, isHydrated: turnsHydrated } = useSessionTurnsState(sessionId);
   const entries = useMemo(() => {
     const derived = buildPromptHistoryEntries(messages, turns);
@@ -41,7 +50,27 @@ export function PromptHistoryPanelContent({ onNavigateToPrompt }: PromptHistoryP
   const [expanded, setExpanded] = useState<string | null>(null);
   const maxHeight = usePanelRowMaxHeight(rootRef);
 
-  if (session?.is_passthrough || entries.length === 0) {
+  // Pagination continues while the server reports older messages and no loaded
+  // entry is the session's first prompt (#1). If payloads omit ordinals, the
+  // hasMore term alone drives exhaustion.
+  const shouldPaginate = hasMore && !entries.some((entry) => entry.promptNumber === 1);
+  const { sentinelRef, onUserGesture } = useLazyLoadSentinel(
+    rootRef,
+    shouldPaginate,
+    messagesLoading,
+    isLoadingMore,
+    loadMore,
+    {
+      rootMargin: "0px 0px 200px 0px",
+      rearmWhileIntersecting: true,
+      joinInFlightWhileLoading: true,
+    },
+  );
+
+  // Passthrough sessions render a toolbar instead of a transcript: the panel
+  // is an unconditional no-controls empty state, even when entries/hasMore
+  // exist (a restored layout can leave the tab present after a session switch).
+  if (session?.is_passthrough) {
     return (
       <PanelRoot
         ref={rootRef}
@@ -53,8 +82,40 @@ export function PromptHistoryPanelContent({ onNavigateToPrompt }: PromptHistoryP
     );
   }
 
+  if (entries.length === 0) {
+    // Keep PanelRoot as the stable top-level element in every branch so the
+    // root element (and its ResizeObserver) survives the empty→rows
+    // transition; only the inner content and wrapper classes vary.
+    const spec = emptyEntriesSpec({
+      messagesLoading,
+      isLoadingMore,
+      hasMore,
+      sentinelRef,
+      emptyText: t("task:promptHistoryEmpty"),
+      loadingText: t("task:loading"),
+      loadingOlderText: t("task:loadingOlderMessages"),
+    });
+    return (
+      <PanelRoot
+        ref={rootRef}
+        data-testid="prompt-history-panel"
+        className={spec.wrapperClass}
+        onWheel={spec.interactive ? onUserGesture : undefined}
+        onTouchMove={spec.interactive ? onUserGesture : undefined}
+      >
+        {spec.content}
+      </PanelRoot>
+    );
+  }
+
   return (
-    <PanelRoot ref={rootRef} data-testid="prompt-history-panel" className="overflow-y-auto p-2">
+    <PanelRoot
+      ref={rootRef}
+      data-testid="prompt-history-panel"
+      className="overflow-y-auto p-2"
+      onWheel={shouldPaginate ? onUserGesture : undefined}
+      onTouchMove={shouldPaginate ? onUserGesture : undefined}
+    >
       {entries.map((entry, index) => (
         <PromptHistoryRow
           key={entry.messageId}
@@ -67,8 +128,79 @@ export function PromptHistoryPanelContent({ onNavigateToPrompt }: PromptHistoryP
           onNavigate={onNavigateToPrompt}
         />
       ))}
+      {shouldPaginate && (
+        <>
+          {isLoadingMore && (
+            <div
+              data-testid={LOADING_OLDER_TEST_ID}
+              className="py-2 text-center text-xs text-muted-foreground"
+            >
+              {t("task:loadingOlderMessages")}
+            </div>
+          )}
+          <div ref={sentinelRef} data-testid={SENTINEL_TEST_ID} aria-hidden="true" />
+        </>
+      )}
     </PanelRoot>
   );
+}
+
+/** Empty-entry non-passthrough states: older-page loading takes precedence
+ * over neutral initial loading, an unexhausted session stays paginatable with
+ * the sentinel, and only the definitive empty state (no entries, no hasMore,
+ * no loading) renders the empty text. Returns content plus the wrapper props
+ * so the caller keeps a stable PanelRoot element across branch switches. */
+function emptyEntriesSpec({
+  messagesLoading,
+  isLoadingMore,
+  hasMore,
+  sentinelRef,
+  emptyText,
+  loadingText,
+  loadingOlderText,
+}: {
+  messagesLoading: boolean;
+  isLoadingMore: boolean;
+  hasMore: boolean;
+  sentinelRef: (node: HTMLDivElement | null) => void;
+  emptyText: string;
+  loadingText: string;
+  loadingOlderText: string;
+}): { content: React.ReactNode; wrapperClass: string; interactive: boolean } {
+  if (isLoadingMore) {
+    return {
+      content: (
+        <>
+          <div className="py-2 text-center text-xs text-muted-foreground">{loadingOlderText}</div>
+          <div ref={sentinelRef} data-testid={SENTINEL_TEST_ID} aria-hidden="true" />
+        </>
+      ),
+      wrapperClass: "overflow-y-auto p-2",
+      interactive: true,
+    };
+  }
+  if (messagesLoading) {
+    return {
+      content: loadingText,
+      wrapperClass: "p-4 text-sm text-muted-foreground",
+      interactive: false,
+    };
+  }
+  if (hasMore) {
+    // No user prompts in the loaded page but older pages remain: keep the
+    // panel paginatable so the sentinel discovers older prompts instead of
+    // declaring the session empty.
+    return {
+      content: <div ref={sentinelRef} data-testid={SENTINEL_TEST_ID} aria-hidden="true" />,
+      wrapperClass: "overflow-y-auto p-2",
+      interactive: true,
+    };
+  }
+  return {
+    content: emptyText,
+    wrapperClass: "p-4 text-sm text-muted-foreground",
+    interactive: false,
+  };
 }
 
 /** Tracks the panel root's height via ResizeObserver and returns 40% of it as
@@ -87,6 +219,21 @@ function usePanelRowMaxHeight(rootRef: RefObject<HTMLDivElement | null>) {
     return () => observer.disconnect();
   }, [rootRef]);
   return maxHeight;
+}
+
+/** The small `#N` ordinal label at the start of a prompt bubble. Rendered
+ * only when the entry carries a known ordinal; `#N` is not translatable copy
+ * (precedent: `#${pr.pr_number}`). */
+function PromptNumberLabel({ index, promptNumber }: { index: number; promptNumber: number }) {
+  return (
+    <span
+      data-testid={`prompt-history-number-${index}`}
+      aria-hidden="true"
+      className="mr-1 shrink-0 text-[10px] font-medium leading-4 text-muted-foreground"
+    >
+      #{promptNumber}
+    </span>
+  );
 }
 
 type PromptHistoryRowProps = {
@@ -153,6 +300,9 @@ function PromptHistoryRow({
             onNavigate?.(entry.messageId);
           }}
         >
+          {entry.promptNumber !== null && (
+            <PromptNumberLabel index={index} promptNumber={entry.promptNumber} />
+          )}
           {entry.isAgentPrompt && (
             <IconRobot
               className="mr-1 inline-block h-3.5 w-3.5 align-text-bottom"

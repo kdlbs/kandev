@@ -5,6 +5,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/kandev/kandev/internal/agent/settings/models"
 )
 
@@ -59,6 +61,14 @@ type Repository interface {
 	// automations) pointing at removed profiles. ErrAgentProfileDeleted is
 	// only used by callers of ProfileResolver, which wraps this method.
 	GetAgentProfileIncludingDeleted(ctx context.Context, id string) (*models.AgentProfile, error)
+	// GetAgentProfileTx is GetAgentProfile's transaction-accepting counterpart:
+	// the automations YAML export (AC-29) opens one read transaction spanning
+	// several stores and passes it through here rather than letting this
+	// method open its own, so the profile read observes the same snapshot as
+	// every other read in the export. A missing row is reported as
+	// found=false rather than an error - AC-19's partial-resolution rule
+	// decides what that means, not this method.
+	GetAgentProfileTx(ctx context.Context, tx *sqlx.Tx, id string) (*models.AgentProfile, bool, error)
 	ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error)
 	// HasDeletedAgentProfiles reports whether the agent has any soft-deleted
 	// profile rows. Seeding paths use this to distinguish a fresh agent that
@@ -68,4 +78,29 @@ type Repository interface {
 	HasDeletedAgentProfiles(ctx context.Context, agentID string) (bool, error)
 
 	Close() error
+}
+
+// DynamicProfileRepository is the optional extension implemented by settings
+// stores that persist the dynamic profile document. Keeping it separate from
+// Repository lets small controller fakes and plugin adapters retain the
+// existing profile contract while dynamic routing is rolled out.
+type DynamicProfileRepository interface {
+	CreateDynamicAgentProfile(ctx context.Context, profile *models.DynamicAgentProfile, routes []models.DynamicAgentRoute) error
+	GetDynamicAgentProfile(ctx context.Context, profileID string) (*models.DynamicAgentProfile, []models.DynamicAgentRoute, error)
+	UpdateDynamicAgentProfile(ctx context.Context, profile *models.DynamicAgentProfile, expectedVersion int64, routes []models.DynamicAgentRoute) error
+	ListDynamicProfileReferencesByExecutionProfile(ctx context.Context, profileID string) ([]models.DynamicProfileReference, error)
+}
+
+// AtomicDynamicProfileRepository updates the base profile row and its
+// optimistic-routing document in one transaction. Controllers use this
+// optional extension when a request changes both surfaces so a stale route
+// version cannot leave the base profile partially updated.
+type AtomicDynamicProfileRepository interface {
+	UpdateAgentProfileWithDynamic(
+		ctx context.Context,
+		profile *models.AgentProfile,
+		dynamic *models.DynamicAgentProfile,
+		expectedVersion int64,
+		routes []models.DynamicAgentRoute,
+	) error
 }

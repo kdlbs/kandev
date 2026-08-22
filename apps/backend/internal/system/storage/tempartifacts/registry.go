@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/common/proclive"
 	"github.com/kandev/kandev/internal/system/storage"
 )
 
@@ -206,7 +207,7 @@ func (r *Registry) Reconcile(ctx context.Context) error {
 			}
 			continue
 		}
-		alive, known := processAlive(artifact.OwnerPID)
+		alive, known := proclive.Alive(artifact.OwnerPID)
 		if !known || alive {
 			continue
 		}

@@ -59,6 +59,29 @@ func TestResolveRejectsNegativePersistedValue(t *testing.T) {
 	}
 }
 
+func TestResolveConfigurationPrecedence(t *testing.T) {
+	configured := &Settings{MaxPerSession: 6, MergeEnabled: true, AutoMergeEnabled: true}
+	startup := Configuration{Value: 14, Present: true}
+
+	resolution, err := Resolve(configured, Environment{}, startup)
+	if err != nil {
+		t.Fatalf("resolve configuration: %v", err)
+	}
+	if resolution.Effective.MaxPerSession != 14 ||
+		resolution.Effective.Source != SourceConfiguration ||
+		!resolution.Effective.Locked {
+		t.Fatalf("configuration resolution = %+v, want locked configuration value", resolution.Effective)
+	}
+
+	resolution, err = Resolve(configured, Environment{Value: "20", Present: true}, startup)
+	if err != nil {
+		t.Fatalf("resolve environment over configuration: %v", err)
+	}
+	if resolution.Effective.MaxPerSession != 20 || resolution.Effective.Source != SourceEnvironment {
+		t.Fatalf("environment resolution = %+v, want environment value", resolution.Effective)
+	}
+}
+
 func TestStoreRoundTripAndValidation(t *testing.T) {
 	raw := &fakeRawStore{}
 	store := NewStore(raw)
@@ -308,6 +331,32 @@ func TestServiceEnvironmentLockRejectsUpdate(t *testing.T) {
 	}
 	if raw.saveCalls != 0 || target.max != 20 {
 		t.Fatalf("locked update mutated state: saves=%d target=%d", raw.saveCalls, target.max)
+	}
+}
+
+func TestServiceConfigurationLockRejectsUpdate(t *testing.T) {
+	raw := &fakeRawStore{}
+	target := &fakeTarget{max: 14}
+	service := NewService(
+		NewStore(raw), target, func() Environment { return Environment{} }, testLogger(t),
+		Configuration{Value: 14, Present: true},
+	)
+
+	response, err := service.Get(context.Background())
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if response.Effective.Source != SourceConfiguration || !response.Effective.Locked ||
+		response.Effective.MaxPerSession != 14 {
+		t.Fatalf("configuration response = %+v, want locked configuration source", response)
+	}
+
+	_, err = service.Update(context.Background(), SettingsPatch{MaxPerSession: new(4)})
+	if !errors.Is(err, ErrConfigurationLocked) {
+		t.Fatalf("update error = %v, want configuration lock", err)
+	}
+	if raw.saveCalls != 0 || target.max != 14 {
+		t.Fatalf("locked configuration update mutated state: saves=%d target=%d", raw.saveCalls, target.max)
 	}
 }
 

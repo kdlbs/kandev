@@ -141,6 +141,70 @@ func (r *Repository) UpdateSkill(ctx context.Context, skill *models.Skill) error
 	return err
 }
 
+// SkillConfigFields is the subset of office_skills columns a config import
+// owns (see UpdateSkillConfigFields).
+type SkillConfigFields struct {
+	Name        string
+	Description string
+	SourceType  models.SkillSourceType
+	Content     string
+}
+
+// UpdateSkillConfigFields updates only the columns a config import owns
+// (name, description, source type, content) and the content_hash derived from
+// content plus the current package metadata. It leaves source_locator,
+// file_inventory, version, approval_state, and the other columns untouched
+// instead of reverting them to a stale read-then-write snapshot.
+func (r *Repository) UpdateSkillConfigFields(
+	ctx context.Context, id string, fields SkillConfigFields,
+) error {
+	const maxMetadataReadAttempts = 3
+	type packageMetadata struct {
+		SourceLocator string `db:"source_locator"`
+		FileInventory string `db:"file_inventory"`
+	}
+
+	for range maxMetadataReadAttempts {
+		var metadata packageMetadata
+		if err := r.db.QueryRowxContext(ctx, r.db.Rebind(`
+			SELECT COALESCE(source_locator, '') AS source_locator,
+				COALESCE(file_inventory, '') AS file_inventory
+			FROM office_skills
+			WHERE id = ?
+		`), id).StructScan(&metadata); err != nil {
+			if err == sql.ErrNoRows {
+				return fmt.Errorf("skill not found: %s", id)
+			}
+			return err
+		}
+
+		contentHash := models.SkillPackageContentHash(
+			fields.Content, metadata.FileInventory, metadata.SourceLocator,
+		)
+		result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+			UPDATE office_skills SET
+				name = ?, description = ?, source_type = ?, content = ?,
+				content_hash = ?, updated_at = ?
+			WHERE id = ?
+				AND COALESCE(source_locator, '') = ?
+				AND COALESCE(file_inventory, '') = ?
+		`), fields.Name, fields.Description, fields.SourceType, fields.Content,
+			contentHash, time.Now().UTC(), id, metadata.SourceLocator, metadata.FileInventory)
+		if err != nil {
+			return err
+		}
+		updated, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if updated == 1 {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("update skill %s: package metadata changed concurrently", id)
+}
+
 // DeleteSkill deletes a skill by ID.
 func (r *Repository) DeleteSkill(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(

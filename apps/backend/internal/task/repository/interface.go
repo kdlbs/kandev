@@ -172,6 +172,13 @@ type TaskRepoRepository interface {
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
 	ListTaskRepositoriesByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskRepository, error)
 	UpdateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error
+	// UpdateTaskRepositoryComparisonTarget atomically replaces or removes the
+	// provider-owned comparison target on one exact attachment. When target is
+	// nil, expected limits removal to the same provider change when supplied.
+	UpdateTaskRepositoryComparisonTarget(ctx context.Context, id string, target *models.ComparisonTarget, expected *models.ComparisonTarget) (*models.TaskRepository, bool, error)
+	// UpdateTaskRepositoryBaseBranchAndClearComparisonTarget changes the manual
+	// base branch and clears any provider-owned comparison target in one write.
+	UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx context.Context, id, baseBranch string) (*models.TaskRepository, bool, error)
 	DeleteTaskRepository(ctx context.Context, id string) error
 	DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
@@ -201,6 +208,11 @@ type WorkflowRepository interface {
 type MessageRepository interface {
 	CreateMessage(ctx context.Context, message *models.Message) error
 	GetMessage(ctx context.Context, id string) (*models.Message, error)
+	// GetMessageWithPromptIndex retrieves a message by ID with its computed
+	// prompt_index (1-based ordinal among the session's user messages).
+	// Used by the idempotent WS replay/response path and user update-event
+	// publication; hot-path reads stay on GetMessage.
+	GetMessageWithPromptIndex(ctx context.Context, id string) (*models.Message, error)
 	GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error)
 	GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error)
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*models.Message, error)

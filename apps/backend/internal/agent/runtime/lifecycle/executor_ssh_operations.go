@@ -640,6 +640,7 @@ func buildSSHCreateInstanceRequest(
 		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:      req.RemoteContributions,
 		ContributionDestinations: req.ContributionDestinations,
+		ComparisonTargets:        req.ComparisonTargets,
 		Env:                      sshRemoteContributionEnv(req, agentctlBin),
 	}
 }

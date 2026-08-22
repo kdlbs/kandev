@@ -223,6 +223,57 @@ func TestGitHubCLIShimRefreshesAndIsolatesEachInvocation(t *testing.T) {
 	}
 }
 
+func TestGitHubCLIShimReissuesInvalidLease(t *testing.T) {
+	var resolveCalls, reissueCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request githubBrokerResolveRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		switch r.URL.Path {
+		case "/resolve":
+			resolveCalls++
+			if resolveCalls == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = io.WriteString(w, `{"code":"github_credential_lease_revoked"}`)
+				return
+			}
+			if request.Lease != "replacement-lease" {
+				t.Errorf("replacement resolve lease = %q", request.Lease)
+			}
+			_, _ = io.WriteString(w, `{"username":"x-access-token","password":"fresh-token"}`)
+		case "/reissue":
+			reissueCalls++
+			if request.Lease != "" || request.ReissueCapability != "execution-capability" {
+				t.Errorf("reissue request = %+v", request)
+			}
+			_, _ = io.WriteString(w, `{"token":"replacement-lease"}`)
+		default:
+			t.Errorf("unexpected endpoint %q", r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+	env := githubCredentialTestEnv(server.URL + "/resolve")
+	env[envGitHubCredentialReissueCapability] = "execution-capability"
+	env["PATH"] = "/shim:/usr/bin"
+	var childToken string
+	err := runGitHubCLIShim(
+		context.Background(), []string{"pr", "list"}, strings.NewReader(""), io.Discard, io.Discard,
+		lookupEnv(env), func() []string { return envMap(env) }, server.Client(), "/shim",
+		func(string, string) (string, error) { return "/usr/bin/gh", nil },
+		func(_ context.Context, _ string, _ []string, childEnv []string, _ io.Reader, _, _ io.Writer) error {
+			childToken = envValue(childEnv, "GH_TOKEN")
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("runGitHubCLIShim() error = %v", err)
+	}
+	if childToken != "fresh-token" || resolveCalls != 2 || reissueCalls != 1 {
+		t.Fatalf("child token/calls = %q/%d/%d, want fresh-token/2/1", childToken, resolveCalls, reissueCalls)
+	}
+}
+
 func TestGitHubCLIShimSelectsRepositoryLease(t *testing.T) {
 	var got githubBrokerResolveRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

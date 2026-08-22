@@ -707,6 +707,16 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if err != nil {
 		return nil, err
 	}
+	comparisonTargets, err := comparisonTargetsFromMetadata(metadata)
+	if err != nil {
+		return nil, err
+	}
+	if len(comparisonTargets) == 0 {
+		comparisonTargets, err = comparisonTargetsFromWorkspaceRepositories(info.WorkspaceRepositories)
+		if err != nil {
+			return nil, err
+		}
+	}
 	autoApprove := false
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -734,8 +744,10 @@ func (m *Manager) prepareExecutionCreateRequest(
 			PreviousExecutionID:            info.AgentExecutionID,
 			AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
 			BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
+			AgentctlStartupConfig:          m.agentctlStartupConfig,
 			RemoteContributions:            remoteContributions,
 			ContributionDestinations:       contributionDestinations,
+			ComparisonTargets:              comparisonTargets,
 		},
 		profileInfo: profileInfo,
 	}, nil
@@ -817,13 +829,6 @@ func (m *Manager) initializeCreatedExecution(
 	// concurrent EnsurePassthroughExecution can reach it, and it must never
 	// observe a half-initialised resume intent.
 	applyResumeIntent(execution, preparation.request)
-
-	// Cache only agent-profile values for the best-effort configure fallback.
-	// The effective runtime snapshot (including repository secrets) is already
-	// captured by ToAgentExecution and must not be mislabeled as profile data.
-	if preparation.profileInfo != nil && len(preparation.profileInfo.EnvVars) > 0 {
-		m.cacheResolvedProfileEnv(execution, m.resolveAgentProfileEnvVars(ctx, preparation.profileInfo.EnvVars))
-	}
 
 	if info.ACPSessionID != "" {
 		execution.ACPSessionID = info.ACPSessionID

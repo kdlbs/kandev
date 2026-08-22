@@ -104,4 +104,13 @@ test.describe("Mobile layout profiles", () => {
     await assertNoDocumentHorizontalOverflow(testPage, "edited layouts page");
     await assertNoDescendantOverflowsRight(layouts.root, "edited layouts settings");
   });
+
+  test("adds Prompt History through the touch layout editor", async ({ testPage }) => {
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.openFromSettingsIndex();
+
+    await expect(layouts.editor.locator(".dv-tab", { hasText: "Prompt History" })).toHaveCount(0);
+    await layouts.addPanel("Prompt History", true);
+    await expect(layouts.editor.locator(".dv-tab", { hasText: "Prompt History" })).toBeVisible();
+  });
 });

@@ -132,6 +132,12 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 	r.migrate.Apply("task_sessions.execution_profile_id", `ALTER TABLE task_sessions ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_sessions.route_generation", `ALTER TABLE task_sessions ADD COLUMN route_generation INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("task_sessions.route_state", `ALTER TABLE task_sessions ADD COLUMN route_state TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_sessions.route_reason", `ALTER TABLE task_sessions ADD COLUMN route_reason TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_sessions.downstream_acp_session_id", `ALTER TABLE task_sessions ADD COLUMN downstream_acp_session_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("dynamic_route_states.continuation_json", `ALTER TABLE dynamic_route_states ADD COLUMN continuation_json TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("dynamic_route_states.policy_state_json", `ALTER TABLE dynamic_route_states ADD COLUMN policy_state_json TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("executors_running.execution_profile_id", `ALTER TABLE executors_running ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("executors_running.last_message_uuid", `ALTER TABLE executors_running ADD COLUMN last_message_uuid TEXT DEFAULT ''`)
 	r.migrate.Apply("executors_running.metadata", `ALTER TABLE executors_running ADD COLUMN metadata TEXT DEFAULT '{}'`)
@@ -263,6 +269,7 @@ func (r *Repository) runMigrations() error {
 	// therefore not added or dropped here.
 	r.migrate.Apply("tasks.origin", `ALTER TABLE tasks ADD COLUMN origin TEXT DEFAULT 'manual'`)
 	r.migrate.Apply("tasks.project_id", `ALTER TABLE tasks ADD COLUMN project_id TEXT DEFAULT ''`)
+	r.migrate.Apply("idx_tasks_project_id", `CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id)`)
 	r.migrate.Apply("tasks.labels", `ALTER TABLE tasks ADD COLUMN labels TEXT DEFAULT '[]'`)
 	r.migrate.Apply("tasks.identifier", `ALTER TABLE tasks ADD COLUMN identifier TEXT`)
 	// Office task-handoffs phase 6 - tag tasks archived as part of a cascade so
@@ -337,6 +344,8 @@ func (r *Repository) runMigrations() error {
 	// frontend snapshots the prior value before the advance to position the
 	// "New" divider (see models.TaskSession.LastReadMessageID).
 	r.migrate.Apply("task_sessions.last_read_message_id", `ALTER TABLE task_sessions ADD COLUMN last_read_message_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_session_turns.execution_profile_id", `ALTER TABLE task_session_turns ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_session_turns.route_generation", `ALTER TABLE task_session_turns ADD COLUMN route_generation BIGINT NOT NULL DEFAULT 0`)
 
 	// Bounded task-level status projection. Keep this on the replay path as well
 	// as the fresh schema path so an existing installation gets the table
@@ -365,6 +374,60 @@ func (r *Repository) runMigrations() error {
 	// backfill belongs in the migration phase.
 	r.migrateSubagentContextBackfill()
 
+	// Durable per-session prompt ordinals. prompt_seq is allocated from a
+	// per-session sequence counter inside the create write boundary, so an
+	// ordinal survives message deletion and clock corrections. Previously the
+	// ordinal was derived from the session's remaining user rows (a correlated
+	// count), which renumbered prompts after a delete. SQLite forbids
+	// non-constant column defaults, so the column is added with DEFAULT 0 and
+	// existing user rows are backfilled with the previously derived ordinal
+	// (count of user rows ordered before them by the normalized microsecond
+	// key, ties by id); the counter is seeded to each session's backfilled
+	// maximum. The backfill predicate (prompt_seq = 0) and ON CONFLICT keep
+	// every statement idempotent across replays.
+	r.migrate.Apply("task_session_messages.prompt_seq", `ALTER TABLE task_session_messages ADD COLUMN prompt_seq INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("task_session_prompt_seq.table", `
+		CREATE TABLE IF NOT EXISTS task_session_prompt_seq (
+			task_session_id TEXT PRIMARY KEY,
+			last_seq INTEGER NOT NULL
+		)`)
+	if err := r.backfillPromptSeq(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// backfillPromptSeq assigns existing user rows their previously derived
+// ordinal (the correlated count over the session's user rows using the same
+// normalized-microsecond predicate the create boundary used) and seeds each
+// session's sequence counter at its backfilled maximum. Idempotent: user rows
+// already carrying a nonzero prompt_seq are untouched, and the counter seed
+// ignores existing rows.
+func (r *Repository) backfillPromptSeq() error {
+	nmU := dialect.NormalizedMicrosecond(r.db.DriverName(), "u.created_at")
+	nmM := dialect.NormalizedMicrosecond(r.db.DriverName(), "task_session_messages.created_at")
+	update := fmt.Sprintf(`
+		UPDATE task_session_messages
+		SET prompt_seq = (
+			SELECT COUNT(*) FROM task_session_messages u
+			WHERE u.task_session_id = task_session_messages.task_session_id
+			  AND u.author_type = 'user'
+			  AND (%s < %s OR (%s = %s AND u.id <= task_session_messages.id))
+		)
+		WHERE author_type = 'user' AND prompt_seq = 0`, nmU, nmM, nmU, nmM)
+	if _, err := r.db.Exec(update); err != nil {
+		return fmt.Errorf("backfill prompt_seq: %w", err)
+	}
+	seed := `
+		INSERT INTO task_session_prompt_seq (task_session_id, last_seq)
+		SELECT task_session_id, MAX(prompt_seq) FROM task_session_messages
+		WHERE author_type = 'user' AND prompt_seq > 0
+		GROUP BY task_session_id
+		ON CONFLICT(task_session_id) DO NOTHING`
+	if _, err := r.db.Exec(seed); err != nil {
+		return fmt.Errorf("seed prompt sequence counters: %w", err)
+	}
 	return nil
 }
 
@@ -854,6 +917,10 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			task_id TEXT NOT NULL,
 			agent_profile_id TEXT,
 			execution_profile_id TEXT NOT NULL DEFAULT '',
+			route_generation INTEGER NOT NULL DEFAULT 0,
+			route_state TEXT NOT NULL DEFAULT '',
+			route_reason TEXT NOT NULL DEFAULT '',
+			downstream_acp_session_id TEXT NOT NULL DEFAULT '',
 			executor_id TEXT DEFAULT '',
 			executor_profile_id TEXT DEFAULT '',
 			environment_id TEXT DEFAULT '',
@@ -882,6 +949,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 		)`,
 		`INSERT INTO task_sessions_new SELECT
 			id, task_id, agent_profile_id, execution_profile_id,
+			route_generation, route_state, route_reason, downstream_acp_session_id,
 			executor_id, executor_profile_id, environment_id, repository_id, base_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
@@ -1087,6 +1155,10 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 			container_id TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT,
 			execution_profile_id TEXT NOT NULL DEFAULT '',
+			route_generation INTEGER NOT NULL DEFAULT 0,
+			route_state TEXT NOT NULL DEFAULT '',
+			route_reason TEXT NOT NULL DEFAULT '',
+			downstream_acp_session_id TEXT NOT NULL DEFAULT '',
 			executor_id TEXT DEFAULT '',
 			executor_profile_id TEXT DEFAULT '',
 			environment_id TEXT DEFAULT '',
@@ -1111,6 +1183,7 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 		)`,
 		`INSERT INTO task_sessions_new SELECT
 			id, task_id, agent_execution_id, container_id, agent_profile_id, execution_profile_id,
+			route_generation, route_state, route_reason, downstream_acp_session_id,
 			executor_id, executor_profile_id, environment_id, repository_id, base_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,

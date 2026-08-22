@@ -85,6 +85,7 @@ func TestActionConstants_MatchWebSocketActions(t *testing.T) {
 	assert.Equal(t, "mcp.update_workflow", ws.ActionMCPUpdateWorkflow)
 	assert.Equal(t, "mcp.delete_workflow", ws.ActionMCPDeleteWorkflow)
 	assert.Equal(t, "mcp.import_workflow", ws.ActionMCPImportWorkflow)
+	assert.Equal(t, "mcp.export_workflow", ws.ActionMCPExportWorkflow)
 	assert.Equal(t, "mcp.create_workflow_step", ws.ActionMCPCreateWorkflowStep)
 	assert.Equal(t, "mcp.update_workflow_step", ws.ActionMCPUpdateWorkflowStep)
 	assert.Equal(t, "mcp.delete_workflow_step", ws.ActionMCPDeleteWorkflowStep)

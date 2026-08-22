@@ -143,6 +143,7 @@ func TestWriteBundleToFS_AllFieldsReachDisk(t *testing.T) {
 	assertEqual(t, "agent name", got.Name, "ada")
 	assertEqual(t, "agent role", string(got.Role), "cto")
 	assertEqual(t, "agent icon", got.Icon, "🤖")
+	assertEqual(t, "agent reports_to", got.ReportsTo, "grace")
 	assertEqual(t, "agent budget", got.BudgetMonthlyCents, 4200)
 	assertEqual(t, "agent max sessions", got.MaxConcurrentSessions, 3)
 	assertEqual(t, "agent desired skills", got.DesiredSkills, `["go","sql"]`)
