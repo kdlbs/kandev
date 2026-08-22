@@ -111,6 +111,7 @@ function buildTaskTopBarProps(params: {
     taskId: taskProps.taskId,
     activeSessionId: params.effectiveSessionId,
     taskTitle: taskProps.taskTitle,
+    repositoryLabel: taskProps.repositoryLabel,
     showDebugOverlay,
     onToggleDebugOverlay,
     workflowSteps,

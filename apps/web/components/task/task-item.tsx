@@ -96,6 +96,13 @@ type TaskItemProps = {
   /** Toggles subtask visibility when the chevron is clicked. */
   onToggleSubtasks?: () => void;
   repositories?: string[];
+  /** Slug (or name) of the task's repository, for the single-repository case. */
+  repositoryPath?: string;
+  /**
+   * Whether this row should name its repository. False when the list is grouped
+   * by repository, where the section header already says it.
+   */
+  showRepository?: boolean;
   prInfo?: { number: number; state: string; aggregateState?: string };
   /** Number of prompts currently en-queued for this task (mail badge). */
   queuedCount?: number;
@@ -105,6 +112,23 @@ type TaskItemProps = {
   isPinned?: boolean;
   agentErrorMessage?: string | null;
 };
+
+/**
+ * The repository text a row shows in its stats line, or `undefined` for none.
+ *
+ * A multi-repository task always names its repositories: its only repository
+ * group is the unnamed "Multiple repositories" bucket, so the header never
+ * covers for the row. A single-repository task defers to the header when the
+ * list is grouped by repository.
+ */
+function resolveRowRepositoryLabel(
+  repositories: string[] | undefined,
+  repositoryPath: string | undefined,
+  showRepository: boolean,
+): string | undefined {
+  if (repositories && repositories.length > 1) return repositories.join(" · ");
+  return showRepository ? repositoryPath : undefined;
+}
 
 // Delegates to the shared classifier in task-switcher so the sidebar bucket
 // and the per-task running spinner always agree. A task whose workflow state
@@ -342,6 +366,8 @@ function TaskItemContent({
   isArchived,
   isPinned,
   repositories,
+  repositoryPath,
+  showRepository,
   updatedAt,
   lastActivityAt,
   showActivityTime,
@@ -363,6 +389,8 @@ function TaskItemContent({
   isArchived?: boolean;
   isPinned?: boolean;
   repositories?: string[];
+  repositoryPath?: string;
+  showRepository: boolean;
   updatedAt?: string;
   lastActivityAt?: string;
   showActivityTime?: boolean;
@@ -402,11 +430,6 @@ function TaskItemContent({
           </span>
         )}
       </span>
-      {repositories && repositories.length > 1 && (
-        <span className="truncate text-[11px] text-muted-foreground/50">
-          {repositories.join(" · ")}
-        </span>
-      )}
       {taskId && (
         <TaskRowMetadata
           taskId={taskId}
@@ -416,6 +439,7 @@ function TaskItemContent({
       )}
       <TaskItemStatsRow
         updatedAt={showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt}
+        repositoryLabel={resolveRowRepositoryLabel(repositories, repositoryPath, showRepository)}
         prInfo={prInfo}
         primarySessionId={primarySessionId}
         queuedCount={queuedCount}
@@ -462,6 +486,8 @@ export const TaskItem = memo(function TaskItem({
   subtasksCollapsed,
   onToggleSubtasks,
   repositories,
+  repositoryPath,
+  showRepository = true,
   prInfo,
   queuedCount,
   wipQueue,
@@ -511,6 +537,8 @@ export const TaskItem = memo(function TaskItem({
         isArchived={isArchived}
         isPinned={isPinned}
         repositories={repositories}
+        repositoryPath={repositoryPath}
+        showRepository={showRepository}
         updatedAt={updatedAt}
         lastActivityAt={lastActivityAt}
         showActivityTime={showActivityTime}

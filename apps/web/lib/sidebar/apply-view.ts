@@ -23,6 +23,13 @@ export type SidebarGroup = {
 export type GroupedSidebarList = {
   groups: SidebarGroup[];
   subTasksByParentId: Map<string, TaskSwitcherItem[]>;
+  /**
+   * Which dimension produced `groups`. Rows read it to decide whether their own
+   * repository label is redundant: grouped by repository, the section header
+   * already names it. Optional so a hand-built list (tests, fixtures) keeps
+   * meaning "unknown grouping" and falls back to showing the label.
+   */
+  groupKey?: GroupKey;
 };
 
 export type SidebarTaskPrefs = {
@@ -336,6 +343,7 @@ export function applyGroup(
     return {
       groups: [{ key: "__all__", label: t(ALL_GROUP_LABEL_KEY), tasks: rootTasks }],
       subTasksByParentId,
+      groupKey,
     };
   }
 
@@ -360,7 +368,7 @@ export function applyGroup(
     sortRepoGroups(groups);
   }
   if (groupKey === "state") sortStateGroups(groups);
-  return { groups, subTasksByParentId };
+  return { groups, subTasksByParentId, groupKey };
 }
 
 function mergeSingleRepoUnassigned(groups: SidebarGroup[]): void {
