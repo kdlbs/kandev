@@ -167,6 +167,10 @@ State the implementation outcome in two or three sentences.
 
 Name prior work orders or write `None`.
 
+## Risks
+
+- Name concrete implementation or compatibility risks, or write `None`.
+
 ## Parallelism
 
 `sequential`

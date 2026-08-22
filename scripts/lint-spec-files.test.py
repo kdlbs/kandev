@@ -69,10 +69,21 @@ requirements:
 # Dependencies System Design
 """
 
+    def valid_system_index(self) -> str:
+        return """---
+status: draft
+system: task-system
+specification_version: 1
+migration: in_progress
+---
+# Task System
+"""
+
     def rules(self, violations) -> list[str]:
         return [violation.rule for violation in violations]
 
     def test_accepts_a_valid_requirement_and_system_design(self) -> None:
+        self.write("docs/specs/task-system/README.md", self.valid_system_index())
         self.write("docs/specs/task-system/requirements/dependencies.md", self.valid_requirement())
         self.write("docs/specs/task-system/system-design/dependencies.md", self.valid_design())
 
@@ -120,6 +131,64 @@ requirements:
 
         self.assertEqual(self.rules(violations), ["stale-size-exception"])
         self.assertIn("Lower the frozen ceiling to 11", violations[0].message)
+
+    def test_reports_a_redundant_legacy_size_exception(self) -> None:
+        self.write("docs/specs/legacy/spec.md", "x" * 8)
+        self.config["limits"]["legacy"] = 10
+        self.config["legacy_size_exceptions"] = {"docs/specs/legacy/spec.md": 8}
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertEqual(self.rules(violations), ["stale-size-exception"])
+        self.assertIn("at or below the default limit", violations[0].message)
+
+    def test_rejects_a_raised_legacy_size_ceiling(self) -> None:
+        path = self.write("docs/specs/legacy/spec.md", "x" * 13)
+        previous_config = {
+            **self.config,
+            "legacy_size_exceptions": {"docs/specs/legacy/spec.md": 12},
+        }
+        current_config = {
+            **self.config,
+            "legacy_size_exceptions": {"docs/specs/legacy/spec.md": 13},
+        }
+
+        violations = load_linter().check_legacy_size_ratchet(
+            self.root, current_config, previous_config
+        )
+
+        self.assertEqual(self.rules(violations), ["legacy-size-ratchet"])
+        self.assertEqual(violations[0].path, path)
+
+    def test_rejects_a_system_artifact_without_a_system_index(self) -> None:
+        self.write("docs/specs/task-system/requirements/dependencies.md", self.valid_requirement())
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertIn("missing-system-index", self.rules(violations))
+
+    def test_requires_system_design_requirements_to_be_a_list(self) -> None:
+        design = self.valid_design().replace(
+            "requirements:\n  - REQ-TASK-DEP-001", "requirements: REQ-TASK-DEP-001"
+        )
+        self.write("docs/specs/task-system/system-design/dependencies.md", design)
+
+        violations = load_linter().lint_specs(self.root, self.config)
+
+        self.assertIn("system-design-requirements", self.rules(violations))
+
+    def test_rejects_unknown_size_limit_keys(self) -> None:
+        self.config["limits"]["legacyy"] = 100
+
+        with self.assertRaisesRegex(ValueError, "unknown limit keys: legacyy"):
+            load_linter().lint_specs(self.root, self.config)
+
+    def test_strips_backticks_from_scalar_frontmatter_values(self) -> None:
+        metadata, _, error = load_linter().parse_frontmatter("---\nstatus: `draft`\n---\n")
+
+        self.assertIsNone(error)
+        self.assertIsNotNone(metadata)
+        self.assertEqual(metadata["status"], "draft")
 
     def test_rejects_duplicate_requirement_and_acceptance_ids(self) -> None:
         content = self.valid_requirement()

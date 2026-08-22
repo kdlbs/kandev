@@ -15,7 +15,7 @@ Explain the technical responsibility and its boundaries.
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-<SYSTEM>-<CAPABILITY>-001` | [Section](#section) |
+| `REQ-<SYSTEM>-<CAPABILITY>-001` | [Purpose and boundaries](#purpose-and-boundaries) |
 
 ## Components and responsibilities
 

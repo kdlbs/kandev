@@ -62,7 +62,8 @@ Migrate one system at a time. Use this sequence:
 4. Extract technical contracts and design into system-design documents.
 5. Add stable IDs and cross-references.
 6. Name the new documents as authoritative in the system index.
-7. Replace the legacy document with a short link or archive it.
+7. Add a short link to the system `README.md`, or archive the legacy document
+   outside `docs/specs/<system>/`.
 8. Set `migration: complete` and remove obsolete size exceptions.
 
 Do not keep two editable sources of truth during migration.

@@ -1,9 +1,10 @@
 # Legacy Feature Specification Catalog
 
 This catalog locates specifications that predate the system-oriented structure.
-Do not add new standalone feature specifications here. New specifications follow
-[`docs/specs/README.md`](README.md) and live under an owning system in
-`requirements/` or `system-design/`.
+Do not add new standalone feature specifications here. New system specifications
+follow [`docs/specs/README.md`](README.md) and live under an owning system in
+`requirements/` or `system-design/`. Product-wide specifications live under
+`docs/specs/product/`.
 
 Each legacy specification remains authoritative until its system `README.md`
 names a replacement.

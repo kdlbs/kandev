@@ -125,8 +125,10 @@ high-impact security decision, stop and request a strong-model design pass. Use
 
 ## Phase 6: Open the PR
 
-After all work-order checks pass, use `/commit`, `/push`, and `/pr`. Do not add
-automatic local simplify, QA, broad review, security review, or `/verify` work.
+After all work-order checks pass, request explicit user authorization before
+running `/commit`, `/push`, or `/pr`. Run only the operations the user authorizes.
+Do not add automatic local simplify, QA, broad review, security review, or
+`/verify` work.
 
 The configured PR reviewers are the semantic-review gate. Use `/pr-fixup` only
 for a CI error or an actionable reviewer finding. Run the affected work-order

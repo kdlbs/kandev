@@ -1,5 +1,5 @@
 ---
-status: active
+status: draft
 system: <system-slug>
 specification_version: 1
 migration: <in_progress|complete>

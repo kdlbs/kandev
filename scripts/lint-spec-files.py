@@ -4,6 +4,7 @@
 import argparse
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +36,7 @@ def load_config(root: Path) -> dict:
 def lint_specs(root: Path, config: dict | None = None) -> list[Violation]:
     config = config or load_config(root)
     validate_config(config)
+    previous_config = load_previous_config(root)
     specs_root = root / "docs/specs"
     if not specs_root.exists():
         return []
@@ -61,6 +63,8 @@ def lint_specs(root: Path, config: dict | None = None) -> list[Violation]:
     requirement_definitions: dict[str, list[tuple[Path, int]]] = {}
     acceptance_definitions: dict[str, list[tuple[Path, int]]] = {}
     design_references: list[tuple[str, Path, int]] = []
+    systems_with_new_artifacts: set[str] = set()
+    system_indexes: set[str] = set()
 
     for path in paths:
         relative = path.relative_to(root)
@@ -77,6 +81,8 @@ def lint_specs(root: Path, config: dict | None = None) -> list[Violation]:
                 )
             )
         if kind == "system-index" and path.name == "README.md":
+            if system is not None:
+                system_indexes.add(system)
             text = path.read_text(encoding="utf-8")
             metadata, metadata_line, metadata_error = parse_frontmatter(text)
             if metadata_error:
@@ -87,6 +93,8 @@ def lint_specs(root: Path, config: dict | None = None) -> list[Violation]:
             continue
         if kind not in {"requirement", "system-design"}:
             continue
+        if system is not None:
+            systems_with_new_artifacts.add(system)
 
         text = path.read_text(encoding="utf-8")
         metadata, metadata_line, metadata_error = parse_frontmatter(text)
@@ -147,10 +155,19 @@ def lint_specs(root: Path, config: dict | None = None) -> list[Violation]:
         else:
             violations.extend(check_design_metadata(path, metadata))
             references = metadata.get("requirements", [])
-            if isinstance(references, str):
-                references = [references] if references else []
-            for reference in references:
-                design_references.append((str(reference), path, 1))
+            if isinstance(references, list):
+                for reference in references:
+                    design_references.append((str(reference), path, 1))
+
+    for system in sorted(systems_with_new_artifacts - system_indexes):
+        violations.append(
+            Violation(
+                "missing-system-index",
+                specs_root / system,
+                1,
+                "system requirements and designs must have a system README.md",
+            )
+        )
 
     violations.extend(check_duplicate_ids("requirement", requirement_definitions))
     violations.extend(check_duplicate_ids("acceptance", acceptance_definitions))
@@ -167,6 +184,7 @@ def lint_specs(root: Path, config: dict | None = None) -> list[Violation]:
             )
 
     violations.extend(check_size_exception_catalog(root, config))
+    violations.extend(check_legacy_size_ratchet(root, config, previous_config))
     return sorted(violations, key=lambda item: (item.path.as_posix(), item.line, item.rule))
 
 
@@ -186,8 +204,57 @@ def validate_config(config: dict) -> None:
     missing = sorted(required_limits - set(limits))
     if missing:
         raise ValueError(f"specification lint configuration is missing limits: {', '.join(missing)}")
+    unknown = sorted(set(limits) - required_limits)
+    if unknown:
+        raise ValueError(f"specification lint configuration has unknown limit keys: {', '.join(unknown)}")
     if any(not isinstance(limits[key], int) or limits[key] <= 0 for key in required_limits):
         raise ValueError("specification size limits must be positive integers")
+
+
+def load_previous_config(root: Path) -> dict | None:
+    """Load the nearest prior config so legacy ceilings cannot increase silently."""
+    try:
+        parents_output = subprocess.run(
+            ["git", "rev-list", "--parents", "-n", "1", "HEAD"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.split()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+    parents = parents_output[1:]
+    candidates = parents[:1]
+    if len(parents) > 1:
+        try:
+            second_parent_output = subprocess.run(
+                ["git", "rev-list", "--parents", "-n", "1", parents[1]],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.split()
+        except (OSError, subprocess.CalledProcessError):
+            second_parent_output = []
+        if len(second_parent_output) > 1:
+            candidates.append(second_parent_output[1])
+
+    for revision in candidates:
+        try:
+            config_text = subprocess.run(
+                ["git", "show", f"{revision}:docs/specs/spec-lint.json"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+            previous_config = json.loads(config_text)
+        except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+            continue
+        if isinstance(previous_config, dict):
+            return previous_config
+    return None
 
 
 def classify_path(relative: Path) -> tuple[str, str | None]:
@@ -262,13 +329,49 @@ def check_size_exception_catalog(root: Path, config: dict) -> list[Violation]:
             )
             continue
         size = path.stat().st_size
-        if size < ceiling or ceiling <= default_limit:
+        if size < ceiling:
             violations.append(
                 Violation(
                     "stale-size-exception",
                     path,
                     1,
                     f"file is {size} bytes. Lower the frozen ceiling to {size} or remove the exception",
+                )
+            )
+        elif ceiling <= default_limit:
+            violations.append(
+                Violation(
+                    "stale-size-exception",
+                    path,
+                    1,
+                    f"frozen ceiling {ceiling} is at or below the default limit {default_limit}; remove the exception",
+                )
+            )
+    return violations
+
+
+def check_legacy_size_ratchet(
+    root: Path, config: dict, previous_config: dict | None
+) -> list[Violation]:
+    if previous_config is None:
+        return []
+    previous_exceptions = previous_config.get("legacy_size_exceptions", {})
+    current_exceptions = config.get("legacy_size_exceptions", {})
+    if not isinstance(previous_exceptions, dict) or not isinstance(current_exceptions, dict):
+        return []
+
+    violations = []
+    for relative_text, previous_ceiling in previous_exceptions.items():
+        current_ceiling = current_exceptions.get(relative_text)
+        if not isinstance(previous_ceiling, int) or not isinstance(current_ceiling, int):
+            continue
+        if current_ceiling > previous_ceiling:
+            violations.append(
+                Violation(
+                    "legacy-size-ratchet",
+                    root / relative_text,
+                    1,
+                    f"frozen ceiling increased from {previous_ceiling} to {current_ceiling}; lower it or migrate the file",
                 )
             )
     return violations
@@ -304,7 +407,7 @@ def parse_frontmatter(text: str) -> tuple[dict | None, int, str | None]:
             metadata[key] = []
             current_list = None
         elif value:
-            metadata[key] = value.strip('"\'')
+            metadata[key] = value.strip('"\'`')
             current_list = None
         else:
             metadata[key] = []
@@ -379,13 +482,13 @@ def check_design_metadata(path: Path, metadata: dict) -> list[Violation]:
                 f"system-design status must be one of {sorted(VALID_DESIGN_STATUSES)}, found `{status or ''}`",
             )
         )
-    if "requirements" not in metadata:
+    if not isinstance(metadata.get("requirements"), list):
         violations.append(
             Violation(
                 "system-design-requirements",
                 path,
                 1,
-                "system design must declare a `requirements` list, including an explicit empty list",
+                "system design must declare `requirements` as a YAML list, including an explicit empty list",
             )
         )
     return violations

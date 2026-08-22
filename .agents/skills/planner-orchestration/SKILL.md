@@ -28,7 +28,7 @@ conversation so the active model, transcript, and costs are visible in one place
    implementation request. The files may remain `draft`/`pending`; do not wait
    for a separate approval marker.
 3. **Execution checkpoint.** After that explicit request, read the
-   task file, mark it `in_progress`, implement with `/tdd`, run its exact
+   work order, mark it `in_progress`, implement with `/tdd`, run its exact
    targeted checks, and mark it `done`. Work sequentially through the plan by
    default. The user, not the harness, chooses the active implementation model.
 4. **Escalation checkpoint.** Stop and ask the user to switch back to a stronger
@@ -42,7 +42,7 @@ default implementation or test model. The active agent must never claim a model
 change occurred based on self-identification; use runtime model-usage metadata
 when such confirmation is needed.
 
-## Task-File Workflow
+## Work-Order Workflow
 
 Feature work still follows `/spec`, `/plan`, and `/spec-driven-development`:
 
@@ -51,8 +51,8 @@ Feature work still follows `/spec`, `/plan`, and `/spec-driven-development`:
 - Store `plan.md` and independently actionable sibling work orders in
   `docs/plans/<initiative>/`.
 - Use `pending`, `in_progress`, and `done` work-order status as the durable
-  execution record. The primary agent updates both the current task and the
-  plan's status after each completed task.
+  execution record. The primary agent updates both the current work order and
+  the plan's status after each completed work order.
 - Keep work orders small enough that the same conversation can resume from their
   acceptance criteria, owned files, and exact verification command after a user
   switches model.
@@ -93,7 +93,7 @@ comments, or spawns children.
 
 ## Task-Driven Validation And PR Review
 
-Each task file owns its TDD requirement and exact unit, integration, or E2E
+Each work order owns its TDD requirement and exact unit, integration, or E2E
 commands. Its completed status and recorded command results are the pre-PR
 evidence; do not add a second generic validation pass here.
 
