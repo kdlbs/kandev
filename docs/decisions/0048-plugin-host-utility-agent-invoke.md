@@ -33,8 +33,9 @@ configuration and the existing host-utility tier.
    `format: agent-profile`. Settings > Plugins renders enabled, global,
    non-CLI profiles and stores the selected stable ID. A missing, deleted,
    disabled, CLI-passthrough, or workspace-scoped profile is a
-   `FailedPrecondition`. When an `agent_profile` field is declared, it is the
-   direct execution selection and takes precedence over `utility_agent`.
+   `FailedPrecondition`. A non-empty declared `agent_profile` is the direct
+   execution selection and takes precedence over `utility_agent`; when it is
+   unset, the legacy selection remains available.
    Existing plugins may continue declaring `utility_agent` with
    `format: utility-agent`; that legacy selector resolves the utility agent's
    effective profile as before.
@@ -52,8 +53,8 @@ configuration and the existing host-utility tier.
    or `max_tokens` is an added proto field, no SDK signature change).
 
 4. **Reuse the host-utility tier (ADR 0002).** The kandev-side handler:
-   gate `agent_invoke` → read the calling plugin's direct profile when declared
-   (otherwise resolve the legacy utility agent) → validate direct-profile
+   gate `agent_invoke` → use a non-empty declared direct profile, otherwise
+   resolve the legacy utility agent → validate direct-profile
    eligibility → call the narrow profile-aware utility runner and return the
    text. `utilityRunner` is a thin
    `pluginsHostUtilityAdapter` over `hostutility.Manager` wired in `backendapp`,
@@ -61,10 +62,11 @@ configuration and the existing host-utility tier.
    cycle-avoidance as the Slack assistant's adapter and ADR 0043's data
    sources). No task, session, workspace, or worktree is involved.
 
-5. **Typed "not configured" failure.** An absent direct selection, or a
-   deleted/ineligible direct profile, returns gRPC `FailedPrecondition`
-   (`no agent profile configured` / `configured agent profile "<id>" not
-   found`). Legacy utility-agent failures retain their existing messages.
+5. **Typed configuration failures.** An absent selection with no usable
+   legacy selector, or a deleted/ineligible non-empty direct profile, returns
+   gRPC `FailedPrecondition` (`no agent profile configured` / `configured
+   agent profile "<id>" not found`). Legacy utility-agent failures retain their
+   existing messages.
    Capability denial is evaluated before either lookup; runner failures remain
    operational errors rather than configuration failures.
 

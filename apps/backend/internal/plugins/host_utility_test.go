@@ -124,6 +124,25 @@ func TestPluginHost_InvokeUtilityAgent_FallsBackToLegacyUtilityAgentWhenDirectPr
 	}
 }
 
+func TestPluginHost_InvokeUtilityAgent_IgnoresUndeclaredAgentProfileConfig(t *testing.T) {
+	d := configuredUtilityHost(t)
+	d.host.configs = &fakeConfigReader{configs: map[string]any{
+		agentProfileConfigKey: "stale-profile",
+		utilityAgentConfigKey: "utility-agent-42",
+	}}
+
+	got, err := d.host.InvokeUtilityAgent(context.Background(), "summarize yesterday")
+	if err != nil || got != "the summary" {
+		t.Fatalf("InvokeUtilityAgent() = (%q, %v)", got, err)
+	}
+	if d.utilAgents.gotSelector != "utility-agent-42" {
+		t.Fatalf("looked up utility agent %q", d.utilAgents.gotSelector)
+	}
+	if d.profiles.profileCalls != 0 {
+		t.Fatalf("looked up direct profiles %d times", d.profiles.profileCalls)
+	}
+}
+
 func TestPluginHost_InvokeUtilityAgent_RejectsMissingOrIneligibleConfiguredAgentProfile(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

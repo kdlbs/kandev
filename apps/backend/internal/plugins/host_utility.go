@@ -83,9 +83,11 @@ func (h *pluginHost) InvokeUtilityAgent(ctx context.Context, prompt string) (str
 	if err != nil {
 		return "", fmt.Errorf("plugins: read plugin config: %w", err)
 	}
-	profileID, _ := config[agentProfileConfigKey].(string)
-	if profileID != "" {
-		return h.invokeConfiguredAgentProfile(ctx, profileID, profiles, runner, prompt)
+	if hasAgentProfileConfig(h.configSchema) {
+		profileID, _ := config[agentProfileConfigKey].(string)
+		if profileID != "" {
+			return h.invokeConfiguredAgentProfile(ctx, profileID, profiles, runner, prompt)
+		}
 	}
 	agentID, _ := config[utilityAgentConfigKey].(string)
 	if agentID != "" {
