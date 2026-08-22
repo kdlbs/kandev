@@ -96,4 +96,11 @@ hooks/use-processed-messages-fallback.test.ts
 hooks/use-lazy-load-sentinel.test.ts
 components/task/chat/message-list-native.test.tsx` passed (4 files, 84
   tests).
+- Added regression coverage for a one-for-one synthetic-to-stored prompt
+  replacement, where the rendered item count stays equal but the oldest real
+  key changes. The native scroll anchor now compensates that layout update.
+- Reused the exported synthetic row ID instead of duplicating the sentinel
+  value in the native scroll owner.
+- The final focused pagination unit suite passed (6 files, 162 tests),
+  including `message-list-shared.test.tsx` and `transcript-auto-scroll.test.ts`.
 - The explicit load-older recovery path remains unchanged.

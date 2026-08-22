@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/ui/task-prompt-transcript-visibility.md
 created: 2026-08-22
-status: building
+status: implemented
 ---
 
 # Implementation plan: Restore complete transcript history
@@ -137,6 +137,24 @@ components/task/chat/message-list-native.test.tsx` passed (4 files, 84
 tests/chat/message-pagination.spec.ts` passed (1 test).
 - Mobile E2E: `cd apps/web && pnpm e2e:run --project mobile-chrome
 tests/chat/mobile-message-pagination.spec.ts` passed (1 test).
+- PR fixup unit suite: `cd apps && pnpm --filter @kandev/web test --
+hooks/use-processed-messages.test.ts hooks/use-processed-messages-fallback.test.ts
+hooks/use-lazy-load-sentinel.test.ts components/task/chat/message-list-native.test.tsx
+components/task/chat/message-list-shared.test.tsx
+components/task/chat/transcript-auto-scroll.test.ts` passed (6 files, 162
+  tests).
+- PR fixup: synthetic task-description rows now stay out of prompt navigation,
+  equal-count synthetic-to-stored replacements preserve the scroll anchor, the
+  synthetic row construction stays referentially stable while streaming, and
+  the metadata overflow locators distinguish the stored row from its fallback.
+- PR fixup desktop last-prompt suite: `cd apps/web && pnpm e2e:run --project
+chromium tests/chat/last-prompt-scroll.spec.ts` passed (11 tests).
+- PR fixup desktop metadata suite: `cd apps/web && pnpm e2e:run --project
+chromium tests/chat/message-metadata-overflow.spec.ts` passed (1 test).
+- PR fixup mobile metadata suite: `cd apps/web && pnpm e2e:run --project
+mobile-chrome tests/chat/mobile-message-metadata-overflow.spec.ts` passed (1
+  test).
+- PR fixup web typecheck and lint passed with zero errors and warnings.
 
 ## Implementation waves
 

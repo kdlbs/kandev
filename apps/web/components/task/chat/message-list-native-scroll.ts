@@ -4,7 +4,7 @@ import { useAppStoreApi } from "@/components/state-provider";
 import { getStoredAutoScrollTop } from "@/lib/local-storage";
 import { useLazyLoadSentinel as useSharedLazyLoadSentinel } from "@/hooks/use-lazy-load-sentinel";
 import type { Message } from "@/lib/types/http";
-import type { RenderItem } from "@/hooks/use-processed-messages";
+import { TASK_DESCRIPTION_SYNTHETIC_ID, type RenderItem } from "@/hooks/use-processed-messages";
 import { getItemKey, shouldAutoScrollToBottom } from "./message-list-shared";
 import {
   isPrependUpdate,
@@ -76,7 +76,7 @@ function useScrollPositionOnPrepend(
 function getOldestNonSyntheticItemKey(items: RenderItem[]): string | null {
   const oldestRealItem = items.find((item) => {
     if (item.type === "prepare_progress" || item.type === "agent_error_notice") return false;
-    return item.type !== "message" || item.message.id !== "task-description";
+    return item.type !== "message" || item.message.id !== TASK_DESCRIPTION_SYNTHETIC_ID;
   });
   return oldestRealItem ? getItemKey(oldestRealItem) : null;
 }

@@ -7,8 +7,11 @@
 /**
  * Distinguishes a genuine prepend (older messages loaded above the current
  * view, e.g. via lazy-loading) from a plain append (a new message arriving
- * at the end) when the rendered item count grows. `useScrollPositionOnPrepend`
- * only needs to compensate scrollTop for the former — compensating an append
+ * at the end) when the rendered item count grows. A one-for-one replacement
+ * of the synthetic task-description row with the stored user prompt is also
+ * a prepend layout update even though its item count stays equal.
+ * `useScrollPositionOnPrepend` only needs to compensate scrollTop for the
+ * former — compensating an append
  * too would drag a scrolled-away user's view down by the height of every new
  * message, fighting the auto-scroll toggle's "stay put while disabled"
  * contract (and, independently of that toggle, jittering anyone who has
@@ -20,7 +23,7 @@ export function isPrependUpdate(params: {
   prevFirstKey: string | null;
   nextFirstKey: string | null;
 }): boolean {
-  if (params.nextItemCount <= params.prevItemCount) return false;
+  if (params.nextItemCount < params.prevItemCount) return false;
   if (params.prevFirstKey === null) return false;
   if (params.nextFirstKey === null) return false;
   return params.nextFirstKey !== params.prevFirstKey;

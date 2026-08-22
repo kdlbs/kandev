@@ -215,6 +215,29 @@ describe("useNativeScrollManagement transcript pagination", () => {
 
     expect(metrics.scrollTop).toBe(140);
   });
+
+  it("anchors a stored prompt replacing the synthetic task description", () => {
+    const metrics = { scrollHeight: 100, scrollTop: 40, clientHeight: 50 };
+    const taskDescription = transcriptMessage("task-description");
+    const newest = transcriptMessage("newest");
+    const { rerender } = render(
+      <NativeScrollManagementHarness items={[taskDescription, newest]} metrics={metrics} />,
+    );
+
+    act(() => {
+      metrics.scrollTop = 40;
+      screen.getByTestId("native-scroll-management-container").dispatchEvent(new Event("scroll"));
+    });
+    metrics.scrollHeight = 200;
+    rerender(
+      <NativeScrollManagementHarness
+        items={[transcriptMessage("stored-prompt"), newest]}
+        metrics={metrics}
+      />,
+    );
+
+    expect(metrics.scrollTop).toBe(140);
+  });
 });
 
 // eslint-disable-next-line max-lines-per-function -- this suite keeps the related scroll invariants together.

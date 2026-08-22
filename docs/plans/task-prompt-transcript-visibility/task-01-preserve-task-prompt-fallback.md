@@ -88,4 +88,8 @@ hooks/use-processed-messages-fallback.test.ts` passed (3 tests), and the
   existing processed-message suite remained green.
 - Added coverage for agent-only history, stored user history, and an empty task
   description.
+- Exported the synthetic row identity so transcript navigation and scroll
+  anchoring can treat it as display-only, and split fallback visibility from
+  message construction so streaming updates reuse the synthetic message
+  object when its inputs are unchanged.
 - Final web typecheck passed with `cd apps/web && pnpm run typecheck`.

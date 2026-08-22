@@ -1,8 +1,13 @@
+/* eslint-disable max-lines -- shared renderer and transcript-navigation invariants use one mocked harness. */
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildGroupedRenderItems, type RenderItem } from "@/hooks/use-processed-messages";
+import {
+  buildGroupedRenderItems,
+  TASK_DESCRIPTION_SYNTHETIC_ID,
+  type RenderItem,
+} from "@/hooks/use-processed-messages";
 import type { Message } from "@/lib/types/http";
 
 const rendererSpy = vi.fn();
@@ -460,7 +465,12 @@ describe("getLastUserMessageId", () => {
   it("returns null when there are no user messages", () => {
     const message = (id: string, author_type: "user" | "agent") => ({ id, author_type }) as Message;
 
-    expect(getLastUserMessageId([message("reply", "agent")])).toBeNull();
+    expect(
+      getLastUserMessageId([
+        message(TASK_DESCRIPTION_SYNTHETIC_ID, "user"),
+        message("reply", "agent"),
+      ]),
+    ).toBeNull();
     expect(getLastUserMessageId([])).toBeNull();
   });
 });
@@ -482,7 +492,12 @@ describe("getFirstUserMessageId", () => {
   it("returns null when there are no user messages", () => {
     const message = (id: string, author_type: "user" | "agent") => ({ id, author_type }) as Message;
 
-    expect(getFirstUserMessageId([message("reply", "agent")])).toBeNull();
+    expect(
+      getFirstUserMessageId([
+        message(TASK_DESCRIPTION_SYNTHETIC_ID, "user"),
+        message("reply", "agent"),
+      ]),
+    ).toBeNull();
     expect(getFirstUserMessageId([])).toBeNull();
   });
 });

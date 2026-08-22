@@ -105,3 +105,9 @@ tests/chat/mobile-message-pagination.spec.ts` passed (1 test).
 - Both scenarios scroll the native list to the oldest loaded edge, wait for the
   first prompt, assert that no load button remains, and verify the recent
   standalone row stays within 8 pixels of its anchored position.
+- CI fixup showed that the synthetic task-description fallback also matched the
+  metadata fixture text. The desktop and mobile metadata specs now use exact
+  text matching for the stored message row.
+- The full desktop last-prompt navigation suite passed after synthetic rows
+  were excluded from prompt lookup (11 tests). Desktop and mobile metadata
+  overflow suites each passed (1 test).
