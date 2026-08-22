@@ -11,6 +11,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	taskEnvironmentRepoStatusFailed  = "failed"
+	taskEnvironmentRepoStatusDeleted = "deleted"
+)
+
 // validateReuseEnvironmentInventory proves that every repository/branch slot
 // selected for this launch has one active canonical environment row before any
 // lifecycle preparer can touch the workspace. It intentionally consults the
@@ -55,7 +60,7 @@ func canonicalInventoryMatches(spec RepoSpec, rows []*models.TaskEnvironmentRepo
 		if row.RepositoryID != spec.RepositoryID || !branchMatches {
 			continue
 		}
-		if row.DeletedAt != nil || row.Status == "failed" || row.Status == "deleted" || (useWorktree && row.WorktreeID == "") {
+		if row.DeletedAt != nil || row.Status == taskEnvironmentRepoStatusFailed || row.Status == taskEnvironmentRepoStatusDeleted || (useWorktree && row.WorktreeID == "") {
 			continue
 		}
 		matches++
