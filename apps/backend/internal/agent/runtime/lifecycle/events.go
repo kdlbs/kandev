@@ -34,6 +34,15 @@ func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string
 	p.publishAgentEventPayload(ctx, eventType, newAgentEventPayload(execution))
 }
 
+// publishAgentEventWithTurnID publishes a lifecycle event with a turn captured
+// by the completion handler. It avoids reading prompt state while that handler
+// still holds the prompt lifecycle lock.
+func (p *EventPublisher) publishAgentEventWithTurnID(
+	ctx context.Context, eventType string, execution *AgentExecution, turnID string,
+) {
+	p.publishAgentEventPayload(ctx, eventType, newAgentEventPayloadWithTurnID(execution, turnID))
+}
+
 // PublishAgentStalled publishes one inactivity signal for a prompt.
 // neverStarted reports whether the agent has emitted zero events since this
 // prompt was dispatched, and activityEpoch lets the consumer revalidate that
@@ -95,11 +104,16 @@ func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType
 }
 
 func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
+	return newAgentEventPayloadWithTurnID(execution, execution.promptTurnIDSnapshot())
+}
+
+func newAgentEventPayloadWithTurnID(execution *AgentExecution, turnID string) AgentEventPayload {
 	return AgentEventPayload{
 		AgentExecutionID:   execution.ID,
 		RunID:              execution.RunID,
 		TaskID:             execution.TaskID,
 		SessionID:          execution.SessionID,
+		TurnID:             turnID,
 		AgentID:            execution.AgentID,
 		AgentProfileID:     execution.officeProfileID(),
 		ExecutionProfileID: execution.AgentProfileID,
@@ -192,6 +206,7 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		ToolCallID:              event.ToolCallID,
 		ParentToolCallID:        event.ParentToolCallID,
 		PendingID:               event.PendingID,
+		RequestID:               event.RequestID,
 		ToolName:                event.ToolName,
 		ToolTitle:               event.ToolTitle,
 		ToolStatus:              event.ToolStatus,
@@ -303,25 +318,28 @@ func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *age
 		AgentID:   execution.ID,
 		Timestamp: update.Timestamp.Format(time.RFC3339Nano),
 		Status: &GitStatusData{
-			Branch:           update.Branch,
-			RemoteBranch:     update.RemoteBranch,
-			HeadCommit:       update.HeadCommit,
-			BaseCommit:       update.BaseCommit,
-			Modified:         update.Modified,
-			Added:            update.Added,
-			Deleted:          update.Deleted,
-			Untracked:        update.Untracked,
-			Renamed:          update.Renamed,
-			Ahead:            update.Ahead,
-			Behind:           update.Behind,
-			RemoteAhead:      update.RemoteAhead,
-			RemoteBehind:     update.RemoteBehind,
-			RemoteHeadCommit: update.RemoteHeadCommit,
-			Files:            update.Files,
-			BranchAdditions:  update.BranchAdditions,
-			BranchDeletions:  update.BranchDeletions,
-			RepositoryName:   update.RepositoryName,
-			IsSubmodule:      update.IsSubmodule,
+			Branch:              update.Branch,
+			RemoteBranch:        update.RemoteBranch,
+			HeadCommit:          update.HeadCommit,
+			BaseCommit:          update.BaseCommit,
+			ComparisonTarget:    update.ComparisonTarget,
+			ComparisonStatus:    update.ComparisonStatus,
+			ComparisonErrorCode: update.ComparisonErrorCode,
+			Modified:            update.Modified,
+			Added:               update.Added,
+			Deleted:             update.Deleted,
+			Untracked:           update.Untracked,
+			Renamed:             update.Renamed,
+			Ahead:               update.Ahead,
+			Behind:              update.Behind,
+			RemoteAhead:         update.RemoteAhead,
+			RemoteBehind:        update.RemoteBehind,
+			RemoteHeadCommit:    update.RemoteHeadCommit,
+			Files:               update.Files,
+			BranchAdditions:     update.BranchAdditions,
+			BranchDeletions:     update.BranchDeletions,
+			RepositoryName:      update.RepositoryName,
+			IsSubmodule:         update.IsSubmodule,
 		},
 	})
 }
@@ -435,6 +453,7 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 		AgentID:       execution.ID,
 		TaskID:        execution.TaskID,
 		SessionID:     execution.SessionID,
+		RequestID:     event.RequestID,
 		PendingID:     event.PendingID,
 		ToolCallID:    event.ToolCallID,
 		Title:         event.PermissionTitle,

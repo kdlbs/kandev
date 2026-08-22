@@ -8,13 +8,15 @@ import type { SeedData } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 
 const GIT_PROTOCOL_ARGS = ["-c", "protocol.file.allow=always"];
+const GIT_INDEX_LOCK_ATTEMPTS = 3;
+const GIT_INDEX_LOCK_RETRY_MS = 300;
 
 export type SubmoduleReviewFixture = {
   taskId: string;
   sessionId: string;
   sourceRoot: string;
   waitForWorktree: (apiClient: ApiClient) => Promise<string>;
-  applyNestedChanges: (worktreePath: string) => void;
+  applyNestedChanges: (worktreePath: string) => Promise<void>;
   cleanup: () => void;
 };
 
@@ -25,6 +27,26 @@ function runGit(repoPath: string, args: string[], env: NodeJS.ProcessEnv): strin
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
+}
+
+/** Retries the short-lived index lock taken by the backend's Git status refresh. */
+export async function retryGitIndexLock<T>(operation: () => T): Promise<T> {
+  for (let attempt = 0; attempt < GIT_INDEX_LOCK_ATTEMPTS; attempt++) {
+    try {
+      return operation();
+    } catch (error) {
+      const isLastAttempt = attempt === GIT_INDEX_LOCK_ATTEMPTS - 1;
+      if (!(error instanceof Error) || !error.message.includes("index.lock") || isLastAttempt) {
+        throw error;
+      }
+      await dwell(
+        GIT_INDEX_LOCK_RETRY_MS,
+        "poll-interval",
+        "the backend's periodic Git status refresh can briefly hold the submodule index lock without publishing a completion event",
+      );
+    }
+  }
+  throw new Error("Git index lock retry exhausted");
 }
 
 function initializeRepository(
@@ -48,9 +70,9 @@ export function readGitValue(repoPath: string, args: string[], tempRoot: string)
   }).trim();
 }
 
-function commit(repoPath: string, env: NodeJS.ProcessEnv, message: string): void {
-  runGit(repoPath, ["add", "-A"], env);
-  runGit(repoPath, ["commit", "-m", message], env);
+async function commit(repoPath: string, env: NodeJS.ProcessEnv, message: string): Promise<void> {
+  await retryGitIndexLock(() => runGit(repoPath, ["add", "-A"], env));
+  await retryGitIndexLock(() => runGit(repoPath, ["commit", "-m", message], env));
 }
 
 async function waitForWorktreePath(
@@ -92,7 +114,7 @@ export async function createSubmoduleReviewFixture(
 
     initializeRepository(outerPath, env, "README.md", "outer base\n");
     runGit(outerPath, [...GIT_PROTOCOL_ARGS, "submodule", "add", "../inner", "vendor/inner"], env);
-    commit(outerPath, env, "add nested inner submodule");
+    await commit(outerPath, env, "add nested inner submodule");
 
     initializeRepository(parentPath, env, "README.md", "parent base\n");
     runGit(parentPath, [...GIT_PROTOCOL_ARGS, "submodule", "add", "../outer", "vendor/outer"], env);
@@ -102,7 +124,7 @@ export async function createSubmoduleReviewFixture(
       [...GIT_PROTOCOL_ARGS, "submodule", "update", "--init", "--recursive"],
       env,
     );
-    commit(parentPath, env, "add outer submodule");
+    await commit(parentPath, env, "add outer submodule");
 
     const repository = await apiClient.createRepository(seedData.workspaceId, parentPath, "main", {
       name: "nested-submodule-parent",
@@ -131,22 +153,24 @@ export async function createSubmoduleReviewFixture(
       sessionId: task.session_id,
       sourceRoot,
       waitForWorktree: (client) => waitForWorktreePath(client, task.id, task.session_id!),
-      applyNestedChanges(worktreePath: string) {
+      async applyNestedChanges(worktreePath: string) {
         const outerWorktree = path.join(worktreePath, "vendor/outer");
         const innerWorktree = path.join(outerWorktree, "vendor/inner");
         if (!fs.existsSync(innerWorktree)) {
-          runGit(
-            worktreePath,
-            [...GIT_PROTOCOL_ARGS, "submodule", "update", "--init", "--recursive"],
-            env,
+          await retryGitIndexLock(() =>
+            runGit(
+              worktreePath,
+              [...GIT_PROTOCOL_ARGS, "submodule", "update", "--init", "--recursive"],
+              env,
+            ),
           );
         }
         fs.appendFileSync(path.join(worktreePath, "README.md"), "parent working-tree change\n");
         fs.appendFileSync(path.join(outerWorktree, "README.md"), "outer committed change\n");
-        commit(outerWorktree, env, "change outer submodule");
+        await commit(outerWorktree, env, "change outer submodule");
         fs.appendFileSync(path.join(innerWorktree, "README.md"), "inner committed change\n");
-        commit(innerWorktree, env, "change inner submodule");
-        commit(outerWorktree, env, "record inner submodule change");
+        await commit(innerWorktree, env, "change inner submodule");
+        await commit(outerWorktree, env, "record inner submodule change");
       },
       cleanup,
     };

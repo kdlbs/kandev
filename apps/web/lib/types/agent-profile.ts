@@ -28,6 +28,48 @@ export type CLIFlag = {
 
 export type BillingType = "api_key" | "subscription";
 
+export type AgentProfileKind = "concrete" | "dynamic";
+
+export type DynamicErrorClass = "transient" | "hard";
+export type DynamicPolicyOutcome = "skip" | "stop";
+
+export type DynamicRetryPolicy = {
+  enabled: boolean;
+  maxRetries: number;
+  initialIntervalSeconds: number;
+};
+
+export type DynamicResetWaitPolicy = {
+  enabled: boolean;
+  maxWaitSeconds: number;
+};
+
+export type DynamicErrorPolicy = {
+  retry: DynamicRetryPolicy;
+  waitForReset: DynamicResetWaitPolicy;
+  onExhausted: DynamicPolicyOutcome;
+};
+
+export type DynamicAgentPolicy = {
+  version: number;
+  transient: DynamicErrorPolicy;
+  hard: DynamicErrorPolicy;
+};
+
+export type DynamicAgentCandidate = {
+  position: number;
+  executionProfileId: AgentProfileId;
+  enabled: boolean;
+  policies: DynamicAgentPolicy;
+  /** Read compatibility for clients that still construct legacy drafts. */
+  rules?: Record<string, string>;
+};
+
+export type DynamicAgentProfile = {
+  version: number;
+  candidates: DynamicAgentCandidate[];
+};
+
 export type UtilizationWindow = {
   label: string;
   utilization_pct: number;
@@ -54,6 +96,10 @@ export type AgentStatus = "idle" | "working" | "paused" | "stopped" | "pending_a
 export type AgentProfile = {
   // --- Identity ---
   id: AgentProfileId;
+  /** The execution family. Dynamic profiles own routing, not a subprocess. */
+  kind?: AgentProfileKind;
+  /** Versioned routing document for the dynamic execution family. */
+  dynamic?: DynamicAgentProfile;
   name: string;
   /** ID of the agent (CLI) this profile belongs to. */
   agentId: string;
@@ -159,6 +205,7 @@ export type OfficeAgentProfile = AgentProfile &
 export type AgentProfilePayload = {
   id: string;
   agent_id: string;
+  kind?: AgentProfileKind;
   name: string;
   agent_display_name: string;
   model: string;
@@ -176,4 +223,40 @@ export type AgentProfilePayload = {
   user_modified?: boolean;
   created_at: string;
   updated_at: string;
+  dynamic?: {
+    version: number;
+    candidates: Array<{
+      position: number;
+      execution_profile_id: string;
+      enabled: boolean;
+      policies?: {
+        version: number;
+        transient: {
+          retry: {
+            enabled: boolean;
+            max_retries: number;
+            initial_interval_seconds: number;
+          };
+          wait_for_reset: {
+            enabled: boolean;
+            max_wait_seconds: number;
+          };
+          on_exhausted: DynamicPolicyOutcome;
+        };
+        hard: {
+          retry: {
+            enabled: boolean;
+            max_retries: number;
+            initial_interval_seconds: number;
+          };
+          wait_for_reset: {
+            enabled: boolean;
+            max_wait_seconds: number;
+          };
+          on_exhausted: DynamicPolicyOutcome;
+        };
+      };
+      rules?: Record<string, string>;
+    }>;
+  };
 };

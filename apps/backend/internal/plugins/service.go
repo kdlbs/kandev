@@ -75,6 +75,18 @@ type Service struct {
 	// insertion one atomic catalog mutation across different plugin IDs.
 	agentToolInstallMu sync.Mutex
 
+	// extractingMu guards extractingPaths and, crucially, is held across the
+	// pkgtar extraction that registers into it: a version directory must never
+	// be observable on disk before it is marked in flight, or a concurrent
+	// prune could delete it in that gap. See extractPackage.
+	extractingMu sync.Mutex
+	// extractingPaths counts, per version directory, the installs that have
+	// extracted it but have not yet finished. Install extracts before it can
+	// know the plugin id (and therefore before it can take that id's lifecycle
+	// lock), so this is what tells a prune running under the lock that a
+	// directory belongs to an install still waiting for it.
+	extractingPaths map[string]int
+
 	pluginsDir       string
 	store            store.Store
 	registry         *Registry

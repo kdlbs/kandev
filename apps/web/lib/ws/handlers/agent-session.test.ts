@@ -227,6 +227,35 @@ describe("session.state_changed handler", () => {
     });
   });
 
+  it("classifies stamped typed failures as launch failures without actions", () => {
+    store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "STARTING" } },
+      },
+    });
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "FAILED",
+        error_message: "pull request is closed",
+        session_metadata: {
+          last_agent_error: {
+            message: "pull request is closed",
+            code: "pr_already_closed",
+            stamp: "closed-pr-stamp",
+          },
+        },
+      }),
+    );
+
+    expect(store.getState().setSessionFailureNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ isLaunchFailure: true }),
+    );
+  });
+
   it("does not set failure notification when session is already FAILED", () => {
     store = makeStore({
       taskSessions: {

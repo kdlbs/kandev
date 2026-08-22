@@ -275,6 +275,7 @@ export class OfficeApiClient {
           execution_profile_ids?: { frontier?: string; balanced?: string; economy?: string };
         }
       >;
+      role_tiers?: Record<string, "frontier" | "balanced" | "economy">;
     };
     known_providers: string[];
     execution_profiles: Array<{
@@ -306,6 +307,7 @@ export class OfficeApiClient {
           execution_profile_ids?: { frontier?: string; balanced?: string; economy?: string };
         }
       >;
+      role_tiers?: Record<string, "frontier" | "balanced" | "economy">;
     },
   ): Promise<Record<string, unknown>> {
     return this.request("PUT", `/workspaces/${wsId}/routing`, cfg);

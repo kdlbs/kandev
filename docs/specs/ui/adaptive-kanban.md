@@ -27,6 +27,12 @@ desktop.
   shown.
 - Existing desktop card interactions remain available in either composition, including pointer
   drag-and-drop between visible columns, multi-select, context actions, and `Move to` for any step.
+- At a fixed viewport size, each Kanban column keeps its mounted card count within the visible
+  vertical area plus a small overscan. The mounted count does not grow with the total task count.
+- Users can reach every task by scrolling or searching. Vertical windowing does not change the
+  column count, task order, WIP queue boundary, selection order, or card actions.
+- A column with 440 tasks mounts fewer than 100 card bodies during initial display on desktop,
+  tablet, and phone surfaces.
 - Opening or resizing the task preview may change the effective desktop composition without
   changing the user's saved Kanban, Pipeline, workflow, or preview preferences.
 - A subtask card presents its parent relationship as contained hierarchy metadata. Long or missing
@@ -68,6 +74,14 @@ desktop.
   navigator and mobile actions remain available and no desktop stage selector is mounted.
 - **GIVEN** the tablet Kanban, **WHEN** the same workflows render, **THEN** the existing two-column
   snap-scrolling layout remains active and no desktop stage selector is mounted.
+- **GIVEN** a desktop column with 440 tasks, **WHEN** Kanban renders, **THEN** fewer than 100 card
+  bodies are mounted and the visible cards respond to user input.
+- **GIVEN** a phone column with 440 tasks, **WHEN** Kanban renders, **THEN** fewer than 100 card
+  bodies are mounted inside the existing focused-column scroll area.
+- **GIVEN** a windowed column, **WHEN** the user scrolls from the first task to the last task,
+  **THEN** each reached card keeps its normal actions and the mounted card count stays bounded.
+- **GIVEN** a windowed WIP column with queued tasks, **WHEN** the user scrolls through the admission
+  boundary, **THEN** the queue divider appears at the correct logical position.
 
 ## Out of scope
 
@@ -75,7 +89,11 @@ desktop.
 - Redesigning Pipeline or List views.
 - Persisting a separate portrait-layout preference or horizontal scroll position.
 - Changing backend task, workflow, WIP-limit, or preview contracts.
+- Removing task descriptions from the board API response.
+- Adding pagination or a manual show-more control to Kanban columns.
 
-## Implementation plan
+## Implementation plans
 
 [Adaptive Kanban implementation plan](../../plans/adaptive-kanban/plan.md)
+
+[Large-column virtualization repair plan](../../plans/kanban-large-column-virtualization/plan.md)

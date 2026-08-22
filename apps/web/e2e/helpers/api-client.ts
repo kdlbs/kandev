@@ -54,6 +54,18 @@ export type MockPR = {
   author_login: string;
   repo_owner: string;
   repo_name: string;
+  /** Explicit source repository identity for fork pull-request tests. */
+  head_repo_id?: number;
+  head_repo_node_id?: string;
+  head_repo_owner?: string;
+  head_repo_name?: string;
+  head_repo_clone_url?: string;
+  /** Explicit target repository identity for fork pull-request tests. */
+  base_repo_id?: number;
+  base_repo_owner?: string;
+  base_repo_name?: string;
+  base_default_branch?: string;
+  maintainer_can_modify?: boolean;
   html_url?: string;
   url?: string;
   body?: string;
@@ -513,12 +525,19 @@ export class ApiClient {
       "GET",
       "/api/v1/agents",
     );
-    return {
-      ...response,
-      agents: response.agents.map((agent) => ({
+    // The Dynamic family is intentionally ranked first by the product API so
+    // settings can present its dedicated card first. Most E2E profile
+    // factories predate virtual families and use the first agent as a
+    // launchable owner, so keep concrete families first in this test client.
+    const agents = response.agents
+      .map((agent) => ({
         ...agent,
         profiles: (agent.profiles ?? []).map(normalizeAgentProfile),
-      })),
+      }))
+      .sort((a, b) => Number(a.id === "dynamic") - Number(b.id === "dynamic"));
+    return {
+      ...response,
+      agents,
     };
   }
 
@@ -677,6 +696,13 @@ export class ApiClient {
 
   async deletePrompt(promptId: string): Promise<void> {
     await this.request("DELETE", `/api/v1/prompts/${promptId}`);
+  }
+
+  async resetGitHubActionPresets(workspaceId: string): Promise<void> {
+    await this.request(
+      "POST",
+      `/api/v1/github/action-presets/reset?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
   }
 
   async createTaskWithAgent(
@@ -882,6 +908,7 @@ export class ApiClient {
   async updateRepository(
     repositoryId: string,
     updates: {
+      default_branch?: string;
       provider?: string;
       provider_repo_id?: string;
       provider_host?: string;
@@ -1076,6 +1103,7 @@ export class ApiClient {
     tasks_list_group?: string;
     task_create_last_used?: TaskCreateLastUsedApi;
     kanban_hidden_step_ids?: Record<string, string[]>;
+    workflow_ids_with_auto_hide_empty_steps?: string[];
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }
@@ -2174,6 +2202,7 @@ export class ApiClient {
     title: string;
     autopilot?: boolean;
     primary_session_id?: string | null;
+    primary_executor_type?: string | null;
     state?: string;
     workflow_step_id?: string;
     parent_id?: string;

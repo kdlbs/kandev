@@ -51,6 +51,7 @@ export const defaultOfficeState: OfficeSliceState = {
     providerHealth: { byWorkspace: {} },
     runAttempts: { byRunId: {} },
     agentRouting: { byAgentId: {} },
+    taskQuorum: { byTaskId: {} },
   },
 };
 
@@ -345,6 +346,13 @@ function createRoutingActions(set: SetFn) {
     ) =>
       set((draft) => {
         draft.office.agentRouting.byAgentId[agentId] = data;
+      }),
+    setTaskQuorum: (
+      taskId: string,
+      quorum: OfficeSlice["office"]["taskQuorum"]["byTaskId"][string],
+    ) =>
+      set((draft) => {
+        draft.office.taskQuorum.byTaskId[taskId] = quorum;
       }),
   };
 }

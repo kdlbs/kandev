@@ -59,6 +59,7 @@ func newTestCostService(t *testing.T) (*costs.CostService, func(string, ...inter
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS tasks (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
+		project_id TEXT DEFAULT '',
 		state TEXT NOT NULL DEFAULT 'TODO',
 		title TEXT DEFAULT '',
 		description TEXT DEFAULT '',
@@ -217,8 +218,11 @@ func TestGetCostsBreakdown_ReturnsAllViews(t *testing.T) {
 	svc, execSQL := newTestCostService(t)
 	ctx := context.Background()
 
-	execSQL(`INSERT OR IGNORE INTO tasks (id, workspace_id) VALUES ('task-1', 'ws-1')`)
-	execSQL(`INSERT OR IGNORE INTO tasks (id, workspace_id) VALUES ('task-2', 'ws-1')`)
+	// GetCostsByProject attributes by the task's live project_id, not the
+	// event snapshot, so each task must carry the assignment it is meant to
+	// group under.
+	execSQL(`INSERT OR IGNORE INTO tasks (id, workspace_id, project_id) VALUES ('task-1', 'ws-1', 'proj-X')`)
+	execSQL(`INSERT OR IGNORE INTO tasks (id, workspace_id, project_id) VALUES ('task-2', 'ws-1', 'proj-Y')`)
 
 	_, _ = svc.RecordCostEvent(ctx,
 		"sess-1", "task-1", "agent-A", "proj-X",

@@ -49,6 +49,17 @@ export type TaskSessionStateChangedPayload = {
    */
   agent_profile_id?: string;
   agent_profile_snapshot?: Record<string, unknown>;
+  execution_profile_id?: string;
+  route_generation?: number;
+  route_state?: string;
+  route_reason?: string;
+  route_error_code?: string;
+  route_error_class?: "transient" | "hard" | "unclassified" | string;
+  route_catalogue_version?: string;
+  route_retry_ordinal?: number;
+  route_deadline?: string;
+  route_pending_outcome?: "skip" | "stop" | string;
+  downstream_acp_session_id?: string;
   metadata?: Record<string, unknown>;
   session_metadata?: Record<string, unknown>;
   is_passthrough?: boolean;
@@ -120,6 +131,8 @@ export type TurnEventPayload = {
   task_id: string;
   started_at: string;
   completed_at?: string;
+  execution_profile_id?: string;
+  route_generation?: number;
   metadata?: Record<string, unknown>;
   /** Whether the completed turn produced any agent output. Only set on turn.completed. */
   had_output?: boolean;

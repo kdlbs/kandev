@@ -89,7 +89,7 @@ test("buildEntry resolves release, manifest, icon_url and stars", async () => {
       published_at: "2026-01-01T00:00:00Z",
       assets: [{ name: "foo-1.2.0.tar.gz", browser_download_url: "https://dl/foo-1.2.0.tar.gz" }],
     },
-    manifestText: "display_name: Foo\ndescription: A foo\nicon: icon.svg\ncategories: [x]",
+    manifestText: "display_name: Foo\ndescription: A foo\nauthor: kandev\nicon: icon.svg\ncategories: [x]",
     repoMeta: { stargazers_count: 42, pushed_at: "2026-02-02T00:00:00Z", owner: { login: "acme" } },
   });
 
@@ -97,6 +97,7 @@ test("buildEntry resolves release, manifest, icon_url and stars", async () => {
   assert.equal(error, undefined);
   assert.equal(record.name, "Foo");
   assert.equal(record.version, "1.2.0");
+  assert.equal(record.author, "kandev");
   assert.equal(record.package_url, "https://dl/foo-1.2.0.tar.gz");
   assert.equal(record.icon_url, "https://raw.githubusercontent.com/acme/foo/v1.2.0/icon.svg");
   assert.equal(record.stars, 42);
@@ -119,6 +120,7 @@ test("buildEntry keeps stars null (never 0) when repo metadata lookup fails", as
   });
   const { record } = await buildEntry({ id: "foo", repo: "acme/foo" });
   assert.equal(record.stars, null);
+  assert.equal(record.author, "acme"); // legacy fallback when the manifest has no author
   assert.equal(record.icon_url, null); // no manifest icon
 });
 

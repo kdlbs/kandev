@@ -50,9 +50,18 @@ export function pickFreshestStatusSummary(
   return next.revision >= current.revision ? next : current;
 }
 
+/** Select the newest detail/live reading without allowing an HTTP response to regress it. */
+export function selectTaskStatusSummary(
+  detail: TaskStatusSummary | null | undefined,
+  live: Array<TaskStatusSummary | null | undefined>,
+): TaskStatusSummary | null | undefined {
+  return live.reduce((current, candidate) => pickFreshestStatusSummary(candidate, current), detail);
+}
+
 /**
  * Returns the current task-level error only when it has not already been
- * acknowledged or dismissed for the same session and stamp.
+ * acknowledged or dismissed for the same session and stamp. Task-owned
+ * errors have no session key and stay visible until the backend clears them.
  */
 export function statusSummaryActiveErrorPreview(
   summary: TaskStatusSummary | null | undefined,
@@ -62,8 +71,9 @@ export function statusSummaryActiveErrorPreview(
   const error = summary?.active_error;
   if (!error) return null;
   if (
-    acknowledgedAgentErrors?.[error.session_id] === error.stamp ||
-    dismissedAgentErrors?.[error.session_id] === error.stamp
+    error.session_id &&
+    (acknowledgedAgentErrors?.[error.session_id] === error.stamp ||
+      dismissedAgentErrors?.[error.session_id] === error.stamp)
   ) {
     return null;
   }

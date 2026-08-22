@@ -103,6 +103,20 @@ func TestMapUserSettingsStateDefaultsHiddenWorkflowStepIdsToEmptyMap(t *testing.
 	}
 }
 
+func TestMapUserSettingsStateDefaultsAutoHideWorkflowIDsToEmptySlice(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{},
+	}, "workspace-1")
+
+	got, ok := state["workflowIdsWithAutoHideEmptySteps"].([]string)
+	if !ok || len(got) != 0 || got == nil {
+		t.Fatalf(
+			"workflowIdsWithAutoHideEmptySteps = %#v, want non-nil empty []string",
+			state["workflowIdsWithAutoHideEmptySteps"],
+		)
+	}
+}
+
 // TestMapUserSettingsStateIncludesAppStatusBarOrder verifies boot state carries the app status bar order.
 func TestMapUserSettingsStateIncludesAppStatusBarOrder(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{

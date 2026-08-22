@@ -15,6 +15,7 @@ import (
 var ErrWorkspaceNameMismatch = repoerrors.ErrWorkspaceNameMismatch
 var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
+var ErrTaskParentMismatch = repoerrors.ErrTaskParentMismatch
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
 var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
@@ -172,6 +173,13 @@ type TaskRepoRepository interface {
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
 	ListTaskRepositoriesByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskRepository, error)
 	UpdateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error
+	// UpdateTaskRepositoryComparisonTarget atomically replaces or removes the
+	// provider-owned comparison target on one exact attachment. When target is
+	// nil, expected limits removal to the same provider change when supplied.
+	UpdateTaskRepositoryComparisonTarget(ctx context.Context, id string, target *models.ComparisonTarget, expected *models.ComparisonTarget) (*models.TaskRepository, bool, error)
+	// UpdateTaskRepositoryBaseBranchAndClearComparisonTarget changes the manual
+	// base branch and clears any provider-owned comparison target in one write.
+	UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx context.Context, id, baseBranch string) (*models.TaskRepository, bool, error)
 	DeleteTaskRepository(ctx context.Context, id string) error
 	DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
@@ -208,6 +216,7 @@ type MessageRepository interface {
 	GetMessageWithPromptIndex(ctx context.Context, id string) (*models.Message, error)
 	GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error)
 	GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error)
+	GetPermissionMessageByIdentity(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.Message, error)
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*models.Message, error)
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error)
 	FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error)
@@ -217,6 +226,9 @@ type MessageRepository interface {
 	FinalizeClarificationResponseDelivery(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
 	RestoreActiveClarificationBundle(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
 	UpdateMessage(ctx context.Context, message *models.Message) error
+	ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
+	FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
+	GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error)
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error)
 	ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error)

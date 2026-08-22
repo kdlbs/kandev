@@ -15,11 +15,22 @@ import type {
 } from "@/lib/types/http";
 import type { PermissionKey } from "@/lib/agent-permissions";
 import { normalizeAgentProfile } from "@/lib/api/domains/agent-profile-normalize";
+import type { AgentProfileKind } from "@/lib/types/agent-profile";
 
 type ProfilePermissions = Record<PermissionKey, boolean>;
 
 const { apiBaseUrl } = getBackendConfig();
 const interimSettingsInterlockHeader = "X-Kandev-Interim-Settings-Interlock";
+
+type DynamicProfilePayload = {
+  version: number;
+  candidates: Array<{
+    position: number;
+    execution_profile_id: string;
+    enabled: boolean;
+    rules?: Record<string, string>;
+  }>;
+};
 
 function normalizeAgentInPlace(agent: Agent): Agent {
   return {
@@ -56,11 +67,13 @@ export async function createAgentAction(payload: {
     {
       name: string;
       model: string;
+      kind?: AgentProfileKind;
       mode?: string;
       cli_passthrough: boolean;
       cli_flags?: CLIFlag[];
       command_prefix?: string;
       env_vars?: ProfileEnvVar[];
+      dynamic?: DynamicProfilePayload;
     } & ProfilePermissions
   >;
 }): Promise<Agent> {
@@ -95,6 +108,7 @@ export async function createAgentProfileAction(
   payload: {
     name: string;
     model: string;
+    kind?: AgentProfileKind;
     fallback_model?: string;
     auto_fallback?: boolean;
     mode?: string;
@@ -103,6 +117,7 @@ export async function createAgentProfileAction(
     cli_flags?: CLIFlag[];
     command_prefix?: string;
     env_vars?: ProfileEnvVar[];
+    dynamic?: DynamicProfilePayload;
   } & ProfilePermissions,
 ): Promise<AgentProfile> {
   const raw = await agentSettingsRequest<unknown>(
@@ -120,6 +135,7 @@ export async function updateAgentProfileAction(
   payload: {
     name?: string;
     model?: string;
+    kind?: AgentProfileKind;
     fallback_model?: string;
     auto_fallback?: boolean;
     mode?: string;
@@ -131,6 +147,7 @@ export async function updateAgentProfileAction(
     cli_flags?: CLIFlag[];
     command_prefix?: string;
     env_vars?: ProfileEnvVar[];
+    dynamic?: DynamicProfilePayload;
   },
   force = false,
 ): Promise<AgentProfile> {

@@ -89,6 +89,29 @@ func (r *Repository) UpdateRepository(ctx context.Context, repository *models.Re
 	return r.updateRepository(ctx, r.db, repository)
 }
 
+// UpdateRepositoryDefaultBranch updates only the default branch while the
+// caller's previously read value is still current. This protects unrelated
+// repository fields from stale recovery writes.
+func (r *Repository) UpdateRepositoryDefaultBranch(ctx context.Context, repositoryID, expectedBranch, branch string) error {
+	updatedAt := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE repositories
+		SET default_branch = ?, updated_at = ?
+		WHERE id = ? AND default_branch = ? AND deleted_at IS NULL
+	`), branch, updatedAt, repositoryID, expectedBranch)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("repository default branch changed or repository not found: %s", repositoryID)
+	}
+	return nil
+}
+
 func (r *Repository) updateRepository(ctx context.Context, exec sqlx.ExtContext, repository *models.Repository) error {
 	repository.UpdatedAt = time.Now().UTC()
 

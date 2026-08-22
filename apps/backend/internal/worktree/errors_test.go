@@ -7,6 +7,13 @@ import (
 	"testing"
 )
 
+func TestInvalidBaseBranchRemainsSentinelDetectable(t *testing.T) {
+	err := fmt.Errorf("prepare failed: %w", ErrInvalidBaseBranch)
+	if !errors.Is(err, ErrInvalidBaseBranch) {
+		t.Fatalf("errors.Is(%v, ErrInvalidBaseBranch) = false", err)
+	}
+}
+
 func TestClassifyGitError_BranchCheckedOut(t *testing.T) {
 	output := "fatal: 'feature/pr-branch' is already checked out at '/tmp/worktree-123'"
 	err := ClassifyGitError(output, fmt.Errorf("exit status 128"))

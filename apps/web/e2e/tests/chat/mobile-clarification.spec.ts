@@ -86,6 +86,43 @@ test.describe("Mobile clarification multiline answer", () => {
     await expect(session.chat).not.toContainText("linesecond line");
   });
 
+  test("keeps the over-limit counter inside the phone viewport", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Limit",
+      { scenario: "clarification" },
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await session.clarificationInput().fill("a".repeat(2001));
+
+    const counter = session.clarificationOverlay().getByTestId("clarification-input-rune-counter");
+    await expect(counter).toHaveAttribute("data-over-limit", "true");
+
+    const [counterBox, overlayBox] = await Promise.all([
+      counter.boundingBox(),
+      session.clarificationOverlay().boundingBox(),
+    ]);
+    if (!counterBox || !overlayBox) {
+      throw new Error("expected mobile counter and overlay to have bounding boxes");
+    }
+    expect(counterBox.x).toBeGreaterThanOrEqual(overlayBox.x - 1);
+    expect(counterBox.x + counterBox.width).toBeLessThanOrEqual(
+      overlayBox.x + overlayBox.width + 1,
+    );
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+  });
+
   test("shows shared context once above the question on mobile", async ({
     testPage,
     apiClient,

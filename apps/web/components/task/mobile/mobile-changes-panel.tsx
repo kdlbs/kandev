@@ -120,6 +120,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
           repoDisplayName={data.repoDisplayName}
           taskId={data.activeTaskId}
           credentialDisplay={data.gitCredentialDisplay}
+          comparisonTargets={data.git.comparisonTargets}
         />
         <ChangesPanelBody {...bodyProps} />
       </PanelRoot>

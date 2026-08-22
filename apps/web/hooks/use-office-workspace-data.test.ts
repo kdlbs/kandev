@@ -20,8 +20,16 @@ const workspaces = [
   { id: KANBAN_WS, office_workflow_id: null },
 ];
 
+type StoredProject = { id: string; name: string };
+
+let projectsByWorkspaceId: Record<string, StoredProject[]> = {};
+
 const setOfficeAgentProfiles = vi.fn();
-const setProjects = vi.fn();
+// Writes through, so a store-miss test can observe the crumb filling in after
+// the load lands rather than only that a request went out.
+const setProjects = vi.fn((workspaceId: string, projects: StoredProject[]) => {
+  projectsByWorkspaceId[workspaceId] = projects;
+});
 const setInboxItems = vi.fn();
 const setInboxCount = vi.fn();
 const setMeta = vi.fn();
@@ -36,6 +44,11 @@ const storeState = {
     },
     get activeId() {
       return activeId;
+    },
+  },
+  office: {
+    get projectsByWorkspaceId() {
+      return projectsByWorkspaceId;
     },
   },
   setOfficeAgentProfiles,
@@ -71,11 +84,12 @@ vi.mock("@/lib/api/domains/office-api", () => ({
   getMeta,
 }));
 
-import { useOfficeWorkspaceData } from "./use-office-workspace-data";
+import { useOfficeProject, useOfficeWorkspaceData } from "./use-office-workspace-data";
 
 beforeEach(() => {
   activeId = OFFICE_WS;
   officeEnabled = true;
+  projectsByWorkspaceId = {};
   listAgentProfiles.mockResolvedValue({ agents: [] });
   listProjects.mockResolvedValue({ projects: [] });
   getInbox.mockResolvedValue({ items: [], total_count: 0 });
@@ -205,5 +219,84 @@ describe("useOfficeWorkspaceData", () => {
     });
 
     expect(setProjects).toHaveBeenCalledWith(OFFICE_WS, [{ id: "p-1" }]);
+  });
+});
+
+describe("useOfficeProject", () => {
+  const PROJECT = { id: "p-1", name: "Checkout" };
+
+  it("shares an in-flight project load with the workspace chrome", async () => {
+    const pending = deferred<{ projects: StoredProject[] }>();
+    listProjects.mockReturnValueOnce(pending.promise);
+
+    renderHook(() => {
+      useOfficeWorkspaceData();
+      return useOfficeProject(PROJECT.id);
+    });
+
+    expect(listProjects).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pending.resolve({ projects: [PROJECT] });
+      await pending.promise;
+    });
+    expect(setProjects).toHaveBeenCalledWith(OFFICE_WS, [PROJECT]);
+  });
+
+  it("reads a warm project straight from the store without a request", async () => {
+    projectsByWorkspaceId = { [OFFICE_WS]: [PROJECT] };
+
+    const { result } = renderHook(() => useOfficeProject(PROJECT.id));
+    await act(async () => {});
+
+    expect(result.current).toEqual(PROJECT);
+    expect(listProjects).not.toHaveBeenCalled();
+  });
+
+  it("fills a store miss through the shared workspace load", async () => {
+    // A cold /t/:id hydrates the task but not the office collections. The crumb
+    // must not fetch into component state: it goes through the same action the
+    // office chrome uses, so both callers share one record and one write path.
+    listProjects.mockResolvedValue({ projects: [PROJECT] });
+
+    const { result, rerender } = renderHook(() => useOfficeProject(PROJECT.id));
+    expect(result.current).toBeUndefined();
+
+    await act(async () => {});
+    expect(listProjects).toHaveBeenCalledWith(OFFICE_WS, { cache: "no-store" });
+    expect(setProjects).toHaveBeenCalledWith(OFFICE_WS, [PROJECT]);
+
+    rerender();
+    expect(result.current).toEqual(PROJECT);
+  });
+
+  it("asks once per project even when the load never fills the store", async () => {
+    // A missing crumb is the harmless failure mode. Re-requesting on every
+    // render because the store is still empty is not.
+    listProjects.mockResolvedValue({ projects: [] });
+
+    const { rerender } = renderHook(() => useOfficeProject(PROJECT.id));
+    await act(async () => {});
+    rerender();
+    await act(async () => {});
+    rerender();
+
+    expect(listProjects).toHaveBeenCalledTimes(1);
+  });
+
+  it("requests nothing for a task with no project", async () => {
+    renderHook(() => useOfficeProject(null));
+    await act(async () => {});
+
+    expect(listProjects).not.toHaveBeenCalled();
+  });
+
+  it("requests nothing outside an office workspace", async () => {
+    activeId = KANBAN_WS;
+
+    renderHook(() => useOfficeProject(PROJECT.id));
+    await act(async () => {});
+
+    expect(listProjects).not.toHaveBeenCalled();
   });
 });

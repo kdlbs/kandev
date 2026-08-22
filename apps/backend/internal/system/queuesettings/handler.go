@@ -42,6 +42,8 @@ func handleUpdate(service *Service) gin.HandlerFunc {
 				ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: err.Error()})
 			case errors.Is(err, ErrEnvironmentLocked):
 				ctx.JSON(http.StatusConflict, gin.H{responseErrorKey: err.Error()})
+			case errors.Is(err, ErrConfigurationLocked):
+				ctx.JSON(http.StatusConflict, gin.H{responseErrorKey: err.Error()})
 			default:
 				ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: "failed to save message queue settings"})
 			}

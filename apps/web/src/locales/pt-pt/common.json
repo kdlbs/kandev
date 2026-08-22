@@ -489,6 +489,7 @@
   "profile": "Perfil",
   "searchPlaceholder": "Pesquisar...",
   "selectOption": "Selecionar opção...",
+  "showMoreActions": "Mostrar mais ações",
   "showMoreBreadcrumbs": "Mostrar mais migalhas",
   "statusWithConnectionIssue": "{{description}} Estado",
   "terminalNumbered": "Terminal {{seq}}",

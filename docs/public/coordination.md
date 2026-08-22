@@ -198,6 +198,19 @@ Before starting, document:
 - the merge order for dependent changes; and
 - the test command required in each repository.
 
+### Fork pull requests and comparison targets
+
+When a task branch is the head of a fork pull request, provider integration records both repository
+identities. Kandev applies the target only when the attached repository matches the PR head and the
+live checkout branch matches the PR source branch. This prevents an old fork PR from changing the
+comparison base of another attachment.
+
+The target repository and branch are stored on that task-repository attachment. A live session uses
+an exact comparison-only ref for the target. It keeps `origin`, checkout, and push routing unchanged.
+Retargeting the PR refreshes the target. Changing the task base branch or removing the owning PR
+association clears it. If the target is unavailable, Kandev fails closed and marks comparison
+unavailable instead of using a same-named local or `origin` branch.
+
 </details>
 
 ### Add sources after creation
@@ -230,7 +243,7 @@ processes after attachment. Local Docker, SSH, and Sprites instead clone the new
 the current remote workspace and rescan it without changing the agent CWD or restarting the agent
 and workspace processes.
 
-Task agents can call `add_workspace_sources_kandev` with the same mixed batch; `task_id` defaults to the current task, and the operation remains idle-only. `add_branch_to_task_kandev` is the Worktree-only legacy one-repository/branch path and may run during an active turn: it creates a sibling worktree under the task directory, promotes the Files root to that parent, and rescans without restarting the agent, terminals, or workspace processes. Its `worktree_path` is the exact new location, `task_workspace_path` is the Files root, and `agent_cwd_changed` is always `false`; the agent's current directory stays unchanged.
+Task agents can call `add_workspace_sources_kandev` with the same mixed batch; `task_id` defaults to the current task, and the operation remains idle-only. A direct parent in the same workspace can use it to recover an idle child that is missing a repository or SDK; siblings and other task relationships cannot target that child. Exact retries are safe no-ops. `add_branch_to_task_kandev` remains the current-task-only Worktree legacy one-repository/branch path and may run during an active turn: it creates a sibling worktree under the task directory, promotes the Files root to that parent, and rescans without restarting the agent, terminals, or workspace processes. Its `worktree_path` is the exact new location, `task_workspace_path` is the Files root, and `agent_cwd_changed` is always `false`; the agent's current directory stays unchanged.
 
 Use `update_repository_base_branch_kandev` with a task-repository ID to change the comparison base. The database update is authoritative. Resetting cached session bases, refreshing Changes, base commit, ahead/behind counts, and cumulative diff in a live tracker are best-effort side effects; a failure is logged without rolling back the new base, and the persisted value is rebuilt on the next session launch. The tool does not rewrite commits, switch the checkout, or change an existing pull request's target branch.
 

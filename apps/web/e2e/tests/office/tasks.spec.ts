@@ -1,9 +1,10 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 
 test.describe("Tasks (Issues)", () => {
   test("tasks page loads", async ({ testPage, officeSeed: _ }) => {
     await testPage.goto("/office/tasks");
-    await expect(testPage.getByRole("heading", { name: /Tasks/i }).first()).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Tasks/i, {
       timeout: 10_000,
     });
   });

@@ -17,6 +17,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useActionMessageSession, useAgentBootOutcomeAfterMessage } from "./action-message-state";
 import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { deleteTask } from "@/lib/api/domains/kanban-api";
@@ -25,6 +26,7 @@ import type { MessageAction } from "@/components/task/chat/types";
 import { ActionMessageDetails, type ActionMeta } from "./action-message-details";
 import { formatDateTime } from "@/lib/i18n/formats";
 import { parseRetryAt, retryCountdownLabel } from "./transient-retry";
+import { hasSessionRecoveryResolutionAfter } from "@/hooks/processed-message-filtering";
 
 const ICON_MAP: Record<string, React.ElementType> = {
   archive: IconArchive,
@@ -46,9 +48,34 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   // state transition doesn't re-render every message in the list (only the
   // rare action messages that actually depend on it).
   const { t } = useTranslation();
-  const { sessionState, sessionError, activeTurnId } = useActionMessageSession(comment.session_id);
+  const { sessionState, sessionError, sessionMetadata, activeTurnId } = useActionMessageSession(
+    comment.session_id,
+  );
   const metadata = comment.metadata as ActionMeta | undefined;
   const message = comment.content || t("task:anErrorOccurred");
+  const isRecoveryMessage = metadata?.recovery_actions === true;
+  // The recovery acknowledgment lives here, on the message row that stays
+  // mounted, not on SettledFailureMessage: a successful resume drives the
+  // session through STARTING/RUNNING (which unmounts the card via
+  // isSessionActive) and back to WAITING_FOR_INPUT once the agent is idle.
+  // Local state on the card would reset on that remount and the recovery banner
+  // would reappear until the next user message.
+  const [recoveryRequested, setRecoveryRequested] = useState(false);
+  // Durable counterpart to the click acknowledgment: the transcript itself
+  // records that the agent booted again after this failure. It survives a
+  // reload or task switch and also covers auto-resume-on-open, where the card
+  // would otherwise linger until the next prompt flipped the session to RUNNING.
+  const { agentRebooted, agentBootFailed } = useAgentBootOutcomeAfterMessage(
+    comment,
+    isRecoveryMessage,
+  );
+  const recoveryResolvedDurably = isRecoveryMessage
+    ? hasSessionRecoveryResolutionAfter(sessionMetadata, comment.created_at)
+    : false;
+  // The click acknowledgment only covers the wait for that outcome. A recovery
+  // that came back failed — a failed boot row, or a session driven to FAILED —
+  // must surface its card again, buttons included, or the retry is unreachable.
+  const recoveryFailedAgain = agentBootFailed || sessionState === "FAILED";
 
   if (metadata?.action_visibility === "running") {
     if (sessionState === "RUNNING" && comment.turn_id && activeTurnId === comment.turn_id) {
@@ -74,6 +101,10 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
       sessionError={sessionError}
       sessionState={sessionState}
       taskId={comment.task_id}
+      recoveryResolved={
+        recoveryResolvedDurably || agentRebooted || (recoveryRequested && !recoveryFailedAgain)
+      }
+      onRecoveryRequested={() => setRecoveryRequested(true)}
     />
   );
 });
@@ -84,12 +115,16 @@ function SettledActionMessage({
   sessionError,
   sessionState,
   taskId,
+  recoveryResolved,
+  onRecoveryRequested,
 }: {
   metadata: ActionMeta | undefined;
   message: string;
   sessionError?: string;
   sessionState?: TaskSessionState;
   taskId?: string;
+  recoveryResolved: boolean;
+  onRecoveryRequested: () => void;
 }) {
   // A retry card is persisted against the failed turn, so hide it while the
   // replacement turn is starting or running to avoid showing stale progress.
@@ -106,6 +141,8 @@ function SettledActionMessage({
       sessionError={sessionError}
       sessionState={sessionState}
       taskId={taskId}
+      recoveryResolved={recoveryResolved}
+      onRecoveryRequested={onRecoveryRequested}
     />
   );
 }
@@ -116,18 +153,24 @@ function SettledFailureMessage({
   sessionError,
   sessionState,
   taskId,
+  recoveryResolved,
+  onRecoveryRequested,
 }: {
   metadata: ActionMeta | undefined;
   message: string;
   sessionError?: string;
   sessionState?: TaskSessionState;
   taskId?: string;
+  recoveryResolved: boolean;
+  onRecoveryRequested: () => void;
 }) {
-  const [recoveryRequested, setRecoveryRequested] = useState(false);
-
-  // A waiting session can still need recovery, so only hide this persisted
-  // card after its own Resume request is acknowledged (or the session starts).
-  if (isSessionActive(sessionState) || (metadata?.recovery_actions && recoveryRequested))
+  // A waiting session can still need recovery, so only hide this persisted card
+  // once its own recovery resolved: either the Resume click was acknowledged or
+  // the transcript shows the agent booted again after this failure. A resumed
+  // agent settles at WAITING_FOR_INPUT, which isSessionActive deliberately
+  // excludes, so without that second signal the card outlives the failure it
+  // describes.
+  if (isSessionActive(sessionState) || (metadata?.recovery_actions && recoveryResolved))
     return null;
 
   const specialRecovery = renderSpecialRecovery({
@@ -135,7 +178,7 @@ function SettledFailureMessage({
     message,
     sessionError,
     taskId,
-    onRecoveryRequested: () => setRecoveryRequested(true),
+    onRecoveryRequested,
   });
   if (specialRecovery) return specialRecovery;
 
@@ -158,9 +201,7 @@ function SettledFailureMessage({
             <ActionButtons
               actions={metadata.actions}
               taskId={taskId}
-              onRecoveryRequested={
-                metadata.recovery_actions ? () => setRecoveryRequested(true) : undefined
-              }
+              onRecoveryRequested={metadata.recovery_actions ? onRecoveryRequested : undefined}
             />
           )}
         </div>
@@ -391,21 +432,6 @@ function ProviderQuotaRecovery({
       </div>
     </section>
   );
-}
-
-function useActionMessageSession(sessionId: Message["session_id"]) {
-  const sessionState = useAppStore((state) =>
-    sessionId ? (state.taskSessions.items[sessionId]?.state ?? undefined) : undefined,
-  );
-  const sessionError = useAppStore((state) =>
-    sessionId
-      ? (state.taskSessions.items[sessionId]?.error_message as string | undefined)
-      : undefined,
-  );
-  const activeTurnId = useAppStore((state) =>
-    sessionId ? (state.turns.activeBySession[sessionId] ?? undefined) : undefined,
-  );
-  return { sessionState, sessionError, activeTurnId };
 }
 
 function RunningActionNotice({

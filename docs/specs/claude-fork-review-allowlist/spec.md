@@ -6,13 +6,13 @@ owner: kdlbs
 
 # Claude Fork Review Allowlist
 
-Decision: ADR-2026-07-31-isolate-manual-pr-review-content; ADR-2026-08-07-claude-allowlist-label-bridge
+Decision: ADR-2026-07-31-isolate-manual-pr-review-content; ADR-2026-08-07-claude-allowlist-label-bridge; ADR-2026-08-22-persistent-fork-approval-labels
 
 ## Why
 
 Trusted fork contributors listed in the repository's Claude review allowlist should receive an automatic review when they open a pull request, without requiring a maintainer to label it. Further review rounds should be explicit so pushes do not repeatedly consume Claude tokens. The workflow must pass the already-authorized contributor to Claude's separate non-write-user permission gate.
 
-The same trusted contributors should also receive the repository's existing review and preview approval markers, so maintainers do not need to maintain a second identity list or apply two labels manually.
+The same trusted contributors should also receive the repository's existing review and preview approval markers, so maintainers do not need to maintain a second identity list or apply two labels manually. Maintainers also use those labels for unallowlisted fork pull requests and expect an explicit approval to remain valid across routine follow-up commits.
 
 ## What
 
@@ -21,7 +21,9 @@ The same trusted contributors should also receive the repository's existing revi
 - The Claude action receives the already job-authorized pull request author through its `allowed_non_write_users` input.
 - When an allowlisted fork pull request opens, the base-controlled workflow adds both existing labels, `safe-to-review` and `safe-to-test`, to the pull request. The label operation is idempotent and applies only to fork pull requests whose opening author matches the allowlist.
 - The `CLAUDE_REVIEW_ALLOWLIST` gate remains a direct authorization path for the fork review job, so adding labels with the repository `GITHUB_TOKEN` does not create a second review run through the `labeled` event.
-- The preview workflow treats an author in `CLAUDE_REVIEW_ALLOWLIST` as trusted for fork preview deployment on every non-closed pull-request-target event it already handles (`opened`, `synchronize`, `reopened`, and `labeled`). This keeps preview deployment automatic even though the existing per-commit `safe-to-test` cleanup removes that label after a fork push.
+- The preview workflow treats an author in `CLAUDE_REVIEW_ALLOWLIST` as trusted for fork preview deployment on every non-closed pull-request-target event it already handles (`opened`, `synchronize`, `reopened`, and `labeled`). A maintainer-applied `safe-to-test` label remains valid across later `synchronize` events and also authorizes the preview deployment path for the current fork head.
+- A maintainer-applied `safe-to-review` label remains valid across later `synchronize` events and authorizes the existing OpenCode fork-review path for the current fork head. The label is not removed automatically after a push.
+- Approval labels remain until a maintainer removes them. A contributor push does not revoke either label or require the maintainer to repeat the same approval for each follow-up commit.
 - A maintainer may apply `safe-to-review` to request the initial review of an untrusted fork pull request.
 - Pushes, ready-for-review transitions, and reopenings do not automatically start another Claude review. A maintainer can request a later review by commenting `@claude review` on the pull request. That requested review reads the current pull request head, including files newly added by the pull request.
 - Manual pull request reviews keep the trusted default branch at the workflow root and do not check out pull request content. Claude may use read-only local tools for trusted surrounding code, reads the current diff through constrained GitHub commands, and reads complete current-head PR files only through a path-validated, size-limited GET helper bound to the event's PR number. Its only write capability is posting review comments.
@@ -33,7 +35,7 @@ The same trusted contributors should also receive the repository's existing revi
 
 - Only the base-controlled `pull_request_target` workflow may add the two labels. It does not check out or execute pull-request content for the labeling step.
 - A matching `CLAUDE_REVIEW_ALLOWLIST` entry authorizes the existing fork review path and the preview workflow's fork deployment path, which has access to the preview deployment credentials. Repository maintainers are responsible for keeping this variable restricted to trusted contributors.
-- A non-allowlisted fork author still needs the existing maintainer-applied labels; the new automation does not broaden the manual label paths.
+- A non-allowlisted fork author still needs the existing maintainer-applied labels. Those labels authorize the current and subsequent fork heads until a maintainer removes them; maintainers are responsible for revoking approval when the contributor or proposed change is no longer trusted.
 
 ## Failure modes
 
@@ -45,7 +47,10 @@ The same trusted contributors should also receive the repository's existing revi
 
 - **GIVEN** `CLAUDE_REVIEW_ALLOWLIST` is `["ClemDNL"]`, **WHEN** `ClemDNL` opens a fork pull request, **THEN** the fork review job supplies `ClemDNL` through `allowed_non_write_users` and Claude does not reject the run solely because the actor has repository permission `read`.
 - **GIVEN** `CLAUDE_REVIEW_ALLOWLIST` is `["ClemDNL"]`, **WHEN** `ClemDNL` opens a fork pull request, **THEN** the pull request receives both `safe-to-review` and `safe-to-test` labels without a maintainer action.
-- **GIVEN** an allowlisted fork pull request has a new commit pushed, **WHEN** the preview workflow handles the `synchronize` event, **THEN** the preview deploy job remains eligible through `CLAUDE_REVIEW_ALLOWLIST` even if the existing cleanup removes `safe-to-test`.
+- **GIVEN** an allowlisted fork pull request has a new commit pushed, **WHEN** the preview workflow handles the `synchronize` event, **THEN** the preview deploy job remains eligible through `CLAUDE_REVIEW_ALLOWLIST` and any existing approval labels remain present.
+- **GIVEN** an unallowlisted fork pull request has `safe-to-test`, **WHEN** its contributor pushes a follow-up commit, **THEN** `safe-to-test` remains present and the preview deploy job is eligible for the current head on the `synchronize` event.
+- **GIVEN** an unallowlisted fork pull request has `safe-to-review`, **WHEN** its contributor pushes a follow-up commit, **THEN** `safe-to-review` remains present and the OpenCode fork-review job is eligible for the current head on the `synchronize` event.
+- **GIVEN** a maintainer removes an approval label from a fork pull request, **WHEN** the contributor pushes another commit, **THEN** the corresponding workflow path is not authorized by that removed label.
 - **GIVEN** a fork pull request has received its initial review, **WHEN** its contributor pushes another commit, marks it ready for review, or reopens it, **THEN** the Claude review workflow does not run again.
 - **GIVEN** a fork contributor is absent from `CLAUDE_REVIEW_ALLOWLIST`, **WHEN** they open or update their pull request without `safe-to-review`, **THEN** the fork review job does not run.
 - **GIVEN** a fork contributor is absent from `CLAUDE_REVIEW_ALLOWLIST`, **WHEN** they open a pull request, **THEN** the automatic labeling job adds neither approval label and the preview workflow does not deploy unless its existing `PREVIEW_ENV_ALLOWLIST` or `safe-to-test` path authorizes it.
@@ -61,6 +66,5 @@ The same trusted contributors should also receive the repository's existing revi
 - Changing the pinned Claude Code Action version.
 - Changing the Claude OAuth token, GitHub token, or OIDC strategy.
 - Creating a second preview-specific allowlist or removing `PREVIEW_ENV_ALLOWLIST`.
-- Re-adding approval labels after every fork push or using a new personal access token/GitHub App solely to make label events recurse into other workflows.
-- Changing the OpenCode review workflow.
+- Changing the Claude automatic follow-up review policy; approval-label persistence does not add a `synchronize` trigger to the Claude review workflow.
 - Changing the automatic review behavior for same-repository pull requests.

@@ -222,6 +222,25 @@ describe("useAllWorkflowSnapshots — fetch guards", () => {
   });
 });
 
+const WORKTREE_EXECUTOR_FIELDS = {
+  primaryExecutorId: "exec-worktree",
+  primaryExecutorType: "worktree",
+  primaryExecutorName: "Worktree",
+  isRemoteExecutor: false,
+};
+
+function seedCachedTask(taskOverrides: Record<string, unknown>) {
+  mockState.kanbanMulti.snapshots = {
+    "wf-A": {
+      workflowId: "wf-A",
+      workflowName: "A",
+      isPlaceholder: true,
+      steps: [],
+      tasks: [{ id: "task-1", workflowStepId: "step-1", ...taskOverrides }],
+    },
+  };
+}
+
 describe("useAllWorkflowSnapshots — snapshot mapping", () => {
   beforeEach(() => {
     resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
@@ -255,15 +274,7 @@ describe("useAllWorkflowSnapshots — snapshot mapping", () => {
   });
 
   it("preserves a cached autopilot marker when a fresh snapshot omits it", async () => {
-    mockState.kanbanMulti.snapshots = {
-      "wf-A": {
-        workflowId: "wf-A",
-        workflowName: "A",
-        isPlaceholder: true,
-        steps: [],
-        tasks: [{ id: "task-1", workflowStepId: "step-1", autopilot: true }],
-      },
-    };
+    seedCachedTask({ autopilot: true });
     mockFetchWorkflowSnapshot.mockResolvedValueOnce({
       steps: [{ id: "step-1", name: "Review", position: 1 }],
       tasks: [{ id: "task-1", workflow_step_id: "step-1", title: "Task" }],
@@ -276,15 +287,7 @@ describe("useAllWorkflowSnapshots — snapshot mapping", () => {
   });
 
   it("keeps an explicit false autopilot value from the fresh snapshot", async () => {
-    mockState.kanbanMulti.snapshots = {
-      "wf-A": {
-        workflowId: "wf-A",
-        workflowName: "A",
-        isPlaceholder: true,
-        steps: [],
-        tasks: [{ id: "task-1", workflowStepId: "step-1", autopilot: true }],
-      },
-    };
+    seedCachedTask({ autopilot: true });
     mockFetchWorkflowSnapshot.mockResolvedValueOnce({
       steps: [{ id: "step-1", name: "Review", position: 1 }],
       tasks: [{ id: "task-1", workflow_step_id: "step-1", title: "Task", autopilot: false }],
@@ -294,6 +297,337 @@ describe("useAllWorkflowSnapshots — snapshot mapping", () => {
 
     await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
     expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0].autopilot).toBe(false);
+  });
+});
+
+describe("useAllWorkflowSnapshots — executor binding merge", () => {
+  beforeEach(() => {
+    resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
+  });
+
+  it("preserves a newer live executor binding when a delayed snapshot omits it", async () => {
+    seedCachedTask({});
+    let resolveSnapshot: (value: { steps: unknown[]; tasks: unknown[] }) => void = () => {};
+    mockFetchWorkflowSnapshot.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalled());
+
+    // A task.updated event adds the executor while the snapshot is in flight.
+    mockState.kanbanMulti.snapshots = {
+      "wf-A": {
+        workflowId: "wf-A",
+        workflowName: "A",
+        isPlaceholder: true,
+        steps: [],
+        tasks: [{ id: "task-1", workflowStepId: "step-1", ...WORKTREE_EXECUTOR_FIELDS }],
+      },
+    };
+    resolveSnapshot({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [{ id: "task-1", workflow_step_id: "step-1", title: "Task" }],
+    });
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0]).toMatchObject(
+      WORKTREE_EXECUTOR_FIELDS,
+    );
+  });
+
+  it("clears a cached executor when a current snapshot omits the primary session", async () => {
+    seedCachedTask({ primarySessionId: "session-1", ...WORKTREE_EXECUTOR_FIELDS });
+    mockFetchWorkflowSnapshot.mockResolvedValueOnce({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      // The backend omits primary_session_id and primary_executor_* when the
+      // task has no primary session because those DTO fields use omitempty.
+      tasks: [{ id: "task-1", workflow_step_id: "step-1", title: "Task" }],
+    });
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0].primaryExecutorType).toBeUndefined();
+  });
+
+  it("preserves each omitted executor field from a newer live binding independently", async () => {
+    seedCachedTask({});
+    let resolveSnapshot: (value: { steps: unknown[]; tasks: unknown[] }) => void = () => {};
+    mockFetchWorkflowSnapshot.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalled());
+
+    mockState.kanbanMulti.snapshots = {
+      "wf-A": {
+        workflowId: "wf-A",
+        workflowName: "A",
+        isPlaceholder: true,
+        steps: [],
+        tasks: [{ id: "task-1", workflowStepId: "step-1", ...WORKTREE_EXECUTOR_FIELDS }],
+      },
+    };
+    resolveSnapshot({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [
+        {
+          id: "task-1",
+          workflow_step_id: "step-1",
+          title: "Task",
+          primary_executor_type: "worktree",
+        },
+      ],
+    });
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0]).toMatchObject(
+      WORKTREE_EXECUTOR_FIELDS,
+    );
+  });
+});
+
+describe("useAllWorkflowSnapshots — executor binding mapping", () => {
+  beforeEach(() => {
+    resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
+  });
+
+  it("clears a cached executor binding when the response explicitly clears the primary session", async () => {
+    seedCachedTask({ primarySessionId: "session-1", ...WORKTREE_EXECUTOR_FIELDS });
+    mockFetchWorkflowSnapshot.mockResolvedValueOnce({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [
+        {
+          id: "task-1",
+          workflow_step_id: "step-1",
+          title: "Task",
+          primary_session_id: null,
+        },
+      ],
+    });
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0].primaryExecutorType).toBeUndefined();
+  });
+
+  it("adopts a fresh primary executor binding when the response includes one", async () => {
+    seedCachedTask({});
+    mockFetchWorkflowSnapshot.mockResolvedValueOnce({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [
+        {
+          id: "task-1",
+          workflow_step_id: "step-1",
+          title: "Task",
+          primary_executor_id: "exec-worktree",
+          primary_executor_type: "worktree",
+          primary_executor_name: "Worktree",
+          is_remote_executor: false,
+        },
+      ],
+    });
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0]).toMatchObject(
+      WORKTREE_EXECUTOR_FIELDS,
+    );
+  });
+});
+
+const REMOTE_EXECUTOR_NAME = "Remote box";
+
+function seedExecutor(executor: Record<string, unknown>) {
+  mockState.kanbanMulti.snapshots = {
+    "wf-A": {
+      workflowId: "wf-A",
+      workflowName: "A",
+      isPlaceholder: true,
+      steps: [],
+      tasks: [{ id: "task-1", workflowStepId: "step-1", ...executor }],
+    },
+  };
+}
+
+function seedCachedExecutor() {
+  seedExecutor({
+    primaryExecutorId: "exec-1",
+    primaryExecutorType: "worktree",
+    primaryExecutorName: "Worktree",
+    isRemoteExecutor: false,
+  });
+}
+
+function seedNewerLiveExecutor() {
+  seedExecutor({
+    primaryExecutorId: "exec-2",
+    primaryExecutorType: "ssh",
+    primaryExecutorName: REMOTE_EXECUTOR_NAME,
+    isRemoteExecutor: true,
+  });
+}
+
+describe("useAllWorkflowSnapshots — executor field preservation", () => {
+  beforeEach(() => {
+    resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
+  });
+
+  it("honors an executor clear from a fresh snapshot", async () => {
+    seedCachedExecutor();
+    mockFetchWorkflowSnapshot.mockResolvedValueOnce({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [{ id: "task-1", workflow_step_id: "step-1", title: "Task" }],
+    });
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    const task = mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0];
+    expect(task.primaryExecutorId).toBeUndefined();
+    expect(task.primaryExecutorType).toBeUndefined();
+    expect(task.primaryExecutorName).toBeUndefined();
+  });
+
+  it("preserves a newer live executor when a stale snapshot omits it", async () => {
+    seedCachedExecutor();
+    let resolveSnapshot: ((value: { steps: unknown[]; tasks: unknown[] }) => void) | undefined;
+    mockFetchWorkflowSnapshot.mockImplementationOnce(
+      () =>
+        new Promise<{ steps: unknown[]; tasks: unknown[] }>((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalled());
+
+    seedNewerLiveExecutor();
+    resolveSnapshot?.({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [{ id: "task-1", workflow_step_id: "step-1", title: "Stale task" }],
+    });
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0]).toMatchObject({
+      primaryExecutorId: "exec-2",
+      primaryExecutorType: "ssh",
+      primaryExecutorName: REMOTE_EXECUTOR_NAME,
+      isRemoteExecutor: true,
+    });
+  });
+
+  it("adopts a legitimately different executor value from the fresh snapshot", async () => {
+    seedCachedExecutor();
+    mockFetchWorkflowSnapshot.mockResolvedValueOnce({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [
+        {
+          id: "task-1",
+          workflow_step_id: "step-1",
+          title: "Task",
+          primary_executor_id: "exec-2",
+          primary_executor_type: "ssh",
+          primary_executor_name: "Remote box",
+          is_remote_executor: true,
+        },
+      ],
+    });
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0]).toMatchObject({
+      primaryExecutorId: "exec-2",
+      primaryExecutorType: "ssh",
+      primaryExecutorName: "Remote box",
+      isRemoteExecutor: true,
+    });
+  });
+});
+
+describe("useAllWorkflowSnapshots — executor race ordering", () => {
+  beforeEach(() => {
+    resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
+  });
+
+  it("keeps a live detach when a stale snapshot carries the old executor", async () => {
+    seedExecutor({
+      primaryExecutorId: "exec-1",
+      primaryExecutorType: "worktree",
+      primaryExecutorName: "Worktree",
+      isRemoteExecutor: true,
+    });
+    let resolveSnapshot: ((value: { steps: unknown[]; tasks: unknown[] }) => void) | undefined;
+    mockFetchWorkflowSnapshot.mockImplementationOnce(
+      () =>
+        new Promise<{ steps: unknown[]; tasks: unknown[] }>((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalled());
+
+    seedExecutor({ isRemoteExecutor: false });
+    resolveSnapshot?.({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [
+        {
+          id: "task-1",
+          workflow_step_id: "step-1",
+          title: "Stale task",
+          primary_executor_id: "exec-1",
+          primary_executor_type: "worktree",
+          primary_executor_name: "Worktree",
+          is_remote_executor: true,
+        },
+      ],
+    });
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    const task = mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0];
+    expect(task.primaryExecutorId).toBeUndefined();
+    expect(task.primaryExecutorType).toBeUndefined();
+    expect(task.primaryExecutorName).toBeUndefined();
+    expect(task.isRemoteExecutor).toBe(false);
+  });
+
+  it("keeps the live executor for a task added during the snapshot fetch", async () => {
+    let resolveSnapshot: ((value: { steps: unknown[]; tasks: unknown[] }) => void) | undefined;
+    mockFetchWorkflowSnapshot.mockImplementationOnce(
+      () =>
+        new Promise<{ steps: unknown[]; tasks: unknown[] }>((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalled());
+
+    seedNewerLiveExecutor();
+    resolveSnapshot?.({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [{ id: "task-1", workflow_step_id: "step-1", title: "Stale task" }],
+    });
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0]).toMatchObject({
+      primaryExecutorId: "exec-2",
+      primaryExecutorType: "ssh",
+      primaryExecutorName: REMOTE_EXECUTOR_NAME,
+      isRemoteExecutor: true,
+    });
   });
 });
 

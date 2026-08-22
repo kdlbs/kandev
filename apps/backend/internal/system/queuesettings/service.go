@@ -26,14 +26,28 @@ type Service struct {
 	store           *Store
 	target          Target
 	readEnvironment EnvironmentReader
+	configuration   Configuration
 	logger          *logger.Logger
 }
 
-func NewService(store *Store, target Target, readEnvironment EnvironmentReader, log *logger.Logger) *Service {
+func NewService(
+	store *Store,
+	target Target,
+	readEnvironment EnvironmentReader,
+	log *logger.Logger,
+	startup ...Configuration,
+) *Service {
 	if readEnvironment == nil {
 		readEnvironment = ReadEnvironment
 	}
-	return &Service{store: store, target: target, readEnvironment: readEnvironment, logger: log}
+	var configuration Configuration
+	if len(startup) > 0 {
+		configuration = startup[0]
+	}
+	return &Service{
+		store: store, target: target, readEnvironment: readEnvironment,
+		configuration: configuration, logger: log,
+	}
 }
 
 func ReadEnvironment() Environment {
@@ -49,7 +63,7 @@ func (s *Service) Get(ctx context.Context) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
-	resolution, err := Resolve(configured, s.readEnvironment())
+	resolution, err := Resolve(configured, s.readEnvironment(), s.configuration)
 	if err != nil {
 		return Response{}, err
 	}
@@ -71,12 +85,15 @@ func (s *Service) Update(ctx context.Context, patch SettingsPatch) (Response, er
 	if err != nil {
 		return Response{}, err
 	}
-	resolution, err := Resolve(current, environment)
+	resolution, err := Resolve(current, environment, s.configuration)
 	if err != nil {
 		return Response{}, err
 	}
 	s.warnInvalidEnvironment(resolution)
 	if patch.MaxPerSession != nil && resolution.Effective.Locked {
+		if resolution.Effective.Source == SourceConfiguration {
+			return Response{}, ErrConfigurationLocked
+		}
 		return Response{}, ErrEnvironmentLocked
 	}
 	settings := patch.Apply(resolution.Settings)
@@ -89,7 +106,7 @@ func (s *Service) Update(ctx context.Context, patch SettingsPatch) (Response, er
 	if err := s.store.Save(ctx, settings); err != nil {
 		return Response{}, err
 	}
-	updated, err := Resolve(&settings, environment)
+	updated, err := Resolve(&settings, environment, s.configuration)
 	if err != nil {
 		return Response{}, err
 	}

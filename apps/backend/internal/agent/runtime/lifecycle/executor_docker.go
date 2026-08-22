@@ -163,10 +163,16 @@ func (r *DockerExecutor) HealthCheck(_ context.Context) error {
 
 func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (instance *ExecutorInstance, err error) {
 	baseCtx := preparationContext(ctx)
+	if err := validateAgentctlStartupConfig(req.AgentctlStartupConfig); err != nil {
+		return nil, fmt.Errorf("invalid agentctl startup configuration: %w", err)
+	}
 	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
 		return nil, err
 	}
 	if _, err := validateContributionDestinations(req.ContributionDestinations); err != nil {
+		return nil, err
+	}
+	if _, err := validateComparisonTargets(req.ComparisonTargets); err != nil {
 		return nil, err
 	}
 	dockerClient, containerMgr, err := r.ensureClient()
@@ -288,6 +294,8 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		BaseBranches:                   getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:            req.RemoteContributions,
 		ContributionDestinations:       req.ContributionDestinations,
+		ComparisonTargets:              req.ComparisonTargets,
+		AgentctlStartupConfig:          req.AgentctlStartupConfig,
 	}, nil
 }
 
@@ -589,6 +597,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:      req.RemoteContributions,
 		ContributionDestinations: req.ContributionDestinations,
+		ComparisonTargets:        req.ComparisonTargets,
 	}
 }
 

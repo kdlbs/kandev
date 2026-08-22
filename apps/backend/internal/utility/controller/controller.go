@@ -3,7 +3,10 @@ package controller
 import (
 	"context"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/utility/dto"
+	"github.com/kandev/kandev/internal/utility/models"
 	"github.com/kandev/kandev/internal/utility/service"
 	"github.com/kandev/kandev/internal/utility/template"
 )
@@ -116,8 +119,14 @@ func (c *Controller) PreparePromptRequest(ctx context.Context, req dto.ExecutePr
 }
 
 // CreateCall creates a call record for tracking.
-func (c *Controller) CreateCall(ctx context.Context, utilityID, sessionID, resolvedPrompt, model, profileID string) (string, error) {
-	call, err := c.svc.CreateCall(ctx, utilityID, sessionID, resolvedPrompt, model, profileID)
+func (c *Controller) CreateCall(ctx context.Context, utilityID, sessionID, resolvedPrompt, model, profileID string, executionProfileID ...string) (string, error) {
+	var call *models.UtilityAgentCall
+	var err error
+	if len(executionProfileID) > 0 && executionProfileID[0] != "" {
+		call, err = c.svc.CreateCallWithExecutionProfile(ctx, utilityID, sessionID, resolvedPrompt, model, profileID, executionProfileID[0])
+	} else {
+		call, err = c.svc.CreateCall(ctx, utilityID, sessionID, resolvedPrompt, model, profileID)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -132,6 +141,22 @@ func (c *Controller) CompleteCall(ctx context.Context, callID, response string, 
 // FailCall marks a call as failed.
 func (c *Controller) FailCall(ctx context.Context, callID, errorMessage string, durationMs int) error {
 	return c.svc.FailCall(ctx, callID, errorMessage, durationMs)
+}
+
+// SetCallExecutionProfile updates the concrete route attribution for a call.
+func (c *Controller) SetCallExecutionProfile(ctx context.Context, callID, executionProfileID string) error {
+	return c.svc.SetCallExecutionProfile(ctx, callID, executionProfileID)
+}
+
+// ResolveExecutionAfterFailure advances a shared dynamic route after a
+// classified pre-result utility failure.
+func (c *Controller) ResolveExecutionAfterFailure(
+	ctx context.Context,
+	sessionID, profileID, currentExecutionProfileID string,
+	expectedGeneration int64,
+	failure *routingerr.Error,
+) (agentruntime.ProfileExecution, error) {
+	return c.svc.ResolveExecutionAfterFailure(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration, failure)
 }
 
 // ListCalls returns the call history for a utility agent.

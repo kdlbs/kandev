@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -40,6 +41,11 @@ const (
 	messageArg           = "message"
 	autopilotArg         = "autopilot"
 	contextParagraphsArg = "context_paragraphs"
+	objType              = "object"
+	propsKey             = "properties"
+	reqKey               = "required"
+	typeKey              = "type"
+	stringType           = "string"
 )
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
@@ -366,6 +372,33 @@ func (s *Server) getTaskMRAutomationHandler() server.ToolHandlerFunc {
 	}
 }
 
+// copyMRIdentityArgs copies the optional repository_id/project_path/mr_iid
+// triple that scopes a patch to one linked MR. repository_id is frequently
+// an empty string on self-managed hosts without a numeric project ID (R6),
+// so presence in args — not non-emptiness — is what marks it as sent;
+// copyOptionalStringArg's "empty means absent" rule would silently turn a
+// complete-but-empty identity into a partial one and get it rejected.
+func copyMRIdentityArgs(payload, args map[string]interface{}) error {
+	for _, key := range []string{"repository_id", "project_path"} {
+		if value, ok := args[key]; ok {
+			if s, ok := value.(string); ok {
+				payload[key] = s
+			}
+		}
+	}
+	if value, ok := args["mr_iid"].(float64); ok {
+		if !isValidMRIID(value) {
+			return fmt.Errorf("mr_iid must be a positive integer")
+		}
+		payload["mr_iid"] = int(value)
+	}
+	return nil
+}
+
+func isValidMRIID(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value > 0 && math.Trunc(value) == value
+}
+
 func (s *Server) updateTaskMRAutomationHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		payload := map[string]interface{}{"task_id": s.taskID}
@@ -373,12 +406,24 @@ func (s *Server) updateTaskMRAutomationHandler() server.ToolHandlerFunc {
 		if hasLifecyclePromptOverrideArgument(args) {
 			return mcp.NewToolResultError("lifecycle prompt overrides are not supported"), nil
 		}
-		for _, key := range []string{"prompt_on_review_requested", "prompt_on_merged", "prompt_on_closed"} {
+		if err := copyMRIdentityArgs(payload, args); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		fieldCount := 0
+		for _, key := range []string{
+			"auto_fix_enabled", "auto_merge_enabled",
+			"prompt_on_review_requested", "prompt_on_merged", "prompt_on_closed",
+		} {
 			if value, ok := args[key].(bool); ok {
 				payload[key] = value
+				fieldCount++
 			}
 		}
-		if len(payload) == 1 {
+		if value, ok := args["auto_fix_prompt_override"].(string); ok {
+			payload["auto_fix_prompt_override"] = value
+			fieldCount++
+		}
+		if fieldCount == 0 {
 			return mcp.NewToolResultError("at least one MR automation option is required"), nil
 		}
 		var result map[string]interface{}
@@ -504,6 +549,42 @@ func (s *Server) listTaskSessionsHandler() server.ToolHandlerFunc {
 
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListTaskSessions, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) listPendingAgentPermissionsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString(mcpKeyTaskID)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		payload := map[string]interface{}{mcpKeyTaskID: taskID}
+		copyOptionalStringArg(payload, req, "session_id")
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListPendingAgentPermissions, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) resolveAgentPermissionHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		payload := make(map[string]interface{}, 5)
+		for _, field := range []string{mcpKeyTaskID, "session_id", "request_id", "pending_id", "option_id"} {
+			value, err := req.RequireString(field)
+			if err != nil {
+				return mcp.NewToolResultError(field + " is required"), nil
+			}
+			payload[field] = value
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPResolveAgentPermission, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
