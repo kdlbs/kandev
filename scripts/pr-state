@@ -393,7 +393,7 @@ review_evidence_json() {
         markdown_prose_lines
         | any(
             .
-            | gsub("^[[:space:]]*(?:(?:[-*+]\\s+)|(?:[0-9]+\\.\\s+))?(?:\\*\\*|__|_|\\*)?"; "")
+            | sub("^[[:space:]]*(?:(?:[-*+]\\s+)|(?:[0-9]+\\.\\s+))?(?:\\*\\*|__|_|\\*)?"; "")
             | test("^(?:blocked|changes[ _-]?requested|action required|must fix|required fix|please fix)\\b"; "i")
           );
       def review_eligibility:
@@ -583,6 +583,7 @@ summarize_state_json() {
         | select(successful_check)
         | {name, workflow, status, conclusion, run_id, job_id, details_url, target_url}
       ],
+      check_count: ([effective_checks[]] | length),
       passed_check_count: ([effective_checks[] | select(successful_check)] | length),
       unresolved_review_thread_count,
       filtered_review_thread_count,
@@ -752,7 +753,7 @@ fetch_review_threads_nodes_json() {
             }
           }
         }' \
-      -f owner="$owner" -f repo="$repo" -F pr="$pr_number" "${cursor_args[@]}")"; then
+      -f owner="$owner" -f repo="$repo" -F pr="$pr_number" ${cursor_args[@]+"${cursor_args[@]}"})"; then
       rm -f "$nodes_file"
       return 1
     fi

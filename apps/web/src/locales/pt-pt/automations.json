@@ -61,6 +61,8 @@
   "excludeDraftPrs": "Excluir PRs em rascunho",
   "executorProfileLabel": "Perfil de executor",
   "executorProfilePlaceholder": "Selecionar executor",
+  "exportFailed": "Não foi possível exportar as automatizações",
+  "exportZip": "Exportar",
   "failedToDeleteAutomation": "Não foi possível eliminar a automatização",
   "failedToDeleteRun": "Não foi possível eliminar a execução",
   "failedToDeleteRuns": "Não foi possível eliminar as execuções",

@@ -13,6 +13,7 @@ const workspaceId = "workspace-1";
 const defaultHost = "https://gitlab.com";
 const credentialsContributorId = "gitlab-credentials";
 const appState = {
+  prompts: { items: [], loaded: true, loading: false },
   gitlabReviewWatches: { items: [] as ReviewWatch[], loaded: false, loading: false },
   gitlabIssueWatches: { items: [], loaded: false, loading: false },
   gitlabActionPresets: {
@@ -48,6 +49,27 @@ vi.mock("@/components/toast-provider", () => ({
 
 vi.mock("@/components/settings/settings-save-provider", () => ({
   useSettingsSaveContributor: vi.fn(),
+}));
+
+vi.mock("@/components/settings/settings-prompt-editor", () => ({
+  SettingsPromptEditor: ({
+    value,
+    onChange,
+    ariaLabel,
+    testId,
+  }: {
+    value: string;
+    onChange: (value: string) => void;
+    ariaLabel?: string;
+    testId?: string;
+  }) => (
+    <textarea
+      aria-label={ariaLabel}
+      data-testid={testId}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  ),
 }));
 
 vi.mock("@/lib/api/domains/gitlab-api", () => ({

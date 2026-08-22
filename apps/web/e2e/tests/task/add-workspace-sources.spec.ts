@@ -4,8 +4,11 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
+
+const WORKSPACE_SOURCES_PATH = /^\/api\/v1\/tasks\/[^/]+\/workspace-sources$/;
 
 async function chooseDirectory(
   page: Page,
@@ -46,6 +49,15 @@ function activeFileEditor(page: Page) {
 
 function activeFileTab(page: Page, filename: string) {
   return page.locator(".dv-tab.dv-active-tab", { hasText: filename }).first();
+}
+
+async function submitWorkspaceSources(page: Page, submit: Locator) {
+  const responsePromise = waitForHttp(page, "POST", WORKSPACE_SOURCES_PATH);
+
+  await submit.click();
+  const response = await responsePromise;
+  expect(response.ok()).toBe(true);
+  await response.finished();
 }
 
 async function waitForWorkspaceReady(
@@ -92,6 +104,19 @@ test.describe("Attach local workspace sources", () => {
 
     if (!task.session_id) throw new Error("task creation did not return a session id");
     await waitForWorkspaceReady(apiClient, task.id, task.session_id);
+
+    // The "Add folder" control is gated on the task's primary executor
+    // binding. Poll the backend directly for it rather than relying on the
+    // later "Add folder" click landing after it incidentally.
+    // `primary_executor_type` is `omitempty`, so an unbound task omits the key
+    // entirely: assert truthiness, never `not.toBeNull()`, which `undefined`
+    // satisfies on the first poll.
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).primary_executor_type, {
+        timeout: 30_000,
+      })
+      .toBeTruthy();
+
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -180,8 +205,8 @@ test.describe("Attach local workspace sources", () => {
       repositoryPath,
     );
     await repositoryRow.getByRole("textbox", { name: "Base branch" }).fill("main");
-    await submit.click();
-    await expect(dialog).not.toBeVisible({ timeout: 30_000 });
+    await submitWorkspaceSources(testPage, submit);
+    await expect(dialog).not.toBeVisible();
     await expect(
       session.files
         .getByTestId("file-tree-node")
@@ -205,8 +230,8 @@ test.describe("Attach local workspace sources", () => {
     await prCapture.screenshot("workspace-actions-mixed-sources", {
       caption: "Desktop Add to workspace dialog with a local folder configured",
     });
-    await submit.click();
-    await expect(dialog).not.toBeVisible({ timeout: 30_000 });
+    await submitWorkspaceSources(testPage, submit);
+    await expect(dialog).not.toBeVisible();
 
     await expect(
       session.files.getByTestId("file-tree-node").filter({ hasText: "plain-local-folder" }),

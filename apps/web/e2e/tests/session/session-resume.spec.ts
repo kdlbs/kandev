@@ -38,6 +38,45 @@ async function openTaskSession(page: Page, title: string): Promise<SessionPage> 
   return session;
 }
 
+type SessionTabHistoryEntry = { id: string; text: string };
+
+async function recordSessionTabHistory(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const history: SessionTabHistoryEntry[][] = [];
+    const record = () => {
+      const entries = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-testid^="session-tab-"]'),
+      )
+        .map((element) => {
+          const testId = element.getAttribute("data-testid") ?? "";
+          return {
+            id: testId.slice("session-tab-".length),
+            text: element.textContent?.trim() ?? "",
+          };
+        })
+        .filter((entry) => entry.id && entry.text);
+      if (entries.length > 0) history.push(entries);
+    };
+    const observer = new MutationObserver(record);
+    const start = () => {
+      observer.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+      });
+      record();
+    };
+    if (document.documentElement) {
+      start();
+    } else {
+      document.addEventListener("DOMContentLoaded", start, { once: true });
+    }
+    (
+      window as Window & { __KANDEV_SESSION_TAB_HISTORY__?: SessionTabHistoryEntry[][] }
+    ).__KANDEV_SESSION_TAB_HISTORY__ = history;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Tests — ACP (normal) mode
 // ---------------------------------------------------------------------------
@@ -439,6 +478,121 @@ test.describe("Session resume (multi-session)", () => {
         },
       )
       .toBe(true);
+  });
+
+  test("keeps distinct model titles during multi-session resume", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+    prCapture,
+  }) => {
+    test.setTimeout(180_000);
+
+    const { agents } = await apiClient.listAgents();
+    const mockAgent = agents.find((agent) => agent.name === "mock-agent") ?? agents[0];
+    if (!mockAgent) throw new Error("mock-agent is not available for model resume test");
+    const solProfile = await apiClient.createAgentProfile(mockAgent.id, "Resume Sol Profile", {
+      model: "mock-smart",
+    });
+    const lunaProfile = await apiClient.createAgentProfile(mockAgent.id, "Resume Luna Profile", {
+      model: "mock-fast",
+    });
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Distinct Model Resume Task",
+      solProfile.id,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    const firstSessionId = task.session_id;
+    if (!firstSessionId) throw new Error("first model resume session was not created");
+
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.some(
+            (session) =>
+              session.id === firstSessionId &&
+              ["WAITING_FOR_INPUT", "COMPLETED"].includes(session.state),
+          );
+        },
+        { timeout: 60_000, message: "first distinct-model session did not settle" },
+      )
+      .toBe(true);
+
+    const second = await apiClient.launchSession(
+      {
+        task_id: task.id,
+        agent_profile_id: lunaProfile.id,
+        workflow_step_id: seedData.startStepId,
+        prompt: "/e2e:simple-message",
+      },
+      60_000,
+    );
+    const secondSessionId = second.session_id;
+
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return (
+            sessions.length === 2 &&
+            sessions.every((session) => ["WAITING_FOR_INPUT", "COMPLETED"].includes(session.state))
+          );
+        },
+        { timeout: 60_000, message: "both distinct-model sessions did not settle" },
+      )
+      .toBe(true);
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.sessionTabBySessionId(firstSessionId)).toContainText("Mock Smart", {
+      timeout: 30_000,
+    });
+    await expect(session.sessionTabBySessionId(secondSessionId)).toContainText("Mock Fast", {
+      timeout: 15_000,
+    });
+    await prCapture.screenshot("desktop-distinct-model-tabs", {
+      caption: "Distinct model labels remain visible across desktop session tabs",
+    });
+
+    await recordSessionTabHistory(testPage);
+    await backend.restart();
+    await testPage.reload();
+    await session.waitForLoad();
+
+    await expect(session.sessionTabBySessionId(firstSessionId)).toContainText("Mock Smart", {
+      timeout: 60_000,
+    });
+    await expect(session.sessionTabBySessionId(secondSessionId)).toContainText("Mock Fast", {
+      timeout: 30_000,
+    });
+
+    const history = await testPage.evaluate(
+      () =>
+        (window as Window & { __KANDEV_SESSION_TAB_HISTORY__?: SessionTabHistoryEntry[][] })
+          .__KANDEV_SESSION_TAB_HISTORY__ ?? [],
+    );
+    const completeSamples = history.filter((sample) => {
+      const first = sample.find((entry) => entry.id === firstSessionId);
+      const secondEntry = sample.find((entry) => entry.id === secondSessionId);
+      return !!first?.text && !!secondEntry?.text;
+    });
+    expect(completeSamples.length).toBeGreaterThan(0);
+    for (const sample of completeSamples) {
+      const first = sample.find((entry) => entry.id === firstSessionId);
+      const secondEntry = sample.find((entry) => entry.id === secondSessionId);
+      expect(first?.text).toContain("Mock Smart");
+      expect(secondEntry?.text).toContain("Mock Fast");
+    }
   });
 });
 

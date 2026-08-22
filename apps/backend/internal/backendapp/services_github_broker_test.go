@@ -173,11 +173,11 @@ func TestGitHubCredentialBrokerEndpoint(t *testing.T) {
 	dedicated := &config.Config{
 		GitHubCredentialBroker: config.GitHubCredentialBrokerConfig{PublicBaseURL: "https://broker.example/"},
 	}
-	if got, want := githubCredentialBrokerEndpoint(dedicated), "https://broker.example/api/v1/github/credentials/resolve"; got != want {
+	if got, want := githubCredentialBrokerEndpoint(dedicated), "https://broker.example/api/v1/git/credentials/resolve"; got != want {
 		t.Fatalf("dedicated endpoint = %q, want %q", got, want)
 	}
 	local := &config.Config{Server: config.ServerConfig{Port: 49123}}
-	if got, want := githubCredentialBrokerEndpoint(local), "http://localhost:49123/api/v1/github/credentials/resolve"; got != want {
+	if got, want := githubCredentialBrokerEndpoint(local), "http://localhost:49123/api/v1/git/credentials/resolve"; got != want {
 		t.Fatalf("local endpoint = %q, want %q", got, want)
 	}
 }

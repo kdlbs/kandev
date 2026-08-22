@@ -560,6 +560,7 @@ test-scripts:
 	@printf "$(CYAN)Running script tests...$(RESET)\n"
 	@python3 .github/scripts/lint-action-pinning_test.py
 	@bash scripts/pr-state.test.sh
+	@bash scripts/pr-await.test.sh
 	@bash scripts/run-quiet.test.sh
 	@bash scripts/dev-prod-db-path.test.sh
 	@bash scripts/opencode-code-review.test.sh

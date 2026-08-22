@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"maps"
+
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // MachineState captures runtime workflow state for a task session.
@@ -57,6 +59,18 @@ type TransitionStore interface {
 	LoadNextStep(ctx context.Context, workflowID string, currentPosition int) (StepSpec, error)
 	LoadPreviousStep(ctx context.Context, workflowID string, currentPosition int) (StepSpec, error)
 	ApplyTransition(ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger Trigger) error
+	// ApplyTransitionIfAtStep is the AC-46/48 compare-and-swap transition
+	// commit used only by the AC-46 quorum re-evaluation apply path. It
+	// applies the transition only when the task is still at expectedStepID,
+	// reading and writing inside the same transaction so a concurrent mover
+	// cannot race past the check. applied=false ("abandoned") means the task
+	// had already left expectedStepID by the time this call ran — not an
+	// error. applied=true means the task left expectedStepID (not
+	// necessarily WIP-admitted at toStepID — a full step still counts as a
+	// completed transition, queuing there). ApplyTransition (and every
+	// existing caller of it) is unaffected: this is an additive method, not
+	// a replacement.
+	ApplyTransitionIfAtStep(ctx context.Context, taskID, sessionID, expectedStepID, toStepID string, trigger Trigger) (applied bool, err error)
 	PersistData(ctx context.Context, sessionID string, data map[string]any) error
 	IsOperationApplied(ctx context.Context, operationID string) (bool, error)
 	MarkOperationApplied(ctx context.Context, operationID string) error
@@ -83,9 +97,21 @@ type HandleResult struct {
 	Transitioned bool
 	FromStepID   string
 	ToStepID     string
-	DataPatch    map[string]any
-	Idempotent   bool
-	ActionCount  int
+	// Guards is the read-only quorum state captured while evaluating a
+	// guarded transition. Decision recording returns this snapshot even when
+	// the successful evaluation moves the task to the next step.
+	Guards      []QuorumGuardState
+	DataPatch   map[string]any
+	Idempotent  bool
+	ActionCount int
+
+	// TransitionAbandoned is true when a guarded transition's outcome was
+	// satisfied but ApplyTransitionIfAtStep (AC-46/48) lost the race — the
+	// task had already left FromStepID by the time the CAS ran. Distinct
+	// from both a successful transition (Transitioned=true) and an error:
+	// abandoning is an expected outcome of concurrent re-evaluation, not a
+	// failure.
+	TransitionAbandoned bool
 }
 
 // Option configures an Engine at construction time. Use With* helpers below.
@@ -127,6 +153,14 @@ func WithWorkflowSwitcher(switcher WorkflowSwitcher) Option {
 	return func(e *Engine) { e.workflowSwitcher = switcher }
 }
 
+// WithLogger wires the AC-24/24a structured log emitted when a guarded
+// transition is evaluated and does not fire. The engine holds no logger
+// today, so wiring one is part of this feature — without it, the engine
+// still increments the quorummetrics counter, it just doesn't log.
+func WithLogger(log *logger.Logger) Option {
+	return func(e *Engine) { e.logger = log }
+}
+
 // Engine evaluates step actions and applies transitions.
 type Engine struct {
 	store     TransitionStore
@@ -141,6 +175,9 @@ type Engine struct {
 	// Phase 8 (ADR-0004) dependencies — also nil-safe.
 	taskCreator      TaskCreator
 	workflowSwitcher WorkflowSwitcher
+	// logger is nil-safe (AC-24): *logger.Logger methods are not nil-safe
+	// themselves, so every use is guarded by an explicit nil check.
+	logger *logger.Logger
 }
 
 // TaskCreatorAdapter exposes the wired TaskCreator (or nil if unset).
@@ -272,11 +309,9 @@ func (e *Engine) evaluateActions(
 	dataPatch := map[string]any{}
 	for _, action := range actions {
 		if targetStepID == "" && isTransitionAction(action.Kind) && !action.RequiresApproval {
-			permitted, err := e.evaluateTransitionGuard(ctx, state, action)
-			if err != nil {
-				return "", nil, err
-			}
-			if !permitted {
+			outcome := e.evaluateTransitionGuard(ctx, state, action)
+			if !outcome.Satisfied {
+				e.recordGuardNotFired(state, action, outcome)
 				continue
 			}
 			resolvedTarget, err := e.resolveTransitionTarget(ctx, state, step, action)

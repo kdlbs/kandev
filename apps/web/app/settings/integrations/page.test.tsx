@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Component, IntegrationSettingsActionProps } from "@kandev/plugin-sdk";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
@@ -138,10 +138,17 @@ describe("IntegrationsIndexPage", () => {
     expect(window.localStorage.getItem("kandev:integrations:hideDisabledInNav:v1")).toBeNull();
   });
 
-  it("navigates when the integration label is clicked", () => {
+  it("exposes one full-card navigation target for a native integration", () => {
     renderPage();
 
-    fireEvent.click(screen.getByRole("link", { name: "Azure DevOps" }));
+    const card = screen.getByTestId("integration-card-azure-devops");
+    const links = within(card).getAllByRole("link");
+
+    expect(links).toHaveLength(1);
+    expect(links[0].getAttribute("aria-label")).toBe("Azure DevOps");
+    expect(links[0].getAttribute("href")).toBe("/settings/integrations/azure-devops");
+
+    fireEvent.click(links[0]);
 
     expect(pushNavigationStateSpy).toHaveBeenCalledWith(
       {},
@@ -179,7 +186,12 @@ describe("IntegrationsIndexPage plugin contributions", () => {
 
     renderPage();
 
-    const link = screen.getByRole("link", { name: /source control/i });
+    const card = screen.getByTestId(`integration-card-${PLUGIN_ID}-${SOURCE_CONTROL_ID}`);
+    const links = within(card).getAllByRole("link");
+
+    expect(links).toHaveLength(1);
+    const link = links[0];
+    expect(link.getAttribute("aria-label")).toBe("Source Control");
     expect(link.getAttribute("href")).toBe(`/settings/integrations/${SOURCE_CONTROL_ID}`);
     expect(screen.getByText(SOURCE_CONTROL_DESCRIPTION)).not.toBeNull();
   });

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -31,6 +32,7 @@ type Launcher struct {
 	port             int
 	logger           *logger.Logger
 	onUnexpectedExit func()
+	startupConfig    commonconfig.AgentctlStartupConfig
 
 	cmd    *exec.Cmd
 	exited chan struct{}
@@ -65,6 +67,7 @@ type Config struct {
 	Host             string // Host to bind to (default: localhost)
 	Port             int    // Control port (default: 39429)
 	OnUnexpectedExit func() // Called once when the child exits without Stop.
+	StartupConfig    commonconfig.AgentctlStartupConfig
 }
 
 // New creates a new Launcher.
@@ -84,6 +87,7 @@ func New(cfg Config, log *logger.Logger) *Launcher {
 		host:             cfg.Host,
 		port:             cfg.Port,
 		onUnexpectedExit: cfg.OnUnexpectedExit,
+		startupConfig:    cfg.StartupConfig,
 		logger:           log.WithFields(zap.String("component", "agentctl-launcher")),
 		exited:           make(chan struct{}),
 	}
@@ -230,8 +234,17 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	// CommandContext sends SIGKILL on cancellation, preventing graceful shutdown.
 	l.cmd = exec.Command(l.binaryPath, fmt.Sprintf("-port=%d", l.port))
 
-	// Inject bootstrap nonce; agentctl generates its own auth token.
-	l.cmd.Env = append(os.Environ(), "AGENTCTL_BOOTSTRAP_NONCE="+nonce)
+	// Inject bootstrap nonce and the resolved child contract. Remove inherited
+	// copies first so a managed child cannot observe a conflicting host value.
+	overrides := []string{"AGENTCTL_BOOTSTRAP_NONCE=" + nonce}
+	if l.startupConfig.Configured {
+		encoded, err := commonconfig.EncodeAgentctlStartupConfig(l.startupConfig)
+		if err != nil {
+			return err
+		}
+		overrides = append(overrides, commonconfig.InternalAgentctlStartupConfigEnv+"="+encoded)
+	}
+	l.cmd.Env = environmentWithOverrides(os.Environ(), overrides...)
 	l.cmd.SysProcAttr = buildSysProcAttr()
 
 	pipeWrite, err := setupLivenessPipe(l.cmd)
@@ -272,6 +285,27 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	go l.monitorExit()
 
 	return nil
+}
+
+func environmentWithOverrides(base []string, overrides ...string) []string {
+	keys := make(map[string]struct{}, len(overrides))
+	for _, entry := range overrides {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok && key != "" {
+			keys[key] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(base)+len(overrides))
+	for _, entry := range base {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok {
+			if _, overridden := keys[key]; overridden {
+				continue
+			}
+		}
+		result = append(result, entry)
+	}
+	return append(result, overrides...)
 }
 
 // performHandshake retrieves agentctl's self-generated auth token using the nonce.

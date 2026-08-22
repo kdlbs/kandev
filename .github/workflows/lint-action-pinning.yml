@@ -50,8 +50,17 @@ jobs:
       - name: Test Claude Code review workflow contract
         run: python3 .github/scripts/claude-code-review-workflow-contract_test.py
 
+      - name: Test PR walkthrough workflow contract
+        run: |
+          python3 .github/scripts/pr-walkthrough-workflow-contract_test.py
+          python3 scripts/pr-walkthrough-pr-body.test.py
+          python3 scripts/pr-walkthrough-read-file.test.py
+
       - name: Test preview environment workflow contract
         run: python3 .github/scripts/preview-env-workflow-contract_test.py
+
+      - name: Test OpenCode code review workflow contract
+        run: python3 .github/scripts/opencode-code-review-workflow-contract_test.py
 
       - name: Test frontend tests workflow contract
         run: python3 .github/scripts/frontend-tests-workflow-contract_test.py

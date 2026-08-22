@@ -53,6 +53,18 @@ func (s *fakeStore) ApplyTransition(_ context.Context, _, _, fromStepID, toStepI
 	return nil
 }
 
+func (s *fakeStore) ApplyTransitionIfAtStep(
+	_ context.Context, _, _, expectedStepID, toStepID string, _ Trigger,
+) (bool, error) {
+	if s.state.CurrentStepID != expectedStepID {
+		return false, nil
+	}
+	s.transitionFrom = expectedStepID
+	s.transitionTo = toStepID
+	s.state.CurrentStepID = toStepID
+	return true, nil
+}
+
 func (s *fakeStore) PersistData(_ context.Context, _ string, data map[string]any) error {
 	s.persistedData = data
 	return nil

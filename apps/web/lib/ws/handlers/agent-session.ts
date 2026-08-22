@@ -1,4 +1,4 @@
-/* eslint-disable max-lines -- comprehensive session-state handler; merge with main pushed it past 600. */
+/* eslint-disable max-lines -- session WebSocket handlers share one event registry. */
 import type { StoreApi } from "zustand";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
@@ -14,8 +14,10 @@ import {
 import type { QueueStatusChangedPayload } from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
 import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
+import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fields";
 import { t } from "@/lib/i18n";
 import { maybeMarkQuickChatUnseenIdle } from "@/lib/ws/handlers/quick-chat-unseen";
+import { readLastAgentError } from "@/lib/session-last-agent-error";
 
 const debug = createDebugLogger("session:state");
 
@@ -233,6 +235,12 @@ const CARRIED_WHEN_DEFINED = [
   "supports_steering",
   "cancellation_pending",
   "cancellation_revision",
+  "execution_profile_id",
+  "route_generation",
+  "route_state",
+  "route_reason",
+  ...ROUTE_SESSION_FIELDS,
+  "downstream_acp_session_id",
 ] as const;
 
 /** Copy each CARRIED_WHEN_DEFINED field onto `update` only when the payload defines it. */
@@ -553,12 +561,24 @@ function maybeNotifySessionFailure(store: StoreApi<AppState>, ctx: SessionFailur
     return;
   }
 
+  const metadata =
+    payload.session_metadata && typeof payload.session_metadata === "object"
+      ? (payload.session_metadata as Record<string, unknown>)
+      : null;
+  const launchError = readLastAgentError(metadata);
+  const isLaunchFailure = Boolean(launchError?.stamp && launchError.code);
+  let message = t("task:sessionFailedUnexpectedly");
+  if (isLaunchFailure) {
+    message = t("task:launchFailedSeeDetails");
+  } else if (payload.error_message) {
+    message = String(payload.error_message);
+  }
+
   store.getState().setSessionFailureNotification({
     sessionId,
     taskId,
-    message: payload.error_message
-      ? String(payload.error_message)
-      : t("task:sessionFailedUnexpectedly"),
+    message,
+    ...(isLaunchFailure ? { isLaunchFailure: true } : {}),
   });
 }
 

@@ -223,6 +223,11 @@ func (s *Store) createTables() error {
 	if err := s.migrateMRAutomationAutomationColumns(); err != nil {
 		return err
 	}
+	// Must follow migrateMRAutomationAutomationColumns, which adds the
+	// mr_scope_migrated_at column this migration is guarded by.
+	if err := s.migrateTaskMROptionsToMRScope(); err != nil {
+		return err
+	}
 	if err := s.migrateConfigRevision(); err != nil {
 		return err
 	}
@@ -589,6 +594,21 @@ func (s *Store) GetTaskMR(ctx context.Context, taskID, repositoryID, projectPath
 	return &tm, nil
 }
 
+// GetTaskMRByID returns one association by its stable primary key. It is used
+// by source-aware detach cleanup before the row is removed.
+func (s *Store) GetTaskMRByID(ctx context.Context, id string) (*TaskMR, error) {
+	var tm TaskMR
+	err := s.ro.GetContext(ctx, &tm, `
+		SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs WHERE id = ? LIMIT 1`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &tm, nil
+}
+
 // ListTaskMRsByTask returns every MR association for a task, oldest first.
 func (s *Store) ListTaskMRsByTask(ctx context.Context, taskID string) ([]*TaskMR, error) {
 	var mrs []TaskMR
@@ -624,12 +644,15 @@ func (s *Store) ListTaskMRsByWorkspaceID(ctx context.Context, workspaceID string
 }
 
 // DeleteTaskMR removes a single task↔MR row, cascading to that MR's
-// lifecycle checkpoint (gitlab_task_mr_state). Without this, re-linking the
+// lifecycle checkpoint (gitlab_task_mr_state) and its per-MR automation
+// switches (gitlab_task_mr_automation_options). Without this, re-linking the
 // same MR later would inherit the old checkpoint and could suppress its next
-// lifecycle prompt — gitlab_task_mrs has no FK relationship to
-// gitlab_task_mr_state (it's keyed by (task_id, repository_id, project_path,
-// mr_iid), not by gitlab_task_mrs.id) for the database to cascade this
-// automatically.
+// lifecycle prompt, or silently re-arm a switch — including auto-merge — that
+// no surface displays but the evaluator still reads. gitlab_task_mrs has no FK
+// relationship to either table (both are keyed by (task_id, repository_id,
+// project_path, mr_iid), not by gitlab_task_mrs.id) for the database to
+// cascade this automatically. Keep in step with
+// DeleteTaskMRForWorkspace, which performs the same three-table cleanup.
 func (s *Store) DeleteTaskMR(ctx context.Context, id string) error {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -653,6 +676,12 @@ func (s *Store) DeleteTaskMR(ctx context.Context, id string) error {
 	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM gitlab_task_mr_state WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM gitlab_task_mr_automation_options
+		 WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
 		mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID); err != nil {
 		return err
 	}

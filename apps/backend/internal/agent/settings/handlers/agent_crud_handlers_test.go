@@ -74,6 +74,7 @@ func wantProfileDTO(id, agentID, name, billingType string) dto.AgentProfileDTO {
 	return dto.AgentProfileDTO{
 		ID:               id,
 		AgentID:          agentID,
+		Kind:             "concrete",
 		Name:             name,
 		AgentDisplayName: "Display",
 		Model:            "model-a",

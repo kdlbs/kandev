@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildRunErrorsFromSessions,
+  hasMatchingSessionLaunchError,
   liveSessionMetadataFromStore,
   mergeLiveSessionMetadata,
 } from "./chat-entries";
@@ -109,6 +110,30 @@ describe("mergeLiveSessionMetadata", () => {
   it("prefers live metadata over the initial fetch", () => {
     const live = { last_agent_error: { message: "newer" } };
     expect(mergeLiveSessionMetadata(initial, live)).toBe(live);
+  });
+});
+
+describe("hasMatchingSessionLaunchError", () => {
+  it("does not match an unstamped run error to a stamped summary", () => {
+    expect(
+      hasMatchingSessionLaunchError("s1", "new-stamp", [
+        { id: "e1", sessionId: "s1", rawPayload: "boom", failedAt: "2026-08-02T15:00:00Z" },
+      ]),
+    ).toBe(false);
+  });
+
+  it("matches only the same explicit stamp", () => {
+    expect(
+      hasMatchingSessionLaunchError("s1", "new-stamp", [
+        {
+          id: "e1",
+          sessionId: "s1",
+          rawPayload: "boom",
+          failedAt: "2026-08-02T15:00:00Z",
+          errorStamp: "new-stamp",
+        },
+      ]),
+    ).toBe(true);
   });
 });
 

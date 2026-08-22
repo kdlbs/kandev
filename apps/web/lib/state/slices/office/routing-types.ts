@@ -1,9 +1,11 @@
 // --- Provider routing types ---
 //
-// Split out of types.ts (which grows past the file-length lint limit easily
-// given how many office domains it hosts) — provider routing is a
-// self-contained concern with no dependencies on the rest of the office
-// slice types, so it splits cleanly.
+// Split out of `types.ts` to keep that file under the repo's 600-line cap
+// (see apps/web/AGENTS.md "Code-quality limits"). Re-exported from
+// `types.ts` so existing `@/lib/state/slices/office/types` imports keep
+// working unchanged.
+
+import type { AgentRole } from "@/lib/types/agent-profile";
 
 export type Tier = "frontier" | "balanced" | "economy";
 
@@ -56,12 +58,23 @@ export type WakeReason = "heartbeat" | "routine_trigger" | "budget_alert";
 
 export type TierPerReason = Partial<Record<WakeReason, Tier>>;
 
+// Per-role tier policy: workspace-level default for every agent of a given
+// role, overridable per-agent and shadowed by tier_per_reason. See
+// docs/specs/office-agent-tier-routing/spec.md.
+export type RoleTierMap = Partial<Record<AgentRole, Tier>>;
+
+// The four precedence levels a resolved tier can come from, in
+// highest-to-lowest priority order: a matching wake-reason policy, a
+// per-agent override, the agent's role entry, or the workspace default.
+export type TierSource = "wake_reason" | "override" | "role" | "workspace";
+
 export type WorkspaceRouting = {
   enabled: boolean;
   provider_order: string[];
   default_tier: Tier;
   provider_profiles: Record<string, ProviderProfile>;
   tier_per_reason?: TierPerReason;
+  role_tiers?: RoleTierMap;
 };
 
 export type AgentRoutingOverrides = {
@@ -106,6 +119,9 @@ export type RouteAttempt = {
   provider_id: string;
   model?: string;
   tier: Tier | "";
+  // Empty for attempts recorded before this column existed, or that never
+  // resolved a tier (e.g. a max-attempts-exceeded row).
+  tier_source?: TierSource | "";
   outcome: RouteAttemptOutcome;
   error_code?: RoutingErrorCode;
   error_confidence?: "high" | "medium" | "low";
@@ -128,7 +144,7 @@ export type ProviderModelPair = {
 export type AgentRoutePreview = {
   agent_id: string;
   agent_name: string;
-  tier_source: "inherit" | "override";
+  tier_source: TierSource;
   effective_tier: Tier;
   // primary_* reflects configured intent — first entry in the
   // effective provider order, even when that provider is currently

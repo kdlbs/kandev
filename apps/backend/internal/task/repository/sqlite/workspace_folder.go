@@ -12,6 +12,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // ListTaskWorkspaceFoldersByTaskIDs loads folders for a task batch in one query.
@@ -89,6 +90,9 @@ func (r *Repository) CreateWorkspaceSourceBatch(ctx context.Context, batch *mode
 }
 
 func (r *Repository) createWorkspaceSourceBatchTx(ctx context.Context, tx *sqlx.Tx, batch *models.WorkspaceSourceBatch) error {
+	if err := r.guardWorkspaceSourceParentTx(ctx, tx, batch); err != nil {
+		return err
+	}
 	if err := r.updateWorkspaceSourceBranchesTx(ctx, tx, batch.RepositoryUpdates); err != nil {
 		return err
 	}
@@ -102,6 +106,31 @@ func (r *Repository) createWorkspaceSourceBatchTx(ctx context.Context, tx *sqlx.
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// guardWorkspaceSourceParentTx makes cross-task attachment authorization part
+// of the durable batch transaction. The no-op update takes the target task row
+// lock on PostgreSQL and SQLite's writer lock, so a reparent either commits
+// before this predicate (and is rejected) or after the source batch commits.
+func (r *Repository) guardWorkspaceSourceParentTx(ctx context.Context, tx *sqlx.Tx, batch *models.WorkspaceSourceBatch) error {
+	if batch.ExpectedParentID == "" {
+		return nil
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET updated_at = updated_at
+		WHERE id = ? AND parent_id = ? AND workspace_id = ?
+	`), batch.TaskID, batch.ExpectedParentID, batch.ExpectedParentWorkspaceID)
+	if err != nil {
+		return fmt.Errorf("guard workspace source parent relation: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("guard workspace source parent relation rows affected: %w", err)
+	}
+	if changed == 0 {
+		return fmt.Errorf("%w: %s", repoerrors.ErrTaskParentMismatch, batch.TaskID)
 	}
 	return nil
 }

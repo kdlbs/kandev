@@ -44,14 +44,14 @@ async function createFinishedTaskWithSession(
   return { task, sessionId: task.session_id };
 }
 
-function simpleLayoutForSession(sessionId: string) {
+function simpleLayoutForSession(sessionId: string, groupId = "group-center") {
   return {
     columns: [
       {
         id: "center",
         groups: [
           {
-            id: "group-center",
+            id: groupId,
             panels: [
               {
                 id: `session:${sessionId}`,
@@ -313,7 +313,10 @@ test.describe("saved Dockview layouts", () => {
     await expect(testPage.getByText("parent session")).toBeVisible({ timeout: 30_000 });
 
     const sidebar = testPage.getByTestId("app-sidebar");
-    await sidebar.getByRole("button", { name: /Shared environment layout child/ }).click();
+    // Not getByRole("button", {name}): the row's title now also renders its
+    // own nested button (the keyboard-operable title-preview trigger) with
+    // the same accessible name, so a name-based query is ambiguous.
+    await sidebar.locator(`[data-task-row-id="${child.id}"]`).click();
     await expect(testPage).toHaveURL(new RegExp(`/t/${child.id}(?:\\?|$)`), { timeout: 10_000 });
 
     await expect
@@ -367,6 +370,7 @@ test.describe("saved Dockview layouts", () => {
       '/e2e:message("target task current")',
     );
 
+    const savedLayoutGroupId = "group-saved-simple";
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,
@@ -382,7 +386,7 @@ test.describe("saved Dockview layouts", () => {
           id: "layout-simple-stale-session",
           name: "Simple",
           is_default: false,
-          layout: simpleLayoutForSession(taskA.sessionId),
+          layout: simpleLayoutForSession(taskA.sessionId, savedLayoutGroupId),
           created_at: new Date().toISOString(),
         },
       ],
@@ -407,11 +411,12 @@ test.describe("saved Dockview layouts", () => {
     await testPage.getByRole("menuitem", { name: "Simple", exact: true }).click();
 
     await expect
-      .poll(() => dockviewPanelIds(testPage), {
+      .poll(async () => (await dockviewDefaultTree(testPage, taskB.sessionId)).centerGroupId, {
         timeout: 10_000,
-        message: "Waiting for saved layout to settle on current session",
+        message: "Waiting for saved layout to finish applying",
       })
-      .toContain(`session:${taskB.sessionId}`);
+      .toBe(savedLayoutGroupId);
+    await expect(testPage.getByRole("menu")).toHaveCount(0);
 
     const panelIds = await dockviewPanelIds(testPage);
     expect(panelIds).not.toContain(`session:${taskA.sessionId}`);

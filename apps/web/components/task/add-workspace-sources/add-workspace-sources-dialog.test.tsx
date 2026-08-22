@@ -49,13 +49,9 @@ function openRepositoryMenu() {
   return trigger;
 }
 
-function Harness({
-  makeTurnActive = false,
-  executorType = "worktree",
-}: {
-  makeTurnActive?: boolean;
-  executorType?: string;
-}) {
+function Harness(props: { makeTurnActive?: boolean; executorType?: string | null }) {
+  const makeTurnActive = props.makeTurnActive ?? false;
+  const executorType = Object.hasOwn(props, "executorType") ? props.executorType : "worktree";
   return (
     <StateProvider>
       <HarnessContent makeTurnActive={makeTurnActive} executorType={executorType} />
@@ -68,7 +64,7 @@ function HarnessContent({
   executorType,
 }: {
   makeTurnActive: boolean;
-  executorType: string;
+  executorType: string | null | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const [opener, setOpener] = useState<HTMLElement | null>(null);
@@ -197,6 +193,26 @@ describe("AddWorkspaceSourcesDialog", () => {
     openRepositoryMenu();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Local Git repository" }));
     expect(form.querySelectorAll('[role="alert"]')).toHaveLength(2);
+  });
+
+  it.each([null, undefined])(
+    "shows Add folder disabled with a touch-visible reason while the executor is unresolved (%s)",
+    async (executorType) => {
+      render(<Harness executorType={executorType} />);
+
+      fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+      const addFolder = screen.getByRole("button", { name: /Add folder/ }) as HTMLButtonElement;
+      expect(addFolder.disabled).toBe(true);
+      const hint = screen.getByText("Waiting to confirm this task's executor supports folders");
+      expect(hint.className).toContain("text-xs");
+    },
+  );
+
+  it("keeps Add folder absent once the executor is known not to support folders", async () => {
+    render(<Harness executorType="local_docker" />);
+
+    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+    expect(screen.queryByRole("button", { name: /Add folder/ })).toBeNull();
   });
 
   it.each([

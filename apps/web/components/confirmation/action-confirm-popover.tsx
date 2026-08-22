@@ -13,6 +13,7 @@ import {
 
 export type ActionConfirmPopoverProps = {
   open: boolean;
+  disabled?: boolean;
   anchorRef: RefObject<HTMLElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
   title: ReactNode;
@@ -37,6 +38,7 @@ export type ActionConfirmPopoverProps = {
  */
 export function ActionConfirmPopover({
   open,
+  disabled = false,
   anchorRef,
   focusBoundaryRef,
   title,
@@ -79,6 +81,7 @@ export function ActionConfirmPopover({
   };
 
   const handleConfirm = () => {
+    if (disabled) return;
     if (!isConnected(anchorRef.current)) {
       handleOpenChange(false);
       return;
@@ -107,6 +110,7 @@ export function ActionConfirmPopover({
         confirmTestId={confirmTestId}
         testId={testId}
         confirmationBoundary={confirmationBoundary}
+        disabled={disabled}
         cancelRef={cancelRef}
         focusBoundaryRef={focusBoundaryRef}
         confirmedRef={confirmedRef}
@@ -129,6 +133,7 @@ type ActionConfirmPopoverContentProps = {
   confirmTestId?: string;
   testId: string;
   confirmationBoundary: boolean;
+  disabled: boolean;
   cancelRef: RefObject<HTMLButtonElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
   confirmedRef: { current: boolean };
@@ -148,6 +153,7 @@ function ActionConfirmPopoverContent({
   confirmTestId,
   testId,
   confirmationBoundary,
+  disabled,
   cancelRef,
   focusBoundaryRef,
   confirmedRef,
@@ -190,6 +196,7 @@ function ActionConfirmPopoverContent({
           ref={cancelRef}
           type="button"
           variant="outline"
+          disabled={disabled}
           className="min-h-11 px-3 transition-[color,background-color,border-color,transform] duration-100 active:scale-[0.96]"
           onClick={onCancel}
         >
@@ -198,6 +205,7 @@ function ActionConfirmPopoverContent({
         <Button
           type="button"
           variant="destructive"
+          disabled={disabled}
           aria-label={confirmAriaLabel}
           data-testid={confirmTestId}
           className="min-h-11 px-3 transition-[color,background-color,border-color,transform] duration-100 active:scale-[0.96]"

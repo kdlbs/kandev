@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	officeenginedispatcher "github.com/kandev/kandev/internal/office/engine_dispatcher"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
@@ -220,10 +220,30 @@ type decisionInput struct {
 	decision   string
 }
 
+// decisionRecordingDispatcher is the AC-57a additive capability this
+// function needs from s.engineDispatcher. Named locally and reached via a
+// type assertion rather than widening shared.WorkflowEngineDispatcher,
+// mirroring the handledWorkflowEngineDispatcher precedent
+// (service_tasks.go) — see AC-57d's implementation note.
+type decisionRecordingDispatcher interface {
+	RecordDecision(
+		ctx context.Context, in officeenginedispatcher.RecordDecisionInput,
+	) (officeenginedispatcher.RecordDecisionResult, error)
+}
+
 // recordTaskDecision performs the shared body of ApproveTask /
 // RequestTaskChanges: validates inputs, resolves the caller's role,
-// persists the decision, fires events + activity, and queues
+// persists the decision and re-evaluates the guarded transition through
+// the engine's AC-57a entry point, fires events + activity, and queues
 // reactivity runs via the configured queuer.
+//
+// AC-57b confines this repoint to the resolve/persist/re-evaluate core:
+// resolveDeciderRole and resolveParticipantID are unchanged, and every
+// downstream side-effect (publishDecisionRecorded, logDecisionActivity,
+// runReactivityForDecision, the returned DecisionRecord shape) is
+// preserved. AC-57c: when the engine entry point isn't wired, this SHALL
+// reject the call rather than falling back to a second, office-side
+// implementation of the write.
 func (s *DashboardService) recordTaskDecision(
 	ctx context.Context, in decisionInput,
 ) (*DecisionRecord, error) {
@@ -231,6 +251,10 @@ func (s *DashboardService) recordTaskDecision(
 		return nil, fmt.Errorf("%s", approvalCallerErrEmpty)
 	}
 	if s.decisions == nil {
+		return nil, fmt.Errorf("%s", decisionStoreNotWiredErr)
+	}
+	dispatcher, ok := s.engineDispatcher.(decisionRecordingDispatcher)
+	if !ok {
 		return nil, fmt.Errorf("%s", decisionStoreNotWiredErr)
 	}
 	role, err := s.resolveDeciderRole(ctx, in.callerType, in.callerID, in.taskID)
@@ -246,20 +270,35 @@ func (s *DashboardService) recordTaskDecision(
 	}
 	participantID := s.resolveParticipantID(ctx, stepID, in.taskID, role, in.callerType, in.callerID)
 
-	row := &workflowmodels.WorkflowStepDecision{
-		ID:            uuid.New().String(),
+	result, err := dispatcher.RecordDecision(ctx, officeenginedispatcher.RecordDecisionInput{
 		TaskID:        in.taskID,
 		StepID:        stepID,
 		ParticipantID: participantID,
 		Decision:      in.decision,
-		DecidedAt:     time.Now().UTC(),
 		DeciderType:   in.callerType,
 		DeciderID:     in.callerID,
 		Role:          role,
 		Comment:       in.comment,
-	}
-	if err := s.decisions.RecordStepDecision(ctx, row); err != nil {
+	})
+	if err != nil {
 		return nil, fmt.Errorf("record decision: %w", err)
+	}
+
+	// AC-57b-i: the engine stamped decision_id/decided_at once at write
+	// time; they are echoed back here, never re-derived. result.StepID is
+	// the AC-37 validated step, which is stepID unless the task moved
+	// between validation and write.
+	row := &workflowmodels.WorkflowStepDecision{
+		ID:            result.DecisionID,
+		TaskID:        in.taskID,
+		StepID:        result.StepID,
+		ParticipantID: participantID,
+		Decision:      in.decision,
+		DecidedAt:     result.DecidedAt,
+		DeciderType:   in.callerType,
+		DeciderID:     in.callerID,
+		Role:          role,
+		Comment:       in.comment,
 	}
 
 	rec := fromWorkflowDecision(row)

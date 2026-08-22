@@ -27,7 +27,12 @@ type CommitPayload = {
   tasksListShowDetails?: boolean;
   kanbanViewMode?: string | null;
   hiddenWorkflowStepIds?: Record<string, string[]>;
+  workflowIdsWithAutoHideEmptySteps?: string[];
 };
+
+export function normalizeWorkflowIds(ids: string[]): string[] {
+  return Array.from(new Set(ids)).sort();
+}
 
 export function normalizeHiddenStepIds(raw: Record<string, string[]>): Record<string, string[]> {
   const result: Record<string, string[]> = {};
@@ -64,6 +69,9 @@ function buildNormalizedSettings(next: CommitPayload, current: DisplaySettings):
     hiddenWorkflowStepIds: normalizeHiddenStepIds(
       next.hiddenWorkflowStepIds ?? current.hiddenWorkflowStepIds ?? {},
     ),
+    workflowIdsWithAutoHideEmptySteps: normalizeWorkflowIds(
+      next.workflowIdsWithAutoHideEmptySteps ?? current.workflowIdsWithAutoHideEmptySteps ?? [],
+    ),
     loaded: true,
   };
 }
@@ -80,7 +88,12 @@ export function isSettingsUnchanged(
     normalized.tasksListShowDetails === current.tasksListShowDetails &&
     normalized.repositoryIds.length === current.repositoryIds.length &&
     normalized.repositoryIds.every((id, index) => id === current.repositoryIds[index]) &&
-    hiddenStepIdsEqual(normalized.hiddenWorkflowStepIds ?? {}, current.hiddenWorkflowStepIds ?? {})
+    hiddenStepIdsEqual(
+      normalized.hiddenWorkflowStepIds ?? {},
+      current.hiddenWorkflowStepIds ?? {},
+    ) &&
+    normalizeWorkflowIds(normalized.workflowIdsWithAutoHideEmptySteps ?? []).join("\0") ===
+      normalizeWorkflowIds(current.workflowIdsWithAutoHideEmptySteps ?? []).join("\0")
   );
 }
 
@@ -92,6 +105,7 @@ export function buildSettingsUpdatePayload(normalized: DisplaySettings): Record<
     enable_preview_on_click: normalized.enablePreviewOnClick,
     tasks_list_show_details: normalized.tasksListShowDetails,
     kanban_hidden_step_ids: normalized.hiddenWorkflowStepIds,
+    workflow_ids_with_auto_hide_empty_steps: normalized.workflowIdsWithAutoHideEmptySteps,
   };
 }
 

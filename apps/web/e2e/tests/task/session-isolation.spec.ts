@@ -84,7 +84,7 @@ test.describe("Session isolation", () => {
 
     // 5. Navigate to the session-less task directly via URL
     await testPage.goto(`/t/${taskWithoutSession.id}`);
-    await expect(testPage.getByRole("link", { name: "Task Without Session" })).toBeVisible({
+    await expect(testPage.getByTestId("task-topbar-title")).toHaveText("Task Without Session", {
       timeout: 5_000,
     });
 
@@ -159,7 +159,7 @@ test.describe("Session isolation", () => {
     await expect(chatPanel.getByText(SIMPLE_MOCK_RESPONSE)).not.toBeVisible({ timeout: 5_000 });
 
     // 8. Verify we're on the correct task
-    await expect(testPage.getByRole("link", { name: "Second Task B" })).toBeVisible({
+    await expect(testPage.getByTestId("task-topbar-title")).toHaveText("Second Task B", {
       timeout: 5_000,
     });
   });

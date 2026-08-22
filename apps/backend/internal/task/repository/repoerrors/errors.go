@@ -12,6 +12,10 @@ var ErrWorkspaceNotFound = errors.New("workspace not found")
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
 
+// ErrTaskParentMismatch reports that a task no longer has the parent/workspace
+// relation a cross-task mutation was authorized against.
+var ErrTaskParentMismatch = errors.New("task parent relation no longer matches")
+
 // ErrTaskPlanNotFound reports that no task plan row matched the supplied task id.
 var ErrTaskPlanNotFound = errors.New("task plan not found")
 

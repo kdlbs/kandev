@@ -26,6 +26,7 @@ import { groupByRepositoryName } from "@/lib/group-by-repo";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 const SCROLL_KEYS = new Set(["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "]);
 
@@ -124,6 +125,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
                 autoMarkOnScroll={autoMarkOnScroll}
                 wordWrap={wordWrap}
                 enableWalkthroughAnnotations={enableWalkthroughAnnotations}
+                hasStickyRepoHeader={showRepoHeaders}
                 isSelected={selectedFile === key}
                 forceLoad={
                   selectedIndex >= 0 &&
@@ -164,6 +166,7 @@ type FileDiffSectionProps = {
   autoMarkOnScroll: boolean;
   wordWrap: boolean;
   enableWalkthroughAnnotations: boolean;
+  hasStickyRepoHeader: boolean;
   isSelected?: boolean;
   forceLoad?: boolean;
   onToggleReviewed: (key: string, reviewed: boolean) => void;
@@ -539,6 +542,7 @@ function FileDiffSection({
   autoMarkOnScroll,
   wordWrap,
   enableWalkthroughAnnotations,
+  hasStickyRepoHeader,
   isSelected,
   forceLoad,
   onToggleReviewed,
@@ -584,7 +588,10 @@ function FileDiffSection({
   });
 
   return (
-    <div ref={sectionRef} className="border-b border-border">
+    <div
+      ref={sectionRef}
+      className={cn("border-b border-border", hasStickyRepoHeader && "scroll-mt-8")}
+    >
       <div ref={scrollSentinelRef} className="h-0" />
       <ReviewDiffHeader
         file={file}
@@ -594,6 +601,7 @@ function FileDiffSection({
         collapsed={controls.collapsed}
         wordWrap={controls.effectiveWordWrap}
         expandUnchanged={controls.expandUnchanged}
+        hasStickyRepoHeader={hasStickyRepoHeader}
         onCheckboxChange={handleCheckboxChange}
         onDiscard={handleDiscard}
         onOpenFile={onOpenFile}

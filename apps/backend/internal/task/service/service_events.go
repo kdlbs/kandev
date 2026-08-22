@@ -385,6 +385,12 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		// Consumers that restore quick-chat tabs filter on origin, so it has to
 		// travel with the event and not just the HTTP DTO.
 		"origin": task.Origin,
+		// Sent as an explicit true/false (never omitted) so a clear reaches
+		// open clients too: preserveOmittedField on the frontend only pins the
+		// previous value when the key is absent from the payload, and an
+		// omitted key here would make clearTaskAutoStartFailedMarker's publish
+		// as invisible as the set it is meant to undo.
+		"auto_start_failed": task.Metadata[models.MetaKeyAutoStartFailed] != nil,
 	}
 	data["queued_for_step_id"] = task.QueuedForStepID
 	if task.QueuedAt != nil {
@@ -433,6 +439,12 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 	}
 	for k, v := range extra {
 		data[k] = v
+	}
+	if eventType == events.TaskStateChanged && oldState != nil && s.taskStateActivity != nil {
+		// Write the Office read-model row before publishing the event. The
+		// WebSocket broadcaster can then trigger a detail GET without racing
+		// the activity projection that supplies Started and Completed.
+		s.taskStateActivity.LogTaskStateChange(ctx, task, *oldState)
 	}
 
 	event := bus.NewEvent(eventType, "task-service", data)

@@ -150,6 +150,61 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 	}
 }
 
+func TestRunDevUsesConfiguredHealthTimeoutForBackendAndWeb(t *testing.T) {
+	repo := makeRepoTree(t)
+	t.Chdir(repo)
+	writeLauncherConfig(t, filepath.Join(repo, "config.yaml"), "launcher:\n  healthTimeoutMs: 12345\n")
+	t.Setenv("KANDEV_TASK_ID", "")
+	t.Setenv("KANDEV_DATABASE_PATH", "")
+	t.Setenv("KANDEV_HOME_DIR", "")
+
+	oldNewSupervisor := newSupervisorFn
+	oldAttachSignals := attachSignalsFn
+	oldLaunchBackend := launchBackendFn
+	oldWaitForHealth := waitForHealthFn
+	oldWaitForURL := waitForURLFn
+	oldOpenBrowser := openBrowserFn
+	oldStartProcess := startProcessFn
+	t.Cleanup(func() {
+		newSupervisorFn = oldNewSupervisor
+		attachSignalsFn = oldAttachSignals
+		launchBackendFn = oldLaunchBackend
+		waitForHealthFn = oldWaitForHealth
+		waitForURLFn = oldWaitForURL
+		openBrowserFn = oldOpenBrowser
+		startProcessFn = oldStartProcess
+	})
+
+	newSupervisorFn = newSupervisor
+	attachSignalsFn = func(_ *processSupervisor) {}
+	launchBackendFn = func(_ backendLaunchConfig) (*restartableBackend, func(), error) {
+		exitCh := make(chan int, 1)
+		exitCh <- 0
+		return &restartableBackend{exitCh: exitCh}, func() {}, nil
+	}
+	var backendTimeout, webTimeout time.Duration
+	waitForHealthFn = func(_ context.Context, _ string, _ childState, timeout time.Duration, _ string, _ func()) error {
+		backendTimeout = timeout
+		return nil
+	}
+	waitForURLFn = func(_ context.Context, _ string, _ childState, timeout time.Duration) error {
+		webTimeout = timeout
+		return nil
+	}
+	openBrowserFn = func(string) {}
+	startProcessFn = func(_ string, _ []string, _ string, _ []string, _ bool, _ string, _ *processSupervisor) (*managedProcess, func(), error) {
+		return &managedProcess{}, func() {}, nil
+	}
+
+	if code := runDev(context.Background(), Options{Command: CommandDev}); code != 0 {
+		t.Fatalf("runDev() = %d, want 0", code)
+	}
+	want := 12345 * time.Millisecond
+	if backendTimeout != want || webTimeout != want {
+		t.Fatalf("health timeouts = backend %s, web %s; want %s for both", backendTimeout, webTimeout, want)
+	}
+}
+
 func TestRunDevHeadlessSkipsBrowser(t *testing.T) {
 	repo := makeRepoTree(t)
 	t.Chdir(repo)

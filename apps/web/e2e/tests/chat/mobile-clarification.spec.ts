@@ -86,6 +86,43 @@ test.describe("Mobile clarification multiline answer", () => {
     await expect(session.chat).not.toContainText("linesecond line");
   });
 
+  test("keeps the over-limit counter inside the phone viewport", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Limit",
+      { scenario: "clarification" },
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await session.clarificationInput().fill("a".repeat(2001));
+
+    const counter = session.clarificationOverlay().getByTestId("clarification-input-rune-counter");
+    await expect(counter).toHaveAttribute("data-over-limit", "true");
+
+    const [counterBox, overlayBox] = await Promise.all([
+      counter.boundingBox(),
+      session.clarificationOverlay().boundingBox(),
+    ]);
+    if (!counterBox || !overlayBox) {
+      throw new Error("expected mobile counter and overlay to have bounding boxes");
+    }
+    expect(counterBox.x).toBeGreaterThanOrEqual(overlayBox.x - 1);
+    expect(counterBox.x + counterBox.width).toBeLessThanOrEqual(
+      overlayBox.x + overlayBox.width + 1,
+    );
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+  });
+
   test("shows shared context once above the question on mobile", async ({
     testPage,
     apiClient,
@@ -136,5 +173,50 @@ test.describe("Mobile clarification multiline answer", () => {
     await session.clarificationStep(1).tap();
     await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
     await expect(context).toHaveCount(1);
+  });
+
+  test("shows a loading spinner while batch answers submit on mobile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Submit Feedback",
+      { scenario: "clarification-multi" },
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await session.clarificationOption("PostgreSQL").tap();
+    await session.clarificationOption("Go").tap();
+    await session.clarificationOption("Docker").tap();
+
+    let releaseResponse = () => undefined;
+    const heldResponse = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      await heldResponse;
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+
+    const submit = session.clarificationSubmit();
+    await expect(submit).toBeEnabled();
+    await submit.tap();
+    await expect(submit).toContainText("Submitting");
+    await expect(submit).toBeDisabled();
+    await expect(submit.locator('[role="status"]')).toBeVisible();
+    await expect(submit.locator('[role="status"]')).toHaveAttribute("aria-hidden", "true");
+    await expect(submit.locator("svg.tabler-icon-check")).toHaveCount(0);
+    await expect(
+      testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).resolves.toBe(true);
+
+    releaseResponse();
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
   });
 });

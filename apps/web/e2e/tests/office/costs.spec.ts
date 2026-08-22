@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 
 test.describe("Costs & Budgets", () => {
   test("cost summary starts at zero", async ({ officeApi, officeSeed }) => {
@@ -13,7 +14,7 @@ test.describe("Costs & Budgets", () => {
 
   test("costs page renders", async ({ testPage, officeSeed: _ }) => {
     await testPage.goto("/office/workspace/costs");
-    await expect(testPage.getByRole("heading", { name: /Costs/i }).first()).toBeVisible({
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Costs/i, {
       timeout: 10_000,
     });
   });

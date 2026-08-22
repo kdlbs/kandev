@@ -24,6 +24,7 @@ Repositories that use Git submodules currently show only a changed gitlink commi
 - Stage, unstage, discard, file-at-ref, and per-file editing actions execute in the file's owning repository scope.
 - A commit-all operation that covers nested repositories commits the deepest changed submodules before their parents so every parent commit records the resulting child gitlink. Independent sibling repositories at the same depth may proceed in parallel.
 - Desktop keeps the existing Review split surface and file tree. Phone Review keeps its existing full-height diff surface; submodule identity is visible in the sticky repository/diff header, so no required cue depends on the desktop-only file tree or hover.
+- When repository-scope and file headers are both sticky, they occupy separate vertical lanes. A scope header, including **Other changes** for the workspace root, never covers the current file identity or its controls on desktop or phone.
 
 ## API surface
 
@@ -38,14 +39,14 @@ For a multi-repository task, a top-level attached repository keeps its existing 
 
 ## Failure modes
 
-| Condition | Observable behavior |
-|---|---|
-| A declared submodule is uninitialized, inaccessible, or its Git metadata is invalid | The child scope is skipped, the rest of the repository graph remains reviewable, and the parent gitlink change remains visible when changed. |
-| One submodule status, log, or cumulative-diff request fails | Other repository scopes remain available and the existing per-repository partial-failure behavior applies. |
-| A submodule comparison gitlink cannot be resolved from the parent comparison tree | Uncommitted child changes remain visible; committed-range collection follows the existing unresolved-base failure behavior for that scope without substituting another repository's base. |
-| The same relative file path changes in a parent, sibling repository, and submodule | Review keeps separate identities and comments for every `(repository_name, path)` pair. |
-| Commit-all fails in one child scope | Ancestor commits that depend on that child are not attempted; independent scopes report their own results through the existing partial-success UI. |
-| A submodule is added or removed after agentctl's repository graph is built | It becomes part of nested review after the existing workspace rescan or session restart; automatic hot discovery of arbitrary graph changes is not required in this iteration. |
+| Condition                                                                           | Observable behavior                                                                                                                                                                       |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A declared submodule is uninitialized, inaccessible, or its Git metadata is invalid | The child scope is skipped, the rest of the repository graph remains reviewable, and the parent gitlink change remains visible when changed.                                              |
+| One submodule status, log, or cumulative-diff request fails                         | Other repository scopes remain available and the existing per-repository partial-failure behavior applies.                                                                                |
+| A submodule comparison gitlink cannot be resolved from the parent comparison tree   | Uncommitted child changes remain visible; committed-range collection follows the existing unresolved-base failure behavior for that scope without substituting another repository's base. |
+| The same relative file path changes in a parent, sibling repository, and submodule  | Review keeps separate identities and comments for every `(repository_name, path)` pair.                                                                                                   |
+| Commit-all fails in one child scope                                                 | Ancestor commits that depend on that child are not attempted; independent scopes report their own results through the existing partial-success UI.                                        |
+| A submodule is added or removed after agentctl's repository graph is built          | It becomes part of nested review after the existing workspace rescan or session restart; automatic hot discovery of arbitrary graph changes is not required in this iteration.            |
 
 ## Scenarios
 
@@ -58,6 +59,7 @@ For a multi-repository task, a top-level attached repository keeps its existing 
 - **GIVEN** `README.md` changes in the parent and `README.md` changes in a nested submodule, **WHEN** the user reviews, comments on, stages, or discards either file, **THEN** the action and review state apply only to the selected repository scope.
 - **GIVEN** staged changes in a nested submodule and its parent, **WHEN** the user commits all reviewed work, **THEN** Kandev commits the child first and the parent commit records the child's new commit ID.
 - **GIVEN** a phone-sized viewport, **WHEN** the user opens Review for a submodule file, **THEN** the sticky diff header identifies the submodule scope and the file remains reviewable without document-level horizontal overflow.
+- **GIVEN** changed files in the workspace root and a nested submodule, **WHEN** the reviewer scrolls a root file beneath the sticky **Other changes** scope header on desktop or phone, **THEN** the scope header remains above the file header without intersecting its file identity or control hit targets.
 
 ## Out of scope
 

@@ -91,6 +91,7 @@ func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo label
 	api.POST("/tasks/:id/approve", h.approveTask)
 	api.POST("/tasks/:id/request-changes", h.requestTaskChanges)
 	api.GET("/tasks/:id/decisions", h.listTaskDecisions)
+	api.GET("/workspaces/:wsId/tasks/:taskId/quorum", h.getTaskQuorum)
 	api.POST("/workspaces/:wsId/git/clone", h.gitClone)
 	api.POST("/workspaces/:wsId/git/pull", h.gitPull)
 	api.POST("/workspaces/:wsId/git/push", h.gitPush)
@@ -462,6 +463,10 @@ func (h *Handler) getTask(c *gin.Context) {
 	h.attachDecisions(ctx, c, task.ID, dto)
 
 	statusChanges, _ := h.svc.ListStatusChanges(ctx, task.WorkspaceID, task.ID)
+	dto.StartedAt, dto.CompletedAt = deriveTaskTimestamps(statusChanges)
+	if !timelineStatusIsDone(dto.Status) {
+		dto.CompletedAt = ""
+	}
 	c.JSON(http.StatusOK, TaskResponse{Task: dto, Timeline: buildStatusTimeline(statusChanges)})
 }
 
@@ -494,19 +499,6 @@ func (h *Handler) attachDecisions(ctx context.Context, c *gin.Context, taskID st
 	for i := range decisions {
 		dto.Decisions[i] = h.decisionToDTO(c, &decisions[i])
 	}
-}
-
-func buildStatusTimeline(changes []TimelineEvent) []TimelineEventDTO {
-	timeline := make([]TimelineEventDTO, len(changes))
-	for i, ev := range changes {
-		timeline[i] = TimelineEventDTO{
-			Type: "status_change",
-			From: ev.From,
-			To:   ev.To,
-			At:   ev.At,
-		}
-	}
-	return timeline
 }
 
 func taskRowToDTO(r *sqlite.TaskRow, lbls []*sqlite.Label) *TaskDTO {

@@ -122,6 +122,9 @@ func (r *SpritesExecutor) ResumeRemoteInstance(_ context.Context, req *ExecutorC
 
 func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
 	baseCtx := preparationContext(ctx)
+	if err := validateAgentctlStartupConfig(req.AgentctlStartupConfig); err != nil {
+		return nil, fmt.Errorf("invalid agentctl startup configuration: %w", err)
+	}
 	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
 		return nil, err
 	}
@@ -232,7 +235,7 @@ func (r *SpritesExecutor) preflightGitHubCredentialBroker(
 		stepCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		cmd := sprite.CommandContext(stepCtx, "sh", "-c", command)
-		cmd.Env = r.buildSpriteEnv(env)
+		cmd.Env = r.buildSpriteEnv(env, req.AgentctlStartupConfig)
 		return cmd.CombinedOutput()
 	})
 }

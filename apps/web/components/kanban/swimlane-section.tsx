@@ -12,6 +12,7 @@ export type SwimlaneSectionProps = {
   dragHandleProps?: HTMLAttributes<HTMLDivElement>;
   onToggleMultiSelect?: () => void;
   isMultiSelectMode?: boolean;
+  fillHeight?: boolean;
   columnsMenu?: ReactNode;
   children: ReactNode;
 };
@@ -24,11 +25,12 @@ export function SwimlaneSection({
   dragHandleProps,
   onToggleMultiSelect,
   isMultiSelectMode,
+  fillHeight = false,
   columnsMenu,
   children,
 }: SwimlaneSectionProps) {
   return (
-    <div>
+    <div className={fillHeight ? "flex h-full min-h-0 flex-col" : undefined}>
       <SwimlaneHeader
         workflowName={workflowName}
         taskCount={taskCount}
@@ -39,7 +41,7 @@ export function SwimlaneSection({
         isMultiSelectMode={isMultiSelectMode}
         columnsMenu={columnsMenu}
       />
-      {!isCollapsed && children}
+      {!isCollapsed && (fillHeight ? <div className="min-h-0 flex-1">{children}</div> : children)}
     </div>
   );
 }

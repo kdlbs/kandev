@@ -459,22 +459,28 @@ type Run struct {
 // Persisted by the routing scheduler dispatcher in
 // internal/office/scheduler/dispatch_routing.go.
 type RouteAttempt struct {
-	RunID              string              `json:"run_id" db:"run_id"`
-	Seq                int                 `json:"seq" db:"seq"`
-	ExecutionProfileID string              `json:"execution_profile_id" db:"execution_profile_id"`
-	ProviderID         string              `json:"provider_id" db:"provider_id"`
-	Model              string              `json:"model" db:"model"`
-	Tier               string              `json:"tier" db:"tier"`
-	Outcome            RouteAttemptOutcome `json:"outcome" db:"outcome"`
-	ErrorCode          string              `json:"error_code,omitempty" db:"error_code"`
-	ErrorConfidence    ErrorConfidence     `json:"error_confidence,omitempty" db:"error_confidence"`
-	AdapterPhase       AdapterPhase        `json:"adapter_phase,omitempty" db:"adapter_phase"`
-	ClassifierRule     string              `json:"classifier_rule,omitempty" db:"classifier_rule"`
-	ExitCode           *int                `json:"exit_code,omitempty" db:"exit_code"`
-	RawExcerpt         string              `json:"raw_excerpt,omitempty" db:"raw_excerpt"`
-	ResetHint          *time.Time          `json:"reset_hint,omitempty" db:"reset_hint"`
-	StartedAt          time.Time           `json:"started_at" db:"started_at"`
-	FinishedAt         *time.Time          `json:"finished_at,omitempty" db:"finished_at"`
+	RunID              string `json:"run_id" db:"run_id"`
+	Seq                int    `json:"seq" db:"seq"`
+	ExecutionProfileID string `json:"execution_profile_id" db:"execution_profile_id"`
+	ProviderID         string `json:"provider_id" db:"provider_id"`
+	Model              string `json:"model" db:"model"`
+	Tier               string `json:"tier" db:"tier"`
+	// TierSource names the precedence level that supplied Tier: one of
+	// "wake_reason", "override", "role", "workspace". Empty means "not
+	// recorded" — either a pre-migration row (Tier non-empty) or an
+	// attempt that never resolved a tier (both empty, e.g. a
+	// max-attempts-exceeded row) — never interpreted as "workspace".
+	TierSource      string              `json:"tier_source,omitempty" db:"tier_source"`
+	Outcome         RouteAttemptOutcome `json:"outcome" db:"outcome"`
+	ErrorCode       string              `json:"error_code,omitempty" db:"error_code"`
+	ErrorConfidence ErrorConfidence     `json:"error_confidence,omitempty" db:"error_confidence"`
+	AdapterPhase    AdapterPhase        `json:"adapter_phase,omitempty" db:"adapter_phase"`
+	ClassifierRule  string              `json:"classifier_rule,omitempty" db:"classifier_rule"`
+	ExitCode        *int                `json:"exit_code,omitempty" db:"exit_code"`
+	RawExcerpt      string              `json:"raw_excerpt,omitempty" db:"raw_excerpt"`
+	ResetHint       *time.Time          `json:"reset_hint,omitempty" db:"reset_hint"`
+	StartedAt       time.Time           `json:"started_at" db:"started_at"`
+	FinishedAt      *time.Time          `json:"finished_at,omitempty" db:"finished_at"`
 }
 
 // ProviderHealth records the health state of one (workspace, provider,
