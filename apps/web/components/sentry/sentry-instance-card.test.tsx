@@ -27,11 +27,21 @@ describe("SentryInstanceCard", () => {
           instance={instance("instance-1", "Production")}
           onEdit={() => {}}
           onDelete={() => {}}
+          isFinePointer
+          confirmingDelete={false}
+          onDeleteCancel={() => {}}
+          onDeleteOpenChange={() => {}}
+          onDeleteConfirm={() => {}}
         />
         <SentryInstanceCard
           instance={instance("instance-2", "Self-hosted")}
           onEdit={() => {}}
           onDelete={() => {}}
+          isFinePointer
+          confirmingDelete={false}
+          onDeleteCancel={() => {}}
+          onDeleteOpenChange={() => {}}
+          onDeleteConfirm={() => {}}
         />
       </>,
     );

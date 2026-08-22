@@ -112,13 +112,14 @@ test.describe("Sentry settings — instances", () => {
     const settings = new SentrySettingsPage(testPage);
     await settings.goto(seedData.workspaceId);
     await expect(settings.cards).toHaveCount(2);
-    testPage.on("dialog", (d) => d.accept());
 
     await settings.cardByName("Primary").getByTestId("sentry-instance-delete-button").click();
+    await testPage.getByTestId("sentry-remove-confirm").click();
     await expect(testPage.getByText(/still bound to it/i)).toBeVisible();
     await expect(settings.cardByName("Primary")).toBeVisible();
 
     await settings.cardByName("Secondary").getByTestId("sentry-instance-delete-button").click();
+    await testPage.getByTestId("sentry-remove-confirm").click();
     await expect(settings.cardByName("Secondary")).toHaveCount(0);
     await expect(settings.cardByName("Primary")).toBeVisible();
   });
