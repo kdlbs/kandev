@@ -66,7 +66,8 @@ func (h *Handlers) handleResolveAgentPermission(ctx context.Context, msg *ws.Mes
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, required.field+" is required", nil)
 		}
 	}
-	principal, isAutomation := mcpscope.PrincipalFromContext(ctx)
+	principal, hasPrincipal := mcpscope.PrincipalFromContext(ctx)
+	isAutomation := hasPrincipal && principal.IsAutomation()
 	if !mcporigin.IsTrustedExternalTransport(ctx) && !isAutomation {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "Agent permission resolution requires external MCP", nil)
 	}

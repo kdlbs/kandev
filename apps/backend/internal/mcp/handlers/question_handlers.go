@@ -108,28 +108,69 @@ func (h *Handlers) handleListPendingQuestions(ctx context.Context, msg *ws.Messa
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list pending questions", nil)
 	}
 
-	page, err := h.clarificationBundles.ListUnresolvedClarificationBundles(ctx, opts)
+	page, err := h.listVisiblePendingQuestionBundles(ctx, opts)
 	if err != nil {
 		h.logger.Error("failed to list unresolved clarification bundles", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list pending questions", nil)
 	}
-	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok && principal.IsAutomation() {
-		filtered := page.Bundles[:0]
-		for _, bundle := range page.Bundles {
-			if bundle.TaskID != principal.CallerTaskID {
-				filtered = append(filtered, bundle)
-			}
-		}
-		page.Bundles = filtered
-		page.HasMore = false
-	}
-
 	resp, err := h.buildListPendingQuestionsResponse(ctx, page)
 	if err != nil {
 		h.logger.Error("failed to build list_pending_questions_kandev response", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list pending questions", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+// listVisiblePendingQuestionBundles applies the automation self-filter while
+// preserving the requested visible page size. The storage query is ordered
+// and cursor-based, so a page filled with the caller's own bundle must be
+// followed until either enough foreign bundles are found or the source is
+// exhausted. Filtering one fetched page would hide later foreign bundles and
+// incorrectly report that there is no next page.
+func (h *Handlers) listVisiblePendingQuestionBundles(
+	ctx context.Context,
+	opts models.ListClarificationBundlesOptions,
+) (*models.ClarificationBundlePage, error) {
+	principal, isAutomation := mcpscope.PrincipalFromContext(ctx)
+	if !isAutomation || !principal.IsAutomation() {
+		return h.clarificationBundles.ListUnresolvedClarificationBundles(ctx, opts)
+	}
+
+	visible := make([]models.ClarificationBundleSummary, 0, opts.Limit)
+	for {
+		page, err := h.clarificationBundles.ListUnresolvedClarificationBundles(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		if page == nil {
+			return nil, fmt.Errorf("clarification bundle lister returned a nil page")
+		}
+
+		visibleBeyondLimit := false
+		for _, bundle := range page.Bundles {
+			if bundle.TaskID == principal.CallerTaskID {
+				continue
+			}
+			if len(visible) >= opts.Limit {
+				visibleBeyondLimit = true
+				break
+			}
+			visible = append(visible, bundle)
+		}
+		if visibleBeyondLimit {
+			return &models.ClarificationBundlePage{Bundles: visible, HasMore: true}, nil
+		}
+		if !page.HasMore || len(page.Bundles) == 0 {
+			return &models.ClarificationBundlePage{Bundles: visible}, nil
+		}
+
+		last := page.Bundles[len(page.Bundles)-1]
+		if last.CreatedAt.Equal(opts.CursorCreatedAt) && last.PendingID == opts.CursorPendingID {
+			return nil, fmt.Errorf("clarification bundle lister returned a non-advancing cursor")
+		}
+		opts.CursorCreatedAt = last.CreatedAt
+		opts.CursorPendingID = last.PendingID
+	}
 }
 
 // resolveBundleVisibility implements L1a-L1c's caller-visibility resolution:

@@ -188,3 +188,71 @@ func TestReuseThreadRequiresSingleConcurrencySlot(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "reuse_thread requires max_concurrent_runs = 1")
 }
+
+func TestReuseThreadNormalizesNonPositiveConcurrencyOnUpdate(t *testing.T) {
+	svc := newTestService(t)
+	a, err := svc.CreateAutomation(context.Background(), &CreateAutomationRequest{
+		WorkspaceID:       "ws-1",
+		Name:              "normalize",
+		MaxConcurrentRuns: 2,
+	})
+	require.NoError(t, err)
+
+	policy := ContinuationPolicyReuseThread
+	zero := 0
+	updated, err := svc.UpdateAutomation(context.Background(), a.ID, &UpdateAutomationRequest{
+		ContinuationPolicy: &policy,
+		MaxConcurrentRuns:  &zero,
+	})
+	require.NoError(t, err)
+	require.Equal(t, ContinuationPolicyReuseThread, updated.ContinuationPolicy)
+	require.Equal(t, 1, updated.MaxConcurrentRuns)
+}
+
+func TestStoreUpdateNormalizesNonPositiveReuseConcurrency(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "ws-1", Name: "normalize-store", Enabled: true, MaxConcurrentRuns: 2}
+	require.NoError(t, store.CreateAutomation(ctx, a))
+
+	policy := ContinuationPolicyReuseThread
+	zero := 0
+	require.NoError(t, store.UpdateAutomation(ctx, a.ID, &UpdateAutomationRequest{
+		ContinuationPolicy: &policy,
+		MaxConcurrentRuns:  &zero,
+	}))
+	got, err := store.GetAutomation(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, got.MaxConcurrentRuns)
+}
+
+func TestDispatchRunBindsExactIdentityAndRejectsStoppedAdmission(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "ws-1", Name: "dispatch", Enabled: true, MaxConcurrentRuns: 1}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+
+	run := &AutomationRun{AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTriggered}
+	require.NoError(t, svc.store.CreateRun(ctx, run))
+	called := false
+	require.NoError(t, svc.DispatchRun(ctx, run.ID, ThreadActionCreated, "created", func() (RunDispatch, error) {
+		called = true
+		return RunDispatch{TaskID: "task-1", SessionID: "session-1", TurnID: "turn-1"}, nil
+	}))
+	got, err := svc.store.GetRun(ctx, run.ID)
+	require.NoError(t, err)
+	require.True(t, called)
+	require.Equal(t, RunStatusTaskCreated, got.Status)
+	require.Equal(t, "turn-1", got.TurnID)
+
+	stopped := &AutomationRun{AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTriggered}
+	require.NoError(t, svc.store.CreateRun(ctx, stopped))
+	require.NoError(t, svc.store.MarkRunTerminal(ctx, stopped.ID, "", "", RunStatusFailed, "stopped"))
+	called = false
+	err = svc.DispatchRun(ctx, stopped.ID, ThreadActionCreated, "created", func() (RunDispatch, error) {
+		called = true
+		return RunDispatch{TaskID: "task-2", SessionID: "session-2", TurnID: "turn-2"}, nil
+	})
+	require.ErrorIs(t, err, ErrAutomationRunNotDispatchable)
+	require.False(t, called)
+}

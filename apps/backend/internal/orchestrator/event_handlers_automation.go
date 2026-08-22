@@ -40,6 +40,16 @@ type automationRunBinding interface {
 	MarkRunTerminalByBinding(ctx context.Context, taskID, sessionID, turnID string, status automation.RunStatus, errMsg string) error
 }
 
+type automationRunDispatcher interface {
+	DispatchRun(
+		ctx context.Context,
+		runID string,
+		action automation.ThreadAction,
+		reason string,
+		dispatch func() (automation.RunDispatch, error),
+	) error
+}
+
 type automationContinuationState interface {
 	SetContinuationTaskID(ctx context.Context, automationID, taskID string) error
 }
@@ -290,7 +300,9 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 			zap.String("automation_id", a.ID),
 			zap.String("task_id", task.ID),
 			zap.Error(err))
-		s.deleteAbandonedTask(ctx, a.ID, task.ID)
+		if action != automation.ThreadActionResumed {
+			s.deleteAbandonedTask(ctx, a.ID, task.ID)
+		}
 		return
 	}
 
@@ -460,15 +472,102 @@ func sameAutomationRepositoryIDs(taskRepos []*models.TaskRepository, expected []
 	return true
 }
 
+// dispatchAutomationRun hands an admitted run to the service-owned
+// dispatcher when available. The dispatcher holds the per-automation lock
+// across the provider call and exact binding, so a stop cannot race a launch.
+// The bool distinguishes that path from legacy test/integration services that
+// do not implement the extension yet.
+func (s *Service) dispatchAutomationRun(
+	ctx context.Context,
+	automationID, taskID, sessionID, runID string,
+	action automation.ThreadAction,
+	reason, operation string,
+	dispatch func() (automation.RunDispatch, error),
+) bool {
+	if runID == "" {
+		return false
+	}
+	dispatcher, ok := s.automationService.(automationRunDispatcher)
+	if !ok {
+		return false
+	}
+	if err := dispatcher.DispatchRun(ctx, runID, action, reason, dispatch); err == nil {
+		return true
+	} else {
+		s.logger.Error("failed to dispatch automation run",
+			zap.String("operation", operation), zap.String("automation_id", automationID),
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+	}
+	s.cleanupFailedAutomationTask(ctx, automationID, taskID, action)
+	return true
+}
+
+func (s *Service) cleanupFailedAutomationTask(ctx context.Context, automationID, taskID string, action automation.ThreadAction) {
+	if action == automation.ThreadActionResumed {
+		return
+	}
+	s.deleteAbandonedTask(ctx, automationID, taskID)
+}
+
+// bindAutomationRun records a dispatch result for legacy callers that do not
+// use the service-owned dispatcher. It returns false after a binding failure
+// because the provider turn must not continue as an untracked run.
+func (s *Service) bindAutomationRun(
+	ctx context.Context,
+	runID, taskID, sessionID, turnID string,
+	action automation.ThreadAction,
+	reason, operation string,
+) bool {
+	if runID == "" {
+		return true
+	}
+	binding, ok := s.automationService.(automationRunBinding)
+	if !ok {
+		return true
+	}
+	bindErr := binding.BindRun(ctx, runID, taskID, sessionID, turnID, action, reason)
+	if bindErr == nil {
+		return true
+	}
+	s.logger.Error("failed to bind automation run",
+		zap.String("operation", operation), zap.String("run_id", runID),
+		zap.String("task_id", taskID), zap.String("turn_id", turnID), zap.Error(bindErr))
+	if !s.markExactAutomationRunTerminal(ctx, runID, "", "", false, bindErr.Error()) {
+		s.markAutomationRunTerminal(ctx, taskID, false, bindErr.Error())
+	}
+	return false
+}
+
 func (s *Service) dispatchAutomationContinuation(ctx context.Context, a *automation.Automation, task *models.Task, session *models.TaskSession, prompt, runID string, action automation.ThreadAction, reason string) {
-	result, err := s.PromptTask(ctx, task.ID, session.ID, prompt, "", false, nil, true)
+	if s.dispatchAutomationRun(ctx, a.ID, task.ID, session.ID, runID, action, reason, "continuation", func() (automation.RunDispatch, error) {
+		return s.promptAutomationContinuation(ctx, task, session, prompt)
+	}) {
+		return
+	}
+
+	dispatch, err := s.promptAutomationContinuation(ctx, task, session, prompt)
 	if err != nil {
 		s.logger.Error("failed to dispatch automation continuation",
 			zap.String("automation_id", a.ID), zap.String("task_id", task.ID), zap.String("session_id", session.ID), zap.Error(err))
-		if !s.markExactAutomationRunTerminal(ctx, runID, session.ID, "", false, err.Error()) {
+		if !s.markExactAutomationRunTerminal(ctx, runID, "", "", false, err.Error()) {
 			s.markAutomationRunTerminal(ctx, task.ID, false, err.Error())
 		}
 		return
+	}
+	if !s.bindAutomationRun(ctx, runID, dispatch.TaskID, dispatch.SessionID, dispatch.TurnID, action, reason, "continuation") {
+		return
+	}
+}
+
+func (s *Service) promptAutomationContinuation(
+	ctx context.Context,
+	task *models.Task,
+	session *models.TaskSession,
+	prompt string,
+) (automation.RunDispatch, error) {
+	result, err := s.PromptTask(ctx, task.ID, session.ID, prompt, "", false, nil, true)
+	if err != nil {
+		return automation.RunDispatch{}, err
 	}
 	turnID := ""
 	if result != nil {
@@ -480,19 +579,20 @@ func (s *Service) dispatchAutomationContinuation(ctx context.Context, a *automat
 		}
 	}
 	if turnID == "" {
-		errMsg := "automation continuation dispatch returned no turn identity"
-		s.markExactAutomationRunTerminal(ctx, runID, session.ID, "", false, errMsg)
-		return
+		s.cancelAutomationDispatch(ctx, task.ID, session.ID)
+		return automation.RunDispatch{}, errors.New("automation continuation dispatch returned no turn identity")
 	}
 	s.recordAutomationContinuationMessage(ctx, task.ID, session.ID, turnID, prompt)
-	if runID != "" {
-		if binding, ok := s.automationService.(automationRunBinding); ok {
-			if err := binding.BindRun(ctx, runID, task.ID, session.ID, turnID, action, reason); err != nil {
-				s.logger.Error("failed to bind automation continuation run",
-					zap.String("run_id", runID), zap.String("task_id", task.ID), zap.String("turn_id", turnID), zap.Error(err))
-				s.markExactAutomationRunTerminal(ctx, runID, session.ID, turnID, false, err.Error())
-			}
-		}
+	return automation.RunDispatch{TaskID: task.ID, SessionID: session.ID, TurnID: turnID}, nil
+}
+
+func (s *Service) cancelAutomationDispatch(ctx context.Context, taskID, sessionID string) {
+	if s.turnService == nil || s.executor == nil {
+		return
+	}
+	if _, err := s.stopTaskSessionForCoordinator(ctx, taskID, sessionID); err != nil {
+		s.logger.Warn("failed to cancel automation dispatch without a turn identity",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
 	}
 }
 
@@ -511,6 +611,39 @@ func (s *Service) autoStartAutomationTask(ctx context.Context, a *automation.Aut
 }
 
 func (s *Service) autoStartAutomationTaskForRun(ctx context.Context, a *automation.Automation, task *models.Task, workflowStepID, runID string, action automation.ThreadAction, reason string) {
+	if s.dispatchAutomationRun(ctx, a.ID, task.ID, "", runID, action, reason, "auto-start", func() (automation.RunDispatch, error) {
+		return s.startAutomationTask(ctx, a, task, workflowStepID)
+	}) {
+		return
+	}
+
+	dispatch, err := s.startAutomationTask(ctx, a, task, workflowStepID)
+	if err != nil {
+		s.logger.Error("failed to auto-start automation task",
+			zap.String("task_id", task.ID), zap.Error(err))
+		// The run row was written before the launch, so a start that never
+		// happened would otherwise sit at task_created forever and hold a
+		// max_concurrent_runs slot — one failed launch would stop the
+		// automation permanently, with no completion event coming to free it.
+		if !s.markExactAutomationRunTerminal(ctx, runID, "", "", false, err.Error()) {
+			s.markAutomationRunTerminal(ctx, task.ID, false, err.Error())
+		}
+		return
+	}
+	if !s.bindAutomationRun(ctx, runID, dispatch.TaskID, dispatch.SessionID, dispatch.TurnID, action, reason, "auto-start") {
+		return
+	}
+	s.logger.Info("auto-started automation task",
+		zap.String("task_id", task.ID),
+		zap.String("automation_id", a.ID))
+}
+
+func (s *Service) startAutomationTask(
+	ctx context.Context,
+	a *automation.Automation,
+	task *models.Task,
+	workflowStepID string,
+) (automation.RunDispatch, error) {
 	execution, err := s.StartTask(
 		ctx,
 		task.ID,
@@ -525,30 +658,12 @@ func (s *Service) autoStartAutomationTaskForRun(ctx context.Context, a *automati
 		nil,
 	)
 	if err != nil {
-		s.logger.Error("failed to auto-start automation task",
-			zap.String("task_id", task.ID), zap.Error(err))
-		// The run row was written before the launch, so a start that never
-		// happened would otherwise sit at task_created forever and hold a
-		// max_concurrent_runs slot — one failed launch would stop the
-		// automation permanently, with no completion event coming to free it.
-		if !s.markExactAutomationRunTerminal(ctx, runID, "", "", false, err.Error()) {
-			s.markAutomationRunTerminal(ctx, task.ID, false, err.Error())
-		}
-		return
+		return automation.RunDispatch{}, err
 	}
-	if runID != "" {
-		if binding, ok := s.automationService.(automationRunBinding); ok {
-			if bindErr := binding.BindRun(ctx, runID, task.ID, execution.SessionID, execution.TurnID, action, reason); bindErr != nil {
-				s.logger.Error("failed to bind automation run to dispatched turn",
-					zap.String("run_id", runID), zap.String("task_id", task.ID), zap.Error(bindErr))
-				s.markExactAutomationRunTerminal(ctx, runID, execution.SessionID, execution.TurnID, false, bindErr.Error())
-				return
-			}
-		}
+	if execution == nil || execution.SessionID == "" || execution.TurnID == "" {
+		return automation.RunDispatch{}, errors.New("automation task start returned no session or turn identity")
 	}
-	s.logger.Info("auto-started automation task",
-		zap.String("task_id", task.ID),
-		zap.String("automation_id", a.ID))
+	return automation.RunDispatch{TaskID: task.ID, SessionID: execution.SessionID, TurnID: execution.TurnID}, nil
 }
 
 // resolveAutomationRepository determines the repositories for an
@@ -831,6 +946,7 @@ func (s *Service) markExactAutomationRunTerminal(ctx context.Context, runID, ses
 	if err := binding.MarkRunTerminal(ctx, runID, sessionID, turnID, status, errMsg); err != nil {
 		s.logger.Warn("failed to update exact automation run terminal status",
 			zap.String("run_id", runID), zap.String("session_id", sessionID), zap.String("turn_id", turnID), zap.Error(err))
+		return false
 	}
 	return true
 }

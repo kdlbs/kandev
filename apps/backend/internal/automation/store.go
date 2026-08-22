@@ -490,6 +490,9 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 	if a.ContinuationPolicy == "" {
 		a.ContinuationPolicy = ContinuationPolicyNewTask
 	}
+	if a.ContinuationPolicy == ContinuationPolicyReuseThread && a.MaxConcurrentRuns <= 0 {
+		a.MaxConcurrentRuns = 1
+	}
 	if err := validateContinuationSettings(a.ContinuationPolicy, a.MaxConcurrentRuns); err != nil {
 		return err
 	}
@@ -964,25 +967,22 @@ func (s *Store) AdoptTriggeredRun(ctx context.Context, r *AutomationRun) (bool, 
 	if r == nil || r.DedupKey == "" {
 		return false, nil
 	}
-	var runID string
-	err := s.ro.GetContext(ctx, &runID, `
-		SELECT id FROM automation_runs
-		WHERE automation_id = ? AND dedup_key = ? AND status = ?
-		ORDER BY created_at DESC, id DESC LIMIT 1`,
-		r.AutomationID, r.DedupKey, string(RunStatusTriggered))
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE automation_runs SET task_id = ?, status = ?, trigger_data = ?, error_message = ?,
+			session_id = ?, turn_id = ?, thread_action = ?, thread_reason = ?, display_title = ?
+		WHERE id = (
+			SELECT id FROM automation_runs
+			WHERE automation_id = ? AND dedup_key = ? AND status = ?
+			ORDER BY created_at DESC, id DESC LIMIT 1
+		) AND status = ?`,
+		r.TaskID, r.Status, r.TriggerDataJSON, r.ErrorMessage, r.SessionID, r.TurnID,
+		r.ThreadAction, r.ThreadReason, r.DisplayTitle,
+		r.AutomationID, r.DedupKey, string(RunStatusTriggered), string(RunStatusTriggered))
 	if err != nil {
 		return false, err
 	}
-	_, err = s.db.ExecContext(ctx, `
-		UPDATE automation_runs SET task_id = ?, status = ?, trigger_data = ?, error_message = ?,
-			session_id = ?, turn_id = ?, thread_action = ?, thread_reason = ?, display_title = ?
-		WHERE id = ?`,
-		r.TaskID, r.Status, r.TriggerDataJSON, r.ErrorMessage, r.SessionID, r.TurnID,
-		r.ThreadAction, r.ThreadReason, r.DisplayTitle, runID)
-	return true, err
+	affected, _ := res.RowsAffected()
+	return affected > 0, nil
 }
 
 // BindRunTask records the task created for an admitted run while leaving the
@@ -1138,35 +1138,68 @@ func (s *Store) ListRuns(ctx context.Context, automationID string, limit int) ([
 // historical transcript metadata in one request.
 const maxRunsLimit = 200
 
+// runSummaryRow is the newest agent message for one exact turn.
+type runSummaryRow struct {
+	TurnID  string         `db:"turn_id"`
+	Summary sql.NullString `db:"summary"`
+}
+
 // hydrateRunSummaries replaces the task-level fallback summary with the
 // message from the exact turn bound to a run. Reused tasks can contain several
 // turns, so looking only at task_id can show a later firing's result for an
 // earlier run. Runs without a turn binding retain the legacy task-level query.
+// Bound runs are hydrated in one set-based query because these lists are also
+// used by live polling and can contain hundreds of runs.
 func (s *Store) hydrateRunSummaries(ctx context.Context, runs []*AutomationRun) error {
+	turnIDs := make([]string, 0, len(runs))
 	for _, run := range runs {
-		if run.TurnID == "" {
-			continue
+		if run.TurnID != "" {
+			turnIDs = append(turnIDs, run.TurnID)
 		}
-		var summary sql.NullString
-		err := s.ro.GetContext(ctx, &summary, `
-			SELECT substr(content, 1, 280)
-			FROM task_session_messages
-			WHERE turn_id = ? AND author_type = 'agent' AND type = 'message'
-			ORDER BY created_at DESC, id DESC LIMIT 1`, run.TurnID)
-		if errors.Is(err, sql.ErrNoRows) {
+	}
+	if len(turnIDs) == 0 {
+		return nil
+	}
+
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(turnIDs)), ",")
+	args := make([]any, len(turnIDs))
+	for i, turnID := range turnIDs {
+		args[i] = turnID
+	}
+	var summaries []runSummaryRow
+	err := s.ro.SelectContext(ctx, &summaries, `
+		SELECT m.turn_id, substr(m.content, 1, 280) AS summary
+		FROM task_session_messages m
+		WHERE m.turn_id IN (`+placeholders+`)
+		  AND m.author_type = 'agent' AND m.type = 'message'
+		  AND NOT EXISTS (
+			SELECT 1 FROM task_session_messages newer
+			WHERE newer.turn_id = m.turn_id
+			  AND newer.author_type = 'agent' AND newer.type = 'message'
+			  AND (newer.created_at > m.created_at OR
+				(newer.created_at = m.created_at AND newer.id > m.id))
+		  )`, args...)
+	if db.IsMissingTableError(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	for _, run := range runs {
+		if run.TurnID != "" {
 			run.Summary = ""
-			continue
 		}
-		if db.IsMissingTableError(err) {
-			continue
+	}
+	byTurn := make(map[string]string, len(summaries))
+	for _, summary := range summaries {
+		if summary.Summary.Valid {
+			byTurn[summary.TurnID] = summary.Summary.String
 		}
-		if err != nil {
-			return err
-		}
-		if summary.Valid {
-			run.Summary = summary.String
-		} else {
-			run.Summary = ""
+	}
+	for _, run := range runs {
+		if summary, ok := byTurn[run.TurnID]; ok {
+			run.Summary = summary
 		}
 	}
 	return nil

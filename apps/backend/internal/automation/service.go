@@ -57,6 +57,11 @@ var ErrAgentProfileNotFound = errors.New("automation: agent profile not found")
 
 var ErrInvalidContinuationPolicy = errors.New("automation: invalid continuation policy")
 
+// ErrAutomationRunNotDispatchable means the run was stopped or otherwise
+// settled before its agent turn could be started. The event handler must not
+// launch work for this run.
+var ErrAutomationRunNotDispatchable = errors.New("automation: run is not dispatchable")
+
 // ErrAutomationRunNotLive is returned by the orchestrator when an exact run
 // binding is no longer the live turn. The service maps that outcome to the
 // same not-found result as a missing or terminal run, so a stale stop request
@@ -74,6 +79,27 @@ type RunStopper interface {
 // blocked. Errors fail closed and leave the run open for a later retry.
 type RunLivenessChecker interface {
 	AutomationRunLive(ctx context.Context, taskID, sessionID, turnID string) (bool, error)
+}
+
+// RunDispatch is the exact identity returned after an agent turn is accepted.
+// The service binds it while holding the automation run lock, so stopping or
+// deleting an automation cannot race the task/session/turn admission.
+type RunDispatch struct {
+	TaskID    string
+	SessionID string
+	TurnID    string
+}
+
+// RunDispatcher serializes accepted-turn dispatch with exact-run stop and
+// run-history deletion.
+type RunDispatcher interface {
+	DispatchRun(
+		ctx context.Context,
+		runID string,
+		action ThreadAction,
+		reason string,
+		dispatch func() (RunDispatch, error),
+	) error
 }
 
 func validateContinuationSettings(policy ContinuationPolicy, maxRuns int) error {
@@ -552,10 +578,18 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	if req.MaxConcurrentRuns != nil {
 		maxRuns = *req.MaxConcurrentRuns
 	}
+	storeReq := req
+	if policy == ContinuationPolicyReuseThread && maxRuns <= 0 {
+		maxRuns = 1
+		normalized := 1
+		clone := *req
+		clone.MaxConcurrentRuns = &normalized
+		storeReq = &clone
+	}
 	if err := validateContinuationSettings(policy, maxRuns); err != nil {
 		return nil, err
 	}
-	if err := s.store.UpdateAutomation(ctx, id, req); err != nil {
+	if err := s.store.UpdateAutomation(ctx, id, storeReq); err != nil {
 		return nil, err
 	}
 	return s.store.GetAutomation(ctx, id)
@@ -756,6 +790,12 @@ func (s *Service) ReconcileCleanupJobs(ctx context.Context) error {
 // StopRun cancels one open automation run. The stored binding is authoritative;
 // callers never provide task, session, or turn identities themselves.
 func (s *Service) StopRun(ctx context.Context, automationID, runID string) (*AutomationRun, error) {
+	if err := s.authorizeAutomation(ctx, automationID); err != nil {
+		return nil, err
+	}
+	unlock := s.automationRunLock(automationID)
+	defer unlock()
+
 	run, err := s.store.GetRun(ctx, runID)
 	if err != nil {
 		return nil, fmt.Errorf("get run: %w", err)
@@ -763,9 +803,6 @@ func (s *Service) StopRun(ctx context.Context, automationID, runID string) (*Aut
 	if run == nil || run.AutomationID != automationID ||
 		(run.Status != RunStatusTriggered && run.Status != RunStatusTaskCreated) {
 		return nil, ErrAutomationNotFound
-	}
-	if err := s.authorizeAutomation(ctx, automationID); err != nil {
-		return nil, err
 	}
 	if run.TaskID != "" && run.SessionID != "" && run.TurnID != "" {
 		if s.runStopper == nil {
@@ -957,6 +994,73 @@ func (s *Service) automationRunLock(automationID string) func() {
 	mu := v.(*sync.Mutex)
 	mu.Lock()
 	return mu.Unlock
+}
+
+// DispatchRun serializes the fallible agent dispatch with exact-run stop and
+// deletion. The callback is invoked only while the admitted run is still
+// open; its exact task/session/turn identity is bound before the lock is
+// released, so a stop can never settle a different firing.
+func (s *Service) DispatchRun(
+	ctx context.Context,
+	runID string,
+	action ThreadAction,
+	reason string,
+	dispatch func() (RunDispatch, error),
+) error {
+	if runID == "" || dispatch == nil {
+		return ErrAutomationRunNotDispatchable
+	}
+	run, err := s.store.GetRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if run == nil {
+		return ErrAutomationRunNotDispatchable
+	}
+	unlock := s.automationRunLock(run.AutomationID)
+	defer unlock()
+
+	run, err = s.store.GetRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if run == nil || run.Status != RunStatusTriggered {
+		return ErrAutomationRunNotDispatchable
+	}
+
+	dispatchResult, err := dispatch()
+	if err != nil {
+		return s.markDispatchFailed(ctx, runID, err)
+	}
+	if dispatchResult.TaskID == "" || dispatchResult.SessionID == "" || dispatchResult.TurnID == "" {
+		return s.markDispatchFailed(ctx, runID, errors.New("automation dispatch returned no exact identity"))
+	}
+	if err := s.store.BindRun(ctx, runID, dispatchResult.TaskID, dispatchResult.SessionID, dispatchResult.TurnID, action, reason); err != nil {
+		return s.markDispatchFailed(ctx, runID, err)
+	}
+	return nil
+}
+
+func (s *Service) markDispatchFailed(ctx context.Context, runID string, dispatchErr error) error {
+	if err := s.store.MarkRunTerminal(ctx, runID, "", "", RunStatusFailed, dispatchErr.Error()); err != nil {
+		return fmt.Errorf("%w (mark run failed: %v)", dispatchErr, err)
+	}
+	return dispatchErr
+}
+
+// lockRun returns the per-automation lock for a persisted run. Binding uses
+// the same lock as DispatchRun and StopRun, while the store's status guard
+// remains the final protection against a row deleted between the lookup and
+// the update.
+func (s *Service) lockRun(ctx context.Context, runID string) (func(), error) {
+	run, err := s.store.GetRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if run == nil {
+		return nil, ErrAutomationRunNotDispatchable
+	}
+	return s.automationRunLock(run.AutomationID), nil
 }
 
 // createRunLocked persists a run row while holding the per-automation lock
@@ -1289,6 +1393,7 @@ func (s *Service) recordSkippedTrigger(
 		DedupKey:     skipDedupKey,
 		TriggerData:  triggerData,
 		ErrorMessage: reason,
+		DisplayTitle: RenderRunDisplayTitle(a, triggerType, triggerData),
 	}
 	if err := s.store.CreateRun(ctx, skipRun); err != nil {
 		s.logger.Warn("failed to record skipped run", zap.Error(err))
@@ -1318,6 +1423,11 @@ func (s *Service) RecordRun(ctx context.Context, run *AutomationRun) error {
 }
 
 func (s *Service) BindRunTask(ctx context.Context, runID, taskID string) error {
+	unlock, err := s.lockRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	return s.store.BindRunTask(ctx, runID, taskID)
 }
 
@@ -1326,6 +1436,11 @@ func (s *Service) SetContinuationTaskID(ctx context.Context, automationID, taskI
 }
 
 func (s *Service) BindRun(ctx context.Context, runID, taskID, sessionID, turnID string, action ThreadAction, reason string) error {
+	unlock, err := s.lockRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	return s.store.BindRun(ctx, runID, taskID, sessionID, turnID, action, reason)
 }
 

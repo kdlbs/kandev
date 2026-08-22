@@ -131,7 +131,7 @@ conversation anchor and continuation outcome needed when several firings share o
 | `automation_name` | `automations.name` | INNER join — a run whose automation is gone is unattributable |
 | `summary` | `task_session_messages` | tail of the agent message for `turn_id`, truncated server-side to 280 chars |
 
-The status shown is derived at read time, not stored: a `task_created` run whose task was deleted or whose primary session was cancelled reads as `cancelled`, and one whose task was archived reads as `archived`. This derivation is defined once and shared with the per-automation log — the two views MUST NOT be able to disagree about the same run.
+The status shown is derived at read time, not stored: a `task_created` run whose task was deleted or whose primary session was cancelled reads as `cancelled`, and one whose task was archived reads as `archived`. Persisted terminal statuses (`failed`, `succeeded`, and `skipped`) take precedence; read-time `cancelled` or `archived` derivation applies only to an open `task_created` run. This derivation is defined once and shared with the per-automation log — the two views MUST NOT be able to disagree about the same run.
 
 Stored `triggered` is also displayed as Running and counts as open. It exists only between durable
 admission and accepted-turn binding; reconciliation turns an interrupted pre-dispatch row into a

@@ -425,7 +425,7 @@ func getRegisteredToolNames(s *Server) []string {
 func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
-	defer backend.Close()
+	t.Cleanup(backend.Close)
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, []string{"github", "gitlab"})
 	require.NotNil(t, s)

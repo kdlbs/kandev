@@ -197,8 +197,8 @@ branch through `orchestrator/event_handlers_automation.go::handleAutomationTrigg
 
 ```text
 trigger fires
-  → resolve repository
   → atomically admit AutomationRun(status=triggered) -- one active run in reuse_thread
+  → resolve repository
   → new_task: CreateReviewTask + StartTask
   → reuse_thread:
       saved thread is resumable: PromptTask(saved primary session)

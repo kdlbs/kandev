@@ -31,6 +31,21 @@ export function filterRunTranscriptMessages<T extends { turn_id?: string | null 
   return turnId ? messages.filter((message) => message.turn_id === turnId) : messages;
 }
 
+function useFilteredRunTranscript(
+  panelState: ReturnType<typeof useChatPanelState>,
+  turnId?: string,
+) {
+  const transcriptItems = useMemo(
+    () => filterRunTranscriptItems(panelState.groupedItems, turnId),
+    [panelState.groupedItems, turnId],
+  );
+  const transcriptMessages = useMemo(
+    () => filterRunTranscriptMessages(panelState.messages, turnId),
+    [panelState.messages, turnId],
+  );
+  return { transcriptItems, transcriptMessages };
+}
+
 /**
  * A run's conversation, in place.
  *
@@ -70,14 +85,7 @@ export function RunTranscript({
   });
   const { isSending, handleSubmit } = useSubmitHandler(panelState, undefined);
   const { handleCancelTurn } = useChatPanelHandlers(panelState.resolvedSessionId, chatInputRef);
-  const transcriptItems = useMemo(
-    () => filterRunTranscriptItems(panelState.groupedItems, turnId),
-    [panelState.groupedItems, turnId],
-  );
-  const transcriptMessages = useMemo(
-    () => filterRunTranscriptMessages(panelState.messages, turnId),
-    [panelState.messages, turnId],
-  );
+  const { transcriptItems, transcriptMessages } = useFilteredRunTranscript(panelState, turnId);
 
   // An automation run is not a session anyone is sitting in: replying starts
   // the agent, it works the prompt, and it shuts down again. Controls that talk

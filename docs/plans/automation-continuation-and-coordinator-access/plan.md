@@ -220,8 +220,8 @@ git diff --check
 
 ## Verification results
 
-- Backend: automation/orchestrator 2,449 tests; lifecycle 1,947 tests; MCP/profile/scope/server/handlers 870 tests; backendapp 466 tests.
-- Frontend: focused automation/run/API tests 307 tests; transcript/detail tests 32 tests; typecheck passed.
+- Backend: automation/orchestrator 2,452 tests; lifecycle 1,947 tests; MCP/profile/scope/server/handlers 877 tests; backendapp 466 tests.
+- Frontend: focused automation/run/API tests 308 tests; transcript/detail tests 32 tests; typecheck passed.
 - Internationalization and public docs checks passed, including the new-code ratchet.
 - Desktop E2E passed 24 tests; mobile E2E passed 10 tests.
 - `pnpm install --frozen-lockfile`, `git diff --check`, and public-doc validation passed.

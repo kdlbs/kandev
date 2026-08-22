@@ -81,4 +81,4 @@ changed, and exact tests.
 
 ## Results
 
-Implemented exact-turn liveness/reconciliation, exact-run stopping, distinct-task retention, reference-aware deletion, durable cleanup jobs, startup retry, and workspace-reset reuse. Automation and orchestrator verification passed with 389 and 2,060 tests respectively.
+Implemented exact-turn liveness/reconciliation, exact-run stopping, distinct-task retention, reference-aware deletion, durable cleanup jobs, startup retry, and worktree-preserving reuse. Automation and orchestrator verification passed with 392 and 2,060 tests respectively.
