@@ -811,6 +811,7 @@ interface PluginRegistry {
   // dropdown, alongside the built-in Workflow/Repository sections. See
   // "Task filters" below.
   registerTaskFilter(registration: TaskFilterRegistration): void;
+  registerTaskListFacet(registration: TaskListFacetRegistration): void;
 }
 
 interface IntegrationSettingsRegistration {
@@ -1242,6 +1243,14 @@ combine with AND (a task must match every section with an active selection),
 mirroring how Workflow/Repository combine with the search query today. If
 `matches()` throws, the task is treated as non-matching and the error is
 logged (mirroring `TaskMenuActionRegistration.visible`'s error handling).
+
+### Task-list facets
+
+`registerTaskListFacet({ id, label, getValues, subscribe? })` adds a choice to `/tasks` Sort and
+Group controls. `getValues({ taskId, workspaceId })` synchronously returns `{ value, label,
+color? }[]`; `subscribe` invalidates the loaded page. Facets are page-local: no facet selection
+is persisted or sent to the backend. The host catches callback errors and revokes registrations
+and active subscriptions when the owning plugin unloads.
 
 ## Registry internals (host side)
 

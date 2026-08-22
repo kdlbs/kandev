@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable max-lines -- the task-page state machine predates the facet addition. */
 
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
@@ -10,9 +11,7 @@ import {
   unarchiveTask,
   updateUserSettings,
 } from "@/lib/api";
-import { KanbanHeader } from "@/components/kanban/kanban-header";
 import { MobileFab } from "@/components/kanban/mobile-fab";
-import { MobileSearchBar } from "@/components/kanban/mobile-search-bar";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import type { Task, Workspace, Workflow, Repository } from "@/lib/types/http";
 import { useToast } from "@/components/toast-provider";
@@ -29,14 +28,17 @@ import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
+import { useTaskListFacets } from "@/hooks/use-task-list-facets";
 import { linkToTask } from "@/lib/links";
 import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
 import { shouldSkipInitialTasksFetch } from "./tasks-page-fetch-policy";
-import { TasksListView } from "./tasks-list-view";
+import { TasksPageContent } from "./tasks-page-content";
 import {
   parseTasksListGroup,
   parseTasksListSort,
+  isTaskListFacetOption,
   sortTasksForList,
+  sortTasksByFacet,
   type TasksListGroup,
   type TasksListSort,
 } from "@/lib/tasks/tasks-list-options";
@@ -515,6 +517,7 @@ function useTasksListPreferenceSync({
   return { handleSortChange, handleGroupChange };
 }
 
+// eslint-disable-next-line max-lines-per-function -- lifecycle hooks remain co-located with page state.
 export function TasksPageClient(props: TasksPageClientProps) {
   const s = useTasksPageSetup(props);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -523,6 +526,17 @@ export function TasksPageClient(props: TasksPageClientProps) {
   const isMobileSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
   const { isMobile } = useResponsiveBreakpoint();
   const showTaskDetails = useAppStore((state) => state.userSettings.tasksListShowDetails ?? false);
+  const { facets, values: facetValues } = useTaskListFacets(s.tasks, s.activeWorkspaceId);
+  const [facetSort, setFacetSort] = useState<string | null>(null);
+  const [facetGroup, setFacetGroup] = useState<string | null>(null);
+  const facetOptions = useMemo(
+    () => facets.map((facet) => ({ value: facet.key, label: facet.label })),
+    [facets],
+  );
+  const displayedTasks = useMemo(
+    () => (facetSort ? sortTasksByFacet(s.tasks, facetSort, facetValues) : s.tasks),
+    [facetSort, facetValues, s.tasks],
+  );
   const activeSteps = useAppStore((state) =>
     state.kanban.workflowId === s.activeWorkflowId ? state.kanban.steps : EMPTY_WORKFLOW_STEPS,
   );
@@ -550,63 +564,75 @@ export function TasksPageClient(props: TasksPageClientProps) {
     setView("list");
   }, [setView]);
 
+  const sort = facetSort ?? s.tasksListSort;
+  const group = facetGroup ?? s.tasksListGroup;
+  const selectSort = (value: string) =>
+    isTaskListFacetOption(value)
+      ? setFacetSort(value)
+      : (setFacetSort(null), handleSortChange(value as TasksListSort));
+  const selectGroup = (value: string) =>
+    isTaskListFacetOption(value)
+      ? setFacetGroup(value)
+      : (setFacetGroup(null), handleGroupChange(value as TasksListGroup));
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      <KanbanHeader
-        workspaceId={s.activeWorkspaceId ?? undefined}
-        currentPage="tasks"
-        searchQuery={s.searchQuery}
-        onSearchChange={s.setSearchQuery}
-        isSearchLoading={s.isLoading && !!s.debouncedQuery}
-        tasksListOptions={{
+    <TasksPageContent
+      header={{
+        workspaceId: s.activeWorkspaceId ?? undefined,
+        currentPage: "tasks",
+        searchQuery: s.searchQuery,
+        onSearchChange: s.setSearchQuery,
+        isSearchLoading: s.isLoading && !!s.debouncedQuery,
+        tasksListOptions: {
           showArchived: s.showArchived,
           onShowArchivedChange: s.setShowArchived,
-          sort: s.tasksListSort,
-          onSortChange: handleSortChange,
-          group: s.tasksListGroup,
-          onGroupChange: handleGroupChange,
-        }}
-      />
-      {isMobile && isMobileSearchOpen && (
-        <MobileSearchBar searchQuery={s.searchQuery} onSearchChange={s.setSearchQuery} />
-      )}
-      <TasksListView
-        showArchived={s.showArchived}
-        setShowArchived={s.setShowArchived}
-        tasksListSort={s.tasksListSort}
-        onTasksListSortChange={handleSortChange}
-        tasksListGroup={s.tasksListGroup}
-        onTasksListGroupChange={handleGroupChange}
-        tasks={s.tasks}
-        workflows={s.workflows}
-        repositories={s.repositories}
-        showTaskDetails={showTaskDetails}
-        total={s.total}
-        pageCount={s.pageCount}
-        pagination={s.pagination}
-        setPagination={s.setPagination}
-        isLoading={s.isLoading}
-        handleRowClick={s.handleRowClick}
-        deletingTaskId={s.deletingTaskId}
-        handleArchive={s.handleArchive}
-        handleUnarchive={s.handleUnarchive}
-        handleDelete={s.handleDelete}
-        onRefresh={isMobile ? () => s.fetchTasks() : undefined}
-      />
-      {isMobile && s.activeWorkspaceId && (
-        <>
-          <MobileFab onClick={() => setIsCreateOpen(true)} />
-          <MobileTasksCreateDialog
-            open={isCreateOpen}
-            onOpenChange={setIsCreateOpen}
-            workspaceId={s.activeWorkspaceId}
-            workflowId={s.activeWorkflowId}
-            steps={activeSteps}
-            onCreated={() => s.fetchTasks(true)}
-          />
-        </>
-      )}
-    </div>
+          sort,
+          onSortChange: selectSort,
+          group,
+          onGroupChange: selectGroup,
+          facetOptions,
+        },
+      }}
+      isMobile={isMobile}
+      isMobileSearchOpen={isMobileSearchOpen}
+      tasks={displayedTasks}
+      workflows={s.workflows}
+      repositories={s.repositories}
+      facetOptions={facetOptions}
+      facetValues={facetValues}
+      total={s.total}
+      pageCount={s.pageCount}
+      pagination={s.pagination}
+      setPagination={s.setPagination}
+      isLoading={s.isLoading}
+      showArchived={s.showArchived}
+      showTaskDetails={showTaskDetails}
+      sort={sort}
+      group={group}
+      onSortChange={selectSort}
+      onGroupChange={selectGroup}
+      onShowArchivedChange={s.setShowArchived}
+      onRowClick={s.handleRowClick}
+      deletingTaskId={s.deletingTaskId}
+      onArchive={s.handleArchive}
+      onUnarchive={s.handleUnarchive}
+      onDelete={s.handleDelete}
+      onRefresh={() => s.fetchTasks()}
+      mobileActions={
+        isMobile && s.activeWorkspaceId ? (
+          <>
+            <MobileFab onClick={() => setIsCreateOpen(true)} />
+            <MobileTasksCreateDialog
+              open={isCreateOpen}
+              onOpenChange={setIsCreateOpen}
+              workspaceId={s.activeWorkspaceId}
+              workflowId={s.activeWorkflowId}
+              steps={activeSteps}
+              onCreated={() => s.fetchTasks(true)}
+            />
+          </>
+        ) : null
+      }
+    />
   );
 }
 
