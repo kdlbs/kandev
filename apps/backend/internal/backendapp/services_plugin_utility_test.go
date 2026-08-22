@@ -88,6 +88,16 @@ func TestPluginsAgentProfileAdapter_MapsTypedNotFound(t *testing.T) {
 	}
 }
 
+func TestPluginsAgentProfileAdapter_PreservesOperationalFailure(t *testing.T) {
+	storeErr := errors.New("agent profile database unavailable")
+	adapter := pluginsAgentProfileAdapter{store: &pluginAgentProfileStoreStub{err: storeErr}}
+
+	_, err := adapter.GetProfileByID(context.Background(), "configured")
+	if !errors.Is(err, storeErr) {
+		t.Fatalf("GetProfileByID() error = %v, want store error", err)
+	}
+}
+
 func TestPluginsAgentProfileAdapter_PreservesEligibilityFields(t *testing.T) {
 	adapter := pluginsAgentProfileAdapter{store: &pluginAgentProfileStoreStub{profile: &agentsettingsmodels.AgentProfile{
 		Enabled:        true,

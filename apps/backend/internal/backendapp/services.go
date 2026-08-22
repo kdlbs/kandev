@@ -1057,11 +1057,14 @@ type pluginsAgentProfileAdapter struct {
 
 func (a pluginsAgentProfileAdapter) GetProfileByID(ctx context.Context, id string) (*plugins.AgentProfile, error) {
 	profile, err := a.store.GetAgentProfile(ctx, id)
-	if errors.Is(err, sql.ErrNoRows) || profile == nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, plugins.ErrAgentProfileNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	if profile == nil {
+		return nil, plugins.ErrAgentProfileNotFound
 	}
 	return &plugins.AgentProfile{
 		Enabled:        profile.Enabled,

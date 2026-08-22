@@ -475,9 +475,9 @@ service Host {
   enabled, global, non-CLI profiles and persists the selected stable ID. A
   non-empty direct selection runs that profile through the sessionless
   host-utility inference tier (ADR 0002), with no task, session, or workspace.
-  It returns gRPC `FailedPrecondition` when the direct selection is missing,
-  deleted, disabled, CLI-passthrough, or workspace-scoped. Existing plugins can
-  keep the legacy `utility_agent` selector (`format: utility-agent`), which
+  It returns gRPC `FailedPrecondition` when a non-empty direct selection is
+  deleted, disabled, CLI-passthrough, or workspace-scoped. Existing plugins
+  can keep the legacy `utility_agent` selector (`format: utility-agent`), which
   resolves the selected utility agent's effective profile. The direct value
   wins only when it is non-empty; an upgraded plugin therefore retains a saved
   legacy selection until an operator chooses a direct profile. See
