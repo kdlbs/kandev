@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
@@ -153,5 +153,67 @@ describe("Graph2StepNode — waiting-for-input variants", () => {
     expect(container.querySelector(".tabler-icon-shield-question")).not.toBeNull();
     expect(container.querySelector(ICON_CHECK)).toBeNull();
     expect(container.querySelector(ICON_LOADER2)).toBeNull();
+  });
+});
+
+describe("Graph2StepNode — hidden destination disclosure", () => {
+  function renderNextMove(nextStepHidden: boolean) {
+    render(
+      <StateProvider>
+        <TooltipProvider delayDuration={0}>
+          <Graph2StepNode
+            step={STEP}
+            phase="current"
+            task={makeTask()}
+            hasPrev={false}
+            hasNext
+            nextStepId="step-done"
+            nextStepTitle="Done"
+            nextStepHidden={nextStepHidden}
+            onMoveTask={() => undefined}
+            onPreviewTask={() => undefined}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+    const currentStep = screen.getByRole("button", { name: "In Progress" });
+    fireEvent.mouseEnter(currentStep.parentElement!);
+    return screen.getByRole("button", { name: "Move to Done" });
+  }
+
+  it("shows the destination tooltip only when the destination is hidden", async () => {
+    const hiddenTargetButton = renderNextMove(true);
+    fireEvent.focus(hiddenTargetButton);
+    await waitFor(() => expect(screen.getByRole("tooltip").textContent).toBe("Move to Done"));
+
+    cleanup();
+    const visibleTargetButton = renderNextMove(false);
+    fireEvent.focus(visibleTargetButton);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("exposes move controls when the current node receives keyboard focus", () => {
+    render(
+      <StateProvider>
+        <TooltipProvider>
+          <Graph2StepNode
+            step={STEP}
+            phase="current"
+            task={makeTask()}
+            hasPrev={false}
+            hasNext
+            nextStepId="step-done"
+            nextStepTitle="Done"
+            nextStepHidden
+            onMoveTask={() => undefined}
+            onPreviewTask={() => undefined}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    fireEvent.focus(screen.getByRole("button", { name: "In Progress" }));
+
+    expect(screen.getByRole("button", { name: "Move to Done" })).not.toBeNull();
   });
 });

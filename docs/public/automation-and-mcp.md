@@ -523,11 +523,11 @@ Use `stop_task_kandev` only when the direct child should halt without a replacem
 
 After an accepted stop, Kandev attempts to move an unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states are preserved. Worktrees, task environments, commits, task records, descendants, and queued messages remain available, and the task can be started again later.
 
-`add_workspace_sources_kandev` adds one or more sources to an idle task and defaults `task_id` to the current task. Its `sources` input accepts the same atomic mixed batch as the Files panel: `repository` sources use exactly one saved repository ID, local Git path, or remote repository locator plus branch fields; `folder` sources use a local path and optional display name. Repository sources work on Worktree, Local/Local PC, Local Docker, SSH, and Sprites; folders work only on Worktree and Local/Local PC. The task must be repository-backed and have no active turn or tool call. Invalid, duplicate, unsupported, or failed sources roll back the entire batch.
+`add_workspace_sources_kandev` adds one or more sources to an idle task and defaults `task_id` to the current task. A task may also target its same-workspace direct child; Kandev verifies the calling task and session on the backend, so agents cannot provide or override that provenance. Its `sources` input accepts the same atomic mixed batch as the Files panel: `repository` sources use exactly one saved repository ID, local Git path, or remote repository locator plus branch fields; `folder` sources use a local path and optional display name. Repository sources work on Worktree, Local/Local PC, Local Docker, SSH, and Sprites; folders work only on Worktree and Local/Local PC. The target must be repository-backed and have no active turn or tool call. Exact normalized retries are idempotent; contradictory duplicates, unsupported, or failed sources roll back the batch.
 
 `add_branch_to_task_kandev` is the Worktree-only compatibility path for adding one repository/branch during an active agent turn. It creates the worktree as a sibling under the task directory, promotes the persisted Files root to that parent, and rescans it without restarting the agent, terminals, or workspace processes. The response returns `worktree_path` (the exact new repository location), `task_workspace_path` (the Files root), and `agent_cwd_changed: false`; deferred pre-launch materialization omits both paths. The original repository stays a separate Git worktree, so the sibling is not reported as an embedded repository or untracked files by its Git status. Use `add_workspace_sources_kandev` for mixed batch attachments to an idle task. `update_repository_base_branch_kandev` changes the base used for Kandev's diff, not a pull request's target branch.
 
-The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sources": [...] }`. It returns `400` for invalid input, `404` for a missing task/source outside the workspace, `409` for duplicates or an active task, and `422` when materialization or executor capability fails. Successful adoption publishes `task.updated` and `session.workspace_sources.updated`; clients should refresh their Files and repository state from those updates.
+The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sources": [...] }`. An exact normalized retry succeeds as a no-op. It returns `400` for invalid input, `404` for a missing task/source outside the workspace, `409` for contradictory duplicates or an active task, and `422` when materialization or executor capability fails. Successful adoption publishes `task.updated` and `session.workspace_sources.updated`; clients should refresh their Files and repository state from those updates.
 
 `step_complete_kandev` is registered and discoverable in every task-mode session. Kandev includes its completion instruction, and acts on its signal, only on Kanban steps whose auto-advance action explicitly requires that signal. A user message arriving before transition can cancel that automatic move.
 
@@ -661,16 +661,98 @@ http://127.0.0.1:<backend-port>/mcp
 
 SSE compatibility uses `/mcp/sse` with messages sent to `/mcp/message`. A reverse proxy must support long-lived streaming connections.
 
-External MCP exposes 36 tools in these groups:
+External MCP exposes 40 tools in these groups:
 
 - workspace/workflow configuration: list workspaces, workflows, repositories, and workflow steps; create, update, delete, import, or export workflows; create, update, delete, or reorder steps;
 - agents and profiles: list/update agents; create/delete profiles; list/update profiles; get/update profile MCP configuration;
 - executors: list executors and profiles; create, update, or delete executor profiles;
-- tasks: list, create, move, delete, archive, or update task state; list a task's sessions; and read task conversation.
+- tasks: list, create, move, delete, archive, or update task state; list a task's sessions; read task conversation; discover or answer pending clarification questions; and discover or resolve live agent permission requests.
 
 `export_workflow_kandev` takes `workflow_id` and returns one version 1 `kandev_workflow` JSON document. It omits instance IDs and timestamps. Pass its JSON text unchanged as `document` to `import_workflow_kandev` when it is within the existing 1 MiB import limit.
 
-The settings page's static **Available tools** preview currently counts 30 and omits `list_repositories_kandev`, `import_workflow_kandev`, `export_workflow_kandev`, and `get_task_conversation_kandev`. Treat the client's live `tools/list` response from the endpoint, not that preview, as authoritative.
+### Answer a pending clarification question
+
+Use `list_pending_questions_kandev` when an external client needs to discover clarification
+questions an agent is blocked on. All arguments are optional: `workspace_id` scopes the results,
+`created_since` (RFC3339) filters by age, and `cursor`/`limit` (default 50, capped at 200) page
+through results oldest-first.
+
+```json
+{
+  "workspace_id": "optional-workspace-uuid",
+  "created_since": "2026-08-01T00:00:00Z",
+  "limit": 50
+}
+```
+
+Each returned bundle carries `pending_id`, `task_id`, `session_id`, `created_at`, `age_seconds`,
+`context`, and an ordered `questions` array; each question carries `question_id`, `title`,
+`prompt`, `status`, and its `options` (`option_id`, `label`, `description`).
+
+After the person answers, pass the bundle's `pending_id` plus one entry per question to
+`answer_question_kandev`:
+
+```json
+{
+  "pending_id": "bundle-uuid",
+  "answers": [
+    { "question_id": "q1", "selected_options": ["opt-a"], "custom_text": "" }
+  ]
+}
+```
+
+Pass `rejected: true` with an optional `reason` instead of `answers` to decline the whole bundle.
+Exactly one caller wins a bundle: a losing call (including a REST submission racing this tool)
+returns `claimed: false` with the winner's own recorded answer, not an error, so a caller can
+always tell whether its answer landed. A `pending_id` that is no longer active with no winner
+returns an error naming that state.
+
+### Resolve a live agent permission request
+
+Use `list_pending_agent_permissions_kandev` when an external client needs to show a person the
+permission prompts currently blocking a task. `task_id` is required; `session_id` is optional and
+must belong to that task. An authorized task with no live request returns an empty list. Each item
+contains the exact task, session, request-generation, provider-pending, and tool-call identities;
+creation time and status; an allowlisted action projection; and the provider's ordered option IDs,
+names, and kinds.
+
+```json
+{
+  "task_id": "task-uuid",
+  "session_id": "optional-session-uuid"
+}
+```
+
+Command text and working directory are included when safe. File contents, diffs, environment
+values, headers, raw MCP arguments, provider-specific fields, and option metadata are omitted.
+Credential-like values in presentation text are redacted, and the action reports whether its
+returned text changed.
+
+After the person chooses one listed option, pass the returned identities unchanged to
+`resolve_agent_permission_kandev`:
+
+```json
+{
+  "task_id": "task-uuid",
+  "session_id": "session-uuid",
+  "request_id": "kandev-request-uuid",
+  "pending_id": "provider-pending-id",
+  "option_id": "allow-once"
+}
+```
+
+The mutation cannot accept a command, edited tool arguments, cancellation flag, or synthesized
+option. To deny an action, select an original `reject_once` or `reject_always` option. Kandev
+authorizes the task/session pair, records a durable audit claim, and only then delivers that exact
+option to the current live provider request. A concurrent, replayed, withdrawn, expired, or
+replaced request fails with a stable permission error and never acts on a newer request. The audit
+records the resolving user, actor kind, source, option identity, time, and result, but never the PAT
+record ID, credential, command environment, headers, or raw MCP arguments.
+
+Live agentctl state is authoritative for whether a request can still be answered. Persisted message
+audit is authoritative for history and replay prevention, but Kandev never reconstructs an
+actionable request from message history after its execution is gone. These tools cover structured
+agent command/tool permission prompts, not Office approvals or clarification questions.
 
 In external mode, `create_task_kandev` has no current task and does not accept the `parent_id: "self"` shorthand. Its registered top-level contract asks for a repository ID, repository URL (including a supported GitHub pull request or GitLab merge request URL), or local path; workspace and workflow resolve automatically only when unambiguous. The current handler can nevertheless accept an omitted repository and create repo-less work, which is a contract/implementation mismatch rather than a supported equivalent of the regular UI's **None** option. Supply an explicit repository locator for portable clients. A resolvable agent profile is required even with `start_agent: false`; otherwise `start_agent` defaults to true. To create a subtask, pass the full ID of an existing parent.
 
@@ -688,6 +770,10 @@ the current single-user behavior. When authentication is enabled, external
 clients must provide a personal access token; an already-authenticated browser
 session may also pass the same middleware. This is separate from task-mode MCP,
 which runs inside the agentctl session boundary.
+
+Permission discovery and resolution use the same task ownership checks as other task reads. A PAT
+has only its owning user's scope; administrator role does not grant access to another user's
+workspace. Unknown and unauthorized task/session IDs return the same not-found result.
 
 - Bind the backend to loopback for a local single-user install.
 - For remote use, place the whole backend behind a VPN, firewall, or authenticated TLS reverse proxy.

@@ -274,7 +274,7 @@ The GitLab MR topbar control has an **Automation** group with the same two actio
 - **Auto-fix CI and address comments** sends the agent a new or changed failing pipeline job or unresolved discussion note once the pipeline settles, and stops after 10 repair rounds for that MR. Disable and re-enable it to reset the limit.
 - **Auto-merge when ready** merges only after the pipeline passes, unresolved discussions are cleared, and GitLab's own merge-readiness check agrees.
 
-Below that, open **Review follow-up** for the same three notification switches GitHub uses, task-level and applying to every merge request linked to the task:
+Below that, open **Review follow-up** for the same three notification switches GitHub uses. Every switch above belongs to one merge request: a task with several linked MRs shows an **Automation** group per MR, each labelled with its MR number, and turning a switch on for one leaves the others alone.
 
 - **Your review is requested** wakes the agent when the workspace's connected GitLab account is newly added as a reviewer on the MR. Staying assigned across MR updates does not re-fire it; being removed and re-added (for example, for a re-review after changes) does.
 - **MR merged** and **MR closed without merging** independently wake the agent when review work ends.

@@ -94,6 +94,7 @@ func (r *Repository) migrateProviderRouting() {
 		provider_order    TEXT    NOT NULL DEFAULT '[]',
 		provider_profiles TEXT    NOT NULL DEFAULT '{}',
 		tier_per_reason   TEXT    NOT NULL DEFAULT '{}',
+		role_tiers        TEXT    NOT NULL DEFAULT '{}',
 		updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`)
 
@@ -105,6 +106,7 @@ func (r *Repository) migrateProviderRouting() {
 		provider_id      TEXT NOT NULL,
 		model            TEXT NOT NULL,
 		tier             TEXT NOT NULL,
+		tier_source      TEXT NOT NULL DEFAULT '',
 		outcome          TEXT NOT NULL,
 		error_code       TEXT,
 		error_confidence TEXT,
@@ -123,6 +125,10 @@ func (r *Repository) migrateProviderRouting() {
 		`ALTER TABLE runs ADD COLUMN resolved_execution_profile_id TEXT`)
 	r.migrate.Apply("office_run_route_attempts.execution_profile_id",
 		`ALTER TABLE office_run_route_attempts ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("office_workspace_routing.role_tiers",
+		`ALTER TABLE office_workspace_routing ADD COLUMN role_tiers TEXT NOT NULL DEFAULT '{}'`)
+	r.migrate.Apply("office_run_route_attempts.tier_source",
+		`ALTER TABLE office_run_route_attempts ADD COLUMN tier_source TEXT NOT NULL DEFAULT ''`)
 
 	_, _ = r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_provider_health (

@@ -1076,6 +1076,11 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 	// External mode does NOT include message_task_kandev (no live session context)
 	assert.NotContains(t, tools, "message_task_kandev")
 	assert.NotContains(t, tools, "stop_task_kandev")
+
+	// External mode includes the question-answering tools (spec S1/S2); the
+	// agent-facing ask_user_question_kandev stays off this surface (spec S3).
+	assert.Contains(t, tools, "list_pending_questions_kandev")
+	assert.Contains(t, tools, "answer_question_kandev")
 }
 
 func TestServerModeExternal_ToolCount(t *testing.T) {
@@ -1085,10 +1090,26 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// 13 workflow (incl. list_repositories + import_workflow + export_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 create_task + 2 task-dependency = 36.
+	// 13 workflow (incl. list_repositories + import_workflow + export_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 create_task + 2 task-dependency + 2 question-answering (list_pending_questions + answer_question) + 2 agent permission (list_pending_agent_permissions + resolve_agent_permission) = 40.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 36, len(tools))
+	assert.Equal(t, 40, len(tools))
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
+}
+
+func TestExternalAnswerQuestionSchemaDoesNotRestrictOptionCardinality(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+	s := New(backend, "", "", 0, log, "", true, ModeExternal)
+
+	answers := toolInputProperties(t, s, "answer_question_kandev")["answers"].(map[string]interface{})
+	answerItem := answers["items"].(map[string]interface{})
+	answerProperties := answerItem["properties"].(map[string]interface{})
+	selectedOptions := answerProperties["selected_options"].(map[string]interface{})
+	description := selectedOptions["description"].(string)
+
+	assert.Contains(t, description, "Zero or more option IDs")
+	assert.NotContains(t, description, "single-choice")
 }
 
 func TestNewExternal_Constructs(t *testing.T) {

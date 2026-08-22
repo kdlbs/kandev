@@ -174,6 +174,26 @@ function dependencyProjection(
   };
 }
 
+/**
+ * `primaryExecutorId`/`Name` map with `?? undefined`, so an omitted wire field
+ * survives mapping as `undefined`. `isRemoteExecutor` maps with `?? false`
+ * instead, so it can never signal omission on its own — but the backend only
+ * ever emits `is_remote_executor` alongside `primary_executor_type` (both are
+ * derived from the same executor snapshot), so gating the whole bundle on
+ * `primaryExecutorType`'s own `undefined`-ness is the reliable signal.
+ */
+export function preserveOmittedExecutorFields(merged: KanbanTask, existing: KanbanTask): void {
+  if (merged.primaryExecutorType !== undefined) return;
+  copyPrimaryExecutorFields(merged, existing);
+}
+
+export function copyPrimaryExecutorFields(merged: KanbanTask, existing: KanbanTask): void {
+  merged.primaryExecutorId = existing.primaryExecutorId;
+  merged.primaryExecutorType = existing.primaryExecutorType;
+  merged.primaryExecutorName = existing.primaryExecutorName;
+  merged.isRemoteExecutor = existing.isRemoteExecutor;
+}
+
 export function toKanbanTask(source: TaskLike): KanbanTask {
   return {
     id: pickId(source),

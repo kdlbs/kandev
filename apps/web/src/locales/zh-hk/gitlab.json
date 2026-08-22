@@ -287,6 +287,7 @@
   "workflowThatReceivesNewTasks": "接收新任務的工作流程。",
   "yourTokenMayStillBeValid": "你的權杖可能仍然有效--這看起來是網絡或上游服務問題。",
   "mrAutomationClosedLabel": "MR 已關閉未合併",
+  "mrAutomationAppliesToMR": "適用於 !{{iid}}",
   "mrAutomationDescription": "當關聯的合併請求請求你的審閱，或該合併請求被合併、關閉時，喚醒此任務的代理程式。通知會傳送到該任務目前處於活動狀態的工作階段佇列。",
   "mrAutomationMergedLabel": "MR 已合併",
   "mrAutomationRetry": "重試",

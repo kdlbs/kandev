@@ -165,6 +165,10 @@ mobile-chrome tests/chat/mobile-message-metadata-overflow.spec.ts` passed (1
 - Final remediation verification: focused unit tests passed (6 files, 163
   tests), web typecheck passed, web lint passed with zero errors and warnings,
   and rebuilt-bundle desktop and mobile pagination E2E each passed (1 test).
+- After merging the current `origin/main`, the focused unit suite passed again
+  (6 files, 170 tests), web typecheck and lint remained clean, and the backend
+  E2E binary and fixture package were rebuilt before rerunning both pagination
+  E2E specs successfully (1 desktop test, 1 mobile test).
 
 ## Implementation waves
 

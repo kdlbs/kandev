@@ -124,8 +124,14 @@ type BlockReason struct {
 // fall through to the existing concrete-profile launch path and ignore
 // the other fields.
 type Resolution struct {
-	Enabled         bool
-	RequestedTier   Tier
+	Enabled       bool
+	RequestedTier Tier
+	// TierSource names the precedence level that supplied
+	// RequestedTier: one of TierSourceWakeReason, TierSourceOverride,
+	// TierSourceRole, TierSourceWorkspace, or "" (only when
+	// RequestedTier is also "", see effectiveTier). This is the sole
+	// carrier of the resolved source — it is not recomputed downstream.
+	TierSource      string
 	ProviderOrder   []ProviderID
 	Candidates      []Candidate
 	SkippedDegraded []SkippedCandidate
@@ -174,12 +180,17 @@ func (r *Resolver) Resolve(
 	if err != nil {
 		return nil, fmt.Errorf("routing: load agent overrides: %w", err)
 	}
-	tier := effectiveTier(cfg, ov, opts.Reason)
+	tier, tierSource := effectiveTier(cfg, ov, string(agent.Role), opts.Reason)
 	order := effectiveOrder(cfg, ov)
 	if len(order) == 0 {
 		return nil, ErrEmptyOrder
 	}
-	res := &Resolution{Enabled: cfg.Enabled, RequestedTier: tier, ProviderOrder: order}
+	res := &Resolution{
+		Enabled:       cfg.Enabled,
+		RequestedTier: tier,
+		TierSource:    tierSource,
+		ProviderOrder: order,
+	}
 	idx, err := r.loadHealthIndex(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -414,21 +425,47 @@ func aggregateBlock(skipped []SkippedCandidate) BlockReason {
 	return br
 }
 
-// effectiveTier resolves the tier for one run.
+// effectiveTier resolves the tier for one run and the precedence level
+// that supplied it (see Resolution.TierSource and PreviewItem.TierSource).
 // Order: 1) wake-reason policy (agent override > workspace policy),
-// 2) agent tier override, 3) workspace default. The reason argument
-// may be empty when the caller has no run context — in that case the
-// wake-reason step is skipped.
-func effectiveTier(cfg *WorkspaceConfig, ov AgentOverrides, reason string) Tier {
+// 2) agent tier override, 3) per-role tier (role's entry in
+// cfg.RoleTiers), 4) workspace default. The reason argument may be
+// empty when the caller has no run context — in that case the
+// wake-reason step is skipped (this is how a preview computation,
+// which never carries a reason, is guaranteed to never report
+// TierSourceWakeReason — see AC-18b). role is the agent's role string;
+// an empty role, or a role absent from (or empty-valued in)
+// cfg.RoleTiers, simply never matches the map lookup and falls through.
+// A non-empty role outside the seven-value enum is explicitly gated by
+// agentRoleSet() (AC-34): role_tiers may persist a matching key for such
+// a role (AC-34b permits it on the read path), so the lookup itself
+// would otherwise match — the enum check exists specifically to stop
+// that from applying. When cfg.DefaultTier is itself empty, the function
+// returns ("", "") rather than (DefaultTier, TierSourceWorkspace): an
+// empty source must never be interpreted as "workspace" (AC-20c). This
+// cannot happen in practice (validateTier rejects an empty default_tier
+// and the column default is non-empty), but the fallthrough is pinned
+// defensively anyway.
+func effectiveTier(cfg *WorkspaceConfig, ov AgentOverrides, role string, reason string) (Tier, string) {
 	if reason != "" {
 		if t := wakeReasonTier(cfg, ov, reason); t != "" {
-			return t
+			return t, TierSourceWakeReason
 		}
 	}
 	if ov.TierSource == TierSourceOverride && ov.Tier != "" {
-		return ov.Tier
+		return ov.Tier, TierSourceOverride
 	}
-	return cfg.DefaultTier
+	if role != "" {
+		if _, known := agentRoleSet()[role]; known {
+			if t, ok := cfg.RoleTiers[role]; ok && t != "" {
+				return t, TierSourceRole
+			}
+		}
+	}
+	if cfg.DefaultTier == "" {
+		return "", ""
+	}
+	return cfg.DefaultTier, TierSourceWorkspace
 }
 
 // wakeReasonTier returns the tier the wake-reason policy assigns for

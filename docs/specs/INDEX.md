@@ -22,6 +22,7 @@ The office umbrella covers kandev's autonomous-agent product surface: workspaces
 | [scheduler](office/scheduler.md) | draft |
 | [runtime](office/runtime.md) | draft |
 | [routing](office/routing.md) | archived |
+| [per-agent + per-role tier selection](office-agent-tier-routing/spec.md) | draft |
 | [costs](office/costs.md) | in-progress |
 | [dashboard](office/dashboard.md) | draft |
 | [live-updates](office/live-updates.md) | draft |
@@ -138,6 +139,7 @@ Roles, governance gates, and granular permissions that apply across human users 
 | [roles](agents/roles.md) | shipped |
 | [governance](agents/governance.md) | shipped |
 | [granular-permissions](agents/granular-permissions.md) | draft |
+| [external-permission-resolution](agents/external-permission-resolution.md) | draft |
 
 ## integrations/ — external service integrations
 
@@ -159,6 +161,7 @@ Per-workspace credentials and triage triggers for external services.
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |
 | [pr-outcome-attribution](pr-outcome-attribution/spec.md) | shipped |
 | [enable-disable-toggle](integrations/enable-disable-toggle.md) | shipped |
+| [clickable-integration-cards](integrations/clickable-integration-cards.md) | shipped |
 
 ## workspaces/ — workspace lifecycle
 
@@ -184,6 +187,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 
 | Spec | Status |
 |---|---|
+| [kanban-auto-hide-empty-columns](kanban-auto-hide-empty-columns/spec.md) | shipped |
 | [workspace-active-first-order](ui/workspace-active-first-order.md) | shipped |
 | [ci-pr-automation](ui/ci-pr-automation.md) | building |
 | [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
@@ -258,6 +262,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [cancel-turn-progress](ui/cancel-turn-progress.md) | approved |
 | [agent-todo-list-panel](ui/agent-todo-list-panel.md) | shipped |
 | [prompt-history-panel](ui/prompt-history-panel.md) | draft |
+| [prompt-turn-duration](ui/prompt-turn-duration.md) | draft |
 
 ## system-page/ — operational diagnostics & maintenance UI
 
@@ -285,6 +290,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [agent-stall-recovery](agent-stall-recovery/spec.md) | approved |
 | [mcp-session-observability](mcp-session-observability/spec.md) | approved |
 | [subagent-context-persistence](subagent-context-persistence/spec.md) | draft |
+| [external-question-answering](external-question-answering/spec.md) | draft |
 | [auth](auth/spec.md) | building |
 | [create-local-repository](create-local-repository/spec.md) | shipped |
 | [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |
@@ -304,6 +310,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [quick-chat-idle-dot](quick-chat-idle-dot/spec.md) | draft |
 | [native-code-review](native-code-review/spec.md) | building |
 | [missing-task-route-recovery](missing-task-route-recovery/spec.md) | draft |
+| [kanban-task-executor-cache-staleness](kanban-task-executor-cache-staleness/spec.md) | draft |
 | [browser-inspect-annotations-save](browser-inspect-annotations-save/spec.md) | shipped |
 | [automations-pr-merged-trigger](automations-pr-merged-trigger/spec.md) | draft |
 | [automation-runs-delete-all-by-status](automation-runs-delete-all-by-status/spec.md) | draft |

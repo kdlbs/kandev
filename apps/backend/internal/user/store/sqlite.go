@@ -619,6 +619,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 		"app_status_bar_order":                     normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
+		"workflow_ids_with_auto_hide_empty_steps":  settings.WorkflowIDsWithAutoHideEmptySteps,
 	})
 }
 
@@ -698,6 +699,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		AppStatusBarEnabled:               false,
 		AppStatusBarOrder:                 normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
 		KanbanHiddenStepIDs:               map[string][]string{},
+		WorkflowIDsWithAutoHideEmptySteps: []string{},
 	}
 }
 
@@ -781,6 +783,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		AppStatusBarEnabled               *bool                               `json:"app_status_bar_enabled"`
 		AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
 		KanbanHiddenStepIDs               json.RawMessage                     `json:"kanban_hidden_step_ids"`
+		WorkflowIDsWithAutoHideEmptySteps json.RawMessage                     `json:"workflow_ids_with_auto_hide_empty_steps"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -912,7 +915,19 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	settings.LastSeenDisplay = normalizeLastSeenDisplayStored(payload.LastSeenDisplay)
 	settings.KanbanHiddenStepIDs = decodeKanbanHiddenStepIDs(payload.KanbanHiddenStepIDs)
+	settings.WorkflowIDsWithAutoHideEmptySteps = decodeStringIDs(payload.WorkflowIDsWithAutoHideEmptySteps)
 	return settings, nil
+}
+
+func decodeStringIDs(raw json.RawMessage) []string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return []string{}
+	}
+	var ids []string
+	if err := json.Unmarshal(raw, &ids); err != nil || ids == nil {
+		return []string{}
+	}
+	return ids
 }
 
 // normalizeLastSeenDisplayStored maps a stored JSON value to the canonical

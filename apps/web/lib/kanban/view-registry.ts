@@ -9,6 +9,7 @@ import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 export type ViewContentProps = {
   workflowId: string;
   steps: WorkflowStep[];
+  moveTargetSteps: WorkflowStep[];
   tasks: Task[];
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;

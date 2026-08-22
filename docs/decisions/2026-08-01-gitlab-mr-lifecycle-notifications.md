@@ -75,6 +75,22 @@ dispatch functions turned out byte-for-byte identical below the decision layer.
 - **`locked` state.** GitLab's MR state machine has a fourth value with no GitHub
   analogue. It is treated as non-terminal (fires neither `merged` nor `closed`) and
   is exercised as its own regression case in the decision-function tests.
+- **Amended: the five switches are now per linked MR, not per task.** As written,
+  this ADR put `prompt_on_review_requested` / `prompt_on_merged` / `prompt_on_closed`
+  (and later auto-fix / auto-merge) on `gitlab_task_mr_options`, keyed by `task_id`
+  alone. That is wrong for a task with more than one linked MR: enabling a switch on
+  one MR silently enabled it on all of them. The five switches moved to
+  `gitlab_task_mr_automation_options`, keyed by the same
+  `(task_id, repository_id, project_path, mr_iid)` identity as
+  `gitlab_task_mr_state`, seeded once from the legacy task-wide values by an
+  `mr_scope_migrated_at`-guarded fan-out. `gitlab_task_mr_options` keeps only what is
+  genuinely task-level — the auto-fix prompt override and the server-resolved
+  reviewer username — so a reviewer-identity change still clears every linked MR's
+  review-request baseline at once, while a switch flip clears only its own MR's
+  checkpoints. A `PATCH` / `update_task_mr_automation_kandev` call naming an MR
+  targets it alone; omitting MR identity fans out to every linked MR, which preserves
+  the behavior of agents that have no MR identity to send. See
+  `docs/specs/gitlab-integration/spec.md`'s "MR automation" section.
 - **Discovered while integrating:** `executeQueuedMessage`'s lifecycle-prompt
   detection (`event_handlers_agent.go`) was hardcoded to the GitHub PR automation
   origin string. A GitLab-originated durable lifecycle entry was queued but never

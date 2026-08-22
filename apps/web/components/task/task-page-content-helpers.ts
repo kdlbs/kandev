@@ -7,6 +7,7 @@ import {
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 import { issueFieldsFromMetadata } from "@/lib/metadata-utils";
+import { repositorySlug } from "@/lib/repository-slug";
 
 type ACPDebugInfo = {
   sessionId: unknown;
@@ -169,7 +170,7 @@ export function buildArchivedValue(task: Task | null, repository: Repository | n
     isArchived,
     archivedTaskId: isArchived ? task?.id : undefined,
     archivedTaskTitle: isArchived ? task?.title : undefined,
-    archivedTaskRepositoryPath: isArchived ? (repository?.local_path ?? undefined) : undefined,
+    archivedTaskRepositoryLabel: isArchived && repository ? repositorySlug(repository) : undefined,
     archivedTaskUpdatedAt: isArchived ? task?.updated_at : undefined,
   };
 }
@@ -238,6 +239,12 @@ export function resolveTaskProps(task: Task | null, repository: Repository | nul
     issueNumber: issue.issueNumber,
     repositoryPath: repository?.local_path ?? null,
     repositoryName: repository?.name ?? null,
+    /**
+     * What the top bar shows so a user can tell which project an open task
+     * belongs to: the same `owner/repo` identity the sidebar rows and the
+     * repository filter use, never the local clone path.
+     */
+    repositoryLabel: repository ? repositorySlug(repository) : null,
     /**
      * Total number of repositories linked to the task. Used by the top-bar
      * breadcrumb to render a "+N" chip next to the primary repo name when
