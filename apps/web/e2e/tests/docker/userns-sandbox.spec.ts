@@ -3,6 +3,15 @@ import { E2E_IMAGE_TAG } from "../../fixtures/docker-probe";
 import { dockerExec, dockerSecurityOpt } from "../../helpers/docker";
 import { waitForLatestSessionDone } from "../../helpers/session";
 
+// Both probes run through `sh -c` on purpose. `docker exec <container> bwrap
+// ...` execs bwrap as the container's entry process, and writing
+// /proc/self/uid_map from that process is refused ("setting up uid map:
+// Permission denied") even when user namespaces are fully permitted. One shell
+// layer makes bwrap a forked child, which is how a real agent runtime spawns
+// it, and the probe then reflects the container's actual capability.
+const BWRAP_PROBE = "bwrap --unshare-user --dev-bind / / true";
+const UNSHARE_PROBE = "unshare --user true";
+
 test.describe("Docker executor user namespace sandbox", () => {
   test("enables bwrap user namespaces only for opted-in profiles", async ({
     apiClient,
@@ -52,31 +61,20 @@ test.describe("Docker executor user namespace sandbox", () => {
       expect(enabledSecurityOpt).toHaveLength(2);
       expect(enabledSecurityOpt).toContain("apparmor=unconfined");
       expect(enabledSecurityOpt![0]).toMatch(/^seccomp=\{/);
-      const enabledBwrap = dockerExec(
-        enabledContainer,
-        "bwrap",
-        "--unshare-user",
-        "--dev-bind",
-        "/",
-        "/",
-        "true",
-      );
+      const enabledUnshare = dockerExec(enabledContainer, "sh", "-c", UNSHARE_PROBE);
+      expect(enabledUnshare.status, `${enabledUnshare.stdout}${enabledUnshare.stderr}`).toBe(0);
+      const enabledBwrap = dockerExec(enabledContainer, "sh", "-c", BWRAP_PROBE);
       expect(enabledBwrap.status, `${enabledBwrap.stdout}${enabledBwrap.stderr}`).toBe(0);
       const disabledContainer = await launch("Userns disabled", disabledProfile.id);
       expect(dockerSecurityOpt(disabledContainer)).toBeNull();
-      const disabledUnshare = dockerExec(disabledContainer, "unshare", "--user", "true");
+      const disabledUnshare = dockerExec(disabledContainer, "sh", "-c", UNSHARE_PROBE);
       expect(disabledUnshare.status).not.toBe(0);
       expect(disabledUnshare.stderr).toContain("Operation not permitted");
-      const disabledBwrap = dockerExec(
-        disabledContainer,
-        "bwrap",
-        "--unshare-user",
-        "--dev-bind",
-        "/",
-        "/",
-        "true",
-      );
+      const disabledBwrap = dockerExec(disabledContainer, "sh", "-c", BWRAP_PROBE);
       expect(disabledBwrap.status).not.toBe(0);
+      // Assert the reason, not just the failure: without this the probe also
+      // "fails" when bwrap is missing or blocked for an unrelated reason.
+      expect(disabledBwrap.stderr).toContain("No permissions to create new namespace");
     } finally {
       await Promise.all([
         apiClient.deleteExecutorProfile(enabledProfile.id).catch(() => {}),
