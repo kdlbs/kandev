@@ -28,7 +28,8 @@ spec: "../../specs/tasks/rich-task-title-previews.md"
   `apps/web/components/task/task-title-hover-card.tsx`,
   `apps/web/components/task/task-title-hover-card.test.tsx`,
   `apps/web/components/kanban-card-content.test.tsx`, and the affected
-  desktop/mobile Playwright specifications.
+  desktop/mobile Playwright specifications, and
+  `apps/web/e2e/tests/pr/pr-status-badge.spec.ts`.
 - **Dependencies:** None. The existing title-preview implementation and task
   hierarchy hooks are available.
 - **Parallelism:** sequential.
@@ -50,3 +51,5 @@ spec: "../../specs/tasks/rich-task-title-previews.md"
   `apps/web/components/task/task-item-content.tsx` to satisfy the repository's
   600-line file limit. This is an internal, behavior-preserving refactor, so
   the product behavior and acceptance criteria are unchanged.
+- PR fixup updated the existing PR badge E2E assertion for the removed sidebar
+  title-preview tab stop. The focused managed Chromium test passed: 1 test.
