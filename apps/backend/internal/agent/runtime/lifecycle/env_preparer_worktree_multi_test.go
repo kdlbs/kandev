@@ -456,6 +456,82 @@ func TestWorktreePreparer_MultiRepo_RollbackRemovesWorktreeCreatedForStaleReuseI
 	}
 }
 
+// TestWorktreePreparer_FreshStartRejectsStaleWorktreePathOwnedByLiveTask
+// protects the fresh-start path from a stale worktree record whose on-disk
+// path has since been claimed by another live task. The stale task must fail
+// safely; it must never attach to or change the live task's checkout.
+func TestWorktreePreparer_FreshStartRejectsStaleWorktreePathOwnedByLiveTask(t *testing.T) {
+	repositoryPath := initBareGitRepo(t, "shared-repository")
+	preparer, manager, store := newPreparerForTestWithStore(t)
+	ctx := context.Background()
+
+	live, err := manager.Create(ctx, worktree.CreateRequest{
+		TaskID:         "task-live",
+		SessionID:      "session-live",
+		TaskTitle:      "Live task",
+		RepositoryID:   "repository-shared",
+		RepositoryPath: repositoryPath,
+		BaseBranch:     "main",
+		TaskDirName:    "live-task_abc",
+		RepoName:       "shared-repository",
+	})
+	if err != nil {
+		t.Fatalf("create live worktree: %v", err)
+	}
+	liveHead := strings.TrimSpace(runGitForPreparerTest(t, live.Path, "rev-parse", "HEAD"))
+
+	if err := store.CreateWorktree(ctx, &worktree.Worktree{
+		ID:           "worktree-stale",
+		TaskID:       "task-stale",
+		SessionID:    "session-stale",
+		RepositoryID: "repository-shared",
+		Path:         live.Path,
+		Branch:       "feat/stale",
+		Status:       worktree.StatusActive,
+	}); err != nil {
+		t.Fatalf("seed stale worktree: %v", err)
+	}
+
+	result, err := preparer.Prepare(ctx, &EnvPrepareRequest{
+		TaskID:         "task-stale",
+		SessionID:      "session-stale",
+		TaskTitle:      "Stale task",
+		ExecutorType:   executor.NameStandalone,
+		RepositoryID:   "repository-shared",
+		RepositoryPath: repositoryPath,
+		BaseBranch:     "main",
+		WorktreeID:     "worktree-stale",
+		TaskDirName:    "stale-task_def",
+		RepoName:       "shared-repository",
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare returned hard error: %v", err)
+	}
+	if result.Success {
+		t.Fatal("fresh start succeeded by reusing a live task's worktree path")
+	}
+	if !errors.Is(result.Error, worktree.ErrWorktreePathOwnedByAnotherTask) {
+		t.Fatalf("prepare error = %v, want ErrWorktreePathOwnedByAnotherTask", result.Error)
+	}
+	if got := strings.TrimSpace(runGitForPreparerTest(t, live.Path, "rev-parse", "HEAD")); got != liveHead {
+		t.Fatalf("live worktree HEAD changed: got %q, want %q", got, liveHead)
+	}
+	if !manager.IsValid(live.Path) {
+		t.Fatal("live worktree was removed or corrupted")
+	}
+}
+
+func runGitForPreparerTest(t *testing.T, directory string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", args...)
+	command.Dir = directory
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s in %s failed: %v\n%s", strings.Join(args, " "), directory, err, output)
+	}
+	return string(output)
+}
+
 func TestWorktreePreparer_MultiRepo_RunsPerRepoSetupScript(t *testing.T) {
 	repoA := initBareGitRepo(t, "frontend")
 	repoB := initBareGitRepo(t, "backend")

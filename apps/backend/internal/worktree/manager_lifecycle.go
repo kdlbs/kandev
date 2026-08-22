@@ -220,6 +220,9 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	if req.SessionID != "" {
 		existing, err := m.GetBySessionAndRepo(ctx, req.SessionID, req.RepositoryID, reuseSlug)
 		if err == nil && existing != nil {
+			if err := m.validateExistingWorktreePathOwner(existing.Path, req.TaskID); err != nil {
+				return nil, true, err
+			}
 			if m.IsValid(existing.Path) {
 				if err := m.validateReusableContribution(ctx, req, existing); err != nil {
 					return nil, true, err
@@ -246,6 +249,9 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	if req.WorktreeID != "" {
 		existing, err := m.GetByID(ctx, req.WorktreeID)
 		if err == nil && existing != nil {
+			if err := m.validateExistingWorktreePathOwner(existing.Path, req.TaskID); err != nil {
+				return nil, true, err
+			}
 			if m.IsValid(existing.Path) {
 				if err := m.validateReusableContribution(ctx, req, existing); err != nil {
 					return nil, true, err
@@ -272,6 +278,36 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	}
 
 	return nil, false, nil
+}
+
+// validateExistingWorktreePathOwner rejects a stale record whose stored path
+// now lies under another task's marked root. It deliberately runs before both
+// reuse and recreate: recreate removes the recorded path before adding a new
+// worktree, so checking only the reusable path could delete a live checkout.
+// Paths outside Kandev's task root and legacy unmarked task roots remain
+// eligible for their existing compatibility behavior.
+func (m *Manager) validateExistingWorktreePathOwner(worktreePath, taskID string) error {
+	if worktreePath == "" || taskID == "" {
+		return nil
+	}
+	tasksBase, err := m.config.ExpandedTasksBasePath()
+	if err != nil {
+		return fmt.Errorf("resolve tasks base path: %w", err)
+	}
+	relativePath, err := filepath.Rel(tasksBase, worktreePath)
+	if err != nil || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	for candidate := filepath.Clean(worktreePath); candidate != tasksBase; candidate = filepath.Dir(candidate) {
+		owner, found, err := storageworkspaces.ReadOwnershipMarker(candidate)
+		if err != nil {
+			return fmt.Errorf("inspect worktree task root ownership: %w", err)
+		}
+		if found && owner.TaskID != taskID {
+			return fmt.Errorf("%w: path %q belongs to task %q", ErrWorktreePathOwnedByAnotherTask, worktreePath, owner.TaskID)
+		}
+	}
+	return nil
 }
 
 func (m *Manager) validateReusableContribution(ctx context.Context, req CreateRequest, existing *Worktree) error {
