@@ -65,6 +65,21 @@ describe("isSettingsUnchanged", () => {
   it("treats both empty hidden-step maps as unchanged", () => {
     expect(isSettingsUnchanged(settingsWithHidden({}), settingsWithHidden({}))).toBe(true);
   });
+
+  it("treats reordered auto-hide workflow ids as unchanged", () => {
+    expect(
+      isSettingsUnchanged(
+        settingsWithAutoHide(["wf-b", "wf-a"]),
+        settingsWithAutoHide(["wf-a", "wf-b"]),
+      ),
+    ).toBe(true);
+  });
+
+  it("detects an auto-hide workflow id change", () => {
+    expect(
+      isSettingsUnchanged(settingsWithAutoHide(["wf-a"]), settingsWithAutoHide(["wf-b"])),
+    ).toBe(false);
+  });
 });
 
 describe("normalizeHiddenStepIds", () => {

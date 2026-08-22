@@ -13,6 +13,7 @@ import {
 import { IconColumns3 } from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
 import { useTranslation } from "react-i18next";
+import { sortWorkflowStepsByPosition } from "@/lib/kanban/auto-hide-empty-columns";
 
 export type ColumnsMenuStep = { id: string; title: string; position: number };
 
@@ -53,10 +54,7 @@ export function ColumnsMenu({
   touchTargets = false,
 }: ColumnsMenuProps) {
   const { t } = useTranslation();
-  const orderedSteps = useMemo(
-    () => [...steps].sort((a, b) => a.position - b.position || a.id.localeCompare(b.id)),
-    [steps],
-  );
+  const orderedSteps = useMemo(() => sortWorkflowStepsByPosition(steps), [steps]);
   const hiddenSet = useMemo(() => new Set(hiddenStepIds), [hiddenStepIds]);
 
   return (

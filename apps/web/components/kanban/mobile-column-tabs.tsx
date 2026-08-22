@@ -206,7 +206,7 @@ function NavigatorDrawerContent({
 }
 
 function getEmptyStepsLabel(allStepsAutoHidden: boolean, t: (key: string) => string): string {
-  return t(allStepsAutoHidden ? "kanban:allEmptyStepsAutoHidden" : "task:noStepsConfigured");
+  return t(allStepsAutoHidden ? "kanban:allEmptyStepsAutoHidden" : "kanban:noStepsConfigured");
 }
 
 function PreviousStepButton({

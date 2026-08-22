@@ -276,6 +276,7 @@ function MobileKanbanLayout({
   }, [steps, tasks]);
 
   const currentStepId = steps[activeIndex]?.id ?? null;
+  const allStepsAutoHidden = areAllEmptyStepsAutoHidden(steps, moveTargetSteps);
 
   return (
     <div
@@ -289,19 +290,17 @@ function MobileKanbanLayout({
           taskCounts={taskCounts}
           onColumnChange={onIndexChange}
           workflowNavigation={mobileWorkflowNavigation}
-          allStepsAutoHidden={areAllEmptyStepsAutoHidden(steps, moveTargetSteps)}
+          allStepsAutoHidden={allStepsAutoHidden}
         />
       )}
       {steps.length === 0 ? (
         <div
           className="mx-4 my-3 flex flex-1 items-center justify-center rounded-xl border border-dashed border-border/70 px-6 text-center text-sm text-muted-foreground"
           data-testid={
-            areAllEmptyStepsAutoHidden(steps, moveTargetSteps)
-              ? "kanban-auto-hidden-empty-state"
-              : "mobile-kanban-no-steps"
+            allStepsAutoHidden ? "kanban-auto-hidden-empty-state" : "mobile-kanban-no-steps"
           }
         >
-          {areAllEmptyStepsAutoHidden(steps, moveTargetSteps)
+          {allStepsAutoHidden
             ? t("kanban:allEmptyStepsAutoHidden")
             : t("kanban:noStepsConfiguredChooseAnotherWorkflow")}
         </div>
