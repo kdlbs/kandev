@@ -521,41 +521,11 @@ func (r *Repository) CreateTaskSessionWithInitialRuntimeSeed(ctx context.Context
 		return err
 	}
 
-	initialRuntimeConfig, hasInitialRuntimeConfig, initialRuntimeConfigProfileID, hasInitialRuntimeSeedKey, err := r.loadInitialSessionRuntimeSeedTx(ctx, tx, session.TaskID)
-	if err != nil {
+	if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
 		return err
 	}
-
-	var sessionCount int
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(
-		`SELECT COUNT(*) FROM task_sessions WHERE task_id = ?`,
-	), session.TaskID).Scan(&sessionCount); err != nil {
-		return fmt.Errorf("check task sessions before initial runtime session: %w", err)
-	}
-	if sessionCount == 0 {
-		if session.Metadata == nil {
-			session.Metadata = make(map[string]interface{})
-		}
-		session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
-		if hasInitialRuntimeConfig && initialRuntimeConfigProfileID == session.AgentProfileID {
-			session.Metadata[models.SessionMetaKeyRuntimeConfigOverrides] = initialRuntimeConfig
-		}
-	} else if models.IsOriginalTaskSession(session.Metadata) {
-		// PrepareSession performs a read before this transaction. If another
-		// launch won the race, do not persist the stale origin marker.
-		delete(session.Metadata, models.SessionMetaKeyOrigin)
-	}
-
 	if err := r.createTaskSession(ctx, tx, session); err != nil {
 		return err
-	}
-	if hasInitialRuntimeSeedKey {
-		if _, err := r.removeTaskMetadataKeyWithExecutor(ctx, tx, session.TaskID, models.MetaKeyInitialSessionRuntimeConfig); err != nil {
-			return fmt.Errorf("consume initial runtime seed: %w", err)
-		}
-		if _, err := r.removeTaskMetadataKeyWithExecutor(ctx, tx, session.TaskID, models.MetaKeyInitialSessionRuntimeConfigProfileID); err != nil {
-			return fmt.Errorf("consume initial runtime seed profile: %w", err)
-		}
 	}
 	return tx.Commit()
 }
