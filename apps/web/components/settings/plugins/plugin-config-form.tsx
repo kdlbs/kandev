@@ -255,7 +255,7 @@ function AgentProfileSelect({
   const profiles = useAppStore((state) => state.agentProfiles.items);
   const selectedID = typeof value === "string" ? value : "";
   const selectedProfile = profiles.find((profile) => profile.id === selectedID);
-  const eligibleProfiles = profiles.filter(utilityProfileEligibility);
+  const eligibleProfiles = profiles.filter((profile) => utilityProfileEligibility(profile));
   let selectedLabel: string | undefined;
   if (selectedProfile) {
     selectedLabel = selectedProfile.label || selectedProfile.agent_name || selectedProfile.id;
