@@ -185,7 +185,9 @@ func TestAgentUpdatePreviewEndpointIsReadOnly(t *testing.T) {
 	if preview["current_version"] != "1.0.0" || preview["target_version"] != "1.1.0" {
 		t.Fatalf("versions = %#v", preview)
 	}
-	if preview["command_string"] != `npm exec --yes --prefer-online --package=@agentclientprotocol/claude-agent-acp@0.70.0 -- node -e ""` {
+	commandArgs := agents.NewClaudeACP().ManagedNPMRuntime().CacheUpdateCommand().Args()
+	wantCommand := strings.Join(commandArgs[:len(commandArgs)-1], " ") + ` ""`
+	if preview["command_string"] != wantCommand {
 		t.Fatalf("command_string = %#v", preview["command_string"])
 	}
 

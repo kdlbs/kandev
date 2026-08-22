@@ -136,40 +136,35 @@ func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
 	tests := []struct {
 		name  string
 		agent agents.Agent
-		want  string
 	}{
 		{
 			name:  "claude",
 			agent: agents.NewClaudeACP(),
-			want:  "npx --yes --prefer-offline @agentclientprotocol/claude-agent-acp@0.70.0",
 		},
 		{
 			name:  "codex",
 			agent: agents.NewCodexACP(),
-			want:  "npx --yes --prefer-offline @agentclientprotocol/codex-acp@1.6.0",
 		},
 		{
 			name:  "opencode",
 			agent: agents.NewOpenCodeACP(),
-			want:  "npx --yes --prefer-offline opencode-ai@1.18.18 acp --print-logs --log-level ERROR",
 		},
 		{
 			name:  "copilot",
 			agent: agents.NewCopilotACP(),
-			want:  "npx --yes --prefer-offline @github/copilot@1.0.75 --acp",
 		},
 		{
 			name:  "gemini",
 			agent: agents.NewGemini(),
-			want:  "npx --yes --prefer-offline @google/gemini-cli@0.52.0 --acp",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			want := strings.Join(tt.agent.(agents.ManagedNPMRuntimeAgent).ManagedNPMRuntime().CachedACPCommand().Args(), " ")
 			cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, tt.agent, true)
 			require.NoError(t, err)
-			require.Equal(t, tt.want, cmds.initial)
+			require.Equal(t, want, cmds.initial)
 		})
 	}
 }

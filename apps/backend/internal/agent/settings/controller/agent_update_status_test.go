@@ -55,7 +55,7 @@ func TestListAgentUpdateStatusesComparesLatestAndCachesFailures(t *testing.T) {
 		case "@agentclientprotocol/claude-agent-acp":
 			return "0.71.0", nil
 		case "@agentclientprotocol/codex-acp":
-			return "1.6.0", nil
+			return agents.NewCodexACP().ManagedNPMRuntime().DefaultVersionOrPinned(), nil
 		case "@github/copilot":
 			return "1.0.74", nil
 		case "@google/gemini-cli":

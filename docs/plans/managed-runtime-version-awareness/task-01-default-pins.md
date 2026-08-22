@@ -67,3 +67,9 @@ preparation/recovery remain online-preferred.
 Verification: `go test ./internal/agent/agents ./internal/agent/registry
 ./internal/agent/runtime/lifecycle -count=1` passed as part of the current
 2,646-test post-remediation scoped backend run.
+
+Follow-up review verification removed duplicated current-pin snapshots from
+the managed-agent and lifecycle tests. Their command expectations now derive
+from the embedded catalogue, so the weekly updater can change a pin without
+making the generated PR fail on stale test literals. The focused catalogue and
+command suite passed again as part of the 2,594-test follow-up backend run.

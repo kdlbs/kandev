@@ -216,10 +216,19 @@ and retried failed page-local status refreshes. The second remediation pass
 also applied least-privilege workflow permissions, package-safe selection
 projection, bounded status lookups, shared default derivation, nil-cache
 initialization, and default restoration when the active version is unknown.
-The current local remediation checks pass 2,646 backend tests, 49 focused web
+The follow-up review pass updates terminal `current_version` from the
+successful capability probe, makes the UI prefer terminal `effective_version`
+and retain the complete backend version projection, derives managed-runtime
+test expectations from the catalogue, and validates those commands before the
+weekly workflow commits or pushes. It also keeps the App token on the push
+step and refreshes existing updater PRs by number.
+
+Follow-up verification passes 2,594 focused backend tests, 32 focused web
 tests, full web lint/typecheck/i18n, 7 pin updater tests, 8 workflow-contract
-tests, 9 action-pinning tests, `zizmor`, and desktop/mobile E2E at 14/14 and
-4/4.
+tests, 9 action-pinning tests, the 19-workflow action linter, `zizmor`, and
+desktop/mobile E2E at 15/15 and 4/4. The aggregate backend phase of `make
+test` passed; its full web Vitest phase did not reach a terminal summary, so it
+was interrupted after the isolated `http-git-server` suite passed 3/3.
 
 ---
 

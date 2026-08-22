@@ -226,6 +226,9 @@ func TestAgentUpdateExactCandidatePersistsBeforePublishing(t *testing.T) {
 	if final.ActiveVersion != "1.0.2" {
 		t.Fatalf("active version = %q, want 1.0.2", final.ActiveVersion)
 	}
+	if final.CurrentVersion != "1.0.2" {
+		t.Fatalf("current version = %q, want probed 1.0.2", final.CurrentVersion)
+	}
 	if len(updater.prepare) != 1 || !strings.Contains(updater.prepare[0], "--package=@example/managed-acp@1.0.2") {
 		t.Fatalf("prepare commands = %#v", updater.prepare)
 	}
@@ -272,6 +275,9 @@ func TestAgentUpdateUseDefaultDeletesSelectionAfterProbe(t *testing.T) {
 	}
 	if final.ActiveVersion != "" || final.EffectiveVersion != "1.0.2" {
 		t.Fatalf("final versions = active %q, effective %q", final.ActiveVersion, final.EffectiveVersion)
+	}
+	if final.CurrentVersion != "1.0.2" {
+		t.Fatalf("current version = %q, want probed default 1.0.2", final.CurrentVersion)
 	}
 	if _, found, err := selectionStore.Get(context.Background(), "managed-acp", "@example/managed-acp"); err != nil || found {
 		t.Fatalf("selection after reset = found %v, err %v; want absent", found, err)

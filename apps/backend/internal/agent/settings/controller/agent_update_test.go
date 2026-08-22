@@ -532,8 +532,8 @@ func TestAgentUpdateJobResolvesUpdatesRefreshesAndStreams(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	final := waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusSucceeded)
-	if final.CurrentVersion != "1.0.0" || final.TargetVersion != "1.1.0" {
-		t.Fatalf("versions = %q -> %q, want 1.0.0 -> 1.1.0", final.CurrentVersion, final.TargetVersion)
+	if final.CurrentVersion != "1.1.0" || final.TargetVersion != "1.1.0" {
+		t.Fatalf("versions = %q -> %q, want 1.1.0 -> 1.1.0", final.CurrentVersion, final.TargetVersion)
 	}
 	if final.Output != "npm prepared runtime\n" {
 		t.Fatalf("Output = %q", final.Output)

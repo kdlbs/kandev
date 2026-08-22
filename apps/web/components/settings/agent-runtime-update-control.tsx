@@ -11,6 +11,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import {
   canApproveAgentRuntimeUpdate,
   resolveRuntimeActiveVersion,
+  resolveRuntimeEffectiveVersion,
   resolveRuntimeOperation,
   resolveRuntimeVersionPair,
   latestRuntimeVersions,
@@ -113,7 +114,7 @@ function RuntimeVersionSummary({
   const activeVersion = resolveRuntimeActiveVersion(preview, job);
   const operation = resolveRuntimeOperation(preview, job);
   const isUpToDate = operation === "up_to_date";
-  const effectiveVersion = preview.effective_version ?? activeVersion ?? currentVersion;
+  const effectiveVersion = resolveRuntimeEffectiveVersion(preview, job);
 
   return (
     <div className="space-y-1" data-testid={`agent-update-version-summary-${agentName}`}>

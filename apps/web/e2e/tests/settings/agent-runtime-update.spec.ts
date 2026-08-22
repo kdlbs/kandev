@@ -295,7 +295,7 @@ test.describe("managed agent runtime updates", () => {
     ).toBeHidden();
   });
 
-  test("limits the version selector to the ten newest options", async ({ testPage }) => {
+  test("shows the complete backend version projection", async ({ testPage }) => {
     const runtime = await installRuntimeUpdateFixture(testPage);
     runtime.setPreviewResponse({
       agent_name: "claude-acp",
@@ -318,7 +318,7 @@ test.describe("managed agent runtime updates", () => {
       .getByTestId(`agent-update-version-${runtime.agentName}`)
       .locator("option");
 
-    await expect(options).toHaveCount(10);
+    await expect(options).toHaveCount(12);
     expect(
       await options.evaluateAll((elements) =>
         elements.map((element) => (element as HTMLOptionElement).value),
@@ -334,6 +334,8 @@ test.describe("managed agent runtime updates", () => {
       "0.67.0",
       "0.66.0",
       "0.65.0",
+      "0.64.0",
+      "0.63.0",
     ]);
   });
 
@@ -431,6 +433,31 @@ test.describe("managed agent runtime updates", () => {
     expect(
       successOptionText.some((text) => text.includes("0.63.0") && text.includes("active")),
     ).toBe(true);
+  });
+
+  test("clears the active version after a successful default reset", async ({ testPage }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage, {
+      postResponse: updateJob({
+        status: "succeeded",
+        operation: "use_default",
+        current_version: "0.64.0",
+        default_version: "0.64.0",
+        effective_version: "0.64.0",
+        target_version: "0.64.0",
+        finished_at: "2026-07-26T12:01:00.000Z",
+      }),
+    });
+
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
+    const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
+    await dialog
+      .getByTestId(`agent-update-version-${runtime.agentName}`)
+      .selectOption({ label: "Use Kandev default (0.64.0)" });
+    await testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`).click();
+
+    await expect(dialog).toContainText("Effective version: 0.64.0");
+    await expect(dialog).not.toContainText("Active version: 0.62.0");
   });
 
   test("keeps the previous active version after a failed activation", async ({ testPage }) => {

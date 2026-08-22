@@ -14,6 +14,8 @@ type UpdateJob = {
   operation?: UpdateOperation;
   active_version?: string;
   current_version?: string;
+  default_version?: string;
+  effective_version?: string;
   target_version?: string;
   output?: string;
   error?: string;

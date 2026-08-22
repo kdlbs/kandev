@@ -382,6 +382,9 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 		s.finishFailed(job, ctx, errors.New(capabilityRefreshError(caps)), ref)
 		return
 	}
+	s.mu.Lock()
+	job.CurrentVersion = caps.AgentVersion
+	s.mu.Unlock()
 	if job.UseDefault {
 		if err := s.selectionStore.Delete(ctx, job.AgentName, spec.Package); err != nil {
 			s.finishFailed(job, ctx, fmt.Errorf("clear active runtime version: %w", err), ref)
@@ -491,6 +494,7 @@ func (s *AgentUpdateJobStore) finishRefresh(
 		job.Error = formatUpdateJobError(ctx, fmt.Errorf("refresh capabilities: %w", err))
 	case caps.Status == hostutility.StatusOK:
 		job.Status = dto.AgentUpdateJobStatusSucceeded
+		job.CurrentVersion = caps.AgentVersion
 		refreshed = true
 	case caps.Status == hostutility.StatusAuthRequired:
 		job.Status = dto.AgentUpdateJobStatusSucceeded

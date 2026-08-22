@@ -69,3 +69,9 @@ the 44 px mobile trigger remains intact.
 Verification: focused frontend unit tests passed 49/49; full web lint passed;
 `pnpm run typecheck` passed; `pnpm run i18n:check` passed with pseudo and all
 four translated catalogues complete.
+
+Follow-up review verification keeps the complete backend version projection in
+the selector, prefers terminal effective versions, and clears a stale active
+selection after a successful default reset. The focused frontend tests passed
+32/32, the changed component lint passed, full web lint/typecheck/i18n passed,
+and desktop/mobile E2E passed 15/15 and 4/4.

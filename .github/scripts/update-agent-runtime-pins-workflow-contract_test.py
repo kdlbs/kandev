@@ -44,16 +44,28 @@ class ManagedRuntimePinWorkflowContractTest(unittest.TestCase):
         self.assertIn('open_pr_number="$(gh pr list', self.workflow)
         self.assertIn('gh pr edit "$open_pr_number"', self.workflow)
         self.assertNotIn('gh pr edit \\\n              --repo "$GITHUB_REPOSITORY" \\\n              --head "$BOT_BRANCH"', self.workflow)
-        self.assertIn("GH_TOKEN: ${{ steps.app-token.outputs.token }}", self.workflow)
+        push_start = self.workflow.index("- name: Commit and push one grouped change")
+        pr_start = self.workflow.index("- name: Create or refresh the single grouped PR")
+        push_step = self.workflow[push_start:pr_start]
+        self.assertIn("GH_TOKEN: ${{ steps.app-token.outputs.token }}", push_step)
 
     def test_workflow_validates_before_any_commit_or_push(self) -> None:
         update_pos = self.workflow.index("node scripts/update-agent-runtime-pins.mjs")
+        validation_pos = self.workflow.index("go test ./internal/agent/agents")
         commit_pos = self.workflow.index("git commit")
         push_pos = self.workflow.index("git push")
-        self.assertLess(update_pos, commit_pos)
+        self.assertLess(update_pos, validation_pos)
+        self.assertLess(validation_pos, commit_pos)
         self.assertLess(commit_pos, push_pos)
         self.assertIn("node --test scripts/update-agent-runtime-pins.test.mjs", self.workflow)
         self.assertIn("--github-output", self.workflow)
+        self.assertIn("working-directory: apps/backend", self.workflow)
+        self.assertIn(
+            "go test ./internal/agent/agents ./internal/agent/managedruntime "
+            "./internal/agent/runtime/lifecycle ./internal/agent/hostutility "
+            "./internal/agent/settings/controller ./internal/agent/settings/handlers",
+            self.workflow,
+        )
         self.assertIn("if: steps.update.outputs.changed == 'true'", self.workflow)
 
     def test_all_actions_are_commit_pinned(self) -> None:

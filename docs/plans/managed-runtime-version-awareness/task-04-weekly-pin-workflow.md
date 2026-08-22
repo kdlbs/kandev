@@ -66,3 +66,9 @@ Verification: updater tests passed 7/7; workflow contract tests passed 8/8;
 action-pinning tests passed 9/9 and the linter accepted all 19 workflow files;
 `zizmor .github/workflows/update-agent-runtime-pins.yml` reported no findings.
 Local checks caused no external workflow or PR side effects.
+
+Follow-up review verification keeps the App token in the push step, edits an
+existing updater PR by its number, and runs the focused managed-runtime Go
+suite after the catalogue update and before any commit or push. The workflow
+contract now asserts that validation boundary; the contract passed 8/8 and
+the action-pinning checks remained green.

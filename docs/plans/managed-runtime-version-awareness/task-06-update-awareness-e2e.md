@@ -61,8 +61,12 @@ reload, unknown-status usability, and structural return-to-default behavior.
 Mobile coverage proves the dotted 44 px trigger, drawer update flow, contained
 scrolling, and no document horizontal overflow.
 
-Verification: `pnpm e2e:run --host --no-build --project chromium --
-tests/settings/agent-runtime-update.spec.ts` passed 14/14, and
-`pnpm e2e:run --host --no-build --project mobile-chrome --
+Verification: the production-build desktop run
+`pnpm e2e:run --project chromium tests/settings/agent-runtime-update.spec.ts`
+passed 15/15, and the production-build mobile run
+`pnpm e2e:run --project mobile-chrome
 tests/settings/mobile-agent-runtime-update.spec.ts` passed 4/4. No raw sleeps
 were added and the fixture uses causal waits.
+
+Follow-up review coverage adds the complete backend projection and successful
+default-reset state, including removal of the stale active-version display.

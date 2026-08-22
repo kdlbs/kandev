@@ -65,6 +65,10 @@ jobs:
         id: update
         run: node scripts/update-agent-runtime-pins.mjs --github-output "$GITHUB_OUTPUT"
 
+      - name: Test managed runtime catalogue and commands
+        working-directory: apps/backend
+        run: go test ./internal/agent/agents ./internal/agent/managedruntime ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agent/settings/handlers
+
       - name: Commit and push one grouped change
         if: steps.update.outputs.changed == 'true'
         env:

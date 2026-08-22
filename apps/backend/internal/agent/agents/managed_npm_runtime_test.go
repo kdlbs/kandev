@@ -12,42 +12,45 @@ func TestManagedNPMRuntimeContracts(t *testing.T) {
 		name        string
 		agent       ManagedNPMRuntimeAgent
 		wantPackage string
-		wantDefault string
 		wantACPArgs []string
 	}{
-		{"claude", NewClaudeACP(), "@agentclientprotocol/claude-agent-acp", "0.70.0", nil},
-		{"codex", NewCodexACP(), "@agentclientprotocol/codex-acp", "1.6.0", nil},
-		{"opencode", NewOpenCodeACP(), "opencode-ai", "1.18.18", []string{"acp", "--print-logs", "--log-level", "ERROR"}},
-		{"copilot", NewCopilotACP(), "@github/copilot", "1.0.75", []string{"--acp"}},
-		{"gemini", NewGemini(), "@google/gemini-cli", "0.52.0", []string{"--acp"}},
+		{"claude", NewClaudeACP(), "@agentclientprotocol/claude-agent-acp", nil},
+		{"codex", NewCodexACP(), "@agentclientprotocol/codex-acp", nil},
+		{"opencode", NewOpenCodeACP(), "opencode-ai", []string{"acp", "--print-logs", "--log-level", "ERROR"}},
+		{"copilot", NewCopilotACP(), "@github/copilot", []string{"--acp"}},
+		{"gemini", NewGemini(), "@google/gemini-cli", []string{"--acp"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			spec := tt.agent.ManagedNPMRuntime()
+			wantDefault := spec.DefaultVersionOrPinned()
+			if wantDefault == "" {
+				t.Fatal("DefaultVersionOrPinned() is empty")
+			}
 			if got := spec.Package; got != tt.wantPackage {
 				t.Fatalf("Package = %q, want %q", got, tt.wantPackage)
 			}
-			if got := spec.DefaultVersion; got != tt.wantDefault {
-				t.Fatalf("DefaultVersion = %q, want %q", got, tt.wantDefault)
+			if got := spec.DefaultVersion; got != wantDefault {
+				t.Fatalf("DefaultVersion = %q, want %q", got, wantDefault)
 			}
 			if got := spec.ACPArgs; !slices.Equal(got, tt.wantACPArgs) {
 				t.Fatalf("ACPArgs = %#v, want %#v", got, tt.wantACPArgs)
 			}
 
 			cached := spec.CachedACPCommand()
-			wantCached := append([]string{"npx", "--yes", "--prefer-offline", tt.wantPackage + "@" + tt.wantDefault}, tt.wantACPArgs...)
+			wantCached := append([]string{"npx", "--yes", "--prefer-offline", tt.wantPackage + "@" + wantDefault}, tt.wantACPArgs...)
 			if !slices.Equal(cached.Args(), wantCached) {
 				t.Fatalf("CachedACPCommand = %#v, want %#v", cached.Args(), wantCached)
 			}
-			if got := spec.PackageSpec(""); got != tt.wantPackage+"@"+tt.wantDefault {
+			if got := spec.PackageSpec(""); got != tt.wantPackage+"@"+wantDefault {
 				t.Fatalf("empty PackageSpec = %q, want exact default", got)
 			}
 
 			update := spec.CacheUpdateCommand()
 			wantUpdate := []string{
 				"npm", "exec", "--yes", "--prefer-online",
-				"--package=" + tt.wantPackage + "@" + tt.wantDefault, "--", "node", "-e", "",
+				"--package=" + tt.wantPackage + "@" + wantDefault, "--", "node", "-e", "",
 			}
 			if !slices.Equal(update.Args(), wantUpdate) {
 				t.Fatalf("CacheUpdateCommand = %#v, want %#v", update.Args(), wantUpdate)
@@ -73,7 +76,7 @@ func TestManagedNPMRuntimeDefaultVersionOrPinned(t *testing.T) {
 		want string
 	}{
 		{name: "explicit default", spec: ManagedNPMRuntimeSpec{Package: "@scope/managed", DefaultVersion: "1.2.3"}, want: "1.2.3"},
-		{name: "built-in catalogue fallback", spec: ManagedNPMRuntimeSpec{Package: "opencode-ai"}, want: "1.18.18"},
+		{name: "built-in catalogue fallback", spec: ManagedNPMRuntimeSpec{Package: "opencode-ai"}, want: MustDefaultManagedNPMRuntimeVersion("opencode-ai")},
 		{name: "custom package without default", spec: ManagedNPMRuntimeSpec{Package: "@scope/managed"}, want: ""},
 	}
 	for _, tt := range tests {

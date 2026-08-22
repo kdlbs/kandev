@@ -72,3 +72,8 @@ Verification: the post-remediation command `go test ./internal/agent/agents
 ./internal/agent/managedruntime ./internal/agent/hostutility
 ./internal/agent/settings/controller ./internal/agent/settings/handlers -count=1`
 passed 2,646 tests.
+
+Follow-up review verification added terminal assertions for normal update,
+rollback, and return-to-default jobs. Successful capability probes now update
+the terminal `current_version` before publication; the focused follow-up
+backend command passed 2,594 tests.

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
@@ -173,5 +173,73 @@ describe("AgentRuntimeUpdateControl", () => {
     expect(
       screen.getByRole("option", { name: `Use Kandev default (${ACTIVE_VERSION})` }),
     ).toBeTruthy();
+  });
+});
+
+describe("AgentRuntimeUpdateControl reset state", () => {
+  it("shows the cleared active version and job effective version after a reset", async () => {
+    const defaultVersion = "0.71.0";
+    const onPreview = vi.fn().mockResolvedValue(
+      preview({
+        default_version: defaultVersion,
+        target_version: defaultVersion,
+        operation: "use_default",
+      }),
+    );
+    const resetJob: AgentUpdateJob = {
+      job_id: "job-reset",
+      agent_name: AGENT_NAME,
+      status: "succeeded",
+      operation: "use_default",
+      current_version: defaultVersion,
+      default_version: defaultVersion,
+      effective_version: defaultVersion,
+      target_version: defaultVersion,
+      started_at: "2026-01-01T00:00:00.000Z",
+      finished_at: "2026-01-01T00:01:00.000Z",
+    };
+    function StatefulControl() {
+      const [job, setJob] = useState<AgentUpdateJob>();
+      const update = vi.fn().mockImplementation(async () => {
+        setJob(resetJob);
+        return resetJob;
+      });
+      return (
+        <AgentRuntimeUpdateControl
+          agentName={AGENT_NAME}
+          displayName="Claude Code"
+          runtimeUpdate={{
+            supported: true,
+            package: PACKAGE_NAME,
+            default_version: defaultVersion,
+            active_version: ACTIVE_VERSION,
+            effective_version: ACTIVE_VERSION,
+          }}
+          onPreview={onPreview}
+          onUpdate={update}
+          job={job}
+        />
+      );
+    }
+
+    render(<StatefulControl />);
+    fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("option", { name: `Use Kandev default (${defaultVersion})` }),
+      ).toBeTruthy(),
+    );
+    fireEvent.change(screen.getByTestId(`agent-update-version-${AGENT_NAME}`), {
+      target: { value: "__kandev_default__" },
+    });
+    await waitFor(() => expect(onPreview).toHaveBeenLastCalledWith(AGENT_NAME, undefined, true));
+    fireEvent.click(screen.getByTestId(`agent-update-confirm-${AGENT_NAME}`));
+
+    await waitFor(() => {
+      const dialog = screen.getByTestId(`agent-update-dialog-${AGENT_NAME}`);
+      const text = dialog.textContent ?? "";
+      expect(text).toContain(`Effective version: ${defaultVersion}`);
+      expect(text).not.toContain(`Active version: ${ACTIVE_VERSION}`);
+    });
   });
 });
