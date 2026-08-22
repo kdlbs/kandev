@@ -196,6 +196,27 @@ func TestResolveDevBackendEnvIgnoresAmbientConfiguredHome(t *testing.T) {
 	}
 }
 
+func TestResolveDevBackendEnvHonorsConfiguredHomeDataDirectory(t *testing.T) {
+	repo := makeRepoTree(t)
+	t.Setenv("KANDEV_TASK_ID", "")
+	configuredHome := filepath.Join(t.TempDir(), "configured-kandev")
+	cfg := &commonconfig.Config{
+		HomeDir: configuredHome,
+		Source: commonconfig.ConfigSource{Values: map[string]commonconfig.SettingSource{
+			"homeDir": commonconfig.SourceConfiguration,
+		}},
+	}
+
+	dbPath, extra := resolveDevBackendEnv(repo, cfg)
+	want := filepath.Join(configuredHome, "data", "kandev.db")
+	if dbPath != want {
+		t.Fatalf("dbPath = %q, want configured home data path %q", dbPath, want)
+	}
+	if got := devEnvToMap(extra)["KANDEV_DATABASE_PATH"]; got != want {
+		t.Fatalf("KANDEV_DATABASE_PATH = %q, want %q", got, want)
+	}
+}
+
 func TestDevLaunchConfigIgnoresAmbientHomeForSupervisorState(t *testing.T) {
 	repo := makeRepoTree(t)
 	t.Chdir(repo)
