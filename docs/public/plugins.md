@@ -127,6 +127,11 @@ Either path runs the same pipeline:
    Before persistence, credential-like values such as PATs, bearer tokens,
    labeled secrets/API keys, and the host home path are redacted; plugin stdout
    is not stored verbatim.
+6. Once the new version has started cleanly, delete the plugin's older
+   extracted versions, keeping the version now running plus the one it
+   replaced as a rollback target (see "Version retention on disk"). Nothing is
+   deleted when the install or the spawn fails, and a deletion that fails is
+   logged without failing the install.
 
 A successful install that failed to spawn returns HTTP 201 with a
 `warning` field rather than failing outright. The package is installed,
@@ -246,6 +251,23 @@ Each `<id>.yml` registration record stores the installed package metadata and
 host-managed runtime fields, including `signed`, `last_error`, and
 `last_error_at`. The diagnostic fields are empty until a runtime failure is
 recorded and are cleared after successful recovery.
+
+### Version retention on disk
+
+A plugin keeps at most two extracted versions: the one currently running and
+the one it replaced, which is what a failed upgrade falls back to. Older
+versions are deleted once a newer one has started cleanly, either right after
+the install that superseded them or at the next backend start. The count is
+fixed and not configurable.
+
+Retention is deliberately conservative. Kandev deletes a version directory only
+after confirming that the active version's process started, so a plugin that is
+disabled, errored, or was never started keeps every version it has. It never
+touches `data/`, a directory whose name does not match the version declared by
+the `manifest.yaml` inside it, or anything outside `~/.kandev/plugins/<id>/`.
+Because an upgrade previously left its predecessor behind forever, an instance
+that has been auto-updating for a long time can reclaim a substantial amount of
+disk on its first restart after upgrading to this version.
 
 ## Security posture
 

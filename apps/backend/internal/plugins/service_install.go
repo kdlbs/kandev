@@ -123,6 +123,13 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	catalogLocked = false
 
 	activateErr := s.activate(rec)
+	if activateErr == nil {
+		// Only now is the new version confirmed started, which is the point
+		// at which the versions it superseded stop being rollback targets.
+		// Pruning any earlier would delete what a failed upgrade falls back
+		// to; see pruneSupersededVersions.
+		s.pruneSupersededVersions(rec.ID, rec.Version, previousVersion(oldRec, hadOldRec))
+	}
 	s.notifyDeliverer()
 	s.notifyAgentToolCatalogChanged()
 
@@ -131,6 +138,16 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		return rec, activateErr
 	}
 	return installed, activateErr
+}
+
+// previousVersion returns the version an in-place upgrade replaced, or "" when
+// this install had no existing record to replace (a first install, or one over
+// a plugin whose record was lost) and therefore knows of no rollback target.
+func previousVersion(oldRec *store.Record, hadOldRec bool) string {
+	if !hadOldRec || oldRec == nil {
+		return ""
+	}
+	return oldRec.Version
 }
 
 // DevKandevVersion is the version string an un-stamped local build carries
