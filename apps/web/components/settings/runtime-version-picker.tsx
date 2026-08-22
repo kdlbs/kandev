@@ -83,7 +83,7 @@ function RuntimeVersionBrowser({
                 <CommandItem
                   key={version.version}
                   value={version.version}
-                  className="min-h-12 cursor-pointer px-3 py-2"
+                  className="min-h-11 cursor-pointer px-3 py-1.5 sm:min-h-10"
                   aria-selected={isSelected}
                   data-checked={isSelected}
                   data-testid={`agent-update-version-option-${agentName}-${version.version}`}
@@ -128,13 +128,13 @@ function RuntimeVersionQuickChoices({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-2">
+    <div className="space-y-1">
       <p className="font-medium">{t("agents:runtimeVersionQuickChoices")}</p>
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid grid-cols-2 gap-1.5">
         <Button
           type="button"
           variant={selectedVersion === latestVersion ? "secondary" : "outline"}
-          className="min-h-12 cursor-pointer justify-start px-3 text-left"
+          className="h-11 min-h-11 min-w-0 cursor-pointer justify-start px-2 text-left text-xs sm:h-10 sm:min-h-10"
           aria-pressed={selectedVersion === latestVersion}
           disabled={disabled}
           onClick={() => onSelectTarget(latestVersion)}
@@ -146,7 +146,7 @@ function RuntimeVersionQuickChoices({
           <Button
             type="button"
             variant={selectedUseDefault ? "secondary" : "outline"}
-            className="min-h-12 cursor-pointer justify-start px-3 text-left"
+            className="h-11 min-h-11 min-w-0 cursor-pointer justify-start px-2 text-left text-xs sm:h-10 sm:min-h-10"
             aria-pressed={selectedUseDefault}
             disabled={disabled}
             onClick={onSelectDefault}
@@ -204,7 +204,7 @@ export function RuntimeVersionPicker({
   };
 
   return (
-    <div className="space-y-3" data-testid={`agent-update-version-picker-${agentName}`}>
+    <div className="space-y-2" data-testid={`agent-update-version-picker-${agentName}`}>
       <RuntimeVersionQuickChoices
         agentName={agentName}
         latestVersion={latestVersion}
@@ -217,7 +217,7 @@ export function RuntimeVersionPicker({
         onSelectDefault={selectDefault}
       />
 
-      <div className="space-y-2">
+      <div className="space-y-1">
         <p className="font-medium">{t("agents:selectRuntimeVersion")}</p>
         <Button
           type="button"

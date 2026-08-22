@@ -117,26 +117,20 @@ function RuntimeVersionSummary({
   const effectiveVersion = resolveRuntimeEffectiveVersion(preview, job);
 
   return (
-    <div className="space-y-1" data-testid={`agent-update-version-summary-${agentName}`}>
+    <div className="space-y-0.5" data-testid={`agent-update-version-summary-${agentName}`}>
       <p className="font-medium" role={isUpToDate ? "status" : undefined}>
         {t(runtimeOperationLabelKey(operation))}
       </p>
       <p className="break-words font-mono text-sm">
         {isUpToDate ? currentVersion : `${currentVersion} → ${targetVersion}`}
       </p>
-      {activeVersion && (
-        <p className="text-sm text-muted-foreground">
-          {t("agents:activeRuntimeVersion", { version: activeVersion })}
-        </p>
-      )}
-      <p className="text-sm text-muted-foreground">
-        {t("agents:effectiveRuntimeVersion", { version: effectiveVersion })}
-      </p>
-      {preview.default_version && (
-        <p className="text-sm text-muted-foreground">
-          {t("agents:kandevDefaultVersion", { version: preview.default_version })}
-        </p>
-      )}
+      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs text-muted-foreground sm:grid-cols-3">
+        {activeVersion && <p>{t("agents:activeRuntimeVersion", { version: activeVersion })}</p>}
+        <p>{t("agents:effectiveRuntimeVersion", { version: effectiveVersion })}</p>
+        {preview.default_version && (
+          <p>{t("agents:kandevDefaultVersion", { version: preview.default_version })}</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -177,13 +171,13 @@ function RuntimeUpdatePreviewDetails({
         onSelectTarget={onSelectTarget}
         onSelectDefault={onSelectDefault}
       />
-      <div className="space-y-1 text-muted-foreground">
+      <div className="space-y-0.5 text-xs text-muted-foreground">
         <p>{t("agents:runtimeUpdateExplainer")}</p>
         <p>{t("agents:runtimeUpdateSessionsNote")}</p>
       </div>
-      <div className="space-y-1">
+      <div className="space-y-0.5">
         <p className="font-medium">{t("agents:commandThatWillRun")}</p>
-        <pre className="whitespace-pre-wrap break-all rounded-md bg-muted p-3 font-mono text-xs text-muted-foreground">
+        <pre className="whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs text-muted-foreground">
           {preview.command_string}
         </pre>
       </div>
@@ -209,7 +203,7 @@ function UpdateBody({
   const phase = updatePhase(t, job?.status);
   return (
     <div
-      className="max-h-[calc(80dvh-10rem)] min-h-0 space-y-3 overflow-y-auto overscroll-contain px-4 py-3 text-xs/relaxed sm:max-h-[calc(60dvh-10rem)]"
+      className="max-h-[calc(92dvh-10rem)] min-h-0 space-y-2 overflow-y-auto overscroll-contain px-4 py-2 text-xs/normal sm:max-h-[calc(92dvh-8rem)]"
       data-testid={`agent-update-dialog-body-${agentName}`}
     >
       {loading && !preview && (
@@ -220,7 +214,7 @@ function UpdateBody({
       )}
       {previewError && (
         <div
-          className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3"
+          className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-2"
           role="alert"
         >
           <p className="flex items-start gap-2 text-destructive">
@@ -234,7 +228,7 @@ function UpdateBody({
       )}
       {approveError && (
         <div
-          className="rounded-md border border-destructive/30 bg-destructive/5 p-3"
+          className="rounded-md border border-destructive/30 bg-destructive/5 p-2"
           role="alert"
           data-testid={`agent-update-approve-error-${agentName}`}
         >
@@ -270,7 +264,7 @@ function UpdateBody({
       {job?.output && (
         <pre
           data-testid={`agent-update-log-${agentName}`}
-          className="whitespace-pre-wrap break-words rounded-md bg-muted p-3 font-mono text-xs text-muted-foreground"
+          className="whitespace-pre-wrap break-words rounded-md bg-muted p-2 font-mono text-xs text-muted-foreground"
         >
           {job.output}
         </pre>
@@ -340,12 +334,12 @@ function UpdateFooter({
   );
   if (mobile) {
     return (
-      <DrawerFooter className="border-t pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <DrawerFooter className="border-t px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
         {content}
       </DrawerFooter>
     );
   }
-  return <DialogFooter className="border-t px-4 py-3">{content}</DialogFooter>;
+  return <DialogFooter className="border-t px-4 py-2">{content}</DialogFooter>;
 }
 
 function UpdateTrigger({

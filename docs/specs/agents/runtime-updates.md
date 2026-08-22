@@ -84,6 +84,9 @@ action unless they inspect backend logs.
 - The version dialog presents a compact status summary and quick choices for
   the latest and Kandev default versions. The complete stable catalogue stays
   behind an explicit browse action and can be searched by version.
+- The initial preview fits within the desktop dialog and phone drawer without
+  body overflow. The shared body becomes scrollable only when the version
+  browser or streamed job output needs more space.
 
 The managed package set is:
 

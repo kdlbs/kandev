@@ -22,6 +22,9 @@ catalogue on demand in both the desktop dialog and mobile drawer.
   list is not rendered in the initial view.
 - Keep current/effective/default values visible as compact metadata and retain
   the existing approval, preview, and job state wiring.
+- Keep the initial preview free of body overflow on desktop and mobile. Allow
+  the shared body to scroll only for long version lists or streamed output,
+  while preserving 44px mobile actions and a reachable footer.
 
 ### Version browser
 
@@ -77,6 +80,10 @@ catalogue on demand in both the desktop dialog and mobile drawer.
 - `cd apps/web && pnpm e2e:run --project chromium e2e/tests/settings/agent-runtime-update.spec.ts` passed (15 tests).
 - `cd apps/web && pnpm e2e:run --project mobile-chrome e2e/tests/settings/mobile-agent-runtime-update.spec.ts` passed (5 tests).
 - `git diff --check` passed.
+- The compactness refinement passed the rendered no-initial-overflow checks on
+  desktop and mobile; streamed output still produced a scrollable body.
+- Fresh desktop and mobile preview screenshots were validated and compressed
+  for PR publication.
 - The Traditional Chinese generator was attempted but refused to write because of the existing `dynamicProfileSettings` residual warning in both Traditional Chinese catalogues. The five new values were added in the generator's OpenCC-equivalent form, and the full i18n check passed afterward.
 
 ## Implementation Waves And Parallel Candidates

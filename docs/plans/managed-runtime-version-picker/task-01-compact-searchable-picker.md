@@ -78,3 +78,7 @@ verification blockers.
 - Added localized copy and regenerated the pseudo catalogue.
 - Component test, typecheck, i18n check, changed-file lint, desktop E2E (15), mobile E2E (5), and `git diff --check` all pass.
 - Traditional Chinese generation was blocked by the pre-existing `dynamicProfileSettings` residual warning; equivalent generated values were added manually and the catalog checks pass.
+- Follow-up compactness refinement keeps the initial desktop dialog and mobile
+  drawer free of body overflow, while long streamed output remains scrollable.
+- Fresh desktop and mobile screenshots were captured, inspected, mapped in the
+  PR asset manifest, and compressed before publication.

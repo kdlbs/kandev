@@ -23,6 +23,10 @@ test.describe("managed agent runtime updates on mobile", () => {
     const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
     await expect(drawer).toBeVisible();
     await expect(drawer).toContainText("0.62.0 → 0.63.0");
+    const body = drawer.getByTestId(`agent-update-dialog-body-${runtime.agentName}`);
+    await expect
+      .poll(() => body.evaluate((element) => element.scrollHeight <= element.clientHeight))
+      .toBe(true);
     expect(runtime.postCount()).toBe(0);
     await prCapture.screenshot("mobile-update-preview", {
       caption: "Mobile update preview before approval",
@@ -43,7 +47,6 @@ test.describe("managed agent runtime updates on mobile", () => {
     await expect(drawer.getByTestId(`agent-update-phase-${runtime.agentName}`)).toContainText(
       "Updating runtime",
     );
-    const body = drawer.getByTestId(`agent-update-dialog-body-${runtime.agentName}`);
     await body.scrollIntoViewIfNeeded();
     await expect(
       body.evaluate((element) => element.scrollHeight > element.clientHeight),

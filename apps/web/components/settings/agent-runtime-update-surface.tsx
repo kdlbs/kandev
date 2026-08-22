@@ -40,8 +40,11 @@ export function AgentRuntimeUpdateSurface({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent className="max-h-[80dvh]" data-testid={`agent-update-drawer-${agentName}`}>
-          <DrawerHeader className="shrink-0 text-left">
+        <DrawerContent
+          className="max-h-[92dvh] overflow-hidden data-[vaul-drawer-direction=bottom]:max-h-[92dvh]"
+          data-testid={`agent-update-drawer-${agentName}`}
+        >
+          <DrawerHeader className="shrink-0 px-4 py-3 text-left">
             <DrawerTitle>{t(UPDATE_AGENT_KEY, { name: displayName })}</DrawerTitle>
             <DrawerDescription>{t("agents:reviewUpdateBeforeApplying")}</DrawerDescription>
           </DrawerHeader>
@@ -54,10 +57,10 @@ export function AgentRuntimeUpdateSurface({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-h-[80dvh] gap-0 p-0 sm:min-w-[40rem] sm:max-w-2xl"
+        className="max-h-[92dvh] gap-0 overflow-hidden p-0 sm:min-w-[40rem] sm:max-w-2xl"
         data-testid={`agent-update-dialog-${agentName}`}
       >
-        <DialogHeader className="px-4 pt-4">
+        <DialogHeader className="px-4 pb-1 pt-3">
           <DialogTitle>{t(UPDATE_AGENT_KEY, { name: displayName })}</DialogTitle>
           <DialogDescription>{t("agents:reviewUpdateBeforeApplying")}</DialogDescription>
         </DialogHeader>

@@ -45,16 +45,20 @@ test.describe("managed agent runtime updates", () => {
       .boundingBox();
     expect(selectorBox).not.toBeNull();
     expect(selectorBox!.height).toBeGreaterThanOrEqual(44);
+    const body = dialog.getByTestId(`agent-update-dialog-body-${runtime.agentName}`);
+    await expect
+      .poll(() => body.evaluate((element) => element.scrollHeight <= element.clientHeight))
+      .toBe(true);
+    const quickLatestBox = await dialog
+      .getByTestId(`agent-update-quick-latest-${runtime.agentName}`)
+      .boundingBox();
+    expect(quickLatestBox).not.toBeNull();
+    expect(quickLatestBox!.height).toBeLessThan(44);
     await expect(dialog).toContainText("0.62.0 → 0.63.0");
     await expect(dialog).toContainText(
       'npm exec --yes --prefer-online --package=@agentclientprotocol/claude-agent-acp -- node -e ""',
     );
     await expect(dialog).toContainText("Active sessions keep running");
-    const viewport = testPage.viewportSize();
-    expect(viewport).not.toBeNull();
-    await expect
-      .poll(() => dialog.evaluate((element) => element.getBoundingClientRect().height))
-      .toBeLessThan(viewport!.height * 0.6);
     expect(runtime.previewCount()).toBe(1);
     expect(runtime.postCount()).toBe(0);
     await prCapture.screenshot("desktop-update-preview", {
