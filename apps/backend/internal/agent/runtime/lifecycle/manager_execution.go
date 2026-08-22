@@ -1029,11 +1029,25 @@ func (m *Manager) revealRuntimeSecret(ctx context.Context, metadata map[string]i
 	return value
 }
 
-func (m *Manager) revealContainerControlAuthToken(ctx context.Context, metadata map[string]interface{}) string {
-	if token := m.revealRuntimeSecret(ctx, metadata, MetadataKeyContainerControlAuthSecret); token != "" {
-		return token
+func (m *Manager) revealContainerControlAuthToken(ctx context.Context, metadata map[string]interface{}, allowLegacyFallback bool) (string, error) {
+	secretID := getMetadataString(metadata, MetadataKeyContainerControlAuthSecret)
+	if secretID == "" {
+		if !allowLegacyFallback {
+			return "", nil
+		}
+		return m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret), nil
 	}
-	return m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret)
+	if m.secretStore == nil {
+		return "", errors.New("container control-token secret store is unavailable")
+	}
+	token, err := revealGlobalSecret(ctx, m.secretStore, secretID)
+	if err != nil {
+		return "", fmt.Errorf("reveal container control token: %w", err)
+	}
+	if token == "" {
+		return "", errors.New("container control token is empty")
+	}
+	return token, nil
 }
 
 // truncateID safely truncates an ID string to maxLen characters.

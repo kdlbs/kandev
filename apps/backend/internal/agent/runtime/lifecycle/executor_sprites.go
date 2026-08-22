@@ -123,6 +123,9 @@ func (r *SpritesExecutor) ResumeRemoteInstance(_ context.Context, req *ExecutorC
 
 func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
 	baseCtx := preparationContext(ctx)
+	if req.WorkspaceReuseRequired && !spritesShouldReconnect(req) {
+		return nil, fmt.Errorf("%w: missing canonical Sprite handle", models.ErrWorkspaceReuseUnsafe)
+	}
 	if err := validateAgentctlStartupConfig(req.AgentctlStartupConfig); err != nil {
 		return nil, fmt.Errorf("invalid agentctl startup configuration: %w", err)
 	}

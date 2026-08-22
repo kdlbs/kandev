@@ -99,3 +99,39 @@ func TestCreate_ReuseRequiredReturnsCanonicalWorktreeWithoutChangingGitState(t *
 		t.Fatalf("attach-only reuse lost uncommitted marker: %v", err)
 	}
 }
+
+func TestCreate_ReuseRequiredRejectsCanonicalWorktreeFromAnotherBranch(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	worktreePath := filepath.Join(t.TempDir(), "canonical")
+	runGit(t, repoPath, "worktree", "add", "-b", "feature/one", worktreePath, "main")
+	store := newMockStore()
+	store.worktrees["canonical-worktree"] = &Worktree{
+		ID:                "canonical-worktree",
+		TaskID:            "task-1",
+		TaskEnvironmentID: "environment-1",
+		RepositoryID:      "repository-1",
+		Path:              worktreePath,
+		Branch:            "feature/one",
+		BranchSlug:        "feature-one",
+		Status:            StatusActive,
+	}
+	mgr, err := NewManager(newTestConfig(t), store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	_, err = mgr.Create(context.Background(), CreateRequest{
+		TaskID:             "task-1",
+		SessionID:          "session-2",
+		TaskEnvironmentID:  "environment-1",
+		RepositoryID:       "repository-1",
+		RepositoryPath:     repoPath,
+		BaseBranch:         "main",
+		WorktreeID:         "canonical-worktree",
+		BranchIdentitySlug: "feature-two",
+		ReuseRequired:      true,
+	})
+	if !errors.Is(err, ErrReuseWorktreeUnavailable) {
+		t.Fatalf("Create() error = %v, want ErrReuseWorktreeUnavailable", err)
+	}
+}
