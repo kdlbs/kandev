@@ -66,7 +66,9 @@ test.describe("Workspace repository sets settings", () => {
 
     // Delete: the set goes, the repositories stay.
     await testPage.getByTestId(`repository-set-delete-${createdId}`).click();
-    await expect(testPage.getByTestId("repository-set-delete-dialog")).toBeVisible();
+    const confirmation = testPage.getByTestId("repository-set-delete-confirm-popover");
+    await expect(confirmation).toBeVisible();
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
     await testPage.getByTestId("repository-set-delete-confirm").click();
 
     await expect(testPage.getByTestId("repository-sets-empty")).toBeVisible();

@@ -449,6 +449,45 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 	require.Equal(t, []bool{true}, canceller.expireContextDeadline)
 }
 
+func TestTransitionTaskSessionStatePublishesMetadataWrittenByHook(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+	errorValue := models.LastAgentError{
+		Message:    "The selected base branch is not available.",
+		Code:       "base_branch_missing",
+		OccurredAt: time.Date(2026, 8, 19, 23, 10, 41, 0, time.UTC),
+		StampValue: "launch-error-stamp",
+	}
+
+	changed, _, err := svc.transitionTaskSessionState(
+		ctx,
+		"t1",
+		"s1",
+		models.TaskSessionStateFailed,
+		errorValue.Message,
+		func() {
+			require.NoError(t, repo.SetSessionMetadataKey(
+				ctx, "s1", models.SessionMetaKeyLastAgentError, errorValue,
+			))
+		},
+	)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Len(t, eb.events, 1)
+	data, ok := eb.events[0].event.Data.(map[string]interface{})
+	require.True(t, ok)
+	metadata, ok := data["session_metadata"].(map[string]interface{})
+	require.True(t, ok)
+	lastError, ok := metadata[models.SessionMetaKeyLastAgentError].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "base_branch_missing", lastError["code"])
+}
+
 func TestTransitionTaskSessionStateReportsPersistenceFailure(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -2642,6 +2681,72 @@ func TestSessionStartClearsInterruptedMarker(t *testing.T) {
 		require.Empty(t, publisher.updatedTaskIDs,
 			"no task.updated may be published when no marker was removed")
 	})
+}
+
+func TestSessionStartClearsAutoStartFailedMarker(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("state hook transition to STARTING", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyAutoStartFailed, true))
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		_, changed := svc.updateTaskSessionStateWithHook(
+			ctx, "t1", "s1", models.TaskSessionStateStarting, "", false, nil,
+		)
+		require.True(t, changed)
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		_, marked := task.Metadata[models.MetaKeyAutoStartFailed]
+		require.False(t, marked)
+		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs)
+	})
+
+	t.Run("launch path via setSessionStarting", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyAutoStartFailed, true))
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		session.State = models.TaskSessionStateStarting
+		session.ErrorMessage = ""
+		session.UpdatedAt = time.Now().UTC()
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		require.NoError(t, svc.setSessionStarting(ctx, "t1", session, models.TaskSessionStateRunning, true))
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		_, marked := task.Metadata[models.MetaKeyAutoStartFailed]
+		require.False(t, marked)
+		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs)
+	})
+}
+
+func TestAutoStartFailureDoesNotMarkTaskWithActiveSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx, "s1", models.TaskSessionStateStarting, "",
+	))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.setTaskAutoStartFailedMarker(ctx, "t1", "task.moved")
+
+	task, err := repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	_, marked := task.Metadata[models.MetaKeyAutoStartFailed]
+	require.False(t, marked, "a late failure must not mark a task with active work")
 }
 
 // Nothing else ever retires a stored agent failure, so without this clear every

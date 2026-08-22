@@ -18,6 +18,7 @@ Decisions:
 Implementation plans:
 
 - [Agent stall recovery](../../plans/agent-stall-recovery/plan.md)
+- [Lost turn-completion cancel recovery](../../plans/lost-turn-completion-cancel-recovery/plan.md)
 - [OpenCode terminal error surfacing](../../plans/opencode-terminal-error-surfacing/plan.md)
 - [OpenCode actionable error links](../../plans/opencode-actionable-error-links/plan.md)
 
@@ -137,6 +138,9 @@ sanitized diagnostic message for the collapsed technical-details surface.
   makes the session input-ready.
 - If the agent does not acknowledge cancellation, the existing bounded
   cancel-escalation path releases the prompt and reconciles the session.
+- Cancel escalation clears every prompt-admission barrier for the cancelled
+  turn, including a pending dispatch-only completion. A later prompt can
+  dispatch without a backend restart.
 - If notice-message persistence fails, the failure is logged without changing
   or terminating the running session.
 - If OpenCode does not support error-only stderr emission, changes its log
@@ -178,6 +182,9 @@ sanitized diagnostic message for the collapsed technical-details surface.
 - **GIVEN** a stall notice is visible, **WHEN** the user activates
   **Cancel turn**, **THEN** the existing cancellation path settles the turn and
   the session becomes available for new input without a backend restart.
+- **GIVEN** a dispatch-only prompt never reports completion and cancellation
+  escalates, **WHEN** the user sends a later prompt, **THEN** Kandev dispatches
+  it without a backend restart.
 - **GIVEN** a stall notice is visible on a phone viewport, **WHEN** the user taps
   **Cancel turn**, **THEN** the same cancellation outcome is reachable through
   an inline, content-width touch target of at least 44px.

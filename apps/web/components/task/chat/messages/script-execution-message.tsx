@@ -9,6 +9,7 @@ import { Badge } from "@kandev/ui/badge";
 import { ExpandableRow } from "./expandable-row";
 import { useExpandState } from "./use-expand-state";
 import { useTranslation } from "react-i18next";
+import { isSuccessfulScriptExecutionMetadata } from "@/hooks/processed-message-filtering";
 
 interface ScriptExecutionMetadata {
   script_type: "setup" | "cleanup" | "agent_boot";
@@ -208,8 +209,7 @@ function parseScriptMetadata(comment: Message) {
   const status = metadata?.status;
   const scriptType = metadata?.script_type;
   const isRunning = status === "starting" || status === "running";
-  const isSuccess =
-    status === "exited" && (metadata?.exit_code === 0 || metadata?.exit_code === undefined);
+  const isSuccess = isSuccessfulScriptExecutionMetadata(metadata);
   return { metadata, status, scriptType, isRunning, isSuccess };
 }
 

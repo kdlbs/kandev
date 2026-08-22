@@ -118,6 +118,29 @@ test.describe.serial("opt-in authentication", () => {
     await context.close();
   });
 
+  test("session cookie is port-scoped to the instance", async ({ browser, backend }) => {
+    // The session cookie is HttpOnly, so the name is asserted from the login
+    // response's Set-Cookie headers, not document.cookie. Two instances on one
+    // host (different ports) must not share a cookie name.
+    const context = await browser.newContext({ baseURL: backend.frontendUrl });
+
+    const res = await context.request.post(`${backend.baseUrl}/api/v1/auth/login`, {
+      data: { email: ADMIN.email, password: ADMIN.password },
+    });
+    expect(res.ok()).toBeTruthy();
+    const sessionNames = res
+      .headersArray()
+      .filter((h) => h.name.toLowerCase() === "set-cookie")
+      .map((h) => h.value.split(";")[0].split("=")[0])
+      .filter((name) => name.startsWith("kandev_session"));
+    expect(sessionNames).toEqual([`kandev_session_${backend.port}`]);
+
+    // The scoped session authenticates: the app renders authenticated content.
+    expect((await context.request.get(`${backend.baseUrl}/api/v1/workspaces`)).ok()).toBeTruthy();
+
+    await context.close();
+  });
+
   test("two users are fully segregated over HTTP, boot payload, and WS", async ({
     browser,
     backend,

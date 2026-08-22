@@ -9,6 +9,7 @@ import { resolveSettingsDiscovery } from "./resolve";
 const GITHUB_CONNECTION_ID = "integration-github-connection";
 const STABLE_CONTROL_IDS = [
   "appearance-color-theme",
+  "appearance-rich-output-motion",
   "appearance-startup-page",
   "appearance-display-language",
   "terminal-preferred-shell",

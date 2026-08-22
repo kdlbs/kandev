@@ -2036,9 +2036,25 @@ func TestResolveActiveOfficeWorkspaceIDPrefersCookie(t *testing.T) {
 		{ID: "ws-b", OfficeWorkflowID: "office-b"},
 	}
 
-	got := resolveActiveOfficeWorkspaceID(workspaces, "ws-b")
-	if got != "ws-b" {
-		t.Fatalf("expected cookie workspace to win, got %q", got)
+	// General cookie wins when it names an office workspace.
+	if got := resolveActiveOfficeWorkspaceID(workspaces, "ws-b", "ws-a", ""); got != "ws-b" {
+		t.Fatalf("expected general cookie workspace to win, got %q", got)
+	}
+	// Office cookie wins over settings when the general cookie misses.
+	if got := resolveActiveOfficeWorkspaceID(workspaces, "ws-missing", "ws-a", "ws-b"); got != "ws-a" {
+		t.Fatalf("expected office cookie workspace to win, got %q", got)
+	}
+	// Settings wins when both cookies miss.
+	if got := resolveActiveOfficeWorkspaceID(workspaces, "", "", "ws-b"); got != "ws-b" {
+		t.Fatalf("expected settings workspace to win, got %q", got)
+	}
+	// A kanban general cookie (not in the office set) falls through.
+	if got := resolveActiveOfficeWorkspaceID(workspaces, "ws-kanban", "ws-a", "ws-b"); got != "ws-a" {
+		t.Fatalf("expected kanban general cookie to fall through to the office cookie, got %q", got)
+	}
+	// No candidate matches: first office workspace.
+	if got := resolveActiveOfficeWorkspaceID(workspaces, "", "", ""); got != "ws-a" {
+		t.Fatalf("expected first office workspace, got %q", got)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -43,24 +44,10 @@ const (
 	SkipReasonMissingModelMapping = "missing_model_mapping"
 )
 
-// autoRetryableCodes is the allow-list of error codes that mark a
-// degraded provider as "the scheduler will retry on its own." Anything
-// outside this set is user-actionable. Referenced again by Phase 4
-// (block-reason aggregation, wake-up scheduling).
-var autoRetryableCodes = map[string]struct{}{
-	"rate_limited":           {},
-	"quota_limited":          {},
-	"network_unavailable":    {},
-	"provider_unavailable":   {},
-	"provider_overloaded":    {},
-	"model_capacity":         {},
-	"unknown_provider_error": {},
-}
-
-// IsAutoRetryableCode reports whether code is in the auto-retry allow-list.
+// IsAutoRetryableCode derives the legacy Office health hint from the shared
+// catalogue. Unknown and non-provider codes fail closed.
 func IsAutoRetryableCode(code string) bool {
-	_, ok := autoRetryableCodes[code]
-	return ok
+	return routingerr.ClassForCode(routingerr.Code(code)) == routingerr.ClassTransient
 }
 
 // Repo is the narrow interface the resolver needs over the sqlite repo.

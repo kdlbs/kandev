@@ -37,7 +37,9 @@ function contentHashSignature(message: Message): string {
     SEP +
     (message.raw_content ?? "") +
     SEP +
-    serializeMetadata(message.metadata);
+    serializeMetadata(message.metadata) +
+    SEP +
+    (message.prompt_index ?? "");
   return `h:${parts.length}:${hashString(parts)}`;
 }
 
@@ -51,12 +53,17 @@ function contentHashSignature(message: Message): string {
  * When the backend supplies `updated_at` (the authoritative per-message change
  * signal, bumped on every content/metadata mutation including streaming tokens),
  * the signature short-circuits to it — an O(1) compare with no content hashing.
- * Older payloads without `updated_at` fall back to the content hash.
+ * `prompt_index` is included in BOTH branches: a refetch that newly supplies an
+ * ordinal (or replaces it) is a meaningful snapshot difference even when
+ * `updated_at` is unchanged. Older payloads without `updated_at` fall back to
+ * the content hash.
  */
 export function signatureOf(message: Message): string {
   const cached = signatureCache.get(message);
   if (cached !== undefined) return cached;
-  const signature = message.updated_at ? `u:${message.updated_at}` : contentHashSignature(message);
+  const signature = message.updated_at
+    ? `u:${message.updated_at}:p${message.prompt_index ?? ""}`
+    : contentHashSignature(message);
   signatureCache.set(message, signature);
   return signature;
 }
@@ -67,13 +74,31 @@ export function signatureOf(message: Message): string {
  * array reference itself when nothing moved (so array identity is preserved and
  * no downstream re-render fires). Only genuinely-changed messages get a fresh
  * reference.
+ *
+ * Before comparing, a merged snapshot carries forward a previously known
+ * `prompt_index` onto incoming payloads that omit the field, so an older or
+ * transient payload can never clear a known ordinal; a later HTTP/boot
+ * snapshot that supplies (or replaces) the index still wins through the
+ * signature.
  */
 export function reconcileMessages(prev: Message[] | undefined, next: Message[]): Message[] {
   if (!prev || prev.length === 0) return next;
   const prevById = new Map<string, Message>();
   for (const message of prev) prevById.set(message.id, message);
-  let identical = prev.length === next.length;
-  const result = next.map((message, i) => {
+  // Carry forward a known prompt_index when the incoming payload omits it.
+  const carried = next.map((message) => {
+    const previous = prevById.get(message.id);
+    if (
+      previous &&
+      message.prompt_index === undefined &&
+      typeof previous.prompt_index === "number"
+    ) {
+      return { ...message, prompt_index: previous.prompt_index };
+    }
+    return message;
+  });
+  let identical = prev.length === carried.length;
+  const result = carried.map((message, i) => {
     const previous = prevById.get(message.id);
     const reused = previous && signatureOf(previous) === signatureOf(message) ? previous : message;
     if (reused !== prev[i]) identical = false;

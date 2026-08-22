@@ -27,9 +27,8 @@ test.describe("Task List", () => {
       testPage.getByTestId("tasks-list").getByText("Direct Navigate Task"),
     ).toBeVisible();
     await expect(testPage.getByTestId("kanban-header-search")).toBeVisible();
-    await expect(
-      testPage.locator("header").first().getByText("Tasks", { exact: true }),
-    ).toHaveCount(0);
+    // The bar names the page through the shared title crumb.
+    await expect(testPage.locator('[data-slot="breadcrumb-page"]')).toHaveText("Tasks");
     await expect(testPage.locator("main").getByRole("button", { name: "New Task" })).toHaveCount(0);
 
     const rowBox = await testPage

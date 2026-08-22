@@ -15,6 +15,22 @@ import (
 // Code is the normalized provider-routing error code.
 type Code string
 
+// Class is the shared recovery class for a normalized provider failure. The
+// class is deliberately smaller than Code so the catalogue can grow without
+// forcing every policy consumer to learn every provider-specific signature.
+type Class string
+
+const (
+	ClassTransient    Class = "transient"
+	ClassHard         Class = "hard"
+	ClassUnclassified Class = "unclassified"
+
+	// CatalogueVersion identifies the deterministic code-to-class catalogue
+	// used for a classification. It is persisted with route decisions so later
+	// catalogue additions do not relabel historical attempts.
+	CatalogueVersion = "provider-errors.v1"
+)
+
 const (
 	CodeAuthRequired                Code = "auth_required"
 	CodeMissingCredentials          Code = "missing_credentials"
@@ -94,17 +110,34 @@ const (
 // Error is the classifier's normalized output. It wraps stderr/stdout in
 // RawExcerpt after sanitization + truncation.
 type Error struct {
-	Code            Code
-	Confidence      Confidence
-	Phase           Phase
-	FallbackAllowed bool
-	AutoRetryable   bool
-	UserAction      bool
-	ClassifierRule  string
-	ExitCode        *int
-	ResetHint       *time.Time
-	RawExcerpt      string
-	RemediationPath string // path to clean before retry; only set for codes that have a known remediation
+	Code             Code
+	Class            Class
+	CatalogueVersion string
+	Confidence       Confidence
+	Phase            Phase
+	FallbackAllowed  bool
+	AutoRetryable    bool
+	UserAction       bool
+	ClassifierRule   string
+	ExitCode         *int
+	ResetHint        *time.Time
+	RawExcerpt       string
+	RemediationPath  string // path to clean before retry; only set for codes that have a known remediation
+}
+
+// ClassForCode returns the policy class assigned by the provider-error
+// catalogue. Codes outside the provider recovery catalogue fail closed.
+func ClassForCode(code Code) Class {
+	switch code {
+	case CodeNetworkUnavailable, CodeProviderUnavailable, CodeProviderOverloaded,
+		CodeModelCapacity, CodeRateLimited, CodeAgentTransportLost:
+		return ClassTransient
+	case CodeAuthRequired, CodeMissingCredentials, CodeSubscriptionRequired,
+		CodeQuotaLimited, CodeModelUnavailable, CodeProviderNotConfigured:
+		return ClassHard
+	default:
+		return ClassUnclassified
+	}
 }
 
 func (e *Error) Error() string {
@@ -266,6 +299,8 @@ func classifyByPhase(in Input, excerpt string) *Error {
 }
 
 func applyInvariants(e *Error) *Error {
+	e.Class = ClassForCode(e.Code)
+	e.CatalogueVersion = CatalogueVersion
 	switch e.Code {
 	case CodeAuthRequired, CodeMissingCredentials, CodeSubscriptionRequired, CodeProviderNotConfigured:
 		e.UserAction = true

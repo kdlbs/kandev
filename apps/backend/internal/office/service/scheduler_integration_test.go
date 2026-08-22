@@ -54,6 +54,45 @@ func TestSchedulerIntegration_TickProcessesRun(t *testing.T) {
 	}
 }
 
+func TestSchedulerIntegration_CancelsRunForMovedWorkflowStep(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	agent := makeAgent("worker-moved-step", models.AgentRoleWorker)
+	agent.ExecutorPreference = `{"type":"local_pc"}`
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	svc.ExecSQL(t, `INSERT INTO tasks
+		(id, workspace_id, workflow_step_id, title, created_at, updated_at)
+		VALUES ('task-moved-step', 'ws-1', 'step-current', 'Moved task',
+		        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+
+	// The run was queued while the task was on step-old. A later workflow
+	// move must prevent the scheduler from launching that stale step.
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"task-moved-step","workflow_step_id":"step-old"}`, ""); err != nil {
+		t.Fatalf("queue run: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	if mock.callCount() != 0 {
+		t.Fatalf("StartTask calls = %d, want 0 for stale workflow step", mock.callCount())
+	}
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs = %d, want 1", len(runs))
+	}
+	if runs[0].Status != service.RunStatusCancelled {
+		t.Fatalf("run status = %q, want %q", runs[0].Status, service.RunStatusCancelled)
+	}
+}
+
 func TestSchedulerIntegration_ResolvesExecutorFromTaskProject(t *testing.T) {
 	mock := &mockTaskStarter{}
 	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})

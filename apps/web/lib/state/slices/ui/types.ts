@@ -173,6 +173,8 @@ export type SessionFailureNotification = {
   sessionId: string;
   taskId: string;
   message: string;
+  /** Typed launch failures point users to the persistent task card. */
+  isLaunchFailure?: boolean;
 };
 
 export type TaskDeletedNotification = {
@@ -225,6 +227,14 @@ export type SettingsMenuState = {
    * open path from the route instead, so it never reads or writes this.
    */
   expandedKeys: string[];
+};
+
+/** Agent rich-output chart motion preference, per device (localStorage). */
+export type RichOutputMotionState = {
+  /** The value rendered now, including an unsaved Appearance preview. */
+  enabled: boolean;
+  /** The persisted value restored when the Appearance draft is discarded. */
+  savedEnabled: boolean;
 };
 
 /** Unified AppSidebar collapse + per-section expand state (localStorage). */
@@ -285,6 +295,8 @@ export type UISliceState = {
   appSidebar: AppSidebarState;
   /** Settings menu shape + open branches (localStorage). */
   settingsMenu: SettingsMenuState;
+  /** Agent rich-output chart animation preference (localStorage). */
+  richOutputMotion: RichOutputMotionState;
   /**
    * Most recently dismissed `last_agent_error` stamp per sessionId. Shared by
    * the chat banner and the sidebar error icon so dismissing the banner also
@@ -422,6 +434,12 @@ export type UISliceActions = {
   /** Drop an unsaved preview and render the persisted mode again. */
   restoreSettingsMenuMode: () => void;
   setSettingsMenuExpandedKeys: (keys: string[]) => void;
+  /** Preview rich-output chart motion without persisting it. */
+  previewRichOutputAnimations: (enabled: boolean) => void;
+  /** Persist rich-output chart motion for this device. */
+  commitRichOutputAnimations: (enabled: boolean) => void;
+  /** Restore the persisted rich-output chart motion preference. */
+  restoreRichOutputAnimations: () => void;
   /** Record multiple sidebar badge acknowledgements with one localStorage merge. */
   acknowledgeAgentErrors: (stamps: Record<string, string>) => void;
   /** Record that `stamp` has been dismissed for `sessionId`. */

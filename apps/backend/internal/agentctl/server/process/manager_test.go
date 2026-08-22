@@ -425,6 +425,28 @@ func TestBuildAdapterConfig_StripEnvRemovesDeclaredVars(t *testing.T) {
 	}
 }
 
+func TestBuildAdapterConfigForwardsNotificationQueueCapacity(t *testing.T) {
+	m := &Manager{
+		cfg: &config.InstanceConfig{
+			AgentArgs:                 []string{"cat"},
+			WorkDir:                   t.TempDir(),
+			AgentEnv:                  []string{"PATH=/usr/bin"},
+			Protocol:                  agent.ProtocolACP,
+			NotificationQueueCapacity: 4096,
+		},
+		logger: newTestLogger(t),
+	}
+
+	if err := m.buildAdapterConfig(); err != nil {
+		t.Fatalf("buildAdapterConfig: %v", err)
+	}
+	t.Cleanup(func() { _ = m.adapter.Close() })
+
+	if got := m.adapterCfg.NotificationQueueCapacity; got != 4096 {
+		t.Fatalf("adapter notification queue capacity = %d, want 4096", got)
+	}
+}
+
 func TestStartOneShotPreservesConfiguredTempEnvironment(t *testing.T) {
 	log := newTestLogger(t)
 	workDir := t.TempDir()

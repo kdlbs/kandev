@@ -14,12 +14,24 @@ const USER_EDIT = "User edit";
 const PROMPT_RESULT_RECOVERY_TEST_ID = "prompt-result-recovery";
 const ENHANCE_PROMPT_BUTTON_TEST_ID = "enhance-prompt-button";
 
+type EscapeEvent = { preventDefault: () => void };
+
 let allowProgrammaticSet = true;
 let mockFs: DialogFormState;
+let dialogEscapeHandler: ((event: EscapeEvent) => void) | undefined;
 
 vi.mock("@kandev/ui/dialog", () => ({
   Dialog: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  DialogContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DialogContent: ({
+    children,
+    onEscapeKeyDown,
+  }: {
+    children: ReactNode;
+    onEscapeKeyDown?: (event: EscapeEvent) => void;
+  }) => {
+    dialogEscapeHandler = onEscapeKeyDown;
+    return <div>{children}</div>;
+  },
   DialogHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DialogFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
@@ -324,10 +336,11 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
   };
 }
 
-function renderDialog() {
+function renderDialog(mode: "create" | "edit" | "session" = "create") {
   return render(
     <TaskCreateDialog
       open
+      mode={mode}
       onOpenChange={() => undefined}
       workspaceId="workspace-1"
       workflowId={null}
@@ -346,7 +359,30 @@ beforeEach(() => {
   enhancePromptMock.mockReset();
   toastMock.mockReset();
   setHasDescriptionMock.mockReset();
+  dialogEscapeHandler = undefined;
   mockFs = buildMockFs();
+});
+
+describe("TaskCreateDialog Escape dismissal", () => {
+  it("prevents Escape from dismissing create mode", () => {
+    renderDialog();
+    const event = { preventDefault: vi.fn() };
+
+    expect(dialogEscapeHandler).toBeTypeOf("function");
+    dialogEscapeHandler?.(event);
+
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it.each(["edit", "session"] as const)("keeps Escape dismissal available in %s mode", (mode) => {
+    renderDialog(mode);
+    const event = { preventDefault: vi.fn() };
+
+    expect(dialogEscapeHandler).toBeTypeOf("function");
+    dialogEscapeHandler?.(event);
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
 });
 
 describe("TaskCreateDialog prompt enhancement", () => {

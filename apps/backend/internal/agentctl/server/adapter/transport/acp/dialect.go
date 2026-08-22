@@ -25,6 +25,13 @@ type acpDialect struct {
 	contextWindow        func(map[string]any, []modelInfo, []streams.ConfigOption) (contextWindowSample, bool)
 	normalizePromptUsage func(*streams.PromptUsage, map[string]any) *streams.PromptUsage
 	subagentFrame        func(map[string]any, string, any) (subagentFrame, bool)
+	mcpToolCall          func(map[string]any, any) (mcpToolCallFrame, bool)
+	mcpToolResult        func(any) (any, bool)
+}
+
+type mcpToolCallFrame struct {
+	name      string
+	arguments map[string]any
 }
 
 type dialectConfigChange struct {
@@ -60,6 +67,20 @@ func (d acpDialect) parseSubagentFrame(meta map[string]any, title string, rawInp
 		return subagentFrame{}, false
 	}
 	return d.subagentFrame(meta, title, rawInput)
+}
+
+func (d acpDialect) parseMCPToolCall(meta map[string]any, rawInput any) (mcpToolCallFrame, bool) {
+	if d.mcpToolCall == nil {
+		return mcpToolCallFrame{}, false
+	}
+	return d.mcpToolCall(meta, rawInput)
+}
+
+func (d acpDialect) normalizeMCPToolResult(rawOutput any) (any, bool) {
+	if d.mcpToolResult == nil {
+		return nil, false
+	}
+	return d.mcpToolResult(rawOutput)
 }
 
 func (d acpDialect) sessionConfigOptions(

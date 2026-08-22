@@ -256,13 +256,13 @@ slice shapes in a released plugin.
 | registerComponent           | registerComponent(slot, Component); component receives { slotProps?: unknown }                                                                                                                                                                                                                         | Active ui.bundle                                                       | Every registration is owner-tracked, error-isolated, and bulk-revoked                                                                                                                                           | registry.registerComponent("task-sidebar", Panel)                                                                   |
 | registerWsHandler           | registerWsHandler(action, handler(payload)); receives actions bridged from lib/ws                                                                                                                                                                                                                      | Active ui.bundle                                                       | Handler is removed on disable/uninstall; tolerate duplicate/replayed actions                                                                                                                                    | registry.registerWsHandler("acme.updated", renderUpdate)                                                            |
 | registerKeybinding          | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo                                                                                                                                                                                  | ui.bundle and ui.keybindings[]                                         | Handler is removed on disable/uninstall; core shortcuts win, and editable targets are skipped unless that entry set ui.keybindings[].allow_in_editor                                                            | registry.registerKeybinding("open-panel", () => host.openModal(...))                                                |
-| registerIntegrationSettings | One provider-owned settings component with an optional header action mounted inside Settings > Integrations                                                                                                                                                                                       | Active ui.bundle                                                       | Registration is exclusive by id and revoked on unload; host owns workspace selection and settings navigation; both component and action receive the routed `workspaceId`                                                               | registry.registerIntegrationSettings({ id: "acme", Component, action: Toggle }) |
+| registerIntegrationSettings | One provider-owned settings component with an optional action mounted in the detail header and the integrations index card                                                                                                                                    | Active ui.bundle                                                       | Registration is exclusive by id and revoked on unload; host owns workspace selection and settings navigation; component and action receive the routed `workspaceId`, and action receives its `surface`                                                               | registry.registerIntegrationSettings({ id: "acme", Component, action: Toggle }) |
 | registerTranslations        | Flat English fallback plus optional Kandev locale catalogs, isolated to this plugin's namespace                                                                                                                                                                                                        | Active ui.bundle                                                       | Catalogs are replaced atomically, removed on unload, and registry consumers invalidate when the host locale changes                                                                                             | registry.registerTranslations({ en: { settings: "Settings" }, "pt-pt": { settings: "Definições" } })                |
 | registerRepositoryProvider  | Provider-owned paged/searchable repository list, URL match/inspect, branches, and optional native `createChangeRequest` transport                                                                                                                                                                      | ui.bundle and matching `repository_providers[]` id                     | Registration and in-flight callbacks are result-fenced on unload; host owns native task and Create PR UI                                                                                                        | registry.registerRepositoryProvider({ id: "acme", ...provider })                                                    |
 | registerTaskAction          | Child action inside the task menu's native Link section                                                                                                                                                                                                                                                | Active ui.bundle                                                       | Action is revoked on unload; host supplies current task/workspace and desktop/mobile presentation                                                                                                               | registry.registerTaskAction({ id: "link-pr", placement: "link", ... })                                              |
 | registerReviewProvider      | Normalized task reviews, workspace associations, unlink, and shared Review panel                                                                                                                                                                                                                       | ui.bundle and matching `repository_providers[]` id                     | Snapshots/subscriptions are owner-scoped and revoked on unload; host owns status chrome, indicators, unlink UI, and responsive Review placement                                                                 | registry.registerReviewProvider({ id: "acme", ...reviews })                                                         |
 | registerTaskPanel           | { id, title, icon?, Component, mobileEnabled? }; adds a row to the task workspace's "+" (add panel) menu; Component receives { panelId, taskId, sessionId, presentation }                                                                                                                              | Active ui.bundle                                                       | Panel renders behind its own error boundary; slow/failed reloads preserve it, a ready generation missing it closes it, and disable/uninstall closes every owned instance                                        | registry.registerTaskPanel({ id: "notes", title: "Notes", Component: NotesPanel })                                  |
-| registerTaskMenuAction      | { id, label, icon?, group: "edit" \| "primary", visible?(context), run(context) }; "edit" nests inside the card's Edit submenu, "primary" renders as a flat top-level item between "Move to"/"Send to workflow" and "Link"                                                                             | Active ui.bundle                                                       | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged                                                                                                                           | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "edit", run: doEnhance })                 |
+| registerTaskMenuAction      | { id, label, icon?, group: "edit" \| "primary", visible?(context), run(context) }; "edit" is card-only inside Edit, while "primary" is a flat item on cards and desktop/mobile task-row menus                                                                                                                     | Active ui.bundle                                                       | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged                                                                                                                           | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "primary", run: doEnhance })              |
 | registerTaskFilter          | { id, label, getOptions(), matches(context, selected) }; adds a client-side, multi-select filter section to the kanban board's display dropdown, alongside Workflow/Repository                                                                                                                         | Active ui.bundle                                                       | Filter is revoked on disable/uninstall; selections are ephemeral (not persisted); matches is only called for a non-empty selection, and a throw is caught, logged, and treated as non-matching                  | registry.registerTaskFilter({ id: "tags", label: "Tags", getOptions: listTagOptions, matches: taskHasSelectedTag }) |
 | host.React / host.jsx       | Shared React instance and React.createElement alias                                                                                                                                                                                                                                                    | Active ui.bundle                                                       | No cleanup; never bundle a second React/Radix runtime                                                                                                                                                           | const h = host.jsx                                                                                                  |
 | host.context                | Versioned provider-neutral reads/subscriptions for active workspace, all workspace ids, native task creation, and exact provider repository identity                                                                                                                                                  | Active ui.bundle                                                       | Subscriptions are generation-owned and revoked on unload; records are stable SDK shapes, not private app state                                                                                                  | const ids = host.context.getWorkspaceIds()                                                                           |
@@ -451,6 +451,7 @@ to strings, but an unmounted name renders nowhere.
 | plugin-settings           | Top of this plugin's Settings > Plugins page              | { pluginId, status }; owner-scoped to the plugin being viewed    |
 | task-card-indicators      | Kanban card, beside the PR status icon                    | { taskId, workspaceId, workflowStepId }                          |
 | task-card-tags            | Kanban card, its own row below the badges row             | { taskId, workspaceId, workflowStepId }                          |
+| task-row-metadata         | Sidebar task tree and `/tasks` rows                       | TaskRowMetadataSlotProps                                        |
 | sidebar-workspace-actions | Desktop New Task row or phone navigation action group, after Quick Terminal and Quick Chat | SidebarWorkspaceActionsSlotProps |
 
 AppStatusBarSlotProps is { placement, presentation, density, pathname,
@@ -931,9 +932,13 @@ ACS in a `webhook`, validate the token yourself, then set the reserved
 `X-Kandev-Auth-Login` response header to a JSON object
 `{"provider","subject","email","display_name"}`. Kandev maps it to a user
 (link-by-email or just-in-time member provisioning), mints the session, and sets
-the `kandev_session` cookie itself; your plugin never handles the raw token,
-and any `Set-Cookie` you return is dropped. Requires authentication enabled;
-emitting the header without `capabilities.auth` returns 403.
+the session cookie itself (the host derives the name from the request host:
+`kandev_session` on default ports, `kandev_session_<port>` otherwise, unless
+`auth.cookieName` is explicitly configured, in which case that name is used
+verbatim and must be unique per cookie host); your
+plugin never handles the raw token, and any `Set-Cookie` you return is
+dropped. Requires authentication enabled; emitting the header without
+`capabilities.auth` returns 403.
 
 **You MUST only assert an `email` the IdP has verified as owned by `subject`.**
 Kandev auto-links that email to (or provisions) an account, so an unverified or
@@ -1063,9 +1068,16 @@ interface IntegrationSettingsRegistration {
   description: string;
   icon?: PluginIcon;
   Component: React.ComponentType<{ workspaceId?: string }>;
-  // Optional native header action. It receives the same routed workspace id
-  // as Component.
-  action?: React.ComponentType<{ workspaceId?: string }>;
+  // Optional action in the detail section header and integrations index card.
+  // The surface identifies the host location.
+  action?: React.ComponentType<IntegrationSettingsActionProps>;
+}
+
+type IntegrationSettingsActionSurface = "detail" | "index";
+
+interface IntegrationSettingsActionProps {
+  workspaceId?: string;
+  surface: IntegrationSettingsActionSurface;
 }
 
 interface PluginRouteOptions {
@@ -1398,8 +1410,10 @@ owned until unload.
 ### Workspace integration state and native save bar
 
 The optional `action` component and the main integration component both receive
-the `workspaceId` from the URL. Use this value for the workspace that the user
-is editing. Do not replace it with `host.context.getActiveWorkspaceId()`.
+the `workspaceId` from the URL. The action also receives `surface`, with the
+value `"detail"` for the settings header or `"index"` for the integrations card.
+Use the workspace value for the workspace that the user is editing. Do not
+replace it with `host.context.getActiveWorkspaceId()`.
 
 `host.setIntegrationEnabled(integrationId, workspaceId, enabled)` updates the
 live **Enabled** badge for one registration. The host checks the registration
@@ -1937,21 +1951,24 @@ func (p *plugin) OnEvent(ctx context.Context, event *pluginsdk.Event) error {
 For critical workflows, periodically reconcile from host.Tasks() or another
 Host reader because event queues are bounded and delivery is best-effort.
 
-### 6. Kanban-aware contribution
+### 6. Task contributions
 
-`registerTaskMenuAction` adds an item to the kanban card's context/dropdown
-menu; group `"edit"` nests it inside the `Edit` submenu, group `"primary"`
-renders it as a flat, top-level item positioned between the "Move
-to"/"Send to workflow" submenus and the "Link" submenu.
+`registerTaskMenuAction` adds an item to native task menus. Group `"edit"` is
+card-only and nests inside the kanban card's `Edit` submenu. Group `"primary"`
+renders as a flat top-level item on cards and desktop/mobile task-row menus.
 `task-card-indicators` (see the named slots table) is the matching read-only
 surface, rendered beside the PR status icon on every card. `task-card-tags`
 is a sibling read-only surface with the same `slotProps` shape, mounted in its
 own row instead of that cramped title-row spot; reach for it when a
-contribution (e.g. a row of tag chips) needs its own width. Both
-`visible(context)` and `run(context)` receive the card's actual `presentation`:
-`"desktop"` on the desktop kanban and `"mobile"` on the phone kanban. Use it
-when an action needs to choose responsive behavior; the host supplies it
-through the card composition.
+contribution (for example, a row of tag chips) needs its own width.
+`visible(context)` and `run(context)` receive the actual `presentation`.
+The value is `"desktop"` or `"mobile"` for the current native task menu.
+
+`task-row-metadata` is the plugin-agnostic compact counterpart for the sidebar
+task tree and `/tasks` list. It receives `{ taskId, workspaceId,
+workflowStepId, surface: "sidebar" | "task-list" }`. Use it for read-only
+metadata such as labels, ownership, provider state, or tags. An empty slot
+adds no wrapper or spacing.
 
 ```js
 registry.registerTaskMenuAction({
@@ -1969,9 +1986,9 @@ With no plugin action registered, the card's `Edit` item stays flat; once any
 plugin registers one for group `"edit"`, it becomes `Edit > Edit task`
 followed by each visible action. A `run` that throws or rejects is caught and
 logged, not left to crash the card; the menu closes either way. Group
-`"primary"` actions render and behave the same way, just as their own
-top-level menu row instead of nested under `Edit`. Do not patch first-party
-Kanban components directly.
+`"primary"` actions render and behave the same way as their own top-level row,
+including in desktop and phone task-row menus. Do not patch first-party task
+components directly.
 
 `registerTaskFilter` adds a client-side, multi-select filter section to the
 kanban board's display dropdown, next to the built-in Workflow and Repository

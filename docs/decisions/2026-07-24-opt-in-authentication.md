@@ -38,8 +38,10 @@ a login screen or any behavioral change.
    — deleted task/workspace row, or an account since deleted or disabled —
    denies the dispatch. Disabling a user revokes their sessions and PATs, so
    their still-running agent session must lose this surface too.
-3. **Opaque DB-backed credentials, not JWTs.** Sessions (`kandev_session`
-   HttpOnly SameSite=Lax cookie) and personal access tokens (`kandev_pat_*`)
+3. **Opaque DB-backed credentials, not JWTs.** Sessions (HttpOnly SameSite=Lax
+   cookie, base name `kandev_session`, effective name derived from the request
+   host — port-scoped on a ported host so instances on one host stay isolated)
+   and personal access tokens (`kandev_pat_*`)
    are 256-bit random values stored as SHA-256 digests. Instant revocation
    (user disable, logout-all) outweighs stateless verification at kandev
    scale. The office agent HMAC-JWT remains a separate machine credential.

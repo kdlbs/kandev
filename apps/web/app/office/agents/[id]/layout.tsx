@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { selectOfficeAgentProfile } from "@/lib/state/slices/office/selectors";
 import { cn } from "@/lib/utils";
-import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
+import { useOfficeTopbar } from "../../components/office-topbar-context";
 import { AgentAvatar } from "../../components/agent-avatar";
 import { AgentStatusDot } from "../components/agent-status-dot";
 import { AgentRoleBadge } from "../components/agent-role-badge";
@@ -49,6 +49,21 @@ export default function AgentDetailLayout({ children, params }: AgentDetailLayou
 
   const activeSlug = activeSlugFromPath(pathname, id);
 
+  useOfficeTopbar(
+    agent
+      ? {
+          title: agent.name,
+          icon: <AgentAvatar role={agent.role} name={agent.name} size="sm" />,
+          titleSlot: (
+            <span data-testid="agent-topbar-name" className="truncate text-sm font-semibold">
+              {agent.name}
+            </span>
+          ),
+          parents: [{ label: t("office:agents"), href: "/office/agents" }],
+        }
+      : null,
+  );
+
   if (!agent) {
     return (
       <div className="p-6">
@@ -58,53 +73,44 @@ export default function AgentDetailLayout({ children, params }: AgentDetailLayou
   }
 
   return (
-    <>
-      <OfficeTopbarPortal>
-        <AgentAvatar role={agent.role} name={agent.name} size="sm" />
-        <h1 data-testid="agent-topbar-name" className="text-sm font-semibold truncate">
-          {agent.name}
-        </h1>
-      </OfficeTopbarPortal>
-
-      <div className="p-6 space-y-4">
-        <div
-          className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2.5"
-          data-testid="agent-identity-strip"
-        >
-          <AgentRoleBadge role={agent.role} />
-          <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <AgentStatusDot status={agent.status} />
-            {agent.status}
-          </span>
-          <CoordinatorRoutineHint agentId={id} agentRole={agent.role} />
-          <div className="ml-auto">
-            <BudgetGauge budgetCents={agent.budgetMonthlyCents} />
-          </div>
+    <div className="p-6 space-y-4">
+      <div
+        className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2.5"
+        data-testid="agent-identity-strip"
+      >
+        <AgentRoleBadge role={agent.role} />
+        <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <AgentStatusDot status={agent.status} />
+          {agent.status}
+        </span>
+        <CoordinatorRoutineHint agentId={id} agentRole={agent.role} />
+        <div className="ml-auto">
+          <BudgetGauge budgetCents={agent.budgetMonthlyCents} />
         </div>
-
-        <AgentRouteStrip agentId={id} />
-
-        <nav className="flex border-b border-border gap-1" aria-label={t("office:agentSections")}>
-          {TABS.map((tab) => (
-            <Link
-              key={tab.slug}
-              href={`/office/agents/${id}/${tab.slug}`}
-              data-testid={`agent-tab-${tab.slug}`}
-              className={cn(
-                "px-3 py-2 text-sm cursor-pointer border-b-2 -mb-px transition-colors",
-                activeSlug === tab.slug
-                  ? "border-foreground text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {t(tab.labelKey)}
-            </Link>
-          ))}
-        </nav>
-
-        <div data-testid="agent-detail-section">{children}</div>
       </div>
-    </>
+
+      <AgentRouteStrip agentId={id} />
+
+      <nav className="flex border-b border-border gap-1" aria-label={t("office:agentSections")}>
+        {TABS.map((tab) => (
+          <Link
+            key={tab.slug}
+            href={`/office/agents/${id}/${tab.slug}`}
+            data-testid={`agent-tab-${tab.slug}`}
+            className={cn(
+              "px-3 py-2 text-sm cursor-pointer border-b-2 -mb-px transition-colors",
+              activeSlug === tab.slug
+                ? "border-foreground text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {t(tab.labelKey)}
+          </Link>
+        ))}
+      </nav>
+
+      <div data-testid="agent-detail-section">{children}</div>
+    </div>
   );
 }
 

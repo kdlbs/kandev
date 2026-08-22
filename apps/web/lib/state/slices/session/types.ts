@@ -15,7 +15,10 @@ export type MessagesState = {
   metaBySession: Record<
     string,
     {
+      /** Initial/refetch loading (never touched by older-page merges). */
       isLoading: boolean;
+      /** Older-page request in flight (set by the shared pagination coordinator). */
+      isLoadingMore: boolean;
       hasMore: boolean;
       oldestCursor: string | null;
     }
@@ -165,6 +168,8 @@ export type QueuedMessage = {
 export type QueueMeta = {
   count: number;
   max: number;
+  /** Backend-owned queue motion policy. Missing server state defaults to on. */
+  autoRun: boolean;
   /** Mirrors the server's message queue merge_enabled setting; hides the
    * "Merge with above" affordance without a separate settings fetch. */
   mergeEnabled: boolean;
@@ -175,6 +180,7 @@ export type QueueStatus = {
   count: number;
   max: number;
   merge_enabled: boolean;
+  auto_run?: boolean;
 };
 
 export type QueueState = {
@@ -227,7 +233,12 @@ export type SessionSliceActions = {
   ) => void;
   setMessagesMetadata: (
     sessionId: string,
-    meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null },
+    meta: {
+      hasMore?: boolean;
+      isLoading?: boolean;
+      isLoadingMore?: boolean;
+      oldestCursor?: string | null;
+    },
   ) => void;
   /** Sets the session's message-loading flag. */
   setMessagesLoading: (sessionId: string, loading: boolean) => void;

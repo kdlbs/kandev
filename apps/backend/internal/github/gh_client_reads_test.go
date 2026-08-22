@@ -147,6 +147,88 @@ func TestGHClient_GetPR_NotFoundBecomesTypedError(t *testing.T) {
 	}
 }
 
+// TestGHClient_GetPR_RequestsOutcomeFields covers AC-09: the --json field
+// list gains changedFiles, mergedBy, autoMergeRequest, and never requests
+// closedBy (absent from the gh CLI's PR field set). The decoded PR carries
+// the three new values.
+func TestGHClient_GetPR_RequestsOutcomeFields(t *testing.T) {
+	calls := newFakeGH(t, ghResponse{
+		Prefix: "pr view",
+		Stdout: `{"number":2554,"title":"fix","url":"https://github.com/kdlbs/kandev/pull/2554",
+			"state":"MERGED","headRefName":"h","headRefOid":"abc","baseRefName":"main",
+			"isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN",
+			"additions":10,"deletions":2,"changedFiles":8,
+			"author":{"login":"alice"},"mergedBy":{"login":"carlosflorencio"},
+			"autoMergeRequest":{"enabledAt":"2026-08-12T00:00:00Z"},
+			"createdAt":"2026-08-01T00:00:00Z","updatedAt":"2026-08-02T00:00:00Z",
+			"mergedAt":"2026-08-12T00:00:00Z","closedAt":"2026-08-12T00:00:00Z"}`,
+	})
+
+	pr, err := NewGHClient().GetPR(context.Background(), "kdlbs", "kandev", 2554)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+
+	argv := calls(t)[0]
+	jsonArgIdx := -1
+	for i, a := range argv {
+		if a == "--json" {
+			jsonArgIdx = i + 1
+			break
+		}
+	}
+	if jsonArgIdx < 0 || jsonArgIdx >= len(argv) {
+		t.Fatalf("no --json argument found in %v", argv)
+	}
+	fieldList := argv[jsonArgIdx]
+	for _, want := range []string{"changedFiles", "mergedBy", "autoMergeRequest"} {
+		if !strings.Contains(fieldList, want) {
+			t.Errorf("--json field list missing %q: %s", want, fieldList)
+		}
+	}
+	if strings.Contains(fieldList, "closedBy") {
+		t.Errorf("--json field list must not request closedBy (not in gh CLI's PR field set): %s", fieldList)
+	}
+
+	if pr.ChangedFiles != 8 {
+		t.Errorf("ChangedFiles = %d, want 8", pr.ChangedFiles)
+	}
+	if pr.MergedByLogin != "carlosflorencio" {
+		t.Errorf("MergedByLogin = %q, want carlosflorencio", pr.MergedByLogin)
+	}
+	if !pr.AutoMergeEnabled {
+		t.Error("AutoMergeEnabled = false, want true (non-null autoMergeRequest)")
+	}
+}
+
+// TestGHClient_GetPR_NoMergerOrAutoMergeDecodesToZeroValues covers the
+// "never observed / not armed" side: a null mergedBy and a null
+// autoMergeRequest must decode to an empty login and AutoMergeEnabled=false,
+// never a placeholder value.
+func TestGHClient_GetPR_NoMergerOrAutoMergeDecodesToZeroValues(t *testing.T) {
+	newFakeGH(t, ghResponse{
+		Prefix: "pr view",
+		Stdout: `{"number":2476,"title":"wip","url":"https://github.com/kdlbs/kandev/pull/2476",
+			"state":"CLOSED","isDraft":true,"changedFiles":114,
+			"author":{"login":"alice"},"mergedBy":null,"autoMergeRequest":null,
+			"createdAt":"2026-08-01T00:00:00Z","updatedAt":"2026-08-02T00:00:00Z","closedAt":"2026-08-05T00:00:00Z"}`,
+	})
+
+	pr, err := NewGHClient().GetPR(context.Background(), "kdlbs", "kandev", 2476)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.MergedByLogin != "" {
+		t.Errorf("MergedByLogin = %q, want empty", pr.MergedByLogin)
+	}
+	if pr.AutoMergeEnabled {
+		t.Error("AutoMergeEnabled = true, want false (null autoMergeRequest)")
+	}
+	if pr.ChangedFiles != 114 {
+		t.Errorf("ChangedFiles = %d, want 114", pr.ChangedFiles)
+	}
+}
+
 func TestGHClient_GetPR_UnparseableOutput(t *testing.T) {
 	newFakeGH(t, ghResponse{Prefix: "pr view", Stdout: "not json"})
 	if _, err := NewGHClient().GetPR(context.Background(), "acme", "widget", 7); err == nil ||

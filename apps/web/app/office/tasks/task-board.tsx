@@ -71,6 +71,24 @@ function BoardColumn({
   );
 }
 
+// Board columns are keyed on the canonical lowercase OfficeTaskStatus
+// vocabulary. `task.status` is normalized to that vocabulary at ingestion
+// (office-slice.ts), so no per-consumer normalization is needed here.
+export function groupTasksByStatus(
+  tasks: OfficeTask[],
+  columnStatuses: OfficeTaskStatus[],
+): Map<OfficeTaskStatus, OfficeTask[]> {
+  const grouped = new Map<OfficeTaskStatus, OfficeTask[]>();
+  for (const status of columnStatuses) {
+    grouped.set(status, []);
+  }
+  for (const task of tasks) {
+    const list = grouped.get(task.status);
+    if (list) list.push(task);
+  }
+  return grouped;
+}
+
 export function TaskBoard({ tasks }: TaskBoardProps) {
   const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
@@ -78,14 +96,10 @@ export function TaskBoard({ tasks }: TaskBoardProps) {
     ? meta.statuses.map((s) => ({ status: s.id as OfficeTaskStatus, label: s.label }))
     : FALLBACK_COLUMNS.map((c) => ({ status: c.status, label: t(c.labelKey) }));
 
-  const grouped = new Map<OfficeTaskStatus, OfficeTask[]>();
-  for (const col of columns) {
-    grouped.set(col.status, []);
-  }
-  for (const task of tasks) {
-    const list = grouped.get(task.status);
-    if (list) list.push(task);
-  }
+  const grouped = groupTasksByStatus(
+    tasks,
+    columns.map((c) => c.status),
+  );
 
   return (
     <div className="flex gap-3 overflow-x-auto pb-4">

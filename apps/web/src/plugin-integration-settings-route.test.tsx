@@ -31,7 +31,10 @@ describe("plugin integration settings route", () => {
     const page = renderPluginIntegrationSettings(INTEGRATION_ID, "workspace-from-route");
     render(page);
 
-    expect(Action.mock.calls[0]?.[0]).toEqual({ workspaceId: "workspace-from-route" });
+    expect(Action.mock.calls[0]?.[0]).toEqual({
+      workspaceId: "workspace-from-route",
+      surface: "detail",
+    });
     expect(actionWorkspaceIds).toEqual(["workspace-from-route"]);
   });
 });

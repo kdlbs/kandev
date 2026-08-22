@@ -512,10 +512,11 @@ These are functions, so they sit beside `navigate`/`openModal` rather than in
 
 ### Native integration settings state
 
-`registerIntegrationSettings` may provide an `action` component. The host passes
-the routed `workspaceId` to both the page component and the action. Use that
-value for workspace-scoped reads and writes. Do not use
-`getActiveWorkspaceId()` for a routed settings page.
+`registerIntegrationSettings` may provide an `action` component. The host mounts
+the action in the detail `SettingsSection` header and in the native integrations
+index card. The host passes the routed `workspaceId` and a `surface` value of
+`"detail"` or `"index"`. Use the workspace value for workspace-scoped reads and
+writes. Do not use `getActiveWorkspaceId()` for a routed settings page.
 
 `host.setIntegrationEnabled(integrationId, workspaceId, enabled)` publishes a
 live value for one registration and workspace. The host checks that the
@@ -697,7 +698,8 @@ interface PluginRegistry {
   // "settings-nav", "chat-input-actions", "task-create-input-actions",
   // "new-session-input-actions", "chat-top-bar",
   // "main-top-bar", "app-status-bar-left", "app-status-bar-right",
-  // "plugin-settings", "task-card-indicators", "task-card-tags", and
+  // "plugin-settings", "task-card-indicators", "task-card-tags",
+  // "task-row-metadata", and
   // "sidebar-workspace-actions".
   // "task-card-indicators" renders a small icon/badge beside the PR status
   // icon on every kanban card and forwards
@@ -709,6 +711,10 @@ interface PluginRegistry {
   // same `{ taskId: string, workspaceId: string | null, workflowStepId: string | null }`
   // shape as `slotProps` (`workspaceId` is null with no active workspace, and
   // `workflowStepId` is null when the task has no workflow step assigned).
+  // "task-row-metadata" renders compact, read-only metadata on the sidebar
+  // task tree and `/tasks` list. It forwards
+  // `{ taskId, workspaceId, workflowStepId, surface }`, where `surface` is
+  // "sidebar" or "task-list". The slot is plugin-agnostic.
   // "chat-input-actions", "task-create-input-actions", and
   // "new-session-input-actions" render composer actions for task/Quick Chat,
   // task creation, and new-session creation. Each forwards the typed
@@ -813,9 +819,17 @@ interface IntegrationSettingsRegistration {
   description: string;
   icon?: PluginIcon;
   Component: React.ComponentType<{ workspaceId?: string }>;
-  // Optional native header action. It receives the same routed workspace id
-  // as Component, so it never needs to infer the target from the active one.
-  action?: React.ComponentType<{ workspaceId?: string }>;
+  // Optional action for the detail section header and integrations index card.
+  // The surface identifies the host location and the workspace id identifies
+  // the settings target.
+  action?: React.ComponentType<IntegrationSettingsActionProps>;
+}
+
+type IntegrationSettingsActionSurface = "detail" | "index";
+
+interface IntegrationSettingsActionProps {
+  workspaceId?: string;
+  surface: IntegrationSettingsActionSurface;
 }
 
 // Integration settings render at /settings/integrations/{id} and
@@ -1188,11 +1202,10 @@ console, and the menu still closes either way (Radix's own close-on-select,
 independent of the async result).
 
 Group `"primary"` renders each visible action as its own flat, top-level menu
-item instead of nesting it under `Edit` — positioned between the "Move
-to"/"Send to workflow" submenus and the "Link" submenu. Visibility filtering,
-registration order, and `run()`/error handling are identical to the `"edit"`
-group; the two groups are independent lists (an action only ever belongs to
-one).
+item instead of nesting it under `Edit`. It appears on cards and on the shared
+desktop/mobile task-row menu. Group `"edit"` remains card-only. Visibility
+filtering, registration order, and `run()`/error handling are identical; the
+two groups are independent lists (an action only ever belongs to one).
 
 `"task-card-indicators"` (documented above with the other slots) is the
 matching read-only surface: a small icon/badge rendered beside the PR status
@@ -1203,6 +1216,11 @@ context — same `{ taskId, workspaceId, workflowStepId }` shape — but mounted
 in its own row on the card instead of the cramped title row
 `"task-card-indicators"` shares with `PRTaskIcon`. Use it for a contribution
 that needs its own width, e.g. a row of tag chips.
+
+`"task-row-metadata"` is a separate, plugin-agnostic slot for compact,
+read-only metadata in the sidebar task tree and `/tasks` list. Its shape is
+`{ taskId, workspaceId, workflowStepId, surface }`, with `surface` equal to
+`"sidebar"` or `"task-list"`. The host emits no wrapper when the slot is empty.
 
 ### Task filters
 

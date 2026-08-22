@@ -16,8 +16,11 @@ to the host.
 ## Decision
 
 The frontend plugin registry adds
-`registerIntegrationSettings({ id, label, description, icon?, Component })`.
-`Component` receives `{ workspaceId?: string }`; the host renders it in the existing
+`registerIntegrationSettings({ id, label, description, icon?, Component, action? })`.
+`Component` receives `{ workspaceId?: string }`. An optional `action` receives the
+routed workspace and a `surface` value. The host renders the action in the detail
+section header and the native integrations index card. The host renders the main
+component in the existing
 settings shell at both `/settings/integrations/{id}` and
 `/settings/workspace/{workspaceId}/integrations/{id}`, and adds the contribution to
 the native integrations index and workspace settings navigation. The host wraps the
@@ -39,10 +42,10 @@ and watch configuration use the native integration settings contribution.
 
 Official and third-party integrations can feel first-party in Settings while retaining
 independent release ownership. Plugins must choose a stable non-reserved slug and make
-their settings component work with either an explicit workspace or the legacy global
-route; it returns the section body rather than duplicating the host heading. The host
-owns navigation, responsive settings chrome, error containment, and
-lifecycle; the plugin owns all provider-specific fields and behavior.
+their settings component and action work with either an explicit workspace or the
+legacy global route. Actions must tolerate the detail and index surfaces. The host
+owns navigation, responsive settings chrome, error containment, and lifecycle. The
+plugin owns all provider-specific fields and behavior.
 
 ## Alternatives Considered
 

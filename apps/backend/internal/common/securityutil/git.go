@@ -77,6 +77,7 @@ func IsKnownSafeGitFlag(arg string) bool {
 		"--amend", "--allow-empty", "--soft", "--mixed", "--hard",
 		"--cached", "--force", "--source=HEAD", "--staged", "--worktree",
 		"--dry-run", "--get-all", "--first-parent", "--is-ancestor",
+		"--src-prefix=", "--dst-prefix=",
 	}
 	for _, safe := range safeFlags {
 		if strings.HasPrefix(arg, safe) {

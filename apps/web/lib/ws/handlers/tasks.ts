@@ -130,6 +130,10 @@ function mergeTaskUpdate(
     payloadKey: "interrupted",
     taskField: "interrupted",
   });
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "auto_start_failed",
+    taskField: "autoStartFailed",
+  });
   if (
     !hasPayloadField(payload, "active_subagent_count") &&
     nextTask.activeSubagentCount === undefined

@@ -1083,7 +1083,13 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	//   - kanban / quick-chat re-launches that hit the full path.
 	// Unlike ResumeSession we do NOT clear req.TaskDescription — wakeups
 	// deliver the new comment / event as the prompt.
-	if startAgent {
+	if startAgent && opts.PriorACPSession != "" {
+		req.ACPSessionID = opts.PriorACPSession
+		e.logger.Info("resuming ACP session via dynamic route state",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", sessionID),
+			zap.String("acp_session_id", opts.PriorACPSession))
+	} else if startAgent {
 		if token := resumeTokenForExecutionProfile(running, agentProfileID); token != "" {
 			req.ACPSessionID = token
 			e.logger.Info("resuming ACP session via stored resume token",
@@ -1115,7 +1121,8 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// Call the AgentManager to launch the container
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
 	if err != nil {
-		return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, failingLaunchRepositoryID(req, err), err)
+		repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
+		return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
 	}
 
 	// Create or update the task environment with launch results
@@ -1140,28 +1147,45 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 // checkout branch in the request. Ambiguous or unrecognized branches fail
 // closed: no repository-scoped destructive guidance can be offered.
 func failingLaunchRepositoryID(req *LaunchAgentRequest, launchErr error) string {
+	repositoryID, _ := failingLaunchRepositoryIdentity(req, launchErr)
+	return repositoryID
+}
+
+func failingLaunchRepositoryIdentity(
+	req *LaunchAgentRequest,
+	launchErr error,
+) (repositoryID, taskRepositoryID string) {
 	if req == nil {
-		return ""
+		return "", ""
 	}
 	if len(req.Repositories) == 0 {
-		return req.RepositoryID
+		return req.RepositoryID, req.TaskRepositoryID
 	}
 
 	branch := extractLaunchFailureBranch(launchErr)
-	if branch == "" {
-		return ""
+	if len(req.Repositories) == 1 && branch == "" {
+		return req.Repositories[0].RepositoryID, req.Repositories[0].TaskRepositoryID
 	}
-	var repositoryID string
+	if branch == "" {
+		return "", ""
+	}
+	var matched RepoSpec
+	found := false
 	for _, spec := range req.Repositories {
-		if strings.TrimSpace(spec.CheckoutBranch) != branch {
+		if strings.TrimSpace(spec.CheckoutBranch) != branch &&
+			strings.TrimSpace(spec.BaseBranch) != branch {
 			continue
 		}
-		if repositoryID != "" {
-			return ""
+		if found {
+			return "", ""
 		}
-		repositoryID = spec.RepositoryID
+		matched = spec
+		found = true
 	}
-	return repositoryID
+	if !found {
+		return "", ""
+	}
+	return matched.RepositoryID, matched.TaskRepositoryID
 }
 
 var (
@@ -1197,12 +1221,16 @@ func resumeTokenForExecutionProfile(running *models.ExecutorRunning, profileID s
 
 // handleLaunchFailure marks the session and task as FAILED and returns a
 // sanitized error that preserves the original cause for errors.Is/errors.As.
-func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID, repositoryID string, launchErr error) error {
+func (e *Executor) handleLaunchFailure(
+	ctx context.Context,
+	taskID, sessionID, repositoryID, taskRepositoryID string,
+	launchErr error,
+) error {
 	// Detach from caller context so failure bookkeeping completes even if the
 	// original request context was cancelled.
 	failCtx := context.WithoutCancel(ctx)
 	safeErr, changed := e.transitionLaunchFailure(
-		failCtx, taskID, sessionID, repositoryID, launchErr,
+		failCtx, taskID, sessionID, repositoryID, taskRepositoryID, launchErr,
 	)
 	if changed {
 		if updateErr := e.updateTaskState(failCtx, taskID, v1.TaskStateFailed); updateErr != nil {
@@ -1221,7 +1249,7 @@ func (e *Executor) handleEarlyLaunchFailure(
 ) error {
 	failCtx := context.WithoutCancel(ctx)
 	safeErr, changed := e.transitionLaunchFailure(
-		failCtx, taskID, sessionID, repositoryID, launchErr,
+		failCtx, taskID, sessionID, repositoryID, "", launchErr,
 	)
 	if !changed {
 		return safeErr
@@ -1269,7 +1297,7 @@ func (e *Executor) handleEarlyLaunchFailure(
 
 func (e *Executor) transitionLaunchFailure(
 	failCtx context.Context,
-	taskID, sessionID, repositoryID string,
+	taskID, sessionID, repositoryID, taskRepositoryID string,
 	launchErr error,
 ) (error, bool) {
 	safeErr := routingerr.SanitizeError(launchErr)
@@ -1277,8 +1305,13 @@ func (e *Executor) transitionLaunchFailure(
 		zap.String("task_id", taskID),
 		zap.Error(safeErr))
 	var onChanged func()
-	if e.onLaunchFailed != nil {
-		onChanged = func() {
+	onChanged = func() {
+		e.persistLastAgentError(
+			failCtx,
+			sessionID,
+			e.buildLastAgentError(failCtx, taskID, taskRepositoryID, launchErr),
+		)
+		if e.onLaunchFailed != nil {
 			e.onLaunchFailed(failCtx, taskID, sessionID, repositoryID, safeErr)
 		}
 	}
@@ -1480,6 +1513,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
 		spec := RepoSpec{
+			TaskRepositoryID:        info.TaskRepositoryID,
 			RepositoryID:            info.RepositoryID,
 			RepositoryPath:          info.RepositoryPath,
 			BaseBranch:              info.BaseBranch,
@@ -1487,6 +1521,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			PRNumber:                info.PRNumber,
 			RemoteContribution:      info.RemoteContribution,
 			ContributionDestination: info.ContributionDestination,
+			ComparisonTarget:        info.ComparisonTarget,
 			WorktreeBranchPrefix:    info.WorktreeBranchPrefix,
 			WorktreeBranchTemplate:  info.WorktreeBranchTemplate,
 			PullBeforeWorktree:      info.PullBeforeWorktree,
@@ -1549,12 +1584,14 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 	if repoInfo.RepositoryPath != "" {
 		req.UseWorktree = shouldUseWorktree(execConfig.ExecutorType)
 		req.RepositoryID = repoInfo.RepositoryID
+		req.TaskRepositoryID = repoInfo.TaskRepositoryID
 		req.RepositoryPath = repoInfo.RepositoryPath
 		req.BaseBranch = repoInfo.BaseBranch
 		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.PRNumber = repoInfo.PRNumber
 		req.RemoteContribution = repoInfo.RemoteContribution
 		req.ContributionDestination = repoInfo.ContributionDestination
+		req.ComparisonTarget = repoInfo.ComparisonTarget
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
@@ -1955,6 +1992,7 @@ func (e *Executor) persistTaskEnvironment(
 		// environment-repository rows are the only physical-worktree record,
 		// so single-repo launches write one row here too.
 		e.persistTaskEnvironmentRepos(ctx, existingEnv.ID, environmentReposForLaunch(req, resp))
+		e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 		return
 	}
 
@@ -1982,6 +2020,41 @@ func (e *Executor) persistTaskEnvironment(
 		return
 	}
 	session.TaskEnvironmentID = env.ID
+	e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
+}
+
+func (e *Executor) selfHealTaskRepositoryBaseBranches(
+	ctx context.Context,
+	taskID string,
+	req *LaunchAgentRequest,
+	resp *LaunchAgentResponse,
+) {
+	if e.taskRepositoryBaseBranchUpdater == nil || req == nil || resp == nil {
+		return
+	}
+	if len(resp.Worktrees) > 0 {
+		for _, result := range resp.Worktrees {
+			e.persistRecoveredBaseBranch(ctx, taskID, result.TaskRepositoryID, result.RequestedBaseBranch, result.BaseBranch, result.BaseBranchFallbackWarning)
+		}
+		return
+	}
+	e.persistRecoveredBaseBranch(ctx, taskID, req.TaskRepositoryID, resp.RequestedBaseBranch, resp.BaseBranch, resp.BaseBranchFallbackWarning)
+}
+
+func (e *Executor) persistRecoveredBaseBranch(
+	ctx context.Context,
+	taskID, taskRepositoryID, requestedBranch, resolvedBranch, warning string,
+) {
+	if strings.TrimSpace(warning) == "" || taskRepositoryID == "" || resolvedBranch == "" || resolvedBranch == requestedBranch {
+		return
+	}
+	if err := e.taskRepositoryBaseBranchUpdater.UpdateTaskRepositoryBaseBranch(ctx, taskID, taskRepositoryID, resolvedBranch); err != nil {
+		e.logger.Warn("failed to persist recovered task repository base branch",
+			zap.String("task_id", taskID),
+			zap.String("task_repository_id", taskRepositoryID),
+			zap.String("base_branch", resolvedBranch),
+			zap.Error(err))
+	}
 }
 
 // environmentReposForLaunch returns the environment-repository rows for a

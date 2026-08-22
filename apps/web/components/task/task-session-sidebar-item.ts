@@ -19,7 +19,7 @@ function summaryDiffStats(
   summary: TaskStatusSummary | null | undefined,
 ): { additions: number; deletions: number } | undefined {
   const git = summary?.git;
-  if (!git) return undefined;
+  if (!git || git.comparison_unavailable) return undefined;
   const additions = git.additions ?? 0;
   const deletions = git.deletions ?? 0;
   return additions > 0 || deletions > 0 ? { additions, deletions } : undefined;
@@ -114,6 +114,7 @@ function sidebarStatus(
       repositoryPathFromSummary(summary) ??
       (task.repositoryId ? context.repositorySlugById.get(task.repositoryId) : undefined),
     diffStats: summaryDiffStats(summary),
+    comparisonUnavailable: summary?.git?.comparison_unavailable === true,
     hasPendingClarification: pending.clarification,
     hasPendingPermission: pending.permission,
     prInfo: summaryPRInfo(summary),

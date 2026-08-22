@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -90,15 +91,6 @@ type ApprovalResolvedData struct {
 	Type                      string `json:"type"`
 }
 
-// TaskStatusChangedData represents the payload of an office.task.status_changed event.
-type TaskStatusChangedData struct {
-	TaskID       string `json:"task_id"`
-	WorkspaceID  string `json:"workspace_id"`
-	NewStatus    string `json:"new_status"`
-	Comment      string `json:"comment"`
-	ActorAgentID string `json:"actor_agent_id"`
-}
-
 // AgentLifecycleData is the subset of agent lifecycle event data needed by office.
 //
 // AgentID is populated by the lifecycle manager for taskless runs
@@ -106,13 +98,50 @@ type TaskStatusChangedData struct {
 // can attribute the run without a task lookup. It stays empty for the
 // task-bound path that already uses TaskID. Today no caller emits
 // taskless lifecycle events; the field is reserved for PR 2 of
-// office-heartbeat-rework.
+// office-heartbeat-rework. Note that AgentID carries the underlying agent
+// TYPE (e.g. "claude-acp"), not an office agent identity — it is unrelated
+// to AgentProfileID below despite the similar name.
+//
+// AgentProfileID is the office agent instance's own identity
+// (lifecycle.AgentEventPayload's "agent_profile_id", sourced from
+// AgentExecution.officeProfileID()) and is always populated on the
+// task-bound path. runs.agent_profile_id is keyed on this same identity, so
+// callers that need to resolve the specific run a lifecycle event belongs
+// to — as opposed to "some claimed run on this task" — must match on this
+// field, not AgentID (Review round 4, BLOCKING FINDING 2).
 type AgentLifecycleData struct {
-	TaskID        string                 `json:"task_id"`
-	AgentID       string                 `json:"agent_id"`
-	SessionID     string                 `json:"session_id"`
-	ErrorMessage  string                 `json:"error_message"`
-	ProviderError *streams.ProviderError `json:"provider_error,omitempty"`
+	TaskID         string                 `json:"task_id"`
+	RunID          string                 `json:"run_id"`
+	AgentID        string                 `json:"agent_id"`
+	AgentProfileID string                 `json:"agent_profile_id"`
+	SessionID      string                 `json:"session_id"`
+	TurnID         string                 `json:"turn_id,omitempty"`
+	ErrorMessage   string                 `json:"error_message"`
+	ProviderError  *streams.ProviderError `json:"provider_error,omitempty"`
+}
+
+// resolveLifecycleRun resolves the exact claimed run named by a lifecycle
+// event. The task-and-agent fallback keeps compatibility with older events
+// that predate run_id, while every current Office launch carries the exact
+// identity and avoids predecessor/successor races.
+func (s *Service) resolveLifecycleRun(ctx context.Context, data AgentLifecycleData) (*models.Run, error) {
+	if data.RunID != "" {
+		run, err := s.repo.GetClaimedRunByID(ctx, data.RunID)
+		if err != nil {
+			return nil, err
+		}
+		if data.AgentProfileID != "" && run.AgentProfileID != data.AgentProfileID {
+			return nil, sql.ErrNoRows
+		}
+		if data.TaskID != "" && taskIDFromRunPayload(run.Payload) != data.TaskID {
+			return nil, sql.ErrNoRows
+		}
+		return run, nil
+	}
+	if data.TaskID != "" {
+		return s.repo.GetClaimedRunByTaskAndAgent(ctx, data.TaskID, data.AgentProfileID)
+	}
+	return s.repo.GetClaimedTasklessRunForAgent(ctx, data.AgentID)
 }
 
 type PromptUsageData struct {
@@ -183,7 +212,6 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 		{events.TaskMoved, s.handleTaskMoved},
 		{events.OfficeApprovalResolved, s.handleApprovalResolved},
 		{events.OfficeCommentCreated, s.handleCommentCreated},
-		{events.OfficeTaskStatusChanged, s.handleTaskStatusChanged},
 		{events.AgentCompleted, maybeAsync(s.handleAgentCompleted)},
 		// AgentStopped fires when StopAgent is called (e.g. office
 		// fire-and-forget turn-complete teardown). Same handler — both
@@ -308,9 +336,9 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	if data.TaskID == "" {
 		return s.handleTasklessAgentCompleted(ctx, data)
 	}
-	run, err := s.repo.GetClaimedRunByTaskID(ctx, data.TaskID)
+	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		return err
@@ -321,7 +349,22 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		"session_id": data.SessionID,
 	})
 	s.markRoutingSuccess(ctx, run)
-	return s.FinishRun(ctx, run.ID)
+	s.recordRunOutputSummary(ctx, run, *data)
+	// resolveLifecycleRun prefers the immutable run ID from the event and
+	// falls back to task plus agent only for legacy events. Releasing here
+	// (rather than unconditionally inside transitionRunTerminal) is safe —
+	// see transitionRunTerminal's doc comment.
+	//
+	// Finish before releasing: if FinishRun's DB update fails, the checkout
+	// must stay held so ReapStaleCheckouts (not a same-agent race) is what
+	// eventually reclaims it, instead of releasing a lock for a run that
+	// never actually reached a terminal state.
+	if err := s.FinishRun(ctx, run.ID); err != nil {
+		return err
+	}
+	s.releaseTaskCheckoutForRun(ctx, run)
+	s.stampRunFinished(ctx, run)
+	return nil
 }
 
 // markRoutingSuccess delegates to the routing dispatcher (when wired)
@@ -354,10 +397,10 @@ func (s *Service) markRoutingSuccess(ctx context.Context, run *models.Run) {
 func (s *Service) handleTasklessAgentCompleted(
 	ctx context.Context, data *AgentLifecycleData,
 ) error {
-	if data == nil || data.AgentID == "" {
+	if data == nil || (data.AgentID == "" && data.RunID == "") {
 		return nil
 	}
-	run, err := s.repo.GetClaimedTasklessRunForAgent(ctx, data.AgentID)
+	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
@@ -369,7 +412,20 @@ func (s *Service) handleTasklessAgentCompleted(
 		"session_id": data.SessionID,
 	})
 	s.refreshContinuationSummary(ctx, run, data.AgentID)
-	return s.FinishRun(ctx, run.ID)
+	s.recordRunOutputSummary(ctx, run, *data)
+	// run came from GetClaimedTasklessRunForAgent: it is the run that
+	// actually launched. Taskless runs typically carry no task_id, so this
+	// is a no-op in the common case, but call it for the same reason as
+	// handleAgentCompleted — see transitionRunTerminal's doc comment.
+	//
+	// Finish before releasing, same as handleAgentCompleted: a failed
+	// FinishRun must not still give up the checkout.
+	if err := s.FinishRun(ctx, run.ID); err != nil {
+		return err
+	}
+	s.releaseTaskCheckoutForRun(ctx, run)
+	s.stampRunFinished(ctx, run)
+	return nil
 }
 
 // refreshContinuationSummary rebuilds the continuation summary for the
@@ -451,14 +507,78 @@ func extractRoutineID(snapshot string) string {
 	return p.RoutineID
 }
 
+// recordRunOutputSummary persists the agent's final message as the run's
+// output_summary. Best-effort — same contract as refreshContinuationSummary
+// above: any failure is logged at warn and never fails the completion
+// event, since the run must still reach a terminal state either way.
+//
+// The lookup uses the exact turn when a completion event carries one.
+// Legacy events use messages created at or after run.ClaimedAt because Office
+// task-bound sessions are reused across runs. A nil ClaimedAt falls back to
+// the zero time, matching the old unscoped behavior.
+//
+// failure_reason is deliberately left "" on this write.
+// UpdateRunOutputSummary is output_summary's only writer, so this never
+// clobbers a value nothing else sets today; giving failure_reason real
+// semantics (skipped / checkout-contended / failed) is card b5cf0858's
+// territory, not this one's.
+func (s *Service) recordRunOutputSummary(ctx context.Context, run *models.Run, data AgentLifecycleData) {
+	if s.repo == nil || run == nil {
+		return
+	}
+	summary, err := s.lookupFinalAgentMessage(ctx, run, data)
+	if err != nil {
+		s.logger.Warn("run output summary: final agent message lookup failed",
+			zap.String("run_id", run.ID), zap.Error(err))
+		return
+	}
+	if summary == "" {
+		return
+	}
+	if updateErr := s.repo.UpdateRunOutputSummary(ctx, run.ID, summary, ""); updateErr != nil {
+		s.logger.Warn("run output summary: update failed",
+			zap.String("run_id", run.ID), zap.Error(updateErr))
+	}
+}
+
+func (s *Service) lookupFinalAgentMessage(
+	ctx context.Context, run *models.Run, data AgentLifecycleData,
+) (string, error) {
+	if data.TurnID != "" && s.taskWorkspace != nil {
+		message, err := s.taskWorkspace.GetLastAgentMessageForTurn(ctx, data.TurnID)
+		if err != nil {
+			return "", err
+		}
+		return truncateRunOutputSummary(message), nil
+	}
+	if data.SessionID == "" {
+		return "", nil
+	}
+	var since time.Time
+	if run.ClaimedAt != nil {
+		since = *run.ClaimedAt
+	}
+	return s.repo.GetFinalAgentMessage(ctx, data.SessionID, since)
+}
+
+const maxRunOutputSummaryChars = 500
+
+func truncateRunOutputSummary(content string) string {
+	runes := []rune(content)
+	if len(runes) <= maxRunOutputSummaryChars {
+		return content
+	}
+	return string(runes[:maxRunOutputSummaryChars])
+}
+
 func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[AgentLifecycleData](event)
 	if err != nil || data.TaskID == "" {
 		return nil
 	}
-	run, err := s.repo.GetClaimedRunByTaskID(ctx, data.TaskID)
+	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		return err
@@ -784,12 +904,13 @@ func (s *Service) queueTaskAssignedRun(
 	return s.QueueRun(ctx, agentProfileID, RunReasonTaskAssigned, payload, key)
 }
 
-// handleTaskMoved logs the step change to the activity log and queues
+// handleTaskMoved keeps the legacy named-step activity fallback and queues
 // downstream blocker / children-completed runs when a task lands in a
-// terminal step. Stage progression itself is owned by the workflow
-// engine (the orchestrator subscribes to TaskMoved and fires
-// on_exit / on_enter); this handler covers the side-effects the engine
-// path doesn't yet emit.
+// terminal step. Canonical task-state activity is written by the task service
+// before task.state_changed is published, so the workflow move path is durable
+// before any WebSocket refetch can run. Stage progression itself is owned by
+// the workflow engine (the orchestrator subscribes to TaskMoved and fires
+// on_exit / on_enter).
 func (s *Service) handleTaskMoved(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[TaskMovedData](event)
 	if err != nil || data.AssigneeAgentProfileID == "" {
@@ -934,33 +1055,6 @@ func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string
 	}
 	return s.dispatchEngineTrigger(ctx, parentID, engine.TriggerOnChildrenCompleted,
 		engine.OnChildrenCompletedPayload{ChildSummaries: summaries}, key)
-}
-
-// handleTaskStatusChanged logs status-change activity. Stage progression
-// (Work → Review → Approval → Done) is owned by the workflow engine via
-// the on_exit / on_enter triggers fired by the orchestrator on
-// TaskMoved; the legacy ExecutionPolicy transition path was removed in
-// Phase 4 of task-model-unification.
-func (s *Service) handleTaskStatusChanged(ctx context.Context, event *bus.Event) error {
-	data, err := decodeEventData[TaskStatusChangedData](event)
-	if err != nil || data.TaskID == "" || data.NewStatus == "" {
-		return nil
-	}
-
-	fields, _ := s.repo.GetTaskExecutionFields(ctx, data.TaskID)
-	if fields != nil && fields.WorkspaceID != "" {
-		actorType := "system"
-		actorID := "office-scheduler"
-		if data.ActorAgentID != "" {
-			actorType = participantTypeAgent
-			actorID = data.ActorAgentID
-		}
-		runID := s.ResolveRunForTask(ctx, data.TaskID)
-		s.LogActivityWithRun(ctx, fields.WorkspaceID, actorType, actorID,
-			"task_status_changed", "task", data.TaskID,
-			fmt.Sprintf(`{"new_status":%q}`, data.NewStatus), runID, "")
-	}
-	return nil
 }
 
 // handleCommentCreated loads the comment and relays it to external channels.

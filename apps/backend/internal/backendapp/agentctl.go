@@ -31,6 +31,7 @@ func provideAgentctlLauncher(
 	l, cleanup, err := launcher.Provide(ctx, launcher.Config{
 		Host:             cfg.Agent.StandaloneHost,
 		Port:             cfg.Agent.StandalonePort,
+		StartupConfig:    cfg.ManagedAgentctlStartupConfig(),
 		OnUnexpectedExit: availability.MarkUnavailable,
 	}, log)
 	if err != nil {

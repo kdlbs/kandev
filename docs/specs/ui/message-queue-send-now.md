@@ -9,6 +9,11 @@ owner: kandev
 Decision:
 [ADR-2026-08-05-queue-send-now-replaces-turn](../../decisions/2026-08-05-queue-send-now-replaces-turn.md)
 
+The first-party header, Auto-run policy, and row placement are governed by
+[Control Pending Message Auto-run](message-queue-run.md). This spec remains
+authoritative for targeted replacement delivery and the backward-compatible
+`message.queue.send_now` protocol, including `scope: "all"`.
+
 ## Why
 
 When an agent is in a long-running turn, an urgent correction can sit in the
@@ -18,15 +23,19 @@ follow-up, without completing or advancing the task's workflow step.
 
 ## What
 
-- Every visible pending queue row offers **Send Now**. On a fine-pointer
-  desktop it appears with the row actions on hover or keyboard focus; on a
-  coarse-pointer surface it is always visible and touch-sized.
+- Every visible pending queue row, including the FIFO head, offers **Send
+  Now**. On a fine-pointer desktop it appears with row actions on hover or
+  keyboard focus; on a coarse-pointer surface it is always visible and
+  touch-sized. No separate **Skip to next** action duplicates this behavior.
 - Per-row **Send Now** interrupts the active agent turn and dispatches that
-  exact entry as the first prompt of a replacement turn. Other queued entries
-  remain pending in their existing FIFO order.
-- The queue header offers **Send Now** immediately to the left of **Clear all**.
-  It dispatches the click-time snapshot of all visible pending entries as one
-  replacement turn.
+  exact entry as the first prompt of a replacement turn. This behaves like a
+  transient promotion without persisting a reorder: other queued entries keep
+  their relative FIFO order. An accepted exact claim also turns Auto-run ON,
+  so automatic FIFO delivery continues through them after the selected turn
+  completes and the session is eligible.
+- The first-party queue header does not offer bulk **Send Now**. Protocol
+  clients may still dispatch the click-time snapshot of all visible pending
+  entries as one replacement turn with `scope: "all"`.
 - Bulk content is concatenated in FIFO order with one blank line between
   non-empty message bodies. Attachment-only entries add no empty separators.
   Attachments retain FIFO order, and entity references are combined in first-
@@ -56,6 +65,12 @@ follow-up, without completing or advancing the task's workflow step.
   session is pending. The backend also rejects overlapping Send Now or explicit
   cancellation operations so rapid clicks and multiple clients cannot create
   successor turns.
+- Auto-run becomes ON in the same repository transaction that claims the exact
+  Send Now selection. Validation, cancellation, conflict, or queue-change
+  failures before that claim leave the previous policy unchanged. If the
+  accepted asynchronous handoff later restores the claim, Auto-run remains ON
+  because Send Now was also an explicit resume request. The all-entry scope
+  follows the same rule.
 - Successful dispatch publishes the existing queue-status and session
   cancellation updates. The initiating client refetches the authoritative queue
   after success or failure.
@@ -152,6 +167,11 @@ accepted, then all durable source rows are acknowledged. A retryable dispatch
 failure restores every ordinary source at its original FIFO position and
 releases every durable reservation before publishing queue status.
 
+The claim transaction also persists `auto_run=true`. This write is part of the
+all-or-nothing selection mutation, so a rejected claim cannot partially resume
+the queue. Restoration after an accepted claim restores message rows but does
+not undo that explicit resume instruction.
+
 ## Permissions
 
 - Any user who can access the session may invoke either Send Now action on its
@@ -164,7 +184,8 @@ releases every durable reservation before publishing queue status.
 ## Failure Modes
 
 - **Cancellation fails:** no queue selection is claimed; the entries remain
-  pending and the UI refetches and shows a localized error.
+  pending, Auto-run retains its prior value, and the UI refetches and shows a
+  localized error.
 - **Selection changes during cancellation:** the active turn may already be
   cancelled, but no replacement is dispatched from a partial or different
   selection. The UI refetches and asks the user to retry.
@@ -174,7 +195,8 @@ releases every durable reservation before publishing queue status.
   prompt, Send Now returns `send_now_conflict`; it leaves that successor and
   the remaining queue authoritative rather than creating a duplicate turn.
 - **Prompt admission fails after claim:** the backend restores the original
-  entries and their FIFO positions before publishing status. Existing ordinary
+  entries and their FIFO positions before publishing status. Auto-run stays ON
+  because the operation was already accepted as a resume. Existing ordinary
   queue delivery retains its current process-crash window after a destructive
   claim; durable lifecycle rows retain their accepted-until-acknowledged
   guarantee.
@@ -189,11 +211,11 @@ releases every durable reservation before publishing queue status.
   its queue list remains the only internal scroll owner and the composer stays
   visible.
 - Desktop row actions keep their current hover/focus disclosure. Phone and
-  coarse-pointer layouts expose per-row **Send Now** without hover and give it
-  at least a 44 by 44 CSS-pixel hit target.
-- The header **Send Now**, **Clear all**, and collapse controls remain reachable
-  without horizontal page overflow. The header may wrap its action group on a
-  narrow phone rather than shrinking labels below usable touch targets.
+  coarse-pointer layouts expose every row's **Send Now** without hover and give
+  it at least a 44 by 44 CSS-pixel hit target.
+- The header **Auto-run** switch, **Clear all**, and collapse controls remain
+  reachable without horizontal page overflow. The header may wrap on a narrow
+  phone rather than shrinking labels below usable targets.
 - Desktop and mobile share the same queue hook, cancellation state, and backend
   action. Mobile Playwright coverage uses touch input and proves the same
   replacement-turn result.
@@ -202,25 +224,32 @@ releases every durable reservation before publishing queue status.
 
 - **GIVEN** an agent is busy and three messages are queued, **WHEN** the user
   clicks row **Send Now** on the second message, **THEN** the active turn is
-  interrupted, the second message starts the replacement turn, and the first
-  and third messages remain queued in FIFO order.
-- **GIVEN** an agent is busy and three messages are queued, **WHEN** the user
-  clicks header **Send Now**, **THEN** one replacement turn receives the three
-  message bodies concatenated in FIFO order and the queue becomes empty.
+  interrupted, Auto-run becomes ON, the second message starts the replacement
+  turn, and after that turn completes the first and third messages run as
+  separate turns in their original relative order without another
+  queue-control click.
+- **GIVEN** Auto-run is OFF with queued A, B, and C, **WHEN** the user clicks
+  Send Now on B, **THEN** B runs first and the preserved A, C remainder
+  continues automatically as separate turns.
+- **GIVEN** an authorized protocol client selects all three visible messages,
+  **WHEN** it sends `message.queue.send_now` with `scope: "all"`, **THEN** one
+  replacement turn receives the three message bodies concatenated in FIFO
+  order and the queue becomes empty.
 - **GIVEN** queued messages contain attachments and repeated entity references,
-  **WHEN** the user sends all now, **THEN** the replacement prompt contains all
-  attachments in FIFO order and one canonical copy of each reference.
-- **GIVEN** a bulk aggregate exceeds an existing message limit, **WHEN** the
-  user clicks header **Send Now**, **THEN** the active turn continues, the queue
-  is unchanged, and a localized limit error is shown.
-- **GIVEN** the session is already promptable with queued work, **WHEN** the user
-  clicks either Send Now action, **THEN** the requested selection starts without
-  issuing a cancellation.
+  **WHEN** a protocol client requests `scope: "all"`, **THEN** the replacement
+  prompt contains all attachments in FIFO order and one canonical copy of each
+  reference.
+- **GIVEN** a bulk aggregate exceeds an existing message limit, **WHEN** a
+  protocol client requests `scope: "all"`, **THEN** the active turn continues,
+  the queue is unchanged, and the stable limit error is returned.
+- **GIVEN** the session is already promptable with queued work, **WHEN** the
+  user invokes row Send Now or a protocol client requests `scope: "all"`,
+  **THEN** the requested selection starts without issuing a cancellation.
 - **GIVEN** a promptable session has two queued messages and normal FIFO
   delivery has reserved the first one but has not accepted its prompt, **WHEN**
-  the user clicks header Send Now, **THEN** the FIFO reservation is restored,
-  both messages are claimed in FIFO order, and exactly one replacement prompt
-  contains both bodies.
+  a protocol client requests `scope: "all"`, **THEN** the FIFO reservation is
+  restored, both messages are claimed in FIFO order, and exactly one
+  replacement prompt contains both bodies.
 - **GIVEN** normal FIFO delivery has already accepted its successor prompt,
   **WHEN** the user clicks Send Now, **THEN** the action fails closed without a
   duplicate user message, duplicate prompt, or cancellation of that successor,
@@ -232,9 +261,9 @@ releases every durable reservation before publishing queue status.
   waits, **WHEN** the operation revalidates, **THEN** it leaves the successor
   running and the requested queue entries pending.
 - **GIVEN** a phone viewport with a busy agent and queued messages, **WHEN** the
-  user opens the queue panel, **THEN** both per-row and header Send Now controls
-  are visible, touch-sized, and can start the same replacement-turn flow without
-  horizontal overflow.
+  user opens the queue panel, **THEN** the Auto-run switch and every row's Send
+  Now control are visible, touch-sized, and contained without horizontal
+  overflow.
 
 ## Out of Scope
 
@@ -244,8 +273,9 @@ releases every durable reservation before publishing queue status.
 - Choosing a different model or plan mode for the bulk turn.
 - Sending an arbitrary user-selected subset other than one entry or all visible
   pending entries.
-- Changing normal FIFO auto-drain selection or **Run next**, **Remove**, **Clear
-  all**, edit, or merge semantics. FIFO participates in Send Now handoff
-  arbitration only until its prompt is accepted.
+- Changing **Remove**, **Clear all**, edit, or merge semantics. FIFO participates
+  in Send Now handoff arbitration only until its prompt is accepted. Normal
+  FIFO policy and first-party queue controls are governed by
+  [Control Pending Message Auto-run](message-queue-run.md).
 - Making ordinary queued-message dispatch crash-durable after its existing
   destructive claim boundary.

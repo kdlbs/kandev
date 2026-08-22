@@ -397,6 +397,7 @@ test.describe("Code walkthrough", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const session = await seedWalkthroughTask(
       testPage,
@@ -438,25 +439,36 @@ test.describe("Code walkthrough", () => {
     await session.walkthroughLauncher().hover();
     await expect(session.walkthroughDiscardButton()).toBeVisible({ timeout: 5_000 });
     await session.walkthroughDiscardButton().click();
-    const discardDialog = session.walkthroughDiscardDialog();
-    await expect(discardDialog).toBeVisible();
-    await expectWalkthroughBehindDialog(testPage, discardDialog, [
-      { locator: card, name: "walkthrough window" },
-      { locator: session.walkthroughLauncher().locator(".."), name: "walkthrough launcher" },
+    const discardConfirmation = session.walkthroughDiscardConfirmation();
+    await expect(discardConfirmation).toBeVisible();
+    await expect(discardConfirmation).toHaveAttribute("role", "dialog");
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await prCapture.screenshot("desktop-walkthrough-discard-confirmation", {
+      caption: "Desktop walkthrough confirms discard in its anchored toolbar",
+    });
+    const [confirmationZIndex, launcherZIndex] = await Promise.all([
+      discardConfirmation.evaluate((element) =>
+        Number.parseInt(getComputedStyle(element).zIndex, 10),
+      ),
+      session
+        .walkthroughLauncher()
+        .locator("..")
+        .evaluate((element) => Number.parseInt(getComputedStyle(element).zIndex, 10)),
     ]);
-    await discardDialog.getByRole("button", { name: "Cancel" }).click();
+    expect(confirmationZIndex).toBeGreaterThan(launcherZIndex);
+    await discardConfirmation.getByRole("button", { name: "Cancel" }).click();
     await expect(card).toBeVisible();
     await expect(session.walkthroughLauncher()).toHaveCount(1);
 
     await session.walkthroughLauncher().hover();
     await session.walkthroughDiscardButton().click();
-    await expect(session.walkthroughDiscardDialog()).toBeVisible();
+    await expect(session.walkthroughDiscardConfirmation()).toBeVisible();
     await session
-      .walkthroughDiscardDialog()
+      .walkthroughDiscardConfirmation()
       .getByRole("button", { name: "Discard walkthrough" })
       .click();
 
-    await expect(session.walkthroughDiscardDialog()).toBeHidden({ timeout: 10_000 });
+    await expect(session.walkthroughDiscardConfirmation()).toBeHidden({ timeout: 10_000 });
     await expect(session.walkthroughLauncher()).toHaveCount(0);
     await expect(session.walkthroughFloating()).toHaveCount(0);
     await expect(session.walkthroughEditorRange()).toHaveCount(0);

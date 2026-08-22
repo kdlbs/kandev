@@ -32,11 +32,21 @@ type Props = {
 export function RunDetailView({ agentId, initial, recent }: Props) {
   const taskId = initial.task_id ?? "";
   const sessionId = initial.session.session_id ?? "";
-  const { events, status } = useRunLiveSync(initial.id, initial.events, initial.status);
-  const liveRun = useMemo<RunDetail>(
-    () => (status === initial.status ? initial : { ...initial, status }),
-    [initial, status],
+  const { events, status, outputSummary } = useRunLiveSync(
+    initial.id,
+    initial.events,
+    initial.status,
+    {
+      agentId,
+      initialOutputSummary: initial.output_summary,
+    },
   );
+  const liveRun = useMemo<RunDetail>(() => {
+    if (status === initial.status && outputSummary === (initial.output_summary ?? "")) {
+      return initial;
+    }
+    return { ...initial, status, output_summary: outputSummary || undefined };
+  }, [initial, outputSummary, status]);
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
       <aside className="lg:sticky lg:top-4 lg:self-start">
@@ -49,7 +59,7 @@ export function RunDetailView({ agentId, initial, recent }: Props) {
         <SessionCollapsible session={initial.session} />
         <InvocationPanel invocation={initial.invocation} />
         <RuntimePanel runtime={initial.runtime} />
-        <PromptPanel run={initial} />
+        <PromptPanel run={liveRun} />
         <TasksTouched runId={initial.id} taskIds={initial.tasks_touched} />
         <RunConversation taskId={taskId} sessionId={sessionId} />
         <EventsLog events={events} />

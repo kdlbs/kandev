@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/office/agents"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"go.uber.org/zap"
@@ -72,14 +73,20 @@ func (h *Handler) createComment(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "body is required"})
 		return
 	}
-	authorType := req.AuthorType
-	if authorType == "" {
-		authorType = userSentinel
+	taskID := c.Param("id")
+	if agents.CallerFromContext(c) != nil ||
+		(req.AuthorType != "" && req.AuthorType != userSentinel) {
+		h.logger.Warn("reject agent comment on dashboard endpoint",
+			zap.String("task_id", taskID))
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "agent comments must use the runtime comments endpoint",
+		})
+		return
 	}
 	comment := &models.TaskComment{
 		ID:         uuid.New().String(),
-		TaskID:     c.Param("id"),
-		AuthorType: authorType,
+		TaskID:     taskID,
+		AuthorType: userSentinel,
 		AuthorID:   userSentinel,
 		Body:       req.Body,
 		Source:     userSentinel,

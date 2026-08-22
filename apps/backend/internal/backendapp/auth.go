@@ -20,10 +20,10 @@ import (
 
 // pluginSSOBridge adapts the auth service to plugins.AuthLoginBridge: it
 // authenticates a plugin-asserted external identity (OIDC/SAML) and sets the
-// kandev_session cookie, so an auth-capable plugin can complete SSO login
-// without ever holding the raw session token. AuthenticateExternal enforces
-// that auth is enabled, so this returns an error (surfaced as 403 by the
-// plugin webhook relay) when it is not.
+// session cookie (name derived from the request host), so an auth-capable
+// plugin can complete SSO login without ever holding the raw session token.
+// AuthenticateExternal enforces that auth is enabled, so this returns an error
+// (surfaced as 403 by the plugin webhook relay) when it is not.
 type pluginSSOBridge struct {
 	auth *auth.Service
 }
@@ -38,7 +38,7 @@ func (b pluginSSOBridge) LoginExternal(c *gin.Context, provider, subject, email,
 	if err != nil {
 		return err
 	}
-	authhttpapi.SetSessionCookie(c, b.auth.CookieName(), token, b.auth.SessionTTL())
+	authhttpapi.SetSessionCookie(c, b.auth.CookieNameForRequest(c.Request), token, b.auth.SessionTTL())
 	return nil
 }
 

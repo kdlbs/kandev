@@ -65,6 +65,7 @@ func (r *sqliteRepository) initSchema() error {
 			response TEXT NOT NULL DEFAULT '',
 			model TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT NOT NULL DEFAULT '',
+			execution_profile_id TEXT NOT NULL DEFAULT '',
 			prompt_tokens INTEGER NOT NULL DEFAULT 0,
 			response_tokens INTEGER NOT NULL DEFAULT 0,
 			duration_ms INTEGER NOT NULL DEFAULT 0,
@@ -88,6 +89,7 @@ func (r *sqliteRepository) initSchema() error {
 	_, _ = r.db.Exec(`ALTER TABLE utility_agents ADD COLUMN agent_profile_id TEXT NOT NULL DEFAULT ''`)
 	_, _ = r.db.Exec(`ALTER TABLE utility_agents ADD COLUMN profile_binding_state TEXT NOT NULL DEFAULT 'explicit'`)
 	_, _ = r.db.Exec(`ALTER TABLE utility_agent_calls ADD COLUMN agent_profile_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = r.db.Exec(`ALTER TABLE utility_agent_calls ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 
 	// Heal pre-existing custom agents that were created with enabled=0 due
 	// to a bug in CreateAgent (the Enabled field on the model defaulted to
@@ -303,7 +305,7 @@ func (r *sqliteRepository) ListCalls(ctx context.Context, utilityID string, limi
 		limit = 50
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, utility_id, session_id, resolved_prompt, response, model, agent_profile_id, prompt_tokens, response_tokens, duration_ms, status, error_message, created_at, completed_at
+		SELECT id, utility_id, session_id, resolved_prompt, response, model, agent_profile_id, execution_profile_id, prompt_tokens, response_tokens, duration_ms, status, error_message, created_at, completed_at
 		FROM utility_agent_calls
 		WHERE utility_id = ?
 		ORDER BY created_at DESC
@@ -323,7 +325,7 @@ func (r *sqliteRepository) scanCallRows(rows *sql.Rows) ([]*models.UtilityAgentC
 		call := &models.UtilityAgentCall{}
 		if err := rows.Scan(
 			&call.ID, &call.UtilityID, &call.SessionID, &call.ResolvedPrompt, &call.Response,
-			&call.Model, &call.AgentProfileID, &call.PromptTokens, &call.ResponseTokens, &call.DurationMs,
+			&call.Model, &call.AgentProfileID, &call.ExecutionProfileID, &call.PromptTokens, &call.ResponseTokens, &call.DurationMs,
 			&call.Status, &call.ErrorMessage, &call.CreatedAt, &call.CompletedAt,
 		); err != nil {
 			return nil, err
@@ -335,13 +337,13 @@ func (r *sqliteRepository) scanCallRows(rows *sql.Rows) ([]*models.UtilityAgentC
 
 func (r *sqliteRepository) GetCallByID(ctx context.Context, id string) (*models.UtilityAgentCall, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, utility_id, session_id, resolved_prompt, response, model, agent_profile_id, prompt_tokens, response_tokens, duration_ms, status, error_message, created_at, completed_at
+		SELECT id, utility_id, session_id, resolved_prompt, response, model, agent_profile_id, execution_profile_id, prompt_tokens, response_tokens, duration_ms, status, error_message, created_at, completed_at
 		FROM utility_agent_calls WHERE id = ?
 	`), id)
 	call := &models.UtilityAgentCall{}
 	if err := row.Scan(
 		&call.ID, &call.UtilityID, &call.SessionID, &call.ResolvedPrompt, &call.Response,
-		&call.Model, &call.AgentProfileID, &call.PromptTokens, &call.ResponseTokens, &call.DurationMs,
+		&call.Model, &call.AgentProfileID, &call.ExecutionProfileID, &call.PromptTokens, &call.ResponseTokens, &call.DurationMs,
 		&call.Status, &call.ErrorMessage, &call.CreatedAt, &call.CompletedAt,
 	); err != nil {
 		return nil, err
@@ -361,10 +363,10 @@ func (r *sqliteRepository) CreateCall(ctx context.Context, call *models.UtilityA
 	}
 
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO utility_agent_calls (id, utility_id, session_id, resolved_prompt, response, model, agent_profile_id, prompt_tokens, response_tokens, duration_ms, status, error_message, created_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO utility_agent_calls (id, utility_id, session_id, resolved_prompt, response, model, agent_profile_id, execution_profile_id, prompt_tokens, response_tokens, duration_ms, status, error_message, created_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), call.ID, call.UtilityID, call.SessionID, call.ResolvedPrompt, call.Response,
-		call.Model, call.AgentProfileID, call.PromptTokens, call.ResponseTokens, call.DurationMs,
+		call.Model, call.AgentProfileID, call.ExecutionProfileID, call.PromptTokens, call.ResponseTokens, call.DurationMs,
 		call.Status, call.ErrorMessage, call.CreatedAt, call.CompletedAt)
 	return err
 }
@@ -375,9 +377,9 @@ func (r *sqliteRepository) UpdateCall(ctx context.Context, call *models.UtilityA
 	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE utility_agent_calls
-		SET response = ?, model = ?, agent_profile_id = ?, prompt_tokens = ?, response_tokens = ?, duration_ms = ?, status = ?, error_message = ?, completed_at = ?
+		SET response = ?, model = ?, agent_profile_id = ?, execution_profile_id = ?, prompt_tokens = ?, response_tokens = ?, duration_ms = ?, status = ?, error_message = ?, completed_at = ?
 		WHERE id = ?
-	`), call.Response, call.Model, call.AgentProfileID, call.PromptTokens, call.ResponseTokens, call.DurationMs,
+	`), call.Response, call.Model, call.AgentProfileID, call.ExecutionProfileID, call.PromptTokens, call.ResponseTokens, call.DurationMs,
 		call.Status, call.ErrorMessage, call.CompletedAt, call.ID)
 	return err
 }

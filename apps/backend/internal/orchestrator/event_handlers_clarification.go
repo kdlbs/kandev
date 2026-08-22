@@ -519,12 +519,32 @@ func (s *Service) dispatchClarificationResumeLocked(ctx context.Context, data cl
 	return nil
 }
 
+// ClarificationPauseOptions controls the queue policy for a clarification
+// pause. Human no-answer pauses drain an already queued prompt, while an
+// autopilot parent question keeps unrelated child prompts parked until the
+// parent answers.
+type ClarificationPauseOptions struct {
+	DrainQueuedMessages bool
+}
+
 // PauseForClarificationInput converts a no-answer ask_user_question outcome
 // into a platform pause. It detaches the pending clarification so a late user
 // answer resumes through the event fallback path, then silently cancels the
 // active agent turn without evaluating workflow turn-complete actions. It
 // returns the number of clarification bundles detached.
 func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID string) (int, error) {
+	return s.PauseForClarificationInputWithOptions(ctx, sessionID, ClarificationPauseOptions{
+		DrainQueuedMessages: true,
+	})
+}
+
+// PauseForClarificationInputWithOptions is the explicit pause policy used by
+// callers whose queue semantics differ from the human clarification timeout.
+func (s *Service) PauseForClarificationInputWithOptions(
+	ctx context.Context,
+	sessionID string,
+	options ClarificationPauseOptions,
+) (int, error) {
 	if sessionID == "" {
 		return 0, fmt.Errorf("session_id is required")
 	}
@@ -533,21 +553,12 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 	guard := s.lockCancelInFlightGuard(sessionID)
 	defer guard.release()
 	guardedPersistenceStartedAt := time.Now()
-	session, err := s.repo.GetTaskSession(writeCtx, sessionID)
+	session, expectedTurnID, expectedTurn, err := s.loadClarificationPauseState(writeCtx, sessionID)
 	if err != nil {
-		return 0, fmt.Errorf("load session for clarification pause: %w", err)
+		return 0, err
 	}
 	if session == nil {
 		return 0, nil
-	}
-	expectedTurnID := ""
-	var expectedTurn *string
-	if s.turnService != nil {
-		expectedTurnID, err = s.peekActiveTurnID(writeCtx, sessionID)
-		if err != nil {
-			return 0, fmt.Errorf("inspect clarification turn before pause: %w", err)
-		}
-		expectedTurn = &expectedTurnID
 	}
 
 	hasPendingClarification := s.sessionHasPendingClarification(writeCtx, sessionID)
@@ -596,7 +607,43 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 	} else if err != nil {
 		return detached, errors.Join(detachErr, err)
 	}
+	if !options.DrainQueuedMessages {
+		return detached, detachErr
+	}
+	if detachErr != nil {
+		// The durable clarification remains the input authority when detachment
+		// failed. Starting a successor here would make the row look stale and
+		// allow work to continue without a recoverable question.
+		return detached, detachErr
+	}
+	// Clarification park is a turn boundary, mirroring the
+	// pre-#677 contract where handleAgentReady always drained after returning
+	// from a turn. PauseForClarificationInput holds the cancelInFlight guard
+	// (line 533) for the entire function, so we must use the *Locked* drain
+	// variant — the public one would try to re-acquire the same non-reentrant
+	// sync.Mutex and deadlock. The detached bundle remains in the UI for the
+	// user to answer, but the workflow will no longer block on it for the new
+	// turn (PR description flags this trade-off for maintainer review).
+	s.drainQueuedMessageForPromptableSessionLocked(pauseCtx, sessionID)
 	return detached, detachErr
+}
+
+func (s *Service) loadClarificationPauseState(
+	ctx context.Context,
+	sessionID string,
+) (*models.TaskSession, string, *string, error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("load session for clarification pause: %w", err)
+	}
+	if session == nil || s.turnService == nil {
+		return session, "", nil, nil
+	}
+	expectedTurnID, err := s.peekActiveTurnID(ctx, sessionID)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("inspect clarification turn before pause: %w", err)
+	}
+	return session, expectedTurnID, &expectedTurnID, nil
 }
 
 // cancelAgentSilent cancels the agent turn without creating a visible message

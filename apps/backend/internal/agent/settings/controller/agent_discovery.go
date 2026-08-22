@@ -575,9 +575,9 @@ func (c *Controller) detectAgents(ctx context.Context) ([]discovery.Availability
 }
 
 // synthAvailabilityFromRegistry builds Availability records for every enabled
-// agent without hitting the filesystem. All agents are marked Available=true
-// because in E2E mode only MockAgent instances are registered and they are
-// always available by definition.
+// inference agent without hitting the filesystem. Virtual families remain
+// visible through their durable settings rows, but they are not discovery
+// results and must never receive a concrete default profile.
 //
 // We still call IsInstalled() per-agent to copy over the agent's static
 // capability flags (SupportsMCP, MCPConfigPaths). Without those, downstream
@@ -588,6 +588,9 @@ func (c *Controller) synthAvailabilityFromRegistry() []discovery.Availability {
 	enabled := c.agentRegistry.ListEnabled()
 	results := make([]discovery.Availability, 0, len(enabled))
 	for _, ag := range enabled {
+		if agents.IsVirtualAgent(ag) {
+			continue
+		}
 		av := discovery.Availability{
 			Name:      ag.ID(),
 			Available: true,

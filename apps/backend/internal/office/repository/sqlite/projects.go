@@ -95,6 +95,34 @@ func (r *Repository) UpdateProject(ctx context.Context, project *models.Project)
 	return err
 }
 
+// ProjectConfigFields is the subset of office_projects columns a config
+// import owns (see UpdateProjectConfigFields).
+type ProjectConfigFields struct {
+	Description    string
+	Color          string
+	BudgetCents    int
+	Repositories   string
+	ExecutorConfig string
+}
+
+// UpdateProjectConfigFields updates only the columns a config import owns
+// (description, color, budget, repositories, executor config), leaving
+// status and lead_agent_profile_id untouched instead of reverting them to
+// a stale read-then-write snapshot.
+func (r *Repository) UpdateProjectConfigFields(
+	ctx context.Context, id string, fields ProjectConfigFields,
+) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE office_projects SET
+			description = ?, color = ?, budget_cents = ?,
+			repositories = ?, executor_config = ?, updated_at = ?
+		WHERE id = ?
+	`), fields.Description, fields.Color, fields.BudgetCents,
+		fields.Repositories, fields.ExecutorConfig, now, id)
+	return err
+}
+
 // DeleteProject deletes a project by ID.
 func (r *Repository) DeleteProject(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(

@@ -56,8 +56,9 @@ func TestRunLifecycle_StepCompleteEventsEmitted(t *testing.T) {
 
 	// Drive the AgentCompleted handler to emit "complete".
 	completed := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
-		"task_id":    taskID,
-		"session_id": "sess-1",
+		"task_id":          taskID,
+		"session_id":       "sess-1",
+		"agent_profile_id": "worker-1",
 	})
 	if pErr := eb.Publish(ctx, events.AgentCompleted, completed); pErr != nil {
 		t.Fatalf("publish completed: %v", pErr)
@@ -142,9 +143,10 @@ func TestRunLifecycle_ErrorEventEmitted(t *testing.T) {
 	}
 
 	failed := bus.NewEvent(events.AgentFailed, "test", map[string]string{
-		"task_id":       taskID,
-		"session_id":    "sess-err",
-		"error_message": "boom",
+		"task_id":          taskID,
+		"session_id":       "sess-err",
+		"error_message":    "boom",
+		"agent_profile_id": "worker-1",
 	})
 	if pErr := eb.Publish(ctx, events.AgentFailed, failed); pErr != nil {
 		t.Fatalf("publish failed: %v", pErr)

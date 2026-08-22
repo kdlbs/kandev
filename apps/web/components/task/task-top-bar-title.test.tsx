@@ -22,20 +22,26 @@ afterEach(() => {
 });
 
 function getTitle() {
-  return screen.getByText("My task", { selector: '[aria-current="page"]' });
+  return screen.getByTestId("task-topbar-title");
 }
 
+const RENAME_INPUT_TEST_ID = "task-title-rename-input";
+
 function queryInput() {
-  return screen.queryByTestId("task-title-rename-input");
+  return screen.queryByTestId(RENAME_INPUT_TEST_ID);
+}
+
+function getInput() {
+  return screen.getByTestId(RENAME_INPUT_TEST_ID) as HTMLInputElement;
 }
 
 function startEditing() {
   fireEvent.doubleClick(getTitle());
-  return screen.getByTestId("task-title-rename-input") as HTMLInputElement;
+  return getInput();
 }
 
 describe("TaskTopBarTitle — idle state", () => {
-  it("renders the title as the breadcrumb page when idle", () => {
+  it("renders the title as the interactive title crumb when idle", () => {
     render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" />);
 
     expect(getTitle()).toBeTruthy();
@@ -44,6 +50,9 @@ describe("TaskTopBarTitle — idle state", () => {
     expect(getTitle().getAttribute("aria-disabled")).toBe("false");
     // Keyboard-operable: reachable via Tab.
     expect(getTitle().getAttribute("tabindex")).toBe("0");
+    // The crumb wrapper carries the breadcrumb semantics; this element is the
+    // control, so it needs a role of its own or AT hears only plain text.
+    expect(getTitle().getAttribute("role")).toBe("button");
   });
 
   it("shows the full title and edit hint in the tooltip when renameable", () => {
@@ -54,11 +63,13 @@ describe("TaskTopBarTitle — idle state", () => {
     );
   });
 
-  it("keeps the breadcrumb aria-disabled and unfocusable when the task is archived", () => {
+  it("keeps the title aria-disabled and unfocusable when the task is archived", () => {
     render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" isArchived />);
 
     expect(getTitle().getAttribute("aria-disabled")).toBe("true");
     expect(getTitle().getAttribute("tabindex")).toBeNull();
+    // Nothing to activate, so it claims no control role either.
+    expect(getTitle().getAttribute("role")).toBeNull();
     expect(screen.getByRole("tooltip").textContent).toBe("My task");
   });
 
@@ -94,8 +105,15 @@ describe("TaskTopBarTitle — entering edit mode", () => {
 
     fireEvent.keyDown(getTitle(), { key: "Enter" });
 
-    const input = screen.getByTestId("task-title-rename-input") as HTMLInputElement;
-    expect(input.value).toBe("My task");
+    expect(getInput().value).toBe("My task");
+  });
+
+  it("enters edit mode on Space, the other key its button role promises", () => {
+    render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" />);
+
+    fireEvent.keyDown(getTitle(), { key: " " });
+
+    expect(getInput().value).toBe("My task");
   });
 
   it("does not enter edit mode on title Enter when the task is archived", () => {

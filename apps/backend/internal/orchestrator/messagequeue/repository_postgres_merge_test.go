@@ -50,9 +50,11 @@ func pgBackendPID(t *testing.T, db *sqlx.DB) int {
 }
 
 // waitForWaitingLocks polls pg_locks for the expected number of NOT-granted
-// transactionid waits owned by the given backend PID, scoping the barrier to
-// this test's worker. The poller must be the held transaction's connection
-// (each test handle has a single connection busy inside its lock tx).
+// waits owned by the given backend PID, scoping the barrier to this test's
+// worker. PostgreSQL can expose the first row-lock waiter as a transactionid
+// wait and a later queued waiter as a tuple wait, so both must satisfy the
+// barrier. The poller must be the held transaction's connection (each test
+// handle has a single connection busy inside its lock tx).
 func waitForWaitingLocks(t *testing.T, poller interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, backendPID, want int, what string) {
@@ -62,7 +64,7 @@ func waitForWaitingLocks(t *testing.T, poller interface {
 		var waiting int
 		if err := poller.QueryRowContext(context.Background(), `
 			SELECT count(*) FROM pg_locks
-			WHERE NOT granted AND locktype = 'transactionid' AND pid = $1
+			WHERE NOT granted AND pid = $1
 		`, backendPID).Scan(&waiting); err != nil {
 			t.Fatalf("query pg_locks: %v", err)
 		}

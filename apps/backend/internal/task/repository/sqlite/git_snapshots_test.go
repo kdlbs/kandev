@@ -64,7 +64,11 @@ func fullGitSnapshot(sessionID string, createdAt time.Time) *models.GitSnapshot 
 				"additions": float64(12),
 			},
 		},
-		TriggeredBy: "agent_completed",
+		// Production archive rows (captureArchiveDiff) carry no trigger; the
+		// trigger field must stay empty so ordering tests exercise the
+		// conditional `archive AND task archived` rank, not a
+		// triggered_by=agent_completed rank.
+		TriggeredBy: "",
 		Metadata: map[string]interface{}{
 			"reason":  "task archived",
 			"attempt": float64(2),
@@ -150,6 +154,15 @@ func TestCreateGitSnapshotRoundTripsEveryField(t *testing.T) {
 	want := fullGitSnapshot("session-snap-full", createdAt)
 	if err := repo.CreateGitSnapshot(ctx, want); err != nil {
 		t.Fatalf("CreateGitSnapshot: %v", err)
+	}
+
+	// Archive the task so GetLatestGitSnapshot selects the archive row via
+	// its rank-0 branch (snapshot_type='archive' AND task archived) rather
+	// than merely being the only row — the fixture's intent is the
+	// authoritative-archive read, and the row is only the sole row here by
+	// construction. (Claude review note on PR #2851.)
+	if err := repo.ArchiveTask(ctx, "task-snap-full"); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
 	}
 
 	got, err := repo.GetLatestGitSnapshot(ctx, "session-snap-full")

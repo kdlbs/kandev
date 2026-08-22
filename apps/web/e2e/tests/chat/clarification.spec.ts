@@ -45,7 +45,7 @@ useRegularMode();
 test.describe("Clarification flow", () => {
   test.describe.configure({ retries: 1 });
 
-  test("keeps a pending question open while typing a digit in the regular composer", async ({
+  test("Auto-run ON does not bypass a pending clarification", async ({
     testPage,
     apiClient,
     seedData,
@@ -71,8 +71,16 @@ test.describe("Clarification flow", () => {
     await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
     await expect(session.clarificationOverlay()).toBeVisible();
     await testPage.getByTestId("queue-chip").click();
-    await expect(testPage.getByTestId("queued-ghost-list")).toBeVisible();
-    await expect(testPage.getByTestId("queue-drain-next")).not.toBeVisible();
+    const panel = testPage.getByTestId("queued-ghost-list");
+    await expect(panel).toBeVisible();
+    const autoRun = panel.getByTestId("queue-auto-run");
+    await expect(autoRun).toHaveAttribute("data-state", "checked");
+    await autoRun.click();
+    await expect(autoRun).toHaveAttribute("data-state", "unchecked");
+    await autoRun.click();
+    await expect(autoRun).toHaveAttribute("data-state", "checked");
+    await expect(panel.getByTestId("queue-entry")).toHaveCount(1);
+    await expect(session.clarificationOverlay()).toBeVisible();
   });
 
   test("select option (happy path)", async ({ testPage, apiClient, seedData }) => {
@@ -890,7 +898,12 @@ test.describe("Multi-question clarification carousel", () => {
 
     await session.chat.focus();
     await testPage.keyboard.press("ControlOrMeta+Enter");
-    await expect(session.clarificationSubmit()).toContainText("Submitting");
+    const submit = session.clarificationSubmit();
+    await expect(submit).toContainText("Submitting");
+    await expect(submit).toBeDisabled();
+    await expect(submit.locator('[role="status"]')).toBeVisible();
+    await expect(submit.locator('[role="status"]')).toHaveAttribute("aria-hidden", "true");
+    await expect(submit.locator("svg.tabler-icon-check")).toHaveCount(0);
 
     await testPage.keyboard.press("ArrowLeft");
     await expect(session.clarificationStep(2)).toHaveAttribute("data-active", "true");

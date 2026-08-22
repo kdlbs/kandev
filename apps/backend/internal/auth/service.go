@@ -11,6 +11,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/httpcookie"
 	"github.com/kandev/kandev/internal/common/logger"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	userstore "github.com/kandev/kandev/internal/user/store"
@@ -47,6 +49,13 @@ const (
 	sessionTouchInterval = time.Minute
 
 	maxUserAgentLen = 256
+
+	// baseSessionCookieName is the session cookie base name. The effective
+	// name is request-host derived (see CookieNameForRequest): port-scoped on
+	// a ported host so multiple instances on one host keep isolated sessions,
+	// plain on a default-port host. An explicit auth.cookieName config value
+	// replaces the base name entirely (verbatim, never suffixed).
+	baseSessionCookieName = "kandev_session"
 )
 
 // Sentinel errors surfaced to HTTP handlers.
@@ -128,12 +137,29 @@ func (s *Service) Mode() Mode {
 	return ModeDisabled
 }
 
-// CookieName returns the configured session cookie name.
+// CookieName returns the configured session cookie name (request-less form).
+// An explicitly configured auth.cookieName is returned verbatim; the empty
+// default resolves to the base name. Contexts without a request (tests) must
+// pass this form or use CookieNameForRequest with a request.
 func (s *Service) CookieName() string {
 	if name := strings.TrimSpace(s.cfg.Auth.CookieName); name != "" {
 		return name
 	}
-	return "kandev_session"
+	return baseSessionCookieName
+}
+
+// CookieNameForRequest returns the session cookie name for a specific
+// request. A non-empty configured auth.cookieName is returned verbatim —
+// custom names disable automatic port isolation and must be unique per
+// cookie host. The empty default is port-scoped from the request host
+// (kandev_session_<port> on a ported host, plain kandev_session otherwise)
+// so two instances on one host (same IP, different ports) keep isolated
+// sessions instead of overwriting each other's token.
+func (s *Service) CookieNameForRequest(r *http.Request) string {
+	if name := strings.TrimSpace(s.cfg.Auth.CookieName); name != "" {
+		return name
+	}
+	return httpcookie.ScopedName(r, baseSessionCookieName)
 }
 
 // SessionTTL returns the sliding session lifetime.
