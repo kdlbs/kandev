@@ -130,6 +130,29 @@ describe("TasksListView row — destructive-action guard", () => {
   });
 });
 
+describe("TasksListView facet grouping", () => {
+  it("keeps a plugin value named untagged separate from the generated ungrouped section", () => {
+    const tagged = makeTask({ id: toTaskId("tagged") });
+    const untagged = makeTask({ id: toTaskId("untagged") });
+
+    render(
+      <StateProvider initialState={{ messages: { bySession: {}, metaBySession: {} } }}>
+        <TooltipProvider>
+          <TasksListView
+            {...props([tagged, untagged])}
+            tasksListGroup="facet:plugin:tags"
+            facetValues={{
+              "facet:plugin:tags:tagged": [{ value: "untagged", label: "Custom untagged" }],
+            }}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    expect(screen.getAllByTestId("tasks-list-section")).toHaveLength(2);
+  });
+});
+
 describe("TasksListView row — task-row-metadata slot", () => {
   const PLUGIN_ID = "example-metadata-plugin";
   const METADATA_TEST_ID = "plugin-row-metadata";

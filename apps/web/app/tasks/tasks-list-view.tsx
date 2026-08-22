@@ -124,6 +124,8 @@ type TaskListSection = {
   nodes: TaskTreeNode[];
 };
 
+const UNGROUPED_FACET_SECTION_KEY = "facet:__host_ungrouped__";
+
 function TaskRows({
   tasks,
   workflows,
@@ -219,7 +221,7 @@ function buildTaskSections(
       const values = facetValues[`${groupBy}:${task.id}`] ?? [];
       const entries = values.length ? values : [{ value: "untagged", label: t("tasks:ungrouped") }];
       for (const value of entries) {
-        const key = `facet:${value.value}`;
+        const key = values.length ? `facet:${value.value}` : UNGROUPED_FACET_SECTION_KEY;
         const section = grouped.get(key) ?? { title: value.label, color: value.color, tasks: [] };
         section.tasks.push(task);
         grouped.set(key, section);

@@ -1,5 +1,4 @@
 "use client";
-/* eslint-disable max-lines -- the task-page state machine predates the facet addition. */
 
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
@@ -11,8 +10,6 @@ import {
   unarchiveTask,
   updateUserSettings,
 } from "@/lib/api";
-import { MobileFab } from "@/components/kanban/mobile-fab";
-import { TaskCreateDialog } from "@/components/task-create-dialog";
 import type { Task, Workspace, Workflow, Repository } from "@/lib/types/http";
 import { useToast } from "@/components/toast-provider";
 // Module-level `t`: every use below is inside a callback or a plain helper
@@ -29,16 +26,17 @@ import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useTaskListFacets } from "@/hooks/use-task-list-facets";
+import { useTaskListFacetSelection } from "@/hooks/use-task-list-facet-selection";
 import { linkToTask } from "@/lib/links";
 import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
 import { shouldSkipInitialTasksFetch } from "./tasks-page-fetch-policy";
 import { TasksPageContent } from "./tasks-page-content";
+import { type MobileTaskStep } from "./mobile-tasks-create-dialog";
+import { MobileTasksActions } from "./mobile-tasks-actions";
 import {
   parseTasksListGroup,
   parseTasksListSort,
-  isTaskListFacetOption,
   sortTasksForList,
-  sortTasksByFacet,
   type TasksListGroup,
   type TasksListSort,
 } from "@/lib/tasks/tasks-list-options";
@@ -67,16 +65,7 @@ type UseTaskOperationsParams = {
   setTotal: (total: number) => void;
 };
 
-const EMPTY_WORKFLOW_STEPS: KanbanStep[] = [];
-
-type KanbanStep = {
-  id: string;
-  title: string;
-  events?: {
-    on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
-    on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
-  };
-};
+const EMPTY_WORKFLOW_STEPS: MobileTaskStep[] = [];
 
 function useLatestWorkspaceRequest(activeWorkspaceId: string | null) {
   const latestFetchRef = useRef({ seq: 0, workspaceId: activeWorkspaceId });
@@ -517,7 +506,6 @@ function useTasksListPreferenceSync({
   return { handleSortChange, handleGroupChange };
 }
 
-// eslint-disable-next-line max-lines-per-function -- lifecycle hooks remain co-located with page state.
 export function TasksPageClient(props: TasksPageClientProps) {
   const s = useTasksPageSetup(props);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -527,15 +515,9 @@ export function TasksPageClient(props: TasksPageClientProps) {
   const { isMobile } = useResponsiveBreakpoint();
   const showTaskDetails = useAppStore((state) => state.userSettings.tasksListShowDetails ?? false);
   const { facets, values: facetValues } = useTaskListFacets(s.tasks, s.activeWorkspaceId);
-  const [facetSort, setFacetSort] = useState<string | null>(null);
-  const [facetGroup, setFacetGroup] = useState<string | null>(null);
   const facetOptions = useMemo(
     () => facets.map((facet) => ({ value: facet.key, label: facet.label })),
     [facets],
-  );
-  const displayedTasks = useMemo(
-    () => (facetSort ? sortTasksByFacet(s.tasks, facetSort, facetValues) : s.tasks),
-    [facetSort, facetValues, s.tasks],
   );
   const activeSteps = useAppStore((state) =>
     state.kanban.workflowId === s.activeWorkflowId ? state.kanban.steps : EMPTY_WORKFLOW_STEPS,
@@ -554,6 +536,15 @@ export function TasksPageClient(props: TasksPageClientProps) {
     setTasks: s.setTasks,
     setPagination: s.setPagination,
   });
+  const { displayedTasks, sort, group, selectSort, selectGroup } = useTaskListFacetSelection({
+    facetKeys: facetOptions.map((facet) => facet.value),
+    coreSort: s.tasksListSort,
+    coreGroup: s.tasksListGroup,
+    tasks: s.tasks,
+    facetValues,
+    onCoreSortChange: handleSortChange,
+    onCoreGroupChange: handleGroupChange,
+  });
 
   useEffect(() => {
     setMobileSearchOpen(false);
@@ -564,16 +555,6 @@ export function TasksPageClient(props: TasksPageClientProps) {
     setView("list");
   }, [setView]);
 
-  const sort = facetSort ?? s.tasksListSort;
-  const group = facetGroup ?? s.tasksListGroup;
-  const selectSort = (value: string) =>
-    isTaskListFacetOption(value)
-      ? setFacetSort(value)
-      : (setFacetSort(null), handleSortChange(value as TasksListSort));
-  const selectGroup = (value: string) =>
-    isTaskListFacetOption(value)
-      ? setFacetGroup(value)
-      : (setFacetGroup(null), handleGroupChange(value as TasksListGroup));
   return (
     <TasksPageContent
       header={{
@@ -617,55 +598,45 @@ export function TasksPageClient(props: TasksPageClientProps) {
       onUnarchive={s.handleUnarchive}
       onDelete={s.handleDelete}
       onRefresh={() => s.fetchTasks()}
-      mobileActions={
-        isMobile && s.activeWorkspaceId ? (
-          <>
-            <MobileFab onClick={() => setIsCreateOpen(true)} />
-            <MobileTasksCreateDialog
-              open={isCreateOpen}
-              onOpenChange={setIsCreateOpen}
-              workspaceId={s.activeWorkspaceId}
-              workflowId={s.activeWorkflowId}
-              steps={activeSteps}
-              onCreated={() => s.fetchTasks(true)}
-            />
-          </>
-        ) : null
-      }
+      mobileActions={mobileTaskActions({
+        isMobile,
+        workspaceId: s.activeWorkspaceId,
+        workflowId: s.activeWorkflowId,
+        steps: activeSteps,
+        open: isCreateOpen,
+        onOpenChange: setIsCreateOpen,
+        onCreated: () => s.fetchTasks(true),
+      })}
     />
   );
 }
 
-type MobileTasksCreateDialogProps = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  workspaceId: string;
-  workflowId: string | null;
-  steps: KanbanStep[];
-  onCreated: () => Promise<void>;
-};
-
-function MobileTasksCreateDialog({
-  open,
-  onOpenChange,
+function mobileTaskActions({
+  isMobile,
   workspaceId,
   workflowId,
   steps,
+  open,
+  onOpenChange,
   onCreated,
-}: MobileTasksCreateDialogProps) {
+}: {
+  isMobile: boolean;
+  workspaceId: string | null;
+  workflowId: string | null;
+  steps: MobileTaskStep[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated: () => Promise<void>;
+}) {
+  if (!isMobile || !workspaceId) return null;
   return (
-    <TaskCreateDialog
-      open={open}
-      onOpenChange={onOpenChange}
-      mode="create"
+    <MobileTasksActions
       workspaceId={workspaceId}
       workflowId={workflowId}
-      defaultStepId={steps[0]?.id ?? null}
       steps={steps}
-      onSuccess={() => {
-        onOpenChange(false);
-        void onCreated();
-      }}
+      open={open}
+      onOpenChange={onOpenChange}
+      onCreated={onCreated}
     />
   );
 }

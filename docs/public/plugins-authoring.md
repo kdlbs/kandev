@@ -2116,6 +2116,8 @@ caught, logged, and treated as non-matching for that task.
 Use `registerTaskListFacet` when a plugin owns values that users should sort or group on in the
 `/tasks` list. Values are synchronous and apply only to the currently loaded page. A facet is
 removed automatically when its plugin unloads; optional subscriptions let it refresh the page.
+Tasks with multiple values appear in every matching group. A child whose parent does not match a
+group is rendered at that group's root.
 
 ```js
 registry.registerTaskListFacet({

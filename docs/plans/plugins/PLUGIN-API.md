@@ -1250,7 +1250,9 @@ logged (mirroring `TaskMenuActionRegistration.visible`'s error handling).
 Group controls. `getValues({ taskId, workspaceId })` synchronously returns `{ value, label,
 color? }[]`; `subscribe` invalidates the loaded page. Facets are page-local: no facet selection
 is persisted or sent to the backend. The host catches callback errors and revokes registrations
-and active subscriptions when the owning plugin unloads.
+and active subscriptions when the owning plugin unloads. A task with multiple values appears in
+each matching group; parent/child indentation is preserved only within a group both tasks match,
+so a matching child without its parent is rendered at that group's root.
 
 ## Registry internals (host side)
 
