@@ -147,8 +147,13 @@ func TestWorkspaceReuseAllowedRequiresMatchingExecutorType(t *testing.T) {
 	if !workspaceReuseAllowed(env, string(models.ExecutorTypeLocal), true) {
 		t.Fatal("workspace reuse should remain enabled for the owning executor type")
 	}
-	if !workspaceReuseAllowed(&models.TaskEnvironment{}, string(models.ExecutorTypeWorktree), true) {
-		t.Fatal("legacy environments without an executor type should remain reusable")
+	if workspaceReuseAllowed(&models.TaskEnvironment{}, string(models.ExecutorTypeWorktree), true) {
+		t.Fatal("legacy environments without a physical worktree should not be reused by worktree launches")
+	}
+	if !workspaceReuseAllowed(&models.TaskEnvironment{
+		Repos: []*models.TaskEnvironmentRepo{{WorktreeID: "legacy-worktree", Status: "active"}},
+	}, string(models.ExecutorTypeWorktree), true) {
+		t.Fatal("legacy environments with a physical worktree should remain reusable")
 	}
 }
 

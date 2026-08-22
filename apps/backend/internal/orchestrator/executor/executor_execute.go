@@ -812,7 +812,7 @@ func (e *Executor) preflightWorkflowWorkspaceReuse(ctx context.Context, task *v1
 
 func workflowEnvironmentHasRepository(rows []*models.TaskEnvironmentRepo, repositoryID string) bool {
 	for _, row := range rows {
-		if row != nil && row.RepositoryID == repositoryID && row.DeletedAt == nil && row.Status != "failed" && row.Status != "deleted" {
+		if row != nil && row.RepositoryID == repositoryID && row.DeletedAt == nil && row.Status != taskEnvironmentRepoStatusFailed && row.Status != taskEnvironmentRepoStatusDeleted {
 			return true
 		}
 	}
@@ -1679,8 +1679,24 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 }
 
 func workspaceReuseAllowed(existingEnv *models.TaskEnvironment, requestedExecutorType string, required bool) bool {
-	if !required || existingEnv == nil || existingEnv.ExecutorType == "" {
+	if !required || existingEnv == nil {
 		return required
+	}
+	if existingEnv.ExecutorType == "" {
+		// Older environments did not persist their executor type. They remain
+		// attachable for local/container launchers, but a worktree launch may
+		// attach only when the durable inventory contains a physical worktree.
+		// Inventory-only rows deliberately have no WorktreeID and cannot satisfy
+		// the worktree preparer's attach-only contract.
+		if requestedExecutorType == string(models.ExecutorTypeWorktree) {
+			for _, repo := range existingEnv.Repos {
+				if repo != nil && repo.WorktreeID != "" && repo.DeletedAt == nil && repo.Status != taskEnvironmentRepoStatusFailed && repo.Status != taskEnvironmentRepoStatusDeleted {
+					return true
+				}
+			}
+			return false
+		}
+		return true
 	}
 	return existingEnv.ExecutorType == requestedExecutorType
 }
