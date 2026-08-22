@@ -41,6 +41,9 @@ type SentinelMutableRefs = {
   disarmedRef: React.MutableRefObject<boolean>;
   intersectingRef: React.MutableRefObject<boolean>;
   fireLoadRef: React.MutableRefObject<(() => void) | null>;
+  loadInFlightRef: React.MutableRefObject<boolean>;
+  continuationScheduledRef: React.MutableRefObject<boolean>;
+  continuationTimerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>;
 };
 
 /** Creates and destroys the IntersectionObserver over the scroll container.
@@ -147,24 +150,29 @@ function useSentinelSettle(opts: {
           // Yield one browser turn so prepend layout effects and the resulting
           // intersection state settle before deciding whether the sentinel is
           // still in the preload region.
-          setTimeout(() => {
-            if (
-              !opts.refs.mountedRef.current ||
-              opts.refs.observerRef.current !== observer ||
-              opts.refs.sentinelNodeRef.current !== node ||
-              !opts.refs.intersectingRef.current ||
-              opts.refs.disarmedRef.current
-            ) {
-              return;
-            }
-            const { hasMore, blocked } = opts.refs.stateRef.current;
-            if (!hasMore || blocked) return;
-            // The just-completed request owns this re-arm. `loadMore` still
-            // applies its own cursor/in-flight guard, so do not reject this
-            // hand-off on a stale loading render from the request that has
-            // already settled.
-            opts.refs.fireLoadRef.current?.();
-          }, 0);
+          if (!opts.refs.continuationScheduledRef.current) {
+            opts.refs.continuationScheduledRef.current = true;
+            opts.refs.continuationTimerRef.current = setTimeout(() => {
+              opts.refs.continuationTimerRef.current = null;
+              opts.refs.continuationScheduledRef.current = false;
+              if (
+                !opts.refs.mountedRef.current ||
+                opts.refs.observerRef.current !== observer ||
+                opts.refs.sentinelNodeRef.current !== node ||
+                !opts.refs.intersectingRef.current ||
+                opts.refs.disarmedRef.current
+              ) {
+                return;
+              }
+              const { hasMore, blocked } = opts.refs.stateRef.current;
+              if (!hasMore || blocked) return;
+              // The just-completed request owns this re-arm. `loadMore` still
+              // applies its own cursor/in-flight guard, so do not reject this
+              // hand-off on a stale loading render from the request that has
+              // already settled.
+              opts.refs.fireLoadRef.current?.();
+            }, 0);
+          }
         }
         // Appended rows push the sentinel below the viewport while the user
         // waits at the bottom, so the re-armed observer never fires. Scroll
@@ -238,6 +246,23 @@ function useScrollPinnedToBottom(scrollRef: React.RefObject<HTMLDivElement | nul
 }
 
 /** Retries an eligible, still-visible sentinel after a firing guard clears. */
+function shouldRetrySentinel(
+  previous: { hasMore: boolean; blocked: boolean; isLoadingMore: boolean },
+  current: { hasMore: boolean; blocked: boolean; isLoadingMore: boolean },
+  refs: SentinelMutableRefs,
+): boolean {
+  const { optionsRef, intersectingRef, disarmedRef } = refs;
+  if (!optionsRef.current.rearmWhileIntersecting) return false;
+  if (!intersectingRef.current || disarmedRef.current) return false;
+  const becameEligible =
+    (!previous.hasMore && current.hasMore) ||
+    (previous.blocked && !current.blocked) ||
+    (previous.isLoadingMore && !current.isLoadingMore);
+  if (!becameEligible || !current.hasMore || current.blocked) return false;
+  if (current.isLoadingMore && !optionsRef.current.joinInFlightWhileLoading) return false;
+  return !refs.loadInFlightRef.current && !refs.continuationScheduledRef.current;
+}
+
 function useRetryWhenSentinelBecomesEligible({
   hasMore,
   blocked,
@@ -252,26 +277,14 @@ function useRetryWhenSentinelBecomesEligible({
   refs: SentinelMutableRefs;
 }) {
   const previousStateRef = useRef({ hasMore, blocked, isLoadingMore });
-  const { optionsRef, intersectingRef, disarmedRef } = refs;
 
   useEffect(() => {
     const previous = previousStateRef.current;
-    previousStateRef.current = { hasMore, blocked, isLoadingMore };
-    if (
-      !optionsRef.current.rearmWhileIntersecting ||
-      !intersectingRef.current ||
-      disarmedRef.current
-    ) {
-      return;
-    }
-    const becameEligible =
-      (!previous.hasMore && hasMore) ||
-      (previous.blocked && !blocked) ||
-      (previous.isLoadingMore && !isLoadingMore);
-    if (!becameEligible || !hasMore || blocked) return;
-    if (isLoadingMore && !optionsRef.current.joinInFlightWhileLoading) return;
+    const current = { hasMore, blocked, isLoadingMore };
+    previousStateRef.current = current;
+    if (!shouldRetrySentinel(previous, current, refs)) return;
     void fireLoad();
-  }, [hasMore, blocked, isLoadingMore, fireLoad, optionsRef, intersectingRef, disarmedRef]);
+  }, [hasMore, blocked, isLoadingMore, fireLoad, refs]);
 }
 
 /**
@@ -340,6 +353,9 @@ export function useLazyLoadSentinel(
   const sentinelNodeRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
   const fireLoadRef = useRef<(() => void) | null>(null);
+  const loadInFlightRef = useRef(false);
+  const continuationScheduledRef = useRef(false);
+  const continuationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** When true, ignore intersections until an observed exit arms the hook. */
   const disarmedRef = useRef(false);
   const intersectingRef = useRef(false);
@@ -349,6 +365,11 @@ export function useLazyLoadSentinel(
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      if (continuationTimerRef.current !== null) {
+        clearTimeout(continuationTimerRef.current);
+        continuationTimerRef.current = null;
+      }
+      continuationScheduledRef.current = false;
     };
   }, []);
 
@@ -361,13 +382,19 @@ export function useLazyLoadSentinel(
     disarmedRef,
     intersectingRef,
     fireLoadRef,
+    loadInFlightRef,
+    continuationScheduledRef,
+    continuationTimerRef,
   };
   const settleLoad = useSentinelSettle({ scrollRef, isPinned, refs });
 
   const fireLoad = useCallback(async () => {
     const node = sentinelNodeRef.current;
     const observer = observerRef.current;
-    if (!node || !observer) return;
+    if (!node || !observer || loadInFlightRef.current || continuationScheduledRef.current) {
+      return;
+    }
+    loadInFlightRef.current = true;
     // Refresh the pin from the CURRENT geometry before the request: the pin
     // otherwise reflects only the initial mount or the last user scroll, which
     // can be stale after a session switch or late-arriving content. Preserving
@@ -385,8 +412,10 @@ export function useLazyLoadSentinel(
       count = await loadMore();
     } catch {
       rejected = true;
+    } finally {
+      settleLoad(node, observer, { count, rejected });
+      loadInFlightRef.current = false;
     }
-    settleLoad(node, observer, { count, rejected });
   }, [loadMore, refreshPinned, settleLoad]);
   fireLoadRef.current = fireLoad;
 

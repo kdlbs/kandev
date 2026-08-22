@@ -405,6 +405,67 @@ describe("useLazyLoadSentinel — stickToBottomWhileLoading", () => {
 });
 
 describe("useLazyLoadSentinel — re-arm, disarm, and stale completions", () => {
+  it("serializes continuation pages when loading state toggles around each request", async () => {
+    const scrollRef = makeScrollRef();
+    let isLoadingMore = true;
+    let resolveRequest: (value: number) => void = () => {};
+    let activeRequest: Promise<number> | null = null;
+    let rerenderHook: () => void = () => {};
+    const pages = [20, 20, 0];
+    let resolveFinalPage: () => void = () => {};
+    const finalPageSettled = new Promise<void>((resolve) => {
+      resolveFinalPage = resolve;
+    });
+    activeRequest = new Promise<number>((resolve) => {
+      resolveRequest = resolve;
+    });
+    const startPage = () => {
+      const page = pages.shift() ?? 0;
+      activeRequest = new Promise<number>((resolve) => {
+        resolveRequest = resolve;
+      });
+      isLoadingMore = true;
+      rerenderHook();
+      queueMicrotask(() => {
+        act(() => {
+          isLoadingMore = false;
+          rerenderHook();
+          resolveRequest(page);
+          if (page === 0) resolveFinalPage();
+          activeRequest = null;
+        });
+      });
+      return activeRequest;
+    };
+    const loadMore = vi.fn(() => activeRequest ?? startPage());
+    const { result, rerender } = renderHook(() =>
+      useLazyLoadSentinel(scrollRef, true, false, isLoadingMore, loadMore, {
+        rearmWhileIntersecting: true,
+        joinInFlightWhileLoading: true,
+      }),
+    );
+    rerenderHook = rerender;
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+
+    fire(records[0], true, node);
+    await act(async () => {
+      isLoadingMore = false;
+      rerender();
+    });
+    expect(loadMore).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveRequest(20);
+      activeRequest = null;
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await finalPageSettled;
+      await waitForDeferredLoad();
+    });
+    expect(loadMore).toHaveBeenCalledTimes(4);
+  });
+
   it("does not re-arm after a positive result when rearmWhileIntersecting is false", async () => {
     const scrollRef = makeScrollRef();
     const loadMore = vi.fn(async () => 20);
