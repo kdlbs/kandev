@@ -994,7 +994,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		)
 	}
 
-	return s.persistAndPublishTaskPRSync(ctx, tp, status.PR, changed, status.OutcomeFieldsPopulated)
+	return s.persistAndPublishTaskPRSync(ctx, taskID, status.PR, tp, changed, status.OutcomeFieldsPopulated)
 }
 
 // persistAndPublishTaskPRSync writes the reconciled sync state and, on
@@ -1010,7 +1010,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 // SyncTaskPR to keep that function within the repo's complexity limits and
 // to make the re-read-before-publish behavior directly testable.
 func (s *Service) persistAndPublishTaskPRSync(
-	ctx context.Context, tp *TaskPR, pr *PR, changed, outcomeFieldsPopulated bool,
+	ctx context.Context, taskID string, pr *PR, tp *TaskPR, changed, outcomeFieldsPopulated bool,
 ) error {
 	// AC-38/AC-18c: the counter fires at the populated-ness decision point,
 	// before the write is attempted, and survives write failure — it
@@ -1023,7 +1023,7 @@ func (s *Service) persistAndPublishTaskPRSync(
 	// Provider payloads carry the authoritative head/base repository identity
 	// and branch. Reconcile after the TaskPR write so a malformed or
 	// unmatchable payload never prevents the review association from persisting.
-	s.reconcileComparisonTargetFromSync(ctx, tp.TaskID, pr)
+	s.reconcileComparisonTargetFromSync(ctx, taskID, pr)
 
 	if changed && s.eventBus != nil {
 		published, err := s.store.GetTaskPRByID(ctx, tp.ID)
