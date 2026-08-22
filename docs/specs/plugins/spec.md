@@ -137,6 +137,7 @@ capabilities:
 actions:
   - key: "connection.save"
     scope: workspace                          # workspace | task | repository
+    access: admin                             # authenticated (default) | admin
     max_body_bytes: 65536
 
 repository_providers: ["example-repository-provider"]
@@ -325,6 +326,8 @@ workspace relation server-side, passes verified actor/resource context separatel
 bounded untrusted JSON, invokes `Plugin.HandleAction` with a hard timeout and
 cancellation, and relays only an allowlisted response-header set. Provider callback
 routes under `/webhooks/` stay public and must not serve authenticated browser actions.
+Actions default to `access: authenticated`; `access: admin` makes Kandev reject
+non-administrator callers before reading the action envelope or invoking the plugin.
 Task-scoped actions require a verified task and may optionally select one persisted
 repository attached to that task; Kandev rejects unattached repository IDs and passes
 the accepted repository separately in `VerifiedActionContext`.

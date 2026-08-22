@@ -72,13 +72,7 @@ func newTestRouterWithIdentity(t *testing.T, identity authn.Identity) (*gin.Engi
 	// fails closed without one), so wire an in-memory one, matching prod
 	// where Provide always attaches the shared vault.
 	svc.SetSecrets(newFakeSecretRevealer())
-	router := gin.New()
-	router.Use(func(ctx *gin.Context) {
-		authn.SetOnGin(ctx, identity)
-		ctx.Next()
-	})
-	RegisterRoutes(router, svc, nil, testLogger(t))
-	return router, svc
+	return registerPluginRoutesWithIdentity(t, svc, identity), svc
 }
 
 func newAdminTestRouter(t *testing.T) (*gin.Engine, *Service) {
@@ -300,7 +294,7 @@ func TestGetHandlerMissingReturns404(t *testing.T) {
 }
 
 func TestEnableDisableHandlersTransitionStatus(t *testing.T) {
-	router, svc := newTestRouter(t)
+	router, svc := newAdminTestRouter(t)
 	installTestPlugin(t, svc, "kandev-plugin-slack") // already active after install
 
 	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/disable", "", nil)
@@ -322,8 +316,8 @@ func TestEnableDisableHandlersTransitionStatus(t *testing.T) {
 	}
 }
 
-func TestUpdateConfigHandlerPersists(t *testing.T) {
-	router, svc := newTestRouter(t)
+func TestUpdateConfigHandlerAdminPersists(t *testing.T) {
+	router, svc := newAdminTestRouter(t)
 	installTestPlugin(t, svc, "kandev-plugin-slack")
 
 	rec := doRequest(router, http.MethodPatch, "/api/plugins/kandev-plugin-slack", `{"config":{"default_channel":"#dev"}}`, nil)
@@ -333,7 +327,7 @@ func TestUpdateConfigHandlerPersists(t *testing.T) {
 }
 
 func TestUninstallHandlerRemovesPlugin(t *testing.T) {
-	router, svc := newTestRouter(t)
+	router, svc := newAdminTestRouter(t)
 	installTestPlugin(t, svc, "kandev-plugin-slack")
 
 	rec := doRequest(router, http.MethodDelete, "/api/plugins/kandev-plugin-slack", "", nil)
@@ -1061,7 +1055,7 @@ func TestWriteWebhookResponse_ValidStatusRelaysHeadersAndBody(t *testing.T) {
 }
 
 func TestSyncHandlerRegistersDirSideload(t *testing.T) {
-	router, svc := newTestRouter(t)
+	router, svc := newAdminTestRouter(t)
 	pluginsDir := svc.pluginsDir
 	versionDir := filepath.Join(pluginsDir, "kandev-plugin-side", "1.0.0")
 	if err := os.MkdirAll(versionDir, 0o755); err != nil {

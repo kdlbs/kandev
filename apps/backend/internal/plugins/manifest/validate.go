@@ -559,6 +559,9 @@ func (m *Manifest) validateActions() []error {
 			action.ResourceScope != ActionScopeRepository {
 			errs = append(errs, fmt.Errorf("action %q has invalid scope %q", action.Key, action.ResourceScope))
 		}
+		if access := action.EffectiveAccess(); access != ActionAccessAuthenticated && access != ActionAccessAdmin {
+			errs = append(errs, fmt.Errorf("action %q has invalid access %q", action.Key, action.Access))
+		}
 		if action.MaxBodyBytes <= 0 || action.MaxBodyBytes > MaxActionBodyBytes {
 			errs = append(errs, fmt.Errorf("action %q max_body_bytes must be between 1 and %d", action.Key, MaxActionBodyBytes))
 		}

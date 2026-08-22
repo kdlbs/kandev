@@ -136,6 +136,7 @@ function installedPlugin(overrides: Partial<PluginRecord> = {}): PluginRecord {
 
 function setStoreState(plugins: PluginRecord[]) {
   storeState = {
+    auth: { user: null },
     plugins: { items: plugins, loading: false, loaded: true, error: null },
     setPlugins: vi.fn(),
     setPluginsLoading: vi.fn(),
