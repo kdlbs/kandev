@@ -444,6 +444,7 @@ function RepoChip({
       <Pill
         icon={<IconCode className="h-3 w-3 shrink-0 text-muted-foreground" />}
         value={repoLabel}
+        selectedValue={row.repositoryId || row.localPath || ""}
         placeholder={t("task:repository")}
         options={repoOptions}
         onSelect={onRepositoryChange}

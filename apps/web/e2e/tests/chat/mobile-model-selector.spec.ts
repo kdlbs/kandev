@@ -124,6 +124,10 @@ test.describe("Mobile chat model selector", () => {
     await expect(testPage.getByRole("option", { name: /Mock Smart/ })).toBeVisible({
       timeout: 5_000,
     });
+    const modelOptions = testPage.getByRole("option");
+    await expect(modelOptions.first()).toContainText("Mock Fast");
+    await expect(modelOptions.first()).toHaveClass(/bg-card/);
+    await expect(modelOptions.first()).toHaveClass(/border-primary\/50/);
     await expect(
       testPage.getByRole("option", { name: /Mock Fast/ }).getByTitle("Fast mock model for testing"),
     ).toBeVisible();
@@ -205,5 +209,8 @@ test.describe("Mobile chat model selector", () => {
     expect(popoverBox).not.toBeNull();
     expect(popoverBox!.x).toBeGreaterThanOrEqual(0);
     expect(popoverBox!.x + popoverBox!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      viewport!.width,
+    );
   });
 });

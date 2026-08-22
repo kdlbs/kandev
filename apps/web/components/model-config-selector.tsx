@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable max-lines -- model and dependent configuration pickers share one popover contract. */
 
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -6,6 +7,7 @@ import type { TFunction } from "i18next";
 import { IconCheck, IconChevronDown, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
+import * as selectorOptions from "@/lib/utils/selector-options";
 import { settingsControlClassName } from "@/components/settings/settings-control";
 import { Button } from "@kandev/ui/button";
 import {
@@ -27,8 +29,7 @@ export type ModelSelectorOption = {
   name: string;
   description?: string;
   usageMultiplier?: string;
-  /** When true the model is unavailable ("gone") — rendered greyed out and
-   * not selectable, with `disabledReason` shown in a tooltip. */
+  /** Unavailable models are dimmed and non-selectable with a reason tooltip. */
   disabled?: boolean;
   disabledReason?: string;
 };
@@ -202,7 +203,7 @@ function ModelRow({
       onSelect={() => !model.disabled && onSelect(model.id)}
       disabled={model.disabled}
       data-testid={selected ? "model-config-selected-row" : undefined}
-      className={cn("relative pr-7", model.disabled && "opacity-40 cursor-not-allowed")}
+      className={selectorOptions.selectorOptionClassName(selected, model.disabled)}
     >
       <div className="flex min-w-0 flex-1 items-center">
         <div className="min-w-0 flex-1">
@@ -285,6 +286,7 @@ function ConfigOptionSubSelector({
   onChange?: (configId: string, value: string) => void;
 }) {
   const { t } = useTranslation();
+  const orderedOptions = selectorOptions.prioritizeValueOption(option.options, option.currentValue);
   return (
     <div className="flex min-h-0 flex-col gap-2">
       <button
@@ -309,7 +311,7 @@ function ConfigOptionSubSelector({
         data-testid={`config-option-section-${option.id}`}
       >
         <div className="space-y-1">
-          {option.options.map((item, index) => {
+          {orderedOptions.map((item, index) => {
             const descriptionId = item.description
               ? `config-option-value-description-${option.id}-${index}`
               : undefined;
@@ -321,7 +323,7 @@ function ConfigOptionSubSelector({
                 aria-describedby={descriptionId}
                 variant={item.value === option.currentValue ? "secondary" : "ghost"}
                 size="sm"
-                className="h-auto min-h-9 w-full min-w-0 cursor-pointer justify-start px-2 py-2 text-left"
+                className={selectorOptions.configClassName(item.value === option.currentValue)}
                 disabled={!onChange}
                 onClick={() => {
                   onChange?.(option.id, item.value);
@@ -381,6 +383,7 @@ function ModelConfigSelectorContent({
   const pendingFocusConfigId = useRef<string | null>(null);
   const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const showModelFilter = modelOptions.length > 5;
+  const orderedModelOptions = selectorOptions.prioritizeIdOption(modelOptions, currentModelValue);
 
   useEffect(() => {
     if (activeConfig) return;
@@ -414,7 +417,7 @@ function ModelConfigSelectorContent({
         <CommandList className="max-h-60">
           <CommandEmpty>{t("agents:noModelsFound")}</CommandEmpty>
           <CommandGroup heading={t("agents:modelHeading")}>
-            {modelOptions.map((model) => (
+            {orderedModelOptions.map((model) => (
               <ModelRow
                 key={model.id}
                 model={model}
@@ -592,9 +595,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
     triggerSummary === "changed"
       ? triggerDetails(modelOptions, currentModel, modelConfig, extraConfigOptions, t)
       : undefined;
-  // The (fallback) marker is a live WS signal, not replayed on reload. When
-  // it is active, explain on the trigger that the note is transient so users
-  // are not surprised when the marker disappears after a refresh.
+  // The fallback marker is live-only, so explain when it is active.
   const triggerTitle = currentModelSuffix ? t("settings:fallbackNoteLive") : undefined;
 
   const hasExtraConfigOptions = extraConfigOptions.length > 0;

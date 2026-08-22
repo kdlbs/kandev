@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { IconCheck } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
+import { prioritizeSelectedOption, selectorOptionClassName } from "@/lib/utils/selector-options";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Badge } from "@kandev/ui/badge";
@@ -43,6 +45,8 @@ export type PillAction = {
 type PillProps = {
   icon: React.ReactNode;
   value: string;
+  /** Option value used for selected-first ordering when the trigger label differs. */
+  selectedValue?: string;
   placeholder: string;
   options: PillOption[];
   onSelect: (value: string) => void;
@@ -87,35 +91,48 @@ function pillActiveClass(flat: boolean): string {
 
 function PillCommandList({
   options,
+  value,
   onSelect,
   onPointerSelect,
   setOpen,
   emptyMessage,
 }: {
   options: PillOption[];
+  value: string;
   onSelect: (value: string) => void;
   onPointerSelect: (pointerType: string) => void;
   setOpen: (open: boolean) => void;
   emptyMessage: string;
 }) {
+  const orderedOptions = prioritizeSelectedOption(options, value, (option) => option.value);
+
   return (
     <CommandList>
       <CommandEmpty>{emptyMessage}</CommandEmpty>
       <CommandGroup>
-        {options.map((option) => (
-          <CommandItem
-            key={option.value}
-            value={option.value}
-            keywords={[option.label, ...(option.keywords ?? [])]}
-            onPointerDown={(event) => onPointerSelect(event.pointerType)}
-            onSelect={() => {
-              onSelect(option.value);
-              setOpen(false);
-            }}
-          >
-            {option.renderLabel ? option.renderLabel() : option.label}
-          </CommandItem>
-        ))}
+        {orderedOptions.map((option) => {
+          const selected = option.value === value;
+          return (
+            <CommandItem
+              key={option.value}
+              value={option.value}
+              keywords={[option.label, ...(option.keywords ?? [])]}
+              onPointerDown={(event) => onPointerSelect(event.pointerType)}
+              onSelect={() => {
+                onSelect(option.value);
+                setOpen(false);
+              }}
+              className={selectorOptionClassName(selected)}
+            >
+              <div className="min-w-0 flex-1">
+                {option.renderLabel ? option.renderLabel() : option.label}
+              </div>
+              <IconCheck
+                className={cn("absolute right-2 h-4 w-4", selected ? "opacity-100" : "opacity-0")}
+              />
+            </CommandItem>
+          );
+        })}
       </CommandGroup>
     </CommandList>
   );
@@ -241,6 +258,22 @@ function DisabledPillTooltip({
   );
 }
 
+function renderDisabledPillTooltip(
+  tooltipOpenState: boolean,
+  onOpenChange: (open: boolean) => void,
+  triggerButton: React.ReactNode,
+  disabledReason: string,
+): React.ReactElement {
+  return (
+    <DisabledPillTooltip
+      open={tooltipOpenState}
+      onOpenChange={onOpenChange}
+      triggerButton={triggerButton}
+      disabledReason={disabledReason}
+    />
+  );
+}
+
 function PillPopoverContent({
   filter,
   searchPlaceholder,
@@ -248,6 +281,7 @@ function PillPopoverContent({
   refreshing,
   refreshLabel,
   options,
+  value,
   onSelect,
   onPointerSelect,
   setOpen,
@@ -261,6 +295,7 @@ function PillPopoverContent({
   refreshing?: boolean;
   refreshLabel?: string;
   options: PillOption[];
+  value: string;
   onSelect: (value: string) => void;
   onPointerSelect: (pointerType: string) => void;
   setOpen: (open: boolean) => void;
@@ -310,6 +345,7 @@ function PillPopoverContent({
         </div>
         <PillCommandList
           options={options}
+          value={value}
           onSelect={onSelect}
           onPointerSelect={onPointerSelect}
           setOpen={setOpen}
@@ -330,6 +366,7 @@ function PillPopover({
   refreshing,
   refreshLabel,
   options,
+  value,
   onSelect,
   onPointerSelect,
   emptyMessage,
@@ -345,6 +382,7 @@ function PillPopover({
   refreshing?: boolean;
   refreshLabel?: string;
   options: PillOption[];
+  value: string;
   onSelect: (value: string) => void;
   onPointerSelect: (pointerType: string) => void;
   emptyMessage: string;
@@ -361,6 +399,7 @@ function PillPopover({
         refreshing={refreshing}
         refreshLabel={refreshLabel}
         options={options}
+        value={value}
         onSelect={onSelect}
         onPointerSelect={onPointerSelect}
         setOpen={setOpen}
@@ -445,6 +484,7 @@ function usePillOpenHandlers(
 export function Pill({
   icon,
   value,
+  selectedValue,
   placeholder,
   options,
   onSelect,
@@ -498,17 +538,13 @@ export function Pill({
     onPointerLeave: tooltip ? handlePointerLeave : undefined,
     onBlur: tooltip ? handleBlur : undefined,
   });
-
-  // Disabled buttons swallow pointer/focus events, so the wrapper owns tooltip
-  // focus while the button stays disabled.
+  // Disabled buttons swallow events, so the wrapper owns tooltip focus.
   if (disabled && disabledReason && !open) {
-    return (
-      <DisabledPillTooltip
-        open={tooltipOpenState}
-        onOpenChange={handleTooltipOpenChange}
-        triggerButton={triggerButton}
-        disabledReason={disabledReason}
-      />
+    return renderDisabledPillTooltip(
+      tooltipOpenState,
+      handleTooltipOpenChange,
+      triggerButton,
+      disabledReason,
     );
   }
 
@@ -525,6 +561,7 @@ export function Pill({
       refreshing={refreshing}
       refreshLabel={refreshLabel}
       options={options}
+      value={selectedValue ?? value}
       onPointerSelect={recordPointerSelection}
       onSelect={(selectedValue) => {
         if (tooltip) suppressForSelection();
@@ -538,8 +575,7 @@ export function Pill({
 
   if (!tooltip) return popover;
 
-  // Suppress the hover tooltip while the popover is open and until the pointer
-  // leaves after close, so a selection cannot disclose a tooltip underneath it.
+  // Suppress hover tooltip while open and until the pointer leaves after close.
   const tooltipOpen =
     open || suppressTooltip || suppressTooltipRef.current ? false : tooltipOpenState;
   return (
