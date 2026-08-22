@@ -1,0 +1,190 @@
+package automation
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestAutomationSchemaIncludesContinuationAndRunBindingColumns(t *testing.T) {
+	store := setupTestStore(t)
+
+	for _, column := range []string{"continuation_policy", "continuation_task_id"} {
+		var count int
+		require.NoError(t, store.db.Get(&count,
+			`SELECT COUNT(*) FROM pragma_table_info('automations') WHERE name = ?`, column))
+		require.Equal(t, 1, count, "automations.%s must be persisted", column)
+	}
+	for _, column := range []string{"session_id", "turn_id", "thread_action", "thread_reason", "display_title"} {
+		var count int
+		require.NoError(t, store.db.Get(&count,
+			`SELECT COUNT(*) FROM pragma_table_info('automation_runs') WHERE name = ?`, column))
+		require.Equal(t, 1, count, "automation_runs.%s must be persisted", column)
+	}
+}
+
+func TestCountActiveRunsIncludesAdmittedTriggeredRuns(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "ws-1", Name: "A", Enabled: true}
+	require.NoError(t, store.CreateAutomation(ctx, a))
+	require.NoError(t, store.CreateRun(ctx, &AutomationRun{
+		AutomationID: a.ID,
+		TriggerType:  TriggerTypeScheduled,
+		Status:       RunStatusTriggered,
+		TriggerData:  json.RawMessage(`{}`),
+	}))
+
+	count, err := store.CountActiveRuns(ctx, a.ID)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+}
+
+func TestAutomationContinuationPolicyDefaultsAndRoundTrips(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+
+	defaulted := &Automation{WorkspaceID: "ws-1", Name: "default", Enabled: true}
+	require.NoError(t, store.CreateAutomation(ctx, defaulted))
+	got, err := store.GetAutomation(ctx, defaulted.ID)
+	require.NoError(t, err)
+	require.Equal(t, ContinuationPolicyNewTask, got.ContinuationPolicy)
+
+	reused := &Automation{
+		WorkspaceID: "ws-1", Name: "reused", Enabled: true,
+		MaxConcurrentRuns: 1, ContinuationPolicy: ContinuationPolicyReuseThread,
+	}
+	require.NoError(t, store.CreateAutomation(ctx, reused))
+	got, err = store.GetAutomation(ctx, reused.ID)
+	require.NoError(t, err)
+	require.Equal(t, ContinuationPolicyReuseThread, got.ContinuationPolicy)
+
+	reused.ContinuationTaskID = "task-1"
+	_, err = store.db.Exec(`UPDATE automations SET continuation_task_id = ? WHERE id = ?`,
+		reused.ContinuationTaskID, reused.ID)
+	require.NoError(t, err)
+	got, err = store.GetAutomation(ctx, reused.ID)
+	require.NoError(t, err)
+	require.Equal(t, "task-1", got.ContinuationTaskID)
+
+	encoded, err := json.Marshal(got)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "continuation_task_id")
+}
+
+func TestAutomationRunPersistsExactBindingAndThreadMetadata(t *testing.T) {
+	store := setupTestStore(t)
+	run := &AutomationRun{
+		AutomationID: "automation-1", TriggerID: "trigger-1", TriggerType: TriggerTypeScheduled,
+		Status: RunStatusTaskCreated, TaskID: "task-1", SessionID: "session-1", TurnID: "turn-1",
+		ThreadAction: ThreadActionResumed, ThreadReason: "", DisplayTitle: "Nightly report",
+		TriggerData: json.RawMessage(`{"ok":true}`),
+	}
+	require.NoError(t, store.CreateRun(context.Background(), run))
+	got, err := store.GetRun(context.Background(), run.ID)
+	require.NoError(t, err)
+	require.Equal(t, run.SessionID, got.SessionID)
+	require.Equal(t, run.TurnID, got.TurnID)
+	require.Equal(t, run.ThreadAction, got.ThreadAction)
+	require.Equal(t, run.DisplayTitle, got.DisplayTitle)
+}
+
+func TestAutomationRunBindsAndSettlesExactTurn(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "ws-1", Name: "exact", MaxConcurrentRuns: 1}
+	if err := store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	run := &AutomationRun{
+		AutomationID: a.ID,
+		TriggerType:  TriggerTypeScheduled,
+		Status:       RunStatusTriggered,
+		TriggerData:  json.RawMessage(`{}`),
+	}
+	if err := store.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.BindRunTask(ctx, run.ID, "task-shared"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.BindRun(ctx, run.ID, "task-shared", "session-shared", "turn-1", ThreadActionResumed, "reused continuation"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkRunTerminalByBinding(ctx, "task-shared", "session-shared", "turn-1", RunStatusSucceeded, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != RunStatusSucceeded || got.TaskID != "task-shared" || got.SessionID != "session-shared" || got.TurnID != "turn-1" {
+		t.Fatalf("settled exact run = %+v", got)
+	}
+	if got.ThreadAction != ThreadActionResumed || got.ThreadReason != "reused continuation" {
+		t.Fatalf("thread metadata = action %q reason %q", got.ThreadAction, got.ThreadReason)
+	}
+}
+
+func TestAutomationRunTerminalBindingDoesNotSettleAnotherTurn(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "ws-1", Name: "exact", MaxConcurrentRuns: 1}
+	if err := store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	for _, turnID := range []string{"turn-1", "turn-2"} {
+		run := &AutomationRun{
+			AutomationID: a.ID,
+			TriggerType:  TriggerTypeScheduled,
+			Status:       RunStatusTaskCreated,
+			TaskID:       "task-shared",
+			SessionID:    "session-shared",
+			TurnID:       turnID,
+			TriggerData:  json.RawMessage(`{}`),
+		}
+		if err := store.CreateRun(ctx, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.MarkRunTerminalByBinding(ctx, "task-shared", "session-shared", "turn-1", RunStatusFailed, "first failed"); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := store.ListRuns(ctx, a.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range runs {
+		if run.TurnID == "turn-1" && run.Status != RunStatusFailed {
+			t.Errorf("turn-1 status = %q, want failed", run.Status)
+		}
+		if run.TurnID == "turn-2" && run.Status != RunStatusTaskCreated {
+			t.Errorf("turn-2 status = %q, want task_created", run.Status)
+		}
+	}
+}
+
+func TestReuseThreadRequiresSingleConcurrencySlot(t *testing.T) {
+	svc := newTestService(t)
+
+	_, err := svc.CreateAutomation(context.Background(), &CreateAutomationRequest{
+		WorkspaceID: "ws-1", Name: "invalid", ContinuationPolicy: ContinuationPolicyReuseThread,
+		MaxConcurrentRuns: 2,
+	})
+	require.ErrorContains(t, err, "reuse_thread requires max_concurrent_runs = 1")
+
+	a, err := svc.CreateAutomation(context.Background(), &CreateAutomationRequest{
+		WorkspaceID: "ws-1", Name: "valid", ContinuationPolicy: ContinuationPolicyReuseThread,
+		MaxConcurrentRuns: 1,
+	})
+	require.NoError(t, err)
+	tooMany := 2
+	_, err = svc.UpdateAutomation(context.Background(), a.ID, &UpdateAutomationRequest{
+		MaxConcurrentRuns: &tooMany,
+	})
+	require.ErrorContains(t, err, "reuse_thread requires max_concurrent_runs = 1")
+}

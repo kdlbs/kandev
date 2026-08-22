@@ -16,7 +16,6 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
-	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -28,6 +27,122 @@ type AutomationService interface {
 	RecordRun(ctx context.Context, run *automation.AutomationRun) error
 	MarkRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error
 	MarkRunSucceededByTaskID(ctx context.Context, taskID string) error
+}
+
+// automationRunBinding is the exact-run extension implemented by the
+// automation service. It stays separate from AutomationService so existing
+// integration stubs that exercise legacy events remain source-compatible.
+type automationRunBinding interface {
+	GetRun(ctx context.Context, id string) (*automation.AutomationRun, error)
+	BindRunTask(ctx context.Context, runID, taskID string) error
+	BindRun(ctx context.Context, runID, taskID, sessionID, turnID string, action automation.ThreadAction, reason string) error
+	MarkRunTerminal(ctx context.Context, runID, sessionID, turnID string, status automation.RunStatus, errMsg string) error
+	MarkRunTerminalByBinding(ctx context.Context, taskID, sessionID, turnID string, status automation.RunStatus, errMsg string) error
+}
+
+type automationContinuationState interface {
+	SetContinuationTaskID(ctx context.Context, automationID, taskID string) error
+}
+
+// StopAutomationRun cancels only the currently active turn identified by the
+// exact task/session/turn triple. A false result means the binding is stale or
+// already terminal and no successor turn was touched.
+func (s *Service) StopAutomationRun(ctx context.Context, taskID, sessionID, turnID string) (bool, error) {
+	if taskID == "" || sessionID == "" || turnID == "" || s.turnService == nil || s.executor == nil {
+		return false, nil
+	}
+	valid, err := s.automationTurnMatches(ctx, taskID, sessionID, turnID, true)
+	if err != nil {
+		return false, err
+	}
+	if !valid {
+		return false, nil
+	}
+	return s.stopTaskSessionForCoordinator(ctx, taskID, sessionID)
+}
+
+// AutomationRunLive is the conservative liveness check used during startup
+// recovery. A session that is still starting/running, an exact open turn, or a
+// live permission blocker remains open. Missing runtime state is not enough to
+// keep a parked/stale binding open forever.
+func (s *Service) AutomationRunLive(ctx context.Context, taskID, sessionID, turnID string) (bool, error) {
+	if taskID == "" || sessionID == "" || turnID == "" || s.turnService == nil {
+		return false, nil
+	}
+	session, valid, err := s.loadAutomationCoordinatorSession(ctx, taskID, sessionID, false)
+	if err != nil {
+		return false, err
+	}
+	if !valid {
+		return false, nil
+	}
+	active, err := s.coordinatorActiveTurn(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	if active != nil && active.ID == turnID {
+		return true, nil
+	}
+	if isCoordinatorLiveSessionState(session.State) {
+		return true, nil
+	}
+	return s.hasPendingCoordinatorPermissions(ctx, sessionID)
+}
+
+func (s *Service) automationTurnMatches(ctx context.Context, taskID, sessionID, turnID string, requireStoppable bool) (bool, error) {
+	session, valid, err := s.loadAutomationCoordinatorSession(ctx, taskID, sessionID, requireStoppable)
+	if err != nil || !valid {
+		return valid, err
+	}
+	active, err := s.coordinatorActiveTurn(ctx, session.ID)
+	if err != nil {
+		return false, err
+	}
+	return active != nil && active.ID == turnID, nil
+}
+
+func (s *Service) loadAutomationCoordinatorSession(ctx context.Context, taskID, sessionID string, requireStoppable bool) (*models.TaskSession, bool, error) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, false, err
+	}
+	if task == nil || task.Origin != models.TaskOriginAutomationRun {
+		return nil, false, nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	if session == nil || session.TaskID != taskID {
+		return nil, false, nil
+	}
+	if requireStoppable && !isCoordinatorStoppableSessionState(session.State) {
+		return nil, false, nil
+	}
+	return session, true, nil
+}
+
+func (s *Service) coordinatorActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	active, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if isNoActiveTurnError(err) {
+		return nil, nil
+	}
+	return active, err
+}
+
+func isCoordinatorLiveSessionState(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateStarting || state == models.TaskSessionStateRunning
+}
+
+func (s *Service) hasPendingCoordinatorPermissions(ctx context.Context, sessionID string) (bool, error) {
+	if s.executor == nil {
+		return false, nil
+	}
+	permissions, err := s.executor.ListPendingPermissions(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return len(permissions) > 0, nil
 }
 
 // taskCleaner deletes a task a firing has abandoned.
@@ -124,6 +239,7 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 	if !a.Enabled {
 		s.logger.Debug("automation disabled, skipping",
 			zap.String("automation_id", evt.AutomationID))
+		s.recordFailedRun(ctx, evt, "automation is disabled")
 		return
 	}
 
@@ -134,16 +250,11 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 	}
 
 	title := s.resolveAutomationTaskTitle(a, evt)
-	repositories := s.resolveAutomationRepository(ctx, a, evt)
-	if len(repositories) == 0 {
-		errMsg := "no repository available; add a repository to the workspace"
-		s.logger.Warn("automation skipped: "+errMsg,
-			zap.String("automation_id", a.ID),
-			zap.String("workspace_id", a.WorkspaceID))
-		s.recordFailedRun(ctx, evt, errMsg)
-		return
+	if binding, ok := s.automationService.(automationRunBinding); ok && evt.RunID != "" {
+		if run, runErr := binding.GetRun(ctx, evt.RunID); runErr == nil && run != nil && run.DisplayTitle != "" {
+			title = run.DisplayTitle
+		}
 	}
-
 	metadata := map[string]interface{}{
 		"automation_id":                 a.ID,
 		"automation_name":               a.Name,
@@ -160,25 +271,10 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 		metadata[models.MetaKeyAutomationTargetTaskID] = triggerData.TaskID
 	}
 
-	// Every automation produces the same kind of run: an ordinary, persistent
-	// task tagged with origin=automation_run. The origin — not is_ephemeral —
-	// is what keeps it off the kanban and out of task lists, so the task keeps
-	// its worktree and stays repliable. Workflow fields are passed through as
-	// configured; they are optional and nothing about the row is special-cased
-	// on write.
-	task, taskErr := s.reviewTaskCreator.CreateReviewTask(ctx, &ReviewTaskRequest{
-		WorkspaceID:    a.WorkspaceID,
-		WorkflowID:     a.WorkflowID,
-		WorkflowStepID: a.WorkflowStepID,
-		Title:          title,
-		Description:    prompt,
-		Repositories:   repositories,
-		Metadata:       metadata,
-		Origin:         models.TaskOriginAutomationRun,
-	})
+	task, continuationSession, action, reason, taskErr := s.prepareAutomationTask(
+		ctx, a, evt, title, prompt, metadata,
+	)
 	if taskErr != nil {
-		s.logger.Error("failed to create automation task",
-			zap.String("automation_id", a.ID), zap.Error(taskErr))
 		s.recordFailedRun(ctx, evt, taskErr.Error())
 		return
 	}
@@ -200,7 +296,9 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 
 	// Associate PR with task for github_pr triggers (same as PR Watcher).
 	if evt.TriggerType == automation.TriggerTypeGitHubPR {
-		s.associateAutomationPR(ctx, task.ID, repositories[0].RepositoryID, evt.TriggerData)
+		if repositories := s.resolveAutomationRepository(ctx, a, evt); len(repositories) > 0 {
+			s.associateAutomationPR(ctx, task.ID, repositories[0].RepositoryID, evt.TriggerData)
+		}
 	}
 
 	s.logger.Info("created automation task",
@@ -208,15 +306,212 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 		zap.String("automation_id", a.ID),
 		zap.String("trigger_type", string(evt.TriggerType)))
 
+	if continuationSession != nil {
+		s.dispatchAutomationContinuation(ctx, a, task, continuationSession, prompt, evt.RunID, action, reason)
+		return
+	}
+
 	// Auto-start unconditionally: nobody opens an automation's task to drag
 	// it, so the trigger has to be the start signal. A workflow step's
 	// auto_start_agent setting is irrelevant here — it describes board
 	// behaviour and automation runs never reach the board.
-	s.autoStartAutomationTask(ctx, a, task, task.WorkflowStepID)
+	s.autoStartAutomationTaskForRun(ctx, a, task, task.WorkflowStepID, evt.RunID, action, reason)
+}
+
+func (s *Service) prepareAutomationTask(
+	ctx context.Context,
+	a *automation.Automation,
+	evt *automation.AutomationTriggeredEvent,
+	title, prompt string,
+	metadata map[string]interface{},
+) (*models.Task, *models.TaskSession, automation.ThreadAction, string, error) {
+	action := automation.ThreadActionCreated
+	reason := "new task created for automation run"
+	var task *models.Task
+	var continuationSession *models.TaskSession
+	if a.ContinuationPolicy == automation.ContinuationPolicyReuseThread {
+		task, continuationSession, reason = s.findAutomationContinuation(ctx, a, evt)
+		if task != nil {
+			action = automation.ThreadActionResumed
+		} else if a.ContinuationTaskID != "" {
+			action = automation.ThreadActionReplaced
+		}
+	}
+	if task != nil {
+		return task, continuationSession, action, reason, nil
+	}
+
+	repositories := s.resolveAutomationRepository(ctx, a, evt)
+	if len(repositories) == 0 {
+		return nil, nil, action, reason, fmt.Errorf("no repository available; add a repository to the workspace")
+	}
+	task, err := s.reviewTaskCreator.CreateReviewTask(ctx, &ReviewTaskRequest{
+		WorkspaceID:    a.WorkspaceID,
+		WorkflowID:     a.WorkflowID,
+		WorkflowStepID: a.WorkflowStepID,
+		Title:          title,
+		Description:    prompt,
+		Repositories:   repositories,
+		Metadata:       metadata,
+		Origin:         models.TaskOriginAutomationRun,
+	})
+	if err != nil {
+		return nil, nil, action, reason, fmt.Errorf("create automation task: %w", err)
+	}
+	if a.ContinuationPolicy != automation.ContinuationPolicyReuseThread {
+		return task, nil, action, reason, nil
+	}
+	state, ok := s.automationService.(automationContinuationState)
+	if !ok {
+		s.deleteAbandonedTask(ctx, a.ID, task.ID)
+		return nil, nil, action, reason, fmt.Errorf("automation continuation state is unavailable")
+	}
+	if err := state.SetContinuationTaskID(ctx, a.ID, task.ID); err != nil {
+		s.deleteAbandonedTask(ctx, a.ID, task.ID)
+		return nil, nil, action, reason, err
+	}
+	if action == automation.ThreadActionReplaced {
+		reason = "previous continuation was unavailable; created a replacement task"
+	}
+	return task, nil, action, reason, nil
+}
+
+func (s *Service) findAutomationContinuation(ctx context.Context, a *automation.Automation, evt *automation.AutomationTriggeredEvent) (*models.Task, *models.TaskSession, string) {
+	if a.ContinuationTaskID == "" {
+		return nil, nil, "no continuation task exists; created the first task"
+	}
+	task, err := s.repo.GetTask(ctx, a.ContinuationTaskID)
+	if err != nil || task == nil {
+		return nil, nil, "previous continuation task was not found"
+	}
+	if reason := s.continuationTaskIncompatibility(ctx, a, evt, task); reason != "" {
+		return nil, nil, reason
+	}
+	session, reason := s.continuationSession(ctx, task.ID)
+	if reason != "" {
+		return nil, nil, reason
+	}
+	return task, session, "continued the previous task and session"
+}
+
+func (s *Service) continuationTaskIncompatibility(ctx context.Context, a *automation.Automation, evt *automation.AutomationTriggeredEvent, task *models.Task) string {
+	if task.WorkspaceID != a.WorkspaceID || task.Origin != models.TaskOriginAutomationRun || task.ArchivedAt != nil {
+		return "previous continuation task is not compatible"
+	}
+	if task.WorkflowID != a.WorkflowID || task.WorkflowStepID != a.WorkflowStepID {
+		return "previous continuation task uses a different workflow"
+	}
+	if metadataString(task.Metadata, models.MetaKeyAgentProfileID) != a.AgentProfileID ||
+		metadataString(task.Metadata, models.MetaKeyExecutorProfileID) != a.ExecutorProfileID {
+		return "previous continuation task uses different runtime profiles"
+	}
+	if !s.continuationRepositoriesMatch(ctx, a, evt, task) {
+		return "previous continuation task uses different repositories"
+	}
+	return ""
+}
+
+func (s *Service) continuationRepositoriesMatch(ctx context.Context, a *automation.Automation, evt *automation.AutomationTriggeredEvent, task *models.Task) bool {
+	expected := s.resolveAutomationRepository(ctx, a, evt)
+	if sameAutomationRepositoryIDs(task.Repositories, expected) {
+		return true
+	}
+	store, ok := s.repo.(interface {
+		ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error)
+	})
+	if !ok {
+		return false
+	}
+	links, err := store.ListTaskRepositories(ctx, task.ID)
+	return err == nil && sameAutomationRepositoryIDs(links, expected)
+}
+
+func (s *Service) continuationSession(ctx context.Context, taskID string) (*models.TaskSession, string) {
+	lookup, ok := s.repo.(interface {
+		GetTaskSessionByTaskID(context.Context, string) (*models.TaskSession, error)
+	})
+	if !ok {
+		return nil, "task session lookup is unavailable"
+	}
+	session, err := lookup.GetTaskSessionByTaskID(ctx, taskID)
+	if err != nil || session == nil {
+		return nil, "previous continuation session was not found"
+	}
+	if session.State != models.TaskSessionStateWaitingForInput && session.State != models.TaskSessionStateIdle {
+		return nil, "previous continuation session is not ready"
+	}
+	return session, ""
+}
+
+func metadataString(metadata map[string]interface{}, key string) string {
+	value, _ := metadata[key].(string)
+	return value
+}
+
+func sameAutomationRepositoryIDs(taskRepos []*models.TaskRepository, expected []ReviewTaskRepository) bool {
+	if len(taskRepos) != len(expected) {
+		return false
+	}
+	for i, expectedRepo := range expected {
+		if taskRepos[i] == nil || taskRepos[i].RepositoryID != expectedRepo.RepositoryID {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Service) dispatchAutomationContinuation(ctx context.Context, a *automation.Automation, task *models.Task, session *models.TaskSession, prompt, runID string, action automation.ThreadAction, reason string) {
+	result, err := s.PromptTask(ctx, task.ID, session.ID, prompt, "", false, nil, true)
+	if err != nil {
+		s.logger.Error("failed to dispatch automation continuation",
+			zap.String("automation_id", a.ID), zap.String("task_id", task.ID), zap.String("session_id", session.ID), zap.Error(err))
+		if !s.markExactAutomationRunTerminal(ctx, runID, session.ID, "", false, err.Error()) {
+			s.markAutomationRunTerminal(ctx, task.ID, false, err.Error())
+		}
+		return
+	}
+	turnID := ""
+	if result != nil {
+		turnID = result.TurnID
+	}
+	if turnID == "" && s.turnService != nil {
+		if active, turnErr := s.turnService.GetActiveTurn(ctx, session.ID); turnErr == nil && active != nil {
+			turnID = active.ID
+		}
+	}
+	if turnID == "" {
+		errMsg := "automation continuation dispatch returned no turn identity"
+		s.markExactAutomationRunTerminal(ctx, runID, session.ID, "", false, errMsg)
+		return
+	}
+	s.recordAutomationContinuationMessage(ctx, task.ID, session.ID, turnID, prompt)
+	if runID != "" {
+		if binding, ok := s.automationService.(automationRunBinding); ok {
+			if err := binding.BindRun(ctx, runID, task.ID, session.ID, turnID, action, reason); err != nil {
+				s.logger.Error("failed to bind automation continuation run",
+					zap.String("run_id", runID), zap.String("task_id", task.ID), zap.String("turn_id", turnID), zap.Error(err))
+				s.markExactAutomationRunTerminal(ctx, runID, session.ID, turnID, false, err.Error())
+			}
+		}
+	}
+}
+
+func (s *Service) recordAutomationContinuationMessage(ctx context.Context, taskID, sessionID, turnID, prompt string) {
+	if s.messageCreator == nil || prompt == "" || turnID == "" {
+		return
+	}
+	meta := NewUserMessageMeta().WithAutoStart(true)
+	if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, turnID, meta.ToMap()); err != nil {
+		s.logger.Warn("failed to record automation continuation prompt", zap.String("task_id", taskID), zap.String("turn_id", turnID), zap.Error(err))
+	}
 }
 
 func (s *Service) autoStartAutomationTask(ctx context.Context, a *automation.Automation, task *models.Task, workflowStepID string) {
-	_, err := s.StartTask(
+	s.autoStartAutomationTaskForRun(ctx, a, task, workflowStepID, "", automation.ThreadActionCreated, "")
+}
+
+func (s *Service) autoStartAutomationTaskForRun(ctx context.Context, a *automation.Automation, task *models.Task, workflowStepID, runID string, action automation.ThreadAction, reason string) {
+	execution, err := s.StartTask(
 		ctx,
 		task.ID,
 		a.AgentProfileID,
@@ -236,8 +531,20 @@ func (s *Service) autoStartAutomationTask(ctx context.Context, a *automation.Aut
 		// happened would otherwise sit at task_created forever and hold a
 		// max_concurrent_runs slot — one failed launch would stop the
 		// automation permanently, with no completion event coming to free it.
-		s.markAutomationRunTerminal(ctx, task.ID, false, err.Error())
+		if !s.markExactAutomationRunTerminal(ctx, runID, "", "", false, err.Error()) {
+			s.markAutomationRunTerminal(ctx, task.ID, false, err.Error())
+		}
 		return
+	}
+	if runID != "" {
+		if binding, ok := s.automationService.(automationRunBinding); ok {
+			if bindErr := binding.BindRun(ctx, runID, task.ID, execution.SessionID, execution.TurnID, action, reason); bindErr != nil {
+				s.logger.Error("failed to bind automation run to dispatched turn",
+					zap.String("run_id", runID), zap.String("task_id", task.ID), zap.Error(bindErr))
+				s.markExactAutomationRunTerminal(ctx, runID, execution.SessionID, execution.TurnID, false, bindErr.Error())
+				return
+			}
+		}
 	}
 	s.logger.Info("auto-started automation task",
 		zap.String("task_id", task.ID),
@@ -366,20 +673,7 @@ func (s *Service) resolveWorkspaceRepository(
 
 // resolveAutomationTaskTitle builds the task title from the automation's template or falls back to a default.
 func (s *Service) resolveAutomationTaskTitle(a *automation.Automation, evt *automation.AutomationTriggeredEvent) string {
-	if a.TaskTitleTemplate != "" {
-		title := automation.InterpolatePrompt(a.TaskTitleTemplate, evt.TriggerType, evt.TriggerData)
-		if title != "" {
-			return taskservice.TruncateTaskTitle(title)
-		}
-	}
-	// Fall back to trigger type default from registry.
-	if info := automation.GetTriggerTypeInfo(evt.TriggerType); info != nil && info.DefaultTaskTitle != "" {
-		title := automation.InterpolatePrompt(info.DefaultTaskTitle, evt.TriggerType, evt.TriggerData)
-		if title != "" {
-			return taskservice.TruncateTaskTitle(title)
-		}
-	}
-	return taskservice.TruncateTaskTitle(fmt.Sprintf("[Auto] %s", a.Name))
+	return automation.RenderRunDisplayTitle(a, evt.TriggerType, evt.TriggerData)
 }
 
 // associateAutomationPR links a task to a GitHub PR using trigger data.
@@ -431,6 +725,9 @@ func (s *Service) recordFailedRun(ctx context.Context, evt *automation.Automatio
 	if s.automationService == nil {
 		return
 	}
+	if s.markExactAutomationRunTerminal(ctx, evt.RunID, "", "", false, errMsg) {
+		return
+	}
 	// github_pr_merged pre-task-failure rows must NOT consume the dedup key so
 	// that a later event for the same PR can retry. All recordFailedRun call
 	// sites are pre-task-creation, so blanking is always correct for this type.
@@ -461,6 +758,7 @@ func (s *Service) recordFailedRun(ctx context.Context, evt *automation.Automatio
 // orphaned — hidden by its origin, pointed at by no run — and only a human
 // reading this line will know it is there.
 func (s *Service) deleteAbandonedTask(ctx context.Context, automationID, taskID string) {
+	s.clearAbandonedContinuation(ctx, automationID, taskID)
 	cleaner, ok := s.repo.(taskCleaner)
 	if !ok {
 		return
@@ -473,11 +771,38 @@ func (s *Service) deleteAbandonedTask(ctx context.Context, automationID, taskID 
 	}
 }
 
+func (s *Service) clearAbandonedContinuation(ctx context.Context, automationID, taskID string) {
+	if s.automationService == nil {
+		return
+	}
+	state, ok := s.automationService.(automationContinuationState)
+	if !ok {
+		return
+	}
+	current, err := s.automationService.GetAutomation(ctx, automationID)
+	if err != nil || current == nil || current.ContinuationTaskID != taskID {
+		return
+	}
+	if err := state.SetContinuationTaskID(ctx, automationID, ""); err != nil {
+		s.logger.Error("failed to clear abandoned automation continuation",
+			zap.String("automation_id", automationID),
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+}
+
 func (s *Service) recordSuccessRun(
 	ctx context.Context, evt *automation.AutomationTriggeredEvent, taskID string,
 ) error {
 	if s.automationService == nil {
 		return nil
+	}
+	if evt.RunID != "" {
+		binding, ok := s.automationService.(automationRunBinding)
+		if !ok {
+			return fmt.Errorf("automation service cannot bind admitted run %s", evt.RunID)
+		}
+		return binding.BindRunTask(ctx, evt.RunID, taskID)
 	}
 	run := &automation.AutomationRun{
 		AutomationID: evt.AutomationID,
@@ -491,12 +816,37 @@ func (s *Service) recordSuccessRun(
 	return s.automationService.RecordRun(ctx, run)
 }
 
+func (s *Service) markExactAutomationRunTerminal(ctx context.Context, runID, sessionID, turnID string, success bool, errMsg string) bool {
+	if runID == "" || s.automationService == nil {
+		return false
+	}
+	binding, ok := s.automationService.(automationRunBinding)
+	if !ok {
+		return false
+	}
+	status := automation.RunStatusFailed
+	if success {
+		status = automation.RunStatusSucceeded
+	}
+	if err := binding.MarkRunTerminal(ctx, runID, sessionID, turnID, status, errMsg); err != nil {
+		s.logger.Warn("failed to update exact automation run terminal status",
+			zap.String("run_id", runID), zap.String("session_id", sessionID), zap.String("turn_id", turnID), zap.Error(err))
+	}
+	return true
+}
+
 // handleAutomationTurnComplete closes out an automation run on the stream
 // complete event. ACP agents can stay alive after stop_reason=end_turn, so
 // waiting for agent.completed would leave the AutomationRun stuck at
 // task_created and keep the executor alive.
 func (s *Service) handleAutomationTurnComplete(
 	ctx context.Context, taskID, sessionID string, session *models.TaskSession, stopReason string, isError bool, errMsg string,
+) bool {
+	return s.handleAutomationTurnCompleteForTurn(ctx, taskID, sessionID, session, "", stopReason, isError, errMsg)
+}
+
+func (s *Service) handleAutomationTurnCompleteForTurn(
+	ctx context.Context, taskID, sessionID string, session *models.TaskSession, turnID, stopReason string, isError bool, errMsg string,
 ) bool {
 	if taskID == "" || sessionID == "" {
 		return false
@@ -530,7 +880,7 @@ func (s *Service) handleAutomationTurnComplete(
 		nextState = models.TaskSessionStateFailed
 	}
 	s.updateTaskSessionState(ctx, taskID, sessionID, nextState, errMsg, false, session)
-	s.markAutomationRunTerminal(ctx, taskID, success, errMsg)
+	s.markAutomationRunTerminalForTurn(ctx, taskID, sessionID, turnID, success, errMsg)
 	s.stopAutomationAgent(ctx, taskID, sessionID, session)
 	// The worktree is deliberately left in place: the files a run writes are
 	// usually the point of running it, and an agent that ends by asking a
@@ -577,6 +927,26 @@ func (s *Service) markAutomationRunTerminal(ctx context.Context, taskID string, 
 	// retention window and pushes the oldest one out, so this is the only hook
 	// that keeps up with the firing rate on its own — no sweeper, no schedule.
 	s.pruneAutomationRunWorktrees(ctx, taskID)
+}
+
+func (s *Service) markAutomationRunTerminalForTurn(ctx context.Context, taskID, sessionID, turnID string, success bool, errMsg string) {
+	if turnID == "" {
+		s.markAutomationRunTerminal(ctx, taskID, success, errMsg)
+		return
+	}
+	binding, ok := s.automationService.(automationRunBinding)
+	if !ok {
+		s.markAutomationRunTerminal(ctx, taskID, success, errMsg)
+		return
+	}
+	status := automation.RunStatusFailed
+	if success {
+		status = automation.RunStatusSucceeded
+	}
+	if err := binding.MarkRunTerminalByBinding(ctx, taskID, sessionID, turnID, status, errMsg); err != nil {
+		s.logger.Warn("failed to update automation run by exact turn binding",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.String("turn_id", turnID), zap.Error(err))
+	}
 }
 
 // pruneAutomationRunWorktrees reclaims the workspaces of the runs that just

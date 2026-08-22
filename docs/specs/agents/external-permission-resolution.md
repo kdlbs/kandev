@@ -21,15 +21,17 @@ another client such as Hermes.
 
 ## What
 
-- The external Kandev MCP endpoint exposes one read-only tool that lists pending agent
-  permission requests for a task, optionally limited to one task session.
+- The external Kandev MCP endpoint exposes one read-only tool that lists pending agent permission
+  requests for a task, optionally limited to one task session. The fixed automation MCP profile
+  exposes the same tool to every automation-run task within its workspace.
 - Each result identifies the exact task, task session, Kandev request generation, provider
   pending request, and originating tool call. It includes creation time, pending status, a safe
   human-readable action presentation, and every provider-offered choice with its immutable
   option ID, label, and kind.
-- The external endpoint exposes one mutation tool that selects exactly one option from exactly
-  one listed request. It accepts no command, tool arguments, replacement option, cancellation
-  flag, or free-form approval text.
+- The external endpoint exposes one mutation tool that selects exactly one option from exactly one
+  listed request. The fixed automation MCP profile exposes the same tool together with discovery;
+  there is no per-automation permission-tool setting. It accepts no command, tool arguments,
+  replacement option, cancellation flag, or free-form approval text.
 - A resolution is accepted only while the complete task/session/request/pending identity still
   names the live request and the selected option is byte-for-byte one of that request's offered
   option IDs.
@@ -79,7 +81,7 @@ display options, and status in metadata. Its resolution audit records:
 | `claim_id` | string | Opaque identity for one serialized resolution attempt |
 | `actor_user_id` | string | Kandev user identity; synthetic single-user identity is recorded as synthetic |
 | `actor_kind` | enum | `browser`, `personal_access_token`, `automation`, or `synthetic` |
-| `source` | enum | `web`, `external_mcp`, or existing internal automation source |
+| `source` | enum | `web`, `external_mcp`, `automation_mcp`, or existing internal automation source |
 | `request_id` / `pending_id` | string | Exact request identities selected |
 | `option_id` / `option_kind` | string | Exact provider-offered option identity and semantics |
 | `selected_at` / `finalized_at` | timestamp | UTC audit times; finalization may be absent after abrupt shutdown |
@@ -196,6 +198,16 @@ Stable failure codes are:
 - The `external_mcp` audit source is derived only from the process-local transport attestation set
   by the authenticated external `/mcp` bridge. Shared in-session dispatcher calls and raw
   WebSocket traffic cannot supply or forge that source.
+- An automation-run MCP server injects its caller task ID outside the tool schema. The backend
+  resolves one trusted automation principal before handler dispatch, containing the automation ID,
+  workspace, caller task, and caller session. It requires the target task/session to belong to the
+  same workspace and forbids the caller's own task and every session on it before reading live
+  runtime state or claiming a resolution. Missing metadata, self targets, and foreign targets fail
+  closed.
+- The `automation_mcp` audit source and automation actor are derived only after that trusted scope
+  resolves. The request cannot supply the source, actor, workspace, or surface. The fixed
+  automation profile does not become personal-access-token authority and does not grant access to
+  another workspace owned by the same user.
 - Unauthorized and nonexistent task/session identities use the same not-found result.
 
 ## Failure modes
@@ -260,6 +272,16 @@ Stable failure codes are:
 - **GIVEN** the existing web UI displays a permission prompt, **WHEN** the user selects one of its
   choices, **THEN** the UI submits the request generation and retains its existing pending,
   approved/rejected, and expired behavior.
+- **GIVEN** an automation session starts or resumes, **WHEN** it discovers MCP tools, **THEN** both
+  permission discovery and resolution tools are present without a per-automation setting.
+- **GIVEN** an automation resolves an offered option for a task in its workspace, **WHEN** the live
+  request still matches, **THEN** the live runtime remains authoritative and the audit records an
+  automation actor with source `automation_mcp`.
+- **GIVEN** an automation names a task or session in another workspace, **WHEN** it lists or
+  resolves, **THEN** the request returns not-found without reading or mutating that runtime.
+- **GIVEN** an automation names its own task or any session on that task, **WHEN** it lists or
+  resolves, **THEN** the request returns not-found and the provider prompt remains pending for a
+  person.
 
 ## Out of scope
 

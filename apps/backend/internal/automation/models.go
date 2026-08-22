@@ -70,6 +70,24 @@ const (
 	RunStatusCancelled RunStatus = "cancelled"
 )
 
+// ContinuationPolicy controls whether a firing receives an isolated task or
+// continues the automation's durable thread.
+type ContinuationPolicy string
+
+const (
+	ContinuationPolicyNewTask     ContinuationPolicy = "new_task"
+	ContinuationPolicyReuseThread ContinuationPolicy = "reuse_thread"
+)
+
+// ThreadAction describes how a dispatched run reached its task/session.
+type ThreadAction string
+
+const (
+	ThreadActionCreated  ThreadAction = "created"
+	ThreadActionResumed  ThreadAction = "resumed"
+	ThreadActionReplaced ThreadAction = "replaced"
+)
+
 // Automation is a named rule with triggers, a prompt template, and agent/executor config.
 type Automation struct {
 	ID          string `json:"id" db:"id"`
@@ -78,18 +96,23 @@ type Automation struct {
 	Description string `json:"description" db:"description"`
 	// WorkflowID / WorkflowStepID are optional: no automation run is placed
 	// on a board, so no automation needs a starting column.
-	WorkflowID        string     `json:"workflow_id" db:"workflow_id"`
-	WorkflowStepID    string     `json:"workflow_step_id" db:"workflow_step_id"`
-	AgentProfileID    string     `json:"agent_profile_id" db:"agent_profile_id"`
-	ExecutorProfileID string     `json:"executor_profile_id" db:"executor_profile_id"`
-	Prompt            string     `json:"prompt" db:"prompt"`
-	TaskTitleTemplate string     `json:"task_title_template" db:"task_title_template"`
-	Enabled           bool       `json:"enabled" db:"enabled"`
-	MaxConcurrentRuns int        `json:"max_concurrent_runs" db:"max_concurrent_runs"`
-	WebhookSecret     string     `json:"-" db:"webhook_secret"`
-	LastTriggeredAt   *time.Time `json:"last_triggered_at,omitempty" db:"last_triggered_at"`
-	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at" db:"updated_at"`
+	WorkflowID         string             `json:"workflow_id" db:"workflow_id"`
+	WorkflowStepID     string             `json:"workflow_step_id" db:"workflow_step_id"`
+	AgentProfileID     string             `json:"agent_profile_id" db:"agent_profile_id"`
+	ExecutorProfileID  string             `json:"executor_profile_id" db:"executor_profile_id"`
+	Prompt             string             `json:"prompt" db:"prompt"`
+	TaskTitleTemplate  string             `json:"task_title_template" db:"task_title_template"`
+	Enabled            bool               `json:"enabled" db:"enabled"`
+	MaxConcurrentRuns  int                `json:"max_concurrent_runs" db:"max_concurrent_runs"`
+	ContinuationPolicy ContinuationPolicy `json:"continuation_policy" db:"continuation_policy"`
+	// ContinuationTaskID is runtime state. It is intentionally omitted from
+	// the public automation JSON because the saved task is not portable
+	// configuration and may be deleted or replaced by the server.
+	ContinuationTaskID string     `json:"-" db:"continuation_task_id"`
+	WebhookSecret      string     `json:"-" db:"webhook_secret"`
+	LastTriggeredAt    *time.Time `json:"last_triggered_at,omitempty" db:"last_triggered_at"`
+	CreatedAt          time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at" db:"updated_at"`
 
 	// LegacyBoardCard reports that this automation was created while the
 	// withdrawn execution_mode still decided where a firing landed, and that
@@ -151,7 +174,11 @@ type AutomationRun struct {
 	Summary string `json:"summary,omitempty" db:"summary"`
 	// SessionID is the run's primary conversation, empty when the task is gone
 	// or never started one. The detail view mounts the transcript from it.
-	SessionID string `json:"session_id,omitempty" db:"session_id"`
+	SessionID    string       `json:"session_id,omitempty" db:"session_id"`
+	TurnID       string       `json:"turn_id,omitempty" db:"turn_id"`
+	ThreadAction ThreadAction `json:"thread_action,omitempty" db:"thread_action"`
+	ThreadReason string       `json:"thread_reason,omitempty" db:"thread_reason"`
+	DisplayTitle string       `json:"display_title,omitempty" db:"display_title"`
 }
 
 // WorkspaceAutomationRun is a run carrying just enough of its owning
@@ -238,18 +265,19 @@ type TaskOriginLookup interface {
 
 // CreateAutomationRequest is the payload for creating an automation.
 type CreateAutomationRequest struct {
-	WorkspaceID       string              `json:"workspace_id"`
-	Name              string              `json:"name"`
-	Description       string              `json:"description"`
-	WorkflowID        string              `json:"workflow_id"`
-	WorkflowStepID    string              `json:"workflow_step_id"`
-	AgentProfileID    string              `json:"agent_profile_id"`
-	ExecutorProfileID string              `json:"executor_profile_id"`
-	RepositoryIDs     []string            `json:"repository_ids"`
-	Prompt            string              `json:"prompt"`
-	TaskTitleTemplate string              `json:"task_title_template"`
-	MaxConcurrentRuns int                 `json:"max_concurrent_runs"`
-	Triggers          []CreateTriggerSpec `json:"triggers"`
+	WorkspaceID        string              `json:"workspace_id"`
+	Name               string              `json:"name"`
+	Description        string              `json:"description"`
+	WorkflowID         string              `json:"workflow_id"`
+	WorkflowStepID     string              `json:"workflow_step_id"`
+	AgentProfileID     string              `json:"agent_profile_id"`
+	ExecutorProfileID  string              `json:"executor_profile_id"`
+	RepositoryIDs      []string            `json:"repository_ids"`
+	Prompt             string              `json:"prompt"`
+	TaskTitleTemplate  string              `json:"task_title_template"`
+	MaxConcurrentRuns  int                 `json:"max_concurrent_runs"`
+	ContinuationPolicy ContinuationPolicy  `json:"continuation_policy,omitempty"`
+	Triggers           []CreateTriggerSpec `json:"triggers"`
 }
 
 // CreateTriggerSpec defines a trigger to add during automation creation.
@@ -269,11 +297,12 @@ type UpdateAutomationRequest struct {
 	ExecutorProfileID *string `json:"executor_profile_id,omitempty"`
 	// RepositoryIDs replaces the automation's repository list when non-nil.
 	// nil means "leave unchanged"; an explicit empty slice clears it.
-	RepositoryIDs     []string `json:"repository_ids,omitempty"`
-	Prompt            *string  `json:"prompt,omitempty"`
-	TaskTitleTemplate *string  `json:"task_title_template,omitempty"`
-	Enabled           *bool    `json:"enabled,omitempty"`
-	MaxConcurrentRuns *int     `json:"max_concurrent_runs,omitempty"`
+	RepositoryIDs      []string            `json:"repository_ids,omitempty"`
+	Prompt             *string             `json:"prompt,omitempty"`
+	TaskTitleTemplate  *string             `json:"task_title_template,omitempty"`
+	Enabled            *bool               `json:"enabled,omitempty"`
+	MaxConcurrentRuns  *int                `json:"max_concurrent_runs,omitempty"`
+	ContinuationPolicy *ContinuationPolicy `json:"continuation_policy,omitempty"`
 }
 
 // AddTriggerRequest adds a trigger to an existing automation.
@@ -307,6 +336,7 @@ type RevealWebhookSecretResponse struct {
 
 // AutomationTriggeredEvent is published when a trigger fires.
 type AutomationTriggeredEvent struct {
+	RunID        string          `json:"run_id"`
 	AutomationID string          `json:"automation_id"`
 	TriggerID    string          `json:"trigger_id"`
 	TriggerType  TriggerType     `json:"trigger_type"`

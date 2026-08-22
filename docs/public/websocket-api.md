@@ -489,6 +489,7 @@ automation.enable
 automation.get
 automation.list
 automation.run.delete
+automation.run.stop
 automation.runs.delete_all
 automation.runs.list
 automation.runs.list_workspace
@@ -504,6 +505,11 @@ automation.webhook.reveal_secret
 ```
 
 These are trusted local-administration operations. In particular, `secrets.reveal` and `automation.webhook.reveal_secret` make the lack of WebSocket authentication security-critical.
+
+`automation.run.stop` requires `automation_id` and `run_id`. It cancels the
+selected open run's exact task/session/turn binding and returns `{run_id,
+status}`. A stale or terminal binding returns not found; it never stops another
+turn that happens to share the same task or session.
 
 ### GitHub and GitLab
 

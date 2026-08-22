@@ -1,6 +1,7 @@
 import { createRepositoryAction } from "@/app/actions/workspaces";
 import type {
   CreateAutomationRequest,
+  ContinuationPolicy,
   TriggerType,
   UpdateAutomationRequest,
 } from "@/lib/types/automation";
@@ -29,6 +30,7 @@ export type FormState = {
   taskTitleTemplate: string;
   enabled: boolean;
   maxConcurrentRuns: number;
+  continuationPolicy: ContinuationPolicy;
 };
 
 export type PendingTrigger = {
@@ -137,6 +139,7 @@ export function buildCreatePayload(
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
     max_concurrent_runs: form.maxConcurrentRuns,
+    continuation_policy: form.continuationPolicy,
     triggers: pending.map((t) => ({ type: t.type, config: t.config, enabled: t.enabled })),
   };
 }
@@ -157,6 +160,7 @@ export function buildUpdatePayload(
     task_title_template: form.taskTitleTemplate,
     enabled: form.enabled,
     max_concurrent_runs: form.maxConcurrentRuns,
+    continuation_policy: form.continuationPolicy,
   };
 }
 

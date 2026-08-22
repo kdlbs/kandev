@@ -137,6 +137,12 @@ func (s *Service) buildExportAutomation(ctx context.Context, tx *sqlx.Tx, a *Aut
 		Description:       a.Description,
 		Enabled:           a.Enabled,
 		MaxConcurrentRuns: a.MaxConcurrentRuns,
+		ContinuationPolicy: func() ContinuationPolicy {
+			if a.ContinuationPolicy == "" {
+				return ContinuationPolicyNewTask
+			}
+			return a.ContinuationPolicy
+		}(),
 		TaskTitleTemplate: a.TaskTitleTemplate,
 		Prompt:            promptNode,
 		AgentProfile:      resolved.AgentProfile,

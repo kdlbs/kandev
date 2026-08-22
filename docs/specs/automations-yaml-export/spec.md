@@ -474,6 +474,7 @@ automations:
   - name: Daily Review — @kegmil/offline-first
     enabled: false
     max_concurrent_runs: 1
+    continuation_policy: reuse_thread
     task_title_template: Daily Review — offline-first ({{trigger.timestamp}})
     prompt: |
       ...
@@ -497,7 +498,8 @@ automations:
           timezone: Asia/Singapore
 ```
 
-**Included, always emitted:** `name`, `enabled`, `max_concurrent_runs`, `triggers`
+**Included, always emitted:** `name`, `enabled`, `max_concurrent_runs`,
+`continuation_policy`, `triggers`
 (possibly empty), and per trigger `type`, `enabled`, `config` (possibly empty).
 
 **Included, omitted when empty:** `description`, `prompt`, `task_title_template`,
@@ -506,7 +508,7 @@ automations:
 
 **Excluded — secret:** `webhook_secret`.
 
-**Excluded — runtime state:** `last_triggered_at`, `created_at`, `updated_at` (automation);
+**Excluded — runtime state:** `continuation_task_id`, `last_triggered_at`, `created_at`, `updated_at` (automation);
 `last_evaluated_at`, `created_at`, `updated_at` (trigger); everything in `automation_runs`.
 
 **Excluded — instance identity:** `id`, `workspace_id`, `automation_id`, `trigger.id`.
@@ -530,6 +532,7 @@ This table is the contract AC-22 tests against. Every field of `Automation` and
 | `Automation` | `TaskTitleTemplate` | exported → `task_title_template` |
 | `Automation` | `Enabled` | exported → `enabled` |
 | `Automation` | `MaxConcurrentRuns` | exported → `max_concurrent_runs` |
+| `Automation` | `ContinuationPolicy` | exported → `continuation_policy` |
 | `Automation` | `Triggers` | exported → `triggers` |
 | `Automation` | `WorkflowID` | exported → `workflow.name` (renamed; resolved to a descriptor) |
 | `Automation` | `WorkflowStepID` | exported → `workflow.step` (renamed; resolved to a descriptor) |
@@ -539,6 +542,7 @@ This table is the contract AC-22 tests against. Every field of `Automation` and
 | `Automation` | `WebhookSecret` | excluded — secret |
 | `Automation` | `ID` | excluded — instance identity |
 | `Automation` | `WorkspaceID` | excluded — instance identity |
+| `Automation` | `ContinuationTaskID` | excluded — instance runtime state |
 | `Automation` | `LastTriggeredAt` | excluded — runtime state |
 | `Automation` | `CreatedAt` | excluded — runtime state / fire anchor |
 | `Automation` | `UpdatedAt` | excluded — runtime state |
@@ -589,7 +593,8 @@ exactly the automations belonging to that workspace, and no automation belonging
 other workspace.
 
 **AC-3** — When an automation is exported, the system shall emit `name`, `enabled`,
-`max_concurrent_runs`, and `triggers` unconditionally, including when `triggers` is empty.
+`max_concurrent_runs`, `continuation_policy`, and `triggers` unconditionally, including when
+`triggers` is empty.
 
 **AC-4** — When an automation is exported, the system shall omit `description`, `prompt`,
 `task_title_template`, `agent_profile`, `executor_profile`, `workflow`, and `repositories`
@@ -721,8 +726,9 @@ this costs nothing extra.)*
 
 **AC-40** — The system shall emit the document's top-level keys in the fixed order
 `version`, `type`, `automations`, `warnings`, and each automation's keys in the fixed order
-`name`, `description`, `enabled`, `max_concurrent_runs`, `task_title_template`, `prompt`,
-`agent_profile`, `executor_profile`, `workflow`, `repositories`, `triggers`, and each
+`name`, `description`, `enabled`, `max_concurrent_runs`, `continuation_policy`,
+`task_title_template`, `prompt`, `agent_profile`, `executor_profile`, `workflow`, `repositories`,
+`triggers`, and each
 trigger's keys in the fixed order `type`, `enabled`, `config`. Keys omitted under AC-4 are
 skipped without disturbing the order of the rest.
 
@@ -1148,7 +1154,7 @@ exported field to its key — that is AC-23 — and it cannot see a column that 
 struct field — that is AC-43. All three are required.)*
 
 **AC-43** — The system shall hold a test over a fixture in which every excluded column
-(`webhook_secret`, `last_evaluated_at`, `last_triggered_at`, `created_at`, `updated_at`,
+(`webhook_secret`, `continuation_task_id`, `last_evaluated_at`, `last_triggered_at`, `created_at`, `updated_at`,
 `workspace_id`, `automation_id`, `id`, `execution_mode`, `repository_id`, `legacy_board_card`)
 holds a distinctive sentinel value where its type permits one, and shall assert **both** of the
 following against both output forms:
@@ -1204,7 +1210,7 @@ The expected value is defined per row, because six rows are transforms and equal
 source field is false by design for all six:
 
 - **Untransformed rows** (`name`, `description`, `prompt`, `task_title_template`, `enabled`,
-  `max_concurrent_runs`, and each trigger's `type` and `enabled`): the expected value is the
+  `max_concurrent_runs`, `continuation_policy`, and each trigger's `type` and `enabled`): the expected value is the
   source field itself.
 - **The five reference rows** (`WorkflowID`, `WorkflowStepID`, `AgentProfileID`,
   `ExecutorProfileID`, `RepositoryIDs`): the expected value is the **descriptor the fixture's

@@ -30,6 +30,38 @@ async function swipeUpOnElement(page: Page, element: Locator): Promise<void> {
 }
 
 test.describe("Automations settings on mobile", () => {
+  test("keeps continuity choices visible and contained on a phone", async ({
+    testPage,
+    seedData,
+  }) => {
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.gotoNew();
+
+    await expect(testPage.getByText("Context between runs", { exact: true })).toBeVisible();
+    await expect(
+      testPage.getByText(
+        "Each run starts with a separate conversation and files. Use this option for independent jobs and concurrent runs.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(
+      testPage.getByText(
+        "Runs continue the same conversation and files, so the agent keeps prior context and changes. Runs execute one at a time.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+
+    const reuse = testPage.getByRole("radio", { name: "Continue the previous session" });
+    await reuse.check();
+    await expect(testPage.getByRole("spinbutton")).toBeDisabled();
+
+    const overflow = await testPage.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  });
+
   test("create page does not hand off bottom overscroll to the document", async ({
     testPage,
     seedData,

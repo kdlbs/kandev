@@ -470,7 +470,7 @@ below. The six auth-mode-independent changes enumerated in A4 are also intention
   code units. It SHALL NOT be set to 2000. Boundary values follow N8b exactly: 2000 runes is
   accepted, 2001 is not, and the count is over code points, not bytes and not UTF-16 units.
 
-### `list_pending_questions_kandev` (external MCP surface only)
+### `list_pending_questions_kandev`
 
 - **L1.** The tool SHALL return every **active** bundle (D4) in the workspaces visible to the caller,
   and no bundle outside them.
@@ -631,7 +631,7 @@ below. The six auth-mode-independent changes enumerated in A4 are also intention
   `get_task_conversation_kandev`. Making such a bundle resolvable requires a change to upstream's
   claim and is named in *Out of scope*.
 
-### `answer_question_kandev` (external MCP surface only)
+### `answer_question_kandev`
 
 - **N1.** The tool SHALL accept `pending_id` plus either `answers` (one entry per question) or
   `rejected: true` with an optional `reason`.
@@ -721,16 +721,24 @@ below. The six auth-mode-independent changes enumerated in A4 are also intention
 
 ### Surface placement
 
-- **S1.** Both tools SHALL be registered for `SurfaceExternal` only.
-- **S2.** Neither tool SHALL appear on `SurfaceKanbanTask`, `SurfaceOfficeTask`, or
-  `SurfaceConfiguration`. In-session MCP scoping resolves to the workspace **owner**
-  (`internal/mcp/scope`), not to a task relationship, so a running agent on the kanban surface would
-  be able to list and answer human questions across every task that owner can see. That defeats the
-  human-input boundary and collides with autopilot's parent-only interaction model
-  (`ask_parent_question_kandev`).
+- **S1.** Both tools SHALL remain registered for `SurfaceExternal` and SHALL also be registered for
+  the fixed `SurfaceAutomation` profile. No per-automation capability setting controls them.
+- **S2.** Every automation-run task receives both `list_pending_questions_kandev` and
+  `answer_question_kandev`. No ordinary Kanban, Office, configuration, or autopilot session
+  receives either tool through this rule.
+- **S2a.** The in-session MCP server injects `caller_task_id` outside the advertised argument schema.
+  Before handler dispatch, the backend resolves one trusted automation principal containing
+  `origin=automation_run`, `automation_id`, `automation.workspace_id`, caller task, and caller
+  session from server-owned records. Listing is forced to that workspace and answering requires the
+  bundle's task to belong to it. The caller's own task and sessions are excluded from listing and
+  answering. Missing metadata, a self target, or a foreign target fails closed as not-found.
+- **S2b.** The automation path does not rely on the generic owner-wide identity produced by
+  `internal/mcp/scope`, does not collide with `ask_parent_question_kandev`, and cannot claim the
+  external transport's personal-access-token attestation.
 - **S3.** `ask_user_question_kandev` SHALL remain absent from the external surface, as today.
-- **S4.** Neither tool SHALL be added to the session agent system prompt, since neither is visible to
-  session agents.
+- **S4.** Neither tool is added to a session system prompt. An automation discovers both through
+  the typed `SurfaceAutomation` profile; all other session profiles omit them unless their own
+  established surface registers them.
 
 ### `list_tasks_kandev` enrichment
 

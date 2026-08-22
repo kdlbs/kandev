@@ -2457,11 +2457,12 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	if session != nil && s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason) {
 		return
 	}
-	if session != nil && s.handleAutomationTurnComplete(
+	if session != nil && s.handleAutomationTurnCompleteForTurn(
 		ctx,
 		payload.TaskID,
 		payload.SessionID,
 		session,
+		completionTurnID,
 		stopReason,
 		extractCompleteIsError(payload),
 		extractCompleteErrorMessage(payload),

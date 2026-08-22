@@ -6,6 +6,9 @@ owner: nova28
 
 # Automation Runs
 
+Decision:
+[ADR-2026-08-22-user-configured-automation-continuity](../../decisions/2026-08-22-user-configured-automation-continuity.md)
+
 ## Why
 
 An automation that produces a report — a nightly drift sweep, a dependency audit — is read daily and edited almost never. Its output was reachable only through the automation's own edit form: Settings → workspace → Automations → open the automation → scroll past the whole configuration → expand a collapsed section → click a row. Six steps into an editing surface to perform a reading task.
@@ -64,6 +67,10 @@ conversation, not a log about it.
 - The pane shows a **run's transcript**, at full size, and lands on the newest —
   "what did it say last night" is the question this page exists for, and it
   should cost zero clicks.
+- A run is anchored to an exact session turn. For `new_task`, that session normally belongs only to
+  the selected run. For `reuse_thread`, several run rows intentionally share one session; selecting
+  a run opens the shared transcript and scrolls/focuses the selected turn instead of showing the
+  latest turn for every row.
 - The automation's **standing instruction** is pinned above the transcript,
   collapsed. It is the same on every run, so it belongs to the automation rather
   than to any one of them; it is what makes the turns underneath legible.
@@ -86,11 +93,20 @@ conversation, not a log about it.
   temporarily reports no open runs.
 - The URL is stable and bookmarkable — checking one automation daily is a first-class use, and it should cost one click from a bookmark.
 - **Run now** fires the automation from the reading surface, because the alternative — waiting until tomorrow to find out whether a schedule works — is not one. A trigger the concurrency cap turns away SHALL be reported as skipped with its reason, never as a fire: nothing ran, and no run appears under Running.
+- A running row exposes **Stop current run**. It cancels the exact bound turn rather than the newest
+  turn on the shared task, marks the run failed, and releases the concurrency slot. On mobile it is
+  a visible 44 px action in the selected-run drawer/content header, not a hover-only rail control.
+- The selected transcript component is keyed by run ID and turn ID, not only by session ID. Two
+  adjacent runs that share a session must still move the viewport and live-status binding to the
+  selected turn.
 
 **Entries**
 
 - Each entry leads with **what the run said**, not with its status. Kandev's runs are prose written by an agent, so the outcome text is the deliverable; status is metadata. This is the difference between a run log and a CI job table.
 - An entry shows: relative time, up to two lines of outcome, and status. In the cross-automation view it also carries the automation's name.
+- An entry may show `Started new thread`, `Continued thread`, or `Replaced thread` when that context
+  helps explain a continuity fallback. The safe replacement reason is detail metadata, not a run
+  failure by itself.
 - Outcome text is the run's `error_message` when it has one, otherwise its `summary` (the tail of the agent's last message). A failed or skipped run therefore explains itself in place. A **skipped** run is not styled as a failure: the concurrency cap turning a firing away is the cap working, and rendering the reason in red makes a correctly throttled automation look broken.
 - A run that never produced a task SHALL NOT be clickable.
 
@@ -101,22 +117,38 @@ conversation, not a log about it.
 
 ## Data model
 
-No new persistent state. The feed reads existing `automation_runs` rows joined to `automations` for attribution.
+The feed reads `automation_runs` rows joined to `automations` for attribution. New runs persist the
+conversation anchor and continuation outcome needed when several firings share one task.
 
 | Field | Source | Note |
 |---|---|---|
 | all `AutomationRun` fields | `automation_runs` | including the read-time-derived `status` |
-| `session_id` | `task_sessions` | the run's primary session; the transcript mounts from it, so resolving it in the projection avoids a lookup per run on the client. Empty when the run never started one |
+| `display_title` | `automation_runs` | trigger-specific rendered title snapshot; does not change when a shared task is reused |
+| `session_id` | `automation_runs` | exact session that accepted this firing; empty when it never dispatched |
+| `turn_id` | `automation_runs` | exact scheduled turn; empty for legacy, skipped, or pre-dispatch failed rows |
+| `thread_action` | `automation_runs` | `created`, `resumed`, or `replaced` for a dispatched run |
+| `thread_reason` | `automation_runs` | optional safe reason for replacement; never raw provider/runtime secrets |
 | `automation_name` | `automations.name` | INNER join — a run whose automation is gone is unattributable |
-| `summary` | `task_session_messages` | tail of the agent's last message, truncated server-side to 280 chars |
+| `summary` | `task_session_messages` | tail of the agent message for `turn_id`, truncated server-side to 280 chars |
 
 The status shown is derived at read time, not stored: a `task_created` run whose task was deleted or whose primary session was cancelled reads as `cancelled`, and one whose task was archived reads as `archived`. This derivation is defined once and shared with the per-automation log — the two views MUST NOT be able to disagree about the same run.
 
-The `summary` lookup filters `task_session_messages` by `task_id`, which requires an index leading with that column (`idx_messages_task_author_created`). Without it the lookup falls back to a global `created_at` scan once per row.
+Stored `triggered` is also displayed as Running and counts as open. It exists only between durable
+admission and accepted-turn binding; reconciliation turns an interrupted pre-dispatch row into a
+visible failure rather than leaving it open forever. The Running filter includes both `triggered`
+and `task_created`.
+
+For new rows, the summary lookup filters by the stored turn identity and agent author. It must never
+fall back to the latest message in a shared task. Rows created before turn binding existed retain the
+legacy task-based projection, which still uses `idx_messages_task_author_created`.
+
+Terminal status transitions address the run ID or exact session/turn binding. A manual reply in the
+same reusable session has no AutomationRun binding and therefore cannot complete, fail, or rewrite a
+scheduled run.
 
 ## API surface
 
-Four actions. The detail view reads one automation's runs and its summary; the
+Five actions. The detail view reads one automation's runs and its summary; the
 list reads every automation's summary; the flat lens reads the workspace feed.
 
 ```text
@@ -143,7 +175,15 @@ automation.summaries
 automation.summary
   request   { automation_id: string (required) }
   response  { summary: AutomationSummary | null }   // null = it has never run
+
+automation.run.stop
+  request   { automation_id: string (required), run_id: string (required) }
+  response  { run_id: string, status: "failed" }
 ```
+
+`automation.run.stop` loads the stored task/session/turn binding; the client never supplies those
+identities. It succeeds only for an open run owned by `automation_id`. A terminal, missing, or
+foreign run returns the same not-found result and does not cancel any newer turn.
 
 Both facts are answered in ONE statement. Two queries are two snapshots: a run
 created between them reads as a still-open `last_run` with `open_runs = 0`, so
@@ -167,6 +207,8 @@ cannot disagree. An automation with no summary row has genuinely never run.
 - Runs are ordered by `created_at` descending across all of the workspace's automations.
 - An empty result serializes as `[]`, never `null`.
 - A missing or empty `workspace_id` returns `BAD_REQUEST`.
+- `AutomationRun` responses include `display_title`, `turn_id`, `thread_action`, and optional
+  `thread_reason`; clients treat empty `turn_id` as legacy or non-dispatched history.
 
 ## Permissions
 
@@ -180,6 +222,10 @@ The action is workspace-scoped: the caller must be authorized for `workspace_id`
 | A filter excludes everything | Distinct message from the never-run case, so the user knows a filter is on |
 | Run has no `task_id` (e.g. a skipped run) | Entry renders and explains itself; it is inert, not a dead link |
 | Run has no `summary` (agent never spoke) | Entry says why there is nothing to read — still running, or no report recorded. It MUST NOT fabricate an outcome, but a blank line that leaves the reader guessing is not the alternative |
+| Several runs share one session | Each row shows the agent output for its own turn. Selecting another row moves to that turn even though `session_id` is unchanged. |
+| A user replies between scheduled firings | The reply remains in the shared transcript but does not create or finalize an AutomationRun. |
+| One run is deleted from a shared thread | Only the run row is removed. The task/session/worktree remain while another run or the automation continuation pointer references them. |
+| Delete-all is confirmed | The continuation pointer is cleared first, run rows are deleted, and each distinct associated task is deleted once through normal task cleanup. |
 | The list request fails | Surface the failure and offer a retry. A transient failure MUST NOT leave a permanently empty feed |
 | A slow first load resolves after a later refresh | The later response wins; a stale response MUST NOT overwrite fresher data |
 | An automation is enabled but cannot fire | The list row states why in place of a next-run time, rather than showing a time that will not happen |
@@ -189,6 +235,7 @@ The action is workspace-scoped: the caller must be authorized for `workspace_id`
 | A run finishes while the page is open | The page stops calling it running without a reload. Polling runs only while something is open, so an idle workspace issues no repeat requests |
 | A visible run is still reported as open while the health summary says there are no open runs | The detail rail/drawer continues reading until the visible run receives a terminal status, then moves it to Completed without a reload |
 | An open run falls outside the page's own run window | The open count comes from the server, not from the loaded window, so the page still reports work in flight and keeps polling |
+| A user stops a running reused turn | The action addresses its stored run/session/turn identity, cancels that exact turn, and marks only that run failed. |
 
 ## Scenarios
 
@@ -202,7 +249,17 @@ The action is workspace-scoped: the caller must be authorized for `workspace_id`
 - **GIVEN** a link carrying `?run=<id>`, **WHEN** it is opened, **THEN** that run's transcript is shown rather than the newest.
 - **GIVEN** a requested run that is no longer in the window, **WHEN** the page loads, **THEN** it falls back to the newest rather than rendering an empty pane.
 - **GIVEN** a finished run, **WHEN** the user types in the composer, **THEN** the agent continues in the same session and worktree.
+- **GIVEN** three scheduled runs share one reusable session, **WHEN** the user selects the middle
+  run, **THEN** the full thread remains available and the view focuses that run's exact turn and
+  shows that turn's summary.
+- **GIVEN** the selected and next run share a session ID, **WHEN** the user changes the run query
+  parameter, **THEN** the transcript still moves to the newly selected turn.
+- **GIVEN** a human reply occurs after a scheduled run completed, **WHEN** that reply turn ends,
+  **THEN** the scheduled run remains unchanged and no new automation run appears.
 - **GIVEN** a run is in flight, **WHEN** the user opens it, **THEN** they see the agent's output as it arrives rather than a placeholder.
+- **GIVEN** a run is in flight on desktop, **WHEN** the user selects Stop current run, **THEN** the exact run becomes failed and the next firing is no longer blocked by its slot.
+- **GIVEN** a run is in flight on a phone, **WHEN** the user opens its run drawer/content and taps Stop current run, **THEN** the same cancellation outcome is available without hover or horizontal scrolling.
+- **GIVEN** two runs share a task but render different title-template values, **WHEN** their rows are listed, **THEN** each row shows its own persisted `display_title`.
 - **GIVEN** a run whose agent asked a question, **WHEN** the user opens it, **THEN** they can reply and the agent continues.
 - **GIVEN** a workspace with runs from two different automations, **WHEN** the user opens the flat lens, **THEN** all runs appear in one feed ordered newest first, each labelled with its own automation's name.
 - **GIVEN** a run whose agent reported "Sweep complete across all 32 specs", **WHEN** the feed renders, **THEN** that text is visible on the entry without opening anything.

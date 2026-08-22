@@ -95,6 +95,8 @@ vi.mock("@/lib/api", async (importOriginal) => ({
 }));
 
 import { ConfigSection, getExecutorItemDisabledReason } from "./config-section";
+import { SettingsSection } from "./automation-editor-sections";
+import type { FormState } from "./automation-payload";
 
 // Every render triggers the fetch, so it needs a resolvable default or the
 // effect throws before the test gets to its own assertion.
@@ -168,6 +170,58 @@ describe("ConfigSection", () => {
 
     expect(screen.queryByTestId("execution-mode-selector")).toBeNull();
     expect(screen.queryByText("Execution Mode")).toBeNull();
+  });
+});
+
+function settingsForm(overrides: Partial<FormState> = {}): FormState {
+  return {
+    name: "Automation",
+    description: "",
+    workflowId: "",
+    workflowStepId: "",
+    agentProfileId: "",
+    executorProfileId: "",
+    repositorySelections: [],
+    prompt: "Run it",
+    taskTitleTemplate: "",
+    enabled: true,
+    maxConcurrentRuns: 3,
+    continuationPolicy: "new_task",
+    ...overrides,
+  };
+}
+
+describe("SettingsSection continuation policy", () => {
+  afterEach(() => cleanup());
+
+  it("shows both continuity choices and their accessible descriptions", () => {
+    const form = settingsForm();
+    const updateField = vi.fn();
+    render(<SettingsSection form={form} savedForm={form} updateField={updateField as never} />);
+
+    expect(screen.getByText("Context between runs")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Choose whether each run starts fresh or continues the same conversation and files.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("Start a new task for every run")).toBeTruthy();
+    expect(screen.getByText("Continue the previous session")).toBeTruthy();
+    const reuse = screen.getByRole("radio", { name: /Continue the previous session/ });
+    expect(reuse.getAttribute("aria-describedby")).toBe(
+      "automation-continuation-reuse-thread-description",
+    );
+  });
+
+  it("sets reuse mode and fixes concurrency to one", () => {
+    const form = settingsForm();
+    const updateField = vi.fn();
+    render(<SettingsSection form={form} savedForm={form} updateField={updateField as never} />);
+
+    fireEvent.click(screen.getByRole("radio", { name: /Continue the previous session/ }));
+
+    expect(updateField).toHaveBeenNthCalledWith(1, "continuationPolicy", "reuse_thread");
+    expect(updateField).toHaveBeenNthCalledWith(2, "maxConcurrentRuns", 1);
   });
 });
 

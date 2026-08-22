@@ -40,6 +40,59 @@ test.describe("Automations settings page", () => {
     await expect(testPage.getByText("Daily Check")).toBeVisible();
   });
 
+  test("shows continuity choices and persists a reusable automation", async ({
+    testPage,
+    seedData,
+  }) => {
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.gotoNew();
+
+    await expect(testPage.getByText("Context between runs", { exact: true })).toBeVisible();
+    await expect(
+      testPage.getByText(
+        "Choose whether each run starts fresh or continues the same conversation and files.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(
+      testPage.getByText(
+        "Each run starts with a separate conversation and files. Use this option for independent jobs and concurrent runs.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(
+      testPage.getByText(
+        "Runs continue the same conversation and files, so the agent keeps prior context and changes. Runs execute one at a time.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+
+    const reuse = testPage.getByRole("radio", { name: "Continue the previous session" });
+    await expect(reuse).not.toBeChecked();
+    await reuse.check();
+    await expect(reuse).toBeChecked();
+    await expect(testPage.getByRole("spinbutton")).toHaveValue("1");
+    await expect(testPage.getByRole("spinbutton")).toBeDisabled();
+    await expect(
+      testPage.getByText("This option supports one active run at a time."),
+    ).toBeVisible();
+
+    await testPage.getByTestId("automation-name-input").fill("Reusable Context");
+    await automations.selectFrequency("every day");
+    await automations.selectWorkflow("E2E Workflow");
+    await automations.selectWorkflowStep(seedData.steps[0].name);
+    await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
+    await automations.saveButton.click();
+
+    await expect(testPage).toHaveURL(/automations$/, { timeout: 15_000 });
+    await automations.openByName("Reusable Context");
+    await expect(testPage).toHaveURL(/automations\/[a-f0-9-]+$/, { timeout: 10_000 });
+    await expect(
+      testPage.getByRole("radio", { name: "Continue the previous session" }),
+    ).toBeChecked();
+    await expect(testPage.getByRole("spinbutton")).toHaveValue("1");
+  });
+
   test("create automation with custom schedule expression", async ({ testPage, seedData }) => {
     const automations = new AutomationsPage(testPage, seedData.workspaceId);
     await automations.gotoNew();

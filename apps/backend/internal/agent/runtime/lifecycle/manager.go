@@ -427,6 +427,13 @@ func (m *Manager) SetMCPIdentityScoper(scoper MCPIdentityScoper) {
 	m.streamManager.mcpIdentityScoper = scoper
 }
 
+// SetMCPPrincipalScoper installs the trusted in-session MCP principal resolver.
+// The resolver derives automation identity and workspace boundaries from the
+// execution's own task and session, never from the agent request payload.
+func (m *Manager) SetMCPPrincipalScoper(scoper MCPPrincipalScoper) {
+	m.streamManager.mcpPrincipalScoper = scoper
+}
+
 // SetSessionAccessChecker installs the per-user session visibility check used
 // by GetOrEnsureExecution and EnsurePassthroughExecution. The checker must
 // return nil for contexts without a request identity (internal callers). Set

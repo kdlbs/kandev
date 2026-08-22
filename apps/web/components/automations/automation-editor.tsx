@@ -66,6 +66,7 @@ const defaultForm: FormState = {
   taskTitleTemplate: "",
   enabled: true,
   maxConcurrentRuns: 1,
+  continuationPolicy: "new_task",
 };
 
 function formFromAutomation(a: Automation): FormState {
@@ -81,6 +82,7 @@ function formFromAutomation(a: Automation): FormState {
     taskTitleTemplate: a.task_title_template ?? "",
     enabled: a.enabled,
     maxConcurrentRuns: a.max_concurrent_runs,
+    continuationPolicy: a.continuation_policy ?? "new_task",
   };
 }
 

@@ -27,6 +27,7 @@ function baseForm(overrides: Partial<FormState> = {}): FormState {
     taskTitleTemplate: "",
     enabled: true,
     maxConcurrentRuns: 1,
+    continuationPolicy: "new_task",
     ...overrides,
   };
 }
@@ -142,5 +143,12 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
   it("sends an empty repository_ids array when no repositories are selected", () => {
     const payload = buildCreatePayload("ws-1", baseForm(), [], []);
     expect(payload.repository_ids).toEqual([]);
+  });
+
+  it("sends the selected continuation policy on create and update", () => {
+    const form = baseForm({ continuationPolicy: "reuse_thread" });
+
+    expect(buildCreatePayload("ws-1", form, [], []).continuation_policy).toBe("reuse_thread");
+    expect(buildUpdatePayload(form, []).continuation_policy).toBe("reuse_thread");
   });
 });

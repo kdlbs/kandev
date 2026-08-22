@@ -20,18 +20,20 @@ type fieldDisposition struct {
 }
 
 var automationFieldDispositions = map[string]fieldDisposition{
-	"Name":              {exported: true, yamlKey: "name"},
-	"Description":       {exported: true, yamlKey: "description"},
-	"Prompt":            {exported: true, yamlKey: "prompt"},
-	"TaskTitleTemplate": {exported: true, yamlKey: "task_title_template"},
-	"Enabled":           {exported: true, yamlKey: "enabled"},
-	"MaxConcurrentRuns": {exported: true, yamlKey: "max_concurrent_runs"},
-	"Triggers":          {exported: true, yamlKey: "triggers"},
-	"WorkflowID":        {exported: true, yamlKey: "workflow.name"},
-	"WorkflowStepID":    {exported: true, yamlKey: "workflow.step"},
-	"AgentProfileID":    {exported: true, yamlKey: "agent_profile"},
-	"ExecutorProfileID": {exported: true, yamlKey: "executor_profile"},
-	"RepositoryIDs":     {exported: true, yamlKey: "repositories"},
+	"Name":               {exported: true, yamlKey: "name"},
+	"Description":        {exported: true, yamlKey: "description"},
+	"Prompt":             {exported: true, yamlKey: "prompt"},
+	"TaskTitleTemplate":  {exported: true, yamlKey: "task_title_template"},
+	"Enabled":            {exported: true, yamlKey: "enabled"},
+	"MaxConcurrentRuns":  {exported: true, yamlKey: "max_concurrent_runs"},
+	"ContinuationPolicy": {exported: true, yamlKey: "continuation_policy"},
+	"Triggers":           {exported: true, yamlKey: "triggers"},
+	"WorkflowID":         {exported: true, yamlKey: "workflow.name"},
+	"WorkflowStepID":     {exported: true, yamlKey: "workflow.step"},
+	"AgentProfileID":     {exported: true, yamlKey: "agent_profile"},
+	"ExecutorProfileID":  {exported: true, yamlKey: "executor_profile"},
+	"RepositoryIDs":      {exported: true, yamlKey: "repositories"},
+	"ContinuationTaskID": {exported: false}, // runtime pointer to the reused task
 
 	"WebhookSecret":   {exported: false}, // secret
 	"ID":              {exported: false}, // instance identity

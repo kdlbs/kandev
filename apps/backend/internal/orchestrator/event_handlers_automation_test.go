@@ -122,6 +122,49 @@ func TestResolveAutomationTaskTitleTruncatesRenderedTitle(t *testing.T) {
 	}
 }
 
+func TestFindAutomationContinuationRejectsChangedLaunchIdentity(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedAutomationWorkspaceRepos(t, repo, "ws-1", []string{"repo-a"})
+	now := time.Now().UTC()
+	ctx := context.Background()
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:             "continuation-task",
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "workflow-a",
+		WorkflowStepID: "step-a",
+		Origin:         models.TaskOriginAutomationRun,
+		Metadata: map[string]interface{}{
+			models.MetaKeyAgentProfileID:    "agent-a",
+			models.MetaKeyExecutorProfileID: "executor-a",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "continuation-repo", TaskID: "continuation-task", RepositoryID: "repo-a", Position: 0,
+		CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "continuation-session", TaskID: "continuation-task",
+		State: models.TaskSessionStateWaitingForInput, StartedAt: now, UpdatedAt: now,
+	}))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	a := &automation.Automation{
+		ContinuationTaskID: "continuation-task", WorkspaceID: "ws-1",
+		WorkflowID: "workflow-b", WorkflowStepID: "step-a",
+		AgentProfileID: "agent-a", ExecutorProfileID: "executor-a",
+		RepositoryIDs: []string{"repo-a"},
+	}
+
+	task, session, reason := svc.findAutomationContinuation(ctx, a, &automation.AutomationTriggeredEvent{
+		TriggerType: automation.TriggerTypeScheduled,
+	})
+	require.Nil(t, task)
+	require.Nil(t, session)
+	require.Equal(t, "previous continuation task uses a different workflow", reason)
+}
+
 // TestResolveAutomationRepository_GitHubPRIgnoresConfiguredRepositoryIDs is
 // the regression guard for a CodeRabbit review finding on PR #2077: the
 // frontend disables (but does not clear) the repository picker for

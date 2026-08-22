@@ -16,10 +16,16 @@ vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { RunTranscript } from "./run-transcript";
+import {
+  filterRunTranscriptItems,
+  filterRunTranscriptMessages,
+  RunTranscript,
+} from "./run-transcript";
 
 const SESSION_ID = "session-1";
 const TASK_ID = "task-1";
+const OLD_TURN_ID = "turn-old";
+const CURRENT_TURN_ID = "turn-current";
 
 function transcript() {
   return (
@@ -74,6 +80,39 @@ describe("RunTranscript session hydration", () => {
     rerender(transcript());
 
     expect(mockFetchTaskSession).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("RunTranscript turn selection", () => {
+  it("keeps only the selected turn in a shared session", () => {
+    const items = [
+      {
+        type: "message" as const,
+        message: { id: "old", turn_id: OLD_TURN_ID } as never,
+      },
+      {
+        type: "turn_group" as const,
+        id: "group-current",
+        turnId: CURRENT_TURN_ID,
+        messages: [],
+      },
+      {
+        type: "prepare_progress" as const,
+        id: "prepare",
+        sessionId: SESSION_ID,
+      },
+    ];
+
+    expect(filterRunTranscriptItems(items, CURRENT_TURN_ID)).toEqual([items[1], items[2]]);
+    expect(
+      filterRunTranscriptMessages(
+        [
+          { id: "old", turn_id: OLD_TURN_ID },
+          { id: "current", turn_id: CURRENT_TURN_ID },
+        ],
+        CURRENT_TURN_ID,
+      ),
+    ).toEqual([{ id: "current", turn_id: CURRENT_TURN_ID }]);
   });
 });
 

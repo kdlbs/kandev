@@ -517,6 +517,26 @@ func TestServerProfile_AutopilotChildHasOnlyParentQuestion(t *testing.T) {
 	assert.NotContains(t, rootTools, "ask_user_question_kandev")
 }
 
+func TestServerSurfaceAutomationHasFixedCoordinatorCatalog(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	profile := mcpprofile.New(mcpprofile.SurfaceAutomation, nil, nil)
+	s := NewWithProfile(backend, "automation-session", "automation-task", 10005, log, "", false, profile)
+	want := []string{
+		"list_workspaces_kandev", "list_workflows_kandev", "list_workflow_steps_kandev",
+		"list_repositories_kandev", "list_tasks_kandev", "list_agents_kandev",
+		"list_executors_kandev", "list_executor_profiles_kandev", "list_related_tasks_kandev",
+		"get_task_conversation_kandev", "list_task_sessions_kandev", "create_task_kandev",
+		"update_task_kandev", "move_task_kandev", "archive_task_kandev",
+		"add_task_dependency_kandev", "remove_task_dependency_kandev", "message_task_kandev",
+		"stop_task_kandev", "spawn_session_kandev", "list_pending_questions_kandev",
+		"answer_question_kandev", "list_pending_agent_permissions_kandev", "resolve_agent_permission_kandev",
+	}
+	assert.ElementsMatch(t, want, getRegisteredToolNames(s))
+}
+
 func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)

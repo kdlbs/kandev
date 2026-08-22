@@ -642,6 +642,8 @@ func startAgentInfrastructure(
 	// tasks via the task service directly.
 	if services.Automation != nil {
 		orchestratorSvc.SetAutomationService(services.Automation.Service)
+		services.Automation.Service.SetRunStopper(orchestratorSvc)
+		services.Automation.Service.SetRunLivenessChecker(orchestratorSvc)
 	}
 
 	// Wire GitHub service into orchestrator for PR auto-detection on push

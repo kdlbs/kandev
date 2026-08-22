@@ -14,7 +14,13 @@ import { AutomationsPage } from "../pages/automations-page";
  * and no toolbar, which would pass most of what follows while broken.
  */
 
-type Seed = { workspaceId: string; workflowId: string; startStepId: string };
+type Seed = {
+  workspaceId: string;
+  workflowId: string;
+  startStepId: string;
+  agentProfileId: string;
+  repositoryId: string;
+};
 
 const STANDING_INSTRUCTION = "Check the overnight drift report and summarise what changed.";
 
@@ -49,6 +55,42 @@ async function openRunView(testPage: Page, automationId: string) {
   await expect(testPage.getByTestId("run-transcript")).toBeVisible({ timeout: 15_000 });
 }
 
+async function seedOpenRun(apiClient: ApiClient, seed: Seed, name: string) {
+  const automation = await apiClient.seedAutomation({
+    workspaceId: seed.workspaceId,
+    name,
+    workflowId: seed.workflowId,
+    workflowStepId: seed.startStepId,
+    prompt: STANDING_INSTRUCTION,
+    agentProfileId: seed.agentProfileId,
+  });
+  const task = await apiClient.createTaskWithAgent(
+    seed.workspaceId,
+    `${name} — running task`,
+    seed.agentProfileId,
+    {
+      description: "/sleep 30",
+      workflow_id: seed.workflowId,
+      workflow_step_id: seed.startStepId,
+      repository_ids: [seed.repositoryId],
+    },
+  );
+  await apiClient.setTaskOrigin(task.id, "automation_run");
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        return sessions.find((session) => session.id === task.session_id)?.state;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe("RUNNING");
+  const run = await apiClient.seedAutomationRun(automation.id, "task_created", task.id);
+  expect(run.session_id).not.toBe("");
+  expect(run.turn_id).not.toBe("");
+  return { automation, task };
+}
+
 test.describe("Automation run detail disclosure", () => {
   test("keeps the standing instruction out of the transcript and behind a rail control", async ({
     testPage,
@@ -80,6 +122,25 @@ test.describe("Automation run detail disclosure", () => {
     // Shuts again — it is a disclosure, not a one-way reveal.
     await disclosure.click();
     await expect(testPage.getByTestId("run-detail-panel")).toHaveCount(0);
+  });
+});
+
+test.describe("Automation exact-run controls", () => {
+  test("stops the selected running run and leaves it failed", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { automation } = await seedOpenRun(apiClient, seedData, "Exact Stop");
+    await openRunView(testPage, automation.id);
+
+    const stop = testPage.getByRole("button", { name: "Stop current run" });
+    await expect(stop).toBeVisible({ timeout: 15_000 });
+    await stop.click();
+
+    await expect(testPage.getByTestId("run-group-completed")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("run-group-completed")).toContainText("Failed");
+    await expect(testPage.getByRole("button", { name: "Stop current run" })).toHaveCount(0);
   });
 });
 

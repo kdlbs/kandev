@@ -5,6 +5,7 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
+import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import type {
   AutomationTrigger,
   PlaceholderInfo,
@@ -212,6 +213,100 @@ export function ThenSection({
   );
 }
 
+function ContinuationPolicySection({
+  form,
+  savedForm,
+  updateField,
+}: {
+  form: FormState;
+  savedForm: FormState;
+  updateField: UpdateField;
+}) {
+  const { t } = useTranslation();
+  const continuationIsDirty = isAutomationFieldDirty(form, savedForm, "continuationPolicy");
+  const reusesThread = form.continuationPolicy === "reuse_thread";
+  const continuationDescriptionId = "automation-continuation-description";
+
+  return (
+    <div className="space-y-2 border-t pt-3">
+      <div>
+        <h3 id="automation-continuation-heading" className="text-sm font-medium">
+          {t("automations:contextBetweenRunsTitle")}
+        </h3>
+        <p id={continuationDescriptionId} className="text-xs text-muted-foreground">
+          {t("automations:contextBetweenRunsDescription")}
+        </p>
+      </div>
+      <RadioGroup
+        aria-labelledby="automation-continuation-heading"
+        aria-describedby={continuationDescriptionId}
+        value={form.continuationPolicy}
+        onValueChange={(value) => {
+          const policy = value as FormState["continuationPolicy"];
+          updateField("continuationPolicy", policy);
+          if (policy === "reuse_thread") updateField("maxConcurrentRuns", 1);
+        }}
+        data-settings-dirty={continuationIsDirty}
+        className="gap-2"
+      >
+        <Label
+          htmlFor="automation-continuation-new-task"
+          className={`flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md border p-3 ${
+            !reusesThread ? "border-primary bg-primary/5" : "border-border hover:bg-muted/30"
+          }`}
+        >
+          <RadioGroupItem
+            id="automation-continuation-new-task"
+            value="new_task"
+            aria-describedby="automation-continuation-new-task-description"
+            className="mt-0.5"
+          />
+          <span className="min-w-0 space-y-1">
+            <span className="block text-sm font-medium">
+              {t("automations:contextBetweenRunsNewTask")}
+            </span>
+            <span
+              id="automation-continuation-new-task-description"
+              className="block whitespace-normal break-words text-xs text-muted-foreground"
+            >
+              {t("automations:contextBetweenRunsNewTaskDescription")}
+            </span>
+          </span>
+        </Label>
+        <Label
+          htmlFor="automation-continuation-reuse-thread"
+          className={`flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md border p-3 ${
+            reusesThread ? "border-primary bg-primary/5" : "border-border hover:bg-muted/30"
+          }`}
+        >
+          <RadioGroupItem
+            id="automation-continuation-reuse-thread"
+            value="reuse_thread"
+            aria-describedby="automation-continuation-reuse-thread-description"
+            className="mt-0.5"
+          />
+          <span className="min-w-0 space-y-1">
+            <span className="block text-sm font-medium">
+              {t("automations:contextBetweenRunsReuseThread")}
+            </span>
+            <span
+              id="automation-continuation-reuse-thread-description"
+              className="block whitespace-normal break-words text-xs text-muted-foreground"
+            >
+              {t("automations:contextBetweenRunsReuseThreadDescription")}
+            </span>
+          </span>
+        </Label>
+      </RadioGroup>
+      {reusesThread && (
+        <p className="text-xs text-muted-foreground">
+          {t("automations:contextBetweenRunsConcurrencyLock")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function SettingsSection({
   form,
   savedForm,
@@ -224,10 +319,12 @@ export function SettingsSection({
   const { t } = useTranslation();
   const enabledIsDirty = isAutomationFieldDirty(form, savedForm, "enabled");
   const maxRunsIsDirty = isAutomationFieldDirty(form, savedForm, "maxConcurrentRuns");
+  const continuationIsDirty = isAutomationFieldDirty(form, savedForm, "continuationPolicy");
+  const reusesThread = form.continuationPolicy === "reuse_thread";
   return (
     <div
       className="space-y-3 rounded-lg border bg-card p-4"
-      data-settings-dirty={enabledIsDirty || maxRunsIsDirty}
+      data-settings-dirty={enabledIsDirty || maxRunsIsDirty || continuationIsDirty}
       data-settings-dirty-level="container"
     >
       <Label className="text-xs uppercase tracking-wider text-muted-foreground">
@@ -248,8 +345,9 @@ export function SettingsSection({
           <Input
             type="number"
             min={1}
-            value={form.maxConcurrentRuns}
+            value={reusesThread ? 1 : form.maxConcurrentRuns}
             data-settings-dirty={maxRunsIsDirty}
+            disabled={reusesThread}
             onChange={(event) =>
               updateField("maxConcurrentRuns", Number.parseInt(event.target.value) || 1)
             }
@@ -257,6 +355,7 @@ export function SettingsSection({
           />
         </div>
       </div>
+      <ContinuationPolicySection form={form} savedForm={savedForm} updateField={updateField} />
     </div>
   );
 }

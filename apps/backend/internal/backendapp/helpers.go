@@ -1643,16 +1643,20 @@ func registerMCPAndDebugRoutes(
 	p.log.Debug("MCP handler configured for agent lifecycle manager")
 
 	// In-session MCP calls reach this same dispatcher over the agent's own WS
-	// stream, which carries no credential — so scope them to the user who owns
-	// the stream's task. Without this the handlers run with no identity, which
-	// the task service treats as an internal caller and serves unscoped.
+	// stream, which carries no credential. Always attach the server-derived
+	// task/session principal so automation self/workspace boundaries remain in
+	// force even when authentication is disabled or unavailable. Owner identity
+	// scoping is conditional because single-user installs intentionally retain
+	// their existing unscoped behavior.
+	mcpScopeResolver := mcpscope.NewResolver(
+		p.taskRepo,
+		p.authSvc,
+		func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled },
+		p.log,
+	)
+	p.lifecycleMgr.SetMCPPrincipalScoper(mcpScopeResolver.ScopePrincipal)
 	if p.authSvc != nil {
-		p.lifecycleMgr.SetMCPIdentityScoper(mcpscope.NewResolver(
-			p.taskRepo,
-			p.authSvc,
-			func() bool { return p.authSvc.Mode() != auth.ModeDisabled },
-			p.log,
-		).Scope)
+		p.lifecycleMgr.SetMCPIdentityScoper(mcpScopeResolver.Scope)
 		p.log.Debug("In-session MCP dispatch scoped to task owner")
 	}
 

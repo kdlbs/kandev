@@ -59,7 +59,7 @@ func registerE2EResetRoutes(
 	// through the WS API (works on any Node version).
 	if automationSvc != nil {
 		api.POST("/automations", handleE2ECreateAutomation(automationSvc, repo, log))
-		api.POST("/automation-runs", handleE2ECreateAutomationRun(automationSvc, log))
+		api.POST("/automation-runs", handleE2ECreateAutomationRun(automationSvc, repo, log))
 		api.POST("/automation-triggers", handleE2EAddTrigger(automationSvc, log))
 		// Fire a fake github_pr_merged event into the in-process event bus so
 		// E2E tests can exercise the automation subscriber without real GitHub
@@ -321,7 +321,7 @@ func deleteAutomationsForReset(
 	if automationSvc == nil {
 		return 0, nil
 	}
-	return automationSvc.Store().DeleteAutomationsByWorkspace(ctx, workspaceID)
+	return automationSvc.DeleteAutomationsByWorkspace(ctx, workspaceID)
 }
 
 type e2eHiddenWorkflowRequest struct {
@@ -433,10 +433,14 @@ type e2eCreateAutomationRunRequest struct {
 	// exercise task-lifecycle interactions (e.g. archiving the task and
 	// asserting the run's displayed status/concurrency accounting reacts).
 	TaskID string `json:"task_id"`
+	// When a task is supplied, the endpoint derives the current session and
+	// open turn so E2E tests can exercise exact-run actions such as stop.
+	SessionID string `json:"session_id,omitempty"`
+	TurnID    string `json:"turn_id,omitempty"`
 }
 
 // handleE2ECreateAutomationRun seeds an automation run row for E2E tests.
-func handleE2ECreateAutomationRun(svc *automation.Service, log *logger.Logger) gin.HandlerFunc {
+func handleE2ECreateAutomationRun(svc *automation.Service, repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body e2eCreateAutomationRunRequest
 		if err := c.ShouldBindJSON(&body); err != nil || body.AutomationID == "" {
@@ -452,7 +456,17 @@ func handleE2ECreateAutomationRun(svc *automation.Service, log *logger.Logger) g
 			TriggerType:  automation.TriggerTypeScheduled,
 			Status:       status,
 			TaskID:       body.TaskID,
+			SessionID:    body.SessionID,
+			TurnID:       body.TurnID,
 			TriggerData:  []byte(`{}`),
+		}
+		if run.TaskID != "" && (run.SessionID == "" || run.TurnID == "") {
+			if session, sessionErr := repo.GetActiveTaskSessionByTaskID(c.Request.Context(), run.TaskID); sessionErr == nil && session != nil {
+				run.SessionID = session.ID
+				if turn, turnErr := repo.GetActiveTurnBySessionID(c.Request.Context(), session.ID); turnErr == nil && turn != nil {
+					run.TurnID = turn.ID
+				}
+			}
 		}
 		if err := svc.RecordRun(c.Request.Context(), run); err != nil {
 			log.Error("e2e: failed to create automation run", zap.Error(err))
@@ -461,6 +475,7 @@ func handleE2ECreateAutomationRun(svc *automation.Service, log *logger.Logger) g
 		}
 		c.JSON(http.StatusCreated, gin.H{
 			"id": run.ID, "automation_id": run.AutomationID, statusKey: run.Status, taskIDPayloadKey: run.TaskID,
+			"session_id": run.SessionID, "turn_id": run.TurnID,
 		})
 	}
 }

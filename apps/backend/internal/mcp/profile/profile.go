@@ -12,6 +12,7 @@ const (
 	SurfaceOfficeTask    Surface = "office-task"
 	SurfaceConfiguration Surface = "configuration"
 	SurfaceExternal      Surface = "external"
+	SurfaceAutomation    Surface = "automation"
 )
 
 type Capability string
@@ -75,6 +76,8 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 		surface = SurfaceConfiguration
 	case "external":
 		surface = SurfaceExternal
+	case "automation":
+		surface = SurfaceAutomation
 	case "task-title-pending":
 		capabilities = append(capabilities, CapabilityTaskTitle)
 	}
@@ -86,7 +89,7 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 
 func normalizeSurface(surface Surface) Surface {
 	switch surface {
-	case SurfaceKanbanTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal:
+	case SurfaceKanbanTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation:
 		return surface
 	default:
 		return SurfaceKanbanTask
