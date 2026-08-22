@@ -79,8 +79,12 @@ remaining risks. Update this task and `plan.md` in the same conversation.
   sorted newest-first by day and segment sequence, and filtered with `Lstat`
   so symlinks and unrelated names are excluded.
 - Existing archive source budgets, tail copying, truncation warnings, and
-  manifest byte ranges remain in the archive path.
-- Added discovery-order and newest-within-budget bundle tests.
+  manifest byte ranges remain in the archive path. Each candidate opens once
+  without following the final path component. The collector uses the opened
+  handle for both `Fstat` and copying. A candidate that disappears before
+  opening produces a partial bundle warning.
+- Added discovery-order, future-date, newest-within-budget, and deterministic
+  rotation-during-collection bundle tests.
 - Verification: `cd apps/backend && go test ./internal/system/logbundle -run
   'TestBackendOnlyBundle|TestBackendCandidates' -count=1` passed.
 - Blockers: none.

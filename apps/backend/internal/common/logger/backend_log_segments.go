@@ -159,7 +159,10 @@ func BackendLogDayRetained(day string, today time.Time) bool {
 	cutoff := time.Date(
 		todayUTC.Year(), todayUTC.Month(), todayUTC.Day(), 0, 0, 0, 0, time.UTC,
 	).AddDate(0, 0, -2)
-	return !parsed.Before(cutoff)
+	todayDay := time.Date(
+		todayUTC.Year(), todayUTC.Month(), todayUTC.Day(), 0, 0, 0, 0, time.UTC,
+	)
+	return !parsed.Before(cutoff) && !parsed.After(todayDay)
 }
 
 type rolloverJournal struct {
@@ -268,15 +271,13 @@ func copyJournaled(source io.Reader, destination io.Writer, journal *rolloverJou
 }
 
 type conversionJournal struct {
-	SourceDay            string             `json:"source_day"`
-	SourceSize           int64              `json:"source_size"`
-	SourceModUnixNano    int64              `json:"source_mod_unix_nano"`
-	TailOffset           int64              `json:"tail_offset"`
-	BackupName           string             `json:"backup_name"`
-	CompactionSourceSize int64              `json:"compaction_source_size,omitempty"`
-	CompactionPrefix     int64              `json:"compaction_prefix,omitempty"`
-	CompactionCopied     int64              `json:"compaction_copied,omitempty"`
-	Outputs              []conversionOutput `json:"outputs"`
+	SourceDay         string             `json:"source_day"`
+	SourceSize        int64              `json:"source_size"`
+	SourceModUnixNano int64              `json:"source_mod_unix_nano"`
+	TailOffset        int64              `json:"tail_offset"`
+	BackupName        string             `json:"backup_name"`
+	NextOutput        int                `json:"next_output"`
+	Outputs           []conversionOutput `json:"outputs"`
 }
 
 type conversionOutput struct {
@@ -326,7 +327,7 @@ func (w *dailyWriter) convertActive(day string, sourceSize int64) error {
 	}
 	journal := &conversionJournal{
 		SourceDay: day, SourceSize: sourceSize, TailOffset: sourceSize - keep,
-		BackupName: conversionSourceName, Outputs: outputs,
+		BackupName: conversionSourceName, NextOutput: len(outputs) - 1, Outputs: outputs,
 	}
 	path := filepath.Join(w.logDir, conversionJournalName)
 	if err := writeJSONOwnerFile(path, journal); err != nil {
@@ -421,10 +422,21 @@ func (w *dailyWriter) finishConversion(journal *conversionJournal) error {
 		return err
 	}
 	backupPath := filepath.Join(w.logDir, journal.BackupName)
-	for _, output := range journal.Outputs {
-		if err := w.finishConversionOutput(backupPath, journal, output); err != nil {
+	backupInfo, err := os.Lstat(backupPath)
+	if err != nil {
+		return err
+	}
+	nextOutput, err := nextConversionOutput(journal, backupInfo.Size())
+	if err != nil {
+		return err
+	}
+	for index := nextOutput; index >= 0; index-- {
+		if err := w.finishConversionOutput(backupPath, journal, index); err != nil {
 			return err
 		}
+	}
+	if !allConversionOutputsPresent(w.logDir, journal.Outputs) {
+		return fmt.Errorf("conversion outputs are incomplete")
 	}
 	if err := removeIfExists(backupPath); err != nil {
 		return err
@@ -433,8 +445,9 @@ func (w *dailyWriter) finishConversion(journal *conversionJournal) error {
 }
 
 func (w *dailyWriter) finishConversionOutput(
-	backupPath string, journal *conversionJournal, output conversionOutput,
+	backupPath string, journal *conversionJournal, index int,
 ) error {
+	output := journal.Outputs[index]
 	outputPath := filepath.Join(w.logDir, output.Name)
 	if err := removeIfExists(outputPath + ".tmp"); err != nil {
 		return err
@@ -446,40 +459,30 @@ func (w *dailyWriter) finishConversionOutput(
 	if !backupInfo.Mode().IsRegular() {
 		return fmt.Errorf("conversion source is not a regular file")
 	}
-	sourceBefore := journal.SourceSize - journal.TailOffset - output.Offset
-	compactionPrefix := output.Length
-	if output.Offset == 0 {
-		compactionPrefix += journal.TailOffset
-	}
-	sourceAfter := sourceBefore - compactionPrefix
-	if sourceBefore < 0 || sourceAfter < 0 {
+	sourceStart := journal.TailOffset + output.Offset
+	sourceEnd := sourceStart + output.Length
+	if sourceEnd > journal.SourceSize || sourceStart < 0 {
 		return fmt.Errorf("invalid conversion source range")
 	}
-	if journal.CompactionPrefix != 0 {
-		if journal.CompactionSourceSize != sourceBefore || journal.CompactionPrefix != compactionPrefix {
-			return fmt.Errorf("invalid conversion compaction state")
-		}
+	if backupInfo.Size() < sourceStart {
+		return fmt.Errorf("invalid conversion source size")
+	}
+	if backupInfo.Size() < sourceEnd {
 		if err := validateConversionOutputFile(outputPath, output); err != nil {
 			return err
 		}
-		return compactConversionSource(
-			backupPath, journal, sourceBefore, compactionPrefix,
-			filepath.Join(w.logDir, conversionJournalName),
-		)
+		return recordConversionProgress(journal, index, filepath.Join(filepath.Dir(backupPath), conversionJournalName))
 	}
-	if backupInfo.Size() == sourceAfter {
-		return validateConversionOutputFile(outputPath, output)
-	}
-	if backupInfo.Size() != sourceBefore {
+	if backupInfo.Size() != sourceEnd {
 		return fmt.Errorf("invalid conversion source size")
 	}
 	if err := ensureConversionOutput(backupPath, outputPath, journal, output); err != nil {
 		return err
 	}
-	return compactConversionSource(
-		backupPath, journal, sourceBefore, compactionPrefix,
-		filepath.Join(w.logDir, conversionJournalName),
-	)
+	if err := truncateConversionSource(backupPath, sourceStart); err != nil {
+		return err
+	}
+	return recordConversionProgress(journal, index, filepath.Join(filepath.Dir(backupPath), conversionJournalName))
 }
 
 func ensureConversionOutput(
@@ -490,12 +493,7 @@ func ensureConversionOutput(
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	offset := output.Offset
-	if output.Offset == 0 {
-		offset += journal.TailOffset
-	} else {
-		offset = 0
-	}
+	offset := journal.TailOffset + output.Offset
 	if err := copyFileRange(backupPath, outputPath+".tmp", offset, output.Length); err != nil {
 		return err
 	}
@@ -519,32 +517,25 @@ func validateConversionOutputFile(path string, output conversionOutput) error {
 	return nil
 }
 
-func compactConversionSource(
-	path string, journal *conversionJournal, sourceBefore, prefix int64, journalPath string,
-) error {
-	if prefix <= 0 || sourceBefore < prefix {
-		return fmt.Errorf("invalid conversion compaction range")
+func nextConversionOutput(journal *conversionJournal, sourceSize int64) (int, error) {
+	if sourceSize == journal.TailOffset {
+		return -1, nil
 	}
-	if journal.CompactionPrefix == 0 {
-		journal.CompactionSourceSize = sourceBefore
-		journal.CompactionPrefix = prefix
-		journal.CompactionCopied = 0
-		if err := writeJSONOwnerFile(journalPath, journal); err != nil {
-			return err
+	for index := len(journal.Outputs) - 1; index >= 0; index-- {
+		output := journal.Outputs[index]
+		if journal.TailOffset+output.Offset+output.Length == sourceSize {
+			return index, nil
 		}
-	} else if journal.CompactionSourceSize != sourceBefore || journal.CompactionPrefix != prefix {
-		return fmt.Errorf("invalid conversion compaction state")
 	}
+	return 0, fmt.Errorf("invalid conversion source progress")
+}
 
+func truncateConversionSource(path string, size int64) error {
 	file, err := os.OpenFile(path, os.O_RDWR, 0o600)
 	if err != nil {
 		return err
 	}
-	if err := copyCompactionChunks(file, journal, sourceBefore, prefix, journalPath); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err := file.Truncate(sourceBefore - prefix); err != nil {
+	if err := file.Truncate(size); err != nil {
 		_ = file.Close()
 		return err
 	}
@@ -552,44 +543,12 @@ func compactConversionSource(
 		_ = file.Close()
 		return err
 	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	journal.CompactionSourceSize = 0
-	journal.CompactionPrefix = 0
-	journal.CompactionCopied = 0
-	return writeJSONOwnerFile(journalPath, journal)
+	return file.Close()
 }
 
-func copyCompactionChunks(
-	file *os.File, journal *conversionJournal, sourceBefore, prefix int64, journalPath string,
-) error {
-	if journal.CompactionCopied < 0 || journal.CompactionCopied > sourceBefore-prefix {
-		return fmt.Errorf("invalid conversion compaction progress")
-	}
-	buffer := make([]byte, 1024*1024)
-	for journal.CompactionCopied < sourceBefore-prefix {
-		remaining := sourceBefore - prefix - journal.CompactionCopied
-		chunkSize := int64(len(buffer))
-		if chunkSize > prefix {
-			chunkSize = prefix
-		}
-		if chunkSize > remaining {
-			chunkSize = remaining
-		}
-		chunk := buffer[:chunkSize]
-		if _, err := file.ReadAt(chunk, prefix+journal.CompactionCopied); err != nil {
-			return err
-		}
-		if _, err := file.WriteAt(chunk, journal.CompactionCopied); err != nil {
-			return err
-		}
-		journal.CompactionCopied += chunkSize
-		if err := writeJSONOwnerFile(journalPath, journal); err != nil {
-			return err
-		}
-	}
-	return nil
+func recordConversionProgress(journal *conversionJournal, index int, journalPath string) error {
+	journal.NextOutput = index - 1
+	return writeJSONOwnerFile(journalPath, journal)
 }
 
 func allConversionOutputsPresent(logDir string, outputs []conversionOutput) bool {
@@ -610,6 +569,9 @@ func validateConversionJournal(journal *conversionJournal) error {
 	if len(journal.Outputs) == 0 {
 		return fmt.Errorf("conversion output is empty")
 	}
+	if journal.NextOutput < -1 || journal.NextOutput >= len(journal.Outputs) {
+		return fmt.Errorf("invalid conversion output progress")
+	}
 	var previousSequence int
 	var total int64
 	for index, output := range journal.Outputs {
@@ -621,7 +583,7 @@ func validateConversionJournal(journal *conversionJournal) error {
 			return err
 		}
 	}
-	if journal.TailOffset+total > journal.SourceSize {
+	if journal.TailOffset+total != journal.SourceSize {
 		return fmt.Errorf("conversion output exceeds source")
 	}
 	return nil

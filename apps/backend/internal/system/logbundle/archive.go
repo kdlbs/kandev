@@ -278,48 +278,29 @@ func (s *Service) addBackendFiles(
 	manifestFiles := make([]backendArchiveFile, 0, len(candidates))
 	included := false
 	for _, candidate := range candidates {
-		info, err := os.Lstat(candidate.Path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, included, partial, warnings, err
-		}
-		if !info.Mode().IsRegular() {
-			continue
-		}
 		if remaining == 0 {
 			partial = true
 			warnings = appendUnique(warnings, "backend logs were truncated to the archive byte limit")
 			continue
 		}
-		length := min(info.Size(), remaining)
-		offset := info.Size() - length
-		if length < info.Size() {
+		file, ok, err := addBackendCandidate(writer, candidate, remaining, openBackendCandidate)
+		if err != nil {
+			if os.IsNotExist(err) {
+				partial = true
+				warnings = appendUnique(warnings, "backend logs changed during collection")
+				continue
+			}
+			return nil, included, partial, warnings, err
+		}
+		if !ok {
+			continue
+		}
+		if file.Length < file.Size {
 			partial = true
 			warnings = appendUnique(warnings, "backend logs were truncated to the archive byte limit")
 		}
-		source, err := os.Open(candidate.Path)
-		if err != nil {
-			return nil, included, partial, warnings, err
-		}
-		header := &zip.FileHeader{Name: "backend/" + candidate.Name, Method: zip.Store}
-		header.SetMode(0o600)
-		destination, err := writer.CreateHeader(header)
-		if err == nil {
-			err = copySection(destination, source, offset, length)
-		}
-		closeErr := source.Close()
-		if err != nil {
-			return nil, included, partial, warnings, err
-		}
-		if closeErr != nil {
-			return nil, included, partial, warnings, closeErr
-		}
-		manifestFiles = append(manifestFiles, backendArchiveFile{
-			Name: candidate.Name, Size: info.Size(), Offset: offset, Length: length,
-		})
-		remaining -= length
+		manifestFiles = append(manifestFiles, file)
+		remaining -= file.Length
 		included = true
 	}
 	if !included {
@@ -327,6 +308,42 @@ func (s *Service) addBackendFiles(
 		warnings = appendUnique(warnings, "no backend log file was included")
 	}
 	return manifestFiles, included, partial, warnings, nil
+}
+
+func addBackendCandidate(
+	writer *zip.Writer, candidate backendCandidate, budget int64,
+	open func(string) (*os.File, error),
+) (backendArchiveFile, bool, error) {
+	source, err := open(candidate.Path)
+	if err != nil {
+		return backendArchiveFile{}, false, err
+	}
+	info, err := source.Stat()
+	if err != nil {
+		_ = source.Close()
+		return backendArchiveFile{}, false, err
+	}
+	if !info.Mode().IsRegular() {
+		return backendArchiveFile{}, false, source.Close()
+	}
+	length := min(info.Size(), budget)
+	offset := info.Size() - length
+	header := &zip.FileHeader{Name: "backend/" + candidate.Name, Method: zip.Store}
+	header.SetMode(0o600)
+	destination, err := writer.CreateHeader(header)
+	if err == nil {
+		err = copySection(destination, source, offset, length)
+	}
+	closeErr := source.Close()
+	if err != nil {
+		return backendArchiveFile{}, false, err
+	}
+	if closeErr != nil {
+		return backendArchiveFile{}, false, closeErr
+	}
+	return backendArchiveFile{
+		Name: candidate.Name, Size: info.Size(), Offset: offset, Length: length,
+	}, true, nil
 }
 
 func addFrontendFiles(writer *zip.Writer, item *job) ([]frontendArchiveFile, error) {

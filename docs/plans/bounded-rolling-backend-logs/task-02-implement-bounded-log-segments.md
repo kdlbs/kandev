@@ -92,13 +92,16 @@ the same conversation.
   segments, a 256 MiB global budget, oldest-closed-segment eviction, UTC-day
   rollover, strict filename parsing, legacy-file retention, and bounded
   oversized-active-file conversion.
-- Conversion renames the source to an owner-only backup, writes each bounded
-  output through a temporary file, and incrementally compacts the consumed
-  source prefix. The journal records compaction progress, so recovery can
-  resume after a stale temporary file or an interrupted in-place copy without
-  retaining a full source plus every output. Recovery checks completed outputs
-  before adopting a fresh active file. Atomic rename is used for normal size
-  and day rotation, so completed segments are never replaced.
+- Conversion renames the source to an owner-only backup and processes retained
+  outputs from newest to oldest. Each output is copied through a temporary
+  file, synced, and atomically renamed. The backup is then truncated and the
+  journal records the next output. This keeps migration I/O linear and lets
+  recovery resume after a stale temporary file, a truncated source, or an
+  interrupted journal write. Recovery checks completed outputs before it
+  adopts a fresh active file. Atomic rename is used for normal size and day
+  rotation, so completed segments are never replaced.
+- Retention accepts only dates from two UTC days before today through today.
+  Future-dated segments are excluded from cleanup and bundle selection.
 - Changed `backend_logger.go` so filesystem and rotation errors use the normal
   30-second retry path instead of a permanent daily-limit stop.
 - Added writer, migration, restart, UTC rollover, global-eviction, legacy,

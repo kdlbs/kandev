@@ -61,7 +61,9 @@ which shows that the retention failure is independent of the reported noise.
 - Keep legacy `backend-logs-YYYY-MM-DD.log` files eligible for retention and
   bundles. Count them toward the global budget.
 - Convert an oversized active file from the old format into bounded segments,
-  preserving its newest content before accepting new writes.
+  preserving its newest content before accepting new writes. Process outputs
+  newest-first, sync each output, truncate the source, and journal progress so
+  migration I/O stays linear.
 - Preserve owner-only file permissions and crash recovery for size rotation,
   day rotation, and legacy conversion.
 - Keep segment metadata and filesystem operations in a focused companion file
@@ -79,7 +81,9 @@ retries activation after 30 seconds. The old permanent
 - Order candidates by day, sequence, and active-file recency from newest to
   oldest before applying the existing archive source budget.
 - Keep the current symlink, regular-file, byte-range, manifest, and privacy
-  rules.
+  rules. Open each candidate once without following the final path component,
+  use the opened handle for size and copying, and mark a disappeared candidate
+  as partial.
 
 ## Tests
 
@@ -94,7 +98,8 @@ Implementation follows red-green-refactor in each task.
 - Failure tests verify that rename, removal, or open failures do not replace
   existing files or exceed the configured test budget.
 - Bundle tests cover numbered-segment discovery, newest-first ordering, legacy
-  compatibility, archive truncation, and symlink exclusion.
+  compatibility, archive truncation, symlink exclusion, future dates, and a
+  rotation during collection.
 
 No browser end-to-end test is required. The behavior changes only backend log
 classification, storage, and collection.

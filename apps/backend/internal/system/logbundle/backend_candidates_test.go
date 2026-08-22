@@ -20,6 +20,7 @@ func TestBackendCandidatesDiscoverNewestSegments(t *testing.T) {
 		"backend-logs.log":                       "active",
 		"backend-logs-2026-08-22-000001.log":     "first",
 		"backend-logs-2026-08-22-000002.log":     "latest",
+		"backend-logs-2026-08-23-000001.log":     "future",
 		"backend-logs-2026-08-21.log":            "legacy",
 		"backend-logs-2026-08-19-000001.log":     "expired",
 		"backend-logs-not-a-segment.log":         "malformed",
@@ -105,5 +106,66 @@ func TestBackendOnlyBundleKeepsNewestSegmentsWithinBudget(t *testing.T) {
 	}
 	if _, ok := contents["backend/backend-logs-2026-08-22-000001.log"]; ok {
 		t.Fatal("old segment was included after the archive budget was full")
+	}
+}
+
+func TestBackendCandidateCollectionUsesOpenedHandleAcrossRotation(t *testing.T) {
+	home := t.TempDir()
+	logDir := filepath.Join(home, "logs")
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		t.Fatalf("create log directory: %v", err)
+	}
+	path := filepath.Join(logDir, "backend-logs.log")
+	writeTestFile(t, path, "old-content")
+	service := newTestService(t, Config{
+		HomeDir: home,
+		Now:     func() time.Time { return time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC) },
+	})
+	candidates := service.backendCandidates()
+	if len(candidates) != 1 {
+		t.Fatalf("candidate count = %d, want 1", len(candidates))
+	}
+
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	rotatedPath := path + ".rotated"
+	open := func(candidatePath string) (*os.File, error) {
+		source, err := openBackendCandidate(candidatePath)
+		if err != nil {
+			return nil, err
+		}
+		if err := os.Rename(candidatePath, rotatedPath); err != nil {
+			_ = source.Close()
+			return nil, err
+		}
+		writeTestFile(t, candidatePath, "new")
+		return source, nil
+	}
+	file, included, err := addBackendCandidate(writer, candidates[0], int64(len("old-content")), open)
+	if err != nil {
+		t.Fatalf("add backend candidate: %v", err)
+	}
+	if !included || file.Length != int64(len("old-content")) {
+		t.Fatalf("file=%#v included=%v", file, included)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close archive: %v", err)
+	}
+
+	reader, err := zip.NewReader(bytes.NewReader(archive.Bytes()), int64(archive.Len()))
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	opened, err := reader.File[0].Open()
+	if err != nil {
+		t.Fatalf("open archived log: %v", err)
+	}
+	contents, err := io.ReadAll(opened)
+	_ = opened.Close()
+	if err != nil {
+		t.Fatalf("read archived log: %v", err)
+	}
+	if got := string(contents); got != "old-content" {
+		t.Fatalf("archived contents = %q, want old-content", got)
 	}
 }
