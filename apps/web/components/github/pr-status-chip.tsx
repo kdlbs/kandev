@@ -27,6 +27,7 @@ import {
   isPRDraft,
   isPRAwaitingReview,
   isPRReadyToMerge,
+  isPRQueued,
   isPRWaitingOnBranchProtection,
   pickDefaultPR,
 } from "@/components/github/pr-task-icon";
@@ -60,6 +61,7 @@ type ChipStatus =
   | "behind"
   | "draft"
   | "waiting"
+  | "queued"
   | "in_progress"
   | "neutral";
 type TriggerRef = { current: HTMLButtonElement | null };
@@ -90,6 +92,7 @@ function chipStatus(pr: TaskPR): ChipStatus {
   if (pr.mergeable_state === "dirty") return "conflict";
   if (pr.mergeable_state === "behind") return "behind";
   if (isPRDraft(pr)) return "draft";
+  if (isPRQueued(pr)) return "queued";
   // Pending checks / pending review must beat checks_state === "success" so a
   // PR with all checks green but reviewers still outstanding renders as
   // in-progress, not passed. Without this order, the chip flips to green the
@@ -114,6 +117,7 @@ const CHIP_STATUS_RANK: Record<ChipStatus, number> = {
   conflict: 5,
   blocked: 4,
   behind: 3,
+  queued: 2.5,
   draft: 0.5,
   in_progress: 2,
   waiting: 1.5,
@@ -450,6 +454,14 @@ function ChipStatusGlyph({ status }: { status: ChipStatus }) {
       return <IconAlertTriangleFilled className="h-3.5 w-3.5 text-red-500" aria-hidden="true" />;
     case "behind":
       return <IconAlertTriangleFilled className="h-3.5 w-3.5 text-yellow-500" aria-hidden="true" />;
+    case "queued":
+      return (
+        <IconClock
+          data-testid="pr-status-glyph-queued"
+          className="h-3.5 w-3.5 text-[#966600]"
+          aria-hidden="true"
+        />
+      );
     case "draft":
       return <IconPointFilled className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />;
     case "blocked":

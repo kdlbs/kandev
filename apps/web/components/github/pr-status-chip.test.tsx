@@ -582,6 +582,19 @@ describe("aggregateChipStatus", () => {
     const failing = makePR({ id: "fail", checks_state: "failure" });
     expect(aggregateChipStatus([conflict, failing])).toBe("failed");
   });
+
+  it("uses the dedicated queued chip status", () => {
+    expect(aggregateChipStatus([makePR({ merge_queue_state: "queued" })])).toBe("queued");
+  });
+
+  it("lets a failing sibling retain chip priority over a queued PR", () => {
+    expect(
+      aggregateChipStatus([
+        makePR({ merge_queue_state: "queued" }),
+        makePR({ pr_number: 2, checks_state: "failure" }),
+      ]),
+    ).toBe("failed");
+  });
 });
 
 describe("PRStatusChip — multiple PRs", () => {
