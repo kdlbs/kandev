@@ -528,6 +528,18 @@ func wireBootReadySimulator(svc *Service, agentMgr *mockAgentManager, newExecID 
 		}
 	}
 	agentMgr.launchAgentFunc = func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		// Record the initial ACP prompt baked into the launch request (this is
+		// how StartCreatedSession/LaunchPreparedSession delivers a merged
+		// hand-off prompt for a fresh session — unlike PromptTask's lazy-resume
+		// path for an already-launched session, there is no separate
+		// PromptAgent call to capture) so assertHandoffDeliveredOrQueued can
+		// find it via the same capturedPromptsForExecution helper.
+		agentMgr.mu.Lock()
+		agentMgr.capturedPromptCalls = append(agentMgr.capturedPromptCalls, promptCall{
+			ExecutionID: newExecID,
+			Prompt:      req.TaskDescription,
+		})
+		agentMgr.mu.Unlock()
 		// Simulate the lifecycle manager's persistExecutorRunning: in production
 		// the row is upserted in lockstep with executionStore.Add; here we mirror
 		// that timing so the orchestrator's GetExecutionIDForSession lookup
@@ -619,29 +631,56 @@ func (sc *pendingMoveScenario) assertOneTransitionToInProgress(t *testing.T, ste
 		t.Error("review session must no longer be primary (the impl session takes over)")
 	}
 
-	impl, err := sc.repo.GetTaskSession(sc.ctx, sc.implSessionID)
+	// The original impl session was seeded COMPLETED (it was previously
+	// launched and completed a real turn — mirroring production). Terminal
+	// sessions are never revived for workflow re-entry (see
+	// findReusableSessionForProfile), so it must stay exactly as seeded:
+	// terminal, non-primary, historically intact.
+	oldImpl, err := sc.repo.GetTaskSession(sc.ctx, sc.implSessionID)
 	if err != nil {
-		t.Fatalf("load impl session: %v", err)
+		t.Fatalf("load original impl session: %v", err)
 	}
-	if !impl.IsPrimary {
-		t.Error("impl session must be primary after the deferred move applies")
+	if oldImpl.State != models.TaskSessionStateCompleted {
+		t.Errorf("original impl session state = %q, want it to remain COMPLETED (never revived)", oldImpl.State)
 	}
-	if impl.State == models.TaskSessionStateCompleted {
-		t.Errorf("impl session state = %q, expected non-terminal (revived for a new turn)", impl.State)
+	if oldImpl.IsPrimary {
+		t.Error("original impl session must remain non-primary (never revived)")
 	}
 
-	sc.assertHandoffDeliveredOrQueued(t)
+	// Re-entry into the Impl profile must create a FRESH session rather than
+	// resurrecting session-impl's stale ACP conversation.
+	sessions, err := sc.repo.ListTaskSessions(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	var freshImpl *models.TaskSession
+	for _, s := range sessions {
+		if s.AgentProfileID == profileImpl && s.ID != sc.implSessionID {
+			freshImpl = s
+		}
+	}
+	if freshImpl == nil {
+		t.Fatal("expected a fresh impl-profile session distinct from the original COMPLETED session-impl")
+	}
+	if !freshImpl.IsPrimary {
+		t.Error("fresh impl session must be primary after the deferred move applies")
+	}
+	if isTerminalSessionState(freshImpl.State) {
+		t.Errorf("fresh impl session state = %q, expected non-terminal", freshImpl.State)
+	}
+
+	sc.assertHandoffDeliveredOrQueued(t, freshImpl.ID)
 }
 
-// assertHandoffDeliveredOrQueued checks the hand-off prompt landed on the impl
-// session — either delivered to its agent (PromptAgent capture) or sitting in
-// the queue waiting for delivery. Both are acceptable; the failure mode the
-// regression catches is "lost" (neither delivered nor queued) or "delivered
-// to the wrong session".
-func (sc *pendingMoveScenario) assertHandoffDeliveredOrQueued(t *testing.T) {
+// assertHandoffDeliveredOrQueued checks the hand-off prompt landed on the
+// given session — either delivered to its agent (PromptAgent capture) or
+// sitting in the queue waiting for delivery. Both are acceptable; the
+// failure mode the regression catches is "lost" (neither delivered nor
+// queued) or "delivered to the wrong session".
+func (sc *pendingMoveScenario) assertHandoffDeliveredOrQueued(t *testing.T, targetSessionID string) {
 	t.Helper()
 	implPrompts := capturedPromptsForExecution(sc.agentMgr, sc.implRelaunchExec)
-	implQueued := sc.svc.messageQueue.GetStatus(sc.ctx, sc.implSessionID)
+	implQueued := sc.svc.messageQueue.GetStatus(sc.ctx, targetSessionID)
 
 	if len(implPrompts) == 0 && implQueued.Count == 0 {
 		t.Error("hand-off prompt was neither delivered to the impl session nor queued for it")
