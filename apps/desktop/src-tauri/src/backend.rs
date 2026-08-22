@@ -287,6 +287,7 @@ fn launch_and_wait(app: &AppHandle, state: &BackendState) -> Result<String, Stri
         return Err("Desktop startup cancelled".to_string());
     }
     wait_for_backend(port, state, HEALTH_TIMEOUT, &health_token)?;
+    wait_for_ready(port, state)?;
     Ok(format!("http://{LOOPBACK_HOST}:{port}/"))
 }
 
@@ -530,6 +531,33 @@ fn wait_for_backend(
     }
 }
 
+// wait_for_ready polls GET /ready after wait_for_backend's /health check
+// already passed. /health flips to 200 as soon as the listener binds, before
+// startup recovery finishes, so treating a healthy response as "safe to
+// navigate the webview" reopens the crash-loop-adjacent bug this backend
+// change fixed: the window would load the bootstrap handler's raw 503 body.
+// /ready is the readiness signal instead. This wait has no timeout and never
+// aborts the launch on its own: HEALTH_TIMEOUT above already made the
+// keep-or-kill decision, and readiness can legitimately take longer while
+// startup recovery sweeps run. It only returns early if the backend process
+// exits or shutdown starts.
+fn wait_for_ready(port: u16, state: &BackendState) -> Result<(), String> {
+    loop {
+        if state.is_shutdown_started() {
+            return Err("Desktop startup cancelled".to_string());
+        }
+        if let Some(message) = state.child_exit_message()? {
+            return Err(format!(
+                "Kandev launcher exited before /ready reported ready ({message})"
+            ));
+        }
+        if ready_ready(port) {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+}
+
 fn launcher_exit_message(status: &str, output: Option<String>) -> String {
     let mut message = status.to_string();
     append_recent_output(&mut message, output);
@@ -575,6 +603,37 @@ fn request_health(port: u16, expected_health_token: &str) -> Result<bool, String
         DESKTOP_HEALTH_TOKEN_HEADER,
         expected_health_token,
     ))
+}
+
+fn ready_ready(port: u16) -> bool {
+    request_ready(port).unwrap_or(false)
+}
+
+// request_ready hits /ready rather than /health. /ready never sets
+// DESKTOP_HEALTH_TOKEN_HEADER (that header is /health-only — see
+// docs/specs/health-endpoint-version/spec.md AC-21), so unlike
+// request_health this does not check for one.
+fn request_ready(port: u16) -> Result<bool, String> {
+    let addr = (LOOPBACK_HOST, port)
+        .to_socket_addrs()
+        .map_err(|err| err.to_string())?
+        .next()
+        .ok_or_else(|| format!("Could not resolve {LOOPBACK_HOST}:{port}"))?;
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(250))
+        .map_err(|err| err.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(250)))
+        .map_err(|err| err.to_string())?;
+    stream
+        .write_all(
+            format!(
+                "GET /ready HTTP/1.1\r\nHost: {LOOPBACK_HOST}:{port}\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .map_err(|err| err.to_string())?;
+    let response = read_http_response_head(&mut stream)?;
+    Ok(response.starts_with(b"HTTP/1.1 200") || response.starts_with(b"HTTP/1.0 200"))
 }
 
 fn read_http_response_head<R: Read>(reader: &mut R) -> Result<Vec<u8>, String> {
@@ -1120,6 +1179,47 @@ mod tests {
             DESKTOP_HEALTH_TOKEN_HEADER,
             "token"
         ));
+    }
+
+    #[test]
+    fn request_ready_accepts_response_without_health_token_header() {
+        // readyHandler never sets X-Kandev-Desktop-Health-Token (that header
+        // is /health-only); request_ready must accept a bare 2xx.
+        let listener = TcpListener::bind((LOOPBACK_HOST, 0)).expect("bind ready listener");
+        let port = listener.local_addr().expect("listener addr").port();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0_u8; 512];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+            }
+        });
+
+        let ready = request_ready(port).expect("request_ready");
+        assert!(
+            ready,
+            "request_ready must treat a bare 2xx as ready with no token check"
+        );
+    }
+
+    #[test]
+    fn request_ready_rejects_non_2xx_response() {
+        let listener = TcpListener::bind((LOOPBACK_HOST, 0)).expect("bind ready listener");
+        let port = listener.local_addr().expect("listener addr").port();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0_u8; 512];
+                let _ = stream.read(&mut buf);
+                let _ = stream
+                    .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n");
+            }
+        });
+
+        let ready = request_ready(port).expect("request_ready");
+        assert!(
+            !ready,
+            "request_ready must reject a non-2xx response (bootstrap-not-ready-yet)"
+        );
     }
 
     #[cfg(unix)]
