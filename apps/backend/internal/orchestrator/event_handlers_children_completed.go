@@ -19,7 +19,13 @@ import (
 )
 
 func (s *Service) handleTaskStateChanged(ctx context.Context, data watcher.TaskEventData) {
-	if data.NewState == nil || !models.IsTerminalTaskState(*data.NewState) {
+	if data.NewState == nil {
+		return
+	}
+
+	s.maybeResumeParentController(ctx, data)
+
+	if !models.IsTerminalTaskState(*data.NewState) {
 		return
 	}
 

@@ -184,6 +184,9 @@ const (
 	// that produced the launch-only runtime seed. A seed is valid only for this
 	// profile, even if task profile selection changes before the first launch.
 	MetaKeyInitialSessionRuntimeConfigProfileID = "initial_session_runtime_config_profile_id"
+	// MetaKeyControllerResumeEnabled opts a parent task into event-driven
+	// controller resume when a direct child becomes reviewable.
+	MetaKeyControllerResumeEnabled = "controller_resume_enabled"
 )
 
 // IsAgentTitlePending reports whether task metadata contains the durable
@@ -193,6 +196,13 @@ const (
 func IsAgentTitlePending(metadata map[string]interface{}) bool {
 	pending, ok := metadata[MetaKeyAgentTitlePending].(bool)
 	return ok && pending
+}
+
+// IsControllerResumeEnabled reports whether task metadata explicitly opts the
+// task into event-driven controller resume.
+func IsControllerResumeEnabled(metadata map[string]interface{}) bool {
+	enabled, ok := metadata[MetaKeyControllerResumeEnabled].(bool)
+	return ok && enabled
 }
 
 // AgentTitleOwnerSessionID returns the session that owns the pending title
