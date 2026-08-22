@@ -95,7 +95,17 @@ type TaskItemProps = {
   subtasksCollapsed?: boolean;
   /** Toggles subtask visibility when the chevron is clicked. */
   onToggleSubtasks?: () => void;
-  repositories?: string[];
+  /**
+   * The task's repository as a stable slug (or name). A multi-repository task
+   * carries its primary repository here; enumerating the rest is deferred,
+   * since `TaskSwitcherItem.repositories` is not populated from live data.
+   */
+  repositoryPath?: string;
+  /**
+   * Whether this row should name its repository. False when the list is grouped
+   * by repository, where the section header already says it.
+   */
+  showRepository?: boolean;
   prInfo?: { number: number; state: string; aggregateState?: string };
   /** Number of prompts currently en-queued for this task (mail badge). */
   queuedCount?: number;
@@ -341,7 +351,8 @@ function TaskItemContent({
   primarySessionId,
   isArchived,
   isPinned,
-  repositories,
+  repositoryPath,
+  showRepository,
   updatedAt,
   lastActivityAt,
   showActivityTime,
@@ -362,7 +373,8 @@ function TaskItemContent({
   primarySessionId?: string | null;
   isArchived?: boolean;
   isPinned?: boolean;
-  repositories?: string[];
+  repositoryPath?: string;
+  showRepository: boolean;
   updatedAt?: string;
   lastActivityAt?: string;
   showActivityTime?: boolean;
@@ -402,11 +414,6 @@ function TaskItemContent({
           </span>
         )}
       </span>
-      {repositories && repositories.length > 1 && (
-        <span className="truncate text-[11px] text-muted-foreground/50">
-          {repositories.join(" · ")}
-        </span>
-      )}
       {taskId && (
         <TaskRowMetadata
           taskId={taskId}
@@ -416,6 +423,7 @@ function TaskItemContent({
       )}
       <TaskItemStatsRow
         updatedAt={showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt}
+        repositoryLabel={showRepository ? repositoryPath : undefined}
         prInfo={prInfo}
         primarySessionId={primarySessionId}
         queuedCount={queuedCount}
@@ -461,7 +469,8 @@ export const TaskItem = memo(function TaskItem({
   subtaskCount,
   subtasksCollapsed,
   onToggleSubtasks,
-  repositories,
+  repositoryPath,
+  showRepository = true,
   prInfo,
   queuedCount,
   wipQueue,
@@ -510,7 +519,8 @@ export const TaskItem = memo(function TaskItem({
         primarySessionId={primarySessionId}
         isArchived={isArchived}
         isPinned={isPinned}
-        repositories={repositories}
+        repositoryPath={repositoryPath}
+        showRepository={showRepository}
         updatedAt={updatedAt}
         lastActivityAt={lastActivityAt}
         showActivityTime={showActivityTime}

@@ -22,6 +22,8 @@ export type TaskRowProps = {
   activeTaskId: string | null;
   selectedTaskId: string | null;
   showActivityTime?: boolean;
+  /** False when the list is grouped by repository and the header already names it. */
+  showRepository?: boolean;
   onSelectTask: (taskId: string) => void;
   onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
@@ -93,6 +95,7 @@ type TaskRowItemProps = Pick<
   | "activeTaskId"
   | "selectedTaskId"
   | "showActivityTime"
+  | "showRepository"
   | "onSelectTask"
   | "selectedTaskIds"
   | "onToggleSelectTask"
@@ -110,6 +113,7 @@ function TaskRowItem({
   activeTaskId,
   selectedTaskId,
   showActivityTime,
+  showRepository,
   onSelectTask,
   selectedTaskIds,
   onToggleSelectTask,
@@ -161,7 +165,8 @@ function TaskRowItem({
       updatedAt={task.updatedAt}
       lastActivityAt={task.lastActivityAt}
       showActivityTime={showActivityTime}
-      repositories={task.repositories}
+      repositoryPath={task.repositoryPath}
+      showRepository={showRepository}
       prInfo={task.prInfo}
       queuedCount={task.queuedCount}
       wipQueue={task.wipQueue}

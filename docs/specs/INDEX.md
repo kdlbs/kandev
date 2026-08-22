@@ -159,6 +159,7 @@ Per-workspace credentials and triage triggers for external services.
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |
 | [pr-outcome-attribution](pr-outcome-attribution/spec.md) | shipped |
 | [enable-disable-toggle](integrations/enable-disable-toggle.md) | shipped |
+| [clickable-integration-cards](integrations/clickable-integration-cards.md) | shipped |
 
 ## workspaces/ — workspace lifecycle
 

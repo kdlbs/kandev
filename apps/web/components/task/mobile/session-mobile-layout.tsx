@@ -80,6 +80,8 @@ type SessionMobileLayoutProps = {
   baseBranch?: string;
   worktreeBranch?: string | null;
   taskTitle?: string;
+  /** `owner/repo` (or the repository name) of the task's primary repository. */
+  repositoryLabel?: string | null;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string | null;
   remoteExecutorName?: string | null;
@@ -352,6 +354,8 @@ type MobileTopBarStickyProps = {
   activeTaskId: string | null;
   workspaceId: string | null;
   taskTitle?: string;
+  /** `owner/repo` (or the repository name) of the task's primary repository. */
+  repositoryLabel?: string | null;
   effectiveSessionId: string | null;
   baseBranch?: string;
   worktreeBranch?: string | null;
@@ -378,6 +382,7 @@ function MobileTopBarSticky(props: MobileTopBarStickyProps) {
         taskId={props.activeTaskId}
         workspaceId={props.workspaceId}
         taskTitle={props.taskTitle}
+        repositoryLabel={props.repositoryLabel}
         sessionId={props.effectiveSessionId}
         baseBranch={props.baseBranch}
         worktreeBranch={props.worktreeBranch}

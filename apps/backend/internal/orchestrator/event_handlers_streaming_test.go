@@ -3417,6 +3417,100 @@ func TestPersistSessionRuntimeConfigUpdatesProviderState(t *testing.T) {
 	require.Equal(t, map[string]string{"model": "mock-fast", "effort": "medium"}, cfg.ConfigOptions)
 }
 
+func TestHandleSessionModelsEventDefersUnsettledStartupState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateStarting, ""))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyOrigin, models.SessionOriginTaskInitial))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyRuntimeConfig, models.SessionRuntimeConfig{
+		Model: "gpt-5.6-sol",
+		ConfigOptions: map[string]string{
+			"model":            "gpt-5.6-sol",
+			"reasoning_effort": "high",
+		},
+	}))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPConfigBaseline, map[string]string{
+		"model":            "gpt-5.6-sol",
+		"reasoning_effort": "medium",
+	}))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPModelState, lifecycle.SessionModelsSnapshot{
+		CurrentModelID: "gpt-5.6-sol",
+		Models:         []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6 Sol"}},
+		ConfigOptions: []streams.ConfigOption{{
+			ID: "model", Category: "model", CurrentValue: "gpt-5.6-sol",
+		}},
+		ConfigOptionsSettled: true,
+	}))
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.AgentProfileSnapshot = map[string]interface{}{"model": "gpt-5.6-sol"}
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	eb := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eb}
+	unsettled := func(model string) {
+		svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			TaskID:    "t1",
+			SessionID: "s1",
+			AgentID:   "a1",
+			Data: &lifecycle.AgentStreamEventData{
+				CurrentModelID: model,
+				SessionModels:  []streams.SessionModelInfo{{ModelID: model, Name: model}},
+				OriginalConfigCandidate: []streams.ConfigOption{{
+					Type: "select", ID: "reasoning_effort", CurrentValue: "high",
+				}},
+				ConfigOptions: []streams.ConfigOption{
+					{ID: "model", Category: "model", CurrentValue: model},
+					{ID: "reasoning_effort", CurrentValue: "low"},
+				},
+				Data: map[string]any{"original_config_settled": true},
+			},
+		})
+	}
+
+	unsettled("gpt-5.6-luna")
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	runtimeConfig, ok := models.LoadSessionRuntimeConfig(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-sol", runtimeConfig.Model)
+	require.Equal(t, "gpt-5.6-sol", updated.AgentProfileSnapshot["model"])
+	modelState, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-sol", modelState.CurrentModelID)
+	require.Empty(t, eb.events)
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		AgentID:   "a1",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID: "gpt-5.6-sol",
+			SessionModels:  []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6 Sol"}},
+			ConfigOptions: []streams.ConfigOption{
+				{ID: "model", Category: "model", CurrentValue: "gpt-5.6-sol"},
+				{ID: "reasoning_effort", CurrentValue: "high"},
+			},
+			Data: map[string]any{
+				"config_options_settled":  true,
+				"original_config_settled": true,
+			},
+		},
+	})
+	require.Len(t, eb.events, 1)
+
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateRunning, ""))
+	unsettled("gpt-5.6-luna")
+	require.Len(t, eb.events, 2)
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	runtimeConfig, ok = models.LoadSessionRuntimeConfig(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-luna", runtimeConfig.Model)
+}
+
 func TestHandleSessionModelsEventPublishesPersistedConfigBaselineAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

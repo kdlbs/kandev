@@ -305,7 +305,16 @@ func (s *Service) StartActivePlugins(ctx context.Context) {
 				s.notifyDeliverer()
 				s.notifyAgentToolCatalogChanged()
 			}
+			continue
 		}
+		// Boot is the only trigger that reaches an instance which already
+		// accumulated superseded versions but installs nothing new (a plugin
+		// already at its latest version, or one whose auto-update is off), so
+		// it prunes too — under the same confirmed-start precondition as
+		// Install, which is what keeps disabled plugins, sideloads registered
+		// disabled, and plugins that fail to spawn untouched. Unlike Install,
+		// this loop holds no lifecycle lock, so the prune takes one itself.
+		s.pruneUnderLifecycleLock(rec.ID, rec.Version, "")
 	}
 }
 

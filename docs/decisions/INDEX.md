@@ -188,3 +188,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-20-startup-configuration-source-parity | [Startup Configuration Uses One Typed Source Model](2026-08-20-startup-configuration-source-parity.md) | accepted | backend, agentctl, frontend, cli, security, operations | 2026-08-20 |
 | 2026-08-20-acp-client-non-underscore-extension-methods | [Route Non-Underscore Inbound Client Methods to the Extension Handler](2026-08-20-acp-client-non-underscore-extension-methods.md) | accepted | backend, protocol | 2026-08-20 |
 | 2026-08-22-persistent-fork-approval-labels | [Persist Fork Approval Labels Across Pushes](2026-08-22-persistent-fork-approval-labels.md) | accepted | infra, workflow, security | 2026-08-22 |
+| 2026-08-22-plugin-version-retention | [Keep Exactly One Superseded Plugin Version](2026-08-22-plugin-version-retention.md) | accepted | backend | 2026-08-22 |
