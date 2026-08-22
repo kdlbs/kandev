@@ -263,7 +263,36 @@ func TestPersistRuntimeSecrets(t *testing.T) {
 	}
 	store.store[authSecretID].Value = "session-auth-token"
 	store.store[controlSecretID].Value = "environment-control-token"
-	if got := m.revealContainerControlAuthToken(context.Background(), execution.MetadataSnapshot()); got != "environment-control-token" {
+	if got, err := m.revealContainerControlAuthToken(context.Background(), execution.MetadataSnapshot(), false); err != nil || got != "environment-control-token" {
 		t.Fatalf("revealed container control token = %q, want environment-control-token", got)
 	}
+}
+
+func TestRevealContainerControlAuthToken(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	store := newInMemorySecretStore()
+	store.store["session-auth"] = &secrets.SecretWithValue{Value: "legacy-session-token"}
+	m := &Manager{logger: log, secretStore: store}
+
+	t.Run("uses the session token only when the environment control handle is absent", func(t *testing.T) {
+		got, err := m.revealContainerControlAuthToken(context.Background(), map[string]interface{}{
+			MetadataKeyAuthTokenSecret: "session-auth",
+		}, true)
+		if err != nil || got != "legacy-session-token" {
+			t.Fatalf("revealContainerControlAuthToken() = %q, %v", got, err)
+		}
+	})
+
+	t.Run("does not fall back when a configured environment handle cannot be revealed", func(t *testing.T) {
+		got, err := m.revealContainerControlAuthToken(context.Background(), map[string]interface{}{
+			MetadataKeyContainerControlAuthSecret: "missing-control-token",
+			MetadataKeyAuthTokenSecret:            "session-auth",
+		}, true)
+		if err == nil {
+			t.Fatal("revealContainerControlAuthToken() succeeded with an unreadable environment handle")
+		}
+		if got != "" {
+			t.Fatalf("revealContainerControlAuthToken() token = %q, want empty", got)
+		}
+	})
 }

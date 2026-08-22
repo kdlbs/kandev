@@ -45,8 +45,14 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 
 func canonicalInventoryMatches(spec RepoSpec, rows []*models.TaskEnvironmentRepo, useWorktree bool) int {
 	matches := 0
+	expectedBranchSlug := launchRepoBranchIdentitySlug(spec)
+	allowLegacyEmptyBranch := expectedBranchSlug != "" && !hasBranchScopedEnvironmentRepoRows(rows)
 	for _, row := range rows {
-		if row.RepositoryID != spec.RepositoryID || worktree.SanitizeBranchSlug(row.BranchSlug) != launchRepoBranchIdentitySlug(spec) {
+		branchMatches := worktree.SanitizeBranchSlug(row.BranchSlug) == expectedBranchSlug
+		if allowLegacyEmptyBranch && row.BranchSlug == "" {
+			branchMatches = true
+		}
+		if row.RepositoryID != spec.RepositoryID || !branchMatches {
 			continue
 		}
 		if row.DeletedAt != nil || row.Status == "failed" || row.Status == "deleted" || (useWorktree && row.WorktreeID == "") {
@@ -346,7 +352,14 @@ func environmentRepoWorktreeIDs(env *models.TaskEnvironment) map[repositoryWorkt
 }
 
 func hasBranchScopedEnvironmentWorktrees(env *models.TaskEnvironment) bool {
-	for _, repo := range env.Repos {
+	if env == nil {
+		return false
+	}
+	return hasBranchScopedEnvironmentRepoRows(env.Repos)
+}
+
+func hasBranchScopedEnvironmentRepoRows(repos []*models.TaskEnvironmentRepo) bool {
+	for _, repo := range repos {
 		if repo.RepositoryID != "" && repo.WorktreeID != "" && worktree.SanitizeBranchSlug(repo.BranchSlug) != "" {
 			return true
 		}

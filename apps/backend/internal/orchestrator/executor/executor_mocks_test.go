@@ -265,6 +265,7 @@ type mockRepository struct {
 	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
 	// transient DB error); if nil, the default map lookup is used.
 	getTaskSessionFunc                 func(ctx context.Context, id string) (*models.TaskSession, error)
+	getTaskEnvironmentFunc             func(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	getTaskEnvironmentByTaskIDFunc     func(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	createTaskSessionFunc              func(ctx context.Context, session *models.TaskSession) error
 	updateTaskSessionStateFunc         func(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
@@ -1080,7 +1081,10 @@ func (m *mockRepository) ListEnvironments(ctx context.Context) ([]*models.Enviro
 }
 
 // Task environment operations
-func (m *mockRepository) GetTaskEnvironment(_ context.Context, id string) (*models.TaskEnvironment, error) {
+func (m *mockRepository) GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error) {
+	if m.getTaskEnvironmentFunc != nil {
+		return m.getTaskEnvironmentFunc(ctx, id)
+	}
 	if env, ok := m.taskEnvironments[id]; ok {
 		return env, nil
 	}

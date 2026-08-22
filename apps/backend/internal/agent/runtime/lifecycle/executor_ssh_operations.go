@@ -485,7 +485,11 @@ func ensureRemoteSessionDir(ctx context.Context, client *ssh.Client, taskDir, se
 		return "", errors.New("ssh: session ID is empty")
 	}
 	sessionDir := taskDir + "/.kandev/sessions/" + sessionID
-	if _, _, err := runSSHCommand(ctx, client, "mkdir -p "+shellQuote(sessionDir)); err != nil {
+	// Change into the canonical directory before creating session-scoped state.
+	// A path-based mkdir -p could recreate taskDir after an attach-only probe
+	// observed it, whereas cd fails if the canonical workspace disappeared.
+	command := "cd -- " + shellQuote(taskDir) + " && mkdir -p -- " + shellQuote(".kandev/sessions/"+sessionID)
+	if _, _, err := runSSHCommand(ctx, client, command); err != nil {
 		return "", fmt.Errorf("ssh: mkdir session dir: %w", err)
 	}
 	return sessionDir, nil

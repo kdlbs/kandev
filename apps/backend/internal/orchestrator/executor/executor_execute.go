@@ -1077,20 +1077,18 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// child task id, so without this fallback the launch path creates a
 	// fresh worktree and the inheritance contract silently breaks.
 	if existingEnv == nil && session.TaskEnvironmentID != "" {
-		if inherited, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID); err == nil {
-			existingEnv = inherited
+		inherited, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: inherited task environment is unavailable", models.ErrWorkspaceReuseUnsafe)
 		}
+		if inherited == nil {
+			return nil, fmt.Errorf("%w: inherited task environment is unavailable", models.ErrWorkspaceReuseUnsafe)
+		}
+		existingEnv = inherited
 	}
 	assignLaunchTaskEnvironmentID(session, existingEnv)
 
 	workspaceReuseRequired := existingEnv != nil && existingEnv.MaterializationSessionID != session.ID
-	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, primaryRepo, allRepos, workspaceReuseRequired)
-	if err != nil {
-		return nil, err
-	}
-	if execCfg.ExecutorID != "" {
-		session.ExecutorID = execCfg.ExecutorID
-	}
 	// A ready/stopped environment belongs to the task, not to the session that
 	// first materialized it. Its next launch must attach rather than recover or
 	// materialize another workspace. A creating environment is usable only by
@@ -1101,7 +1099,13 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusFailed {
 		return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
 	}
-	req.WorkspaceReuseRequired = workspaceReuseRequired
+	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, primaryRepo, allRepos, workspaceReuseRequired)
+	if err != nil {
+		return nil, err
+	}
+	if execCfg.ExecutorID != "" {
+		session.ExecutorID = execCfg.ExecutorID
+	}
 	req.OfficeAgentProfileID = opts.OfficeAgentProfileID
 	req.TurnID = opts.TurnID
 	if req.OfficeAgentProfileID == "" && session.AgentProfileID != "" {
@@ -2155,6 +2159,30 @@ func (e *Executor) persistRecoveredBaseBranch(
 func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentResponse) []*models.TaskEnvironmentRepo {
 	if len(resp.Worktrees) > 0 {
 		return buildTaskEnvironmentRepos(resp.Worktrees)
+	}
+	// Clone-based remote executors materialize all repositories inside one
+	// task workspace, so they have no host worktree result to project here.
+	// Still record every repository/branch slot before the environment becomes
+	// reusable; otherwise the next attach-only launch correctly rejects the
+	// partial inventory.
+	if len(req.Repositories) > 0 {
+		repos := make([]*models.TaskEnvironmentRepo, 0, len(req.Repositories))
+		for position, spec := range req.Repositories {
+			if spec.RepositoryID == "" {
+				continue
+			}
+			repos = append(repos, &models.TaskEnvironmentRepo{
+				RepositoryID: spec.RepositoryID,
+				BranchSlug:   launchRepoBranchIdentitySlug(spec),
+				// Remote clone launches only report an environment-level workspace
+				// handle when they have no per-repository result. Do not invent a
+				// path or branch for every repository from that shared handle: it
+				// is not a canonical repository projection and could point a later
+				// attach at the wrong checkout.
+				Position: position,
+			})
+		}
+		return repos
 	}
 	if req.RepositoryID == "" {
 		return nil

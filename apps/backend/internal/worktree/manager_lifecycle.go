@@ -168,6 +168,10 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 	if req.WorktreeID == "" || req.TaskEnvironmentID == "" {
 		return nil, ErrReuseWorktreeUnavailable
 	}
+	requestedBranchSlug := requestBranchIdentitySlug(req)
+	if (req.BranchSlug != "" || req.BranchIdentitySlug != "") && requestedBranchSlug == "" {
+		return nil, ErrReuseWorktreeUnavailable
+	}
 	wt, err := m.GetByID(ctx, req.WorktreeID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrReuseWorktreeUnavailable, err)
@@ -175,6 +179,7 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 	if wt == nil || wt.Status != StatusActive || wt.TaskID != req.TaskID ||
 		wt.RepositoryID != req.RepositoryID ||
 		wt.TaskEnvironmentID != req.TaskEnvironmentID ||
+		(requestedBranchSlug != "" && SanitizeBranchSlug(wt.BranchSlug) != requestedBranchSlug) ||
 		!m.IsValid(wt.Path) {
 		return nil, ErrReuseWorktreeUnavailable
 	}

@@ -849,6 +849,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		metadata[MetadataKeyContributionDestinations] = contributionDestinations
 	}
 
+	allowLegacyContainerControlFallback := reqWithWorktree.WorkspaceReuseRequired &&
+		(reqWithWorktree.ExecutorType == string(models.ExecutorTypeLocalDocker) || reqWithWorktree.ExecutorType == string(models.ExecutorTypeRemoteDocker))
+	containerControlAuthToken, err := m.revealContainerControlAuthToken(ctx, metadata, allowLegacyContainerControlFallback)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("resolve container control token: %w", err)
+	}
+
 	var autoApproveOverride *bool
 	if profileInfo != nil {
 		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
@@ -877,7 +884,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpMode:                        reqWithWorktree.McpMode,
 		McpProviders:                   reqWithWorktree.McpProviders,
 		McpProfile:                     reqWithWorktree.McpProfile,
-		AuthToken:                      m.revealContainerControlAuthToken(ctx, metadata),
+		AuthToken:                      containerControlAuthToken,
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		AgentctlStartupConfig:          m.agentctlStartupConfig,
 		OnProgress:                     onProgress,

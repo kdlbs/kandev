@@ -819,6 +819,46 @@ func TestLaunchPreparedSession_InheritsEnvFromSessionEnvironmentID(t *testing.T)
 	}
 }
 
+func TestLaunchPreparedSession_RejectsUnavailableInheritedEnvironment(t *testing.T) {
+	repo := newMockRepository()
+	session := &models.TaskSession{
+		ID:                "session-child",
+		TaskID:            "task-child",
+		AgentProfileID:    "profile-123",
+		TaskEnvironmentID: "env-parent",
+		State:             models.TaskSessionStateCreated,
+		StartedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+	}
+	repo.sessions[session.ID] = session
+	repo.getTaskEnvironmentFunc = func(_ context.Context, id string) (*models.TaskEnvironment, error) {
+		if id != session.TaskEnvironmentID {
+			t.Fatalf("GetTaskEnvironment id = %q, want %q", id, session.TaskEnvironmentID)
+		}
+		return nil, errors.New("environment row disappeared")
+	}
+
+	launched := false
+	executor := newTestExecutor(t, &mockAgentManager{
+		launchAgentFunc: func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			launched = true
+			return nil, nil
+		},
+	}, repo)
+
+	_, err := executor.LaunchPreparedSession(context.Background(), &v1.Task{ID: session.TaskID, WorkspaceID: "ws-1"}, session.ID,
+		LaunchOptions{AgentProfileID: session.AgentProfileID, Prompt: "test", StartAgent: true})
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("LaunchPreparedSession() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if launched {
+		t.Fatal("LaunchAgent was called for an unavailable inherited environment")
+	}
+	if len(repo.createTaskEnvironmentCalls) != 0 {
+		t.Fatalf("created %d task environments for an unavailable inherited environment", len(repo.createTaskEnvironmentCalls))
+	}
+}
+
 func TestLaunchPreparedSession_SessionNotBelongsToTask(t *testing.T) {
 	repo := newMockRepository()
 

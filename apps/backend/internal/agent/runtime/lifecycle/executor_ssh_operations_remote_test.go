@@ -657,8 +657,27 @@ func TestEnsureRemoteSessionDir(t *testing.T) {
 			t.Fatalf("sessionDir = %q", sessionDir)
 		}
 		if got := server.commands(); len(got) != 1 ||
-			got[0] != "mkdir -p '/remote/task/.kandev/sessions/sess-7'" {
+			got[0] != "cd -- '/remote/task' && mkdir -p -- '.kandev/sessions/sess-7'" {
 			t.Fatalf("commands = %v", got)
+		}
+	})
+
+	t.Run("does not recreate a task directory deleted after the reuse probe", func(t *testing.T) {
+		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+			sshScriptRule{match: "test -d", result: sshOK},
+			sshScriptRule{match: "cd --", result: sshFail("no such file or directory")},
+		).handle)
+		client := server.dial(t)
+		if err := ensureReuseRequiredRemoteTaskDirExists(context.Background(), client, "/remote/task"); err != nil {
+			t.Fatalf("ensureReuseRequiredRemoteTaskDirExists: %v", err)
+		}
+		if _, err := ensureRemoteSessionDir(context.Background(), client, "/remote/task", "sess-7"); err == nil {
+			t.Fatal("ensureRemoteSessionDir succeeded after the canonical task directory disappeared")
+		}
+		for _, command := range server.commands() {
+			if strings.Contains(command, "mkdir -p '/remote/task") {
+				t.Fatalf("session creation could recreate the canonical directory: %q", command)
+			}
 		}
 	})
 

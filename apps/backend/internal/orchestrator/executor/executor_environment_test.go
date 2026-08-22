@@ -52,6 +52,19 @@ func TestReuseExistingEnvironment_WorktreeReuse(t *testing.T) {
 	}
 }
 
+func TestCanonicalInventoryMatches_AcceptsLegacyUnscopedRowWhenNoScopedRowsExist(t *testing.T) {
+	spec := RepoSpec{RepositoryID: "repo-1", BranchIdentitySlug: "main"}
+	rows := []*models.TaskEnvironmentRepo{{
+		RepositoryID: "repo-1",
+		BranchSlug:   "",
+		WorktreeID:   "worktree-1",
+	}}
+
+	if got := canonicalInventoryMatches(spec, rows, true); got != 1 {
+		t.Fatalf("canonicalInventoryMatches() = %d, want legacy inventory match", got)
+	}
+}
+
 func TestReuseExistingEnvironment_WorktreeReuseKeepsTaskDirName(t *testing.T) {
 	repo := newMockRepository()
 	e := newTestExecutor(t, &mockAgentManager{}, repo)
@@ -144,6 +157,32 @@ func TestEnvironmentReposForLaunch_PersistsRemoteWorkspaceIdentity(t *testing.T)
 	}
 }
 
+func TestEnvironmentReposForLaunch_PersistsEveryRemoteRepository(t *testing.T) {
+	req := &LaunchAgentRequest{
+		RepositoryID:  "repo-primary",
+		WorkspacePath: "/remote/tasks/task-1",
+		Repositories: []RepoSpec{
+			{RepositoryID: "repo-primary", BranchIdentitySlug: "main"},
+			{RepositoryID: "repo-secondary", BranchIdentitySlug: "release/v2"},
+		},
+	}
+
+	repos := environmentReposForLaunch(req, &LaunchAgentResponse{WorkspacePath: req.WorkspacePath})
+	if len(repos) != 2 {
+		t.Fatalf("environment repos = %#v, want one row per remote repository", repos)
+	}
+	if repos[0].RepositoryID != "repo-primary" || repos[0].BranchSlug != "main" {
+		t.Fatalf("primary remote environment repo = %#v", repos[0])
+	}
+	if repos[1].RepositoryID != "repo-secondary" || repos[1].BranchSlug != "release-v2" {
+		t.Fatalf("secondary remote environment repo = %#v", repos[1])
+	}
+	for _, repo := range repos {
+		if repo.WorktreePath != "" || repo.WorktreeBranch != "" {
+			t.Fatalf("remote repository without a concrete result recorded shared launch fields: %#v", repo)
+		}
+	}
+}
 func TestReuseExistingEnvironment_ContainerReuse(t *testing.T) {
 	e := newEnvTestExecutor(t)
 	req := &LaunchAgentRequest{TaskID: "task-1", WorkspaceReuseRequired: true}
