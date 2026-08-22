@@ -61,13 +61,26 @@ test.describe("Agent profile — ACP-first", () => {
 
     await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
 
-    const selector = testPage.getByRole("button", { name: "Profile start model settings" });
+    const profileSettingsPanel = testPage.locator(
+      '[data-settings-target^="setting-agent-profile-"][data-settings-target$="-profile-settings"]',
+    );
+    const selector = profileSettingsPanel.getByRole("button", {
+      name: "Profile start model settings",
+    });
     await expect(selector).toBeVisible({ timeout: 15_000 });
     await selector.click();
 
+    const popoverContent = testPage.locator('[data-slot="popover-content"]:visible');
+    await expect(popoverContent).toBeVisible();
+    await popoverContent.evaluate(async (element) => {
+      await Promise.all(
+        element.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
+      );
+    });
+
     const [selectorBox, popoverBox] = await Promise.all([
       selector.boundingBox(),
-      testPage.locator('[data-slot="popover-content"]').boundingBox(),
+      popoverContent.boundingBox(),
     ]);
 
     expect(selectorBox).not.toBeNull();
