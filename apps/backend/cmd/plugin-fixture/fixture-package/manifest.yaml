@@ -88,7 +88,7 @@ webhooks:
   - key: "public-hook"
     description: "Public counterpart of test-hook for exercising the anonymous auth-gate opt-in"
     method: "POST"
-    public: true
+    access: public
 
 ui:
   bundle: "/ui/bundle.js"
