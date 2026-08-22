@@ -31,21 +31,23 @@ func TestPageInfoProtoRoundTrip(t *testing.T) {
 
 func TestTaskProtoRoundTrip(t *testing.T) {
 	task := Task{
-		ID:          "task-1",
-		WorkspaceID: "ws-1",
-		WorkflowID:  "wf-1",
-		Title:       "Fix the bug",
-		Description: "Details here",
-		State:       "in_progress",
-		Priority:    "high",
-		CreatedBy:   "user-1",
-		CreatedAt:   "2026-07-15T12:00:00Z",
-		UpdatedAt:   "2026-07-15T12:05:00Z",
-		StartedAt:   strPtr("2026-07-15T12:01:00Z"),
-		CompletedAt: nil,
-		ParentID:    strPtr("task-0"),
-		Identifier:  "PROJ-42",
-		IsEphemeral: false,
+		ID:             "task-1",
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		Title:          "Fix the bug",
+		Description:    "Details here",
+		State:          "in_progress",
+		Priority:       "high",
+		Labels:         []string{"bug", "plugin"},
+		WorkflowStepID: "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f",
+		CreatedBy:      "user-1",
+		CreatedAt:      "2026-07-15T12:00:00Z",
+		UpdatedAt:      "2026-07-15T12:05:00Z",
+		StartedAt:      strPtr("2026-07-15T12:01:00Z"),
+		CompletedAt:    nil,
+		ParentID:       strPtr("task-0"),
+		Identifier:     "PROJ-42",
+		IsEphemeral:    false,
 		Repositories: []TaskRepository{
 			{ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0, CheckoutBranch: "feature/fix"},
 			{ID: "tr-2", RepositoryID: "repo-2", BaseBranch: "develop", Position: 1},
@@ -56,6 +58,7 @@ func TestTaskProtoRoundTrip(t *testing.T) {
 	proto, err := task.toProto()
 	require.NoError(t, err)
 	require.Equal(t, "task-1", proto.GetId())
+	require.Equal(t, "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f", proto.GetWorkflowStepId())
 	require.Equal(t, "2026-07-15T12:01:00Z", proto.GetStartedAt())
 	require.Nil(t, proto.CompletedAt)
 	require.Equal(t, "feature/fix", proto.GetRepositories()[0].GetCheckoutBranch())
@@ -168,6 +171,8 @@ func TestCreateTaskInputRichProtoRoundTrip(t *testing.T) {
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Plugin-created task",
+		Priority:    "high",
+		Labels:      []string{"bug", "plugin"},
 		Repositories: []PluginTaskRepository{{
 			Remote: &RemoteRepositoryDescriptor{
 				ProviderID: "example", ProviderHost: "code.example.test", OwnerOrProject: "team",
@@ -185,6 +190,40 @@ func TestCreateTaskInputRichProtoRoundTrip(t *testing.T) {
 	back, err := createTaskInputFromProto(proto)
 	require.NoError(t, err)
 	require.Equal(t, input, back)
+}
+
+func TestCreateTaskInputProtoRoundTripPreservesPriorityAndLabels(t *testing.T) {
+	input := CreateTaskInput{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "plugin task",
+		Priority:    "critical",
+		Labels:      []string{"security", "urgent"},
+	}
+	proto, err := input.toProto()
+	require.NoError(t, err)
+	require.Equal(t, "critical", proto.GetPriority())
+	require.Equal(t, []string{"security", "urgent"}, proto.GetLabels())
+
+	back, err := createTaskInputFromProto(proto)
+	require.NoError(t, err)
+	require.Equal(t, input, back)
+}
+
+func TestUpdateTaskInputProtoRoundTripPreservesLabelsPresence(t *testing.T) {
+	priority := "low"
+	labels := []string{}
+	input := UpdateTaskInput{ID: "task-1", Priority: &priority, Labels: &labels}
+
+	proto := input.toProto()
+	require.NotNil(t, proto.Labels, "an empty non-nil label slice must clear labels")
+	require.Empty(t, proto.Labels.Values)
+	require.Equal(t, input, updateTaskInputFromProto(proto))
+
+	input.Labels = nil
+	proto = input.toProto()
+	require.Nil(t, proto.Labels, "nil labels must leave labels unchanged")
+	require.Equal(t, input, updateTaskInputFromProto(proto))
 }
 
 func TestRepositoryProtoRoundTrip(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -901,19 +902,21 @@ func TestSortSessionsNewestFirst_TiesBrokenByID(t *testing.T) {
 func TestTaskModelToDTO_MapsFields(t *testing.T) {
 	created := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	task := &taskmodels.Task{
-		ID:          "task-1",
-		WorkspaceID: "ws-1",
-		WorkflowID:  "wf-1",
-		Title:       "Fix bug",
-		Description: "details",
-		State:       v1.TaskStateInProgress,
-		Priority:    "high",
-		Origin:      "agent_created",
-		CreatedAt:   created,
-		UpdatedAt:   created,
-		ParentID:    "parent-1",
-		Identifier:  "KAN-1",
-		IsEphemeral: false,
+		ID:             "task-1",
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f",
+		Title:          "Fix bug",
+		Description:    "details",
+		State:          v1.TaskStateInProgress,
+		Priority:       "high",
+		Labels:         `["bug","plugin"]`,
+		Origin:         "agent_created",
+		CreatedAt:      created,
+		UpdatedAt:      created,
+		ParentID:       "parent-1",
+		Identifier:     "KAN-1",
+		IsEphemeral:    false,
 		Repositories: []*taskmodels.TaskRepository{
 			{ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0, CheckoutBranch: "feature/fix"},
 		},
@@ -924,6 +927,9 @@ func TestTaskModelToDTO_MapsFields(t *testing.T) {
 
 	if dto.ID != "task-1" || dto.State != "IN_PROGRESS" || dto.CreatedBy != "agent_created" {
 		t.Fatalf("taskModelToDTO() = %+v, unexpected core fields", dto)
+	}
+	if dto.Priority != "high" {
+		t.Errorf("Priority = %q, want high", dto.Priority)
 	}
 	if dto.CreatedAt != created.Format(time.RFC3339) {
 		t.Errorf("CreatedAt = %q, want RFC3339 %q", dto.CreatedAt, created.Format(time.RFC3339))
@@ -936,6 +942,19 @@ func TestTaskModelToDTO_MapsFields(t *testing.T) {
 	}
 	if dto.Metadata["k"] != "v" {
 		t.Errorf("Metadata = %+v, want k=v", dto.Metadata)
+	}
+	if got, want := dto.Labels, []string{"bug", "plugin"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Labels = %#v, want %#v", got, want)
+	}
+	if dto.WorkflowStepID != "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f" {
+		t.Errorf("WorkflowStepID = %q, want %q", dto.WorkflowStepID, "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f")
+	}
+}
+
+func TestTaskModelToDTO_MalformedLabelsFallbackToEmpty(t *testing.T) {
+	dto := taskModelToDTO(&taskmodels.Task{ID: "task-1", Labels: `not-json`})
+	if len(dto.Labels) != 0 {
+		t.Errorf("Labels = %#v, want empty fallback for malformed stored JSON", dto.Labels)
 	}
 }
 

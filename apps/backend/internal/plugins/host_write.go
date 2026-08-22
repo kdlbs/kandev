@@ -7,10 +7,9 @@
 // Every write routes through the same first-party layer the REST/MCP API uses,
 // never a repository — that is how task.* events fire and how a message reaches
 // the agent through the orchestrator's real delivery path (queue when the
-// session is running, resume/start it otherwise). The service types can't be
-// referenced here without an import cycle (see SetDataSources' doc), so task
-// writes go through a narrow taskWriter interface and message delivery through a
-// narrow taskMessenger interface, both satisfied by backendapp adapters.
+// session is running, resume/start it otherwise). Task writes and message
+// delivery go through narrow taskWriter and taskMessenger interfaces,
+// satisfied by backendapp adapters.
 package plugins
 
 import (
@@ -23,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -49,6 +49,8 @@ type TaskCreateInput struct {
 	Launch         TaskLaunchInput
 	Metadata       map[string]any
 	PlanMode       bool
+	Priority       string
+	Labels         []string
 }
 
 // TaskLaunchInput contains validated launch fields for a freshly-created
@@ -70,6 +72,8 @@ type TaskUpdateInput struct {
 	Description    *string
 	State          *string
 	WorkflowStepID *string
+	Priority       *string
+	Labels         *[]string
 }
 
 // PluginMessageResult is the outcome of delivering a message to a task session,
@@ -141,6 +145,9 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 	if in.Title == "" {
 		return nil, invalidArgument("title is required")
 	}
+	if in.Priority != "" && taskservice.ValidateTaskPriority(in.Priority) != nil {
+		return nil, invalidArgument(fmt.Sprintf("invalid task priority %q", in.Priority))
+	}
 	metadata, err := r.host.pluginTaskMetadata(in.Metadata)
 	if err != nil {
 		return nil, err
@@ -173,6 +180,8 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 		Launch:         launch,
 		Metadata:       metadata,
 		PlanMode:       launch.PlanMode,
+		Priority:       in.Priority,
+		Labels:         in.Labels,
 	})
 	if err != nil {
 		return nil, err
@@ -194,12 +203,17 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 	if in.ID == "" {
 		return nil, invalidArgument("id is required")
 	}
+	if in.Priority != nil && taskservice.ValidateTaskPriority(*in.Priority) != nil {
+		return nil, invalidArgument(fmt.Sprintf("invalid task priority %q", *in.Priority))
+	}
 	updated, err := r.host.taskWriter.UpdateTask(ctx, TaskUpdateInput{
 		ID:             in.ID,
 		Title:          in.Title,
 		Description:    in.Description,
 		State:          in.State,
 		WorkflowStepID: in.WorkflowStepID,
+		Priority:       in.Priority,
+		Labels:         in.Labels,
 	})
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrTaskNotFound) {
