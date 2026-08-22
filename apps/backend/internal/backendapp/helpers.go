@@ -110,6 +110,7 @@ const (
 	branchDeletionsFieldKey  = "branch_deletions"
 	deletedFieldKey          = "deleted"
 	versionFieldKey          = "version"
+	serviceFieldKey          = "service"
 	kandevName               = "kandev"
 	startingStatus           = "starting"
 )
@@ -798,8 +799,8 @@ func healthHandler(p routeParams) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !ready.Load() {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"status":        startingStatus,
-				"service":       kandevName,
+				statusKey:       startingStatus,
+				serviceFieldKey: kandevName,
 				versionFieldKey: version,
 			})
 			return
@@ -808,8 +809,8 @@ func healthHandler(p routeParams) gin.HandlerFunc {
 			c.Header(desktopHealthTokenHeader, token)
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"status":        "ok",
-			"service":       kandevName,
+			statusKey:       "ok",
+			serviceFieldKey: kandevName,
 			"mode":          "websocket+http",
 			versionFieldKey: version,
 		})

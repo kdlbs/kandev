@@ -179,9 +179,12 @@ func parseBackendFlags(args []string) (backendFlags, func(), error) {
 // ready is the readiness flag consulted by the GET /health handler.
 // Until it flips true, /health returns 503 — so callers polling for
 // readiness (Playwright fixtures, container orchestrators, manual
-// curl loops) keep waiting instead of racing ahead. main() flips it
-// after every route is mounted, the agent registry is seeded, and
-// the HTTP listener is accepting connections.
+// curl loops) keep waiting instead of racing ahead. The HTTP listener
+// itself is bound and answering liveness probes well before this flips
+// (see bindBootstrapListeners); startGatewayAndServe flips it
+// synchronously in the same step that swaps the bootstrap handler for
+// the fully wired router, so there is no window where the real router
+// is live but ready is still false.
 var ready atomic.Bool
 
 // Run contains all startup logic and returns 0 on success or 1 on fatal error.
@@ -741,14 +744,21 @@ func startAgentInfrastructure(
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath, addRuntimeCleanup, runCleanups, cancelContext, restoreCleanups)
 }
 
-// startOrchestratorAndAutomationConsumers establishes the event-consumer
-// chain in dependency order. The GitHub poller performs an immediate sweep on
-// start, so both downstream consumers must be ready before it is started.
+// startOrchestratorAndAutomationConsumers establishes the startup chain in
+// dependency order: the HTTP listener must be bound (so the launcher's
+// liveness probe can succeed) before the orchestrator runs its startup
+// recovery sweeps, which can run long. The GitHub poller performs an
+// immediate sweep on start, so both downstream consumers must be ready
+// before it is started.
 func startOrchestratorAndAutomationConsumers(
+	bindListeners func() error,
 	startOrchestrator func() error,
 	startAutomation func(),
 	startGitHubPoller func(),
 ) error {
+	if err := bindListeners(); err != nil {
+		return err
+	}
 	if err := startOrchestrator(); err != nil {
 		return err
 	}
@@ -873,7 +883,22 @@ func startGatewayAndServe(
 		services.Plugins.SetUtilityAgent(pluginsUtilityAgentAdapter{svc: services.Utility, userSvc: services.User}, pluginsHostUtilityAdapter{mgr: hostUtilityMgr})
 	}
 
+	var (
+		handler   *handlerSwitch
+		server    *http.Server
+		listeners *serverListeners
+	)
+	bindListeners := func() error {
+		h, s, l, err := bindBootstrapListeners(cfg, log, Version)
+		if err != nil {
+			return err
+		}
+		handler, server, listeners = h, s, l
+		return nil
+	}
+
 	if err := startOrchestratorAndAutomationConsumers(
+		bindListeners,
 		func() error { return orchestratorSvc.Start(ctx) },
 		func() {
 			if services.Automation == nil {
@@ -894,7 +919,9 @@ func startGatewayAndServe(
 			log.Info("GitHub poller started")
 		},
 	); err != nil {
-		log.Error("Failed to start orchestrator", zap.Error(err))
+		if !errors.Is(err, errServerBindFailed) {
+			log.Error("Failed to start orchestrator", zap.Error(err))
+		}
 		return false
 	}
 	log.Info("Orchestrator initialized")
@@ -1046,23 +1073,17 @@ func startGatewayAndServe(
 	// ============================================
 	// HTTP SERVER
 	// ============================================
-	server, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
+	// The listener was already bound (and is serving the bootstrap handler)
+	// by bindListeners above, before orchestratorSvc.Start ran its startup
+	// recovery sweeps. Build the real router now and swap it in on the same,
+	// already-bound handler and listeners — no second bind, no window where
+	// the socket is closed and reopened.
+	builtServer, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
 		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
 		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
-		return false
-	}
-
-	port := resolvedHTTPPort(cfg)
-	hosts, err := cfg.Server.ResolvedBinds()
-	if err != nil {
-		log.Error("Invalid server bind configuration", zap.Error(err))
-		return false
-	}
-	listeners, ok := startHTTPServers(server, hosts, port, log)
-	if !ok {
 		return false
 	}
 
@@ -1072,12 +1093,13 @@ func startGatewayAndServe(
 		zap.String("http", "/api/v1"),
 	)
 
-	// Flip the readiness flag once the HTTP listener is actually
-	// accepting connections, not just "spawned". Serve runs in a goroutine
-	// after we bind the socket above; probe a reachable local listener with a
-	// short retry loop — once a single connect succeeds, the kernel queue is up
-	// and any subsequent /health call will land on a wired route.
-	go waitListenerThenMarkReady(listeners.probeAddr(), log)
+	// Swap the bootstrap handler for the fully wired router and flip
+	// readiness synchronously in the same step. The socket has been
+	// accepting connections since bindListeners ran, so there is no window
+	// in which the real router is live but ready is still false, or vice
+	// versa.
+	handler.Store(builtServer.Handler)
+	ready.Store(true)
 
 	awaitShutdown(server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
 	return true
@@ -1109,40 +1131,6 @@ func serverProbeAddr(listenAddr string) string {
 		host = "::1"
 	}
 	return net.JoinHostPort(host, port)
-}
-
-// waitListenerThenMarkReady probes the local HTTP listener until a
-// connect succeeds, then flips the package-level `ready` flag so the
-// /health handler stops returning 503. Runs in its own goroutine so
-// the caller can proceed into awaitShutdown.
-//
-// The probe budget is generous (30s) — under heavy parallel-suite
-// load the OS scheduler can delay the listen goroutine for a couple
-// of seconds. If the budget expires the flag still flips, so the
-// backend doesn't permanently advertise "not ready" if probing fails
-// for some unrelated reason (e.g. an iptables hiccup on a dev box).
-func waitListenerThenMarkReady(listenAddr string, log *logger.Logger) {
-	addr := serverProbeAddr(listenAddr)
-	deadline := time.Now().Add(30 * time.Second)
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
-		if err == nil {
-			_ = conn.Close()
-			// A successful TCP dial proves the listener is bound.
-			ready.Store(true)
-			log.Info("backend ready", zap.String("addr", addr))
-			return
-		}
-		if time.Now().After(deadline) {
-			log.Warn("backend readiness probe never connected; flipping ready anyway",
-				zap.String("addr", addr))
-			ready.Store(true)
-			return
-		}
-		<-ticker.C
-	}
 }
 
 // initOfficeServices constructs the run processor service for every backend and
