@@ -222,16 +222,29 @@ func pluginCredentialExpiry(raw string) (time.Time, error) {
 }
 
 func (a *githubBrokerScopeAuthorizer) AuthorizeGitCredential(ctx context.Context, scope gitcredentials.Scope) error {
-	if a == nil || a.repo == nil {
-		return fmt.Errorf("task repository is unavailable")
-	}
-	if err := a.authorizeTaskSession(ctx, scope.WorkspaceID, scope.TaskID, scope.SessionID); err != nil {
+	owner, repo, err := gitCredentialScopeOwnerRepo(scope.Path)
+	if err != nil {
 		return err
 	}
-	if _, err := a.authorizeTaskRepository(ctx, scope.TaskID, scope.RepositoryID); err != nil {
-		return err
+	if err := a.AuthorizeGitHubRepositoryWithIdentity(
+		ctx, scope.WorkspaceID, scope.TaskID, scope.SessionID, scope.RepositoryID,
+		owner, repo, scope.IdentityProviderID, scope.ParentProviderID,
+	); err == nil {
+		return nil
 	}
+	// Legacy GitHub rows may omit ProviderHost while their persisted clone
+	// URL still proves github.com. Retain that exact-identity compatibility
+	// path after checking server-authored contribution destinations.
 	return a.authorizeRepositoryIdentity(ctx, scope)
+}
+
+func gitCredentialScopeOwnerRepo(path string) (string, string, error) {
+	trimmed := strings.TrimSuffix(strings.Trim(path, "/"), ".git")
+	owner, repo, found := strings.Cut(trimmed, "/")
+	if !found || owner == "" || repo == "" || strings.Contains(repo, "/") {
+		return "", "", fmt.Errorf("repository identity does not match lease scope")
+	}
+	return owner, repo, nil
 }
 
 func (a *githubBrokerScopeAuthorizer) authorizeRepositoryIdentity(ctx context.Context, scope gitcredentials.Scope) error {

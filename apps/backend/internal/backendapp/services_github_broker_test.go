@@ -329,8 +329,15 @@ func TestGitHubBrokerScopeAuthorizerAllowsOnlyTheBoundContributionDestination(t 
 	); err != nil {
 		t.Fatalf("bound destination identity was denied: %v", err)
 	}
-	if verifier.calls != 1 {
-		t.Fatalf("provider verification calls = %d, want 1", verifier.calls)
+	if err := authorizer.AuthorizeGitCredential(context.Background(), gitcredentials.Scope{
+		ProviderID: "github", WorkspaceID: "workspace-destination", TaskID: "task-destination", SessionID: "session-destination",
+		RepositoryID: "repository-destination", Host: "github.com", Path: "/automation/kandev.git",
+		IdentityProviderID: "200", ParentProviderID: "100",
+	}); err != nil {
+		t.Fatalf("authorized contribution-destination lease was denied: %v", err)
+	}
+	if verifier.calls != 2 {
+		t.Fatalf("provider verification calls = %d, want 2", verifier.calls)
 	}
 	if err := authorizer.AuthorizeGitHubRepositoryWithIdentity(
 		context.Background(), "workspace-destination", "task-destination", "session-destination", "repository-destination", "automation", "kandev", "201", "100",
