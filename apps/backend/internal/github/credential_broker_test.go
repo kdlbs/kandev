@@ -2,10 +2,12 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
 
+	"github.com/kandev/kandev/internal/gitcredentials"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
@@ -222,6 +224,44 @@ func TestCredentialBrokerRejectsDestinationLeaseForChangedWorkspaceConnection(t 
 	redemption.ParentProviderID = "100"
 	if _, err := broker.Resolve(context.Background(), redemption); !errors.Is(err, ErrCredentialLeaseRevoked) {
 		t.Fatalf("Resolve with changed connection error = %v, want lease revoked", err)
+	}
+}
+
+func TestCredentialBrokerReissueRefreshesDestinationBindingGeneration(t *testing.T) {
+	broker, connection, _ := newPATCredentialBroker(t)
+	signer, err := gitcredentials.NewReissueCapabilitySigner("stable-test-key")
+	if err != nil {
+		t.Fatalf("NewReissueCapabilitySigner() error = %v", err)
+	}
+	broker.broker.SetReissueCapabilitySigner(signer)
+	binding, err := json.Marshal(taskmodels.ContributionDestinationCredentialBinding{
+		Source: string(ConnectionSourcePAT), Login: "octocat", CredentialGeneration: connection.CredentialGeneration,
+	})
+	if err != nil {
+		t.Fatalf("marshal destination binding: %v", err)
+	}
+	scope := gitcredentials.Scope{
+		ProviderID: "github", WorkspaceID: "workspace-1", TaskID: "task-1", SessionID: "session-1",
+		RepositoryID: "repository-1", Host: "github.com", Path: "/kdlbs/kandev.git",
+		CredentialBinding: string(binding),
+	}
+	_, capability, err := broker.broker.IssueWithReissueCapability(t.Context(), scope)
+	if err != nil {
+		t.Fatalf("IssueWithReissueCapability() error = %v", err)
+	}
+	connection.CredentialGeneration++
+	reissued, err := broker.broker.Reissue(t.Context(), gitcredentials.ReissueRequest{
+		Capability: capability.Token, TaskID: "task-1", SessionID: "session-1", RepositoryID: "repository-1",
+		Host: "github.com", Path: "/kdlbs/kandev.git",
+	})
+	if err != nil {
+		t.Fatalf("Reissue() after destination connection rotation error = %v", err)
+	}
+	if _, err := broker.broker.Redeem(t.Context(), gitcredentials.Redemption{
+		Lease: reissued.Token, TaskID: "task-1", SessionID: "session-1", RepositoryID: "repository-1",
+		Host: "github.com", Path: "/kdlbs/kandev.git",
+	}); err != nil {
+		t.Fatalf("Redeem() reissued destination lease error = %v", err)
 	}
 }
 

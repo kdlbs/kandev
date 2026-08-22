@@ -5,9 +5,9 @@ import { useTranslation } from "react-i18next";
 import { IconChevronRight } from "@tabler/icons-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { Label } from "@kandev/ui/label";
-import { Textarea } from "@kandev/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { Workflow } from "@/lib/types/http";
+import { SettingsPromptEditor } from "./settings-prompt-editor";
 import { HelpTip } from "./workflow-pipeline-editor-helpers";
 import { isWorkflowFieldDirty } from "./workflow-dirty-state";
 
@@ -68,15 +68,20 @@ export function WorkflowPromptSection({
         )}
       </div>
       <CollapsibleContent className="space-y-1.5">
-        <Textarea
+        <SettingsPromptEditor
           value={prompt}
-          onChange={(e) => onUpdate(e.target.value)}
-          disabled={readOnly}
-          placeholder={t("workflows:workflowPromptPlaceholder")}
-          rows={4}
-          className="min-h-24 font-mono text-sm"
-          data-testid="workflow-prompt-input"
-          data-settings-dirty={isWorkflowFieldDirty(workflow, savedWorkflow, "prompt")}
+          onChange={onUpdate}
+          promptReferences
+          readOnly={readOnly}
+          ariaLabel={t("workflows:workflowPrompt")}
+          testId="workflow-prompt-input"
+          isDirty={isWorkflowFieldDirty(workflow, savedWorkflow, "prompt")}
+          dirtyLevel="field"
+          help={
+            <p className="text-xs text-muted-foreground">
+              {t("workflows:workflowPromptPlaceholder")}
+            </p>
+          }
         />
       </CollapsibleContent>
     </Collapsible>

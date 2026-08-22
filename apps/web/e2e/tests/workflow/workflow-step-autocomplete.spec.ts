@@ -43,12 +43,45 @@ test.describe("Workflow step prompt autocomplete", () => {
     await expect(suggestion).toContainText("task_prompt");
   });
 
+  test("does not duplicate closing braces when completing inside a token", async ({
+    testPage,
+    seedData,
+  }) => {
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const card = await page.findWorkflowCard("E2E Workflow");
+    await expect(card).toBeVisible();
+
+    const stepNodes = card.locator(".group.relative");
+    await stepNodes.first().click();
+
+    const monacoEditor = card.locator(".monaco-editor");
+    await expect(monacoEditor).toBeVisible({ timeout: 10_000 });
+    await monacoEditor.click();
+    await expect(monacoEditor.locator(".native-edit-context")).toBeFocused({ timeout: 5_000 });
+
+    await testPage.keyboard.insertText("{{}}");
+    await testPage.keyboard.press("ArrowLeft");
+    await testPage.keyboard.press("ArrowLeft");
+    await testPage.keyboard.press("Control+Space");
+
+    const suggestWidget = testPage.locator(".monaco-editor .suggest-widget");
+    await expect(suggestWidget).toBeVisible({ timeout: 5_000 });
+    const suggestion = suggestWidget.locator(".monaco-list-row").filter({ hasText: "task_prompt" });
+    await expect(suggestion.first()).toBeVisible();
+    await suggestion.first().click();
+
+    await expect(monacoEditor).toContainText("{{task_prompt}}");
+    await expect(monacoEditor).not.toContainText("{{task_prompt}}}}");
+  });
+
   test("shows and inserts a saved prompt mention when typing @ in step prompt editor", async ({
     testPage,
     seedData,
     apiClient,
   }) => {
-    const promptName = "e2e-mention-prompt";
+    const promptName = `Daily Summary ${Date.now()}`;
     await apiClient.createPrompt(promptName, "Some reusable prompt content for e2e mentions.");
 
     try {
@@ -72,8 +105,8 @@ test.describe("Workflow step prompt autocomplete", () => {
       // textarea. See the note in the first test.
       await expect(monacoEditor.locator(".native-edit-context")).toBeFocused({ timeout: 5_000 });
 
-      // Type @ to trigger the prompt-mention autocomplete
-      await testPage.keyboard.type("@");
+      // Type a multi-word name prefix to trigger and filter the prompt-mention autocomplete
+      await testPage.keyboard.type("@Daily ");
 
       // The Monaco suggest widget should appear with the seeded prompt
       const suggestWidget = testPage.locator(".monaco-editor .suggest-widget");

@@ -155,18 +155,41 @@ test.describe("Mobile code walkthrough", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     await seedWalkthroughTask(testPage, apiClient, seedData);
     const session = new SessionPage(testPage);
 
     await expect(session.walkthroughLauncher()).toBeVisible({ timeout: 30_000 });
     await expect(session.walkthroughDiscardButton()).toBeVisible({ timeout: 5_000 });
-    await session.walkthroughDiscardButton().click();
-    await expect(session.walkthroughDiscardDialog()).toBeVisible();
+    await session.walkthroughDiscardButton().tap();
+    const discardConfirmation = session.walkthroughDiscardConfirmation();
+    await expect(discardConfirmation).toBeVisible();
+    await expect(discardConfirmation).toHaveAttribute("role", "group");
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await prCapture.screenshot("mobile-walkthrough-discard-confirmation", {
+      caption: "Mobile walkthrough keeps discard confirmation inside its touch launcher",
+    });
+    const actionBoxes = await Promise.all(
+      ["Cancel", "Discard walkthrough"].map((name) =>
+        discardConfirmation.getByRole("button", { name }).boundingBox(),
+      ),
+    );
+    for (const box of actionBoxes) {
+      if (!box) throw new Error("walkthrough discard action geometry unavailable");
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+    await discardConfirmation.getByRole("button", { name: "Cancel" }).tap();
+    await expect(discardConfirmation).toHaveCount(0);
+    await expect(session.walkthroughLauncher()).toBeVisible();
+
+    await session.walkthroughDiscardButton().tap();
+    await expect(session.walkthroughDiscardConfirmation()).toBeVisible();
     await session
-      .walkthroughDiscardDialog()
+      .walkthroughDiscardConfirmation()
       .getByRole("button", { name: "Discard walkthrough" })
-      .click();
+      .tap();
 
     await expect(session.walkthroughLauncher()).toHaveCount(0);
     await expect(session.walkthroughFloating()).toHaveCount(0);

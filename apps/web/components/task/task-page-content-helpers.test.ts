@@ -3,6 +3,7 @@ import {
   taskId as toTaskId,
   workflowId as toWorkflowId,
   workspaceId as toWorkspaceId,
+  type Repository,
   type Task,
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
@@ -107,6 +108,75 @@ describe("resolveTaskProps", () => {
 
     expect(props.issueUrl).toBe("https://github.com/kdlbs/kandev/issues/1470");
     expect(props.issueNumber).toBe(1470);
+  });
+
+  it("labels the repository by its provider slug, not its local clone path", () => {
+    const props = resolveTaskProps(
+      { id: "task-1", title: "Any" } as unknown as Task,
+      {
+        id: "repo-1",
+        name: "kandev",
+        local_path: "/home/dev/src/kandev",
+        provider_owner: "kdlbs",
+        provider_name: "kandev",
+      } as unknown as Repository,
+    );
+
+    expect(props.repositoryLabel).toBe("kdlbs/kandev");
+  });
+
+  it("falls back to the repository name when no provider owns it", () => {
+    const props = resolveTaskProps(
+      { id: "task-1", title: "Any" } as unknown as Task,
+      {
+        id: "repo-1",
+        name: "scratchpad",
+        local_path: "/home/dev/src/scratchpad",
+      } as unknown as Repository,
+    );
+
+    expect(props.repositoryLabel).toBe("scratchpad");
+  });
+
+  it("has no repository label for a task with no repository", () => {
+    const props = resolveTaskProps({ id: "task-1", title: "Any" } as unknown as Task, null);
+
+    expect(props.repositoryLabel).toBeNull();
+  });
+});
+
+describe("buildArchivedValue repository identity", () => {
+  // The archived row renders this value, so a local clone path here would put
+  // "/home/dev/src/kandev" in the sidebar and give archived tasks a different
+  // repository grouping key from every ordinary task.
+  it("carries the provider slug, not the local clone path", () => {
+    const value = buildArchivedValue(
+      { id: "task-1", title: "Any", archived_at: ARCHIVED_AT } as unknown as Task,
+      {
+        id: "repo-1",
+        name: "kandev",
+        local_path: "/home/dev/src/kandev",
+        provider_owner: "kdlbs",
+        provider_name: "kandev",
+      } as unknown as Repository,
+    );
+
+    expect(value.archivedTaskRepositoryLabel).toBe("kdlbs/kandev");
+  });
+
+  it("leaves the label unset for a task that is not archived", () => {
+    const value = buildArchivedValue(
+      { id: "task-1", title: "Any" } as unknown as Task,
+      {
+        id: "repo-1",
+        name: "kandev",
+        local_path: "/home/dev/src/kandev",
+        provider_owner: "kdlbs",
+        provider_name: "kandev",
+      } as unknown as Repository,
+    );
+
+    expect(value.archivedTaskRepositoryLabel).toBeUndefined();
   });
 });
 

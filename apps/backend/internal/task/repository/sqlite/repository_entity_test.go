@@ -454,6 +454,31 @@ func TestRepositoryProviderHost_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestUpdateRepositoryDefaultBranchUsesExpectedValue(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-default-branch-cas")
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-default-branch-cas", WorkspaceID: "ws-default-branch-cas", Name: "default-branch", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+
+	if err := repo.UpdateRepositoryDefaultBranch(ctx, "repo-default-branch-cas", "main", "trunk"); err != nil {
+		t.Fatalf("update default branch: %v", err)
+	}
+	if err := repo.UpdateRepositoryDefaultBranch(ctx, "repo-default-branch-cas", "main", "develop"); err == nil {
+		t.Fatal("stale expected branch was accepted")
+	}
+	got, err := repo.GetRepository(ctx, "repo-default-branch-cas")
+	if err != nil {
+		t.Fatalf("get repository: %v", err)
+	}
+	if got.DefaultBranch != "trunk" {
+		t.Fatalf("default branch = %q, want trunk", got.DefaultBranch)
+	}
+}
+
 func TestGetRepositoryByProviderInfoSeparatesGitLabHosts(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

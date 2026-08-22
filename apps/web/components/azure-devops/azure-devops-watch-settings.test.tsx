@@ -9,10 +9,16 @@ import type {
 const PR_CARD = "azure-pull-request-watch-pr-1";
 const WI_CARD = "azure-work-item-watch-wi-1";
 
-const mocks = vi.hoisted(() => ({ watches: vi.fn() }));
+const mocks = vi.hoisted(() => ({ watches: vi.fn(), promptEditor: vi.fn() }));
 
 vi.mock("@/hooks/domains/azure-devops/use-azure-devops-watches", () => ({
   useAzureDevOpsWatches: mocks.watches,
+}));
+vi.mock("@/components/settings/settings-prompt-editor", () => ({
+  SettingsPromptEditor: (props: Record<string, unknown>) => {
+    mocks.promptEditor(props);
+    return <div data-testid={props.testId as string} />;
+  },
 }));
 
 import { AzureDevOpsWatchSettings } from "@/components/azure-devops/azure-devops-watch-settings";
@@ -157,5 +163,22 @@ describe("AzureDevOpsWatchSettings", () => {
     expect(await screen.findByTestId("reset-watch-dialog")).toBeTruthy();
     expect(previewReset).toHaveBeenCalledWith("pull-request", "pr-1");
     expect(nativeConfirm).not.toHaveBeenCalled();
+  });
+
+  it("uses typed Azure DevOps placeholders with saved-prompt references", () => {
+    render(<AzureDevOpsWatchSettings workspaceId="workspace-a" />);
+
+    fireEvent.click(screen.getByTestId("azure-pull-request-watch-edit-pr-1"));
+
+    expect(mocks.promptEditor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptReferences: true,
+        testId: "azure-pull-request-watch-prompt-editor",
+        placeholders: expect.arrayContaining([
+          expect.objectContaining({ key: "pull_request.url" }),
+          expect.objectContaining({ key: "pull_request.target_branch" }),
+        ]),
+      }),
+    );
   });
 });

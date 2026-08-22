@@ -59,8 +59,16 @@ export function applyProfileDuplicated(
   const merged = mergeOptionsByNewest(state.agentProfiles.items, rebuiltOptions);
   // The copy must appear exactly once with the known agent metadata: append
   // it when absent, replace an OLDER existing option (e.g. a WS stub) with
-  // it, and keep a NEWER WS-delivered option untouched.
-  const copyOption = toAgentProfileOption({ id: agent.id, name: agent.name }, created);
+  // it, and keep a NEWER WS-delivered option untouched. When the owning
+  // agent is present in the store, prefer the rebuilt option (sourced from
+  // the live `item`) over a fresh copyOption built from the `agent`
+  // parameter: `agent` is a click-time snapshot that can be stale relative
+  // to a capability refresh delivered after the row rendered but before this
+  // duplicate request resolved, so falling back to it here would silently
+  // regress the copy's capability_status even though the correct value was
+  // already rebuilt.
+  const rebuiltCopy = rebuiltOptions.find((option) => option.id === created.id);
+  const copyOption = rebuiltCopy ?? toAgentProfileOption(agent, created);
   const existingCopy = merged.find((option) => option.id === created.id);
   let agentProfilesItems: AgentProfileOption[];
   if (!existingCopy) {

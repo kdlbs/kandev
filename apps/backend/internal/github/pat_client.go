@@ -1044,20 +1044,34 @@ func (c *PATClient) FetchBranchProtection(ctx context.Context, owner, repo, bran
 
 // patPR is the JSON shape from the GitHub REST API for PRs.
 type patPR struct {
-	Number             int       `json:"number"`
-	Title              string    `json:"title"`
-	HTMLURL            string    `json:"html_url"`
-	Body               string    `json:"body"`
-	State              string    `json:"state"`
-	Draft              bool      `json:"draft"`
-	Mergeable          *bool     `json:"mergeable"`
-	MergeableState     string    `json:"mergeable_state"`
-	Additions          int       `json:"additions"`
-	Deletions          int       `json:"deletions"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
-	MergedAt           *string   `json:"merged_at"`
-	ClosedAt           *string   `json:"closed_at"`
+	Number  int    `json:"number"`
+	Title   string `json:"title"`
+	HTMLURL string `json:"html_url"`
+	Body    string `json:"body"`
+	State   string `json:"state"`
+	// Draft is a pointer: AC-12a requires distinguishing an omitted or null
+	// draft from a genuine false, which a plain bool can't after decode.
+	Draft          *bool  `json:"draft"`
+	Mergeable      *bool  `json:"mergeable"`
+	MergeableState string `json:"mergeable_state"`
+	Additions      int    `json:"additions"`
+	Deletions      int    `json:"deletions"`
+	// ChangedFiles is a pointer for the same reason as Draft (AC-12a): 0 is
+	// a legitimate observation and must stay distinguishable from absent/null.
+	ChangedFiles *int      `json:"changed_files"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	MergedAt     *string   `json:"merged_at"`
+	ClosedAt     *string   `json:"closed_at"`
+	// MergedBy is absent from the REST pulls response for an unmerged PR;
+	// its zero-value Login must never be written as a placeholder.
+	MergedBy *struct {
+		Login string `json:"login"`
+	} `json:"merged_by"`
+	// AutoMerge is present as a non-null object only while auto-merge is
+	// armed; GitHub clears it to null once it fires, so this can only ever
+	// mean "armed at fetch time" — never "merged by auto-merge".
+	AutoMerge          *struct{} `json:"auto_merge"`
 	RequestedReviewers []struct {
 		Login string `json:"login"`
 	} `json:"requested_reviewers"`
@@ -1162,27 +1176,43 @@ func convertPatPR(raw *patPR, owner, repo string) *PR {
 	if raw.Mergeable != nil {
 		mergeable = *raw.Mergeable
 	}
+	mergedByLogin := ""
+	if raw.MergedBy != nil {
+		mergedByLogin = raw.MergedBy.Login
+	}
+	draft, changedFiles := false, 0
+	if raw.Draft != nil {
+		draft = *raw.Draft
+	}
+	if raw.ChangedFiles != nil {
+		changedFiles = *raw.ChangedFiles
+	}
 	pr := &PR{
-		Number:              raw.Number,
-		Title:               raw.Title,
-		HTMLURL:             raw.HTMLURL,
-		Body:                raw.Body,
-		State:               state,
-		HeadBranch:          raw.Head.Ref,
-		HeadSHA:             raw.Head.SHA,
-		BaseBranch:          raw.Base.Ref,
-		AuthorLogin:         raw.User.Login,
-		RepoOwner:           owner,
-		RepoName:            repo,
-		MaintainerCanModify: raw.MaintainerCanModify,
-		Draft:               raw.Draft,
-		Mergeable:           mergeable,
-		MergeableState:      strings.ToLower(raw.MergeableState),
-		Additions:           raw.Additions,
-		Deletions:           raw.Deletions,
-		RequestedReviewers:  convertPatRequestedReviewers(raw),
-		CreatedAt:           raw.CreatedAt,
-		UpdatedAt:           raw.UpdatedAt,
+		Number:               raw.Number,
+		Title:                raw.Title,
+		HTMLURL:              raw.HTMLURL,
+		Body:                 raw.Body,
+		State:                state,
+		HeadBranch:           raw.Head.Ref,
+		HeadSHA:              raw.Head.SHA,
+		BaseBranch:           raw.Base.Ref,
+		AuthorLogin:          raw.User.Login,
+		RepoOwner:            owner,
+		RepoName:             repo,
+		MaintainerCanModify:  raw.MaintainerCanModify,
+		Draft:                draft,
+		IsDraftObserved:      raw.Draft != nil,
+		Mergeable:            mergeable,
+		MergeableState:       strings.ToLower(raw.MergeableState),
+		Additions:            raw.Additions,
+		Deletions:            raw.Deletions,
+		ChangedFiles:         changedFiles,
+		ChangedFilesObserved: raw.ChangedFiles != nil,
+		MergedByLogin:        mergedByLogin,
+		AutoMergeEnabled:     raw.AutoMerge != nil,
+		RequestedReviewers:   convertPatRequestedReviewers(raw),
+		CreatedAt:            raw.CreatedAt,
+		UpdatedAt:            raw.UpdatedAt,
 	}
 	applyPatHeadRepository(pr, raw.HeadRepository)
 	applyPatBaseRepository(pr, raw.BaseRepository)

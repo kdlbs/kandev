@@ -16,14 +16,18 @@
 export type DiscoveredAgent = { name: string; available: boolean };
 export type SavedAgent = { name: string; profiles: ReadonlyArray<unknown> };
 
+/** The built-in virtual family has no host installation to appear in discovery. */
+export const DYNAMIC_AGENT_NAME = "dynamic";
+
 /** Agents the scan currently detects, in rank order. */
 export function detectedAgents<D extends DiscoveredAgent>(discovery: ReadonlyArray<D>): D[] {
   return discovery.filter((agent) => agent.available);
 }
 
 /**
- * Configured agents the scan no longer detects, in rank order. Only ones with
- * profiles: an agent with nothing configured under it has nothing to preserve.
+ * Configured agents the scan no longer detects, in rank order. Empty concrete
+ * agent families have nothing to preserve, but the virtual Dynamic family is
+ * always retained so settings can create its first profile.
  *
  * The Agents page still renders these — via a synthetic discovery record — so a
  * CLI going missing never hides the profiles configured against it.
@@ -33,7 +37,11 @@ export function orphanedAgents<S extends SavedAgent>(
   saved: ReadonlyArray<S>,
 ): S[] {
   const detectedNames = new Set(detected.map((agent) => agent.name));
-  return saved.filter((agent) => agent.profiles.length > 0 && !detectedNames.has(agent.name));
+  return saved.filter(
+    (agent) =>
+      (agent.profiles.length > 0 || agent.name === DYNAMIC_AGENT_NAME) &&
+      !detectedNames.has(agent.name),
+  );
 }
 
 /**

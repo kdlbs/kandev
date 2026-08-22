@@ -38,6 +38,19 @@ type fakeGitHubCredentialLeaseIssuer struct {
 	calls    int
 }
 
+type fakeGitCredentialLeaseReissuer struct {
+	fakeGitHubCredentialLeaseIssuer
+	capability gitcredentials.ReissueCapability
+}
+
+func (f *fakeGitCredentialLeaseReissuer) IssueWithReissueCapability(
+	ctx context.Context,
+	req gitcredentials.Scope,
+) (gitcredentials.Lease, gitcredentials.ReissueCapability, error) {
+	lease, err := f.Issue(ctx, req)
+	return lease, f.capability, err
+}
+
 type fakeTaskGitCredentialPolicyResolver struct {
 	policy TaskGitCredentialPolicy
 	err    error
@@ -125,6 +138,29 @@ func TestConfigureGitHubCredentialBroker(t *testing.T) {
 	}
 	if _, ok := req.Env[envGHToken]; ok {
 		t.Error("managed credential configuration exposed GH_TOKEN")
+	}
+}
+
+func TestConfigureGitHubCredentialBrokerPublishesReissueCapability(t *testing.T) {
+	issuer := &fakeGitCredentialLeaseReissuer{
+		fakeGitHubCredentialLeaseIssuer: fakeGitHubCredentialLeaseIssuer{lease: gitcredentials.Lease{Token: "opaque-lease"}},
+		capability:                      gitcredentials.ReissueCapability{Token: "execution-capability"},
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExecutorType: string(models.ExecutorTypeRemoteDocker), Env: map[string]string{},
+	}
+	info := &repoInfo{RepositoryID: "repo-1", Repository: &models.Repository{Provider: "github", ProviderOwner: "acme", ProviderName: "widgets"}}
+	if err := exec.configureGitHubCredentialBroker(context.Background(), req, info); err != nil {
+		t.Fatalf("configureGitHubCredentialBroker() error = %v", err)
+	}
+	if got := req.Env[githubauth.CredentialReissueCapabilityEnv]; got != "execution-capability" {
+		t.Fatalf("reissue capability env = %q", got)
+	}
+	if got := req.Env[githubauth.CredentialScopesEnv]; !strings.Contains(got, `"reissue_capability":"execution-capability"`) {
+		t.Fatalf("credential scopes = %q, want reissue capability", got)
 	}
 }
 

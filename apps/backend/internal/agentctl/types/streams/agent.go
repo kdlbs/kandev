@@ -198,6 +198,9 @@ type AgentEvent struct {
 	MCPAttachmentAttempt *MCPAttachmentAttempt `json:"mcp_attachment_attempt,omitempty"`
 
 	// --- Permission request fields (for "permission_request" type) ---
+	// RequestID is the Kandev-generated identity for this exact request
+	// generation. It is distinct from the provider-controlled PendingID.
+	RequestID string `json:"request_id,omitempty"`
 
 	// PendingID uniquely identifies this pending permission request.
 	PendingID string `json:"pending_id,omitempty"`

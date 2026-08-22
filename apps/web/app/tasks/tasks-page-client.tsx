@@ -527,10 +527,9 @@ export function TasksPageClient(props: TasksPageClientProps) {
     state.kanban.workflowId === s.activeWorkflowId ? state.kanban.steps : EMPTY_WORKFLOW_STEPS,
   );
   useWorkflowSnapshot(s.activeWorkflowId);
-  useWorkspacePRs(showTaskDetails ? s.activeWorkspaceId : null);
-  // Unconditional, unlike useWorkspacePRs above: useWorkspaceMRs(null) clears
-  // every workspace's cached MRs, not just this page's, and the sidebar (also
-  // mounted here) reads that same cache — see spec "Hydration ownership".
+  // Task-title previews render PR/MR glyphs independently of the list-details
+  // preference, so both workspace caches must be hydrated here.
+  useWorkspacePRs(s.activeWorkspaceId);
   useWorkspaceMRs(s.activeWorkspaceId);
   useForegroundRefresh(() => s.fetchTasks(true), Boolean(s.activeWorkspaceId), s.activeWorkspaceId);
   const { handleSortChange, handleGroupChange } = useTasksListPreferenceSync({
@@ -556,7 +555,6 @@ export function TasksPageClient(props: TasksPageClientProps) {
       <KanbanHeader
         workspaceId={s.activeWorkspaceId ?? undefined}
         currentPage="tasks"
-        hideTitle
         searchQuery={s.searchQuery}
         onSearchChange={s.setSearchQuery}
         isSearchLoading={s.isLoading && !!s.debouncedQuery}

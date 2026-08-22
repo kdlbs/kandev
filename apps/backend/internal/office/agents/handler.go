@@ -1,7 +1,9 @@
 package agents
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -18,6 +20,12 @@ const (
 	ctxKeyAgentClaims = "agent_claims"
 	ctxKeyAgentCaller = "agent_caller"
 )
+
+// maxUpdateAgentBodyBytes bounds the update-agent request body via
+// http.MaxBytesReader, writing the 413 response below when exceeded.
+// UpdateAgentRequest carries only short scalar fields plus a routing
+// override blob, so this is generous relative to any legitimate payload.
+const maxUpdateAgentBodyBytes = 64 * 1024
 
 // Handler provides HTTP handlers for agent routes.
 type Handler struct {
@@ -120,7 +128,7 @@ func (h *Handler) listAgents(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, AgentListResponse{Agents: agents})
+	c.JSON(http.StatusOK, AgentListResponse{Agents: newAgentResponseBodies(agents)})
 }
 
 func (h *Handler) createAgent(c *gin.Context) {
@@ -165,7 +173,7 @@ func (h *Handler) createAgent(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusCreated, AgentResponse{Agent: agent})
+	c.JSON(http.StatusCreated, AgentResponse{Agent: newAgentResponseBody(agent)})
 }
 
 func (h *Handler) getAgent(c *gin.Context) {
@@ -174,7 +182,7 @@ func (h *Handler) getAgent(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, AgentResponse{Agent: agent})
+	c.JSON(http.StatusOK, AgentResponse{Agent: newAgentResponseBody(agent)})
 }
 
 func (h *Handler) updateAgent(c *gin.Context) {
@@ -191,9 +199,8 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	var req UpdateAgentRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	req, ok := decodeUpdateAgentRequest(c, agent.Role != "")
+	if !ok {
 		return
 	}
 	if req.Permissions != nil {
@@ -212,7 +219,7 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		})
 		return
 	}
-	applyAgentUpdates(agent, &req)
+	applyAgentUpdates(agent, req)
 	if err := h.svc.UpdateAgentInstance(ctx, agent); err != nil {
 		if code := agentValidationErrorCode(err); code != "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": code})
@@ -221,7 +228,57 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, AgentResponse{Agent: agent})
+	c.JSON(http.StatusOK, AgentResponse{Agent: newAgentResponseBody(agent)})
+}
+
+// decodeUpdateAgentRequest buffers the body once so the handler can inspect
+// raw keys and then decode the typed request. Office identities reject the
+// ignored model key before the request reaches the normal update path.
+func decodeUpdateAgentRequest(c *gin.Context, officeAgent bool) (*UpdateAgentRequest, bool) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUpdateAgentBodyBytes)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return nil, false
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return nil, false
+	}
+	if officeAgent {
+		hasModel, err := requestBodyHasKey(body, "model")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return nil, false
+		}
+		if hasModel {
+			respondRoutingValidation(c, &routing.ValidationError{
+				Field: "model",
+				Message: "model no longer selects a launched model for an Office agent; " +
+					"update the agent routing override or workspace tier profiles",
+			})
+			return nil, false
+		}
+	}
+	var req UpdateAgentRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return nil, false
+	}
+	return &req, true
+}
+
+// requestBodyHasKey reports whether the top-level JSON object in body
+// carries key, without caring about its value — {"model":"x"},
+// {"model":""}, and {"model":null} must all be detected identically.
+func requestBodyHasKey(body []byte, key string) (bool, error) {
+	raw := map[string]json.RawMessage{}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return false, err
+	}
+	_, ok := raw[key]
+	return ok, nil
 }
 
 // applyRoutingOverride validates the override blob and writes it onto
@@ -322,7 +379,7 @@ func (h *Handler) updateAgentStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, AgentResponse{Agent: agent})
+	c.JSON(http.StatusOK, AgentResponse{Agent: newAgentResponseBody(agent)})
 }
 
 // -- Instruction handlers --

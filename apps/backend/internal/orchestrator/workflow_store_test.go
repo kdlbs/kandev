@@ -61,6 +61,37 @@ func TestWorkflowStore_LoadState(t *testing.T) {
 	}
 }
 
+// TestWorkflowStore_LoadState_BlankSessionIDResolvesFromTaskRow is AC-62's
+// production-side companion: a task that has never had a session (the F38/
+// dispatcher case for zero task_sessions rows, sessionID == "") must still
+// resolve via LoadState, because CurrentStepID is derived from the task row,
+// not the session. Skipping GetTaskSession/IsPassthroughSession for a blank
+// sessionID mirrors the existing sessionID == "" sentinel convention used
+// elsewhere in this codebase (AC-16a).
+func TestWorkflowStore_LoadState_BlankSessionIDResolvesFromTaskRow(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskWithoutSession(t, repo, "t1", "step1")
+
+	agentMgr := &mockAgentManager{isPassthrough: true}
+	store := newWorkflowStore(repo, newMockStepGetter(), agentMgr, noopPublisher, testLogger())
+
+	state, err := store.LoadState(ctx, "t1", "")
+	if err != nil {
+		t.Fatalf("LoadState failed: %v", err)
+	}
+
+	if state.TaskID != "t1" {
+		t.Errorf("expected TaskID %q, got %q", "t1", state.TaskID)
+	}
+	if state.WorkflowID != "wf1" {
+		t.Errorf("expected WorkflowID %q, got %q", "wf1", state.WorkflowID)
+	}
+	if state.CurrentStepID != "step1" {
+		t.Errorf("expected CurrentStepID %q, got %q", "step1", state.CurrentStepID)
+	}
+}
+
 func TestWorkflowStore_LoadStep(t *testing.T) {
 	ctx := context.Background()
 
@@ -330,6 +361,105 @@ func TestWorkflowStore_ApplyTransitionPullsNextFeederTaskOnVacate(t *testing.T) 
 	}
 	if movedTaskID != "task-critical" {
 		t.Fatalf("moved event task = %s, want task-critical", movedTaskID)
+	}
+}
+
+// TestWorkflowStore_ApplyTransitionIfAtStep_AppliesWhenStepMatches is the
+// AC-46/48 orchestrator-level happy path: the CAS precondition holds, so the
+// move lands and behaves like ApplyTransition (task moved, review status
+// cleared, task.updated published).
+func TestWorkflowStore_ApplyTransitionIfAtStep_AppliesWhenStepMatches(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+	}
+	pub := &capturingPublisher{}
+	store := newWorkflowStore(repo, stepGetter, nil, pub.publish, testLogger())
+
+	applied, err := store.ApplyTransitionIfAtStep(ctx, "t1", "s1", "step1", "step2", "on_turn_complete")
+	if err != nil {
+		t.Fatalf("ApplyTransitionIfAtStep failed: %v", err)
+	}
+	if !applied {
+		t.Fatal("expected applied=true when expectedStepID matches the task's persisted step")
+	}
+
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if task.WorkflowStepID != "step2" {
+		t.Errorf("expected task WorkflowStepID %q, got %q", "step2", task.WorkflowStepID)
+	}
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+	if session.ReviewStatus != models.ReviewStatusNone {
+		t.Errorf("expected review status to be cleared, got %q", session.ReviewStatus)
+	}
+
+	if len(pub.calls) != 1 {
+		t.Fatalf("expected exactly 1 publishTaskUpdated call, got %d", len(pub.calls))
+	}
+}
+
+// TestWorkflowStore_ApplyTransitionIfAtStep_LostRaceReturnsFalseWithoutSideEffects
+// covers the AC-46/48 abandonment path: another transition already moved the
+// task off expectedStepID by the time the CAS write ran, so no event is
+// published, no review-status clear runs, and the task row is untouched.
+func TestWorkflowStore_ApplyTransitionIfAtStep_LostRaceReturnsFalseWithoutSideEffects(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+	}
+	pub := &capturingPublisher{}
+	store := newWorkflowStore(repo, stepGetter, nil, pub.publish, testLogger())
+
+	applied, err := store.ApplyTransitionIfAtStep(ctx, "t1", "s1", "not-the-current-step", "step2", "on_turn_complete")
+	if err != nil {
+		t.Fatalf("ApplyTransitionIfAtStep failed: %v", err)
+	}
+	if applied {
+		t.Fatal("expected applied=false when expectedStepID does not match the task's persisted step")
+	}
+
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if task.WorkflowStepID != "step1" {
+		t.Errorf("expected task to remain at step1 after a lost CAS race, got %q", task.WorkflowStepID)
+	}
+
+	if len(pub.calls) != 0 {
+		t.Fatalf("expected no publishTaskUpdated call on a lost race, got %d", len(pub.calls))
+	}
+}
+
+// TestWorkflowStore_ApplyTransitionIfAtStep_ErrorsWhenTargetStepMissing
+// mirrors the same guard ApplyTransition relies on for its target step
+// lookup: a nil step (unknown ID) must fail loudly rather than silently
+// moving the task nowhere.
+func TestWorkflowStore_ApplyTransitionIfAtStep_ErrorsWhenTargetStepMissing(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+
+	_, err := store.ApplyTransitionIfAtStep(ctx, "t1", "s1", "step1", "missing-step", "on_turn_complete")
+	if err == nil {
+		t.Fatal("expected an error when the target step does not exist")
 	}
 }
 

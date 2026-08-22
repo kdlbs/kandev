@@ -132,6 +132,10 @@ test.describe("Prompt history panel on mobile", () => {
     await expect(panel).toBeVisible({ timeout: 10_000 });
     await expect(panel.getByTestId("prompt-history-number-0")).toHaveText("#121");
     await expect(panel.getByText(SECOND_PROMPT_MARKER)).toHaveCount(0);
+    // Touch gestures must target the panel's inner scroll container (the
+    // outer root is only the positioned overlay wrapper).
+    const scroller = panel.getByTestId("prompt-history-scroll");
+    await expect(scroller).toBeVisible();
 
     // Arm a route handler that holds older-page requests, then touch-scroll:
     // the panel-triggered request is held, the loading row shows, and the
@@ -157,7 +161,7 @@ test.describe("Prompt history panel on mobile", () => {
       scrolls < 10 &&
       (await panel.getByTestId("prompt-history-loading-older").count()) === 0
     ) {
-      await touchScrollDown(testPage, panel);
+      await touchScrollDown(testPage, scroller);
       scrolls += 1;
     }
     await expect(panel.getByTestId("prompt-history-loading-older")).toBeVisible({
@@ -173,7 +177,7 @@ test.describe("Prompt history panel on mobile", () => {
     });
     for (let attempt = 0; attempt < 10 && (await firstRow.count()) === 0; attempt++) {
       const rowsBefore = await panel.locator('[data-testid^="prompt-history-row-"]').count();
-      await touchScrollDown(testPage, panel);
+      await touchScrollDown(testPage, scroller);
       await expect
         .poll(async () => await panel.locator('[data-testid^="prompt-history-row-"]').count(), {
           timeout: 5_000,

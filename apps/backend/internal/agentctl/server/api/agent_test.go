@@ -820,6 +820,45 @@ func TestHandleWSPermissionRespond_BadPayload(t *testing.T) {
 	}
 }
 
+func TestHandleWSPermissionListReturnsTypedEmptyResult(t *testing.T) {
+	s := newTestServer(t)
+	msg, _ := ws.NewRequest("req-list", "agent.permissions.list", nil)
+
+	resp := s.handleAgentStreamRequest(context.Background(), msg)
+	if resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("expected response, got %+v", resp)
+	}
+	var result map[string]any
+	if err := resp.ParsePayload(&result); err != nil {
+		t.Fatal(err)
+	}
+	permissions, ok := result["permissions"].([]any)
+	if !ok || len(permissions) != 0 || result["total"] != float64(0) {
+		t.Fatalf("unexpected list result: %+v", result)
+	}
+}
+
+func TestHandleWSPermissionResolveReturnsStableNotFoundCode(t *testing.T) {
+	s := newTestServer(t)
+	msg, _ := ws.NewRequest("req-resolve", "agent.permissions.resolve", map[string]string{
+		"request_id": "missing-request",
+		"pending_id": "missing-pending",
+		"option_id":  "allow-once",
+	})
+
+	resp := s.handleAgentStreamRequest(context.Background(), msg)
+	if resp.Type != ws.MessageTypeError {
+		t.Fatalf("expected error, got %+v", resp)
+	}
+	var payload ws.ErrorPayload
+	if err := resp.ParsePayload(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Details["permission_code"] != streams.PermissionErrorNotFound {
+		t.Fatalf("permission_code = %v, want %q", payload.Details["permission_code"], streams.PermissionErrorNotFound)
+	}
+}
+
 func TestHandleWSInitialize_BadPayload(t *testing.T) {
 	s := newTestServer(t)
 	ctx := context.Background()

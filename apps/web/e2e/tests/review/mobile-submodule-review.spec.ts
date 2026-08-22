@@ -25,7 +25,7 @@ test.describe("Nested submodule Review on mobile", () => {
       await session.waitForChatIdle({ timeout: 45_000 });
 
       const worktreePath = await fixture.waitForWorktree(apiClient);
-      fixture.applyNestedChanges(worktreePath);
+      await fixture.applyNestedChanges(worktreePath);
 
       await testPage.getByRole("button", { name: "Changes" }).tap();
       const changesPanel = testPage.getByTestId("mobile-changes-panel");

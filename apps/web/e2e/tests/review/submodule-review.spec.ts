@@ -47,7 +47,7 @@ test.describe("Nested submodule Review", () => {
       await session.waitForChatIdle({ timeout: 45_000 });
 
       const worktreePath = await fixture.waitForWorktree(apiClient);
-      fixture.applyNestedChanges(worktreePath);
+      await fixture.applyNestedChanges(worktreePath);
       const parentBaseSha = readGitValue(worktreePath, ["rev-parse", "HEAD"], backend.tmpDir);
 
       await session.clickTab("Changes");

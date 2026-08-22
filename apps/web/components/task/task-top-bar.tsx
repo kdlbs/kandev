@@ -5,6 +5,8 @@ import Link from "@/components/routing/app-link";
 import { IconBug, IconCircleDot } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { PageTopbar, type ParentCrumb } from "@/components/page-topbar";
+import { useOfficeProject } from "@/hooks/use-office-workspace-data";
 import { TaskTopBarTitle } from "@/components/task/task-top-bar-title";
 import { EditorsMenu } from "@/components/task/editors-menu";
 import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
@@ -29,16 +31,15 @@ type TaskTopBarProps = {
   taskId?: string | null;
   activeSessionId?: string | null;
   taskTitle?: string;
-  onStartAgent?: (agentProfileId: string) => void;
-  onStopAgent?: () => void;
-  isAgentRunning?: boolean;
-  isAgentLoading?: boolean;
+  /** `owner/repo` (or the repository name) of the task's primary repository. */
+  repositoryLabel?: string | null;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   workflowSteps?: WorkflowStepperStep[];
   currentStepId?: string | null;
   workflowId?: string | null;
   workspaceId?: string | null;
+  projectId?: string | null;
   issueUrl?: string;
   issueNumber?: number;
   isArchived?: boolean;
@@ -48,24 +49,18 @@ type TaskTopBarProps = {
   onTaskUnarchived?: (taskId: string) => void;
 };
 
-type TopBarLeftProps = {
-  taskId?: string | null;
-  activeSessionId?: string | null;
-  taskTitle?: string;
-  remoteExecutorType?: string | null;
-  isArchived?: boolean;
-};
-
 const TaskTopBar = memo(function TaskTopBar({
   taskId,
   activeSessionId,
   taskTitle,
+  repositoryLabel,
   showDebugOverlay,
   onToggleDebugOverlay,
   workflowSteps,
   currentStepId,
   workflowId,
   workspaceId,
+  projectId,
   isArchived,
   embeddedVscodeSupported,
   issueUrl,
@@ -74,20 +69,32 @@ const TaskTopBar = memo(function TaskTopBar({
   officeTaskHref,
   onTaskUnarchived,
 }: TaskTopBarProps) {
+  const { t } = useTranslation();
+  // Projects only exist for office-owned tasks, so kanban-mode tasks render no
+  // ancestry trail at all.
+  const project = useOfficeProject(projectId);
+  const showExecutorSettings =
+    !isArchived && shouldShowExecutorEnvironmentControls(remoteExecutorType);
+  const parents = buildTaskCrumbs(project, repositoryLabel);
   return (
-    <header
-      data-testid="task-topbar"
-      className="@container/topbar grid h-10 shrink-0 grid-cols-[minmax(0,auto)_minmax(0,1fr)_auto] items-center gap-2 overflow-hidden px-3 py-1 border-b border-border"
-    >
-      <TopBarLeft
-        taskId={taskId}
-        activeSessionId={activeSessionId}
-        taskTitle={taskTitle}
-        remoteExecutorType={remoteExecutorType}
-        isArchived={isArchived}
-      />
-      <div className="min-w-0 justify-self-stretch overflow-hidden">
-        {workflowSteps && workflowSteps.length > 0 && (
+    <PageTopbar
+      testId="task-topbar"
+      // Same fallback the rename control renders, so the crumb's accessible
+      // name and the measured width never diverge from what is shown.
+      title={taskTitle ?? t("task:taskDetails")}
+      titleSlot={<TaskTopBarTitle taskId={taskId} taskTitle={taskTitle} isArchived={isArchived} />}
+      parents={parents}
+      // This bar is desktop-only (the mobile session bar owns phones), so the
+      // phone-only home crumb and status trigger have no surface here.
+      homeAffordance="none"
+      showStatusTrigger={false}
+      leftActions={
+        showExecutorSettings ? (
+          <ExecutorSettingsButton taskId={taskId} sessionId={activeSessionId ?? null} />
+        ) : undefined
+      }
+      center={
+        workflowSteps && workflowSteps.length > 0 ? (
           <WorkflowStepper
             steps={workflowSteps}
             currentStepId={currentStepId ?? null}
@@ -95,25 +102,49 @@ const TaskTopBar = memo(function TaskTopBar({
             workflowId={workflowId ?? null}
             isArchived={isArchived}
           />
-        )}
-      </div>
-      <TopBarRight
-        taskId={taskId}
-        activeSessionId={activeSessionId}
-        showDebugOverlay={showDebugOverlay}
-        onToggleDebugOverlay={onToggleDebugOverlay}
-        isArchived={isArchived}
-        workspaceId={workspaceId}
-        embeddedVscodeSupported={embeddedVscodeSupported}
-        taskTitle={taskTitle}
-        issueUrl={issueUrl}
-        issueNumber={issueNumber}
-        officeTaskHref={officeTaskHref}
-        onTaskUnarchived={onTaskUnarchived}
-      />
-    </header>
+        ) : undefined
+      }
+      // The stepper handles its own truncation (`w-full min-w-0 overflow-hidden`),
+      // so the center zone may shrink instead of pushing chrome out of the bar.
+      centerClassName="min-w-0 shrink"
+      actions={
+        <TopBarRight
+          taskId={taskId}
+          activeSessionId={activeSessionId}
+          showDebugOverlay={showDebugOverlay}
+          onToggleDebugOverlay={onToggleDebugOverlay}
+          isArchived={isArchived}
+          workspaceId={workspaceId}
+          embeddedVscodeSupported={embeddedVscodeSupported}
+          taskTitle={taskTitle}
+          issueUrl={issueUrl}
+          issueNumber={issueNumber}
+          officeTaskHref={officeTaskHref}
+          onTaskUnarchived={onTaskUnarchived}
+        />
+      }
+    />
   );
 });
+
+/**
+ * Ancestry crumbs for the open task: its office project (when it has one) and
+ * then its repository, closest to the title. The repository crumb carries no
+ * `href` on purpose: it orients ("this task is in kdlbs/kandev") rather than
+ * navigating, since there is no repository route to land on.
+ *
+ * A multi-repository task names its primary repository only, which is the same
+ * one the rest of the page (branch pickers, Changes) treats as primary.
+ */
+function buildTaskCrumbs(
+  project: { id: string; name: string } | null | undefined,
+  repositoryLabel: string | null | undefined,
+): ParentCrumb[] | undefined {
+  const crumbs: ParentCrumb[] = [];
+  if (project) crumbs.push({ label: project.name, href: `/office/projects/${project.id}` });
+  if (repositoryLabel) crumbs.push({ label: repositoryLabel });
+  return crumbs.length > 0 ? crumbs : undefined;
+}
 
 // IssueTrackerButtons picks the right ticket status button for a task whose
 // title already carries an external issue key. Jira and Linear use the same
@@ -140,27 +171,6 @@ function IssueTrackerButtons({
     return <LinearIssueButton workspaceId={workspaceId} taskTitle={taskTitle} />;
   }
   return null;
-}
-
-/** Left section: task name breadcrumb + executor info. Home + integrations
- *  moved to the unified AppSidebar in the UI overhaul. */
-function TopBarLeft({
-  taskId,
-  activeSessionId,
-  taskTitle,
-  remoteExecutorType,
-  isArchived,
-}: TopBarLeftProps) {
-  const showExecutorSettings = shouldShowExecutorEnvironmentControls(remoteExecutorType);
-  return (
-    <div className="flex min-w-0 max-w-[min(44rem,45vw)] items-center gap-2.5 overflow-hidden">
-      <TaskTopBarTitle taskId={taskId} taskTitle={taskTitle} isArchived={isArchived} />
-
-      {!isArchived && showExecutorSettings && (
-        <ExecutorSettingsButton taskId={taskId} sessionId={activeSessionId ?? null} />
-      )}
-    </div>
-  );
 }
 
 function TopbarCluster({

@@ -3,6 +3,31 @@ import { fetchWorkflowSnapshot } from "@/lib/api";
 import { snapshotToState } from "@/lib/ssr/mapper";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { isCurrentWorkspaceContext } from "@/lib/state/workspace-context";
+import type { KanbanState } from "@/lib/state/slices/kanban/types";
+
+type KanbanTask = KanbanState["tasks"][number];
+
+function preserveLiveAutoStartFailed(
+  snapshotTasks: KanbanTask[],
+  fetchStartTasks: KanbanTask[],
+  currentTasks: KanbanTask[],
+) {
+  const fetchStartByID = new Map(fetchStartTasks.map((task) => [task.id, task]));
+  const currentByID = new Map(currentTasks.map((task) => [task.id, task]));
+  return snapshotTasks.map((task) => {
+    const current = currentByID.get(task.id);
+    if (!current) return task;
+    const fetchStart = fetchStartByID.get(task.id);
+    if (
+      task.autoStartFailed === undefined ||
+      fetchStart === undefined ||
+      current.autoStartFailed !== fetchStart.autoStartFailed
+    ) {
+      return { ...task, autoStartFailed: current.autoStartFailed };
+    }
+    return task;
+  });
+}
 
 export function useWorkflowSnapshot(workflowId: string | null) {
   const store = useAppStoreApi();
@@ -36,7 +61,17 @@ export function useWorkflowSnapshot(workflowId: string | null) {
         ) {
           return;
         }
-        store.getState().hydrate(snapshotToState(snapshot));
+        const nextState = snapshotToState(snapshot);
+        if (nextState.kanban) {
+          const currentTasks = store.getState().kanban.tasks;
+          const fetchedAtStartTasks = existing.tasks;
+          nextState.kanban.tasks = preserveLiveAutoStartFailed(
+            nextState.kanban.tasks,
+            fetchedAtStartTasks,
+            currentTasks,
+          );
+        }
+        store.getState().hydrate(nextState);
       })
       .catch((error) => {
         // Suppress superseded-fetch noise; retry happens on WS reconnect.

@@ -23,12 +23,16 @@ func TestGitHubCredentialBrokerConfigValidation(t *testing.T) {
 
 func TestGitHubCredentialBrokerConfigEnvironmentBinding(t *testing.T) {
 	t.Setenv("KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL", "https://kandev.example.com")
+	t.Setenv("KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY", "test-signing-key")
 	cfg, err := LoadWithPath(t.TempDir())
 	if err != nil {
 		t.Fatalf("LoadWithPath: %v", err)
 	}
 	if got := cfg.GitHubCredentialBroker.PublicBaseURL; got != "https://kandev.example.com" {
 		t.Fatalf("broker public base URL = %q", got)
+	}
+	if got := cfg.GitHubCredentialBroker.ReissueSigningKey; got != "test-signing-key" {
+		t.Fatalf("broker reissue signing key was not bound")
 	}
 }
 

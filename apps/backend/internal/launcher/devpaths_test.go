@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 )
 
 func makeRepoTree(t *testing.T) string {
@@ -169,6 +171,28 @@ func TestResolveDevBackendEnvIgnoresWhitespaceOnlyOverride(t *testing.T) {
 	}
 	if env["KANDEV_DATABASE_PATH"] != "" {
 		t.Fatalf("KANDEV_DATABASE_PATH = %q, want empty", env["KANDEV_DATABASE_PATH"])
+	}
+}
+
+func TestResolveDevBackendEnvHonorsEnvironmentConfiguredHome(t *testing.T) {
+	repo := makeRepoTree(t)
+	customHome := filepath.Join(t.TempDir(), "kandev")
+	t.Setenv("KANDEV_HOME_DIR", customHome)
+	t.Setenv("KANDEV_TASK_ID", "")
+	t.Setenv("KANDEV_DATABASE_PATH", "")
+
+	cfg := &commonconfig.Config{
+		HomeDir: customHome,
+		Source: commonconfig.ConfigSource{Values: map[string]commonconfig.SettingSource{
+			"homeDir": commonconfig.SourceEnvironment,
+		}},
+	}
+	dbPath, extra := resolveDevBackendEnv(repo, cfg)
+	if want := filepath.Join(customHome, "data", "kandev.db"); dbPath != want {
+		t.Fatalf("dbPath = %q, want %q", dbPath, want)
+	}
+	if env := devEnvToMap(extra); env["KANDEV_HOME_DIR"] != "" {
+		t.Fatalf("dev extra environment overwrote configured home: %q", env["KANDEV_HOME_DIR"])
 	}
 }
 

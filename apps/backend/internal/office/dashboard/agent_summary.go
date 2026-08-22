@@ -277,6 +277,9 @@ func buildLatestRunDTO(run *sqlite.RunSummaryRow) *AgentLatestRunDTO {
 		dto.FinishedAt = &s
 	}
 	dto.TaskID, dto.Summary = parseRunPayload(run.Payload)
+	if run.OutputSummary != "" {
+		dto.Summary = run.OutputSummary
+	}
 	return dto
 }
 

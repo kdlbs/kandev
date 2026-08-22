@@ -594,10 +594,11 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 			"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar,
 			"simplified":   settings.SystemMetricsDisplay.Simplified,
 		},
-		"appStatusBarEnabled":   settings.AppStatusBarEnabled,
-		"appStatusBarOrder":     mapAppStatusBarOrder(settings.AppStatusBarOrder),
-		"hiddenWorkflowStepIds": stringSliceMap(settings.KanbanHiddenStepIDs),
-		"loaded":                true,
+		"appStatusBarEnabled":               settings.AppStatusBarEnabled,
+		"appStatusBarOrder":                 mapAppStatusBarOrder(settings.AppStatusBarOrder),
+		"hiddenWorkflowStepIds":             stringSliceMap(settings.KanbanHiddenStepIDs),
+		"workflowIdsWithAutoHideEmptySteps": stringSlice(settings.WorkflowIDsWithAutoHideEmptySteps),
+		"loaded":                            true,
 	}
 }
 
@@ -691,6 +692,7 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"queuedForStepId":             nullString(task.QueuedForStepID),
 		"queuedAt":                    task.QueuedAt,
 		"interrupted":                 task.Interrupted,
+		"autoStartFailed":             task.AutoStartFailed,
 		"statusSummary":               task.StatusSummary,
 		"sessionCount":                task.SessionCount,
 		"reviewStatus":                nullString(string(task.ReviewStatus)),
