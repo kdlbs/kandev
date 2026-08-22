@@ -105,9 +105,6 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 	if err := s.workspaceSourcesIdle(ctx, task.ID); err != nil {
 		return nil, err
 	}
-	if err := s.rejectUnsupportedFolderSources(ctx, task.ID, req.Sources); err != nil {
-		return nil, err
-	}
 	existing, err := s.taskRepos.ListTaskRepositories(ctx, task.ID)
 	if err != nil {
 		return nil, err
@@ -125,6 +122,18 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 	}
 	inputs, err := filterExactWorkspaceSourceDuplicates(existing, folders, req.Sources)
 	if err != nil {
+		// Preserve the capability-first error for unsupported executors when a
+		// new folder path cannot be normalized. Valid paths still reach the
+		// duplicate filter first, so exact retries remain no-ops after an
+		// executor change.
+		if errors.Is(err, ErrInvalidWorkspaceSource) {
+			if capabilityErr := s.rejectUnsupportedFolderSources(ctx, task.ID, req.Sources); capabilityErr != nil {
+				return nil, capabilityErr
+			}
+		}
+		return nil, err
+	}
+	if err := s.rejectUnsupportedFolderSources(ctx, task.ID, inputs); err != nil {
 		return nil, err
 	}
 	if len(inputs) == 0 {

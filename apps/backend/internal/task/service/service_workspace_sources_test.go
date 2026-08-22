@@ -962,6 +962,27 @@ func TestAttachWorkspaceSourcesExactFolderRetryCanonicalizesPathWithoutSideEffec
 	require.Len(t, folders, 1)
 }
 
+func TestAttachWorkspaceSourcesExactFolderRetryIgnoresExecutorChange(t *testing.T) {
+	svc, _, repo, task := newWorkspaceSourceRetryFixture(t)
+	ctx := context.Background()
+	folder := t.TempDir()
+	source := WorkspaceSourceInput{Kind: WorkspaceSourceFolder, LocalPath: folder, DisplayName: "docs"}
+	_, err := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{source}})
+	require.NoError(t, err)
+
+	// A task can switch executor profiles between launches. An exact retry must
+	// remain an idempotent no-op even when the new executor cannot accept folders.
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-retry-remote", TaskID: task.ID, ExecutorType: "remote_docker",
+	}))
+	retry, err := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{source}})
+	require.NoError(t, err)
+	require.False(t, retry.Changed)
+	folders, err := repo.ListTaskWorkspaceFolders(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, folders, 1)
+}
+
 func TestAttachWorkspaceSourcesMixedDuplicateAndNewFoldersCommitsOnlyNewSource(t *testing.T) {
 	svc, eventBus, repo, task := newWorkspaceSourceRetryFixture(t)
 	ctx := context.Background()
