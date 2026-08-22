@@ -275,6 +275,24 @@ test.describe("Mobile sidebar — view system", () => {
     const popover = testPage.getByTestId("sidebar-filter-popover");
     await expect(popover).toBeVisible();
     await popover.getByTestId("sort-key-select").tap();
+    await expect(testPage.getByRole("option", { name: "Updated", exact: true })).toContainText(
+      "Last task summary refresh. Background events can change it.",
+    );
+    await expect(
+      testPage.getByRole("option", { name: "Last activity", exact: true }),
+    ).toContainText("Last user or agent action. Viewing a task does not change it.");
+    await expect(testPage.getByRole("option", { name: "Status", exact: true })).toContainText(
+      "Task state, from review to backlog.",
+    );
+    await expect(testPage.getByRole("option", { name: "Created", exact: true })).toContainText(
+      "When the task was created.",
+    );
+    await expect(testPage.getByRole("option", { name: "Title", exact: true })).toContainText(
+      "Task title in alphabetical order.",
+    );
+    await expect(testPage.getByRole("option", { name: "Custom", exact: true })).toContainText(
+      "The manual order you set for tasks.",
+    );
     await testPage.getByRole("option", { name: "Last activity", exact: true }).tap();
     const direction = popover.getByTestId("sort-direction-toggle");
     if ((await direction.getAttribute("data-direction")) !== "desc") await direction.tap();
