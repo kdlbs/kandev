@@ -127,8 +127,9 @@ On a normal start, the launcher:
 2. creates the Kandev data directory with owner-only permissions where the platform supports Unix modes;
 3. selects backend and `agentctl` ports;
 4. starts and supervises the backend;
-5. waits up to 45 seconds for `/health`; and
-6. opens the printed local URL in the default browser.
+5. waits up to 45 seconds for `/health` (the backend is alive and its socket is bound);
+6. waits for `/ready` (the backend has finished startup recovery and can serve real requests); this wait is unbounded by design, since recovery can legitimately take much longer than 45 seconds; and
+7. opens the printed local URL in the default browser.
 
 The launcher remains in the foreground. Press `Ctrl+C` or terminate it to stop the backend and its managed children cleanly. A force-kill can leave worktree processes or containers running; inspect them before deleting data.
 

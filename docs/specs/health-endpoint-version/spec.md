@@ -234,7 +234,7 @@ Every in-tree `/health` consumer was checked against an additive body field.
 | Desktop smoke test | `apps/desktop/e2e/desktop-launch-smoke.mjs` | URL match on a fake runtime | None |
 | Playwright fixture | `apps/web/e2e/fixtures/backend.ts:461` | Waits for HTTP readiness | None |
 | Homebrew service | `scripts/release/kandev.rb` | Polls the URL | None |
-| Docker docs example | `docs/docker.md` | `curl -f`, status only | None |
+| Docker docs example | `docs/docker.md` | `curl -f`, status only | None at the time; later repointed to `/ready` by the Amendment below |
 | Public operations doc | `docs/public/operations.md:70` | **Pins the exact JSON body** | **Must be updated — AC-15** |
 
 No consumer deserializes the body into a fixed struct that would reject an unknown field,
@@ -300,7 +300,12 @@ Resolved with the requester on 2026-08-07, before this spec was frozen.
   (AC-15). It is the only doc that reproduces the payload verbatim.
 - `docs/docker.md`, `docs/k8s.md`, `docs/run-as-a-service.md`, `docs/public/cli.md`, and
   `docs/public/authentication.md` reference `/health` but do not reproduce its body, so
-  they need no change.
+  they need no change for this base spec. (Superseded for `docs/docker.md` and
+  `docs/k8s.md` by the Amendment below: the liveness/readiness split gave them a second
+  endpoint to document, which is a structural change independent of the body-shape
+  question this bullet answers. `docs/run-as-a-service.md` still needs no change from
+  either spec; it has its own pre-existing `/health` wording inconsistency that predates
+  both this spec and the Amendment and is tracked separately, not fixed here.)
 - Consider noting in `docs/public/operations.md` that `/health` is now the
   credential-free way to read the running version, since that is the operator-visible
   benefit.
@@ -390,7 +395,10 @@ table):
 | K8s livenessProbe | `k8s/deployment.yaml` | HTTP status only, stays on `/health` | None |
 | Playwright fixture | `apps/web/e2e/fixtures/backend.ts` | Waits for HTTP readiness, now against `/ready` | Repointed |
 | Go launcher | `internal/launcher/health.go` | Status code against `/health`; body discarded | None — still liveness, unaffected |
-| CLI, Desktop shell, Homebrew service, Docker docs | (unchanged files) | Status/socket against `/health` | None — liveness consumers, correctly unaffected |
+| CLI, Desktop shell, Homebrew service | (unchanged files) | Status/socket against `/health` | None — liveness consumers, correctly unaffected |
+| Docker Compose healthcheck example | `docs/docker.md` | Was `curl -f .../health`, status only | Repointed to `/ready` (Review round 3, R3-1 finding) — Compose's single healthcheck concept means "can serve real traffic," which is `/ready`'s contract, not `/health`'s |
+| K8s docs prose | `docs/k8s.md` | Described "both probes on `/health`" | Corrected to match `k8s/deployment.yaml`: liveness stays `/health`, readiness is `/ready` (Review round 3, R3-3 finding) |
+| Playwright fixture docs | `docs/test_e2e_web.md` | Described waiting for `/health` | Corrected to `/ready`, matching `apps/web/e2e/fixtures/backend.ts`'s actual wait (Review round 3, R3-3 finding) |
 
 **Updated Out of Scope note.** The original spec's "Renaming, moving, or
 changing the auth posture of any endpoint" bullet refers to `/health` itself,
@@ -407,6 +415,7 @@ is a new endpoint, not a rename — adding it does not conflict with that bullet
 | `k8s/deployment.yaml` | `readinessProbe.httpGet.path` changed to `/ready`; `livenessProbe` stays `/health` |
 | `apps/web/e2e/fixtures/backend.ts` | Readiness waits repointed to `/ready` |
 | `docs/public/{operations,k8s,docker,run-as-a-service,authentication,remote-cloud-environment}.md` | Updated to describe the liveness/readiness split |
+| `docs/docker.md`, `docs/k8s.md`, `docs/test_e2e_web.md` | Updated (Review round 3 / Build round 4, not the initial amendment pass) to repoint their `/health`-only readiness references to `/ready` |
 
 ## Rollback
 
