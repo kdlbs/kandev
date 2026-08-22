@@ -258,7 +258,11 @@ func (s *Service) settleMovedCompletionIntent(
 	// task.moved may already have recorded the destination handoff while
 	// the source turn was still RUNNING. Now that this exact old turn is
 	// terminal, no provider-ready callback remains to drain it.
-	s.drainQueuedMessageForPromptableSession(ctx, intent.SessionID)
+	// reconcileCompletionIntentLocked already owns the per-session
+	// cancellation/ready guard. Re-acquiring it through the public drain helper
+	// would deadlock the moved-step recovery path, leaving the stale turn and
+	// destination handoff stranded forever.
+	s.drainQueuedMessageForPromptableSessionLocked(ctx, intent.SessionID)
 	s.finishCompletionIntent(ctx, store, intent, models.CompletionIntentStateSuperseded, now, "task_moved")
 }
 
