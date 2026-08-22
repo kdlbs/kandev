@@ -24,6 +24,7 @@
   "addBlocker": "+ Add blocker",
   "addDetailsAboutThisChange": "Add details about this change...",
   "addFolder": "Add folder",
+  "addFolderExecutorUnknown": "Waiting to confirm this task's executor supports folders",
   "addLabel": "Add label",
   "addLabels": "+ Add labels",
   "addMore": "Add more",

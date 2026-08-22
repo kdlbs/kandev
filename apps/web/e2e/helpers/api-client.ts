@@ -2202,6 +2202,7 @@ export class ApiClient {
     title: string;
     autopilot?: boolean;
     primary_session_id?: string | null;
+    primary_executor_type?: string | null;
     state?: string;
     workflow_step_id?: string;
     parent_id?: string;
