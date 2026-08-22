@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -949,7 +950,7 @@ func TestAttachWorkspaceSourcesExactFolderRetryCanonicalizesPathWithoutSideEffec
 	svc.SetWorkspaceSourceMaterializer(materializer)
 	svc.SetWorkspaceSourceProviderRefresher(refresher)
 	retry, err := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{{
-		Kind: WorkspaceSourceFolder, LocalPath: filepath.Join(folder, "."), DisplayName: "docs",
+		Kind: WorkspaceSourceFolder, LocalPath: workspaceSourceTestSymlink(t, folder), DisplayName: "docs",
 	}}})
 	require.NoError(t, err)
 	require.False(t, retry.Changed)
@@ -977,7 +978,7 @@ func TestAttachWorkspaceSourcesMixedDuplicateAndNewFoldersCommitsOnlyNewSource(t
 	svc.SetWorkspaceSourceMaterializer(materializer)
 	svc.SetWorkspaceSourceProviderRefresher(refresher)
 	result, err := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{
-		{Kind: WorkspaceSourceFolder, LocalPath: filepath.Join(existing, "."), DisplayName: "existing"},
+		{Kind: WorkspaceSourceFolder, LocalPath: workspaceSourceTestSymlink(t, existing), DisplayName: "existing"},
 		{Kind: WorkspaceSourceFolder, LocalPath: newFolder, DisplayName: "new"},
 	}})
 	require.NoError(t, err)
@@ -1005,7 +1006,7 @@ func TestAttachWorkspaceSourcesRejectsContradictoryFolderDuplicates(t *testing.T
 		name   string
 		source WorkspaceSourceInput
 	}{
-		{name: "same path different name", source: WorkspaceSourceInput{Kind: WorkspaceSourceFolder, LocalPath: filepath.Join(folder, "."), DisplayName: "renamed"}},
+		{name: "same path different name", source: WorkspaceSourceInput{Kind: WorkspaceSourceFolder, LocalPath: workspaceSourceTestSymlink(t, folder), DisplayName: "renamed"}},
 		{name: "same name different path", source: WorkspaceSourceInput{Kind: WorkspaceSourceFolder, LocalPath: t.TempDir(), DisplayName: "docs"}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1019,6 +1020,15 @@ func TestAttachWorkspaceSourcesRejectsContradictoryFolderDuplicates(t *testing.T
 			require.Len(t, folders, 1)
 		})
 	}
+}
+
+func workspaceSourceTestSymlink(t *testing.T, target string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "folder-link")
+	if err := os.Symlink(target, path); err != nil {
+		t.Skipf("create workspace-source test symlink: %v", err)
+	}
+	return path
 }
 
 func TestAttachWorkspaceSourcesExactRepositoryRetryNormalizesDefaultBaseBranch(t *testing.T) {

@@ -33,7 +33,7 @@ manually moving files into the task workspace.
 - A successful submission makes every added source visible as a named top-level entry in the Files
   panel. Repository sources also appear in repository-aware Changes, branch, editor, and pull
   request surfaces; folder sources remain file-only.
-- Duplicate repository/branch pairs, duplicate canonical folder paths, cross-workspace repository
+- Contradictory repository/branch pairs, contradictory canonical folder paths, cross-workspace repository
   IDs, invalid remote URLs, and inaccessible local paths are rejected before the task changes.
 - A source file rename may stay within its canonical workspace/source root; a cross-root move or
   rename is rejected before either source is mutated.
@@ -127,7 +127,7 @@ identity or make folders participate in Git operations.
 
 The response returns the persisted source projection, the effective task workspace path, and the
 affected session IDs. Validation errors return `400`, ownership/not-found errors return `404`,
-duplicates or an active turn return `409`, and materialization failures return `422` after rollback.
+contradictory duplicates or an active turn return `409`, and materialization failures return `422` after rollback. Exact normalized retries succeed as no-ops.
 
 The backend publishes `task.updated` with both `repositories` and `workspace_folders`, then emits a
 session-scoped workspace-sources update after agentctl has adopted the new workspace root. Clients
@@ -188,7 +188,7 @@ persisted in source URLs or copied into agent-visible metadata.
 | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A turn or tool call is active for batch attachment             | The UI disables the action when known; a racing batch request returns `409` without mutation.                                                       |
 | The invoking agent calls legacy add-branch during its turn     | The worktree is created and trackers refresh without stopping the active agent, terminals, or workspace processes.                                  |
-| Any source is invalid or duplicated                            | The full batch is rejected before persistence or materialization.                                                                                   |
+| Any source is invalid or contradicts an existing source identity | The full batch is rejected before persistence or materialization. Exact normalized retries are no-ops.                                             |
 | A host materializer fails                                      | New filesystem entries and source records are rolled back; existing task contents remain.                                                           |
 | A container/remote repository clone fails                      | Newly created remote entries are removed best-effort, durable attachments are rolled back, and the response identifies the failed source.           |
 | A container/remote task submits a folder source                | The request returns `422` without persistence or filesystem changes.                                                                                |
@@ -285,9 +285,10 @@ persisted; every relaunch and resume of that task reuses the persisted name.
 - **GIVEN** a live legacy add-branch materialization fails, **WHEN** the MCP call returns an error,
   **THEN** the new `task_repositories` row and any newly created repository entity are rolled back
   while the agent and existing processes continue running.
-- **GIVEN** the same repository/branch or canonical folder is already attached, **WHEN** it is
-  submitted again, **THEN** the request returns a conflict naming the duplicate and leaves the task
-  unchanged.
+- **GIVEN** a source identity conflicts with an already attached repository/branch or canonical folder,
+  **WHEN** it is submitted, **THEN** the request returns a conflict and leaves the task unchanged.
+- **GIVEN** the same normalized repository/branch or canonical folder is already attached, **WHEN** it is
+  submitted again, **THEN** the request succeeds without changing the task.
 - **GIVEN** a phone viewport on the Files tab, **WHEN** the user opens the 44px workspace-actions
   control, **THEN** an inset bottom-sheet menu exposes both actions with touch-sized rows.
 - **GIVEN** that phone action menu, **WHEN** the user selects **Add Repositories to workspace**,

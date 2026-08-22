@@ -128,6 +128,9 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 		return nil, err
 	}
 	if len(inputs) == 0 {
+		if err := guardWorkspaceSourceParent(ctx, store, task, req); err != nil {
+			return nil, err
+		}
 		return s.hydrateWorkspaceSourceResult(ctx, task, store)
 	}
 	batch, cleanupCreated, err := s.prepareWorkspaceSourceBatch(ctx, task, existing, folders, inputs)
@@ -138,9 +141,23 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 	batch.ExpectedParentWorkspaceID = req.ExpectedParentWorkspaceID
 	if len(batch.Sources) == 0 && len(batch.RepositoryUpdates) == 0 {
 		cleanupCreated(context.WithoutCancel(ctx))
+		if err := guardWorkspaceSourceParent(ctx, store, task, req); err != nil {
+			return nil, err
+		}
 		return s.hydrateWorkspaceSourceResult(ctx, task, store)
 	}
 	return s.commitWorkspaceSourceBatch(ctx, task, batch, cleanupCreated, s.materializeWorkspaceSources)
+}
+
+func guardWorkspaceSourceParent(ctx context.Context, store taskrepository.TaskWorkspaceFolderRepository, task *models.Task, req AttachWorkspaceSourcesRequest) error {
+	if req.ExpectedParentID == "" {
+		return nil
+	}
+	return store.CreateWorkspaceSourceBatch(ctx, &models.WorkspaceSourceBatch{
+		TaskID:                    task.ID,
+		ExpectedParentID:          req.ExpectedParentID,
+		ExpectedParentWorkspaceID: req.ExpectedParentWorkspaceID,
+	})
 }
 
 func filterExactWorkspaceSourceDuplicates(existing []*models.TaskRepository, folders []*models.TaskWorkspaceFolder, inputs []WorkspaceSourceInput) ([]WorkspaceSourceInput, error) {

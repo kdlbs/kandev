@@ -282,7 +282,7 @@ func TestHandleAddWorkspaceSourcesActiveChildRejectsExactRetryBeforeSideEffects(
 
 func TestHandleAddWorkspaceSourcesRejectsChildReparentedBeforeDurableCommit(t *testing.T) {
 	ctx := context.Background()
-	svc, repo, parent, child, eventBus := newWorkspaceSourceAuthorizationFixtureWithReparentingStore(t)
+	svc, repo, parent, child, eventBus, _ := newWorkspaceSourceAuthorizationFixtureWithReparentingStore(t)
 	events := observeWorkspaceSourceEvents(t, eventBus)
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "parent-session", TaskID: parent.ID}))
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "child-session", TaskID: child.ID}))
@@ -303,6 +303,39 @@ func TestHandleAddWorkspaceSourcesRejectsChildReparentedBeforeDurableCommit(t *t
 	session, err := repo.GetTaskSession(ctx, "child-session")
 	require.NoError(t, err)
 	require.Equal(t, models.TaskSessionStateCreated, session.State)
+}
+
+func TestHandleAddWorkspaceSourcesRejectsExactRetryAfterChildReparenting(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, parent, child, eventBus, reparentingStore := newWorkspaceSourceAuthorizationFixtureWithReparentingStore(t)
+	events := observeWorkspaceSourceEvents(t, eventBus)
+	reparentingStore.beforeCreate = nil
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "parent-session", TaskID: parent.ID}))
+	materializer := &workspaceSourceMaterializerRecorder{}
+	refresher := &workspaceSourceProviderRefresherRecorder{}
+	svc.SetWorkspaceSourceMaterializer(materializer)
+	svc.SetWorkspaceSourceProviderRefresher(refresher)
+	h := &Handlers{taskSvc: svc, sessionRepo: repo, logger: testLogger(t).WithFields()}
+	source := []interface{}{map[string]interface{}{"kind": "folder", "local_path": t.TempDir(), "display_name": "docs"}}
+
+	initial, err := h.handleAddWorkspaceSources(ctx, makeWSMessage(t, ws.ActionMCPAddWorkspaceSources, map[string]interface{}{
+		"task_id": child.ID, "caller_task_id": parent.ID, "caller_session_id": "parent-session", "sources": source,
+	}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, initial.Type)
+	events.reset()
+	materializer.called, refresher.calls = false, 0
+	reparentingStore.beforeCreate = func(context.Context) error {
+		_, err := repo.DB().ExecContext(ctx, "UPDATE tasks SET parent_id = '' WHERE id = ?", child.ID)
+		return err
+	}
+
+	retry, err := h.handleAddWorkspaceSources(ctx, makeWSMessage(t, ws.ActionMCPAddWorkspaceSources, map[string]interface{}{
+		"task_id": child.ID, "caller_task_id": parent.ID, "caller_session_id": "parent-session", "sources": source,
+	}))
+	require.NoError(t, err)
+	assertWSError(t, retry, ws.ErrorCodeForbidden)
+	assertWorkspaceSourceStateUnchanged(t, ctx, repo, child.ID, events, materializer, refresher, 1, 1)
 }
 
 type workspaceSourceMaterializerRecorder struct{ called bool }
@@ -365,7 +398,7 @@ func newWorkspaceSourceAuthorizationFixtureWithEventBus(t *testing.T) (*service.
 	return svc, repo, parent, child, eventBus
 }
 
-func newWorkspaceSourceAuthorizationFixtureWithReparentingStore(t *testing.T) (*service.Service, *sqliterepo.Repository, *models.Task, *models.Task, *bus.MemoryEventBus) {
+func newWorkspaceSourceAuthorizationFixtureWithReparentingStore(t *testing.T) (*service.Service, *sqliterepo.Repository, *models.Task, *models.Task, *bus.MemoryEventBus, *reparentingWorkspaceSourceStore) {
 	t.Helper()
 	_, repo, eventBus := newTestTaskServiceWithEventBus(t)
 	ctx := context.Background()
@@ -384,7 +417,7 @@ func newWorkspaceSourceAuthorizationFixtureWithReparentingStore(t *testing.T) (*
 		_, err := repo.DB().ExecContext(ctx, "UPDATE tasks SET parent_id = '' WHERE id = ?", child.ID)
 		return err
 	}
-	return svc, repo, parent, child, eventBus
+	return svc, repo, parent, child, eventBus, store
 }
 
 type reparentingWorkspaceSourceStore struct {

@@ -1829,58 +1829,17 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 // union to the shared attachment service. It deliberately rejects fields from
 // the other variant so callers cannot get a silently ambiguous attachment.
 func (h *Handlers) handleAddWorkspaceSources(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		TaskID          string            `json:"task_id"`
-		CallerTaskID    string            `json:"caller_task_id"`
-		CallerSessionID string            `json:"caller_session_id"`
-		Sources         []json.RawMessage `json:"sources"`
+	req, sources, response := parseAddWorkspaceSourcesRequest(msg)
+	if response != nil {
+		return response, nil
 	}
-	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	caller, response := h.verifyWorkspaceSourceCaller(ctx, msg, req)
+	if response != nil {
+		return response, nil
 	}
-	if req.TaskID == "" || req.CallerTaskID == "" || req.CallerSessionID == "" || len(req.Sources) == 0 {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id, caller provenance, and at least one source are required", nil)
-	}
-	sources, err := parseWorkspaceSources(req.Sources)
-	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
-	}
-	if h.sessionRepo == nil || h.taskSvc == nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "workspace source authorization is not configured", nil)
-	}
-	callerSession, err := h.sessionRepo.GetTaskSession(ctx, req.CallerSessionID)
-	if err != nil {
-		if errors.Is(err, models.ErrTaskSessionNotFound) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "caller session is not authorized for the calling task", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to verify caller session", nil)
-	}
-	if callerSession == nil || callerSession.TaskID != req.CallerTaskID {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "caller session is not authorized for the calling task", nil)
-	}
-	caller, err := h.taskSvc.GetTask(ctx, req.CallerTaskID)
-	if err != nil {
-		if errors.Is(err, taskrepository.ErrTaskNotFound) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "caller task is not authorized", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to verify caller task", nil)
-	}
-	if caller == nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "caller task is not authorized", nil)
-	}
-	target, err := h.taskSvc.GetTask(ctx, req.TaskID)
-	if err != nil {
-		if errors.Is(err, taskrepository.ErrTaskNotFound) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target task not found", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load target task", nil)
-	}
-	if target == nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target task not found", nil)
-	}
-	isChildTarget := req.TaskID != req.CallerTaskID
-	if isChildTarget && !canDirectParentAccess(caller, target) {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "only a task's direct parent in the same workspace can attach its sources", nil)
+	_, isChildTarget, response := h.authorizeWorkspaceSourceTarget(ctx, msg, req, caller)
+	if response != nil {
+		return response, nil
 	}
 	attachReq := service.AttachWorkspaceSourcesRequest{TaskID: req.TaskID, Sources: sources}
 	if isChildTarget {
@@ -1899,6 +1858,78 @@ func (h *Handlers) handleAddWorkspaceSources(ctx context.Context, msg *ws.Messag
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"task_id": result.Task.ID, "repositories": result.Task.Repositories, "workspace_folders": result.Task.WorkspaceFolders, "workspace_path": result.WorkspacePath, "session_ids": result.SessionIDs,
 	})
+}
+
+type addWorkspaceSourcesRequest struct {
+	TaskID          string            `json:"task_id"`
+	CallerTaskID    string            `json:"caller_task_id"`
+	CallerSessionID string            `json:"caller_session_id"`
+	Sources         []json.RawMessage `json:"sources"`
+}
+
+func parseAddWorkspaceSourcesRequest(msg *ws.Message) (addWorkspaceSourcesRequest, []service.WorkspaceSourceInput, *ws.Message) {
+	var req addWorkspaceSourcesRequest
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return req, nil, newWorkspaceSourceError(msg, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error())
+	}
+	if req.TaskID == "" || req.CallerTaskID == "" || req.CallerSessionID == "" || len(req.Sources) == 0 {
+		return req, nil, newWorkspaceSourceError(msg, ws.ErrorCodeValidation, "task_id, caller provenance, and at least one source are required")
+	}
+	sources, err := parseWorkspaceSources(req.Sources)
+	if err != nil {
+		return req, nil, newWorkspaceSourceError(msg, ws.ErrorCodeValidation, err.Error())
+	}
+	return req, sources, nil
+}
+
+func (h *Handlers) verifyWorkspaceSourceCaller(ctx context.Context, msg *ws.Message, req addWorkspaceSourcesRequest) (*models.Task, *ws.Message) {
+	if h.sessionRepo == nil || h.taskSvc == nil {
+		return nil, newWorkspaceSourceError(msg, ws.ErrorCodeInternalError, "workspace source authorization is not configured")
+	}
+	callerSession, err := h.sessionRepo.GetTaskSession(ctx, req.CallerSessionID)
+	if err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			return nil, newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "caller session is not authorized for the calling task")
+		}
+		return nil, newWorkspaceSourceError(msg, ws.ErrorCodeInternalError, "failed to verify caller session")
+	}
+	if callerSession == nil || callerSession.TaskID != req.CallerTaskID {
+		return nil, newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "caller session is not authorized for the calling task")
+	}
+	caller, err := h.taskSvc.GetTask(ctx, req.CallerTaskID)
+	if err != nil {
+		if errors.Is(err, taskrepository.ErrTaskNotFound) {
+			return nil, newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "caller task is not authorized")
+		}
+		return nil, newWorkspaceSourceError(msg, ws.ErrorCodeInternalError, "failed to verify caller task")
+	}
+	if caller == nil {
+		return nil, newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "caller task is not authorized")
+	}
+	return caller, nil
+}
+
+func (h *Handlers) authorizeWorkspaceSourceTarget(ctx context.Context, msg *ws.Message, req addWorkspaceSourcesRequest, caller *models.Task) (*models.Task, bool, *ws.Message) {
+	target, err := h.taskSvc.GetTask(ctx, req.TaskID)
+	if err != nil {
+		if errors.Is(err, taskrepository.ErrTaskNotFound) {
+			return nil, false, newWorkspaceSourceError(msg, ws.ErrorCodeNotFound, "target task not found")
+		}
+		return nil, false, newWorkspaceSourceError(msg, ws.ErrorCodeInternalError, "failed to load target task")
+	}
+	if target == nil {
+		return nil, false, newWorkspaceSourceError(msg, ws.ErrorCodeNotFound, "target task not found")
+	}
+	isChildTarget := req.TaskID != req.CallerTaskID
+	if isChildTarget && !canDirectParentAccess(caller, target) {
+		return nil, false, newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "only a task's direct parent in the same workspace can attach its sources")
+	}
+	return target, isChildTarget, nil
+}
+
+func newWorkspaceSourceError(msg *ws.Message, code, message string) *ws.Message {
+	response, _ := ws.NewError(msg.ID, msg.Action, code, message, nil)
+	return response
 }
 
 func parseWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSourceInput, error) {

@@ -141,6 +141,14 @@ func TestCreateWorkspaceSourceBatchRejectsStaleParentAuthorizationBeforeWrites(t
 			LocalPath: "/canonical/docs", DisplayName: "docs",
 		}}},
 	}
+	validBatch := *batch
+	validBatch.ExpectedParentID = "current-parent"
+	validBatch.Sources = []models.WorkspaceSource{{Folder: &models.TaskWorkspaceFolder{
+		LocalPath: "/canonical/approved", DisplayName: "approved",
+	}}}
+	if err := repo.CreateWorkspaceSourceBatch(ctx, &validBatch); err != nil {
+		t.Fatalf("CreateWorkspaceSourceBatch matching parent: %v", err)
+	}
 	err := repo.CreateWorkspaceSourceBatch(ctx, batch)
 	if !errors.Is(err, repoerrors.ErrTaskParentMismatch) {
 		t.Fatalf("CreateWorkspaceSourceBatch error = %v, want stale parent authorization", err)
@@ -149,8 +157,8 @@ func TestCreateWorkspaceSourceBatchRejectsStaleParentAuthorizationBeforeWrites(t
 	if err != nil {
 		t.Fatalf("list folders: %v", err)
 	}
-	if len(folders) != 0 {
-		t.Fatalf("folders = %#v, want no durable writes", folders)
+	if len(folders) != 1 || folders[0].DisplayName != "approved" {
+		t.Fatalf("folders = %#v, want only matching-parent write", folders)
 	}
 }
 
