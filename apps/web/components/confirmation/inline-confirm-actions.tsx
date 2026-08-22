@@ -5,6 +5,7 @@ import { Button } from "@kandev/ui/button";
 
 export type InlineConfirmActionsProps = {
   density?: "compact" | "touch";
+  disabled?: boolean;
   testId?: string;
   ariaLabel?: string;
   description?: ReactNode;
@@ -22,6 +23,7 @@ export type InlineConfirmActionsProps = {
  */
 export function InlineConfirmActions({
   density = "compact",
+  disabled = false,
   testId = "inline-confirm-actions",
   ariaLabel,
   description,
@@ -43,6 +45,7 @@ export function InlineConfirmActions({
   }, []);
 
   const handleConfirm = () => {
+    if (disabled) return;
     onClose?.();
     setConfirmed(true);
     queueMicrotask(() => {
@@ -82,6 +85,7 @@ export function InlineConfirmActions({
           type="button"
           variant="ghost"
           size="sm"
+          disabled={disabled}
           className={`${actionClass} transition-[color,background-color,border-color,transform] duration-100 active:scale-[0.96]`}
           onClick={onCancel}
         >
@@ -91,6 +95,7 @@ export function InlineConfirmActions({
           type="button"
           variant="destructive"
           size="sm"
+          disabled={disabled}
           aria-label={confirmAriaLabel}
           data-testid={confirmTestId}
           className={`${actionClass} transition-[color,background-color,border-color,transform] duration-100 active:scale-[0.96]`}
