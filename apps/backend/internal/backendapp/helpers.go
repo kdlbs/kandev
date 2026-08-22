@@ -1154,7 +1154,7 @@ func registerSecondaryRoutes(
 	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log)
 	p.log.Debug("Registered Agent Capabilities handlers (HTTP)")
 
-	clarification.RegisterRoutes(
+	clarificationHandlers := clarification.RegisterRoutes(
 		p.router,
 		clarificationStore,
 		p.gateway.Hub,
@@ -1165,6 +1165,19 @@ func registerSecondaryRoutes(
 		p.log,
 	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
+
+	// Wire the plugin Host interaction write path (ADR 0052) onto the same
+	// orchestrator and the same clarification handler instance the native
+	// surfaces use, so a plugin's response is indistinguishable from a user's.
+	// Deliberately here rather than in initOfficeServices: that returns early
+	// when features.office=false (the production default), while plugins run
+	// whenever services.Plugins is non-nil.
+	if p.services.Plugins != nil {
+		p.services.Plugins.SetInteractionResponder(pluginsInteractionResponderAdapter{
+			permissions:    p.orchestratorSvc,
+			clarifications: clarificationHandlers,
+		})
+	}
 
 	if p.secretsSvc != nil {
 		secrets.RegisterRoutes(p.router, p.gateway.Dispatcher, p.secretsSvc, p.log)

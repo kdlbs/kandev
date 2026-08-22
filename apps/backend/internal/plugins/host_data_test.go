@@ -275,6 +275,9 @@ type testDataHost struct {
 	taskWriter *fakeTaskWriter
 	messenger  *fakeMessenger
 	starter    *fakeTaskStarter
+
+	interactions *fakeInteractionDataSource
+	responder    *fakeInteractionResponder
 }
 
 // newTestDataHost builds a fully-wired pluginHost (every Host data API
@@ -293,6 +296,9 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		taskWriter: &fakeTaskWriter{},
 		messenger:  &fakeMessenger{},
 		starter:    &fakeTaskStarter{},
+
+		interactions: &fakeInteractionDataSource{},
+		responder:    &fakeInteractionResponder{},
 	}
 	d.host = &pluginHost{
 		pluginID:         "p1",
@@ -303,6 +309,7 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		agentProfiles:    d.profiles,
 		sessionCodeStats: d.codeStats,
 		messageData:      d.messages,
+		interactionData:  d.interactions,
 		taskWriter:       d.taskWriter,
 		configs:          &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}},
 		utilityDeps: func() (utilityAgentSource, utilityRunner) {
@@ -311,6 +318,7 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		writeDeps: func() (taskMessenger, taskStarter) {
 			return d.messenger, d.starter
 		},
+		interactionDeps: func() interactionResponder { return d.responder },
 	}
 	return d
 }

@@ -151,7 +151,10 @@ func NewHandlers(
 	}
 }
 
-// RegisterRoutes registers clarification HTTP routes.
+// RegisterRoutes registers clarification HTTP routes and returns the Handlers
+// backing them, so a non-REST caller (the plugin Host interaction API) drives
+// the SAME instance through Respond/Cancel rather than reimplementing the
+// claim-deliver-publish sequence against a second store.
 func RegisterRoutes(
 	router *gin.Engine,
 	store *Store,
@@ -161,7 +164,7 @@ func RegisterRoutes(
 	eventBus EventBus,
 	detachedResumer DetachedClarificationResumer,
 	log *logger.Logger,
-) {
+) *Handlers {
 	h := NewHandlers(store, hub, messageCreator, repo, eventBus, detachedResumer, log)
 	api := router.Group("/api/v1/clarification")
 	api.POST("/request", h.httpCreateRequest)
@@ -169,6 +172,7 @@ func RegisterRoutes(
 	api.GET("/:id/wait", h.httpWaitForResponse)
 	api.POST("/:id/respond", h.httpRespond)
 	api.POST("/:id/cancel", h.httpCancelRequest)
+	return h
 }
 
 // CreateRequestBody is the request body for creating a clarification request.
@@ -331,6 +335,42 @@ type RespondBody struct {
 	RejectReason string   `json:"reject_reason"`
 }
 
+// RespondError is the typed outcome of a failed Respond or Cancel. Status is
+// the HTTP status the REST route reports; non-REST callers (the plugin Host
+// interaction API) map it onto their own transport's status vocabulary rather
+// than string-matching Message.
+type RespondError struct {
+	Status  int
+	Message string
+}
+
+func (e *RespondError) Error() string { return e.Message }
+
+func respondError(status int, message string) error {
+	return &RespondError{Status: status, Message: message}
+}
+
+// Respond submits a user's answer to (or rejection of) a clarification bundle.
+// It is the single implementation behind both the REST route and any
+// first-party caller that needs the same delivery guarantees: claim the
+// durable bundle exclusively, hand the response to the live waiter (or the
+// acknowledged detached-resume fallback), then publish the terminal rows.
+//
+// The write path deliberately detaches from the caller's context: an accepted
+// durable claim must complete or compensate even when the caller goes away.
+func (h *Handlers) Respond(ctx context.Context, pendingID string, body RespondBody) error {
+	writeCtx := context.WithoutCancel(ctx)
+	claim, statusCode, errorMessage := h.claimClarificationResponse(writeCtx, pendingID, body)
+	if statusCode != 0 {
+		return respondError(statusCode, errorMessage)
+	}
+	statusCode, errorMessage = h.deliverClaimedClarificationResponse(writeCtx, pendingID, body, claim)
+	if statusCode != 0 {
+		return respondError(statusCode, errorMessage)
+	}
+	return nil
+}
+
 func (h *Handlers) httpRespond(c *gin.Context) {
 	pendingID := c.Param("id")
 	var body RespondBody
@@ -338,19 +378,20 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload: " + err.Error()})
 		return
 	}
-
-	writeCtx := context.WithoutCancel(c.Request.Context())
-	claim, statusCode, errorMessage := h.claimClarificationResponse(writeCtx, pendingID, body)
-	if statusCode != 0 {
-		c.JSON(statusCode, gin.H{"error": errorMessage})
-		return
-	}
-	statusCode, errorMessage = h.deliverClaimedClarificationResponse(writeCtx, pendingID, body, claim)
-	if statusCode != 0 {
-		c.JSON(statusCode, gin.H{"error": errorMessage})
+	if err := h.Respond(c.Request.Context(), pendingID, body); err != nil {
+		writeRespondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func writeRespondError(c *gin.Context, err error) {
+	var respondErr *RespondError
+	if errors.As(err, &respondErr) {
+		c.JSON(respondErr.Status, gin.H{"error": respondErr.Message})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 }
 
 type clarificationResponseClaim struct {
@@ -696,22 +737,28 @@ func (h *Handlers) expectedQuestionIDs(ctx context.Context, pendingID string) []
 	return ids
 }
 
-func (h *Handlers) httpCancelRequest(c *gin.Context) {
-	pendingID := c.Param("id")
+// Cancel withdraws a live clarification request on the operator's behalf: the
+// in-memory entry is cancelled (unblocking its waiter with a cancellation
+// rather than an answer) and every question message is marked cancelled.
+//
+// It requires the in-memory entry, so it only applies while the original
+// waiter is still parked. A bundle whose waiter has gone away (a restart, or
+// the agent moving on) is no longer cancellable and must be declined through
+// Respond with Rejected instead — that path is durable-claim based and works
+// in both states.
+func (h *Handlers) Cancel(ctx context.Context, pendingID string) error {
 	req, ok := h.store.GetRequest(pendingID)
 	if !ok || req == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "clarification request not found"})
-		return
+		return respondError(http.StatusNotFound, "clarification request not found")
 	}
 	if !h.store.CancelRequest(pendingID) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "clarification request not found"})
-		return
+		return respondError(http.StatusNotFound, "clarification request not found")
 	}
 
 	if h.messageCreator != nil {
 		for _, q := range req.Questions {
 			if err := h.messageCreator.UpdateClarificationMessage(
-				c.Request.Context(),
+				ctx,
 				req.SessionID,
 				pendingID,
 				q.ID,
@@ -725,11 +772,19 @@ func (h *Handlers) httpCancelRequest(c *gin.Context) {
 			}
 		}
 	}
-	h.publishCancelledEvent(c, pendingID, req)
+	h.publishCancelledEvent(ctx, pendingID, req)
 	h.logger.Info("clarification cancelled by operator",
 		zap.String("pending_id", pendingID),
 		zap.String("session_id", req.SessionID),
 		zap.String("task_id", req.TaskID))
+	return nil
+}
+
+func (h *Handlers) httpCancelRequest(c *gin.Context) {
+	if err := h.Cancel(c.Request.Context(), c.Param("id")); err != nil {
+		writeRespondError(c, err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
@@ -814,7 +869,7 @@ func clarificationClaimRecovery(messages []*taskmodels.Message) (string, []strin
 	return turnID, messageIDs, nil
 }
 
-func (h *Handlers) publishCancelledEvent(c *gin.Context, pendingID string, req *Request) {
+func (h *Handlers) publishCancelledEvent(ctx context.Context, pendingID string, req *Request) {
 	if h.eventBus == nil || req == nil {
 		return
 	}
@@ -831,7 +886,7 @@ func (h *Handlers) publishCancelledEvent(c *gin.Context, pendingID string, req *
 		"rejected":      true,
 		"reject_reason": "cancelled",
 	}
-	if err := h.eventBus.Publish(c.Request.Context(), events.ClarificationCancelled, bus.NewEvent(
+	if err := h.eventBus.Publish(ctx, events.ClarificationCancelled, bus.NewEvent(
 		events.ClarificationCancelled,
 		"clarification-handlers",
 		eventData,

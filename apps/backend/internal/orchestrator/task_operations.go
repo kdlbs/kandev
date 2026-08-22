@@ -4863,67 +4863,6 @@ func (s *Service) trySwitchModel(ctx context.Context, taskID, sessionID, model, 
 	}, true, nil
 }
 
-// RespondToPermission sends a response to a permission request for a session
-func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID, optionID string, cancelled, rejected bool) error {
-	if err := s.authorizeSession(ctx, sessionID); err != nil {
-		return err
-	}
-
-	s.logger.Debug("responding to permission request",
-		zap.String("session_id", sessionID),
-		zap.String("pending_id", pendingID),
-		zap.String("option_id", optionID),
-		zap.Bool("cancelled", cancelled),
-		zap.Bool("rejected", rejected))
-
-	// Respond to the permission via agentctl
-	if err := s.executor.RespondToPermission(ctx, sessionID, pendingID, optionID, cancelled); err != nil {
-		// Permission likely expired — update message so frontend reflects this
-		if s.messageCreator != nil {
-			if updateErr := s.messageCreator.UpdatePermissionMessage(ctx, sessionID, pendingID, models.PermissionStatusExpired); updateErr != nil {
-				s.logger.Warn("failed to mark expired permission message",
-					zap.String("session_id", sessionID),
-					zap.String("pending_id", pendingID),
-					zap.Error(updateErr))
-			}
-		}
-		return err
-	}
-
-	// Determine status based on response. cancelled=true means the user dismissed
-	// the dialog; rejected=true means the user explicitly clicked Deny with a
-	// reject option. Both map to "rejected" message status.
-	status := models.PermissionStatusApproved
-	if cancelled || rejected {
-		status = models.PermissionStatusRejected
-	}
-
-	// Update the permission message with the new status
-	if s.messageCreator != nil {
-		if err := s.messageCreator.UpdatePermissionMessage(ctx, sessionID, pendingID, status); err != nil {
-			s.logger.Warn("failed to update permission message status",
-				zap.String("session_id", sessionID),
-				zap.String("pending_id", pendingID),
-				zap.String("status", string(status)),
-				zap.Error(err))
-			// Don't fail the whole operation if message update fails
-		}
-	}
-
-	if !cancelled {
-		session, err := s.repo.GetTaskSession(ctx, sessionID)
-		if err != nil {
-			s.logger.Warn("failed to load task session after permission response",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			return nil
-		}
-		s.setSessionRunning(ctx, session.TaskID, sessionID, session)
-	}
-
-	return nil
-}
-
 // DrainQueuedMessage dispatches one queued message for a session that is ready
 // for input. It is intentionally one-at-a-time: each successful prompt will
 // complete its own turn and then drain the next entry through handleAgentReady.

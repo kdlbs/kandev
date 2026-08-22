@@ -97,6 +97,10 @@ type MessageCreator interface {
 	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
 	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
 	UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error
+	// ClaimPermissionResponse atomically resolves a pending permission row.
+	// RespondToPermission claims before dispatching so two responders cannot
+	// both reach the agent; the second gets the already-recorded status back.
+	ClaimPermissionResponse(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) (bool, models.PermissionStatus, error)
 	// CreateAgentMessageStreaming creates a new agent message with a pre-generated ID for streaming updates
 	CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error
 	// AppendAgentMessage appends additional content to an existing streaming message

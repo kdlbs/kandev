@@ -264,6 +264,12 @@ func (m *mockRepository) FindActiveClarificationMessagesBySessionID(ctx context.
 func (m *mockRepository) GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error) {
 	return make(map[string]models.TaskPendingAction), nil
 }
+func (m *mockRepository) ListPendingInteractions(context.Context, models.PendingInteractionFilter) ([]*models.Message, error) {
+	return nil, nil
+}
+func (m *mockRepository) ClaimPermissionResponse(_ context.Context, _, _ string, status models.PermissionStatus) (bool, models.PermissionStatus, error) {
+	return true, status, nil
+}
 func (m *mockRepository) CompleteActiveClarificationBundle(
 	context.Context,
 	string,
