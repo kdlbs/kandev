@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import {
   IconCurrencyDollar,
@@ -33,11 +33,17 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
   const [byModel, setByModel] = useState<CostBreakdownItem[]>([]);
   const [byProvider, setByProvider] = useState<CostBreakdownItem[]>([]);
 
+  // Range changes, workspace changes, and WS-triggered refetches (below) can
+  // all call fetchCosts in overlapping succession; guard against an older
+  // request's response landing after a newer one and clobbering fresher data.
+  const requestId = useRef(0);
   const fetchCosts = useCallback(() => {
+    const current = ++requestId.current;
     // Single composed call (Stream D of office optimization). Was four
     // parallel round-trips (summary + by-agent + by-project + by-model).
     getCostsBreakdown(workspaceId)
       .then((res) => {
+        if (current !== requestId.current) return;
         setTotalSubcents(res.total_subcents ?? 0);
         setByAgent((res.by_agent ?? []) as CostBreakdownItem[]);
         setByProject((res.by_project ?? []) as CostBreakdownItem[]);
@@ -45,6 +51,7 @@ export function CostOverview({ workspaceId }: { workspaceId: string }) {
         setByProvider((res.by_provider ?? []) as CostBreakdownItem[]);
       })
       .catch((err) => {
+        if (current !== requestId.current) return;
         toast.error(err instanceof Error ? err.message : staticT("office:failedToLoadCostData"));
       });
   }, [workspaceId]);

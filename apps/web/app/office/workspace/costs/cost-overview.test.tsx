@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { StoreApi } from "zustand";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
@@ -89,5 +89,56 @@ describe("CostOverview", () => {
     // Give any (incorrect) refetch a chance to fire before asserting it didn't.
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(getCostsBreakdownMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("discards a stale response when an older request resolves after a newer one", async () => {
+    let resolveFirst: (value: typeof EMPTY_BREAKDOWN) => void;
+    let resolveSecond: (value: typeof EMPTY_BREAKDOWN) => void;
+    getCostsBreakdownMock
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+    const storeRef: { current: StoreApi<AppState> | null } = { current: null };
+
+    render(
+      <StateProvider initialState={{ workspaces: { activeId: "ws-1", items: [] } }}>
+        <StoreCapture storeRef={storeRef} />
+        <CostOverview workspaceId="ws-1" />
+      </StateProvider>,
+    );
+
+    await waitFor(() => {
+      expect(getCostsBreakdownMock).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      storeRef.current!.getState().setOfficeRefetchTrigger("costs");
+    });
+
+    await waitFor(() => {
+      expect(getCostsBreakdownMock).toHaveBeenCalledTimes(2);
+    });
+
+    // Resolve the newer (second) request first with real data, then the
+    // stale first request with different data. The stale response must not
+    // overwrite the fresher state.
+    await act(async () => {
+      resolveSecond({ ...EMPTY_BREAKDOWN, total_subcents: 20000 });
+    });
+    await act(async () => {
+      resolveFirst({ ...EMPTY_BREAKDOWN, total_subcents: 10000 });
+    });
+
+    // getByText throws if no element with this text exists.
+    screen.getByText("$2.00");
   });
 });

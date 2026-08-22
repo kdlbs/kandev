@@ -238,7 +238,9 @@ describe("office WS handler — costs refetch gating on office.task.updated", ()
   // not refetch costs on every unrelated task touch.
   it.each([
     { fields: ["project_id"], expectCosts: true },
+    { fields: ["project_id", "title"], expectCosts: true },
     { fields: ["priority"], expectCosts: false },
+    { fields: [], expectCosts: false },
     { fields: undefined, expectCosts: false },
   ])("gates the costs trigger by fields=$fields", ({ fields, expectCosts }) => {
     const { store, setOfficeRefetchTrigger } = makeStore(ACTIVE_WS);
