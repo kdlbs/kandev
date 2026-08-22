@@ -770,6 +770,23 @@ func startOrchestratorAndAutomationConsumers(
 	return nil
 }
 
+// closeBoundListeners releases the HTTP listener(s) bound by bindListeners
+// when a later startup step fails and startGatewayAndServe returns early.
+// listeners.Stop only halts the background bind-retry loop; the bound TCP
+// sockets are released by the shared http.Server (see serverListeners's doc
+// comment), so an early return that skips this leaves the port held by this
+// process even though the caller sees a start failure. server is non-nil
+// whenever listeners is, since bindListeners assigns both together.
+func closeBoundListeners(server *http.Server, listeners *serverListeners, log *logger.Logger) {
+	if listeners == nil {
+		return
+	}
+	listeners.Stop()
+	if err := server.Close(); err != nil {
+		log.Warn("failed to close HTTP listeners after startup failure", zap.Error(err))
+	}
+}
+
 // startGatewayAndServe sets up the WebSocket gateway, HTTP routes, starts the server,
 // and blocks until a shutdown signal.
 //
@@ -925,6 +942,7 @@ func startGatewayAndServe(
 		if !errors.Is(err, errServerBindFailed) {
 			log.Error("Failed to start orchestrator", zap.Error(err))
 		}
+		closeBoundListeners(server, listeners, log)
 		return false
 	}
 	log.Info("Orchestrator initialized")
@@ -951,6 +969,7 @@ func startGatewayAndServe(
 	// ============================================
 	runProcessorSvc, ok := initOfficeServices(ctx, cfg, log, repos, services, orchestratorSvc, eventBus, agentctlBinaryPath, addCleanup, lifecycleMgr, agentRegistry)
 	if !ok {
+		closeBoundListeners(server, listeners, log)
 		return false
 	}
 	scheduling := startSchedulingRuntime(
@@ -1013,6 +1032,7 @@ func startGatewayAndServe(
 	)
 	if err != nil {
 		log.Error("Failed to initialize storage maintenance", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
 		return false
 	}
 	hostUtilityMgr.SetTemporaryArtifactRegistry(storageComposition.tempArtifacts)
@@ -1087,6 +1107,7 @@ func startGatewayAndServe(
 		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
 		return false
 	}
 

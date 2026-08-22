@@ -187,3 +187,52 @@ func TestBindBootstrapListenersFailsWhenPortUnavailable(t *testing.T) {
 			handler, server, listeners)
 	}
 }
+
+// TestCloseBoundListenersReleasesPortOnStartupFailure is the regression test
+// for the listener-leak flagged in Build round 3 review: a step that fails
+// after bindBootstrapListeners already bound the socket (orchestrator start,
+// office services, storage composition, buildHTTPServer) must release the
+// port before returning, not just stop the background bind-retry loop.
+func TestCloseBoundListenersReleasesPortOnStartupFailure(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	cfg := &config.Config{}
+	cfg.Server.Host = "127.0.0.1"
+	cfg.Server.Port = freePort(t)
+	log := testLogger(t)
+
+	_, server, listeners, err := bindBootstrapListeners(cfg, log, "1.2.3-test")
+	if err != nil {
+		t.Fatalf("bindBootstrapListeners: %v", err)
+	}
+
+	closeBoundListeners(server, listeners, log)
+
+	// The port must become free: a later startup failure that leaks the
+	// listener would leave a same-process retry (or even a fresh process
+	// racing a restart) unable to bind here. server.Close() closing the
+	// listener's fd and the OS releasing the address aren't guaranteed to be
+	// observable in the same instant, so poll briefly rather than asserting
+	// on the very next syscall.
+	deadline := time.Now().Add(2 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", fmt.Sprint(cfg.Server.Port)))
+		if err == nil {
+			if closeErr := ln.Close(); closeErr != nil {
+				t.Fatalf("close probe listener: %v", closeErr)
+			}
+			return
+		}
+		lastErr = err
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("port still held after closeBoundListeners: %v", lastErr)
+}
+
+// TestCloseBoundListenersNoopWhenListenersNil covers the pure-bind-failure
+// case: bindBootstrapListeners returns a nil listeners/server pair when the
+// bind itself failed, so closeBoundListeners must not dereference server.
+func TestCloseBoundListenersNoopWhenListenersNil(t *testing.T) {
+	closeBoundListeners(nil, nil, testLogger(t))
+}
