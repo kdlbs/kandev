@@ -116,7 +116,7 @@ test.describe("integration configuration removal confirmations on mobile", () =>
     const card = settings.cardByName("Mobile Sentry");
     const removeButton = card.getByTestId("sentry-instance-delete-button");
     await removeButton.tap();
-    const inline = testPage.getByTestId("sentry-remove-inline-confirmation");
+    const inline = card.getByTestId("sentry-remove-inline-confirmation");
     await expect(inline).toBeVisible();
     await expect(inline).toContainText("Mobile Sentry");
     await expectTouchSized(inline.getByTestId("sentry-remove-confirm"));

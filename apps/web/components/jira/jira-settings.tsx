@@ -1,15 +1,7 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type Dispatch,
-  type SetStateAction,
-} from "react";
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { IconTicket } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { settingsCredentialClassName } from "@/components/settings/settings-control";
@@ -18,21 +10,19 @@ import { Separator } from "@kandev/ui/separator";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useToast } from "@/components/toast-provider";
-import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
-import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { TaskPresetsSection } from "@/components/jira/task-presets-section";
 import { JiraIssueWatchersSection } from "@/components/jira/jira-issue-watchers-section";
 import { JiraEnabledControl } from "@/components/jira/jira-enabled-control";
+import { JiraActionBar } from "@/components/jira/jira-action-bar";
 import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
-import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import {
   getJiraConfig,
   setJiraConfig,
@@ -323,85 +313,6 @@ function configToHealth(config: JiraConfig | null): IntegrationAuthHealth | null
   };
 }
 
-type ActionBarProps = {
-  testing: boolean;
-  loading: boolean;
-  hasConfig: boolean;
-  disableTest: boolean;
-  onTest: () => void;
-  onDelete: () => void;
-};
-
-function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete }: ActionBarProps) {
-  const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const deleteAnchorRef = useRef<HTMLButtonElement>(null);
-  const removeConfirmation = t("jira:removeJiraConfiguration");
-
-  useEffect(() => {
-    if (!hasConfig && confirmingDelete) setConfirmingDelete(false);
-  }, [confirmingDelete, hasConfig]);
-
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button
-        type="button"
-        variant="outline"
-        onClick={onTest}
-        disabled={testing || loading || disableTest}
-        className="cursor-pointer"
-        title={disableTest ? t("jira:pasteATokenToTestTheConnection") : undefined}
-        data-testid="jira-test-button"
-      >
-        {testing ? t("jira:testingConnection") : t("jira:testConnection")}
-      </Button>
-      {hasConfig && (isFinePointer || !confirmingDelete) && (
-        <Button
-          ref={deleteAnchorRef}
-          type="button"
-          variant="destructive"
-          onClick={() => setConfirmingDelete(true)}
-          className="ml-auto min-h-11 cursor-pointer"
-          data-testid="jira-delete-button"
-        >
-          {t("jira:removeConfiguration")}
-        </Button>
-      )}
-      {hasConfig && !isFinePointer && confirmingDelete ? (
-        <InlineConfirmActions
-          density="touch"
-          testId="jira-remove-inline-confirmation"
-          ariaLabel={removeConfirmation}
-          description={removeConfirmation}
-          cancelLabel={t("common:cancel")}
-          confirmLabel={t("jira:removeConfiguration")}
-          confirmAriaLabel={removeConfirmation}
-          confirmTestId="jira-remove-confirm"
-          onCancel={() => setConfirmingDelete(false)}
-          onClose={() => setConfirmingDelete(false)}
-          onConfirm={onDelete}
-        />
-      ) : null}
-      {hasConfig && isFinePointer ? (
-        <ActionConfirmPopover
-          open={confirmingDelete}
-          anchorRef={deleteAnchorRef}
-          title={removeConfirmation}
-          cancelLabel={t("common:cancel")}
-          confirmLabel={t("jira:removeConfiguration")}
-          confirmAriaLabel={removeConfirmation}
-          confirmTestId="jira-remove-confirm"
-          testId="jira-remove-confirm-popover"
-          onOpenChange={setConfirmingDelete}
-          onCancel={() => setConfirmingDelete(false)}
-          onConfirm={onDelete}
-        />
-      ) : null}
-    </div>
-  );
-}
-
 function useJiraConfigRefresh(workspaceId: string, setConfig: (cfg: JiraConfig | null) => void) {
   // Background refresh so the auth-health banner picks up new probe results
   // from the backend poller without requiring a page reload. We re-fetch the
@@ -648,7 +559,7 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
           />
           <TestResultAlert result={s.testResult} />
           <Separator />
-          <ActionBar
+          <JiraActionBar
             testing={s.testing}
             loading={s.loading}
             hasConfig={!!s.config}
