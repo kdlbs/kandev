@@ -35,25 +35,25 @@ import (
 )
 
 // installedWebhookPlugin installs a plugin declaring exactly one webhook
-// (key, with the given public flag), then disables it so the runtime never
+// (key, with the given access policy), then disables it so the runtime never
 // reports it running — see the file doc comment for why.
 func installedWebhookPlugin(t *testing.T, svc *Service, id, key string, public bool) {
 	t.Helper()
 	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
 	manifestYAML := fmt.Sprintf(`
 id: %s
-api_version: 1
+api_version: 2
 version: "1.0.0"
 display_name: Test Plugin
 webhooks:
   - key: %s
     method: POST
-    public: %v
+    access: %s
 runtime:
   type: binary
   executables:
     %s: server/plugin
-`, id, key, public, platformKey)
+`, id, key, webhookAccessForTest(public), platformKey)
 	var buf bytes.Buffer
 	files := map[string][]byte{
 		"manifest.yaml": []byte(manifestYAML),
@@ -68,6 +68,13 @@ runtime:
 	if err := svc.Disable(id); err != nil {
 		t.Fatalf("Disable(%q): %v", id, err)
 	}
+}
+
+func webhookAccessForTest(public bool) string {
+	if public {
+		return "public"
+	}
+	return "authenticated"
 }
 
 // reachedRelay reports whether a webhook response proves the request reached
