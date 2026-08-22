@@ -120,19 +120,8 @@ func applyStartModelPolicy(
 		FallbackModel:  policy.FallbackModel,
 	}
 	advertised := advertisedModelIDs(state)
-	if len(advertised) == 0 {
-		return providerDefaultDecision(state, policy, ModelSelectionReasonCatalogEmpty), nil
-	}
-
-	if !containsModel(advertised, policy.Model) {
-		if policy.FallbackModel != "" && containsModel(advertised, policy.FallbackModel) {
-			return applyAdvertisedFallback(ctx, log, applier, state, policy, decision)
-		}
-		reason := ModelSelectionReasonRequestedNotAdvertised
-		if policy.FallbackModel != "" {
-			reason = ModelSelectionReasonFallbackNotAdvertised
-		}
-		return providerDefaultDecision(state, policy, reason), nil
+	if len(advertised) > 0 && !containsModel(advertised, policy.Model) {
+		return decision, fmt.Errorf("%w: requested model %q is not advertised", ErrModelIdentityBlock, policy.Model)
 	}
 
 	decision.SetModelCalled = true
@@ -144,14 +133,7 @@ func applyStartModelPolicy(
 			decision.SetModelCalled = true
 			return decision, nil
 		}
-		if policy.AutoFallback {
-			log.Warn("failed to set profile model via ACP (auto-fallback)",
-				zap.String("model", policy.Model), zap.Error(err))
-			decision = providerDefaultDecision(state, policy, ModelSelectionReasonSelectionFailedAutoFallback)
-			decision.SetModelCalled = true
-			return decision, nil
-		}
-		return decision, fmt.Errorf("failed to set start model %q: %w", policy.Model, err)
+		return decision, fmt.Errorf("%w: failed to set requested model %q: %v", ErrModelIdentityBlock, policy.Model, err)
 	}
 
 	decision.EffectiveModel = policy.Model

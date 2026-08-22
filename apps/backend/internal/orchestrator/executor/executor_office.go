@@ -103,7 +103,10 @@ func (e *Executor) rebindOfficeSessionExecutionProfile(
 	if session == nil || executionProfileID == "" || session.ExecutionProfileID == executionProfileID {
 		return nil
 	}
-	snapshot, isPassthrough := e.resolveAgentProfileSnapshot(ctx, executionProfileID)
+	snapshot, isPassthrough, err := e.resolveAgentProfileSnapshot(ctx, executionProfileID)
+	if err != nil {
+		return err
+	}
 	updater, ok := e.repo.(officeSessionMetadataUpdater)
 	if !ok {
 		return errors.New("office session rebind requires guarded metadata updates")
@@ -221,7 +224,10 @@ func (e *Executor) createOfficeSession(
 		baseBranch = primaryTaskRepo.BaseBranch
 	}
 
-	agentProfileSnapshot, isPassthrough := e.resolveAgentProfileSnapshot(ctx, agentProfileID)
+	agentProfileSnapshot, isPassthrough, err := e.resolveAgentProfileSnapshot(ctx, agentProfileID)
+	if err != nil {
+		return nil, err
+	}
 
 	now := time.Now().UTC()
 	// Office sessions are owned by the stable agent identity while their

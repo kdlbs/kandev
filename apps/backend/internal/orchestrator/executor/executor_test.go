@@ -186,6 +186,7 @@ func TestPrepareSessionSnapshotsProfileRuntimeConfig(t *testing.T) {
 		resolveAgentProfileFunc: func(context.Context, string) (*AgentProfileInfo, error) {
 			return &AgentProfileInfo{
 				ProfileID:     "profile-123",
+				AgentName:     "test-agent",
 				Model:         "gpt-5.6-sol",
 				Mode:          "agent",
 				ConfigOptions: map[string]string{"reasoning_effort": "high"},
@@ -208,6 +209,44 @@ func TestPrepareSessionSnapshotsProfileRuntimeConfig(t *testing.T) {
 	options, ok := snapshot["config_options"].(map[string]string)
 	if !ok || options["reasoning_effort"] != "high" {
 		t.Fatalf("profile snapshot config options = %#v", snapshot["config_options"])
+	}
+}
+
+func TestPrepareSessionRejectsUnresolvedProfileBeforePersisting(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{
+		resolveAgentProfileFunc: func(context.Context, string) (*AgentProfileInfo, error) {
+			return nil, errors.New("profile unavailable")
+		},
+	}
+	executor := newTestExecutor(t, agentManager, repo)
+	task := &v1.Task{ID: "task-123", WorkspaceID: "workspace-123", Title: "Test Task"}
+
+	_, err := executor.PrepareSession(context.Background(), task, "profile-123", "executor-123", "", "step-123")
+	if err == nil || !strings.Contains(err.Error(), "profile unavailable") {
+		t.Fatalf("PrepareSession error = %v, want profile resolution failure", err)
+	}
+	if len(repo.createTaskSessionCalls) != 0 {
+		t.Fatalf("CreateTaskSession calls = %d, want 0", len(repo.createTaskSessionCalls))
+	}
+}
+
+func TestPrepareSessionRejectsOpaqueModelIdentityBeforePersisting(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{
+		resolveAgentProfileFunc: func(context.Context, string) (*AgentProfileInfo, error) {
+			return &AgentProfileInfo{AgentName: "codex", Model: "__MODEL_ID__"}, nil
+		},
+	}
+	executor := newTestExecutor(t, agentManager, repo)
+	task := &v1.Task{ID: "task-123", WorkspaceID: "workspace-123", Title: "Test Task"}
+
+	_, err := executor.PrepareSession(context.Background(), task, "profile-123", "executor-123", "", "step-123")
+	if err == nil || !strings.Contains(err.Error(), "BLOCKED_MODEL_IDENTITY") {
+		t.Fatalf("PrepareSession error = %v, want BLOCKED_MODEL_IDENTITY", err)
+	}
+	if len(repo.createTaskSessionCalls) != 0 {
+		t.Fatalf("CreateTaskSession calls = %d, want 0", len(repo.createTaskSessionCalls))
 	}
 }
 
