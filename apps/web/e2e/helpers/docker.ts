@@ -100,6 +100,21 @@ export function dockerExec(containerID: string, ...command: string[]): DockerExe
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
+/**
+ * Returns true when the container has configured UID/GID sub-id ranges,
+ * without which bwrap (and any other tool using user namespaces) will fail
+ * with "setting up uid map: Permission denied" even when the seccomp and
+ * AppArmor layers allow the namespace creation.
+ */
+export function dockerHasSubuidMapping(containerID: string): boolean {
+  const result = spawnSync(
+    "docker",
+    ["exec", containerID, "sh", "-c", "head -1 /etc/subuid /etc/subgid 2>/dev/null | grep -q ."],
+    { encoding: "utf8", stdio: "pipe" },
+  );
+  return result.status === 0;
+}
+
 export function dockerSecurityOpt(containerID: string): string[] | null {
   const result = spawnSync(
     "docker",
