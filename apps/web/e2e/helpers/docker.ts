@@ -101,15 +101,21 @@ export function dockerExec(containerID: string, ...command: string[]): DockerExe
 }
 
 /**
- * Returns true when the container has configured UID/GID sub-id ranges,
- * without which bwrap (and any other tool using user namespaces) will fail
- * with "setting up uid map: Permission denied" even when the seccomp and
- * AppArmor layers allow the namespace creation.
+ * Returns true when the container can perform a full user-namespace map,
+ * which requires both the seccomp/AppArmor relaxation AND functioning
+ * sub-id mapping (newuidmap/newgidmap setuid binaries or /etc/subuid
+ * entries). Without this bwrap will fail with "setting up uid map:
+ * Permission denied" even when namespace creation is allowed.
+ *
+ * The probe uses `unshare --map-root-user` which goes one step beyond
+ * `unshare --user`: it also maps the UID inside the new namespace, the
+ * operation bwrap needs. On hosts where user namespaces are allowed but
+ * mapping is unavailable, `unshare --user` succeeds but this probe fails.
  */
 export function dockerHasSubuidMapping(containerID: string): boolean {
   const result = spawnSync(
     "docker",
-    ["exec", containerID, "sh", "-c", "head -1 /etc/subuid /etc/subgid 2>/dev/null | grep -q ."],
+    ["exec", containerID, "sh", "-c", "unshare --map-root-user --user true 2>/dev/null"],
     { encoding: "utf8", stdio: "pipe" },
   );
   return result.status === 0;
