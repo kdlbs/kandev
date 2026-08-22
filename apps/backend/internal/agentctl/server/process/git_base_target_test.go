@@ -63,8 +63,11 @@ func TestPrepareBaseBranchTarget(t *testing.T) {
 		if target != "" {
 			t.Errorf("target = %q, want empty target", target)
 		}
-		if err == nil || err.Error() != `base branch "main" does not exist locally` {
+		if err == nil || !strings.HasPrefix(err.Error(), `base branch "main" does not exist locally`) {
 			t.Fatalf("error = %v, want missing-local-base error", err)
+		}
+		if !strings.Contains(err.Error(), "fatal: Needed a single revision") {
+			t.Fatalf("error = %v, want underlying git error", err)
 		}
 		if strings.Contains(err.Error(), "fetch") {
 			t.Fatalf("missing local branch error unexpectedly fetched: %v", err)

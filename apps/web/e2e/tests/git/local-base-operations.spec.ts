@@ -1,5 +1,5 @@
 import { test } from "../../fixtures/test-base";
-import { openTaskSession } from "../../helpers/git-helper";
+import { openTaskSession } from "../../helpers/session";
 import {
   assertBaseCommitReachable,
   openDesktopVcsMenu,
@@ -17,7 +17,7 @@ test.describe("Desktop local-only Git operations", () => {
 
   test("merges a local base without origin", async ({ testPage, apiClient, seedData, backend }) => {
     const scenario = prepareLocalBaseScenario(seedData, backend, "merge");
-    await apiClient.createTaskWithAgent(
+    const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Desktop local-only merge",
       seedData.agentProfileId,
@@ -35,7 +35,7 @@ test.describe("Desktop local-only Git operations", () => {
       },
     );
 
-    const session = await openTaskSession(testPage, "Desktop local-only merge");
+    const session = await openTaskSession(testPage, task.id);
     await session.waitForChatIdle({ timeout: 45_000 });
     const menu = await openDesktopVcsMenu(session, testPage);
     await menu

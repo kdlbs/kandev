@@ -111,9 +111,9 @@ the repository record removes that exact durable grant from the workspace.
   merges or rebases from `main`, **THEN** Kandev uses the local branch and the operation succeeds.
 - **GIVEN** a repository has an `origin` remote, **WHEN** the user merges or rebases from `main`,
   **THEN** Kandev fetches and uses `origin/main`.
-- **GIVEN** a task worktree has no `origin` remote and has no selected base branch, **WHEN** the user
-  starts Merge or Rebase, **THEN** Kandev reports that the local branch does not exist and leaves
-  repository history unchanged.
+- **GIVEN** a task worktree has no `origin` remote and the selected `main` base branch is missing
+  locally, **WHEN** the user starts Merge or Rebase, **THEN** Kandev reports
+  `base branch "main" does not exist locally` and leaves repository history unchanged.
 - **GIVEN** a manually saved repository outside every discovery root, **WHEN** the user confirms a
   fresh-branch operation for it, **THEN** Kandev resolves the saved repository ID before changing
   the working tree.

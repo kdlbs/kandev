@@ -80,8 +80,11 @@ func assertMissingLocalBaseDoesNotMoveHead(t *testing.T, path string, body any) 
 	if result.Success {
 		t.Fatalf("operation succeeded: %+v", result)
 	}
-	if result.Error != `base branch "missing" does not exist locally` {
+	if !strings.HasPrefix(result.Error, `base branch "missing" does not exist locally`) {
 		t.Errorf("error = %q, want missing-local-base error", result.Error)
+	}
+	if !strings.Contains(result.Error, "fatal: Needed a single revision") {
+		t.Errorf("error = %q, want underlying git error", result.Error)
 	}
 	if after := fixture.head(t); after != before {
 		t.Errorf("HEAD moved from %q to %q", before, after)

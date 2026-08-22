@@ -27,8 +27,9 @@ func (g *GitOperator) prepareBaseBranchTarget(
 	}
 
 	localTarget := "refs/heads/" + baseBranch
-	if _, err := g.runGitCommand(ctx, "rev-parse", "--verify", localTarget); err != nil {
-		return "", "", fmt.Errorf("base branch %q does not exist locally", baseBranch)
+	verifyOutput, verifyErr := g.runGitCommand(ctx, "rev-parse", "--verify", localTarget)
+	if verifyErr != nil {
+		return verifyOutput, "", fmt.Errorf("base branch %q does not exist locally: %w", baseBranch, verifyErr)
 	}
 	return "", localTarget, nil
 }

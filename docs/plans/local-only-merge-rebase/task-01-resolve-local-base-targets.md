@@ -95,3 +95,13 @@ Implemented the shared base-target decision boundary.
   `origin` fetch. Green: the targeted backend suite passed 11 tests in 2
   packages.
 - Desktop and mobile focused E2E scenarios each passed with 1 test.
+
+PR fixup:
+
+- The missing-local-base error now keeps the clear public prefix and wraps the
+  underlying Git verification error for diagnostics.
+- The desktop E2E opens the created task by ID, matching the mobile helper and
+  avoiding duplicate-title ambiguity.
+- Fixup red: the new underlying-error assertions failed 4 tests before the
+  production change. Fixup green: the focused backend suite passed 11 tests and
+  the desktop E2E passed 1 test.
