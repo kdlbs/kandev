@@ -587,6 +587,12 @@ describe("aggregateChipStatus", () => {
     expect(aggregateChipStatus([makePR({ merge_queue_state: "queued" })])).toBe("queued");
   });
 
+  it("keeps queued status ahead of dirty mergeability", () => {
+    expect(
+      aggregateChipStatus([makePR({ merge_queue_state: "queued", mergeable_state: "dirty" })]),
+    ).toBe("queued");
+  });
+
   it("lets a failing sibling retain chip priority over a queued PR", () => {
     expect(
       aggregateChipStatus([

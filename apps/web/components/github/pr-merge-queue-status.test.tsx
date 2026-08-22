@@ -71,6 +71,14 @@ describe("merge queue status", () => {
     expect(getMergeQueueSummaryStatus(state)).toBe(expected);
   });
 
+  it("uses an unknown label for a future provider state", () => {
+    const { getByTestId } = render(
+      <PRMergeQueueStatus pr={makePR({ merge_queue_state: "future_state" })} />,
+    );
+
+    expect(getByTestId(QUEUE_STATUS_TEST_ID).textContent).toContain("Merge queue: Unknown");
+  });
+
   it("renders queue state, one-based position, and an available estimate", () => {
     const { getByTestId } = render(
       <PRMergeQueueStatus

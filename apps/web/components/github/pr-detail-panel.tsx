@@ -427,6 +427,7 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
   const isDraft = feedback?.pr.draft ?? false;
   const isMergeable = feedback?.pr.mergeable ?? true;
   const mergeableState = feedback?.pr.mergeable_state ?? taskPR.mergeable_state;
+  const displayPR = { ...taskPR, state: liveState };
 
   return (
     <ChangeRequestDetail
@@ -450,8 +451,8 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
         </>
       }
       notice={
-        hasActiveMergeQueueEntry(taskPR) ? (
-          <PRMergeQueueStatus pr={taskPR} />
+        hasActiveMergeQueueEntry(displayPR) ? (
+          <PRMergeQueueStatus pr={displayPR} />
         ) : (
           <PRMergeabilityNotice
             state={mergeableState}

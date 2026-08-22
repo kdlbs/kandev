@@ -35,7 +35,7 @@ cd apps/backend && go test -tags fts5 ./internal/github/... ./internal/task/stat
 - `apps/backend/internal/github/store.go`
 - `apps/backend/internal/github/service_pr_watch.go`
 - `apps/backend/internal/github/mock_controller.go`
-- `apps/backend/internal/github/graphql_test.go`
+- `apps/backend/internal/github/graphql_merge_queue_status_test.go`
 - `apps/backend/internal/github/service_pr_merge_queue_status_test.go`
 - `apps/backend/internal/github/store_taskpr_schema_drift_test.go`
 - `apps/backend/internal/github/store_merge_queue_status_test.go`

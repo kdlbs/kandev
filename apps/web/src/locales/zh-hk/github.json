@@ -587,7 +587,7 @@
   "mergeQueueStateMergeable": "可合併",
   "mergeQueueStateQueued": "排隊中",
   "mergeQueueStateUnmergeable": "不可合併",
-  "mergeQueueStateUnknown": "排隊中",
+  "mergeQueueStateUnknown": "未知",
   "mergeQueueStatus": "合併佇列：{{state}}",
   "mergeQueueSubMinuteEstimate": "預計合併時間：少於一分鐘"
 }

@@ -128,7 +128,7 @@ action is needed.
 - **What:** GraphQL selection and decoding distinguish every known queue enum,
   position, a present or absent estimated duration, `null`, and an unknown
   future state. **File:**
-  `apps/backend/internal/github/graphql_test.go`. **How:** query snapshot and
+  `apps/backend/internal/github/graphql_merge_queue_status_test.go`. **How:** query snapshot and
   table-driven conversion tests.
 - **What:** sync atomically persists queue entry transitions and metadata,
   preserves all fields across queue-unaware feedback reads, clears them on an

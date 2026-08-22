@@ -86,6 +86,34 @@ func TestTaskPRColumnListsIncludeMergeQueueColumns(t *testing.T) {
 	}
 }
 
+func TestRestoreTaskPRPreservesMergeQueueFields(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	position := 3
+	estimate := 90
+	seed := &TaskPR{
+		TaskID: "task-queue-restore", WorkspaceID: "workspace-queue-restore",
+		Owner: "owner", Repo: "repo", PRNumber: 43, PRURL: "https://example.test/43",
+		PRTitle: "queued restore", State: "open", CreatedAt: time.Now().UTC(),
+		MergeQueueState: "awaiting_checks", MergeQueuePosition: &position,
+		MergeQueueEstimatedTimeToMergeSeconds: &estimate,
+	}
+	if err := store.CreateTaskPR(ctx, seed); err != nil {
+		t.Fatalf("CreateTaskPR: %v", err)
+	}
+	if _, changed, err := store.DetachTaskPR(ctx, seed.ID); err != nil || !changed {
+		t.Fatalf("DetachTaskPR: changed=%v err=%v", changed, err)
+	}
+
+	restored, err := store.RestoreTaskPR(ctx, seed.TaskID, seed.RepositoryID, &PRStatus{
+		PR: &PR{Number: seed.PRNumber, RepoOwner: seed.Owner, RepoName: seed.Repo, HTMLURL: seed.PRURL, Title: seed.PRTitle, State: "open"},
+	})
+	if err != nil {
+		t.Fatalf("RestoreTaskPR: %v", err)
+	}
+	assertTaskPRMergeQueueFields(t, "RestoreTaskPR", restored, seed.MergeQueueState, &position, &estimate)
+}
+
 func mustGetTaskPR(t *testing.T, store *Store, ctx context.Context, id string) *TaskPR {
 	t.Helper()
 	got, err := store.GetTaskPRByID(ctx, id)

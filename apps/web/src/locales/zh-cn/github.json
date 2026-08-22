@@ -587,7 +587,7 @@
   "mergeQueueStateMergeable": "可合并",
   "mergeQueueStateQueued": "排队中",
   "mergeQueueStateUnmergeable": "不可合并",
-  "mergeQueueStateUnknown": "排队中",
+  "mergeQueueStateUnknown": "未知",
   "mergeQueueStatus": "合并队列：{{state}}",
   "mergeQueueSubMinuteEstimate": "预计合并时间：少于一分钟"
 }
