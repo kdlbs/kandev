@@ -102,9 +102,15 @@ checkbox.
 tests/chat/message-pagination.spec.ts` passed (1 test).
 - Mobile: `cd apps/web && pnpm e2e:run --project mobile-chrome
 tests/chat/mobile-message-pagination.spec.ts` passed (1 test).
-- Both scenarios scroll the native list to the oldest loaded edge, wait for the
-  first prompt, assert that no load button remains, and verify the recent
-  standalone row stays within 8 pixels of its anchored position.
+- Both scenarios continue upward scrolling at each loaded-page boundary rather
+  than clicking the recovery button, wait for the first prompt, assert that no
+  load button remains, and verify the recent standalone row stays within 8
+  pixels of its anchored position after every prepend.
+- After rebuilding the current web bundle, the final host-run desktop and
+  mobile pagination commands passed (1 test each): `pnpm run build:e2e`, then
+  `pnpm e2e:run --host --no-build --project chromium
+tests/chat/message-pagination.spec.ts` and the equivalent `mobile-chrome`
+  command.
 - CI fixup showed that the synthetic task-description fallback also matched the
   metadata fixture text. The desktop and mobile metadata specs now use exact
   text matching for the stored message row.

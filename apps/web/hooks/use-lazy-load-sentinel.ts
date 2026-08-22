@@ -33,8 +33,11 @@ export type LazyLoadSentinelOptions = {
  * intersection is ignored, arming happens only after an observed exit, and a
  * retry fires on the next true re-entry — or via `onUserGesture` while still
  * intersecting (the panel's wheel/touch path when short content prevents a
- * scroll-away). Stale completions (unmount, observer cleanup, sentinel
- * replacement) never re-arm.
+ * scroll-away). If an eligible sentinel was observed while blocked or while
+ * another request was in flight, an eligibility transition retries it while
+ * it remains intersecting; this closes the gap where IntersectionObserver does
+ * not emit a second entry after the blocked state changes. Stale completions
+ * (unmount, observer cleanup, sentinel replacement) never re-arm.
  */
 // eslint-disable-next-line max-params, max-lines-per-function -- plan-mandated unified sentinel state machine (scrollRef, hasMore, blocked, isLoadingMore, loadMore, options); splitting would fragment the re-arm/disarm/join invariants
 export function useLazyLoadSentinel(
@@ -66,6 +69,8 @@ export function useLazyLoadSentinel(
   const observerRef = useRef<IntersectionObserver | null>(null);
   const sentinelNodeRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
+  const previousStateRef = useRef({ hasMore, blocked, isLoadingMore });
+  const fireLoadRef = useRef<(() => void) | null>(null);
   /** When true, ignore intersections until an observed exit arms the hook. */
   const disarmedRef = useRef(false);
   const intersectingRef = useRef(false);
@@ -97,6 +102,33 @@ export function useLazyLoadSentinel(
         disarmedRef.current = false;
         if (optionsRef.current.rearmWhileIntersecting) {
           observerRef.current.observe(node);
+          // Browsers do not consistently emit a new entry when an already
+          // intersecting target is observed again after its layout changes.
+          // Schedule the next page directly, while preserving the same
+          // observer/node validity checks used by stale-completion handling.
+          // Yield one browser turn so prepend layout effects and the resulting
+          // intersection state settle before deciding whether the sentinel is
+          // still in the preload region.
+          setTimeout(() => {
+            if (
+              !mountedRef.current ||
+              observerRef.current !== observer ||
+              sentinelNodeRef.current !== node ||
+              !intersectingRef.current ||
+              disarmedRef.current
+            ) {
+              return;
+            }
+            const { hasMore, blocked } = stateRef.current;
+            if (!hasMore || blocked) {
+              return;
+            }
+            // The just-completed request owns this re-arm. `loadMore` still
+            // applies its own cursor/in-flight guard, so do not reject this
+            // hand-off on a stale `isLoadingMore` render from the request that
+            // has already settled.
+            fireLoadRef.current?.();
+          }, 0);
         }
         return;
       }
@@ -129,6 +161,7 @@ export function useLazyLoadSentinel(
     }
     settleLoad(node, observer, { count, rejected });
   }, [loadMore, settleLoad]);
+  fireLoadRef.current = fireLoad;
 
   // Create/destroy observer when the scroll container changes
   useEffect(() => {
@@ -168,6 +201,31 @@ export function useLazyLoadSentinel(
       observerRef.current = null;
     };
   }, [scrollRef, loadMore, rootMargin, fireLoad]);
+
+  // IntersectionObserver does not emit a new entry merely because a firing
+  // guard changed. If the sentinel was already visible while initial/refetch
+  // loading or another page request was active, retry on the transition to an
+  // eligible state. Keep this scoped to re-arming callers so the default
+  // one-shot sentinel contract remains unchanged, and never retry a sentinel
+  // disarmed after a zero-result or rejected request.
+  useEffect(() => {
+    const previous = previousStateRef.current;
+    previousStateRef.current = { hasMore, blocked, isLoadingMore };
+    if (
+      !optionsRef.current.rearmWhileIntersecting ||
+      !intersectingRef.current ||
+      disarmedRef.current
+    ) {
+      return;
+    }
+    const becameEligible =
+      (!previous.hasMore && hasMore) ||
+      (previous.blocked && !blocked) ||
+      (previous.isLoadingMore && !isLoadingMore);
+    if (!becameEligible || !hasMore || blocked) return;
+    if (isLoadingMore && !optionsRef.current.joinInFlightWhileLoading) return;
+    void fireLoad();
+  }, [hasMore, blocked, isLoadingMore, fireLoad]);
 
   // Callback ref — stores the node and observes if the observer already exists
   const sentinelRef = useCallback((node: HTMLDivElement | null) => {

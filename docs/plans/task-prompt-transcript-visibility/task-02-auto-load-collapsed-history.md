@@ -101,6 +101,13 @@ components/task/chat/message-list-native.test.tsx` passed (4 files, 84
   key changes. The native scroll anchor now compensates that layout update.
 - Reused the exported synthetic row ID instead of duplicating the sentinel
   value in the native scroll owner.
+- Extended the shared re-arming sentinel so an intersection observed during
+  initial/refetch loading retries when the firing guard clears, and a positive
+  page result schedules the next eligible page after prepend layout settles.
+  The follow-up keeps the observer/node validity checks and stops on a
+  zero-result or rejected request.
 - The final focused pagination unit suite passed (6 files, 162 tests),
   including `message-list-shared.test.tsx` and `transcript-auto-scroll.test.ts`.
+- The final focused pagination unit suite passed again after the sentinel
+  follow-up change (6 files, 163 tests).
 - The explicit load-older recovery path remains unchanged.

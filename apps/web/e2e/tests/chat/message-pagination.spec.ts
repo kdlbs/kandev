@@ -9,6 +9,7 @@ import {
   TASK_DESCRIPTION_MARKER,
   readStandaloneMessageTop,
   seedCollapsedMessageHistory,
+  scrollToOldestLoadedEdge,
 } from "./message-pagination-helpers";
 
 test.describe("@chat message pagination", () => {
@@ -34,37 +35,36 @@ test.describe("@chat message pagination", () => {
 
     await expect(chat.getByText(TASK_DESCRIPTION_MARKER, { exact: true })).toBeVisible();
     await expect(chat.getByText(INITIAL_PROMPT_MARKER, { exact: true })).toHaveCount(0);
-    const recentRowTopBeforeScroll = await readStandaloneMessageTop(list, RECENT_AGENT_MARKER);
-    expect(Number.isFinite(recentRowTopBeforeScroll)).toBe(true);
 
-    // Put the single native scroll owner at the oldest loaded edge. The
-    // sentinel may immediately start loading, so capture the row position in
-    // the same DOM task before the observer callback can run.
-    const recentRowTopAtOldestLoadedEdge = await list.evaluate((element, marker) => {
-      element.scrollTop = 0;
-      element.dispatchEvent(new Event("scroll", { bubbles: true }));
-      const row = Array.from(element.querySelectorAll<HTMLElement>("[id^='msg-']")).find(
-        (candidate) => candidate.textContent?.includes(marker),
-      );
-      return row?.getBoundingClientRect().top ?? Number.NaN;
-    }, RECENT_AGENT_MARKER);
-    expect(Number.isFinite(recentRowTopAtOldestLoadedEdge)).toBe(true);
+    // Each upward gesture reaches the current oldest loaded edge. Older pages
+    // may only extend a collapsed activity row, so keep scrolling until the
+    // stored prompt appears. The row-position assertion belongs to each load:
+    // it verifies prepend anchoring without treating the user's next upward
+    // gesture as an anchoring regression.
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const edge = await scrollToOldestLoadedEdge(list, RECENT_AGENT_MARKER);
+      expect(Number.isFinite(edge.rowTop)).toBe(true);
 
-    // Positive page loads must re-arm the still-visible sentinel until the
-    // stored prompt replaces the synthetic task-description fallback.
-    await expect
-      .poll(() => chat.getByText(INITIAL_PROMPT_MARKER, { exact: true }).count(), {
-        timeout: 60_000,
-        intervals: [300],
-        message: "Loading older pages until initial prompt",
-      })
-      .toBe(1);
+      await expect
+        .poll(
+          async () =>
+            (await chat.getByText(INITIAL_PROMPT_MARKER, { exact: true }).count()) === 1 ||
+            (await list.evaluate((element) => element.scrollHeight)) > edge.scrollHeight,
+          {
+            timeout: 15_000,
+            intervals: [300],
+            message: "Loading older pages until initial prompt",
+          },
+        )
+        .toBe(true);
+
+      const afterLoadTop = await readStandaloneMessageTop(list, RECENT_AGENT_MARKER);
+      expect(Math.abs(afterLoadTop - edge.rowTop)).toBeLessThanOrEqual(8);
+      if ((await chat.getByText(INITIAL_PROMPT_MARKER, { exact: true }).count()) === 1) break;
+    }
 
     await expect(chat.getByText(INITIAL_PROMPT_MARKER, { exact: true })).toBeVisible();
     await expect(chat.getByText(TASK_DESCRIPTION_MARKER, { exact: true })).toHaveCount(0);
     await expect(chat.getByTestId("load-older-messages")).toHaveCount(0);
-
-    const recentRowTopAfterPagination = await readStandaloneMessageTop(list, RECENT_AGENT_MARKER);
-    expect(Math.abs(recentRowTopAfterPagination - recentRowTopAtOldestLoadedEdge)).toBeLessThan(8);
   });
 });

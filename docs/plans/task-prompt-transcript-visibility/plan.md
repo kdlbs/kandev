@@ -24,9 +24,11 @@ When an older page only enlarges a collapsed activity row, the sentinel stays
 in view but does not re-arm. The existing message-pagination E2E documents the
 manual button as the workaround for this exact state.
 
-The shared sentinel already supports safe positive-result re-arming. Its 13
+The shared sentinel already supports safe positive-result re-arming. Its
 focused tests cover the enabled and disabled re-arm cases and the zero-result
-guard. The repair can reuse this behavior without a backend or API change.
+guard, but browser behavior also requires an eligibility retry after a blocked
+intersection and a deferred follow-up after prepend layout settles. The repair
+extends that shared behavior without a backend or API change.
 
 ## Frontend
 
@@ -155,6 +157,14 @@ chromium tests/chat/message-metadata-overflow.spec.ts` passed (1 test).
 mobile-chrome tests/chat/mobile-message-metadata-overflow.spec.ts` passed (1
   test).
 - PR fixup web typecheck and lint passed with zero errors and warnings.
+- Final PR-fixup remediation: the shared re-arming sentinel now retries when
+  eligibility clears after an observed blocked state and schedules the next
+  positive page after prepend layout settles. Desktop and mobile pagination
+  regressions now continue upward scrolling at each boundary and assert the
+  anchored row after each prepend.
+- Final remediation verification: focused unit tests passed (6 files, 163
+  tests), web typecheck passed, web lint passed with zero errors and warnings,
+  and rebuilt-bundle desktop and mobile pagination E2E each passed (1 test).
 
 ## Implementation waves
 

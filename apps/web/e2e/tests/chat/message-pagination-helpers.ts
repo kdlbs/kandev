@@ -51,3 +51,22 @@ export async function readStandaloneMessageTop(list: Locator, marker: string): P
     return row?.getBoundingClientRect().top ?? Number.NaN;
   }, marker);
 }
+
+/** Scrolls the native transcript to the oldest loaded edge and captures the
+ * anchored row's position before the next older-page request can prepend. */
+export async function scrollToOldestLoadedEdge(
+  list: Locator,
+  marker: string,
+): Promise<{ rowTop: number; scrollHeight: number }> {
+  return list.evaluate((element, messageMarker) => {
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    const row = Array.from(element.querySelectorAll<HTMLElement>("[id^='msg-']")).find(
+      (candidate) => candidate.textContent?.includes(messageMarker),
+    );
+    return {
+      rowTop: row?.getBoundingClientRect().top ?? Number.NaN,
+      scrollHeight: element.scrollHeight,
+    };
+  }, marker);
+}
