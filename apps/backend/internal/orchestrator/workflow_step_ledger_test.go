@@ -21,6 +21,67 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
+// TestExecuteStepTransitionRecordsEngineTransitionOnLegacyPath drives the
+// legacy path directly (executeStepTransition, reached by ProcessOnTurnStart
+// and ProcessOnTurnComplete) end to end and asserts the resulting ledger row
+// — every other orchestrator ledger test exercises engineTransitionAttribution
+// only through the newer workflowStore.ApplyTransition call site
+// (TestApplyTransitionRecordsEngineTransitionFromSessionID) or in isolation
+// (TestEngineTransitionAttributionPreservesUserCancellationTrigger), never
+// through executeStepTransition's own call to it with a real ledger write.
+// Table-driven over both legacy triggers so each of ProcessOnTurnStart's and
+// ProcessOnTurnComplete's real call sites into executeStepTransition is
+// proven to reach a correct session-originated ledger row on its own, not
+// just one of the two. This does NOT distinguish on_turn_start from
+// on_turn_complete: engineTriggerIsSessionOriginated puts both in the same
+// case arm, so a bug that swapped the triggerOnEnter->engine.Trigger mapping
+// at the executeStepTransition call site (event_handlers_workflow.go) would
+// still produce byte-identical rows here and go undetected — only a change
+// that stopped treating one of the two as session-originated would surface
+// as a failure.
+func TestExecuteStepTransitionRecordsEngineTransitionOnLegacyPath(t *testing.T) {
+	tests := []struct {
+		name           string
+		triggerOnEnter bool
+		wantTrigger    engine.Trigger
+	}{
+		{name: "on_turn_start", triggerOnEnter: false, wantTrigger: engine.TriggerOnTurnStart},
+		{name: "on_turn_complete", triggerOnEnter: true, wantTrigger: engine.TriggerOnTurnComplete},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
+
+			steps := newMockStepGetter()
+			fromStep := &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1", Name: "Source"}
+			steps.steps["step2"] = &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1", Name: "Target"}
+			svc := createTestService(repo, steps, newMockTaskRepo())
+
+			svc.executeStepTransition(ctx, "t1", "s1", fromStep, "step2", tc.triggerOnEnter)
+
+			rows := stepTransitionRowsForTaskOrchestrator(t, repo, "t1")
+			if len(rows) == 0 {
+				t.Fatalf("expected a ledger row, got none")
+			}
+			last := rows[len(rows)-1]
+			if last.trigger != string(steptelemetry.TriggerEngineTransition) {
+				t.Fatalf("trigger = %q, want %q", last.trigger, steptelemetry.TriggerEngineTransition)
+			}
+			if last.actorKind != string(steptelemetry.ActorAgent) {
+				t.Fatalf("actor_kind = %q, want %q (legacy %s is session-originated)", last.actorKind, steptelemetry.ActorAgent, tc.wantTrigger)
+			}
+			if last.actorID == nil || *last.actorID != "s1" {
+				t.Fatalf("actor_id = %v, want s1", last.actorID)
+			}
+			if last.sessionID == nil || *last.sessionID != "s1" {
+				t.Fatalf("session_id = %v, want s1", last.sessionID)
+			}
+		})
+	}
+}
+
 func stepTransitionRowsForTaskOrchestrator(t *testing.T, repo *sqliterepo.Repository, taskID string) []struct {
 	trigger   string
 	actorKind string

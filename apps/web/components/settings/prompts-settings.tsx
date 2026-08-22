@@ -6,10 +6,10 @@ import { IconLock } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Input } from "@kandev/ui/input";
-import { Textarea } from "@kandev/ui/textarea";
 import { PromptDeleteConfirmation } from "@/components/settings/prompt-delete-confirmation";
 import { PromptRowActions } from "@/components/settings/prompt-row-actions";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
+import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import { useToast } from "@/components/toast-provider";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -79,15 +79,14 @@ function PromptCreateForm({ formState, onFormChange, onCancel, isBusy }: PromptC
         disabled={isBusy}
         data-settings-dirty={nameIsDirty}
       />
-      <Textarea
+      <SettingsPromptEditor
         value={formState.content}
-        onChange={(event) => onFormChange({ content: event.target.value })}
-        placeholder={t("settings:promptContentPlaceholder")}
-        rows={5}
-        className="resize-y max-h-60 overflow-auto"
-        data-testid="prompt-content-input"
-        disabled={isBusy}
-        data-settings-dirty={contentIsDirty}
+        onChange={(value) => onFormChange({ content: value })}
+        promptReferences
+        readOnly={isBusy}
+        testId="prompt-content-input"
+        isDirty={contentIsDirty}
+        dirtyLevel="field"
       />
       <div className="flex items-center gap-2">
         <Button variant="ghost" onClick={onCancel} disabled={isBusy}>
@@ -190,15 +189,15 @@ function PromptListItem({
             disabled={isBusy}
             data-settings-dirty={nameIsDirty}
           />
-          <Textarea
+          <SettingsPromptEditor
             value={formState.content}
-            onChange={(event) => onFormChange({ content: event.target.value })}
-            placeholder={t("settings:promptContentPlaceholder")}
-            rows={5}
-            className="resize-y max-h-60 overflow-auto"
-            data-testid="prompt-content-input"
-            disabled={isBusy}
-            data-settings-dirty={contentIsDirty}
+            onChange={(value) => onFormChange({ content: value })}
+            promptReferences
+            excludedPromptIds={[prompt.id]}
+            readOnly={isBusy}
+            testId="prompt-content-input"
+            isDirty={contentIsDirty}
+            dirtyLevel="field"
           />
           <div className="flex items-center gap-2">
             <Button variant="ghost" onClick={onCancel} disabled={isBusy}>

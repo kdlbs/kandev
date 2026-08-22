@@ -309,6 +309,44 @@ func TestShowCommit_CountsDashAndPlusPrefixedContent(t *testing.T) {
 	}
 }
 
+// TestParseCommitDiffWithOptions_EntriesCarryPath guards the file-entry
+// contract the frontend's changes tree depends on: every entry must include
+// its own `path` field, not just sit under the map key. The DB-snapshot
+// fallback replays these entries as a git status_update, and the frontend
+// builds its file tree from each entry's `path` — an entry without one
+// crashes the changes panel (`Cannot read properties of undefined (reading
+// 'split')`) for archived tasks whose live execution is gone.
+func TestParseCommitDiffWithOptions_EntriesCarryPath(t *testing.T) {
+	output := "diff --git a/apps/a.go b/apps/a.go\n" +
+		"--- a/apps/a.go\n" +
+		"+++ b/apps/a.go\n" +
+		"@@ -1,3 +1,3 @@\n" +
+		" package a\n" +
+		"-old\n" +
+		"+new\n" +
+		"diff --git a/readme.md b/readme.md\n" +
+		"--- a/readme.md\n" +
+		"+++ b/readme.md\n" +
+		"@@ -1 +1 @@\n" +
+		"-hello\n" +
+		"+world\n"
+
+	gitOp := &GitOperator{}
+	files := gitOp.parseCommitDiffWithOptions(output, parseCommitDiffOptions{})
+	if len(files) != 2 {
+		t.Fatalf("got %d files, want 2 (%v)", len(files), keysOf(files))
+	}
+	for _, path := range []string{"apps/a.go", "readme.md"} {
+		entry, ok := files[path].(map[string]interface{})
+		if !ok {
+			t.Fatalf("no file entry for %q", path)
+		}
+		if got, _ := entry["path"].(string); got != path {
+			t.Errorf("entry %q path = %#v, want %q", path, entry["path"], path)
+		}
+	}
+}
+
 // TestGetCumulativeDiff_CountsDashAndPlusPrefixedContent covers the second
 // caller, which builds its diff from `git diff <base>` rather than `git show`.
 func TestGetCumulativeDiff_CountsDashAndPlusPrefixedContent(t *testing.T) {

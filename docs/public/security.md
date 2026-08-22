@@ -106,6 +106,8 @@ launching an agent.
 
 Adding a repository or folder gives the task access to that source. A local folder is a live host-path grant, not an upload: Kandev does not copy, move, delete, or add marker files to it. Folder sources are therefore limited to Local/Local PC and Worktree tasks and are never sent to Docker, SSH, Sprites, or Remote Docker.
 
+For task MCP source attachment, a task can grant a source to itself or to its direct child in the same workspace only. The backend verifies the session-bound caller identity; sibling, ancestor, non-direct descendant, unrelated, and cross-workspace tasks cannot use this path to grant access. Treat a parent-to-child attachment as a deliberate access grant, and keep the target idle while it is made.
+
 Remote repository locators and clone credentials can reveal authority. Kandev does not persist credential-bearing URLs or include credentials in source metadata or logs. Use provider credentials or a safe cloneable locator, and never paste tokens into a repository URL, task prompt, or source display name.
 
 ## Protect stored secrets

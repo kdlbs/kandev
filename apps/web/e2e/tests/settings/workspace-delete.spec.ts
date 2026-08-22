@@ -85,7 +85,7 @@ test.describe("Workspace settings", () => {
 
       await expect(dialog).not.toBeVisible();
       await expect(testPage).toHaveURL(/\/t\//);
-      await expect(testPage.getByRole("link", { name: taskTitle, exact: true })).toBeVisible();
+      await expect(testPage.getByTestId("task-topbar-title")).toHaveText(taskTitle);
     } finally {
       if (createdTaskId) await apiClient.deleteTask(createdTaskId);
       if (workspaceId) await apiClient.deleteWorkspace(workspaceId, workspaceName);

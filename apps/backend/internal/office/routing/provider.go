@@ -22,8 +22,15 @@ import (
 // eligible candidate); when not degraded these equal the primary.
 // When every provider is skipped, both Current fields are empty.
 type PreviewItem struct {
-	AgentID                   string
-	AgentName                 string
+	AgentID   string
+	AgentName string
+	// TierSource names the precedence level supplying EffectiveTier:
+	// one of TierSourceWakeReason, TierSourceOverride, TierSourceRole,
+	// TierSourceWorkspace (see effectiveTier). Always computed with an
+	// empty reason (AC-18b), so this never reports TierSourceWakeReason
+	// even when the agent's own wake-reason policy would shadow it at
+	// runtime — the frontend surfaces that shadowing separately from
+	// the agent's TierPerReason data, not from this field.
 	TierSource                string
 	EffectiveTier             string
 	PrimaryProviderID         string
@@ -166,14 +173,15 @@ func (p *Provider) ListExecutionProfiles(
 //   - enabled→disabled: parked runs would otherwise sit forever waiting
 //     on a provider that no longer matters.
 //   - enabled→enabled with a material change (provider order, default
-//     tier, or provider profiles): a user fixing a missing tier mapping
-//     should unblock blocked_provider_action_required runs immediately;
-//     without this, those parks persist until the user manually retries.
+//     tier, role tiers, or provider profiles): a user fixing a missing
+//     tier mapping should unblock blocked_provider_action_required runs
+//     immediately; without this, those parks persist until the user
+//     manually retries.
 //
 // "Material" is defined coarsely — any change to ProviderOrder,
-// DefaultTier, or ProviderProfiles triggers a clear. False positives
-// (clearing when the change couldn't affect any block reason) are
-// harmless because runs simply re-dispatch and re-park with the
+// DefaultTier, RoleTiers, or ProviderProfiles triggers a clear. False
+// positives (clearing when the change couldn't affect any block reason)
+// are harmless because runs simply re-dispatch and re-park with the
 // latest verdict.
 func (p *Provider) UpdateConfig(
 	ctx context.Context, workspaceID string, cfg WorkspaceConfig,
@@ -396,8 +404,8 @@ func shouldClearParked(prev *WorkspaceConfig, next WorkspaceConfig) bool {
 
 // routingConfigEqual reports whether two enabled configs are
 // behaviorally identical for routing decisions. Compares provider
-// order, default tier, and per-provider profile maps. The Enabled
-// field is intentionally not compared — callers check that.
+// order, default tier, per-provider profile maps, and role tiers. The
+// Enabled field is intentionally not compared — callers check that.
 func routingConfigEqual(a, b WorkspaceConfig) bool {
 	if a.DefaultTier != b.DefaultTier {
 		return false
@@ -405,7 +413,22 @@ func routingConfigEqual(a, b WorkspaceConfig) bool {
 	if !providerOrderEqual(a.ProviderOrder, b.ProviderOrder) {
 		return false
 	}
+	if !roleTiersEqual(a.RoleTiers, b.RoleTiers) {
+		return false
+	}
 	return providerProfilesEqual(a.ProviderProfiles, b.ProviderProfiles)
+}
+
+func roleTiersEqual(a, b RoleTierMap) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, va := range a {
+		if vb, ok := b[k]; !ok || va != vb {
+			return false
+		}
+	}
+	return true
 }
 
 func providerOrderEqual(a, b []ProviderID) bool {
@@ -567,11 +590,11 @@ func (p *Provider) previewForAgent(
 	ctx context.Context, workspaceID string,
 	agent models.AgentInstance, cfg *WorkspaceConfig,
 ) (PreviewItem, error) {
-	tierSource := tierSourceForAgent(agent, cfg)
 	res, err := p.resolver.Resolve(ctx, workspaceID, agent, ResolveOptions{})
 	if err != nil {
 		return PreviewItem{}, fmt.Errorf("routing: resolve %s: %w", agent.ID, err)
 	}
+	tierSource := previewTierSource(res, agent, cfg)
 	primaryProvider, primaryProfile, primaryModel := primaryProviderModel(res, cfg)
 	return PreviewItem{
 		AgentID:                   agent.ID,
@@ -607,17 +630,43 @@ func primaryProviderModel(res *Resolution, cfg *WorkspaceConfig) (string, string
 	return string(first), prof.ExecutionProfileID(res.RequestedTier), prof.TierMap.Model(res.RequestedTier)
 }
 
-// tierSourceForAgent returns "override" when the agent's settings flip
-// TierSource explicitly; "inherit" otherwise.
-func tierSourceForAgent(agent models.AgentInstance, _ *WorkspaceConfig) string {
-	ov, err := ReadAgentOverrides(agent.Settings)
-	if err != nil {
-		return "inherit"
+// tierSourceForAgent delegates to effectiveTier — the resolve path's
+// producer — rather than deciding independently, so preview and resolve
+// never diverge on which precedence level supplied the tier (AC-20d).
+// Always called with an empty reason (AC-18b): a preview never carries
+// run context, so this can never report TierSourceWakeReason. A parse
+// error on the agent's settings blob falls back to zero-value overrides
+// rather than a fixed string, so the result still lands on one of the
+// four widened values instead of the old error-only "inherit" literal.
+func tierSourceForAgent(agent models.AgentInstance, cfg *WorkspaceConfig) string {
+	ov, _ := ReadAgentOverrides(agent.Settings)
+	if cfg == nil {
+		cfg = &WorkspaceConfig{}
 	}
-	if ov.TierSource == TierSourceOverride && ov.Tier != "" {
-		return "override"
+	_, source := effectiveTier(cfg, ov, string(agent.Role), "")
+	return source
+}
+
+// previewTierSource returns the source PreviewItem.TierSource must carry.
+// AC-20d requires preview and resolve to share one producer AND never
+// disagree — sharing the effectiveTier function alone is not enough,
+// because previewForAgent's cfg snapshot and Resolve's own internal
+// GetWorkspaceRouting read are two independent reads of the same row: a
+// workspace routing write landing between them would otherwise let
+// tierSourceForAgent(agent, cfg) answer from a config Resolve never saw.
+// res.TierSource is therefore the primary source — it is exactly what
+// Resolve computed against the config it actually used. The one
+// exception is Resolve's disabled-empty-config early return
+// (resolver.go, cfg == nil || (!cfg.Enabled && len(cfg.ProviderOrder) ==
+// 0)), which returns a Resolution that never calls effectiveTier and so
+// carries an empty TierSource; previewForAgent's own contract still
+// requires a non-blank preview row in that case, so it falls back to the
+// snapshot computation only then.
+func previewTierSource(res *Resolution, agent models.AgentInstance, cfg *WorkspaceConfig) string {
+	if res != nil && res.TierSource != "" {
+		return res.TierSource
 	}
-	return "inherit"
+	return tierSourceForAgent(agent, cfg)
 }
 
 // effectivePreviewTier returns the tier the resolver consumed, falling

@@ -4,13 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/task/models"
 )
+
+func isTaskErrorRefreshEvent(eventType string) bool {
+	return eventType == events.TaskUpdated || eventType == events.TaskStateChanged
+}
 
 func isPendingSensitiveEvent(eventType string, data map[string]interface{}) bool {
 	switch eventType {
@@ -169,10 +175,13 @@ func errorFromMap(now time.Time, sessionID string, data map[string]interface{}) 
 		stamp = occurredAt.UTC().Format(time.RFC3339Nano) + ":" + preview
 	}
 	return &ActiveErrorSummary{
-		SessionID:  truncateString(sessionID, maxSessionIDBytes),
-		Stamp:      truncateString(stamp, maxActiveErrorStampBytes),
-		OccurredAt: occurredAt.UTC(),
-		Preview:    preview,
+		SessionID:        truncateString(sessionID, maxSessionIDBytes),
+		TaskRepositoryID: truncateString(stringField(data, "task_repository_id"), maxTaskRepositoryIDBytes),
+		Stamp:            truncateString(stamp, maxActiveErrorStampBytes),
+		OccurredAt:       occurredAt.UTC(),
+		Preview:          preview,
+		Category:         truncateString(firstString(data, "category", "code"), maxActiveErrorCategoryBytes),
+		RecoveryActions:  normalizeRecoveryActions(recoveryActionsValue(data["recovery_actions"])),
 	}, true
 }
 
@@ -180,8 +189,31 @@ func errorEqual(a, b *ActiveErrorSummary) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.SessionID == b.SessionID && a.Stamp == b.Stamp &&
-		a.OccurredAt.Equal(b.OccurredAt) && a.Preview == b.Preview
+	return a.SessionID == b.SessionID && a.TaskRepositoryID == b.TaskRepositoryID &&
+		a.Stamp == b.Stamp && a.OccurredAt.Equal(b.OccurredAt) &&
+		a.Preview == b.Preview && a.Category == b.Category &&
+		slices.Equal(a.RecoveryActions, b.RecoveryActions)
+}
+
+func normalizeRecoveryActions(actions []string) []string {
+	return models.NormalizeRecoveryActions(actions)
+}
+
+func recoveryActionsValue(value interface{}) []string {
+	switch actions := value.(type) {
+	case []string:
+		return append([]string(nil), actions...)
+	case []interface{}:
+		out := make([]string, 0, len(actions))
+		for _, action := range actions {
+			if value, ok := action.(string); ok {
+				out = append(out, value)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func eventDataMap(data interface{}) (map[string]interface{}, error) {

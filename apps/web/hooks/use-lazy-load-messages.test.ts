@@ -11,6 +11,7 @@ const storeMock = vi.hoisted(() => ({
     isLoadingMore: false,
   },
   prepended: [] as Array<{ id: string }>,
+  bySession: [] as Array<{ id: string; author_type?: string }>,
   setMessagesMetadata: vi.fn(),
 }));
 
@@ -19,18 +20,19 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       messages: {
         metaBySession: { s1: storeMock.meta },
-        bySession: { s1: [] },
+        bySession: { s1: storeMock.bySession },
       },
     }),
   useAppStoreApi: () => ({
     getState: () => ({
       messages: {
-        bySession: { s1: [] as Array<{ id: string }> },
+        bySession: { s1: storeMock.bySession },
         metaBySession: { s1: storeMock.meta },
       },
       setMessagesMetadata: storeMock.setMessagesMetadata,
       prependMessages: (_sessionId: string, messages: Array<{ id: string }>, _meta: unknown) => {
         storeMock.prepended = [...messages, ...storeMock.prepended];
+        storeMock.bySession = [...messages, ...storeMock.bySession];
       },
     }),
   }),
@@ -43,6 +45,7 @@ beforeEach(() => {
   storeMock.setMessagesMetadata.mockReset();
   storeMock.meta = { hasMore: true, oldestCursor: "m3", isLoading: false, isLoadingMore: false };
   storeMock.prepended = [];
+  storeMock.bySession = [];
 });
 
 afterEach(() => {
@@ -52,6 +55,17 @@ afterEach(() => {
 function wireResponse(ids: string[], hasMore: boolean) {
   return {
     messages: ids.map((id) => ({ id, created_at: "2026-01-01T00:00:00.000000Z" })),
+    has_more: hasMore,
+  };
+}
+
+function wireTypedResponse(entries: Array<{ id: string; author_type?: string }>, hasMore: boolean) {
+  return {
+    messages: entries.map((entry) => ({
+      id: entry.id,
+      author_type: entry.author_type ?? "agent",
+      created_at: "2026-01-01T00:00:00.000000Z",
+    })),
     has_more: hasMore,
   };
 }
@@ -112,5 +126,103 @@ describe("useLazyLoadMessages loadMore", () => {
       await result.current.loadMore();
     });
     expect(listTaskSessionMessages).not.toHaveBeenCalled();
+  });
+});
+
+describe("useLazyLoadMessages minUserPromptsPerLoad", () => {
+  it("loads multiple pages until at least the threshold of user prompts arrives", async () => {
+    listTaskSessionMessages
+      .mockResolvedValueOnce(
+        wireTypedResponse(
+          [
+            { id: "m4", author_type: "user" },
+            { id: "m3", author_type: "agent" },
+            { id: "m2", author_type: "user" },
+          ],
+          true,
+        ),
+      )
+      .mockResolvedValueOnce(wireTypedResponse([{ id: "m1", author_type: "user" }], false));
+    const { result } = renderHook(() => useLazyLoadMessages("s1", { minUserPromptsPerLoad: 3 }));
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    // Page 1 carries only 2 user prompts (below the threshold of 3), so a
+    // second page is fetched; page 2 brings the total to 3 and the loop stops.
+    expect(listTaskSessionMessages).toHaveBeenCalledTimes(2);
+    expect(listTaskSessionMessages).toHaveBeenNthCalledWith(2, "s1", {
+      limit: 20,
+      before: "m2",
+      sort: "desc",
+    });
+    expect(storeMock.bySession.filter((m) => m.author_type === "user")).toHaveLength(3);
+  });
+
+  it("continues the accumulation loop after joining a request once it settles", async () => {
+    const { promise: pagePromise, resolve: resolvePage } = Promise.withResolvers<unknown>();
+    listTaskSessionMessages.mockReturnValueOnce(pagePromise);
+    listTaskSessionMessages.mockResolvedValueOnce(
+      wireTypedResponse([{ id: "m1", author_type: "user" }], false),
+    );
+    const { result } = renderHook(() => useLazyLoadMessages("s1", { minUserPromptsPerLoad: 3 }));
+
+    // A transcript-owned request is in flight for the current cursor; the
+    // panel's loadMore joins it.
+    storeMock.meta.isLoadingMore = true;
+    const loadPromise = result.current.loadMore();
+    // The joined flight is the session's LAST: the coordinator clears the
+    // store's flag before the join promise resolves.
+    await act(async () => {
+      storeMock.meta.isLoadingMore = false;
+      resolvePage(
+        wireTypedResponse(
+          [
+            { id: "m4", author_type: "user" },
+            { id: "m3", author_type: "agent" },
+          ],
+          true,
+        ),
+      );
+    });
+    await act(async () => {
+      await loadPromise;
+    });
+
+    // The loop continued past the joined page (page 2 fetched) instead of
+    // stopping on the stale in-flight flag.
+    expect(listTaskSessionMessages).toHaveBeenCalledTimes(2);
+    expect(listTaskSessionMessages).toHaveBeenNthCalledWith(2, "s1", {
+      limit: 20,
+      before: "m3",
+      sort: "desc",
+    });
+  });
+
+  it("stops after a zero-result page even when the threshold is unmet", async () => {
+    listTaskSessionMessages
+      .mockResolvedValueOnce(wireTypedResponse([{ id: "m1", author_type: "user" }], true))
+      .mockResolvedValueOnce(wireTypedResponse([], true));
+    const { result } = renderHook(() => useLazyLoadMessages("s1", { minUserPromptsPerLoad: 3 }));
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    expect(listTaskSessionMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("fetches a single page when no threshold is set (transcript behavior)", async () => {
+    listTaskSessionMessages.mockResolvedValueOnce(
+      wireTypedResponse([{ id: "m1", author_type: "user" }], false),
+    );
+    const { result } = renderHook(() => useLazyLoadMessages("s1"));
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    expect(listTaskSessionMessages).toHaveBeenCalledTimes(1);
   });
 });

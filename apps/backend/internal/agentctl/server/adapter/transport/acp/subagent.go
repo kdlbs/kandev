@@ -343,15 +343,20 @@ func openCodeSubagentMetadata(out map[string]any, res *SubagentTaskResult) bool 
 	return found
 }
 
-// cursorSubagentResult reads Cursor's flat `rawOutput.durationMs` into res.
-// Returns false when no Cursor-shaped field is present so it doesn't claim
-// unrelated rawOutput maps.
+// cursorSubagentResult reads Cursor's flat `rawOutput.durationMs` and
+// `rawOutput.isBackground` into res. Returns false only when neither field is
+// present so it doesn't claim unrelated rawOutput maps; a result carrying only
+// `isBackground` still marks the subagent async.
 func cursorSubagentResult(out map[string]any, res *SubagentTaskResult) bool {
-	dur, present := out["durationMs"]
-	if !present {
+	dur, durPresent := out["durationMs"]
+	background, backgroundPresent := out["isBackground"].(bool)
+	if !durPresent && !backgroundPresent {
 		return false
 	}
-	res.DurationMs = asInt64(dur)
+	if durPresent {
+		res.DurationMs = asInt64(dur)
+	}
+	res.IsAsync = background
 	return true
 }
 

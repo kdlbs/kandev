@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { Task } from "./types";
+import {
+  OfficeTopbarChromeProvider,
+  useOfficeTopbarChrome,
+} from "../../components/office-topbar-context";
 
 vi.mock("@/lib/routing/client-dynamic", () => ({
   default: () =>
@@ -29,10 +33,6 @@ vi.mock("../../components/execution-indicator", () => ({
   ExecutionIndicator: ({ status }: { status: string }) => (
     <div data-testid="execution-indicator">{status}</div>
   ),
-}));
-
-vi.mock("../../components/office-topbar-portal", () => ({
-  OfficeTopbarPortal: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
 vi.mock("@kandev/ui/label", () => ({
@@ -66,35 +66,37 @@ const baseTask: Task = {
 
 afterEach(() => cleanup());
 
+function TopbarActions() {
+  const chrome = useOfficeTopbarChrome();
+  return <>{chrome?.actions}</>;
+}
+
+function renderAdvanced(task: Task) {
+  render(
+    <OfficeTopbarChromeProvider>
+      <TaskAdvancedMode task={task} onToggleSimple={() => {}} />
+      <TopbarActions />
+    </OfficeTopbarChromeProvider>,
+  );
+}
+
 describe("TaskAdvancedMode ExecutionIndicator wiring", () => {
   // Regression: the detail page's store-seeded task must feed ExecutionIndicator
   // the raw backend status, not the normalized canonical one, so it still tells
   // SCHEDULING (live) apart from WAITING_FOR_INPUT (not live) — the same
   // distinction task-row.tsx already preserves for the board/list views.
   it("prefers rawStatus over status so a SCHEDULING task still shows Live", () => {
-    render(
-      <TaskAdvancedMode
-        task={{ ...baseTask, status: "todo", rawStatus: "SCHEDULING" } as Task}
-        onToggleSimple={() => {}}
-      />,
-    );
+    renderAdvanced({ ...baseTask, status: "todo", rawStatus: "SCHEDULING" } as Task);
     expect(screen.getByTestId("execution-indicator").textContent).toBe("SCHEDULING");
   });
 
   it("prefers rawStatus over status so a WAITING_FOR_INPUT task does not falsely show Live", () => {
-    render(
-      <TaskAdvancedMode
-        task={{ ...baseTask, status: "in_progress", rawStatus: "WAITING_FOR_INPUT" } as Task}
-        onToggleSimple={() => {}}
-      />,
-    );
+    renderAdvanced({ ...baseTask, status: "in_progress", rawStatus: "WAITING_FOR_INPUT" } as Task);
     expect(screen.getByTestId("execution-indicator").textContent).toBe("WAITING_FOR_INPUT");
   });
 
   it("falls back to status when rawStatus is absent", () => {
-    render(
-      <TaskAdvancedMode task={{ ...baseTask, status: "in_progress" }} onToggleSimple={() => {}} />,
-    );
+    renderAdvanced({ ...baseTask, status: "in_progress" });
     expect(screen.getByTestId("execution-indicator").textContent).toBe("in_progress");
   });
 });

@@ -9,7 +9,10 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/config"
 )
 
 const (
@@ -36,6 +39,18 @@ func healthTimeout(defaultMS int) time.Duration {
 		return time.Duration(defaultMS) * time.Millisecond
 	}
 	return time.Duration(n) * time.Millisecond
+}
+
+func healthTimeoutForConfig(defaultMS int, cfg *config.Config) time.Duration {
+	if raw, ok := os.LookupEnv("KANDEV_HEALTH_TIMEOUT_MS"); ok && strings.TrimSpace(raw) != "" {
+		return healthTimeout(defaultMS)
+	}
+	if configSourceIsExplicit(cfg, "launcher.healthTimeoutMs") || cfg != nil {
+		if cfg != nil && cfg.Launcher.HealthTimeoutMs > 0 {
+			return time.Duration(cfg.Launcher.HealthTimeoutMs) * time.Millisecond
+		}
+	}
+	return healthTimeout(defaultMS)
 }
 
 func waitForHealth(ctx context.Context, baseURL string, proc childState, timeout time.Duration, expectedToken string, onFailure func()) error {

@@ -70,6 +70,26 @@ func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bo
 	return true, nil
 }
 
+// runBoundedGitInspect runs a non-interactive local git inspection after
+// acquiring the lifecycle throttle. The timeout starts after admission so
+// queue wait does not consume the command's inspection budget.
+func (m *Manager) runBoundedGitInspect(ctx context.Context, repoPath string, args ...string) (string, error) {
+	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
+	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
+	defer cancel()
+	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, args...)
+	output, runErr := cmd.CombinedOutput()
+	if ctxErr := inspectCtx.Err(); ctxErr != nil {
+		return string(output), fmt.Errorf("git inspection timed out: %w", ctxErr)
+	}
+	return string(output), runErr
+}
+
 // checkoutBranchExistsAnywhere returns true when the named branch is present
 // either locally or as origin/<branch>. Used by createInTaskDir to decide
 // whether to treat req.CheckoutBranch as "fetch this existing ref" or as

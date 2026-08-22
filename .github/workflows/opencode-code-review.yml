@@ -6,7 +6,7 @@ on:
   pull_request_target:
     # `labeled` is needed so a maintainer applying `safe-to-review` to a fork
     # PR triggers a review against the current head SHA. Subsequent fork pushes
-    # do not re-use the stale label — see strip-safe-to-review below.
+    # re-use the maintainer's approval for the new head.
     types: [opened, synchronize, ready_for_review, reopened, labeled]
 
 concurrency:
@@ -239,48 +239,19 @@ jobs:
           path: .opencode-review/
           if-no-files-found: ignore
 
-  # Strip safe-to-review label on new pushes to fork PRs.
-  # Together with the `github.event.action != 'synchronize'` guard on the
-  # fork review job's label path, this gives per-commit maintainer opt-in.
-  strip-safe-to-review:
-    if: >
-      github.event_name == 'pull_request_target' &&
-      github.event.action == 'synchronize' &&
-      github.event.pull_request.head.repo.full_name != github.repository &&
-      contains(github.event.pull_request.labels.*.name, 'safe-to-review')
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    steps:
-      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            try {
-              await github.rest.issues.removeLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.pull_request.number,
-                name: 'safe-to-review',
-              });
-            } catch (error) {
-              if (error.status !== 404) throw error;
-              core.info('safe-to-review label already absent; nothing to remove.');
-            }
-
   opencode-review-fork:
     # Fork PRs only, via pull_request_target so OPENCODE_API_KEY is available.
     # Two approval paths:
     #   - OPENCODE_REVIEW_ALLOWLIST repo variable (trusted login list, all events;
     #     JSON array, e.g. ["alice","bob"])
-    #   - `safe-to-review` label (maintainer opt-in, per-commit). Explicitly
-    #     blocked on `synchronize` so a contributor push cannot re-use a stale
-    #     label — the maintainer must re-apply it after each push.
+    #   - `safe-to-review` label (maintainer opt-in, durable until removed).
+    #     It authorizes the current and subsequent fork heads.
     if: >
       vars.OPENCODE_REVIEW_ENABLED == 'true' &&
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name != github.repository &&
-      ((github.event.action != 'synchronize' && contains(github.event.pull_request.labels.*.name, 'safe-to-review')) ||
+      ((contains(github.event.pull_request.labels.*.name, 'safe-to-review')) ||
        (vars.OPENCODE_REVIEW_ALLOWLIST != '' && contains(fromJSON(vars.OPENCODE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)))
     runs-on: ubuntu-latest
     timeout-minutes: 15

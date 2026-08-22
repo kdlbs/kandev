@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
   prompts: [] as CustomPrompt[],
   finePointer: true,
+  promptEditor: vi.fn(),
 }));
 
 vi.mock("@/hooks/domains/settings/use-custom-prompts", () => ({
@@ -31,6 +32,19 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mocks.toast }),
 }));
+vi.mock("@/components/settings/settings-prompt-editor", () => ({
+  SettingsPromptEditor: (props: Record<string, unknown>) => {
+    mocks.promptEditor(props);
+    return (
+      <textarea
+        data-testid={props.testId as string}
+        value={props.value as string}
+        onChange={(event) => (props.onChange as (value: string) => void)(event.target.value)}
+        placeholder="Prompt content"
+      />
+    );
+  },
+}));
 
 vi.mock("@/lib/api", () => ({
   createPrompt: mocks.createPrompt,
@@ -42,6 +56,7 @@ const promptId = "prompt-1";
 const promptName = "Review";
 const promptContent = "Review this change";
 const promptRowTestId = "prompt-list-item";
+const promptContentInputTestId = "prompt-content-input";
 const promptDeleteButtonTestId = "prompt-delete-button";
 const promptDeletePopoverTestId = "prompt-delete-confirm-popover";
 const promptDeleteInlineTestId = "prompt-delete-inline-confirmation";
@@ -91,7 +106,7 @@ describe("PromptsSettings deletion confirmation", () => {
 
     const row = screen.getByTestId(promptRowTestId);
     fireEvent.click(within(row).getByTestId("prompt-edit-button"));
-    fireEvent.change(within(row).getByTestId("prompt-content-input"), {
+    fireEvent.change(within(row).getByTestId(promptContentInputTestId), {
       target: { value: "Keep this draft" },
     });
     fireEvent.click(within(row).getByTestId(promptDeleteButtonTestId));
@@ -101,7 +116,7 @@ describe("PromptsSettings deletion confirmation", () => {
     fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
 
     expect(mocks.deletePrompt).not.toHaveBeenCalled();
-    expect((within(row).getByTestId("prompt-content-input") as HTMLTextAreaElement).value).toBe(
+    expect((within(row).getByTestId(promptContentInputTestId) as HTMLTextAreaElement).value).toBe(
       "Keep this draft",
     );
   });
@@ -130,7 +145,7 @@ describe("PromptsSettings deletion confirmation", () => {
 
     const row = screen.getByTestId(promptRowTestId);
     fireEvent.click(within(row).getByTestId("prompt-edit-button"));
-    fireEvent.change(within(row).getByTestId("prompt-content-input"), {
+    fireEvent.change(within(row).getByTestId(promptContentInputTestId), {
       target: { value: "Save this draft" },
     });
     fireEvent.click(within(row).getByTestId(promptDeleteButtonTestId));
@@ -263,9 +278,15 @@ describe("PromptsSettings coordinated creation", () => {
     fireEvent.change(screen.getByPlaceholderText("Prompt name"), {
       target: { value: promptName },
     });
-    fireEvent.change(screen.getByPlaceholderText("Prompt content"), {
+    fireEvent.change(screen.getByTestId(promptContentInputTestId), {
       target: { value: promptContent },
     });
+    expect(mocks.promptEditor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptReferences: true,
+        testId: promptContentInputTestId,
+      }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() =>

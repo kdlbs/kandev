@@ -1,10 +1,21 @@
 ---
-status: draft
+status: archived
 created: 2026-05-10
 owner: cfl
 ---
 
 # Office Provider Routing
+
+> Superseded by [Dynamic Agent Routing](../agents/dynamic-agent-routing.md).
+> Office now selects a concrete or dynamic execution agent profile. Provider
+> mappings, rules, health, and fallback belong to the reusable dynamic profile,
+> not to Office workspace settings. This file is retained as the historical
+> Office-only contract until its implementation is migrated.
+>
+> Upgrade compatibility retains the legacy Office routing tables and rows but
+> no longer displays or reads them for launch decisions. They are not converted
+> automatically. Users configure concrete or dynamic execution profiles for new
+> behavior.
 
 Provider routing lets a workspace map abstract model tiers (Frontier / Balanced / Economy) to concrete execution profiles, configure an ordered provider fallback chain, and degrade routes automatically when they hit auth / quota / rate / outage limits. An execution profile is a complete launch configuration, not a model-only overlay. This spec describes the routing contract: Office identity preservation, execution-profile selection, fallback, provider health, degraded-state lifecycle, and wake-reason tier policy.
 

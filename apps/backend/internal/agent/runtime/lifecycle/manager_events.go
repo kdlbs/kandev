@@ -113,7 +113,7 @@ func (m *Manager) handleCompleteEventMarkState(execution *AgentExecution, event 
 		// shows no red error banner. MarkCompleted applies the same guard, but
 		// routing here keeps the misleading "marking as failed" WARN out of logs.
 		if m.IsShuttingDown() {
-			_ = m.markStoppedDuringShutdown(execution, 1, errorMsg)
+			_ = m.markStoppedDuringShutdown(execution, 1, errorMsg, event.TurnID)
 			return
 		}
 		m.logger.Warn("error completion received, marking execution as failed",
@@ -125,7 +125,7 @@ func (m *Manager) handleCompleteEventMarkState(execution *AgentExecution, event 
 			zap.Any("event_data", event.Data),
 			zap.String("agent_command", execution.AgentCommand),
 			zap.String("acp_session_id", execution.ACPSessionID))
-		if err := m.MarkCompleted(execution.ID, 1, errorMsg); err != nil {
+		if err := m.markCompletedWithTurnID(execution.ID, 1, errorMsg, event.TurnID); err != nil {
 			m.logger.Error("failed to mark execution as failed after error completion",
 				zap.String("execution_id", execution.ID),
 				zap.Error(err))
@@ -225,11 +225,11 @@ func (m *Manager) claimPromptCompletion(
 		if current.Status != v1.AgentStatusReady {
 			current.firstActivityOnce.Do(func() {
 				claim.publishRunning = true
-				claim.runningPayload = newAgentEventPayload(current)
+				claim.runningPayload = newAgentEventPayloadWithTurnID(current, event.TurnID)
 			})
 		}
 		current.Status = v1.AgentStatusReady
-		claim.readyPayload = newAgentEventPayload(current)
+		claim.readyPayload = newAgentEventPayloadWithTurnID(current, event.TurnID)
 	})
 	if err == nil && claimed {
 		return claim, true

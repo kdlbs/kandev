@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 )
 
 func TestRenderSystemdUnitExecsNativeKandev(t *testing.T) {
@@ -25,6 +27,29 @@ func TestRenderSystemdUnitExecsNativeKandev(t *testing.T) {
 	}
 	if !strings.Contains(unit, "Environment=KANDEV_SERVER_PORT=1234") {
 		t.Fatalf("unit missing port env:\n%s", unit)
+	}
+}
+
+func TestRenderSystemdUnitPinsSelectedConfigWithoutOverridingYAML(t *testing.T) {
+	unit := renderSystemdUnit(nativeServiceUnitInput{
+		Executable:        "/opt/kandev/bin/kandev",
+		HomeDir:           "/srv/kandev",
+		LogDir:            "/srv/kandev/logs",
+		ConfigFile:        "/etc/kandev/config.yaml",
+		HomeDirFromConfig: true,
+		ConfigHomeFile:    true,
+	})
+	if !strings.Contains(unit, "Environment=KANDEV_INTERNAL_CONFIG_FILE=/etc/kandev/config.yaml") {
+		t.Fatalf("unit missing selected config handoff:\n%s", unit)
+	}
+	if !strings.Contains(unit, "Environment="+commonconfig.InternalConfigHomeFileEnv+"=1") {
+		t.Fatalf("unit missing home-config handoff:\n%s", unit)
+	}
+	if strings.Contains(unit, "Environment=KANDEV_HOME_DIR=") {
+		t.Fatalf("unit copied YAML homeDir into public environment:\n%s", unit)
+	}
+	if strings.Contains(unit, "Environment=KANDEV_LOG_LEVEL=info") {
+		t.Fatalf("unit replaced YAML logging.level with the built-in default:\n%s", unit)
 	}
 }
 

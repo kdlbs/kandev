@@ -9,11 +9,13 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconEyeCode,
+  IconHourglass,
   IconInfoCircle,
   IconStar,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
+import { formatPromptDuration, messageTurnDurationSeconds } from "@/lib/prompt-history";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useAppStore } from "@/components/state-provider";
 import type { Message, Turn } from "@/lib/types/http";
@@ -392,15 +394,26 @@ export function MessageActions(props: MessageActionsProps) {
     isFavorite,
     onToggleFavorite,
   } = resolveMessageActionsProps(props);
+  const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
   const { turn, usageMultiplier } = useMessageTurnAndUsage(message);
+  const usesTouchDrawer = useTouchDrawer();
+  const durationSeconds = messageTurnDurationSeconds(message, turn);
   const sessionConfigText = formatMessageSessionConfig(message.metadata, turn?.metadata);
+  const actionRowVisibility = usesTouchDrawer
+    ? "opacity-100"
+    : "opacity-100 sm:opacity-0 sm:group-hover:opacity-100";
   const handleCopy = async () => {
     await copy(message.content);
   };
 
   return (
-    <div className="flex items-center gap-2 mt-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+    <div
+      className={cn(
+        "flex items-center gap-2 mt-2 focus-within:opacity-100 transition-opacity",
+        actionRowVisibility,
+      )}
+    >
       {showCopy && <CopyButton copied={copied} onCopy={handleCopy} />}
       {showRawToggle && onToggleRaw && (
         <RawToggleButton
@@ -425,6 +438,19 @@ export function MessageActions(props: MessageActionsProps) {
         showTimestamp={showTimestamp}
         createdAt={message.created_at}
       />
+      {durationSeconds !== null && (
+        <span
+          data-testid="message-turn-duration"
+          className="inline-flex items-center gap-1 whitespace-nowrap shrink-0 text-[10px] text-muted-foreground/60 font-mono"
+        >
+          <IconHourglass className="h-3 w-3 shrink-0" aria-hidden="true" />
+          {formatPromptDuration(durationSeconds, {
+            s: t("task:durationUnitSeconds"),
+            m: t("task:durationUnitMinutes"),
+            h: t("task:durationUnitHours"),
+          })}
+        </span>
+      )}
     </div>
   );
 }

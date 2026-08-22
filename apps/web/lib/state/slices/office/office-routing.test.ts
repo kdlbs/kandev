@@ -98,7 +98,7 @@ describe("office routing store actions", () => {
       {
         agent_id: "a-1",
         agent_name: "CEO",
-        tier_source: "inherit",
+        tier_source: "workspace",
         effective_tier: "balanced",
         fallback_chain: [],
         missing: [],

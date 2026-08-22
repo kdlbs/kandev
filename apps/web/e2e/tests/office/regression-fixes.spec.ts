@@ -114,19 +114,19 @@ test.describe("Office regression net", () => {
     apiClient,
     officeSeed,
   }) => {
-    // The topbar disappeared once because office-topbar.tsx's
-    // isDetailPage regex still matched /office/issues/ after the
-    // issues→tasks rename. Pin the breadcrumb visibility on the
-    // new route shape — without it, the topbar is gone.
+    // The topbar disappeared once because the office shell decided which pages
+    // were detail pages with a route regex that still matched /office/issues/
+    // after the issues->tasks rename. The regex is gone (detail pages now
+    // declare their chrome through useOfficeTopbar), but the outcome it broke
+    // is still worth pinning on the new route shape.
     const task = await apiClient.createTask(officeSeed.workspaceId, "Topbar visible task", {
       workflow_id: officeSeed.workflowId,
     });
 
     await testPage.goto(`/office/tasks/${task.id}`);
 
-    // Breadcrumb is rendered into the office topbar slot — it has a
-    // <nav aria-label="breadcrumb"> wrapper that disappears when the
-    // topbar bug regresses.
+    // The shell's shared breadcrumb has a <nav aria-label="breadcrumb">
+    // wrapper, and that is what disappears when the topbar bug regresses.
     await expect(testPage.getByRole("navigation", { name: /breadcrumb/i })).toBeVisible({
       timeout: 10_000,
     });

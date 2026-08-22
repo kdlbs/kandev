@@ -14,6 +14,14 @@ import (
 
 const headFile = "HEAD"
 
+type defaultBranchSource uint8
+
+const (
+	defaultBranchSourceRemote defaultBranchSource = iota + 1
+	defaultBranchSourceNamedFallback
+	defaultBranchSourceCurrentHEAD
+)
+
 // DefaultBranch returns the repository's *integration* branch — the branch
 // that work is meant to merge back into. It is intentionally NOT the current
 // HEAD: a developer who runs the dialog while checked out on a feature
@@ -32,26 +40,31 @@ const headFile = "HEAD"
 //     feature branch still produce a value — callers that care about
 //     correctness can override.
 func DefaultBranch(repoPath string) (string, error) {
+	branch, _, err := resolveDefaultBranch(repoPath)
+	return branch, err
+}
+
+func resolveDefaultBranch(repoPath string) (string, defaultBranchSource, error) {
 	safe, err := guardRepoPath(repoPath)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	gitDir, err := ResolveGitDir(safe)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	commonDir := ResolveCommonGitDir(gitDir)
 	commonDir, err = guardRepoPath(commonDir)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	if branch := readOriginHEAD(commonDir); branch != "" {
 		if branch == "master" {
 			if refExists(commonDir, "refs/remotes/origin/main") {
-				return "main", nil
+				return "main", defaultBranchSourceRemote, nil
 			}
 		}
-		return branch, nil
+		return branch, defaultBranchSourceRemote, nil
 	}
 	for _, candidate := range []struct {
 		ref    string
@@ -63,17 +76,18 @@ func DefaultBranch(repoPath string) (string, error) {
 		{"refs/heads/master", "master"},
 	} {
 		if refExists(commonDir, candidate.ref) {
-			return candidate.branch, nil
+			return candidate.branch, defaultBranchSourceNamedFallback, nil
 		}
 	}
-	return readHEADBranchFallback(gitDir)
+	branch, err := readHEADBranchFallback(gitDir)
+	return branch, defaultBranchSourceCurrentHEAD, err
 }
 
 // DefaultBranchOrEmpty returns DefaultBranch, but collapses detached HEAD's
 // literal "HEAD" sentinel to empty for callers that persist branch names.
 func DefaultBranchOrEmpty(repoPath string) (string, error) {
-	branch, err := DefaultBranch(repoPath)
-	if err != nil || branch == headFile {
+	branch, source, err := resolveDefaultBranch(repoPath)
+	if err != nil || source == defaultBranchSourceCurrentHEAD {
 		return "", err
 	}
 	return branch, nil

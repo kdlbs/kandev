@@ -575,6 +575,17 @@ describe("last seen display hydration", () => {
   });
 });
 
+describe("auto-hide empty steps preference hydration", () => {
+  it("hydrates the canonical workflow-scoped key", () => {
+    const mapped = mapUserSettingsData(
+      { workflow_ids_with_auto_hide_empty_steps: ["wf-a"] },
+      createDefaultUserSettings(),
+    );
+
+    expect(mapped.workflowIdsWithAutoHideEmptySteps).toEqual(["wf-a"]);
+  });
+});
+
 describe("prevent auto-start on open preference", () => {
   it("defaults the missing preference to false", () => {
     expect(buildCoreFields({}).preventAutoStartAgentOnOpen).toBe(false);

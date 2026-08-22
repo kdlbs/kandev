@@ -69,11 +69,11 @@ test.describe("Stale session navigation", () => {
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     // 6. Verify Task B's page shows the correct title.
-    // Use the breadcrumb link specifically — `getByText` collides with the
+    // Scope to the topbar's title control. A bare `getByText` collides with the
     // task card still visible in the sidebar list, triggering a strict-mode
     // failure ("resolved to 2 elements") under flaky conditions where both
     // surfaces happen to render the title.
-    await expect(testPage.getByRole("link", { name: "Sessionless Task" })).toBeVisible({
+    await expect(testPage.getByTestId("task-topbar-title")).toHaveText("Sessionless Task", {
       timeout: 10_000,
     });
 

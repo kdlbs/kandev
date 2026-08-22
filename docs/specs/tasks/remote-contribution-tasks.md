@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-08-04
-updated: 2026-08-13
+updated: 2026-08-19
 owner: product
 ---
 
@@ -56,6 +56,13 @@ Kandev must preserve both versions and ask for user intent before one version re
 - The Changes panel uses provider evidence only from a pull request whose repository and normalized
   head branch match the live checkout. Historical pull requests remain available in Review, but they
   do not affect Changes after the checkout moves to another branch.
+- Associating a pull request with an ordinary task also reconciles the comparison base when the task
+  is attached to the provider-reported head repository but the pull request targets another
+  repository. Kandev stores that repository-qualified target on the exact matching task attachment,
+  materializes a comparison-only remote, and keeps `origin` and push routing unchanged.
+- A provider sync may update that target branch only for the same associated change. Another pull
+  request, a repository-only match, or a historical sibling branch cannot replace it. Detaching the
+  source association clears only its own target; merge and close retain the base comparison.
 - Provider commit history is optional enrichment for the Changes panel. Kandev shares identical
   provider reads across Changes consumers and retries one failed read. If the retry fails, the panel
   keeps the checkout history and does not show a provider-history warning.
@@ -130,6 +137,36 @@ title/body, or other user-authored remote text.
 The JSON field is versioned so later providers or collaboration attributes can be added without a
 database migration. Unknown versions fail closed during materialization and credential authorization.
 
+An ordinary repository task MAY also gain `metadata["comparison_target"]` after a matching pull
+request is associated:
+
+```json
+{
+  "version": 1,
+  "provider": "github",
+  "kind": "pull_request",
+  "number": 1154,
+  "head_branch": "fix/cursor-cost",
+  "target_branch": "main",
+  "head_repository": {
+    "host": "github.com",
+    "path": "contributor/widget",
+    "provider_id": "provider-head-id",
+    "remote_url": "https://github.com/contributor/widget.git"
+  },
+  "target_repository": {
+    "host": "github.com",
+    "path": "upstream/widget",
+    "provider_id": "provider-target-id",
+    "remote_url": "https://github.com/upstream/widget.git"
+  }
+}
+```
+
+The binding is credential-free and server-authored from provider data. It is stored only when the
+head identity and normalized branch resolve to exactly one task-repository attachment. See
+[ADR-2026-08-19-repository-qualified-comparison-targets](../../decisions/2026-08-19-repository-qualified-comparison-targets.md).
+
 ## API surface
 
 The `create_task_kandev` input schema keeps the same property set. The existing field is documented as:
@@ -189,6 +226,8 @@ recovery branch name after a successful reset. Neither action appears in the age
 | Effective Git credentials cannot dry-run a push to the source branch                         | The task remains durable, but the session does not start and exposes an actionable credential/collaboration error.                       |
 | Contribution binding is missing, malformed, or an unknown version                            | Runtime preparation and managed source-scope issuance fail closed.                                                                       |
 | Agent attempts a normal create-PR action                                                     | Kandev reuses the existing association and does not open a second remote change.                                                         |
+| Associated PR head does not match exactly one task attachment                                | The PR remains linked for Review, but no comparison target changes; Kandev logs the scoped mismatch.                                    |
+| Cross-repository comparison remote collides or cannot fetch                                  | Working-tree status remains available, comparison-derived data is explicitly unavailable, and Kandev never falls back to same-named `origin`. |
 
 ## Persistence guarantees
 
@@ -204,6 +243,9 @@ reset, rebase, merge, or replace either version without a direct user action.
 
 A recovery branch created by **Use PR version** remains in the task repository across backend
 restarts. Kandev does not persist confirmation dialogs, provider snapshots, or replacement leases.
+
+Repository-qualified comparison targets survive backend and executor restarts. Their deterministic
+remote/ref is reconstructed without changing `origin`, the checkout upstream, or push routing.
 
 ## Scenarios
 
@@ -327,6 +369,16 @@ GIVEN an ordinary GitHub, GitLab, or provider-neutral repository URL
 WHEN it is passed as `repository_url`
 THEN Kandev follows the existing repository task path without a contribution binding or source scope
 
+### Reconcile an ordinary fork after PR creation
+
+GIVEN an ordinary task attached to a contributor fork whose `main` is stale
+AND the checked-out feature branch opens a PR against `upstream/widget:main`
+WHEN Kandev associates the provider PR with the task
+THEN only the attachment whose repository and checkout branch match the PR head stores the upstream
+comparison target
+AND Changes, commits, cumulative diff, Review, and task-card totals use the upstream ref without
+rewriting `origin` or the push destination
+
 ### Keep the MCP catalog compact
 
 GIVEN the external MCP catalog before and after this feature
@@ -348,3 +400,4 @@ mentions pull and merge request URLs
   evidence. The backend replacement operations remain provider-neutral.
 - Copying remote titles, bodies, comments, or diffs into trusted prompts.
 - Guaranteeing write access after credentials or provider permissions change during a running session.
+- Expanding task Git credentials so an otherwise unreadable private target can be fetched.

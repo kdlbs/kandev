@@ -10,16 +10,15 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
-// TestMigrate_PriorityRebuildPreservesExternalIDUniqueIndex is a regression
+// TestMigrate_PriorityRebuildPreservesRequiredIndexes is a regression
 // test: the priority-to-TEXT rebuild (docs: taskPriorityMigrationStatements)
 // recreates the tasks table via DROP TABLE + CREATE TABLE, which silently
-// drops every index on the old table — uniq_tasks_external_id included —
-// unless it is explicitly relisted among the indexes the rebuild recreates.
-// Without that, task create-idempotency (external-id-idempotency spec) loses
-// its uniqueness guarantee on any install that still needs this historical
-// rebuild, with no compile-time or single-connection-serial-insert signal
-// that anything is wrong.
-func TestMigrate_PriorityRebuildPreservesExternalIDUniqueIndex(t *testing.T) {
+// drops every index on the old table — including the project cost lookup and
+// external-id uniqueness indexes — unless each is explicitly relisted among
+// the indexes the rebuild recreates. Without that, task create-idempotency
+// loses its uniqueness guarantee and project budget queries lose their index
+// on any install that still needs this historical rebuild.
+func TestMigrate_PriorityRebuildPreservesRequiredIndexes(t *testing.T) {
 	dbPath := t.TempDir() + "/test.db?_journal_mode=WAL"
 	db, err := sqlx.Open("sqlite3", dbPath)
 	if err != nil {
@@ -55,6 +54,9 @@ func TestMigrate_PriorityRebuildPreservesExternalIDUniqueIndex(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("seed legacy schema: %v", err)
 	}
+	if _, err := db.Exec(`CREATE INDEX idx_tasks_project_id ON tasks(project_id)`); err != nil {
+		t.Fatalf("seed project_id index: %v", err)
+	}
 
 	if _, err := sqlite.NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("init office repo (run migrations): %v", err)
@@ -65,6 +67,11 @@ func TestMigrate_PriorityRebuildPreservesExternalIDUniqueIndex(t *testing.T) {
 		SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'uniq_tasks_external_id'
 	`); err != nil {
 		t.Fatalf("uniq_tasks_external_id index missing after priority rebuild: %v", err)
+	}
+	if err := db.Get(&indexName, `
+		SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_tasks_project_id'
+	`); err != nil {
+		t.Fatalf("idx_tasks_project_id index missing after priority rebuild: %v", err)
 	}
 
 	now := time.Now().UTC()

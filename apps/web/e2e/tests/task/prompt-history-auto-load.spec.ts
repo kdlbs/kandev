@@ -55,15 +55,28 @@ kandevTest.describe("Prompt history auto-load", () => {
       await expect(panel.getByTestId("prompt-history-number-0")).toHaveText("#121");
       await expect(panel.getByText(SECOND_PROMPT_MARKER)).toHaveCount(0);
 
-      // Scroll the panel to the bottom: the sentinel fires an older-page
-      // request (held), the loading row shows while isLoadingMore is true, and
-      // the marker is still absent.
-      await panel.evaluate((el) => {
+      // Baseline the scroll layout BEFORE the sentinel fires: scrollTop below
+      // triggers the held older-page request, and an in-flow loading row would
+      // already have grown scrollHeight by the time the indicator is visible.
+      const scroller = panel.getByTestId("prompt-history-scroll");
+      const scrollHeightBefore = await scroller.evaluate((el) => el.scrollHeight);
+      const scrollableBefore = await scroller.evaluate((el) => el.scrollHeight > el.clientHeight);
+      // The seeded history (100 initial rows in a 900x900 viewport) must
+      // overflow the panel; otherwise the floating assertions below would
+      // silently skip instead of proving the no-reflow contract.
+      expect(scrollableBefore).toBe(true);
+      await scroller.evaluate((el) => {
         el.scrollTop = el.scrollHeight;
       });
       await expect(panel.getByTestId("prompt-history-loading-older")).toBeVisible({
         timeout: 10_000,
       });
+      // The panel content scrolls, so the loading message floats at the panel
+      // bottom, out of the content flow: its presence must not change the
+      // scrollable height (the flicker regression - an in-flow row would grow
+      // scrollHeight).
+      expect(await scroller.evaluate((el) => el.scrollHeight)).toBe(scrollHeightBefore);
+      await expect(panel.getByTestId("prompt-history-loading-older")).toHaveClass(/absolute/);
       await expect(panel.getByText(SECOND_PROMPT_MARKER)).toHaveCount(0);
       expect(heldOlderRequests.length).toBeGreaterThanOrEqual(1);
 

@@ -115,6 +115,80 @@ func TestListStepParticipants_OrderedByRoleAndPosition(t *testing.T) {
 	}
 }
 
+func TestListParticipantsForTaskAnyStep_ReturnsPerTaskRowsAcrossSteps(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	review := newPhase2TestStep(t, repo, "Review")
+	approval := newPhase2TestStep(t, repo, "Approval")
+
+	mustUpsert := func(stepID, taskID string, role models.ParticipantRole, profile string) {
+		t.Helper()
+		if err := repo.UpsertStepParticipant(ctx, &models.WorkflowStepParticipant{
+			StepID: stepID, TaskID: taskID, Role: role, AgentProfileID: profile,
+		}); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+	mustUpsert(review.ID, "task-1", models.ParticipantRoleReviewer, "rev-A")
+	mustUpsert(approval.ID, "task-1", models.ParticipantRoleApprover, "app-A")
+	mustUpsert(review.ID, "", models.ParticipantRoleReviewer, "rev-template") // template row, not per-task
+	mustUpsert(review.ID, "task-2", models.ParticipantRoleReviewer, "rev-B")  // different task
+
+	got, err := repo.ListParticipantsForTaskAnyStep(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 per-task rows across both steps, got %d: %+v", len(got), got)
+	}
+	steps := map[string]bool{}
+	for _, p := range got {
+		if p.TaskID != "task-1" {
+			t.Fatalf("unexpected task_id in result: %+v", p)
+		}
+		steps[p.StepID] = true
+	}
+	if !steps[review.ID] || !steps[approval.ID] {
+		t.Fatalf("expected rows from both review and approval steps, got %+v", got)
+	}
+}
+
+func TestListParticipantsForTaskAnyStep_RejectsEmptyTaskID(t *testing.T) {
+	repo := setupTestRepo(t)
+	if _, err := repo.ListParticipantsForTaskAnyStep(context.Background(), ""); err == nil {
+		t.Fatal("expected error for empty task_id")
+	}
+}
+
+func TestListParticipantsForTaskWorkflow_ScopesRowsToActiveWorkflow(t *testing.T) {
+	repo, db := setupTestRepoWithDB(t)
+	ctx := context.Background()
+	if _, err := db.Exec(`INSERT INTO workflows (id, workspace_id, name, created_at, updated_at)
+		VALUES ('wf-other', '', 'Other', datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("insert second workflow: %v", err)
+	}
+	review := newPhase2TestStep(t, repo, "Review")
+	other := &models.WorkflowStep{WorkflowID: "wf-other", Name: "Other review", Position: 0}
+	if err := repo.CreateStep(ctx, other); err != nil {
+		t.Fatalf("create other step: %v", err)
+	}
+	for _, p := range []*models.WorkflowStepParticipant{
+		{StepID: review.ID, TaskID: "task-1", Role: models.ParticipantRoleReviewer, AgentProfileID: "active", DecisionRequired: true},
+		{StepID: other.ID, TaskID: "task-1", Role: models.ParticipantRoleReviewer, AgentProfileID: "stale", DecisionRequired: true},
+	} {
+		if err := repo.UpsertStepParticipant(ctx, p); err != nil {
+			t.Fatalf("upsert participant: %v", err)
+		}
+	}
+	got, err := repo.ListParticipantsForTaskWorkflow(ctx, "task-1", "wf-test")
+	if err != nil {
+		t.Fatalf("list scoped participants: %v", err)
+	}
+	if len(got) != 1 || got[0].AgentProfileID != "active" {
+		t.Fatalf("got scoped participants %+v, want only active row", got)
+	}
+}
+
 func TestDeleteStepParticipant_RemovesRow(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
@@ -316,6 +390,116 @@ func TestRecordStepDecision_SupersedesPriorByDeciderRole(t *testing.T) {
 	}
 	if active[0].Decision != "approved" {
 		t.Fatalf("active decision should be the latest 'approved', got %q", active[0].Decision)
+	}
+}
+
+// TestIsDecisionActiveDeciderViolation_MatchesSQLiteConstraintMessage forces
+// the exact constraint violation decisionActiveDeciderIndexName exists to
+// catch — a second active row for the same (task, step, decider, role) —
+// by inserting it directly, bypassing RecordStepDecision's own supersede
+// step (which would otherwise correctly find and supersede the first row,
+// never reaching the index). This is what a writer that lost the AC-27/29
+// race produces, and confirms the SQLite branch of the classifier
+// RecordStepDecision's retry loop depends on actually recognizes it.
+func TestIsDecisionActiveDeciderViolation_MatchesSQLiteConstraintMessage(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	step := newPhase2TestStep(t, repo, "Review")
+
+	first := &models.WorkflowStepDecision{
+		TaskID: "t-race-classify", StepID: step.ID, ParticipantID: "p1",
+		Decision: "approved", DeciderType: "agent", DeciderID: "alice", Role: "reviewer",
+	}
+	if err := repo.RecordStepDecision(ctx, first); err != nil {
+		t.Fatalf("record first: %v", err)
+	}
+
+	_, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO workflow_step_decisions
+			(id, task_id, step_id, participant_id, decision, decided_at, decider_type, decider_id, role)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), "manual-conflict-id", "t-race-classify", step.ID, "p1", "approved", time.Now().UTC(), "agent", "alice", "reviewer")
+	if !isDecisionActiveDeciderViolation(err) {
+		t.Fatalf("expected isDecisionActiveDeciderViolation to recognize this constraint violation, got err=%v", err)
+	}
+}
+
+// TestInitPhase2Schema_DedupesPreExistingDuplicateActiveDecisionsBeforeUniqueIndex
+// reproduces an existing install that hit the pre-fix AC-27/29 concurrent
+// double-insert race (commit 73226d29b): two active rows already share the
+// same (task_id, step_id, decider_id, role) identity by the time the new
+// uniq_workflow_step_decisions_active_decider index is introduced. Without
+// dedupeActiveStepDecisionsBeforeUniqueIndex running first,
+// CREATE UNIQUE INDEX fails outright and aborts backend startup. This drops
+// the index the initial setupTestRepo call already created, reinserts the
+// duplicate-row scenario directly (bypassing RecordStepDecision's own
+// supersede step, matching the sibling classifier test above), and reruns
+// initPhase2Schema to prove it is safe to run again against a database that
+// already has the conflicting rows.
+func TestInitPhase2Schema_DedupesPreExistingDuplicateActiveDecisionsBeforeUniqueIndex(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	step := newPhase2TestStep(t, repo, "Review")
+
+	if _, err := repo.db.Exec(`DROP INDEX IF EXISTS ` + decisionActiveDeciderIndexName); err != nil {
+		t.Fatalf("drop unique index to simulate a pre-fix install: %v", err)
+	}
+
+	older := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	newer := time.Now().UTC().Truncate(time.Millisecond)
+	insertActive := func(id, taskID, deciderID, role string, decidedAt time.Time) {
+		t.Helper()
+		if _, err := repo.db.Exec(repo.db.Rebind(`
+			INSERT INTO workflow_step_decisions
+				(id, task_id, step_id, participant_id, decision, decided_at, decider_type, decider_id, role)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`), id, taskID, step.ID, "p1", "approved", decidedAt, "agent", deciderID, role); err != nil {
+			t.Fatalf("insert duplicate active decision %s: %v", id, err)
+		}
+	}
+	// Duplicate group: same (task_id, step_id, decider_id, role) identity,
+	// both active (superseded_at NULL) — the exact shape the pre-fix race left
+	// behind.
+	insertActive("dup-older", "t-dedupe", "alice", "reviewer", older)
+	insertActive("dup-newer", "t-dedupe", "alice", "reviewer", newer)
+	// A distinct decider's active row must survive untouched.
+	insertActive("solo-active", "t-dedupe", "bob", "reviewer", newer)
+
+	if err := repo.initPhase2Schema(); err != nil {
+		t.Fatalf("initPhase2Schema did not tolerate pre-existing duplicate active decisions: %v", err)
+	}
+
+	active, err := repo.ListActiveTaskDecisions(ctx, "t-dedupe")
+	if err != nil {
+		t.Fatalf("list active: %v", err)
+	}
+	if len(active) != 2 {
+		t.Fatalf("expected 2 active decisions after dedupe (1 per decider), got %d: %+v", len(active), active)
+	}
+	byID := map[string]*models.WorkflowStepDecision{}
+	for _, d := range active {
+		byID[d.ID] = d
+	}
+	if byID["dup-newer"] == nil {
+		t.Fatalf("expected the newest duplicate (dup-newer) to remain active, got %+v", active)
+	}
+	if byID["solo-active"] == nil {
+		t.Fatalf("expected the unrelated decider's active row (solo-active) to remain untouched, got %+v", active)
+	}
+	if byID["dup-older"] != nil {
+		t.Fatalf("expected the older duplicate (dup-older) to be superseded, but it is still active")
+	}
+
+	// The index must now genuinely be enforcing uniqueness again: a fresh
+	// conflicting insert should fail the same way it would on a database that
+	// never had duplicates.
+	_, err = repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO workflow_step_decisions
+			(id, task_id, step_id, participant_id, decision, decided_at, decider_type, decider_id, role)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), "post-dedupe-conflict", "t-dedupe", step.ID, "p1", "approved", time.Now().UTC(), "agent", "alice", "reviewer")
+	if !isDecisionActiveDeciderViolation(err) {
+		t.Fatalf("expected the recreated unique index to reject a new conflicting active row, got err=%v", err)
 	}
 }
 

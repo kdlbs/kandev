@@ -42,6 +42,13 @@ type AgentEventData struct {
 	FailureDetails     string                 `json:"failure_details,omitempty"`
 	ProviderError      *streams.ProviderError `json:"provider_error,omitempty"`
 	PromptGeneration   uint64                 `json:"prompt_generation,omitempty"`
+	// DynamicRouteAttempt marks failures and stream evidence that belong to a
+	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
+	// explicitly known to contain no output or effects.
+	DynamicRouteAttempt bool `json:"dynamic_route_attempt,omitempty"`
+	EvidenceKnown       bool `json:"evidence_known,omitempty"`
+	OutputObserved      bool `json:"output_observed,omitempty"`
+	EffectObserved      bool `json:"effect_observed,omitempty"`
 }
 
 // ACPSessionEventData contains data from ACP session events
@@ -57,6 +64,7 @@ type PermissionRequestData struct {
 	TaskID        string                   `json:"task_id"`
 	TaskSessionID string                   `json:"session_id"`
 	AgentID       string                   `json:"agent_id"`
+	RequestID     string                   `json:"request_id"`
 	PendingID     string                   `json:"pending_id"`
 	ToolCallID    string                   `json:"tool_call_id"`
 	Title         string                   `json:"title"`

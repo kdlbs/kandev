@@ -42,7 +42,7 @@ export const defaultOfficeState: OfficeSliceState = {
     },
     meta: null,
     isLoading: false,
-    refetchTrigger: null,
+    refetchTriggers: {},
     routing: {
       byWorkspace: {},
       knownProviders: [],
@@ -51,6 +51,7 @@ export const defaultOfficeState: OfficeSliceState = {
     providerHealth: { byWorkspace: {} },
     runAttempts: { byRunId: {} },
     agentRouting: { byAgentId: {} },
+    taskQuorum: { byTaskId: {} },
   },
 };
 
@@ -272,7 +273,8 @@ function createMiscActions(set: SetFn) {
       }),
     setOfficeRefetchTrigger: (type: string) =>
       set((draft) => {
-        draft.office.refetchTrigger = { type, timestamp: Date.now() };
+        const prev = draft.office.refetchTriggers[type] ?? 0;
+        draft.office.refetchTriggers[type] = prev + 1;
       }),
   };
 }
@@ -344,6 +346,13 @@ function createRoutingActions(set: SetFn) {
     ) =>
       set((draft) => {
         draft.office.agentRouting.byAgentId[agentId] = data;
+      }),
+    setTaskQuorum: (
+      taskId: string,
+      quorum: OfficeSlice["office"]["taskQuorum"]["byTaskId"][string],
+    ) =>
+      set((draft) => {
+        draft.office.taskQuorum.byTaskId[taskId] = quorum;
       }),
   };
 }

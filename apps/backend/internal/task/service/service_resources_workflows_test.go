@@ -121,6 +121,47 @@ func TestStandaloneTaskEventPublishers(t *testing.T) {
 	}
 }
 
+type recordingTaskStateActivityLogger struct {
+	called          bool
+	taskID          string
+	old             v1.TaskState
+	new             v1.TaskState
+	publishedBefore int
+	eventBus        *MockEventBus
+}
+
+func (l *recordingTaskStateActivityLogger) LogTaskStateChange(
+	_ context.Context, task *models.Task, oldState v1.TaskState,
+) {
+	l.called = true
+	l.taskID = task.ID
+	l.old = oldState
+	l.new = task.State
+	if l.eventBus != nil {
+		l.publishedBefore = len(l.eventBus.GetPublishedEvents())
+	}
+}
+
+func TestTaskStateActivityIsLoggedBeforeStateEvent(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	activity := &recordingTaskStateActivityLogger{eventBus: eventBus}
+	svc.SetTaskStateActivityLogger(activity)
+
+	svc.PublishTaskStateChanged(context.Background(), &models.Task{
+		ID: "task-state-activity", WorkspaceID: "ws-1", State: v1.TaskStateCompleted,
+	}, v1.TaskStateInProgress)
+
+	if !activity.called || activity.taskID != "task-state-activity" {
+		t.Fatalf("activity logger call = %+v, want task-state-activity", activity)
+	}
+	if activity.old != v1.TaskStateInProgress || activity.new != v1.TaskStateCompleted {
+		t.Fatalf("activity transition = %q -> %q", activity.old, activity.new)
+	}
+	if activity.publishedBefore != 0 {
+		t.Fatalf("activity logger observed %d published events, want 0", activity.publishedBefore)
+	}
+}
+
 func TestPublishAfterTaskEventsRunsCallback(t *testing.T) {
 	svc, _, _ := createTestService(t)
 	ctx := context.Background()

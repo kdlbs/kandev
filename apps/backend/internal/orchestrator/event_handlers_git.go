@@ -104,8 +104,9 @@ func (c *gitSnapshotCache) forget(sessionID string) {
 
 func gitStatusHash(s *lifecycle.GitStatusData) string {
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%d|%d|%d|%d",
-		s.Branch, s.RemoteBranch, s.HeadCommit, s.BaseCommit,
+	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%d|%d",
+		s.RepositoryName, s.Branch, s.RemoteBranch, s.HeadCommit, s.BaseCommit,
+		s.ComparisonTarget, s.ComparisonStatus, s.ComparisonErrorCode,
 		s.Ahead, s.Behind, s.BranchAdditions, s.BranchDeletions)
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -198,14 +199,18 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 		Behind:       st.Behind,
 		Files:        nil, // intentional: badge only needs totals
 		Metadata: map[string]interface{}{
-			"branch_additions": st.BranchAdditions,
-			"branch_deletions": st.BranchDeletions,
-			"modified":         st.Modified,
-			"added":            st.Added,
-			"deleted":          st.Deleted,
-			"untracked":        st.Untracked,
-			"renamed":          st.Renamed,
-			"timestamp":        data.Timestamp,
+			"repository_name":       st.RepositoryName,
+			"branch_additions":      st.BranchAdditions,
+			"branch_deletions":      st.BranchDeletions,
+			"comparison_target":     st.ComparisonTarget,
+			"comparison_status":     st.ComparisonStatus,
+			"comparison_error_code": st.ComparisonErrorCode,
+			"modified":              st.Modified,
+			"added":                 st.Added,
+			"deleted":               st.Deleted,
+			"untracked":             st.Untracked,
+			"renamed":               st.Renamed,
+			"timestamp":             data.Timestamp,
 		},
 	}
 	if err := s.repo.UpsertLatestLiveGitSnapshot(ctx, snapshot); err != nil {
@@ -665,6 +670,7 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 			ctx,
 			data.TaskID,
 			data.TaskSessionID,
+			data.RequestID,
 			data.PendingID,
 			data.ToolCallID,
 			data.Title,
@@ -711,8 +717,10 @@ func (s *Service) failAutomationRunOnPermission(ctx context.Context, data watche
 
 	// Use rejected=true so the backend persists "rejected" status. cancelled is
 	// also true here because the session is going to be marked failed anyway.
-	optionID := pickRejectOption(data.Options)
-	if err := s.RespondToPermission(ctx, data.TaskSessionID, data.PendingID, optionID, true, true); err != nil {
+	if err := s.cancelAgentPermission(ctx, ResolveAgentPermissionRequest{
+		TaskID: data.TaskID, SessionID: data.TaskSessionID, RequestID: data.RequestID,
+		PendingID: data.PendingID, Source: models.PermissionSourceAutomation,
+	}); err != nil {
 		s.logger.Warn("failed to auto-reject permission for automation run",
 			zap.String("task_id", data.TaskID),
 			zap.String("pending_id", data.PendingID),
