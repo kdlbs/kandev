@@ -140,7 +140,8 @@ func TestFormatKandevContext_UserQuestionIsHardInputBarrier(t *testing.T) {
 	assert.Contains(t, context, "do not continue working")
 	assert.Contains(t, context, "do not provide a final response")
 	assert.Contains(t, context, "until the tool returns the user's answers")
-	assert.Contains(t, context, "If it returns without completed answers, end your turn immediately")
+	assert.Contains(t, context, "If the tool reports a validation error before creating a question, correct the request and retry")
+	assert.Contains(t, context, "If an accepted question returns without completed answers, end your turn immediately")
 }
 
 func TestFormatKandevContext_TitleToolFollowsCapability(t *testing.T) {

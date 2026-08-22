@@ -18,7 +18,9 @@ spec: "../../specs/tasks/user-question-turn-boundary.md"
 2. The same guidance requires an immediate turn end when the call returns
    without completed answers, while completed answers or a structured rejection
    remain usable results.
-3. Autopilot child/root capability guidance and the question tool schema,
+3. A validation error before question creation remains retryable, and the prompt
+   does not tell the agent to end the turn for that error.
+4. Autopilot child/root capability guidance and the question tool schema,
    transport, timeout, and persistence behavior remain unchanged.
 
 ## Verification
@@ -68,6 +70,8 @@ behavioral repair.
 
 - Keep the distinction between an answered call and an early non-answer return
   explicit. Otherwise, the prompt can stop useful work after the user replies.
+- Keep pre-acceptance validation errors retryable because no clarification wait
+  exists for those calls.
 - Keep the new text capability-scoped so an autopilot root never receives
   instructions for an unavailable tool.
 
@@ -82,6 +86,9 @@ results, residual risks, and synchronized task/plan status.
   '^TestFormatKandevContext_UserQuestionIsHardInputBarrier$' -count=1` failed
   because `userQuestionSection` did not state a hard input barrier.
 - GREEN: The same focused test passed after the prompt update.
+- Review RED: the focused test failed after adding the validation-retry
+  assertion because the prompt did not distinguish pre-acceptance errors.
+- Review GREEN: the focused test passed after the distinction was added.
 - `cd apps/backend && go test ./internal/sysprompt ./internal/mcp/server -run
   'TestFormatKandevContext_(UserQuestionIsHardInputBarrier|AutopilotChildUsesParentQuestionOnly|AutopilotRootHasNoQuestionTool)|TestAskUserQuestionDocs_MatchSchema|TestAskUserQuestion_StreamsKeepAliveDuringWait' -count=1`
   — passed, 5 tests across 2 packages.

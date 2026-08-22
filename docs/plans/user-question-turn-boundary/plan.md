@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/tasks/user-question-turn-boundary.md
 created: 2026-08-22
-status: building
+status: shipped
 ---
 
 # Fix Plan: Enforce the User Question Turn Boundary
@@ -44,9 +44,12 @@ It has no fail-closed action for timeout, disconnect, or pending results.
   concise overview while defining a hard user-input barrier.
 - State that the agent must not call another tool, continue working, or produce
   a final response until the tool returns the user's answers.
+- State that a validation error before question creation is recoverable. The
+  agent corrects the request and retries.
 - State that a return without completed answers requires the agent to end the
-  turn immediately. Preserve the existing ability to continue when completed
-  answers or a structured rejection are returned.
+  turn immediately only after an accepted question. Preserve the existing
+  ability to continue when completed answers or a structured rejection are
+  returned.
 - Keep the text inside the capability-controlled section. Do not add it to the
   static `kandev-context.md` template. That location exposes the instruction to
   autopilot roots that have no user-question tool.
@@ -87,6 +90,10 @@ rendered user interaction.
 - GREEN: `cd apps/backend && go test ./internal/sysprompt -run
   '^TestFormatKandevContext_UserQuestionIsHardInputBarrier$' -count=1` — passed,
   1 test.
+- Review RED: the same regression failed after adding the pre-acceptance retry
+  assertions because the first prompt did not distinguish validation errors.
+- Review GREEN: the focused regression passed after the prompt distinguished
+  validation errors from accepted-question waits.
 - Task checks: `cd apps/backend && go test ./internal/sysprompt ./internal/mcp/server
   -run 'TestFormatKandevContext_(UserQuestionIsHardInputBarrier|AutopilotChildUsesParentQuestionOnly|AutopilotRootHasNoQuestionTool)|TestAskUserQuestionDocs_MatchSchema|TestAskUserQuestion_StreamsKeepAliveDuringWait' -count=1`
   — passed, 5 tests across 2 packages.
@@ -111,6 +118,8 @@ authorized.
 - Wording that says every question call always ends the turn can incorrectly
   forbid the healthy path where the blocking call returns completed answers.
   The repair must distinguish completed answers from early non-answer returns.
+- Validation errors occur before a question enters the clarification lifecycle.
+  The prompt must keep those errors retryable.
 - Putting the rule in the static template can expose instructions for a tool
   absent from autopilot roots. Keep it in `userQuestionSection`.
 

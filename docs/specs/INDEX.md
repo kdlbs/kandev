@@ -114,7 +114,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [prompt-attachments](tasks/prompt-attachments.md) | draft |
 | [sidebar-task-edit](tasks/sidebar-task-edit.md) | approved |
 | [autopilot-mode](tasks/autopilot-mode.md) | draft |
-| [user-question-turn-boundary](tasks/user-question-turn-boundary.md) | building |
+| [user-question-turn-boundary](tasks/user-question-turn-boundary.md) | shipped |
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
 | [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | building |
 | [task-step-transition-ledger](workflow/task-step-transition-ledger/spec.md) | draft |
