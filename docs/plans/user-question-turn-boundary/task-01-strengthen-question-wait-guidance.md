@@ -14,10 +14,11 @@ spec: "../../specs/tasks/user-question-turn-boundary.md"
 
 1. Every normal task first-turn context that exposes
    `ask_user_question_kandev` explicitly forbids another tool call, continued
-   work, or a final response until completed user answers return.
-2. The same guidance requires an immediate turn end when the call returns
-   without completed answers, while completed answers or a structured rejection
-   remain usable results.
+   work, or a final response until completed user answers or a structured
+   rejection return.
+2. The same guidance requires an immediate turn end when an accepted call
+   returns without completed answers or a structured rejection, while either
+   usable result remains actionable.
 3. A validation error before question creation remains retryable, and the prompt
    does not tell the agent to end the turn for that error.
 4. Autopilot child/root capability guidance and the question tool schema,
@@ -89,6 +90,10 @@ results, residual risks, and synchronized task/plan status.
 - Review RED: the focused test failed after adding the validation-retry
   assertion because the prompt did not distinguish pre-acceptance errors.
 - Review GREEN: the focused test passed after the distinction was added.
+- Review RED: the focused test failed after adding the structured-rejection
+  assertion because the prompt did not define that result as usable.
+- Review GREEN: the focused test passed after the fail-closed rule was limited
+  to accepted results with neither completed answers nor structured rejection.
 - `cd apps/backend && go test ./internal/sysprompt ./internal/mcp/server -run
   'TestFormatKandevContext_(UserQuestionIsHardInputBarrier|AutopilotChildUsesParentQuestionOnly|AutopilotRootHasNoQuestionTool)|TestAskUserQuestionDocs_MatchSchema|TestAskUserQuestion_StreamsKeepAliveDuringWait' -count=1`
   — passed, 5 tests across 2 packages.

@@ -22,9 +22,10 @@ question wait timed out or disconnected.
   user's answers.
 - If the tool reports a validation error before it creates a question, the agent
   corrects the request and retries it.
-- If the call returns without completed user answers, including a timeout,
-  disconnect, or pending result after the question is accepted, the agent ends
-  the turn immediately. It does not infer an answer or continue the task.
+- If the accepted call returns without completed user answers or a structured
+  rejection, including a timeout, disconnect, or pending result, the agent ends
+  the turn immediately. It does not infer an answer or continue the task for
+  that incomplete result.
 - When the call returns completed user answers, the agent can continue using
   those answers.
 - The guidance appears only when the task MCP profile exposes
@@ -33,9 +34,10 @@ question wait timed out or disconnected.
 
 ## Failure modes
 
-- If the MCP wait ends without answers, the prompt requires a fail-closed turn
-  boundary. The existing clarification lifecycle remains responsible for
-  preserving or resuming the pending question.
+- If the MCP wait ends without completed answers or a structured rejection, the
+  prompt requires a fail-closed turn boundary. The existing clarification
+  lifecycle remains responsible for preserving or resuming the pending
+  question.
 - If validation fails before a question is accepted, the agent can correct the
   request and retry. No clarification wait exists in this path.
 - If the user rejects the question bundle, the structured rejection is a
@@ -51,9 +53,9 @@ question wait timed out or disconnected.
 - **GIVEN** the agent calls `ask_user_question_kandev`, **WHEN** the tool returns
   completed answers, **THEN** the agent can continue the task using those
   answers.
-- **GIVEN** the agent calls `ask_user_question_kandev`, **WHEN** the call returns
-  without completed answers, **THEN** the agent ends the turn immediately and
-  performs no further task work.
+- **GIVEN** the agent calls `ask_user_question_kandev`, **WHEN** the accepted
+  call returns without completed answers or a structured rejection, **THEN**
+  the agent ends the turn immediately and performs no further task work.
 - **GIVEN** the agent submits an invalid question request, **WHEN** MCP returns a
   validation error before creating a question, **THEN** the agent corrects the
   request and retries instead of ending the turn.

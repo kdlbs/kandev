@@ -43,13 +43,13 @@ It has no fail-closed action for timeout, disconnect, or pending results.
   `apps/backend/internal/sysprompt/sysprompt.go` so the tool entry remains a
   concise overview while defining a hard user-input barrier.
 - State that the agent must not call another tool, continue working, or produce
-  a final response until the tool returns the user's answers.
+  a final response until the tool returns completed user answers or a
+  structured rejection.
 - State that a validation error before question creation is recoverable. The
   agent corrects the request and retries.
-- State that a return without completed answers requires the agent to end the
-  turn immediately only after an accepted question. Preserve the existing
-  ability to continue when completed answers or a structured rejection are
-  returned.
+- State that an accepted return without completed answers or a structured
+  rejection requires the agent to end the turn immediately. Preserve the
+  ability to continue when either usable result is returned.
 - Keep the text inside the capability-controlled section. Do not add it to the
   static `kandev-context.md` template. That location exposes the instruction to
   autopilot roots that have no user-question tool.
@@ -94,6 +94,11 @@ rendered user interaction.
   assertions because the first prompt did not distinguish validation errors.
 - Review GREEN: the focused regression passed after the prompt distinguished
   validation errors from accepted-question waits.
+- Review RED: the focused regression failed after adding the structured-
+  rejection assertion because the turn-boundary wording did not make that
+  usable result explicit.
+- Review GREEN: the focused regression passed after the prompt limited the
+  fail-closed rule to accepted results with neither answers nor rejection.
 - Task checks: `cd apps/backend && go test ./internal/sysprompt ./internal/mcp/server
   -run 'TestFormatKandevContext_(UserQuestionIsHardInputBarrier|AutopilotChildUsesParentQuestionOnly|AutopilotRootHasNoQuestionTool)|TestAskUserQuestionDocs_MatchSchema|TestAskUserQuestion_StreamsKeepAliveDuringWait' -count=1`
   — passed, 5 tests across 2 packages.
@@ -116,8 +121,9 @@ authorized.
   regression can prove only that every normal first-turn context contains the
   unambiguous barrier.
 - Wording that says every question call always ends the turn can incorrectly
-  forbid the healthy path where the blocking call returns completed answers.
-  The repair must distinguish completed answers from early non-answer returns.
+  forbid the healthy path where the blocking call returns completed answers or
+  a structured rejection. The repair must distinguish usable results from
+  early incomplete returns.
 - Validation errors occur before a question enters the clarification lifecycle.
   The prompt must keep those errors retryable.
 - Putting the rule in the static template can expose instructions for a tool
