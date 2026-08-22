@@ -130,11 +130,25 @@ func (f *fakeWorkflowStepLister) ListStepsByWorkflow(_ context.Context, workflow
 }
 
 type fakeAgentProfileDataSource struct {
-	resp *agentsettingsdto.ListAgentsResponse
+	resp         *agentsettingsdto.ListAgentsResponse
+	profilesByID map[string]*AgentProfile
+	profileErr   error
+	profileCalls int
 }
 
 func (f *fakeAgentProfileDataSource) ListAgents(context.Context) (*agentsettingsdto.ListAgentsResponse, error) {
 	return f.resp, nil
+}
+
+func (f *fakeAgentProfileDataSource) GetProfileByID(_ context.Context, id string) (*AgentProfile, error) {
+	f.profileCalls++
+	if f.profileErr != nil {
+		return nil, f.profileErr
+	}
+	if profile, ok := f.profilesByID[id]; ok {
+		return profile, nil
+	}
+	return nil, ErrAgentProfileNotFound
 }
 
 type fakeSessionCodeStatsSource struct {
@@ -305,8 +319,8 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		messageData:      d.messages,
 		taskWriter:       d.taskWriter,
 		configs:          &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}},
-		utilityDeps: func() (utilityAgentSource, utilityRunner) {
-			return d.utilAgents, d.utilRun
+		utilityDeps: func() (utilityAgentSource, agentProfileSource, utilityRunner) {
+			return d.utilAgents, d.profiles, d.utilRun
 		},
 		writeDeps: func() (taskMessenger, taskStarter) {
 			return d.messenger, d.starter

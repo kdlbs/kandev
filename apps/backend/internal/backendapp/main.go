@@ -870,7 +870,11 @@ func startGatewayAndServe(
 	// runs them through the sessionless host-utility tier, at the first point
 	// where hostUtilityMgr is live.
 	if services.Plugins != nil && services.Utility != nil {
-		services.Plugins.SetUtilityAgent(pluginsUtilityAgentAdapter{svc: services.Utility, userSvc: services.User}, pluginsHostUtilityAdapter{mgr: hostUtilityMgr})
+		services.Plugins.SetUtilityAgent(
+			pluginsUtilityAgentAdapter{svc: services.Utility, userSvc: services.User},
+			pluginsAgentProfileAdapter{store: repos.AgentSettings},
+			pluginsHostUtilityAdapter{mgr: hostUtilityMgr},
+		)
 	}
 
 	if err := startOrchestratorAndAutomationConsumers(
