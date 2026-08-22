@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { settledBoundingBox } from "../../helpers/settled-box";
 import { installRuntimeUpdateFixture, updateJob } from "./agent-runtime-update-helpers";
 
 test.describe("managed agent runtime updates", () => {
@@ -267,7 +268,7 @@ test.describe("managed agent runtime updates", () => {
     await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
     const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
     await testPage.getByTestId(`agent-update-version-${runtime.agentName}`).click();
-    await dialog
+    await testPage
       .getByTestId(`agent-update-version-browser-${runtime.agentName}`)
       .getByTestId(`agent-update-version-option-${runtime.agentName}-0.61.0`)
       .click();
@@ -290,7 +291,7 @@ test.describe("managed agent runtime updates", () => {
     const body = dialog.getByTestId(`agent-update-dialog-body-${runtime.agentName}`);
 
     await dialog.getByTestId(`agent-update-version-${runtime.agentName}`).click();
-    await dialog
+    await testPage
       .getByTestId(`agent-update-version-browser-${runtime.agentName}`)
       .getByTestId(`agent-update-version-option-${runtime.agentName}-0.61.0`)
       .click();
@@ -325,14 +326,25 @@ test.describe("managed agent runtime updates", () => {
 
     await testPage.goto("/settings/agents");
     await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
+    const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
     const selector = testPage.getByTestId(`agent-update-version-${runtime.agentName}`);
     await expect(
       testPage.getByTestId(`agent-update-version-option-${runtime.agentName}-0.74.0`),
     ).toHaveCount(0);
+    const dialogBefore = await settledBoundingBox(dialog);
     await selector.click();
-    const options = testPage
-      .getByTestId(`agent-update-version-browser-${runtime.agentName}`)
-      .getByRole("option");
+    const browser = testPage.getByTestId(`agent-update-version-browser-${runtime.agentName}`);
+    await expect(browser).toBeVisible();
+    await expect(browser).toHaveAttribute("data-slot", "popover-content");
+    const dialogAfter = await settledBoundingBox(dialog);
+    expect(Math.abs(dialogAfter.height - dialogBefore.height)).toBeLessThan(2);
+    expect(
+      await browser.evaluate(
+        (element) =>
+          element.closest('[data-slot="dialog-content"], [data-slot="drawer-content"]') === null,
+      ),
+    ).toBe(true);
+    const options = browser.getByRole("option");
 
     await expect(options).toHaveCount(12);
     expect(
@@ -366,7 +378,7 @@ test.describe("managed agent runtime updates", () => {
     await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
     const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
     await testPage.getByTestId(`agent-update-version-${runtime.agentName}`).click();
-    await dialog
+    await testPage
       .getByTestId(`agent-update-version-browser-${runtime.agentName}`)
       .getByTestId(`agent-update-version-option-${runtime.agentName}-0.61.0`)
       .click();
@@ -449,7 +461,7 @@ test.describe("managed agent runtime updates", () => {
 
     await expect(dialog).toContainText("Active version: 0.63.0");
     await dialog.getByTestId(`agent-update-version-${runtime.agentName}`).click();
-    const successOptionText = await dialog
+    const successOptionText = await testPage
       .getByTestId(`agent-update-version-browser-${runtime.agentName}`)
       .getByRole("option")
       .allTextContents();
@@ -499,7 +511,7 @@ test.describe("managed agent runtime updates", () => {
 
     await expect(dialog).toContainText("Active version: 0.62.0");
     await dialog.getByTestId(`agent-update-version-${runtime.agentName}`).click();
-    const failedOptionText = await dialog
+    const failedOptionText = await testPage
       .getByTestId(`agent-update-version-browser-${runtime.agentName}`)
       .getByRole("option")
       .allTextContents();

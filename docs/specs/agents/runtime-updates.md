@@ -87,6 +87,9 @@ action unless they inspect backend logs.
 - The initial preview fits within the desktop dialog and phone drawer without
   body overflow. The shared body becomes scrollable only when the version
   browser or streamed job output needs more space.
+- Opening the version browser uses an anchored popover. The popover must not
+  increase the dialog or drawer height, must remain viewport-contained, and
+  must close after a version is selected.
 
 The managed package set is:
 
@@ -473,6 +476,10 @@ produces a repair job.
   operator searches or selects a version, **THEN** the existing update drawer
   keeps one contained scroll owner, exposes 44px touch rows, and preserves the
   same target selection behavior as desktop.
+- **GIVEN** the operator opens a long version catalogue, **WHEN** the operator
+  opens the version selector, **THEN** the catalogue appears in an anchored
+  popover without increasing the dialog or drawer height, and selecting a
+  version closes the popover.
 - **GIVEN** a dotted update control on a phone, **WHEN** the operator taps it,
   **THEN** the existing update drawer opens and shows a live authoritative
   preview without requiring hover.

@@ -13,6 +13,7 @@ import {
   CommandItem,
   CommandList,
 } from "@kandev/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { latestRuntimeVersions, resolveRuntimeActiveVersion } from "@/lib/agent-runtime-update";
 import type { AgentUpdateJob, AgentUpdatePreview, AgentUpdateVersion } from "@/lib/api";
 
@@ -64,17 +65,20 @@ function RuntimeVersionBrowser({
 }) {
   const { t } = useTranslation();
   return (
-    <div id={browserId} className="rounded-md border bg-background" data-testid={browserId}>
-      <Command
-        className="h-auto min-h-0 w-full overflow-visible rounded-md bg-transparent p-1"
-        shouldFilter
-      >
+    <PopoverContent
+      id={browserId}
+      align="start"
+      className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] p-0"
+      data-testid={browserId}
+      onWheel={(event) => event.stopPropagation()}
+    >
+      <Command className="h-auto min-h-0 w-full rounded-md bg-transparent" shouldFilter>
         <CommandInput
           autoFocus
           placeholder={t("agents:searchRuntimeVersions")}
           aria-label={t("agents:searchRuntimeVersions")}
         />
-        <CommandList className="max-h-none overflow-visible">
+        <CommandList className="max-h-[min(24rem,var(--radix-popover-content-available-height))]">
           <CommandEmpty>{t("agents:noMatchingRuntimeVersions")}</CommandEmpty>
           <CommandGroup>
             {versions.map((version) => {
@@ -101,7 +105,7 @@ function RuntimeVersionBrowser({
           </CommandGroup>
         </CommandList>
       </Command>
-    </div>
+    </PopoverContent>
   );
 }
 
@@ -219,44 +223,44 @@ export function RuntimeVersionPicker({
 
       <div className="space-y-1">
         <p className="font-medium">{t("agents:selectRuntimeVersion")}</p>
-        <Button
-          type="button"
-          variant="outline"
-          className="h-12 w-full cursor-pointer justify-between px-3"
-          aria-expanded={browseOpen}
-          aria-controls={browserId}
-          disabled={disabled}
-          onClick={() => setBrowseOpen((open) => !open)}
-          data-testid={`agent-update-version-${agentName}`}
-        >
-          <span>{t("agents:browseRuntimeVersions")}</span>
-          {loading ? (
-            <span
-              className="flex items-center"
-              data-testid={`agent-update-version-loading-${agentName}`}
-              role="status"
+        <Popover modal={false} open={browseOpen} onOpenChange={setBrowseOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-12 w-full cursor-pointer justify-between px-3"
+              aria-expanded={browseOpen}
+              aria-controls={browserId}
+              disabled={disabled}
+              data-testid={`agent-update-version-${agentName}`}
             >
-              <IconLoader2 className="size-4 animate-spin text-muted-foreground" />
-              <span className="sr-only">{t("agents:checkingLatestRuntimeVersion")}</span>
-            </span>
-          ) : (
-            <IconChevronDown className="size-4 text-muted-foreground" aria-hidden="true" />
-          )}
-        </Button>
+              <span>{t("agents:browseRuntimeVersions")}</span>
+              {loading ? (
+                <span
+                  className="flex items-center"
+                  data-testid={`agent-update-version-loading-${agentName}`}
+                  role="status"
+                >
+                  <IconLoader2 className="size-4 animate-spin text-muted-foreground" />
+                  <span className="sr-only">{t("agents:checkingLatestRuntimeVersion")}</span>
+                </span>
+              ) : (
+                <IconChevronDown className="size-4 text-muted-foreground" aria-hidden="true" />
+              )}
+            </Button>
+          </PopoverTrigger>
+          <RuntimeVersionBrowser
+            agentName={agentName}
+            browserId={browserId}
+            versions={versions}
+            activeVersion={activeVersion}
+            defaultVersion={preview.default_version}
+            selectedVersion={selectedVersion}
+            selectedUseDefault={selectedUseDefault}
+            onSelectTarget={selectTarget}
+          />
+        </Popover>
       </div>
-
-      {browseOpen && (
-        <RuntimeVersionBrowser
-          agentName={agentName}
-          browserId={browserId}
-          versions={versions}
-          activeVersion={activeVersion}
-          defaultVersion={preview.default_version}
-          selectedVersion={selectedVersion}
-          selectedUseDefault={selectedUseDefault}
-          onSelectTarget={selectTarget}
-        />
-      )}
     </div>
   );
 }

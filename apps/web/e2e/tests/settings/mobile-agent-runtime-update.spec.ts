@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { settledBoundingBox } from "../../helpers/settled-box";
 import { installRuntimeUpdateFixture, updateJob } from "./agent-runtime-update-helpers";
 
 test.describe("managed agent runtime updates on mobile", () => {
@@ -101,10 +102,20 @@ test.describe("managed agent runtime updates on mobile", () => {
     const selectorBox = await selector.boundingBox();
     expect(selectorBox).not.toBeNull();
     expect(selectorBox!.height).toBeGreaterThanOrEqual(44);
+    const drawerBefore = await settledBoundingBox(drawer);
     await selector.tap();
-    const option = drawer
-      .getByTestId(`agent-update-version-browser-${runtime.agentName}`)
-      .getByTestId(`agent-update-version-option-${runtime.agentName}-0.61.0`);
+    const browser = testPage.getByTestId(`agent-update-version-browser-${runtime.agentName}`);
+    await expect(browser).toBeVisible();
+    await expect(browser).toHaveAttribute("data-slot", "popover-content");
+    const drawerAfter = await settledBoundingBox(drawer);
+    expect(Math.abs(drawerAfter.height - drawerBefore.height)).toBeLessThan(2);
+    expect(
+      await browser.evaluate(
+        (element) =>
+          element.closest('[data-slot="dialog-content"], [data-slot="drawer-content"]') === null,
+      ),
+    ).toBe(true);
+    const option = browser.getByTestId(`agent-update-version-option-${runtime.agentName}-0.61.0`);
     const optionBox = await option.boundingBox();
     expect(optionBox).not.toBeNull();
     expect(optionBox!.height).toBeGreaterThanOrEqual(44);
@@ -142,16 +153,18 @@ test.describe("managed agent runtime updates on mobile", () => {
     await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).tap();
     const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
     await drawer.getByTestId(`agent-update-version-${runtime.agentName}`).tap();
-    const search = drawer.getByPlaceholder("Search versions");
+    const browser = testPage.getByTestId(`agent-update-version-browser-${runtime.agentName}`);
+    await expect(browser).toBeVisible();
+    const search = browser.getByPlaceholder("Search versions");
     await expect(search).toBeVisible();
     await search.fill("0.70");
-    const option = drawer
-      .getByTestId(`agent-update-version-browser-${runtime.agentName}`)
-      .getByTestId(`agent-update-version-option-${runtime.agentName}-0.70.0`);
+    const option = browser.getByTestId(`agent-update-version-option-${runtime.agentName}-0.70.0`);
     await expect(option).toBeVisible();
-    const optionBox = await option.boundingBox();
-    expect(optionBox).not.toBeNull();
-    expect(optionBox!.height).toBeGreaterThanOrEqual(44);
+    // The popover entrance animation scales the option row briefly. Poll until
+    // the touch target reaches its settled 44px height before tapping it.
+    await expect
+      .poll(async () => Math.round((await option.boundingBox())?.height ?? 0))
+      .toBeGreaterThanOrEqual(44);
     await option.tap();
     await expect(drawer).toContainText("0.62.0 → 0.70.0");
     expect(runtime.previewTargets()).toEqual(["", "0.70.0"]);
