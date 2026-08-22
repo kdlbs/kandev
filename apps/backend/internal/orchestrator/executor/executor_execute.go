@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/subproc"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
@@ -1169,18 +1170,23 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}
 	assignLaunchTaskEnvironmentID(session, existingEnv)
 
-	workspaceReuseRequired := existingEnv != nil && existingEnv.MaterializationSessionID != session.ID
-	// A ready/stopped environment belongs to the task, not to the session that
-	// first materialized it. Its next launch must attach rather than recover or
-	// materialize another workspace. A creating environment is usable only by
-	// its durable elected owner; every sibling fails before lifecycle setup.
+	// A sibling can be prepared while the elected materializer is still
+	// creating the environment (for example, an inherit_parent autopilot child
+	// starts immediately after its parent). Wait for that durable owner to
+	// publish READY instead of turning a recoverable race into a terminal
+	// session failure.
 	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusCreating && existingEnv.MaterializationSessionID != session.ID {
-		return nil, fmt.Errorf("%w: retry after the initial workspace launch completes", models.ErrWorkspacePreparing)
+		readyEnv, waitErr := e.waitForTaskEnvironmentReady(ctx, existingEnv.ID)
+		if waitErr != nil {
+			return nil, waitErr
+		}
+		existingEnv = readyEnv
 	}
+	workspaceReuseRequired := existingEnv != nil && existingEnv.MaterializationSessionID != session.ID
 	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusFailed {
 		return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
 	}
-	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, primaryRepo, allRepos, workspaceReuseRequired)
+	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, primaryRepo, allRepos, workspaceReuseRequired, existingEnv)
 	if err != nil {
 		return nil, err
 	}
@@ -1289,6 +1295,37 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}(sessionID)
 
 	return e.finalizeLaunch(ctx, task, session, agentProfileID, sessionID, primaryRepo, resp, startAgent, execCfg)
+}
+
+func (e *Executor) waitForTaskEnvironmentReady(ctx context.Context, environmentID string) (*models.TaskEnvironment, error) {
+	if environmentID == "" || e.repo == nil {
+		return nil, fmt.Errorf("%w: task environment is unavailable", models.ErrWorkspaceReuseUnsafe)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, constants.AgentLaunchTimeout)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		env, err := e.repo.GetTaskEnvironment(waitCtx, environmentID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: load task environment while waiting: %v", models.ErrWorkspaceReuseUnsafe, err)
+		}
+		if env == nil {
+			return nil, fmt.Errorf("%w: task environment disappeared while waiting", models.ErrWorkspaceReuseUnsafe)
+		}
+		switch env.Status {
+		case models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
+			return env, nil
+		case models.TaskEnvironmentStatusFailed:
+			return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+		}
+
+		select {
+		case <-waitCtx.Done():
+			return nil, fmt.Errorf("%w: timed out waiting for task environment %s", models.ErrWorkspacePreparing, environmentID)
+		case <-ticker.C:
+		}
+	}
 }
 
 // failingLaunchRepositoryID identifies the repository that caused a
@@ -1545,7 +1582,7 @@ func assignLaunchTaskEnvironmentID(session *models.TaskSession, existingEnv *mod
 // applying executor config, repository/worktree settings, and remote docker URL as needed.
 // allRepos carries every repository for the task in Position order; for single-repo
 // or repo-less tasks it has length <=1 and the legacy single-repo path runs unchanged.
-func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, executorID, prompt string, repoInfo *repoInfo, allRepos []*repoInfo, workspaceReuseRequired bool) (*LaunchAgentRequest, executorConfig, error) {
+func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, executorID, prompt string, repoInfo *repoInfo, allRepos []*repoInfo, workspaceReuseRequired bool, existingEnv *models.TaskEnvironment) (*LaunchAgentRequest, executorConfig, error) {
 	metadata := cloneMetadata(task.Metadata)
 	if session.ExecutorProfileID != "" {
 		if metadata == nil {
@@ -1577,6 +1614,13 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		req.ExecutorConfig = execConfig.ExecutorCfg
 		req.SetupScript = execConfig.SetupScript
 	}
+	// A task environment is reusable only by the executor type that owns it.
+	// If the caller selected a different profile, this launch must provision
+	// the new backend instead of attaching to the old environment. Resolve this
+	// before repository configuration so clone URL requirements are applied to
+	// the fresh launch as well.
+	workspaceReuseRequired = workspaceReuseAllowed(existingEnv, req.ExecutorType, workspaceReuseRequired)
+	req.WorkspaceReuseRequired = workspaceReuseRequired
 
 	// For remote executors (containerized *and* SSH), resolve only explicitly
 	// selected profile auth secrets. Workspace GitHub automation is configured
@@ -1632,6 +1676,13 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	}
 
 	return req, execConfig, nil
+}
+
+func workspaceReuseAllowed(existingEnv *models.TaskEnvironment, requestedExecutorType string, required bool) bool {
+	if !required || existingEnv == nil || existingEnv.ExecutorType == "" {
+		return required
+	}
+	return existingEnv.ExecutorType == requestedExecutorType
 }
 
 func mergeEnv(req *LaunchAgentRequest, env map[string]string) {
