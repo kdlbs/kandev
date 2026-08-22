@@ -26,6 +26,7 @@ type ReviewDiffHeaderProps = ReviewExternalLinkContext & {
   collapsed: boolean;
   wordWrap: boolean;
   expandUnchanged: boolean;
+  hasStickyRepoHeader?: boolean;
   onCheckboxChange: (checked: boolean | "indeterminate") => void;
   onDiscard: () => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
@@ -262,6 +263,7 @@ export function ReviewDiffHeader({
   collapsed,
   wordWrap,
   expandUnchanged,
+  hasStickyRepoHeader = false,
   sessionId,
   onCheckboxChange,
   onDiscard,
@@ -313,7 +315,8 @@ export function ReviewDiffHeader({
       data-testid="review-file-header"
       data-file-path={file.path}
       className={cn(
-        "sticky top-0 z-10 border-b border-border/50 bg-card/95 backdrop-blur-sm",
+        "sticky z-10 border-b border-border/50 bg-card/95 backdrop-blur-sm",
+        hasStickyRepoHeader ? "top-8" : "top-0",
         !isMobile && "flex items-center gap-2 px-4 py-2",
       )}
     >

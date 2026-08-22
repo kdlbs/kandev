@@ -1,6 +1,7 @@
 ---
 status: shipped
 created: 2026-07-20
+updated: 2026-08-22
 owner: kandev
 ---
 
@@ -24,6 +25,11 @@ work without widening automatic filesystem scans or editing packaged runtime con
   repositories.
 - Saved repositories remain usable for branch listing, current status, refresh, task creation, and
   fresh-branch workflows after restart.
+- A saved repository without an `origin` remote supports Merge and Rebase when the selected base
+  branch exists locally.
+- A repository with an `origin` remote refreshes and uses `origin/<base>` for Merge and Rebase.
+- A missing local base branch causes a clear error before Merge or Rebase changes repository
+  history.
 - A saved repository must continue resolving to its recorded canonical location. Git metadata
   outside that location is accepted only for a verifiable linked worktree with reciprocal metadata.
 - Provider-backed repositories may be saved without a local path and are unaffected until Kandev
@@ -82,6 +88,8 @@ directly rather than treating discovery roots as an authorization mechanism.
 | A saved path later resolves to a different canonical location | Identity-bound reads and mutations fail closed. |
 | A pre-canonical saved path contains symbolic-link components | The user re-saves it once to persist its canonical location. |
 | Saved repository later disappears | Read and Git operations surface the filesystem error; the stored grant remains until edited or deleted. |
+| No `origin` remote and the selected local base branch is missing | Merge and Rebase report that the local base branch does not exist. The operation does not change repository history. |
+| An `origin` fetch fails | Merge and Rebase report the fetch error. They do not use a local branch as a fallback. |
 | Automatic scan requests an unconfigured root | Discovery rejects the request and does not scan it. |
 | Destructive request supplies only an untrusted raw path | The operation fails closed and does not run Git. |
 
@@ -99,6 +107,13 @@ the repository record removes that exact durable grant from the workspace.
 - **GIVEN** a manually saved repository outside every discovery root, **WHEN** the user lists or
   refreshes its branches after a restart, **THEN** Kandev resolves the saved repository ID and the
   operation succeeds.
+- **GIVEN** a task worktree has no `origin` remote and has a local `main` branch, **WHEN** the user
+  merges or rebases from `main`, **THEN** Kandev uses the local branch and the operation succeeds.
+- **GIVEN** a repository has an `origin` remote, **WHEN** the user merges or rebases from `main`,
+  **THEN** Kandev fetches and uses `origin/main`.
+- **GIVEN** a task worktree has no `origin` remote and the selected `main` base branch is missing
+  locally, **WHEN** the user starts Merge or Rebase, **THEN** Kandev reports
+  `base branch "main" does not exist locally` and leaves repository history unchanged.
 - **GIVEN** a manually saved repository outside every discovery root, **WHEN** the user confirms a
   fresh-branch operation for it, **THEN** Kandev resolves the saved repository ID before changing
   the working tree.
@@ -118,7 +133,9 @@ the repository record removes that exact durable grant from the workspace.
 - Changing provider clone placement or container host-path mounting.
 - Introducing multi-user authentication or repository-grant roles.
 - Making packaged runtime configuration files writable from the UI.
+- Making Pull, Push, or change-request creation work without a configured remote.
 
-## Implementation Plan
+## Implementation Plans
 
-See [Explicit Local Repository Trust plan](../../plans/explicit-local-repository-trust/plan.md).
+- [Explicit Local Repository Trust](../../plans/explicit-local-repository-trust/plan.md)
+- [Local-only Merge and Rebase](../../plans/local-only-merge-rebase/plan.md)
